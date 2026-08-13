@@ -68,6 +68,51 @@ def test_event_bus_persistence(tmp_path):
     assert "persist_event" in content
     assert "hello" in content
 
+
+def test_attempt_transition_append_read_restart_and_interleaving(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    for task, attempt, seq in (("t1", "a1", 1), ("t2", "a1", 1), ("t1", "a1", 2)):
+        NexusEventBus.emit_attempt_transition(build_attempt_transition_event(
+            task_id=task, attempt_id=attempt, sequence=seq, state="RUNNING",
+            source_revision="src", contract_revision="contract",
+        ))
+    first = NexusEventBus.get_recent_events(event_type="attempt_transition", limit=10)
+    assert len(first) == 3
+    NexusEventBus._event_log_path = None
+    NexusEventBus._log_store = JsonlEventLogStore()
+    NexusEventBus.configure(tmp_path)
+    assert NexusEventBus.next_attempt_sequence("t1", "a1") == 3
+    assert NexusEventBus.next_attempt_sequence("t2", "a1") == 2
+
+
+def test_attempt_transition_tamper_and_missing_fields_fail_closed(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    NexusEventBus.emit_attempt_transition(build_attempt_transition_event(
+        task_id="t1", attempt_id="a1", sequence=1, state="RUNNING",
+        source_revision="src", contract_revision="contract",
+    ))
+    path = tmp_path / ".nexus" / "events" / "event_log.jsonl"
+    record = json.loads(path.read_text().splitlines()[-1])
+    record["payload"].pop("source_revision")
+    path.write_text(json.dumps(record) + "\n")
+    with pytest.raises(ValueError):
+        JsonlEventLogStore().configure(tmp_path)
+
+
+def test_attempt_transition_missing_continuity_revision_fails_closed(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    event = build_attempt_transition_event(
+        task_id="t1", attempt_id="a1", sequence=1, state="RUNNING",
+        source_revision="src", contract_revision="contract",
+    )
+    NexusEventBus.emit_attempt_transition(event)
+    path = tmp_path / ".nexus" / "events" / "event_log.jsonl"
+    record = json.loads(path.read_text().splitlines()[-1])
+    record["payload"].pop("contract_revision")
+    path.write_text(json.dumps(record) + "\n")
+    with pytest.raises(ValueError):
+        JsonlEventLogStore().configure(tmp_path)
+
 def test_event_bus_signal_injection_and_drain(tmp_path):
     """驗證信號注入與消費 (inject/drain)。"""
     NexusEventBus.configure(tmp_path)

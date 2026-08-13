@@ -43,7 +43,7 @@ def test_execution_domains_and_candidate_namespaces_are_unambiguous():
     merge = (ROOT / ".agents/skills/nexus-merge-gate/SKILL.md").read_text(encoding="utf-8")
 
     assert "The Owner chooses the execution lane" in agents
-    assert "does not select\n  local lifecycle" in agents
+    assert "does not select local lifecycle" in agents
     assert "A GitHub PR Candidate" in agents
     assert "a local lifecycle Candidate" in agents
     assert "never substitutes for program correctness" in agents
@@ -61,6 +61,73 @@ def test_execution_domains_and_candidate_namespaces_are_unambiguous():
 
     assert "applies exclusively to a local Nexus lifecycle Candidate" in merge
     assert "It is not the merge procedure for a GitHub PR Candidate" in merge
+
+
+def test_ready_issue_claim_contract_is_worker_neutral_and_fail_closed():
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(encoding="utf-8")
+
+    assert "eligible governed worker" in agents
+    assert "Provider/model names are not normative" in agents
+    for token in (
+        "claim_intent",
+        "claim_enforcement_state",
+        "claim_mode",
+        "PROJECTION_ONLY",
+        "UNKNOWN",
+        "MANUAL_DISPATCH",
+        "assignees, labels, comments, Project fields, branch names",
+    ):
+        assert token in agents
+        if token != "assignees, labels, comments, Project fields, branch names":
+            assert token in contract
+    assert "GitHub UI metadata and branch names remain" in contract
+    assert "canonical atomic/fenced claim operation" in contract
+    assert "never grants\n  route selection" in contract
+
+
+def test_protected_merge_requires_exact_owner_slot_not_standing_grant():
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(encoding="utf-8")
+    merge = (ROOT / ".agents/skills/nexus-merge-gate/SKILL.md").read_text(encoding="utf-8")
+    prior_card = (
+        ROOT / "tasks/standing-owner-autonomy-20260811/01-standing-coordinator-authority.md"
+    ).read_text(encoding="utf-8")
+    prior_index = (ROOT / "tasks/standing-owner-autonomy-20260811/INDEX.md").read_text(
+        encoding="utf-8"
+    )
+    allowed_actions = next(
+        line for line in prior_card.splitlines() if line.startswith("- allowed_actions:")
+    ).casefold()
+
+    assert "A standing grant is never a protected-merge slot" in agents
+    assert "Standing coordinator authority covers pre-merge work only" in agents
+    assert "bound to the exact repository, PR, head, and base" in agents
+    assert "`MERGE_INTENT` is evidence" in agents
+
+    assert "Protected merge then requires a fresh Owner `MERGE_SLOT_GRANTED`" in contract
+    assert "Any drift invalidates the slot" in contract
+    assert "Neither `MERGE_INTENT`\nnor standing authority is merge permission" in contract
+    assert "standing authority is merge permission" not in contract.replace(
+        "Neither `MERGE_INTENT`\nnor standing authority is merge permission", ""
+    )
+
+    assert "fresh exact PR/head/base-bound Owner" in merge
+    assert "Standing authority\nprepares evidence" in merge
+
+    assert "status: ACTIVE_NARROWED_BY_OWNER_MERGE_QUEUE_AUTHORITY" in prior_card
+    assert "status: active, narrowed by Owner merge-queue authority" in prior_index
+    assert "frontier: 01-standing-coordinator-authority.md" in prior_index
+    assert "prepare MERGE_INTENT" in prior_card
+    assert "protected exact-head merge" not in prior_card
+    assert "Protected PR merge is excluded" in prior_card
+    for forbidden in (
+        "authorize protected merge",
+        "authorizes protected merge",
+        "protected merge authorization",
+        "protected merge authority",
+    ):
+        assert forbidden not in allowed_actions
 
 
 def test_bootstrap_file_set_is_complete_and_tracked():

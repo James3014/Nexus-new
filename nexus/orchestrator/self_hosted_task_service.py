@@ -32,11 +32,16 @@ from nexus.contracts.lifecycle_action import (
     canonical_request_hash,
     validate_owner_inline_contract,
 )
+from nexus.contracts.operator_outcome_receipt import (
+    OperatorOutcomeReceipt,
+    validate_operator_outcome_receipt,
+)
 from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,
     IntegrationAuthorizationEnvelope,
 )
 from nexus.contracts.unified_runtime_receipt import build_runtime_development_mapping
+from nexus.core.task_continuity import events_from_attempt_records
 from nexus.engine.canonical_task_seam import build_canonical_dispatch_envelope
 from nexus.events.contracts import build_attempt_transition_event
 from nexus.events.transport import NexusEventBus
@@ -1594,6 +1599,169 @@ class SelfHostedTaskService:
         _, archived = self._latest_archived_state(task_id)
         return archived
 
+    def record_operator_outcome(
+        self,
+        task_id: str,
+        receipt: OperatorOutcomeReceipt | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Persist one privacy-bounded outcome in the existing task state.
+
+        Idempotent replays return the original receipt.  A key reused with a
+        different payload, a cross-attempt supersession, or a cycle fails
+        closed; this method never changes task authority or lifecycle status.
+        """
+        state = self._read_state(task_id)
+        if state is None:
+            raise KeyError(f"unknown task: {task_id}")
+        contract = state.get("contract") if isinstance(state.get("contract"), Mapping) else {}
+        expected_action_id = str(state.get("action_id") or "").strip() or None
+        expected_source_revision = str(
+            state.get("controller_revision") or contract.get("controller_revision") or ""
+        ).strip() or None
+        expected_runtime_receipt_hash = str(
+            state.get("runtime_receipt_hash") or ""
+        ).strip() or None
+        normalized = validate_operator_outcome_receipt(
+            receipt,
+            task_id=task_id,
+            attempt_id=str(state.get("attempt_id") or ""),
+            lifecycle_revision=str(state.get("lifecycle_revision") or ""),
+        )
+        if normalized.action_id is not None and normalized.action_id != expected_action_id:
+            raise ValueError("OPERATOR_OUTCOME_ACTION_ID_MISMATCH")
+        if normalized.source_revision is not None and (
+            expected_source_revision is None
+            or normalized.source_revision != expected_source_revision
+        ):
+            raise ValueError("OPERATOR_OUTCOME_SOURCE_REVISION_MISMATCH")
+        if normalized.runtime_receipt_hash is not None and (
+            expected_runtime_receipt_hash is None
+            or normalized.runtime_receipt_hash != expected_runtime_receipt_hash
+        ):
+            raise ValueError("OPERATOR_OUTCOME_RUNTIME_RECEIPT_HASH_MISMATCH")
+
+        def mutate(current: dict[str, Any]) -> None:
+            current_contract = (
+                current.get("contract")
+                if isinstance(current.get("contract"), Mapping)
+                else {}
+            )
+            current_action_id = str(current.get("action_id") or "").strip() or None
+            current_source_revision = str(
+                current.get("controller_revision")
+                or current_contract.get("controller_revision")
+                or ""
+            ).strip() or None
+            current_runtime_receipt_hash = str(
+                current.get("runtime_receipt_hash") or ""
+            ).strip() or None
+            validate_operator_outcome_receipt(
+                normalized,
+                task_id=task_id,
+                attempt_id=str(current.get("attempt_id") or ""),
+                lifecycle_revision=str(current.get("lifecycle_revision") or ""),
+            )
+            if normalized.action_id is not None and normalized.action_id != current_action_id:
+                raise ValueError("OPERATOR_OUTCOME_ACTION_ID_MISMATCH")
+            if normalized.source_revision is not None and (
+                current_source_revision is None
+                or normalized.source_revision != current_source_revision
+            ):
+                raise ValueError("OPERATOR_OUTCOME_SOURCE_REVISION_MISMATCH")
+            if normalized.runtime_receipt_hash is not None and (
+                current_runtime_receipt_hash is None
+                or normalized.runtime_receipt_hash != current_runtime_receipt_hash
+            ):
+                raise ValueError("OPERATOR_OUTCOME_RUNTIME_RECEIPT_HASH_MISMATCH")
+            raw_existing = current.get("operator_outcome_receipts", [])
+            if type(raw_existing) is not list or any(
+                not isinstance(item, Mapping) for item in raw_existing
+            ):
+                raise ValueError("OPERATOR_OUTCOME_PERSISTED_RECEIPT_TAMPERED")
+            existing = list(raw_existing)
+            singular = current.get("operator_outcome_receipt")
+            if (existing and singular is None) or (
+                singular is not None
+                and (
+                    not isinstance(singular, Mapping)
+                    or not existing
+                    or dict(singular) != dict(existing[-1])
+                )
+            ):
+                raise ValueError("OPERATOR_OUTCOME_PERSISTED_RECEIPT_TAMPERED")
+            parsed = {}
+            for item in existing:
+                try:
+                    prior = validate_operator_outcome_receipt(
+                        item,
+                        task_id=task_id,
+                        check_freshness=False,
+                    )
+                except ValueError as exc:
+                    raise ValueError("OPERATOR_OUTCOME_PERSISTED_RECEIPT_TAMPERED") from exc
+                if prior.receipt_id in parsed:
+                    raise ValueError("OPERATOR_OUTCOME_PERSISTED_RECEIPT_TAMPERED")
+                parsed[prior.receipt_id] = prior
+            for prior in parsed.values():
+                parent_hash = prior.supersedes_receipt_id
+                if parent_hash is not None:
+                    parent = parsed.get(parent_hash)
+                    if parent is None:
+                        raise ValueError("OPERATOR_OUTCOME_PERSISTED_SUPERSESSION_TARGET_MISSING")
+                    if parent.task_id != task_id or parent.attempt_id != prior.attempt_id:
+                        raise ValueError("OPERATOR_OUTCOME_PERSISTED_SUPERSESSION_ATTEMPT_MISMATCH")
+                    if prior.observed_at <= parent.observed_at:
+                        raise ValueError("OPERATOR_OUTCOME_PERSISTED_SUPERSESSION_ORDER_INVALID")
+            for start in parsed.values():
+                seen = set()
+                cursor = start
+                while cursor.supersedes_receipt_id is not None:
+                    parent_hash = cursor.supersedes_receipt_id
+                    if parent_hash in seen or parent_hash == start.receipt_id:
+                        raise ValueError("OPERATOR_OUTCOME_PERSISTED_SUPERSESSION_CYCLE")
+                    seen.add(parent_hash)
+                    cursor = parsed.get(parent_hash)
+                    if cursor is None:
+                        raise ValueError("OPERATOR_OUTCOME_PERSISTED_SUPERSESSION_TARGET_MISSING")
+            for item in existing:
+                if item.get("idempotency_key") != normalized.idempotency_key:
+                    continue
+                if item.get("receipt_id") != normalized.receipt_id:
+                    raise ValueError("OPERATOR_OUTCOME_IDEMPOTENCY_CONFLICT")
+                return
+            hashes = {str(item.get("receipt_id")) for item in existing}
+            if normalized.supersedes_receipt_id is not None:
+                if normalized.supersedes_receipt_id not in hashes:
+                    raise ValueError("OPERATOR_OUTCOME_SUPERSESSION_TARGET_MISSING")
+                if normalized.supersedes_receipt_id == normalized.receipt_id:
+                    raise ValueError("OPERATOR_OUTCOME_SUPERSESSION_CYCLE")
+                target = next(
+                    item
+                    for item in existing
+                    if item.get("receipt_id") == normalized.supersedes_receipt_id
+                )
+                if target.get("task_id") != task_id or target.get("attempt_id") != normalized.attempt_id:
+                    raise ValueError("OPERATOR_OUTCOME_SUPERSESSION_ATTEMPT_MISMATCH")
+                if normalized.observed_at <= parsed[normalized.supersedes_receipt_id].observed_at:
+                    raise ValueError("OPERATOR_OUTCOME_SUPERSESSION_ORDER_INVALID")
+                seen = set()
+                cursor = target
+                while cursor.get("supersedes_receipt_id"):
+                    parent = str(cursor["supersedes_receipt_id"])
+                    if parent in seen or parent == normalized.receipt_id:
+                        raise ValueError("OPERATOR_OUTCOME_SUPERSESSION_CYCLE")
+                    seen.add(parent)
+                    cursor = next(
+                        (item for item in existing if item.get("receipt_id") == parent),
+                        {},
+                    )
+            existing.append(normalized.model_dump(mode="json"))
+            current["operator_outcome_receipts"] = existing
+            current["operator_outcome_receipt"] = existing[-1]
+
+        result = self._mutate_state(task_id, mutate)
+        return dict(result.get("operator_outcome_receipt") or normalized.model_dump(mode="json"))
+
     def _promotion_authority_error(
         self,
         *,
@@ -1714,12 +1882,44 @@ class SelfHostedTaskService:
         # Persistence/sequence failures are deterministic event blocks.  They
         # must remain visible to the caller; silently dropping them creates a
         # false lifecycle receipt while leaving the lifecycle authority intact.
+        request = result.get("request") if isinstance(result.get("request"), Mapping) else {}
         NexusEventBus.emit_attempt_transition(build_attempt_transition_event(
             task_id=str(result.get("task_id") or task_id),
             attempt_id=str(result.get("attempt_id")), sequence=sequence,
             state=str(result.get("status")), reason=str(result.get("error") or ""),
             candidate_refs=candidate_refs, evidence_refs=evidence_refs,
+            source_revision=str(result.get("source_revision") or request.get("controller_revision") or "unknown"),
+            contract_revision=str(result.get("contract_revision") or request.get("contract_hash") or "unknown"),
         ))
+
+    @staticmethod
+    def read_canonical_attempt_events(task_id: str, attempt_id: str) -> list[dict[str, Any]]:
+        """Read attempt events from the canonical EventBus log, without mutation."""
+        # Read the validated canonical store directly.  The EventBus observer
+        # facade intentionally serves best-effort dashboards and swallows
+        # integrity failures; continuity recovery must preserve those errors.
+        if NexusEventBus._log_store.event_log_path != NexusEventBus._event_log_path:
+            NexusEventBus._log_store.event_log_path = NexusEventBus._event_log_path
+        records = NexusEventBus._log_store.read_recent(event_type="attempt_transition", limit=10_000)
+        selected = []
+        for record in records:
+            payload = record.get("payload") if isinstance(record, Mapping) else None
+            if not isinstance(payload, Mapping):
+                raise ValueError("attempt transition payload is missing")
+            if payload.get("task_id") == task_id and payload.get("attempt_id") == attempt_id:
+                selected.append(dict(record))
+        if not selected:
+            raise ValueError("attempt continuity stream is empty")
+        return selected
+
+    @staticmethod
+    def read_canonical_attempt_continuity(task_id: str, attempt_id: str) -> list[Any]:
+        """Consume the canonical JSONL attempt log as validated continuity events."""
+        return events_from_attempt_records(
+            SelfHostedTaskService.read_canonical_attempt_events(task_id, attempt_id),
+            task_id=task_id,
+            attempt_id=attempt_id,
+        )
 
     @staticmethod
     def _request_hash(request: Mapping[str, Any]) -> str:
@@ -3723,9 +3923,12 @@ class SelfHostedTaskService:
             if state is None:
                 return None
             envelope = state.get("task_action") or self._task_action_envelope(state)
+            detailed_state = dict(state)
+            detailed_state.pop("operator_outcome_receipt", None)
+            detailed_state.pop("operator_outcome_receipts", None)
             if envelope.get("action_state") != "IN_PROGRESS":
                 result = {
-                    **(state if include_details else {
+                    **(detailed_state if include_details else {
                         "schema": "nexus.self_hosted_task_status.v1",
                         "task_id": state.get("task_id"),
                         "status": state.get("status"),
@@ -3747,7 +3950,7 @@ class SelfHostedTaskService:
             if time.monotonic() >= deadline:
                 envelope = {**envelope, "wait_timed_out": True}
                 return {
-                    **(state if include_details else {
+                    **(detailed_state if include_details else {
                         "schema": "nexus.self_hosted_task_status.v1",
                         "task_id": state.get("task_id"),
                         "status": state.get("status"),
@@ -5962,7 +6165,11 @@ class SelfHostedTaskService:
 
 
     def get_task(self, task_id: str) -> Optional[dict[str, Any]]:
-        return self.get_task_snapshot(task_id, include_details=True)
+        result = self.get_task_snapshot(task_id, include_details=True)
+        if result is not None:
+            result.pop("operator_outcome_receipt", None)
+            result.pop("operator_outcome_receipts", None)
+        return result
 
     def get_task_snapshot(
         self, task_id: str, *, include_details: bool = False
@@ -5973,7 +6180,10 @@ class SelfHostedTaskService:
             return None
         approval_requirements = self._approval_requirements(state)
         if include_details:
-            return {**state, "approval_requirements": approval_requirements}
+            details = {**state, "approval_requirements": approval_requirements}
+            details.pop("operator_outcome_receipt", None)
+            details.pop("operator_outcome_receipts", None)
+            return details
         action = state.get("task_action") or self._task_action_envelope(state)
         return {
             "schema": "nexus.self_hosted_task_status.v1",
@@ -5991,7 +6201,7 @@ class SelfHostedTaskService:
         }
 
     def get_receipt(self, task_id: str) -> Optional[dict[str, Any]]:
-        state = self.get_task(task_id)
+        state = self._read_state(task_id)
         if state is None:
             return None
         contract = state.get("contract") or {}
@@ -6072,6 +6282,8 @@ class SelfHostedTaskService:
             "collaboration_provenance": collaboration_provenance,
             "candidate_collaboration_provenance": candidate_collaboration_provenance,
             "error": state.get("error"),
+            "operator_outcome_receipt": state.get("operator_outcome_receipt"),
+            "operator_outcome_receipts": state.get("operator_outcome_receipts", []),
         }
 
     def get_promotion_packet(self, task_id: str) -> Optional[dict[str, Any]]:

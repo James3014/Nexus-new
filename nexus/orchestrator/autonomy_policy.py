@@ -36,6 +36,7 @@ from nexus.contracts.autonomy_goal import (
     CollaborationBaseIdentity,
     RepositoryIdentity,
     SensitiveScope,
+    StandingGrantContext,
     canonical_autonomy_hash,
 )
 
@@ -100,6 +101,123 @@ def _path(value: str) -> str:
 class AutonomyDecisionState(str, Enum):
     WOULD_AUTO_CONTINUE = "WOULD_AUTO_CONTINUE"
     WOULD_BLOCK = "WOULD_BLOCK"
+
+
+class StandingGrantOutcome(str, Enum):
+    GRANT_MATCH = "GRANT_MATCH"
+    OUT_OF_SCOPE = "OUT_OF_SCOPE"
+    INVALID = "INVALID"
+    PLATFORM_APPROVAL_REQUIRED = "PLATFORM_APPROVAL_REQUIRED"
+    OWNER_MERGE_SLOT_REQUIRED = "OWNER_MERGE_SLOT_REQUIRED"
+
+
+class StandingGrantRequest(_FrozenModel):
+    schema: Literal["nexus.standing_grant_request.v1"] = "nexus.standing_grant_request.v1"
+    owner_id: StrictStr
+    coordinator_id: StrictStr
+    repository: RepositoryIdentity
+    thread_id: StrictStr
+    goal_id: StrictStr
+    action: AutonomyActionClass
+    requested_at: AwareDatetime
+    context_hash: StrictStr
+
+    @field_validator("owner_id", "coordinator_id", "thread_id", "goal_id")
+    @classmethod
+    def validate_ids(cls, value: str, info) -> str:
+        return _safe_id(value, info.field_name)
+
+    @field_validator("context_hash")
+    @classmethod
+    def validate_context_hash(cls, value: str) -> str:
+        return _sha(value, "context_hash")
+
+
+class StandingGrantDecision(_FrozenModel):
+    schema: Literal["nexus.standing_grant_decision.v1"] = "nexus.standing_grant_decision.v1"
+    outcome: StandingGrantOutcome
+    context_hash: StrictStr
+    decision_hash: StrictStr
+    mutation_authorized: Literal[False] = False
+    claim_ceiling: Literal["EVIDENCE_ONLY_PLATFORM_BOUND"] = "EVIDENCE_ONLY_PLATFORM_BOUND"
+
+    @field_validator("context_hash", "decision_hash")
+    @classmethod
+    def validate_hashes(cls, value: str, info) -> str:
+        return _sha(value, info.field_name)
+
+    @model_validator(mode="after")
+    def validate_decision_hash(self) -> "StandingGrantDecision":
+        payload = self.model_dump(mode="json", exclude={"decision_hash"})
+        if self.decision_hash != canonical_autonomy_hash(payload):
+            raise ValueError("STANDING_DECISION_HASH_INVALID")
+        return self
+
+
+def _standing_decision(outcome: StandingGrantOutcome, context_hash: str) -> StandingGrantDecision:
+    payload = {
+        "schema": "nexus.standing_grant_decision.v1",
+        "outcome": outcome.value,
+        "context_hash": context_hash,
+        "mutation_authorized": False,
+        "claim_ceiling": "EVIDENCE_ONLY_PLATFORM_BOUND",
+    }
+    return StandingGrantDecision.model_validate({
+        **payload,
+        "decision_hash": canonical_autonomy_hash(payload),
+    })
+
+
+def evaluate_standing_grant_decision(
+    context: StandingGrantContext | Mapping[str, Any],
+    request: StandingGrantRequest | Mapping[str, Any],
+) -> StandingGrantDecision:
+    """Match a coordinator standing grant without authorizing mutation."""
+    raw_context_hash = (
+        context.context_hash
+        if isinstance(context, StandingGrantContext)
+        else context.get("context_hash")
+        if isinstance(context, Mapping)
+        else None
+    )
+    context_hash = (
+        raw_context_hash
+        if isinstance(raw_context_hash, str) and _SHA64.fullmatch(raw_context_hash)
+        else "0" * 64
+    )
+    try:
+        grant = StandingGrantContext.model_validate(
+            context.model_dump(mode="json")
+            if isinstance(context, StandingGrantContext)
+            else context
+        )
+        asked = StandingGrantRequest.model_validate(
+            request.model_dump(mode="json")
+            if isinstance(request, StandingGrantRequest)
+            else request
+        )
+    except (ValidationError, AttributeError, TypeError, ValueError):
+        return _standing_decision(StandingGrantOutcome.INVALID, context_hash)
+    if asked.context_hash != grant.context_hash:
+        return _standing_decision(StandingGrantOutcome.INVALID, grant.context_hash)
+    if asked.action is AutonomyActionClass.GITHUB_MERGE:
+        return _standing_decision(
+            StandingGrantOutcome.OWNER_MERGE_SLOT_REQUIRED, grant.context_hash
+        )
+    now = asked.requested_at
+    if (
+        asked.owner_id != grant.owner_id
+        or asked.coordinator_id != grant.coordinator_id
+        or asked.repository != grant.repository
+        or asked.thread_id != grant.thread_id
+        or asked.goal_id != grant.goal_id
+        or asked.action not in grant.allowed_actions
+        or now < grant.issued_at
+        or now >= grant.expires_at
+        or grant.revoked_at is not None
+    ):
+        return _standing_decision(StandingGrantOutcome.OUT_OF_SCOPE, grant.context_hash)
+    return _standing_decision(StandingGrantOutcome.GRANT_MATCH, grant.context_hash)
 
 
 class AutonomyReasonCode(str, Enum):

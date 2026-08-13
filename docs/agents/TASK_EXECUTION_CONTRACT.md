@@ -73,6 +73,20 @@ authorize its own work.
   acceptance, and expected-head/CAS merge authority.
 - A local lifecycle Candidate is formal Target output governed by self-hosted
   submit, receipt, approval, and integration gates.
+- Ready-Issue collaboration is worker-neutral. A claim contract may carry
+  `claim_intent` (`AUTO_CLAIM_IF_READY`, `MANUAL_DISPATCH`, or
+  `NOT_CLAIMABLE`), `claim_enforcement_state` (`REPO_ENFORCED`,
+  `PROJECTION_ONLY`, or `UNKNOWN`), and effective `claim_mode` with the same
+  values. These are distinct: intent is planning metadata, enforcement is a
+  repository capability claim, and mode is the dispatch result.
+- Autonomous mutation requires the exact Issue/attempt to pass all hard gates
+  and a canonical atomic/fenced claim operation to succeed. Until that
+  operation is physically proven, `PROJECTION_ONLY` and `UNKNOWN` resolve
+  fail-closed to `MANUAL_DISPATCH`. GitHub UI metadata and branch names remain
+  projections and do not provide exclusive ownership.
+- A claim grants only the bounded implementation attempt. It never grants
+  route selection, Workforce promotion, independent acceptance, approval,
+  integration, merge, runtime activation, release, or production truth.
 
 Ordinary GitHub Issue work does not enter local lifecycle merely because it is
 delegated or produces a PR Candidate. Local lifecycle tools are mandatory only
@@ -109,11 +123,14 @@ receipt. Candidate, approval, integration, push, cleanup, and production/public
 claims are separate lifecycle states. A failed required commit is a block, not
 completion.
 
-The primary coordinator may perform the GitHub protected merge under the root
-standing-authority gate only after an independent exact-head review, terminal
-success for every ruleset-required check, an up-to-date base, a complete scope
-and deletion audit, and an expected-head/CAS merge. This GitHub action does not
-approve or integrate local Nexus lifecycle state.
+The primary coordinator may prepare `MERGE_INTENT` under standing authority
+after an independent exact-head review, terminal success for every
+ruleset-required check, an up-to-date base, and complete scope/deletion audits.
+Protected merge then requires a fresh Owner `MERGE_SLOT_GRANTED` decision bound
+to the exact repository, PR, head, and base. Any drift invalidates the slot and
+requires a new decision before expected-head/CAS merge. Neither `MERGE_INTENT`
+nor standing authority is merge permission. This GitHub action does not approve
+or integrate local Nexus lifecycle state.
 
 ## Blocks and residual debt
 

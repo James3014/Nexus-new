@@ -17,31 +17,44 @@ source behavior, tests, and required verifiers remain authoritative.
 
 - The collaboration repository is `James3014/Nexus-new`; its default and
   collaboration branch is `main`.
-- A Ready GitHub Issue authorizes bounded collaboration only; it does not select
-  local lifecycle. Draft, triage, and unready Issues grant no mutation.
-- Codex implements a Ready Issue on an issue-specific branch such as
-  `codex/issue-<number>-<slug>`, pushes only that branch, and opens a pull
-  request to `main`.
+- A Ready GitHub Issue is a worker-neutral bounded collaboration contract; it
+  does not select local lifecycle. Draft, triage, and unready Issues grant no
+  mutation.
+- An eligible governed worker implements a Ready Issue on an issue-specific
+  branch such as `codex/issue-<number>-<slug>`, pushes only that branch, and
+  opens a pull request to `main`. Provider/model names are not normative
+  ownership identities.
+- Issue claim metadata is explicit and fail-closed: `claim_intent` describes
+  Owner planning intent, `claim_enforcement_state` describes whether a
+  repository-enforced atomic/fenced claim exists, and `claim_mode` describes
+  effective dispatch. Until a canonical claim operation is physically proven,
+  `PROJECTION_ONLY` or `UNKNOWN` enforcement resolves to `MANUAL_DISPATCH`;
+  assignees, labels, comments, Project fields, branch names, and worker prose
+  are projections and cannot authorize autonomous mutation.
 - No agent direct-pushes, force-pushes, or deletes `main`; delegated workers
   never approve or merge their Candidate. Only the primary coordinator may use
-  protected PR merge under exact Owner approval or the standing grant below.
+  protected PR merge after the Owner grants a fresh, exact PR/head-bound merge
+  slot. A standing grant is never a protected-merge slot.
 - Never merge runtime history into GitHub `main` to align SHAs; synchronize only
   reviewed deltas without secrets or generated/runtime state.
 - The Owner may give the primary coordinator a non-transferable standing grant
   for bounded Ready Issues in one thread, eliminating repeated Task Card,
-  branch, push, PR, and merge approvals. Its active Task Card receipt binds
+  branch, issue-branch push, and PR approvals. Its active Task Card receipt binds
   grant/Goal ids, parties, repository/thread, scope/actions, eligibility,
   issuance, expiry, and revocation. It ends when revoked, narrowed, or the Goal
-  is verified terminal and grants no delegated-worker authority.
+  is verified terminal and grants no delegated-worker or protected-merge
+  authority.
 - Under that standing grant, the primary coordinator may create and commit a
   missing Task Card/INDEX only when the effective Issue contract is already
   Ready, exact allowed/forbidden paths and the claim ceiling are frozen,
   overlap and Workforce gates are satisfied, and `AUTO_CHAIN=false`. Workers
   may consume the committed card but cannot create, widen, or self-authorize
   it.
-- Every coordinator merge still requires a fresh SHA-bound PR/head/base/diff,
-  Issue/card, independent acceptance, resolved blockers, valid authorization,
+- Every coordinator merge requires a fresh Owner `MERGE_SLOT_GRANTED` decision
+  bound to the exact repository, PR, head, and base, plus a fresh SHA-bound
+  PR/head/base/diff, Issue/card, independent acceptance, resolved blockers,
   current `main`, terminal-success required checks, and expected-head/CAS.
+  `MERGE_INTENT` is evidence and a request for that slot, never authorization.
   Drift, conflict, unexpected deletion, or unknown/failed checks fail closed.
 - The coordinator handles ordinary implementation, rebind, retry, and evidence
   autonomously. It asks again only for contract widening/change, weaker
@@ -85,10 +98,10 @@ source behavior, tests, and required verifiers remain authoritative.
   open a PR. For manual/legacy work it cannot convert its own implementation
   or Candidate into approval, integration, merge, release, or production truth.
   For this program's autonomy-enabled Goals, a separate designated integration
-  action may perform only the exact machine-authorized merge after independent
+  action may perform only the exact Owner-slot-authorized merge after independent
   acceptance and fresh merge-gate verification. The primary coordinator acting
-  under a valid standing grant is that separate integration action; a delegated
-  implementer or reviewer is not.
+  under a valid, exact `MERGE_SLOT_GRANTED` decision is that separate integration
+  action; a delegated implementer or reviewer is not.
 - GitHub review/merge does not silently perform Nexus lifecycle approval or
   runtime integration. Local Nexus runtime actions keep their existing formal
   authority and evidence requirements until a separate migration changes them.
@@ -100,8 +113,8 @@ source behavior, tests, and required verifiers remain authoritative.
   required.
 - Do not hand-edit lifecycle JSON. Use the formal lifecycle API, CLI, or
   service surface. Do not direct-push protected main or delete refs. Protected
-  PR merge requires exact Owner authority or the standing coordinator grant
-  above and never permits bypassing required checks.
+  PR merge requires a fresh exact Owner merge slot and never permits bypassing
+  required checks. Standing coordinator authority covers pre-merge work only.
 - Completion requires behavioral evidence, structural conformance, and the
   applicable request- or card-defined verifier. A report or green subset is not
   solve truth.
@@ -137,8 +150,8 @@ source behavior, tests, and required verifiers remain authoritative.
 - Direct work does not commit, push, merge, delete, or continue into a successor
   task unless the Owner grants that exact direct authority. The standing
   coordinator grant does not expand `DIRECT_CANONICAL`; it applies only to
-  governed GitHub Ready-Issue card creation, issue-branch work, and protected
-  PR merge. If eligibility is unclear, stop and report the specific escalation
+  governed GitHub Ready-Issue card creation, issue-branch work, and pre-merge
+  PR preparation. If eligibility is unclear, stop and report the specific escalation
   condition.
 - A Ready GitHub Issue separately authorizes scoped commits and pushes on its
   issue-specific branch and opening a PR; it never authorizes direct `main`

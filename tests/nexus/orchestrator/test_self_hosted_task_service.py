@@ -26,6 +26,7 @@ from nexus.contracts.lifecycle_action import (
     build_owner_inline_contract,
     canonical_request_hash,
 )
+from nexus.contracts.operator_outcome_receipt import build_operator_outcome_receipt
 from nexus.contracts.target_integration_lifecycle import (
     ExternalAcceptanceReceipt,
     IntegrationAuthorizationEnvelope,
@@ -35,6 +36,7 @@ from nexus.engine.canonical_task_seam import (
     build_canonical_dispatch_envelope,
     build_canonical_planner_admission,
 )
+from nexus.events.transport import NexusEventBus
 from nexus.executors.worker_contract import (
     SUPPORTED_WORKER_PROVIDERS,
     WorkerExecutionReceipt,
@@ -62,6 +64,23 @@ from nexus.services.model_workforce_policy import WorkforcePolicyLoader
 from nexus.services.runtime_workforce_admission import evaluate_runtime_workforce_admission
 
 
+def _operator_provenance(kind="operator"):
+    source = {"source_ref": "authenticated-submission"}
+    if kind == "system":
+        source = {"source_hash": "c" * 64}
+    return {
+        field: {"provenance": kind, **source}
+        for field in (
+            "observed_outcome",
+            "observation_basis",
+            "reason_code",
+            "observed_at",
+            "source_revision",
+            "runtime_receipt_hash",
+        )
+    }
+
+
 def _request(tmp_path: Path, **overrides):
     values = {
         "task_id": "mcp-task-001",
@@ -80,6 +99,386 @@ def _request(tmp_path: Path, **overrides):
     }
     values.update(overrides)
     return values
+
+
+def test_operator_outcome_persists_idempotently_and_projects(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("task-1", {
+        "schema": "nexus.self_hosted_task_state.v1",
+        "task_id": "task-1",
+        "status": "SUBMITTED",
+        "attempt_id": "attempt-1",
+        "action_id": "action-1",
+        "lifecycle_revision": "life-1",
+        "controller_revision": "a" * 40,
+        "runtime_receipt_hash": "b" * 64,
+        "status_history": [],
+    })
+    receipt = build_operator_outcome_receipt(
+        task_id="task-1", attempt_id="attempt-1", action_id="action-1",
+        lifecycle_revision="life-1", source_revision="a" * 40,
+        runtime_receipt_hash="b" * 64, observed_outcome="SUCCESS",
+        observation_basis="OPERATOR_REPORT", reason_code="OPERATOR_CONFIRMED",
+        idempotency_key="idem-1", field_provenance=_operator_provenance(),
+    )
+    first = service.record_operator_outcome("task-1", receipt)
+    second = service.record_operator_outcome("task-1", receipt)
+    assert first == second
+    projected = service.get_receipt("task-1")
+    assert projected["operator_outcome_receipt"] == first
+    assert len(projected["operator_outcome_receipts"]) == 1
+    assert "operator_outcome_receipt" not in service.get_task("task-1")
+    conflict = receipt.model_dump(mode="json")
+    conflict["observed_outcome"] = "FAILURE"
+    conflict["receipt_id"] = "0" * 64
+    with pytest.raises(ValueError, match="PAYLOAD_HASH"):
+        service.record_operator_outcome("task-1", conflict)
+
+
+def test_operator_outcome_rejects_supersession_cycle_unknown_target_and_order(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("task-1", {
+        "schema": "nexus.self_hosted_task_state.v1", "task_id": "task-1", "status": "SUBMITTED",
+        "attempt_id": "attempt-1", "action_id": "action-1", "lifecycle_revision": "life-1", "controller_revision": "a" * 40,
+        "runtime_receipt_hash": "b" * 64, "status_history": [],
+    })
+    kwargs = dict(task_id="task-1", attempt_id="attempt-1", action_id="action-1", lifecycle_revision="life-1",
+                  source_revision="a" * 40, runtime_receipt_hash="b" * 64,
+                  observed_outcome="SUCCESS", observation_basis="OPERATOR_REPORT", reason_code="OPERATOR_CONFIRMED",
+                  field_provenance=_operator_provenance())
+    unknown = build_operator_outcome_receipt(**kwargs, idempotency_key="idem-unknown", supersedes_receipt_id="c" * 64)
+    with pytest.raises(ValueError, match="SUPERSESSION_TARGET_MISSING"):
+        service.record_operator_outcome("task-1", unknown)
+
+    parent = build_operator_outcome_receipt(
+        **kwargs, idempotency_key="parent", observed_at=datetime.now(timezone.utc)
+    )
+    service.record_operator_outcome("task-1", parent)
+    older_child = build_operator_outcome_receipt(
+        **kwargs, idempotency_key="older-child",
+        observed_at=datetime.now(timezone.utc) - timedelta(seconds=30),
+        supersedes_receipt_id=parent.receipt_id,
+    )
+    with pytest.raises(ValueError, match="SUPERSESSION_ORDER_INVALID"):
+        service.record_operator_outcome("task-1", older_child)
+
+
+def test_operator_outcome_optional_runtime_receipt_binds_current_evidence(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("task-1", {"task_id": "task-1", "attempt_id": "a", "action_id": "x", "lifecycle_revision": "l",
+                                    "controller_revision": "a" * 40, "runtime_receipt_hash": "b" * 64, "status": "SUBMITTED"})
+    receipt = build_operator_outcome_receipt(task_id="task-1", attempt_id="a", action_id="x", lifecycle_revision="l",
+        source_revision="a" * 40, runtime_receipt_hash="c" * 64, observed_outcome="SUCCESS",
+        observation_basis="SYSTEM_OBSERVATION", reason_code="SYSTEM_RECORDED", idempotency_key="i",
+        field_provenance=_operator_provenance("system"))
+    with pytest.raises(ValueError, match="RUNTIME_RECEIPT_HASH_MISMATCH"):
+        service.record_operator_outcome("task-1", receipt)
+    optional = build_operator_outcome_receipt(
+        task_id="task-1", attempt_id="a", lifecycle_revision="l",
+        observed_outcome="NOT_OBSERVED", observation_basis="NOT_OBSERVED",
+        reason_code="NOT_PROVIDED", idempotency_key="optional",
+        field_provenance={
+            field: {"provenance": "operator", "source_ref": "authenticated-submission"}
+            for field in ("observed_outcome", "observation_basis", "reason_code", "observed_at")
+        },
+    )
+    assert service.record_operator_outcome("task-1", optional)["action_id"] is None
+
+
+def test_operator_outcome_rejects_malformed_persisted_chain(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    runtime_hash = "b" * 64
+    malformed = build_operator_outcome_receipt(
+        task_id="task-1", attempt_id="attempt-1", action_id="action-1", lifecycle_revision="life-1",
+        source_revision="a" * 40, runtime_receipt_hash=runtime_hash, observed_outcome="SUCCESS",
+        observation_basis="OPERATOR_REPORT", reason_code="OPERATOR_CONFIRMED", idempotency_key="old", supersedes_receipt_id="c" * 64,
+        field_provenance=_operator_provenance(),
+    )
+    service._write_state("task-1", {"schema": "nexus.self_hosted_task_state.v1", "task_id": "task-1", "status": "SUBMITTED", "attempt_id": "attempt-1", "lifecycle_revision": "life-1",
+                                    "controller_revision": "a" * 40, "action_id": "action-1", "runtime_receipt_hash": runtime_hash,
+                                    "operator_outcome_receipts": [malformed.model_dump(mode="json")],
+                                    "operator_outcome_receipt": malformed.model_dump(mode="json")})
+    candidate = build_operator_outcome_receipt(task_id="task-1", attempt_id="attempt-1", action_id="action-1", lifecycle_revision="life-1",
+            source_revision="a" * 40, runtime_receipt_hash=runtime_hash, observed_outcome="SUCCESS", observation_basis="OPERATOR_REPORT",
+            reason_code="OPERATOR_CONFIRMED", idempotency_key="new", field_provenance=_operator_provenance())
+    with pytest.raises(ValueError, match="PERSISTED_SUPERSESSION_TARGET_MISSING"):
+        service.record_operator_outcome("task-1", candidate)
+
+
+def test_operator_outcome_stale_history_remains_valid_and_detailed_snapshot_is_private(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    state = {"schema": "nexus.self_hosted_task_state.v1", "task_id": "task-1", "status": "SUBMITTED",
+             "attempt_id": "attempt-1", "action_id": "action-1", "lifecycle_revision": "life-1",
+             "controller_revision": "a" * 40, "runtime_receipt_hash": "b" * 64}
+    kwargs = dict(task_id="task-1", attempt_id="attempt-1", action_id="action-1", lifecycle_revision="life-1",
+                  source_revision="a" * 40, runtime_receipt_hash="b" * 64,
+                  observation_basis="OPERATOR_REPORT", reason_code="OPERATOR_CONFIRMED",
+                  field_provenance=_operator_provenance())
+    stale = build_operator_outcome_receipt(**kwargs, observed_outcome="SUCCESS", idempotency_key="old",
+                                           observed_at=datetime.now(timezone.utc) - timedelta(minutes=10))
+    state["operator_outcome_receipts"] = [stale.model_dump(mode="json")]
+    state["operator_outcome_receipt"] = stale.model_dump(mode="json")
+    service._write_state("task-1", state)
+    fresh = build_operator_outcome_receipt(**kwargs, observed_outcome="FAILURE", idempotency_key="new")
+    service.record_operator_outcome("task-1", fresh)
+    assert len(service.get_receipt("task-1")["operator_outcome_receipts"]) == 2
+    detailed = service.get_task_snapshot("task-1", include_details=True)
+    assert "operator_outcome_receipt" not in detailed
+    assert "operator_outcome_receipts" not in detailed
+    completed_wait = service.wait_task("task-1", include_details=True)
+    assert "operator_outcome_receipt" not in completed_wait
+    assert "operator_outcome_receipts" not in completed_wait
+    state["status"] = "RUNNING"
+    service._write_state("task-1", state)
+    timed_out_wait = service.wait_task(
+        "task-1", timeout_seconds=0, include_details=True
+    )
+    assert "operator_outcome_receipt" not in timed_out_wait
+    assert "operator_outcome_receipts" not in timed_out_wait
+
+
+def test_operator_outcome_revalidates_identity_inside_locked_append(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    service._write_state(
+        "task-1",
+        {
+            "schema": "nexus.self_hosted_task_state.v1",
+            "task_id": "task-1",
+            "status": "SUBMITTED",
+            "attempt_id": "attempt-1",
+            "action_id": "action-1",
+            "lifecycle_revision": "life-1",
+            "controller_revision": "a" * 40,
+            "runtime_receipt_hash": "b" * 64,
+        },
+    )
+    receipt = build_operator_outcome_receipt(
+        task_id="task-1",
+        attempt_id="attempt-1",
+        action_id="action-1",
+        lifecycle_revision="life-1",
+        source_revision="a" * 40,
+        runtime_receipt_hash="b" * 64,
+        observed_outcome="SUCCESS",
+        observation_basis="OPERATOR_REPORT",
+        reason_code="OPERATOR_CONFIRMED",
+        idempotency_key="race",
+        field_provenance=_operator_provenance(),
+    )
+    original_mutate = service._mutate_state
+
+    def drift_then_mutate(task_id, mutator):
+        state = service._read_state(task_id)
+        state["attempt_id"] = "attempt-2"
+        state["lifecycle_revision"] = "life-2"
+        service._write_state(task_id, state)
+        return original_mutate(task_id, mutator)
+
+    monkeypatch.setattr(service, "_mutate_state", drift_then_mutate)
+    with pytest.raises(ValueError, match="ATTEMPT_ID_MISMATCH"):
+        service.record_operator_outcome("task-1", receipt)
+    assert not service._read_state("task-1").get("operator_outcome_receipts")
+
+
+def test_operator_outcome_preserves_valid_prior_attempt_history(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    prior = build_operator_outcome_receipt(
+        task_id="task-1",
+        attempt_id="attempt-1",
+        action_id="action-1",
+        lifecycle_revision="life-1",
+        source_revision="a" * 40,
+        runtime_receipt_hash="b" * 64,
+        observed_outcome="FAILURE",
+        observation_basis="OPERATOR_REPORT",
+        reason_code="OPERATOR_CONFIRMED",
+        idempotency_key="prior-attempt",
+        observed_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+        field_provenance=_operator_provenance(),
+    )
+    service._write_state(
+        "task-1",
+        {
+            "schema": "nexus.self_hosted_task_state.v1",
+            "task_id": "task-1",
+            "status": "SUBMITTED",
+            "attempt_id": "attempt-2",
+            "action_id": "action-2",
+            "lifecycle_revision": "life-2",
+            "controller_revision": "c" * 40,
+            "runtime_receipt_hash": "d" * 64,
+            "operator_outcome_receipt": prior.model_dump(mode="json"),
+            "operator_outcome_receipts": [prior.model_dump(mode="json")],
+        },
+    )
+    current = build_operator_outcome_receipt(
+        task_id="task-1",
+        attempt_id="attempt-2",
+        action_id="action-2",
+        lifecycle_revision="life-2",
+        source_revision="c" * 40,
+        runtime_receipt_hash="d" * 64,
+        observed_outcome="SUCCESS",
+        observation_basis="OPERATOR_REPORT",
+        reason_code="OPERATOR_CONFIRMED",
+        idempotency_key="current-attempt",
+        field_provenance=_operator_provenance(),
+    )
+    service.record_operator_outcome("task-1", current)
+    projected = service.get_receipt("task-1")
+    assert [item["attempt_id"] for item in projected["operator_outcome_receipts"]] == [
+        "attempt-1",
+        "attempt-2",
+    ]
+    cross_attempt = build_operator_outcome_receipt(
+        task_id="task-1",
+        attempt_id="attempt-2",
+        action_id="action-2",
+        lifecycle_revision="life-2",
+        source_revision="c" * 40,
+        runtime_receipt_hash="d" * 64,
+        observed_outcome="SUCCESS",
+        observation_basis="OPERATOR_REPORT",
+        reason_code="OPERATOR_CONFIRMED",
+        idempotency_key="cross-attempt",
+        supersedes_receipt_id=prior.receipt_id,
+        field_provenance=_operator_provenance(),
+    )
+    with pytest.raises(ValueError, match="SUPERSESSION_ATTEMPT_MISMATCH"):
+        service.record_operator_outcome("task-1", cross_attempt)
+
+
+@pytest.mark.parametrize(
+    "malformed_history",
+    [
+        {"unexpected": "mapping"},
+        ["malformed-non-object"],
+        [None],
+    ],
+)
+def test_operator_outcome_rejects_malformed_history_container_or_element(
+    tmp_path, malformed_history
+):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    state = {
+        "schema": "nexus.self_hosted_task_state.v1",
+        "task_id": "task-1",
+        "status": "SUBMITTED",
+        "attempt_id": "attempt-1",
+        "action_id": "action-1",
+        "lifecycle_revision": "life-1",
+        "controller_revision": "a" * 40,
+        "runtime_receipt_hash": "b" * 64,
+        "operator_outcome_receipts": malformed_history,
+    }
+    service._write_state("task-1", state)
+    candidate = build_operator_outcome_receipt(
+        task_id="task-1",
+        attempt_id="attempt-1",
+        action_id="action-1",
+        lifecycle_revision="life-1",
+        source_revision="a" * 40,
+        runtime_receipt_hash="b" * 64,
+        observed_outcome="SUCCESS",
+        observation_basis="OPERATOR_REPORT",
+        reason_code="OPERATOR_CONFIRMED",
+        idempotency_key="new",
+        field_provenance=_operator_provenance(),
+    )
+    with pytest.raises(ValueError, match="PERSISTED_RECEIPT_TAMPERED"):
+        service.record_operator_outcome("task-1", candidate)
+    assert service._read_state("task-1")["operator_outcome_receipts"] == malformed_history
+
+
+def test_operator_outcome_rejects_singular_history_projection_mismatch(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    common = dict(
+        task_id="task-1",
+        attempt_id="attempt-1",
+        action_id="action-1",
+        lifecycle_revision="life-1",
+        source_revision="a" * 40,
+        runtime_receipt_hash="b" * 64,
+        observed_outcome="SUCCESS",
+        observation_basis="OPERATOR_REPORT",
+        reason_code="OPERATOR_CONFIRMED",
+        field_provenance=_operator_provenance(),
+    )
+    listed = build_operator_outcome_receipt(**common, idempotency_key="listed")
+    singular = build_operator_outcome_receipt(**common, idempotency_key="singular")
+    service._write_state(
+        "task-1",
+        {
+            "schema": "nexus.self_hosted_task_state.v1",
+            "task_id": "task-1",
+            "status": "SUBMITTED",
+            "attempt_id": "attempt-1",
+            "action_id": "action-1",
+            "lifecycle_revision": "life-1",
+            "controller_revision": "a" * 40,
+            "runtime_receipt_hash": "b" * 64,
+            "operator_outcome_receipts": [listed.model_dump(mode="json")],
+            "operator_outcome_receipt": singular.model_dump(mode="json"),
+        },
+    )
+    candidate = build_operator_outcome_receipt(**common, idempotency_key="new")
+    with pytest.raises(ValueError, match="PERSISTED_RECEIPT_TAMPERED"):
+        service.record_operator_outcome("task-1", candidate)
+    assert len(service._read_state("task-1")["operator_outcome_receipts"]) == 1
+
+
+def test_operator_outcome_rejects_nonempty_history_without_singular_projection(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    common = dict(
+        task_id="task-1", attempt_id="attempt-1", action_id="action-1",
+        lifecycle_revision="life-1", source_revision="a" * 40,
+        runtime_receipt_hash="b" * 64, observed_outcome="SUCCESS",
+        observation_basis="OPERATOR_REPORT", reason_code="OPERATOR_CONFIRMED",
+        field_provenance=_operator_provenance(),
+    )
+    prior = build_operator_outcome_receipt(**common, idempotency_key="prior")
+    service._write_state("task-1", {
+        "schema": "nexus.self_hosted_task_state.v1", "task_id": "task-1",
+        "status": "SUBMITTED", "attempt_id": "attempt-1", "action_id": "action-1",
+        "lifecycle_revision": "life-1", "controller_revision": "a" * 40,
+        "runtime_receipt_hash": "b" * 64,
+        "operator_outcome_receipts": [prior.model_dump(mode="json")],
+    })
+    candidate = build_operator_outcome_receipt(**common, idempotency_key="new")
+    with pytest.raises(ValueError, match="PERSISTED_RECEIPT_TAMPERED"):
+        service.record_operator_outcome("task-1", candidate)
+    assert len(service._read_state("task-1")["operator_outcome_receipts"]) == 1
+
+
+def test_operator_outcome_allows_empty_history_without_singular_projection(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    service._write_state("task-1", {
+        "schema": "nexus.self_hosted_task_state.v1", "task_id": "task-1",
+        "status": "SUBMITTED", "attempt_id": "attempt-1", "action_id": "action-1",
+        "lifecycle_revision": "life-1", "controller_revision": "a" * 40,
+        "runtime_receipt_hash": "b" * 64, "operator_outcome_receipts": [],
+    })
+    candidate = build_operator_outcome_receipt(
+        task_id="task-1", attempt_id="attempt-1", action_id="action-1",
+        lifecycle_revision="life-1", source_revision="a" * 40,
+        runtime_receipt_hash="b" * 64, observed_outcome="SUCCESS",
+        observation_basis="OPERATOR_REPORT", reason_code="OPERATOR_CONFIRMED",
+        idempotency_key="first", field_provenance=_operator_provenance(),
+    )
+    persisted = service.record_operator_outcome("task-1", candidate)
+    assert persisted["receipt_id"] == candidate.receipt_id
 
 
 def _valid_local_dispatch():
@@ -2607,6 +3006,107 @@ def test_exact_approved_integration_is_idempotent(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="EXTERNAL_ACCEPTANCE_REQUIRED"):
         service.integrate_approved("integration-once")
     assert calls == []
+
+
+def test_gb042_valid_approved_integration_is_one_side_effect_and_stable_duplicate(
+    tmp_path, monkeypatch
+):
+    """GB-042: a valid acceptance/approval binding integrates once only."""
+    from nexus.orchestrator.governed_integration import IntegrationReceipt
+
+    task_id = "gb042-integration-once"
+    candidate = "c" * 40
+    request = _request(tmp_path, task_id=task_id)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    contract = service.build_contract(request)
+    closure = _closure_context(task_id, candidate)
+    authorization_hash = IntegrationAuthorizationEnvelope(
+        **closure["integration_authorization"]
+    ).authorization_hash
+    closure["integration_authorization"]["authorization_hash"] = authorization_hash
+    packet = {
+        "candidate_commit_sha": candidate,
+        "candidate_tree_sha": "d" * 40,
+        "candidate_state_hash": "e" * 64,
+        "verified_receipt_hash": "f" * 64,
+    }
+    grant = {
+        **closure["approval_context"],
+        "consumed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "status": "APPROVED",
+            "promotion_status": "APPROVED",
+            "attempt_id": "attempt-1",
+            "request": request,
+            "contract": contract.model_dump(mode="json"),
+            "promotion_packet": packet,
+            "approved_binding": {**packet, "approval_grant": grant},
+            "external_acceptance": closure["external_acceptance"],
+            "integration_authorization": closure["integration_authorization"],
+            "verified_receipt": {
+                "repository_contract_gate_passed": True,
+                "repository_contract_policy_revision_hash": "a" * 64,
+            },
+        },
+    )
+    gate_calls = []
+    integration_calls = []
+
+    def passing_gate(self, **kwargs):
+        gate_calls.append(kwargs)
+        return RepositoryContractGateReceipt(
+            passed=True,
+            mode="shadow",
+            policy_revision_hash="a" * 64,
+            findings=(),
+            blocking_reasons=(),
+        )
+
+    class SuccessfulIntegration:
+        def __init__(self, integration_root):
+            pass
+
+        def integrate_authorized_task_state(self, state, **kwargs):
+            integration_calls.append(kwargs)
+            return IntegrationReceipt(
+                schema="nexus.integration_receipt/v1",
+                task_id=task_id,
+                integration_branch="nexus/integration/main",
+                source_branch="nexus/task/gb042-integration-once",
+                candidate_commit_sha=candidate,
+                integration_base_sha="b" * 40,
+                integration_commit_sha="1" * 40,
+                verifier_passed=True,
+                merge_performed=True,
+                push_performed=False,
+                worktree_removed=True,
+                staging_commit_sha="1" * 40,
+                post_apply_verified=True,
+                acceptance_receipt_hash=closure["external_acceptance"]["receipt_hash"],
+                authorization_hash=authorization_hash,
+            )
+
+    monkeypatch.setattr(RepositoryContractGate, "evaluate_committed_candidate", passing_gate)
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.ControlledIntegrationManager",
+        SuccessfulIntegration,
+    )
+
+    first = service.integrate_approved(task_id)
+    second = service.integrate_approved(task_id)
+
+    assert len(integration_calls) == 1
+    assert len(gate_calls) == 2  # preflight and locked apply recheck
+    assert first["status"] == "INTEGRATED"
+    assert second["status"] == "INTEGRATED"
+    assert second["integration_result_sha"] == first["integration_result_sha"] == "1" * 40
+    assert second["integration_receipt"] == first["integration_receipt"]
 
 
 def test_lifecycle_receipt_exposes_required_fields(tmp_path):
@@ -6646,3 +7146,16 @@ def test_m3d_event_append_failure_persists_reconciliation_debt(tmp_path, monkeyp
     assert durable["event_append_failure"]["status"] == "BLOCKED"
     assert durable["event_append_failure"]["error_type"] == "OSError"
     assert len(durable["event_append_failure"]["error_sha256"]) == 64
+
+
+def test_canonical_continuity_read_preserves_event_store_integrity_error(monkeypatch):
+    class ExplodingStore:
+        event_log_path = None
+
+        def read_recent(self, **_kwargs):
+            raise ValueError("tampered event log")
+
+    monkeypatch.setattr(NexusEventBus, "_log_store", ExplodingStore())
+    monkeypatch.setattr(NexusEventBus, "_event_log_path", None)
+    with pytest.raises(ValueError, match="tampered event log"):
+        SelfHostedTaskService.read_canonical_attempt_events("task-1", "attempt-1")

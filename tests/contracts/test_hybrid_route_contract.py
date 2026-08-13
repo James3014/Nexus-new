@@ -3,13 +3,15 @@ from __future__ import annotations
 import pytest
 
 from nexus.contracts.hybrid_route import (
+    Authority,
     HybridRouteDecision,
     RouteMode,
     VerifierResult,
-    Authority,
-    hybrid_route_decision_from_payload,
     build_hybrid_route_decision,
+    hybrid_route_decision_from_payload,
 )
+from nexus.engine.capability_receipt_adapters import LocalHealReceiptAdapter
+from nexus.services.local_heal.hybrid_route_bridge import capability_payload_from_hybrid_route
 
 
 def test_hybrid_route_default_values() -> None:
@@ -42,6 +44,23 @@ def test_to_dict_round_trip() -> None:
 
     round_trip = hybrid_route_decision_from_payload(payload)
     assert round_trip == decision
+
+
+def test_gb013_default_payload_is_observational_and_non_claiming() -> None:
+    payload = capability_payload_from_hybrid_route(HybridRouteDecision())
+    receipt = LocalHealReceiptAdapter().build(claim_verified=False, payload=payload)
+    assert payload["gate_passed"] is False
+    assert payload["invoked"] is False
+    assert receipt.public_claim_safe is False
+    assert receipt.outcome_contributed is False
+
+
+def test_gb014_round_trip_tamper_cannot_escalate_authority() -> None:
+    payload = HybridRouteDecision().to_dict()
+    payload["authority"] = "fail_closed"
+    payload["public_claim_allowed"] = True
+    with pytest.raises(ValueError):
+        hybrid_route_decision_from_payload(payload)
 
 
 def test_from_payload_coerces_enum() -> None:
@@ -101,6 +120,49 @@ def test_advisory_guard_cannot_block_delivery_yet() -> None:
         behavior_changed=False,
     )
     assert decision.route_mode == RouteMode.CLOUD_FIRST_LOCAL_GUARD_ADVISORY
+
+
+def test_gb019_advisory_failure_does_not_block_delivery_or_claim() -> None:
+    """GB-019: an advisory verifier failure is observational only."""
+    decision = HybridRouteDecision(
+        route_mode=RouteMode.CLOUD_FIRST_LOCAL_GUARD_ADVISORY,
+        authority=Authority.ADVISORY_ONLY,
+        verifier_result=VerifierResult.FAIL,
+        evidence_refs=("gb019-evidence",),
+        candidate_output_isolated=True,
+    )
+    payload = capability_payload_from_hybrid_route(decision)
+    route_payload = payload["hybrid_route"]
+    receipt = LocalHealReceiptAdapter().build(claim_verified=False, payload=payload)
+
+    assert decision.fallback_block_reason == ""
+    assert decision.blockers == ()
+    assert payload["gate_passed"] is False
+    assert payload["invoked"] is False
+    assert route_payload["public_claim_allowed"] is False
+    assert route_payload["production_ready"] is False
+    assert route_payload["blockers"] == []
+    assert route_payload["fallback_block_reason"] == ""
+    assert receipt.gate_passed is False
+    assert receipt.outcome_contributed is False
+    assert receipt.public_claim_safe is False
+
+
+def test_gb019_blocking_override_fails_closed() -> None:
+    """A deliberate fail-closed authority is distinct from advisory mode."""
+    payload = build_hybrid_route_decision(
+        route_mode=RouteMode.CLOUD_FIRST_LOCAL_GUARD_FAIL_CLOSED,
+        authority=Authority.FAIL_CLOSED,
+        verifier_result=VerifierResult.FAIL,
+        fallback_block_reason="verifier_fail",
+        blockers=("verifier_fail",),
+    )
+    decision = hybrid_route_decision_from_payload(payload)
+
+    assert decision.authority is Authority.FAIL_CLOSED
+    assert decision.fallback_block_reason == "verifier_fail"
+    assert decision.blockers == ("verifier_fail",)
+    assert decision.public_claim_allowed is False
 
 
 def test_public_claim_allowed_true_fails() -> None:
@@ -233,4 +295,3 @@ def test_local_only_executed_missing_fields_fails() -> None:
             applied_patch_hash="",
             selected_candidate_hash_matches_applied=True,
         )
-
