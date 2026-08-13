@@ -65,9 +65,7 @@ def test_execution_domains_and_candidate_namespaces_are_unambiguous():
 
 def test_ready_issue_claim_contract_is_worker_neutral_and_fail_closed():
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(
-        encoding="utf-8"
-    )
+    contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(encoding="utf-8")
 
     assert "eligible governed worker" in agents
     assert "Provider/model names are not normative" in agents
