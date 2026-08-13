@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: COMPLETED
 task_id: github-issue-7-m3-d-events-e2e
 campaign_id: github-issue-7-acceptance-repair-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/7
@@ -10,6 +10,11 @@ worker_may_commit: true
 worker_may_approve: false
 worker_may_integrate: false
 worker_may_push: true
+completion_marker: M3_ACCEPTANCE_REPAIR_MERGED
+candidate_head: a2394a39b6a234a3c185e8486e299cc57fccefe8
+merge_commit: f3dc8d28a0f90d5c5fd2f31dbeb0ab2f29f7ca04
+reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+claim_ceiling: M3_ACCEPTANCE_REPAIR_IMPLEMENTED
 ---
 
 # M3-D Ordered Attempt Events and End-to-End Acceptance
@@ -67,6 +72,19 @@ E2E suites, affected lifecycle regressions, Ruff, Pyright, `git diff --check`;
 exact commit and independent review. Final claim ceiling is
 `M3_ACCEPTANCE_REPAIR_IMPLEMENTED`, never runtime activated or public-production
 ready.
+
+## Completion receipt
+
+PR #219 head `a2394a39b6a234a3c185e8486e299cc57fccefe8` merged as
+`f3dc8d28a0f90d5c5fd2f31dbeb0ab2f29f7ca04`. The exact nine-file M3-D
+implementation/test scope had zero deletions. Independent acceptance passed
+296 focused tests and all required checks; Tier3 was skipped as expected.
+Issue #7 is CLOSED with Owner marker `M3_ACCEPTANCE_REPAIR_MERGED`.
+
+This completion is limited to `M3_ACCEPTANCE_REPAIR_IMPLEMENTED`. It does not
+activate #31 continuity, #76 operator receipts, #8 GitHub intent, #163 merge
+execution, runtime, provider, approval, integration, release, or production.
+`AUTO_CHAIN=false` and the worker cannot approve or integrate.
 
 ## Block classification
 
