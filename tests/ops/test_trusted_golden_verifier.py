@@ -57,6 +57,12 @@ def test_invalid_duplicate_corpus_fails_closed(tmp_path: Path) -> None:
         verify(repo, head)
 
 
+def test_single_case_ast_false_green_fails_closed(tmp_path: Path) -> None:
+    repo, head = _repo(tmp_path, GOOD.split('    _c("GB-002"')[0] + ")\n")
+    with pytest.raises(ValueError, match="too few case ids"):
+        verify(repo, head)
+
+
 def test_fake_same_name_evidence_cannot_produce_trusted_pass(tmp_path: Path) -> None:
     repo, head = _repo(tmp_path, GOOD)
     fake = tmp_path / "fake-same-name-report.json"

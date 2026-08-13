@@ -20,6 +20,7 @@ from typing import Any
 CORPUS_PATH = "tests/golden_behavior/corpus.py"
 REPORT_SCHEMA = "nexus.trusted_golden_verifier.v1"
 SHA_LENGTH = 40
+MIN_CASE_COUNT = 2
 
 
 def _exact_sha(value: str, label: str) -> str:
@@ -57,8 +58,8 @@ def _case_ids(source: str) -> list[str]:
         ):
             raise ValueError("Golden corpus contains a non-literal case id")
         ids.append(node.args[0].value)
-    if not ids:
-        raise ValueError("Golden corpus contains no case ids")
+    if len(ids) < MIN_CASE_COUNT:
+        raise ValueError(f"Golden corpus contains too few case ids: {len(ids)}")
     return ids
 
 

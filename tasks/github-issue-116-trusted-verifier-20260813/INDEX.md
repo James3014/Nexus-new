@@ -5,8 +5,12 @@ status: active
 purpose: Issue #116 trusted default-branch Golden verifier repair.
 authority: Owner standing coordinator grant; issue branch and Draft PR only.
 repository: James3014/Nexus-new
-base: f3dc8d28a0f90d5c5fd2f31dbeb0ab2f29f7ca04
-head: 3005e2c51647b32f905607e3550639cb546f6581
+base: eb668fb76f0c30d8f025db42cdb8e320d556c037
+repair_from_head: 2654dd58fa606f7e36271b66a77b71923f5e234a
+max_files: 8
+authorized_deletions: []
+AUTO_CHAIN: false
+claim_ceiling: TRUSTED_DEFAULT_BRANCH_EVALUATOR_SEALED_EXACT_HEAD_CANONICAL_GOLDEN_EVIDENCE_CANDIDATE_ONLY
 ---
 
 # Issue #116 — trusted default-branch Golden verifier
@@ -18,10 +22,26 @@ protection, or production behavior.
 
 Active card: `01-trusted-golden-verifier.md`.
 
-Owner-authorized scope rebind: the fixture repair adds
-`tests/ops/test_trusted_deletion_anchor.py` to the allowed set as a
-`FIXTURE_NON_EQUIVALENT` correction. This binds the existing PR head above;
-no other files are admitted.
+Owner-authorized scope rebind: the repair uses exactly eight files. It adds
+`scripts/ops/trusted_deletion_anchor.py` to the original verifier scope and
+adds `scripts/ops/run_golden_behavior_eval.py` only for a trusted explicit,
+SHA-bound repository-root seam. The legacy evaluator invocation remains
+unchanged. The existing workflow is already one of the eight allowed files and
+continues to invoke only the anchor controller/executor/verifier subcommands;
+no ninth file or second evaluator path is admitted.
 
-Forbidden: merge, force-push, ruleset/settings mutation, issue closure,
-lifecycle approval, release/production claims, #191, and #143.
+Exact allowed files:
+
+1. `.github/workflows/trusted-deletion-anchor.yml`
+2. `scripts/ops/trusted_deletion_anchor.py`
+3. `scripts/ops/trusted_golden_verifier.py`
+4. `scripts/ops/run_golden_behavior_eval.py`
+5. `tests/ops/test_trusted_deletion_anchor.py`
+6. `tests/ops/test_trusted_golden_verifier.py`
+7. `tasks/github-issue-116-trusted-verifier-20260813/INDEX.md`
+8. `tasks/github-issue-116-trusted-verifier-20260813/01-trusted-golden-verifier.md`
+
+Forbidden: fake or GB-only canonical fixtures, privileged execution of PR
+evaluator code, weakened hashes or file modes, merge, force-push,
+ruleset/settings mutation, issue closure, lifecycle approval,
+release/production claims, PR #228 mutation, #191, and #143.

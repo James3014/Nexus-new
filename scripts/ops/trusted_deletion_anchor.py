@@ -31,6 +31,7 @@ BASE_REF = "refs/trusted-anchor/base"
 HEAD_REF = "refs/trusted-anchor/head"
 WORKFLOW_REF = "refs/trusted-anchor/workflow"
 RUNTIME_FILENAMES = ("runtime.tar", "runtime-metadata.json", "requirements.txt")
+GOLDEN_EVALUATOR_PATH = "scripts/ops/run_golden_behavior_eval.py"
 PYTEST_PLUGINS = ["pytest", "pytest_asyncio", "pytest_timeout"]
 UV_VERSION = "uv 0.9.2"
 REQUIRED_EVIDENCE_KEYS = {
@@ -55,6 +56,12 @@ REQUIRED_EVIDENCE_KEYS = {
     "runtime_archive_sha256",
     "runtime_metadata_sha256",
     "runtime_identity",
+    "golden_evaluator_sha256",
+    "golden_corpus_sha256",
+    "golden_test_corpus_sha256",
+    "golden_topology_sha256",
+    "golden_report_sha256",
+    "golden_report",
     "executor",
 }
 
@@ -274,6 +281,10 @@ def build_manifest(
     runtime_archive: bytes = b"",
     runtime_metadata: bytes = b"{}",
     runtime_identity: dict[str, Any] | None = None,
+    golden_evaluator: bytes = b"",
+    golden_corpus: bytes = b"",
+    golden_test_corpus: bytes = b"",
+    golden_topology: bytes = b"",
     base_tree: str | None = None,
     head_tree: str | None = None,
     test_tree: str | None = None,
@@ -314,6 +325,10 @@ def build_manifest(
         "runtime_archive_sha256": _sha(runtime_archive),
         "runtime_metadata_sha256": _sha(runtime_metadata),
         "runtime_identity": runtime_identity or {},
+        "golden_evaluator_sha256": _sha(golden_evaluator),
+        "golden_corpus_sha256": _sha(golden_corpus),
+        "golden_test_corpus_sha256": _sha(golden_test_corpus),
+        "golden_topology_sha256": _sha(golden_topology),
     }
     unsigned = (
         _json(manifest)
@@ -324,6 +339,7 @@ def build_manifest(
         + requirements
         + runtime_archive
         + runtime_metadata
+        + golden_evaluator
     )
     manifest["bundle_sha256"] = _sha(unsigned)
     return manifest
@@ -340,6 +356,7 @@ def verify_evidence(
     requirements: bytes | None = None,
     runtime_archive: bytes | None = None,
     runtime_metadata: bytes | None = None,
+    golden_evaluator: bytes | None = None,
     recomputed_pyproject: bytes | None = None,
     recomputed_uv_lock: bytes | None = None,
     recomputed_base_tree: str | None = None,
@@ -384,6 +401,10 @@ def verify_evidence(
             "runtime_archive_sha256",
             "runtime_metadata_sha256",
             "runtime_identity",
+            "golden_evaluator_sha256",
+            "golden_corpus_sha256",
+            "golden_test_corpus_sha256",
+            "golden_topology_sha256",
             "node_ids",
         ):
             if evidence[key] != manifest[key]:
@@ -397,6 +418,55 @@ def verify_evidence(
             raise ValueError("pytest plugin identity mismatch")
         if executor.get("runtime_probe") != manifest["runtime_identity"].get("runtime_probe"):
             raise ValueError("executor runtime identity mismatch")
+        golden_report = evidence["golden_report"]
+        if not isinstance(golden_report, dict):
+            raise ValueError("Golden report is missing")
+        if evidence["golden_report_sha256"] != _sha(_json(golden_report)):
+            raise ValueError("Golden report digest mismatch")
+        if evidence["golden_evaluator_sha256"] != manifest["golden_evaluator_sha256"]:
+            raise ValueError("Golden evaluator identity mismatch")
+        if (
+            golden_report.get("schema") != "nexus.golden_behavior_eval.v1"
+            or golden_report.get("source_revision") != manifest["head_sha"]
+            or golden_report.get("source_tree") != manifest["head_tree"]
+            or golden_report.get("root_binding_mode") != "explicit_sha_bound"
+            or golden_report.get("trusted_evaluator_sha256") != manifest["golden_evaluator_sha256"]
+            or golden_report.get("evaluator_identity") != manifest["golden_evaluator_sha256"]
+            or golden_report.get("corpus_identity") != manifest["golden_corpus_sha256"]
+            or golden_report.get("test_corpus_identity") != manifest["golden_test_corpus_sha256"]
+            or golden_report.get("topology_identity") != manifest["golden_topology_sha256"]
+            or golden_report.get("workspace_dirty") is not False
+            or golden_report.get("validation_errors") != []
+            or golden_report.get("collection_exit_code") != 0
+            or golden_report.get("pytest_exit_code") != 0
+        ):
+            raise ValueError("Golden report identity or status mismatch")
+        cases = golden_report.get("case_evidence")
+        if (
+            not isinstance(cases, list)
+            or len(cases) != golden_report.get("case_count")
+            or golden_report.get("selected_case_count") != golden_report.get("case_count")
+        ):
+            raise ValueError("Golden report case set is incomplete")
+        case_ids = [case.get("case_id") for case in cases if isinstance(case, dict)]
+        if len(case_ids) != len(cases) or len(set(case_ids)) != len(case_ids):
+            raise ValueError("Golden report case identity is malformed")
+        for case in cases:
+            if case.get("status") == "covered":
+                witnesses = case.get("witnesses")
+                if (
+                    not isinstance(witnesses, list)
+                    or not witnesses
+                    or any(
+                        witness.get("collection_status") != "collected"
+                        or witness.get("execution_status") != "passed"
+                        for witness in witnesses
+                        if isinstance(witness, dict)
+                    )
+                ):
+                    raise ValueError("Golden covered witness did not pass")
+            elif case.get("status") != "finding":
+                raise ValueError("Golden case status is invalid")
         if source_archive is not None:
             if _sha(source_archive) != manifest["source_archive_sha256"]:
                 raise ValueError("source archive digest mismatch")
@@ -422,6 +492,11 @@ def verify_evidence(
             ):
                 raise ValueError("runtime contract mismatch")
         if (
+            golden_evaluator is not None
+            and _sha(golden_evaluator) != manifest["golden_evaluator_sha256"]
+        ):
+            raise ValueError("trusted Golden evaluator digest mismatch")
+        if (
             recomputed_pyproject is not None
             and _sha(recomputed_pyproject) != manifest["pyproject_sha256"]
         ):
@@ -445,6 +520,7 @@ def verify_evidence(
             and requirements is not None
             and runtime_archive is not None
             and runtime_metadata is not None
+            and golden_evaluator is not None
         ):
             unsigned = dict(manifest)
             unsigned.pop("bundle_sha256", None)
@@ -457,6 +533,7 @@ def verify_evidence(
                 + requirements
                 + runtime_archive
                 + runtime_metadata
+                + golden_evaluator
             )
             if expected_bundle != manifest["bundle_sha256"]:
                 raise ValueError("bundle digest mismatch")
@@ -554,6 +631,21 @@ def _controller(args: argparse.Namespace) -> None:
     runtime_archive = (runtime_dir / "runtime.tar").read_bytes()
     runtime_metadata = (runtime_dir / "runtime-metadata.json").read_bytes()
     runtime_identity = json.loads(runtime_metadata)
+    golden_evaluator = _git(repo, "show", f"{workflow_sha}:{GOLDEN_EVALUATOR_PATH}", binary=True)
+    golden_corpus = _git(repo, "show", f"{head_sha}:tests/golden_behavior/corpus.py", binary=True)
+    golden_test_corpus = _git(
+        repo, "show", f"{head_sha}:tests/golden_behavior/test_corpus.py", binary=True
+    )
+    topology_paths = _git(
+        repo, "ls-tree", "-r", "--name-only", head_sha, "tests/golden_behavior", binary=False
+    )
+    assert isinstance(topology_paths, str)
+    golden_topology = b"\n".join(
+        path.encode() + b":" + _git(repo, "show", f"{head_sha}:{path}", binary=True)
+        for path in sorted(topology_paths.splitlines())
+        if path.endswith(".py")
+    )
+    assert isinstance(golden_evaluator, bytes)
     if (
         runtime_identity.get("schema_version") != RUNTIME_SCHEMA_VERSION
         or runtime_identity.get("pyproject_sha256") != _sha(pyproject)
@@ -580,21 +672,28 @@ def _controller(args: argparse.Namespace) -> None:
         runtime_archive=runtime_archive,
         runtime_metadata=runtime_metadata,
         runtime_identity=runtime_identity,
+        golden_evaluator=golden_evaluator,
+        golden_corpus=golden_corpus,
+        golden_test_corpus=golden_test_corpus,
+        golden_topology=golden_topology,
     )
     (output / "source.tar").write_bytes(source_archive)
     (output / "raw-diff.bin").write_bytes(raw_diff)
     (output / "test-inventory.json").write_bytes(_json(selected) + b"\n")
     (output / "manifest.json").write_bytes(_json(manifest) + b"\n")
+    (output / "run_golden_behavior_eval.py").write_bytes(golden_evaluator)
     for name in RUNTIME_FILENAMES:
         (output / name).write_bytes((runtime_dir / name).read_bytes())
     (output / "external-anchor.json").write_bytes(
-        _json({
-            "schema_version": SCHEMA_VERSION,
-            "manifest_sha256": _sha((output / "manifest.json").read_bytes()),
-            "workflow_identity": manifest["workflow_identity"],
-            "base_sha": manifest["base_sha"],
-            "head_sha": manifest["head_sha"],
-        })
+        _json(
+            {
+                "schema_version": SCHEMA_VERSION,
+                "manifest_sha256": _sha((output / "manifest.json").read_bytes()),
+                "workflow_identity": manifest["workflow_identity"],
+                "base_sha": manifest["base_sha"],
+                "head_sha": manifest["head_sha"],
+            }
+        )
         + b"\n"
     )
     (output / "trusted_deletion_anchor.py").write_bytes(Path(__file__).read_bytes())
@@ -671,9 +770,36 @@ def _executor(args: argparse.Namespace) -> None:
         cwd=source,
         env=environment,
     )
+    golden_report_path = bundle / "golden-report.json"
+    golden_result = subprocess.run(
+        [
+            sys.executable,
+            "-S",
+            str(bundle / "run_golden_behavior_eval.py"),
+            "--repo-root",
+            str(source),
+            "--source-revision",
+            manifest["head_sha"],
+            "--source-tree",
+            manifest["head_tree"],
+            "--trusted-evaluator-sha256",
+            manifest["golden_evaluator_sha256"],
+            "--json-report",
+            str(golden_report_path),
+        ],
+        cwd=source,
+        env=environment,
+    )
+    if not golden_report_path.is_file():
+        raise ValueError("canonical Golden report is missing")
+    golden_report = json.loads(golden_report_path.read_text(encoding="utf-8"))
     evidence = {key: manifest[key] for key in REQUIRED_EVIDENCE_KEYS if key != "executor"}
     evidence["schema_version"] = SCHEMA_VERSION
-    evidence["status"] = "COMPLETE" if result.returncode == 0 else "FAILED"
+    evidence["status"] = (
+        "COMPLETE" if result.returncode == 0 and golden_result.returncode == 0 else "FAILED"
+    )
+    evidence["golden_report"] = golden_report
+    evidence["golden_report_sha256"] = _sha(_json(golden_report))
     evidence["executor"] = {
         "exit_code": result.returncode,
         "selected_tests": manifest["test_inventory"],
@@ -681,7 +807,7 @@ def _executor(args: argparse.Namespace) -> None:
         "runtime_probe": _runtime_probe(),
     }
     (bundle / "raw-evidence.json").write_bytes(_json(evidence) + b"\n")
-    raise SystemExit(result.returncode)
+    raise SystemExit(result.returncode or golden_result.returncode)
 
 
 def _prepare_executor_git_context(bundle: Path, source: Path, manifest: dict[str, Any]) -> None:
@@ -877,6 +1003,7 @@ def _verifier(args: argparse.Namespace) -> None:
         requirements=(bundle / "requirements.txt").read_bytes(),
         runtime_archive=(bundle / "runtime.tar").read_bytes(),
         runtime_metadata=(bundle / "runtime-metadata.json").read_bytes(),
+        golden_evaluator=(bundle / "run_golden_behavior_eval.py").read_bytes(),
         recomputed_pyproject=trusted_pyproject,
         recomputed_uv_lock=trusted_uv_lock,
         recomputed_base_tree=recomputed_base_tree,

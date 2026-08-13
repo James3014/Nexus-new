@@ -18,12 +18,8 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-_corpus = importlib.import_module("tests.golden_behavior.corpus")
-CASES = _corpus.CASES
-FINDINGS = _corpus.FINDINGS
+CASES: tuple[Any, ...] = ()
+FINDINGS: dict[str, Any] = {}
 
 
 CLASSIFICATIONS = {"invariant", "regression", "compatibility", "security"}
@@ -42,6 +38,84 @@ STATUSES = {"covered", "finding"}
 
 
 PROBES: dict[str, Callable[[], tuple[bool, str]]] = {}
+
+
+def _load_corpus(root: Path) -> None:
+    """Load corpus data from the already validated source root."""
+
+    global CASES, FINDINGS
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    sys.modules.pop("tests.golden_behavior.corpus", None)
+    corpus = importlib.import_module("tests.golden_behavior.corpus")
+    CASES = corpus.CASES
+    FINDINGS = corpus.FINDINGS
+
+
+def _bind_explicit_root(
+    root: Path,
+    *,
+    source_revision: str,
+    source_tree: str,
+    trusted_evaluator_sha256: str,
+) -> None:
+    """Bind the trusted evaluator to one clean, exact Git source tree."""
+
+    global ROOT
+    resolved = root.resolve(strict=True)
+    if not resolved.is_dir() or root.is_symlink():
+        raise ValueError("repo root must be a real directory")
+    expected = {
+        "source_revision": source_revision,
+        "source_tree": source_tree,
+        "trusted_evaluator_sha256": trusted_evaluator_sha256,
+    }
+    if any(
+        len(value) != 40 for key, value in expected.items() if key != "trusted_evaluator_sha256"
+    ):
+        raise ValueError("source revision and tree must be full object IDs")
+    if len(trusted_evaluator_sha256) != 64:
+        raise ValueError("trusted evaluator digest must be SHA-256")
+
+    def run(*args: str) -> str:
+        completed = subprocess.run(
+            ["git", "-C", str(resolved), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise ValueError(f"explicit root Git identity unavailable: {' '.join(args)}")
+        return completed.stdout.strip()
+
+    if Path(run("rev-parse", "--show-toplevel")).resolve() != resolved:
+        raise ValueError("repo root does not match Git toplevel")
+    if run("rev-parse", "HEAD") != source_revision:
+        raise ValueError("source revision mismatch")
+    if run("rev-parse", "HEAD^{tree}") != source_tree:
+        raise ValueError("source tree mismatch")
+    if run("status", "--porcelain"):
+        raise ValueError("explicit repo root is dirty")
+    if _sha256(Path(__file__)) != trusted_evaluator_sha256:
+        raise ValueError("trusted evaluator digest mismatch")
+    for relative in (
+        "tests/golden_behavior/corpus.py",
+        "tests/golden_behavior/test_corpus.py",
+        "uv.lock",
+    ):
+        candidate = resolved / relative
+        actual = candidate.resolve(strict=True)
+        if not actual.is_relative_to(resolved) or not actual.is_file() or candidate.is_symlink():
+            raise ValueError(f"canonical Golden file is unsafe: {relative}")
+        mode = run("ls-tree", "HEAD", "--", relative).split(maxsplit=1)[0]
+        if mode != "100644":
+            raise ValueError(f"canonical Golden file mode mismatch: {relative}")
+    ROOT = resolved
+    _load_corpus(ROOT)
+
+
+if (ROOT / "tests/golden_behavior/corpus.py").is_file():
+    _load_corpus(ROOT)
 
 
 def _sha256(path: Path) -> str:
@@ -244,9 +318,12 @@ def _provenance(errors: list[str]) -> dict[str, Any]:
         errors.append("workspace_status_unavailable")
 
     corpus_path = ROOT / "tests/golden_behavior/corpus.py"
+    test_corpus_path = ROOT / "tests/golden_behavior/test_corpus.py"
     lock_path = ROOT / "uv.lock"
     if not corpus_path.is_file():
         errors.append("corpus_identity_unavailable")
+    if not test_corpus_path.is_file():
+        errors.append("test_corpus_identity_unavailable")
     if not lock_path.is_file():
         errors.append("dependency_lock_identity_unavailable")
 
@@ -255,6 +332,14 @@ def _provenance(errors: list[str]) -> dict[str, Any]:
         "source_tree": source_tree,
         "workspace_dirty": bool(status.stdout.strip()) if status.returncode == 0 else None,
         "corpus_identity": _sha256(corpus_path) if corpus_path.is_file() else None,
+        "test_corpus_identity": (_sha256(test_corpus_path) if test_corpus_path.is_file() else None),
+        "topology_identity": hashlib.sha256(
+            b"\n".join(
+                path.relative_to(ROOT).as_posix().encode() + b":" + path.read_bytes()
+                for path in sorted((ROOT / "tests/golden_behavior").glob("*.py"))
+                if path.is_file() and not path.is_symlink()
+            )
+        ).hexdigest(),
         "evaluator_identity": _sha256(Path(__file__)),
         "dependency_lock_identity": _sha256(lock_path) if lock_path.is_file() else None,
         "python_version": sys.version.split()[0],
@@ -264,6 +349,10 @@ def _provenance(errors: list[str]) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--repo-root", type=Path)
+    parser.add_argument("--source-revision")
+    parser.add_argument("--source-tree")
+    parser.add_argument("--trusted-evaluator-sha256")
     parser.add_argument("--validate-only", action="store_true")
     parser.add_argument("--classification", choices=sorted(CLASSIFICATIONS))
     parser.add_argument("--scenario", choices=sorted(SCENARIOS))
@@ -271,6 +360,26 @@ def main() -> int:
     parser.add_argument("--include-findings", action="store_true")
     parser.add_argument("--json-report", type=Path)
     args = parser.parse_args()
+
+    explicit_values = (
+        args.repo_root,
+        args.source_revision,
+        args.source_tree,
+        args.trusted_evaluator_sha256,
+    )
+    if any(value is not None for value in explicit_values):
+        if any(value is None for value in explicit_values):
+            parser.error(
+                "explicit root requires repo root, source revision/tree, and evaluator digest"
+            )
+        _bind_explicit_root(
+            args.repo_root,
+            source_revision=args.source_revision,
+            source_tree=args.source_tree,
+            trusted_evaluator_sha256=args.trusted_evaluator_sha256,
+        )
+    elif not CASES:
+        raise ValueError("canonical Golden corpus is unavailable from the legacy root")
 
     errors = validate_corpus()
     selected = [
@@ -289,9 +398,9 @@ def main() -> int:
     executable_cases = [
         case for case in selected if case.status == "covered" or args.include_findings
     ]
-    executable_nodeids = sorted({
-        nodeid for case in executable_cases for nodeid in case.automated_tests
-    })
+    executable_nodeids = sorted(
+        {nodeid for case in executable_cases for nodeid in case.automated_tests}
+    )
 
     collection_evidence, collection_exit_code = collect_witnesses(selected_nodeids)
     for nodeid, evidence in collection_evidence.items():
@@ -319,16 +428,20 @@ def main() -> int:
             else:
                 witness["execution_status"] = "not_executed"
             witnesses.append(witness)
-        case_evidence.append({
-            "case_id": case.case_id,
-            "status": case.status,
-            "witnesses": witnesses,
-            "finding_probe": case.finding_probe,
-        })
+        case_evidence.append(
+            {
+                "case_id": case.case_id,
+                "status": case.status,
+                "witnesses": witnesses,
+                "finding_probe": case.finding_probe,
+            }
+        )
 
     result: dict[str, Any] = {
         "schema": "nexus.golden_behavior_eval.v1",
         **provenance,
+        "root_binding_mode": "explicit_sha_bound" if args.repo_root else "legacy_default",
+        "trusted_evaluator_sha256": (args.trusted_evaluator_sha256 if args.repo_root else None),
         "case_count": len(CASES),
         "selected_case_count": len(selected),
         "test_bound_case_count": sum(bool(case.automated_tests) for case in selected),
