@@ -73,6 +73,20 @@ authorize its own work.
   acceptance, and expected-head/CAS merge authority.
 - A local lifecycle Candidate is formal Target output governed by self-hosted
   submit, receipt, approval, and integration gates.
+- Ready-Issue collaboration is worker-neutral. A claim contract may carry
+  `claim_intent` (`AUTO_CLAIM_IF_READY`, `MANUAL_DISPATCH`, or
+  `NOT_CLAIMABLE`), `claim_enforcement_state` (`REPO_ENFORCED`,
+  `PROJECTION_ONLY`, or `UNKNOWN`), and effective `claim_mode` with the same
+  values. These are distinct: intent is planning metadata, enforcement is a
+  repository capability claim, and mode is the dispatch result.
+- Autonomous mutation requires the exact Issue/attempt to pass all hard gates
+  and a canonical atomic/fenced claim operation to succeed. Until that
+  operation is physically proven, `PROJECTION_ONLY` and `UNKNOWN` resolve
+  fail-closed to `MANUAL_DISPATCH`. GitHub UI metadata and branch names remain
+  projections and do not provide exclusive ownership.
+- A claim grants only the bounded implementation attempt. It never grants
+  route selection, Workforce promotion, independent acceptance, approval,
+  integration, merge, runtime activation, release, or production truth.
 
 Ordinary GitHub Issue work does not enter local lifecycle merely because it is
 delegated or produces a PR Candidate. Local lifecycle tools are mandatory only
