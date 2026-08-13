@@ -1,3 +1,18 @@
+---
+artifact_authority: current
+owner: James Chen
+status: COMPLETE
+task_id: github-issue-207-narrow-committee-impact-target
+source_issue: https://github.com/James3014/Nexus-new/issues/207
+historical_baseline: 8620b72e5688dc41551afb8ed5454b49d21dc5e3
+reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+frontier_status: TERMINAL_RECONCILIATION
+terminal_marker: ISSUE_51_COMMITTEE_IMPACT_TARGET_REPAIR_PROVEN
+claim_ceiling: ISSUE_51_COMMITTEE_IMPACT_TARGET_REPAIR_PROVEN_ONLY
+AUTO_CHAIN: false
+---
+
 # Task Card: Issue 207 Narrow Committee Impact Target
 
 ## Objective
@@ -36,3 +51,17 @@ Risk remains `high` with reason `issue51_proven_orphan_cleanup_contract`.
 ## Forbidden
 
 No PR #71 deletion mutation, runtime/API change, ruleset/bypass change, merge/approval authority, Workforce/lifecycle/route, release, or production change.
+
+## Physical evidence and terminal boundary
+
+- Historical baseline: `8620b72e5688dc41551afb8ed5454b49d21dc5e3`.
+- Mapping commit: `abf781ea62c1c7384031bfb47d3185d2e24ca314`.
+- Exact testcase-identity commit: `cdf72a61165a006049074c137c6a0de13e4a1724`.
+- Reconciled current main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`.
+- Focused current-main evidence: `tests/ops/test_issue51_cleanup_impact_map.py` — 4 passed.
+
+`ISSUE_51_COMMITTEE_IMPACT_TARGET_REPAIR_PROVEN` is limited to the exact mapped
+test targets, high-risk escalation, and fail-closed fallback behavior. Historical live
+check-rollup details were not recovered and are not inferred. It grants no PR #71
+deletion, selector algorithm, ruleset, merge/approval, Workforce/lifecycle/route,
+runtime, release, or production authority. `AUTO_CHAIN=false`.
