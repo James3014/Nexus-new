@@ -1010,7 +1010,7 @@ CASES: tuple[GoldenCase, ...] = (
         ("tests/golden_behavior/test_corpus.py::test_workforce_policy_wording_is_post_route_only",),
     ),
     _c(
-        "GB-083",
+        "GB-082",
         "Policy manifest updater is idempotent",
         "regression",
         "idempotency",
