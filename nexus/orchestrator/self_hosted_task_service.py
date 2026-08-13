@@ -1640,6 +1640,38 @@ class SelfHostedTaskService:
             raise ValueError("OPERATOR_OUTCOME_RUNTIME_RECEIPT_HASH_MISMATCH")
 
         def mutate(current: dict[str, Any]) -> None:
+            current_contract = (
+                current.get("contract")
+                if isinstance(current.get("contract"), Mapping)
+                else {}
+            )
+            current_action_id = str(current.get("action_id") or "").strip() or None
+            current_source_revision = str(
+                current.get("controller_revision")
+                or current_contract.get("controller_revision")
+                or ""
+            ).strip() or None
+            current_runtime_receipt_hash = str(
+                current.get("runtime_receipt_hash") or ""
+            ).strip() or None
+            validate_operator_outcome_receipt(
+                normalized,
+                task_id=task_id,
+                attempt_id=str(current.get("attempt_id") or ""),
+                lifecycle_revision=str(current.get("lifecycle_revision") or ""),
+            )
+            if normalized.action_id is not None and normalized.action_id != current_action_id:
+                raise ValueError("OPERATOR_OUTCOME_ACTION_ID_MISMATCH")
+            if normalized.source_revision is not None and (
+                current_source_revision is None
+                or normalized.source_revision != current_source_revision
+            ):
+                raise ValueError("OPERATOR_OUTCOME_SOURCE_REVISION_MISMATCH")
+            if normalized.runtime_receipt_hash is not None and (
+                current_runtime_receipt_hash is None
+                or normalized.runtime_receipt_hash != current_runtime_receipt_hash
+            ):
+                raise ValueError("OPERATOR_OUTCOME_RUNTIME_RECEIPT_HASH_MISMATCH")
             existing = [item for item in current.get("operator_outcome_receipts", []) if isinstance(item, Mapping)]
             parsed = {}
             for item in existing:
@@ -1647,11 +1679,6 @@ class SelfHostedTaskService:
                     prior = validate_operator_outcome_receipt(
                         item,
                         task_id=task_id,
-                        attempt_id=normalized.attempt_id,
-                        action_id=normalized.action_id,
-                        lifecycle_revision=normalized.lifecycle_revision,
-                        source_revision=normalized.source_revision,
-                        runtime_receipt_hash=normalized.runtime_receipt_hash,
                         check_freshness=False,
                     )
                 except ValueError as exc:
@@ -1667,6 +1694,8 @@ class SelfHostedTaskService:
                         raise ValueError("OPERATOR_OUTCOME_PERSISTED_SUPERSESSION_TARGET_MISSING")
                     if parent.task_id != task_id or parent.attempt_id != prior.attempt_id:
                         raise ValueError("OPERATOR_OUTCOME_PERSISTED_SUPERSESSION_ATTEMPT_MISMATCH")
+                    if prior.observed_at <= parent.observed_at:
+                        raise ValueError("OPERATOR_OUTCOME_PERSISTED_SUPERSESSION_ORDER_INVALID")
             for start in parsed.values():
                 seen = set()
                 cursor = start
@@ -3846,9 +3875,12 @@ class SelfHostedTaskService:
             if state is None:
                 return None
             envelope = state.get("task_action") or self._task_action_envelope(state)
+            detailed_state = dict(state)
+            detailed_state.pop("operator_outcome_receipt", None)
+            detailed_state.pop("operator_outcome_receipts", None)
             if envelope.get("action_state") != "IN_PROGRESS":
                 result = {
-                    **(state if include_details else {
+                    **(detailed_state if include_details else {
                         "schema": "nexus.self_hosted_task_status.v1",
                         "task_id": state.get("task_id"),
                         "status": state.get("status"),
@@ -3870,7 +3902,7 @@ class SelfHostedTaskService:
             if time.monotonic() >= deadline:
                 envelope = {**envelope, "wait_timed_out": True}
                 return {
-                    **(state if include_details else {
+                    **(detailed_state if include_details else {
                         "schema": "nexus.self_hosted_task_status.v1",
                         "task_id": state.get("task_id"),
                         "status": state.get("status"),
