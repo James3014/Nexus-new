@@ -66,3 +66,10 @@ def test_workforce_policy_wording_is_post_route_only() -> None:
     assert "Nexus must route in this order:" not in policy
     assert "## 6. Post-route worker dispatch guidance" in policy
     assert "These preferences never choose or revise a route" in policy
+
+
+def test_gb082_hostile_preference_directive_is_not_authority() -> None:
+    root = Path(__file__).resolve().parents[2]
+    policy = (root / "docs/arch/MODEL_WORKFORCE_POLICY.md").read_text(encoding="utf-8")
+    assert "must route in this order" not in policy.lower()
+    assert "never choose or revise a route" in policy

@@ -90,6 +90,21 @@ def test_validate_rejects_attempted_unlocks_from_read_model_payload() -> None:
     ]
 
 
+def test_gb061_pass_read_model_remains_observational_when_binding_is_tampered() -> None:
+    payload = build_claim_evidence_read_model(
+        claim_class=ClaimClass.RUNTIME_APPLY_REVIEW,
+        records=[_record(evidence_refs=["evidence-a"], receipt_refs=["receipt-a"])],
+        evidence_bundle_refs=["evidence-a"],
+        receipt_refs=["receipt-a"],
+    )
+    payload["runtime_update_allowed"] = True
+    payload["public_benchmark_allowed"] = True
+    assert validate_claim_evidence_read_model(payload) == [
+        "read_model_must_not_unlock_public_benchmark",
+        "read_model_must_not_update_runtime",
+    ]
+
+
 def test_read_model_requires_sealed_and_hash_valid_evidence_when_requested() -> None:
     payload = build_claim_evidence_read_model(
         claim_class=ClaimClass.RUNTIME_APPLY_REVIEW,

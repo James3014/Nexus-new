@@ -8,7 +8,6 @@ from nexus.contracts.workforce_admission import (
     AdmissionDecision,
     WorkforceAdmissionDecision,
     WorkforceAdmissionRequest,
-    WorkforcePolicySnapshot,
     WorkforceWorker,
     parse_autonomy_rank,
 )
@@ -50,6 +49,18 @@ def test_admission_decision_valid_values_remain_deterministic() -> None:
         assert decision.decision is member
         assert decision.to_dict()["decision"] == member.value
     assert WorkforceAdmissionDecision().decision is AdmissionDecision.BLOCK
+
+
+def test_gb021_admission_decision_preserves_fail_closed_reason() -> None:
+    blocked = WorkforceAdmissionDecision(
+        decision=AdmissionDecision.BLOCK,
+        decision_reasons=("missing_controls",),
+        missing_controls=("task_card",),
+    )
+    assert blocked.to_dict()["decision"] == "BLOCK"
+    assert blocked.missing_controls == ("task_card",)
+    with pytest.raises(ValueError):
+        WorkforceAdmissionDecision(decision="ALLOW")  # type: ignore[arg-type]
 
 
 def test_autonomy_level_deterministic_parsing_and_ordering() -> None:
@@ -159,3 +170,10 @@ def test_workforce_admission_decision_schema_and_serialization() -> None:
     assert d["decision"] == "ALLOW"
     assert d["resolved_worker_id"] == "agy_flash"
     assert d["freshness_evidence"]["is_future"] is False
+
+
+def test_gb025_tampered_identity_does_not_change_admission_vocabulary() -> None:
+    payload = WorkforceAdmissionDecision(decision=AdmissionDecision.BLOCK).to_dict()
+    payload["decision"] = "allow"
+    with pytest.raises(ValueError):
+        WorkforceAdmissionDecision(decision=payload["decision"])  # type: ignore[arg-type]
