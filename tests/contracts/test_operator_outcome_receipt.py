@@ -126,19 +126,99 @@ def test_receipt_rejects_cross_field_semantic_contradictions(
 
 
 @pytest.mark.parametrize(
-    ("observed_outcome", "observation_basis", "reason_code"),
+    ("observed_outcome", "observation_basis", "reason_code", "provenance"),
     [
-        ("NOT_OBSERVED", "NOT_OBSERVED", "NOT_PROVIDED"),
-        ("UNKNOWN", "OPERATOR_REPORT", "OUTCOME_UNKNOWN"),
-        ("UNKNOWN", "SYSTEM_OBSERVATION", "OUTCOME_UNKNOWN"),
+        ("NOT_OBSERVED", "NOT_OBSERVED", "NOT_PROVIDED", "operator"),
+        ("UNKNOWN", "OPERATOR_REPORT", "OUTCOME_UNKNOWN", "operator"),
+        ("UNKNOWN", "SYSTEM_OBSERVATION", "OUTCOME_UNKNOWN", "system"),
     ],
 )
 def test_receipt_accepts_explicit_unknown_and_not_observed_semantics(
-    observed_outcome, observation_basis, reason_code
+    observed_outcome, observation_basis, reason_code, provenance
 ):
     receipt = _receipt(
         observed_outcome=observed_outcome,
         observation_basis=observation_basis,
         reason_code=reason_code,
+        field_provenance={
+            field: {"provenance": provenance, "source_ref": "authenticated-submission"}
+            for field in (
+                "observed_outcome",
+                "observation_basis",
+                "reason_code",
+                "observed_at",
+                "source_revision",
+                "runtime_receipt_hash",
+            )
+        },
     )
     assert receipt.observed_outcome == observed_outcome
+
+
+@pytest.mark.parametrize(
+    ("observed_outcome", "observation_basis", "reason_code", "provenance"),
+    [
+        ("SUCCESS", "OPERATOR_REPORT", "OPERATOR_CONFIRMED", "operator"),
+        ("FAILURE", "OPERATOR_REPORT", "OPERATOR_CONFIRMED", "operator"),
+        ("PARTIAL", "OPERATOR_REPORT", "REWORK_REQUIRED", "operator"),
+        ("SUCCESS", "SYSTEM_OBSERVATION", "SYSTEM_RECORDED", "system"),
+        ("FAILURE", "SYSTEM_OBSERVATION", "SYSTEM_RECORDED", "system"),
+        ("PARTIAL", "SYSTEM_OBSERVATION", "SYSTEM_RECORDED", "system"),
+    ],
+)
+def test_receipt_accepts_ordinary_outcome_basis_reason_and_provenance_matrix(
+    observed_outcome, observation_basis, reason_code, provenance
+):
+    receipt = _receipt(
+        observed_outcome=observed_outcome,
+        observation_basis=observation_basis,
+        reason_code=reason_code,
+        field_provenance={
+            field: {"provenance": provenance, "source_ref": "authenticated-submission"}
+            for field in (
+                "observed_outcome",
+                "observation_basis",
+                "reason_code",
+                "observed_at",
+                "source_revision",
+                "runtime_receipt_hash",
+            )
+        },
+    )
+    assert receipt.observation_basis == observation_basis
+
+
+@pytest.mark.parametrize(
+    ("observed_outcome", "observation_basis", "reason_code", "provenance"),
+    [
+        ("SUCCESS", "SYSTEM_OBSERVATION", "OPERATOR_CONFIRMED", "system"),
+        ("FAILURE", "OPERATOR_REPORT", "SYSTEM_RECORDED", "operator"),
+        ("SUCCESS", "OPERATOR_REPORT", "REWORK_REQUIRED", "operator"),
+        ("PARTIAL", "OPERATOR_REPORT", "OPERATOR_CONFIRMED", "operator"),
+        ("SUCCESS", "OPERATOR_REPORT", "OPERATOR_CONFIRMED", "system"),
+        ("FAILURE", "SYSTEM_OBSERVATION", "SYSTEM_RECORDED", "operator"),
+    ],
+)
+def test_receipt_rejects_incompatible_outcome_basis_reason_or_provenance(
+    observed_outcome, observation_basis, reason_code, provenance
+):
+    with pytest.raises(ValueError, match="SEMANTICS_INVALID"):
+        _receipt(
+            observed_outcome=observed_outcome,
+            observation_basis=observation_basis,
+            reason_code=reason_code,
+            field_provenance={
+                field: {
+                    "provenance": provenance,
+                    "source_ref": "authenticated-submission",
+                }
+                for field in (
+                    "observed_outcome",
+                    "observation_basis",
+                    "reason_code",
+                    "observed_at",
+                    "source_revision",
+                    "runtime_receipt_hash",
+                )
+            },
+        )

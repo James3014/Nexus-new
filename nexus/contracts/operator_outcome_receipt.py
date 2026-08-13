@@ -22,6 +22,30 @@ _PROVENANCE_FIELDS = frozenset({
     "source_revision",
     "runtime_receipt_hash",
 })
+_BASIS_PROVENANCE = {
+    "OPERATOR_REPORT": "operator",
+    "SYSTEM_OBSERVATION": "system",
+    "NOT_OBSERVED": "operator",
+}
+_OUTCOME_REASON_CODES = {
+    "SUCCESS": {
+        "OPERATOR_REPORT": "OPERATOR_CONFIRMED",
+        "SYSTEM_OBSERVATION": "SYSTEM_RECORDED",
+    },
+    "FAILURE": {
+        "OPERATOR_REPORT": "OPERATOR_CONFIRMED",
+        "SYSTEM_OBSERVATION": "SYSTEM_RECORDED",
+    },
+    "PARTIAL": {
+        "OPERATOR_REPORT": "REWORK_REQUIRED",
+        "SYSTEM_OBSERVATION": "SYSTEM_RECORDED",
+    },
+    "UNKNOWN": {
+        "OPERATOR_REPORT": "OUTCOME_UNKNOWN",
+        "SYSTEM_OBSERVATION": "OUTCOME_UNKNOWN",
+    },
+    "NOT_OBSERVED": {"NOT_OBSERVED": "NOT_PROVIDED"},
+}
 
 
 def _hash_payload(value: Mapping[str, Any]) -> str:
@@ -125,15 +149,10 @@ class OperatorOutcomeReceipt(BaseModel):
 
     @model_validator(mode="after")
     def _digest(self) -> "OperatorOutcomeReceipt":
-        if self.observed_outcome == "NOT_OBSERVED":
-            if self.observation_basis != "NOT_OBSERVED" or self.reason_code != "NOT_PROVIDED":
-                raise ValueError("OPERATOR_OUTCOME_SEMANTICS_INVALID")
-        elif self.observation_basis == "NOT_OBSERVED":
-            raise ValueError("OPERATOR_OUTCOME_SEMANTICS_INVALID")
-        elif self.observed_outcome == "UNKNOWN":
-            if self.reason_code != "OUTCOME_UNKNOWN":
-                raise ValueError("OPERATOR_OUTCOME_SEMANTICS_INVALID")
-        elif self.reason_code in {"NOT_PROVIDED", "OUTCOME_UNKNOWN"}:
+        expected_reason = _OUTCOME_REASON_CODES.get(self.observed_outcome, {}).get(
+            self.observation_basis
+        )
+        if expected_reason is None or self.reason_code != expected_reason:
             raise ValueError("OPERATOR_OUTCOME_SEMANTICS_INVALID")
         required_provenance = {
             "observed_outcome",
@@ -147,6 +166,10 @@ class OperatorOutcomeReceipt(BaseModel):
             required_provenance.add("runtime_receipt_hash")
         if not required_provenance.issubset(self.field_provenance):
             raise ValueError("OPERATOR_OUTCOME_FIELD_PROVENANCE_INCOMPLETE")
+        expected_provenance = _BASIS_PROVENANCE[self.observation_basis]
+        for field in ("observed_outcome", "observation_basis", "reason_code"):
+            if self.field_provenance[field].provenance != expected_provenance:
+                raise ValueError("OPERATOR_OUTCOME_SEMANTICS_INVALID")
         if self.recorded_at < self.observed_at:
             raise ValueError("OPERATOR_OUTCOME_RECORDED_BEFORE_OBSERVED")
         payload = self.model_dump(mode="json", exclude={"receipt_id"})
