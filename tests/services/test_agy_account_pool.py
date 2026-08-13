@@ -389,6 +389,40 @@ def test_two_consumer_isolation(tmp_path):
     manager.release(lease_b)
 
 
+def test_release_cleans_local_bindings_when_provider_health_is_unavailable(monkeypatch):
+    """Terminal release must not require a provider status/health round-trip."""
+    accounts = [
+        AgyAccount(alias="A", home_dir="/tmp/agy-a"),
+        AgyAccount(alias="B", home_dir="/tmp/agy-b"),
+    ]
+    manager = AgyAccountPoolManager(accounts)
+    lease_a = manager.acquire("consumer-A")
+    lease_b = manager.acquire("consumer-B")
+    pool = manager._pool
+    assert pool is not None
+
+    raw_alias_a = manager._lease_to_raw_alias[lease_a.lease_id]
+    monkeypatch.setattr(
+        manager,
+        "_refresh_pool_health",
+        lambda: (_ for _ in ()).throw(AgyAccountPoolError("manager unavailable")),
+    )
+
+    manager.release(lease_a)
+
+    assert lease_a.lease_id not in pool._active_leases
+    assert lease_a.lease_id not in pool._lease_to_account_id
+    assert lease_a.lease_id not in pool._accounts["A"].active_lease_ids
+    assert lease_a.lease_id not in manager._lease_to_raw_alias
+    assert raw_alias_a == "A"
+    assert lease_b.lease_id in pool._active_leases
+    assert lease_b.lease_id in pool._accounts["B"].active_lease_ids
+
+    # The unrelated lease remains releasable despite the provider outage.
+    manager.release(lease_b)
+    assert lease_b.lease_id not in pool._active_leases
+
+
 def test_real_manager_text_success(tmp_path):
     from nexus.services.agy_account_pool import AgyAccountPoolManager
     from nexus.services.external_account_pool import AccountFailureKind

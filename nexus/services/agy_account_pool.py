@@ -472,7 +472,9 @@ class AgyAccountPoolManager:
         return lease
 
     def release(self, lease: AccountLease) -> None:
-        self._refresh_pool_health()
+        # Releasing an already-issued request lease is local lifecycle cleanup.
+        # Do not make it depend on a provider control-plane refresh: a transient
+        # manager outage must not leak the neutral lease or its private binding.
         pool = self._ensure_pool()
         pool.release(lease)
         self._lease_to_raw_alias.pop(lease.lease_id, None)
