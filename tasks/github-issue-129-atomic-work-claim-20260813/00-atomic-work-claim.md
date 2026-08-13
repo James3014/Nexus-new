@@ -5,7 +5,7 @@ repository: James3014/Nexus-new
 baseline_revision: 8e0986b40db56016c79b03eb81ff3d03c85c6f32
 rebind_lineage_commit: 7c47118458f320a56f6b209393eb906b3fe878f4
 rebind_authorization: direct Owner authorization for persistent claim subrecord/recovery under existing SelfHostedTaskService .state.lock
-status: ACTIVE
+status: COMPLETED
 execution_lane: ISOLATED_TARGET
 worker_role: bounded_code_candidate
 claim_intent: MANUAL_DISPATCH
@@ -19,7 +19,10 @@ allowed_files:
   - tasks/github-issue-129-atomic-work-claim-20260813/INDEX.md
   - tasks/github-issue-129-atomic-work-claim-20260813/00-atomic-work-claim.md
 authorized_deletions: []
-claim_ceiling: CLAIM_PROTOCOL_CANDIDATE_PR_ONLY
+reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+terminal_marker: ATOMIC_READY_ISSUE_WORK_CLAIM_PROVEN
+claim_ceiling: ATOMIC_READY_ISSUE_WORK_CLAIM_PROVEN_EXISTING_SELF_HOSTED_SERVICE_ONLY
 shared_file_gate: SATISFIED_BY_PR226_MERGE_A787E8E7
 implementation_gate: Owner-authorized bounded implementation active
 ---
@@ -27,7 +30,7 @@ implementation_gate: Owner-authorized bounded implementation active
 # Atomic Ready-Issue work claim
 
 - task_id: `github-issue-129-atomic-work-claim`
-- status: `ACTIVE`
+- status: `COMPLETED`
 
 ## Objective
 
@@ -150,3 +153,20 @@ format delta is allowed in changed hunks.
 Stop at an exact four-file Candidate commit/PR with deterministic hostile
 tests, scope/deletion audit, exact-base static evidence, and independent review
 pending. `AUTO_CHAIN=false`.
+
+## Completion receipt
+
+PR #235 head `3828921cfea8bd924fef7aced016c88f3c56b394` merged at
+`eb668fb76f0c30d8f025db42cdb8e320d556c037` from the preserved historical
+baseline `8e0986b40db56016c79b03eb81ff3d03c85c6f32`. The exact four-file change
+had zero deletions; required checks were successful with Tier3 skipped as
+expected. Independent post-merge acceptance passed 26 focused work-claim
+tests and all 291 SelfHostedTaskService tests, with no new exact-base Ruff
+debt and no hostile behavioral finding.
+
+`ATOMIC_READY_ISSUE_WORK_CLAIM_PROVEN` covers only the canonical atomic claim
+subrecord in the existing SelfHostedTaskService state and `.state.lock`. It
+does not authorize #130 consumer/polling, #98 Target concurrency, another
+store/scheduler/router, route or Workforce selection, approval, integration,
+merge, runtime, release, or production truth. `AUTO_CHAIN=false` remains in
+force.
