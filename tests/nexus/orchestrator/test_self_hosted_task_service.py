@@ -121,14 +121,27 @@ def test_work_claim_hostile_matrix_and_recovery(tmp_path):
     assert service.acquire_work_claim(_claim_request())["status"] == "ALREADY_CLAIMED"
     assert service.acquire_work_claim(_claim_request(worker_id="worker-b"))["status"] == "BLOCKED"
     claim = first["claim"]
-    bound = {**_claim_request(), "claim_id": claim["claim_id"], "generation": claim["generation"]}
+    bound = {
+        **_claim_request(),
+        "claim_id": claim["claim_id"],
+        "generation": claim["generation"],
+        "fencing_token": claim["fencing_token"],
+    }
+    with pytest.raises(RuntimeError, match="STALE_FENCE"):
+        service.validate_work_claim({**bound, "fencing_token": "wrong:1"})
     with pytest.raises(RuntimeError, match="STALE_FENCE"):
         service.validate_work_claim({**bound, "generation": 99})
     recovered = service.recover_work_claim(bound, reason="crash")
     assert recovered["claim"]["generation"] == 2
     with pytest.raises(RuntimeError, match="STALE_FENCE"):
         service.release_work_claim(bound)
-    assert service.release_work_claim({**bound, "generation": 2})["status"] == "RELEASED"
+    assert service.release_work_claim(
+        {
+            **bound,
+            "generation": 2,
+            "fencing_token": recovered["claim"]["fencing_token"],
+        }
+    )["status"] == "RELEASED"
 
 
 def test_work_claim_different_issues_and_tamper_fail_closed(tmp_path):
@@ -142,7 +155,14 @@ def test_work_claim_different_issues_and_tamper_fail_closed(tmp_path):
     service._write_state("claim-a", state)
     claim = state["work_claim"]
     with pytest.raises(RuntimeError, match="TAMPERED"):
-        service.validate_work_claim({**_claim_request(task_id="claim-a"), "claim_id": claim["claim_id"], "generation": 1})
+        service.validate_work_claim(
+            {
+                **_claim_request(task_id="claim-a"),
+                "claim_id": claim["claim_id"],
+                "generation": 1,
+                "fencing_token": claim.get("fencing_token", ""),
+            }
+        )
 
 
 @pytest.mark.parametrize("field", ["repository", "issue", "attempt_id", "action_id", "worker_id", "provider", "model", "role", "claim_ceiling", "base_revision", "source_hash", "task_card_path", "allowed_files", "workforce_admission"])
@@ -150,7 +170,12 @@ def test_work_claim_owner_tuple_change_is_fenced(tmp_path, field):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     service._write_state("claim-task", {"task_id": "claim-task", "status": "SUBMITTED"})
     claim = service.acquire_work_claim(_claim_request())["claim"]
-    altered = dict(_claim_request(), claim_id=claim["claim_id"], generation=1)
+    altered = dict(
+        _claim_request(),
+        claim_id=claim["claim_id"],
+        generation=1,
+        fencing_token=claim["fencing_token"],
+    )
     altered[field] = ["different.py"] if field == "allowed_files" else {"receipt_id": "different"} if field == "workforce_admission" else "different"
     with pytest.raises(RuntimeError, match="FENCE_MISMATCH"):
         service.validate_work_claim(altered)
@@ -188,7 +213,15 @@ def test_work_claim_attempt_generation_recovery_is_durable_and_once(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     service._write_state("claim-task", {"task_id": "claim-task", "status": "SUBMITTED"})
     initial = service.acquire_work_claim(_claim_request())["claim"]
-    recovered = service.recover_work_claim({**_claim_request(), "claim_id": initial["claim_id"], "generation": 1}, reason="worker crash")
+    recovered = service.recover_work_claim(
+        {
+            **_claim_request(),
+            "claim_id": initial["claim_id"],
+            "generation": 1,
+            "fencing_token": initial["fencing_token"],
+        },
+        reason="worker crash",
+    )
     assert recovered["claim"]["generation"] == 2
     assert recovered["claim"]["recovery_reason"] == "worker crash"
     persisted = service._read_state("claim-task")["work_claim"]
@@ -207,7 +240,14 @@ def test_work_claim_timeout_does_not_transfer_authority(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True, stale_after_seconds=0)
     service._write_state("claim-task", {"task_id": "claim-task"})
     claim = service.acquire_work_claim(_claim_request())["claim"]
-    assert service.validate_work_claim({**_claim_request(), "claim_id": claim["claim_id"], "generation": 1})["status"] == "CLAIMED"
+    assert service.validate_work_claim(
+        {
+            **_claim_request(),
+            "claim_id": claim["claim_id"],
+            "generation": 1,
+            "fencing_token": claim["fencing_token"],
+        }
+    )["status"] == "CLAIMED"
 
 
 def test_work_claim_release_is_owner_exact_and_preserves_authority_fields(tmp_path):
@@ -215,7 +255,14 @@ def test_work_claim_release_is_owner_exact_and_preserves_authority_fields(tmp_pa
     service._write_state("claim-task", {"task_id": "claim-task", "status": "SUBMITTED", "execution_authority": "SELF_HOSTED"})
     claim = service.acquire_work_claim(_claim_request())["claim"]
     with pytest.raises(RuntimeError, match="FENCE_MISMATCH"):
-        service.release_work_claim({**_claim_request(worker_id="other"), "claim_id": claim["claim_id"], "generation": 1})
+        service.release_work_claim(
+            {
+                **_claim_request(worker_id="other"),
+                "claim_id": claim["claim_id"],
+                "generation": 1,
+                "fencing_token": claim["fencing_token"],
+            }
+        )
     state = service._read_state("claim-task")
     assert state["status"] == "SUBMITTED" and state["execution_authority"] == "SELF_HOSTED" and "work_claim" in state
 

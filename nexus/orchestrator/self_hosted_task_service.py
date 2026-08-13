@@ -1896,7 +1896,18 @@ class SelfHostedTaskService:
         expected = cls._claim_identity(request)
         if record["identity_hash"] != cls._claim_hash(expected):
             raise RuntimeError("WORK_CLAIM_FENCE_MISMATCH")
-        if not isinstance(request.get("claim_id"), str) or request["claim_id"] != record["claim_id"] or not isinstance(request.get("generation"), int) or isinstance(request.get("generation"), bool) or request["generation"] != record["generation"]:
+        expected_fencing_token = f"{record['claim_id']}:{record['generation']}"
+        if (
+            not isinstance(record.get("fencing_token"), str)
+            or record["fencing_token"] != expected_fencing_token
+            or not isinstance(request.get("claim_id"), str)
+            or request["claim_id"] != record["claim_id"]
+            or not isinstance(request.get("generation"), int)
+            or isinstance(request.get("generation"), bool)
+            or request["generation"] != record["generation"]
+            or not isinstance(request.get("fencing_token"), str)
+            or request["fencing_token"] != expected_fencing_token
+        ):
             raise RuntimeError("WORK_CLAIM_STALE_FENCE")
         return record
 
