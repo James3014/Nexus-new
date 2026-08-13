@@ -121,6 +121,14 @@
 | scripts/legacy/patcher.py | tests/services/test_patcher.py | active | high | issue52_archived_adapter_cleanup_contract |
 | scripts/legacy/reporter.py | tests/test_reporter.py | active | high | issue52_archived_adapter_cleanup_contract |
 | scripts/legacy/workspace_manager.py | tests/services/test_workspace_manager.py, tests/benchmark/test_workspace.py | active | high | issue52_archived_adapter_cleanup_contract |
+| scripts/brain_b_indexer.py | tests/ops/test_source_inventory_integrity.py | active | high | issue55_abandoned_experiment_cleanup_contract |
+| scripts/core/brain_b_indexer.py | tests/ops/test_source_inventory_integrity.py | active | high | issue55_abandoned_experiment_cleanup_contract |
+| scripts/brain_b_reality_check.py | tests/ops/test_source_inventory_integrity.py | active | high | issue55_abandoned_experiment_cleanup_contract |
+| scripts/core/brain_b_reality_check.py | tests/ops/test_source_inventory_integrity.py | active | high | issue55_abandoned_experiment_cleanup_contract |
+| scripts/reality_check_v2.py | tests/ops/test_source_inventory_integrity.py | active | high | issue55_abandoned_experiment_cleanup_contract |
+| scripts/core/reality_check_v2.py | tests/ops/test_source_inventory_integrity.py | active | high | issue55_abandoned_experiment_cleanup_contract |
+| scripts/trigger_test.py | tests/ops/test_source_inventory_integrity.py | active | high | issue55_abandoned_experiment_cleanup_contract |
+| scripts/core/trigger_test.py | tests/ops/test_source_inventory_integrity.py | active | high | issue55_abandoned_experiment_cleanup_contract |
 ## Candidate Legacy Tests
 | 檔案 | 理由 |
 | :--- | :--- |

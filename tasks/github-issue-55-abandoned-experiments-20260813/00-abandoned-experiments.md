@@ -17,6 +17,8 @@ allowed_files:
   - muse_nexus.egg-info/SOURCES.txt
   - tasks/github-issue-55-abandoned-experiments-20260813/INDEX.md
   - tasks/github-issue-55-abandoned-experiments-20260813/00-abandoned-experiments.md
+  - docs/testing/test_impact_map.md
+  - tests/ops/test_issue55_cleanup_impact_map.py
 forbidden_scope:
   - docs/archive and full_workspace_xray historical evidence
   - scripts/idea_check_v2.py
