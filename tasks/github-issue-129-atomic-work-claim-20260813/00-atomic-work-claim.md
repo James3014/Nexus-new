@@ -2,7 +2,7 @@
 task_id: github-issue-129-atomic-work-claim
 issue: 129
 repository: James3014/Nexus-new
-baseline_revision: 8015d9cbd4a24eea483f6406acafff5c35a62d9a
+baseline_revision: 8e0986b40db56016c79b03eb81ff3d03c85c6f32
 rebind_lineage_commit: 7c47118458f320a56f6b209393eb906b3fe878f4
 rebind_authorization: direct Owner authorization for persistent claim subrecord/recovery under existing SelfHostedTaskService .state.lock
 status: ACTIVE
@@ -20,8 +20,8 @@ allowed_files:
   - tasks/github-issue-129-atomic-work-claim-20260813/00-atomic-work-claim.md
 authorized_deletions: []
 claim_ceiling: CLAIM_PROTOCOL_CANDIDATE_PR_ONLY
-shared_file_gate: SERIALIZE_MUTATION_AFTER_PR226
-implementation_gate: coordinator release required before touching shared service/test files
+shared_file_gate: SATISFIED_BY_PR226_MERGE_A787E8E7
+implementation_gate: Owner-authorized bounded implementation active
 ---
 
 # Atomic Ready-Issue work claim
@@ -59,7 +59,7 @@ id, and monotonic generation/fencing identity.
 ## Rebind and frozen contract
 
 This card is freshly bound to exact `nexus-new/main` commit
-`8015d9cbd4a24eea483f6406acafff5c35a62d9a`; no force, rebase, or history
+`8e0986b40db56016c79b03eb81ff3d03c85c6f32`; no force, rebase, or history
 rewrite is permitted. The Owner authorizes only the persistent claim subrecord
 and recovery protocol within the existing `SelfHostedTaskService` state
 directory and `.state.lock`. The implementation must freeze, validate, and
