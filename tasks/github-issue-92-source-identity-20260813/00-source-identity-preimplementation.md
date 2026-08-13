@@ -3,7 +3,7 @@ artifact_authority: current
 owner: James Chen
 status: blocked_serialize_after_issue_29
 purpose: Freeze Issue #92 physical source identity semantics without preempting Issue #29 runtime ownership.
-baseline: 96bb71e89a0b5112a7b54ab6a3f4ff1ed879f857
+baseline: 82b904a730095494213ad1dc6c54bcb09b798a47
 issue: 92
 allowed_files:
   - tasks/github-issue-92-source-identity-20260813/INDEX.md
