@@ -15,7 +15,9 @@ permissions:
 jobs:
   impact-gate:
     name: Exact-base impact gate
-    if: github.event_name != 'workflow_dispatch' && github.event_name != 'schedule'
+    # Phase 2 hostile-test branch intentionally suppresses the real gate so a
+    # same-name untrusted job can be observed against the protected context.
+    if: github.event_name != 'workflow_dispatch' && github.event_name != 'schedule' && github.head_ref != 'codex/issue-116-golden-negative-test'
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -283,6 +285,20 @@ jobs:
           path: ${{ runner.temp }}/nexus-ci-impact/
           if-no-files-found: error
           retention-days: 7
+
+  same-name-substitution:
+    name: Exact-base impact gate
+    # Evidence-only Issue #116 Phase 2: deliberately do not run Golden.
+    if: github.event_name == 'pull_request' && github.head_ref == 'codex/issue-116-golden-negative-test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Emit untrusted same-name success
+        run: |
+          set -euo pipefail
+          echo "UNTRUSTED_SAME_NAME_SUBSTITUTION branch=${{ github.head_ref }}"
+          echo "Golden Behavior intentionally not executed"
 
   full-regression:
     name: Tier 3 full regression

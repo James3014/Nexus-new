@@ -2,7 +2,7 @@
 artifact_authority: current
 owner: James Chen
 status: active
-purpose: Issue #116 controlled negative Golden Behavior merge-gate test.
+purpose: Issue #116 controlled negative Golden Behavior merge-gate and same-name substitution test.
 authority: Owner standing coordinator grant; evidence-only Draft PR; DO NOT MERGE.
 repository: James3014/Nexus-new
 base: f3dc8d28a0f90d5c5fd2f31dbeb0ab2f29f7ca04
@@ -17,5 +17,7 @@ green evidence. This branch and Draft PR are evidence-only and must not merge.
 
 Active card: `01-controlled-negative-test.md`.
 
-Forbidden: production changes, workflow/ruleset changes, `main` mutation,
-merge, force-push, issue closure, lifecycle approval, #191, and #143.
+Forbidden: ruleset changes, Trusted verifier changes, `main` mutation, merge,
+force-push, issue closure, lifecycle approval, #191, and #143. Phase 2 permits
+only the branch-local workflow substitution explicitly described in the active
+card.
