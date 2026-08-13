@@ -11,14 +11,16 @@ from typing import Any, Callable, Mapping
 from nexus.services.unified_runtime import UnifiedRuntimeRequest
 
 SCHEMA = "nexus.nightshift_candidate_demand.v1"
-REQUIRED_CONTROLS = frozenset({
-    "isolated_directory",
-    "bounded_context",
-    "json_event_receipt",
-    "parser",
-    "focused_tests",
-    "verifier",
-})
+REQUIRED_CONTROLS = frozenset(
+    {
+        "isolated_directory",
+        "bounded_context",
+        "json_event_receipt",
+        "parser",
+        "focused_tests",
+        "verifier",
+    }
+)
 FORBIDDEN_WORKER_ACTIONS = frozenset({"commit", "push", "approve", "integrate"})
 
 
@@ -69,6 +71,15 @@ class NightshiftQueueConsumer:
                 item["disposition"] = "DISPATCHED"
                 item["disposition_task"] = result.get("task")
                 changed = True
+        if dispatched_ids:
+            for item in payload:
+                if not isinstance(item, dict):
+                    continue
+                identity = (str(item.get("task") or ""), str(item.get("commit_sha") or ""))
+                if identity in dispatched_ids and item.get("disposition") != "DISPATCHED":
+                    item["disposition"] = "DISPATCHED"
+                    item["disposition_task"] = identity[0]
+                    changed = True
         if changed:
             fd, temporary = tempfile.mkstemp(
                 prefix="pending.", suffix=".json", dir=str(manifest_path.parent)

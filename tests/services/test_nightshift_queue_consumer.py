@@ -81,6 +81,39 @@ def test_unreadable_or_non_array_manifest_fails_closed(tmp_path: Path):
     assert consumer.consume_file(path)[0]["reason"] == "manifest_unreadable"
 
 
+def test_success_marks_all_duplicate_entries_and_restart_dispatches_once(tmp_path: Path):
+    dispatched = []
+    item = _item()
+    consumer = NightshiftQueueConsumer(
+        lambda _request: {
+            "workforce_admission": {"overall_decision": "ALLOW"},
+            "gateway_invocation_authority": {"status": "ALLOW", "gate_passed": True},
+        },
+        dispatched.append,
+        project_root=tmp_path,
+    )
+    path = tmp_path / ".nexus/nightshift/pending.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps([item, dict(item)]), encoding="utf-8")
+    assert consumer.consume_file(path)[0]["status"] == "DISPATCHED"
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    assert all(entry["disposition"] == "DISPATCHED" for entry in stored)
+    restarted = NightshiftQueueConsumer(
+        lambda _request: {}, dispatched.append, project_root=tmp_path
+    )
+    assert all(entry["status"] == "SKIP" for entry in restarted.consume_file(path))
+    assert len(dispatched) == 1
+
+
+def test_noncanonical_manifest_path_is_blocked(tmp_path: Path):
+    consumer = NightshiftQueueConsumer(
+        lambda _request: {}, lambda _item: None, project_root=tmp_path
+    )
+    path = tmp_path / "other.json"
+    path.write_text("[]", encoding="utf-8")
+    assert consumer.consume_file(path)[0]["reason"] == "noncanonical_manifest_path"
+
+
 def test_nightshift_producer_emits_option_b_contract(tmp_path: Path):
     runner = AutoResearchNightShift(project_root=tmp_path, task="producer task")
     runner._append_to_pending_manifest("producer task", "target.py", "deadbeef", 0.9, str(tmp_path))
