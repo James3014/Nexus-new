@@ -24,3 +24,11 @@ Implementation remains blocked until the coordinator releases the shared
 `nexus/orchestrator/self_hosted_task_service.py` and
 `tests/nexus/orchestrator/test_self_hosted_task_service.py` gate after PR226;
 this rebind changes no production or test file.
+
+## Current Frontier
+
+`00-atomic-work-claim.md`
+
+## Ordered Cards
+
+1. [Atomic Ready-Issue work claim](00-atomic-work-claim.md) - `github-issue-129-atomic-work-claim`
