@@ -1,4 +1,3 @@
-from pathlib import Path
 import time
 
 import pytest
@@ -392,6 +391,7 @@ def test_every_adapter_exit_0_result_is_execution_completed(tmp_path, monkeypatc
 
 def test_explicit_worker_model_is_used_in_direct_cli_argv(tmp_path, monkeypatch):
     from types import SimpleNamespace
+
     from nexus.executors.worker_registry import DirectCliWorkerAdapter, _opencode_args
     monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
     monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: f"/bin/{name}")
@@ -1511,3 +1511,109 @@ def test_no_unified_runtime_changes():
         import subprocess
         diff = subprocess.run(["git", "diff", "--name-only", str(unified_runtime_path)], capture_output=True, text=True)
         assert diff.stdout.strip() == "", "nexus/orchestrator/unified_runtime.py must not be modified"
+
+
+def test_agy_eligible_failover_continuation_prompt(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
+    from nexus.services.agy_account_pool import AgyAccount, AgyAccountPoolManager
+
+    acc1 = AgyAccount(alias="user1_secret_email@gmail.com", home_dir=str(tmp_path / "h1"))
+    acc2 = AgyAccount(alias="user2_secret_email@gmail.com", home_dir=str(tmp_path / "h2"))
+    pool = AgyAccountPoolManager([acc1, acc2])
+
+    seen_requests = []
+
+    def fake_worker(request, on_process_group=None):
+        seen_requests.append(request)
+        if len(seen_requests) == 1:
+            return CliWorkerResult(
+                status=CliWorkerStatus.COMPLETED,
+                executable_identity=request.executable,
+                argv=request.argv,
+                cwd=request.cwd,
+                exit_code=1,
+                stdout=b"",
+                stderr=b"RESOURCE_EXHAUSTED: Quota exceeded",
+                wall_time_ms=10,
+                process_group_id=None,
+            )
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=b"success",
+            stderr=b"",
+            wall_time_ms=15,
+            process_group_id=None,
+        )
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    adapter = AgyWorkerAdapter(account_pool=pool)
+    receipt = adapter.invoke(
+        type("Contract", (), {"task_id": "agy-continuation-task", "maximum_provider_calls": 2})(),
+        type("Lease", (), {"target_worktree": str(tmp_path)})(),
+        prompt="original prompt text",
+    )
+
+    assert len(seen_requests) == 2
+    assert seen_requests[0].argv[-1] == "original prompt text"
+
+    second_prompt = seen_requests[1].argv[-1]
+    assert "[Continuation Handoff]" in second_prompt
+    assert "Task ID: agy-continuation-task" in second_prompt
+    assert "Attempt: 2" in second_prompt
+    assert f"Previous Account Hash: {acc1.alias_hash}" in second_prompt
+    assert f"New Account Hash: {acc2.alias_hash}" in second_prompt
+    assert "Failure Kind: QUOTA_EXHAUSTED" in second_prompt
+    assert "Original Instruction: original prompt text" in second_prompt
+    assert "user1_secret_email" not in second_prompt
+    assert "user2_secret_email" not in second_prompt
+
+    assert receipt.provider_calls == 2
+    assert receipt.provider_attempt_count == 2
+    assert receipt.account_alias_hash == acc2.alias_hash
+    assert receipt.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+
+
+def test_agy_non_eligible_failure_aborts_loop(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
+    from nexus.services.agy_account_pool import AgyAccount, AgyAccountPoolManager
+
+    acc1 = AgyAccount(alias="acc1", home_dir=str(tmp_path / "h1"))
+    acc2 = AgyAccount(alias="acc2", home_dir=str(tmp_path / "h2"))
+    pool = AgyAccountPoolManager([acc1, acc2])
+
+    seen_requests = []
+
+    def fake_worker(request, on_process_group=None):
+        seen_requests.append(request)
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=1,
+            stdout=b"",
+            stderr=b"403 Forbidden: Permission denied",
+            wall_time_ms=10,
+            process_group_id=None,
+        )
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    adapter = AgyWorkerAdapter(account_pool=pool)
+    receipt = adapter.invoke(
+        type("Contract", (), {"task_id": "agy-abort-task", "maximum_provider_calls": 2})(),
+        type("Lease", (), {"target_worktree": str(tmp_path)})(),
+        prompt="hello",
+    )
+
+    assert len(seen_requests) == 1
+    assert receipt.provider_calls == 1
+    assert receipt.provider_attempt_count == 1
+    assert receipt.outcome == WorkerOutcome.FAILED.value
+    assert receipt.failure_reason is not None
+    assert "non-eligible account failure: PERMISSION_OR_SCOPE_ERROR" in receipt.failure_reason
