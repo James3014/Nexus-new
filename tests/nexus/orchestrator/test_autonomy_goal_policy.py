@@ -16,6 +16,7 @@ from nexus.contracts.autonomy_goal import (
     RepositoryIdentity,
     RuntimeActivationPolicy,
     SensitiveScope,
+    StandingGrantContext,
 )
 from nexus.orchestrator.autonomy_policy import (
     AcceptanceAuthorityKind,
@@ -28,11 +29,110 @@ from nexus.orchestrator.autonomy_policy import (
     AutonomyRuntimeIdentity,
     AutonomySubmissionBinding,
     ChildAutonomyScope,
+    StandingGrantOutcome,
+    StandingGrantRequest,
     evaluate_autonomy_policy,
+    evaluate_standing_grant_decision,
 )
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 
 NOW = datetime.now(timezone.utc)
+
+
+def _standing_context(**overrides) -> StandingGrantContext:
+    values = {
+        "owner_id": "owner-james",
+        "coordinator_id": "coordinator-codex",
+        "repository": RepositoryIdentity(
+            repository_id="James3014/Nexus-new",
+            canonical_remote="https://github.com/James3014/Nexus-new.git",
+        ),
+        "thread_id": "thread-163",
+        "goal_id": "goal-163",
+        "allowed_actions": (AutonomyActionClass.REPOSITORY_PUSH,),
+        "issued_at": NOW - timedelta(minutes=5),
+        "expires_at": NOW + timedelta(hours=1),
+    }
+    values.update(overrides)
+    return StandingGrantContext.issue(**values)
+
+
+def _standing_request(context: StandingGrantContext, **overrides) -> StandingGrantRequest:
+    values = {
+        "owner_id": context.owner_id,
+        "coordinator_id": context.coordinator_id,
+        "repository": context.repository,
+        "thread_id": context.thread_id,
+        "goal_id": context.goal_id,
+        "action": AutonomyActionClass.REPOSITORY_PUSH,
+        "requested_at": NOW,
+        "context_hash": context.context_hash,
+    }
+    values.update(overrides)
+    return StandingGrantRequest(**values)
+
+
+def test_standing_grant_match_is_evidence_only_and_hash_bound():
+    context = _standing_context()
+    decision = evaluate_standing_grant_decision(context, _standing_request(context))
+    assert decision.outcome is StandingGrantOutcome.GRANT_MATCH
+    assert decision.mutation_authorized is False
+    assert decision.context_hash == context.context_hash
+    assert decision.decision_hash
+
+
+def test_standing_grant_merge_requires_platform_approval():
+    context = _standing_context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    decision = evaluate_standing_grant_decision(
+        context, _standing_request(context, action=AutonomyActionClass.GITHUB_MERGE)
+    )
+    assert decision.outcome is StandingGrantOutcome.OWNER_MERGE_SLOT_REQUIRED
+    assert decision.mutation_authorized is False
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"coordinator_id": "other-coordinator"},
+        {"goal_id": "other-goal"},
+        {"context_hash": "0" * 64},
+        {"action": AutonomyActionClass.RUNTIME_ACTIVATE},
+    ],
+)
+def test_standing_grant_mismatch_is_fail_closed(override):
+    context = _standing_context()
+    decision = evaluate_standing_grant_decision(context, _standing_request(context, **override))
+    assert decision.outcome in {
+        StandingGrantOutcome.OUT_OF_SCOPE,
+        StandingGrantOutcome.INVALID,
+    }
+    assert decision.mutation_authorized is False
+
+
+def test_standing_grant_context_rejects_tampering_and_revocation_pairing():
+    context = _standing_context()
+    tampered = context.model_dump(mode="json")
+    tampered["goal_id"] = "tampered-goal"
+    with pytest.raises(ValidationError, match="CONTEXT_HASH_INVALID"):
+        StandingGrantContext.model_validate(tampered)
+    with pytest.raises(ValidationError, match="REVOCATION_BINDING_INVALID"):
+        _standing_context(revocation_reason="owner revoked")
+
+
+@pytest.mark.parametrize(
+    "context, requested_value",
+    [
+        ({"context_hash": "not-a-hash"}, {}),
+        ({"context_hash": "0" * 64, "unexpected": True}, {}),
+        (_standing_context().model_dump(mode="json"), {"context_hash": "bad"}),
+        (None, None),
+    ],
+)
+def test_malformed_standing_inputs_return_typed_invalid(context, requested_value):
+    decision = evaluate_standing_grant_decision(context, requested_value)
+    assert decision.outcome is StandingGrantOutcome.INVALID
+    assert decision.mutation_authorized is False
+    assert len(decision.context_hash) == 64
 
 
 def _grant(**overrides) -> AutonomyGoalGrant:
