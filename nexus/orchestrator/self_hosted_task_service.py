@@ -1839,6 +1839,138 @@ class SelfHostedTaskService:
             mutator(state)
             return self._write_state_locked(task_id, state)
 
+    # Issue #129: the claim is deliberately a subrecord of the existing task
+    # receipt.  The state lock above is the sole serialization point.
+    @staticmethod
+    def _claim_identity(request: Mapping[str, Any]) -> dict[str, Any]:
+        admission = request.get("workforce_admission", request.get("admission_binding"))
+        preflight = request.get("provider_preflight", request.get("realm_preflight"))
+        allowed = request.get("allowed_files", request.get("mutation_domain", []))
+        if isinstance(allowed, str):
+            allowed = [allowed]
+        identity = {
+            "repository": str(request.get("repository") or request.get("repo") or "").strip(),
+            "issue": str(request.get("issue") or request.get("issue_number") or "").strip(),
+            "task_id": str(request.get("task_id") or "").strip(),
+            "attempt_id": str(request.get("attempt_id") or "").strip(),
+            "action_id": str(request.get("action_id") or "").strip(),
+            "worker_id": str(request.get("worker_id") or request.get("worker") or "").strip(),
+            "provider": str(request.get("provider") or "").strip(),
+            "model": str(request.get("model") or "").strip(),
+            "role": str(request.get("role") or request.get("worker_role") or "").strip(),
+            "claim_ceiling": str(request.get("claim_ceiling") or "").strip(),
+            "base_revision": str(request.get("base_revision") or request.get("target_base_revision") or "").strip(),
+            "source_hash": str(request.get("source_hash") or request.get("source_revision") or "").strip(),
+            "task_card_path": str(request.get("task_card_path") or "").strip(),
+            "allowed_files": sorted({str(item).strip() for item in allowed if str(item).strip()}),
+            "admission_identity": hashlib.sha256(json.dumps(_jsonable(admission), sort_keys=True, separators=(",", ":")).encode()).hexdigest() if admission is not None else "",
+            "provider_preflight_identity": hashlib.sha256(json.dumps(_jsonable(preflight), sort_keys=True, separators=(",", ":")).encode()).hexdigest() if preflight is not None else "",
+        }
+        return identity
+
+    @classmethod
+    def _claim_hash(cls, identity: Mapping[str, Any]) -> str:
+        return hashlib.sha256(json.dumps(_jsonable(identity), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+    @staticmethod
+    def _claim_request(request: Mapping[str, Any]) -> dict[str, Any]:
+        identity = SelfHostedTaskService._claim_identity(request)
+        return {"identity": identity, "identity_hash": SelfHostedTaskService._claim_hash(identity),
+                "claim_id": str(request.get("claim_id") or uuid4()),
+                "generation": int(request.get("generation") or 1),
+                "fencing_token": str(request.get("fencing_token") or "")}
+
+    @classmethod
+    def _validate_claim_record(cls, record: Mapping[str, Any]) -> None:
+        if not isinstance(record, Mapping) or not isinstance(record.get("identity"), Mapping) or not record.get("identity"):
+            raise RuntimeError("WORK_CLAIM_MALFORMED")
+        if not isinstance(record.get("identity_hash"), str) or record.get("identity_hash") != cls._claim_hash(record["identity"]):
+            raise RuntimeError("WORK_CLAIM_TAMPERED")
+        if not isinstance(record.get("generation"), int) or isinstance(record.get("generation"), bool) or record["generation"] < 1 or not isinstance(record.get("claim_id"), str) or not record["claim_id"]:
+            raise RuntimeError("WORK_CLAIM_MALFORMED")
+
+    @classmethod
+    def _validate_claim_locked(cls, state: Mapping[str, Any], request: Mapping[str, Any]) -> Mapping[str, Any]:
+        record = state.get("work_claim")
+        cls._validate_claim_record(record)
+        expected = cls._claim_identity(request)
+        if record["identity_hash"] != cls._claim_hash(expected):
+            raise RuntimeError("WORK_CLAIM_FENCE_MISMATCH")
+        expected_fencing_token = f"{record['claim_id']}:{record['generation']}"
+        if (
+            not isinstance(record.get("fencing_token"), str)
+            or record["fencing_token"] != expected_fencing_token
+            or not isinstance(request.get("claim_id"), str)
+            or request["claim_id"] != record["claim_id"]
+            or not isinstance(request.get("generation"), int)
+            or isinstance(request.get("generation"), bool)
+            or request["generation"] != record["generation"]
+            or not isinstance(request.get("fencing_token"), str)
+            or request["fencing_token"] != expected_fencing_token
+        ):
+            raise RuntimeError("WORK_CLAIM_STALE_FENCE")
+        return record
+
+    def acquire_work_claim(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        candidate = self._claim_request(request)
+        task_id = candidate["identity"]["task_id"]
+        if not task_id:
+            return {"status": "BLOCKED", "reason": "TASK_ID_REQUIRED"}
+        with self._state_lock():
+            path = self._state_path(task_id)
+            if not path.exists():
+                return {"status": "BLOCKED", "reason": "TASK_NOT_FOUND"}
+            state = json.loads(path.read_text(encoding="utf-8"))
+            existing = state.get("work_claim")
+            if existing is not None:
+                self._validate_claim_record(existing)
+                if existing["identity_hash"] == candidate["identity_hash"]:
+                    return {"status": "ALREADY_CLAIMED", "claim": existing}
+                return {"status": "BLOCKED", "reason": "ALREADY_CLAIMED", "claim": existing}
+            candidate["generation"] = 1
+            candidate["fencing_token"] = f"{candidate['claim_id']}:{candidate['generation']}"
+            candidate["status"] = "CLAIMED"
+            candidate["claimed_at"] = _utc_now()
+            state["work_claim"] = candidate
+            self._write_state_locked(task_id, state)
+            return {"status": "CLAIMED", "claim": candidate}
+
+    claim_work = acquire_work_claim
+
+    def validate_work_claim(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        task_id = str(request.get("task_id") or "")
+        with self._state_lock():
+            path = self._state_path(task_id)
+            if not path.exists():
+                raise RuntimeError("WORK_CLAIM_NOT_FOUND")
+            state = json.loads(path.read_text(encoding="utf-8"))
+            record = self._validate_claim_locked(state, request)
+            return {"status": "CLAIMED", "claim": record}
+
+    def release_work_claim(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        task_id = str(request["task_id"])
+        with self._state_lock():
+            state = json.loads(self._state_path(task_id).read_text(encoding="utf-8"))
+            self._validate_claim_locked(state, request)
+            state.pop("work_claim", None)
+            self._write_state_locked(task_id, state)
+        return {"status": "RELEASED", "task_id": task_id}
+
+    def recover_work_claim(self, request: Mapping[str, Any], *, reason: str = "RECOVERY") -> dict[str, Any]:
+        task_id = str(request["task_id"])
+        with self._state_lock():
+            state = json.loads(self._state_path(task_id).read_text(encoding="utf-8"))
+            record = self._validate_claim_locked(state, request)
+            generation = int(record["generation"]) + 1
+            record["generation"] = generation
+            record["fencing_token"] = f"{record['claim_id']}:{generation}"
+            record["recovery_reason"] = _bounded_failure_text(reason)
+            record["recovered_at"] = _utc_now()
+            self._write_state_locked(task_id, state)
+            return {"status": "CLAIMED", "claim": record}
+
+    renew_work_claim = validate_work_claim
+
     def _record_event_append_failure(self, task_id: str, error: Exception) -> None:
         """Persist the state/event reconciliation debt without emitting another event."""
         now = _utc_now()
