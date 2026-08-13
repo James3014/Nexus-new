@@ -53,6 +53,7 @@ from nexus.orchestrator.self_hosted_task_service import (
     validate_task_card_binding,
     validate_workforce_dispatch_binding,
 )
+from nexus.contracts.operator_outcome_receipt import build_operator_outcome_receipt
 from nexus.orchestrator.worktree_manager import (
     TargetWorktreeLease,
     WorktreeManager,
@@ -80,6 +81,82 @@ def _request(tmp_path: Path, **overrides):
     }
     values.update(overrides)
     return values
+
+
+def test_operator_outcome_persists_idempotently_and_projects(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("task-1", {
+        "schema": "nexus.self_hosted_task_state.v1",
+        "task_id": "task-1",
+        "status": "SUBMITTED",
+        "attempt_id": "attempt-1",
+        "lifecycle_revision": "life-1",
+        "controller_revision": "a" * 40,
+        "lifecycle_executable_path": "runtime-1",
+        "status_history": [],
+    })
+    receipt = build_operator_outcome_receipt(
+        task_id="task-1", attempt_id="attempt-1", lifecycle_revision="life-1",
+        source_revision="a" * 40, runtime_identity=__import__("hashlib").sha256(b"runtime-1").hexdigest(), outcome="SUCCESS",
+        idempotency_key="idem-1",
+    )
+    first = service.record_operator_outcome("task-1", receipt)
+    second = service.record_operator_outcome("task-1", receipt)
+    assert first == second
+    projected = service.get_receipt("task-1")
+    assert projected["operator_outcome_receipt"] == first
+    assert len(projected["operator_outcome_receipts"]) == 1
+    assert "operator_outcome_receipt" not in service.get_task("task-1")
+    conflict = receipt.model_dump(mode="json")
+    conflict["outcome"] = "FAILURE"
+    conflict["payload_hash"] = "0" * 64
+    with pytest.raises(ValueError, match="PAYLOAD_HASH"):
+        service.record_operator_outcome("task-1", conflict)
+
+
+def test_operator_outcome_rejects_supersession_cycle_and_unknown_target(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("task-1", {
+        "schema": "nexus.self_hosted_task_state.v1", "task_id": "task-1", "status": "SUBMITTED",
+        "attempt_id": "attempt-1", "lifecycle_revision": "life-1", "controller_revision": "a" * 40,
+        "lifecycle_executable_path": "runtime-1", "status_history": [],
+    })
+    kwargs = dict(task_id="task-1", attempt_id="attempt-1", lifecycle_revision="life-1",
+                  source_revision="a" * 40, runtime_identity=__import__("hashlib").sha256(b"runtime-1").hexdigest(),
+                  outcome="SUCCESS")
+    unknown = build_operator_outcome_receipt(**kwargs, idempotency_key="idem-unknown", supersedes_receipt_hash="c" * 64)
+    with pytest.raises(ValueError, match="SUPERSESSION_TARGET_MISSING"):
+        service.record_operator_outcome("task-1", unknown)
+
+
+def test_operator_outcome_runtime_identity_missing_or_tampered_fails_closed(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("task-1", {"task_id": "task-1", "attempt_id": "a", "lifecycle_revision": "l",
+                                    "controller_revision": "a" * 40, "status": "SUBMITTED"})
+    with pytest.raises(ValueError, match="RUNTIME_IDENTITY_MISSING"):
+        service.record_operator_outcome("task-1", {})
+
+
+def test_operator_outcome_rejects_malformed_persisted_chain(tmp_path):
+    import hashlib
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    executable = tmp_path / "runtime-1"
+    executable.write_text("runtime", encoding="utf-8")
+    executable_path = str(executable.resolve())
+    runtime_hash = hashlib.sha256(executable_path.encode()).hexdigest()
+    malformed = build_operator_outcome_receipt(
+        task_id="task-1", attempt_id="attempt-1", lifecycle_revision="life-1",
+        source_revision="a" * 40, runtime_identity=runtime_hash, outcome="SUCCESS",
+        idempotency_key="old", supersedes_receipt_hash="c" * 64,
+    )
+    service._write_state("task-1", {"schema": "nexus.self_hosted_task_state.v1", "task_id": "task-1", "status": "SUBMITTED", "attempt_id": "attempt-1", "lifecycle_revision": "life-1",
+                                    "controller_revision": "a" * 40, "lifecycle_executable_path": executable_path,
+                                    "runtime_identity": runtime_hash,
+                                    "operator_outcome_receipts": [malformed.model_dump(mode="json")]})
+    candidate = build_operator_outcome_receipt(task_id="task-1", attempt_id="attempt-1", lifecycle_revision="life-1",
+            source_revision="a" * 40, runtime_identity=__import__("hashlib").sha256(executable_path.encode()).hexdigest(), outcome="SUCCESS", idempotency_key="new")
+    with pytest.raises(ValueError, match="PERSISTED_SUPERSESSION_TARGET_MISSING"):
+        service.record_operator_outcome("task-1", candidate)
 
 
 def _valid_local_dispatch():
