@@ -1,14 +1,21 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: COMPLETE
 task_id: github-issue-93-candidate-generation-only
 campaign_id: github-issue-93-candidate-generation-only-20260812
 source_issue: https://github.com/James3014/Nexus-new/issues/93
 baseline_main: ea8c15293455575b4312b92eeeebc69daa4abbcf
+historical_baseline: ea8c15293455575b4312b92eeeebc69daa4abbcf
+merge_base: 34fc70af1cd57f7499bf92ecec4926a9716c8de2
+reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+frontier_status: TERMINAL_RECONCILIATION
+terminal_marker: CANDIDATE_GENERATION_ONLY_SEMANTIC_PROVEN
+claim_ceiling: CANDIDATE_GENERATION_ONLY_SEMANTIC_PROVEN_ONLY
 AUTO_CHAIN: false
 commit_required: true
-candidate_required: true
+candidate_required: false
 worker_may_commit: true
 worker_may_push: true
 worker_may_approve: false
@@ -81,12 +88,19 @@ before execution.
 - complete allowed-file and staged-diff audit
 - independent exact-head hostile review
 
-## Exit and claim ceiling
+## Physical evidence and terminal boundary
 
-Commit and push only an issue-specific Candidate branch and open a PR to
-`main`. The maximum claim is
-`ISSUE_93_CANDIDATE_GENERATION_ONLY_SEMANTIC_CANDIDATE`; approval,
-integration, merge, runtime execution, and production truth remain separate.
+- Historical card baseline: `ea8c15293455575b4312b92eeeebc69daa4abbcf`.
+- Exact merge base: `34fc70af1cd57f7499bf92ecec4926a9716c8de2`.
+- PR #185 head: `024f51bd0e7e9b0e8995d18a62212647bf050a42`.
+- PR #185 merge: `0e4c325bbca2304658cea4e0c23f4584d9440dff`.
+- Exact changed scope: the four source/test paths above plus this card and INDEX.
+- Head workflows: Pyright, Wiki governance, Ruff, Policy lane, Bandit, and Pytest
+  completed successfully.
+- Reconciled current main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`.
 
-Missing authority or an unresolved architecture conflict is `HARD_BLOCK`.
-Transient test or transport failure is `RECOVERABLE_BLOCK`.
+`CANDIDATE_GENERATION_ONLY_SEMANTIC_PROVEN` is limited to the strict canonical
+fact and existing CapabilityPlanner demand projection. It grants no provider/model/
+worker identity selection, second route or authority, Candidate acceptance, runtime,
+approval, integration, merge, release, production, or public-readiness truth.
+`AUTO_CHAIN=false`.
