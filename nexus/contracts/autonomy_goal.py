@@ -104,6 +104,68 @@ class _FrozenModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class StandingGrantContext(_FrozenModel):
+    """Immutable evidence binding for a coordinator standing grant."""
+
+    schema: Literal["nexus.standing_grant_context.v1"] = "nexus.standing_grant_context.v1"
+    owner_id: StrictStr
+    coordinator_id: StrictStr
+    repository: RepositoryIdentity
+    thread_id: StrictStr
+    goal_id: StrictStr
+    allowed_actions: tuple[AutonomyActionClass, ...]
+    issued_at: AwareDatetime
+    expires_at: AwareDatetime
+    revoked_at: AwareDatetime | None = None
+    revocation_reason: StrictStr | None = None
+    context_hash: StrictStr
+
+    @field_validator("owner_id", "coordinator_id", "thread_id", "goal_id")
+    @classmethod
+    def validate_ids(cls, value: str, info) -> str:
+        return _safe_id(value, info.field_name)
+
+    @field_validator("allowed_actions")
+    @classmethod
+    def canonicalize_actions(cls, values: tuple[AutonomyActionClass, ...]) -> tuple[AutonomyActionClass, ...]:
+        if not values:
+            raise ValueError("STANDING_GRANT_ACTIONS_REQUIRED")
+        return tuple(sorted(set(values), key=lambda item: item.value))
+
+    @field_validator("revocation_reason")
+    @classmethod
+    def validate_revocation_reason(cls, value: str | None) -> str | None:
+        if value is not None and (not value.strip() or value.strip() != value):
+            raise ValueError("REVOCATION_REASON_INVALID")
+        return value
+
+    @field_validator("context_hash")
+    @classmethod
+    def validate_context_hash_format(cls, value: str) -> str:
+        if not _SHA64.fullmatch(value):
+            raise ValueError("CONTEXT_HASH_INVALID")
+        return value
+
+    @model_validator(mode="after")
+    def validate_context(self) -> "StandingGrantContext":
+        if self.expires_at <= self.issued_at:
+            raise ValueError("STANDING_GRANT_EXPIRY_INVALID")
+        if (self.revoked_at is None) != (self.revocation_reason is None):
+            raise ValueError("REVOCATION_BINDING_INVALID")
+        payload = self.model_dump(mode="json", exclude={"context_hash"})
+        if self.context_hash != canonical_autonomy_hash(payload):
+            raise ValueError("CONTEXT_HASH_INVALID")
+        return self
+
+    @classmethod
+    def issue(cls, **values: Any) -> "StandingGrantContext":
+        values.setdefault("schema", "nexus.standing_grant_context.v1")
+        payload = dict(values)
+        payload.pop("context_hash", None)
+        payload = cls.model_construct(**payload).model_dump(mode="json")
+        return cls.model_validate({**payload, "context_hash": canonical_autonomy_hash(payload)})
+
+
 class RepositoryIdentity(_FrozenModel):
     repository_id: StrictStr
     canonical_remote: StrictStr
