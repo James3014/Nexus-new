@@ -1,11 +1,19 @@
 ---
 task_id: nexus-issue-execution-capsule-skill-20260811-01
 campaign_id: nexus-issue-execution-capsule-skill-20260811
-status: in_progress
+status: COMPLETE
 authority: governed delegated worker
 owner: James Chen
 baseline: 752d1dec0517b29e1e1179827919e45dac33d131
-setup_commit_required: true
+historical_baseline: 752d1dec0517b29e1e1179827919e45dac33d131
+merge_base: 752d1dec0517b29e1e1179827919e45dac33d131
+reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+block_class: NONE
+frontier_status: TERMINAL_RECONCILIATION
+terminal_marker: NEXUS_ISSUE_EXECUTION_CAPSULE_SKILL_PROVEN
+claim_ceiling: NEXUS_ISSUE_EXECUTION_CAPSULE_SKILL_ONLY
+AUTO_CHAIN: false
 ---
 
 # Create Nexus Issue Execution Capsule Skill
@@ -74,13 +82,25 @@ initializer outputs; the setup commit must contain only this campaign's two
 files. Report both SHAs and exact files. Do not create a Candidate or claim
 approval, integration, or production readiness.
 
-## Exit criteria and evidence
+## Physical evidence and terminal boundary
 
-- Setup commit exists before skill mutation.
-- `SKILL.md` and `agents/openai.yaml` exist and no other skill resources exist.
-- Validator passes and `git diff --check` passes.
-- Staged and unstaged scope audits show only allowed files.
-- Skill commit exists and is bound to this card's hash.
+- Historical card baseline: `752d1dec0517b29e1e1179827919e45dac33d131`.
+- PR #138 head: `ec18a8c5be95b61cfe2e5830254e1d57087a638e`.
+- PR #138 merge: `c450c75cedbe7679f564d4eaddb7aa351b8aa0ee`.
+- Exact scope: the capsule `SKILL.md`, `agents/openai.yaml`, and this card
+  plus INDEX.
+- Exact-head workflows: Pytest, Pyright, Bandit, Ruff, and Wiki governance
+  completed successfully.
+- Independent Agy exact-head review recorded with evidence hash
+  `cf176160bf9488810b2f37991d391da065d1680a6cc9bdfd8353dfc38e81a562` and no
+  filesystem delta.
+- Owner receipt: `POST_COMPLETION_RECONCILIATION` on Issue #137.
+- Reconciled current main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`.
+
+`NEXUS_ISSUE_EXECUTION_CAPSULE_SKILL_PROVEN` is limited to the skill descriptor
+and source contract. No runtime eligibility, catalog promotion, selector or
+workflow change, route, Workforce, Candidate acceptance, approval, integration,
+merge, release, or production claim follows. `AUTO_CHAIN=false`.
 
 ## Block classification
 
