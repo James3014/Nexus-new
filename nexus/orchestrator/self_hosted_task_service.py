@@ -1613,21 +1613,31 @@ class SelfHostedTaskService:
         if state is None:
             raise KeyError(f"unknown task: {task_id}")
         contract = state.get("contract") if isinstance(state.get("contract"), Mapping) else {}
-        executable = str(state.get("lifecycle_executable_path") or "").strip()
-        if not executable:
-            raise ValueError("OPERATOR_OUTCOME_RUNTIME_IDENTITY_MISSING")
-        expected_runtime_identity = hashlib.sha256(executable.encode()).hexdigest()
-        persisted_runtime_identity = str(state.get("runtime_identity") or expected_runtime_identity)
-        if persisted_runtime_identity != expected_runtime_identity:
-            raise ValueError("OPERATOR_OUTCOME_RUNTIME_IDENTITY_TAMPERED")
+        expected_action_id = str(state.get("action_id") or "").strip() or None
+        expected_source_revision = str(
+            state.get("controller_revision") or contract.get("controller_revision") or ""
+        ).strip() or None
+        expected_runtime_receipt_hash = str(
+            state.get("runtime_receipt_hash") or ""
+        ).strip() or None
         normalized = validate_operator_outcome_receipt(
             receipt,
             task_id=task_id,
             attempt_id=str(state.get("attempt_id") or ""),
             lifecycle_revision=str(state.get("lifecycle_revision") or ""),
-            source_revision=str(state.get("controller_revision") or contract.get("controller_revision") or ""),
-            runtime_identity=expected_runtime_identity,
         )
+        if normalized.action_id is not None and normalized.action_id != expected_action_id:
+            raise ValueError("OPERATOR_OUTCOME_ACTION_ID_MISMATCH")
+        if normalized.source_revision is not None and (
+            expected_source_revision is None
+            or normalized.source_revision != expected_source_revision
+        ):
+            raise ValueError("OPERATOR_OUTCOME_SOURCE_REVISION_MISMATCH")
+        if normalized.runtime_receipt_hash is not None and (
+            expected_runtime_receipt_hash is None
+            or normalized.runtime_receipt_hash != expected_runtime_receipt_hash
+        ):
+            raise ValueError("OPERATOR_OUTCOME_RUNTIME_RECEIPT_HASH_MISMATCH")
 
         def mutate(current: dict[str, Any]) -> None:
             existing = [item for item in current.get("operator_outcome_receipts", []) if isinstance(item, Mapping)]
@@ -1638,17 +1648,19 @@ class SelfHostedTaskService:
                         item,
                         task_id=task_id,
                         attempt_id=normalized.attempt_id,
+                        action_id=normalized.action_id,
                         lifecycle_revision=normalized.lifecycle_revision,
                         source_revision=normalized.source_revision,
-                        runtime_identity=normalized.runtime_identity,
+                        runtime_receipt_hash=normalized.runtime_receipt_hash,
+                        check_freshness=False,
                     )
                 except ValueError as exc:
                     raise ValueError("OPERATOR_OUTCOME_PERSISTED_RECEIPT_TAMPERED") from exc
-                if prior.payload_hash in parsed:
+                if prior.receipt_id in parsed:
                     raise ValueError("OPERATOR_OUTCOME_PERSISTED_RECEIPT_TAMPERED")
-                parsed[prior.payload_hash] = prior
+                parsed[prior.receipt_id] = prior
             for prior in parsed.values():
-                parent_hash = prior.supersedes_receipt_hash
+                parent_hash = prior.supersedes_receipt_id
                 if parent_hash is not None:
                     parent = parsed.get(parent_hash)
                     if parent is None:
@@ -1658,9 +1670,9 @@ class SelfHostedTaskService:
             for start in parsed.values():
                 seen = set()
                 cursor = start
-                while cursor.supersedes_receipt_hash is not None:
-                    parent_hash = cursor.supersedes_receipt_hash
-                    if parent_hash in seen or parent_hash == start.payload_hash:
+                while cursor.supersedes_receipt_id is not None:
+                    parent_hash = cursor.supersedes_receipt_id
+                    if parent_hash in seen or parent_hash == start.receipt_id:
                         raise ValueError("OPERATOR_OUTCOME_PERSISTED_SUPERSESSION_CYCLE")
                     seen.add(parent_hash)
                     cursor = parsed.get(parent_hash)
@@ -1669,26 +1681,35 @@ class SelfHostedTaskService:
             for item in existing:
                 if item.get("idempotency_key") != normalized.idempotency_key:
                     continue
-                if item.get("payload_hash") != normalized.payload_hash:
+                if item.get("receipt_id") != normalized.receipt_id:
                     raise ValueError("OPERATOR_OUTCOME_IDEMPOTENCY_CONFLICT")
                 return
-            hashes = {str(item.get("payload_hash")) for item in existing}
-            if normalized.supersedes_receipt_hash is not None:
-                if normalized.supersedes_receipt_hash not in hashes:
+            hashes = {str(item.get("receipt_id")) for item in existing}
+            if normalized.supersedes_receipt_id is not None:
+                if normalized.supersedes_receipt_id not in hashes:
                     raise ValueError("OPERATOR_OUTCOME_SUPERSESSION_TARGET_MISSING")
-                if normalized.supersedes_receipt_hash == normalized.payload_hash:
+                if normalized.supersedes_receipt_id == normalized.receipt_id:
                     raise ValueError("OPERATOR_OUTCOME_SUPERSESSION_CYCLE")
-                target = next(item for item in existing if item.get("payload_hash") == normalized.supersedes_receipt_hash)
+                target = next(
+                    item
+                    for item in existing
+                    if item.get("receipt_id") == normalized.supersedes_receipt_id
+                )
                 if target.get("task_id") != task_id or target.get("attempt_id") != normalized.attempt_id:
                     raise ValueError("OPERATOR_OUTCOME_SUPERSESSION_ATTEMPT_MISMATCH")
+                if normalized.observed_at <= parsed[normalized.supersedes_receipt_id].observed_at:
+                    raise ValueError("OPERATOR_OUTCOME_SUPERSESSION_ORDER_INVALID")
                 seen = set()
                 cursor = target
-                while cursor.get("supersedes_receipt_hash"):
-                    parent = str(cursor["supersedes_receipt_hash"])
-                    if parent in seen or parent == normalized.payload_hash:
+                while cursor.get("supersedes_receipt_id"):
+                    parent = str(cursor["supersedes_receipt_id"])
+                    if parent in seen or parent == normalized.receipt_id:
                         raise ValueError("OPERATOR_OUTCOME_SUPERSESSION_CYCLE")
                     seen.add(parent)
-                    cursor = next((item for item in existing if item.get("payload_hash") == parent), {})
+                    cursor = next(
+                        (item for item in existing if item.get("receipt_id") == parent),
+                        {},
+                    )
             existing.append(normalized.model_dump(mode="json"))
             current["operator_outcome_receipts"] = existing
             current["operator_outcome_receipt"] = existing[-1]
@@ -6079,7 +6100,10 @@ class SelfHostedTaskService:
             return None
         approval_requirements = self._approval_requirements(state)
         if include_details:
-            return {**state, "approval_requirements": approval_requirements}
+            details = {**state, "approval_requirements": approval_requirements}
+            details.pop("operator_outcome_receipt", None)
+            details.pop("operator_outcome_receipts", None)
+            return details
         action = state.get("task_action") or self._task_action_envelope(state)
         return {
             "schema": "nexus.self_hosted_task_status.v1",
