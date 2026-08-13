@@ -43,7 +43,7 @@ def test_execution_domains_and_candidate_namespaces_are_unambiguous():
     merge = (ROOT / ".agents/skills/nexus-merge-gate/SKILL.md").read_text(encoding="utf-8")
 
     assert "The Owner chooses the execution lane" in agents
-    assert "does not select\n  local lifecycle" in agents
+    assert "does not select local lifecycle" in agents
     assert "A GitHub PR Candidate" in agents
     assert "a local lifecycle Candidate" in agents
     assert "never substitutes for program correctness" in agents
@@ -61,6 +61,31 @@ def test_execution_domains_and_candidate_namespaces_are_unambiguous():
 
     assert "applies exclusively to a local Nexus lifecycle Candidate" in merge
     assert "It is not the merge procedure for a GitHub PR Candidate" in merge
+
+
+def test_ready_issue_claim_contract_is_worker_neutral_and_fail_closed():
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "eligible governed worker" in agents
+    assert "Provider/model names are not normative" in agents
+    for token in (
+        "claim_intent",
+        "claim_enforcement_state",
+        "claim_mode",
+        "PROJECTION_ONLY",
+        "UNKNOWN",
+        "MANUAL_DISPATCH",
+        "assignees, labels, comments, Project fields, branch names",
+    ):
+        assert token in agents
+        if token != "assignees, labels, comments, Project fields, branch names":
+            assert token in contract
+    assert "GitHub UI metadata and branch names remain" in contract
+    assert "canonical atomic/fenced claim operation" in contract
+    assert "never grants\n  route selection" in contract
 
 
 def test_bootstrap_file_set_is_complete_and_tracked():

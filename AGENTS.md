@@ -17,11 +17,20 @@ source behavior, tests, and required verifiers remain authoritative.
 
 - The collaboration repository is `James3014/Nexus-new`; its default and
   collaboration branch is `main`.
-- A Ready GitHub Issue authorizes bounded collaboration only; it does not select
-  local lifecycle. Draft, triage, and unready Issues grant no mutation.
-- Codex implements a Ready Issue on an issue-specific branch such as
-  `codex/issue-<number>-<slug>`, pushes only that branch, and opens a pull
-  request to `main`.
+- A Ready GitHub Issue is a worker-neutral bounded collaboration contract; it
+  does not select local lifecycle. Draft, triage, and unready Issues grant no
+  mutation.
+- An eligible governed worker implements a Ready Issue on an issue-specific
+  branch such as `codex/issue-<number>-<slug>`, pushes only that branch, and
+  opens a pull request to `main`. Provider/model names are not normative
+  ownership identities.
+- Issue claim metadata is explicit and fail-closed: `claim_intent` describes
+  Owner planning intent, `claim_enforcement_state` describes whether a
+  repository-enforced atomic/fenced claim exists, and `claim_mode` describes
+  effective dispatch. Until a canonical claim operation is physically proven,
+  `PROJECTION_ONLY` or `UNKNOWN` enforcement resolves to `MANUAL_DISPATCH`;
+  assignees, labels, comments, Project fields, branch names, and worker prose
+  are projections and cannot authorize autonomous mutation.
 - No agent direct-pushes, force-pushes, or deletes `main`; delegated workers
   never approve or merge their Candidate. Only the primary coordinator may use
   protected PR merge under exact Owner approval or the standing grant below.
