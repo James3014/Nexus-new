@@ -51,12 +51,23 @@ before evidence construction or provider invocation.
    missing, stale, substituted, escaped, symlinked, non-regular, or mismatched
    source fails before evidence or provider calls.
 4. Runtime binds task, workspace revision, generated attempt, path, bytes,
-   digest, and stable file identity. Caller/planner prose cannot manufacture
-   physical truth.
+   digest, and stable file identity. Request/path/byte validation happens before
+   evidence construction or provider activity. An optional attempt assertion is
+   checked only after runtime itself generates the attempt ID and immediately
+   before preflight/evidence/provider use; any mismatch still produces zero
+   provider calls. Caller/planner prose cannot manufacture physical truth.
 5. The bound physical digest is separate from the existing canonical evidence
    bundle `source_hash`; neither that field nor `bundle_hash` may be replaced.
+   The receipt/context projection records distinct runtime-owned root identity,
+   normalized artifact path, declared digest, bound digest, byte count, stable
+   file identity, and validation verdict. None of those fields may self-attest
+   the trusted root or override bundle identity.
 6. No second Router, Planner, verifier, claim authority, lifecycle authority,
    or Workforce selector may be created.
+7. `nexus/engine/capability_planner.py` is excluded from the later implementation
+   frontier unless the fresh post-#29 source audit proves that checked assertion
+   metadata must traverse the plan. Even then it may only propagate already
+   validated metadata and cannot select a route or establish physical truth.
 
 ## Hostile verification required after rebind
 
@@ -69,7 +80,10 @@ before evidence construction or provider invocation.
 - omitted declaration preserves legacy behavior;
 - declared physical digest cannot overwrite canonical bundle source identity;
 - route, Workforce admission, finding/claim, and final-delivery authority remain
-  unchanged.
+  unchanged;
+- every negative path is exercised through the runtime boundary and proves that
+  evidence construction and provider callbacks were not invoked. Dataclass-only
+  validation tests or caller-supplied zero-call assertions are insufficient.
 
 ## Allowed files now
 
@@ -98,7 +112,9 @@ the post-#29 rebind.
 This card exits only as `TASK_CARD_COMPILED_IMPLEMENTATION_NOT_AUTHORIZED`.
 After #29 physically settles, the primary coordinator must create a fresh
 Owner-authorized implementation frontier with exact current blobs, files,
-tests, overlap, and claim ceiling. This card cannot authorize that mutation.
+tests, overlap, and claim ceiling. That rebind must default-deny
+`capability_planner.py` unless propagation necessity is physically demonstrated.
+This card cannot authorize that mutation.
 
 ## Block class
 
