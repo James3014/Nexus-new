@@ -70,6 +70,7 @@ class AutoResearchNightShift:
         project_root: Optional[Path] = None,
         context_hub: Any = None,
         context_dependencies: Any = None,
+        queue_dispatcher: Any = None,
     ):
         self.task = task.strip()
         self.max_rounds = max_rounds
@@ -120,6 +121,7 @@ class AutoResearchNightShift:
         self.model_exhausted: Dict[str, str] = {}
         env_keep = os.getenv("NIGHTSHIFT_KEEP_WORKTREE", "").strip().lower() in {"1", "true", "yes", "on"}
         self.keep_worktree = env_keep if keep_worktree is None else bool(keep_worktree)
+        self.queue_dispatcher = queue_dispatcher
 
         if self.git_enabled:
             try:
@@ -1106,6 +1108,8 @@ class AutoResearchNightShift:
                         "reason": "tier2_gate_rejected",
                     }
                 self._append_to_pending_manifest(self.task, self.resolved_target_file, self.base_commit, self.best_score, str(workpath))
+                if self.queue_dispatcher is not None:
+                    self.consume_pending_queue(self.queue_dispatcher)
 
             final_status = "SUCCESS" if self.best_score > 0 else "NO_IMPROVEMENT"
             final_reason = "best_score_recorded" if self.best_score > 0 else "no_valid_candidate"
@@ -1263,6 +1267,18 @@ class AutoResearchNightShift:
                 print(f"❌ [Gate Error] Failed to append with lock: {e}")
             finally:
                 fcntl.flock(f, fcntl.LOCK_UN)
+
+    def consume_pending_queue(self, dispatcher: Any) -> list[dict[str, Any]]:
+        """Consume only the canonical NightShift manifest for this project."""
+        from nexus.services.nightshift_queue_consumer import NightshiftQueueConsumer
+
+        manifest = self.project_root / ".nexus/nightshift/pending.json"
+        consumer = NightshiftQueueConsumer(
+            runtime_runner=lambda request: self.gateway.ask_unified(request),
+            dispatcher=dispatcher,
+            project_root=self.project_root,
+        )
+        return consumer.consume_file(manifest)
 
 
 

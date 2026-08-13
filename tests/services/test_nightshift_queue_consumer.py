@@ -27,7 +27,10 @@ def _item(**overrides):
 def test_dispatch_requires_canonical_allow_and_is_idempotent(tmp_path: Path):
     dispatched = []
     consumer = NightshiftQueueConsumer(
-        lambda _request: {"workforce_admission": {"overall_decision": "ALLOW"}},
+        lambda _request: {
+            "workforce_admission": {"overall_decision": "ALLOW"},
+            "gateway_invocation_authority": {"status": "ALLOW", "gate_passed": True},
+        },
         dispatched.append,
     )
     path = tmp_path / "pending.json"
@@ -54,6 +57,18 @@ def test_malformed_tampered_or_non_allow_manifest_never_dispatches(tmp_path: Pat
     result = consumer.consume_file(path)
 
     assert all(entry["status"] == "BLOCK" for entry in result)
+    assert dispatched == []
+
+
+def test_fake_allow_without_canonical_authority_never_dispatches(tmp_path: Path):
+    dispatched = []
+    consumer = NightshiftQueueConsumer(
+        lambda _request: {"workforce_admission": {"overall_decision": "ALLOW"}},
+        dispatched.append,
+    )
+    path = tmp_path / "pending.json"
+    path.write_text(json.dumps([_item()]), encoding="utf-8")
+    assert consumer.consume_file(path)[0]["status"] == "BLOCK"
     assert dispatched == []
 
 
