@@ -80,6 +80,33 @@ def test_snapshot_tail_matches_projection():
     ).snapshot == project([first, second, third])
 
 
+def test_snapshot_tail_preserves_and_deduplicates_risks():
+    first = event(
+        1,
+        "PLAN_FORMED",
+        unresolved_risks=("risk-1",),
+        next_action="try A",
+        claim_ceiling="bounded",
+    )
+    second = event(
+        2,
+        "OBSERVATION_RECORDED",
+        first.event_hash,
+        unresolved_risks=("risk-1", "risk-2"),
+        next_action="finish",
+        claim_ceiling="bounded",
+    )
+    resumed = resume(
+        project([first]),
+        [second],
+        task_id="task-1",
+        attempt_id="attempt-1",
+        source_revision="src-a",
+        contract_revision="contract-a",
+    )
+    assert resumed.unresolved_risks == ("risk-1", "risk-2")
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [

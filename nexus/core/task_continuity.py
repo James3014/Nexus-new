@@ -370,7 +370,7 @@ def _project_tail(snapshot: ContinuitySnapshot, tail: list[ContinuityEvent]) -> 
         applied_changes=unique(applied),
         failed_attempts=unique(failed),
         rejected_strategies=unique(rejected),
-        unresolved_risks=snapshot.unresolved_risks,
+        unresolved_risks=unique(risks),
         unknowns=tuple(dict.fromkeys(unknowns)),
         evidence_refs=unique(evidence),
         next_action=next_action,
