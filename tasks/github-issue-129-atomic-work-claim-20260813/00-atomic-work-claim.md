@@ -2,7 +2,9 @@
 task_id: github-issue-129-atomic-work-claim
 issue: 129
 repository: James3014/Nexus-new
-baseline_revision: 80370ab3c5e3c3714cf378de1dba90412d1a2a7f
+baseline_revision: a74d838cc6bb14af47ce79207181c12a1aed1d35
+rebind_lineage_commit: 7c47118458f320a56f6b209393eb906b3fe878f4
+rebind_authorization: direct Owner authorization for persistent claim subrecord/recovery under existing SelfHostedTaskService .state.lock
 status: ACTIVE
 execution_lane: ISOLATED_TARGET
 worker_role: bounded_code_candidate
@@ -18,6 +20,8 @@ allowed_files:
   - tasks/github-issue-129-atomic-work-claim-20260813/00-atomic-work-claim.md
 authorized_deletions: []
 claim_ceiling: CLAIM_PROTOCOL_CANDIDATE_PR_ONLY
+shared_file_gate: SERIALIZE_MUTATION_AFTER_PR226
+implementation_gate: coordinator release required before touching shared service/test files
 ---
 
 # Atomic Ready-Issue work claim
@@ -48,6 +52,34 @@ id, and monotonic generation/fencing identity.
 - `CapabilityPlanner` remains the sole route selector. Workforce Admission is
   eligibility evidence only and must be freshly verified, not recomputed into
   routing authority by the claim seam.
+
+## Rebind and frozen contract
+
+This card is freshly bound to exact `nexus-new/main` commit
+`a74d838cc6bb14af47ce79207181c12a1aed1d35`; no force, rebase, or history
+rewrite is permitted. The Owner authorizes only the persistent claim subrecord
+and recovery protocol within the existing `SelfHostedTaskService` state
+directory and `.state.lock`. The implementation must freeze, validate, and
+hash-bind the following exact identity tuple before any mutable callback:
+
+`repository`, `issue`, `task_id`, `attempt_id`, `action_id`, `worker_id`,
+`provider`, `model`, `role`, `claim_ceiling`, `base_revision`, `source_hash`,
+`task_card_path`, normalized `allowed_files`/mutation-domain hash, fresh
+Workforce Admission receipt identity, optional required provider/realm
+preflight identity, `claim_id`, and monotonic `generation`/`fencing_token`.
+
+Recovery is a durable subrecord update under the same lock: it records the
+reason, advances generation/fencing, and leaves exactly one current owner.
+Timeout is not authority transfer. All acquisition, replay, release, cleanup,
+recovery, and later authoritative mutation/Candidate handoff paths validate the
+claim id plus generation and the full owner/scope tuple. The hostile matrix
+below is the acceptance boundary for malformed, stale, competing, tampered,
+and wrong-owner requests.
+
+The card preserves #128 worker-neutral semantics and remains separate from
+#98 physical Target leases, #130 consumers/polling, #191/#143, route selection,
+Workforce policy, lifecycle approval/integration/merge, runtime activation,
+release, and production claims.
 
 ## Required behavior
 
@@ -115,4 +147,3 @@ format delta is allowed in changed hunks.
 Stop at an exact four-file Candidate commit/PR with deterministic hostile
 tests, scope/deletion audit, exact-base static evidence, and independent review
 pending. `AUTO_CHAIN=false`.
-
