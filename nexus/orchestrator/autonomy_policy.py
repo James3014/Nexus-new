@@ -49,26 +49,22 @@ _RISK_RANK = {
     AutonomyRiskLevel.HIGH: 2,
     AutonomyRiskLevel.CRITICAL: 3,
 }
-_RUNTIME_BOUND_ACTIONS = frozenset(
-    {
-        AutonomyActionClass.CANDIDATE_APPROVE,
-        AutonomyActionClass.CANDIDATE_INTEGRATE,
-        AutonomyActionClass.REPOSITORY_PUSH,
-        AutonomyActionClass.GITHUB_MERGE,
-        AutonomyActionClass.RUNTIME_ACTIVATE,
-        AutonomyActionClass.PRODUCTION_RELEASE,
-    }
-)
-_CANDIDATE_BOUND_ACTIONS = frozenset(
-    {
-        AutonomyActionClass.CANDIDATE_APPROVE,
-        AutonomyActionClass.CANDIDATE_INTEGRATE,
-        AutonomyActionClass.REPOSITORY_PUSH,
-        AutonomyActionClass.GITHUB_MERGE,
-        AutonomyActionClass.RUNTIME_ACTIVATE,
-        AutonomyActionClass.PRODUCTION_RELEASE,
-    }
-)
+_RUNTIME_BOUND_ACTIONS = frozenset({
+    AutonomyActionClass.CANDIDATE_APPROVE,
+    AutonomyActionClass.CANDIDATE_INTEGRATE,
+    AutonomyActionClass.REPOSITORY_PUSH,
+    AutonomyActionClass.GITHUB_MERGE,
+    AutonomyActionClass.RUNTIME_ACTIVATE,
+    AutonomyActionClass.PRODUCTION_RELEASE,
+})
+_CANDIDATE_BOUND_ACTIONS = frozenset({
+    AutonomyActionClass.CANDIDATE_APPROVE,
+    AutonomyActionClass.CANDIDATE_INTEGRATE,
+    AutonomyActionClass.REPOSITORY_PUSH,
+    AutonomyActionClass.GITHUB_MERGE,
+    AutonomyActionClass.RUNTIME_ACTIVATE,
+    AutonomyActionClass.PRODUCTION_RELEASE,
+})
 
 
 class _FrozenModel(BaseModel):
@@ -166,9 +162,10 @@ def _standing_decision(outcome: StandingGrantOutcome, context_hash: str) -> Stan
         "mutation_authorized": False,
         "claim_ceiling": "EVIDENCE_ONLY_PLATFORM_BOUND",
     }
-    return StandingGrantDecision.model_validate(
-        {**payload, "decision_hash": canonical_autonomy_hash(payload)}
-    )
+    return StandingGrantDecision.model_validate({
+        **payload,
+        "decision_hash": canonical_autonomy_hash(payload),
+    })
 
 
 def evaluate_standing_grant_decision(
@@ -544,12 +541,10 @@ def _decision(*, reasons: list[str], input_hash: str) -> AutonomyDecision:
         "authority_inputs_verified": False,
         "claim_ceiling": "SHADOW_CALLER_BOUND_EVIDENCE_ONLY",
     }
-    return AutonomyDecision.model_validate(
-        {
-            **payload,
-            "decision_hash": canonical_autonomy_hash(payload),
-        }
-    )
+    return AutonomyDecision.model_validate({
+        **payload,
+        "decision_hash": canonical_autonomy_hash(payload),
+    })
 
 
 def _safe_input_hash(grant: Any, evaluation: Any) -> str:
