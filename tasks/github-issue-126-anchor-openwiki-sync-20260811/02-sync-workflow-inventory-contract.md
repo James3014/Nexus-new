@@ -1,7 +1,8 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: active
+status: COMPLETE
+terminal_state: TERMINAL_RECONCILIATION
 purpose: Synchronize the derived OpenWiki workflow inventory and its exact count assertion.
 issue: 126
 supersedes: 01-sync-workflow-inventory.md
@@ -79,3 +80,12 @@ exact-head review. Any further file requirement is a `HARD_BLOCK`.
 The worker may implement and commit only the two scoped files. Push, PR
 creation, review, merge, Issue closure, protected-proof claims, and post-merge
 PR #118 activation remain with the primary agent/Owner authority.
+
+## Terminal reconciliation
+
+Completed by PR #127 exact head `6d1eb2bf39db537a3f0714dda77ba0c290da11cf`,
+merge `fffc127cb`, required checks successful, reconciled on current `main`
+`eb668fb76f0c30d8f025db42cdb8e320d556c037`. Historical workflow-count delta
+`9` -> `10` remains effective. Markers: `BOOTSTRAP_ANCHOR_INSTALLED`,
+`OPENWIKI_INVENTORY_SYNCHRONIZED`; ceiling: `NO_PROTECTED_PROVENANCE_CLAIM`;
+`AUTO_CHAIN=false`.
