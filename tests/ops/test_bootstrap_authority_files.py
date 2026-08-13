@@ -85,6 +85,7 @@ def test_ready_issue_claim_contract_is_worker_neutral_and_fail_closed():
     assert "canonical atomic/fenced claim operation" in contract
     assert "never grants\n  route selection" in contract
 
+
 def test_protected_merge_requires_exact_owner_slot_not_standing_grant():
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(encoding="utf-8")
