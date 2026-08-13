@@ -400,8 +400,6 @@ class AgyWorkerAdapter:
             if timeout <= 0.0:
                 return 0.0
             elapsed = time.monotonic() - started_at
-            if elapsed < 0.005:  # Avoid micro elapsed time causing 41.999s regression
-                elapsed = 0.0
             return timeout - elapsed
 
         pool = self._get_account_pool()
@@ -434,9 +432,12 @@ class AgyWorkerAdapter:
                     provider_attempt_count=0,
                 )
 
+            argv_seconds = int(round(remaining_seconds))
+            if argv_seconds < 1:
+                argv_seconds = 1
             request = CliWorkerRequest(
                 executable=executable,
-                argv=build_argv(remaining_seconds, prompt),
+                argv=build_argv(argv_seconds, prompt),
                 cwd=target,
                 timeout_seconds=remaining_seconds,
             )
@@ -549,9 +550,12 @@ class AgyWorkerAdapter:
                         failure_reason = "shared wall-time budget exhausted"
                         break
 
+                    argv_seconds = int(round(remaining_seconds))
+                    if argv_seconds < 1:
+                        argv_seconds = 1
                     request = CliWorkerRequest(
                         executable=executable,
-                        argv=build_argv(remaining_seconds, current_prompt),
+                        argv=build_argv(argv_seconds, current_prompt),
                         cwd=target,
                         env=sub_env,
                         timeout_seconds=remaining_seconds,

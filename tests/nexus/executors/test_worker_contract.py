@@ -1617,3 +1617,122 @@ def test_agy_non_eligible_failure_aborts_loop(monkeypatch, tmp_path):
     assert receipt.outcome == WorkerOutcome.FAILED.value
     assert receipt.failure_reason is not None
     assert "non-eligible account failure: PERMISSION_OR_SCOPE_ERROR" in receipt.failure_reason
+
+
+def test_terminal_release_spy(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
+    from nexus.services.agy_account_pool import AgyAccount, AgyAccountPoolManager
+
+    acc = AgyAccount(alias="acc1", home_dir=str(tmp_path / "h1"))
+    pool = AgyAccountPoolManager([acc])
+
+    released_leases = []
+    original_release = pool.release
+
+    def spy_release(lease):
+        released_leases.append(lease)
+        original_release(lease)
+
+    monkeypatch.setattr(pool, "release", spy_release)
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", lambda req, **opts: CliWorkerResult(
+        status=CliWorkerStatus.COMPLETED, executable_identity=req.executable, argv=req.argv, cwd=req.cwd, exit_code=0, stdout=b"ok", stderr=b"", wall_time_ms=5, process_group_id=None
+    ))
+    adapter = AgyWorkerAdapter(account_pool=pool)
+    adapter.invoke(
+        type("Contract", (), {"task_id": "success-task", "maximum_provider_calls": 1})(),
+        type("Lease", (), {"target_worktree": str(tmp_path)})(),
+        prompt="hello",
+    )
+    assert len(released_leases) == 1
+    released_leases.clear()
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", lambda req, **opts: CliWorkerResult(
+        status=CliWorkerStatus.COMPLETED, executable_identity=req.executable, argv=req.argv, cwd=req.cwd, exit_code=1, stdout=b"", stderr=b"403 Forbidden", wall_time_ms=5, process_group_id=None
+    ))
+    adapter.invoke(
+        type("Contract", (), {"task_id": "non-eligible-task", "maximum_provider_calls": 1})(),
+        type("Lease", (), {"target_worktree": str(tmp_path)})(),
+        prompt="hello",
+    )
+    assert len(released_leases) == 1
+    released_leases.clear()
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", lambda req, **opts: CliWorkerResult(
+        status=CliWorkerStatus.TIMED_OUT, executable_identity=req.executable, argv=req.argv, cwd=req.cwd, exit_code=1, stdout=b"", stderr=b"", wall_time_ms=5, process_group_id=None
+    ))
+    adapter.invoke(
+        type("Contract", (), {"task_id": "timeout-task", "maximum_provider_calls": 1})(),
+        type("Lease", (), {"target_worktree": str(tmp_path)})(),
+        prompt="hello",
+    )
+    assert len(released_leases) == 1
+    released_leases.clear()
+
+
+def test_clock_decrease_real_time(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
+    from nexus.services.agy_account_pool import AgyAccount, AgyAccountPoolManager
+
+    acc1 = AgyAccount(alias="acc1", home_dir=str(tmp_path / "h1"))
+    acc2 = AgyAccount(alias="acc2", home_dir=str(tmp_path / "h2"))
+    pool = AgyAccountPoolManager([acc1, acc2])
+
+    seen_timeouts = []
+
+    def fake_worker(request, on_process_group=None):
+        seen_timeouts.append(request.timeout_seconds)
+        time.sleep(0.01)
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=1,
+            stdout=b"",
+            stderr=b"RESOURCE_EXHAUSTED: Quota exceeded",
+            wall_time_ms=10,
+            process_group_id=None,
+        )
+
+    monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", fake_worker)
+    adapter = AgyWorkerAdapter(account_pool=pool)
+    adapter.invoke(
+        type("Contract", (), {"task_id": "clock-decrease-task", "maximum_provider_calls": 2})(),
+        type("Lease", (), {"target_worktree": str(tmp_path)})(),
+        prompt="hello",
+        timeout_seconds=0.5,
+    )
+
+    assert len(seen_timeouts) == 2
+    assert seen_timeouts[1] < seen_timeouts[0]
+
+
+def test_mandatory_negative_tests(monkeypatch, tmp_path):
+    monkeypatch.setenv("NEXUS_EXTERNAL_RUNTIME_AUTHORIZED", "1")
+    monkeypatch.setattr("nexus.executors.worker_registry.shutil.which", lambda name: "/bin/agy")
+    from nexus.services.agy_account_pool import AgyAccount, AgyAccountPoolManager
+
+    acc1 = AgyAccount(alias="acc1", home_dir=str(tmp_path / "h1"))
+    acc2 = AgyAccount(alias="acc2", home_dir=str(tmp_path / "h2"))
+
+    failures = [
+        (CliWorkerStatus.TIMED_OUT, 1, b"", b"", "TIMEOUT"),
+        (CliWorkerStatus.COMPLETED, 2, b"", b"SyntaxError: unexpected EOF", "SYNTAX_OR_IMPLEMENTATION_ERROR"),
+        (CliWorkerStatus.COMPLETED, 3, b"", b"ValueError: Invalid model option", "MODEL_OR_TASK_ERROR"),
+    ]
+
+    for status, exit_code, stdout, stderr, expected_kind in failures:
+        pool = AgyAccountPoolManager([acc1, acc2])
+        monkeypatch.setattr("nexus.executors.worker_registry.run_cli_worker", lambda req, **opts: CliWorkerResult(
+            status=status, executable_identity=req.executable, argv=req.argv, cwd=req.cwd, exit_code=exit_code, stdout=stdout, stderr=stderr, wall_time_ms=5, process_group_id=None
+        ))
+        adapter = AgyWorkerAdapter(account_pool=pool)
+        receipt = adapter.invoke(
+            type("Contract", (), {"task_id": f"neg-{expected_kind}", "maximum_provider_calls": 2})(),
+            type("Lease", (), {"target_worktree": str(tmp_path)})(),
+            prompt="hello",
+        )
+        assert receipt.provider_calls == 1

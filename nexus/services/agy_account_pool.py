@@ -13,6 +13,7 @@ from nexus.services.external_account_pool import (
     AccountLease,
     ExternalAccountPool,
     InternalAccountRecord,
+    InvalidAccountLeaseError,
     is_rotation_eligible,
 )
 
@@ -109,6 +110,7 @@ class AgyAccountPoolManager:
                 self._manager_root = self.resolve_manager_root(manager_root, self._manager_path)
 
         self._pool: Optional[ExternalAccountPool] = None
+        self._lease_to_raw_alias: dict[str, str] = {}
 
     @staticmethod
     def resolve_manager_path(override_path: Optional[str] = None) -> Optional[str]:
@@ -335,10 +337,38 @@ class AgyAccountPoolManager:
                 raise AgyAccountPoolError(f"Failed to get manager status: {exc}")
 
             accounts_data = status.get("accounts") or {}
-            for name, info in accounts_data.items():
+
+            # Support both dict and list response schema
+            accounts_list = []
+            if isinstance(accounts_data, dict):
+                for name, info in accounts_data.items():
+                    accounts_list.append((name, info))
+            elif isinstance(accounts_data, list):
+                for info in accounts_data:
+                    name = info.get("name")
+                    if name:
+                        accounts_list.append((name, info))
+
+            for name, info in accounts_list:
                 if info.get("enabled") is True:
-                    is_avail = info.get("cooldown_until") is None
-                    env = build_isolated_env(home_dir=str(Path(root) / "accounts" / name))
+                    snapshot_dir = Path(root) / "accounts" / name
+                    is_avail = False
+                    if snapshot_dir.is_dir():
+                        cooldown_val = info.get("cooldown_until")
+                        is_cooldown = False
+                        if cooldown_val:
+                            try:
+                                from datetime import datetime, timezone
+                                cooldown_str = str(cooldown_val).replace("Z", "+00:00")
+                                dt = datetime.fromisoformat(cooldown_str)
+                                if dt > datetime.now(timezone.utc):
+                                    is_cooldown = True
+                            except Exception:
+                                is_cooldown = True
+                        if not is_cooldown:
+                            is_avail = True
+
+                    env = build_isolated_env(home_dir=str(snapshot_dir))
                     h = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
                     records.append(
                         InternalAccountRecord(
@@ -349,8 +379,6 @@ class AgyAccountPoolManager:
                         )
                     )
         else:
-            if not self._accounts:
-                self._accounts.append(AgyAccount(alias="default", home_dir=str(Path.home())))
             for acc in self._accounts:
                 env = build_isolated_env(home_dir=acc.home_dir)
                 records.append(
@@ -367,17 +395,20 @@ class AgyAccountPoolManager:
 
     def acquire(self, consumer_id: str) -> AccountLease:
         # Trigger ensure_active and build_isolated_env to respect subclass overrides
-        self.ensure_active()
-        env = self.build_isolated_env()
+        try:
+            self.ensure_active()
+            self.build_isolated_env()
+        except Exception:
+            pass
         pool = self._ensure_pool()
         lease = pool.acquire(consumer_id)
-        import dataclasses
-        lease = dataclasses.replace(lease, execution_env=env)
+        self._lease_to_raw_alias[lease.lease_id] = pool._require_active_lease(lease)
         return lease
 
     def release(self, lease: AccountLease) -> None:
         pool = self._ensure_pool()
         pool.release(lease)
+        self._lease_to_raw_alias.pop(lease.lease_id, None)
 
     def report_failure(
         self,
@@ -385,13 +416,28 @@ class AgyAccountPoolManager:
         failure_kind: AccountFailureKind,
     ) -> Optional[AccountLease]:
         pool = self._ensure_pool()
+        failed_alias = self._lease_to_raw_alias.get(lease.lease_id)
+        if failed_alias is None:
+            try:
+                failed_alias = pool._require_active_lease(lease)
+            except InvalidAccountLeaseError:
+                return None
+
         if is_rotation_eligible(failure_kind):
-            # Trigger rotate_account to run subclass overrides or CLI commands
-            self.rotate_account(reason=failure_kind.value, failed_account_hash=lease.account_alias_hash)
+            if self._use_real_manager:
+                try:
+                    self._call_manager_cli(["mark-bad", failed_alias, "--reason", failure_kind.value])
+                except Exception:
+                    pass
+            else:
+                for acc in self._accounts:
+                    if acc.alias == failed_alias:
+                        acc.is_active = False
+
             next_lease = pool.report_failure(lease, failure_kind)
             if next_lease is not None:
-                import dataclasses
-                next_lease = dataclasses.replace(next_lease, execution_env=self.build_isolated_env())
+                new_alias = pool._require_active_lease(next_lease)
+                self._lease_to_raw_alias[next_lease.lease_id] = new_alias
             return next_lease
         return None
 
@@ -420,9 +466,6 @@ def get_account_pool_manager() -> AgyAccountPoolManager:
                 home_env_key = f"NEXUS_AGY_HOME_{alias.upper()}"
                 home = os.getenv(home_env_key, str(Path.home() / f".gemini/antigravity-{alias}"))
                 accounts.append(AgyAccount(alias=alias, home_dir=home))
-
-    if not accounts:
-        accounts.append(AgyAccount(alias="default", home_dir=str(Path.home())))
 
     _GLOBAL_POOL_MANAGER = AgyAccountPoolManager(accounts)
     return _GLOBAL_POOL_MANAGER
