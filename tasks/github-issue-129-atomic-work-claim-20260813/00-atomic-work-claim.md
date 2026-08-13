@@ -26,6 +26,9 @@ implementation_gate: coordinator release required before touching shared service
 
 # Atomic Ready-Issue work claim
 
+- task_id: `github-issue-129-atomic-work-claim`
+- status: `ACTIVE`
+
 ## Objective
 
 Extend the existing `SelfHostedTaskService` canonical machine-shared task

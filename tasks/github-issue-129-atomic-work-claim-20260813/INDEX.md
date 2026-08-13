@@ -4,7 +4,7 @@ issue: 129
 repository: James3014/Nexus-new
 baseline_main: a74d838cc6bb14af47ce79207181c12a1aed1d35
 status: ACTIVE
-current_frontier: 00-atomic-work-claim.md
+current_frontier: github-issue-129-atomic-work-claim
 AUTO_CHAIN: false
 owner: James Chen
 owner_authorization: direct Owner authorization for persistent claim subrecord/recovery under existing SelfHostedTaskService .state.lock
@@ -27,7 +27,7 @@ this rebind changes no production or test file.
 
 ## Current Frontier
 
-`00-atomic-work-claim.md`
+`github-issue-129-atomic-work-claim`
 
 ## Ordered Cards
 
