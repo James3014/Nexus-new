@@ -1895,7 +1895,12 @@ class SelfHostedTaskService:
     @staticmethod
     def read_canonical_attempt_events(task_id: str, attempt_id: str) -> list[dict[str, Any]]:
         """Read attempt events from the canonical EventBus log, without mutation."""
-        records = NexusEventBus.read_recent(event_type="attempt_transition", limit=10_000)
+        # Read the validated canonical store directly.  The EventBus observer
+        # facade intentionally serves best-effort dashboards and swallows
+        # integrity failures; continuity recovery must preserve those errors.
+        if NexusEventBus._log_store.event_log_path != NexusEventBus._event_log_path:
+            NexusEventBus._log_store.event_log_path = NexusEventBus._event_log_path
+        records = NexusEventBus._log_store.read_recent(event_type="attempt_transition", limit=10_000)
         selected = []
         for record in records:
             payload = record.get("payload") if isinstance(record, Mapping) else None

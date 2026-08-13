@@ -209,6 +209,8 @@ def _validate_chain(
 
 def project(events: Iterable[ContinuityEvent]) -> ContinuitySnapshot:
     ordered = list(events)
+    if not ordered:
+        raise ValueError("continuity event stream is empty")
     first = ordered[0]
     _validate_chain(ordered, first.task_id, first.attempt_id)
     facts: list[str] = []
@@ -295,6 +297,12 @@ def resume(
         raise ValueError("snapshot source or contract is stale")
     tail_events = list(tail)
     if tail_events:
+        if any(
+            event.source_revision != snapshot.source_revision
+            or event.contract_revision != snapshot.contract_revision
+            for event in tail_events
+        ):
+            raise ValueError("tail source or contract revision drift")
         if (
             tail_events[0].sequence != snapshot.last_sequence + 1
             or tail_events[0].previous_hash != snapshot.event_root
@@ -347,6 +355,12 @@ def events_from_attempt_records(
             raise ValueError("continuity fields are missing")
         if payload["task_id"] != task_id or payload["attempt_id"] != attempt_id:
             raise ValueError("foreign task or attempt event")
+        if not isinstance(payload["state"], str) or not payload["state"].strip():
+            raise ValueError("attempt transition state must be a non-empty string")
+        for revision_name in ("source_revision", "contract_revision"):
+            revision = payload[revision_name]
+            if not isinstance(revision, str) or not revision.strip():
+                raise ValueError(f"{revision_name} must be a non-empty string")
         persisted_parent = record.get("_attempt_parent_digest")
         persisted_digest = record.get("_attempt_record_digest")
         if not isinstance(persisted_parent, str) or not isinstance(persisted_digest, str):
@@ -363,8 +377,8 @@ def events_from_attempt_records(
             attempt_id=attempt_id,
             sequence=payload["sequence"],
             event_type=payload.get("continuity_event_type", "OBSERVATION_RECORDED"),
-            summary=str(payload.get("state") or ""),
-            observation=str(payload.get("reason") or ""),
+            summary=payload["state"],
+            observation=payload.get("reason", ""),
             evidence_refs=tuple(payload.get("evidence_refs") or ()),
             source_revision=payload["source_revision"],
             contract_revision=payload["contract_revision"],
