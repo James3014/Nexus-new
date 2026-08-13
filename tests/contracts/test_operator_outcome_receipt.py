@@ -40,9 +40,10 @@ def test_receipt_is_hashed_and_strict():
     receipt = _receipt()
     assert len(receipt.receipt_id) == 64
     with pytest.raises(ValueError, match="PAYLOAD_HASH"):
-        type(receipt).model_validate(
-            {**receipt.model_dump(mode="json"), "observed_outcome": "FAILURE"}
-        )
+        type(receipt).model_validate({
+            **receipt.model_dump(mode="json"),
+            "observed_outcome": "FAILURE",
+        })
     with pytest.raises(ValueError):
         type(receipt).model_validate({**receipt.model_dump(mode="json"), "free_text": "no"})
 

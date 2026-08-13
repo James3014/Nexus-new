@@ -14,16 +14,14 @@ SCHEMA = "nexus.operator_outcome_receipt.v1"
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _GIT_HASH = re.compile(r"^[0-9a-f]{40}(?:[0-9a-f]{24})?$")
 _REASON_CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
-_PROVENANCE_FIELDS = frozenset(
-    {
-        "observed_outcome",
-        "observation_basis",
-        "reason_code",
-        "observed_at",
-        "source_revision",
-        "runtime_receipt_hash",
-    }
-)
+_PROVENANCE_FIELDS = frozenset({
+    "observed_outcome",
+    "observation_basis",
+    "reason_code",
+    "observed_at",
+    "source_revision",
+    "runtime_receipt_hash",
+})
 
 
 def _hash_payload(value: Mapping[str, Any]) -> str:
