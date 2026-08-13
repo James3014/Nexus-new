@@ -127,7 +127,9 @@ class StandingGrantContext(_FrozenModel):
 
     @field_validator("allowed_actions")
     @classmethod
-    def canonicalize_actions(cls, values: tuple[AutonomyActionClass, ...]) -> tuple[AutonomyActionClass, ...]:
+    def canonicalize_actions(
+        cls, values: tuple[AutonomyActionClass, ...]
+    ) -> tuple[AutonomyActionClass, ...]:
         if not values:
             raise ValueError("STANDING_GRANT_ACTIONS_REQUIRED")
         return tuple(sorted(set(values), key=lambda item: item.value))

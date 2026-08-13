@@ -49,22 +49,26 @@ _RISK_RANK = {
     AutonomyRiskLevel.HIGH: 2,
     AutonomyRiskLevel.CRITICAL: 3,
 }
-_RUNTIME_BOUND_ACTIONS = frozenset({
-    AutonomyActionClass.CANDIDATE_APPROVE,
-    AutonomyActionClass.CANDIDATE_INTEGRATE,
-    AutonomyActionClass.REPOSITORY_PUSH,
-    AutonomyActionClass.GITHUB_MERGE,
-    AutonomyActionClass.RUNTIME_ACTIVATE,
-    AutonomyActionClass.PRODUCTION_RELEASE,
-})
-_CANDIDATE_BOUND_ACTIONS = frozenset({
-    AutonomyActionClass.CANDIDATE_APPROVE,
-    AutonomyActionClass.CANDIDATE_INTEGRATE,
-    AutonomyActionClass.REPOSITORY_PUSH,
-    AutonomyActionClass.GITHUB_MERGE,
-    AutonomyActionClass.RUNTIME_ACTIVATE,
-    AutonomyActionClass.PRODUCTION_RELEASE,
-})
+_RUNTIME_BOUND_ACTIONS = frozenset(
+    {
+        AutonomyActionClass.CANDIDATE_APPROVE,
+        AutonomyActionClass.CANDIDATE_INTEGRATE,
+        AutonomyActionClass.REPOSITORY_PUSH,
+        AutonomyActionClass.GITHUB_MERGE,
+        AutonomyActionClass.RUNTIME_ACTIVATE,
+        AutonomyActionClass.PRODUCTION_RELEASE,
+    }
+)
+_CANDIDATE_BOUND_ACTIONS = frozenset(
+    {
+        AutonomyActionClass.CANDIDATE_APPROVE,
+        AutonomyActionClass.CANDIDATE_INTEGRATE,
+        AutonomyActionClass.REPOSITORY_PUSH,
+        AutonomyActionClass.GITHUB_MERGE,
+        AutonomyActionClass.RUNTIME_ACTIVATE,
+        AutonomyActionClass.PRODUCTION_RELEASE,
+    }
+)
 
 
 class _FrozenModel(BaseModel):
@@ -175,7 +179,9 @@ def evaluate_standing_grant_decision(
     raw_context_hash = (
         context.context_hash
         if isinstance(context, StandingGrantContext)
-        else context.get("context_hash") if isinstance(context, Mapping) else None
+        else context.get("context_hash")
+        if isinstance(context, Mapping)
+        else None
     )
     context_hash = (
         raw_context_hash
@@ -184,17 +190,23 @@ def evaluate_standing_grant_decision(
     )
     try:
         grant = StandingGrantContext.model_validate(
-            context.model_dump(mode="json") if isinstance(context, StandingGrantContext) else context
+            context.model_dump(mode="json")
+            if isinstance(context, StandingGrantContext)
+            else context
         )
         asked = StandingGrantRequest.model_validate(
-            request.model_dump(mode="json") if isinstance(request, StandingGrantRequest) else request
+            request.model_dump(mode="json")
+            if isinstance(request, StandingGrantRequest)
+            else request
         )
     except (ValidationError, AttributeError, TypeError, ValueError):
         return _standing_decision(StandingGrantOutcome.INVALID, context_hash)
     if asked.context_hash != grant.context_hash:
         return _standing_decision(StandingGrantOutcome.INVALID, grant.context_hash)
     if asked.action is AutonomyActionClass.GITHUB_MERGE:
-        return _standing_decision(StandingGrantOutcome.OWNER_MERGE_SLOT_REQUIRED, grant.context_hash)
+        return _standing_decision(
+            StandingGrantOutcome.OWNER_MERGE_SLOT_REQUIRED, grant.context_hash
+        )
     now = asked.requested_at
     if (
         asked.owner_id != grant.owner_id
@@ -532,10 +544,12 @@ def _decision(*, reasons: list[str], input_hash: str) -> AutonomyDecision:
         "authority_inputs_verified": False,
         "claim_ceiling": "SHADOW_CALLER_BOUND_EVIDENCE_ONLY",
     }
-    return AutonomyDecision.model_validate({
-        **payload,
-        "decision_hash": canonical_autonomy_hash(payload),
-    })
+    return AutonomyDecision.model_validate(
+        {
+            **payload,
+            "decision_hash": canonical_autonomy_hash(payload),
+        }
+    )
 
 
 def _safe_input_hash(grant: Any, evaluation: Any) -> str:
