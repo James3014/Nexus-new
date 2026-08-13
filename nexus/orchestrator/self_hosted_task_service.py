@@ -38,6 +38,8 @@ from nexus.contracts.target_integration_lifecycle import (
 )
 from nexus.contracts.unified_runtime_receipt import build_runtime_development_mapping
 from nexus.engine.canonical_task_seam import build_canonical_dispatch_envelope
+from nexus.events.contracts import build_attempt_transition_event
+from nexus.events.transport import NexusEventBus
 from nexus.executors.worker_contract import (
     SUPPORTED_WORKER_PROVIDERS,
     AttemptResolutionVerdict,
@@ -1669,6 +1671,56 @@ class SelfHostedTaskService:
             mutator(state)
             return self._write_state_locked(task_id, state)
 
+    def _record_event_append_failure(self, task_id: str, error: Exception) -> None:
+        """Persist the state/event reconciliation debt without emitting another event."""
+        now = _utc_now()
+
+        def mutate(state: dict[str, Any]) -> None:
+            state["event_reconciliation_required"] = True
+            state["event_append_failure"] = {
+                "status": "BLOCKED",
+                "error_type": type(error).__name__,
+                "error_sha256": hashlib.sha256(str(error).encode("utf-8")).hexdigest(),
+                "at": now,
+            }
+            state["updated_at"] = now
+
+        self._mutate_state(task_id, mutate)
+
+    def _emit_bound_attempt_transition(
+        self, result: Optional[Mapping[str, Any]], task_id: str
+    ) -> None:
+        try:
+            self._emit_attempt_transition(result, task_id)
+        except Exception as exc:
+            self._record_event_append_failure(task_id, exc)
+            raise
+
+    @staticmethod
+    def _emit_attempt_transition(result: Optional[Mapping[str, Any]], task_id: str) -> None:
+        if not result or not result.get("attempt_id"):
+            return
+        sequence = NexusEventBus.next_attempt_sequence(
+            str(result.get("task_id") or task_id), str(result.get("attempt_id"))
+        )
+        candidate_refs = tuple(str(value) for value in (
+            result.get("candidate_commit_sha"),
+            (result.get("promotion_packet") or {}).get("candidate_tree_sha"),
+        ) if value)
+        evidence_refs = tuple(str(value) for value in (
+            result.get("verified_receipt_hash"),
+            (result.get("verified_receipt") or {}).get("receipt_ref"),
+        ) if value)
+        # Persistence/sequence failures are deterministic event blocks.  They
+        # must remain visible to the caller; silently dropping them creates a
+        # false lifecycle receipt while leaving the lifecycle authority intact.
+        NexusEventBus.emit_attempt_transition(build_attempt_transition_event(
+            task_id=str(result.get("task_id") or task_id),
+            attempt_id=str(result.get("attempt_id")), sequence=sequence,
+            state=str(result.get("status")), reason=str(result.get("error") or ""),
+            candidate_refs=candidate_refs, evidence_refs=evidence_refs,
+        ))
+
     @staticmethod
     def _request_hash(request: Mapping[str, Any]) -> str:
         return hashlib.sha256(
@@ -1698,7 +1750,9 @@ class SelfHostedTaskService:
             state["updated_at"] = now
             state.setdefault("status_history", []).append({"status": state["status"], "at": now})
 
-        return self._mutate_state(task_id, mutate)
+        result = self._mutate_state(task_id, mutate)
+        self._emit_bound_attempt_transition(result, task_id)
+        return result
 
     def record_canonical_action_failure(self, task_id: str, blocker: str, error: str = "") -> Optional[dict[str, Any]]:
         """Public observer-safe hook for an Assisted provider/apply failure."""
@@ -1823,7 +1877,9 @@ class SelfHostedTaskService:
                 development_receipt_ref=str(state.get("verified_receipt_hash") or ""),
             )
 
-        return self._mutate_state(task_id, mutate)
+        result = self._mutate_state(task_id, mutate)
+        self._emit_bound_attempt_transition(result, task_id)
+        return result
 
     def _heartbeat(self, task_id: str, attempt_id: str, stop: threading.Event) -> None:
         while not stop.wait(1.0):

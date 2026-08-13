@@ -6615,3 +6615,34 @@ def test_m3c_repair_retry_rebinds_fresh_attempt_and_preserves_old_evidence(
         "promotion_packet",
     ):
         assert durable[field] is None
+
+
+def test_m3d_event_append_failure_persists_reconciliation_debt(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    task_id = "m3d-event-append-failure"
+    attempt_id = "attempt-m3d-event-failure"
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": "SUBMITTED",
+            "status_history": [{"status": "SUBMITTED", "at": "2026-01-01T00:00:00+00:00"}],
+        },
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.NexusEventBus.emit_attempt_transition",
+        lambda _event: (_ for _ in ()).throw(OSError("event append failed")),
+    )
+
+    with pytest.raises(OSError, match="event append failed"):
+        service._checkpoint(task_id, "WORKER_RUNNING", attempt_id=attempt_id)
+
+    durable = service._read_state(task_id)
+    assert durable["status"] == "WORKER_RUNNING"
+    assert durable["event_reconciliation_required"] is True
+    assert durable["event_append_failure"]["status"] == "BLOCKED"
+    assert durable["event_append_failure"]["error_type"] == "OSError"
+    assert len(durable["event_append_failure"]["error_sha256"]) == 64

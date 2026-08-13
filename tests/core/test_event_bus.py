@@ -1,19 +1,33 @@
-from pathlib import Path
-import time
 import json
-import pytest
+import os
+import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import pytest
+
 from nexus.core.belief_contracts import HealingArtifact
 from nexus.core.event_bus import NexusEventBus
 from nexus.core.healing_artifacts import HealingArtifactKeyPolicy, sign_healing_artifact
+from nexus.events.contracts import build_attempt_transition_event
+from nexus.events.log_store import JsonlEventLogStore
+
 
 @pytest.fixture(autouse=True)
 def cleanup_bus():
-    """每個測試後清理 EventBus 狀態。"""
+    """每個測試前後清理 EventBus 狀態，避免 hostile log 汙染其他 suites。"""
     NexusEventBus._subscribers = {}
     NexusEventBus._signal_queue = []
     NexusEventBus._observer_error_count = 0
     NexusEventBus._last_observer_error = None
+    NexusEventBus._event_log_path = None
+    NexusEventBus._log_store = JsonlEventLogStore()
+    NexusEventBus._attempt_sequences = {}
+    yield
+    NexusEventBus._event_log_path = None
+    NexusEventBus._log_store = JsonlEventLogStore()
+    NexusEventBus._attempt_sequences = {}
 
 def test_event_bus_publish_subscribe():
     """驗證基本的發布與訂閱流程。"""
@@ -238,3 +252,176 @@ def test_event_bus_persists_same_timestamp_and_monotonic_sequence_seen_by_handle
     for row in rows:
         assert row["timestamp"] == row["payload"]["internal_ts"]
     assert [item["_seq"] for item in seen] == [row["seq"] for row in rows]
+
+
+def test_attempt_transition_events_are_contiguous_and_replayable(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    first = build_attempt_transition_event(task_id="t1", attempt_id="a1", sequence=1, state="VERIFY")
+    second = build_attempt_transition_event(task_id="t1", attempt_id="a1", sequence=2, state="ACCEPT")
+    NexusEventBus.emit_attempt_transition(first)
+    NexusEventBus.emit_attempt_transition(second)
+    rows = NexusEventBus.get_recent_events(event_type="attempt_transition", limit=5)
+    assert [row["payload"]["sequence"] for row in rows] == [1, 2]
+
+
+def test_attempt_transition_sequence_recovers_after_restart(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(task_id="restart-task", attempt_id="a1", sequence=1, state="VERIFY")
+    )
+
+    # Simulate a fresh process: only the persisted append log may establish
+    # the next sequence.
+    NexusEventBus._attempt_sequences = {}
+    NexusEventBus.configure(tmp_path)
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(task_id="restart-task", attempt_id="a1", sequence=2, state="ACCEPT")
+    )
+    rows = NexusEventBus.get_recent_events(event_type="attempt_transition", limit=5)
+    assert [row["payload"]["sequence"] for row in rows] == [1, 2]
+
+
+@pytest.mark.parametrize("sequence", [2, 3])
+def test_attempt_transition_rejects_first_sequence_above_one(tmp_path, sequence):
+    NexusEventBus.configure(tmp_path)
+    with pytest.raises(ValueError, match="contiguous"):
+        NexusEventBus.emit_attempt_transition(
+            build_attempt_transition_event(task_id="first-seq", attempt_id="a1", sequence=sequence, state="VERIFY")
+        )
+
+
+def test_attempt_transition_rejects_duplicate_and_gap(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    first = build_attempt_transition_event(task_id="ordered", attempt_id="a1", sequence=1, state="VERIFY")
+    NexusEventBus.emit_attempt_transition(first)
+    with pytest.raises(ValueError, match="contiguous"):
+        NexusEventBus.emit_attempt_transition(first)
+    with pytest.raises(ValueError, match="contiguous"):
+        NexusEventBus.emit_attempt_transition(
+            build_attempt_transition_event(task_id="ordered", attempt_id="a1", sequence=3, state="ACCEPT")
+        )
+
+
+def test_attempt_transition_rejects_tampered_persisted_record(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(task_id="tamper", attempt_id="a1", sequence=1, state="VERIFY")
+    )
+    log_file = tmp_path / ".nexus" / "events" / "event_log.jsonl"
+    row = json.loads(log_file.read_text().splitlines()[0])
+    row["payload"]["state"] = "ACCEPT"
+    log_file.write_text(json.dumps(row) + "\n")
+
+    NexusEventBus._attempt_sequences = {}
+    with pytest.raises(ValueError, match="tampered"):
+        NexusEventBus.configure(tmp_path)
+
+
+def _attempt_record(store: JsonlEventLogStore, *, task_id="t1", attempt_id="a1", sequence=1):
+    record = {
+        "event_type": "attempt_transition",
+        "timestamp": 1.0,
+        "seq": sequence,
+        "payload": {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "sequence": sequence,
+            "state": "VERIFY",
+        },
+    }
+    store.append_record(record)
+    return record
+
+
+@pytest.mark.parametrize("field", ["payload", "_attempt_parent_digest", "_attempt_record_digest"])
+def test_attempt_log_rejects_payload_parent_and_self_digest_tamper(tmp_path, field):
+    store = JsonlEventLogStore()
+    _, path = store.configure(tmp_path)
+    _attempt_record(store)
+    row = json.loads(path.read_text().splitlines()[0])
+    if field == "payload":
+        row["payload"]["state"] = "ACCEPT"
+    else:
+        row[field] = "f" * 64
+    path.write_text(json.dumps(row) + "\n")
+
+    with pytest.raises(ValueError, match="tampered"):
+        JsonlEventLogStore().configure(tmp_path)
+
+
+def test_attempt_log_rejects_malformed_json_and_legacy_digestless_record(tmp_path):
+    store = JsonlEventLogStore()
+    _, path = store.configure(tmp_path)
+    _attempt_record(store)
+    row = json.loads(path.read_text().splitlines()[0])
+    row.pop("_attempt_parent_digest")
+    path.write_text(json.dumps(row) + "\n")
+    with pytest.raises(ValueError, match="legacy attempt transition"):
+        JsonlEventLogStore().configure(tmp_path)
+
+    path.write_text("{not-json}\n")
+    with pytest.raises(json.JSONDecodeError):
+        JsonlEventLogStore().configure(tmp_path)
+
+
+def test_attempt_log_ignores_non_attempt_interleaving_and_isolates_attempt_tails(tmp_path):
+    store = JsonlEventLogStore()
+    _, path = store.configure(tmp_path)
+    _attempt_record(store, task_id="t1", attempt_id="a1", sequence=1)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps({"event_type": "phase_start", "payload": {"task_id": "t1"}}) + "\n")
+    _attempt_record(store, task_id="t2", attempt_id="a2", sequence=1)
+    _attempt_record(store, task_id="t1", attempt_id="a1", sequence=2)
+
+    assert store.attempt_tail("t1", "a1") == 2
+    assert store.attempt_tail("t2", "a2") == 1
+
+
+def test_attempt_log_rolls_back_tail_when_append_fails_before_write(tmp_path):
+    store = JsonlEventLogStore()
+    _, path = store.configure(tmp_path)
+    real_open = open
+
+    def fail_event_append(target, mode="r", *args, **kwargs):
+        if Path(target) == path and "a" in mode:
+            raise OSError("injected append failure")
+        return real_open(target, mode, *args, **kwargs)
+
+    record = {
+        "event_type": "attempt_transition",
+        "timestamp": 1.0,
+        "seq": 1,
+        "payload": {"task_id": "rollback", "attempt_id": "a1", "sequence": 1, "state": "VERIFY"},
+    }
+    with patch("nexus.events.log_store.open", side_effect=fail_event_append):
+        with pytest.raises(OSError, match="injected append failure"):
+            store.append_record(record)
+
+    assert store.attempt_tail("rollback", "a1") == 0
+    assert not path.exists() or path.read_text() == ""
+
+
+def test_attempt_log_cross_process_duplicate_writer_allows_one_append(tmp_path):
+    script = """
+import sys
+from pathlib import Path
+from nexus.events.log_store import JsonlEventLogStore
+store = JsonlEventLogStore()
+store.configure(Path(sys.argv[1]))
+store.append_record({
+    'event_type': 'attempt_transition', 'timestamp': 1.0, 'seq': 1,
+    'payload': {'task_id': 'shared', 'attempt_id': 'attempt', 'sequence': 1, 'state': 'VERIFY'},
+})
+"""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
+    processes = [
+        subprocess.Popen([sys.executable, "-c", script, str(tmp_path)], env=env)
+        for _ in range(2)
+    ]
+    returncodes = sorted(process.wait(timeout=10) for process in processes)
+
+    assert returncodes == [0, 1]
+    store = JsonlEventLogStore()
+    store.configure(tmp_path)
+    assert store.attempt_tail("shared", "attempt") == 1
