@@ -190,8 +190,6 @@ scripts/battlesuit_test_v16.py
 scripts/bootstrap_knowledge.py
 scripts/brain_b_health_monitor.py
 scripts/brain_b_incubator.py
-scripts/brain_b_indexer.py
-scripts/brain_b_reality_check.py
 scripts/brain_crystallizer_pro.py
 scripts/brain_dupe_audit.py
 scripts/brain_index_manager.py
@@ -263,7 +261,6 @@ scripts/pre_write_quality_gate.py
 scripts/proactive_scout.py
 scripts/purge_old_tables.py
 scripts/quality_stamper.py
-scripts/reality_check_v2.py
 scripts/redundancy_check.py
 scripts/reflective_healer.py
 scripts/replay_case.py
@@ -310,7 +307,6 @@ scripts/test_token_direct.py
 scripts/tg_pty_bridge.py
 scripts/token_probe.py
 scripts/tracelog_analyzer.py
-scripts/trigger_test.py
 scripts/trinity_status.py
 scripts/ui-validator.py
 scripts/v1.8_feature_bench.py
@@ -377,8 +373,6 @@ scripts/core/batch_guard.py
 scripts/core/batch_monitor.py
 scripts/core/brain_b_health_monitor.py
 scripts/core/brain_b_incubator.py
-scripts/core/brain_b_indexer.py
-scripts/core/brain_b_reality_check.py
 scripts/core/brain_search_v3.py
 scripts/core/context_hub.py
 scripts/core/factory_router.py
@@ -391,12 +385,10 @@ scripts/core/morning_report.py
 scripts/core/night_batch_contracts.py
 scripts/core/parallel_spawner.py
 scripts/core/queue_manager.py
-scripts/core/reality_check_v2.py
 scripts/core/self_evolution.py
 scripts/core/semantic_gravity_smelter.py
 scripts/core/skills_router.py
 scripts/core/steward.py
-scripts/core/trigger_test.py
 scripts/diagnostics/benchmark_entry_smoke_test.py
 scripts/diagnostics/constructor_smoke_test.py
 scripts/diagnostics/escalation_smoke_test.py
