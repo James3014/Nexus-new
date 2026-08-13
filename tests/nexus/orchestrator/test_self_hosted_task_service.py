@@ -3007,6 +3007,107 @@ def test_exact_approved_integration_is_idempotent(tmp_path, monkeypatch):
     assert calls == []
 
 
+def test_gb042_valid_approved_integration_is_one_side_effect_and_stable_duplicate(
+    tmp_path, monkeypatch
+):
+    """GB-042: a valid acceptance/approval binding integrates once only."""
+    from nexus.orchestrator.governed_integration import IntegrationReceipt
+
+    task_id = "gb042-integration-once"
+    candidate = "c" * 40
+    request = _request(tmp_path, task_id=task_id)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    contract = service.build_contract(request)
+    closure = _closure_context(task_id, candidate)
+    authorization_hash = IntegrationAuthorizationEnvelope(
+        **closure["integration_authorization"]
+    ).authorization_hash
+    closure["integration_authorization"]["authorization_hash"] = authorization_hash
+    packet = {
+        "candidate_commit_sha": candidate,
+        "candidate_tree_sha": "d" * 40,
+        "candidate_state_hash": "e" * 64,
+        "verified_receipt_hash": "f" * 64,
+    }
+    grant = {
+        **closure["approval_context"],
+        "consumed_at": datetime.now(timezone.utc).isoformat(),
+    }
+    service._write_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "status": "APPROVED",
+            "promotion_status": "APPROVED",
+            "attempt_id": "attempt-1",
+            "request": request,
+            "contract": contract.model_dump(mode="json"),
+            "promotion_packet": packet,
+            "approved_binding": {**packet, "approval_grant": grant},
+            "external_acceptance": closure["external_acceptance"],
+            "integration_authorization": closure["integration_authorization"],
+            "verified_receipt": {
+                "repository_contract_gate_passed": True,
+                "repository_contract_policy_revision_hash": "a" * 64,
+            },
+        },
+    )
+    gate_calls = []
+    integration_calls = []
+
+    def passing_gate(self, **kwargs):
+        gate_calls.append(kwargs)
+        return RepositoryContractGateReceipt(
+            passed=True,
+            mode="shadow",
+            policy_revision_hash="a" * 64,
+            findings=(),
+            blocking_reasons=(),
+        )
+
+    class SuccessfulIntegration:
+        def __init__(self, integration_root):
+            pass
+
+        def integrate_authorized_task_state(self, state, **kwargs):
+            integration_calls.append(kwargs)
+            return IntegrationReceipt(
+                schema="nexus.integration_receipt/v1",
+                task_id=task_id,
+                integration_branch="nexus/integration/main",
+                source_branch="nexus/task/gb042-integration-once",
+                candidate_commit_sha=candidate,
+                integration_base_sha="b" * 40,
+                integration_commit_sha="1" * 40,
+                verifier_passed=True,
+                merge_performed=True,
+                push_performed=False,
+                worktree_removed=True,
+                staging_commit_sha="1" * 40,
+                post_apply_verified=True,
+                acceptance_receipt_hash=closure["external_acceptance"]["receipt_hash"],
+                authorization_hash=authorization_hash,
+            )
+
+    monkeypatch.setattr(RepositoryContractGate, "evaluate_committed_candidate", passing_gate)
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.ControlledIntegrationManager",
+        SuccessfulIntegration,
+    )
+
+    first = service.integrate_approved(task_id)
+    second = service.integrate_approved(task_id)
+
+    assert len(integration_calls) == 1
+    assert len(gate_calls) == 2  # preflight and locked apply recheck
+    assert first["status"] == "INTEGRATED"
+    assert second["status"] == "INTEGRATED"
+    assert second["integration_result_sha"] == first["integration_result_sha"] == "1" * 40
+    assert second["integration_receipt"] == first["integration_receipt"]
+
+
 def test_lifecycle_receipt_exposes_required_fields(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     service._write_state("receipt", {"task_id": "receipt", "status": "FINAL_BLOCK"})
