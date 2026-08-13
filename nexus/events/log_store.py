@@ -74,7 +74,12 @@ class JsonlEventLogStore:
             raise ValueError("invalid attempt transition payload")
         task_id, attempt_id = payload.get("task_id"), payload.get("attempt_id")
         sequence = payload.get("sequence")
-        if not isinstance(task_id, str) or not task_id or not isinstance(attempt_id, str) or not attempt_id:
+        if (
+            not isinstance(task_id, str)
+            or not task_id
+            or not isinstance(attempt_id, str)
+            or not attempt_id
+        ):
             raise ValueError("attempt transition identity is required")
         if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 1:
             raise ValueError("attempt transition sequence must be a positive integer")
@@ -85,7 +90,9 @@ class JsonlEventLogStore:
         unsigned = dict(record)
         unsigned.pop("_attempt_record_digest", None)
         return hashlib.sha256(
-            json.dumps(unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str).encode()
+            json.dumps(
+                unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str
+            ).encode()
         ).hexdigest()
 
     def _bind_attempt_record(self, record: Dict[str, Any]) -> None:
