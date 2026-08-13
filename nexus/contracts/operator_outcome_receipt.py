@@ -125,6 +125,16 @@ class OperatorOutcomeReceipt(BaseModel):
 
     @model_validator(mode="after")
     def _digest(self) -> "OperatorOutcomeReceipt":
+        if self.observed_outcome == "NOT_OBSERVED":
+            if self.observation_basis != "NOT_OBSERVED" or self.reason_code != "NOT_PROVIDED":
+                raise ValueError("OPERATOR_OUTCOME_SEMANTICS_INVALID")
+        elif self.observation_basis == "NOT_OBSERVED":
+            raise ValueError("OPERATOR_OUTCOME_SEMANTICS_INVALID")
+        elif self.observed_outcome == "UNKNOWN":
+            if self.reason_code != "OUTCOME_UNKNOWN":
+                raise ValueError("OPERATOR_OUTCOME_SEMANTICS_INVALID")
+        elif self.reason_code in {"NOT_PROVIDED", "OUTCOME_UNKNOWN"}:
+            raise ValueError("OPERATOR_OUTCOME_SEMANTICS_INVALID")
         required_provenance = {
             "observed_outcome",
             "observation_basis",

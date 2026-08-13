@@ -1672,7 +1672,19 @@ class SelfHostedTaskService:
                 or normalized.runtime_receipt_hash != current_runtime_receipt_hash
             ):
                 raise ValueError("OPERATOR_OUTCOME_RUNTIME_RECEIPT_HASH_MISMATCH")
-            existing = [item for item in current.get("operator_outcome_receipts", []) if isinstance(item, Mapping)]
+            raw_existing = current.get("operator_outcome_receipts", [])
+            if type(raw_existing) is not list or any(
+                not isinstance(item, Mapping) for item in raw_existing
+            ):
+                raise ValueError("OPERATOR_OUTCOME_PERSISTED_RECEIPT_TAMPERED")
+            existing = list(raw_existing)
+            singular = current.get("operator_outcome_receipt")
+            if singular is not None and (
+                not isinstance(singular, Mapping)
+                or not existing
+                or dict(singular) != dict(existing[-1])
+            ):
+                raise ValueError("OPERATOR_OUTCOME_PERSISTED_RECEIPT_TAMPERED")
             parsed = {}
             for item in existing:
                 try:

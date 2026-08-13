@@ -350,6 +350,89 @@ def test_operator_outcome_preserves_valid_prior_attempt_history(tmp_path):
         service.record_operator_outcome("task-1", cross_attempt)
 
 
+@pytest.mark.parametrize(
+    "malformed_history",
+    [
+        {"unexpected": "mapping"},
+        ["malformed-non-object"],
+        [None],
+    ],
+)
+def test_operator_outcome_rejects_malformed_history_container_or_element(
+    tmp_path, malformed_history
+):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    state = {
+        "schema": "nexus.self_hosted_task_state.v1",
+        "task_id": "task-1",
+        "status": "SUBMITTED",
+        "attempt_id": "attempt-1",
+        "action_id": "action-1",
+        "lifecycle_revision": "life-1",
+        "controller_revision": "a" * 40,
+        "runtime_receipt_hash": "b" * 64,
+        "operator_outcome_receipts": malformed_history,
+    }
+    service._write_state("task-1", state)
+    candidate = build_operator_outcome_receipt(
+        task_id="task-1",
+        attempt_id="attempt-1",
+        action_id="action-1",
+        lifecycle_revision="life-1",
+        source_revision="a" * 40,
+        runtime_receipt_hash="b" * 64,
+        observed_outcome="SUCCESS",
+        observation_basis="OPERATOR_REPORT",
+        reason_code="OPERATOR_CONFIRMED",
+        idempotency_key="new",
+        field_provenance=_operator_provenance(),
+    )
+    with pytest.raises(ValueError, match="PERSISTED_RECEIPT_TAMPERED"):
+        service.record_operator_outcome("task-1", candidate)
+    assert service._read_state("task-1")["operator_outcome_receipts"] == malformed_history
+
+
+def test_operator_outcome_rejects_singular_history_projection_mismatch(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    common = dict(
+        task_id="task-1",
+        attempt_id="attempt-1",
+        action_id="action-1",
+        lifecycle_revision="life-1",
+        source_revision="a" * 40,
+        runtime_receipt_hash="b" * 64,
+        observed_outcome="SUCCESS",
+        observation_basis="OPERATOR_REPORT",
+        reason_code="OPERATOR_CONFIRMED",
+        field_provenance=_operator_provenance(),
+    )
+    listed = build_operator_outcome_receipt(**common, idempotency_key="listed")
+    singular = build_operator_outcome_receipt(**common, idempotency_key="singular")
+    service._write_state(
+        "task-1",
+        {
+            "schema": "nexus.self_hosted_task_state.v1",
+            "task_id": "task-1",
+            "status": "SUBMITTED",
+            "attempt_id": "attempt-1",
+            "action_id": "action-1",
+            "lifecycle_revision": "life-1",
+            "controller_revision": "a" * 40,
+            "runtime_receipt_hash": "b" * 64,
+            "operator_outcome_receipts": [listed.model_dump(mode="json")],
+            "operator_outcome_receipt": singular.model_dump(mode="json"),
+        },
+    )
+    candidate = build_operator_outcome_receipt(**common, idempotency_key="new")
+    with pytest.raises(ValueError, match="PERSISTED_RECEIPT_TAMPERED"):
+        service.record_operator_outcome("task-1", candidate)
+    assert len(service._read_state("task-1")["operator_outcome_receipts"]) == 1
+
+
 def _valid_local_dispatch():
     demands = {
         "schema": "nexus.workforce_demands.v1",

@@ -103,3 +103,42 @@ def test_receipt_settled_schema_enums_and_provenance_are_strict():
     future_recorded = _receipt(recorded_at=datetime.now(timezone.utc) + timedelta(minutes=10))
     with pytest.raises(ValueError, match="STALE"):
         validate_operator_outcome_receipt(future_recorded)
+
+
+@pytest.mark.parametrize(
+    ("observed_outcome", "observation_basis", "reason_code"),
+    [
+        ("SUCCESS", "NOT_OBSERVED", "NOT_PROVIDED"),
+        ("NOT_OBSERVED", "OPERATOR_REPORT", "OPERATOR_CONFIRMED"),
+        ("UNKNOWN", "NOT_OBSERVED", "NOT_PROVIDED"),
+        ("NOT_OBSERVED", "NOT_OBSERVED", "OPERATOR_CONFIRMED"),
+    ],
+)
+def test_receipt_rejects_cross_field_semantic_contradictions(
+    observed_outcome, observation_basis, reason_code
+):
+    with pytest.raises(ValueError, match="SEMANTICS_INVALID"):
+        _receipt(
+            observed_outcome=observed_outcome,
+            observation_basis=observation_basis,
+            reason_code=reason_code,
+        )
+
+
+@pytest.mark.parametrize(
+    ("observed_outcome", "observation_basis", "reason_code"),
+    [
+        ("NOT_OBSERVED", "NOT_OBSERVED", "NOT_PROVIDED"),
+        ("UNKNOWN", "OPERATOR_REPORT", "OUTCOME_UNKNOWN"),
+        ("UNKNOWN", "SYSTEM_OBSERVATION", "OUTCOME_UNKNOWN"),
+    ],
+)
+def test_receipt_accepts_explicit_unknown_and_not_observed_semantics(
+    observed_outcome, observation_basis, reason_code
+):
+    receipt = _receipt(
+        observed_outcome=observed_outcome,
+        observation_basis=observation_basis,
+        reason_code=reason_code,
+    )
+    assert receipt.observed_outcome == observed_outcome
