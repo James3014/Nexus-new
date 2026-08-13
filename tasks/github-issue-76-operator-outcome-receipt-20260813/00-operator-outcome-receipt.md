@@ -4,8 +4,11 @@ task_id: github-issue-76-operator-outcome-receipt
 campaign_id: github-issue-76-operator-outcome-receipt-20260813
 source_issue: "#76"
 owner: James Chen
-status: ACTIVE
+status: COMPLETE
 baseline_revision: f3dc8d28a0f90d5c5fd2f31dbeb0ab2f29f7ca04
+reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+frontier_status: COMPLETE
+terminal_marker: OPERATOR_OUTCOME_RECEIPT_CONTRACT_AND_TASK_STATE_PERSISTENCE_VERIFIED
 commit_required: true
 candidate_required: true
 worker_may_commit: false
@@ -62,6 +65,20 @@ implementation ceiling.
 Exit with a Candidate PR only. No automatic adaptation, production, release,
 or public-readiness claim. Claim ceiling:
 `OPERATOR_OUTCOME_RECEIPT_CONTRACT_AND_TASK_STATE_PERSISTENCE_TESTED_ONLY`.
+
+## Completion receipt
+
+- Historical baseline preserved exactly: `f3dc8d28a0f90d5c5fd2f31dbeb0ab2f29f7ca04`.
+- Reconciled/current `main`: `eb668fb76f0c30d8f025db42cdb8e320d556c037`.
+- PR #224: head `78df547667c9682ab403ef4ed05c4eeb9f7dca85`, merge
+  `96bb71e89a0b5112a7b54ab6a3f4ff1ed879f857`; historical receipt records an
+  exact six-file, zero-deletion scope and 36 independent tests/check refs.
+- Terminal marker: `OPERATOR_OUTCOME_RECEIPT_CONTRACT_AND_TASK_STATE_PERSISTENCE_VERIFIED`.
+- `AUTO_CHAIN=false`; claim ceiling remains tested-only.
+
+The receipt is metadata reconciliation only. It does not establish verifier,
+Candidate, claim, release, approval, integration, mergeability, runtime, or
+production truth, and does not authorize downstream work.
 
 `HARD_BLOCK` for privacy/authority widening or unexpected overlap;
 `RECOVERABLE_BLOCK` for bounded verifier or formatting defects.
