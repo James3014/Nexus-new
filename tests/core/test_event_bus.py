@@ -1,4 +1,7 @@
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -396,3 +399,29 @@ def test_attempt_log_rolls_back_tail_when_append_fails_before_write(tmp_path):
 
     assert store.attempt_tail("rollback", "a1") == 0
     assert not path.exists() or path.read_text() == ""
+
+
+def test_attempt_log_cross_process_duplicate_writer_allows_one_append(tmp_path):
+    script = """
+import sys
+from pathlib import Path
+from nexus.events.log_store import JsonlEventLogStore
+store = JsonlEventLogStore()
+store.configure(Path(sys.argv[1]))
+store.append_record({
+    'event_type': 'attempt_transition', 'timestamp': 1.0, 'seq': 1,
+    'payload': {'task_id': 'shared', 'attempt_id': 'attempt', 'sequence': 1, 'state': 'VERIFY'},
+})
+"""
+    env = dict(os.environ)
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
+    processes = [
+        subprocess.Popen([sys.executable, "-c", script, str(tmp_path)], env=env)
+        for _ in range(2)
+    ]
+    returncodes = sorted(process.wait(timeout=10) for process in processes)
+
+    assert returncodes == [0, 1]
+    store = JsonlEventLogStore()
+    store.configure(tmp_path)
+    assert store.attempt_tail("shared", "attempt") == 1

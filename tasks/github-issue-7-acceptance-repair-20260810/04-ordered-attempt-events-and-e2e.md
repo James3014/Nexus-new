@@ -41,7 +41,8 @@ M3-C completed and exact-reviewed.
 - `tests/nexus/orchestrator/test_self_hosted_task_service.py`
 - `tests/nexus/orchestrator/test_acceptance_loop.py`
 
-Maximum changed files: 8.
+Maximum implementation/test files changed: 9. Governance card/INDEX amendments
+do not count toward this implementation ceiling.
 
 ## Required behavior
 

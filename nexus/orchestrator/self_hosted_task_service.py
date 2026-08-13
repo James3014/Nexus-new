@@ -1671,6 +1671,31 @@ class SelfHostedTaskService:
             mutator(state)
             return self._write_state_locked(task_id, state)
 
+    def _record_event_append_failure(self, task_id: str, error: Exception) -> None:
+        """Persist the state/event reconciliation debt without emitting another event."""
+        now = _utc_now()
+
+        def mutate(state: dict[str, Any]) -> None:
+            state["event_reconciliation_required"] = True
+            state["event_append_failure"] = {
+                "status": "BLOCKED",
+                "error_type": type(error).__name__,
+                "error_sha256": hashlib.sha256(str(error).encode("utf-8")).hexdigest(),
+                "at": now,
+            }
+            state["updated_at"] = now
+
+        self._mutate_state(task_id, mutate)
+
+    def _emit_bound_attempt_transition(
+        self, result: Optional[Mapping[str, Any]], task_id: str
+    ) -> None:
+        try:
+            self._emit_attempt_transition(result, task_id)
+        except Exception as exc:
+            self._record_event_append_failure(task_id, exc)
+            raise
+
     @staticmethod
     def _emit_attempt_transition(result: Optional[Mapping[str, Any]], task_id: str) -> None:
         if not result or not result.get("attempt_id"):
@@ -1726,7 +1751,7 @@ class SelfHostedTaskService:
             state.setdefault("status_history", []).append({"status": state["status"], "at": now})
 
         result = self._mutate_state(task_id, mutate)
-        self._emit_attempt_transition(result, task_id)
+        self._emit_bound_attempt_transition(result, task_id)
         return result
 
     def record_canonical_action_failure(self, task_id: str, blocker: str, error: str = "") -> Optional[dict[str, Any]]:
@@ -1853,7 +1878,7 @@ class SelfHostedTaskService:
             )
 
         result = self._mutate_state(task_id, mutate)
-        self._emit_attempt_transition(result, task_id)
+        self._emit_bound_attempt_transition(result, task_id)
         return result
 
     def _heartbeat(self, task_id: str, attempt_id: str, stop: threading.Event) -> None:
