@@ -1147,12 +1147,10 @@ def test_workflow_is_three_job_isolated_anchor():
     for job in workflow["jobs"].values():
         for step in job["steps"]:
             assert "actions/checkout@" not in step.get("uses", "")
-            if step.get("uses", "").startswith(
-                (
-                    "actions/upload-artifact@",
-                    "actions/download-artifact@",
-                )
-            ):
+            if step.get("uses", "").startswith((
+                "actions/upload-artifact@",
+                "actions/download-artifact@",
+            )):
                 pin = step["uses"].split("@", 1)[1].split()[0]
                 assert re.fullmatch(r"[0-9a-f]{40}", pin)
     assert "--verify-evidence" in next(
