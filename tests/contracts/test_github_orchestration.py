@@ -21,10 +21,17 @@ def evidence(**overrides):
     reviews = (ReviewResult(reviewer="reviewer", state="APPROVED"),)
     impact = ImpactResult(classification="NO_CHANGE", known=True, regression_free=True)
     candidate = CandidateLineage(
-        task_id="task-8", attempt_id="attempt-1", contract_hash="2" * 64,
-        card_hash="7" * 64, candidate_commit_sha="b" * 40, candidate_tree_sha="c" * 40,
-        candidate_state_hash="3" * 64, verified_receipt_hash="4" * 64,
-        independent_acceptance_hash="5" * 64, reviewer="reviewer", implementer="implementer",
+        task_id="task-8",
+        attempt_id="attempt-1",
+        contract_hash="2" * 64,
+        card_hash="7" * 64,
+        candidate_commit_sha="b" * 40,
+        candidate_tree_sha="c" * 40,
+        candidate_state_hash="3" * 64,
+        verified_receipt_hash="4" * 64,
+        independent_acceptance_hash="5" * 64,
+        reviewer="reviewer",
+        implementer="implementer",
     )
     value = dict(
         repository="James3014/Nexus-new",

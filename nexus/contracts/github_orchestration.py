@@ -199,7 +199,10 @@ class GitHubOrchestrationEvidence(_Frozen):
             raise ValueError("REPOSITORY_IDENTITY_INVALID")
         if self.current_main_sha != self.base_sha:
             raise ValueError("CURRENT_MAIN_SHA_MISMATCH")
-        if self.candidate.candidate_commit_sha != self.head_sha or self.candidate.candidate_tree_sha != self.tree_sha:
+        if (
+            self.candidate.candidate_commit_sha != self.head_sha
+            or self.candidate.candidate_tree_sha != self.tree_sha
+        ):
             raise ValueError("CANDIDATE_LINEAGE_MISMATCH")
         if self.candidate.reviewer.strip() == self.candidate.implementer.strip():
             raise ValueError("REVIEWER_IMPLEMENTER_MUST_DIFFER")
@@ -212,11 +215,23 @@ class GitHubOrchestrationEvidence(_Frozen):
             raise ValueError("CHECKS_FAILED_OR_MISSING")
         if not self.required_checks:
             raise ValueError("CHECK_FAILED_OR_MISSING")
-        if not all(c.terminal and c.conclusion.lower() in {"success", "passed"} for c in self.required_checks):
+        if not all(
+            c.terminal and c.conclusion.lower() in {"success", "passed"}
+            for c in self.required_checks
+        ):
             raise ValueError("CHECKS_SUMMARY_CONTRADICTS_DETAIL")
-        if not self.reviews_resolved or not all(not r.unresolved_threads and r.state.upper() not in {"CHANGES_REQUESTED", "REQUESTED_CHANGES"} for r in self.reviews):
+        if not self.reviews_resolved or not all(
+            not r.unresolved_threads
+            and r.state.upper() not in {"CHANGES_REQUESTED", "REQUESTED_CHANGES"}
+            for r in self.reviews
+        ):
             raise ValueError("REVIEWS_SUMMARY_CONTRADICTS_DETAIL")
-        if not self.impact_known or not self.regression_free or not self.impact.known or not self.impact.regression_free:
+        if (
+            not self.impact_known
+            or not self.regression_free
+            or not self.impact.known
+            or not self.impact.regression_free
+        ):
             raise ValueError("IMPACT_SUMMARY_CONTRADICTS_DETAIL")
         if self.candidate.contract_hash != self.task_attempt_contract_hash:
             raise ValueError("TASK_ATTEMPT_LINEAGE_MISMATCH")
@@ -228,9 +243,13 @@ class GitHubOrchestrationEvidence(_Frozen):
             raise ValueError("ACCEPTANCE_HASH_LINEAGE_MISMATCH")
         if not self.independent_acceptance:
             raise ValueError("INDEPENDENT_ACCEPTANCE_MISSING")
-        if self.reviews_hash != canonical_hash({"reviews": [r.model_dump(mode="json") for r in self.reviews]}):
+        if self.reviews_hash != canonical_hash({
+            "reviews": [r.model_dump(mode="json") for r in self.reviews]
+        }):
             raise ValueError("REVIEWS_HASH_MISMATCH")
-        if self.required_checks and self.checks_hash != canonical_hash({"checks": [c.model_dump(mode="json") for c in self.required_checks]}):
+        if self.required_checks and self.checks_hash != canonical_hash({
+            "checks": [c.model_dump(mode="json") for c in self.required_checks]
+        }):
             raise ValueError("CHECKS_HASH_MISMATCH")
         if self.impact_hash != canonical_hash(self.impact.model_dump(mode="json")):
             raise ValueError("IMPACT_HASH_MISMATCH")
