@@ -5,7 +5,7 @@
 - source_issue: `#52`
 - owner: James Chen
 - status: ACTIVE
-- baseline_revision: `c994b24c57c1ad7cfec1cb407074995925e7deb6`
+- baseline_revision: `069596056fff852bad8c826725902d25361aa9c7`
 - commit_required: true
 - candidate_required: true
 - worker_may_commit: true
@@ -37,14 +37,17 @@ no replacement, shim, alias, caller adaptation, or behavior change.
 - `scripts/legacy/reporter.py` (delete)
 - `scripts/legacy/workspace_manager.py` (delete)
 - `muse_nexus.egg-info/SOURCES.txt` (remove exactly six rows)
+- `docs/testing/test_impact_map.md` (add exact six adapter impact mappings)
+- `tests/ops/test_issue52_cleanup_impact_map.py` (assert mappings and fallback)
 - this card and campaign `INDEX.md`
 
 ## Forbidden scope
 
 No active `nexus.services.*`, callers, dependencies, entry points, historical
 reports, other inventory rows, compatibility surfaces, #55 implementation,
-#191, or #143. If any live caller or packaging requirement appears, stop rather
-than adapting it.
+#191, or #143. The impact-map amendment is documentation/test-selector scope
+only; it does not add a replacement or alter runtime behavior. If any live
+caller or packaging requirement appears, stop rather than adapting it.
 
 ## Verification
 
@@ -52,14 +55,15 @@ than adapting it.
 - focused Git/Linter/Gateway/Patcher/Reporter/Workspace/migration/CLI tests
 - `uv build` and archive/source-inventory absence checks
 - `uv run ruff check` on affected current test/service surfaces
-- `git diff --check` and exact deletion/inventory audit
+- `git diff --check` and exact deletion/inventory/impact-map audit
 
 ## Exit, block, and residual debt
 
-Exit only with exact nine-file scope (six deletions, one inventory edit, two
-governance files), package artifacts excluding all deleted paths, focused tests,
-independent acceptance, and protected PR checks. `HARD_BLOCK` on any caller,
-unexpected inventory change, overlap, or scope widening. PR #87 becomes
-superseded only after this fresh Candidate is physically established.
+Exit only with exact eleven-file scope (six deletions, one inventory edit, two
+impact-map/test files, and two governance files), package artifacts excluding
+all deleted paths, focused tests, independent acceptance, and protected PR
+checks. `HARD_BLOCK` on any caller, unexpected inventory change, overlap, or
+scope widening. PR #87 becomes superseded only after this fresh Candidate is
+physically established.
 
 Claim ceiling: `SIX_ARCHIVED_CALLER_FREE_ADAPTERS_REMOVED_CANDIDATE_ONLY`.

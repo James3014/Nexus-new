@@ -115,6 +115,12 @@
 | scripts/core/migration_validator.py | tests/core/test_migration_validator_contract.py | active | high | migration_validator_contract |
 | scripts/core/drclaw_diagnosis.py | tests/benchmark/test_drclaw_diagnosis_contract.py | active | high | drclaw_diagnosis_contract |
 | muse_nexus.egg-info/SOURCES.txt | tests/ops/test_source_inventory_integrity.py | active | high | source_inventory_integrity_contract |
+| scripts/legacy/git_manager.py | tests/services/test_git_service.py | active | high | issue52_archived_adapter_cleanup_contract |
+| scripts/legacy/linter.py | tests/services/test_linter.py | active | high | issue52_archived_adapter_cleanup_contract |
+| scripts/legacy/llm_client.py | tests/test_battlesuit_gateway.py, tests/test_llm_token_regex.py | active | high | issue52_archived_adapter_cleanup_contract |
+| scripts/legacy/patcher.py | tests/services/test_patcher.py | active | high | issue52_archived_adapter_cleanup_contract |
+| scripts/legacy/reporter.py | tests/test_reporter.py | active | high | issue52_archived_adapter_cleanup_contract |
+| scripts/legacy/workspace_manager.py | tests/services/test_workspace_manager.py, tests/benchmark/test_workspace.py | active | high | issue52_archived_adapter_cleanup_contract |
 ## Candidate Legacy Tests
 | 檔案 | 理由 |
 | :--- | :--- |
