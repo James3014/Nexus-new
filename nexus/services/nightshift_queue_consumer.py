@@ -11,16 +11,14 @@ from typing import Any, Callable, Mapping
 from nexus.services.unified_runtime import UnifiedRuntimeRequest
 
 SCHEMA = "nexus.nightshift_candidate_demand.v1"
-REQUIRED_CONTROLS = frozenset(
-    {
-        "isolated_directory",
-        "bounded_context",
-        "json_event_receipt",
-        "parser",
-        "focused_tests",
-        "verifier",
-    }
-)
+REQUIRED_CONTROLS = frozenset({
+    "isolated_directory",
+    "bounded_context",
+    "json_event_receipt",
+    "parser",
+    "focused_tests",
+    "verifier",
+})
 FORBIDDEN_WORKER_ACTIONS = frozenset({"commit", "push", "approve", "integrate"})
 
 
