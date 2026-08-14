@@ -5,7 +5,8 @@
 COMPLETE / TERMINAL_RECONCILIATION
 
 - Historical baseline: `c7e60f4c6798554e51cbc322ebfaf89e2c5cc346`
-- Reconciled main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
+- Reconciled main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+- Current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
 - Terminal marker: `ISSUE_121_SELECTOR_MAPPING_PROVEN`
 - Claim ceiling: `ISSUE_121_SELECTOR_MAPPING_PROVEN_ONLY`
 - AUTO_CHAIN: `false`
@@ -103,7 +104,7 @@ Historical candidate claim: `ISSUE_121_SELECTOR_MAPPING_CANDIDATE_ONLY` bound
 the pre-merge contract. Terminal claim:
 `ISSUE_121_SELECTOR_MAPPING_PROVEN_ONLY` — the current model workforce policy
 path selects its exact two executable contract suites without fallback, proven
-at current main `eb668fb76f0c30d8f025db42cdb8e320d556c037` after PR #159
+at current main `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601` after PR #159
 physically merged.
 
 ## Terminal reconciliation (post-merge)
