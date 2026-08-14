@@ -118,7 +118,7 @@ implementation baseline.
   `b5ce286dc94ae73c93f122906eea039f37597da3bb41b3233c44c74ad29385fa`;
   independent hostile review ACCEPT; `uv run pytest -q tests/learning` 293
   passed; dedicated hostile matrix 51 passed; `git diff --check` PASS.
-- Current main `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`; merge ancestry
+- Current main `cdf2570ede5ae218f36f886b696c8da45458043a`; merge ancestry
   verified via `git merge-base --is-ancestor`; reducer/tests remain present on
   current main.
 - Marker: `LEARNING_EFFECTIVENESS_SCORECARD_REPLAYED`.
