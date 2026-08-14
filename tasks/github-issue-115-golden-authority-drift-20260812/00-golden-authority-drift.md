@@ -8,8 +8,8 @@
 - baseline_revision: `4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e`
 - historical_baseline: `4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e`
 - merge_base: `4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e`
-- reconciled_main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
-- current_main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
+- reconciled_main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+- current_main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
 - block_class: NONE
 - frontier_status: TERMINAL_RECONCILIATION
 - terminal_marker: `GOLDEN_AUTHORITY_DRIFT_GATE_PROVEN`
@@ -79,7 +79,9 @@ second evaluator or persistent report authority.
 - Owner receipt on Issue #115 records `COMPLETION_RECONCILIATION` /
   `DONE_NO_FOLLOW_UP` with independent exact-head Luna acceptance ACCEPT; the
   PR #210 GitHub review surface records no review.
-- Reconciled current main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`.
+- Reconciled current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+  (historical verification receipt `eb668fb76f0c30d8f025db42cdb8e320d556c037`
+  from the 2026-08-13 snapshot).
 
 `GOLDEN_AUTHORITY_DRIFT_GATE_PROVEN` proves only the read-only authority-drift
 detection gate and its focused tests. It grants no Golden evaluator or corpus

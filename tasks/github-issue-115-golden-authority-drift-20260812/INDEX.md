@@ -7,8 +7,8 @@
 - baseline_main: `4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e`
 - historical_baseline: `4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e`
 - merge_base: `4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e`
-- reconciled_main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
-- current_main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
+- reconciled_main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+- current_main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
 - frontier: TERMINAL_RECONCILIATION
 - frontier_status: COMPLETE
 - completed_cards: `[00-golden-authority-drift.md]`
@@ -28,7 +28,9 @@ Physically merged by PR #210:
 - PR #210 head: `89f4115a392239787d2928d5bc530817d812cfd1`
 - PR #210 merge: `e0289e8baa27df445858d51e09dc758d45fb9c8a`
 
-Verified at current main `eb668fb76f0c30d8f025db42cdb8e320d556c037`:
+Verified at current main `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+(historical verification receipt `eb668fb76f0c30d8f025db42cdb8e320d556c037`
+from the 2026-08-13 snapshot):
 
 - `scripts/ops/check_golden_authority_drift.py` and
   `tests/ops/test_golden_authority_drift.py` are present;
