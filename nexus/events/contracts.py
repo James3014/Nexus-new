@@ -57,6 +57,8 @@ class AttemptTransitionEvent:
             raise ValueError("reason must be a string")
         if not isinstance(self.continuity_event_type, str) or not self.continuity_event_type.strip():
             raise ValueError("continuity_event_type is required")
+        if self.state == "ATTEMPT_REJECTED" and self.continuity_event_type != "ATTEMPT_REJECTED":
+            raise ValueError("rejected state requires ATTEMPT_REJECTED continuity type")
         for name in ("strategy_delta", "next_action", "claim_ceiling"):
             if not isinstance(getattr(self, name), str):
                 raise ValueError(f"{name} must be a string")
