@@ -79,8 +79,15 @@ Physically merged by PR #215:
 - PR #215 merge: `2c820eab67669ab63297bf76fcf1751aaa9496ba`
 
 Historical verification receipt: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
-(original 2026-08-13 snapshot). Reconfirmed at current main
+(original 2026-08-13 snapshot). Reconfirmed at historical current main
 `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`:
+
+- all six authorized `scripts/legacy` adapter paths are absent;
+- exactly their six stale `muse_nexus.egg-info/SOURCES.txt` rows are absent;
+- PR #215 merge commit is an ancestor of current main.
+
+Reconfirmed at current main `cdf2570ede5ae218f36f886b696c8da45458043a`
+(post-PR236 rebind, merge commit `663ea1660c03c07627c050af91ca3fa393133150`):
 
 - all six authorized `scripts/legacy` adapter paths are absent;
 - exactly their six stale `muse_nexus.egg-info/SOURCES.txt` rows are absent;

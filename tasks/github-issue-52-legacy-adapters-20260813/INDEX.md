@@ -5,7 +5,8 @@
 - status: COMPLETE / TERMINAL_RECONCILIATION
 - source_issue: `#52`
 - baseline_main: `069596056fff852bad8c826725902d25361aa9c7`
-- reconciled_main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+- historical_reconciled_main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+- reconciled_main: `cdf2570ede5ae218f36f886b696c8da45458043a`
 - current_frontier: `00-remove-six-legacy-adapters.md`
 - completed_cards: `[00-remove-six-legacy-adapters.md]`
 - blocked_cards: `[]`
@@ -34,7 +35,16 @@ Physically merged by PR #215:
 Historical reconciliation receipt: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
 (original 2026-08-13 verification snapshot).
 
-Current-main readback at `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`:
+Historical current-main readback at `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+(recorded on repair head `2cf77ca6eabce03e5ebbacf18feced6b6b7cce11`):
+
+- all six `scripts/legacy/{git_manager,linter,llm_client,patcher,reporter,
+  workspace_manager}.py` paths are absent;
+- `muse_nexus.egg-info/SOURCES.txt` contains zero `scripts/legacy` rows;
+- PR #215 merge is an ancestor of current main.
+
+Current-main readback at `cdf2570ede5ae218f36f886b696c8da45458043a`
+(post-PR236 rebind, merge commit `663ea1660c03c07627c050af91ca3fa393133150`):
 
 - all six `scripts/legacy/{git_manager,linter,llm_client,patcher,reporter,
   workspace_manager}.py` paths are absent;
