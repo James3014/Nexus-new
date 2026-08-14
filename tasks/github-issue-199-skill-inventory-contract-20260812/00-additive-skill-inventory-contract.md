@@ -6,8 +6,8 @@ task_id: github-issue-199-additive-skill-inventory-contract
 campaign_id: github-issue-199-skill-inventory-contract-20260812
 source_issue: https://github.com/James3014/Nexus-new/issues/199
 baseline_main: bc16cbf2bf00377a4521e3eab233175112d0c963
-reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
-current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
+current_main: cdf2570ede5ae218f36f886b696c8da45458043a
 frontier_status: TERMINAL_RECONCILIATION
 terminal_marker: ADDITIVE_SKILL_INVENTORY_CONTRACT_PROVEN
 AUTO_CHAIN: false
@@ -49,7 +49,7 @@ Claim ceiling: `ADDITIVE_SKILL_INVENTORY_CONTRACT_PROVEN_ONLY`.
 - Implementation commit: `17b6dc8883263c9b3e896552470c12bebc59d5bd`.
 - PR #200 head: `016254db670e512a6cb8d1a4bfcfef0ed96f613f`.
 - PR #200 merge: `752d1dec0517b29e1e1179827919e45dac33d131`.
-- Reconciled current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`.
+- Reconciled current main: `cdf2570ede5ae218f36f886b696c8da45458043a`.
 - Current-main focused evidence: `tests/ops/test_skill_file_contract.py` — 13 passed.
 
 The marker proves only additive physical-inventory assertions and preserved descriptor
