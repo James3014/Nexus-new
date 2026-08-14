@@ -1,7 +1,8 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: active
+status: COMPLETE
+terminal_state: TERMINAL_RECONCILIATION
 purpose: Install the fail-closed three-job trusted deletion-evidence workflow anchor.
 issue: 124
 ---
@@ -75,3 +76,20 @@ approve, configure rulesets/Apps, or claim #104/protected provenance.
 
 `HARD_BLOCK` if the boundary cannot be proven fail-closed within the frozen
 file scope. Do not commit speculative workflow code in that case.
+
+## Terminal reconciliation
+
+This card is terminally reconciled after physical integration by successor
+PR #127, which preserved this candidate chain and added the separately
+authorized Issue #126 OpenWiki inventory synchronization:
+
+- PR #127 exact base: `73d7437bfc64b0afd453ef56e46e3467304eb99e`.
+- PR #127 exact head: `6d1eb2bf39db537a3f0714dda77ba0c290da11cf`.
+- PR #127 merge: `fffc127cb` (Owner exact merge readback; ancestor of current `main`).
+- Required checks at exact head: Pytest run `31456046430` success; Pyright/Ruff/Bandit/Wiki runs `31456046*` success.
+- Reconciled current `main`: `eb668fb76f0c30d8f025db42cdb8e320d556c037`; `trusted-deletion-anchor.yml`, `trusted_deletion_anchor.py`, `test_trusted_deletion_anchor.py`, and the OpenWiki inventory row are present.
+- Historical baseline preserved: implementation was bound to `4232478da8061caba1be82b5a213974e840099fa`; final integration was PR #127.
+- Historical PR #125 (merge `1301514db`) was superseded by PR #127 due to the exact-base OpenWiki impact failure and is not the integrated merge.
+- Marker: `BOOTSTRAP_ANCHOR_INSTALLED`.
+- Claim ceiling: `BOOTSTRAP_ANCHOR_ONLY / NO_PROTECTED_PROVENANCE_CLAIM`; merge proved anchor installation only and no protected deletion provenance.
+- `AUTO_CHAIN=false`; this record grants no #104/#105/#106, ruleset, runtime, approval, integration, merge, release, or production authority.
