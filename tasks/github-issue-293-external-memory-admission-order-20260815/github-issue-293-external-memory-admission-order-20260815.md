@@ -39,8 +39,8 @@ candidate_lane:
   autonomy: L1
   external_verification_required: true
   admission_policy_hash: 8bc154848ac95b2478045c0d4568fcbb208263d4f46232d8b671a88b4a13bdca
-  admission_binding_hash: 034f987598f49b35959e70850f0c117b96747f004ed5a0cd49b9465d06aa826c
-  admission_aggregate_hash: fb6ccd2d4cfd720e401e95b24c53b5eae2da4efec8fb201955e676f2adfdae9c
+  admission_binding_hash: bff35a27645eb9a09e42574da9adf514dc76101cdf170f0c15f0209ebb78f049
+  admission_aggregate_hash: 2e20ea1d9edc0f8b5c8c600dbcfc412d31f15b164cabaeedf08dc86cbfa6a132
 ---
 
 # Issue #293 — fail closed before external memory becomes retrievable
