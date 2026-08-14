@@ -7,8 +7,8 @@ campaign_id: github-issue-55-abandoned-experiments-20260813
 source_issue: https://github.com/James3014/Nexus-new/issues/55
 baseline_main: 2c820eab67669ab63297bf76fcf1751aaa9496ba
 historical_baseline: 2c820eab67669ab63297bf76fcf1751aaa9496ba
-reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
-current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
+current_main: cdf2570ede5ae218f36f886b696c8da45458043a
 implementation_commit: 092617a1d937fd31f33531e7c0539d6360a599a1
 rebind_lineage_commit: 62f34b5acbc4064268426cc2455c5c6561611fc6
 ordered_cards:
