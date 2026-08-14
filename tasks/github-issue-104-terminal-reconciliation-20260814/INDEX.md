@@ -24,8 +24,8 @@ claim_ceiling: ISSUE_104_PROTECTED_THREE_STAGE_BOOTSTRAP_PROVEN_ONLY
 - pr_118_head: `d9e72df557493e249b54e7641d20ee314bc35646`
 - pr_141_merge: `d62310bf68ef44ca98664c47c22ed854a37d2caf`
 - pr_141_head: `4bcdeff77984e32bd81e5ceff9560cc9a17b1636`
-- reconciled_main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
-- current_main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
+- reconciled_main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+- current_main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
 - branch: `codex/issue-104-terminal-reconciliation`
 - AUTO_CHAIN: false
 - frontier: TERMINAL_RECONCILIATION
@@ -64,7 +64,7 @@ deletions) installed the executor exact-Git context repair. PR #118
 `70fd467ab0d29f4373616a5e98d85b014efcd4de`, 2026-08-11, six files, zero
 deletions) merged the exact-Git deletion-provenance foundation and closed Issue
 #75. Both merges are ancestors of current main
-`eb668fb76f0c30d8f025db42cdb8e320d556c037` (verified via
+`12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601` (verified via
 `git merge-base --is-ancestor`); current-main readback confirms
 `.github/workflows/trusted-deletion-anchor.yml`,
 `scripts/ops/trusted_deletion_anchor.py`, and

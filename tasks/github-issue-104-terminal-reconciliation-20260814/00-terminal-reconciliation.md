@@ -23,8 +23,8 @@ auto_chain: false
 - pr_141_merge: `d62310bf68ef44ca98664c47c22ed854a37d2caf`
 - pr_118_head: `d9e72df557493e249b54e7641d20ee314bc35646`
 - pr_118_merge: `70fd467ab0d29f4373616a5e98d85b014efcd4de`
-- reconciled_main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
-- current_main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
+- reconciled_main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+- current_main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
 - branch: `codex/issue-104-terminal-reconciliation`
 - worker_role: governance-only terminal reconciliation
 - autonomy: bounded metadata writeback
@@ -60,7 +60,7 @@ workflows, source, or tests, and without reopening Issue #104.
   `d62310bf68ef44ca98664c47c22ed854a37d2caf` as
   `70fd467ab0d29f4373616a5e98d85b014efcd4de`; exact six-file scope, zero
   deletions; closes Issue #75.
-- Current main `eb668fb76f0c30d8f025db42cdb8e320d556c037` readback:
+- Current main `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601` readback:
   `git merge-base --is-ancestor` confirms PR #141 merge `d62310bf...`, PR #118
   merge `70fd467a...`, and PR #118 head `d9e72df5...` are ancestors;
   `.github/workflows/trusted-deletion-anchor.yml`,
