@@ -9,6 +9,13 @@ readiness_marker: 130A_READY_FOR_GOVERNED_CANDIDATE_PUBLICATION
 claim_ceiling: WORK_CONSUMPTION_READ_ONLY_PROJECTION_CANDIDATE_PR_ONLY
 AUTO_CHAIN: false
 authorized_deletions: []
+rejected_candidate: d2a6d1ce594131bb5b057eb868e911e98a179875
+repair_candidate: 3b83b9e517b7946d6cd03519a62242d5bbd8b502
+owner_waiver:
+  waiver_id: OWNER_WAIVER
+  head: 3b83b9e517b7946d6cd03519a62242d5bbd8b502
+  receipt_requirement: WAIVED_FOR_THIS_CANDIDATE_ONLY
+  acceptance: EXTERNAL_PENDING
 ---
 
 # Issue #130 — bounded work-consumption slice
@@ -24,3 +31,8 @@ Issue #130 API remains outside this slice.
 - Listing is read-only and must never acquire ownership.
 - `AUTO_CHAIN=false`.
 - Claim ceiling: `WORK_CONSUMPTION_READ_ONLY_PROJECTION_CANDIDATE_PR_ONLY`.
+- Owner waiver: `OWNER_WAIVER` at exact PR head
+  `3b83b9e517b7946d6cd03519a62242d5bbd8b502`,
+  `receipt_requirement=WAIVED_FOR_THIS_CANDIDATE_ONLY`; original rejected
+  candidate `d2a6d1ce…`, repair candidate `3b83b9e5…`, acceptance external and
+  pending.
