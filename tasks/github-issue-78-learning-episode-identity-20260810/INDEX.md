@@ -1,10 +1,12 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: active
+status: COMPLETE
+terminal_state: TERMINAL_RECONCILIATION
 campaign_id: github-issue-78-learning-episode-identity-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/78
 baseline_main: 84eaa6886e0388a4e15f5b837c89e37768b14307
+reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
 ordered_cards:
   - 01-bind-learning-episode-identity.md
 current_frontier: null
@@ -45,3 +47,37 @@ Completion receipt:
 - Pyright exact-base differential: prod 20 (matches base), test 39 (base 67)
 - `git diff --check`: clean
 - reached `CANDIDATE_PR_READY` (PR opened to `main`; no self-approve/merge)
+
+## Terminal reconciliation
+
+Reconciled on fresh main `eb668fb76f0c30d8f025db42cdb8e320d556c037` with
+historical baseline preserved at `84eaa6886e0388a4e15f5b837c89e37768b14307`.
+
+Post-merge evidence:
+
+- Issue #78 is CLOSED/completed (state_reason=completed) with Owner receipts:
+  `5235366173` (pre-mutation defect), `5235661276` (Owner directive),
+  `5236118747` (CANDIDATE_PR_READY), `5253054683`
+  (POST_MERGE_CONSUMER_VERIFICATION: clean main `70fd467ab...`, 293 passed,
+  6 warnings, exit 0).
+- PR #84 merged: base `84eaa6886e0388a4e15f5b837c89e37768b14307`, head
+  `310c8db50d7ec0789bef8d30848564f3ef375d55`, merge
+  `c304e7d98f62f615f7ca44c2ab4451dff9e780e3`; 4 files, +343/-4.
+- PR84 head required checks terminal success: Wiki Exact-Base Governance CI,
+  Exact-Base Bandit, Exact-Base Ruff, Exact-Base Pyright, Pytest.
+- PR84 merge and head are both ancestors of current `nexus-new/main`.
+- Current-main physical readback: `nexus/contracts/learning_experience.py`
+  contains `canonical_episode_identity` used by builder and validator, with
+  fail-closed guards `NEXUS_LEARNING_EPISODE_EMPTY_IDEMPOTENCY_KEY`,
+  `NEXUS_LEARNING_EPISODE_MALFORMED_EPISODE_ID`, and
+  `NEXUS_LEARNING_EPISODE_IDENTITY_MISMATCH`;
+  `tests/learning/test_nexus_learning_episode_contract.py` contains
+  tamper/cross-task/malformed/custom-key/determinism/authority tests.
+
+Terminal marker: `LEARNING_EPISODE_IDENTITY_BINDING_PROVEN`.
+Claim ceiling: `LEARNING_EPISODE_IDENTITY_BINDING_PROVEN_ONLY` - repository-
+contained learning episode identity contract/source/test evidence only; no
+learning uplift, runtime, route/Workforce selection, provider/model identity,
+approval, integration, merge, release, or production claim.
+
+`AUTO_CHAIN: false`. No open PR overlap; no further mutation required.

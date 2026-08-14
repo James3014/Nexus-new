@@ -103,6 +103,29 @@ immutable envelope or signature.
 - `git diff --check`: clean
 - reached `CANDIDATE_PR_READY` (PR opened to `main`; no self-approve/merge)
 
+## Terminal reconciliation receipt
+
+Reconciled on fresh main `eb668fb76f0c30d8f025db42cdb8e320d556c037`;
+historical baseline preserved at `84eaa6886e0388a4e15f5b837c89e37768b14307`.
+
+- Issue #78 CLOSED/completed; Owner receipts `5235366173`, `5235661276`,
+  `5236118747`, and `5253054683`
+  (POST_MERGE_CONSUMER_VERIFICATION: clean main `70fd467ab...`, 293 passed,
+  6 warnings, exit 0).
+- PR #84 merged: base `84eaa6886e0388a4e15f5b837c89e37768b14307`, head
+  `310c8db50d7ec0789bef8d30848564f3ef375d55`, merge
+  `c304e7d98f62f615f7ca44c2ab4451dff9e780e3`; 4 files, +343/-4; head checks
+  terminal success (Governance/Bandit/Ruff/Pyright/Pytest).
+- PR84 merge and head are ancestors of current main; current-main source/test
+  readback confirms the merged identity-binding contract.
+
+Terminal marker: `LEARNING_EPISODE_IDENTITY_BINDING_PROVEN`.
+Claim ceiling: `LEARNING_EPISODE_IDENTITY_BINDING_PROVEN_ONLY` - repository-
+contained learning episode identity contract/source/test evidence only; no
+learning uplift, runtime, route/Workforce selection, provider/model identity,
+approval, integration, merge, release, or production claim.
+`AUTO_CHAIN: false`; no further mutation required.
+
 ## Block classification
 
 - `RECOVERABLE_BLOCK`: bounded implementation or regression defect.
