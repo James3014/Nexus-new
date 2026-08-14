@@ -129,7 +129,7 @@ Issue #77 is CLOSED (state_reason: completed). PR #85 was merged on
 - head CI terminal success: Nexus Pytest CI, Exact-Base Pyright, Exact-Base
   Bandit, Exact-Base Ruff, Wiki Exact-Base Governance, Policy Lane Gate
 - ancestry: `git merge-base --is-ancestor 8f7c75ca main` PASS
-- reconciled main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+- reconciled main: `cdf2570ede5ae218f36f886b696c8da45458043a`
 - Owner post-merge receipt `5253054718`
   (POST_MERGE_CONSUMER_VERIFICATION_20260811): clean exact-main target
   `70fd467ab0d29f4373616a5e98d85b014efcd4de`, 293 passed, 6 warnings,
