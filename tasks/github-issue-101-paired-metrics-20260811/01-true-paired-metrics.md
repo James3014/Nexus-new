@@ -4,8 +4,8 @@
 - issue: #101
 - status: COMPLETE / TERMINAL_RECONCILIATION
 - historical_baseline: e13ad5472296c8a303387f19662d19ce5a82bd0a
-- reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
-- current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+- reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+- current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 - worker_role: luna_worker
 - autonomy: bounded implementation
 - target: /private/tmp/nexus-issue101-luna-019fee
@@ -94,7 +94,7 @@ git diff --name-only e13ad5472296c8a303387f19662d19ce5a82bd0a...HEAD
 Completed by PR #108: exact head
 `ce7e40ed99deece77cc587d6dd729faed527751a`, merge
 `4437d34afc78b247354fbd0d2c1d7bf0d2fdf4c9`, reconciled on current `main`
-`eb668fb76f0c30d8f025db42cdb8e320d556c037`. Required checks succeeded with
+`12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`. Required checks succeeded with
 Tier3 skipped as expected; Owner terminal receipt comment `5282536716`; 65
 zero-provider focused tests passed on current main (metrics and report suites).
 Historical baseline `e13ad5472296c8a303387f19662d19ce5a82bd0a`, the two-file

@@ -4,8 +4,8 @@
 - status: COMPLETE / TERMINAL_RECONCILIATION
 - task_id: github-issue-101
 - historical_baseline: e13ad5472296c8a303387f19662d19ce5a82bd0a
-- reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
-- current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+- reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+- current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 - branch: codex/issue-101-paired-metrics
 - AUTO_CHAIN: false
 - frontier_status: TERMINAL_RECONCILIATION
