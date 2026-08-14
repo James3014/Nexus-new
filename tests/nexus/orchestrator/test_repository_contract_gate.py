@@ -654,3 +654,29 @@ def test_new_execution_topology_config_is_blocked(tmp_path):
     current = controller.collect_candidate(contract, lease)
     receipt = RepositoryContractGate(controller.worktree_manager).evaluate(contract, lease, current, current)
     assert any(reason.startswith("effective_route_authority_change:") for reason in receipt.blocking_reasons)
+
+
+def test_tampered_topology_bypass_remains_blocked(tmp_path):
+    controller_root = tmp_path / "controller"
+    target_root = tmp_path / "targets"
+    target_sha, controller_sha = _init_repo(controller_root, with_policy_inputs=False)
+    contract = _contract(
+        controller_root,
+        target_root,
+        task_id="topology-tamper",
+        target_sha=target_sha,
+        controller_sha=controller_sha,
+        allowed_files=["nexus/config/execution_topology.yaml"],
+        verifier_commands=[],
+    )
+    controller, lease = _prepare(contract, target_root)
+    path = Path(lease.target_worktree, "nexus/config/execution_topology.yaml")
+    path.parent.mkdir(parents=True)
+    path.write_text("execution_lane: alternate\nroute_authority: forged\n", encoding="utf-8")
+    receipt = RepositoryContractGate(controller.worktree_manager).evaluate(
+        contract,
+        lease,
+        controller.collect_candidate(contract, lease),
+        controller.collect_candidate(contract, lease),
+    )
+    assert receipt.passed is False
