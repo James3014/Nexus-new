@@ -31,8 +31,8 @@ candidate_lane:
   autonomy: L1
   external_verification_required: true
   admission_policy_hash: 8bc154848ac95b2478045c0d4568fcbb208263d4f46232d8b671a88b4a13bdca
-  admission_binding_hash: 7aeb0c506d688f02bc2f98b8b6fcea1abff568c316c69fb9ab5eb9143c6e47be
-  admission_aggregate_hash: 7554431050e9519f1cb2aa8491a2aeae4bfd3bd861d2d96a4a788fb8f730d3b0
+  admission_binding_hash: c2320e887be82dbdac9c10c20bfb07ac048732f7a83d55d8123dbfd255e5cda5
+  admission_aggregate_hash: fecaa4a90f5bf587b6bd2d85dd8c539ff45dde303eab0d58d776b527a1bb1524
 ---
 
 # Issue #292 G1 — retrieve canonical cross-task LearningEpisodes
