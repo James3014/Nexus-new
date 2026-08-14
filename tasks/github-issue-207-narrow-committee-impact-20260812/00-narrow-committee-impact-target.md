@@ -5,8 +5,8 @@ status: COMPLETE
 task_id: github-issue-207-narrow-committee-impact-target
 source_issue: https://github.com/James3014/Nexus-new/issues/207
 historical_baseline: 8620b72e5688dc41551afb8ed5454b49d21dc5e3
-reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
-current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 frontier_status: TERMINAL_RECONCILIATION
 terminal_marker: ISSUE_51_COMMITTEE_IMPACT_TARGET_REPAIR_PROVEN
 claim_ceiling: ISSUE_51_COMMITTEE_IMPACT_TARGET_REPAIR_PROVEN_ONLY
