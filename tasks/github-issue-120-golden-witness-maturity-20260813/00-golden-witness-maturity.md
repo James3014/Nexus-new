@@ -5,8 +5,8 @@
 COMPLETE / TERMINAL_RECONCILIATION
 
 - Historical baseline: `e0289e8baa27df445858d51e09dc758d45fb9c8a`
-- Reconciled main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
-- Current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+- Reconciled main: `cdf2570ede5ae218f36f886b696c8da45458043a`
+- Current main: `cdf2570ede5ae218f36f886b696c8da45458043a`
 - Terminal marker: `GOLDEN_WITNESS_MATURITY_MODEL_VALIDATED`
 - Claim ceiling: `GOLDEN_WITNESS_MATURITY_MODEL_VALIDATED_TEST_GOVERNANCE_ONLY`
 - AUTO_CHAIN: `false`

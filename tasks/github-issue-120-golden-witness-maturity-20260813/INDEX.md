@@ -5,8 +5,8 @@
 - status: COMPLETE / TERMINAL_RECONCILIATION
 - source_issue: `#120`
 - historical baseline_main: `e0289e8baa27df445858d51e09dc758d45fb9c8a`
-- reconciled_main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
-- current_main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+- reconciled_main: `cdf2570ede5ae218f36f886b696c8da45458043a`
+- current_main: `cdf2570ede5ae218f36f886b696c8da45458043a`
 - completed_card: `00-golden-witness-maturity.md`
 - terminal_marker: `GOLDEN_WITNESS_MATURITY_MODEL_VALIDATED`
 - claim_ceiling: `GOLDEN_WITNESS_MATURITY_MODEL_VALIDATED_TEST_GOVERNANCE_ONLY`
