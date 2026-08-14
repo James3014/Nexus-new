@@ -10,8 +10,10 @@ import pytest
 from nexus.core.belief_contracts import HealingArtifact
 from nexus.core.event_bus import NexusEventBus
 from nexus.core.healing_artifacts import HealingArtifactKeyPolicy, sign_healing_artifact
+from nexus.core.task_continuity import events_from_attempt_records, project, resume
 from nexus.events.contracts import build_attempt_transition_event
 from nexus.events.log_store import JsonlEventLogStore
+from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 
 
 @pytest.fixture(autouse=True)
@@ -131,6 +133,104 @@ def test_attempt_transition_persists_continuity_projection_fields(tmp_path):
     assert payload["unknowns"] == ["unknown"]
     assert payload["next_action"] == "retry"
     assert payload["claim_ceiling"] == "evidence-only"
+
+
+def test_attempt_transition_rejected_lifecycle_state_maps_to_attempt_rejected(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    SelfHostedTaskService._emit_attempt_transition(
+        {
+            "task_id": "t1",
+            "attempt_id": "a1",
+            "status": "REJECTED",
+            "error": "provider rejected",
+            "do_not_repeat": ["provider-a"],
+            "source_revision": "src",
+            "contract_revision": "contract",
+        },
+        "t1",
+    )
+    rows = SelfHostedTaskService.read_canonical_attempt_events("t1", "a1")
+    decoded = events_from_attempt_records(rows, task_id="t1", attempt_id="a1")
+    snapshot = project(decoded)
+    context = resume(
+        snapshot,
+        [],
+        task_id="t1",
+        attempt_id="a1",
+        source_revision="src",
+        contract_revision="contract",
+    )
+    assert decoded[0].event_type == "ATTEMPT_REJECTED"
+    assert decoded[0].failure_reason == "provider rejected"
+    assert snapshot.failure_reason == "provider rejected"
+    assert context.failure_reason == "provider rejected"
+    assert context.do_not_repeat == ("provider-a",)
+
+
+def test_attempt_transition_rejected_state_explicit_observation_fails_closed(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    with pytest.raises(ValueError, match="rejected state requires ATTEMPT_REJECTED"):
+        SelfHostedTaskService._emit_attempt_transition(
+            {
+                "task_id": "t1",
+                "attempt_id": "a1",
+                "status": "REJECTED",
+                "continuity_event_type": "OBSERVATION_RECORDED",
+                "source_revision": "src",
+                "contract_revision": "contract",
+            },
+            "t1",
+        )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("do_not_repeat", {"a": 1}),
+        ("do_not_repeat", {"a"}),
+        ("do_not_repeat", 7),
+        ("unresolved_risks", {"a": 1}),
+        ("unknowns", {"a": 1}),
+    ],
+)
+def test_attempt_transition_rejects_malformed_mapping_continuity_input(tmp_path, field, value):
+    NexusEventBus.configure(tmp_path)
+    with pytest.raises(ValueError, match=f"{field} must be a list/tuple"):
+        SelfHostedTaskService._emit_attempt_transition(
+            {
+                "task_id": "t1",
+                "attempt_id": "a1",
+                "status": "RUNNING",
+                field: value,
+                "source_revision": "src",
+                "contract_revision": "contract",
+            },
+            "t1",
+        )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("do_not_repeat", {"a": 1}),
+        ("unresolved_risks", {"a": 1}),
+        ("unknowns", 7),
+        ("candidate_refs", {"a": 1}),
+        ("evidence_refs", {"a": 1}),
+    ],
+)
+def test_build_attempt_transition_event_rejects_malformed_continuity_lists(field, value):
+    with pytest.raises(ValueError, match=f"{field} must be a list/tuple"):
+        build_attempt_transition_event(
+            task_id="t1",
+            attempt_id="a1",
+            sequence=1,
+            state="RUNNING",
+            source_revision="src",
+            contract_revision="contract",
+            **{field: value},
+        )
+
 
 def test_event_bus_signal_injection_and_drain(tmp_path):
     """驗證信號注入與消費 (inject/drain)。"""

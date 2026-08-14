@@ -18,6 +18,21 @@ PHASE_OBSERVER_HOOKS = frozenset(
     }
 )
 
+REJECTED_STATES = frozenset({"ATTEMPT_REJECTED", "REJECTED"})
+
+
+def _continuity_sequence(name: str, value: Any) -> tuple[str, ...]:
+    """Normalize a canonical bounded string sequence, rejecting malformed shapes."""
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        return (value,)
+    if isinstance(value, (list, tuple)):
+        if any(not isinstance(item, str) or not item.strip() for item in value):
+            raise ValueError(f"{name} must contain non-empty strings")
+        return tuple(value)
+    raise ValueError(f"{name} must be a list/tuple of non-empty strings")
+
 
 @dataclass(frozen=True)
 class AttemptTransitionEvent:
@@ -57,7 +72,7 @@ class AttemptTransitionEvent:
             raise ValueError("reason must be a string")
         if not isinstance(self.continuity_event_type, str) or not self.continuity_event_type.strip():
             raise ValueError("continuity_event_type is required")
-        if self.state == "ATTEMPT_REJECTED" and self.continuity_event_type != "ATTEMPT_REJECTED":
+        if self.state in REJECTED_STATES and self.continuity_event_type != "ATTEMPT_REJECTED":
             raise ValueError("rejected state requires ATTEMPT_REJECTED continuity type")
         for name in ("strategy_delta", "next_action", "claim_ceiling"):
             if not isinstance(getattr(self, name), str):
@@ -95,10 +110,13 @@ def build_attempt_transition_event(
     return AttemptTransitionEvent(
         task_id=task_id, attempt_id=attempt_id, sequence=sequence, state=state,
         reason=reason, continuity_event_type=continuity_event_type,
-        strategy_delta=strategy_delta, do_not_repeat=tuple(do_not_repeat),
-        unresolved_risks=tuple(unresolved_risks), unknowns=tuple(unknowns),
+        strategy_delta=strategy_delta,
+        do_not_repeat=_continuity_sequence("do_not_repeat", do_not_repeat),
+        unresolved_risks=_continuity_sequence("unresolved_risks", unresolved_risks),
+        unknowns=_continuity_sequence("unknowns", unknowns),
         next_action=next_action, claim_ceiling=claim_ceiling,
-        candidate_refs=tuple(candidate_refs), evidence_refs=tuple(evidence_refs),
+        candidate_refs=_continuity_sequence("candidate_refs", candidate_refs),
+        evidence_refs=_continuity_sequence("evidence_refs", evidence_refs),
         source_revision=source_revision, contract_revision=contract_revision,
     )
 

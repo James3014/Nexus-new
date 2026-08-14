@@ -2016,11 +2016,18 @@ class SelfHostedTaskService:
         # false lifecycle receipt while leaving the lifecycle authority intact.
         request = result.get("request") if isinstance(result.get("request"), Mapping) else {}
         status = str(result.get("status"))
-        continuity_event_type = str(
-            result.get("continuity_event_type")
-            or request.get("continuity_event_type")
-            or (status if status == "ATTEMPT_REJECTED" else "OBSERVATION_RECORDED")
-        )
+        rejected_states = frozenset({"ATTEMPT_REJECTED", "REJECTED"})
+        explicit_type = result.get("continuity_event_type") or request.get("continuity_event_type")
+        if explicit_type is not None:
+            if not isinstance(explicit_type, str) or not explicit_type.strip():
+                raise ValueError("continuity_event_type must be a non-empty string")
+            if status in rejected_states and explicit_type != "ATTEMPT_REJECTED":
+                raise ValueError("rejected state requires ATTEMPT_REJECTED continuity type")
+            continuity_event_type = explicit_type
+        else:
+            continuity_event_type = (
+                "ATTEMPT_REJECTED" if status in rejected_states else "OBSERVATION_RECORDED"
+            )
 
         def continuity_list(name: str, alias: str = "") -> tuple[str, ...]:
             value = result.get(name)
@@ -2034,6 +2041,10 @@ class SelfHostedTaskService:
                 return ()
             if isinstance(value, str):
                 return (value,)
+            if not isinstance(value, (list, tuple)):
+                raise ValueError(f"{name} must be a list/tuple of non-empty strings")
+            if any(not isinstance(item, str) or not item.strip() for item in value):
+                raise ValueError(f"{name} must contain non-empty strings")
             return tuple(value)
 
         NexusEventBus.emit_attempt_transition(build_attempt_transition_event(

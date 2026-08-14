@@ -272,6 +272,127 @@ def test_rejected_attempt_without_explicit_continuity_type_fails_closed():
         events_from_attempt_records([record], task_id="task-1", attempt_id="attempt-1")
 
 
+def test_rejected_lifecycle_state_without_type_fails_closed():
+    record = {
+        "event_type": "attempt_transition",
+        "payload": {
+            "task_id": "task-1",
+            "attempt_id": "attempt-1",
+            "sequence": 1,
+            "state": "REJECTED",
+            "source_revision": "src-a",
+            "contract_revision": "contract-a",
+        },
+        "_attempt_parent_digest": "0" * 64,
+        "_attempt_record_digest": "",
+    }
+    unsigned = dict(record)
+    unsigned.pop("_attempt_record_digest")
+    record["_attempt_record_digest"] = hashlib.sha256(
+        json.dumps(unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    ).hexdigest()
+    with pytest.raises(ValueError, match="rejected continuity event type"):
+        events_from_attempt_records([record], task_id="task-1", attempt_id="attempt-1")
+
+
+def test_rejected_lifecycle_state_with_observation_type_fails_closed():
+    record = {
+        "event_type": "attempt_transition",
+        "payload": {
+            "task_id": "task-1",
+            "attempt_id": "attempt-1",
+            "sequence": 1,
+            "state": "REJECTED",
+            "continuity_event_type": "OBSERVATION_RECORDED",
+            "source_revision": "src-a",
+            "contract_revision": "contract-a",
+        },
+        "_attempt_parent_digest": "0" * 64,
+        "_attempt_record_digest": "",
+    }
+    unsigned = dict(record)
+    unsigned.pop("_attempt_record_digest")
+    record["_attempt_record_digest"] = hashlib.sha256(
+        json.dumps(unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    ).hexdigest()
+    with pytest.raises(ValueError, match="rejected state requires ATTEMPT_REJECTED"):
+        events_from_attempt_records([record], task_id="task-1", attempt_id="attempt-1")
+
+
+def test_canonical_attempt_records_persist_failure_reason_through_replay():
+    record = {
+        "event_type": "attempt_transition",
+        "payload": {
+            "task_id": "task-1",
+            "attempt_id": "attempt-1",
+            "sequence": 1,
+            "state": "REJECTED",
+            "continuity_event_type": "ATTEMPT_REJECTED",
+            "reason": "provider rejected",
+            "do_not_repeat": ["provider-a"],
+            "evidence_refs": ["ev-1"],
+            "unresolved_risks": ["risk-1"],
+            "unknowns": ["unknown-1"],
+            "next_action": "try provider-b",
+            "claim_ceiling": "evidence-only",
+            "source_revision": "src-a",
+            "contract_revision": "contract-a",
+        },
+        "_attempt_parent_digest": "0" * 64,
+        "_attempt_record_digest": "",
+    }
+    unsigned = dict(record)
+    unsigned.pop("_attempt_record_digest")
+    record["_attempt_record_digest"] = hashlib.sha256(
+        json.dumps(unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    ).hexdigest()
+    decoded = events_from_attempt_records([record], task_id="task-1", attempt_id="attempt-1")
+    assert decoded[0].failure_reason == "provider rejected"
+    snapshot = project(decoded)
+    assert snapshot.failure_reason == "provider rejected"
+    context = resume(
+        snapshot,
+        [],
+        task_id="task-1",
+        attempt_id="attempt-1",
+        source_revision="src-a",
+        contract_revision="contract-a",
+    )
+    assert context.failure_reason == "provider rejected"
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("do_not_repeat", {"a": 1}),
+        ("unresolved_risks", {"a": 1}),
+        ("unknowns", {"a": 1}),
+    ],
+)
+def test_canonical_attempt_records_reject_malformed_continuity_lists(field, value):
+    record = {
+        "event_type": "attempt_transition",
+        "payload": {
+            "task_id": "task-1",
+            "attempt_id": "attempt-1",
+            "sequence": 1,
+            "state": "RUNNING",
+            "source_revision": "src-a",
+            "contract_revision": "contract-a",
+        },
+        "_attempt_parent_digest": "0" * 64,
+        "_attempt_record_digest": "",
+    }
+    record["payload"][field] = value
+    unsigned = dict(record)
+    unsigned.pop("_attempt_record_digest")
+    record["_attempt_record_digest"] = hashlib.sha256(
+        json.dumps(unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    ).hexdigest()
+    with pytest.raises(ValueError, match=f"{field} must be a list"):
+        events_from_attempt_records([record], task_id="task-1", attempt_id="attempt-1")
+
+
 @pytest.mark.parametrize(
     "field,value",
     [

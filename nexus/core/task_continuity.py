@@ -23,6 +23,7 @@ EVENT_TYPES = frozenset({
     "ESCALATED",
     "COMPLETED",
 })
+REJECTED_STATES = frozenset({"ATTEMPT_REJECTED", "REJECTED"})
 PROTECTED = (
     "task_id",
     "attempt_id",
@@ -31,6 +32,7 @@ PROTECTED = (
     "unresolved_risks",
     "next_action",
     "claim_ceiling",
+    "failure_reason",
 )
 
 
@@ -145,6 +147,7 @@ class ContinuitySnapshot:
     evidence_refs: tuple[str, ...]
     next_action: str
     claim_ceiling: str
+    failure_reason: str
     _snapshot_digest: str = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -174,6 +177,7 @@ class ResumeContext:
     snapshot: ContinuitySnapshot
     next_action: str
     claim_ceiling: str
+    failure_reason: str
     do_not_repeat: tuple[str, ...]
     evidence_refs: tuple[str, ...]
     unresolved_risks: tuple[str, ...]
@@ -225,6 +229,7 @@ def project(events: Iterable[ContinuityEvent]) -> ContinuitySnapshot:
     evidence: list[str] = []
     next_action = ""
     claim = ""
+    failure_reason = ""
     source = first.source_revision
     contract = first.contract_revision
     for event in ordered:
@@ -247,6 +252,7 @@ def project(events: Iterable[ContinuityEvent]) -> ContinuitySnapshot:
         unknowns.extend(event.unknowns)
         next_action = event.next_action or next_action
         claim = event.claim_ceiling or claim
+        failure_reason = event.failure_reason or failure_reason
     return ContinuitySnapshot(
         schema=SCHEMA,
         task_id=first.task_id,
@@ -268,6 +274,7 @@ def project(events: Iterable[ContinuityEvent]) -> ContinuitySnapshot:
         evidence_refs=tuple(dict.fromkeys(evidence)),
         next_action=next_action,
         claim_ceiling=claim,
+        failure_reason=failure_reason,
     )
 
 
@@ -322,6 +329,7 @@ def resume(
         merged,
         merged.next_action,
         merged.claim_ceiling,
+        merged.failure_reason,
         merged.rejected_strategies,
         merged.evidence_refs,
         merged.unresolved_risks,
@@ -387,11 +395,13 @@ def events_from_attempt_records(
         if continuity_event_type is None:
             # Legacy records may omit the optional projection type, but a
             # rejected transition must never silently become an observation.
-            if payload["state"] == "ATTEMPT_REJECTED":
+            if payload["state"] in REJECTED_STATES:
                 raise ValueError("rejected continuity event type is missing")
             continuity_event_type = "OBSERVATION_RECORDED"
-        if not isinstance(continuity_event_type, str):
-            raise ValueError("continuity_event_type must be a string")
+        if not isinstance(continuity_event_type, str) or not continuity_event_type.strip():
+            raise ValueError("continuity_event_type must be a non-empty string")
+        if payload["state"] in REJECTED_STATES and continuity_event_type != "ATTEMPT_REJECTED":
+            raise ValueError("rejected state requires ATTEMPT_REJECTED continuity type")
         current = ContinuityEvent(
             task_id=task_id,
             attempt_id=attempt_id,
@@ -399,7 +409,7 @@ def events_from_attempt_records(
             event_type=continuity_event_type,
             summary=payload["state"],
             observation=payload.get("reason", ""),
-            failure_reason=payload.get("failure_reason", ""),
+            failure_reason=payload.get("reason", ""),
             strategy_delta=payload.get("strategy_delta", ""),
             do_not_repeat=tuple_field(payload, "do_not_repeat", "rejected_strategies"),
             evidence_refs=tuple_field(payload, "evidence_refs"),
@@ -429,6 +439,7 @@ def _project_tail(snapshot: ContinuitySnapshot, tail: list[ContinuityEvent]) -> 
     rejected, evidence = list(snapshot.rejected_strategies), list(snapshot.evidence_refs)
     risks, unknowns = list(snapshot.unresolved_risks), list(snapshot.unknowns)
     next_action, claim = snapshot.next_action, snapshot.claim_ceiling
+    failure_reason = snapshot.failure_reason
     for event in tail:
         if event.observation:
             facts.append(event.observation)
@@ -445,6 +456,7 @@ def _project_tail(snapshot: ContinuitySnapshot, tail: list[ContinuityEvent]) -> 
         evidence.extend(event.evidence_refs)
         next_action = event.next_action or next_action
         claim = event.claim_ceiling or claim
+        failure_reason = event.failure_reason or failure_reason
         risks.extend(event.unresolved_risks)
         unknowns.extend(event.unknowns)
 
@@ -472,4 +484,5 @@ def _project_tail(snapshot: ContinuitySnapshot, tail: list[ContinuityEvent]) -> 
         evidence_refs=unique(evidence),
         next_action=next_action,
         claim_ceiling=claim,
+        failure_reason=failure_reason,
     )
