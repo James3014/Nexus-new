@@ -5,8 +5,9 @@ status: COMPLETE
 campaign_id: github-issue-95-world-c-executor-projection-20260812
 source_issue: https://github.com/James3014/Nexus-new/issues/95
 baseline_main: ea8c15293455575b4312b92eeeebc69daa4abbcf
-reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
-current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+historical_reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
+current_main: cdf2570ede5ae218f36f886b696c8da45458043a
 ordered_cards:
   - 01-world-c-executor-projection.md
 current_frontier: TERMINAL_RECONCILIATION
