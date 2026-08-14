@@ -253,11 +253,15 @@ def test_rejected_attempt_without_explicit_continuity_type_fails_closed():
     record = {
         "event_type": "attempt_transition",
         "payload": {
-            "task_id": "task-1", "attempt_id": "attempt-1", "sequence": 1,
-            "state": "ATTEMPT_REJECTED", "source_revision": "src-a",
+            "task_id": "task-1",
+            "attempt_id": "attempt-1",
+            "sequence": 1,
+            "state": "ATTEMPT_REJECTED",
+            "source_revision": "src-a",
             "contract_revision": "contract-a",
         },
-        "_attempt_parent_digest": "0" * 64, "_attempt_record_digest": "",
+        "_attempt_parent_digest": "0" * 64,
+        "_attempt_record_digest": "",
     }
     unsigned = dict(record)
     unsigned.pop("_attempt_record_digest")
