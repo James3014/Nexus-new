@@ -7,8 +7,8 @@ owner: James Chen
 baseline: 752d1dec0517b29e1e1179827919e45dac33d131
 historical_baseline: 752d1dec0517b29e1e1179827919e45dac33d131
 merge_base: 752d1dec0517b29e1e1179827919e45dac33d131
-reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
-current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
+current_main: cdf2570ede5ae218f36f886b696c8da45458043a
 block_class: NONE
 frontier: TERMINAL_RECONCILIATION
 frontier_status: COMPLETE
@@ -96,7 +96,7 @@ approval, integration, or production readiness.
   `cf176160bf9488810b2f37991d391da065d1680a6cc9bdfd8353dfc38e81a562` and no
   filesystem delta.
 - Owner receipt: `POST_COMPLETION_RECONCILIATION` on Issue #137.
-- Reconciled current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`.
+- Reconciled current main: `cdf2570ede5ae218f36f886b696c8da45458043a`.
 
 `NEXUS_ISSUE_EXECUTION_CAPSULE_SKILL_PROVEN` is limited to the skill descriptor
 and source contract. No runtime eligibility, catalog promotion, selector or
