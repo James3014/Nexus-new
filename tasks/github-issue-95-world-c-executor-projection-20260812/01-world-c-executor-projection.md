@@ -6,8 +6,8 @@ task_id: github-issue-95-world-c-executor-projection
 campaign_id: github-issue-95-world-c-executor-projection-20260812
 source_issue: https://github.com/James3014/Nexus-new/issues/95
 baseline_main: ea8c15293455575b4312b92eeeebc69daa4abbcf
-reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
-current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 AUTO_CHAIN: false
 worker_may_commit: true
 worker_may_push: true
@@ -75,7 +75,7 @@ release, runtime activation, production/public claim, approval, integration, or 
 - Focused follow-up test commit: `279567b7fae472d67859181ea7f62f87e0387718`.
 - PR #186 head: `d585f43b0b02c3d0f79851f5bcd7f2b359a9d064`.
 - PR #186 merge: `facd84753b42d2a4bc00581cab74c19b075c733a`.
-- Reconciled current main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`.
+- Reconciled current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`.
 
 `WORLD_C_EXECUTOR_PROJECTION_WIRING_PROVEN` is limited to the canonical World C
 executor projection source and focused tests. Historical live check-rollup details were
