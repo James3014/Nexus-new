@@ -78,7 +78,9 @@ Physically merged by PR #215:
 - PR #215 head: `845954d1498e7afffce9b278f5827edb7682dd01`
 - PR #215 merge: `2c820eab67669ab63297bf76fcf1751aaa9496ba`
 
-Verified at current main `eb668fb76f0c30d8f025db42cdb8e320d556c037`:
+Historical verification receipt: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
+(original 2026-08-13 snapshot). Reconfirmed at current main
+`12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`:
 
 - all six authorized `scripts/legacy` adapter paths are absent;
 - exactly their six stale `muse_nexus.egg-info/SOURCES.txt` rows are absent;

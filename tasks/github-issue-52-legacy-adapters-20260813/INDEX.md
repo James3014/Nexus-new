@@ -5,7 +5,7 @@
 - status: COMPLETE / TERMINAL_RECONCILIATION
 - source_issue: `#52`
 - baseline_main: `069596056fff852bad8c826725902d25361aa9c7`
-- reconciled_main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
+- reconciled_main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
 - current_frontier: `00-remove-six-legacy-adapters.md`
 - completed_cards: `[00-remove-six-legacy-adapters.md]`
 - blocked_cards: `[]`
@@ -31,7 +31,10 @@ Physically merged by PR #215:
 - PR #215 merge: `2c820eab67669ab63297bf76fcf1751aaa9496ba`
 - stale predecessor PR #87 is closed and superseded; it grants no authority.
 
-Current-main readback at `eb668fb76f0c30d8f025db42cdb8e320d556c037`:
+Historical reconciliation receipt: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
+(original 2026-08-13 verification snapshot).
+
+Current-main readback at `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`:
 
 - all six `scripts/legacy/{git_manager,linter,llm_client,patcher,reporter,
   workspace_manager}.py` paths are absent;
