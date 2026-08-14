@@ -4,11 +4,35 @@ Baseline (historical): `a74d838cc6bb14af47ce79207181c12a1aed1d35`; prior
 reconciled main (historical): `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`;
 reconciled/current main: `cdf2570ede5ae218f36f886b696c8da45458043a`.
 
-Rebind: non-destructive `merge --no-ff nexus-new/main` on the same branch;
-exact head `c475c401415e42fdce8d24728814e46c1ea8c543` with parents
+Prior rebind (historical): non-destructive merge head
+`c475c401415e42fdce8d24728814e46c1ea8c543` with parents
 `dbe1b49d99ae9636cd96870c434aca0b0512f4b2` + `cdf2570ede5ae218f36f886b696c8da45458043a`;
-exact 7 changed files / zero deletions; scoped blobs byte-identical to prior
-accepted head.
+that head was superseded by the rejected candidate `c603fd8d8fad62523deff74e2d0c47e4e5aa78c1`.
+
+Repair candidate head: `41351277b0c22a1bf890f0f9cf67e9a683cc2668` (parent
+`c603fd8d8fad62523deff74e2d0c47e4e5aa78c1`); exact 5 changed code/test files
+plus this card and `INDEX.md`, zero deletions. No terminal acceptance is
+claimed; the Owner KEEP_OPEN gate remains active.
+
+Bounded repair deltas:
+1. Canonical `failure_reason` persists producer -> payload -> decoder ->
+   projection -> replay from the single `reason` field; no second reason
+   field is retained.
+2. Supported `REJECTED` lifecycle state maps to `ATTEMPT_REJECTED`; rejected
+   transitions with missing or explicit `OBSERVATION_RECORDED` continuity type
+   fail closed at both the producer and the decoder.
+3. Malformed mapping/iterable continuity list inputs fail closed; only
+   canonical bounded string sequences are accepted.
+
+Hostile regression witnesses added in `tests/core/test_task_continuity.py` and
+`tests/core/test_event_bus.py`, including a real JSONL
+append -> canonical read -> decode -> project -> resume proof that preserves
+`ATTEMPT_REJECTED`, `failure_reason`, and `do_not_repeat`. Evidence: 69
+continuity/event-bus tests, 291 self-hosted service tests, 5 lifecycle phase
+receipt tests (365 total), compileall, and `git diff --check` pass. Ruff on the
+changed Python files reports only five pre-existing base findings in
+`self_hosted_task_service.py` (lines 66, 3299, 5059, 5061, 7296), unchanged
+from the base revision.
 
 Status: `ACTIVE`; frontier: `IMPLEMENTATION_ACTIVE`; terminal marker: none
 (Owner KEEP_OPEN repair gate; VERIFIED/terminal status is not authorized).
