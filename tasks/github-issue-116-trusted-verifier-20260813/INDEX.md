@@ -5,7 +5,7 @@ status: active
 purpose: Issue #116 trusted default-branch Golden verifier repair.
 authority: Owner standing coordinator grant; issue branch and Draft PR only.
 repository: James3014/Nexus-new
-base: eb668fb76f0c30d8f025db42cdb8e320d556c037
+base: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 repair_from_head: 2654dd58fa606f7e36271b66a77b71923f5e234a
 max_files: 8
 authorized_deletions: []
