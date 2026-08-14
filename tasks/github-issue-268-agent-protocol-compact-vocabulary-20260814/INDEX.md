@@ -28,4 +28,3 @@ protocol, authority, lifecycle, or runtime change.
 - The worker may implement, test, commit, push the issue branch, and open a PR.
 - The worker may not approve, integrate, merge, close, release, or claim
   production truth.
-
