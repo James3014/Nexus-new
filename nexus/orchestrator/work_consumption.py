@@ -22,9 +22,9 @@ class WorkItemStatus(str, Enum):
 
 
 class ClaimIntent(str, Enum):
+    AUTO_CLAIM_IF_READY = "AUTO_CLAIM_IF_READY"
     MANUAL_DISPATCH = "MANUAL_DISPATCH"
-    AUTONOMOUS = "AUTONOMOUS"
-    UNKNOWN = "UNKNOWN"
+    NOT_CLAIMABLE = "NOT_CLAIMABLE"
 
 
 class ClaimEnforcementState(str, Enum):
@@ -49,7 +49,7 @@ class BlockReason(str, Enum):
     MALFORMED = "MALFORMED"
     NOT_READY = "NOT_READY"
     ROLE_INCOMPATIBLE = "ROLE_INCOMPATIBLE"
-    CLAIM_INTENT_NOT_AUTONOMOUS = "CLAIM_INTENT_NOT_AUTONOMOUS"
+    CLAIM_INTENT_INELIGIBLE = "CLAIM_INTENT_INELIGIBLE"
     PROJECTION_ONLY = "PROJECTION_ONLY"
     PREREQUISITES_UNSATISFIED = "PREREQUISITES_UNSATISFIED"
     ADMISSION_NOT_ALLOWED = "ADMISSION_NOT_ALLOWED"
@@ -110,9 +110,7 @@ class WorkItem:
             raise ValueError("direct_successor must be a boolean")
         for optional_key in ("owner", "realm", "provider"):
             value = raw.get(optional_key)
-            if value is not None and (
-                not isinstance(value, str) or not value
-            ):
+            if value is not None and (not isinstance(value, str) or not value):
                 raise ValueError(f"{optional_key} must be a non-empty string or null")
 
         try:
@@ -121,9 +119,7 @@ class WorkItem:
                 status=WorkItemStatus(_required("status")),
                 roles=frozenset(roles),
                 claim_intent=ClaimIntent(_required("claim_intent")),
-                claim_enforcement_state=ClaimEnforcementState(
-                    _required("claim_enforcement_state")
-                ),
+                claim_enforcement_state=ClaimEnforcementState(_required("claim_enforcement_state")),
                 prerequisites_satisfied=prerequisites,
                 admission=AdmissionDecision(_required("admission")),
                 priority=WorkPriority(_required("priority")),
@@ -163,8 +159,8 @@ def _block_reason(
         return BlockReason.NOT_READY
     if role not in item.roles:
         return BlockReason.ROLE_INCOMPATIBLE
-    if item.claim_intent is not ClaimIntent.AUTONOMOUS:
-        return BlockReason.CLAIM_INTENT_NOT_AUTONOMOUS
+    if item.claim_intent is not ClaimIntent.AUTO_CLAIM_IF_READY:
+        return BlockReason.CLAIM_INTENT_INELIGIBLE
     if item.claim_enforcement_state is not ClaimEnforcementState.REPO_ENFORCED:
         return BlockReason.PROJECTION_ONLY
     if item.prerequisites_satisfied is not True:
@@ -211,9 +207,7 @@ def list_claimable_work(
                 item = WorkItem.from_mapping(raw)
             except ValueError:
                 issue_id = (
-                    raw.get("issue_id", "<unknown>")
-                    if isinstance(raw, Mapping)
-                    else "<unknown>"
+                    raw.get("issue_id", "<unknown>") if isinstance(raw, Mapping) else "<unknown>"
                 )
                 blocked.append(
                     BlockedWorkItem(issue_id=str(issue_id), reason=BlockReason.MALFORMED)

@@ -18,7 +18,7 @@ def _valid(issue_id="issue-1", **overrides):
         "issue_id": issue_id,
         "status": "READY_NOW",
         "roles": ("primary_implementer",),
-        "claim_intent": "AUTONOMOUS",
+        "claim_intent": "AUTO_CLAIM_IF_READY",
         "claim_enforcement_state": "REPO_ENFORCED",
         "prerequisites_satisfied": True,
         "admission": "ALLOW",
@@ -57,9 +57,7 @@ def test_acquire_work_claim_never_called(monkeypatch):
     def fail_claim(*_args, **_kwargs):
         raise AssertionError("claim_work must never be called by listing")
 
-    monkeypatch.setattr(
-        work_consumption, "acquire_work_claim", fail, raising=False
-    )
+    monkeypatch.setattr(work_consumption, "acquire_work_claim", fail, raising=False)
     monkeypatch.setattr(work_consumption, "claim_work", fail_claim, raising=False)
 
     projection = list_claimable_work([_valid()], role="primary_implementer")
@@ -91,18 +89,23 @@ def test_requires_compatible_role():
     assert _reasons(projection) == {"wrong-role": BlockReason.ROLE_INCOMPATIBLE}
 
 
-def test_requires_autonomous_claim_intent():
+def test_claim_intent_vocabulary_witnesses():
     projection = list_claimable_work(
         [
+            _valid("auto-claim", claim_intent="AUTO_CLAIM_IF_READY"),
             _valid("manual", claim_intent="MANUAL_DISPATCH"),
+            _valid("not-claimable", claim_intent="NOT_CLAIMABLE"),
+            _valid("autonomous", claim_intent="AUTONOMOUS"),
             _valid("unknown", claim_intent="UNKNOWN"),
         ],
         role="primary_implementer",
     )
-    assert projection.claimable == ()
+    assert _ids(projection) == ["auto-claim"]
     assert _reasons(projection) == {
-        "manual": BlockReason.CLAIM_INTENT_NOT_AUTONOMOUS,
-        "unknown": BlockReason.CLAIM_INTENT_NOT_AUTONOMOUS,
+        "manual": BlockReason.CLAIM_INTENT_INELIGIBLE,
+        "not-claimable": BlockReason.CLAIM_INTENT_INELIGIBLE,
+        "autonomous": BlockReason.MALFORMED,
+        "unknown": BlockReason.MALFORMED,
     }
 
 
@@ -127,9 +130,7 @@ def test_requires_satisfied_prerequisites():
         role="primary_implementer",
     )
     assert projection.claimable == ()
-    assert _reasons(projection) == {
-        "unsatisfied": BlockReason.PREREQUISITES_UNSATISFIED
-    }
+    assert _reasons(projection) == {"unsatisfied": BlockReason.PREREQUISITES_UNSATISFIED}
 
 
 def test_requires_allowed_admission():
@@ -195,9 +196,7 @@ def test_malformed_items_fail_closed_and_do_not_affect_others():
         _valid("bad-successor", direct_successor="yes"),
         {k: v for k, v in _valid("missing-role-key").items() if k != "roles"},
     ]
-    projection = list_claimable_work(
-        [_valid("good")] + cases, role="primary_implementer"
-    )
+    projection = list_claimable_work([_valid("good")] + cases, role="primary_implementer")
     assert _ids(projection) == ["good"]
     for issue_id in (
         "<unknown>",
@@ -260,7 +259,7 @@ def test_workitem_instance_input_is_accepted():
         issue_id="instance",
         status=WorkItemStatus.READY_NOW,
         roles=frozenset({"primary_implementer"}),
-        claim_intent=ClaimIntent.AUTONOMOUS,
+        claim_intent=ClaimIntent.AUTO_CLAIM_IF_READY,
         claim_enforcement_state=ClaimEnforcementState.REPO_ENFORCED,
         prerequisites_satisfied=True,
         admission=AdmissionDecision.ALLOW,
@@ -275,7 +274,7 @@ def test_eligible_item_keeps_full_identity():
     (item,) = projection.claimable
     assert item.issue_id == "kept"
     assert item.status is WorkItemStatus.READY_NOW
-    assert item.claim_intent is ClaimIntent.AUTONOMOUS
+    assert item.claim_intent is ClaimIntent.AUTO_CLAIM_IF_READY
     assert item.claim_enforcement_state is ClaimEnforcementState.REPO_ENFORCED
     assert item.prerequisites_satisfied is True
     assert item.admission is AdmissionDecision.ALLOW
