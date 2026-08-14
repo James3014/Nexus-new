@@ -80,7 +80,7 @@ Owner receipt `5253011891` (POST_MERGE_RECONCILIATION_20260811) binds Issue
 #82 CLOSED, PR #83 implementation `713273bb3f8899abdaf65d5aaf4f41041529d1fb`
 merged by `b19c80709cadb6f334487f94384930c4d1f09133`, disposition
 PRODUCT_COMPLETE / STALE_CARD_ONLY. Current `main`
-`12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601` readback confirms the delivered
+`cdf2570ede5ae218f36f886b696c8da45458043a` readback confirms the delivered
 impact-map row and learning default-map test. Terminal marker:
 `LEARNING_IMPACT_MAPPING_PROVEN`; claim ceiling:
 `LEARNING_IMPACT_MAPPING_PROVEN_ONLY`. This card status update is
