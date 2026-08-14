@@ -62,7 +62,7 @@ preserved unchanged as the implementation baseline.
   31447108675, Wiki Exact-Base Governance CI 31447108665, Nexus Exact-Base
   Ruff CI 31447108699, Nexus Exact-Base Bandit CI 31447108709, Nexus Pytest CI
   31447108704).
-- Current main `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`; merge `3c4f9065...`
+- Current main `cdf2570ede5ae218f36f886b696c8da45458043a`; merge `3c4f9065...`
   verified ancestor of current main (`git merge-base --is-ancestor` PASS).
 - Marker: `DUPLICATE_MODULE_CLEANUP_PROVEN`.
 - Claim ceiling: cleanup-only / proven-only. The three uncalled duplicate
