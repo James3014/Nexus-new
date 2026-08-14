@@ -5,8 +5,8 @@
 - status: COMPLETE
 - base_sha: 3c4f9065739e7a718bc27e1bf0d0113150946c60
 - historical_baseline: 3c4f9065739e7a718bc27e1bf0d0113150946c60
-- reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
-- current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+- reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+- current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 - frontier_status: TERMINAL_RECONCILIATION
 - terminal_marker: EXACT_GIT_DELETION_PROVENANCE_PROVEN
 - claim_ceiling: EXACT_GIT_EVIDENCE_ONLY_PROVEN_ONLY
@@ -138,7 +138,7 @@ drift, result-authority ceiling, and lifecycle/Candidate non-consumption.
   `ISSUE_75_MONOTONIC_TEST_INVENTORY_CANDIDATE`, and
   `ISSUE_75_EXACT_HEAD_ACCEPTANCE_PASS` recorded on Issue #75; Issue #75 is
   closed `completed`.
-- Reconciled current main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`;
+- Reconciled current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`;
   readback confirms `scripts/ops/pr_impact_gate.py` and
   `tests/ops/test_pr_impact_gate.py` are present and PR #118's merge is an
   ancestor of current main.
