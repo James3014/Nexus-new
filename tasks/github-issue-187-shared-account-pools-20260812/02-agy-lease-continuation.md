@@ -5,7 +5,7 @@ status: ACTIVE
 task_id: github-issue-191-agy-lease-continuation
 campaign_id: github-issue-187-shared-account-pools-20260812
 source_issue: https://github.com/James3014/Nexus-new/issues/191
-baseline_main: 37526fc9705cf984b0b2fd9f373460b3c98d7391
+baseline_main: f752c77d9410747825406df5d56f9fa6244e7084
 AUTO_CHAIN: false
 worker_preference: agy / gemini-3.6-flash-high
 worker_may_commit: true
@@ -28,18 +28,18 @@ The bounded result SHALL bind each Agy execution to an immutable request-scoped 
 - Campaign Issue #187.
 - Ready implementation Issue #191.
 - Completed predecessor #190 / PR #201, merged at `21add665679acaa57a795296dfef2f5b4e49af27`.
-- Collaboration baseline `Nexus-new/main@37526fc9705cf984b0b2fd9f373460b3c98d7391`.
+- Collaboration baseline `Nexus-new/main@f752c77d9410747825406df5d56f9fa6244e7084`.
 - Root `AGENTS.md` and `docs/agents/TASK_EXECUTION_CONTRACT.md`.
 - `CapabilityPlanner` remains sole route/capability selection authority.
 
-## Candidate status — 2026-08-14 (updated after PR #239 merge)
+## Candidate status — 2026-08-14 (updated after PR #237 merge)
 
-- PR #239 merged as `nexus-new/main@37526fc9705cf984b0b2fd9f373460b3c98d7391`; PR #237 rebound onto that exact main with current head `7e216d8769a07589f80615f3f2470abaddde0a62` and exact scope:
+- PR #237 merged 2026-08-14T05:38:45Z as `f752c77d9410747825406df5d56f9fa6244e7084` (parents `37526fc9705cf984b0b2fd9f373460b3c98d7391` + `7e216d8769a07589f80615f3f2470abaddde0a62`) after the authorized PR #239 merge, with exact scope:
   - `nexus/services/agy_account_pool.py`
   - `nexus/executors/worker_registry.py`
   - `tests/services/test_agy_account_pool.py`
   - `tests/nexus/executors/test_worker_contract.py`
-- Exact-head required checks and exact-base impact reached terminal success; focused suite 94 passed; candidate independently accepted `MERGE_SLOT_ONLY`. Only the exact Owner merge slot remains; the candidate is not yet merged.
+- Exact-head required checks and exact-base impact reached terminal success; focused suite 94 passed; candidate independently accepted `MERGE_SLOT_ONLY` before merge. Final physical merge receipt recorded; post-merge reconciliation of #191 remains.
 - This card does not authorize new #191 implementation and does not widen PR #237 scope; no readiness/approval/integration/production claim.
 
 ## Allowed files
