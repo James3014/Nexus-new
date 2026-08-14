@@ -2,7 +2,7 @@
 
 - status: COMPLETED
 - historical baseline: `96bb71e89a0b5112a7b54ab6a3f4ff1ed879f857`
-- reconciled/current main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
+- reconciled/current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
 - terminal marker: `WORKER_NEUTRAL_READY_ISSUE_CLAIM_CONTRACT_PROVEN`
 - claim ceiling: `WORKER_NEUTRAL_READY_ISSUE_CLAIM_CONTRACT_PROVEN_PROJECTION_ONLY`
 - AUTO_CHAIN: false
