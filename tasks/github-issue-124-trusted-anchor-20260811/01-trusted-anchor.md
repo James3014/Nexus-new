@@ -85,7 +85,7 @@ authorized Issue #126 OpenWiki inventory synchronization:
 
 - PR #127 exact base: `73d7437bfc64b0afd453ef56e46e3467304eb99e`.
 - PR #127 exact head: `6d1eb2bf39db537a3f0714dda77ba0c290da11cf`.
-- PR #127 merge: `fffc127cb` (Owner exact merge readback; ancestor of current `main`).
+- PR #127 merge: `fffc127cbb91bf1d06940f4a021c6e3011e96cce` (Owner exact merge readback; ancestor of current `main`).
 - Required checks at exact head: Pytest run `31456046430` success; Pyright/Ruff/Bandit/Wiki runs `31456046*` success.
 - Reconciled current `main`: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`; `trusted-deletion-anchor.yml`, `trusted_deletion_anchor.py`, `test_trusted_deletion_anchor.py`, and the OpenWiki inventory row are present.
 - Historical baseline preserved: implementation was bound to `4232478da8061caba1be82b5a213974e840099fa`; final integration was PR #127.
