@@ -2,8 +2,14 @@
 
 - task_id: github-issue-102
 - issue: #102
-- status: ACTIVE
+- status: COMPLETE
 - base_sha: 3c4f9065739e7a718bc27e1bf0d0113150946c60
+- historical_baseline: 3c4f9065739e7a718bc27e1bf0d0113150946c60
+- reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+- current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+- frontier_status: TERMINAL_RECONCILIATION
+- terminal_marker: R2B3_REPORT_REPLAY_TAMPER_PROVEN
+- claim_ceiling: repository-contained report replay/tamper verifier source/tests only
 - worker_role: luna_worker
 - autonomy: bounded implementation
 - target: /private/tmp/nexus-issue102-luna-019fee
@@ -78,3 +84,23 @@ git diff --name-only 3c4f9065739e7a718bc27e1bf0d0113150946c60...HEAD
 - `RECOVERABLE_BLOCK`: bounded verifier/test defect.
 - `HARD_BLOCK`: need to mutate #101 schema or another forbidden authority,
   or inability to remain deterministic/read-only/fail-closed.
+
+## Physical evidence and terminal boundary
+
+- Historical card baseline: `3c4f9065739e7a718bc27e1bf0d0113150946c60`.
+- PR #123 head: `f523a772edc4dc721a9b6e7dbd73ff9e75c3f9ae`.
+- PR #123 merge: `73d7437bfc64b0afd453ef56e46e3467304eb99e` (parents exactly
+  `4232478da8061caba1be82b5a213974e840099fa` and `f523a772...`).
+- Exact scope: `nexus/research/epistemic_benchmark/report.py`,
+  `tests/research/test_epistemic_benchmark_report.py`, and this campaign pair.
+- All required exact-head checks SUCCESS; Tier3 expected SKIPPED.
+- Owner receipt: `TERMINAL_REVERIFY_RECEIPT_20260813` on Issue #102; post-#101
+  fresh current-main reverify ran report + metrics + e2e suites together,
+  65 passed, zero provider/model calls.
+- Reconciled current main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`.
+
+`R2B3_REPORT_REPLAY_TAMPER_PROVEN` proves only the exact GitHub collaboration
+report replay/tamper verifier source and tests. It grants no benchmark result,
+superiority, causality, provider readiness, execution, release, runtime,
+approval, integration, or production authority. #100/#101/#103 boundaries are
+preserved and `AUTO_CHAIN=false`.
