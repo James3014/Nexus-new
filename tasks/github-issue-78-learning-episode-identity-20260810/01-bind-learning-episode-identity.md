@@ -2,6 +2,7 @@
 artifact_authority: current
 owner: James Chen
 status: COMPLETED
+terminal_state: TERMINAL_RECONCILIATION
 task_id: github-issue-78-learning-episode-identity
 campaign_id: github-issue-78-learning-episode-identity-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/78
