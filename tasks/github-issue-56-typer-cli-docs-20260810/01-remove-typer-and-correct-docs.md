@@ -17,8 +17,8 @@ historical_baseline: 14dd1f29183b09646215462b97b0dd0feb8c0743
 pr70_base: 84eaa6886e0388a4e15f5b837c89e37768b14307
 pr70_head: 40c37dc5eed5a72199c373ea3e21bd51bf9462bc
 pr70_merge: 4e785930eb67ea973a9917c906561c1c86946595
-reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
-current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 ---
 
 # Remove Direct Typer Contract and Correct CLI/Cueline Docs
@@ -89,7 +89,7 @@ first-party code actually imports Typer or requires it as a direct API contract.
   (`POST_MERGE_RECONCILIATION_20260811`): `PRODUCT_COMPLETE / STALE_CARD_ONLY`;
   exact-base Bandit/Pyright/Ruff/impact/Wiki gates passed; Tier 3 skipped;
   transitive Typer may remain by design.
-- Current main `eb668fb76f0c30d8f025db42cdb8e320d556c037` readback: PR #70 merge
+- Current main `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601` readback: PR #70 merge
   `4e785930...` and head `40c37dc5...` are ancestors
   (`git merge-base --is-ancestor`); `pyproject.toml` contains no direct Typer
   declaration; `openwiki/runtime/cli-and-cueline.md` contains no Typer or stale

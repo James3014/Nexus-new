@@ -8,8 +8,8 @@ historical_baseline: 14dd1f29183b09646215462b97b0dd0feb8c0743
 pr70_base: 84eaa6886e0388a4e15f5b837c89e37768b14307
 pr70_head: 40c37dc5eed5a72199c373ea3e21bd51bf9462bc
 pr70_merge: 4e785930eb67ea973a9917c906561c1c86946595
-reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
-current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 ordered_cards:
   - 01-remove-typer-and-correct-docs.md
 current_frontier: 01-remove-typer-and-correct-docs.md
@@ -39,7 +39,7 @@ Issue #56 is closed `completed` (2026-08-10). PR #70 merged
 Task Card pair; current main no longer declares Typer directly; stale
 Typer/nonexistent-command/Cueline claims are absent; exact-base
 Bandit/Pyright/Ruff/impact/Wiki gates passed; Tier 3 was skipped. Current main
-`eb668fb76f0c30d8f025db42cdb8e320d556c037` readback confirms both PR #70 merge
+`12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601` readback confirms both PR #70 merge
 and head are ancestors and `pyproject.toml` plus the OpenWiki page contain no
 Typer declaration or stale claim.
 
