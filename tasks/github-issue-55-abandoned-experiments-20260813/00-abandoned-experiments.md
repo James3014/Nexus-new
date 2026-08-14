@@ -6,8 +6,8 @@ purpose: Remove eight duplicated, repository-unwired Issue #55 experiment script
 authority: Owner-authorized Ready Issue #55 and this exact card
 baseline: 2c820eab67669ab63297bf76fcf1751aaa9496ba
 historical_baseline: 2c820eab67669ab63297bf76fcf1751aaa9496ba
-reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
-current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 frontier_status: TERMINAL_RECONCILIATION
 terminal_marker: ISSUE_55_ABANDONED_EXPERIMENTS_REMOVED_AND_SOURCE_INVENTORY_VERIFIED
 claim_ceiling: ISSUE_55_ABANDONED_EXPERIMENTS_REMOVED_AND_SOURCE_INVENTORY_VERIFIED_PROVEN_ONLY
@@ -69,7 +69,7 @@ that limitation without inventing runtime ownership.
 - Exact-head workflows: Pytest, Pyright, Bandit, Ruff, and Wiki governance
   completed successfully (five runs).
 - Owner receipt: `COMPLETION_RECONCILIATION` recorded on Issue #55.
-- Reconciled current main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`;
+- Reconciled current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`;
   readback confirms all eight deleted paths absent, their eight inventory rows
   absent, the eight exact impact-map rows present with
   `issue55_abandoned_experiment_cleanup_contract`, the focused impact-map
