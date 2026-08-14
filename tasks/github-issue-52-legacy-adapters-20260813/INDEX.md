@@ -44,7 +44,7 @@ Historical current-main readback at `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
 - PR #215 merge is an ancestor of current main.
 
 Current-main readback at `cdf2570ede5ae218f36f886b696c8da45458043a`
-(post-PR236 rebind, merge commit `663ea1660c03c07627c050af91ca3fa393133150`):
+(post-PR236 rebind, merge commit `663ea1660c4e2db5527472a63d7f720f1cc9ff20`):
 
 - all six `scripts/legacy/{git_manager,linter,llm_client,patcher,reporter,
   workspace_manager}.py` paths are absent;

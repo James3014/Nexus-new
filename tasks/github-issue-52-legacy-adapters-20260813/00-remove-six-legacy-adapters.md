@@ -87,7 +87,7 @@ Historical verification receipt: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
 - PR #215 merge commit is an ancestor of current main.
 
 Reconfirmed at current main `cdf2570ede5ae218f36f886b696c8da45458043a`
-(post-PR236 rebind, merge commit `663ea1660c03c07627c050af91ca3fa393133150`):
+(post-PR236 rebind, merge commit `663ea1660c4e2db5527472a63d7f720f1cc9ff20`):
 
 - all six authorized `scripts/legacy` adapter paths are absent;
 - exactly their six stale `muse_nexus.egg-info/SOURCES.txt` rows are absent;
