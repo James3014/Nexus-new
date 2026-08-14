@@ -14,7 +14,7 @@ COMPLETE / TERMINAL_RECONCILIATION
 - task_id: `github-issue-120-golden-witness-maturity`
 - source_issue: `#120`
 - owner: James Chen
-- status: ACTIVE
+- status: COMPLETE / TERMINAL_RECONCILIATION
 - baseline_revision: `e0289e8baa27df445858d51e09dc758d45fb9c8a`
 - commit_required: true
 - candidate_required: true
