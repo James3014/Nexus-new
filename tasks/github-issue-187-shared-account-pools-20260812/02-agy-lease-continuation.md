@@ -5,7 +5,7 @@ status: ACTIVE
 task_id: github-issue-191-agy-lease-continuation
 campaign_id: github-issue-187-shared-account-pools-20260812
 source_issue: https://github.com/James3014/Nexus-new/issues/191
-baseline_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+baseline_main: 37526fc9705cf984b0b2fd9f373460b3c98d7391
 AUTO_CHAIN: false
 worker_preference: agy / gemini-3.6-flash-high
 worker_may_commit: true
@@ -28,19 +28,19 @@ The bounded result SHALL bind each Agy execution to an immutable request-scoped 
 - Campaign Issue #187.
 - Ready implementation Issue #191.
 - Completed predecessor #190 / PR #201, merged at `21add665679acaa57a795296dfef2f5b4e49af27`.
-- Collaboration baseline `Nexus-new/main@eb668fb76f0c30d8f025db42cdb8e320d556c037`.
+- Collaboration baseline `Nexus-new/main@37526fc9705cf984b0b2fd9f373460b3c98d7391`.
 - Root `AGENTS.md` and `docs/agents/TASK_EXECUTION_CONTRACT.md`.
 - `CapabilityPlanner` remains sole route/capability selection authority.
 
-## Candidate status — 2026-08-14
+## Candidate status — 2026-08-14 (updated after PR #239 merge)
 
-- Existing PR #237 / Issue #191 candidate head: `7c66d005a0ed736351a125a13b10278633c00165` with exact scope:
+- PR #239 merged as `nexus-new/main@37526fc9705cf984b0b2fd9f373460b3c98d7391`; PR #237 rebound onto that exact main with current head `7e216d8769a07589f80615f3f2470abaddde0a62` and exact scope:
   - `nexus/services/agy_account_pool.py`
   - `nexus/executors/worker_registry.py`
   - `tests/services/test_agy_account_pool.py`
   - `tests/nexus/executors/test_worker_contract.py`
-- The candidate is explicitly open and unaccepted. It remains impact-blocked until PR #239 merges; after PR #239, the candidate requires rebind and exact-head rerun before independent acceptance.
-- This card does not authorize new #191 implementation and does not widen PR #237 scope.
+- Exact-head required checks and exact-base impact reached terminal success; focused suite 94 passed; candidate independently accepted `MERGE_SLOT_ONLY`. Only the exact Owner merge slot remains; the candidate is not yet merged.
+- This card does not authorize new #191 implementation and does not widen PR #237 scope; no readiness/approval/integration/production claim.
 
 ## Allowed files
 
