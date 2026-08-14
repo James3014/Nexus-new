@@ -7,8 +7,8 @@ campaign_id: github-issue-51-orphan-files-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/51
 baseline_main: 61ea89a85ad0e8cb453ec642293a2da9df072a4c
 historical_baseline: 61ea89a85ad0e8cb453ec642293a2da9df072a4c
-reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
-current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 frontier_status: TERMINAL_RECONCILIATION
 terminal_marker: ISSUE_51_ORPHAN_CLEANUP_PROVEN
 claim_ceiling: ISSUE_51_ORPHAN_CLEANUP_PROVEN_ONLY
@@ -89,6 +89,6 @@ Every physical deletion is individually supported, no executable test behavior i
 - PR #71 merge: `4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e`.
 - Exact scope: thirteen deletions, one Wiki stale row, this card, and INDEX.
 - Exact-head workflows: Trusted verifier, Unprivileged executor, Impact gate, Ruff, Wiki, Pyright, Policy Lane, Bandit, and Trusted controller completed successfully; Tier3 workflow skipped, all pre-merge.
-- Reconciled current main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`; readback confirms all thirteen paths absent, `legacy/logmemory.py` present byte-identical (blob `4c3d4a90a8dacc14626d264b7d2223f4870536f1`), `nexus/core/engine/nexus_transaction.py` retained (blob `3a94beb605f4ba627f7a243e5c89888087631448`), and the stale Wiki row absent.
+- Reconciled current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`; readback confirms all thirteen paths absent, `legacy/logmemory.py` present byte-identical (blob `4c3d4a90a8dacc14626d264b7d2223f4870536f1`), `nexus/core/engine/nexus_transaction.py` retained (blob `3a94beb605f4ba627f7a243e5c89888087631448`), and the stale Wiki row absent.
 
 `ISSUE_51_ORPHAN_CLEANUP_PROVEN` proves only the exact GitHub collaboration physical-deletion reconciliation. It grants no runtime, route, Workforce, lifecycle, claim, approval, integration, merge, release, or production authority. `AUTO_CHAIN=false`.

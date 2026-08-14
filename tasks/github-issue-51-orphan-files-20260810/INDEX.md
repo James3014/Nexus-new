@@ -6,8 +6,8 @@ campaign_id: github-issue-51-orphan-files-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/51
 baseline_main: 61ea89a85ad0e8cb453ec642293a2da9df072a4c
 historical_baseline: 61ea89a85ad0e8cb453ec642293a2da9df072a4c
-reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
-current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 implementation_commit: 4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e
 rebind_lineage_commit: 7bfadd2f1fd2cb4fd8b951d4568a2818121827f3
 current_frontier: TERMINAL_RECONCILIATION
