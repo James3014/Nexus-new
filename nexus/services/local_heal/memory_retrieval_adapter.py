@@ -30,8 +30,7 @@ class RetrievedLesson:
 
 
 class LessonStore(Protocol):
-    def query(self, *, query_text: str, limit: int) -> list[dict[str, Any]]:
-        ...
+    def query(self, *, query_text: str, limit: int) -> list[dict[str, Any]]: ...
 
 
 class LocalJsonlLessonStore:
@@ -44,7 +43,9 @@ class LocalJsonlLessonStore:
     def query(self, *, query_text: str, limit: int) -> list[dict[str, Any]]:
         if not self.path.exists():
             return []
-        tokens = {token for token in query_text.lower().replace("_", " ").split() if len(token) >= 3}
+        tokens = {
+            token for token in query_text.lower().replace("_", " ").split() if len(token) >= 3
+        }
         raw_rows: list[dict[str, Any]] = []
         for line in self.path.read_text(encoding="utf-8", errors="replace").splitlines():
             try:
@@ -54,23 +55,37 @@ class LocalJsonlLessonStore:
             if isinstance(item, dict):
                 raw_rows.append(item)
         try:
-            from nexus.learning.learning_episode_projection import project_learning_entries, semantic_projection_key
+            from nexus.learning.learning_episode_projection import (
+                project_learning_entries,
+                semantic_projection_key,
+            )
+
             projected = project_learning_entries(raw_rows)
         except Exception:
             return []
         representatives: dict[str, dict[str, Any]] = {}
         for item in raw_rows:
-            key = semantic_projection_key(item) if semantic_projection_key else str(item.get("lesson_id") or item.get("task_id") or "")
+            key = (
+                semantic_projection_key(item)
+                if semantic_projection_key
+                else str(item.get("lesson_id") or item.get("task_id") or "")
+            )
             representatives.setdefault(key, item)
         rows: list[tuple[float, dict[str, Any]]] = []
         for projection in projected:
-            if not projection.get("retrieval_eligible", False) and projection.get("pattern_type") == "verifier_pass":
+            if (
+                not projection.get("retrieval_eligible", False)
+                and projection.get("pattern_type") == "verifier_pass"
+            ):
                 continue
             key = str(projection.get("projection_key") or "")
             item = dict(representatives.get(key) or projection)
             item["occurrence_count"] = int(projection.get("occurrence_count", 1) or 1)
             item["projection_key"] = key
-            text = " ".join(str(item.get(key, "")) for key in ("lesson_id", "task_id", "classification", "summary", "source"))
+            text = " ".join(
+                str(item.get(key, ""))
+                for key in ("lesson_id", "task_id", "classification", "summary", "source")
+            )
             lowered = text.lower().replace("_", " ")
             overlap = sum(1 for token in tokens if token in lowered)
             if overlap:
@@ -102,7 +117,9 @@ class FindingsMemoryLessonStore:
             store = self._store()
             cards = list(store.search(query_text, kind="episodes", scope="both"))
             if not cards:
-                tokens = [token for token in re.split(r"[_\W]+", query_text.lower()) if len(token) >= 3]
+                tokens = [
+                    token for token in re.split(r"[_\W]+", query_text.lower()) if len(token) >= 3
+                ]
                 seen_ids: set[str] = set()
                 for token in tokens[:8]:
                     for card in store.search(token, kind="episodes", scope="both"):
@@ -128,9 +145,12 @@ class FindingsMemoryLessonStore:
                     "lesson_id": extra.get("lesson_id") or getattr(card, "id", ""),
                     "finding_id": getattr(card, "id", ""),
                     "task_id": getattr(card, "task_id", "") or extra.get("task_id", ""),
-                    "classification": extra.get("classification") or ",".join(getattr(card, "tags", []) or []),
+                    "classification": extra.get("classification")
+                    or ",".join(getattr(card, "tags", []) or []),
                     "summary": getattr(card, "body", "") or getattr(card, "title", ""),
-                    "provenance": evidence_paths[0] if evidence_paths else extra.get("receipt_id", ""),
+                    "provenance": evidence_paths[0]
+                    if evidence_paths
+                    else extra.get("receipt_id", ""),
                     "relevance_score": 1.0,
                     "source": "FindingsMemoryStore",
                 }
@@ -185,6 +205,168 @@ class MemoryRepositoryLessonStore:
         return rows
 
 
+class CanonicalEpisodicMemoryLessonStore:
+    """Read-only validated adapter over the canonical LearningEpisode ledger.
+
+    Only canonical ``nexus.learning_episode.v1`` records that pass the existing
+    contract validation and carry terminal provenance are exposed. Records that
+    are malformed, identity-mismatched, missing provenance, non-terminal, or not
+    qualified are rejected; a missing ledger is fail-open empty. This is
+    retrieval-only and never mutates the ledger.
+    """
+
+    backend = "canonical_episodic_memory"
+
+    def __init__(self, project_root: Path | None = None) -> None:
+        self.project_root = project_root or Path(__file__).resolve().parents[3]
+        self.last_error: str = ""
+        self.last_metadata: dict[str, Any] = {}
+
+    @staticmethod
+    def _canonical_terminal_provenance(entry: dict[str, Any]) -> str:
+        evidence = entry.get("terminal_evidence")
+        if not isinstance(evidence, dict):
+            return ""
+        receipt = str(evidence.get("receipt") or evidence.get("receipt_id") or "").strip()
+        if receipt and receipt.lower() not in {"receipt:pending", "pending"}:
+            return receipt
+        verifier = str(evidence.get("verifier") or "").strip()
+        if verifier and verifier.lower() not in {
+            "missing",
+            "unverified",
+            "unknown",
+            "fail",
+            "failed",
+            "pass",
+            "passed",
+            "success",
+            "succeeded",
+        }:
+            return verifier
+        for key in ("artifact", "artifact_path", "artifact_ref", "evidence_ref", "provenance"):
+            value = str(evidence.get(key) or "").strip()
+            if value and value.lower() not in {"receipt:pending", "pending"}:
+                return value
+        return ""
+
+    @staticmethod
+    def _qualified_terminal_episode(entry: dict[str, Any]) -> bool:
+        if str(entry.get("terminal_outcome") or "").upper() not in {"SUCCESS", "SUCCEEDED"}:
+            return False
+        if str(entry.get("qualification_status") or "").upper() != "QUALIFIED":
+            return False
+        qualification = entry.get("qualification")
+        if not isinstance(qualification, dict) or not all(
+            qualification.get(field)
+            for field in ("repeatability", "prevention_rule", "authority_qualification")
+        ):
+            return False
+        stages = entry.get("stages")
+        if isinstance(stages, dict) and stages.get("outcome_measured") is False:
+            return False
+        return True
+
+    @staticmethod
+    def _canonical_episode_row(
+        entry: dict[str, Any], provenance: str, source: str
+    ) -> dict[str, Any]:
+        episode_id = str(entry.get("episode_id") or "")
+        qualification = (
+            entry.get("qualification") if isinstance(entry.get("qualification"), dict) else {}
+        )
+        summary = str(
+            entry.get("summary")
+            or qualification.get("prevention_rule")
+            or entry.get("lesson_disposition")
+            or f"canonical learning episode {episode_id}"
+        )
+        return {
+            "schema": entry.get("schema"),
+            "source_schema": entry.get("source_schema") or entry.get("schema"),
+            "episode_id": episode_id,
+            "idempotency_key": entry.get("idempotency_key"),
+            "lesson_id": episode_id,
+            "finding_id": episode_id,
+            "task_id": str(entry.get("task_id") or ""),
+            "classification": "verifier_pass",
+            "summary": summary,
+            "provenance": provenance,
+            "receipt_id": provenance,
+            "evidence_ref": provenance,
+            "terminal_outcome": entry.get("terminal_outcome"),
+            "terminal_evidence": entry.get("terminal_evidence"),
+            "qualification_status": entry.get("qualification_status"),
+            "qualification": entry.get("qualification"),
+            "stages": entry.get("stages"),
+            "lesson_disposition": entry.get("lesson_disposition"),
+            "auto_replay_allowed": entry.get("auto_replay_allowed"),
+            "relevance_score": 1.0,
+            "occurrence_count": 1,
+            "source": source,
+        }
+
+    def query(self, *, query_text: str, limit: int) -> list[dict[str, Any]]:
+        self.last_error = ""
+        from nexus.contracts.learning_experience import validate_nexus_learning_episode
+        from nexus.learning.learning_closure_effectiveness import (
+            canonical_learning_episode_path,
+            load_canonical_learning_episodes,
+        )
+
+        ledger = canonical_learning_episode_path(self.project_root)
+        self.last_metadata = {
+            "backend": self.backend,
+            "query_attempted": True,
+            "query_succeeded": False,
+            "result_count": 0,
+            "ledger_path": str(ledger),
+            "ledger_exists": ledger.exists(),
+            "rejected_validation": 0,
+            "rejected_without_terminal_provenance": 0,
+            "rejected_non_terminal": 0,
+        }
+        if not ledger.exists():
+            self.last_metadata["query_succeeded"] = True
+            return []
+
+        tokens = {
+            token for token in query_text.lower().replace("_", " ").split() if len(token) >= 3
+        }
+        scored: list[tuple[int, dict[str, Any]]] = []
+        for entry in load_canonical_learning_episodes(self.project_root):
+            if not isinstance(entry, dict):
+                continue
+            try:
+                validate_nexus_learning_episode(entry)
+            except Exception:
+                self.last_metadata["rejected_validation"] += 1
+                continue
+            if entry.get("auto_replay_allowed") is not False:
+                self.last_metadata["rejected_validation"] += 1
+                continue
+            if not self._qualified_terminal_episode(entry):
+                self.last_metadata["rejected_non_terminal"] += 1
+                continue
+            provenance = self._canonical_terminal_provenance(entry)
+            if not provenance:
+                self.last_metadata["rejected_without_terminal_provenance"] += 1
+                continue
+            row = self._canonical_episode_row(entry, provenance, self.backend)
+            text = (
+                " ".join(str(row.get(key, "")) for key in ("task_id", "summary", "classification"))
+                .lower()
+                .replace("_", " ")
+            )
+            overlap = sum(1 for token in tokens if token in text)
+            scored.append((overlap, row))
+
+        scored.sort(key=lambda pair: (-pair[0], str(pair[1].get("episode_id") or "")))
+        selected = [row for _overlap, row in scored]
+        self.last_metadata["query_succeeded"] = True
+        self.last_metadata["result_count"] = len(selected)
+        return selected[:limit] if limit and limit > 0 else selected
+
+
 class NexusCompositeLessonStore:
     """Composite Nexus memory read path with bounded, fail-open sources."""
 
@@ -193,6 +375,7 @@ class NexusCompositeLessonStore:
             LocalJsonlLessonStore(),
             FindingsMemoryLessonStore(),
             MemoryRepositoryLessonStore(),
+            CanonicalEpisodicMemoryLessonStore(),
         ]
         self.last_metadata: dict[str, Any] = {}
 
@@ -222,22 +405,12 @@ class NexusCompositeLessonStore:
                 {
                     "store": source,
                     "backend": str(
-                        store_metadata.get("backend")
-                        or getattr(store, "backend", "")
-                        or source
+                        store_metadata.get("backend") or getattr(store, "backend", "") or source
                     ),
-                    "query_attempted": bool(
-                        store_metadata.get("query_attempted", True)
-                    ),
-                    "query_succeeded": bool(
-                        store_metadata.get("query_succeeded", not last_error)
-                    ),
-                    "result_count": int(
-                        store_metadata.get("result_count", len(store_rows)) or 0
-                    ),
-                    "error": str(
-                        store_metadata.get("error") or last_error or ""
-                    ),
+                    "query_attempted": bool(store_metadata.get("query_attempted", True)),
+                    "query_succeeded": bool(store_metadata.get("query_succeeded", not last_error)),
+                    "result_count": int(store_metadata.get("result_count", len(store_rows)) or 0),
+                    "error": str(store_metadata.get("error") or last_error or ""),
                 }
             )
 
@@ -258,18 +431,25 @@ class MemoryRetrievalAdapter:
     match records no_memory_match instead of blocking repair.
     """
 
-    def __init__(self, store: LessonStore | None = None, *, enabled: bool = True, memory_arm: str = "") -> None:
+    def __init__(
+        self, store: LessonStore | None = None, *, enabled: bool = True, memory_arm: str = ""
+    ) -> None:
         self.store = store or NexusCompositeLessonStore()
         self.enabled = enabled
         self.memory_arm = memory_arm
         self.last_metadata: dict[str, Any] = {}
 
-    def retrieve(self, *, query_text: str, limit: int = 5) -> list[RetrievedLesson]:
+    def retrieve(
+        self, *, query_text: str, limit: int = 5, exclude_task_id: str = ""
+    ) -> list[RetrievedLesson]:
         self.last_metadata = {
             "enabled": bool(self.enabled),
-            "query_text_hash": hashlib.sha256(query_text.encode()).hexdigest()[:16] if query_text else "",
+            "query_text_hash": hashlib.sha256(query_text.encode()).hexdigest()[:16]
+            if query_text
+            else "",
             "no_memory_match": False,
             "rejected_without_provenance": 0,
+            "rejected_same_task": 0,
             "source": self.store.__class__.__name__,
             "retrieval_sources": [],
             "source_errors": {},
@@ -289,7 +469,11 @@ class MemoryRetrievalAdapter:
 
         lessons: list[RetrievedLesson] = []
         try:
-            from nexus.learning.learning_episode_projection import project_learning_entries, semantic_projection_key
+            from nexus.learning.learning_episode_projection import (
+                project_learning_entries,
+                semantic_projection_key,
+            )
+
             projection_by_key = {
                 row["projection_key"]: row for row in project_learning_entries(raw_rows)
             }
@@ -305,11 +489,15 @@ class MemoryRetrievalAdapter:
 
         seen_legacy: set[tuple[str, str]] = set()
         for key, projection in projection_by_key.items():
-            if projection.get("pattern_type") == "verifier_pass" and not projection.get("retrieval_eligible", False):
+            if projection.get("pattern_type") == "verifier_pass" and not projection.get(
+                "retrieval_eligible", False
+            ):
                 continue
             row = dict(representatives.get(key) or projection)
             occurrence_count = int(projection.get("occurrence_count", 1) or 1)
-            provenance = str(row.get("provenance") or row.get("receipt_id") or row.get("evidence_ref") or "").strip()
+            provenance = str(
+                row.get("provenance") or row.get("receipt_id") or row.get("evidence_ref") or ""
+            ).strip()
             if not provenance:
                 self.last_metadata["rejected_without_provenance"] += 1
                 continue
@@ -324,12 +512,24 @@ class MemoryRetrievalAdapter:
                     self.last_metadata["rejected_without_provenance"] += 1
                     continue
                 provenance = str(evidence_provenance)
-            finding_id = str(row.get("lesson_id") or row.get("finding_id") or row.get("id") or row.get("task_id") or "lesson")
+            finding_id = str(
+                row.get("lesson_id")
+                or row.get("finding_id")
+                or row.get("id")
+                or row.get("task_id")
+                or "lesson"
+            )
             legacy_key = (finding_id, provenance)
             if legacy_key in seen_legacy:
                 continue
             seen_legacy.add(legacy_key)
-            summary = str(row.get("summary") or row.get("lesson") or row.get("body") or row.get("content") or "")
+            summary = str(
+                row.get("summary")
+                or row.get("lesson")
+                or row.get("body")
+                or row.get("content")
+                or ""
+            )
             classification = str(row.get("classification") or row.get("pattern_type") or "").lower()
             if classification in {"correct_abstain", "abstain"}:
                 pattern_type = "abstain"
@@ -350,6 +550,18 @@ class MemoryRetrievalAdapter:
                 )
             )
 
+        if exclude_task_id:
+            caller_task = re.sub(r"[^a-zA-Z0-9]", "", str(exclude_task_id)).lower()
+            if caller_task:
+                kept: list[RetrievedLesson] = []
+                for lesson in lessons:
+                    lesson_task = re.sub(r"[^a-zA-Z0-9]", "", lesson.task_id).lower()
+                    if lesson_task == caller_task:
+                        self.last_metadata["rejected_same_task"] += 1
+                        continue
+                    kept.append(lesson)
+                lessons = kept
+
         self.last_metadata["accepted"] = len(lessons)
         self.last_metadata["no_memory_match"] = not lessons
         self.last_metadata["status"] = "ok"
@@ -358,7 +570,9 @@ class MemoryRetrievalAdapter:
         self.last_metadata["primary_selected_id"] = lessons[0].finding_id if lessons else ""
         store_metadata = dict(getattr(self.store, "last_metadata", {}) or {})
         if store_metadata:
-            self.last_metadata["retrieval_sources"] = list(store_metadata.get("retrieval_sources") or [])
+            self.last_metadata["retrieval_sources"] = list(
+                store_metadata.get("retrieval_sources") or []
+            )
             self.last_metadata["source_errors"] = dict(store_metadata.get("source_errors") or {})
             self.last_metadata["source_counts"] = dict(store_metadata.get("source_counts") or {})
             self.last_metadata["retrieval_backend_receipts"] = list(
@@ -412,8 +626,8 @@ class MemoryRetrievalAdapter:
             return []
 
         # Build anchor token sets
-        sym_tokens = set(re.split(r'[_\W]+', anchor_symbol.lower())) - {"", "py"}
-        file_tokens = set(re.split(r'[/\\._]+', anchor_file.lower())) - {"", "py"}
+        sym_tokens = set(re.split(r"[_\W]+", anchor_symbol.lower())) - {"", "py"}
+        file_tokens = set(re.split(r"[/\\._]+", anchor_file.lower())) - {"", "py"}
 
         # Score candidates
         scored: list[tuple[float, RetrievedLesson]] = []
@@ -421,7 +635,7 @@ class MemoryRetrievalAdapter:
 
         for lesson in raw_candidates:
             summary_lower = lesson.summary.lower()
-            words = re.split(r'\W+', summary_lower)
+            words = re.split(r"\W+", summary_lower)
             fingerprint = " ".join(sorted(w for w in words if len(w) >= 3))
             if fingerprint in seen_fingerprints:
                 continue  # deduplicate
@@ -445,8 +659,10 @@ class MemoryRetrievalAdapter:
 
             # Task ID match boost
             if task_id and lesson.task_id:
+
                 def normalize_id(t: str) -> str:
-                    return re.sub(r'[^a-zA-Z0-9]', '', t).lower()
+                    return re.sub(r"[^a-zA-Z0-9]", "", t).lower()
+
                 if normalize_id(lesson.task_id) == normalize_id(task_id):
                     score += 10.0
 
@@ -458,7 +674,9 @@ class MemoryRetrievalAdapter:
         # Prune summaries and return top limit
         result: list[RetrievedLesson] = []
         for _score, lesson in scored[:limit]:
-            pruned_summary = lesson.summary[:max_chars] if len(lesson.summary) > max_chars else lesson.summary
+            pruned_summary = (
+                lesson.summary[:max_chars] if len(lesson.summary) > max_chars else lesson.summary
+            )
             result.append(
                 RetrievedLesson(
                     finding_id=lesson.finding_id,
@@ -480,9 +698,16 @@ class MemoryRetrievalAdapter:
         # BMF10-RSH: shadow ranking telemetry (runtime order UNCHANGED)
         try:
             from nexus.services.local_heal.shadow_memory_ranking import shadow_score_lessons
+
             lesson_dicts = [
-                {"lesson_id": l.finding_id, "summary": l.summary, "classification": l.pattern_type,
-                 "provenance": l.provenance, "source": l.source, "relevance_score": l.relevance_score}
+                {
+                    "lesson_id": l.finding_id,
+                    "summary": l.summary,
+                    "classification": l.pattern_type,
+                    "provenance": l.provenance,
+                    "source": l.source,
+                    "relevance_score": l.relevance_score,
+                }
                 for l in raw_candidates
             ]
             shadow = shadow_score_lessons(
