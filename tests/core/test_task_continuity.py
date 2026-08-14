@@ -211,6 +211,63 @@ def test_canonical_attempt_records_are_consumed_after_record_validation():
     assert project(events).evidence_refs == ("ev-1",)
 
 
+def test_canonical_attempt_records_round_trip_protected_continuity_fields():
+    record = {
+        "event_type": "attempt_transition",
+        "payload": {
+            "task_id": "task-1",
+            "attempt_id": "attempt-1",
+            "sequence": 1,
+            "state": "REJECTED",
+            "continuity_event_type": "ATTEMPT_REJECTED",
+            "reason": "provider rejected",
+            "strategy_delta": "switch provider",
+            "do_not_repeat": ["provider-a"],
+            "evidence_refs": ["ev-1"],
+            "unresolved_risks": ["risk-1"],
+            "unknowns": ["unknown-1"],
+            "next_action": "try provider-b",
+            "claim_ceiling": "evidence-only",
+            "source_revision": "src-a",
+            "contract_revision": "contract-a",
+        },
+        "_attempt_parent_digest": "0" * 64,
+        "_attempt_record_digest": "",
+    }
+    unsigned = dict(record)
+    unsigned.pop("_attempt_record_digest")
+    record["_attempt_record_digest"] = hashlib.sha256(
+        json.dumps(unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    ).hexdigest()
+    decoded = events_from_attempt_records([record], task_id="task-1", attempt_id="attempt-1")
+    assert decoded[0].event_type == "ATTEMPT_REJECTED"
+    assert decoded[0].do_not_repeat == ("provider-a",)
+    snapshot = project(decoded)
+    assert snapshot.rejected_strategies == ("provider-a",)
+    assert snapshot.strategy_changes == ("switch provider",)
+    assert snapshot.next_action == "try provider-b"
+    assert snapshot.claim_ceiling == "evidence-only"
+
+
+def test_rejected_attempt_without_explicit_continuity_type_fails_closed():
+    record = {
+        "event_type": "attempt_transition",
+        "payload": {
+            "task_id": "task-1", "attempt_id": "attempt-1", "sequence": 1,
+            "state": "ATTEMPT_REJECTED", "source_revision": "src-a",
+            "contract_revision": "contract-a",
+        },
+        "_attempt_parent_digest": "0" * 64, "_attempt_record_digest": "",
+    }
+    unsigned = dict(record)
+    unsigned.pop("_attempt_record_digest")
+    record["_attempt_record_digest"] = hashlib.sha256(
+        json.dumps(unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode()
+    ).hexdigest()
+    with pytest.raises(ValueError, match="rejected continuity event type"):
+        events_from_attempt_records([record], task_id="task-1", attempt_id="attempt-1")
+
+
 @pytest.mark.parametrize(
     "field,value",
     [

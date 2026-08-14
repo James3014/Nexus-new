@@ -4,13 +4,13 @@
 - issue: #31
 - authority: Owner standing grant, bounded Ready Issue
 - baseline_main: a74d838cc6bb14af47ce79207181c12a1aed1d35
-- reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
-- status: COMPLETE
-- frontier_status: TERMINAL
-- current_frontier: none
-- terminal_marker: CANONICAL_TASK_CONTINUITY_CONTRACT_VERIFIED_SOURCE_AND_HOSTILE_TESTS_ONLY
+- reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+- status: ACTIVE
+- frontier_status: IMPLEMENTATION_ACTIVE
+- current_frontier: 01
+- terminal_marker: none (repair required)
 - AUTO_CHAIN=false
-- claim_ceiling: ISSUE_31_TERMINAL_METADATA_ACCEPTED_SOURCE_AND_HOSTILE_TESTS_ONLY
+- claim_ceiling: ISSUE_31_REPAIR_CANDIDATE_ONLY_PENDING_OWNER_KEEP_OPEN_GATE
 - maximum_files: 8
 - allowed_files: nexus/core/task_continuity.py, nexus/events/contracts.py, nexus/orchestrator/self_hosted_task_service.py, tests/core/test_task_continuity.py, tests/core/test_event_bus.py, tests/nexus/orchestrator/test_self_hosted_task_service.py, this card, INDEX.md
 - worker_may_approve: false
@@ -20,6 +20,11 @@
 
 The implementation consumes the existing post-#7 attempt event seam. It adds
 no lifecycle, route, workforce, verifier, approval, or merge authority.
+
+Owner KEEP_OPEN repair gate: the prior metadata acceptance is superseded for
+this repair. Continuity producer/event/replay fields must preserve the exact
+event type and protected continuity fields; no VERIFIED or terminal claim is
+authorized until independent re-acceptance of this bounded repair.
 
 Terminal reconciliation records PR #226 head `49cba7ccf36daf39bafa6f5100436eac4103106a`
 and merge `a787e8e7` on the reconciled main above. Its exact bounded receipt is

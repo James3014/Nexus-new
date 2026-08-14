@@ -28,6 +28,13 @@ class AttemptTransitionEvent:
     sequence: int
     state: str
     reason: str = ""
+    continuity_event_type: str = "OBSERVATION_RECORDED"
+    strategy_delta: str = ""
+    do_not_repeat: tuple[str, ...] = ()
+    unresolved_risks: tuple[str, ...] = ()
+    unknowns: tuple[str, ...] = ()
+    next_action: str = ""
+    claim_ceiling: str = ""
     candidate_refs: tuple[str, ...] = ()
     evidence_refs: tuple[str, ...] = ()
     source_revision: str = ""
@@ -48,32 +55,48 @@ class AttemptTransitionEvent:
             raise ValueError("state is required")
         if not isinstance(self.reason, str):
             raise ValueError("reason must be a string")
+        if not isinstance(self.continuity_event_type, str) or not self.continuity_event_type.strip():
+            raise ValueError("continuity_event_type is required")
+        for name in ("strategy_delta", "next_action", "claim_ceiling"):
+            if not isinstance(getattr(self, name), str):
+                raise ValueError(f"{name} must be a string")
         if not isinstance(self.source_revision, str) or not isinstance(self.contract_revision, str):
             raise ValueError("source and contract revisions must be strings")
         if not isinstance(self.timestamp, (int, float)) or isinstance(self.timestamp, bool):
             raise ValueError("timestamp must be numeric")
-        if not isinstance(self.candidate_refs, tuple) or not isinstance(self.evidence_refs, tuple):
-            raise ValueError("event references must be tuples")
-        for refs in (self.candidate_refs, self.evidence_refs):
+        for name in ("do_not_repeat", "unresolved_risks", "unknowns", "candidate_refs", "evidence_refs"):
+            if not isinstance(getattr(self, name), tuple):
+                raise ValueError(f"{name} must be a tuple")
+        for refs in (self.do_not_repeat, self.unresolved_risks, self.unknowns, self.candidate_refs, self.evidence_refs):
             if any(not isinstance(ref, str) or not ref.strip() for ref in refs):
-                raise ValueError("event references must be non-empty strings")
+                raise ValueError("continuity fields must contain non-empty strings")
 
     def to_dict(self) -> Dict[str, Any]:
         value = asdict(self)
         value["candidate_refs"] = list(self.candidate_refs)
         value["evidence_refs"] = list(self.evidence_refs)
+        value["do_not_repeat"] = list(self.do_not_repeat)
+        value["unresolved_risks"] = list(self.unresolved_risks)
+        value["unknowns"] = list(self.unknowns)
         return value
 
 
 def build_attempt_transition_event(
     *, task_id: str, attempt_id: str, sequence: int, state: str,
     reason: str = "", candidate_refs: tuple[str, ...] | list[str] = (),
-    evidence_refs: tuple[str, ...] | list[str] = (),
+    evidence_refs: tuple[str, ...] | list[str] = (), continuity_event_type: str = "OBSERVATION_RECORDED",
+    strategy_delta: str = "", do_not_repeat: tuple[str, ...] | list[str] = (),
+    unresolved_risks: tuple[str, ...] | list[str] = (), unknowns: tuple[str, ...] | list[str] = (),
+    next_action: str = "", claim_ceiling: str = "",
     source_revision: str = "", contract_revision: str = "",
 ) -> AttemptTransitionEvent:
     return AttemptTransitionEvent(
         task_id=task_id, attempt_id=attempt_id, sequence=sequence, state=state,
-        reason=reason, candidate_refs=tuple(candidate_refs), evidence_refs=tuple(evidence_refs),
+        reason=reason, continuity_event_type=continuity_event_type,
+        strategy_delta=strategy_delta, do_not_repeat=tuple(do_not_repeat),
+        unresolved_risks=tuple(unresolved_risks), unknowns=tuple(unknowns),
+        next_action=next_action, claim_ceiling=claim_ceiling,
+        candidate_refs=tuple(candidate_refs), evidence_refs=tuple(evidence_refs),
         source_revision=source_revision, contract_revision=contract_revision,
     )
 

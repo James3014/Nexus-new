@@ -2015,10 +2015,38 @@ class SelfHostedTaskService:
         # must remain visible to the caller; silently dropping them creates a
         # false lifecycle receipt while leaving the lifecycle authority intact.
         request = result.get("request") if isinstance(result.get("request"), Mapping) else {}
+        status = str(result.get("status"))
+        continuity_event_type = str(
+            result.get("continuity_event_type")
+            or request.get("continuity_event_type")
+            or (status if status == "ATTEMPT_REJECTED" else "OBSERVATION_RECORDED")
+        )
+
+        def continuity_list(name: str, alias: str = "") -> tuple[str, ...]:
+            value = result.get(name)
+            if value is None and alias:
+                value = result.get(alias)
+            if value is None:
+                value = request.get(name)
+            if value is None and alias:
+                value = request.get(alias)
+            if value is None:
+                return ()
+            if isinstance(value, str):
+                return (value,)
+            return tuple(value)
+
         NexusEventBus.emit_attempt_transition(build_attempt_transition_event(
             task_id=str(result.get("task_id") or task_id),
             attempt_id=str(result.get("attempt_id")), sequence=sequence,
-            state=str(result.get("status")), reason=str(result.get("error") or ""),
+            state=status, reason=str(result.get("error") or result.get("reason") or ""),
+            continuity_event_type=continuity_event_type,
+            strategy_delta=str(result.get("strategy_delta") or request.get("strategy_delta") or ""),
+            do_not_repeat=continuity_list("do_not_repeat", "rejected_strategies"),
+            unresolved_risks=continuity_list("unresolved_risks"),
+            unknowns=continuity_list("unknowns"),
+            next_action=str(result.get("next_action") or request.get("next_action") or ""),
+            claim_ceiling=str(result.get("claim_ceiling") or request.get("claim_ceiling") or ""),
             candidate_refs=candidate_refs, evidence_refs=evidence_refs,
             source_revision=str(result.get("source_revision") or request.get("controller_revision") or "unknown"),
             contract_revision=str(result.get("contract_revision") or request.get("contract_hash") or "unknown"),

@@ -113,6 +113,25 @@ def test_attempt_transition_missing_continuity_revision_fails_closed(tmp_path):
     with pytest.raises(ValueError):
         JsonlEventLogStore().configure(tmp_path)
 
+
+def test_attempt_transition_persists_continuity_projection_fields(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    NexusEventBus.emit_attempt_transition(build_attempt_transition_event(
+        task_id="t1", attempt_id="a1", sequence=1, state="REJECTED",
+        continuity_event_type="ATTEMPT_REJECTED", strategy_delta="switch",
+        do_not_repeat=["old"], unresolved_risks=["risk"], unknowns=["unknown"],
+        next_action="retry", claim_ceiling="evidence-only",
+        source_revision="src", contract_revision="contract",
+    ))
+    row = NexusEventBus.get_recent_events(event_type="attempt_transition", limit=1)[0]
+    payload = row["payload"]
+    assert payload["continuity_event_type"] == "ATTEMPT_REJECTED"
+    assert payload["do_not_repeat"] == ["old"]
+    assert payload["unresolved_risks"] == ["risk"]
+    assert payload["unknowns"] == ["unknown"]
+    assert payload["next_action"] == "retry"
+    assert payload["claim_ceiling"] == "evidence-only"
+
 def test_event_bus_signal_injection_and_drain(tmp_path):
     """驗證信號注入與消費 (inject/drain)。"""
     NexusEventBus.configure(tmp_path)

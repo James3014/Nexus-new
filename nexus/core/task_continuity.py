@@ -334,6 +334,16 @@ def events_from_attempt_records(
     records: Iterable[dict[str, Any]], *, task_id: str, attempt_id: str
 ) -> list[ContinuityEvent]:
     """Decode canonical EventBus attempt records without trusting projections."""
+    def tuple_field(payload: dict[str, Any], name: str, alias: str = "") -> tuple[str, ...]:
+        value = payload.get(name, payload.get(alias, ()) if alias else ())
+        if value is None:
+            return ()
+        if not isinstance(value, (list, tuple)) or any(
+            not isinstance(item, str) or not item.strip() for item in value
+        ):
+            raise ValueError(f"{name} must be a list of non-empty strings")
+        return tuple(value)
+
     decoded: list[ContinuityEvent] = []
     previous = ""
     record_previous = "0" * 64
@@ -372,14 +382,30 @@ def events_from_attempt_records(
             raise ValueError("continuity record tampered")
         if persisted_parent != record_previous:
             raise ValueError("continuity record parent mismatch")
+        continuity_event_type = payload.get("continuity_event_type")
+        if continuity_event_type is None:
+            # Legacy records may omit the optional projection type, but a
+            # rejected transition must never silently become an observation.
+            if payload["state"] == "ATTEMPT_REJECTED":
+                raise ValueError("rejected continuity event type is missing")
+            continuity_event_type = "OBSERVATION_RECORDED"
+        if not isinstance(continuity_event_type, str):
+            raise ValueError("continuity_event_type must be a string")
         current = ContinuityEvent(
             task_id=task_id,
             attempt_id=attempt_id,
             sequence=payload["sequence"],
-            event_type=payload.get("continuity_event_type", "OBSERVATION_RECORDED"),
+            event_type=continuity_event_type,
             summary=payload["state"],
             observation=payload.get("reason", ""),
-            evidence_refs=tuple(payload.get("evidence_refs") or ()),
+            failure_reason=payload.get("failure_reason", ""),
+            strategy_delta=payload.get("strategy_delta", ""),
+            do_not_repeat=tuple_field(payload, "do_not_repeat", "rejected_strategies"),
+            evidence_refs=tuple_field(payload, "evidence_refs"),
+            unresolved_risks=tuple_field(payload, "unresolved_risks"),
+            unknowns=tuple_field(payload, "unknowns"),
+            next_action=payload.get("next_action", ""),
+            claim_ceiling=payload.get("claim_ceiling", ""),
             source_revision=payload["source_revision"],
             contract_revision=payload["contract_revision"],
             previous_hash=previous,
