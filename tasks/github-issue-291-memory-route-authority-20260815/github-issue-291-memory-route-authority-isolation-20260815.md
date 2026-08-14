@@ -31,8 +31,8 @@ candidate_lane:
   autonomy: L1
   external_verification_required: true
   admission_policy_hash: 8bc154848ac95b2478045c0d4568fcbb208263d4f46232d8b671a88b4a13bdca
-  admission_binding_hash: 050facd0
-  admission_aggregate_hash: 903c7ce9
+  admission_binding_hash: b1f2ecb41facc1a4af95f3d044828289ec124b99372a50f9f45fb5ad30d415b8
+  admission_aggregate_hash: 4f3e923f2a2499ebc3916ad95c2bd44140b5a93b722044b328d0e48517f3e094
 ---
 
 # Issue #291 — isolate legacy memory route authority
