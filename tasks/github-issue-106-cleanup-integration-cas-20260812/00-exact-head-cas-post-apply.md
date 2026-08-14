@@ -67,7 +67,9 @@ merge authority. Maximum claim before physical merge:
 Status: `COMPLETE / TERMINAL_RECONCILIATION`.
 
 The four-file Candidate was merged via PR #202 and the guard now exists in
-current `main` `eb668fb76f0c30d8f025db42cdb8e320d556c037`:
+current `main` `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601` (historical
+verification receipt `eb668fb76f0c30d8f025db42cdb8e320d556c037` from the
+2026-08-13 snapshot):
 
 - PR #202 base: `21add665679acaa57a795296dfef2f5b4e49af27`
 - PR #202 head: `7eccc17a4adf807c7b8724be178dcf2cf624d18a`
