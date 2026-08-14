@@ -1,58 +1,82 @@
 ---
 type: Concept
 title: Capability Planner & Routing Authority
-description: Deep dive into CapabilityPlanner and HybridRouteDecision, the sole Nexus route authority governing capability graph composition.
+description: Current-source guide to CapabilityPlanner, the single canonical planning seam, execution depths, and Planner-derived route payloads.
 tags: [routing, capability-planner, hybrid-route, authority]
 openwiki:
   roles: [architecture, domain]
   change_kinds: [public-api, routing]
-  source_paths: [nexus/engine/capability_planner.py, nexus/contracts/hybrid_route.py, nexus/services/mainchain_route_freeze.py]
-  symbols: [CapabilityPlanner, HybridRouteDecision, CapabilityPlan, MAINCHAIN_AUTHORITY]
-  test_paths: [tests/test_lite_route_oracle.py, tests/test_route_optimization.py]
-  invariants: [CapabilityPlanner and HybridRouteDecision remain sole Nexus route authority. OpenWiki has zero route authority.]
-  validation_commands: [pytest tests/test_lite_route_oracle.py -q]
+  source_paths: [nexus/engine/capability_planner.py, nexus/contracts/canonical_execution.py, nexus/contracts/hybrid_route.py, nexus/services/unified_runtime.py]
+  symbols: [CapabilityPlanner, CapabilityPlan, CanonicalPlanningBundle, HybridRouteDecision]
+  test_paths: [tests/engine/test_capability_planner.py, tests/contracts/test_canonical_execution.py, tests/contracts/test_hybrid_route_contract.py]
+  invariants: [CapabilityPlanner is the sole route and capability-selection authority. HybridRouteDecision is Planner-derived and is not a second selector, router, or planner. Execution depths are LIGHT, STANDARD, and FULL.]
+  validation_commands: [pytest tests/engine/test_capability_planner.py tests/contracts/test_canonical_execution.py tests/contracts/test_hybrid_route_contract.py -q]
 ---
 
 # Capability Planner & Routing Authority
 
-In Nexus Singularity OS, **`CapabilityPlanner`** is the sole route and
-capability-selection authority. **`HybridRouteDecision`** is the
-Planner-derived decision contract/projection that carries the settled route;
-it is not a second selector, router, or planner. All execution requests
-originating from `[NexusCLI](../runtime/cli-and-cueline.md)`,
-`[UnifiedMCPGateway](../runtime/mcp-gateway.md)`, or autonomous workers must
-obtain routing authorization through `CapabilityPlanner`.
+In current Nexus source, **`CapabilityPlanner` is the sole route and capability-selection authority**. `nexus/contracts/canonical_execution.py` hard-binds `_ROUTE_AUTHORITY = "CapabilityPlanner"`, and its module contract explicitly says canonical planning contracts do not themselves select a provider, model, execution lane, Target, lifecycle, or execution world.
 
-> 🏛️ **Authority Contract Requirement**: `AGENTS.md` remains repository governance authority. `CapabilityPlanner` is the sole route/capability-selection authority; `HybridRouteDecision` is its derived contract/projection. OpenWiki documentation must never create, infer, promote, or duplicate route authority.
+`HybridRouteDecision` is a Planner-derived route decision payload/projection. It carries fields such as `execution_world`, `execution_topology`, `route_mode`, `authority`, and evidence, but its own default `route_truth_source` is `"CapabilityPlanner"` and `adapter_output_is_route_truth` defaults to `False`. It is therefore **not a second selector, router, or planner**.
+
+> 🏛️ **Authority ceiling**: `AGENTS.md` remains repository/agent governance authority. OpenWiki is `derived_non_authoritative`. No Wiki page, adapter, workforce admission result, execution receipt, or HybridRouteDecision may become a parallel route source.
 
 ---
 
-## 🎯 Capability Planning Logic & Flow
+## 🎯 Planner Inputs and Output
 
-`CapabilityPlanner` evaluates task descriptions, risk scores, code intelligence signals, and budget constraints to compute an optimal execution depth (`LIGHT`, `STANDARD`, or `DEEP`) and activate appropriate governance and tool nodes.
+`CapabilityPlanner.plan()` accepts explicit task and evidence inputs including:
+
+- `execution_world`
+- `task_desc`
+- `task_type`
+- `route`
+- optional `pillars`, `codeintel`, `phase_trace`, `budget`, `skills`
+- optional `ExecutionReplanAuthorization`
+
+The planner builds capability signals and constraints, applies governance and policy floors, and returns one `CapabilityPlan`.
+
+The current execution-depth vocabulary is:
+
+- `LIGHT`
+- `STANDARD`
+- `FULL`
+
+Older OpenWiki wording that used `DEEP` is stale for this contract.
 
 ```mermaid
 flowchart TD
-    A["Task Description & Route Inputs"] --> B["build_capability_signals()"]
-    B --> C["_decide_routing_tier(signals)"]
-    C --> D{"base_depth == LIGHT and Safety Blockers present?"}
-    D -- "Yes" --> E["Escalate to STANDARD depth"]
-    D -- "No" --> F["Preserve Base Depth"]
-    E --> G["Enforce Required Gates: mempalace, artifact, claim"]
-    F --> G
-    G --> H["Produce CapabilityPlan & HybridRouteDecision"]
+    A["Task + route facts + evidence"] --> B["build_capability_signals()"]
+    B --> C["build_capability_constraints()"]
+    C --> D["_decide_routing_tier(signals)"]
+    D --> E["execution_depth_for_routing_tier()"]
+    E --> F{"LIGHT safety blockers?"}
+    F -- "yes" --> G["raise floor to STANDARD"]
+    F -- "no" --> H["preserve base depth"]
+    G --> I["apply policies + governance constraints"]
+    H --> I
+    I --> J["optional verified replan depth floor"]
+    J --> K["CapabilityPlan"]
 ```
-*Figure 1: CapabilityPlanner signal evaluation, safety floor escalation, and execution depth resolution logic.*
+
+`UnifiedRuntime` consumes `CapabilityPlanner` for task-scoped planning and may build a verifier-evidence-backed replan request. A replan request is not a free-form route override: it is tied to the source planner decision and can only raise the execution-depth floor through the planner contract.
 
 ---
 
-## 🔒 Governance & Delivery Hard Constraints
+## 🔒 Hard Governance Nodes Are Not Route Alternatives
 
-`CapabilityPlanner` enforces mandatory governance nodes regardless of task parameters:
-- **`mempalace_gate`**: Requires memory palace verification for state consistency.
-- **`artifact_gate`**: Ensures code modification artifacts conform to schema.
-- **`claim_gate`**: Enforces physical evidence verification before claim verification.
-- **`delivery_gate`**: Activates fail-closed delivery contracts.
+The planner marks key governance capabilities as hard constraints or required nodes. Current source includes:
+
+- `mempalace_gate`
+- `artifact_gate`
+- `claim_gate`
+- `delivery_gate`
+- `harness_preflight_sensor`
+- `research_route`
+
+These gates constrain execution; they do not become independent route authorities.
+
+The capability graph also includes phase-scoped execution capabilities such as `codeintel`, `research`, `nightshift`, `swarm`, `drone`, and `local_model_executor`. Their presence in `default_capability_nodes()` proves that the planner can represent them; runtime invocation must still be verified separately.
 
 ---
 
@@ -63,34 +87,18 @@ component: CapabilityPlanner
 implementation_status: CURRENT
 wiring_status: WIRED
 runtime_surfaces:
-  - MAIN_CLI
-  - MCP_GATEWAY
   - LOCAL_RUNTIME
 authority_roles:
   - ROUTE_AUTHORITY
 evidence_basis:
   - nexus/engine/capability_planner.py:CapabilityPlanner
-  - nexus/services/mainchain_route_freeze.py:MAINCHAIN_AUTHORITY
-claim_ceiling: Canonical route authority responsible for capability node graph composition and execution depth determination.
+  - nexus/contracts/canonical_execution.py:_ROUTE_AUTHORITY
+  - nexus/services/unified_runtime.py:CapabilityPlanner
+claim_ceiling: Sole canonical route and capability-selection authority for the task-scoped runtime planning seam.
 ```
 
 ```yaml
-component: HybridRouteDecision
-implementation_status: CURRENT
-wiring_status: WIRED
-runtime_surfaces:
-  - MAIN_CLI
-  - MCP_GATEWAY
-  - LOCAL_RUNTIME
-authority_roles:
-  - ROUTE_AUTHORITY
-evidence_basis:
-  - nexus/contracts/hybrid_route.py:HybridRouteDecision
-claim_ceiling: Immutable payload contract capturing CapabilityPlanner selection state and route features.
-```
-
-```yaml
-component: CapabilityRegistry
+component: CanonicalPlanningBundle
 implementation_status: CURRENT
 wiring_status: WIRED
 runtime_surfaces:
@@ -98,43 +106,62 @@ runtime_surfaces:
 authority_roles:
   - NONE
 evidence_basis:
-  - nexus/services/capability_registry.py:CapabilityRegistry
-claim_ceiling: Registry mapping CapabilityPlanner node names to UnifiedRuntime invokers; holds zero route authority.
+  - nexus/contracts/canonical_execution.py:CanonicalPlanningBundle
+  - nexus/services/unified_runtime.py:CanonicalPlanningBundle
+claim_ceiling: Immutable planner-output bundle used by the task-scoped runtime; it carries planning truth but does not independently select provider, model, execution lane, Target, lifecycle, or world.
+```
+
+```yaml
+component: HybridRouteDecision
+implementation_status: CURRENT
+wiring_status: UNKNOWN
+runtime_surfaces: []
+authority_roles:
+  - NONE
+evidence_basis:
+  - nexus/contracts/hybrid_route.py:HybridRouteDecision
+  - nexus/contracts/hybrid_route.py:route_truth_source
+  - nexus/contracts/hybrid_route.py:adapter_output_is_route_truth
+claim_ceiling: Current Planner-derived route payload implementation exists; this bounded source evidence does not establish a specific runtime caller and does not grant route-selection authority.
 ```
 
 ---
 
-## 🛠️ Extension Recipe: Adding a Capability Node
+## 🛠️ Extension Recipe: Adding or Changing a Capability Node
 
-To register a new capability node in the `CapabilityPlanner` execution graph:
-
-1. **Define the Node**: Add a new `CapabilityNode` entry in `default_capability_nodes()` within `nexus/engine/capability_planner.py`.
-2. **Bind to Registry**: Map the node name to its invoker in `nexus/services/capability_registry.py`.
-3. **Register Invoker**: Implement the node execution hook in `[UnifiedRuntime](../architecture/overview.md)`.
-4. **Unit Validation**: Add test coverage verifying that `CapabilityPlanner.plan()` correctly sets node status (`required`, `optional`, `conditional`).
-5. **Run Checks**: Run `pytest tests/test_lite_route_oracle.py -q` to ensure no route regression.
+1. **Define or edit the node** in `default_capability_nodes()` in `nexus/engine/capability_planner.py`.
+2. **Preserve phase semantics** against the canonical runtime contract (`S`, `P`, `D`, `X`, `R`, `A`, `C`).
+3. **Preserve route authority**: do not add a new Router/Planner/topology selector or adapter-owned route truth.
+4. **Bind execution separately** through the existing runtime/invoker surface; node existence alone is not runtime wiring proof.
+5. **Add focused planner and contract tests** for state, constraints, depth, route truth, and any replan behavior.
+6. **Run the focused gate** below before broader tests.
 
 ---
 
 ## 🧭 Change Navigation & Validation
 
 ### When to Consult
-Consult this page when modifying capability selection rules, adding new tools to the planner graph, modifying execution depth safety floors, or debugging route authorization failures.
+Consult this page when modifying capability selection, route facts, execution-depth floors, replan semantics, planner-owned workforce demands, or a Planner-derived route contract.
 
 ### Runtime Invariants
-- `route_truth_source` in all execution receipts must evaluate to `"CapabilityPlanner"`.
-- Modifying route authority elsewhere in the codebase violates system governance.
+- `CapabilityPlanner` is the only route/capability-selection authority.
+- `_ROUTE_AUTHORITY` remains `"CapabilityPlanner"`.
+- `HybridRouteDecision.route_truth_source` must remain `"CapabilityPlanner"` for valid Planner-derived decisions.
+- `adapter_output_is_route_truth` must not be promoted into a parallel route source.
+- Execution-depth values are `LIGHT`, `STANDARD`, and `FULL`.
 
 ### Exact Source Files & Symbols
-- `nexus/engine/capability_planner.py` -> `CapabilityPlanner`, `CapabilityPlan`
-- `nexus/contracts/hybrid_route.py` -> `HybridRouteDecision`
-- `nexus/services/mainchain_route_freeze.py` -> `MAINCHAIN_AUTHORITY`
+- `nexus/engine/capability_planner.py` → `CapabilityPlanner`, `default_capability_nodes`, `CapabilityPlan`
+- `nexus/contracts/canonical_execution.py` → `_ROUTE_AUTHORITY`, `CanonicalTaskContext`, `CanonicalPlanningBundle`
+- `nexus/contracts/hybrid_route.py` → `HybridRouteDecision`, `RouteMode`, `Authority`
+- `nexus/services/unified_runtime.py` → planner invocation and evidence-backed replan seam
 
 ### Focused Tests
-- `tests/test_lite_route_oracle.py`
-- `tests/test_route_optimization.py`
+- `tests/engine/test_capability_planner.py`
+- `tests/contracts/test_canonical_execution.py`
+- `tests/contracts/test_hybrid_route_contract.py`
 
 ### Minimal Validation Command
 ```bash
-pytest tests/test_lite_route_oracle.py -q
+pytest tests/engine/test_capability_planner.py tests/contracts/test_canonical_execution.py tests/contracts/test_hybrid_route_contract.py -q
 ```
