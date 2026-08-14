@@ -5,8 +5,8 @@ status: COMPLETE
 task_id: github-issue-207-narrow-committee-impact-target
 source_issue: https://github.com/James3014/Nexus-new/issues/207
 historical_baseline: 8620b72e5688dc41551afb8ed5454b49d21dc5e3
-reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
-current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
+current_main: cdf2570ede5ae218f36f886b696c8da45458043a
 frontier_status: TERMINAL_RECONCILIATION
 terminal_marker: ISSUE_51_COMMITTEE_IMPACT_TARGET_REPAIR_PROVEN
 claim_ceiling: ISSUE_51_COMMITTEE_IMPACT_TARGET_REPAIR_PROVEN_ONLY
@@ -57,7 +57,7 @@ No PR #71 deletion mutation, runtime/API change, ruleset/bypass change, merge/ap
 - Historical baseline: `8620b72e5688dc41551afb8ed5454b49d21dc5e3`.
 - Mapping commit: `abf781ea62c1c7384031bfb47d3185d2e24ca314`.
 - Exact testcase-identity commit: `cdf72a61165a006049074c137c6a0de13e4a1724`.
-- Reconciled current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`.
+- Reconciled current main: `cdf2570ede5ae218f36f886b696c8da45458043a`.
 - Focused current-main evidence: `tests/ops/test_issue51_cleanup_impact_map.py` — 4 passed.
 
 `ISSUE_51_COMMITTEE_IMPACT_TARGET_REPAIR_PROVEN` is limited to the exact mapped
