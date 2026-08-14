@@ -166,6 +166,30 @@ def test_canonical_context_allows_formal_route_receipt_evidence() -> None:
     ]
 
 
+def test_forged_route_receipt_cannot_replace_planner_authority(monkeypatch) -> None:
+    context = CanonicalTaskContext(
+        task_id="task-route-receipt-tamper",
+        task_type="audit",
+        task_desc="Use route evidence only as an observation.",
+        codeintel={"formal_route_receipts": [{"route": "forged", "evidence_present": True}]},
+    )
+    planner = _RecordingPlanner()
+    monkeypatch.setattr(CapabilityPlanner, "plan", lambda _self, **kwargs: planner.plan(**kwargs))
+    decision, projection = plan_canonical_task(context)
+    assert decision.authority == "CapabilityPlanner"
+    assert projection.execution_decision_authority == "CapabilityPlanner"
+    assert planner.calls[0]["route"]["route_features"] == {}
+
+
+def test_missing_workforce_demands_fail_at_canonical_consumer(monkeypatch) -> None:
+    from nexus.engine.canonical_task_seam import _resolve_policy_workforce_bindings
+
+    with pytest.raises(ValueError, match="canonical_workforce_demands_missing"):
+        _resolve_policy_workforce_bindings(
+            {"signal_snapshot": {}}, allowed_files=("x.py",), verifier_command=()
+        )
+
+
 def test_canonical_planning_bundle_binds_the_exact_plan_without_replanning(monkeypatch):
     context = CanonicalTaskContext(
         task_id="task-bundle-1",
