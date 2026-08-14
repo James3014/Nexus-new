@@ -7,8 +7,8 @@ campaign_id: github-issue-153-event-feedback-impact-map-20260811
 source_issue: https://github.com/James3014/Nexus-new/issues/153
 baseline_main: 9dddd018ad2761face3d2f3ce29dff8d8feae72d
 historical_baseline: 9dddd018ad2761face3d2f3ce29dff8d8feae72d
-reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
-current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 frontier_status: TERMINAL_RECONCILIATION
 terminal_marker: EVENT_AND_FEEDBACK_IMPACT_MAPPING_PROVEN
 claim_ceiling: EVENT_AND_FEEDBACK_IMPACT_MAPPING_PROVEN_ONLY
@@ -73,7 +73,7 @@ semantics.
 - Exact scope: impact-map, selector tests, this card, and INDEX.
 - Exact-head workflows: Pytest, Pyright, Bandit, Ruff, and Wiki governance completed
   successfully.
-- Reconciled current main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`.
+- Reconciled current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`.
 
 `EVENT_AND_FEEDBACK_IMPACT_MAPPING_PROVEN` proves only exact selector mapping,
 high-risk escalation, and preserved fail-closed fallback. It grants no PR #151 mutation,

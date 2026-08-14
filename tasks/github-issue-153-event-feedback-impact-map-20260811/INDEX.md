@@ -6,8 +6,8 @@ campaign_id: github-issue-153-event-feedback-impact-map-20260811
 source_issue: https://github.com/James3014/Nexus-new/issues/153
 baseline_main: 9dddd018ad2761face3d2f3ce29dff8d8feae72d
 historical_baseline: 9dddd018ad2761face3d2f3ce29dff8d8feae72d
-reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
-current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 implementation_commit: 4ffbd1fa7e4b88c932615daf3dfa3dec9e8ecd7b
 rebind_lineage_commit: 88a6c616fdf145738e582aa625c94abbf90daf66
 current_frontier: TERMINAL_RECONCILIATION
