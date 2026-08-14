@@ -7,8 +7,8 @@
 **source_issue:** #107
 **baseline_main:** 025bb5df0275423801b550451fedfc7b60dfb2ca
 **historical_baseline:** 025bb5df0275423801b550451fedfc7b60dfb2ca
-**reconciled_main:** eb668fb76f0c30d8f025db42cdb8e320d556c037
-**current_main:** eb668fb76f0c30d8f025db42cdb8e320d556c037
+**reconciled_main:** 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+**current_main:** 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 **frontier_status:** TERMINAL_RECONCILIATION
 **terminal_marker:** OWNER_APPROVED_DEEPSEEK_L1_ROLE_WRITEBACK_PROVEN
 **claim_ceiling:** OWNER_APPROVED_DEEPSEEK_L1_ROLE_WRITEBACK_PROVEN_ONLY
@@ -91,8 +91,9 @@ authority, evidence-integrity, or specification conflict is `HARD_BLOCK`.
   completed successfully (five runs).
 - Owner receipt: physical completion receipt recorded on Issue #107 with
   `89ed130ac...` merge, exact head, and base.
-- Reconciled current main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`;
-  readback confirms the DeepSeek entry remains
+- Reconciled current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+  (historical verification receipt `eb668fb76f0c30d8f025db42cdb8e320d556c037`
+  from the 2026-08-13 snapshot); readback confirms the DeepSeek entry remains
   `REGISTERED_CONDITIONAL`/`AVAILABLE`/`L1`/`default_route: false` with roles
   `bounded_candidate_generation` and `compact_code_candidate`, per-dispatch
   `second_repetition`/`physical_patch_suite` controls removed, dated
