@@ -26,7 +26,7 @@ body after the final card content is frozen.
 - Integrated successor PR #127 exact head: `6d1eb2bf39db537a3f0714dda77ba0c290da11cf`.
 - PR #127 merge: `fffc127cb` (Owner exact merge readback, ancestor of current `main`).
 - Required checks at exact head: Pytest run `31456046430` success; Pyright/Ruff/Bandit/Wiki runs `31456046*` success.
-- Reconciled current `main`: `eb668fb76f0c30d8f025db42cdb8e320d556c037`; workflow, module, focused tests, and OpenWiki inventory row are present.
+- Reconciled current `main`: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`; workflow, module, focused tests, and OpenWiki inventory row are present.
 - Historical PR #125 (`1301514db`) was superseded, not the integrated merge; actual integration is PR #127.
 - Marker: `BOOTSTRAP_ANCHOR_INSTALLED`.
 - Claim ceiling remains `BOOTSTRAP_ANCHOR_ONLY / NO_PROTECTED_PROVENANCE_CLAIM`.
