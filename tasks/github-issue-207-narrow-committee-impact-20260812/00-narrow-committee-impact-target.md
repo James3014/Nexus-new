@@ -57,7 +57,7 @@ No PR #71 deletion mutation, runtime/API change, ruleset/bypass change, merge/ap
 - Historical baseline: `8620b72e5688dc41551afb8ed5454b49d21dc5e3`.
 - Mapping commit: `abf781ea62c1c7384031bfb47d3185d2e24ca314`.
 - Exact testcase-identity commit: `cdf72a61165a006049074c137c6a0de13e4a1724`.
-- Reconciled current main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`.
+- Reconciled current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`.
 - Focused current-main evidence: `tests/ops/test_issue51_cleanup_impact_map.py` — 4 passed.
 
 `ISSUE_51_COMMITTEE_IMPACT_TARGET_REPAIR_PROVEN` is limited to the exact mapped
