@@ -94,9 +94,9 @@ def test_default_composite_includes_canonical_store():
 
 def test_composite_metadata_records_canonical_source(tmp_path):
     _write_ledger(tmp_path, [json.dumps(_episode())])
-    composite = NexusCompositeLessonStore(
-        [CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)]
-    )
+    composite = NexusCompositeLessonStore([
+        CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)
+    ])
     adapter = MemoryRetrievalAdapter(store=composite)
 
     lessons = adapter.retrieve(query_text="canonical receipt", limit=5)
@@ -230,12 +230,10 @@ def test_missing_ledger_is_fail_open_empty_and_legacy_store_remains_isolated(tmp
         '"summary":"legacy format owner","provenance":"receipt:jsonl"}\n',
         encoding="utf-8",
     )
-    composite = NexusCompositeLessonStore(
-        [
-            LocalJsonlLessonStore(legacy_path),
-            CanonicalEpisodicMemoryLessonStore(project_root=tmp_path),
-        ]
-    )
+    composite = NexusCompositeLessonStore([
+        LocalJsonlLessonStore(legacy_path),
+        CanonicalEpisodicMemoryLessonStore(project_root=tmp_path),
+    ])
     adapter = MemoryRetrievalAdapter(store=composite)
 
     lessons = adapter.retrieve(query_text="legacy format", limit=5)
