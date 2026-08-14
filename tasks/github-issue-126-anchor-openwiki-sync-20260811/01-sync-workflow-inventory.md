@@ -73,4 +73,4 @@ post-merge PR #118 activation remain with the primary agent/Owner authority.
 
 ## Reconciliation record
 
-This card remains superseded by the contract-delta successor. Completed successor PR #127 exact head `6d1eb2bf39db537a3f0714dda77ba0c290da11cf`, merge `fffc127cb`, reconciled on current `main` `eb668fb76f0c30d8f025db42cdb8e320d556c037`. No implementation scope is reopened.
+This card remains superseded by the contract-delta successor. Completed successor PR #127 exact head `6d1eb2bf39db537a3f0714dda77ba0c290da11cf`, merge `fffc127cb`, reconciled on current `main` `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`. No implementation scope is reopened.
