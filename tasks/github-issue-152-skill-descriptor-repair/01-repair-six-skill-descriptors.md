@@ -6,8 +6,8 @@ source_issue: https://github.com/James3014/Nexus-new/issues/152
 baseline_main: 70fd467ab0d29f4373616a5e98d85b014efcd4de
 historical_baseline: 70fd467ab0d29f4373616a5e98d85b014efcd4de
 merge_base: 96f2c8a19a2f3d208a106fa1850bee7ce5a4e863
-reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
-current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 frontier_status: TERMINAL_RECONCILIATION
 terminal_marker: SIX_SKILL_DESCRIPTOR_CONTRACTS_REPAIRED
 claim_ceiling: SIX_SKILL_DESCRIPTOR_CONTRACTS_REPAIRED_ONLY
@@ -65,7 +65,7 @@ release, or production changes.
 - Exact-head workflows: Pytest, Pyright, Bandit, Ruff, and Wiki governance completed
   successfully.
 - Owner receipt: `SIX_SKILL_DESCRIPTOR_CONTRACTS_REPAIRED`.
-- Reconciled current main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`.
+- Reconciled current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`.
 
 The GitHub review surface for PR #154 is empty, so this reconciliation does not claim a
 recorded GitHub independent review. `SIX_SKILL_DESCRIPTOR_CONTRACTS_REPAIRED` is
