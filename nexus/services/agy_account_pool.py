@@ -2,12 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import os
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Sequence
+from typing import Any, Optional, Sequence
 
+from nexus.services.external_account_pool import (
+    AccountFailureKind,
+    AccountLease,
+    ExternalAccountPool,
+    InternalAccountRecord,
+    InvalidAccountLeaseError,
+    is_rotation_eligible,
+)
 
 SENSITIVE_API_KEYS = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY")
 
@@ -101,6 +109,9 @@ class AgyAccountPoolManager:
             if not self._manager_root:
                 self._manager_root = self.resolve_manager_root(manager_root, self._manager_path)
 
+        self._pool: Optional[ExternalAccountPool] = None
+        self._lease_to_raw_alias: dict[str, str] = {}
+
     @staticmethod
     def resolve_manager_path(override_path: Optional[str] = None) -> Optional[str]:
         if override_path:
@@ -162,7 +173,7 @@ class AgyAccountPoolManager:
         fallback_root = Path.home() / ".nexus/agy-account-pool/runtime"
         return str(fallback_root.resolve()) if fallback_root.exists() else str(fallback_root)
 
-    def _call_manager_cli(self, args: list[str]) -> dict:
+    def _call_manager_cli(self, args: list[str], expect_json: bool = True) -> Any:
         mgr = self._manager_path or self.resolve_manager_path()
         if not mgr or not Path(mgr).is_file():
             raise AgyAccountPoolManagerError("AGY account pool manager binary not found")
@@ -178,6 +189,8 @@ class AgyAccountPoolManager:
             raise AgyAccountPoolManagerError(
                 f"agy-cli-manager failed with exit code {res.returncode}"
             )
+        if not expect_json:
+            return res.stdout
         try:
             import json
             return json.loads(res.stdout)
@@ -206,7 +219,17 @@ class AgyAccountPoolManager:
         if not live_dir_path.is_absolute() or not live_dir_path.is_dir():
             raise AgyAccountPoolManagerError("Active account live_dir is not an absolute existing directory")
 
-        account_home = live_dir_path.parent.resolve()
+        # Resolve request lease using provider-owned immutable account snapshot HOME
+        mgr_root = self._manager_root or status.get("root")
+        if mgr_root:
+            snapshot_home = Path(mgr_root) / "accounts" / active_name
+            if snapshot_home.is_dir():
+                account_home = snapshot_home.resolve()
+            else:
+                account_home = live_dir_path.parent.resolve()
+        else:
+            account_home = live_dir_path.parent.resolve()
+
         if not account_home.is_dir():
             raise AgyAccountPoolManagerError("Active account HOME does not exist")
 
@@ -249,7 +272,20 @@ class AgyAccountPoolManager:
         failed_account_hash: Optional[str] = None,
     ) -> AgyAccount:
         if self._use_real_manager:
-            data = self._call_manager_cli(["rotate-after-failure", "--reason", reason, "--json"])
+            failed_alias = None
+            if failed_account_hash and self._accounts:
+                for acc in self._accounts:
+                    if acc.alias_hash == failed_account_hash:
+                        failed_alias = acc.alias
+                        break
+
+            if failed_alias:
+                # Mark only the exact failed account as bad
+                self._call_manager_cli(["mark-bad", failed_alias, "--reason", reason])
+                data = self._call_manager_cli(["ensure-active", "--json"])
+            else:
+                data = self._call_manager_cli(["rotate-after-failure", "--reason", reason, "--json"])
+
             new_active = data.get("switched_to") or data.get("active")
             outcome = data.get("outcome")
             if not new_active or outcome in ("no_active_account", "marked_bad_no_standby"):
@@ -261,10 +297,16 @@ class AgyAccountPoolManager:
         if not self._accounts:
             raise AgyAccountPoolExhaustedError("No AGY accounts registered in pool")
 
-        start_idx = self._active_index
-        if 0 <= start_idx < len(self._accounts):
-            self._accounts[start_idx].is_active = False
+        if failed_account_hash:
+            for acc in self._accounts:
+                if acc.alias_hash == failed_account_hash:
+                    acc.is_active = False
+        else:
+            start_idx = self._active_index
+            if 0 <= start_idx < len(self._accounts):
+                self._accounts[start_idx].is_active = False
 
+        start_idx = self._active_index
         next_idx = (start_idx + 1) % len(self._accounts) if start_idx >= 0 else 0
         visited = 0
         while visited < len(self._accounts):
@@ -281,6 +323,196 @@ class AgyAccountPoolManager:
         account = self.active_account
         home_dir = account.home_dir if account else None
         return build_isolated_env(home_dir=home_dir, base_env=base_env)
+
+    def _ensure_pool(self) -> ExternalAccountPool:
+        if self._pool is not None:
+            return self._pool
+
+        records = []
+        if self._use_real_manager:
+            mgr = self._manager_path or self.resolve_manager_path()
+            root = self._manager_root or self.resolve_manager_root(manager_path=mgr)
+            try:
+                self._call_manager_cli(["ensure-active", "--json"])
+                status = self._call_manager_cli(["status", "--json"])
+            except Exception as exc:
+                raise AgyAccountPoolError(f"Failed to get manager status: {exc}")
+
+            accounts_data = status.get("accounts") or {}
+
+            # Support both dict and list response schema
+            accounts_list = []
+            if isinstance(accounts_data, dict):
+                for name, info in accounts_data.items():
+                    accounts_list.append((name, info))
+            elif isinstance(accounts_data, list):
+                for info in accounts_data:
+                    name = info.get("name")
+                    if name:
+                        accounts_list.append((name, info))
+
+            for name, info in accounts_list:
+                if info.get("enabled") is True:
+                    snapshot_dir = Path(root) / "accounts" / name
+                    is_avail = False
+                    if snapshot_dir.is_dir():
+                        cooldown_val = info.get("cooldown_until")
+                        is_cooldown = False
+                        if cooldown_val:
+                            try:
+                                from datetime import datetime, timezone
+                                cooldown_str = str(cooldown_val).replace("Z", "+00:00")
+                                dt = datetime.fromisoformat(cooldown_str)
+                                if dt > datetime.now(timezone.utc):
+                                    is_cooldown = True
+                            except Exception:
+                                is_cooldown = True
+                        if not is_cooldown:
+                            is_avail = True
+
+                    env = build_isolated_env(home_dir=str(snapshot_dir))
+                    h = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
+                    records.append(
+                        InternalAccountRecord(
+                            internal_id=name,
+                            alias_hash=h,
+                            execution_env=env,
+                            is_available=is_avail,
+                        )
+                    )
+        else:
+            for acc in self._accounts:
+                env = build_isolated_env(home_dir=acc.home_dir)
+                records.append(
+                    InternalAccountRecord(
+                        internal_id=acc.alias,
+                        alias_hash=acc.alias_hash,
+                        execution_env=env,
+                        is_available=acc.is_active,
+                    )
+                )
+
+        self._pool = ExternalAccountPool(provider="agy", accounts=records)
+        return self._pool
+
+    def _refresh_pool_health(self) -> None:
+        if self._pool is None:
+            self._ensure_pool()
+            return
+
+        if not self._use_real_manager:
+            for acc in self._accounts:
+                record = self._pool._accounts.get(acc.alias)
+                if record is not None:
+                    record.is_available = acc.is_active
+            return
+
+        mgr = self._manager_path or self.resolve_manager_path()
+        root = self._manager_root or self.resolve_manager_root(manager_path=mgr)
+        try:
+            self._call_manager_cli(["ensure-active", "--json"])
+            status = self._call_manager_cli(["status", "--json"])
+        except Exception as exc:
+            raise AgyAccountPoolError(f"Failed to get manager status during refresh: {exc}")
+
+        accounts_data = status.get("accounts") or {}
+        accounts_list = []
+        if isinstance(accounts_data, dict):
+            for name, info in accounts_data.items():
+                accounts_list.append((name, info))
+        elif isinstance(accounts_data, list):
+            for info in accounts_data:
+                name = info.get("name")
+                if name:
+                    accounts_list.append((name, info))
+
+        for name, info in accounts_list:
+            record = self._pool._accounts.get(name)
+            snapshot_dir = Path(root) / "accounts" / name
+            is_avail = False
+            if info.get("enabled") is True and snapshot_dir.is_dir():
+                cooldown_val = info.get("cooldown_until")
+                is_cooldown = False
+                if cooldown_val:
+                    try:
+                        from datetime import datetime, timezone
+                        cooldown_str = str(cooldown_val).replace("Z", "+00:00")
+                        dt = datetime.fromisoformat(cooldown_str)
+                        if dt > datetime.now(timezone.utc):
+                            is_cooldown = True
+                    except Exception:
+                        is_cooldown = True
+                if not is_cooldown:
+                    is_avail = True
+
+            if record is not None:
+                record.is_available = is_avail
+            else:
+                env = build_isolated_env(home_dir=str(snapshot_dir))
+                h = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
+                new_rec = InternalAccountRecord(
+                    internal_id=name,
+                    alias_hash=h,
+                    execution_env=env,
+                    is_available=is_avail,
+                )
+                self._pool.register_account(new_rec)
+
+    def acquire(self, consumer_id: str) -> AccountLease:
+        # Trigger ensure_active and build_isolated_env to respect subclass overrides
+        try:
+            self.ensure_active()
+            self.build_isolated_env()
+        except Exception:
+            pass
+        self._refresh_pool_health()
+        pool = self._ensure_pool()
+        lease = pool.acquire(consumer_id)
+        self._lease_to_raw_alias[lease.lease_id] = pool._require_active_lease(lease)
+        return lease
+
+    def release(self, lease: AccountLease) -> None:
+        # Releasing an already-issued request lease is local lifecycle cleanup.
+        # Do not make it depend on a provider control-plane refresh: a transient
+        # manager outage must not leak the neutral lease or its private binding.
+        pool = self._ensure_pool()
+        pool.release(lease)
+        self._lease_to_raw_alias.pop(lease.lease_id, None)
+
+    def report_failure(
+        self,
+        lease: AccountLease,
+        failure_kind: AccountFailureKind,
+    ) -> Optional[AccountLease]:
+        self._refresh_pool_health()
+        pool = self._ensure_pool()
+        failed_alias = self._lease_to_raw_alias.get(lease.lease_id)
+        if failed_alias is None:
+            try:
+                failed_alias = pool._require_active_lease(lease)
+            except InvalidAccountLeaseError:
+                return None
+
+        if is_rotation_eligible(failure_kind):
+            if self._use_real_manager:
+                # Execute mark-bad without parsing as JSON and propagate errors
+                self._call_manager_cli(["mark-bad", failed_alias, "--reason", failure_kind.value], expect_json=False)
+            else:
+                for acc in self._accounts:
+                    if acc.alias == failed_alias:
+                        acc.is_active = False
+
+            # Refresh local pool health after mutating vendor status to ensure status updates are reflected
+            self._refresh_pool_health()
+
+            next_lease = pool.report_failure(lease, failure_kind)
+            # Remove old mapping from mapping database
+            self._lease_to_raw_alias.pop(lease.lease_id, None)
+            if next_lease is not None:
+                new_alias = pool._require_active_lease(next_lease)
+                self._lease_to_raw_alias[next_lease.lease_id] = new_alias
+            return next_lease
+        return None
 
 
 _GLOBAL_POOL_MANAGER: Optional[AgyAccountPoolManager] = None
@@ -307,9 +539,6 @@ def get_account_pool_manager() -> AgyAccountPoolManager:
                 home_env_key = f"NEXUS_AGY_HOME_{alias.upper()}"
                 home = os.getenv(home_env_key, str(Path.home() / f".gemini/antigravity-{alias}"))
                 accounts.append(AgyAccount(alias=alias, home_dir=home))
-
-    if not accounts:
-        accounts.append(AgyAccount(alias="default", home_dir=str(Path.home())))
 
     _GLOBAL_POOL_MANAGER = AgyAccountPoolManager(accounts)
     return _GLOBAL_POOL_MANAGER
