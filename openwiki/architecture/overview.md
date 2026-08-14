@@ -1,147 +1,162 @@
 ---
 type: Concept
-title: System Architecture & P-X-D-R-A-C Engine Topology
-description: Technical architecture of Nexus Singularity OS, the P-X-D-R-A-C lifecycle loop, sub-process isolation, and streaming process execution.
-tags: [architecture, runtime, execution, pxdrac]
+title: System Architecture & S-P-D-X-R-A-C Runtime Topology
+description: Current-source architecture of the canonical Nexus runtime phase contract, task-scoped execution seam, and continuity projection boundaries.
+tags: [architecture, runtime, execution, spdxrac]
 openwiki:
   roles: [architecture, domain]
   change_kinds: [public-api, lifecycle]
-  source_paths: [nexus/services/unified_runtime.py, scripts/engine/nexus_cli.py]
-  symbols: [UnifiedRuntime, SanitizedRunner, AsyncProcessExecutor]
-  test_paths: [tests/test_cli_deadlock_and_injection.py, tests/test_service_decomposition.py]
-  invariants: [Subprocesses must use SanitizedRunner with shell=False. UV cache isolation enforced.]
-  validation_commands: [pytest tests/test_cli_deadlock_and_injection.py -q]
+  source_paths: [nexus/engine/runtime_phase_contract.py, nexus/engine/pipeline.py, nexus/services/unified_runtime.py, nexus/core/task_continuity.py]
+  symbols: [RuntimePhase, RUNTIME_PHASE_FLOW, NexusPipeline, UnifiedRuntime, ContinuitySnapshot]
+  test_paths: [tests/engine/test_runtime_phase_contract.py, tests/core/test_task_continuity.py, tests/test_service_decomposition.py]
+  invariants: [Runtime flow is S-P-D-X-R-A-C. A-to-C requires explicit audit pass. TaskContinuity is projection-only. CapabilityPlanner remains sole route and capability-selection authority.]
+  validation_commands: [pytest tests/engine/test_runtime_phase_contract.py tests/core/test_task_continuity.py -q]
 ---
 
-# System Architecture & P-X-D-R-A-C Engine Topology
+# System Architecture & S-P-D-X-R-A-C Runtime Topology
 
-Nexus Singularity OS is an orchestration layer for autonomous AI software development. It structures model execution into an auditable, self-healing pipeline organized around the **P-X-D-R-A-C** operational lifecycle.
+Nexus currently separates **runtime lifecycle semantics**, **route/capability selection**, **task-service lifecycle**, and **continuity projection** instead of collapsing them into one orchestrator. The canonical runtime phase vocabulary is defined physically in `nexus/engine/runtime_phase_contract.py` and consumed by `NexusPipeline`.
 
----
-
-## 🏛️ P-X-D-R-A-C Lifecycle Stages
-
-1. **Plan (P)**: Tasks are analyzed and decomposed into a capability graph by `[CapabilityPlanner](../routing/capability-planner.md)`.
-2. **Execute (X)**: Code generation and modifications are executed via `UnifiedRuntime` using `SanitizedRunner` and `AsyncProcessExecutor`.
-3. **Diagnose (D)**: Test or execution failures trigger automated diagnostic routines in `DrClaw` and `reflective_healer`.
-4. **Research (R)**: Deep research flows gather context and search repository knowledge via `OracleDispatcher` and `research_flow_service`.
-5. **Audit (A)**: Completion criteria, security policies, and quality gates are verified by `[CompletionEnforcer](../governance/gates-and-contracts.md)`.
-6. **Crystallize (C)**: Execution receipts and learned heuristics are stored as structured JSONL trace artifacts by `brain_crystallizer_pro`.
+> **Current-source correction:** the runtime order is `S → P → D → X → R → A → C`. In this contract, **X means optional external research / xray**, while **R is repair / execution**. Older descriptions that expand `P-X-D-R-A-C` as `Plan → Execute → Diagnose → Research → Audit → Crystallize` are not the current runtime phase contract.
 
 ---
 
-## 🔄 Runtime Request Execution Flow
+## 🏛️ Canonical Runtime Phases
 
-The following sequence diagram illustrates how task execution flows from `[NexusCLI](../runtime/cli-and-cueline.md)` through process isolation and routing to completion enforcement:
+`RUNTIME_PHASE_FLOW` is the ordered tuple of every runtime phase. `PRODUCT_VISIBLE_PHASES` omits only the internal `S` gate.
+
+| Phase | Current source meaning | Contractual next steps |
+| :--- | :--- | :--- |
+| **S** | specification / cold-start gate | `P` or `HARD_BLOCK` |
+| **P** | plan | `D` or `HARD_BLOCK` |
+| **D** | diagnose | `X`, `R`, `P`, `RECOVERABLE_BLOCK`, or `HARD_BLOCK` |
+| **X** | optional external research / xray | returns to `D`, or blocks |
+| **R** | repair / execute | `A`, `D`, or blocks |
+| **A** | audit / acceptance | `C`, `R`, `D`, or blocks |
+| **C** | crystallize | `COMPLETE`, `FAILED`, or `HUMAN_REVIEW` |
+
+`A → C` is fail-closed: `validate_transition()` rejects the transition unless `audit_passed is True`.
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    actor User as User / Script
-    participant CLI as NexusCLI (scripts/engine/nexus_cli.py)
-    participant Runner as SanitizedRunner / AsyncProcessExecutor
-    participant Planner as CapabilityPlanner (nexus/engine/capability_planner.py)
-    participant Runtime as UnifiedRuntime (nexus/services/unified_runtime.py)
-    participant Enforcer as CompletionEnforcer (nexus/engine/completion_enforcer.py)
-
-    User->>CLI: nexus run --task "task description"
-    CLI->>Runner: validate_task_name(task_name)
-    Runner-->>CLI: Validation OK
-    CLI->>Planner: plan(task_desc, task_type, route)
-    Planner-->>CLI: CapabilityPlan
-    CLI->>Runtime: invoke_capabilities(plan)
-    Runtime->>Runner: run_async(cmd, log_path)
-    Runner-->>Runtime: returncode, stdout_len, stderr_len
-    Runtime-->>CLI: Execution Results
-    CLI->>Enforcer: ensure_verified_completion(task_id, envelope)
-    Enforcer-->>CLI: Verified Completion Handoff
-    CLI-->>User: Delivery Report & Receipts
+flowchart TD
+    S["S: specification / cold start"] --> P["P: plan"]
+    P --> D["D: diagnose"]
+    D -->|external evidence needed| X["X: research / xray"]
+    X --> D
+    D -->|repair path ready| R["R: repair / execute"]
+    D -->|replan| P
+    R --> A["A: audit / acceptance"]
+    R -->|recoverable repair loop| D
+    A -->|audit pass| C["C: crystallize"]
+    A -->|repairable defect| R
+    A -->|diagnostic reset| D
+    C --> T["COMPLETE / FAILED / HUMAN_REVIEW"]
 ```
-*Figure 1: Sequence flow from CLI invocation through process isolation, capability routing, execution, and completion enforcement.*
+
+`nexus/engine/pipeline.py` derives `CANONICAL_STAGE_FLOW` directly from `RUNTIME_PHASE_FLOW`, so the phase contract is not merely documentation vocabulary.
 
 ---
 
-## 🛡️ Subprocess Isolation & Security Invariants
+## ⚙️ Task-Scoped Online / Local Execution Seam
 
-To prevent command injection, shell escape, and pipe buffer deadlocks during autonomous agent tool invocation, the runtime relies on two core process wrappers in `scripts/engine/nexus_cli.py`:
+`nexus/services/unified_runtime.py` describes itself as the canonical task-scoped runtime seam for Online and Local execution. Its source-level responsibilities include:
 
-### 1. `SanitizedRunner`
-- **Injection Prevention**: Forces `shell=False` for all subprocesses. Attempting to pass `shell=True` raises an explicit `ValueError`.
-- **Validation**: Enforces task name character restrictions via `ALLOWED_TASK_PATTERN = re.compile(r"^[a-zA-Z0-9_\-\s]+$")`.
-- **Argument Quoting**: Uses `shlex.quote` for explicit string sanitization.
+- carrying task identity through `UnifiedRuntimeRequest` / receipt contracts;
+- invoking `CapabilityPlanner` rather than inventing a second route source;
+- applying `LIGHT`, `STANDARD`, and `FULL` execution-depth semantics;
+- evaluating runtime workforce admission before model/worker use;
+- generating fail-closed execution and replan evidence;
+- keeping `public_claim_allowed=False` on execution-replan requests.
 
-### 2. `AsyncProcessExecutor`
-- **Deadlock Avoidance**: Reads `stdout` and `stderr` asynchronously in 64KB chunks using `asyncio.StreamReader` to prevent OS pipe buffer exhaustion during heavy test or model execution.
-- **Environment Isolation**: Sets `UV_CACHE_DIR` to isolated workspace paths to avoid permission collisions.
-- **Self-Healing Fallback**: Automatically catches `PermissionError` or `OSError` on log file writes, falling back to `sys.stderr` without crashing the task.
+The provider registry is adapter metadata only. Presence of a provider entry does **not** prove that its binary was invoked in a given task.
+
+---
+
+## 🧠 Task Continuity Is a Projection, Not Lifecycle Authority
+
+`nexus/core/task_continuity.py` was added after the previous OpenWiki synchronization. It projects an existing task/attempt event stream into immutable `ContinuitySnapshot` and `ResumeContext` objects.
+
+Its own module contract is explicit: continuity carries summaries and evidence references only; it is **not** a task state machine, router, verifier, or lifecycle authority. It preserves items such as rejected strategies, unresolved risks, evidence refs, next action, and claim ceiling across attempts while validating sequence and hash-chain integrity.
+
+This distinction matters for implementation work:
+
+- use continuity to recover **what is already known**;
+- use the task/lifecycle service to decide **what action is legal next**;
+- use `CapabilityPlanner` to decide **route/capability selection**;
+- use independent verification/acceptance to decide **whether a Candidate is acceptable**.
 
 ---
 
 ## 🏷️ Required V3 Classifications
 
 ```yaml
-component: UnifiedRuntime
+component: RuntimePhaseContract
 implementation_status: CURRENT
 wiring_status: WIRED
 runtime_surfaces:
-  - MAIN_CLI
-  - MCP_GATEWAY
   - LOCAL_RUNTIME
 authority_roles:
-  - EXECUTION_AUTHORITY
+  - NONE
 evidence_basis:
-  - nexus/services/unified_runtime.py:UnifiedRuntime
-claim_ceiling: Core orchestration service executing planned capability graphs; bound to CapabilityPlanner routing authority.
+  - nexus/engine/runtime_phase_contract.py:RUNTIME_PHASE_FLOW
+  - nexus/engine/runtime_phase_contract.py:LEGAL_RUNTIME_TRANSITIONS
+  - nexus/engine/pipeline.py:CANONICAL_STAGE_FLOW
+claim_ceiling: Canonical runtime phase/transition contract used by NexusPipeline; it explicitly does not own routing, development-task state, approval, integration, or learning authority.
 ```
 
 ```yaml
-component: SanitizedRunner
+component: UnifiedRuntime
 implementation_status: CURRENT
-wiring_status: WIRED
-runtime_surfaces:
-  - MAIN_CLI
+wiring_status: UNKNOWN
+runtime_surfaces: []
 authority_roles:
   - EXECUTION_AUTHORITY
 evidence_basis:
-  - scripts/engine/nexus_cli.py:SanitizedRunner
-claim_ceiling: Subprocess security wrapper blocking shell injection and validating task parameters.
+  - nexus/services/unified_runtime.py:UnifiedRuntimeRequest
+  - nexus/services/unified_runtime.py:CapabilityPlanner
+claim_ceiling: Current provider-neutral task-scoped Online/Local runtime implementation exists and binds planning to CapabilityPlanner; this bounded source review does not by itself claim every external runtime caller.
 ```
 
 ```yaml
-component: AsyncProcessExecutor
+component: TaskContinuity
 implementation_status: CURRENT
 wiring_status: WIRED
 runtime_surfaces:
-  - MAIN_CLI
+  - LOCAL_RUNTIME
 authority_roles:
-  - EXECUTION_AUTHORITY
+  - NONE
 evidence_basis:
-  - scripts/engine/nexus_cli.py:AsyncProcessExecutor
-claim_ceiling: Streaming asynchronous process execution engine preventing pipe buffer deadlocks.
+  - nexus/core/task_continuity.py:ContinuitySnapshot
+  - nexus/orchestrator/self_hosted_task_service.py:events_from_attempt_records
+claim_ceiling: Privacy-safe continuity projection consumed by the self-hosted task service; it has no routing, verification, or lifecycle authority.
 ```
 
 ---
 
-## 🧭 Change Navigation & Extension Seams
+## 🧭 Change Navigation & Validation
 
 ### When to Consult
-Read this page when modifying core execution loops, subprocess handling, environment variable isolation, or the P-X-D-R-A-C lifecycle orchestrator.
+Read this page when changing runtime phase order, transition semantics, task-scoped Online/Local execution, replan behavior, or cross-attempt continuity projection.
 
 ### Runtime Invariants
-- All subprocess execution must pass through `SanitizedRunner` or `AsyncProcessExecutor` with `shell=False`.
-- Routing decisions must be obtained from `[CapabilityPlanner](../routing/capability-planner.md)` before invoking runtime capabilities.
-- Task completion must be validated by `[CompletionEnforcer](../governance/gates-and-contracts.md)`.
+- Canonical runtime order is `S → P → D → X → R → A → C`.
+- `X` is optional research/xray and returns to `D`.
+- `A → C` requires an explicit audit pass.
+- `CapabilityPlanner` is the sole route and capability-selection authority.
+- Task continuity must remain projection-only and must not become another task state machine.
 
 ### Exact Source Files & Symbols
-- `nexus/services/unified_runtime.py` -> `UnifiedRuntime`
-- `scripts/engine/nexus_cli.py` -> `SanitizedRunner`, `AsyncProcessExecutor`
-- `nexus/contracts/canonical_execution.py` -> `CanonicalTaskContext`
+- `nexus/engine/runtime_phase_contract.py` → `RuntimePhase`, `RuntimeStatus`, `RUNTIME_PHASE_FLOW`, `LEGAL_RUNTIME_TRANSITIONS`, `validate_transition`
+- `nexus/engine/pipeline.py` → `CANONICAL_STAGE_FLOW`, `NexusPipeline`
+- `nexus/services/unified_runtime.py` → task-scoped execution/replan seam
+- `nexus/core/task_continuity.py` → `ContinuityEvent`, `ContinuitySnapshot`, `ResumeContext`
 
 ### Focused Tests
-- `tests/test_cli_deadlock_and_injection.py` -> Validates injection blocking and stream reading under lock scenarios.
-- `tests/test_service_decomposition.py` -> Verifies `UnifiedRuntime` layer boundaries.
+- `tests/engine/test_runtime_phase_contract.py`
+- `tests/core/test_task_continuity.py`
+- `tests/test_service_decomposition.py`
 
 ### Minimal Validation Command
 ```bash
-pytest tests/test_cli_deadlock_and_injection.py -q
+pytest tests/engine/test_runtime_phase_contract.py tests/core/test_task_continuity.py -q
 ```
