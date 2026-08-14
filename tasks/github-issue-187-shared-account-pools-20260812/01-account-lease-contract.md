@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: COMPLETED
 task_id: github-issue-190-account-lease-contract
 campaign_id: github-issue-187-shared-account-pools-20260812
 source_issue: https://github.com/James3014/Nexus-new/issues/190
@@ -12,7 +12,10 @@ worker_may_commit: true
 worker_may_approve: false
 worker_may_integrate: false
 worker_may_push: true
-claim_ceiling: request_scoped_external_account_lease_contract_candidate_only
+claim_ceiling: request_scoped_external_account_lease_contract_implemented_and_merged
+completion_disposition: DONE_NO_FOLLOW_UP
+merged_pr: 201
+merged_main: 21add665679acaa57a795296dfef2f5b4e49af27
 ---
 
 # Task Card: Request-scoped external account lease contract
@@ -90,3 +93,12 @@ The full `test_worker_contract.py` suite may additionally be observed, but a pro
 A passing implementation ends at `request_scoped_external_account_lease_contract_candidate_only` and requires independent acceptance before merge.
 
 Only accepted merge plus post-merge readback may unblock #191 and #192. `AUTO_CHAIN=false`; do not start either downstream Issue from this card.
+
+## Completion reconciliation — 2026-08-14
+
+- Issue #190: `DONE_NO_FOLLOW_UP`; implementation merged through PR #201.
+- Final synchronized integration head before merge: `eeafe6869e71614da7f2fab6201d924e44033c21`.
+- PR #201 merge commit: `21add665679acaa57a795296dfef2f5b4e49af27`; verified ancestor of current `nexus-new/main` `eb668fb76f0c30d8f025db42cdb8e320d556c037`.
+- Exact merged scope: 4 files / 0 deletions (`nexus/services/external_account_pool.py`, `tests/services/test_external_account_pool.py`, this card, campaign `INDEX.md`).
+- Current-main focused evidence rerun: `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest -q tests/services/test_external_account_pool.py` → 22 passed.
+- Durable claim ceiling: `request_scoped_external_account_lease_contract_implemented_and_merged` only. No provider/account/runtime/Codex/Agy/Grok production claim is inherited.
