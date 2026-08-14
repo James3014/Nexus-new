@@ -4,7 +4,7 @@ owner: James Chen
 status: COMPLETE
 source_issue: "#76"
 baseline_main: f3dc8d28a0f90d5c5fd2f31dbeb0ab2f29f7ca04
-reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 frontier_status: COMPLETE
 current_frontier: null
 terminal_marker: OPERATOR_OUTCOME_RECEIPT_CONTRACT_AND_TASK_STATE_PERSISTENCE_VERIFIED
@@ -20,7 +20,8 @@ bounded task receipt contract and existing task-state/receipt projection.
 ## Terminal reconciliation
 
 - Historical baseline preserved exactly: `f3dc8d28a0f90d5c5fd2f31dbeb0ab2f29f7ca04`.
-- Current/reconciled `main`: `eb668fb76f0c30d8f025db42cdb8e320d556c037`.
+- Historical original receipt recorded reconciled/current `main`: `eb668fb76f0c30d8f025db42cdb8e320d556c037`.
+- Current/reconciled `main`: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`.
 - Terminal marker: `OPERATOR_OUTCOME_RECEIPT_CONTRACT_AND_TASK_STATE_PERSISTENCE_VERIFIED`.
 - PR #224 receipt preserved: head `78df547667c9682ab403ef4ed05c4eeb9f7dca85`,
   merge `96bb71e89a0b5112a7b54ab6a3f4ff1ed879f857`, exact six-file scope with
