@@ -6,7 +6,7 @@ terminal_state: TERMINAL_RECONCILIATION
 campaign_id: github-issue-78-learning-episode-identity-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/78
 baseline_main: 84eaa6886e0388a4e15f5b837c89e37768b14307
-reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 ordered_cards:
   - 01-bind-learning-episode-identity.md
 current_frontier: null
@@ -50,7 +50,7 @@ Completion receipt:
 
 ## Terminal reconciliation
 
-Reconciled on fresh main `eb668fb76f0c30d8f025db42cdb8e320d556c037` with
+Reconciled on fresh main `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601` with
 historical baseline preserved at `84eaa6886e0388a4e15f5b837c89e37768b14307`.
 
 Post-merge evidence:

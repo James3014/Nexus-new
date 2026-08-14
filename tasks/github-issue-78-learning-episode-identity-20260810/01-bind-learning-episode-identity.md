@@ -106,7 +106,7 @@ immutable envelope or signature.
 
 ## Terminal reconciliation receipt
 
-Reconciled on fresh main `eb668fb76f0c30d8f025db42cdb8e320d556c037`;
+Reconciled on fresh main `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`;
 historical baseline preserved at `84eaa6886e0388a4e15f5b837c89e37768b14307`.
 
 - Issue #78 CLOSED/completed; Owner receipts `5235366173`, `5235661276`,
