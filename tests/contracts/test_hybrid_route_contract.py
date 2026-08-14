@@ -34,6 +34,14 @@ def test_hybrid_route_default_values() -> None:
     assert decision.evidence_refs == ()
     assert decision.fallback_block_reason == ""
 
+    # GB-013: the default delivery payload and receipt are observational only.
+    payload = capability_payload_from_hybrid_route(decision)
+    receipt = LocalHealReceiptAdapter().build(claim_verified=False, payload=payload)
+    assert payload["gate_passed"] is False
+    assert payload["invoked"] is False
+    assert receipt.public_claim_safe is False
+    assert receipt.outcome_contributed is False
+
 
 def test_to_dict_round_trip() -> None:
     decision = HybridRouteDecision()
@@ -45,22 +53,12 @@ def test_to_dict_round_trip() -> None:
     round_trip = hybrid_route_decision_from_payload(payload)
     assert round_trip == decision
 
-
-def test_gb013_default_payload_is_observational_and_non_claiming() -> None:
-    payload = capability_payload_from_hybrid_route(HybridRouteDecision())
-    receipt = LocalHealReceiptAdapter().build(claim_verified=False, payload=payload)
-    assert payload["gate_passed"] is False
-    assert payload["invoked"] is False
-    assert receipt.public_claim_safe is False
-    assert receipt.outcome_contributed is False
-
-
-def test_gb014_round_trip_tamper_cannot_escalate_authority() -> None:
-    payload = HybridRouteDecision().to_dict()
-    payload["authority"] = "fail_closed"
-    payload["public_claim_allowed"] = True
+    # GB-014: a tampered round trip cannot escalate authority or claims.
+    tampered = HybridRouteDecision().to_dict()
+    tampered["authority"] = "fail_closed"
+    tampered["public_claim_allowed"] = True
     with pytest.raises(ValueError):
-        hybrid_route_decision_from_payload(payload)
+        hybrid_route_decision_from_payload(tampered)
 
 
 def test_from_payload_coerces_enum() -> None:
@@ -113,21 +111,12 @@ def test_trace_only_requires_behavior_unchanged() -> None:
 
 
 def test_advisory_guard_cannot_block_delivery_yet() -> None:
-    decision = HybridRouteDecision(
-        route_mode=RouteMode.CLOUD_FIRST_LOCAL_GUARD_ADVISORY,
-        authority=Authority.ADVISORY_ONLY,
-        verifier_result=VerifierResult.FAIL,
-        behavior_changed=False,
-    )
-    assert decision.route_mode == RouteMode.CLOUD_FIRST_LOCAL_GUARD_ADVISORY
-
-
-def test_gb019_advisory_failure_does_not_block_delivery_or_claim() -> None:
     """GB-019: an advisory verifier failure is observational only."""
     decision = HybridRouteDecision(
         route_mode=RouteMode.CLOUD_FIRST_LOCAL_GUARD_ADVISORY,
         authority=Authority.ADVISORY_ONLY,
         verifier_result=VerifierResult.FAIL,
+        behavior_changed=False,
         evidence_refs=("gb019-evidence",),
         candidate_output_isolated=True,
     )
@@ -135,6 +124,7 @@ def test_gb019_advisory_failure_does_not_block_delivery_or_claim() -> None:
     route_payload = payload["hybrid_route"]
     receipt = LocalHealReceiptAdapter().build(claim_verified=False, payload=payload)
 
+    assert decision.route_mode == RouteMode.CLOUD_FIRST_LOCAL_GUARD_ADVISORY
     assert decision.fallback_block_reason == ""
     assert decision.blockers == ()
     assert payload["gate_passed"] is False
