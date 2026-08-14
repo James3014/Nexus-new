@@ -9,7 +9,12 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-from nexus.executors.cli_worker import CliWorkerRequest, CliWorkerResult, CliWorkerStatus, run_cli_worker
+from nexus.executors.cli_worker import (
+    CliWorkerRequest,
+    CliWorkerResult,
+    CliWorkerStatus,
+    run_cli_worker,
+)
 from nexus.executors.codex_executor import CodexCliExecutor
 from nexus.executors.worker_contract import (
     SUPPORTED_WORKER_PROVIDERS,
@@ -18,6 +23,11 @@ from nexus.executors.worker_contract import (
     WorkerOutcome,
     WorkerPreflight,
     WorkerProviderUnavailable,
+)
+from nexus.services.external_account_pool import (
+    AccountFailureKind,
+    AccountLease,
+    is_rotation_eligible,
 )
 from nexus.services.unified_runtime import resolve_registered_provider_executable
 
@@ -267,31 +277,37 @@ class AgyWorkerAdapter:
         return None
 
     @staticmethod
-    def _is_auth_or_quota_failure(status: CliWorkerStatus, exit_code: Optional[int], stdout: bytes, stderr: bytes) -> bool:
+    def _classify_failure_static(status: CliWorkerStatus, exit_code: Optional[int], stdout: bytes, stderr: bytes) -> AccountFailureKind:
         if status is CliWorkerStatus.TIMED_OUT:
-            return False
+            return AccountFailureKind.TIMEOUT
         text = (stdout.decode("utf-8", errors="replace") + "\n" + stderr.decode("utf-8", errors="replace")).lower()
-        auth_quota_keywords = (
-            "quota",
-            "resource_exhausted",
-            "429",
-            "rate limit",
-            "ratelimit",
-            "exceeded your current quota",
-            "insufficient_quota",
-            "unauthorized",
-            "authenticated",
-            "authentication",
-            "invalid api key",
-            "invalid_api_key",
-            "401",
-            "403",
-            "forbidden",
-            "token expired",
-            "invalid token",
-            "login required",
-        )
-        return any(kw in text for kw in auth_quota_keywords)
+        if any(kw in text for kw in ("quota", "resource_exhausted", "exceeded your current quota", "insufficient_quota")):
+            return AccountFailureKind.QUOTA_EXHAUSTED
+        if any(kw in text for kw in ("429", "rate limit", "ratelimit")):
+            return AccountFailureKind.RATE_LIMITED
+        if any(kw in text for kw in ("unauthorized", "authenticated", "authentication", "invalid api key", "invalid_api_key", "401", "token expired", "invalid token", "login required")):
+            if "expired" in text:
+                return AccountFailureKind.TOKEN_EXPIRED
+            return AccountFailureKind.AUTH_OR_SESSION_INVALID
+        if "refresh failed" in text or "token refresh" in text:
+            return AccountFailureKind.TOKEN_REFRESH_FAILED
+        if "403" in text or "forbidden" in text:
+            return AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
+        if any(kw in text for kw in ("unavailable", "503", "service unavailable")):
+            return AccountFailureKind.ACCOUNT_UNAVAILABLE
+        if "disabled" in text:
+            return AccountFailureKind.ACCOUNT_DISABLED
+        if exit_code == 2:
+            return AccountFailureKind.SYNTAX_OR_IMPLEMENTATION_ERROR
+        return AccountFailureKind.UNKNOWN
+
+    def _classify_failure(self, status: CliWorkerStatus, exit_code: Optional[int], stdout: bytes, stderr: bytes) -> AccountFailureKind:
+        return self._classify_failure_static(status, exit_code, stdout, stderr)
+
+    @staticmethod
+    def _is_auth_or_quota_failure(status: CliWorkerStatus, exit_code: Optional[int], stdout: bytes, stderr: bytes) -> bool:
+        kind = AgyWorkerAdapter._classify_failure_static(status, exit_code, stdout, stderr)
+        return is_rotation_eligible(kind)
 
     def preflight(self) -> WorkerPreflight:
         executable = self._configured_executable()
@@ -336,7 +352,7 @@ class AgyWorkerAdapter:
         raw_budget = getattr(contract, "maximum_provider_calls", 1)
         provider_call_budget = max(0, int(1 if raw_budget is None else raw_budget))
 
-        def build_argv(call_timeout: float) -> tuple[str, ...]:
+        def build_argv(call_timeout: float, current_prompt: str) -> tuple[str, ...]:
             return (
                 "--new-project",
                 "--add-dir",
@@ -349,10 +365,10 @@ class AgyWorkerAdapter:
                 "--print-timeout",
                 self._timeout_arg(call_timeout),
                 "--print",
-                prompt,
+                current_prompt,
             )
 
-        argv = build_argv(timeout)
+        argv = build_argv(timeout, prompt)
 
         if provider_call_budget == 0:
             return WorkerExecutionReceipt(
@@ -383,7 +399,8 @@ class AgyWorkerAdapter:
         def get_remaining_seconds() -> float:
             if timeout <= 0.0:
                 return 0.0
-            return timeout - (time.monotonic() - started_at)
+            elapsed = time.monotonic() - started_at
+            return timeout - elapsed
 
         pool = self._get_account_pool()
 
@@ -415,9 +432,12 @@ class AgyWorkerAdapter:
                     provider_attempt_count=0,
                 )
 
+            argv_seconds = int(round(remaining_seconds))
+            if argv_seconds < 1:
+                argv_seconds = 1
             request = CliWorkerRequest(
                 executable=executable,
-                argv=build_argv(remaining_seconds),
+                argv=build_argv(argv_seconds, prompt),
                 cwd=target,
                 timeout_seconds=remaining_seconds,
             )
@@ -458,97 +478,150 @@ class AgyWorkerAdapter:
         total_wall_time_ms = 0
         last_result = None
         last_account_hash = None
+        previous_account_hash = None
+        last_failure_kind = None
         failure_reason = None
+        current_prompt = prompt
 
-        for attempt in range(max_subprocesses):
+        has_lease_api = pool is not None and hasattr(pool, "acquire")
+        current_lease: Optional[AccountLease] = None
+        if has_lease_api and pool is not None:
             try:
-                if hasattr(pool, "ensure_active"):
-                    active_acc = pool.ensure_active(target_worktree=target)
-                elif hasattr(pool, "get_active_account"):
-                    active_acc = pool.get_active_account()
-                else:
-                    active_acc = getattr(pool, "active_account", None)
+                current_lease = pool.acquire(consumer_id=contract.task_id)
             except Exception as exc:
-                failure_reason = f"account pool active account error: {exc}"
-                break
+                failure_reason = f"account pool lease acquire failed: {exc}"
 
-            if hasattr(pool, "active_account_alias_hash") and pool.active_account_alias_hash:
-                active_hash = pool.active_account_alias_hash
-            elif hasattr(active_acc, "alias_hash"):
-                active_hash = active_acc.alias_hash
-            elif isinstance(active_acc, dict) and "alias_hash" in active_acc:
-                active_hash = active_acc["alias_hash"]
-            elif hasattr(active_acc, "alias"):
-                import hashlib
-                active_hash = hashlib.sha256(str(active_acc.alias).encode("utf-8")).hexdigest()[:12]
-            else:
-                active_hash = "unknown"
-
-            last_account_hash = active_hash
-
-            if hasattr(pool, "build_isolated_env"):
-                sub_env = pool.build_isolated_env()
-            elif hasattr(active_acc, "home_dir"):
-                from nexus.services.agy_account_pool import build_isolated_env
-                sub_env = build_isolated_env(home_dir=active_acc.home_dir)
-            else:
-                from nexus.services.agy_account_pool import build_isolated_env
-                sub_env = build_isolated_env()
-
-            remaining_seconds = get_remaining_seconds()
-            if remaining_seconds <= 0:
-                failure_reason = "shared wall-time budget exhausted"
-                break
-
-            request = CliWorkerRequest(
-                executable=executable,
-                argv=build_argv(remaining_seconds),
-                cwd=target,
-                env=sub_env,
-                timeout_seconds=remaining_seconds,
-            )
-
-            keys_to_restore = {}
-            for k in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"):
-                if k in os.environ:
-                    keys_to_restore[k] = os.environ.pop(k)
-
+        if failure_reason is None:
             try:
-                actual_calls += 1
-                result = run_cli_worker(request, on_process_group=on_process_group)
-            finally:
-                for k, v in keys_to_restore.items():
-                    os.environ[k] = v
+                for attempt in range(max_subprocesses):
+                    if has_lease_api and current_lease is not None:
+                        active_hash = current_lease.account_alias_hash
+                        sub_env = dict(current_lease.execution_env)
+                    else:
+                        try:
+                            if pool is not None and hasattr(pool, "ensure_active"):
+                                active_acc = pool.ensure_active(target_worktree=target)
+                            elif pool is not None and hasattr(pool, "get_active_account"):
+                                active_acc = pool.get_active_account()
+                            else:
+                                active_acc = getattr(pool, "active_account", None)
+                        except Exception as exc:
+                            failure_reason = f"account pool active account error: {exc}"
+                            break
 
-            total_wall_time_ms += result.wall_time_ms
-            last_result = result
+                        if pool is not None and hasattr(pool, "active_account_alias_hash") and pool.active_account_alias_hash:
+                            active_hash = pool.active_account_alias_hash
+                        elif active_acc is not None and hasattr(active_acc, "alias_hash"):
+                            active_hash = getattr(active_acc, "alias_hash")
+                        elif isinstance(active_acc, dict) and "alias_hash" in active_acc:
+                            active_hash = active_acc["alias_hash"]
+                        elif active_acc is not None and hasattr(active_acc, "alias"):
+                            import hashlib
+                            active_hash = hashlib.sha256(str(getattr(active_acc, "alias")).encode("utf-8")).hexdigest()[:12]
+                        else:
+                            active_hash = "unknown"
 
-            if result.status is CliWorkerStatus.TIMED_OUT:
-                break
-            elif result.status is CliWorkerStatus.COMPLETED and result.exit_code == 0:
-                break
-            else:
-                if self._is_auth_or_quota_failure(result.status, result.exit_code, result.stdout, result.stderr):
-                    remaining_after_call = timeout - (time.monotonic() - started_at)
-                    if remaining_after_call <= 0:
+                        if pool is not None and hasattr(pool, "build_isolated_env"):
+                            sub_env = pool.build_isolated_env()
+                        elif active_acc is not None and hasattr(active_acc, "home_dir"):
+                            from nexus.services.agy_account_pool import build_isolated_env
+                            sub_env = build_isolated_env(home_dir=getattr(active_acc, "home_dir"))
+                        else:
+                            from nexus.services.agy_account_pool import build_isolated_env
+                            sub_env = build_isolated_env()
+
+                    last_account_hash = active_hash
+
+                    if attempt > 0 and previous_account_hash and last_failure_kind:
+                        # Add structured continuation handoff metadata without raw credentials
+                        current_prompt = (
+                            f"[Continuation Handoff]\n"
+                            f"Task ID: {contract.task_id}\n"
+                            f"Attempt: {attempt + 1}\n"
+                            f"Previous Account Hash: {previous_account_hash}\n"
+                            f"New Account Hash: {active_hash}\n"
+                            f"Failure Kind: {last_failure_kind.value}\n"
+                            f"Original Instruction: {prompt}\n\n"
+                            f"Please re-inspect the current worktree, code changes, diffs, and run tests to proceed with the task."
+                        )
+
+                    remaining_seconds = get_remaining_seconds()
+                    if remaining_seconds <= 0:
                         failure_reason = "shared wall-time budget exhausted"
                         break
-                    if attempt < max_subprocesses - 1:
-                        try:
-                            if hasattr(pool, "rotate_account"):
-                                pool.rotate_account(reason="auth_or_quota_failure", failed_account_hash=active_hash)
-                            elif hasattr(pool, "rotate"):
-                                pool.rotate(reason="auth_or_quota_failure", failed_account_hash=active_hash)
-                            else:
-                                failure_reason = "account pool does not support rotation"
-                                break
-                        except Exception as exc:
-                            failure_reason = f"account pool rotation failed: {exc}"
-                            break
-                    else:
+
+                    argv_seconds = int(round(remaining_seconds))
+                    if argv_seconds < 1:
+                        argv_seconds = 1
+                    request = CliWorkerRequest(
+                        executable=executable,
+                        argv=build_argv(argv_seconds, current_prompt),
+                        cwd=target,
+                        env=sub_env,
+                        timeout_seconds=remaining_seconds,
+                    )
+
+                    keys_to_restore = {}
+                    for k in ("GEMINI_API_KEY", "GOOGLE_API_KEY", "GOOGLE_GENAI_API_KEY"):
+                        if k in os.environ:
+                            keys_to_restore[k] = os.environ.pop(k)
+
+                    try:
+                        actual_calls += 1
+                        result = run_cli_worker(request, on_process_group=on_process_group)
+                    finally:
+                        for k, v in keys_to_restore.items():
+                            os.environ[k] = v
+
+                    total_wall_time_ms += result.wall_time_ms
+                    last_result = result
+
+                    if result.status is CliWorkerStatus.TIMED_OUT:
+                        last_failure_kind = AccountFailureKind.TIMEOUT
                         break
-                else:
-                    break
+                    elif result.status is CliWorkerStatus.COMPLETED and result.exit_code == 0:
+                        break
+                    else:
+                        failure_kind = self._classify_failure(result.status, result.exit_code, result.stdout, result.stderr)
+                        last_failure_kind = failure_kind
+
+                        if is_rotation_eligible(failure_kind):
+                            remaining_after_call = timeout - (time.monotonic() - started_at)
+                            if remaining_after_call <= 0:
+                                failure_reason = "shared wall-time budget exhausted"
+                                break
+                            if attempt < max_subprocesses - 1:
+                                try:
+                                    previous_account_hash = active_hash
+                                    if has_lease_api and current_lease is not None and pool is not None:
+                                        next_lease = pool.report_failure(current_lease, failure_kind)
+                                        if next_lease is None:
+                                            failure_reason = "account pool rotation returned no replacement lease"
+                                            break
+                                        current_lease = next_lease
+                                    else:
+                                        if pool is not None and hasattr(pool, "rotate_account"):
+                                            pool.rotate_account(reason=failure_kind.value, failed_account_hash=active_hash)
+                                        elif pool is not None and hasattr(pool, "rotate"):
+                                            pool.rotate(reason=failure_kind.value, failed_account_hash=active_hash)
+                                        else:
+                                            failure_reason = "account pool does not support rotation"
+                                            break
+                                except Exception as exc:
+                                    failure_reason = f"account pool rotation failed: {exc}"
+                                    break
+                            else:
+                                break
+                        else:
+                            # Non-eligible failures abort execution loop directly without rotation
+                            failure_reason = f"non-eligible account failure: {failure_kind.value}"
+                            break
+            finally:
+                if has_lease_api and pool is not None and current_lease is not None:
+                    try:
+                        pool.release(current_lease)
+                    except Exception:
+                        pass
 
         if actual_calls == 0 or last_result is None:
             return WorkerExecutionReceipt(
