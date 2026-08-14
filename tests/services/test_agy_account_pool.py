@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
 from nexus.services.agy_account_pool import (
@@ -276,3 +274,275 @@ def test_resolve_manager_root_prefers_populated_canonical_root_over_empty_venv_s
 
     root = AgyAccountPoolManager.resolve_manager_root(manager_path=str(venv_bin))
     assert root == str(populated_runtime.resolve())
+
+
+def test_rotate_account_with_failed_hash_local():
+    acc1 = AgyAccount(alias="u1", home_dir="/h1")
+    acc2 = AgyAccount(alias="u2", home_dir="/h2")
+    manager = AgyAccountPoolManager([acc1, acc2])
+
+    assert manager.ensure_active().alias == "u1"
+    rotated = manager.rotate_account(reason="quota", failed_account_hash=acc1.alias_hash)
+    assert rotated.alias == "u2"
+    assert acc1.is_active is False
+    assert acc2.is_active is True
+
+
+def test_rotate_account_with_failed_hash_real_manager(tmp_path):
+    manager_script = tmp_path / "mock-agy-cli-manager"
+    manager_root = tmp_path / "mgr_root"
+    live_home = manager_root / "live-home"
+    live_dir = live_home / ".gemini"
+    live_dir.mkdir(parents=True)
+
+    state_file = manager_root / "mock_state.txt"
+    script_content = f"""#!/usr/bin/env python3
+import json, sys, pathlib
+captured_args_file = pathlib.Path("{manager_root / 'args.txt'}")
+with open(captured_args_file, "a") as f:
+    f.write(" ".join(sys.argv) + "\\n")
+
+sf = pathlib.Path("{state_file}")
+curr = sf.read_text().strip() if sf.exists() else "mock_acc_1"
+
+if "mark-bad" in sys.argv:
+    sf.write_text("mock_acc_2")
+    print(json.dumps({{"active": "mock_acc_2", "switched_to": "mock_acc_2", "outcome": "marked"}}))
+elif "rotate-after-failure" in sys.argv:
+    sf.write_text("mock_acc_2")
+    print(json.dumps({{"active": "mock_acc_2", "switched_to": "mock_acc_2", "outcome": "rotated"}}))
+elif "ensure-active" in sys.argv:
+    print(json.dumps({{"active": curr, "switched_to": None, "reason": "ok"}}))
+elif "status" in sys.argv:
+    print(json.dumps({{"active": curr, "live_dir": "{live_dir}", "root": "{manager_root}"}}))
+else:
+    print(json.dumps({{}}))
+"""
+    manager_script.write_text(script_content)
+    manager_script.chmod(0o755)
+
+    manager = AgyAccountPoolManager(
+        manager_path=str(manager_script),
+        manager_root=str(manager_root),
+        use_real_manager=True,
+    )
+    acc = manager.ensure_active()
+    assert acc.alias == "mock_acc_1"
+
+    rotated = manager.rotate_account(reason="quota_error", failed_account_hash=acc.alias_hash)
+    assert rotated.alias == "mock_acc_2"
+
+    args_file = manager_root / 'args.txt'
+    assert args_file.exists()
+    args_content = args_file.read_text()
+    assert "mark-bad mock_acc_1 --reason quota_error" in args_content
+    assert "ensure-active" in args_content
+
+
+def test_two_consumer_isolation(tmp_path):
+    from nexus.services.agy_account_pool import AgyAccount, AgyAccountPoolManager
+    from nexus.services.external_account_pool import AccountFailureKind
+
+    h1 = str(tmp_path / "h1")
+    h2 = str(tmp_path / "h2")
+    h3 = str(tmp_path / "h3")
+    (tmp_path / "h1").mkdir()
+    (tmp_path / "h2").mkdir()
+    (tmp_path / "h3").mkdir()
+
+    acc_a = AgyAccount(alias="A", home_dir=h1)
+    acc_b = AgyAccount(alias="B", home_dir=h2)
+    acc_c = AgyAccount(alias="C", home_dir=h3)
+    manager = AgyAccountPoolManager([acc_a, acc_b, acc_c])
+
+    lease_a = manager.acquire("consumer-A")
+    lease_b = manager.acquire("consumer-B")
+
+    assert lease_a.lease_id != lease_b.lease_id
+    assert lease_a.account_alias_hash == acc_a.alias_hash
+    assert lease_b.account_alias_hash == acc_b.alias_hash
+    assert lease_a.execution_env["HOME"] == h1
+    assert lease_b.execution_env["HOME"] == h2
+
+    b_hash_before = lease_b.account_alias_hash
+    b_env_before = dict(lease_b.execution_env)
+
+    replacement_a = manager.report_failure(lease_a, AccountFailureKind.QUOTA_EXHAUSTED)
+    assert replacement_a is not None
+    assert replacement_a.lease_id != lease_b.lease_id
+    assert replacement_a.account_alias_hash == acc_c.alias_hash
+    assert replacement_a.execution_env["HOME"] == h3
+
+    assert not acc_a.is_active
+
+    # Assert old mapping is popped and only the replacement exists
+    assert lease_a.lease_id not in manager._lease_to_raw_alias
+    assert replacement_a.lease_id in manager._lease_to_raw_alias
+
+    assert lease_b.account_alias_hash == b_hash_before
+    assert dict(lease_b.execution_env) == b_env_before
+
+    manager.release(replacement_a)
+    assert lease_b.account_alias_hash == b_hash_before
+    assert dict(lease_b.execution_env) == b_env_before
+
+    manager.release(lease_b)
+
+
+def test_release_cleans_local_bindings_when_provider_health_is_unavailable(monkeypatch):
+    """Terminal release must not require a provider status/health round-trip."""
+    accounts = [
+        AgyAccount(alias="A", home_dir="/tmp/agy-a"),
+        AgyAccount(alias="B", home_dir="/tmp/agy-b"),
+    ]
+    manager = AgyAccountPoolManager(accounts)
+    lease_a = manager.acquire("consumer-A")
+    lease_b = manager.acquire("consumer-B")
+    pool = manager._pool
+    assert pool is not None
+
+    raw_alias_a = manager._lease_to_raw_alias[lease_a.lease_id]
+    monkeypatch.setattr(
+        manager,
+        "_refresh_pool_health",
+        lambda: (_ for _ in ()).throw(AgyAccountPoolError("manager unavailable")),
+    )
+
+    manager.release(lease_a)
+
+    assert lease_a.lease_id not in pool._active_leases
+    assert lease_a.lease_id not in pool._lease_to_account_id
+    assert lease_a.lease_id not in pool._accounts["A"].active_lease_ids
+    assert lease_a.lease_id not in manager._lease_to_raw_alias
+    assert raw_alias_a == "A"
+    assert lease_b.lease_id in pool._active_leases
+    assert lease_b.lease_id in pool._accounts["B"].active_lease_ids
+
+    # The unrelated lease remains releasable despite the provider outage.
+    manager.release(lease_b)
+    assert lease_b.lease_id not in pool._active_leases
+
+
+def test_real_manager_text_success(tmp_path):
+    from nexus.services.agy_account_pool import AgyAccountPoolManager
+    from nexus.services.external_account_pool import AccountFailureKind
+
+    manager_root = tmp_path / "mgr_root"
+    manager_root.mkdir()
+    (manager_root / "accounts").mkdir()
+    (manager_root / "accounts" / "mock_acc_1").mkdir()
+    (manager_root / "accounts" / "mock_acc_2").mkdir()
+
+    manager_script = tmp_path / "agy-cli-manager"
+    script_content = f"""#!/usr/bin/env python3
+import json, sys, pathlib
+captured_args_file = pathlib.Path("{manager_root / 'args.txt'}")
+with open(captured_args_file, "a") as f:
+    f.write(" ".join(sys.argv) + "\\n")
+
+sf = pathlib.Path("{tmp_path / 'state.txt'}")
+curr = sf.read_text().strip() if sf.exists() else "mock_acc_1"
+
+if "mark-bad" in sys.argv:
+    # Simulate real text success non-JSON stdout response
+    print("marked-bad: mock_acc_1")
+    cooldown_file = pathlib.Path("{tmp_path / 'cooldown.txt'}")
+    cooldown_file.write_text("1")
+    sys.exit(0)
+elif "ensure-active" in sys.argv:
+    print(json.dumps({{"active": curr, "switched_to": None, "reason": "ok"}}))
+elif "status" in sys.argv:
+    is_cooldown = pathlib.Path("{tmp_path / 'cooldown.txt'}").exists()
+    accounts_data = {{
+        "mock_acc_1": {{"enabled": True, "cooldown_until": "2026-08-15T00:00:00Z" if is_cooldown else None}},
+        "mock_acc_2": {{"enabled": True, "cooldown_until": None}}
+    }}
+    print(json.dumps({{"active": curr, "accounts": accounts_data, "root": "{manager_root}"}}))
+else:
+    print(json.dumps({{}}))
+"""
+    manager_script.write_text(script_content)
+    manager_script.chmod(0o755)
+
+    manager = AgyAccountPoolManager(
+        manager_path=str(manager_script),
+        manager_root=str(manager_root),
+        use_real_manager=True,
+    )
+
+    lease_a = manager.acquire(consumer_id="consumer-A")
+    lease_b = manager.acquire(consumer_id="consumer-B")
+    b_hash_before = lease_b.account_alias_hash
+    b_env_before = dict(lease_b.execution_env)
+
+    # Global active changes on the side
+    (tmp_path / "state.txt").write_text("mock_acc_2")
+
+    # A fails
+    replacement_a = manager.report_failure(lease_a, AccountFailureKind.QUOTA_EXHAUSTED)
+    assert replacement_a is not None
+
+    args_file = manager_root / 'args.txt'
+    args_content = args_file.read_text()
+    # Prove exact A was marked, and no rotate-after-failure occurred
+    assert "mark-bad mock_acc_1" in args_content
+    assert "mark-bad mock_acc_2" not in args_content
+    assert "rotate-after-failure" not in args_content
+    # Prove existing lease B remains immutable and valid
+    assert lease_b.account_alias_hash == b_hash_before
+    assert dict(lease_b.execution_env) == b_env_before
+
+def test_real_manager_mutation_failure(tmp_path):
+    import pytest
+
+    from nexus.services.agy_account_pool import AgyAccountPoolManager, AgyAccountPoolManagerError
+    from nexus.services.external_account_pool import AccountFailureKind
+
+    manager_root = tmp_path / "mgr_root"
+    manager_root.mkdir()
+    (manager_root / "accounts").mkdir()
+    (manager_root / "accounts" / "mock_acc_1").mkdir()
+
+    manager_script = tmp_path / "agy-cli-manager"
+    script_content = f"""#!/usr/bin/env python3
+import json, sys
+if "mark-bad" in sys.argv:
+    # Simulate real failure
+    sys.stderr.write("provider mutation failed\\n")
+    sys.exit(1)
+elif "ensure-active" in sys.argv:
+    print(json.dumps({{"active": "mock_acc_1", "switched_to": None, "reason": "ok"}}))
+elif "status" in sys.argv:
+    accounts_data = {{
+        "mock_acc_1": {{"enabled": True, "cooldown_until": None}}
+    }}
+    print(json.dumps({{"active": "mock_acc_1", "accounts": accounts_data, "root": "{manager_root}"}}))
+else:
+    print(json.dumps({{}}))
+"""
+    manager_script.write_text(script_content)
+    manager_script.chmod(0o755)
+
+    manager = AgyAccountPoolManager(
+        manager_path=str(manager_script),
+        manager_root=str(manager_root),
+        use_real_manager=True,
+    )
+
+    lease_a = manager.acquire(consumer_id="consumer-A")
+
+    # Fail closed with error propagated
+    with pytest.raises(AgyAccountPoolManagerError) as exc_info:
+        manager.report_failure(lease_a, AccountFailureKind.QUOTA_EXHAUSTED)
+    assert "agy-cli-manager failed with exit code 1" in str(exc_info.value)
+
+
+def test_pool_exhaustion(tmp_path):
+    import pytest
+
+    from nexus.services.agy_account_pool import AgyAccountPoolManager
+    from nexus.services.external_account_pool import ExternalAccountPoolExhaustedError
+
+    manager = AgyAccountPoolManager([])
+    with pytest.raises(ExternalAccountPoolExhaustedError):
+        manager.acquire("consumer-1")
