@@ -1,7 +1,14 @@
 # Bounded implementation
 
-Baseline: `a74d838cc6bb14af47ce79207181c12a1aed1d35`; reconciled/current main:
-`12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`.
+Baseline (historical): `a74d838cc6bb14af47ce79207181c12a1aed1d35`; prior
+reconciled main (historical): `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`;
+reconciled/current main: `cdf2570ede5ae218f36f886b696c8da45458043a`.
+
+Rebind: non-destructive `merge --no-ff nexus-new/main` on the same branch;
+exact head `c475c401415e42fdce8d24728814e46c1ea8c543` with parents
+`dbe1b49d99ae9636cd96870c434aca0b0512f4b2` + `cdf2570ede5ae218f36f886b696c8da45458043a`;
+exact 7 changed files / zero deletions; scoped blobs byte-identical to prior
+accepted head.
 
 Status: `ACTIVE`; frontier: `IMPLEMENTATION_ACTIVE`; terminal marker: none
 (Owner KEEP_OPEN repair gate; VERIFIED/terminal status is not authorized).
