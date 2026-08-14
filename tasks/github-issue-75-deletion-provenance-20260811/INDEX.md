@@ -5,8 +5,8 @@
 - task_id: github-issue-75
 - base_sha: 3c4f9065739e7a718bc27e1bf0d0113150946c60
 - historical_baseline: 3c4f9065739e7a718bc27e1bf0d0113150946c60
-- reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
-- current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+- reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
+- current_main: cdf2570ede5ae218f36f886b696c8da45458043a
 - implementation_commit: 70fd467ab0d29f4373616a5e98d85b014efcd4de
 - rebind_lineage_commit: d9e72df557493e249b54e7641d20ee314bc35646
 - branch: codex/issue-75-deletion-provenance
@@ -36,7 +36,7 @@ run `31481084538` and impact run `31481085768` are terminal PASS with
 `DESIGN_REVIEW_ACCEPTED_WITH_CLAIM_CEILING`,
 `ISSUE_75_MONOTONIC_TEST_INVENTORY_CANDIDATE`, and
 `ISSUE_75_EXACT_HEAD_ACCEPTANCE_PASS` are recorded on Issue #75, which is
-closed `completed`. Current main `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+closed `completed`. Current main `cdf2570ede5ae218f36f886b696c8da45458043a`
 readback confirms the implementation files remain present.
 
 ## Claim boundary
