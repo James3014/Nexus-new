@@ -8,8 +8,8 @@ issue: 94
 repository: James3014/Nexus-new
 source_issue: https://github.com/James3014/Nexus-new/issues/94
 baseline_revision: 8e05e0827fe913e3e408f87dc274e005bdc0bf92
-reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
-current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 terminal_marker: OLLAMA_LEDGER_METRICS_PERSISTED
 claim_ceiling: OLLAMA_LEDGER_METRICS_PERSISTED
 implementation_gate: SATISFIED_BY_PR158_MERGE_19343D31
