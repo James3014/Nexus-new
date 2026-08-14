@@ -9,7 +9,8 @@ purpose: Govern Issue #114 Golden evaluator evidence hardening on fresh GitHub m
 
 - Issue: `#114`
 - Historical baseline: `c450c75cedbe7679f564d4eaddb7aa351b8aa0ee`
-- Reconciled main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
+- Reconciled main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+- Current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
 - AUTO_CHAIN: `false`
 - Completed card: `00-golden-evaluator-hardening.md`
 - Terminal marker: `GOLDEN_EVALUATOR_EVIDENCE_HARDENING_PROVEN`
