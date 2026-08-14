@@ -63,6 +63,38 @@ def test_issue153_event_feedback_rows_map_without_fallback():
     ]
 
 
+def test_worker_registry_contract_maps_exact_targets_without_fallback():
+    details = select_target_details(
+        ["nexus/executors/worker_registry.py"],
+        load_impact_rules(),
+        index_path=Path("/tmp/missing-worker-registry-impact-index.json"),
+        history_path=Path("/tmp/missing-worker-registry-history.jsonl"),
+    )
+
+    assert details.targets == [
+        "tests/nexus/executors/test_worker_contract.py",
+        "tests/services/test_agy_account_pool.py",
+        "tests/services/test_policy_gate.py",
+    ]
+    assert details.unmatched_paths == []
+    assert details.fallback_used is False
+    assert details.risk == "high"
+    assert details.high_risk_escalated is True
+    assert details.risk_reasons == ["worker_registry_contract"]
+
+
+def test_unrelated_worker_registry_path_remains_fallback():
+    details = select_target_details(
+        ["nexus/executors/worker_registry_unknown.py"],
+        load_impact_rules(),
+        index_path=Path("/tmp/missing-worker-registry-impact-index.json"),
+        history_path=Path("/tmp/missing-worker-registry-history.jsonl"),
+    )
+
+    assert details.fallback_used is True
+    assert details.unmatched_paths == ["nexus/executors/worker_registry_unknown.py"]
+
+
 def test_issue153_feedback_row_maps_exact_targets_without_fallback():
     rules = load_impact_rules()
     details = select_target_details(
