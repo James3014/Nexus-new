@@ -1,18 +1,23 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: COMPLETED
 task_id: github-issue-191-agy-lease-continuation
 campaign_id: github-issue-187-shared-account-pools-20260812
 source_issue: https://github.com/James3014/Nexus-new/issues/191
 baseline_main: f752c77d9410747825406df5d56f9fa6244e7084
+reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+frontier_status: TERMINAL_RECONCILIATION
+terminal_marker: AGY_REQUEST_SCOPED_LEASE_CONTINUATION_MERGED
+implementation_gate: SATISFIED_BY_PR237_MERGE_F752C77D
 AUTO_CHAIN: false
 worker_preference: agy / gemini-3.6-flash-high
 worker_may_commit: true
 worker_may_approve: false
 worker_may_integrate: false
 worker_may_push: true
-claim_ceiling: agy_request_scoped_lease_continuation_candidate_only
+claim_ceiling: AGY_REQUEST_SCOPED_LEASE_CONTINUATION_MERGED
 ---
 
 # Task Card: Agy request-scoped lease failover and continuation
@@ -39,8 +44,16 @@ The bounded result SHALL bind each Agy execution to an immutable request-scoped 
   - `nexus/executors/worker_registry.py`
   - `tests/services/test_agy_account_pool.py`
   - `tests/nexus/executors/test_worker_contract.py`
-- Exact-head required checks and exact-base impact reached terminal success; focused suite 94 passed; candidate independently accepted `MERGE_SLOT_ONLY` before merge. Final physical merge receipt recorded; post-merge reconciliation of #191 remains.
+- Exact-head required checks and exact-base impact reached terminal success; focused suite 94 passed; candidate independently accepted `MERGE_SLOT_ONLY` before merge. Final physical merge receipt recorded.
 - This card does not authorize new #191 implementation and does not widen PR #237 scope; no readiness/approval/integration/production claim.
+
+## Terminal reconciliation — 2026-08-14 (post-merge)
+
+- Issue #191 CLOSED with `state_reason=completed` at 2026-08-14T05:38:46Z immediately after the PR #237 merge.
+- PR #237 merge `f752c77d9410747825406df5d56f9fa6244e7084` (parents `37526fc9705cf984b0b2fd9f373460b3c98d7391` + `7e216d8769a07589f80615f3f2470abaddde0a62`) is an ancestor of current `main` `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601` (PR #274 merge); exact four files / zero deletions, required checks and exact-base impact terminal success.
+- Implementation gate `SATISFIED_BY_PR237_MERGE_F752C77D`; terminal marker `AGY_REQUEST_SCOPED_LEASE_CONTINUATION_MERGED`.
+- This card is COMPLETE / TERMINAL_RECONCILIATION. It grants no runtime/provider/production claim and does not authorize Grok implementation.
+- Issue #192 is the next frontier candidate only: it is not marked Ready, no Task Card exists, and no implementation is authorized.
 
 ## Allowed files
 
@@ -160,4 +173,4 @@ Stop without widening scope on any of:
 
 A passing implementation ends at `agy_request_scoped_lease_continuation_candidate_only` and requires independent exact-head acceptance before merge.
 
-Only accepted merge plus post-merge readback/reconciliation may unblock Issue #192. `AUTO_CHAIN=false`; do not begin Grok implementation from this card.
+Terminal reconciliation is complete. Issue #192 becomes the next frontier candidate only when the Owner marks it Ready; no card exists and no implementation is authorized today. `AUTO_CHAIN=false`; do not begin Grok implementation from this card.
