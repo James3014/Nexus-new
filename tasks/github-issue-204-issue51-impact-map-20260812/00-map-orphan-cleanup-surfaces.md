@@ -7,8 +7,8 @@ campaign_id: github-issue-204-issue51-impact-map-20260812
 source_issue: https://github.com/James3014/Nexus-new/issues/204
 baseline_main: bdcc427f6249406079c85f9725b3af6cd62ab1f1
 historical_baseline: bdcc427f6249406079c85f9725b3af6cd62ab1f1
-reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
-current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 AUTO_CHAIN: false
 block_class: NONE
 completion_marker: ISSUE_51_IMPACT_MAP_PREREQUISITE_PROVEN
@@ -41,7 +41,7 @@ PR #71 fail closed as `IMPACT_UNKNOWN`, without broadening cleanup or product au
 PR #205 merged candidate `69bf750f811164a71871e5f6635e82e25b8139bd` as
 `8620b72e5688dc41551afb8ed5454b49d21dc5e3` into the historical baseline. The
 current and reconciled `nexus-new/main` are
-`eb668fb76f0c30d8f025db42cdb8e320d556c037`. The exact four-file scope and four
+`12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`. The exact four-file scope and four
 focused tests are bound above; live CI status is not asserted here.
 
 ## Allowed files
