@@ -13,8 +13,8 @@
 - worker: codex_luna
 - provider: codex
 - model: gpt-5.6-luna
-- reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
-- current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+- reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
+- current_main: cdf2570ede5ae218f36f886b696c8da45458043a
 - terminal_marker: ISSUE_121_SELECTOR_MAPPING_PROVEN
 - claim_ceiling: ISSUE_121_SELECTOR_MAPPING_PROVEN_ONLY
 
@@ -34,7 +34,7 @@ tests and real probes passed, all required protected checks passed, Tier3
 skipped); comment `5255294744` closes after physical mainline merge and exact
 receipt readback.
 
-Current main readback (`12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`):
+Current main readback (`cdf2570ede5ae218f36f886b696c8da45458043a`):
 `docs/testing/test_impact_map.md` row maps `nexus/config/model_workforce.yaml`
 to `tests/contracts/test_model_workforce_policy.py,
 tests/services/test_model_workforce_policy_loader.py` (medium /
