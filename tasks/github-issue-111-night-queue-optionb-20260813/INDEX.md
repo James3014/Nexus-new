@@ -14,4 +14,4 @@
   - PR merge: `587aa4b1d6026dc85efe35930f2067fbd1ead3cc`
   - Exact scope: 8 files (+698/-117): `nexus/app/nightshift_runner_service.py`, `nexus/services/nightshift_queue_consumer.py`, `scripts/nightshift.py`, `tests/services/test_nightshift_queue_consumer.py`, `tests/ops/test_issue111_nightshift_impact_map.py`, `docs/testing/test_impact_map.md`, this campaign INDEX, `01-queue-contract.md`.
   - Head required checks: 6/6 SUCCESS (Pytest 396, Ruff 390, Pyright 390, Bandit 390, Policy Lane 80, Wiki 390).
-  - Current main readback (`eb668fb76f0c30d8f025db42cdb8e320d556c037`): producer/consumer present; 7 focused consumer tests present.
+  - Current main readback (`12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`): producer/consumer present; 7 focused consumer tests present.
