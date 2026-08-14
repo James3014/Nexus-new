@@ -4,7 +4,7 @@ issue: 291
 repository: James3014/Nexus-new
 status: ACTIVE
 baseline_main: cdf2570ede5ae218f36f886b696c8da45458043a
-current_frontier: 00-isolate-legacy-memory-route-authority.md
+current_frontier: github-issue-291-memory-route-authority-isolation-20260815.md
 readiness_marker: MEMORY_ROUTE_AUTHORITY_SOURCE_FROZEN
 claim_ceiling: memory_route_authority_candidate_pr_only
 AUTO_CHAIN: false
@@ -18,7 +18,7 @@ localization and fresh Workforce Admission. The only implementation slice is
 the legacy `CapabilitySelector` dynamic-learning-policy add/remove step and its
 focused hostile tests.
 
-- Current frontier: `00-isolate-legacy-memory-route-authority.md`.
+- Current frontier: `github-issue-291-memory-route-authority-isolation-20260815.md`.
 - Baseline/current main: `cdf2570ede5ae218f36f886b696c8da45458043a`.
 - Durable readiness marker: `MEMORY_ROUTE_AUTHORITY_SOURCE_FROZEN`.
 - `CapabilityPlanner` remains the sole route/capability-selection authority.

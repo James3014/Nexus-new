@@ -12,7 +12,7 @@ implementation_files:
   - tests/core/test_capability_selector_route_authority.py
 governance_files:
   - tasks/github-issue-291-memory-route-authority-20260815/INDEX.md
-  - tasks/github-issue-291-memory-route-authority-20260815/00-isolate-legacy-memory-route-authority.md
+  - tasks/github-issue-291-memory-route-authority-20260815/github-issue-291-memory-route-authority-isolation-20260815.md
 allowed_files:
   - nexus/core/capability_selector.py
   - tests/core/test_capability_selector_route_authority.py
