@@ -26,7 +26,7 @@ Dependency head: historical Issue #124 candidate `1301514dba50587f25631c3b0a8d2e
 - Live Issue #126: CLOSED/completed.
 - Successor PR #127 exact head: `6d1eb2bf39db537a3f0714dda77ba0c290da11cf`.
 - PR #127 merge: `fffc127cb` (Owner receipt exact merge readback).
-- Reconciled current `main`: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`.
+- Reconciled current `main`: `cdf2570ede5ae218f36f886b696c8da45458043a`.
 - Accepted successor scope: inherited workflow inventory row and exact source-contract count delta (`9` -> `10`); required checks succeeded.
 - Markers: `BOOTSTRAP_ANCHOR_INSTALLED`, `OPENWIKI_INVENTORY_SYNCHRONIZED`.
 - Claim ceiling remains `NO_PROTECTED_PROVENANCE_CLAIM`; no deletion, runtime, integration, release, or production claim.
