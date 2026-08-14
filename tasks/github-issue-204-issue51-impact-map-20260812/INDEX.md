@@ -4,8 +4,8 @@ owner: James Chen
 status: COMPLETE
 purpose: Govern the Issue #51 exact-base impact-map prerequisite.
 historical_baseline: bdcc427f6249406079c85f9725b3af6cd62ab1f1
-reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
-current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
+current_main: cdf2570ede5ae218f36f886b696c8da45458043a
 current_frontier: TERMINAL_RECONCILIATION
 frontier_status: COMPLETE
 terminal_marker: ISSUE_51_IMPACT_MAP_PREREQUISITE_PROVEN
