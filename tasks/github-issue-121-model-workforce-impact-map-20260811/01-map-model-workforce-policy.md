@@ -1,5 +1,15 @@
 # Task Card: 01-map-model-workforce-policy.md
 
+## Status
+
+COMPLETE / TERMINAL_RECONCILIATION
+
+- Historical baseline: `c7e60f4c6798554e51cbc322ebfaf89e2c5cc346`
+- Reconciled main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
+- Terminal marker: `ISSUE_121_SELECTOR_MAPPING_PROVEN`
+- Claim ceiling: `ISSUE_121_SELECTOR_MAPPING_PROVEN_ONLY`
+- AUTO_CHAIN: `false`
+
 - issue: #121
 - task_id: github-issue-121-model-workforce-impact-map
 - status: ACTIVE
@@ -89,4 +99,38 @@ GREEN after the map row: the selector returns exactly the two ordered workforce 
 
 ## Maximum Supportable Claim
 
-`ISSUE_121_SELECTOR_MAPPING_CANDIDATE_ONLY`: the current model workforce policy path selects its exact two executable contract suites without fallback. This does not make PR #110 mergeable or suppress any architecture baseline failure.
+Historical candidate claim: `ISSUE_121_SELECTOR_MAPPING_CANDIDATE_ONLY` bound
+the pre-merge contract. Terminal claim:
+`ISSUE_121_SELECTOR_MAPPING_PROVEN_ONLY` — the current model workforce policy
+path selects its exact two executable contract suites without fallback, proven
+at current main `eb668fb76f0c30d8f025db42cdb8e320d556c037` after PR #159
+physically merged.
+
+## Terminal reconciliation (post-merge)
+
+Physically merged by PR #159:
+
+- PR #159 base: `c7e60f4c6798554e51cbc322ebfaf89e2c5cc346`
+- PR #159 head: `c59cc663fd57120962387b83edd7de64e91a20fe`
+- PR #159 merge: `025bb5df0275423801b550451fedfc7b60dfb2ca`
+- Exact scope: 4 files, 0 deletions (+133): `docs/testing/test_impact_map.md`, `tests/ops/test_select_tests.py`, campaign INDEX, this card.
+- Head required checks: 5/5 SUCCESS (Pytest 224, Ruff 219, Pyright 219, Bandit 219, Wiki 219).
+
+Owner receipts on Issue #121: comment `5255290925` (physical completion with
+exact head/merge, 22 selector tests and real probes passed, all required
+protected checks passed, Tier3 skipped); comment `5255294744` (closed after
+physical mainline merge and exact receipt readback).
+
+Current main readback: `docs/testing/test_impact_map.md` contains the
+`nexus/config/model_workforce.yaml` row mapped to exactly
+`tests/contracts/test_model_workforce_policy.py,
+tests/services/test_model_workforce_policy_loader.py` with risk `medium` and
+reason `workforce_policy_contract`; `tests/ops/test_select_tests.py` contains
+`test_model_workforce_policy_uses_exact_contract_targets_without_fallback`
+proving `fallback_used=false` and `unmatched_paths=[]` for the workforce path
+while preserving unrelated-path fallback.
+
+This reconciliation changes no selector, classifier, fallback, Workforce,
+runtime, route, or product semantics. It grants no approval, integration,
+merge, release, or production authority and does not make PR #110 mergeable or
+suppress any architecture baseline failure.
