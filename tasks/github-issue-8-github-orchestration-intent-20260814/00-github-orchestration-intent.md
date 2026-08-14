@@ -22,7 +22,8 @@ outcome, but it never executes or implies a merge.
 PR #234 is recorded at head
 `87998b0e1c555170b91062e902d6a9c5aae36a21`, merged as
 `8e0986b40db56016c79b03eb81ff3d03c85c6f32`. Exact-main evidence references
-cover 140 focused tests/checks. The metadata is rebound to current `main`
+cover 51 focused/hostile M4 substrate tests (Owner comment 5285977862). The
+metadata is rebound to current `main`
 `eb668fb76f0c30d8f025db42cdb8e320d556c037` while preserving historical
 baseline `a74d838cc6bb14af47ce79207181c12a1aed1d35`.
 

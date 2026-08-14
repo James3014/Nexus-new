@@ -10,7 +10,8 @@
 - terminal marker: `NEXUS_GITHUB_ORCHESTRATION_M4_INTENT_SUBSTRATE_VERIFIED`
 - physical receipt: PR #234, head `87998b0e1c555170b91062e902d6a9c5aae36a21`,
   merge `8e0986b40db56016c79b03eb81ff3d03c85c6f32`; exact-main verification
-  references include 140 focused tests/checks.
+  references include 51 focused/hostile M4 substrate tests (Owner comment
+  5285977862).
 - claim ceiling: `NEXUS_GITHUB_ORCHESTRATION_M4_INTENT_ONLY`; deterministic
   orchestration-intent substrate projection only. No adapter, network,
   subprocess, merge executor, runtime, provider, approval, integration,
