@@ -4,7 +4,7 @@
 - issue: `8`
 - repository: `James3014/Nexus-new`
 - historical baseline: `a74d838cc6bb14af47ce79207181c12a1aed1d35`
-- reconciled/current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+- reconciled/current main: `cdf2570ede5ae218f36f886b696c8da45458043a`
 - status: COMPLETE
 - terminal marker: `NEXUS_GITHUB_ORCHESTRATION_M4_INTENT_SUBSTRATE_VERIFIED`
 - AUTO_CHAIN: false
@@ -24,7 +24,7 @@ PR #234 is recorded at head
 `8e0986b40db56016c79b03eb81ff3d03c85c6f32`. Exact-main evidence references
 cover 51 focused/hostile M4 substrate tests (Owner comment 5285977862). The
 metadata is rebound to current `main`
-`12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601` while preserving historical
+`cdf2570ede5ae218f36f886b696c8da45458043a` while preserving historical
 baseline `a74d838cc6bb14af47ce79207181c12a1aed1d35`.
 
 ## Scope boundary
