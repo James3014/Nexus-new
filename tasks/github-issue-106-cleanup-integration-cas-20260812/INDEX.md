@@ -22,7 +22,7 @@ The later #51 / PR #71 cleanup remains outside this Task Card.
 
 Status: `COMPLETE / TERMINAL_RECONCILIATION`.
 
-Reconciled current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+Reconciled current main: `cdf2570ede5ae218f36f886b696c8da45458043a`
 (historical verification receipt `eb668fb76f0c30d8f025db42cdb8e320d556c037`
 from the 2026-08-13 snapshot).
 
