@@ -1,5 +1,15 @@
 # Task Card: Issue 114 Golden Evaluator Hardening
 
+## Status
+
+COMPLETE / TERMINAL_RECONCILIATION
+
+- Historical baseline: `c450c75cedbe7679f564d4eaddb7aa351b8aa0ee`
+- Reconciled main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
+- Terminal marker: `GOLDEN_EVALUATOR_EVIDENCE_HARDENING_PROVEN`
+- Claim ceiling: `GOLDEN_EVALUATOR_EVIDENCE_HARDENING_PROVEN_ONLY`
+- AUTO_CHAIN: `false`
+
 ## Scope
 
 Allowed:
@@ -13,6 +23,7 @@ Forbidden:
 - tests/golden_behavior/test_corpus.py
 - runtime, route, Planner, Workforce, lifecycle, acceptance authority
 - findings semantics changes
+- #116 / PR #229 trusted-verifier authority
 
 ## Goal
 
@@ -22,6 +33,17 @@ Make Golden evaluator evidence revision-bound:
 - per-case witness evidence map;
 - remove evaluator-only permanent case ceiling;
 - add push-to-main backstop without duplicate schedule.
+
+## Implementation evidence
+
+- PR #198 base `c450c75cedbe7679f564d4eaddb7aa351b8aa0ee`; head
+  `2008bba49d024b39c037483889646a6841e51f64`; merge
+  `5e2e4f9b651582d51df5d02c270fec712d241124`.
+- Owner receipt `5264607384`; post-merge push-triggered Golden run
+  `31580745921` reached the main-push Golden step on merge SHA `5e2e4f9b` with
+  success.
+- Current-main readback confirms evaluator collection/provenance/backstop are
+  present; frozen #65 corpus files unchanged.
 
 ## Verification
 
