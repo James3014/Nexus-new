@@ -5,8 +5,8 @@
 - status: COMPLETE
 - base_sha: 3c4f9065739e7a718bc27e1bf0d0113150946c60
 - historical_baseline: 3c4f9065739e7a718bc27e1bf0d0113150946c60
-- reconciled_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
-- current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+- reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+- current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 - frontier_status: TERMINAL_RECONCILIATION
 - terminal_marker: R2B3_REPORT_REPLAY_TAMPER_PROVEN
 - claim_ceiling: repository-contained report replay/tamper verifier source/tests only
@@ -97,7 +97,7 @@ git diff --name-only 3c4f9065739e7a718bc27e1bf0d0113150946c60...HEAD
 - Owner receipt: `TERMINAL_REVERIFY_RECEIPT_20260813` on Issue #102; post-#101
   fresh current-main reverify ran report + metrics + e2e suites together,
   65 passed, zero provider/model calls.
-- Reconciled current main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`.
+- Reconciled current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`.
 
 `R2B3_REPORT_REPLAY_TAMPER_PROVEN` proves only the exact GitHub collaboration
 report replay/tamper verifier source and tests. It grants no benchmark result,
