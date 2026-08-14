@@ -6,7 +6,7 @@ campaign_id: github-issue-7-acceptance-repair-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/7
 baseline_main: 599227f0efbe1e9a4ca8cd6bff56824f0a6d9965
 reconciled_main: 89ed130ac5d3ad58106e7d9ba8f0d3a65066fdc2
-current_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+current_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
 rebind_owner_directive: https://github.com/James3014/Nexus-new/issues/7#issuecomment-5250252765
 rebind_date: 2026-08-11
 ordered_cards:
@@ -72,7 +72,7 @@ terminal SUCCESS, with Tier3 skipped as expected. Live Issue #7 is CLOSED and
 the Owner reconciliation records `M3_ACCEPTANCE_REPAIR_MERGED`.
 
 This campaign is reconciled at current main
-`eb668fb76f0c30d8f025db42cdb8e320d556c037`. #31 continuity, #76 operator
+`12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`. #31 continuity, #76 operator
 outcome receipt, #8 M4 intent substrate, and #163 evidence-only merge-slot
 authority remain separate. Protected `GITHUB_MERGE` always requires a fresh
 `MERGE_SLOT_GRANTED`; no standing grant authorizes merge.
