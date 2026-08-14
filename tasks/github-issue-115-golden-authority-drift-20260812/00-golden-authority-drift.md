@@ -8,8 +8,8 @@
 - baseline_revision: `4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e`
 - historical_baseline: `4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e`
 - merge_base: `4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e`
-- reconciled_main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
-- current_main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+- reconciled_main: `cdf2570ede5ae218f36f886b696c8da45458043a`
+- current_main: `cdf2570ede5ae218f36f886b696c8da45458043a`
 - block_class: NONE
 - frontier_status: TERMINAL_RECONCILIATION
 - terminal_marker: `GOLDEN_AUTHORITY_DRIFT_GATE_PROVEN`
@@ -79,8 +79,9 @@ second evaluator or persistent report authority.
 - Owner receipt on Issue #115 records `COMPLETION_RECONCILIATION` /
   `DONE_NO_FOLLOW_UP` with independent exact-head Luna acceptance ACCEPT; the
   PR #210 GitHub review surface records no review.
-- Reconciled current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
-  (historical verification receipt `eb668fb76f0c30d8f025db42cdb8e320d556c037`
+- Reconciled current main: `cdf2570ede5ae218f36f886b696c8da45458043a`
+  (historical verification receipts `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+  pre-PR236 rebind and `eb668fb76f0c30d8f025db42cdb8e320d556c037`
   from the 2026-08-13 snapshot).
 
 `GOLDEN_AUTHORITY_DRIFT_GATE_PROVEN` proves only the read-only authority-drift
