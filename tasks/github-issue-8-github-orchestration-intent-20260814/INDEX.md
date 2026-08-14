@@ -2,7 +2,7 @@
 
 - authority: Owner-authorized Ready GitHub Issue #8; fresh remote `main`
 - historical baseline: `a74d838cc6bb14af47ce79207181c12a1aed1d35`
-- reconciled/current main: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
+- reconciled/current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
 - status: COMPLETE
 - frontier status: COMPLETE
 - current frontier: terminal reconciliation; `00-github-orchestration-intent.md` completed
