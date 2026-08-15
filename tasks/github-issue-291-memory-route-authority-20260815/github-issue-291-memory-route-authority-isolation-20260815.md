@@ -5,7 +5,7 @@ repository: James3014/Nexus-new
 baseline_revision: cdf2570ede5ae218f36f886b696c8da45458043a
 status: COMPLETE
 terminal_state: TERMINAL_RECONCILIATION
-reconciled_main: b537a7120f79f73029513c4ed83ef325be4a7466
+reconciled_main: ccd23defe9aa5905d26f34a865746c1eff7d039f
 readiness_marker: LEGACY_MEMORY_ROUTE_AUTHORITY_ISOLATED
 AUTO_CHAIN: false
 claim_ceiling: LEGACY_MEMORY_ROUTE_AUTHORITY_ISOLATED_PROVEN_ONLY
@@ -104,7 +104,7 @@ acceptance are separate coordinator gates.
 The preceding Exit text is the preserved historical Candidate boundary. PR294
 head `27229058093ea7f20e4ed9a1c1afff505e397ec1` was independently accepted and
 merged as `c57c183f4f1c3701ccc1e3731ea498d60b2297d4`; this reconciliation is bound
-to current main `b537a7120f79f73029513c4ed83ef325be4a7466`. The merged change contained
+to current main `ccd23defe9aa5905d26f34a865746c1eff7d039f`. The merged change contained
 exactly four files and zero deletions. All six required exact-head workflows
 completed successfully, and the clean exact-main focused suite passed 18
 tests.

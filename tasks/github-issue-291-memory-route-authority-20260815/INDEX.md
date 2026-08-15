@@ -5,7 +5,7 @@ repository: James3014/Nexus-new
 status: COMPLETE
 terminal_state: TERMINAL_RECONCILIATION
 baseline_main: cdf2570ede5ae218f36f886b696c8da45458043a
-reconciled_main: b537a7120f79f73029513c4ed83ef325be4a7466
+reconciled_main: ccd23defe9aa5905d26f34a865746c1eff7d039f
 current_frontier: github-issue-291-memory-route-authority-isolation-20260815.md
 readiness_marker: LEGACY_MEMORY_ROUTE_AUTHORITY_ISOLATED
 claim_ceiling: LEGACY_MEMORY_ROUTE_AUTHORITY_ISOLATED_PROVEN_ONLY
@@ -23,7 +23,7 @@ focused hostile tests.
 - Current frontier: `github-issue-291-memory-route-authority-isolation-20260815.md`.
 - Historical candidate baseline: `cdf2570ede5ae218f36f886b696c8da45458043a`.
 - Physical implementation merge: `c57c183f4f1c3701ccc1e3731ea498d60b2297d4` (PR294).
-- Reconciled/current main: `b537a7120f79f73029513c4ed83ef325be4a7466`.
+- Reconciled/current main: `ccd23defe9aa5905d26f34a865746c1eff7d039f`.
 - Durable terminal marker: `LEGACY_MEMORY_ROUTE_AUTHORITY_ISOLATED`.
 - `CapabilityPlanner` remains the sole route/capability-selection authority.
 - `AUTO_CHAIN=false`.
