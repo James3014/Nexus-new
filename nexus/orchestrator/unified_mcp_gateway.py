@@ -2762,7 +2762,15 @@ class UnifiedMCPGateway:
         lineage_id = str(arguments.get("lineage_id") or "").strip()
         provider = str(arguments.get("provider") or "").strip()
         model = str(arguments.get("model") or "").strip()
-        if lineage_id and not provider and not model:
+        if lineage_id and (provider or model):
+            raise GatewayInputError(
+                "nexus_model_calibration_evidence accepts lineage_id OR exact provider+model, not both"
+            )
+        if bool(provider) != bool(model):
+            raise GatewayInputError(
+                "nexus_model_calibration_evidence requires provider and model together"
+            )
+        if lineage_id:
             try:
                 return self._calibration_planner.evidence_bundle(lineage_id=lineage_id)
             except LineageResolutionError as exc:
