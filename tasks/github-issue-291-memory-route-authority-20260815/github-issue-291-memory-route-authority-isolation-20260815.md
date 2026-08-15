@@ -3,10 +3,12 @@ task_id: github-issue-291-memory-route-authority-isolation-20260815
 issue: 291
 repository: James3014/Nexus-new
 baseline_revision: cdf2570ede5ae218f36f886b696c8da45458043a
-status: ACTIVE
-readiness_marker: MEMORY_ROUTE_AUTHORITY_SOURCE_FROZEN
+status: COMPLETE
+terminal_state: TERMINAL_RECONCILIATION
+reconciled_main: ccd23defe9aa5905d26f34a865746c1eff7d039f
+readiness_marker: LEGACY_MEMORY_ROUTE_AUTHORITY_ISOLATED
 AUTO_CHAIN: false
-claim_ceiling: memory_route_authority_candidate_pr_only
+claim_ceiling: LEGACY_MEMORY_ROUTE_AUTHORITY_ISOLATED_PROVEN_ONLY
 implementation_files:
   - nexus/core/capability_selector.py
   - tests/core/test_capability_selector_route_authority.py
@@ -96,3 +98,21 @@ acceptance are separate coordinator gates.
 
 `AUTO_CHAIN=false`. Claim ceiling:
 `memory_route_authority_candidate_pr_only`.
+
+## Terminal receipt
+
+The preceding Exit text is the preserved historical Candidate boundary. PR294
+head `27229058093ea7f20e4ed9a1c1afff505e397ec1` was independently accepted and
+merged as `c57c183f4f1c3701ccc1e3731ea498d60b2297d4`; this reconciliation is bound
+to current main `ccd23defe9aa5905d26f34a865746c1eff7d039f`. The merged change contained
+exactly four files and zero deletions. All six required exact-head workflows
+completed successfully, and the clean exact-main focused suite passed 18
+tests.
+
+Legacy dynamic-learning-policy add/remove authority is isolated from
+`CapabilitySelector`; `CapabilityPlanner` remains the sole route and
+capability-selection authority. Terminal marker:
+`LEGACY_MEMORY_ROUTE_AUTHORITY_ISOLATED`. Claim ceiling:
+`LEGACY_MEMORY_ROUTE_AUTHORITY_ISOLATED_PROVEN_ONLY`, limited to
+repository-contained source and tests. `AUTO_CHAIN=false`; no runtime,
+Workforce, provider, release, or production truth is claimed.
