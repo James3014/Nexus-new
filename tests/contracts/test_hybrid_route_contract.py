@@ -43,6 +43,10 @@ def test_hybrid_route_default_values() -> None:
     assert receipt.outcome_contributed is False
 
 
+def test_gb013_default_payload_is_observational_and_non_claiming() -> None:
+    test_hybrid_route_default_values()
+
+
 def test_to_dict_round_trip() -> None:
     decision = HybridRouteDecision()
     payload = decision.to_dict()
@@ -59,6 +63,10 @@ def test_to_dict_round_trip() -> None:
     tampered["public_claim_allowed"] = True
     with pytest.raises(ValueError):
         hybrid_route_decision_from_payload(tampered)
+
+
+def test_gb014_round_trip_tamper_cannot_escalate_authority() -> None:
+    test_to_dict_round_trip()
 
 
 def test_from_payload_coerces_enum() -> None:
@@ -136,6 +144,10 @@ def test_advisory_guard_cannot_block_delivery_yet() -> None:
     assert receipt.gate_passed is False
     assert receipt.outcome_contributed is False
     assert receipt.public_claim_safe is False
+
+
+def test_gb019_advisory_failure_does_not_block_delivery_or_claim() -> None:
+    test_advisory_guard_cannot_block_delivery_yet()
 
 
 def test_gb019_blocking_override_fails_closed() -> None:
