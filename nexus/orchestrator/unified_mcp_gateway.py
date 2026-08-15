@@ -59,6 +59,12 @@ from nexus.orchestrator.self_hosted_task_service import (
     resolve_lifecycle_identity,
     validate_task_card_binding,
 )
+from nexus.services.model_capability_lineage import (
+    CHANGE_KIND_VALUES,
+    CalibrationPlanner,
+    LineageResolutionError,
+    ModelCapabilityLineageRegistry,
+)
 from nexus.services.model_workforce_policy import NON_ADMISSIBLE_STATES, WorkforcePolicyLoader
 from nexus.services.unified_runtime import (
     LOCAL_ONLY_PROVIDERS,
@@ -926,6 +932,8 @@ class UnifiedMCPGateway:
         self._ignored_model_runner = model_runner
         self._ignored_apply_runner = apply_runner
         self._workforce_loader = WorkforcePolicyLoader()
+        self._lineage_registry = ModelCapabilityLineageRegistry()
+        self._calibration_planner = CalibrationPlanner(self._lineage_registry)
         self._assist_processes: dict[str, subprocess.Popen[str]] = {}
         self._assist_lock = threading.RLock()
 
@@ -2743,6 +2751,61 @@ class UnifiedMCPGateway:
                         "candidate_only": True})
         return payload
 
+    def _model_calibration_evidence(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        """Read-only calibration-evidence query.  Never Workforce Admission.
+
+        Resolves one lineage by lineage_id OR by exact provider+model execution
+        identity.  Unknown or ambiguous lineage fails closed.  The action does
+        not modify any file, grant admission, select a route, or call a
+        provider.
+        """
+        lineage_id = str(arguments.get("lineage_id") or "").strip()
+        provider = str(arguments.get("provider") or "").strip()
+        model = str(arguments.get("model") or "").strip()
+        if lineage_id and not provider and not model:
+            try:
+                return self._calibration_planner.evidence_bundle(lineage_id=lineage_id)
+            except LineageResolutionError as exc:
+                raise GatewayInputError(str(exc)) from exc
+        if provider and model:
+            try:
+                return self._calibration_planner.evidence_bundle(provider=provider, model=model)
+            except LineageResolutionError as exc:
+                raise GatewayInputError(str(exc)) from exc
+        raise GatewayInputError(
+            "nexus_model_calibration_evidence requires lineage_id OR exact provider+model"
+        )
+
+    def _model_calibration_plan(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        """Read-only minimum-requalification plan.  Never Workforce Admission.
+
+        Plans reuse still-valid lower-tier semantic evidence instead of
+        restarting from L1.  The action does not modify any file, grant
+        admission, select a route, start a model call, promote a model, or
+        change runtime state.
+        """
+        provider = str(arguments.get("provider") or "").strip()
+        model = str(arguments.get("model") or "").strip()
+        target_role = _text(arguments.get("target_role"), "target_role", max_length=256)
+        if not provider or not model:
+            raise GatewayInputError("nexus_model_calibration_plan requires provider and model")
+        change_kind = str(arguments.get("change_kind") or "").strip().lower() or None
+        if change_kind is not None and change_kind not in CHANGE_KIND_VALUES:
+            raise GatewayInputError(
+                f"change_kind must be one of {', '.join(CHANGE_KIND_VALUES)}"
+            )
+        description = str(arguments.get("description") or "").strip()[:512]
+        try:
+            return self._calibration_planner.build_calibration_plan(
+                provider=provider,
+                model=model,
+                target_role=target_role,
+                change_kind=change_kind,
+                description=description,
+            ).to_dict()
+        except LineageResolutionError as exc:
+            raise GatewayInputError(str(exc)) from exc
+
     @staticmethod
     def tool_specs() -> list[dict[str, Any]]:
         return [
@@ -2982,6 +3045,35 @@ class UnifiedMCPGateway:
                 "name": "nexus_model_probe_result",
                 "description": "Retrieve one durable schema-bound model probe result and filesystem/process receipt.",
                 "inputSchema": {"type": "object", "required": ["task_id"], "properties": {"task_id": {"type": "string"}}},
+            },
+            {
+                "name": "nexus_model_calibration_evidence",
+                "description": "Read-only model capability lineage evidence; calibration only, NOT Workforce Admission.",
+                "inputSchema": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "lineage_id": {"type": "string"},
+                        "provider": {"type": "string"},
+                        "model": {"type": "string"},
+                    },
+                },
+            },
+            {
+                "name": "nexus_model_calibration_plan",
+                "description": "Read-only minimum-requalification plan for one model lineage; reuses still-valid lower-tier evidence instead of restarting from L1. Does not grant admission, select a route, or call a provider.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["provider", "model", "target_role"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "provider": {"type": "string"},
+                        "model": {"type": "string"},
+                        "target_role": {"type": "string"},
+                        "change_kind": {"type": "string", "enum": list(CHANGE_KIND_VALUES)},
+                        "description": {"type": "string", "maxLength": 512},
+                    },
+                },
             },
             {
                 "name": "nexus_candidate_approve",
@@ -4042,6 +4134,10 @@ class UnifiedMCPGateway:
             if job is None or job.get("job_kind") != "model_probe":
                 raise KeyError(f"unknown model_probe task_id: {task_id}")
             return self._assist_response(self._assist_refresh(task_id) or job, operation="result")
+        if name == "nexus_model_calibration_evidence":
+            return self._model_calibration_evidence(arguments)
+        if name == "nexus_model_calibration_plan":
+            return self._model_calibration_plan(arguments)
         if name == "nexus_candidate_approve":
             return self._candidate_approve(arguments)
         if name == "nexus_candidate_bind_integration":
