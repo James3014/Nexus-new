@@ -19,7 +19,7 @@ existing local-heal memory retrieval adapter with strict validation and
 provenance.
 
 - Current frontier: `github-issue-292-canonical-episodic-memory-g1-20260815.md`.
-- Baseline/current main: `cdf2570ede5ae218f36f886b696c8da45458043a`.
+- Historical baseline: `cdf2570ede5ae218f36f886b696c8da45458043a`; current main (rebound): `586abbfb459550de912002203ff2911c7a40db58`.
 - Durable readiness marker: `CANONICAL_EPISODIC_MEMORY_G1_SOURCE_FROZEN`.
 - G2–G4 are not authorized by this card.
 - `AUTO_CHAIN=false`.
