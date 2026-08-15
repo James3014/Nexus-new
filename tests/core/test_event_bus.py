@@ -11,7 +11,11 @@ from nexus.core.belief_contracts import HealingArtifact
 from nexus.core.event_bus import NexusEventBus
 from nexus.core.healing_artifacts import HealingArtifactKeyPolicy, sign_healing_artifact
 from nexus.core.task_continuity import events_from_attempt_records, project, resume
-from nexus.events.contracts import build_attempt_transition_event
+from nexus.events.contracts import (
+    MAX_CONTINUITY_COLLECTION_ITEMS,
+    AttemptTransitionEvent,
+    build_attempt_transition_event,
+)
 from nexus.events.log_store import JsonlEventLogStore
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 
@@ -589,3 +593,57 @@ store.append_record({
     store = JsonlEventLogStore()
     store.configure(tmp_path)
     assert store.attempt_tail("shared", "attempt") == 1
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["do_not_repeat", "unresolved_risks", "unknowns", "candidate_refs", "evidence_refs"],
+)
+@pytest.mark.parametrize("value", ["single", b"single"])
+def test_build_attempt_transition_event_rejects_scalar_string_and_bytes(field, value):
+    with pytest.raises(ValueError, match=f"{field} must be a list/tuple"):
+        build_attempt_transition_event(
+            task_id="t1",
+            attempt_id="a1",
+            sequence=1,
+            state="RUNNING",
+            source_revision="src",
+            contract_revision="contract",
+            **{field: value},
+        )
+
+
+def test_attempt_transition_event_enforces_bounded_collection_ceiling():
+    with pytest.raises(ValueError, match="exceeds bounded size"):
+        build_attempt_transition_event(
+            task_id="t1",
+            attempt_id="a1",
+            sequence=1,
+            state="RUNNING",
+            do_not_repeat=["x"] * (MAX_CONTINUITY_COLLECTION_ITEMS + 1),
+            source_revision="src",
+            contract_revision="contract",
+        )
+    boundary = build_attempt_transition_event(
+        task_id="t1",
+        attempt_id="a1",
+        sequence=1,
+        state="RUNNING",
+        do_not_repeat=["x"] * MAX_CONTINUITY_COLLECTION_ITEMS,
+        evidence_refs=("ev-1",),
+        source_revision="src",
+        contract_revision="contract",
+    )
+    assert boundary.do_not_repeat == ("x",) * MAX_CONTINUITY_COLLECTION_ITEMS
+    assert boundary.evidence_refs == ("ev-1",)
+    assert boundary.to_dict()["do_not_repeat"] == ["x"] * MAX_CONTINUITY_COLLECTION_ITEMS
+    with pytest.raises(ValueError, match="exceeds bounded size"):
+        AttemptTransitionEvent(
+            task_id="t1",
+            attempt_id="a1",
+            sequence=1,
+            state="RUNNING",
+            do_not_repeat=("x",) * (MAX_CONTINUITY_COLLECTION_ITEMS + 1),
+            source_revision="src",
+            contract_revision="contract",
+        )

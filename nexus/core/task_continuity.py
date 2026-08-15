@@ -12,6 +12,8 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Iterable
 
+from nexus.events.contracts import MAX_CONTINUITY_COLLECTION_ITEMS
+
 SCHEMA = "nexus.task_continuity.v1"
 EVENT_TYPES = frozenset({
     "PLAN_FORMED",
@@ -111,6 +113,8 @@ class ContinuityEvent:
                 not isinstance(v, str) or not v.strip() for v in values
             ):
                 raise ValueError(f"{name} must contain non-empty strings")
+            if len(values) > MAX_CONTINUITY_COLLECTION_ITEMS:
+                raise ValueError(f"{name} exceeds bounded size {MAX_CONTINUITY_COLLECTION_ITEMS}")
         payload = {
             name: getattr(self, name) for name in self.__dataclass_fields__ if name != "event_hash"
         }
@@ -351,6 +355,8 @@ def events_from_attempt_records(
             not isinstance(item, str) or not item.strip() for item in value
         ):
             raise ValueError(f"{name} must be a list of non-empty strings")
+        if len(value) > MAX_CONTINUITY_COLLECTION_ITEMS:
+            raise ValueError(f"{name} exceeds bounded size {MAX_CONTINUITY_COLLECTION_ITEMS}")
         return tuple(value)
 
     decoded: list[ContinuityEvent] = []
@@ -408,7 +414,7 @@ def events_from_attempt_records(
             sequence=payload["sequence"],
             event_type=continuity_event_type,
             summary=payload["state"],
-            observation=payload.get("reason", ""),
+            observation=payload.get("observation", ""),
             failure_reason=payload.get("reason", ""),
             strategy_delta=payload.get("strategy_delta", ""),
             do_not_repeat=tuple_field(payload, "do_not_repeat", "rejected_strategies"),

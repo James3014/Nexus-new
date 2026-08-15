@@ -20,16 +20,22 @@ PHASE_OBSERVER_HOOKS = frozenset(
 
 REJECTED_STATES = frozenset({"ATTEMPT_REJECTED", "REJECTED"})
 
+# Single deterministic ceiling for the bounded continuity string sequences
+# shared by the producer, the transition event, and the continuity decoder.
+MAX_CONTINUITY_COLLECTION_ITEMS = 64
+
 
 def _continuity_sequence(name: str, value: Any) -> tuple[str, ...]:
     """Normalize a canonical bounded string sequence, rejecting malformed shapes."""
     if value is None:
         return ()
-    if isinstance(value, str):
-        return (value,)
+    if isinstance(value, (str, bytes)):
+        raise ValueError(f"{name} must be a list/tuple of non-empty strings")
     if isinstance(value, (list, tuple)):
         if any(not isinstance(item, str) or not item.strip() for item in value):
             raise ValueError(f"{name} must contain non-empty strings")
+        if len(value) > MAX_CONTINUITY_COLLECTION_ITEMS:
+            raise ValueError(f"{name} exceeds bounded size {MAX_CONTINUITY_COLLECTION_ITEMS}")
         return tuple(value)
     raise ValueError(f"{name} must be a list/tuple of non-empty strings")
 
@@ -84,6 +90,8 @@ class AttemptTransitionEvent:
         for name in ("do_not_repeat", "unresolved_risks", "unknowns", "candidate_refs", "evidence_refs"):
             if not isinstance(getattr(self, name), tuple):
                 raise ValueError(f"{name} must be a tuple")
+            if len(getattr(self, name)) > MAX_CONTINUITY_COLLECTION_ITEMS:
+                raise ValueError(f"{name} exceeds bounded size {MAX_CONTINUITY_COLLECTION_ITEMS}")
         for refs in (self.do_not_repeat, self.unresolved_risks, self.unknowns, self.candidate_refs, self.evidence_refs):
             if any(not isinstance(ref, str) or not ref.strip() for ref in refs):
                 raise ValueError("continuity fields must contain non-empty strings")
