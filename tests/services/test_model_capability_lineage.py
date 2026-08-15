@@ -431,17 +431,19 @@ def test_capability_evidence_provenance_is_honest() -> None:
 def test_workforce_authority_refs_separate_from_capability_evidence() -> None:
     registry = _registry()
     gemini = registry.resolve_by_lineage_id("gemini-3.7-flash-medium")
-    gemini_identities = {(ref.provider, ref.model) for ref in gemini.workforce_authority_refs}
-    assert ("agy", "gemini-3.6-flash-medium") in gemini_identities
-    assert ("agy", "gemini-3.7-flash-medium") not in gemini_identities
-    assert all(ref.current_autonomy == "L1" for ref in gemini.workforce_authority_refs)
+    gemini_refs = {(ref.provider, ref.model, ref.current_autonomy) for ref in gemini.workforce_authority_refs}
+    assert gemini_refs == {("agy", "gemini-3.7-flash-medium", "L3")}
+
     deepseek = registry.resolve_by_lineage_id("deepseek-v4-flash")
-    assert any(
-        ref.provider == "opencode"
-        and ref.model == "opencode/deepseek-v4-flash-free"
-        and ref.current_autonomy == "L1"
-        for ref in deepseek.workforce_authority_refs
-    )
+    deepseek_refs = {
+        (ref.provider, ref.model, ref.current_autonomy) for ref in deepseek.workforce_authority_refs
+    }
+    assert deepseek_refs == {("opencode", "opencode/deepseek-v4-flash-free", "L2")}
+
+    # Workforce authority is current context only; it does not become semantic
+    # calibration evidence and it does not admit unregistered aliases.
+    assert all("model_workforce.yaml" in ref.ref for ref in gemini.workforce_authority_refs)
+    assert all("model_workforce.yaml" in ref.ref for ref in deepseek.workforce_authority_refs)
 
 
 def test_capability_evidence_provenance_contradiction_rejected(tmp_path: Path) -> None:

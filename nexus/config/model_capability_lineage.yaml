@@ -6,17 +6,19 @@
 # must never imply admission equivalence.
 #
 # PROVENANCE RULE: capability calibration evidence must never claim a reference
-# it does not have. As of base c75a422:
-#   * model_workforce.yaml workers.agy_flash_medium registers
-#     gemini-3.6-flash-medium at autonomy L1 (NOT gemini-3.7-flash-medium L3);
+# it does not have. As of workforce authority merge 5ce3587a7f3f3c4c1068e1fc9def02bc6f6a104a:
+#   * model_workforce.yaml workers.agy_flash_medium preserves
+#     gemini-3.6-flash-medium at autonomy L1 for backward compatibility;
+#   * model_workforce.yaml workers.agy_flash_37_medium registers
+#     gemini-3.7-flash-medium at autonomy L3;
 #   * model_workforce.yaml workers.opencode_deepseek_v4_flash registers
-#     opencode/deepseek-v4-flash-free at autonomy L1.
+#     opencode/deepseek-v4-flash-free at autonomy L2.
 # Those workforce records are current admission authority CONTEXT, not
 # capability calibration evidence. Capability floors/frontiers below are
-# Owner-settled calibration values; where no durable repository receipt exists
-# they are marked OWNER_DECISION or
+# calibration values with their own explicit provenance; where no durable
+# calibration receipt exists they remain marked OWNER_DECISION or
 # EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK rather than being
-# falsely pointed at model_workforce.yaml. No hash or repository path is
+# falsely promoted into receipt-backed evidence. No hash or repository path is
 # invented.
 #
 # The three-arm benchmark (scripts/bench/experimental/model_workforce_three_arm.py)
@@ -100,7 +102,7 @@ lineages:
         provenance: OWNER_DECISION
         date: '2026-08-15'
         digest: null
-        note: "Owner-settled stable floor; no durable L2 repository receipt yet"
+        note: "Owner-settled stable floor; no separate durable calibration receipt hash recorded in this lineage registry"
       - id: ds-v4-flash-l3-frontier
         phase: FIRST_PASS
         tier: L3
@@ -109,7 +111,7 @@ lineages:
         provenance: OWNER_DECISION
         date: '2026-08-15'
         digest: null
-        note: "Owner-settled frontier; no durable L3 repository receipt yet"
+        note: "Owner-settled frontier; no separate durable calibration receipt hash recorded in this lineage registry"
       - id: ds-v4-flash-l4-first-pass
         phase: FIRST_PASS
         tier: L4
@@ -134,11 +136,11 @@ lineages:
       - ref: nexus/config/model_workforce.yaml#workers.opencode_deepseek_v4_flash
         provider: opencode
         model: opencode/deepseek-v4-flash-free
-        current_autonomy: L1
+        current_autonomy: L2
         note: >-
-          current workforce admission authority is L1 for
-          opencode/deepseek-v4-flash-free; lineage capability floor L2 / frontier
-          L3 are Owner-settled calibration values, separate from admission
+          current workforce admission authority is L2 for
+          opencode/deepseek-v4-flash-free; lineage capability frontier L3 remains
+          separate calibration evidence and does not raise admitted authority
     evidence_notes:
       - "capability evidence provenance is OWNER_DECISION or EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK; no invented hashes or repository paths"
       - "workforce_authority_refs are current admission context only and carry no calibration weight"
@@ -178,16 +180,16 @@ lineages:
         provenance: OWNER_DECISION
         date: '2026-08-15'
         digest: null
-        note: "Owner-settled stable floor; no durable L3 repository receipt yet"
+        note: "Owner-settled stable floor; no separate durable calibration receipt hash recorded in this lineage registry"
     workforce_authority_refs:
-      - ref: nexus/config/model_workforce.yaml#workers.agy_flash_medium
+      - ref: nexus/config/model_workforce.yaml#workers.agy_flash_37_medium
         provider: agy
-        model: gemini-3.6-flash-medium
-        current_autonomy: L1
+        model: gemini-3.7-flash-medium
+        current_autonomy: L3
         note: >-
-          current workforce admission authority registers gemini-3.6-flash-medium
-          at L1; the gemini-3.7-flash-medium L3 lineage capability is
-          Owner-settled calibration and is separate from admission
+          current workforce admission authority registers gemini-3.7-flash-medium
+          as distinct worker agy_flash_37_medium at L3; agy_flash_medium remains
+          a separate gemini-3.6-flash-medium L1 identity for compatibility
     evidence_notes:
       - "capability evidence provenance is OWNER_DECISION; no invented hashes or repository paths"
       - "conditional_ceiling L3 means L4 evidence is experimental and non-admitted"
