@@ -4,12 +4,18 @@ Baseline (historical): `a74d838cc6bb14af47ce79207181c12a1aed1d35`; prior
 reconciled main (historical): `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`;
 prior reconciled main (historical): `cdf2570ede5ae218f36f886b696c8da45458043a`;
 prior reconciled main (historical): `586abbfb459550de912002203ff2911c7a40db58`;
-reconciled/current main: `c57c183f4f1c3701ccc1e3731ea498d60b2297d4`.
+prior reconciled main (historical): `c57c183f4f1c3701ccc1e3731ea498d60b2297d4`;
+reconciled/current main: `ccd23defe9aa5905d26f34a865746c1eff7d039f`.
 
 Prior rebind (historical): non-destructive merge head
 `c475c401415e42fdce8d24728814e46c1ea8c543` with parents
 `dbe1b49d99ae9636cd96870c434aca0b0512f4b2` + `cdf2570ede5ae218f36f886b696c8da45458043a`;
 that head was superseded by the rejected candidate `c603fd8d8fad62523deff74e2d0c47e4e5aa78c1`.
+
+Prior rebind (historical): non-destructive merge head
+`801220a9b1babe61a0830e31a21202caaf0dc8d5` with parents
+`7dcf4b56f12a1df9a9975ee71a26285479e6e524` + `ccd23defe9aa5905d26f34a865746c1eff7d039f`;
+active current-main binding updated to `ccd23defe9aa5905d26f34a865746c1eff7d039f`.
 
 Prior repair candidate `41351277b0c22a1bf890f0f9cf67e9a683cc2668`
 (parent `c603fd8d8fad62523deff74e2d0c47e4e5aa78c1`) is retained as rejected
