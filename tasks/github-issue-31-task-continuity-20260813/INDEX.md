@@ -26,11 +26,15 @@ this repair. Continuity producer/event/replay fields must preserve the exact
 event type and protected continuity fields; no VERIFIED or terminal claim is
 authorized until independent re-acceptance of this bounded repair.
 
-Repair candidate head: `41351277b0c22a1bf890f0f9cf67e9a683cc2668` (code and
-hostile tests only). Rejected lifecycle state maps/fails closed to
-`ATTEMPT_REJECTED`, canonical `failure_reason` persists through replay, and
-malformed continuity lists fail closed. KEEP_OPEN remains active; acceptance
-is external and pending; no terminal marker is authorized.
+Prior repair candidate `41351277b0c22a1bf890f0f9cf67e9a683cc2668`
+is retained as rejected history. The current semantic repair candidate is
+`7e14303927be3235ad05493574a46e975bb759c9` (parent
+`ee673dc93a6de9505414f23d498637293b306827`; code and hostile tests only).
+Rejected lifecycle state maps/fails closed to `ATTEMPT_REJECTED`, canonical
+`failure_reason` persists independently from observation through replay, and
+malformed, scalar, or over-limit continuity collections fail closed at the
+shared 64-item ceiling. KEEP_OPEN remains active; acceptance is external and
+pending; no terminal marker is authorized.
 
 Terminal reconciliation records PR #226 head `49cba7ccf36daf39bafa6f5100436eac4103106a`
 and merge `a787e8e7` on the reconciled main above. Its exact bounded receipt is

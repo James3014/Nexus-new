@@ -9,30 +9,38 @@ Prior rebind (historical): non-destructive merge head
 `dbe1b49d99ae9636cd96870c434aca0b0512f4b2` + `cdf2570ede5ae218f36f886b696c8da45458043a`;
 that head was superseded by the rejected candidate `c603fd8d8fad62523deff74e2d0c47e4e5aa78c1`.
 
-Repair candidate head: `41351277b0c22a1bf890f0f9cf67e9a683cc2668` (parent
-`c603fd8d8fad62523deff74e2d0c47e4e5aa78c1`); exact 5 changed code/test files
-plus this card and `INDEX.md`, zero deletions. No terminal acceptance is
-claimed; the Owner KEEP_OPEN gate remains active.
+Prior repair candidate `41351277b0c22a1bf890f0f9cf67e9a683cc2668`
+(parent `c603fd8d8fad62523deff74e2d0c47e4e5aa78c1`) is retained as rejected
+history. The current semantic repair candidate is
+`7e14303927be3235ad05493574a46e975bb759c9` (parent
+`ee673dc93a6de9505414f23d498637293b306827`); it changes exactly 4 code/test
+files, with this card and `INDEX.md` updated afterward to bind that candidate,
+and has zero deletions. No terminal acceptance is claimed; the Owner KEEP_OPEN
+gate remains active.
 
 Bounded repair deltas:
 1. Canonical `failure_reason` persists producer -> payload -> decoder ->
-   projection -> replay from the single `reason` field; no second reason
-   field is retained.
+   projection -> replay from the single `reason` field, while `observation`
+   remains an independent channel and alone contributes verified facts.
 2. Supported `REJECTED` lifecycle state maps to `ATTEMPT_REJECTED`; rejected
    transitions with missing or explicit `OBSERVATION_RECORDED` continuity type
    fail closed at both the producer and the decoder.
-3. Malformed mapping/iterable continuity list inputs fail closed; only
-   canonical bounded string sequences are accepted.
+3. Scalar strings/bytes, mappings, malformed elements, and collections above
+   the shared 64-item ceiling fail closed; exact-boundary canonical string
+   sequences remain accepted deterministically.
+4. The producer, event contract, decoder, and projection consume one shared
+   `MAX_CONTINUITY_COLLECTION_ITEMS` authority; no second schema or state
+   machine is introduced.
 
-Hostile regression witnesses added in `tests/core/test_task_continuity.py` and
-`tests/core/test_event_bus.py`, including a real JSONL
-append -> canonical read -> decode -> project -> resume proof that preserves
-`ATTEMPT_REJECTED`, `failure_reason`, and `do_not_repeat`. Evidence: 69
-continuity/event-bus tests, 291 self-hosted service tests, 5 lifecycle phase
-receipt tests (365 total), compileall, and `git diff --check` pass. Ruff on the
-changed Python files reports only five pre-existing base findings in
-`self_hosted_task_service.py` (lines 66, 3299, 5059, 5061, 7296), unchanged
-from the base revision.
+Hostile regression witnesses in `tests/core/test_task_continuity.py` and
+`tests/core/test_event_bus.py` include real JSONL append -> canonical read ->
+decode -> project -> resume coverage preserving `ATTEMPT_REJECTED`,
+`failure_reason`, `observation`, and `do_not_repeat`, plus scalar/malformed and
+64/65 boundary probes. Current semantic repair evidence: 88 focused tests,
+compileall, Ruff check, and `git diff --check` pass. Ruff preview-format debt
+in the touched files is byte-identical to the repair parent; no added line is
+formatter-flagged. The earlier 291 self-hosted and lifecycle evidence remains
+historical and is not reasserted as a fresh run for this candidate.
 
 Status: `ACTIVE`; frontier: `IMPLEMENTATION_ACTIVE`; terminal marker: none
 (Owner KEEP_OPEN repair gate; VERIFIED/terminal status is not authorized).
