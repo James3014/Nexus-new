@@ -30,9 +30,13 @@ class RetrievedLesson:
         return 0.0
 
 
-_CURRENT_STATE_DIMENSIONS = frozenset(
-    {"state_version", "source_revision", "contract_revision", "runtime_identity", "max_age_days"}
-)
+_CURRENT_STATE_DIMENSIONS = frozenset({
+    "state_version",
+    "source_revision",
+    "contract_revision",
+    "runtime_identity",
+    "max_age_days",
+})
 
 
 def _is_integer(value: Any) -> bool:
@@ -244,21 +248,17 @@ class FindingsMemoryLessonStore:
         for card in cards[:limit]:
             extra = dict(getattr(card, "extra", {}) or {})
             evidence_paths = list(getattr(card, "evidence_paths", []) or [])
-            rows.append(
-                {
-                    "lesson_id": extra.get("lesson_id") or getattr(card, "id", ""),
-                    "finding_id": getattr(card, "id", ""),
-                    "task_id": getattr(card, "task_id", "") or extra.get("task_id", ""),
-                    "classification": extra.get("classification")
-                    or ",".join(getattr(card, "tags", []) or []),
-                    "summary": getattr(card, "body", "") or getattr(card, "title", ""),
-                    "provenance": evidence_paths[0]
-                    if evidence_paths
-                    else extra.get("receipt_id", ""),
-                    "relevance_score": 1.0,
-                    "source": "FindingsMemoryStore",
-                }
-            )
+            rows.append({
+                "lesson_id": extra.get("lesson_id") or getattr(card, "id", ""),
+                "finding_id": getattr(card, "id", ""),
+                "task_id": getattr(card, "task_id", "") or extra.get("task_id", ""),
+                "classification": extra.get("classification")
+                or ",".join(getattr(card, "tags", []) or []),
+                "summary": getattr(card, "body", "") or getattr(card, "title", ""),
+                "provenance": evidence_paths[0] if evidence_paths else extra.get("receipt_id", ""),
+                "relevance_score": 1.0,
+                "source": "FindingsMemoryStore",
+            })
         return rows
 
 
@@ -475,7 +475,8 @@ class CanonicalEpisodicMemoryLessonStore:
                 continue
             row = self._canonical_episode_row(entry, provenance, self.backend)
             text = (
-                " ".join(str(row.get(key, "")) for key in ("task_id", "summary", "classification"))
+                " "
+                .join(str(row.get(key, "")) for key in ("task_id", "summary", "classification"))
                 .lower()
                 .replace("_", " ")
             )
@@ -541,18 +542,16 @@ class NexusCompositeLessonStore:
                 source_counts[source] = len(store_rows)
             rows.extend(store_rows)
             store_metadata = dict(getattr(store, "last_metadata", {}) or {})
-            backend_receipts.append(
-                {
-                    "store": source,
-                    "backend": str(
-                        store_metadata.get("backend") or getattr(store, "backend", "") or source
-                    ),
-                    "query_attempted": bool(store_metadata.get("query_attempted", True)),
-                    "query_succeeded": bool(store_metadata.get("query_succeeded", not last_error)),
-                    "result_count": int(store_metadata.get("result_count", len(store_rows)) or 0),
-                    "error": str(store_metadata.get("error") or last_error or ""),
-                }
-            )
+            backend_receipts.append({
+                "store": source,
+                "backend": str(
+                    store_metadata.get("backend") or getattr(store, "backend", "") or source
+                ),
+                "query_attempted": bool(store_metadata.get("query_attempted", True)),
+                "query_succeeded": bool(store_metadata.get("query_succeeded", not last_error)),
+                "result_count": int(store_metadata.get("result_count", len(store_rows)) or 0),
+                "error": str(store_metadata.get("error") or last_error or ""),
+            })
             for key in g2_counters:
                 g2_counters[key] += int(store_metadata.get(key, 0) or 0)
 

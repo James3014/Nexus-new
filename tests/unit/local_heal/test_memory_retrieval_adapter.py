@@ -109,9 +109,9 @@ def test_default_composite_includes_canonical_store():
 
 def test_composite_metadata_records_canonical_source(tmp_path):
     _write_ledger(tmp_path, [json.dumps(_episode())])
-    composite = NexusCompositeLessonStore(
-        [CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)]
-    )
+    composite = NexusCompositeLessonStore([
+        CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)
+    ])
     adapter = MemoryRetrievalAdapter(store=composite)
 
     lessons = adapter.retrieve(query_text="canonical receipt", limit=5)
@@ -245,12 +245,10 @@ def test_missing_ledger_is_fail_open_empty_and_legacy_store_remains_isolated(tmp
         '"summary":"legacy format owner","provenance":"receipt:jsonl"}\n',
         encoding="utf-8",
     )
-    composite = NexusCompositeLessonStore(
-        [
-            LocalJsonlLessonStore(legacy_path),
-            CanonicalEpisodicMemoryLessonStore(project_root=tmp_path),
-        ]
-    )
+    composite = NexusCompositeLessonStore([
+        LocalJsonlLessonStore(legacy_path),
+        CanonicalEpisodicMemoryLessonStore(project_root=tmp_path),
+    ])
     adapter = MemoryRetrievalAdapter(store=composite)
 
     lessons = adapter.retrieve(query_text="legacy format", limit=5)
@@ -432,9 +430,9 @@ def test_g2_adapter_counters_aggregate_across_composite_receipts(tmp_path):
             json.dumps(_with_applicability(_episode(idempotency_key="ep-g2-b"), state_version=5)),
         ],
     )
-    composite = NexusCompositeLessonStore(
-        [CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)]
-    )
+    composite = NexusCompositeLessonStore([
+        CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)
+    ])
     adapter = MemoryRetrievalAdapter(store=composite)
 
     lessons = adapter.retrieve(query_text="canonical", limit=5, current_state={"state_version": 2})
@@ -460,12 +458,10 @@ def test_g2_legacy_stores_remain_isolated_under_current_state(tmp_path):
             )
         ],
     )
-    composite = NexusCompositeLessonStore(
-        [
-            LocalJsonlLessonStore(legacy_path),
-            CanonicalEpisodicMemoryLessonStore(project_root=tmp_path),
-        ]
-    )
+    composite = NexusCompositeLessonStore([
+        LocalJsonlLessonStore(legacy_path),
+        CanonicalEpisodicMemoryLessonStore(project_root=tmp_path),
+    ])
     adapter = MemoryRetrievalAdapter(store=composite)
 
     lessons = adapter.retrieve(
