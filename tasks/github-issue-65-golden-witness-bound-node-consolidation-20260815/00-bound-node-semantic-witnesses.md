@@ -25,8 +25,9 @@ Keep the bound node names stable and consolidate redundant sibling coverage.
 
 ## Inputs and dependencies
 
-- Current main `ccd23defe9aa5905d26f34a865746c1eff7d039f`; prior reconciled
-  main `586abbfb459550de912002203ff2911c7a40db58` includes PR #244 and prior
+- Current main `c75a42279556cd515e8f5d775cecd2ecde7aa301`; prior reconciled
+  main `ccd23defe9aa5905d26f34a865746c1eff7d039f`, prior reconciled main
+  `586abbfb459550de912002203ff2911c7a40db58` (includes PR #244), and prior
   reconciled main `cdf2570ede5ae218f36f886b696c8da45458043a` (PR #236 merge)
   are retained as historical receipts.
 - The semantic sibling witnesses already exist in
