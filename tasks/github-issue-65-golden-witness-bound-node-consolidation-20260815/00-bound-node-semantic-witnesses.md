@@ -25,7 +25,9 @@ Keep the bound node names stable and consolidate redundant sibling coverage.
 
 ## Inputs and dependencies
 
-- Current main `cdf2570ede5ae218f36f886b696c8da45458043a` includes PR #236.
+- Current main `586abbfb459550de912002203ff2911c7a40db58` includes PR #244;
+  prior reconciled main `cdf2570ede5ae218f36f886b696c8da45458043a` (PR #236
+  merge) retained as historical receipt.
 - The semantic sibling witnesses already exist in
   `tests/contracts/test_hybrid_route_contract.py`.
 - PR #290 owns the separate GB-042 corpus binding and remains outside this
