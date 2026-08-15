@@ -1,50 +1,25 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-logger = logging.getLogger(__name__)
-
-
-def _load_dynamic_learning_policy_safe(project_root: Optional[str]) -> dict:
-    """Fail-safe loader for .nexus/memory/dynamic_learning_policy.json.
-    Returns {promoted_capabilities: [...], penalized_capabilities: [...]}
-    or empty dict on any error.
-    """
-    if not project_root:
-        return {}
-    try:
-        path = Path(project_root) / ".nexus" / "memory" / "dynamic_learning_policy.json"
-        if not path.exists():
-            return {}
-        with open(path, encoding="utf-8") as f:
-            policy = json.load(f)
-        if policy.get("schema_version") != "nexus_dynamic_learning_policy.v1":
-            return {}
-        if policy.get("status") != "PASS":
-            return {}
-        return {
-            "promoted_capabilities": [str(c) for c in policy.get("promoted_capabilities", []) or [] if str(c).strip()],
-            "penalized_capabilities": [str(c) for c in policy.get("penalized_capabilities", []) or [] if str(c).strip()],
-        }
-    except Exception as exc:
-        logger.debug("[CapabilitySelector] dynamic_learning_policy load skipped: %s", exc)
-        return {}
-
 from nexus.core.belief_contracts import CapabilityExecutionPlan, SkillSlot
+from nexus.core.capability_constraints import CapabilityConstraints
 from nexus.core.capability_registry import CapabilityRegistry
 from nexus.core.capability_signal_set import CapabilitySignalSet
-from nexus.core.capability_constraints import CapabilityConstraints
+
+logger = logging.getLogger(__name__)
 
 
 class CapabilitySelector:
     """🧠 The single source of truth decision engine that dynamically generates execution plans."""
 
-    def __init__(self, registry: Optional[CapabilityRegistry] = None, project_root: Optional[str] = None) -> None:
+    def __init__(
+        self, registry: Optional[CapabilityRegistry] = None, project_root: Optional[str] = None
+    ) -> None:
         self.registry = registry or CapabilityRegistry()
         self.project_root = project_root
 
@@ -52,8 +27,11 @@ class CapabilitySelector:
         try:
             root = Path(self.project_root) if self.project_root else Path.cwd()
             src_dirs = [
-                d for d in root.iterdir()
-                if d.is_dir() and not d.name.startswith((".")) and d.name not in ("node_modules", ".git", "__pycache__")
+                d
+                for d in root.iterdir()
+                if d.is_dir()
+                and not d.name.startswith(("."))
+                and d.name not in ("node_modules", ".git", "__pycache__")
             ]
             files = []
             for d in src_dirs[:5]:
@@ -83,6 +61,7 @@ class CapabilitySelector:
             }
 
         from nexus.core.lite_route_oracle import should_use_lite_route
+
         lane_name = signal_set.metadata.get("lane") or signal_set.metadata.get("lane_name")
         lite_decision = should_use_lite_route(
             risk_level=signal_set.risk_level,
@@ -97,8 +76,18 @@ class CapabilitySelector:
         # 2. 智慧能力動態選擇演算法 (Autonomic Adaptive Selection)
         if lite_decision.is_lite:
             # 🚀 輕量路由模式下，只保留最核心的 S-P-R-C 骨幹能力，跳過重度沙盒與多重自癒模組
-            required_caps = ["mempalace", "autonomic_router", "belief", "repair_loop", "learning_closure"]
-            phases = [p for p in ["S", "P", "X", "D", "R", "A", "C"] if p not in lite_decision.skipped_phases]
+            required_caps = [
+                "mempalace",
+                "autonomic_router",
+                "belief",
+                "repair_loop",
+                "learning_closure",
+            ]
+            phases = [
+                p
+                for p in ["S", "P", "X", "D", "R", "A", "C"]
+                if p not in lite_decision.skipped_phases
+            ]
         else:
             phases = ["S", "P", "X", "D", "R", "A", "C"]
             query_lower = signal_set.task_desc.lower()
@@ -150,7 +139,11 @@ class CapabilitySelector:
                 required_caps.append("drone")
             if "long" in query_lower or "overnight" in query_lower:
                 required_caps.append("nightshift")
-            if "battle" in query_lower or "campaign" in query_lower or signal_set.impact_complexity > 4.5:
+            if (
+                "battle" in query_lower
+                or "campaign" in query_lower
+                or signal_set.impact_complexity > 4.5
+            ):
                 required_caps.append("battle_swarm")
             if signal_set.risk_level == "CRITICAL":
                 required_caps.append("sandbox_runner")
@@ -169,20 +162,6 @@ class CapabilitySelector:
             required_caps.append("promotion_engine")
             required_caps.append("subagent_outcome_service")
             required_caps.append("attempt_settlement_service")
-
-        # 2.5: 套用動態學習政策 (RC-1 Learning Closure)
-        learning_policy = _load_dynamic_learning_policy_safe(self.project_root)
-        if learning_policy:
-            penalized = set(learning_policy.get("penalized_capabilities", []))
-            required_caps = [c for c in required_caps if c not in penalized]
-            promoted = learning_policy.get("promoted_capabilities", [])
-            existing = set(required_caps)
-            for cap in promoted:
-                if cap not in existing and self.registry.get_capability(cap):
-                    required_caps.append(cap)
-                    logger.debug("[CapabilitySelector] learning_policy promoted: %s", cap)
-            if penalized:
-                logger.debug("[CapabilitySelector] learning_policy penalized (removed): %s", penalized & existing)
 
         # 2.7: M4 — CodeIntel/JIT 獨立查詢 (X/Recon 階段)
         if getattr(signal_set, "codeintel_query_available", False):
@@ -223,9 +202,14 @@ class CapabilitySelector:
                 continue
             slots = []
             # Mode C 且 risk 較高時裝配 Swarm 複數協作 Assembly
-            if "Mode C" in info.allowed_heep_modes and (
-                signal_set.risk_level in ("HIGH", "CRITICAL") or signal_set.impact_complexity > 3.5
-            ) and not lite_decision.is_lite:
+            if (
+                "Mode C" in info.allowed_heep_modes
+                and (
+                    signal_set.risk_level in ("HIGH", "CRITICAL")
+                    or signal_set.impact_complexity > 3.5
+                )
+                and not lite_decision.is_lite
+            ):
                 slots.append(
                     SkillSlot(
                         role="SCOUT",
@@ -262,4 +246,3 @@ class CapabilitySelector:
             },
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
-
