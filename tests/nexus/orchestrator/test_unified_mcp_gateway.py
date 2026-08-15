@@ -997,6 +997,119 @@ def test_manifest_status_and_recommended_tools_share_tools_list_truth():
     assert {"nexus_provider_preflight", "nexus_task_card_create", "nexus_model_probe", "nexus_model_probe_result"}.issubset(set(names))
 
 
+def test_calibration_actions_registered_and_manifest_stays_deterministic():
+    gateway = UnifiedMCPGateway(service=FakeService())
+    names = tuple(tool["name"] for tool in gateway.tool_specs())
+    assert "nexus_model_calibration_evidence" in names
+    assert "nexus_model_calibration_plan" in names
+    status = gateway._gateway_status()
+    assert status["tool_count"] == len(names)
+    assert status["tool_manifest_revision"] == TOOL_MANIFEST_REVISION
+    recomputed_schema = hashlib.sha256(
+        json.dumps(UnifiedMCPGateway.tool_specs(), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    assert recomputed_schema == FULL_TOOL_SCHEMA_HASH
+    assert TOOL_MANIFEST_REVISION == hashlib.sha256(
+        json.dumps(names, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def test_calibration_evidence_action_resolves_lineage_and_fails_closed():
+    gateway = UnifiedMCPGateway(service=FakeService())
+    by_id = gateway.handle({"jsonrpc": "2.0", "id": 900, "method": "tools/call", "params": {"name": "nexus_model_calibration_evidence", "arguments": {"lineage_id": "deepseek-v4-flash"}}})
+    payload = by_id["result"]["structuredContent"]
+    assert payload["schema"] == "nexus.model_calibration_evidence.v1"
+    assert payload["lineage_id"] == "deepseek-v4-flash"
+    assert payload["stable_floor"] == "L2"
+    assert payload["frontier"] == "L3"
+    assert payload["admission_authority"] == "SEPARATE_NOT_ESTABLISHED_BY_THIS_ACTION"
+    by_identity = gateway.handle({"jsonrpc": "2.0", "id": 901, "method": "tools/call", "params": {"name": "nexus_model_calibration_evidence", "arguments": {"provider": "opencode", "model": "opencode-go/deepseek-v4-flash"}}})
+    assert by_identity["result"]["structuredContent"]["lineage_id"] == "deepseek-v4-flash"
+    unknown = gateway.handle({"jsonrpc": "2.0", "id": 902, "method": "tools/call", "params": {"name": "nexus_model_calibration_evidence", "arguments": {"provider": "opencode", "model": "opencode/deepseek-v4-flash"}}})
+    assert unknown["result"]["isError"] is True
+    assert "No registered lineage" in unknown["result"]["structuredContent"]["error"]
+    missing = gateway.handle({"jsonrpc": "2.0", "id": 903, "method": "tools/call", "params": {"name": "nexus_model_calibration_evidence", "arguments": {}}})
+    assert missing["result"]["isError"] is True
+
+
+def test_calibration_plan_action_does_not_restart_from_l1():
+    gateway = UnifiedMCPGateway(service=FakeService())
+    response = gateway.handle({"jsonrpc": "2.0", "id": 904, "method": "tools/call", "params": {"name": "nexus_model_calibration_plan", "arguments": {"provider": "opencode", "model": "opencode-go/deepseek-v4-flash", "target_role": "compact_code_candidate", "change_kind": "alias_only"}}})
+    payload = response["result"]["structuredContent"]
+    assert payload["schema"] == "nexus.model_calibration_plan.v1"
+    assert payload["change_class"] == "ALIAS_ONLY"
+    assert payload["stable_floor"] == "L2"
+    assert payload["current_frontier"] == "L3"
+    assert payload["admission_authority"] == "SEPARATE_NOT_ESTABLISHED_BY_THIS_ACTION"
+    kinds = [trial["kind"] for trial in payload["required_trials"]]
+    assert "IDENTITY_RESOLUTION" in kinds and "TRANSPORT_PREFLIGHT" in kinds
+    assert "STABLE_FLOOR_REGRESSION" in kinds and "FRONTIER_EVALUATION" in kinds
+    assert [trial["tier"] for trial in payload["not_required_trials"]] == ["L0", "L0.25", "L0.5", "L1"]
+    assert not any(trial["tier"] in {"L0", "L0.25", "L0.5", "L1"} for trial in payload["required_trials"])
+
+
+def test_calibration_plan_action_fails_closed_on_unknown_material_change():
+    gateway = UnifiedMCPGateway(service=FakeService())
+    response = gateway.handle({"jsonrpc": "2.0", "id": 905, "method": "tools/call", "params": {"name": "nexus_model_calibration_plan", "arguments": {"provider": "opencode", "model": "opencode/deepseek-v4-flash-free", "target_role": "compact_code_candidate", "change_kind": "unknown_material_change"}}})
+    payload = response["result"]["structuredContent"]
+    assert payload["change_class"] == "UNKNOWN_MATERIAL_CHANGE"
+    assert payload["plan_status"] == "FAIL_CLOSED"
+    assert payload["required_trials"] == []
+
+
+def test_calibration_actions_never_call_provider_or_submit_tasks(monkeypatch):
+    def _fail(*args, **kwargs):
+        raise AssertionError("calibration actions must never spawn a provider subprocess")
+
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", _fail)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.run", _fail)
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    gateway.handle({"jsonrpc": "2.0", "id": 906, "method": "tools/call", "params": {"name": "nexus_model_calibration_evidence", "arguments": {"lineage_id": "deepseek-v4-flash"}}})
+    gateway.handle({"jsonrpc": "2.0", "id": 907, "method": "tools/call", "params": {"name": "nexus_model_calibration_plan", "arguments": {"provider": "opencode", "model": "opencode-go/deepseek-v4-flash", "target_role": "compact_code_candidate", "change_kind": "alias_only"}}})
+    assert service.submitted == []
+    assert service.approved_binding is None
+
+
+def test_calibration_actions_do_not_mutate_gateway_state(tmp_path):
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
+    before = sorted(str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*") if path.is_file())
+    gateway.handle({"jsonrpc": "2.0", "id": 908, "method": "tools/call", "params": {"name": "nexus_model_calibration_evidence", "arguments": {"lineage_id": "gemini-3.7-flash-medium"}}})
+    gateway.handle({"jsonrpc": "2.0", "id": 909, "method": "tools/call", "params": {"name": "nexus_model_calibration_plan", "arguments": {"provider": "agy", "model": "gemini-3.7-flash-medium", "target_role": "focused_verification", "change_kind": "model_revision_or_backend_change"}}})
+    after = sorted(str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*") if path.is_file())
+    assert before == after
+
+
+def test_calibration_plan_action_invalidates_semantic_evidence_on_backend_change():
+    gateway = UnifiedMCPGateway(service=FakeService())
+    response = gateway.handle({"jsonrpc": "2.0", "id": 910, "method": "tools/call", "params": {"name": "nexus_model_calibration_plan", "arguments": {"provider": "agy", "model": "gemini-3.7-flash-medium", "target_role": "focused_verification", "change_kind": "model_revision_or_backend_change"}}})
+    payload = response["result"]["structuredContent"]
+    assert payload["change_class"] == "MODEL_REVISION_OR_BACKEND_CHANGE"
+    assert payload["invalidated_evidence"]
+    assert all(entry["scope"] == "SEMANTIC" for entry in payload["invalidated_evidence"])
+    assert not any(entry["scope"] == "SEMANTIC" for entry in payload["reusable_evidence"])
+
+
+def test_calibration_plan_action_rejects_invalid_change_kind():
+    gateway = UnifiedMCPGateway(service=FakeService())
+    response = gateway.handle({"jsonrpc": "2.0", "id": 911, "method": "tools/call", "params": {"name": "nexus_model_calibration_plan", "arguments": {"provider": "opencode", "model": "opencode/deepseek-v4-flash-free", "target_role": "compact_code_candidate", "change_kind": "made_up_kind"}}})
+    assert response["result"]["isError"] is True
+    assert "change_kind" in response["result"]["structuredContent"]["error"]
+
+
+def test_model_probe_tool_schema_remains_unchanged():
+    spec = next(item for item in UnifiedMCPGateway.tool_specs() if item["name"] == "nexus_model_probe")
+    schema = spec["inputSchema"]
+    assert set(schema["required"]) == {"provider", "model", "prompt", "output_schema"}
+    assert schema["properties"]["context_arm"]["enum"] == ["bare", "nexus_bounded", "nexus_full"]
+    assert schema["properties"]["workspace_mode"]["default"] == "isolated"
+    assert spec["description"].startswith("Run one schema-bound model probe")
+    result_spec = next(item for item in UnifiedMCPGateway.tool_specs() if item["name"] == "nexus_model_probe_result")
+    assert result_spec["inputSchema"]["required"] == ["task_id"]
+
+
 def test_public_candidate_approve_schema_requires_versioned_approval():
     spec = next(item for item in UnifiedMCPGateway.tool_specs() if item["name"] == "nexus_candidate_approve")
     schema = spec["inputSchema"]
