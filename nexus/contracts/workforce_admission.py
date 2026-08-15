@@ -12,6 +12,7 @@ AUTONOMY_LEVELS: dict[str, int] = {
     "L1": 3,
     "L2": 4,
     "L2+": 5,
+    "L3": 6,
     "L3_HISTORICAL": 6,
 }
 
