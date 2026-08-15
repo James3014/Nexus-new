@@ -42,9 +42,11 @@ unchanged as the implementation baseline.
   31445937788, Wiki Exact-Base Governance CI 31445937753, Nexus Exact-Base
   Ruff CI 31445937745, Nexus Exact-Base Bandit CI 31445937759, Nexus Pytest CI
   31445937764). Tier 3 skipped.
-- Current main `586abbfb459550de912002203ff2911c7a40db58` (includes PR #244);
-  prior reconciled main `cdf2570ede5ae218f36f886b696c8da45458043a` retained as
-  historical receipt; merge `b025f86a...`
+- Current main `63becf8462eb1f28bf8e143139157ce82318a07d` (rebind target,
+  includes PR #244 and later merges); prior reconciled mains
+  `cdf2570ede5ae218f36f886b696c8da45458043a` and
+  `586abbfb459550de912002203ff2911c7a40db58` retained as historical receipts;
+  merge `b025f86a...`
   verified ancestor of current main (`git merge-base --is-ancestor` PASS);
   delivered reducer/tests remain present on current main.
 - Marker: `LEARNING_EFFECTIVENESS_SCORECARD_REPLAYED`.
