@@ -97,8 +97,32 @@ def test_adapter_returns_canonical_lessons_as_first_class_source(tmp_path):
     assert lessons[0].pattern_type == "success"
     assert lessons[0].provenance == "test_verifier"
     assert lessons[0].summary == QUALIFICATION["prevention_rule"]
+    assert lessons[0].episode_id.startswith("lep:")
+    assert lessons[0].attempt_id == "attempt-1"
+    assert lessons[0].action_id == "action-1"
+    assert lessons[0].qualification_status == "QUALIFIED"
+    assert lessons[0].validity_state == "active"
+    assert lessons[0].evidence_ref == "test_verifier"
     assert adapter.last_metadata["accepted"] == 1
     assert adapter.last_metadata["no_memory_match"] is False
+    assert adapter.last_metadata["retrieval_receipt"]["schema"] == "nexus.retrieval_receipt.v1"
+    assert adapter.last_metadata["retrieval_receipt"]["status"] == "PASS"
+    assert adapter.last_metadata["retrieval_receipt_hash"].startswith("sha256:")
+    lineage = adapter.last_metadata["selected_lesson_lineage"]
+    assert lineage == [
+        {
+            "lesson_id": lessons[0].finding_id,
+            "episode_id": lessons[0].episode_id,
+            "source_task_id": "github-issue-999-cross-task",
+            "source_attempt_id": "attempt-1",
+            "source_action_id": "action-1",
+            "qualification_status": "QUALIFIED",
+            "validity_state": "active",
+            "evidence_ref": "test_verifier",
+            "source": "canonical_episodic_memory",
+            "retrieval_receipt_hash": adapter.last_metadata["retrieval_receipt_hash"],
+        }
+    ]
 
 
 def test_default_composite_includes_canonical_store():
@@ -137,6 +161,29 @@ def test_same_task_excluded_when_caller_supplies_task_identity(tmp_path):
     assert [lesson.task_id for lesson in lessons] == ["github-issue-999-cross-task"]
     assert adapter.last_metadata["rejected_same_task"] == 1
     assert adapter.last_metadata["accepted"] == 1
+
+
+def test_reranked_path_excludes_same_task_and_receipt_matches_final_selection(tmp_path):
+    same = _episode(task_id="github-issue-292-same-task", idempotency_key="ep-292-rerank-same")
+    cross = _episode(task_id="github-issue-999-cross-task", idempotency_key="ep-292-rerank-cross")
+    _write_ledger(tmp_path, [json.dumps(same), json.dumps(cross)])
+    adapter = MemoryRetrievalAdapter(
+        store=CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)
+    )
+
+    lessons = adapter.retrieve_reranked(
+        query_text="canonical receipt",
+        limit=5,
+        task_id="github-issue-292-same-task",
+    )
+
+    assert [lesson.task_id for lesson in lessons] == ["github-issue-999-cross-task"]
+    assert adapter.last_metadata["rejected_same_task"] == 1
+    receipt = adapter.last_metadata["retrieval_receipt"]
+    selected = [item for item in receipt["results"] if item["selected"]]
+    assert [item["source_id"] for item in selected] == [lesson.episode_id for lesson in lessons]
+    assert receipt["selected_count"] == len(lessons)
+    assert len(adapter.last_metadata["selected_lesson_lineage"]) == len(lessons)
 
 
 def test_wrong_schema_and_malformed_json_lines_fail_closed(tmp_path):
@@ -482,3 +529,89 @@ def test_g2_unsupported_store_fails_closed_without_exception_leak(tmp_path):
     assert adapter.last_metadata["status"] == "current_state_unsupported"
     assert adapter.last_metadata["rejected_current_state_input"] == 1
     assert adapter.last_metadata["no_memory_match"] is True
+
+
+def test_g3_later_contradict_masks_prior_canonical_episode(tmp_path):
+    prior = _episode(idempotency_key="ep-g3-prior")
+    invalidator = _episode(
+        task_id="github-issue-g3-contradict",
+        terminal_outcome="FAILED",
+        terminal_evidence={"receipt": "receipt:g3-contradict", "verifier_status": "FAIL"},
+        retrieved_lesson_ids=[prior["episode_id"]],
+        applied_lesson_ids=[prior["episode_id"]],
+        lesson_disposition="contradict",
+        idempotency_key="ep-g3-contradict",
+    )
+    _write_ledger(tmp_path, [json.dumps(prior), json.dumps(invalidator)])
+    store = CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)
+
+    rows = store.query(query_text="canonical", limit=5)
+
+    assert rows == []
+    assert store.last_metadata["rejected_invalidated"] == 1
+    assert store.last_metadata["invalidation_event_count"] == 1
+
+
+def test_g3_later_quarantine_masks_prior_canonical_episode(tmp_path):
+    prior = _episode(idempotency_key="ep-g3-quarantine-prior")
+    quarantine = _episode(
+        task_id="github-issue-g3-quarantine",
+        terminal_outcome="FAILED",
+        terminal_evidence={"receipt": "receipt:g3-quarantine", "verifier_status": "FAIL"},
+        retrieved_lesson_ids=[prior["episode_id"]],
+        applied_lesson_ids=[prior["episode_id"]],
+        lesson_disposition="quarantine",
+        idempotency_key="ep-g3-quarantine",
+    )
+    _write_ledger(tmp_path, [json.dumps(prior), json.dumps(quarantine)])
+    store = CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)
+
+    rows = store.query(query_text="canonical", limit=5)
+
+    assert rows == []
+    assert store.last_metadata["rejected_invalidated"] == 1
+    assert store.last_metadata["invalidation_event_count"] == 1
+
+
+def test_g3_later_retire_masks_prior_but_order_is_not_reversed(tmp_path):
+    prior = _episode(idempotency_key="ep-g3-retire-prior")
+    retire = _episode(
+        task_id="github-issue-g3-retire",
+        terminal_outcome="RETIRED",
+        terminal_evidence={"receipt": "receipt:g3-retire", "verifier_status": "FAIL"},
+        retrieved_lesson_ids=[prior["episode_id"]],
+        applied_lesson_ids=[prior["episode_id"]],
+        qualification={},
+        lesson_disposition="retire",
+        idempotency_key="ep-g3-retire",
+    )
+    _write_ledger(tmp_path, [json.dumps(retire), json.dumps(prior)])
+    store = CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)
+
+    rows = store.query(query_text="canonical", limit=5)
+
+    assert [row["episode_id"] for row in rows] == [prior["episode_id"]]
+    assert store.last_metadata["rejected_invalidated"] == 0
+    assert store.last_metadata["invalidation_event_count"] == 0
+
+
+def test_g3_tampered_invalidator_cannot_mask_prior_canonical_episode(tmp_path):
+    prior = _episode(idempotency_key="ep-g3-tamper-prior")
+    invalidator = _episode(
+        task_id="github-issue-g3-tamper",
+        terminal_outcome="FAILED",
+        terminal_evidence={"receipt": "receipt:g3-tamper", "verifier_status": "FAIL"},
+        retrieved_lesson_ids=[prior["episode_id"]],
+        applied_lesson_ids=[prior["episode_id"]],
+        lesson_disposition="contradict",
+        idempotency_key="ep-g3-tamper",
+    )
+    invalidator["episode_id"] = "lep:000000000000000000000000"
+    _write_ledger(tmp_path, [json.dumps(prior), json.dumps(invalidator)])
+    store = CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)
+
+    rows = store.query(query_text="canonical", limit=5)
+
+    assert [row["episode_id"] for row in rows] == [prior["episode_id"]]
+    assert store.last_metadata["rejected_invalidated"] == 0
+    assert store.last_metadata["rejected_validation"] == 1

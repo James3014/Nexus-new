@@ -7,6 +7,82 @@ from __future__ import annotations
 import pytest
 
 
+def test_provenance_bound_memory_context_includes_lineage_and_receipt_hash():
+    from nexus.services.local_heal.memory_retrieval_adapter import (
+        RetrievedLesson,
+        _build_existing_retrieval_receipt,
+        format_retrieved_lesson_context,
+    )
+
+    lesson = RetrievedLesson(
+        finding_id="lep:lesson-1",
+        summary="preserve the verified repair",
+        relevance_score=1.0,
+        provenance="receipt://lesson-1",
+        source="canonical_episodic_memory",
+        pattern_type="success",
+        task_id="task-source",
+        episode_id="lep:lesson-1",
+        attempt_id="attempt-source",
+        qualification_status="QUALIFIED",
+        validity_state="active",
+        evidence_ref="receipt://lesson-1",
+    )
+
+    receipt, receipt_hash, _lineage = _build_existing_retrieval_receipt(
+        "preserve repair", [lesson]
+    )
+    context = format_retrieved_lesson_context([lesson], receipt, receipt_hash)
+
+    assert "preserve the verified repair" in context
+    assert "lesson_id=lep:lesson-1" in context
+    assert "episode_id=lep:lesson-1" in context
+    assert "source_task=task-source" in context
+    assert "source_attempt=attempt-source" in context
+    assert "qualification=QUALIFIED" in context
+    assert "validity=active" in context
+    assert "evidence=receipt://lesson-1" in context
+    assert f"retrieval={receipt_hash}" in context
+
+
+def test_provenance_bound_memory_context_fails_closed_on_tamper_or_stale_receipt():
+    from dataclasses import replace
+
+    from nexus.services.local_heal.memory_retrieval_adapter import (
+        RetrievedLesson,
+        _build_existing_retrieval_receipt,
+        format_retrieved_lesson_context,
+    )
+
+    lesson = RetrievedLesson(
+        finding_id="lep:lesson-2",
+        summary="retain the verified invariant",
+        relevance_score=1.0,
+        provenance="receipt://lesson-2",
+        source="canonical_episodic_memory",
+        pattern_type="success",
+        task_id="task-source",
+        episode_id="lep:lesson-2",
+        attempt_id="attempt-source",
+        qualification_status="QUALIFIED",
+        validity_state="active",
+        evidence_ref="receipt://lesson-2",
+    )
+    receipt, receipt_hash, _lineage = _build_existing_retrieval_receipt("invariant", [lesson])
+    assert format_retrieved_lesson_context([lesson], receipt, receipt_hash)
+
+    tampered = dict(receipt)
+    tampered["results"] = [dict(receipt["results"][0])]
+    tampered["results"][0]["source_path"] = "receipt://substituted"
+    assert format_retrieved_lesson_context([lesson], tampered, receipt_hash) == ""
+
+    stale_hash = "sha256:" + "0" * 64
+    assert format_retrieved_lesson_context([lesson], receipt, stale_hash) == ""
+
+    substituted_lesson = replace(lesson, summary="substituted unbound content")
+    assert format_retrieved_lesson_context([substituted_lesson], receipt, receipt_hash) == ""
+
+
 def test_retry_prompt_includes_retrieved_lesson_summary_content():
     """Retry prompt must include actual lesson summary text, not just IDs."""
     from nexus.services.local_heal.prompt_builder import PromptBuilder

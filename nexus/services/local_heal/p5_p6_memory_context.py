@@ -39,7 +39,10 @@ def build_p5_p6_memory_context(
 
     try:
         from nexus.services.local_heal.memory_retrieval_adapter import MemoryRetrievalAdapter
-        from nexus.services.local_heal.memory_trace import get_empty_trace
+        from nexus.services.local_heal.memory_trace import (
+            build_memory_trace_from_adapter,
+            get_empty_trace,
+        )
 
         adapter = MemoryRetrievalAdapter(enabled=True)
         lessons = adapter.retrieve_reranked(
@@ -61,20 +64,33 @@ def build_p5_p6_memory_context(
                 reason="no_hits",
             )
 
-        # Convert lessons to dicts
+        # Preserve provenance-bearing lineage instead of projecting to summary-only text.
         lesson_dicts = []
         for lesson in lessons:
-            if hasattr(lesson, "summary"):
-                lesson_dicts.append({"summary": lesson.summary, "source": getattr(lesson, "source", "unknown")})
-            elif hasattr(lesson, "content"):
-                lesson_dicts.append({"content": lesson.content, "source": getattr(lesson, "source", "unknown")})
-            else:
-                lesson_dicts.append({"content": str(lesson), "source": "unknown"})
+            content = getattr(lesson, "summary", None) or getattr(lesson, "content", None) or str(lesson)
+            lesson_dicts.append(
+                {
+                    "summary": str(content),
+                    "source": getattr(lesson, "source", "unknown"),
+                    "lesson_id": getattr(lesson, "finding_id", ""),
+                    "episode_id": getattr(lesson, "episode_id", ""),
+                    "task_id": getattr(lesson, "task_id", ""),
+                    "attempt_id": getattr(lesson, "attempt_id", ""),
+                    "action_id": getattr(lesson, "action_id", ""),
+                    "qualification_status": getattr(lesson, "qualification_status", ""),
+                    "validity_state": getattr(lesson, "validity_state", ""),
+                    "evidence_ref": getattr(lesson, "evidence_ref", "")
+                    or getattr(lesson, "provenance", ""),
+                }
+            )
 
         sources = list(set(d.get("source", "unknown") for d in lesson_dicts))
 
         return P5P6MemoryContext(
-            memory_trace=get_empty_trace().to_dict(),
+            memory_trace=build_memory_trace_from_adapter(
+                adapter.last_metadata,
+                query_text=query_text,
+            ).to_dict(),
             retrieved_lessons=lesson_dicts,
             memory_sources=sources,
             decision_mode="audit_only",

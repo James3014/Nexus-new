@@ -1289,7 +1289,10 @@ class LocalModelExecutor:
         if "memory" in selected_caps:
             memory_retrieval_attempted = True
             try:
-                from nexus.services.local_heal.memory_retrieval_adapter import MemoryRetrievalAdapter
+                from nexus.services.local_heal.memory_retrieval_adapter import (
+                    MemoryRetrievalAdapter,
+                    format_retrieved_lesson_context,
+                )
                 from nexus.services.local_heal.memory_trace import build_memory_trace_from_adapter
                 adapter = MemoryRetrievalAdapter(enabled=True)
                 lessons = adapter.retrieve_reranked(
@@ -1320,6 +1323,9 @@ class LocalModelExecutor:
                     "source_counts": {},
                     "accepted": 0,
                     "query_text_hash": hashlib.sha256(request.problem_statement.encode("utf-8")).hexdigest()[:16] if request.problem_statement else "",
+                    "retrieval_receipt": {},
+                    "retrieval_receipt_hash": "",
+                    "selected_lesson_lineage": [],
                 }
                 memory_trace = {
                     "available": True,
@@ -1346,21 +1352,18 @@ class LocalModelExecutor:
                     "internal_only": True,
                     "shadow_ranking": {},
                     "primary_selected_id": "",
+                    "retrieval_receipt": {},
+                    "retrieval_receipt_hash": "",
+                    "selected_lesson_lineage": [],
                 }
 
         memory_context = ""
         if lessons:
-            memory_context = "\n\n=== RELEVANT HISTORICAL LESSONS ===\n"
-            for idx, lesson in enumerate(lessons, 1):
-                content = ""
-                if hasattr(lesson, "summary"):
-                    content = lesson.summary
-                elif hasattr(lesson, "content"):
-                    content = lesson.content
-                else:
-                    content = str(lesson)
-                memory_context += f"Lesson {idx}: {content}\n"
-            memory_context += "====================================\n"
+            memory_context = format_retrieved_lesson_context(
+                lessons,
+                dict(memory_adapter_metadata.get("retrieval_receipt") or {}),
+                str(memory_adapter_metadata.get("retrieval_receipt_hash") or ""),
+            )
         if memory_retrieval_attempted and memory_adapter_metadata:
             memory_adapter_metadata["prompt_included"] = bool(memory_context)
             memory_trace["prompt_included"] = bool(memory_context)
@@ -1397,6 +1400,15 @@ class LocalModelExecutor:
                 ) or []
             ),
             "memory_primary_selected_id": str(memory_adapter_metadata.get("primary_selected_id", "") or ""),
+            "memory_retrieval_receipt": dict(memory_adapter_metadata.get("retrieval_receipt") or {}),
+            "memory_retrieval_receipt_hash": str(
+                memory_adapter_metadata.get("retrieval_receipt_hash", "") or ""
+            ),
+            "memory_selected_lesson_lineage": [
+                dict(item)
+                for item in (memory_adapter_metadata.get("selected_lesson_lineage") or [])
+                if isinstance(item, dict)
+            ],
             "memory_no_match": bool(memory_adapter_metadata.get("no_memory_match", not lessons)),
             "memory_trace": dict(memory_trace or {}),
         }
