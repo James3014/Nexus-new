@@ -117,18 +117,16 @@ def format_retrieved_lesson_context(
         return ""
     lines = ["\n\n=== RELEVANT HISTORICAL LESSONS ==="]
     for idx, lesson in enumerate(lessons, 1):
-        binding = " ".join(
-            [
-                f"lesson_id={lesson.finding_id}",
-                f"episode_id={lesson.episode_id or '-'}",
-                f"source_task={lesson.task_id or '-'}",
-                f"source_attempt={lesson.attempt_id or '-'}",
-                f"qualification={lesson.qualification_status or '-'}",
-                f"validity={lesson.validity_state or 'legacy_provenance_only'}",
-                f"evidence={lesson.evidence_ref or lesson.provenance or '-'}",
-                f"retrieval={retrieval_receipt_hash}",
-            ]
-        )
+        binding = " ".join([
+            f"lesson_id={lesson.finding_id}",
+            f"episode_id={lesson.episode_id or '-'}",
+            f"source_task={lesson.task_id or '-'}",
+            f"source_attempt={lesson.attempt_id or '-'}",
+            f"qualification={lesson.qualification_status or '-'}",
+            f"validity={lesson.validity_state or 'legacy_provenance_only'}",
+            f"evidence={lesson.evidence_ref or lesson.provenance or '-'}",
+            f"retrieval={retrieval_receipt_hash}",
+        ])
         lines.append(f"Lesson {idx} [{binding}]: {lesson.summary}")
     lines.append("====================================")
     return "\n".join(lines) + "\n"
@@ -154,25 +152,25 @@ def _build_existing_retrieval_receipt(
         for item in lineage
     ]
     snapshot_payload = json.dumps(snapshot_material, ensure_ascii=False, sort_keys=True)
-    index_snapshot_id = "memory:" + hashlib.sha256(snapshot_payload.encode("utf-8")).hexdigest()[:24]
+    index_snapshot_id = (
+        "memory:" + hashlib.sha256(snapshot_payload.encode("utf-8")).hexdigest()[:24]
+    )
     results = []
     for lesson in lessons:
         content_hash = hashlib.sha256(
             f"{lesson.finding_id}|{lesson.summary}|{lesson.provenance}".encode("utf-8")
         ).hexdigest()
-        results.append(
-            {
-                "source_id": lesson.episode_id or lesson.finding_id,
-                "source_path": lesson.evidence_ref or lesson.provenance,
-                "selected": True,
-                "selected_reason": "provenance_backed_memory_selection",
-                "score_components": {
-                    "relevance_score": float(lesson.relevance_score),
-                    "occurrence_count": float(lesson.occurrence_count),
-                },
-                "chunk_hash": content_hash,
-            }
-        )
+        results.append({
+            "source_id": lesson.episode_id or lesson.finding_id,
+            "source_path": lesson.evidence_ref or lesson.provenance,
+            "selected": True,
+            "selected_reason": "provenance_backed_memory_selection",
+            "score_components": {
+                "relevance_score": float(lesson.relevance_score),
+                "occurrence_count": float(lesson.occurrence_count),
+            },
+            "chunk_hash": content_hash,
+        })
     receipt = build_retrieval_receipt(
         query=query_text,
         index_snapshot_id=index_snapshot_id,
@@ -912,8 +910,8 @@ class MemoryRetrievalAdapter:
                     kept.append(lesson)
                 lessons = kept
 
-        retrieval_receipt, retrieval_receipt_hash, selected_lineage = _build_existing_retrieval_receipt(
-            query_text, lessons
+        retrieval_receipt, retrieval_receipt_hash, selected_lineage = (
+            _build_existing_retrieval_receipt(query_text, lessons)
         )
         self.last_metadata["retrieval_receipt"] = retrieval_receipt
         self.last_metadata["retrieval_receipt_hash"] = retrieval_receipt_hash
@@ -1055,8 +1053,8 @@ class MemoryRetrievalAdapter:
                 )
             )
 
-        retrieval_receipt, retrieval_receipt_hash, selected_lineage = _build_existing_retrieval_receipt(
-            query_text, result
+        retrieval_receipt, retrieval_receipt_hash, selected_lineage = (
+            _build_existing_retrieval_receipt(query_text, result)
         )
         self.last_metadata["retrieval_receipt"] = retrieval_receipt
         self.last_metadata["retrieval_receipt_hash"] = retrieval_receipt_hash
