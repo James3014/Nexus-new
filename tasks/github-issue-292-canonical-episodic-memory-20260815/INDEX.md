@@ -4,9 +4,13 @@ issue: 292
 repository: James3014/Nexus-new
 status: ACTIVE
 baseline_main: 19d815954ff72e99ed50734410cd2342a0b62bc7
-current_frontier: github-issue-292-canonical-episodic-memory-g2-20260815.md
-readiness_marker: CANONICAL_EPISODIC_MEMORY_G2_SOURCE_FROZEN
-claim_ceiling: canonical_episodic_memory_g2_candidate_pr_only
+current_main: d181a653d4a155266bf9e97fdfe35b69d3f08991
+current_frontier: NONE
+frontier_status: G3_SOURCE_LOCALIZATION_PENDING
+completed_cards:
+  - github-issue-292-canonical-episodic-memory-g2-20260815
+completion_marker: CANONICAL_EPISODIC_MEMORY_G2_APPLICABILITY_PROVEN
+claim_ceiling: canonical_episodic_memory_g2_source_and_tests_only
 AUTO_CHAIN: false
 authorized_deletions: []
 ---
@@ -15,14 +19,16 @@ authorized_deletions: []
 
 Issue #292 is decomposed into independently bounded G1–G4 slices. G1 is
 physically merged through PR #295 (`ccd23defe9aa5905d26f34a865746c1eff7d039f`)
-and is an ancestor of current main. The current frontier is G2: add a
-deterministic, read-only current-state applicability filter to the existing G1
-retrieval surface.
+and G2 is physically merged through PR #303
+(`d181a653d4a155266bf9e97fdfe35b69d3f08991`). Both are ancestors of current
+main. No G3 Task Card has been frozen; the next gate is read-only G3 source and
+overlap localization.
 
-- Current frontier: `github-issue-292-canonical-episodic-memory-g2-20260815.md`.
+- Current frontier: none; `G3_SOURCE_LOCALIZATION_PENDING`.
 - G1 physical receipt: PR #295 merge `ccd23defe9aa5905d26f34a865746c1eff7d039f`; historical campaign baseline `cdf2570ede5ae218f36f886b696c8da45458043a`.
-- Current main: `19d815954ff72e99ed50734410cd2342a0b62bc7`.
-- Durable readiness marker: `CANONICAL_EPISODIC_MEMORY_G2_SOURCE_FROZEN`.
-- G3–G4 are not authorized by this card.
+- G2 physical receipt: PR #303 head `c06ba7dc160af5b0ef0a0165d39ee89a47f57af3`; merge/current main `d181a653d4a155266bf9e97fdfe35b69d3f08991`; exact four-file PR scope, zero deletions; focused `52 passed`; required exact-head checks successful with Tier 3 skipped by policy.
+- G2 implementation-only diff SHA-256: `8a16e6595da0cd23a674305bc5a2b6502418dab4b1f27373e0128bd3769bc7d6`.
+- Completion marker: `CANONICAL_EPISODIC_MEMORY_G2_APPLICABILITY_PROVEN`.
+- G3–G4 implementation is not authorized by this reconciliation.
 - `AUTO_CHAIN=false`.
-- Claim ceiling: `canonical_episodic_memory_g2_candidate_pr_only`.
+- Claim ceiling: `canonical_episodic_memory_g2_source_and_tests_only`.
