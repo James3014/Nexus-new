@@ -66,13 +66,20 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _validate_identity(args: argparse.Namespace) -> tuple[str, str]:
+def _validate_selector(args: argparse.Namespace) -> tuple[str, str, str]:
+    lineage_id = str(getattr(args, "lineage_id", "") or "").strip()
     provider = str(args.provider or "").strip()
     model = str(args.model or "").strip()
+    if lineage_id and (provider or model):
+        raise SystemExit(
+            "error: --lineage-id OR --provider/--model may be supplied, not both"
+        )
+    if bool(provider) != bool(model):
+        raise SystemExit("error: --provider and --model must be supplied together")
+    if lineage_id:
+        return lineage_id, "", ""
     if provider and model:
-        return provider, model
-    if getattr(args, "lineage_id", None):
-        return "", ""
+        return "", provider, model
     raise SystemExit(
         "error: --provider and --model are required (exact registered identity) or --lineage-id"
     )
@@ -84,17 +91,17 @@ def main(argv: list[str] | None = None) -> int:
     planner = CalibrationPlanner(registry)
 
     try:
+        lineage_id, provider, model = _validate_selector(args)
         if args.command == "evidence":
-            if getattr(args, "lineage_id", None):
-                bundle = planner.evidence_bundle(lineage_id=args.lineage_id)
+            if lineage_id:
+                bundle = planner.evidence_bundle(lineage_id=lineage_id)
             else:
-                provider, model = _validate_identity(args)
                 bundle = planner.evidence_bundle(provider=provider, model=model)
             _emit(bundle)
             return 0
 
-        if getattr(args, "lineage_id", None):
-            lineage = registry.resolve_by_lineage_id(args.lineage_id)
+        if lineage_id:
+            lineage = registry.resolve_by_lineage_id(lineage_id)
             plan = planner.build_calibration_plan(
                 provider=lineage.execution_identities[0].provider,
                 model=lineage.execution_identities[0].model,
@@ -103,7 +110,6 @@ def main(argv: list[str] | None = None) -> int:
                 description=args.description,
             )
         else:
-            provider, model = _validate_identity(args)
             plan = planner.build_calibration_plan(
                 provider=provider,
                 model=model,

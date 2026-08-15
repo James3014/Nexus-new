@@ -100,6 +100,43 @@ def test_plan_cli_unknown_model_fails_closed(capsys) -> None:
     assert "No registered lineage" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        [
+            "evidence",
+            "--lineage-id",
+            "deepseek-v4-flash",
+            "--provider",
+            "opencode",
+            "--model",
+            "opencode/deepseek-v4-flash-free",
+        ],
+        [
+            "plan",
+            "--lineage-id",
+            "deepseek-v4-flash",
+            "--provider",
+            "opencode",
+            "--model",
+            "opencode/deepseek-v4-flash-free",
+            "--target-role",
+            "compact_code_candidate",
+        ],
+    ],
+)
+def test_cli_dual_selector_fails_closed(argv) -> None:
+    module = _load_plan_cli()
+    with pytest.raises(SystemExit, match="not both"):
+        module.main(argv)
+
+
+def test_cli_partial_execution_identity_fails_closed() -> None:
+    module = _load_plan_cli()
+    with pytest.raises(SystemExit, match="together"):
+        module.main(["evidence", "--provider", "opencode"])
+
+
 def test_plan_cli_rejects_invalid_change_kind(capsys) -> None:
     module = _load_plan_cli()
     with pytest.raises(SystemExit):
