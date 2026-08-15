@@ -316,6 +316,26 @@ def test_unknown_impact_fails_closed_to_broader_verification():
     assert "tests/ops/test_pr_impact_gate.py" in plan.pytest_targets
 
 
+def test_model_capability_lineage_pr_paths_are_mapped_and_high_risk_not_unknown():
+    plan = build_impact_plan(
+        [
+            "nexus/config/model_capability_lineage.yaml",
+            "nexus/services/model_capability_lineage.py",
+            "scripts/bench/experimental/model_calibration_plan.py",
+            "tests/services/test_model_capability_lineage.py",
+            "tests/bench/test_model_calibration_plan.py",
+            "nexus/orchestrator/unified_mcp_gateway.py",
+            "tests/nexus/orchestrator/test_unified_mcp_gateway.py",
+        ]
+    )
+
+    assert plan.tier == 2
+    assert plan.impact_class == "HIGH_RISK_INTEGRATION"
+    assert plan.unmatched_paths == []
+    assert "tests/ops/test_pr_impact_gate.py" in plan.pytest_targets
+    assert "tests/services/test_policy_gate.py" in plan.pytest_targets
+
+
 def test_preexisting_exact_base_failure_is_distinguished_from_new_regression():
     result = classify_regression(
         _run(1, ["tests.test_contract::test_existing_debt"], revision="base"),

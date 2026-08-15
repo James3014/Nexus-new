@@ -308,6 +308,34 @@ def test_model_workforce_policy_uses_exact_contract_targets_without_fallback(tmp
     assert details.unmatched_paths == []
 
 
+def test_model_capability_lineage_config_uses_exact_calibration_targets_without_fallback(tmp_path):
+    rules = load_impact_rules()
+    lineage_rule = next(
+        rule
+        for rule in rules
+        if rule.code_path == "nexus/config/model_capability_lineage.yaml"
+    )
+    details = select_target_details(
+        ["nexus/config/model_capability_lineage.yaml"],
+        rules,
+        index_path=tmp_path / "missing_impact_index.json",
+        stats_path=tmp_path / "missing_impact_stats.json",
+        history_path=tmp_path / "missing_test_history.jsonl",
+    )
+
+    assert details.targets == [
+        "tests/services/test_model_capability_lineage.py",
+        "tests/bench/test_model_calibration_plan.py",
+        "tests/nexus/orchestrator/test_unified_mcp_gateway.py",
+        "tests/services/test_policy_gate.py",
+    ]
+    assert lineage_rule.risk_reason == "model_capability_lineage_calibration_contract"
+    assert details.risk == "high"
+    assert details.high_risk_escalated is True
+    assert details.fallback_used is False
+    assert details.unmatched_paths == []
+
+
 def test_select_targets_uses_fallback_when_no_paths_match():
     targets, reasons = select_targets(
         ["nexus/app/flow.py"],
