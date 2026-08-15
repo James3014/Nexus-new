@@ -3,10 +3,12 @@ task_id: github-issue-292-canonical-episodic-memory-g2-20260815
 issue: 292
 repository: James3014/Nexus-new
 baseline_revision: 19d815954ff72e99ed50734410cd2342a0b62bc7
-status: ACTIVE
-readiness_marker: CANONICAL_EPISODIC_MEMORY_G2_SOURCE_FROZEN
+status: COMPLETE
+frontier_status: TERMINAL_RECONCILIATION
+completion_marker: CANONICAL_EPISODIC_MEMORY_G2_APPLICABILITY_PROVEN
+reconciled_main: d181a653d4a155266bf9e97fdfe35b69d3f08991
 AUTO_CHAIN: false
-claim_ceiling: canonical_episodic_memory_g2_candidate_pr_only
+claim_ceiling: canonical_episodic_memory_g2_source_and_tests_only
 implementation_files:
   - nexus/services/local_heal/memory_retrieval_adapter.py
   - tests/unit/local_heal/test_memory_retrieval_adapter.py
@@ -118,3 +120,26 @@ Publication and acceptance remain separate coordinator gates.
 
 `AUTO_CHAIN=false`. Claim ceiling:
 `canonical_episodic_memory_g2_candidate_pr_only`.
+
+## Terminal reconciliation
+
+G2 was independently accepted and physically merged through PR #303.
+
+- Candidate head: `c06ba7dc160af5b0ef0a0165d39ee89a47f57af3`.
+- Merge/current main: `d181a653d4a155266bf9e97fdfe35b69d3f08991`.
+- Implementation-only diff SHA-256: `8a16e6595da0cd23a674305bc5a2b6502418dab4b1f27373e0128bd3769bc7d6`.
+- Scope: the two declared implementation/test files, plus this card and the
+  campaign INDEX; zero deletions.
+- Evidence: focused `52 passed`; Ruff check and preview format check passed;
+  compileall and `git diff --check` passed; required exact-head CI succeeded;
+  Tier 3 was skipped by policy.
+- Independent acceptance: `ACCEPT_MERGE_SLOT_ONLY` at the exact Candidate
+  head before merge.
+
+This reconciliation records only the deterministic G2 applicability source
+and hostile tests. It grants no G3/G4 implementation, Router,
+CapabilityPlanner, Workforce, lifecycle, provider, runtime, approval, release,
+or production authority. Issue #292 remains open and `AUTO_CHAIN=false`.
+
+Completion marker: `CANONICAL_EPISODIC_MEMORY_G2_APPLICABILITY_PROVEN`.
+Claim ceiling: `canonical_episodic_memory_g2_source_and_tests_only`.
