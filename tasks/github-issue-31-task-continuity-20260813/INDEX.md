@@ -4,7 +4,7 @@
 - issue: #31
 - authority: Owner standing grant, bounded Ready Issue
 - baseline_main: a74d838cc6bb14af47ce79207181c12a1aed1d35
-- reconciled_main: ccd23defe9aa5905d26f34a865746c1eff7d039f
+- reconciled_main: c75a42279556cd515e8f5d775cecd2ecde7aa301
 - status: ACTIVE
 - frontier_status: ACCEPTED_CANDIDATE_PENDING_OWNER_MERGE_SLOT
 - current_frontier: 01
