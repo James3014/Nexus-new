@@ -99,7 +99,7 @@ def test_ready_issue_claim_contract_is_worker_neutral_and_fail_closed():
     assert "never grants\n  route selection" in contract
 
 
-def test_coordinator_integration_authority_is_owner_bound_not_magic_token():
+def test_protected_merge_requires_exact_owner_slot_not_standing_grant():
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(encoding="utf-8")
     merge = (ROOT / ".agents/skills/nexus-merge-gate/SKILL.md").read_text(encoding="utf-8")
