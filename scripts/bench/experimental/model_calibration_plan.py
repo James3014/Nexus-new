@@ -71,9 +71,7 @@ def _validate_selector(args: argparse.Namespace) -> tuple[str, str, str]:
     provider = str(args.provider or "").strip()
     model = str(args.model or "").strip()
     if lineage_id and (provider or model):
-        raise SystemExit(
-            "error: --lineage-id OR --provider/--model may be supplied, not both"
-        )
+        raise SystemExit("error: --lineage-id OR --provider/--model may be supplied, not both")
     if bool(provider) != bool(model):
         raise SystemExit("error: --provider and --model must be supplied together")
     if lineage_id:
