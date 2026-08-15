@@ -431,7 +431,9 @@ def test_capability_evidence_provenance_is_honest() -> None:
 def test_workforce_authority_refs_separate_from_capability_evidence() -> None:
     registry = _registry()
     gemini = registry.resolve_by_lineage_id("gemini-3.7-flash-medium")
-    gemini_refs = {(ref.provider, ref.model, ref.current_autonomy) for ref in gemini.workforce_authority_refs}
+    gemini_refs = {
+        (ref.provider, ref.model, ref.current_autonomy) for ref in gemini.workforce_authority_refs
+    }
     assert gemini_refs == {("agy", "gemini-3.7-flash-medium", "L3")}
 
     deepseek = registry.resolve_by_lineage_id("deepseek-v4-flash")
