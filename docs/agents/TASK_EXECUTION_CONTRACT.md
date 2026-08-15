@@ -2,15 +2,16 @@
 artifact_authority: current
 owner: James Chen
 status: active
-purpose: Conditional execution contract for governed Nexus task cards.
+purpose: Governed task-card and Owner-authorized direct-delegated execution contracts.
 ---
 
 # Task Execution Contract
 
-This is the L1 contract loaded for a governed mutating task. The active
-Git-tracked Task Card remains the task-specific authority; this document
-supplies the shared schema and gates. It is not required for an eligible
-Owner-authorized `DIRECT_CANONICAL` change.
+This is the L1 contract loaded for a governed mutating task and for
+`DIRECT_DELEGATED` work. The active Git-tracked Task Card remains the
+task-specific authority for governed work; this document supplies the shared
+schema and gates. It is not required for an eligible Owner-authorized
+`DIRECT_CANONICAL` change.
 
 ## Direct canonical boundary
 
@@ -25,14 +26,73 @@ must not relabel that explicit choice. The lane governs authorization, not
 correctness: source behavior, tests, and required verifiers decide whether the
 program works.
 
-Escalate to this governed contract before mutation when implementation is
-delegated, requires an isolated Target, crosses subsystems, changes
-route/lifecycle/workforce authority, weakens security, changes a migration or
-schema, performs cleanup or protected-branch/ref operations, creates a
-Candidate, or supports a production/public claim. Direct work does not commit,
-push, merge, delete, or auto-chain without exact Owner authority. The standing
-coordinator grant does not expand `DIRECT_CANONICAL`; it applies only to the
-governed GitHub Ready-Issue actions defined below.
+Direct work becomes governed before mutation when it changes
+route/lifecycle/workforce authority, weakens security, changes migration or
+schema authority, requires protected branch/ref operations, or makes
+production/public claims, or otherwise exceeds the `DIRECT_CANONICAL` or
+`DIRECT_DELEGATED` boundary. Direct work does not commit, push, merge, delete,
+or auto-chain without exact Owner authority. The standing coordinator grant does
+not expand `DIRECT_CANONICAL`; it applies only to the governed GitHub Ready-Issue
+actions defined below.
+
+## Direct delegated boundary
+
+This governed contract is not required solely because implementation is
+delegated when the root `AGENTS.md` `DIRECT_DELEGATED` contract is satisfied.
+Escalate to this governed contract when delegated work exceeds the
+`DIRECT_DELEGATED` boundary, requires Nexus lifecycle/Candidate authority,
+changes route/lifecycle/workforce/security authority, requires protected
+integration, or otherwise meets a governed-work condition.
+
+`DIRECT_DELEGATED` means:
+
+Owner -> primary coordinator -> approved non-Nexus control plane such as
+DevSpace -> exactly one bounded external implementation worker -> independent
+primary-coordinator verification -> STOP.
+
+It is not Nexus runtime, Task Card, Nexus lifecycle, CapabilityPlanner routing,
+Nexus Workforce Admission, or Candidate lifecycle authority. An explicit current
+Owner request is the authority source. No Nexus Task Card, lifecycle state, or
+Workforce Admission is required solely for this lane.
+
+Eligibility requires, at minimum:
+
+- exactly one bounded implementation task;
+- exact external control plane and worker identity;
+- repository root / branch / HEAD / dirty baseline recorded before dispatch;
+- exact profile/provider/model and material CLI/runtime version when observable;
+- bounded mutation scope;
+- unrelated dirty state preserved;
+- the worker cannot approve, integrate, merge, push, clean unrelated state,
+  release, or make production/public claims;
+- the worker cannot act as its own required independent verifier;
+- the primary coordinator independently inspects the physical changes and reruns
+  the applicable verification; worker-reported PASS is implementation evidence
+  only;
+- `AUTO_CHAIN=false`;
+- timeout/disconnect reconciles the same durable worker/session and
+  filesystem/Git/provider state before retry; do not blindly launch a
+  replacement worker.
+
+Isolation: use the canonical checkout only when unrelated dirty state is
+demonstrably non-overlapping; otherwise an approved DevSpace-managed isolated
+worktree may be used. That is transport/workspace isolation only and is never a
+Nexus Target or Candidate.
+
+Fail closed with `DIRECT_DELEGATED_BLOCKED` — without silently creating a Task
+Card or switching to Nexus — when the work materially requires:
+
+- CapabilityPlanner / route authority changes;
+- Nexus lifecycle authority changes;
+- Workforce Admission / workforce policy changes;
+- security-boundary weakening;
+- unresolved product/business semantics;
+- potentially executed historical migration rewrite;
+- ambiguous production-data mutation/backfill;
+- protected merge/push/ref operations;
+- release or production/public claim authority;
+- milestone/program-level `AUTO_CHAIN`;
+- the worker acting as its own required independent verifier.
 
 ## Governed discovery and authority
 
