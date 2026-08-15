@@ -33,23 +33,27 @@ source behavior, tests, and required verifiers remain authoritative.
   worker prose are projections and cannot authorize autonomous mutation.
 - No agent direct-pushes, force-pushes, or deletes `main`; delegated workers
   never approve or merge their Candidate. Only the primary coordinator may use
-  protected PR merge after a fresh, exact PR/head-bound Owner merge slot.
-  A standing grant is never a protected-merge slot. Never merge runtime history
-  into GitHub `main` to align SHAs.
+  protected PR merge under current Owner integration authority. A standing grant
+  alone is not merge authority. Never merge runtime history into GitHub `main`
+  to align SHAs.
 - A non-transferable standing grant for bounded Ready Issues in one thread, bound
   by its active Task Card receipt, may let the coordinator create/commit a
   missing Task Card/INDEX when the Issue is Ready, paths and claim ceiling are
   frozen, gates pass, and `AUTO_CHAIN=false`; workers cannot create, widen, or
   self-authorize cards.
-- Every coordinator merge requires a fresh Owner `MERGE_SLOT_GRANTED` decision
-  bound to the exact repository, PR, head, and base, plus a fresh SHA-bound
-  PR/head/base/diff, Issue/card, independent acceptance, resolved blockers,
-  current `main`, terminal-success required checks, and expected-head/CAS.
-  `MERGE_INTENT` is evidence and a request for that slot, never authorization.
-  Drift, conflict, or unknown/failed checks fail closed.
-- The coordinator handles ordinary implementation, rebind, retry, and evidence
-  autonomously and asks again only for contract widening, weaker security, a new
-  irreversible external effect, or release/production claims.
+- A current explicit Owner instruction to complete/finish/integrate the bounded
+  GitHub change is the coordinator's non-transferable integration authority for
+  that approved goal/scope. Merge stays strict: independent acceptance, fresh
+  PR/head/base/diff, current `main`/base compatibility, resolved blockers,
+  terminal-success required checks, and expected-head/CAS. Drift, conflict, or
+  unknown/failed checks fail closed.
+- Integration authority survives ordinary in-scope repair commits (format,
+  lint, test, or in-risk-bound semantic repair); a head SHA change alone is not
+  reauthorization. Ask the Owner again only on material drift: goal/scope
+  widening, destructive deletion, weaker security, branch-protection/check
+  bypass, migration/schema/production-data authority, force-push/history
+  rewrite, release/production/public claim, or a conflict requiring a new
+  product/authority decision.
 - Detailed standing-grant, claim, PR/merge, and reconciliation procedure:
   `docs/agents/TASK_EXECUTION_CONTRACT.md`.
 
@@ -76,15 +80,15 @@ source behavior, tests, and required verifiers remain authoritative.
 - An agent may implement, test, commit, push an authorized issue branch, and
   open a PR, but cannot convert its own implementation or Candidate into
   approval, integration, merge, release, or production truth. A separate
-  designated integration action may perform only the exact Owner-slot-authorized
+  designated integration action may perform only the Owner integration-authorized
   merge after independent acceptance and fresh merge-gate verification; only the
-  primary coordinator under a valid `MERGE_SLOT_GRANTED` decision is that
+  primary coordinator under current Owner integration authority is that
   separate action, never a delegated implementer or reviewer.
 - Worker output is implementation/candidate evidence only; it cannot self-approve
   or self-verify. No agent direct-pushes or deletes `main`. Do not hand-edit
-  lifecycle JSON or protected control-plane state. Protected PR merge requires a
-  fresh exact Owner merge slot and never permits bypassing required checks.
-  Standing coordinator authority covers pre-merge work only.
+  lifecycle JSON or protected control-plane state. Protected PR merge requires
+  current Owner integration authority and never permits bypassing required
+  checks. Standing coordinator authority covers pre-merge work only.
 - Completion requires behavioral evidence, structural conformance, and the
   applicable request- or card-defined verifier. A report or green subset is not
   solve truth. Report evidence in the final response.

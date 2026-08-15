@@ -99,10 +99,34 @@ def test_ready_issue_claim_contract_is_worker_neutral_and_fail_closed():
     assert "never grants\n  route selection" in contract
 
 
-def test_protected_merge_requires_exact_owner_slot_not_standing_grant():
+def test_coordinator_integration_authority_is_owner_bound_not_magic_token():
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(encoding="utf-8")
     merge = (ROOT / ".agents/skills/nexus-merge-gate/SKILL.md").read_text(encoding="utf-8")
+
+    for stale_token in ("MERGE_SLOT_GRANTED", "MERGE_INTENT"):
+        assert stale_token not in agents
+        assert stale_token not in contract
+        assert stale_token not in merge
+
+    assert "No agent direct-pushes, force-pushes, or deletes `main`" in agents
+    assert "never approve or merge their Candidate" in agents
+    assert "A standing grant\n  alone is not merge authority" in agents
+    assert "terminal-success required checks" in agents
+    assert "expected-head/CAS" in agents
+    assert "never permits bypassing required\n  checks" in agents
+    assert "integration authority" in agents
+    assert "material drift" in agents
+    assert "head SHA change alone is not\n  reauthorization" in agents
+
+    assert "integration authority" in contract
+    assert "material drift" in contract
+    assert "no separate\nmerge-intent comment" in contract
+
+    assert "applies exclusively to a local Nexus lifecycle Candidate" in merge
+    assert "It is not the merge procedure for a GitHub PR Candidate" in merge
+    assert "does\nnot restate that procedure" in merge
+
     prior_card = (
         ROOT / "tasks/standing-owner-autonomy-20260811/01-standing-coordinator-authority.md"
     ).read_text(encoding="utf-8")
@@ -112,21 +136,6 @@ def test_protected_merge_requires_exact_owner_slot_not_standing_grant():
     allowed_actions = next(
         line for line in prior_card.splitlines() if line.startswith("- allowed_actions:")
     ).casefold()
-
-    assert "A standing grant is never a protected-merge slot" in agents
-    assert "Standing coordinator authority covers pre-merge work only" in agents
-    assert "bound to the exact repository, PR, head, and base" in agents
-    assert "`MERGE_INTENT` is evidence" in agents
-
-    assert "Protected merge then requires a fresh Owner `MERGE_SLOT_GRANTED`" in contract
-    assert "Any drift invalidates the slot" in contract
-    assert "Neither `MERGE_INTENT`\nnor standing authority is merge permission" in contract
-    assert "standing authority is merge permission" not in contract.replace(
-        "Neither `MERGE_INTENT`\nnor standing authority is merge permission", ""
-    )
-
-    assert "fresh exact PR/head/base-bound Owner" in merge
-    assert "Standing authority\nprepares evidence" in merge
 
     assert "status: ACTIVE_NARROWED_BY_OWNER_MERGE_QUEUE_AUTHORITY" in prior_card
     assert "status: active, narrowed by Owner merge-queue authority" in prior_index

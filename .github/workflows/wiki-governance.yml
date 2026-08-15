@@ -69,11 +69,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install uv and dependencies
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          uv sync --frozen --all-groups --all-extras
-      - name: Resolve exact revisions, impact, and worktree
+      - name: Resolve exact revisions and impact
         id: revisions
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'workflow_dispatch' && inputs.base_sha || github.event.before }}
@@ -87,21 +83,35 @@ jobs:
           git cat-file -e "$BASE_SHA^{commit}"
           git cat-file -e "$HEAD_SHA^{commit}"
           test "$(git rev-parse HEAD)" = "$HEAD_SHA"
-          BASE_WORKTREE=$(mktemp -d /tmp/nexus-wiki-base.XXXXXX)
-          git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"
-          .venv/bin/python - "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT" <<'PY'
-          import subprocess
-          import sys
-          changed = subprocess.check_output(
-              ['git', 'diff', '--name-only', sys.argv[1], sys.argv[2]], text=True
-          ).splitlines()
-          prefixes = ('openwiki/', 'nexus_wiki_vault/', 'scripts/ops/wiki_', 'tests/ops/test_wiki_')
-          exact = {'.github/workflows/wiki-governance.yml'}
-          required = any(path in exact or path.startswith(prefixes) for path in changed)
-          with open(sys.argv[3], 'a', encoding='utf-8') as stream:
-              stream.write(f'required={str(required).lower()}\n')
-          PY
-          echo "base_worktree=$BASE_WORKTREE" >> "$GITHUB_OUTPUT"
+          CHANGED="$(git diff --name-only "$BASE_SHA" "$HEAD_SHA")"
+          REQUIRED="false"
+          if [ -n "$CHANGED" ]; then
+            while IFS= read -r path; do
+              case "$path" in
+                .github/workflows/wiki-governance.yml)
+                  REQUIRED="true"
+                  ;;
+                openwiki/*|nexus_wiki_vault/*|scripts/ops/wiki_*|tests/ops/test_wiki_*)
+                  REQUIRED="true"
+                  ;;
+              esac
+            done <<< "$CHANGED"
+          fi
+          echo "required=$REQUIRED" >> "$GITHUB_OUTPUT"
+          if [ "$REQUIRED" = "true" ]; then
+            BASE_WORKTREE=$(mktemp -d /tmp/nexus-wiki-base.XXXXXX)
+            git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"
+            echo "base_worktree=$BASE_WORKTREE" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Record non-Wiki impact
+        if: steps.revisions.outputs.required != 'true'
+        run: |
+          printf '%s\n' '{"classification":"PASS","blocking":false,"reason":"no Wiki-governed paths changed"}' > .ci-wiki/classification.json
+      - name: Install uv and dependencies
+        if: steps.revisions.outputs.required == 'true'
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          uv sync --frozen
       - name: Run Wiki gate on exact base and head
         if: steps.revisions.outputs.required == 'true'
         id: wiki
@@ -132,10 +142,6 @@ jobs:
           echo '## Exact-base Wiki governance classification' >> "$GITHUB_STEP_SUMMARY"
           cat .ci-wiki/classification.json >> "$GITHUB_STEP_SUMMARY"
           exit "$STATUS"
-      - name: Record non-Wiki impact
-        if: steps.revisions.outputs.required != 'true'
-        run: |
-          printf '%s\n' '{"classification":"PASS","blocking":false,"reason":"no Wiki-governed paths changed"}' > .ci-wiki/classification.json
       - name: Remove exact base worktree
         if: always() && steps.revisions.outputs.base_worktree != ''
         run: git worktree remove --force "${{ steps.revisions.outputs.base_worktree }}"

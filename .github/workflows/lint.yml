@@ -74,12 +74,7 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install uv and dependencies
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          uv sync --frozen --all-groups --all-extras
-
-      - name: Resolve exact revisions and worktree
+      - name: Resolve exact revisions, impact, and worktree
         id: revisions
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'workflow_dispatch' && inputs.base_sha || github.event.before }}
@@ -93,19 +88,36 @@ jobs:
           git cat-file -e "$BASE_SHA^{commit}"
           git cat-file -e "$HEAD_SHA^{commit}"
           test "$(git rev-parse HEAD)" = "$HEAD_SHA"
-          BASE_WORKTREE=$(mktemp -d /tmp/nexus-ruff-base.XXXXXX)
-          git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"
           if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- pyproject.toml ruff.toml; then
             git diff --name-only -z "$BASE_SHA" "$HEAD_SHA" -- '*.py' > .ci-ruff/changed.nul
           else
             { git ls-tree -r -z --name-only "$BASE_SHA" -- '*.py'; git ls-tree -r -z --name-only "$HEAD_SHA" -- '*.py'; } \
               | sort -zu > .ci-ruff/changed.nul
           fi
+          if [ -s .ci-ruff/changed.nul ]; then
+            BASE_WORKTREE=$(mktemp -d /tmp/nexus-ruff-base.XXXXXX)
+            git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"
+            echo "base_worktree=$BASE_WORKTREE" >> "$GITHUB_OUTPUT"
+            echo "impact=required" >> "$GITHUB_OUTPUT"
+          else
+            echo "impact=none" >> "$GITHUB_OUTPUT"
+          fi
           echo "base=$BASE_SHA" >> "$GITHUB_OUTPUT"
           echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"
-          echo "base_worktree=$BASE_WORKTREE" >> "$GITHUB_OUTPUT"
+
+      - name: Record no-impact PASS
+        if: steps.revisions.outputs.impact == 'none'
+        run: |
+          printf '%s\n' '{"classification":"PASS","blocking":false,"reason":"no Ruff-governed Python paths changed"}' > .ci-ruff/classification.json
+
+      - name: Install uv and dependencies
+        if: steps.revisions.outputs.impact == 'required'
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          uv sync --frozen
 
       - name: Run Ruff on exact base and head
+        if: steps.revisions.outputs.impact == 'required'
         id: ruff
         env:
           BASE_WORKTREE: ${{ steps.revisions.outputs.base_worktree }}
@@ -150,6 +162,7 @@ jobs:
           run_ruff "$GITHUB_WORKSPACE" .ci-ruff/head.json head
 
       - name: Classify Ruff regression
+        if: steps.revisions.outputs.impact == 'required'
         run: |
           set +e
           .venv/bin/python scripts/ops/exact_base_tool_gate.py \

@@ -69,11 +69,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install uv and dependencies
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          uv sync --frozen --all-groups --all-extras
-      - name: Resolve exact revisions and worktree
+      - name: Resolve exact revisions, impact, and worktree
         id: revisions
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'workflow_dispatch' && inputs.base_sha || github.event.before }}
@@ -87,17 +83,32 @@ jobs:
           git cat-file -e "$BASE_SHA^{commit}"
           git cat-file -e "$HEAD_SHA^{commit}"
           test "$(git rev-parse HEAD)" = "$HEAD_SHA"
-          BASE_WORKTREE=$(mktemp -d /tmp/nexus-bandit-base.XXXXXX)
-          git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"
           if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- pyproject.toml .bandit bandit.yaml; then
             git diff --name-only -z "$BASE_SHA" "$HEAD_SHA" -- 'nexus/core/*.py' 'nexus/core/**/*.py' > .ci-bandit/changed.nul
           else
             { git ls-tree -r -z --name-only "$BASE_SHA" -- nexus/core; git ls-tree -r -z --name-only "$HEAD_SHA" -- nexus/core; } \
-              | .venv/bin/python -c 'import sys; data=sys.stdin.buffer.read().split(b"\0"); paths=sorted({p for p in data if p.endswith(b".py")}); sys.stdout.buffer.write(b"\0".join(paths) + (b"\0" if paths else b""))' \
+              | python -c 'import sys; data=sys.stdin.buffer.read().split(b"\0"); paths=sorted({p for p in data if p.endswith(b".py")}); sys.stdout.buffer.write(b"\0".join(paths) + (b"\0" if paths else b""))' \
               > .ci-bandit/changed.nul
           fi
-          echo "base_worktree=$BASE_WORKTREE" >> "$GITHUB_OUTPUT"
+          if [ -s .ci-bandit/changed.nul ]; then
+            BASE_WORKTREE=$(mktemp -d /tmp/nexus-bandit-base.XXXXXX)
+            git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"
+            echo "base_worktree=$BASE_WORKTREE" >> "$GITHUB_OUTPUT"
+            echo "impact=required" >> "$GITHUB_OUTPUT"
+          else
+            echo "impact=none" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Record no-impact PASS
+        if: steps.revisions.outputs.impact == 'none'
+        run: |
+          printf '%s\n' '{"classification":"PASS","blocking":false,"reason":"no Bandit-governed nexus/core Python paths changed"}' > .ci-bandit/classification.json
+      - name: Install uv and dependencies
+        if: steps.revisions.outputs.impact == 'required'
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          uv sync --frozen
       - name: Run Bandit on exact base and head
+        if: steps.revisions.outputs.impact == 'required'
         id: bandit
         env:
           BASE_WORKTREE: ${{ steps.revisions.outputs.base_worktree }}
@@ -124,6 +135,7 @@ jobs:
           run_bandit "$BASE_WORKTREE" .ci-bandit/base.json base
           run_bandit "$GITHUB_WORKSPACE" .ci-bandit/head.json head
       - name: Classify Bandit regression
+        if: steps.revisions.outputs.impact == 'required'
         run: |
           set +e
           .venv/bin/python scripts/ops/exact_base_tool_gate.py \

@@ -183,14 +183,19 @@ receipt. Candidate, approval, integration, push, cleanup, and production/public
 claims are separate lifecycle states. A failed required commit is a block, not
 completion.
 
-The primary coordinator may prepare `MERGE_INTENT` under standing authority
-after an independent exact-head review, terminal success for every
-ruleset-required check, an up-to-date base, and complete scope/deletion audits.
-Protected merge then requires a fresh Owner `MERGE_SLOT_GRANTED` decision bound
-to the exact repository, PR, head, and base. Any drift invalidates the slot and
-requires a new decision before expected-head/CAS merge. Neither `MERGE_INTENT`
-nor standing authority is merge permission. This GitHub action does not approve
-or integrate local Nexus lifecycle state.
+Under current Owner integration authority, the primary coordinator may integrate
+the bounded GitHub change after an independent exact-head review, terminal
+success for every ruleset-required check, an up-to-date base, resolved
+blockers, and complete scope/deletion audits. Expected-head/CAS merge protects
+the actual merge from a stale head; an ordinary in-scope repair commit that
+changes the head SHA does not invalidate the integration authority. Ask the
+Owner again only on material drift: contract widening, weaker security, new
+destructive deletion, protection/check bypass, migration/schema/
+production-data authority, force-push/history rewrite, release/production/
+public claim, or a conflict requiring a new product/authority decision. GitHub
+PR metadata and required checks are the merge evidence surface; no separate
+merge-intent comment or duplicated head/base/check payload is required. This
+GitHub action does not approve or integrate local Nexus lifecycle state.
 
 ## Blocks and residual debt
 
