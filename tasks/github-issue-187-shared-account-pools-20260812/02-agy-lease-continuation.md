@@ -6,8 +6,8 @@ task_id: github-issue-191-agy-lease-continuation
 campaign_id: github-issue-187-shared-account-pools-20260812
 source_issue: https://github.com/James3014/Nexus-new/issues/191
 baseline_main: f752c77d9410747825406df5d56f9fa6244e7084
-reconciled_main: 586abbfb459550de912002203ff2911c7a40db58
-current_main: 586abbfb459550de912002203ff2911c7a40db58
+reconciled_main: c57c183f4f1c3701ccc1e3731ea498d60b2297d4
+current_main: c57c183f4f1c3701ccc1e3731ea498d60b2297d4
 frontier_status: TERMINAL_RECONCILIATION
 terminal_marker: AGY_REQUEST_SCOPED_LEASE_CONTINUATION_MERGED
 implementation_gate: SATISFIED_BY_PR237_MERGE_F752C77D
@@ -51,6 +51,7 @@ The bounded result SHALL bind each Agy execution to an immutable request-scoped 
 
 - Issue #191 CLOSED with `state_reason=completed` at 2026-08-14T05:38:46Z immediately after the PR #237 merge.
 - PR #237 merge `f752c77d9410747825406df5d56f9fa6244e7084` (parents `37526fc9705cf984b0b2fd9f373460b3c98d7391` + `7e216d8769a07589f80615f3f2470abaddde0a62`) is an ancestor of current `main` `586abbfb459550de912002203ff2911c7a40db58` (PR #244 merge); prior reconciled `main` `cdf2570ede5ae218f36f886b696c8da45458043a` (PR #236 merge) retained as historical receipt; exact four files / zero deletions, required checks and exact-base impact terminal success.
+- Second non-destructive rebind (PR #287, 2026-08-15): merge commit `8ddfde4069d7e0d4df491a93eac5e6ea7650e89d` (parents `9c767f3f3192cb422eb32cb691b0d063bf90ec74` + `c57c183f4f1c3701ccc1e3731ea498d60b2297d4`); active reconciled/current `main` now `c57c183f4f1c3701ccc1e3731ea498d60b2297d4` (PR #294 merge); `586abbfb459550de912002203ff2911c7a40db58` (PR #244 merge) retained as historical receipt; exact two metadata files / zero deletions preserved, no content semantics changed.
 - Implementation gate `SATISFIED_BY_PR237_MERGE_F752C77D`; terminal marker `AGY_REQUEST_SCOPED_LEASE_CONTINUATION_MERGED`.
 - This card is COMPLETE / TERMINAL_RECONCILIATION. It grants no runtime/provider/production claim and does not authorize Grok implementation.
 - Issue #192 is the next frontier candidate only: it is not marked Ready, no Task Card exists, and no implementation is authorized.

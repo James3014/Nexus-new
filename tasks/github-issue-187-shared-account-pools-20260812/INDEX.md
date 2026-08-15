@@ -5,8 +5,8 @@ status: active
 campaign_id: github-issue-187-shared-account-pools-20260812
 source_campaign_issue: https://github.com/James3014/Nexus-new/issues/187
 baseline_main: f752c77d9410747825406df5d56f9fa6244e7084
-reconciled_main: 586abbfb459550de912002203ff2911c7a40db58
-current_main: 586abbfb459550de912002203ff2911c7a40db58
+reconciled_main: c57c183f4f1c3701ccc1e3731ea498d60b2297d4
+current_main: c57c183f4f1c3701ccc1e3731ea498d60b2297d4
 ordered_cards:
   - 01-account-lease-contract.md
   - 02-agy-lease-continuation.md
