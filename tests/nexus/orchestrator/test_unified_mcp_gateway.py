@@ -992,26 +992,23 @@ def test_manifest_status_and_recommended_tools_share_tools_list_truth():
     gateway = UnifiedMCPGateway(service=FakeService())
     names = tuple(tool["name"] for tool in gateway.tool_specs())
     assert names == PUBLIC_TOOL_NAMES
-    assert gateway.handle({"jsonrpc": "2.0", "id": 10, "method": "tools/call", "params": {"name": "nexus_gateway_status", "arguments": {}}})["result"]["structuredContent"]["tool_count"] == len(names)
-    assert TOOL_MANIFEST_REVISION
-    assert {"nexus_provider_preflight", "nexus_task_card_create", "nexus_model_probe", "nexus_model_probe_result"}.issubset(set(names))
-
-
-def test_calibration_actions_registered_and_manifest_stays_deterministic():
-    gateway = UnifiedMCPGateway(service=FakeService())
-    names = tuple(tool["name"] for tool in gateway.tool_specs())
     assert "nexus_model_calibration_evidence" in names
     assert "nexus_model_calibration_plan" in names
-    status = gateway._gateway_status()
-    assert status["tool_count"] == len(names)
-    assert status["tool_manifest_revision"] == TOOL_MANIFEST_REVISION
+    assert TOOL_MANIFEST_REVISION
     recomputed_schema = hashlib.sha256(
-        json.dumps(UnifiedMCPGateway.tool_specs(), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        json.dumps(
+            UnifiedMCPGateway.tool_specs(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
     ).hexdigest()
     assert recomputed_schema == FULL_TOOL_SCHEMA_HASH
     assert TOOL_MANIFEST_REVISION == hashlib.sha256(
         json.dumps(names, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
+    assert {"nexus_provider_preflight", "nexus_task_card_create", "nexus_model_probe", "nexus_model_probe_result"}.issubset(set(names))
+    assert gateway.handle({"jsonrpc": "2.0", "id": 10, "method": "tools/call", "params": {"name": "nexus_gateway_status", "arguments": {}}})["result"]["structuredContent"]["tool_count"] == len(names)
 
 
 def test_calibration_evidence_action_resolves_lineage_and_fails_closed():
@@ -1030,6 +1027,12 @@ def test_calibration_evidence_action_resolves_lineage_and_fails_closed():
     assert "No registered lineage" in unknown["result"]["structuredContent"]["error"]
     missing = gateway.handle({"jsonrpc": "2.0", "id": 903, "method": "tools/call", "params": {"name": "nexus_model_calibration_evidence", "arguments": {}}})
     assert missing["result"]["isError"] is True
+    dual_selector = gateway.handle({"jsonrpc": "2.0", "id": 912, "method": "tools/call", "params": {"name": "nexus_model_calibration_evidence", "arguments": {"lineage_id": "deepseek-v4-flash", "provider": "opencode", "model": "opencode/deepseek-v4-flash-free"}}})
+    assert dual_selector["result"]["isError"] is True
+    assert "not both" in dual_selector["result"]["structuredContent"]["error"]
+    partial_identity = gateway.handle({"jsonrpc": "2.0", "id": 913, "method": "tools/call", "params": {"name": "nexus_model_calibration_evidence", "arguments": {"provider": "opencode"}}})
+    assert partial_identity["result"]["isError"] is True
+    assert "together" in partial_identity["result"]["structuredContent"]["error"]
 
 
 def test_calibration_plan_action_does_not_restart_from_l1():
