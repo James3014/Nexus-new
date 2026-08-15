@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta, timezone
 
 from nexus.contracts.learning_experience import build_nexus_learning_episode
 from nexus.services.local_heal.memory_retrieval_adapter import (
@@ -39,6 +40,20 @@ def _write_ledger(tmp_path, lines):
         payload += "\n"
     ledger.write_text(payload, encoding="utf-8")
     return ledger
+
+
+def _with_applicability(episode, **fields):
+    episode = dict(episode)
+    episode.update(fields)
+    return episode
+
+
+def _iso_utc(offset):
+    return (datetime.now(timezone.utc) + offset).isoformat()
+
+
+def _naive_iso():
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
 def test_canonical_store_exposes_valid_terminal_episodes(tmp_path):
@@ -240,3 +255,230 @@ def test_missing_ledger_is_fail_open_empty_and_legacy_store_remains_isolated(tmp
 
     assert [lesson.finding_id for lesson in lessons] == ["lh-jsonl"]
     assert adapter.last_metadata["retrieval_sources"] == ["LocalJsonlLessonStore"]
+
+
+def test_g2_version_boundary_lower_equal_accepted_future_rejected(tmp_path):
+    lower = _with_applicability(_episode(idempotency_key="ep-g2-v1"), state_version=1)
+    equal = _with_applicability(_episode(idempotency_key="ep-g2-v2"), state_version=2)
+    future = _with_applicability(_episode(idempotency_key="ep-g2-v3"), state_version=3)
+    _write_ledger(tmp_path, [json.dumps(lower), json.dumps(equal), json.dumps(future)])
+    store = CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)
+
+    rows = store.query(query_text="canonical", limit=5, current_state={"state_version": 2})
+
+    assert {row["episode_id"] for row in rows} == {lower["episode_id"], equal["episode_id"]}
+    assert store.last_metadata["result_count"] == 2
+    assert store.last_metadata["rejected_applicability_mismatch"] == 1
+    assert store.last_metadata["rejected_recency"] == 0
+
+
+def test_g2_non_integer_and_missing_episode_version_fails_closed(tmp_path):
+    tampered = _with_applicability(_episode(idempotency_key="ep-g2-str"), state_version="2")
+    missing = _episode(idempotency_key="ep-g2-missing")
+    _write_ledger(tmp_path, [json.dumps(tampered), json.dumps(missing)])
+    store = CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)
+
+    rows = store.query(query_text="canonical", limit=5, current_state={"state_version": 5})
+
+    assert rows == []
+    assert store.last_metadata["rejected_applicability_mismatch"] == 2
+
+
+def test_g2_identity_dimensions_match_accepted_mismatch_and_missing_rejected(tmp_path):
+    matching = _with_applicability(
+        _episode(idempotency_key="ep-g2-match"),
+        source_hash="sha256:abc",
+        contract_revision="rev-1",
+        runtime_identity="runtime-a",
+    )
+    mismatched = _with_applicability(
+        _episode(idempotency_key="ep-g2-mismatch"),
+        source_hash="sha256:other",
+        contract_revision="rev-1",
+        runtime_identity="runtime-a",
+    )
+    missing = _episode(idempotency_key="ep-g2-missing-identity")
+    _write_ledger(tmp_path, [json.dumps(matching), json.dumps(mismatched), json.dumps(missing)])
+    store = CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)
+
+    rows = store.query(
+        query_text="canonical",
+        limit=5,
+        current_state={
+            "source_revision": "sha256:abc",
+            "contract_revision": "rev-1",
+            "runtime_identity": "runtime-a",
+        },
+    )
+
+    assert [row["episode_id"] for row in rows] == [matching["episode_id"]]
+    assert store.last_metadata["rejected_applicability_mismatch"] == 2
+
+
+def test_g2_recency_fresh_accepted_stale_future_missing_malformed_naive_rejected(tmp_path):
+    fresh = _with_applicability(
+        _episode(idempotency_key="ep-g2-fresh"), created_at=_iso_utc(timedelta(hours=-1))
+    )
+    stale = _with_applicability(
+        _episode(idempotency_key="ep-g2-stale"), created_at=_iso_utc(timedelta(days=-4))
+    )
+    future = _with_applicability(
+        _episode(idempotency_key="ep-g2-future"), created_at=_iso_utc(timedelta(days=1))
+    )
+    missing = _episode(idempotency_key="ep-g2-no-ts")
+    malformed = _with_applicability(
+        _episode(idempotency_key="ep-g2-bad-ts"), created_at="not-a-date"
+    )
+    naive = _with_applicability(_episode(idempotency_key="ep-g2-naive"), created_at=_naive_iso())
+    _write_ledger(
+        tmp_path,
+        [json.dumps(ep) for ep in (fresh, stale, future, missing, malformed, naive)],
+    )
+    store = CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)
+
+    rows = store.query(query_text="canonical", limit=5, current_state={"max_age_days": 2})
+
+    assert [row["episode_id"] for row in rows] == [fresh["episode_id"]]
+    assert store.last_metadata["rejected_recency"] == 5
+
+
+def test_g2_unknown_or_malformed_current_state_fails_closed_with_no_rows(tmp_path):
+    _write_ledger(tmp_path, [json.dumps(_episode())])
+    store = CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)
+
+    unknown = store.query(query_text="canonical", limit=5, current_state={"unknown_key": 1})
+    assert unknown == []
+    assert store.last_metadata["rejected_current_state_input"] == 1
+    assert store.last_metadata["current_state_failure_reason"].startswith(
+        "unknown current_state key"
+    )
+    wrong_type = store.query(query_text="canonical", limit=5, current_state={"state_version": "2"})
+    assert wrong_type == []
+    assert store.last_metadata["rejected_current_state_input"] == 1
+    not_mapping = store.query(query_text="canonical", limit=5, current_state="state")
+
+    assert not_mapping == []
+    assert store.last_metadata["rejected_current_state_input"] == 1
+    assert store.last_metadata["result_count"] == 0
+    assert store.last_metadata["query_succeeded"] is True
+
+
+def test_g2_tampered_fields_fail_closed_and_repeated_reads_are_stable(tmp_path):
+    tampered = _with_applicability(_episode(idempotency_key="ep-g2-tamper"), contract_revision="")
+    stable = _with_applicability(
+        _episode(idempotency_key="ep-g2-stable"), contract_revision="rev-1"
+    )
+    _write_ledger(tmp_path, [json.dumps(tampered), json.dumps(stable)])
+    ledger = tmp_path / ".nexus" / "memory" / "learning_episodes.jsonl"
+    before = ledger.read_bytes()
+    store = CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)
+
+    first = store.query(
+        query_text="canonical", limit=5, current_state={"contract_revision": "rev-1"}
+    )
+    assert [row["episode_id"] for row in first] == [stable["episode_id"]]
+    assert store.last_metadata["rejected_applicability_mismatch"] == 1
+    second = store.query(
+        query_text="canonical", limit=5, current_state={"contract_revision": "rev-1"}
+    )
+
+    assert [row["episode_id"] for row in second] == [stable["episode_id"]]
+    assert store.last_metadata["rejected_applicability_mismatch"] == 1
+    assert ledger.read_bytes() == before
+
+
+def test_g2_current_state_none_reproduces_g1(tmp_path):
+    _write_ledger(tmp_path, [json.dumps(_episode())])
+    adapter = MemoryRetrievalAdapter(
+        store=CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)
+    )
+
+    baseline = adapter.retrieve(query_text="canonical receipt", limit=5)
+    explicit = adapter.retrieve(query_text="canonical receipt", limit=5, current_state=None)
+
+    assert [lesson.finding_id for lesson in baseline] == [lesson.finding_id for lesson in explicit]
+    assert adapter.last_metadata["current_state_applied"] is False
+    assert adapter.last_metadata["rejected_current_state_input"] == 0
+
+
+def test_g2_adapter_direct_canonical_store_surfaces_counters(tmp_path):
+    _write_ledger(
+        tmp_path,
+        [
+            json.dumps(
+                _with_applicability(_episode(idempotency_key="ep-g2-direct"), state_version=3)
+            )
+        ],
+    )
+    adapter = MemoryRetrievalAdapter(
+        store=CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)
+    )
+
+    lessons = adapter.retrieve(query_text="canonical", limit=5, current_state={"state_version": 1})
+
+    assert lessons == []
+    assert adapter.last_metadata["accepted"] == 0
+    assert adapter.last_metadata["no_memory_match"] is True
+    assert adapter.last_metadata["rejected_applicability_mismatch"] == 1
+
+
+def test_g2_adapter_counters_aggregate_across_composite_receipts(tmp_path):
+    _write_ledger(
+        tmp_path,
+        [
+            json.dumps(_with_applicability(_episode(idempotency_key="ep-g2-a"), state_version=1)),
+            json.dumps(_with_applicability(_episode(idempotency_key="ep-g2-b"), state_version=5)),
+        ],
+    )
+    composite = NexusCompositeLessonStore([
+        CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)
+    ])
+    adapter = MemoryRetrievalAdapter(store=composite)
+
+    lessons = adapter.retrieve(query_text="canonical", limit=5, current_state={"state_version": 2})
+
+    assert len(lessons) == 1
+    assert adapter.last_metadata["accepted"] == 1
+    assert adapter.last_metadata["rejected_applicability_mismatch"] == 1
+    assert adapter.last_metadata["current_state_applied"] is True
+
+
+def test_g2_legacy_stores_remain_isolated_under_current_state(tmp_path):
+    legacy_path = tmp_path / "learning_closure.jsonl"
+    legacy_path.write_text(
+        '{"lesson_id":"lh-g2","task_id":"C_1","classification":"success",'
+        '"summary":"legacy format owner","provenance":"receipt:jsonl"}\n',
+        encoding="utf-8",
+    )
+    _write_ledger(
+        tmp_path,
+        [
+            json.dumps(
+                _with_applicability(_episode(idempotency_key="ep-g2-legacy"), state_version=9)
+            )
+        ],
+    )
+    composite = NexusCompositeLessonStore([
+        LocalJsonlLessonStore(legacy_path),
+        CanonicalEpisodicMemoryLessonStore(project_root=tmp_path),
+    ])
+    adapter = MemoryRetrievalAdapter(store=composite)
+
+    lessons = adapter.retrieve(
+        query_text="legacy format", limit=5, current_state={"state_version": 1}
+    )
+
+    assert [lesson.finding_id for lesson in lessons] == ["lh-g2"]
+    assert adapter.last_metadata["retrieval_sources"] == ["LocalJsonlLessonStore"]
+    assert adapter.last_metadata["rejected_applicability_mismatch"] == 1
+
+
+def test_g2_unsupported_store_fails_closed_without_exception_leak(tmp_path):
+    adapter = MemoryRetrievalAdapter(store=LocalJsonlLessonStore(tmp_path / "missing.jsonl"))
+
+    lessons = adapter.retrieve(query_text="canonical", limit=5, current_state={"state_version": 1})
+
+    assert lessons == []
+    assert adapter.last_metadata["status"] == "current_state_unsupported"
+    assert adapter.last_metadata["rejected_current_state_input"] == 1
+    assert adapter.last_metadata["no_memory_match"] is True

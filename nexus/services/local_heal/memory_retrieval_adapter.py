@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -27,6 +28,113 @@ class RetrievedLesson:
         if self.pattern_type == "failure":
             return -base
         return 0.0
+
+
+_CURRENT_STATE_DIMENSIONS = frozenset({
+    "state_version",
+    "source_revision",
+    "contract_revision",
+    "runtime_identity",
+    "max_age_days",
+})
+
+
+def _is_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _normalize_current_state(current_state: Any) -> tuple[dict[str, Any] | None, str]:
+    """Strictly validate the optional G2 current-state mapping; fail closed on deviation."""
+    if current_state is None:
+        return {}, ""
+    if not isinstance(current_state, dict):
+        return None, "current_state must be a mapping"
+    unknown = sorted(set(current_state) - _CURRENT_STATE_DIMENSIONS)
+    if unknown:
+        return None, f"unknown current_state key(s): {','.join(unknown)}"
+    normalized: dict[str, Any] = {}
+    if "state_version" in current_state:
+        version = current_state["state_version"]
+        if not _is_integer(version) or version < 0:
+            return None, "current_state.state_version must be a non-negative integer"
+        normalized["state_version"] = version
+    for key in ("source_revision", "contract_revision", "runtime_identity"):
+        if key in current_state:
+            value = current_state[key]
+            if not isinstance(value, str) or not value.strip():
+                return None, f"current_state.{key} must be a non-empty string"
+            normalized[key] = value.strip()
+    if "max_age_days" in current_state:
+        max_age = current_state["max_age_days"]
+        if not _is_integer(max_age) or max_age <= 0:
+            return None, "current_state.max_age_days must be a positive integer"
+        normalized["max_age_days"] = max_age
+    return normalized, ""
+
+
+def _episode_created_at(entry: dict[str, Any]) -> datetime | None:
+    """Parse a timezone-aware ISO-8601 episode timestamp; naive/malformed is None."""
+    raw = entry.get("created_at")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed
+
+
+def _g2_applicable(
+    entry: dict[str, Any],
+    current_state: dict[str, Any],
+    metadata: dict[str, Any],
+) -> bool:
+    """Deterministically filter one episode against the validated current-state mapping."""
+    if "state_version" in current_state:
+        version = entry.get("state_version")
+        if not _is_integer(version) or int(version) > current_state["state_version"]:
+            metadata["rejected_applicability_mismatch"] += 1
+            return False
+    if "source_revision" in current_state:
+        source_hash = entry.get("source_hash")
+        if (
+            not isinstance(source_hash, str)
+            or not source_hash.strip()
+            or source_hash.strip() != current_state["source_revision"]
+        ):
+            metadata["rejected_applicability_mismatch"] += 1
+            return False
+    if "contract_revision" in current_state:
+        revision = entry.get("contract_revision")
+        if (
+            not isinstance(revision, str)
+            or not revision.strip()
+            or revision.strip() != current_state["contract_revision"]
+        ):
+            metadata["rejected_applicability_mismatch"] += 1
+            return False
+    if "runtime_identity" in current_state:
+        identity = entry.get("runtime_identity")
+        if (
+            not isinstance(identity, str)
+            or not identity.strip()
+            or identity.strip() != current_state["runtime_identity"]
+        ):
+            metadata["rejected_applicability_mismatch"] += 1
+            return False
+    if "max_age_days" in current_state:
+        created = _episode_created_at(entry)
+        now = datetime.now(timezone.utc)
+        if (
+            created is None
+            or created > now
+            or now - created > timedelta(days=current_state["max_age_days"])
+        ):
+            metadata["rejected_recency"] += 1
+            return False
+    return True
 
 
 class LessonStore(Protocol):
@@ -301,7 +409,13 @@ class CanonicalEpisodicMemoryLessonStore:
             "source": source,
         }
 
-    def query(self, *, query_text: str, limit: int) -> list[dict[str, Any]]:
+    def query(
+        self,
+        *,
+        query_text: str,
+        limit: int,
+        current_state: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         self.last_error = ""
         from nexus.contracts.learning_experience import validate_nexus_learning_episode
         from nexus.learning.learning_closure_effectiveness import (
@@ -310,6 +424,7 @@ class CanonicalEpisodicMemoryLessonStore:
         )
 
         ledger = canonical_learning_episode_path(self.project_root)
+        normalized_state, state_reason = _normalize_current_state(current_state)
         self.last_metadata = {
             "backend": self.backend,
             "query_attempted": True,
@@ -320,7 +435,16 @@ class CanonicalEpisodicMemoryLessonStore:
             "rejected_validation": 0,
             "rejected_without_terminal_provenance": 0,
             "rejected_non_terminal": 0,
+            "rejected_current_state_input": 0,
+            "rejected_applicability_mismatch": 0,
+            "rejected_recency": 0,
+            "current_state_applied": bool(normalized_state),
         }
+        if state_reason:
+            self.last_metadata["rejected_current_state_input"] += 1
+            self.last_metadata["current_state_failure_reason"] = state_reason
+            self.last_metadata["query_succeeded"] = True
+            return []
         if not ledger.exists():
             self.last_metadata["query_succeeded"] = True
             return []
@@ -346,6 +470,8 @@ class CanonicalEpisodicMemoryLessonStore:
             provenance = self._canonical_terminal_provenance(entry)
             if not provenance:
                 self.last_metadata["rejected_without_terminal_provenance"] += 1
+                continue
+            if normalized_state and not _g2_applicable(entry, normalized_state, self.last_metadata):
                 continue
             row = self._canonical_episode_row(entry, provenance, self.backend)
             text = (
@@ -376,17 +502,35 @@ class NexusCompositeLessonStore:
         ]
         self.last_metadata: dict[str, Any] = {}
 
-    def query(self, *, query_text: str, limit: int) -> list[dict[str, Any]]:
+    def query(
+        self,
+        *,
+        query_text: str,
+        limit: int,
+        current_state: dict[str, Any] | None = None,
+    ) -> list[dict[str, Any]]:
         rows: list[dict[str, Any]] = []
         sources: list[str] = []
         source_counts: dict[str, int] = {}
         source_errors: dict[str, str] = {}
         backend_receipts: list[dict[str, Any]] = []
+        g2_counters: dict[str, int] = {
+            "rejected_current_state_input": 0,
+            "rejected_applicability_mismatch": 0,
+            "rejected_recency": 0,
+        }
 
         for store in self.stores:
             source = store.__class__.__name__
             try:
-                store_rows = list(store.query(query_text=query_text, limit=limit))
+                if current_state is not None and isinstance(
+                    store, CanonicalEpisodicMemoryLessonStore
+                ):
+                    store_rows = list(
+                        store.query(query_text=query_text, limit=limit, current_state=current_state)
+                    )
+                else:
+                    store_rows = list(store.query(query_text=query_text, limit=limit))
             except Exception as exc:
                 store_rows = []
                 source_errors[source] = exc.__class__.__name__
@@ -408,12 +552,15 @@ class NexusCompositeLessonStore:
                 "result_count": int(store_metadata.get("result_count", len(store_rows)) or 0),
                 "error": str(store_metadata.get("error") or last_error or ""),
             })
+            for key in g2_counters:
+                g2_counters[key] += int(store_metadata.get(key, 0) or 0)
 
         self.last_metadata = {
             "retrieval_sources": sources,
             "source_counts": source_counts,
             "source_errors": source_errors,
             "retrieval_backend_receipts": backend_receipts,
+            **g2_counters,
         }
         return rows[:limit]
 
@@ -435,7 +582,12 @@ class MemoryRetrievalAdapter:
         self.last_metadata: dict[str, Any] = {}
 
     def retrieve(
-        self, *, query_text: str, limit: int = 5, exclude_task_id: str = ""
+        self,
+        *,
+        query_text: str,
+        limit: int = 5,
+        exclude_task_id: str = "",
+        current_state: dict[str, Any] | None = None,
     ) -> list[RetrievedLesson]:
         self.last_metadata = {
             "enabled": bool(self.enabled),
@@ -445,6 +597,10 @@ class MemoryRetrievalAdapter:
             "no_memory_match": False,
             "rejected_without_provenance": 0,
             "rejected_same_task": 0,
+            "rejected_current_state_input": 0,
+            "rejected_applicability_mismatch": 0,
+            "rejected_recency": 0,
+            "current_state_applied": current_state is not None,
             "source": self.store.__class__.__name__,
             "retrieval_sources": [],
             "source_errors": {},
@@ -455,7 +611,23 @@ class MemoryRetrievalAdapter:
             self.last_metadata["no_memory_match"] = True
             return []
         try:
-            raw_rows = self.store.query(query_text=query_text, limit=limit)
+            if current_state is not None and isinstance(
+                self.store, (CanonicalEpisodicMemoryLessonStore, NexusCompositeLessonStore)
+            ):
+                raw_rows = self.store.query(
+                    query_text=query_text, limit=limit, current_state=current_state
+                )
+            elif current_state is not None:
+                self.last_metadata["current_state_applied"] = False
+                self.last_metadata["rejected_current_state_input"] += 1
+                self.last_metadata["current_state_failure_reason"] = (
+                    f"{self.store.__class__.__name__} does not support current_state filtering"
+                )
+                self.last_metadata["status"] = "current_state_unsupported"
+                self.last_metadata["no_memory_match"] = True
+                return []
+            else:
+                raw_rows = self.store.query(query_text=query_text, limit=limit)
         except Exception as exc:
             self.last_metadata["status"] = "retrieval_failed"
             self.last_metadata["failure_reason"] = exc.__class__.__name__
@@ -573,6 +745,13 @@ class MemoryRetrievalAdapter:
             self.last_metadata["retrieval_backend_receipts"] = list(
                 store_metadata.get("retrieval_backend_receipts") or []
             )
+            for key in (
+                "rejected_current_state_input",
+                "rejected_applicability_mismatch",
+                "rejected_recency",
+            ):
+                if key in store_metadata:
+                    self.last_metadata[key] = int(store_metadata.get(key, 0) or 0)
         return lessons
 
     def retrieve_reranked(
@@ -696,14 +875,14 @@ class MemoryRetrievalAdapter:
 
             lesson_dicts = [
                 {
-                    "lesson_id": l.finding_id,
-                    "summary": l.summary,
-                    "classification": l.pattern_type,
-                    "provenance": l.provenance,
-                    "source": l.source,
-                    "relevance_score": l.relevance_score,
+                    "lesson_id": candidate.finding_id,
+                    "summary": candidate.summary,
+                    "classification": candidate.pattern_type,
+                    "provenance": candidate.provenance,
+                    "source": candidate.source,
+                    "relevance_score": candidate.relevance_score,
                 }
-                for l in raw_candidates
+                for candidate in raw_candidates
             ]
             shadow = shadow_score_lessons(
                 lesson_dicts,
