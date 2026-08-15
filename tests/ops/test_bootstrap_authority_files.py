@@ -194,15 +194,20 @@ def test_direct_delegated_contract_is_explicit_and_bounded():
     assert "one bounded external worker" in agents or "one bounded implementation task" in agents
     assert "No Nexus Task Card, Nexus lifecycle, CapabilityPlanner routing" in agents
     assert "does not force governed execution" in agents
-    assert "independently inspects the physical diff" in agents or "independent coordinator" in combined
+    assert (
+        "independently inspects the physical diff" in agents
+        or "independent coordinator" in combined
+    )
     assert "AUTO_CHAIN=false" in agents
     assert "DIRECT_DELEGATED_BLOCKED" in combined
-    assert "direct external delegation boundary" in _norm(
-        texts["docs/agents/WORKFORCE_EXECUTION_OVERLAY.md"]
-    ).lower()
-    assert "Direct work becomes governed before mutation if it delegates implementation" not in texts[
-        "AGENTS.md"
-    ]
+    assert (
+        "direct external delegation boundary"
+        in _norm(texts["docs/agents/WORKFORCE_EXECUTION_OVERLAY.md"]).lower()
+    )
+    assert (
+        "Direct work becomes governed before mutation if it delegates implementation"
+        not in texts["AGENTS.md"]
+    )
 
 
 def test_task_execution_contract_preserves_direct_delegated_exception():
@@ -216,7 +221,10 @@ def test_task_execution_contract_preserves_direct_delegated_exception():
     assert "changes route/lifecycle/workforce/security authority" in normalized
     assert "requires protected integration" in normalized
     assert "production/public claim" in normalized
-    assert "Escalate to this governed contract before mutation when implementation is delegated" not in contract
+    assert (
+        "Escalate to this governed contract before mutation when implementation is delegated"
+        not in contract
+    )
 
 
 def test_direct_external_delegation_does_not_inherit_nexus_workforce_admission():
@@ -225,7 +233,10 @@ def test_direct_external_delegation_does_not_inherit_nexus_workforce_admission()
 
     assert "DIRECT_DELEGATED" in overlay
     assert "does NOT use Nexus Workforce Admission" in normalized
-    assert "Nexus runtime model execution always requires fresh Nexus Workforce Admission" in normalized
+    assert (
+        "Nexus runtime model execution always requires fresh Nexus Workforce Admission"
+        in normalized
+    )
     assert "transport/execution evidence only" in normalized
     assert "grants no Nexus" in normalized
     assert "route, admission, approval, integration, merge, release" in normalized
