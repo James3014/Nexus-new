@@ -2015,10 +2015,49 @@ class SelfHostedTaskService:
         # must remain visible to the caller; silently dropping them creates a
         # false lifecycle receipt while leaving the lifecycle authority intact.
         request = result.get("request") if isinstance(result.get("request"), Mapping) else {}
+        status = str(result.get("status"))
+        rejected_states = frozenset({"ATTEMPT_REJECTED", "REJECTED"})
+        explicit_type = result.get("continuity_event_type") or request.get("continuity_event_type")
+        if explicit_type is not None:
+            if not isinstance(explicit_type, str) or not explicit_type.strip():
+                raise ValueError("continuity_event_type must be a non-empty string")
+            if status in rejected_states and explicit_type != "ATTEMPT_REJECTED":
+                raise ValueError("rejected state requires ATTEMPT_REJECTED continuity type")
+            continuity_event_type = explicit_type
+        else:
+            continuity_event_type = (
+                "ATTEMPT_REJECTED" if status in rejected_states else "OBSERVATION_RECORDED"
+            )
+
+        def continuity_list(name: str, alias: str = "") -> tuple[str, ...]:
+            value = result.get(name)
+            if value is None and alias:
+                value = result.get(alias)
+            if value is None:
+                value = request.get(name)
+            if value is None and alias:
+                value = request.get(alias)
+            if value is None:
+                return ()
+            if isinstance(value, str):
+                return (value,)
+            if not isinstance(value, (list, tuple)):
+                raise ValueError(f"{name} must be a list/tuple of non-empty strings")
+            if any(not isinstance(item, str) or not item.strip() for item in value):
+                raise ValueError(f"{name} must contain non-empty strings")
+            return tuple(value)
+
         NexusEventBus.emit_attempt_transition(build_attempt_transition_event(
             task_id=str(result.get("task_id") or task_id),
             attempt_id=str(result.get("attempt_id")), sequence=sequence,
-            state=str(result.get("status")), reason=str(result.get("error") or ""),
+            state=status, reason=str(result.get("error") or result.get("reason") or ""),
+            continuity_event_type=continuity_event_type,
+            strategy_delta=str(result.get("strategy_delta") or request.get("strategy_delta") or ""),
+            do_not_repeat=continuity_list("do_not_repeat", "rejected_strategies"),
+            unresolved_risks=continuity_list("unresolved_risks"),
+            unknowns=continuity_list("unknowns"),
+            next_action=str(result.get("next_action") or request.get("next_action") or ""),
+            claim_ceiling=str(result.get("claim_ceiling") or request.get("claim_ceiling") or ""),
             candidate_refs=candidate_refs, evidence_refs=evidence_refs,
             source_revision=str(result.get("source_revision") or request.get("controller_revision") or "unknown"),
             contract_revision=str(result.get("contract_revision") or request.get("contract_hash") or "unknown"),
