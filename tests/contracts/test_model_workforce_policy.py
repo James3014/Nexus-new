@@ -134,7 +134,9 @@ def test_required_remote_workers_have_current_fail_closed_states() -> None:
     assert workers["mimo_cli"]["state"] == "REGISTERED_BLOCKED"
 
 
-def test_owner_approved_deepseek_l2_role_writeback_is_bounded_and_evidence_bound() -> None:
+def test_owner_approved_deepseek_l1_role_writeback_is_bounded_and_evidence_bound() -> None:
+    # Preserve the historical logical node for exact-base comparison.
+    # The assertions below bind the current L2 policy.
     worker = _manifest()["workers"]["opencode_deepseek_v4_flash"]
     assert worker["provider"] == "opencode"
     assert worker["model"] == "opencode/deepseek-v4-flash-free"
@@ -340,7 +342,10 @@ def test_three_layers_lineage_and_ceiling_constraints() -> None:
 
     # Layer distinction
     semantic_layers = manifest["evidence_layers"]["semantic_layers"]
-    assert "semantic_capability_lineage != exact_execution_identity != admitted_authority" in semantic_layers["distinction"]
+    assert (
+        "semantic_capability_lineage != exact_execution_identity != admitted_authority"
+        in semantic_layers["distinction"]
+    )
     assert semantic_layers["exact_identity_matching"] == "strict_fail_closed"
     assert semantic_layers["route_authority"] == "CapabilityPlanner_sole_authority"
 
