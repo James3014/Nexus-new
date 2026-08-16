@@ -40,7 +40,7 @@ This card does not implement the probe and does not change finding status.
 
 The merged PR #245 merge commit `5853073a29cab5600187c9fa03728c8ee61ebe0a`
 is an ancestor of fresh current main
-`a7c88646df966b15acb947b4f92c236edcbcdd2b`.
+`9c9d0ed0c3db8d86f839b0febdd4abfdb07668bb`.
 
 ## Probe inputs and outputs
 
