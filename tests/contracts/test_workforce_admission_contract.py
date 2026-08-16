@@ -126,10 +126,11 @@ def test_autonomy_level_deterministic_parsing_and_ordering() -> None:
         parse_autonomy_rank("L1"),
         parse_autonomy_rank("L2"),
         parse_autonomy_rank("L2+"),
+        parse_autonomy_rank("L3"),
         parse_autonomy_rank("L3_HISTORICAL"),
     ]
-    # Check strictly increasing integer order without floating point ambiguity
-    assert ranks == [0, 1, 2, 3, 4, 5, 6]
+    # Formal L3 and legacy L3_HISTORICAL share the same authority rank.
+    assert ranks == [0, 1, 2, 3, 4, 5, 6, 6]
     assert sorted(ranks) == ranks
 
     with pytest.raises(ValueError, match="Unknown autonomy level"):
