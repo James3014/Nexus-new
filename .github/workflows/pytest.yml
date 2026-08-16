@@ -179,7 +179,7 @@ jobs:
           BASE_SHA: ${{ steps.base.outputs.sha }}
         run: |
           set -euo pipefail
-          BASE_WORKTREE=$(mktemp -d /tmp/nexus-ci-base.XXXXXX)
+          BASE_WORKTREE=$(mktemp -d "$RUNNER_TEMP/nexus-ci-base.XXXXXX")
           git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"
           echo "path=$BASE_WORKTREE" >> "$GITHUB_OUTPUT"
 
