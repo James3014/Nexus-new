@@ -66,14 +66,53 @@ jobs:
           fi
       - name: Link persistent evidence directory
         run: ln -s "$RUNNER_TEMP/nexus-ci-wiki" .ci-wiki
+      - name: Decide cheap exact-base impact
+        id: impact
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'workflow_dispatch' && inputs.base_sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then
+            echo "required=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ || ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Exact revisions must be full 40-character lowercase SHAs" >&2
+            exit 1
+          fi
+          git cat-file -e "$BASE_SHA^{commit}"
+          git cat-file -e "$HEAD_SHA^{commit}"
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          REQUIRED="false"
+          prefixes=('openwiki/' 'nexus_wiki_vault/' 'scripts/ops/wiki_' 'tests/ops/test_wiki_')
+          while IFS= read -r path; do
+            if [[ "$path" == ".github/workflows/wiki-governance.yml" ]]; then
+              REQUIRED="true"
+            fi
+            for prefix in "${prefixes[@]}"; do
+              if [[ "$path" == "$prefix"* ]]; then
+                REQUIRED="true"
+              fi
+            done
+          done < <(git diff --name-only "$BASE_SHA" "$HEAD_SHA")
+          if ! git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- pyproject.toml uv.lock; then
+            REQUIRED="true"
+          fi
+          if ! git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- scripts/ops/exact_base_tool_gate.py scripts/ops/wiki_ci_release_gate.py; then
+            REQUIRED="true"
+          fi
+          echo "required=$REQUIRED" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Install uv and dependencies
+        if: steps.impact.outputs.required == 'true'
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
           uv sync --frozen --all-groups --all-extras
-      - name: Resolve exact revisions, impact, and worktree
+      - name: Resolve exact revisions and worktree
+        if: steps.impact.outputs.required == 'true'
         id: revisions
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'workflow_dispatch' && inputs.base_sha || github.event.before }}
@@ -89,21 +128,9 @@ jobs:
           test "$(git rev-parse HEAD)" = "$HEAD_SHA"
           BASE_WORKTREE=$(mktemp -d /tmp/nexus-wiki-base.XXXXXX)
           git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"
-          .venv/bin/python - "$BASE_SHA" "$HEAD_SHA" "$GITHUB_OUTPUT" <<'PY'
-          import subprocess
-          import sys
-          changed = subprocess.check_output(
-              ['git', 'diff', '--name-only', sys.argv[1], sys.argv[2]], text=True
-          ).splitlines()
-          prefixes = ('openwiki/', 'nexus_wiki_vault/', 'scripts/ops/wiki_', 'tests/ops/test_wiki_')
-          exact = {'.github/workflows/wiki-governance.yml'}
-          required = any(path in exact or path.startswith(prefixes) for path in changed)
-          with open(sys.argv[3], 'a', encoding='utf-8') as stream:
-              stream.write(f'required={str(required).lower()}\n')
-          PY
           echo "base_worktree=$BASE_WORKTREE" >> "$GITHUB_OUTPUT"
       - name: Run Wiki gate on exact base and head
-        if: steps.revisions.outputs.required == 'true'
+        if: steps.impact.outputs.required == 'true'
         id: wiki
         env:
           BASE_WORKTREE: ${{ steps.revisions.outputs.base_worktree }}
@@ -116,7 +143,7 @@ jobs:
             --check --repo-root "$GITHUB_WORKSPACE" --output-dir "$GITHUB_WORKSPACE/.ci-wiki/head"
           echo "head_exit=$?" >> "$GITHUB_OUTPUT"
       - name: Classify Wiki governance regression
-        if: steps.revisions.outputs.required == 'true'
+        if: steps.impact.outputs.required == 'true'
         run: |
           set +e
           .venv/bin/python scripts/ops/exact_base_tool_gate.py \
@@ -133,7 +160,7 @@ jobs:
           cat .ci-wiki/classification.json >> "$GITHUB_STEP_SUMMARY"
           exit "$STATUS"
       - name: Record non-Wiki impact
-        if: steps.revisions.outputs.required != 'true'
+        if: steps.impact.outputs.required != 'true'
         run: |
           printf '%s\n' '{"classification":"PASS","blocking":false,"reason":"no Wiki-governed paths changed"}' > .ci-wiki/classification.json
       - name: Remove exact base worktree

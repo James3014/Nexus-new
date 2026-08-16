@@ -66,14 +66,48 @@ jobs:
           fi
       - name: Link persistent evidence directory
         run: ln -s "$RUNNER_TEMP/nexus-ci-bandit" .ci-bandit
+      - name: Decide cheap exact-base impact
+        id: impact
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'workflow_dispatch' && inputs.base_sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then
+            echo "required=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ || ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Exact revisions must be full 40-character lowercase SHAs" >&2
+            exit 1
+          fi
+          git cat-file -e "$BASE_SHA^{commit}"
+          git cat-file -e "$HEAD_SHA^{commit}"
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          REQUIRED="false"
+          if ! git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- pyproject.toml .bandit bandit.yaml; then
+            REQUIRED="true"
+          fi
+          if ! git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- .github/workflows/security.yml; then
+            REQUIRED="true"
+          fi
+          if ! git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- scripts/ops/exact_base_tool_gate.py; then
+            REQUIRED="true"
+          fi
+          if [[ "$REQUIRED" != "true" ]] && git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- 'nexus/core/*.py' 'nexus/core/**/*.py' | grep -q .; then
+            REQUIRED="true"
+          fi
+          echo "required=$REQUIRED" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - name: Install uv and dependencies
+        if: steps.impact.outputs.required == 'true'
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
           uv sync --frozen --all-groups --all-extras
       - name: Resolve exact revisions and worktree
+        if: steps.impact.outputs.required == 'true'
         id: revisions
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'workflow_dispatch' && inputs.base_sha || github.event.before }}
@@ -98,6 +132,7 @@ jobs:
           fi
           echo "base_worktree=$BASE_WORKTREE" >> "$GITHUB_OUTPUT"
       - name: Run Bandit on exact base and head
+        if: steps.impact.outputs.required == 'true'
         id: bandit
         env:
           BASE_WORKTREE: ${{ steps.revisions.outputs.base_worktree }}
@@ -124,6 +159,7 @@ jobs:
           run_bandit "$BASE_WORKTREE" .ci-bandit/base.json base
           run_bandit "$GITHUB_WORKSPACE" .ci-bandit/head.json head
       - name: Classify Bandit regression
+        if: steps.impact.outputs.required == 'true'
         run: |
           set +e
           .venv/bin/python scripts/ops/exact_base_tool_gate.py \
@@ -139,6 +175,10 @@ jobs:
           echo '## Exact-base Bandit classification' >> "$GITHUB_STEP_SUMMARY"
           cat .ci-bandit/classification.json >> "$GITHUB_STEP_SUMMARY"
           exit "$STATUS"
+      - name: Record no Bandit impact
+        if: steps.impact.outputs.required != 'true'
+        run: |
+          printf '%s\n' '{"classification":"PASS","blocking":false,"reason":"no Bandit-impacted paths changed"}' > .ci-bandit/classification.json
       - name: Remove exact base worktree
         if: always() && steps.revisions.outputs.base_worktree != ''
         run: git worktree remove --force "${{ steps.revisions.outputs.base_worktree }}"
