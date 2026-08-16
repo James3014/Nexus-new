@@ -14,10 +14,15 @@ from nexus.services.external_intelligence import (
     ExternalIntelligenceSidecar,
     ExternalIntelligenceStore,
 )
-from nexus.services.external_intelligence_closure import CLAIM_CEILING as CLOSURE_CLAIM_CEILING
+from nexus.services.external_intelligence_closure import (
+    CLAIM_CEILING as CLOSURE_CLAIM_CEILING,
+)
 from nexus.services.external_intelligence_closure import (
     ExternalIntelligenceClosureRuntime,
+    TaskCardAuthority,
     VerifierSpec,
+    _path_matches,
+    parse_task_card_authority,
 )
 from nexus.services.external_intelligence_fanout import AdaptiveDeepSeekFanoutRuntime, CapacityLease
 
@@ -414,6 +419,36 @@ class ExternalIntelligenceAutomation:
             raise AutomationError("TASK_CARD_DECODE_FAILED") from exc
         return Path(rel.as_posix()), text
 
+    def _validate_task_card_authority(
+        self, contract: Mapping[str, Any], task_card_text: str
+    ) -> TaskCardAuthority:
+        authority = parse_task_card_authority(task_card_text)
+        if not authority.task_id or authority.task_id != str(contract.get("task_id")):
+            raise AutomationError("TASK_CARD_TASK_ID_MISMATCH")
+        if not authority.is_executable:
+            raise AutomationError("TASK_CARD_STATUS_NOT_EXECUTABLE")
+        if not authority.allowed_files:
+            raise AutomationError("TASK_CARD_SCOPE_MISMATCH")
+        for unit in contract.get("execution_units", []):
+            for path in unit.get("mutation_paths", []):
+                if not any(_path_matches(path, allowed) for allowed in authority.allowed_files):
+                    raise AutomationError("TASK_CARD_SCOPE_MISMATCH")
+        for unit in contract.get("execution_units", []):
+            if unit.get("allow_deletions") and not authority.allow_deletions:
+                raise AutomationError("TASK_CARD_DELETION_FORBIDDEN")
+        unit_verifiers = contract.get("unit_verifiers") or {}
+        for unit_id, specs in unit_verifiers.items():
+            for spec in specs:
+                parsed_spec = VerifierSpec.from_value(spec)
+                if parsed_spec.argv not in authority.verification_commands:
+                    raise AutomationError("VERIFIER_NOT_AUTHORIZED")
+        whole_verifiers = contract.get("whole_verifiers") or []
+        for spec in whole_verifiers:
+            parsed_spec = VerifierSpec.from_value(spec)
+            if parsed_spec.argv not in authority.verification_commands:
+                raise AutomationError("VERIFIER_NOT_AUTHORIZED")
+        return authority
+
     def _record(self, item: IssueWorkItem) -> dict[str, Any]:
         c = item.contract
         return {
@@ -535,6 +570,7 @@ class ExternalIntelligenceAutomation:
         try:
             self._validate_source_lineage(item.repository, str(contract["main_sha"]))
             _, task_card_text = self._task_card(contract)
+            self._validate_task_card_authority(contract, task_card_text)
             record = self._record(item)
             self.state_store.save(item, "INTELLIGENCE_DISPATCHING")
             intelligence = self.sidecar.analyze(record, self._sources(item, task_card_text))
@@ -561,6 +597,7 @@ class ExternalIntelligenceAutomation:
 
             self.state_store.save(item, "CLOSURE_DISPATCHING")
             closure = self.d_runtime.close_task(
+                main_sha=str(contract["main_sha"]),
                 unit_receipts=receipts,
                 unit_verifiers=contract["unit_verifiers"],
                 whole_verifiers=contract["whole_verifiers"],
