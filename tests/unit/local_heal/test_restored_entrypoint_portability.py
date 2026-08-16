@@ -45,9 +45,7 @@ def _artifact_files() -> set:
 
 
 def test_portable_repo_root_resolves_to_checkout():
-    spec = importlib.util.spec_from_file_location(
-        "bench_repo_root", BENCH_DIR / "_repo_root.py"
-    )
+    spec = importlib.util.spec_from_file_location("bench_repo_root", BENCH_DIR / "_repo_root.py")
     module = importlib.util.module_from_spec(spec)
     assert spec is not None and spec.loader is not None
     spec.loader.exec_module(module)
@@ -80,7 +78,9 @@ def test_restored_script_dry_run_zero_writes(tmp_path, tid):
 
 @pytest.mark.parametrize("tid", RESTORED_IDS + ["rebuild_av_substrate"])
 def test_no_machine_specific_root_literal(tid):
-    path = BENCH_DIR / (f"run_{tid}_regression.py" if tid != "rebuild_av_substrate" else "rebuild_av_substrate.py")
+    path = BENCH_DIR / (
+        f"run_{tid}_regression.py" if tid != "rebuild_av_substrate" else "rebuild_av_substrate.py"
+    )
     text = path.read_text(encoding="utf-8")
     assert "/Users/jameschen" not in text
     assert "from _repo_root import REPO_ROOT" in text
