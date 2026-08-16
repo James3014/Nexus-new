@@ -55,6 +55,45 @@ def _retrieval_receipt_digest(receipt: dict[str, Any]) -> str:
     return "sha256:" + hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _lesson_chunk_hash(lesson: RetrievedLesson) -> str:
+    """Canonical content and provenance hash for one retrieved lesson."""
+    payload = {
+        "finding_id": str(lesson.finding_id or ""),
+        "summary": str(lesson.summary or ""),
+        "provenance": str(lesson.provenance or ""),
+        "source": str(lesson.source or ""),
+        "task_id": str(lesson.task_id or ""),
+        "episode_id": str(lesson.episode_id or ""),
+        "attempt_id": str(lesson.attempt_id or ""),
+        "action_id": str(lesson.action_id or ""),
+        "qualification_status": str(lesson.qualification_status or ""),
+        "validity_state": str(lesson.validity_state or "legacy_provenance_only"),
+        "evidence_ref": str(lesson.evidence_ref or lesson.provenance or ""),
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _build_index_snapshot_id(lessons: list[RetrievedLesson]) -> str:
+    lineage = [_selected_lesson_lineage(lesson) for lesson in lessons]
+    snapshot_material = [
+        {
+            "lesson_id": item["lesson_id"],
+            "episode_id": item["episode_id"],
+            "source_task_id": item["source_task_id"],
+            "source_attempt_id": item["source_attempt_id"],
+            "source_action_id": item["source_action_id"],
+            "qualification_status": item["qualification_status"],
+            "validity_state": item["validity_state"],
+            "evidence_ref": item["evidence_ref"],
+            "source": item["source"],
+        }
+        for item in lineage
+    ]
+    snapshot_payload = json.dumps(snapshot_material, ensure_ascii=False, sort_keys=True)
+    return "memory:" + hashlib.sha256(snapshot_payload.encode("utf-8")).hexdigest()[:24]
+
+
 def validate_retrieved_lesson_context_binding(
     lessons: list[RetrievedLesson],
     retrieval_receipt: dict[str, Any],
@@ -78,7 +117,7 @@ def validate_retrieved_lesson_context_binding(
             return False
     except Exception:
         return False
-    if retrieval_receipt_hash != _retrieval_receipt_digest(retrieval_receipt):
+    if not retrieval_receipt_hash or retrieval_receipt_hash != _retrieval_receipt_digest(retrieval_receipt):
         return False
     results = retrieval_receipt.get("results")
     if not isinstance(results, list) or len(results) != len(lessons):
@@ -93,9 +132,7 @@ def validate_retrieved_lesson_context_binding(
     for lesson, result in zip(lessons, selected):
         expected_source_id = lesson.episode_id or lesson.finding_id
         expected_source_path = lesson.evidence_ref or lesson.provenance
-        expected_chunk_hash = hashlib.sha256(
-            f"{lesson.finding_id}|{lesson.summary}|{lesson.provenance}".encode("utf-8")
-        ).hexdigest()
+        expected_chunk_hash = _lesson_chunk_hash(lesson)
         if str(result.get("source_id") or "") != expected_source_id:
             return False
         if str(result.get("source_path") or "") != expected_source_path:
@@ -142,24 +179,10 @@ def _build_existing_retrieval_receipt(
     from nexus.contracts.retrieval_receipt import build_retrieval_receipt
 
     lineage = [_selected_lesson_lineage(lesson) for lesson in lessons]
-    snapshot_material = [
-        {
-            "lesson_id": item["lesson_id"],
-            "episode_id": item["episode_id"],
-            "evidence_ref": item["evidence_ref"],
-            "source": item["source"],
-        }
-        for item in lineage
-    ]
-    snapshot_payload = json.dumps(snapshot_material, ensure_ascii=False, sort_keys=True)
-    index_snapshot_id = (
-        "memory:" + hashlib.sha256(snapshot_payload.encode("utf-8")).hexdigest()[:24]
-    )
+    index_snapshot_id = _build_index_snapshot_id(lessons)
     results = []
     for lesson in lessons:
-        content_hash = hashlib.sha256(
-            f"{lesson.finding_id}|{lesson.summary}|{lesson.provenance}".encode("utf-8")
-        ).hexdigest()
+        content_hash = _lesson_chunk_hash(lesson)
         results.append({
             "source_id": lesson.episode_id or lesson.finding_id,
             "source_path": lesson.evidence_ref or lesson.provenance,
@@ -596,6 +619,7 @@ class CanonicalEpisodicMemoryLessonStore:
             "rejected_non_terminal": 0,
             "rejected_invalidated": 0,
             "invalidation_event_count": 0,
+            "invalidated_episode_count": 0,
             "rejected_current_state_input": 0,
             "rejected_applicability_mismatch": 0,
             "rejected_recency": 0,
@@ -616,8 +640,16 @@ class CanonicalEpisodicMemoryLessonStore:
         scored: list[tuple[int, dict[str, Any]]] = []
         canonical_entries = load_canonical_learning_episodes(self.project_root)
         validity = reduce_learning_episode_validity(canonical_entries)
-        self.last_metadata["invalidation_event_count"] = sum(
-            1 for state in validity.values() if state.get("validity_state") == "invalidated"
+        invalidated_states = [
+            state for state in validity.values() if state.get("validity_state") == "invalidated"
+        ]
+        self.last_metadata["invalidated_episode_count"] = len(invalidated_states)
+        self.last_metadata["invalidation_event_count"] = len(
+            {
+                state["invalidated_by_episode_id"]
+                for state in invalidated_states
+                if state.get("invalidated_by_episode_id")
+            }
         )
         for entry in canonical_entries:
             if not isinstance(entry, dict):
@@ -913,6 +945,15 @@ class MemoryRetrievalAdapter:
         retrieval_receipt, retrieval_receipt_hash, selected_lineage = (
             _build_existing_retrieval_receipt(query_text, lessons)
         )
+        if lessons and not retrieval_receipt_hash:
+            self.last_metadata["status"] = "binding_failed"
+            self.last_metadata["failure_reason"] = "retrieval_receipt_binding_failed"
+            self.last_metadata["no_memory_match"] = True
+            self.last_metadata["accepted"] = 0
+            self.last_metadata["selected_ids"] = []
+            self.last_metadata["memory_evidence_ids"] = []
+            self.last_metadata["primary_selected_id"] = ""
+            return []
         self.last_metadata["retrieval_receipt"] = retrieval_receipt
         self.last_metadata["retrieval_receipt_hash"] = retrieval_receipt_hash
         self.last_metadata["selected_lesson_lineage"] = selected_lineage
@@ -1056,6 +1097,15 @@ class MemoryRetrievalAdapter:
         retrieval_receipt, retrieval_receipt_hash, selected_lineage = (
             _build_existing_retrieval_receipt(query_text, result)
         )
+        if result and not retrieval_receipt_hash:
+            self.last_metadata["status"] = "binding_failed"
+            self.last_metadata["failure_reason"] = "retrieval_receipt_binding_failed"
+            self.last_metadata["no_memory_match"] = True
+            self.last_metadata["rerank_accepted"] = 0
+            self.last_metadata["selected_ids"] = []
+            self.last_metadata["memory_evidence_ids"] = []
+            self.last_metadata["primary_selected_id"] = ""
+            return []
         self.last_metadata["retrieval_receipt"] = retrieval_receipt
         self.last_metadata["retrieval_receipt_hash"] = retrieval_receipt_hash
         self.last_metadata["selected_lesson_lineage"] = selected_lineage

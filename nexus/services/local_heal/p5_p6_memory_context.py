@@ -38,7 +38,10 @@ def build_p5_p6_memory_context(
         )
 
     try:
-        from nexus.services.local_heal.memory_retrieval_adapter import MemoryRetrievalAdapter
+        from nexus.services.local_heal.memory_retrieval_adapter import (
+            MemoryRetrievalAdapter,
+            validate_retrieved_lesson_context_binding,
+        )
         from nexus.services.local_heal.memory_trace import (
             build_memory_trace_from_adapter,
             get_empty_trace,
@@ -62,6 +65,23 @@ def build_p5_p6_memory_context(
                 decision_mode="audit_only",
                 decision_eligible=False,
                 reason="no_hits",
+            )
+
+        retrieval_receipt = dict(adapter.last_metadata.get("retrieval_receipt") or {})
+        retrieval_receipt_hash = str(adapter.last_metadata.get("retrieval_receipt_hash") or "")
+        if not validate_retrieved_lesson_context_binding(
+            lessons, retrieval_receipt, retrieval_receipt_hash
+        ):
+            return P5P6MemoryContext(
+                memory_trace=build_memory_trace_from_adapter(
+                    adapter.last_metadata,
+                    query_text=query_text,
+                ).to_dict(),
+                retrieved_lessons=[],
+                memory_sources=[],
+                decision_mode="audit_only",
+                decision_eligible=False,
+                reason="binding_failed",
             )
 
         # Preserve provenance-bearing lineage instead of projecting to summary-only text.

@@ -615,3 +615,52 @@ def test_g3_tampered_invalidator_cannot_mask_prior_canonical_episode(tmp_path):
     assert [row["episode_id"] for row in rows] == [prior["episode_id"]]
     assert store.last_metadata["rejected_invalidated"] == 0
     assert store.last_metadata["rejected_validation"] == 1
+
+
+def test_g3_invalidation_event_count_truthful_cardinality_multiple_targets(tmp_path):
+    """One invalidating episode targeting multiple prior episodes represents 1 event, 2 invalidated episodes."""
+    prior_1 = _episode(idempotency_key="ep-g3-multi-1")
+    prior_2 = _episode(idempotency_key="ep-g3-multi-2")
+    invalidator = _episode(
+        task_id="github-issue-g3-multi-invalidator",
+        terminal_outcome="FAILED",
+        terminal_evidence={"receipt": "receipt:g3-multi", "verifier_status": "FAIL"},
+        retrieved_lesson_ids=[prior_1["episode_id"], prior_2["episode_id"]],
+        applied_lesson_ids=[prior_1["episode_id"], prior_2["episode_id"]],
+        lesson_disposition="contradict",
+        idempotency_key="ep-g3-multi-invalidator",
+    )
+    _write_ledger(tmp_path, [json.dumps(prior_1), json.dumps(prior_2), json.dumps(invalidator)])
+    store = CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)
+
+    rows = store.query(query_text="canonical", limit=5)
+
+    assert rows == []
+    assert store.last_metadata["rejected_invalidated"] == 2
+    assert store.last_metadata["invalidation_event_count"] == 1
+    assert store.last_metadata["invalidated_episode_count"] == 2
+
+
+def test_adapter_fails_closed_when_receipt_binding_fails(tmp_path, monkeypatch):
+    """Adapter retrieve/retrieve_reranked must fail closed if receipt binding fails."""
+    import nexus.services.local_heal.memory_retrieval_adapter as mra
+
+    _write_ledger(tmp_path, [json.dumps(_episode())])
+    adapter = MemoryRetrievalAdapter(
+        store=CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)
+    )
+
+    # Force validate_retrieved_lesson_context_binding to fail
+    monkeypatch.setattr(mra, "validate_retrieved_lesson_context_binding", lambda *args, **kwargs: False)
+
+    lessons = adapter.retrieve(query_text="canonical", limit=5)
+    assert lessons == []
+    assert adapter.last_metadata["status"] == "binding_failed"
+    assert adapter.last_metadata["failure_reason"] == "retrieval_receipt_binding_failed"
+    assert adapter.last_metadata["accepted"] == 0
+
+    reranked = adapter.retrieve_reranked(query_text="canonical", limit=5)
+    assert reranked == []
+    assert adapter.last_metadata["status"] == "binding_failed"
+    assert adapter.last_metadata["failure_reason"] == "retrieval_receipt_binding_failed"
+    assert adapter.last_metadata["accepted"] == 0
