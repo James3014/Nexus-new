@@ -32791,10 +32791,9 @@ def test_h6_15_provider_boundary_closure_seal_bundle_empty_dict():
 
 def test_h6_15_provider_boundary_closure_seal_collect_only():
     """H6-15 T41: collect-only meta-test verifies >=40 h6_15 tests selected."""
-    import subprocess
     import re
     result = subprocess.run(
-        ["pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_15",
+        [sys.executable, "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_15",
          "--collect-only", "-q"],
         capture_output=True, text=True, cwd=str(REPO_ROOT)
     )
