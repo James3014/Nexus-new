@@ -916,30 +916,22 @@ class LearnModeService:
             return False
         return True
 
-    _claims_cache = None
-    _claims_mtime = 0
-
     def load_claims(self) -> list[dict[str, Any]]:
         if not self.claims_path.exists():
             return []
 
-        current_mtime = self.claims_path.stat().st_mtime
-        if self.__class__._claims_cache is None or current_mtime > self.__class__._claims_mtime:
-            out: list[dict[str, Any]] = []
-            for line in self.claims_path.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    parsed = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if self._is_claim_admitted(parsed):
-                    out.append(self._enrich_claim(parsed))
-            self.__class__._claims_cache = out
-            self.__class__._claims_mtime = current_mtime
-
-        return self.__class__._claims_cache
+        out: list[dict[str, Any]] = []
+        for line in self.claims_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                parsed = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if self._is_claim_admitted(parsed):
+                out.append(self._enrich_claim(parsed))
+        return out
 
     def _validate_ingest_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         missing = [field for field in self.INGEST_REQUIRED_FIELDS if field not in payload]

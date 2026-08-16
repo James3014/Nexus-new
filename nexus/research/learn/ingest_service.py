@@ -160,14 +160,23 @@ class IngestService:
             source_refs.append(source_ref)
             snap = self.ctx._save_source_snapshot(source_ref, text)
             snapshot_paths.append(str(snap))
-            snapshot_hashes[source_ref] = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            snapshot_hashes[source_ref] = hashlib.sha256(snap.read_bytes()).hexdigest()
             parsed_claims.extend(
                 self.ctx._split_to_claims(text, source_ref, topic_hint=topic or source_ref)
             )
 
         palace = MemPalace(str(self.ctx.project_root))
-        verified = palace.verify([c.to_dict() for c in parsed_claims])
-        verified_keys = {self.ctx._claim_key(cand) for cand in verified if isinstance(cand, dict)}
+        try:
+            sync_res = palace.sync()
+            if isinstance(sync_res, dict) and sync_res.get("status") == "SUCCESS":
+                verified = palace.verify([c.to_dict() for c in parsed_claims])
+                verified_keys = {
+                    self.ctx._claim_key(cand) for cand in verified if isinstance(cand, dict)
+                }
+            else:
+                verified_keys = set()
+        except Exception:
+            verified_keys = set()
 
         admitted_claims: list[LearnClaim] = []
         verifier_identity = "mempalace.verify"

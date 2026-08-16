@@ -164,23 +164,116 @@ def test_tampered_claim_invalidates_admission_proof(tmp_path: Path) -> None:
     assert service._is_claim_admitted(tampered) is False
 
 
-def test_source_snapshot_change_invalidates_existing_claim(tmp_path: Path) -> None:
-    """Snapshot Tamper: Replacing bound snapshot bytes invalidates existing claim."""
+def test_ingest_syncs_fresh_mempalace_policy_before_admission(tmp_path: Path) -> None:
+    """Policy Sync: Fresh MemPalace policy is synced and deterministic blacklist blocks poison claims."""
+    config_dir = tmp_path / "nexus" / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    blacklist_file = config_dir / "ethical_blacklist.json"
+    blacklist_file.write_text(json.dumps({"patterns": ["poison-marker"]}), encoding="utf-8")
+
+    clean_text = "This is legitimate clean research material that should be verified and admitted."
+    poison_text = "This contains poison-marker malicious content attempting to bypass admission."
+    src_file = _create_source_file(tmp_path, "policy_source.md", f"{clean_text}\n{poison_text}")
+
+    service = LearnModeService(tmp_path)
+    res = service.ingest(source="file://policy", source_file=str(src_file), topic="policy-test")
+
+    assert res["status"] == "SUCCESS"
+    assert res["claims_count"] == 2
+    assert res["verified_claims_count"] == 1
+
+    claims = service.load_claims()
+    assert len(claims) == 1
+    assert "poison-marker" not in claims[0]["claim"]
+    assert "clean research material" in claims[0]["claim"]
+
+    if service.claims_path.exists():
+        lines = [
+            json.loads(line)
+            for line in service.claims_path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        assert len(lines) == 1
+        assert not any("poison-marker" in c.get("claim", "") for c in lines)
+
+    ans = service.ask(topic="policy-test", question="poison-marker", top_k=3)
+    assert not any("poison-marker" in c.get("claim", "") for c in ans.get("citations", []))
+
+
+def test_sync_failure_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sync Error Fail-Closed: If MemPalace.sync() errors, verification fails closed."""
+    content = "Valid content that cannot be admitted if policy sync fails."
+    src_file = _create_source_file(tmp_path, "sync_err_source.md", content)
+
+    service = LearnModeService(tmp_path)
+    monkeypatch.setattr(MemPalace, "sync", lambda self: {"status": "ERROR"})
+
+    res = service.ingest(source="file://sync_err", source_file=str(src_file), topic="sync_err")
+    assert res["status"] == "SUCCESS"
+    assert res["claims_count"] >= 1
+    assert res["verified_claims_count"] == 0
+    assert service.load_claims() == []
+
+
+def test_snapshot_tamper_after_successful_load_fails_closed_without_cache_reset(
+    tmp_path: Path,
+) -> None:
+    """Warm-Cache Tamper Proof: Mutating snapshot bytes after load_claims fails closed without cache reset."""
     content = "Original text in source snapshot file."
     src_file = _create_source_file(tmp_path, "snap_source.md", content)
 
     service = LearnModeService(tmp_path)
     service.ingest(source="file://snap", source_file=str(src_file), topic="snap")
 
-    assert len(service.load_claims()) >= 1
+    initial_claims = service.load_claims()
+    assert len(initial_claims) >= 1
 
     # Overwrite the snapshot file in raw_dir with modified text
     for snap in service.raw_dir.glob("*.txt"):
         snap.write_text("Modified text replacing original snapshot content.", encoding="utf-8")
 
-    # Reset cache to force reload
-    LearnModeService._claims_cache = None
+    # load_claims must fail closed immediately without any cache reset
     assert service.load_claims() == []
+
+
+def test_claim_loading_is_isolated_by_project_root(tmp_path: Path) -> None:
+    """Cross-Project Isolation: Independent project roots return only their own bound claims."""
+    root_a = tmp_path / "root_a"
+    root_b = tmp_path / "root_b"
+    root_a.mkdir(parents=True, exist_ok=True)
+    root_b.mkdir(parents=True, exist_ok=True)
+
+    src_a = _create_source_file(
+        root_a, "source_a.md", "Distinct knowledge content specific to project root A."
+    )
+    src_b = _create_source_file(
+        root_b, "source_b.md", "Distinct knowledge content specific to project root B."
+    )
+
+    service_a = LearnModeService(root_a)
+    service_b = LearnModeService(root_b)
+
+    service_a.ingest(source="file://project_a", source_file=str(src_a), topic="proj_a")
+    service_b.ingest(source="file://project_b", source_file=str(src_b), topic="proj_b")
+
+    claims_a = service_a.load_claims()
+    claims_b = service_b.load_claims()
+
+    assert len(claims_a) >= 1
+    assert len(claims_b) >= 1
+    assert all(
+        "project root A" in c["claim"] and "project root B" not in c["claim"] for c in claims_a
+    )
+    assert all(
+        "project root B" in c["claim"] and "project root A" not in c["claim"] for c in claims_b
+    )
+
+    # Interleaved reload ensures no cross-talk
+    claims_a_again = service_a.load_claims()
+    assert all(
+        "project root A" in c["claim"] and "project root B" not in c["claim"]
+        for c in claims_a_again
+    )
 
 
 def test_foreign_verifier_identity_fails_closed(tmp_path: Path) -> None:
