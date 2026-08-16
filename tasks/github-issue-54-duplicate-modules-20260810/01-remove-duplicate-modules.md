@@ -142,7 +142,9 @@ classification above are preserved unchanged as the implementation baseline.
   source-inventory, and policy tests 31 passed; retained
   `scripts/migrationsafetyvalidator.py` gatekeeper surface pass; retained
   `scripts/drclaw_diagnosis.py --help` pass; `git diff --check` pass.
-- Current main `cdf2570ede5ae218f36f886b696c8da45458043a`; merge ancestry
+- Previous current main (historical rebind receipt, post-PR236):
+  `cdf2570ede5ae218f36f886b696c8da45458043a`.
+- Current main `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`; merge ancestry
   verified via `git merge-base --is-ancestor`.
 - Marker: `DUPLICATE_MODULE_CLEANUP_PROVEN`.
 - Claim ceiling: cleanup-only / proven-only. No runtime, route, Workforce,
