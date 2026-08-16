@@ -2,8 +2,17 @@
 
 - issue: #68
 - task_id: github-issue-68
-- status: ACTIVE
+- status: COMPLETE
+- reconcile_status: TERMINAL_RECONCILIATION
 - base_sha: 8f7c75ca08a6c88fad9b791f254d38d79ad8bf29
+- current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+- reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+- marker: CLEAN_WHEEL_ENTRYPOINTS_IMPLEMENTED_AND_MERGED
+- claim_ceiling: CLEAN_WHEEL_ENTRYPOINTS_IMPLEMENTED_AND_MERGED_ONLY
+- merged_pr: #99
+- merged_base: b025f86a0456d9a7c892368e0fd0fab6d0607614
+- merged_head: cd0b6d82771acca6bd65113f772e1451187e704a
+- merge_commit: e13ad5472296c8a303387f19662d19ce5a82bd0a
 - worker: agy_flash
 - provider: agy
 - model: gemini-3.6-flash-high
@@ -55,6 +64,14 @@ Task Card authority artifacts in `tasks/github-issue-68-clean-wheel-entrypoints-
 - Receipt recorded with base SHA, Task Card SHA-256, Workforce Admission binding, Candidate SHA, wheel identity, isolated env test output, verification commands/results, claim ceiling
 - No self-approve, no self-merge
 
+## Terminal Reconciliation Receipt
+
+- Issue #68: CLOSED, state_reason=completed (2026-08-11); PR #99: MERGED (merge commit `e13ad5472296c8a303387f19662d19ce5a82bd0a`, base `b025f86a0456d9a7c892368e0fd0fab6d0607614`, head `cd0b6d82771acca6bd65113f772e1451187e704a`), 4 files / +137 / -1
+- Physical change: `pyproject.toml` includes the `scripts` package; focused clean-wheel test `tests/ops/test_clean_wheel_entrypoints.py`
+- Verified at merge head: focused clean-wheel test 1 passed; Ruff check and preview format pass; `git diff --check` pass; all five GitHub exact-base required gates pass
+- Current main readback: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`; both card blobs byte-identical to the PR #99 merge
+- This card records a historical implementation receipt only. It grants no runtime/route/Workforce/provider/approval/integration/merge/release/production authority. AUTO_CHAIN=false.
+
 ## Maximum Supportable Claim
 
-The registered Nexus CLI and Cueline console entrypoints are importable and invoke their expected bounded surfaces from a clean installation of the exact Candidate wheel.
+The registered Nexus CLI and Cueline console entrypoints are importable and invoke their expected bounded surfaces from a clean installation of the exact wheel, as physically merged via PR #99 into Nexus-new main. Repository-contained packaging/source/test receipt only; no production/release claim.
