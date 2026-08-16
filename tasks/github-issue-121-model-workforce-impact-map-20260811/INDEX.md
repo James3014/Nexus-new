@@ -13,8 +13,8 @@
 - worker: codex_luna
 - provider: codex
 - model: gpt-5.6-luna
-- reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
-- current_main: cdf2570ede5ae218f36f886b696c8da45458043a
+- reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+- current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
 - terminal_marker: ISSUE_121_SELECTOR_MAPPING_PROVEN
 - claim_ceiling: ISSUE_121_SELECTOR_MAPPING_PROVEN_ONLY
 
@@ -34,13 +34,16 @@ tests and real probes passed, all required protected checks passed, Tier3
 skipped); comment `5255294744` closes after physical mainline merge and exact
 receipt readback.
 
-Current main readback (`cdf2570ede5ae218f36f886b696c8da45458043a`):
+Current main readback (`46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`):
 `docs/testing/test_impact_map.md` row maps `nexus/config/model_workforce.yaml`
 to `tests/contracts/test_model_workforce_policy.py,
 tests/services/test_model_workforce_policy_loader.py` (medium /
 `workforce_policy_contract`); `tests/ops/test_select_tests.py` holds
 `test_model_workforce_policy_uses_exact_contract_targets_without_fallback`
 proving `fallback_used=false` and `unmatched_paths=[]`.
+
+Prior readback binding `cdf2570ede5ae218f36f886b696c8da45458043a`
+(2026-08-15) is retained as historical only.
 
 `ISSUE_121_SELECTOR_MAPPING_PROVEN` proves only that the model workforce
 policy path selects its exact two executable contract suites without fallback.
