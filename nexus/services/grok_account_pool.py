@@ -6,16 +6,19 @@ It owns Grok-specific account/profile binding only; it does not select route,
 provider, or capability and does not introduce a second pool framework.
 
 Public leases expose only a non-secret alias hash and immutable execution
-binding data. Raw profile names and any credential material stay machine-local.
+binding data. Raw profile names and any credential material stay machine-local;
+lease environments never inherit the ambient process environment.
 """
 
 from __future__ import annotations
 
 import hashlib
 import os
+import time
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, Callable, Mapping, Optional, Sequence
 
 from nexus.services.external_account_pool import (
     AccountFailureKind,
@@ -28,6 +31,22 @@ from nexus.services.external_account_pool import (
 
 GROK_SENSITIVE_ENV_KEYS = ("XAI_API_KEY", "GROK_API_KEY", "NEXUS_GROK_API_KEY")
 
+# Only these neutral keys may pass from a caller-supplied base environment into
+# an isolated lease environment. The ambient process environment is never
+# copied, so unrelated inherited tokens or cloud credentials cannot leak into a
+# public lease.
+GROK_NEUTRAL_ENV_KEYS = (
+    "PATH",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "LC_MESSAGES",
+    "LC_NUMERIC",
+    "LC_TIME",
+    "TZ",
+    "TERM",
+)
+
 GROK_ACCOUNT_POOL_PROVIDER = "grok"
 
 
@@ -36,7 +55,7 @@ class GrokAccountPoolError(RuntimeError):
 
 
 class GrokAccountPoolExhaustedError(GrokAccountPoolError):
-    """Raised when no active Grok profile is available in the pool."""
+    """Raised when no active, isolated Grok profile is available in the pool."""
 
 
 @dataclass
@@ -44,31 +63,53 @@ class GrokAccount:
     """One machine-local Grok profile binding.
 
     ``alias`` is the local profile alias, not a credential. The public lease
-    surface carries only ``alias_hash`` derived from the alias.
+    surface carries only ``alias_hash`` derived from the alias. ``cooldown_until``
+    is a monotonic-clock deadline; until it elapses, the profile stays
+    unavailable after an eligible failure instead of being permanently
+    quarantined.
     """
 
     alias: str
     home_dir: str
     is_active: bool = True
+    cooldown_until: Optional[float] = None
 
     @property
     def alias_hash(self) -> str:
         return hashlib.sha256(self.alias.encode("utf-8")).hexdigest()[:12]
 
 
+def _isolated_home_dir(home_dir: str, alias_hash: str) -> str:
+    """Return a HOME path that never embeds the raw profile alias."""
+
+    home = Path(home_dir)
+    return str(home.parent / f"profile-{alias_hash}")
+
+
 def build_grok_isolated_env(
     home_dir: Optional[str] = None,
-    base_env: Optional[dict[str, str]] = None,
+    base_env: Optional[Mapping[str, str]] = None,
+    alias_hash: Optional[str] = None,
 ) -> dict[str, str]:
-    """Build an isolated environment scoped to one Grok profile HOME.
+    """Build an isolated environment scoped to one Grok profile.
 
-    Sensitive Grok API-key variants are removed so a swapped profile cannot
-    inherit another profile's credential material.
+    Only the explicit neutral allowlist passes through from ``base_env`` (or an
+    empty environment when ``base_env`` is omitted), so a swapped profile cannot
+    inherit another profile's credential material or arbitrary process secrets.
+    When ``alias_hash`` is supplied, ``HOME`` is rewritten to a hash-derived
+    binding directory so the raw profile alias never appears in the environment.
     """
 
-    env = dict(os.environ if base_env is None else base_env)
+    source = {} if base_env is None else dict(base_env)
+    env: dict[str, str] = {}
+    for key in GROK_NEUTRAL_ENV_KEYS:
+        if key in source:
+            env[key] = source[key]
     if home_dir:
-        env["HOME"] = str(home_dir)
+        if alias_hash:
+            env["HOME"] = _isolated_home_dir(home_dir, alias_hash)
+        else:
+            env["HOME"] = str(home_dir)
     for key in GROK_SENSITIVE_ENV_KEYS:
         env.pop(key, None)
     return env
@@ -82,12 +123,21 @@ class GrokAccountPoolManager:
         accounts: Optional[Sequence[GrokAccount]] = None,
         manager_path: Optional[str] = None,
         manager_root: Optional[str] = None,
+        cooldown_seconds: float = 60.0,
+        clock: Optional[Callable[[], float]] = None,
     ) -> None:
         self._accounts: list[GrokAccount] = list(accounts or [])
         self._manager_path: Optional[str] = manager_path
         self._manager_root: Optional[str] = manager_root
+        self._cooldown_seconds = cooldown_seconds
+        self._clock = clock
         self._pool: Optional[ExternalAccountPool] = None
         self._lease_to_raw_alias: dict[str, str] = {}
+
+    def _now(self) -> float:
+        if self._clock is not None:
+            return self._clock()
+        return time.monotonic()
 
     @staticmethod
     def resolve_manager_path(override_path: Optional[str] = None) -> Optional[str]:
@@ -164,7 +214,10 @@ class GrokAccountPoolManager:
             return self._pool
         records: list[InternalAccountRecord] = []
         for acc in self._accounts:
-            env = build_grok_isolated_env(home_dir=acc.home_dir)
+            env = build_grok_isolated_env(
+                home_dir=acc.home_dir,
+                alias_hash=acc.alias_hash,
+            )
             records.append(
                 InternalAccountRecord(
                     internal_id=acc.alias,
@@ -183,15 +236,45 @@ class GrokAccountPoolManager:
         if self._pool is None:
             self._ensure_pool()
             return
+        now = self._now()
         for acc in self._accounts:
+            if not acc.is_active and acc.cooldown_until is not None and now >= acc.cooldown_until:
+                acc.is_active = True
+                acc.cooldown_until = None
             record = self._pool._accounts.get(acc.alias)
             if record is not None:
                 record.is_available = acc.is_active
 
+    def _acquire_from_account(
+        self,
+        consumer_id: str,
+        account: GrokAccount,
+    ) -> AccountLease:
+        """Acquire a lease pinned to one account without load-based repick."""
+
+        pool = self._ensure_pool()
+        record = pool._accounts[account.alias]
+        lease_id = f"lease_{uuid.uuid4().hex}"
+        lease = AccountLease(
+            lease_id=lease_id,
+            provider=GROK_ACCOUNT_POOL_PROVIDER,
+            consumer_id=str(consumer_id),
+            account_alias_hash=account.alias_hash,
+            execution_env=record.execution_env,
+        )
+        record.active_lease_ids.add(lease_id)
+        pool._lease_to_account_id[lease_id] = account.alias
+        pool._active_leases[lease_id] = lease
+        self._lease_to_raw_alias[lease_id] = account.alias
+        return lease
+
     def acquire(self, consumer_id: str) -> AccountLease:
         self._refresh_pool_health()
         pool = self._ensure_pool()
-        lease = pool.acquire(consumer_id)
+        try:
+            lease = pool.acquire(consumer_id)
+        except ExternalAccountPoolExhaustedError as exc:
+            raise GrokAccountPoolExhaustedError(f"GROK_ACCOUNT_POOL_EXHAUSTED: {exc}") from exc
         self._lease_to_raw_alias[lease.lease_id] = pool._require_active_lease(lease)
         return lease
 
@@ -218,17 +301,24 @@ class GrokAccountPoolManager:
         for acc in self._accounts:
             if acc.alias == failed_alias:
                 acc.is_active = False
+                acc.cooldown_until = self._now() + self._cooldown_seconds
         self._refresh_pool_health()
-        try:
-            next_lease = pool.report_failure(lease, failure_kind)
-        except ExternalAccountPoolExhaustedError as exc:
-            raise GrokAccountPoolExhaustedError(
-                f"GROK_ACCOUNT_POOL_EXHAUSTED: No available Grok account: {exc}"
-            ) from exc
+        pool.release(lease)
         self._lease_to_raw_alias.pop(lease.lease_id, None)
-        if next_lease is not None:
-            self._lease_to_raw_alias[next_lease.lease_id] = pool._require_active_lease(next_lease)
-        return next_lease
+
+        held_aliases = set(self._lease_to_raw_alias.values())
+        candidates = [
+            acc
+            for acc in self._accounts
+            if acc.is_active and acc.alias in pool._accounts and acc.alias not in held_aliases
+        ]
+        if not candidates:
+            raise GrokAccountPoolExhaustedError(
+                "GROK_ACCOUNT_POOL_EXHAUSTED: no isolated Grok profile available for failover"
+            )
+        candidates.sort(key=lambda acc: pool._accounts[acc.alias].load)
+        chosen = candidates[0]
+        return self._acquire_from_account(lease.consumer_id, chosen)
 
 
 _GLOBAL_GROK_POOL_MANAGER: Optional[GrokAccountPoolManager] = None
