@@ -12,8 +12,8 @@
 - terminal_marker: IMPACT_COVERAGE_FOR_86_PROVEN
 - claim_ceiling: candidate_pr_only
 - implementation_gate: SATISFIED_BY_PR97_MERGE_CB25EF23
-- reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
-- current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+- reconciled_main: 8f9b555739f828ae1c65e3d0c6f11e7755c96068
+- current_main: 8f9b555739f828ae1c65e3d0c6f11e7755c96068
 - AUTO_CHAIN: false
 - worker: agy_flash
 - provider: agy
@@ -29,7 +29,8 @@ Issue #88 is CLOSED with `state_reason=completed` (2026-08-11T00:42:17Z).
 Implementation PR #97 MERGED 2026-08-11T00:42:16Z into `main`, head
 `ae13d4c4f27916e96a180fb90fd459da5e3c21db`, merge
 `cb25ef23cdcc876671803415fa3b430bad817e78`, ancestor of current main
-`46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`.
+`8f9b555739f828ae1c65e3d0c6f11e7755c96068` (prior reconciliation binding
+`46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`, historical).
 
 This reconciliation records the terminal status of the existing
 `01-impact-coverage.md` card only. It does not authorize selector, CI,
