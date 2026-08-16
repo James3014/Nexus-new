@@ -54,22 +54,20 @@ RECEIPT_PATH = SCRATCH / "nexus_all_capability_closure_receipt.json"
 RECEIPT_TMP = Path(tempfile.gettempdir()) / "nexus_all_capability_closure_receipt.json"
 CANARY_WORKSPACE_ROOT = SCRATCH / "family_canary_workspaces"
 
-_SHALLOW_ACTIONS = frozenset(
-    {
-        "should_run",
-        "health_check",
-        "construct",
-        "import_success",
-        "probe",
-        "fixture",
-        "bind",
-        "resolve",
-        "resolve_service",
-        "resolve_module",
-        "resolve_providers",
-        "cleanup",
-    }
-)
+_SHALLOW_ACTIONS = frozenset({
+    "should_run",
+    "health_check",
+    "construct",
+    "import_success",
+    "probe",
+    "fixture",
+    "bind",
+    "resolve",
+    "resolve_service",
+    "resolve_module",
+    "resolve_providers",
+    "cleanup",
+})
 
 # Canonical online Workforce Admission bindings mirror the role map in
 # nexus/config/model_workforce.yaml.  We first derive the Planner role from the
@@ -474,42 +472,40 @@ def _run_family_canary(
         online_enabled=True,
         # Local stage only when exercising local_model_executor ownership.
         local_enabled=local_enabled,
-        local_request=LocalAssistRequest.from_dict(
-            {
-                "schema": "nexus.local_assist.request.v1",
-                "task_id": task_id,
-                "parent_task_id": task_id,
-                "workspace_root": str(canary_root),
-                "workspace_revision": "rev-family-canary",
-                "task_statement": statement,
-                "action": local_action,
-                "allowed_files": ["target.py"],
-                "target_file": "target.py",
-                "target_symbol": "family_canary_target",
-                "evidence_refs": [f"family-canary:{name}"],
-                "verifier_command": [
-                    sys.executable,
-                    "-c",
-                    (
-                        "ns={}; exec(open('target.py', encoding='utf-8').read(), ns); "
-                        "assert ns['family_canary_target']() == 'verified'"
-                    ),
-                ]
-                if local_action == "verified-subtask"
-                else [],
-                "requested_role": "candidate",
-                "mutation_policy": "isolated_only",
-                "planner_snapshot": {
-                    "route_truth_source": "CapabilityPlanner",
-                    "selected_capabilities": [name] if positive else [],
-                    "execution_topology": "single_local_model",
-                    "protocol_mode": "code_patch",
-                    "model_call_allowed": True,
-                    "executor_provider": "ollama",
-                    "executor_model": "qwen2.5-coder:7b-instruct",
-                },
-            }
-        )
+        local_request=LocalAssistRequest.from_dict({
+            "schema": "nexus.local_assist.request.v1",
+            "task_id": task_id,
+            "parent_task_id": task_id,
+            "workspace_root": str(canary_root),
+            "workspace_revision": "rev-family-canary",
+            "task_statement": statement,
+            "action": local_action,
+            "allowed_files": ["target.py"],
+            "target_file": "target.py",
+            "target_symbol": "family_canary_target",
+            "evidence_refs": [f"family-canary:{name}"],
+            "verifier_command": [
+                sys.executable,
+                "-c",
+                (
+                    "ns={}; exec(open('target.py', encoding='utf-8').read(), ns); "
+                    "assert ns['family_canary_target']() == 'verified'"
+                ),
+            ]
+            if local_action == "verified-subtask"
+            else [],
+            "requested_role": "candidate",
+            "mutation_policy": "isolated_only",
+            "planner_snapshot": {
+                "route_truth_source": "CapabilityPlanner",
+                "selected_capabilities": [name] if positive else [],
+                "execution_topology": "single_local_model",
+                "protocol_mode": "code_patch",
+                "model_call_allowed": True,
+                "executor_provider": "ollama",
+                "executor_model": "qwen2.5-coder:7b-instruct",
+            },
+        })
         if local_enabled
         else None,
         online_prompt="family canary",
@@ -772,17 +768,15 @@ def _run_family_canary(
         else []
     )
     evidence = list(
-        dict.fromkeys(
-            [
-                str(ref)
-                for ref in (
-                    list(cap_row.get("evidence_refs") or [])
-                    + list(stage.get("evidence_refs") or [])
-                    + list((nested or {}).get("evidence_refs") or [])
-                )
-                if str(ref)
-            ]
-        )
+        dict.fromkeys([
+            str(ref)
+            for ref in (
+                list(cap_row.get("evidence_refs") or [])
+                + list(stage.get("evidence_refs") or [])
+                + list((nested or {}).get("evidence_refs") or [])
+            )
+            if str(ref)
+        ])
     )
 
     # mainchain_entry proven from receipt (not hardcoded): route stamp and/or planner stage.
@@ -1172,55 +1166,53 @@ def build_and_write_closure_receipt() -> dict[str, Any]:
             and pos["final_status"] in {"FAIL", "PROBE", "IMPLEMENTATION_FAILURE"}
         ):
             real_positive_fails += 1
-        per_cap.append(
-            {
-                "capability": name,
-                "execution_class": contract["execution_class"],
-                "maturity": _node_meta(name)["maturity"],
-                "promotable": name in promotable,
-                "gap_proxy": contract["execution_class"],
-                "local_mode": project_local_execution_mode(name),
-                "online_mode": project_online_execution_mode(name),
-                "provider_authorization_required": bool(
-                    contract.get("provider_authorization_required")
-                ),
-                "consumer_effect": contract["consumer_effect"],
-                "public_claim_allowed": False,
-                "positive": {
-                    k: pos[k]
-                    for k in (
-                        "invoked",
-                        "skipped",
-                        "gate_passed",
-                        "status",
-                        "physical_callable",
-                        "action",
-                        "evidence_refs",
-                        "consumer_proof",
-                        "planner_selected",
-                        "mainchain_entry",
-                        "local_stage_status",
-                        "local_stage_reason",
-                        "local_provider",
-                        "local_fallback_reason",
-                    )
-                },
-                "negative": {
-                    k: neg[k]
-                    for k in (
-                        "invoked",
-                        "skipped",
-                        "gate_passed",
-                        "status",
-                        "action",
-                        "evidence_refs",
-                        "consumer_proof",
-                    )
-                },
-                "first_broken_edge": first_broken,
-                "final_status": final_status,
-            }
-        )
+        per_cap.append({
+            "capability": name,
+            "execution_class": contract["execution_class"],
+            "maturity": _node_meta(name)["maturity"],
+            "promotable": name in promotable,
+            "gap_proxy": contract["execution_class"],
+            "local_mode": project_local_execution_mode(name),
+            "online_mode": project_online_execution_mode(name),
+            "provider_authorization_required": bool(
+                contract.get("provider_authorization_required")
+            ),
+            "consumer_effect": contract["consumer_effect"],
+            "public_claim_allowed": False,
+            "positive": {
+                k: pos[k]
+                for k in (
+                    "invoked",
+                    "skipped",
+                    "gate_passed",
+                    "status",
+                    "physical_callable",
+                    "action",
+                    "evidence_refs",
+                    "consumer_proof",
+                    "planner_selected",
+                    "mainchain_entry",
+                    "local_stage_status",
+                    "local_stage_reason",
+                    "local_provider",
+                    "local_fallback_reason",
+                )
+            },
+            "negative": {
+                k: neg[k]
+                for k in (
+                    "invoked",
+                    "skipped",
+                    "gate_passed",
+                    "status",
+                    "action",
+                    "evidence_refs",
+                    "consumer_proof",
+                )
+            },
+            "first_broken_edge": first_broken,
+            "final_status": final_status,
+        })
 
     ec_counts = Counter(c["execution_class"] for c in PLANNER_EXECUTION_CONTRACTS.values())
     prom_missing = [
