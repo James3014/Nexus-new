@@ -223,6 +223,7 @@ class LearningClosureBridge:
                 f"Receipt: {lesson['receipt_id']}",
                 f"Memory trace status: {memory_trace.get('trace_status', 'TRACE_MISSING')}",
                 f"Memory evidence ids: {', '.join(memory_trace.get('memory_evidence_ids') or [])}",
+                f"Memory retrieval receipt: {memory_trace.get('retrieval_receipt_hash', '')}",
             ]
         )
 
@@ -339,6 +340,8 @@ class LearningClosureBridge:
             "internal_only": True,
             "memory_trace_status": memory_trace.get("trace_status", "TRACE_MISSING"),
             "retrieved_memory_ids": list(memory_trace.get("memory_evidence_ids") or []),
+            "memory_trace": dict(memory_trace),
+            "retrieval_receipt_hash": str(memory_trace.get("retrieval_receipt_hash") or ""),
             "terminal_evidence": terminal_evidence,
             "capability_receipts": receipts,
             "learning_episode": persisted_episode,
