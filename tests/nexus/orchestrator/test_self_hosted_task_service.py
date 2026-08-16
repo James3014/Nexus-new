@@ -1335,6 +1335,9 @@ def _init_repo(path: Path) -> None:
     """Initialize a git repo with hooks disabled, regardless of user global config."""
     _git(path, "init", "-b", "main")
     _git(path, "config", "core.hooksPath", "/dev/null")
+    _git(path, "config", "user.name", "Nexus Lifecycle Test")
+    _git(path, "config", "user.email", "nexus-lifecycle@example.test")
+    _git(path, "config", "user.useConfigOnly", "true")
 
 
 def _real_request(tmp_path: Path, task_id: str = "real-reconcile"):
@@ -3906,6 +3909,9 @@ def test_direct_canonical_duplicate_finish_reuses_receipt_without_second_commit(
     controller.mkdir()
     _init_repo(controller)
     _git(controller, "branch", "-M", "nexus/integration/main")
+    assert _git(controller, "config", "--local", "user.useConfigOnly") == "true"
+    assert _git(controller, "config", "--local", "user.name") == "Nexus Lifecycle Test"
+    assert _git(controller, "config", "--local", "user.email") == "nexus-lifecycle@example.test"
     _git(controller, "commit", "--allow-empty", "-m", "init")
     base = _git(controller, "rev-parse", "HEAD")
     (controller / "src").mkdir()
