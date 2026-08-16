@@ -1,40 +1,44 @@
 from __future__ import annotations
 
-import json
-import re
+import concurrent.futures
 import hashlib
+import html
+import json
 import os
+import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib import request
 from urllib.parse import quote_plus
-import html
-import time
-import concurrent.futures
 
-from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
-from nexus.services.mem_palace import MemPalace
-from nexus.core.skill_outcomes import OutcomePayload, build_outcome_event, append_skill_outcome_event
+from nexus.core.skill_outcomes import (
+    OutcomePayload,
+    append_skill_outcome_event,
+    build_outcome_event,
+)
 from nexus.learning.learning_closure_effectiveness import (
-    normalize_learning_episode,
     append_learning_episode,
     canonical_learning_episode_path,
+    normalize_learning_episode,
 )
+from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
+from nexus.services.mem_palace import MemPalace
 from nexus.services.memory import MemoryService
-from .learn.ingest_service import IngestService
+
+from .learn.ask_service import AskService
+from .learn.benchmark_service import BenchmarkService
 from .learn.claim_service import ClaimService
 from .learn.converge_service import ConvergeService
-from .learn.ask_service import AskService
-from .learn.phase_slo_service import PhaseSLOService
-from .learn.report_service import ReportService
+from .learn.ingest_service import IngestService
 from .learn.phase_bridge_service import PhaseBridgeService
-from .learn.benchmark_service import BenchmarkService
-from .learn.source_registry_service import SourceRegistryService
-from .learn.phase_slo_summary_service import PhaseSLOSummaryService
 from .learn.phase_kpi_service import PhaseKPIService
-
+from .learn.phase_slo_service import PhaseSLOService
+from .learn.phase_slo_summary_service import PhaseSLOSummaryService
+from .learn.report_service import ReportService
+from .learn.source_registry_service import SourceRegistryService
 
 
 @dataclass
@@ -48,6 +52,11 @@ class LearnClaim:
     evidence_strength: str = "medium"
     freshness_days: float = 0.0
     freshness_score: float = 1.0
+    admission_status: str = "UNVERIFIED"
+    admission_verifier: str = ""
+    source_snapshot_sha256: str = ""
+    admission_claim_key: str = ""
+    admission_proof: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -60,6 +69,11 @@ class LearnClaim:
             "evidence_strength": self.evidence_strength,
             "freshness_days": self.freshness_days,
             "freshness_score": self.freshness_score,
+            "admission_status": self.admission_status,
+            "admission_verifier": self.admission_verifier,
+            "source_snapshot_sha256": self.source_snapshot_sha256,
+            "admission_claim_key": self.admission_claim_key,
+            "admission_proof": self.admission_proof,
         }
 
 
@@ -93,7 +107,6 @@ class LearnModeService:
         self._phase_slo_summary_svc = PhaseSLOSummaryService(self)
         self._phase_kpi_svc = PhaseKPIService(self)
 
-
     PHASES: tuple[str, ...] = ("P", "X", "D", "R", "A", "C")
     INGEST_REQUIRED_FIELDS: tuple[str, ...] = (
         "status",
@@ -118,7 +131,11 @@ class LearnModeService:
             dt = datetime.fromisoformat(ts)
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=timezone.utc)
-            return max(0.0, (datetime.now(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds() / 86400.0)
+            return max(
+                0.0,
+                (datetime.now(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds()
+                / 86400.0,
+            )
         except Exception:
             return 365.0
 
@@ -196,7 +213,17 @@ class LearnModeService:
         if isinstance(claim, LearnClaim):
             raw = f"{claim.claim}|{claim.source_url}|{claim.citation_span}"
         else:
-            raw = f"{claim.get('claim','')}|{claim.get('source_url','')}|{claim.get('citation_span',[])}"
+            raw = f"{claim.get('claim', '')}|{claim.get('source_url', '')}|{claim.get('citation_span', [])}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _compute_admission_proof(
+        claim_key: str,
+        source_snapshot_sha256: str,
+        verifier: str,
+        status: str = "ADMITTED",
+    ) -> str:
+        raw = f"nexus.learn.claim_admission.v1|{claim_key}|{source_snapshot_sha256}|{verifier}|{status}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def _save_source_snapshot(self, source_ref: str, text: str) -> Path:
@@ -278,10 +305,14 @@ class LearnModeService:
             rank = 5
         return (rank, len(path))
 
-    def _load_github_repo_documents(self, owner: str, repo: str, max_files: int = 24, max_total_chars: int = 400_000) -> list[tuple[str, str]]:
+    def _load_github_repo_documents(
+        self, owner: str, repo: str, max_files: int = 24, max_total_chars: int = 400_000
+    ) -> list[tuple[str, str]]:
         repo_meta = self._http_get_json(f"https://api.github.com/repos/{owner}/{repo}", timeout=12)
         default_branch = str(repo_meta.get("default_branch") or "main")
-        tree_api = f"https://api.github.com/repos/{owner}/{repo}/git/trees/{default_branch}?recursive=1"
+        tree_api = (
+            f"https://api.github.com/repos/{owner}/{repo}/git/trees/{default_branch}?recursive=1"
+        )
         tree_data = self._http_get_json(tree_api, timeout=15)
         tree_items = tree_data.get("tree", []) if isinstance(tree_data, dict) else []
         if not isinstance(tree_items, list):
@@ -324,7 +355,9 @@ class LearnModeService:
             docs.append((cleaned, raw_url))
         return docs
 
-    def _load_source_documents(self, source: str, source_file: str | None = None) -> list[tuple[str, str]]:
+    def _load_source_documents(
+        self, source: str, source_file: str | None = None
+    ) -> list[tuple[str, str]]:
         if source_file:
             src_path = self._resolve_path(source_file)
             txt = self._clean_text(src_path.read_text(encoding="utf-8"))
@@ -390,7 +423,12 @@ class LearnModeService:
             "policy_memory_synced": False,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
-        if os.environ.get("NEXUS_LEARN_CLOSURE_WRITEBACK", "").strip().lower() in {"0", "false", "no", "off"}:
+        if os.environ.get("NEXUS_LEARN_CLOSURE_WRITEBACK", "").strip().lower() in {
+            "0",
+            "false",
+            "no",
+            "off",
+        }:
             closure["writeback_disabled"] = True
             closure["reason"] = f"{reason} | writeback_disabled"
             return closure
@@ -433,7 +471,9 @@ class LearnModeService:
             closure["mempalace_sync"] = sync_info
             closure["arweave_tx_id"] = palace.trigger_arweave_distillation(clean[0])
 
-            pass_rate = float(metrics.get("self_question_pass_rate", metrics.get("pass_rate", 0.0)) or 0.0)
+            pass_rate = float(
+                metrics.get("self_question_pass_rate", metrics.get("pass_rate", 0.0)) or 0.0
+            )
             claims_count = int(metrics.get("claims_count", 0) or 0)
             outcome = build_outcome_event(
                 OutcomePayload(
@@ -484,7 +524,10 @@ class LearnModeService:
     def _append_closure_log(self, closure: dict[str, Any]) -> None:
         # Keep the historical LearnMode projection, but make the canonical
         # episode envelope the only effectiveness authority.
-        task_id = str(closure.get("task_id") or f"learn-{closure.get('action', 'unknown')}-{closure.get('topic_or_source', 'unknown')}")
+        task_id = str(
+            closure.get("task_id")
+            or f"learn-{closure.get('action', 'unknown')}-{closure.get('topic_or_source', 'unknown')}"
+        )
         evidence = {
             "status": str(closure.get("status", "")),
             "verifier_status": "pass" if closure.get("mempalace_verified") else "missing",
@@ -501,7 +544,9 @@ class LearnModeService:
             attempt_id=str(closure.get("attempt_id") or closure.get("timestamp", "")),
             action_id=str(closure.get("action", "unknown")),
             source="learn_mode",
-            terminal_outcome="SUCCEEDED" if str(closure.get("status", "")).upper() == "SUCCESS" else "FAILED",
+            terminal_outcome="SUCCEEDED"
+            if str(closure.get("status", "")).upper() == "SUCCESS"
+            else "FAILED",
             terminal_evidence=evidence,
             retrieved_lesson_ids=tuple(closure.get("retrieved_lesson_ids") or ()),
             applied_lesson_ids=tuple(closure.get("applied_lesson_ids") or ()),
@@ -523,7 +568,9 @@ class LearnModeService:
         with self.closure_log.open("a", encoding="utf-8") as f:
             f.write(json.dumps(closure, ensure_ascii=False) + "\n")
 
-    def _decide_learn_phase_route(self, *, phase: str, topic: str, metrics: dict[str, Any]) -> dict[str, Any]:
+    def _decide_learn_phase_route(
+        self, *, phase: str, topic: str, metrics: dict[str, Any]
+    ) -> dict[str, Any]:
         return self._phase_bridge_svc._decide_learn_phase_route(
             phase=phase,
             topic=topic,
@@ -605,7 +652,9 @@ class LearnModeService:
             min_occurrences=min_occurrences,
         )
 
-    def _sync_registry_after_ingest(self, *, source: str, source_file: str | None, topic: str, claims_count: int) -> None:
+    def _sync_registry_after_ingest(
+        self, *, source: str, source_file: str | None, topic: str, claims_count: int
+    ) -> None:
         self._source_registry_svc.sync_registry_after_ingest(
             source=source,
             source_file=source_file,
@@ -673,7 +722,14 @@ class LearnModeService:
             str(out.get("claim", "")),
         )
         out["freshness_days"] = float(out.get("freshness_days", freshness_days) or freshness_days)
-        out["freshness_score"] = float(out.get("freshness_score", freshness_score) or freshness_score)
+        out["freshness_score"] = float(
+            out.get("freshness_score", freshness_score) or freshness_score
+        )
+        out["admission_status"] = str(out.get("admission_status") or "UNVERIFIED")
+        out["admission_verifier"] = str(out.get("admission_verifier") or "")
+        out["source_snapshot_sha256"] = str(out.get("source_snapshot_sha256") or "")
+        out["admission_claim_key"] = str(out.get("admission_claim_key") or "")
+        out["admission_proof"] = str(out.get("admission_proof") or "")
         return out
 
     def _claim_strength_weight(self, claim: dict[str, Any]) -> float:
@@ -681,27 +737,31 @@ class LearnModeService:
         return {"high": 1.0, "medium": 0.75, "low": 0.45}.get(strength, 0.6)
 
     def _claim_pack_score(self, claim: dict[str, Any], topic: str, question: str) -> float:
-        hay = " ".join(
-            [
-                str(claim.get("topic_pack", "")),
-                " ".join(claim.get("topic_tags", []) or []),
-                str(claim.get("source_url", "")),
-            ]
-        ).lower()
+        hay = " ".join([
+            str(claim.get("topic_pack", "")),
+            " ".join(claim.get("topic_tags", []) or []),
+            str(claim.get("source_url", "")),
+        ]).lower()
         score = 0.0
         for tok in self._extract_tokens(f"{topic} {question}"):
             if tok in hay:
                 score += 1.0
         return score
 
-    def _route_topic_pack(self, claims: list[dict[str, Any]], topic: str, question: str) -> tuple[str, list[dict[str, Any]]]:
+    def _route_topic_pack(
+        self, claims: list[dict[str, Any]], topic: str, question: str
+    ) -> tuple[str, list[dict[str, Any]]]:
         if not claims:
             return "general", []
         pack_scores: dict[str, float] = {}
         for claim in claims:
             pack = str(claim.get("topic_pack", "general"))
-            pack_scores[pack] = pack_scores.get(pack, 0.0) + self._claim_pack_score(claim, topic, question)
-        selected_pack = max(pack_scores.items(), key=lambda item: item[1])[0] if pack_scores else "general"
+            pack_scores[pack] = pack_scores.get(pack, 0.0) + self._claim_pack_score(
+                claim, topic, question
+            )
+        selected_pack = (
+            max(pack_scores.items(), key=lambda item: item[1])[0] if pack_scores else "general"
+        )
         routed = [c for c in claims if str(c.get("topic_pack", "general")) == selected_pack]
         return selected_pack, (routed or claims)
 
@@ -787,47 +847,91 @@ class LearnModeService:
                 overlap_ratio = 0.0 if not union else len(overlap) / len(union)
                 if overlap_ratio < 0.55:
                     continue
-                if self._claim_polarity(str(left.get("claim", ""))) == self._claim_polarity(str(right.get("claim", ""))):
+                if self._claim_polarity(str(left.get("claim", ""))) == self._claim_polarity(
+                    str(right.get("claim", ""))
+                ):
                     continue
-                conflicts.append(
-                    {
-                        "left": {
-                            "claim": left.get("claim", ""),
-                            "source_url": left.get("source_url", ""),
-                            "citation_span": left.get("citation_span", []),
-                        },
-                        "right": {
-                            "claim": right.get("claim", ""),
-                            "source_url": right.get("source_url", ""),
-                            "citation_span": right.get("citation_span", []),
-                        },
-                        "conflict_score": round(overlap_ratio, 4),
-                    }
-                )
+                conflicts.append({
+                    "left": {
+                        "claim": left.get("claim", ""),
+                        "source_url": left.get("source_url", ""),
+                        "citation_span": left.get("citation_span", []),
+                    },
+                    "right": {
+                        "claim": right.get("claim", ""),
+                        "source_url": right.get("source_url", ""),
+                        "citation_span": right.get("citation_span", []),
+                    },
+                    "conflict_score": round(overlap_ratio, 4),
+                })
         return conflicts
 
-    _claims_cache = None
-    _claims_mtime = 0
+    def _is_claim_admitted(self, raw_claim: dict[str, Any]) -> bool:
+        if not isinstance(raw_claim, dict):
+            return False
+        if raw_claim.get("admission_status") != "ADMITTED":
+            return False
+        expected_verifier = "mempalace.verify"
+        if raw_claim.get("admission_verifier") != expected_verifier:
+            return False
+        c_key = self._claim_key(raw_claim)
+        if not c_key or raw_claim.get("admission_claim_key") != c_key:
+            return False
+        source_url = str(raw_claim.get("source_url") or "")
+        if not source_url:
+            return False
+        digest = hashlib.sha256(source_url.encode("utf-8")).hexdigest()[:16]
+        snap_path = self.raw_dir / f"{digest}.txt"
+        if not snap_path.is_file():
+            return False
+        try:
+            snap_bytes = snap_path.read_bytes()
+        except Exception:
+            return False
+        snap_sha = hashlib.sha256(snap_bytes).hexdigest()
+        if not snap_sha or raw_claim.get("source_snapshot_sha256") != snap_sha:
+            return False
+        snap_text = snap_bytes.decode("utf-8", errors="ignore")
+        span = raw_claim.get("citation_span")
+        if not isinstance(span, list) or len(span) != 2:
+            return False
+        try:
+            start, end = int(span[0]), int(span[1])
+        except (ValueError, TypeError):
+            return False
+        if not (0 <= start < end <= len(snap_text)):
+            return False
+        claim_text = str(raw_claim.get("claim") or "").strip()
+        span_text = snap_text[start:end].strip()
+        if not claim_text or claim_text != span_text:
+            return False
+        expected_proof = self._compute_admission_proof(
+            claim_key=c_key,
+            source_snapshot_sha256=snap_sha,
+            verifier=expected_verifier,
+            status="ADMITTED",
+        )
+        stored_proof = str(raw_claim.get("admission_proof") or "")
+        if not stored_proof or stored_proof != expected_proof:
+            return False
+        return True
 
     def load_claims(self) -> list[dict[str, Any]]:
         if not self.claims_path.exists():
             return []
-            
-        current_mtime = self.claims_path.stat().st_mtime
-        if self.__class__._claims_cache is None or current_mtime > self.__class__._claims_mtime:
-            out: list[dict[str, Any]] = []
-            for line in self.claims_path.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    out.append(self._enrich_claim(json.loads(line)))
-                except json.JSONDecodeError:
-                    continue
-            self.__class__._claims_cache = out
-            self.__class__._claims_mtime = current_mtime
-            
-        return self.__class__._claims_cache
+
+        out: list[dict[str, Any]] = []
+        for line in self.claims_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                parsed = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if self._is_claim_admitted(parsed):
+                out.append(self._enrich_claim(parsed))
+        return out
 
     def _validate_ingest_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         missing = [field for field in self.INGEST_REQUIRED_FIELDS if field not in payload]
@@ -835,7 +939,9 @@ class LearnModeService:
             raise RuntimeError(f"learn_ingest_contract_violation: missing={missing}")
         return payload
 
-    def ingest(self, source: str, source_file: str | None = None, topic: str = "") -> dict[str, Any]:
+    def ingest(
+        self, source: str, source_file: str | None = None, topic: str = ""
+    ) -> dict[str, Any]:
         payload = self._ingest_svc.ingest(source, source_file, topic)
         if not isinstance(payload, dict):
             raise RuntimeError("learn_ingest_contract_violation: payload_must_be_dict")
@@ -933,15 +1039,15 @@ class LearnModeService:
         tokens = sorted(self._extract_tokens(topic))
         qs = []
         for token in tokens[: max(3, question_count)]:
-            qs.append(
-                {
-                    "token": token,
-                    "question": f"What cited evidence explains '{token}' in topic context?",
-                }
-            )
+            qs.append({
+                "token": token,
+                "question": f"What cited evidence explains '{token}' in topic context?",
+            })
         return qs
 
-    def _answer_questions(self, questions: list[dict[str, Any]], claims: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    def _answer_questions(
+        self, questions: list[dict[str, Any]], claims: list[dict[str, Any]]
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         answered, unresolved = [], []
         for q in questions:
             token = q["token"]
@@ -949,15 +1055,13 @@ class LearnModeService:
             for c in claims:
                 if not self._is_valid_citation(c):
                     continue
-                blob = f"{c.get('claim','')} {' '.join(c.get('topic_tags',[]))}".lower()
+                blob = f"{c.get('claim', '')} {' '.join(c.get('topic_tags', []))}".lower()
                 if token in blob:
-                    matched.append(
-                        {
-                            "source_url": c.get("source_url"),
-                            "citation_span": c.get("citation_span"),
-                            "claim": c.get("claim", ""),
-                        }
-                    )
+                    matched.append({
+                        "source_url": c.get("source_url"),
+                        "citation_span": c.get("citation_span"),
+                        "claim": c.get("claim", ""),
+                    })
                 if len(matched) >= 2:
                     break
             if matched:
@@ -1025,12 +1129,18 @@ class LearnModeService:
                 max_workers = max(1, min(swarm_max_parallel, len(sources)))
                 with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
                     fut_map = {pool.submit(_ingest_one, src): src for src in sources}
-                    for fut in concurrent.futures.as_completed(fut_map, timeout=max(1, per_source_timeout_sec) * len(sources)):
+                    for fut in concurrent.futures.as_completed(
+                        fut_map, timeout=max(1, per_source_timeout_sec) * len(sources)
+                    ):
                         src = fut_map[fut]
                         try:
                             rec = fut.result(timeout=max(1, per_source_timeout_sec))
                         except Exception as exc:
-                            rec = {"source": src, "ok": False, "error": f"swarm_timeout_or_error:{exc}"}
+                            rec = {
+                                "source": src,
+                                "ok": False,
+                                "error": f"swarm_timeout_or_error:{exc}",
+                            }
                         round_rec["ingest_results"].append(rec)
             else:
                 for src in sources:
@@ -1041,7 +1151,11 @@ class LearnModeService:
         matched = [c for c in claims if self._is_valid_citation(c)]
         pass_rate = 0.0 if not questions else len(answered_q) / len(questions)
         converged = pass_rate >= pass_threshold
-        unresolved = [] if converged else [f"Need cited evidence for token: {q['token']}" for q in unresolved_q]
+        unresolved = (
+            []
+            if converged
+            else [f"Need cited evidence for token: {q['token']}" for q in unresolved_q]
+        )
         report = {
             "status": "SUCCESS",
             "topic": topic,
@@ -1077,7 +1191,12 @@ class LearnModeService:
                 "claims_count": report["claims_total"],
                 "coverage": report["coverage"],
                 "self_question_pass_rate": report["self_question_pass_rate"],
-                "citation_valid_ratio": round(0.0 if report["claims_total"] == 0 else report["claims_matched"] / max(1, report["claims_total"]), 4),
+                "citation_valid_ratio": round(
+                    0.0
+                    if report["claims_total"] == 0
+                    else report["claims_matched"] / max(1, report["claims_total"]),
+                    4,
+                ),
             },
         )
         phase_status = {
@@ -1086,14 +1205,21 @@ class LearnModeService:
             "D": "SUCCESS" if report["claims_total"] > 0 else "PARTIAL",
             "R": "SUCCESS" if report["converged"] else "PARTIAL",
             "A": "SUCCESS" if report["claims_matched"] > 0 else "PARTIAL",
-            "C": "SUCCESS" if bool((report.get("learning_closure") or {}).get("mempalace_verified")) else "PARTIAL",
+            "C": "SUCCESS"
+            if bool((report.get("learning_closure") or {}).get("mempalace_verified"))
+            else "PARTIAL",
         }
         report["phase_learning_bridge"] = self.sync_phase_learning_closure(
             topic=topic,
             metrics={
                 "coverage": report["coverage"],
                 "self_question_pass_rate": report["self_question_pass_rate"],
-                "citation_valid_ratio": round(0.0 if report["claims_total"] == 0 else report["claims_matched"] / max(1, report["claims_total"]), 4),
+                "citation_valid_ratio": round(
+                    0.0
+                    if report["claims_total"] == 0
+                    else report["claims_matched"] / max(1, report["claims_total"]),
+                    4,
+                ),
                 "stale_claims_count": 0,
                 "conflict_count": 0,
             },
@@ -1127,7 +1253,12 @@ class LearnModeService:
                 topic_or_source=topic,
                 evidence_paths=[str(self.claims_path)],
                 retrieval_hints=[],
-                metrics={"claims_count": 0, "coverage": 0.0, "pass_rate": 0.0, "citation_valid_ratio": 0.0},
+                metrics={
+                    "claims_count": 0,
+                    "coverage": 0.0,
+                    "pass_rate": 0.0,
+                    "citation_valid_ratio": 0.0,
+                },
             )
             return {
                 "status": "UNKNOWN",
@@ -1169,7 +1300,10 @@ class LearnModeService:
             }
 
         filtered_claims = [
-            c for c in routed_claims if max_staleness_days is None or float(c.get("freshness_days", 0.0)) <= float(max_staleness_days)
+            c
+            for c in routed_claims
+            if max_staleness_days is None
+            or float(c.get("freshness_days", 0.0)) <= float(max_staleness_days)
         ]
         scored: list[tuple[float, dict[str, Any], set[str]]] = []
         for c in filtered_claims:
@@ -1188,9 +1322,7 @@ class LearnModeService:
                     token_hits.add(t)
             if score > 0:
                 score = (
-                    score
-                    + self._claim_strength_weight(c)
-                    + float(c.get("freshness_score", 0.0))
+                    score + self._claim_strength_weight(c) + float(c.get("freshness_score", 0.0))
                 )
                 scored.append((score, c, token_hits))
         scored.sort(key=lambda x: x[0], reverse=True)
@@ -1267,7 +1399,11 @@ class LearnModeService:
             }
 
         if len(best) < max(1, min_evidence) or token_coverage < float(min_token_coverage):
-            unknown_reason = "insufficient_cited_claims" if len(best) < max(1, min_evidence) else "insufficient_token_coverage"
+            unknown_reason = (
+                "insufficient_cited_claims"
+                if len(best) < max(1, min_evidence)
+                else "insufficient_token_coverage"
+            )
             self._append_benchmark_candidate(
                 topic=topic,
                 question=question,
@@ -1311,13 +1447,11 @@ class LearnModeService:
             source_url = c.get("source_url", "unknown://source")
             citation = f"{source_url}#span={span[0]}-{span[1]}"
             lines.append(f"- {c.get('claim', '')} [{citation}]")
-            citations.append(
-                {
-                    "source_url": source_url,
-                    "citation_span": span,
-                    "claim": c.get("claim", ""),
-                }
-            )
+            citations.append({
+                "source_url": source_url,
+                "citation_span": span,
+                "claim": c.get("claim", ""),
+            })
         return {
             "status": "ANSWERED",
             "topic": topic,

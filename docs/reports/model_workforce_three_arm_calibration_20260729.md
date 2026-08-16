@@ -4,13 +4,15 @@
 
 - **Task:** `u3a-composite-v1`
 - **Scope:** 25 enrolled models × Bare / Nexus-Bounded / Nexus-Full = 75 arms
-- **Run type:** first universal repetition
-- **Claim ceiling:** `PROVISIONAL_CALIBRATION_ONLY`
+- **Run type:** historical universal calibration baseline
+- **Benchmark role:** historical baseline and comparative diagnostic instrument
+- **Claim ceiling:** `HISTORICAL_BASELINE_ONLY`
 - **Role definitions final:** `false`
 - **Public claim allowed:** `false`
-- **Promotion rule:** a second repetition plus a role-specific suite and physical verification remain mandatory.
+- **Historical scores:** immutable (frozen at 2026-07-29)
+- **Requalification rule:** cumulative evidence + stable-floor regression + target/current frontier + failure-family/hidden probes + transport/protocol/isolation; FIRST_PASS and VERIFIER_GUIDED_REPAIR remain distinct.
 
-This report is an internal routing calibration. It does not replace James's model-role authority, CapabilityPlanner, Verifier, Receipt, Git controls, or provider account-pool rules. A semantic pass in this synthetic composite task is not proof of repository implementation ability, production readiness, or permission to mutate the formal workspace.
+This report records the internal 2026-07-29 routing calibration baseline. It does not replace James's model-role authority, CapabilityPlanner, Verifier, Receipt, Git controls, or provider account-pool rules. A semantic pass in this synthetic composite task is not proof of repository implementation ability, production readiness, or permission to mutate the formal workspace. Workforce governance enforces three distinct layers: semantic capability lineage != exact execution identity != admitted authority.
 
 ## Composite task and verifier
 
@@ -129,12 +131,14 @@ DeepSeek R1 14B passed all checks, while Gemma 12B and Qwen 14B remained at 10/1
 - Harness: `scripts/bench/experimental/model_workforce_three_arm.py`
 - Machine summary: `docs/reports/model_workforce_three_arm_calibration_20260729.json`
 
-## Residual gates
+## Historical baseline status and future requalification
 
-This work is complete at the **first universal calibration** level. Stable role promotion remains intentionally incomplete until:
+This document serves as the permanent historical baseline from the initial 2026-07-29 universal three-arm run. All historical scores and records are frozen and immutable.
 
-1. a second repetition is run on promotion candidates;
-2. role-specific suites test read-only audit, physical patch generation, schema adherence, injection resistance, and exact mandatory-command execution;
-3. provider/client blockers are repaired and rerun;
-4. physical diff, isolated apply, deterministic verifier, and sealed receipt evidence exist;
-5. James approves any change to external-agent authority.
+For subsequent workforce updates and candidate requalification:
+
+1. The three-arm benchmark operates as a baseline comparative diagnostic fixture, not a required rerun-from-zero constraint for every minor change.
+2. Future qualification uses cumulative evidence: stable-floor regression, target/current frontier validation, failure-family/hidden defect probes, and transport/protocol/isolation checks.
+3. Autonomous `FIRST_PASS` reliability, hidden defect checks, and `VERIFIER_GUIDED_REPAIR` remain distinct evidence phases and must not be conflated.
+4. Observed higher-tier repair capabilities (such as L4 repair) remain experimental and are NOT admitted autonomy.
+5. Autonomy ceilings (e.g. Gemini 3.7 Flash Medium at L3, DeepSeek V4 Flash at L2) and non-default routing are governed by `nexus/config/model_workforce.yaml` and Owner authority. Lineage sharing (such as between `opencode/deepseek-v4-flash-free` and `opencode-go/deepseek-v4-flash`) does not collapse exact execution identity matching.
