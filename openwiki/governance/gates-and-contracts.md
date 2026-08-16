@@ -1,132 +1,198 @@
 ---
 type: Concept
-title: Governance Gates & Completion Contracts
-description: Architectural specification of delivery verification gates, completion envelopes, and fail-closed governance enforcement.
-tags: [governance, gates, completion, contracts, security]
+title: Governance Gates, Independent Acceptance & Evidence Contracts
+description: Current-source guide to fail-closed completion, exact-Candidate acceptance, operator outcome receipts, and non-mutating GitHub merge-intent preparation.
+tags: [governance, gates, completion, acceptance, receipts, github]
 openwiki:
   roles: [architecture, domain, operations]
   change_kinds: [public-api, governance]
   source_paths: [nexus/engine/completion_enforcer.py, nexus/engine/completion_contract.py, scripts/pre_write_quality_gate.py]
   symbols: [CompletionEnforcer, build_completion_envelope, ensure_verified_completion, CompletionEnforcementError]
-  test_paths: [tests/test_task_runner_completion_gate.py, tests/test_iron_gate_governance.py]
-  invariants: [CompletionEnforcer fails closed if verified criteria are not met.]
-  validation_commands: [pytest tests/test_task_runner_completion_gate.py -q]
+  test_paths: [tests/test_task_runner_completion_gate.py, tests/nexus/orchestrator/test_acceptance_loop.py, tests/contracts/test_operator_outcome_receipt.py, tests/contracts/test_github_orchestration.py, tests/nexus/orchestrator/test_github_orchestration.py]
+  invariants: [Completion fails closed. Independent acceptance never performs approval, integration, merge, or public-claim promotion. GitHub merge intent is non-mutating. OpenWiki has no approval or release authority.]
+  validation_commands: [pytest tests/nexus/orchestrator/test_acceptance_loop.py tests/contracts/test_operator_outcome_receipt.py tests/contracts/test_github_orchestration.py tests/nexus/orchestrator/test_github_orchestration.py -q]
 ---
 
-# Governance Gates & Completion Contracts
+# Governance Gates, Independent Acceptance & Evidence Contracts
 
-Nexus Singularity OS uses fail-closed **Governance Gates** and structured **Completion Envelopes** to ensure that task execution and code modifications dispatched via `[NexusCLI](../runtime/cli-and-cueline.md)` or `[UnifiedMCPGateway](../runtime/mcp-gateway.md)` meet strict verification criteria before delivery.
+Nexus separates **verification evidence**, **independent Candidate acceptance**, **operator-observed outcomes**, and **GitHub merge intent** so that no single receipt silently acquires approval or integration authority.
 
-> 🏛️ **Authority Contract Requirement**: `AGENTS.md` remains repository/agent governance authority. [`CapabilityPlanner`](../routing/capability-planner.md) is the sole route/capability-selection authority; [`HybridRouteDecision`](../routing/capability-planner.md) is its derived decision contract/projection, not a second selector. OpenWiki is `derived_non_authoritative` and holds zero approval or release authority.
-
----
-
-## 🛡️ Core Verified Gates
-
-1. **Pytest Collect (P0)**: Mandatory discovery check ensuring test suite integrity without regression (`4246` test items baseline).
-2. **Enterprise Audit (P1)**: Machine-verifiable isolation and hallucination checks executed via `nexus status`.
-3. **PR-Safe Lint (P1)**: Quality enforcement on changed files via Ruff.
-4. **`CompletionEnforcer` Fail-Closed Gate**: Blocks delivery handoff if behavioral verification commands fail or output receipts are missing.
+> 🏛️ **Authority contract**: `AGENTS.md` remains repository/agent governance authority. [`CapabilityPlanner`](../routing/capability-planner.md) is the sole route/capability-selection authority. OpenWiki is `derived_non_authoritative`. A passing verifier, an `ACCEPT` result, an operator outcome receipt, or a prepared merge intent does not by itself authorize merge, push, integration, release, or public claims.
 
 ---
 
-## 🔄 Completion Envelope Lifecycle State Machine
+## 🛡️ Fail-Closed Completion
+
+The existing completion layer remains the navigation point for task-delivery verification:
+
+- `nexus/engine/completion_enforcer.py` — fail-closed completion enforcement;
+- `nexus/engine/completion_contract.py` — structured completion envelope construction and verification contracts.
+
+Avoid hard-coding a global test-count baseline in implementation guidance. Current validation should be bound to the exact command, revision, and artifact used for the change under review.
+
+---
+
+## ✅ Exact-Candidate Independent Acceptance
+
+`nexus/orchestrator/acceptance_loop.py` introduces an immutable acceptance reducer for one exact Candidate. It binds:
+
+- `task_id` and `attempt_id`;
+- implementer and independent reviewer identity;
+- candidate commit/tree/state/diff hashes;
+- verified receipt hash and verifier artifact hash;
+- review status and exit code.
+
+The reducer can return:
+
+- `ACCEPT`
+- `REPAIRABLE`
+- `BLOCK`
+
+It explicitly does **not** perform promotion. `CandidateAcceptanceResult` defaults all of the following to false:
+
+- `approval_performed`
+- `integration_performed`
+- `merge_performed`
+- `public_claim_allowed`
+
+A reviewer equal to the implementer, identity mismatch, blocking review, non-zero verifier exit, or failed verified-repair evidence forces a non-accepting result.
 
 ```mermaid
-stateDiagram-v2
-    [*] --> Pending: Task Started
-    Pending --> Executing: Subprocess Run via AsyncProcessExecutor
-    Executing --> VerificationRequired: Execution Complete
-    VerificationRequired --> VerifiedSuccess: Verification Passes (returncode 0)
-    VerificationRequired --> EnforcementError: Verification Fails
-    EnforcementError --> [*]: Delivery Blocked (CompletionEnforcementError)
-    VerifiedSuccess --> EnvelopeWritten: write_completion_envelope()
-    EnvelopeWritten --> [*]: Delivery Handoff Complete
+flowchart LR
+    C["Exact Candidate identities"] --> R["IndependentReviewReceipt"]
+    R --> A["reduce_candidate_acceptance()"]
+    A -->|clean independent PASS| OK["ACCEPT"]
+    A -->|repairable defect| FIX["REPAIRABLE"]
+    A -->|identity / verifier / review block| BLOCK["BLOCK"]
+    OK --> N["No automatic approval / integration / merge"]
 ```
-*Figure 1: State transitions of a completion envelope from task execution through fail-closed verification to delivery handoff.*
+
+---
+
+## 🧾 Operator Outcome Receipts
+
+`nexus/contracts/operator_outcome_receipt.py` defines `nexus.operator_outcome_receipt.v1`, a privacy-bounded immutable observational receipt.
+
+It distinguishes observation basis from authority:
+
+- `OPERATOR_REPORT`
+- `SYSTEM_OBSERVATION`
+- `NOT_OBSERVED`
+
+Allowed observed outcomes are `SUCCESS`, `FAILURE`, `PARTIAL`, `UNKNOWN`, and `NOT_OBSERVED`. Fields carry explicit provenance and canonical hashes. The contract contains no free-form approval authority and must not be converted into a release or merge decision.
+
+---
+
+## 🔀 GitHub Orchestration Is Intent Preparation, Not Merge Execution
+
+`nexus/contracts/github_orchestration.py` defines strict immutable evidence for GitHub merge-intent preparation. Current evidence may include:
+
+- terminal successful required checks;
+- review state and unresolved-thread count;
+- exact Candidate lineage and independent acceptance;
+- impact classification and regression status;
+- freshness timestamps.
+
+`nexus/orchestrator/github_orchestration.py` is deliberately a **pure reducer/preparer**. Its module contract says it performs no provider, subprocess, network, or merge call. `prepare_merge_intent()` rejects stale evidence, failed/missing checks, unresolved review state, unknown/regressing impact, or missing independent acceptance.
+
+A successful result still carries:
+
+```text
+schema = nexus.github_merge_intent.v2
+kind = MERGE_INTENT
+mutation_authorized = false
+claim_ceiling = m4_merge_eligible_and_intent_ready_only
+```
+
+So the strongest supportable claim is **merge intent ready under fresh evidence**, not “merged” or “approved”.
 
 ---
 
 ## 🏷️ Required V3 Classifications
 
 ```yaml
-component: CompletionEnforcer
+component: CandidateAcceptanceReducer
 implementation_status: CURRENT
 wiring_status: WIRED
 runtime_surfaces:
-  - MAIN_CLI
-  - MCP_GATEWAY
   - LOCAL_RUNTIME
+authority_roles:
+  - GOVERNANCE_AUTHORITY
+evidence_basis:
+  - nexus/orchestrator/acceptance_loop.py:reduce_candidate_acceptance
+  - nexus/orchestrator/self_hosted_task_service.py:CandidateAcceptanceResult
+claim_ceiling: Independently reduces exact Candidate and reviewer evidence to ACCEPT/REPAIRABLE/BLOCK without performing approval, integration, merge, or public-claim promotion.
+```
+
+```yaml
+component: OperatorOutcomeReceipt
+implementation_status: CURRENT
+wiring_status: WIRED
+runtime_surfaces:
+  - LOCAL_RUNTIME
+authority_roles:
+  - NONE
+evidence_basis:
+  - nexus/contracts/operator_outcome_receipt.py:OperatorOutcomeReceipt
+  - nexus/orchestrator/self_hosted_task_service.py:validate_operator_outcome_receipt
+claim_ceiling: Immutable privacy-bounded observation receipt consumed by the task service; observational evidence is not approval or route authority.
+```
+
+```yaml
+component: GitHubMergeIntent
+implementation_status: CURRENT
+wiring_status: UNKNOWN
+runtime_surfaces: []
+authority_roles:
+  - NONE
+evidence_basis:
+  - nexus/contracts/github_orchestration.py:MergeIntent
+  - nexus/orchestrator/github_orchestration.py:prepare_merge_intent
+claim_ceiling: Current source can prepare and revalidate a non-mutating merge intent from fresh evidence; this bounded source review does not claim that the intent is automatically executed or merged.
+```
+
+```yaml
+component: CompletionEnforcer
+implementation_status: CURRENT
+wiring_status: UNKNOWN
+runtime_surfaces: []
 authority_roles:
   - GOVERNANCE_AUTHORITY
 evidence_basis:
   - nexus/engine/completion_enforcer.py:CompletionEnforcer
-  - nexus/engine/completion_enforcer.py:CompletionEnforcementError
-claim_ceiling: Fail-closed governance enforcer preventing task closeout when completion criteria or verification checks fail.
+claim_ceiling: Current fail-closed completion implementation exists; runtime-surface claims require a current caller or bound receipt beyond class existence.
 ```
-
-```yaml
-component: build_completion_envelope
-implementation_status: CURRENT
-wiring_status: WIRED
-runtime_surfaces:
-  - MAIN_CLI
-  - MCP_GATEWAY
-  - LOCAL_RUNTIME
-authority_roles:
-  - GOVERNANCE_AUTHORITY
-evidence_basis:
-  - nexus/engine/completion_contract.py:build_completion_envelope
-claim_ceiling: Constructs structured JSON verification envelopes capturing task artifacts and evidence hashes.
-```
-
-```yaml
-component: PreWriteGate
-implementation_status: CURRENT
-wiring_status: WIRED
-runtime_surfaces:
-  - MAIN_CLI
-  - LOCAL_RUNTIME
-authority_roles:
-  - GOVERNANCE_AUTHORITY
-evidence_basis:
-  - scripts/pre_write_quality_gate.py:main
-claim_ceiling: Quality gate inspecting file modifications prior to disk persistence.
-```
-
----
-
-## 🛠️ Extension Recipe: Adding a Custom Completion Verifier
-
-To add a domain-specific completion verification check:
-
-1. **Define Verifier Function**: Add the verifier signature in `nexus/engine/completion_contract.py`.
-2. **Hook into Enforcer**: Call the verifier in `ensure_verified_completion()` within `nexus/engine/completion_enforcer.py`.
-3. **Raise Enforcement Error**: On validation failure, raise `CompletionEnforcementError` to trigger fail-closed delivery blocking.
-4. **Unit Verification**: Add a test in `tests/test_task_runner_completion_gate.py`.
-5. **Run Verification**: `pytest tests/test_task_runner_completion_gate.py -q`.
 
 ---
 
 ## 🧭 Change Navigation & Validation
 
 ### When to Consult
-Consult this page when modifying delivery verification rules, altering completion envelope schemas, updating pre-write quality gates, or troubleshooting blocked delivery reports.
+Consult this page for completion gates, Candidate acceptance, verifier/receipt identity binding, operator-observed outcomes, or GitHub merge-intent evidence.
 
-### Runtime Invariants
-- `CompletionEnforcer` must fail closed when verification output is absent or returns non-zero exit codes.
-- `openwiki/` output must be kept strictly derived and non-authoritative.
+### Governance Invariants
+- Independent reviewer identity must remain separate from implementer identity.
+- Candidate commit/tree/state/diff/receipt identities must bind exactly.
+- `ACCEPT` does not mean approval, integration, merge, or public claim.
+- Operator outcome evidence remains observational.
+- GitHub merge intent remains `mutation_authorized=false` until a separate authority explicitly performs an allowed mutation.
+- OpenWiki must not elevate any of these evidence objects into approval or release authority.
 
 ### Exact Source Files & Symbols
-- `nexus/engine/completion_enforcer.py` -> `CompletionEnforcer`, `CompletionEnforcementError`
-- `nexus/engine/completion_contract.py` -> `build_completion_envelope`, `ensure_verified_completion`
-- `scripts/pre_write_quality_gate.py` -> `main`
+- `nexus/orchestrator/acceptance_loop.py` → `CandidateAcceptanceRequest`, `IndependentReviewReceipt`, `reduce_candidate_acceptance`
+- `nexus/contracts/operator_outcome_receipt.py` → `OperatorOutcomeReceipt`, `build_operator_outcome_receipt`
+- `nexus/contracts/github_orchestration.py` → `GitHubOrchestrationEvidence`, `MergeIntent`
+- `nexus/orchestrator/github_orchestration.py` → `prepare_merge_intent`, `revalidate_merge_intent`
+- `nexus/engine/completion_enforcer.py` / `completion_contract.py` → completion gates
 
 ### Focused Tests
+- `tests/nexus/orchestrator/test_acceptance_loop.py`
+- `tests/contracts/test_operator_outcome_receipt.py`
+- `tests/contracts/test_github_orchestration.py`
+- `tests/nexus/orchestrator/test_github_orchestration.py`
 - `tests/test_task_runner_completion_gate.py`
-- `tests/test_iron_gate_governance.py`
 
 ### Minimal Validation Command
 ```bash
-pytest tests/test_task_runner_completion_gate.py -q
+pytest tests/nexus/orchestrator/test_acceptance_loop.py tests/contracts/test_operator_outcome_receipt.py tests/contracts/test_github_orchestration.py tests/nexus/orchestrator/test_github_orchestration.py -q
 ```
