@@ -60,11 +60,44 @@ def make_repo(tmp_path: Path) -> tuple[Path, str]:
     return root, _git(root, "rev-parse", "HEAD")
 
 
-def make_task_card(repo: Path) -> tuple[str, str]:
+def make_task_card(repo: Path, commands: list[str] | None = None) -> tuple[str, str]:
     ref = "tasks/test-closure/00-test.md"
     path = repo / ref
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("# Test closure task\n", encoding="utf-8")
+    default_cmds = [
+        f'{sys.executable} -c "raise SystemExit(0)"',
+        f'{sys.executable} -c "raise SystemExit(1)"',
+        f'{sys.executable} -c "raise SystemExit(2)"',
+        f'{sys.executable} -c "raise SystemExit(3)"',
+        f'{sys.executable} -c "raise SystemExit(7)"',
+        f"{sys.executable} -c \"from pathlib import Path; assert 'A = 1' in Path('a.py').read_text()\"",
+        f"{sys.executable} -c \"from pathlib import Path; assert 'B = 1' in Path('b.py').read_text()\"",
+        f"{sys.executable} -c \"from pathlib import Path; assert 'A = 2' in Path('a.py').read_text()\"",
+        f"{sys.executable} -c \"from pathlib import Path; Path('a.py').write_text('A = 7\\n')\"",
+        f"{sys.executable} -c \"from pathlib import Path; assert 'A = ' in Path('a.py').read_text()\"",
+        f"{sys.executable} -c \"from pathlib import Path; assert Path('a.py').read_text() == 'A = 2\\n' and Path('b.py').read_text() == 'B = 1\\n'\"",
+        f"{sys.executable} -c \"from pathlib import Path; assert 'A = 1' in Path('a.py').read_text() and 'B = 1' in Path('b.py').read_text()\"",
+    ]
+    if commands:
+        default_cmds.extend(commands)
+    lines = [
+        "# Task Card: test-closure",
+        "",
+        "- task_id: `test-closure`",
+        "- status: ACTIVE",
+        "",
+        "## Allowed files",
+        "- `a.py`",
+        "- `b.py`",
+        "- `c.py`",
+        "",
+        "## Verification commands",
+        "```bash",
+        *default_cmds,
+        "```",
+        "",
+    ]
+    path.write_text("\n".join(lines), encoding="utf-8")
     _git(repo, "add", ref)
     _git(repo, "commit", "-m", "test task card")
     return ref, _sha256(path.read_bytes())
@@ -628,3 +661,33 @@ def test_mixed_whole_failure_owners_cannot_build_composition_repair_delta(tmp_pa
     )
     with pytest.raises(ClosureError, match="WHOLE_FAILURE_NOT_UNIQUELY_OWNED"):
         build_composition_repair_delta(ua, whole, repair_index=1)
+
+
+def test_closure_rejects_unauthorized_verifier_before_subprocess(tmp_path, monkeypatch):
+    repo, base = make_repo(tmp_path)
+    ua = make_receipt(repo, tmp_path, base, "ua", "a.py", "A = 1\n")
+    card_ref, card_hash = make_task_card(repo)
+    called = []
+    real_run = subprocess.run
+
+    def spy_run(args, **kwargs):
+        called.append(args)
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", spy_run)
+
+    with pytest.raises(ClosureError, match="VERIFIER_NOT_AUTHORIZED"):
+        runtime(repo, tmp_path).close_task(
+            unit_receipts=[ua],
+            unit_verifiers={
+                "ua": [
+                    {"id": "evil", "argv": ["python3", "-c", "import os; os.system('malicious')"]}
+                ]
+            },
+            whole_verifiers=[verifier("whole", "raise SystemExit(0)")],
+            task_card_ref=card_ref,
+            task_card_hash=card_hash,
+        )
+
+    # Verify the unauthorized verifier command was NEVER executed in subprocess
+    assert not any("malicious" in str(cmd) for cmd in called)
