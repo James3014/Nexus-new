@@ -11,8 +11,8 @@
 - role: fast_bounded_implementation
 - autonomy: L2
 - context: nexus_bounded
-- terminal_marker: IMPACT_COVERAGE_EVIDENCE_PROVEN
-- claim_ceiling: IMPACT_COVERAGE_EVIDENCE_PROVEN_ONLY
+- terminal_marker: IMPACT_COVERAGE_FOR_86_PROVEN
+- claim_ceiling: candidate_pr_only
 - implementation_gate: SATISFIED_BY_PR97_MERGE_CB25EF23
 - reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
 - current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
@@ -97,7 +97,7 @@ Implementation PR #97 MERGED 2026-08-11T00:42:16Z into `main`, head
 `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`. Issue #88 is CLOSED with
 `state_reason=completed` (2026-08-11T00:42:17Z).
 
-This card is terminally reconciled: `IMPACT_COVERAGE_EVIDENCE_PROVEN` with
-claim ceiling `IMPACT_COVERAGE_EVIDENCE_PROVEN_ONLY` and `AUTO_CHAIN=false`.
+This card is terminally reconciled: `IMPACT_COVERAGE_FOR_86_PROVEN` with
+claim ceiling `candidate_pr_only` and `AUTO_CHAIN=false`.
 No selector/CI/product/runtime/route/Workforce/approval/integration/merge/
 release/production authority is granted by this reconciliation.

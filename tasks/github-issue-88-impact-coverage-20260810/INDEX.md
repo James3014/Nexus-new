@@ -9,8 +9,8 @@
 - frontier: 01-impact-coverage.md
 - completed_cards:
   - 01-impact-coverage.md
-- terminal_marker: IMPACT_COVERAGE_EVIDENCE_PROVEN
-- claim_ceiling: IMPACT_COVERAGE_EVIDENCE_PROVEN_ONLY
+- terminal_marker: IMPACT_COVERAGE_FOR_86_PROVEN
+- claim_ceiling: candidate_pr_only
 - implementation_gate: SATISFIED_BY_PR97_MERGE_CB25EF23
 - reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
 - current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
