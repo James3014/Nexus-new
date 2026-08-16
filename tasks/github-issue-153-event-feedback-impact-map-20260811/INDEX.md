@@ -6,8 +6,8 @@ campaign_id: github-issue-153-event-feedback-impact-map-20260811
 source_issue: https://github.com/James3014/Nexus-new/issues/153
 baseline_main: 9dddd018ad2761face3d2f3ce29dff8d8feae72d
 historical_baseline: 9dddd018ad2761face3d2f3ce29dff8d8feae72d
-reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
-current_main: cdf2570ede5ae218f36f886b696c8da45458043a
+reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
 implementation_commit: 4ffbd1fa7e4b88c932615daf3dfa3dec9e8ecd7b
 rebind_lineage_commit: 88a6c616fdf145738e582aa625c94abbf90daf66
 current_frontier: TERMINAL_RECONCILIATION
@@ -38,3 +38,6 @@ mapping rows and their selector tests.
 selection and fail-closed fallback. It grants no PR #151 mutation, selector algorithm,
 workflow, runtime, route, Workforce, lifecycle, claim, approval, integration, merge,
 release, or production authority. `AUTO_CHAIN=false`.
+
+Prior readback binding `cdf2570ede5ae218f36f886b696c8da45458043a`
+(2026-08-14) is retained as historical only.

@@ -7,8 +7,8 @@ campaign_id: github-issue-153-event-feedback-impact-map-20260811
 source_issue: https://github.com/James3014/Nexus-new/issues/153
 baseline_main: 9dddd018ad2761face3d2f3ce29dff8d8feae72d
 historical_baseline: 9dddd018ad2761face3d2f3ce29dff8d8feae72d
-reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
-current_main: cdf2570ede5ae218f36f886b696c8da45458043a
+reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
 frontier_status: TERMINAL_RECONCILIATION
 terminal_marker: EVENT_AND_FEEDBACK_IMPACT_MAPPING_PROVEN
 claim_ceiling: EVENT_AND_FEEDBACK_IMPACT_MAPPING_PROVEN_ONLY
@@ -73,9 +73,12 @@ semantics.
 - Exact scope: impact-map, selector tests, this card, and INDEX.
 - Exact-head workflows: Pytest, Pyright, Bandit, Ruff, and Wiki governance completed
   successfully.
-- Reconciled current main: `cdf2570ede5ae218f36f886b696c8da45458043a`.
+- Reconciled current main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`.
 
 `EVENT_AND_FEEDBACK_IMPACT_MAPPING_PROVEN` proves only exact selector mapping,
 high-risk escalation, and preserved fail-closed fallback. It grants no PR #151 mutation,
 selector algorithm, workflow, runtime, routing, lifecycle, Workforce, claim, approval,
 integration, merge, release, or production authority. `AUTO_CHAIN=false`.
+
+Prior readback binding `cdf2570ede5ae218f36f886b696c8da45458043a`
+(2026-08-14) is retained as historical only.
