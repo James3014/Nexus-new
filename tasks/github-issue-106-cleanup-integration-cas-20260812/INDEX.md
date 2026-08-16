@@ -22,9 +22,10 @@ The later #51 / PR #71 cleanup remains outside this Task Card.
 
 Status: `COMPLETE / TERMINAL_RECONCILIATION`.
 
-Reconciled current main: `cdf2570ede5ae218f36f886b696c8da45458043a`
-(historical verification receipt `eb668fb76f0c30d8f025db42cdb8e320d556c037`
-from the 2026-08-13 snapshot).
+Reconciled current main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`
+(previous reconciled snapshot
+`cdf2570ede5ae218f36f886b696c8da45458043a`; historical verification receipt
+`eb668fb76f0c30d8f025db42cdb8e320d556c037` from the 2026-08-13 snapshot).
 
 Physical implementation merged via PR #202:
 
