@@ -34,13 +34,11 @@ def _make_manager(tmp_path) -> GrokAccountPoolManager:
     h3 = str(tmp_path / "grok-c")
     for p in (h1, h2, h3):
         Path(p).mkdir(parents=True)
-    return GrokAccountPoolManager(
-        [
-            GrokAccount(alias="grok-a", home_dir=h1),
-            GrokAccount(alias="grok-b", home_dir=h2),
-            GrokAccount(alias="grok-c", home_dir=h3),
-        ]
-    )
+    return GrokAccountPoolManager([
+        GrokAccount(alias="grok-a", home_dir=h1),
+        GrokAccount(alias="grok-b", home_dir=h2),
+        GrokAccount(alias="grok-c", home_dir=h3),
+    ])
 
 
 def test_grok_account_alias_hash_is_non_secret_slug():
@@ -208,12 +206,10 @@ def test_failover_never_reuses_profile_held_by_another_consumer(tmp_path):
     h2 = str(tmp_path / "grok-b")
     for p in (h1, h2):
         Path(p).mkdir(parents=True)
-    manager = GrokAccountPoolManager(
-        [
-            GrokAccount(alias="grok-a", home_dir=h1),
-            GrokAccount(alias="grok-b", home_dir=h2),
-        ]
-    )
+    manager = GrokAccountPoolManager([
+        GrokAccount(alias="grok-a", home_dir=h1),
+        GrokAccount(alias="grok-b", home_dir=h2),
+    ])
     lease_a = manager.acquire("consumer-A")
     lease_b = manager.acquire("consumer-B")
 
@@ -230,12 +226,10 @@ def test_released_profile_becomes_eligible_for_failover(tmp_path):
     h2 = str(tmp_path / "grok-b")
     for p in (h1, h2):
         Path(p).mkdir(parents=True)
-    manager = GrokAccountPoolManager(
-        [
-            GrokAccount(alias="grok-a", home_dir=h1),
-            GrokAccount(alias="grok-b", home_dir=h2),
-        ]
-    )
+    manager = GrokAccountPoolManager([
+        GrokAccount(alias="grok-a", home_dir=h1),
+        GrokAccount(alias="grok-b", home_dir=h2),
+    ])
     lease_a = manager.acquire("consumer-A")
     lease_b = manager.acquire("consumer-B")
     manager.release(lease_b)
