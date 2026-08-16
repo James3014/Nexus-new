@@ -32,8 +32,8 @@
 GB-079 / GBF-004 (canonical task continuity) is the only Golden finding whose
 owner evidence is physically settled. Issue #31 is CLOSED
 `DONE_NO_FOLLOW_UP`; its implementation PR #245 merged as
-`5853073a29cab5600187c9fa03728c8ee61ebe0a`, which is an ancestor of current
-main `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`. The merged contract exposes
+`5853073a29cab5600187c9fa03728c8ee61ebe0a`, which is an ancestor of fresh current
+main `a7c88646df966b15acb947b4f92c236edcbcdd2b`. The merged contract exposes
 `nexus/core/task_continuity.py`, `nexus/events/contracts.py`, and the
 `self_hosted_task_service.py` attempt-event seam.
 

@@ -39,7 +39,8 @@ This card does not implement the probe and does not change finding status.
   seam producing the records consumed by `events_from_attempt_records()`.
 
 The merged PR #245 merge commit `5853073a29cab5600187c9fa03728c8ee61ebe0a`
-is an ancestor of current main `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`.
+is an ancestor of fresh current main
+`a7c88646df966b15acb947b4f92c236edcbcdd2b`.
 
 ## Probe inputs and outputs
 
