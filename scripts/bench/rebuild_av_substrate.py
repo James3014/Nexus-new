@@ -12,9 +12,11 @@ Main driver script that:
 import os
 import json
 import subprocess
+import sys
 import time
 
-from _repo_root import REPO_ROOT
+sys.dont_write_bytecode = True
+from _repo_root import REPO_ROOT  # noqa: E402, I001
 OUTPUT_DIR = REPO_ROOT / "artifacts" / "runtime" / "av_executable_benchmark_substrate_v0"
 REPORTS_DIR = REPO_ROOT / "docs" / "reports"
 SCRIPTS_DIR = REPO_ROOT / "scripts" / "bench"
@@ -62,7 +64,8 @@ import sys
 import time
 from pathlib import Path
 
-from _repo_root import REPO_ROOT
+sys.dont_write_bytecode = True
+from _repo_root import REPO_ROOT  # noqa: E402, I001
 DEFAULT_OUTPUT = REPO_ROOT / "artifacts" / "runtime" / "av_executable_benchmark_substrate_v0" / "execution_results" / "{task_id}.json"
 
 TASK_ID = "{task_id}"

@@ -11,7 +11,8 @@ import sys
 import time
 from pathlib import Path
 
-from _repo_root import REPO_ROOT
+sys.dont_write_bytecode = True
+from _repo_root import REPO_ROOT  # noqa: E402
 
 DEFAULT_OUTPUT = REPO_ROOT / "artifacts" / "runtime" / "av_executable_benchmark_substrate_v0" / "execution_results" / "anchored_edit_gap_003.json"
 
