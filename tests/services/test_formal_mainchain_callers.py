@@ -38,14 +38,26 @@ FORMAL_CALLER_PATHS: tuple[str, ...] = (
 )
 
 # Modules that may retain compatibility shims — must still fail closed / not select.
-COMPAT_LABELS: frozenset[str] = frozenset(
-    {
-        "compatibility",
-        "legacy_shim",
-        "non_formal",
-        "fail_closed",
+COMPAT_LABELS: frozenset[str] = frozenset({
+    "compatibility",
+    "legacy_shim",
+    "non_formal",
+    "fail_closed",
+})
+
+
+def _agy_online_workforce_binding() -> dict[str, dict[str, object]]:
+    return {
+        "online": {
+            "worker_id": "agy_flash",
+            "controls": [
+                "task_card",
+                "allowed_files",
+                "mandatory_commands",
+                "independent_verification",
+            ],
+        }
     }
-)
 
 
 class _Planner:
@@ -221,6 +233,8 @@ def test_gateway_ask_unified_single_planner_decision(monkeypatch, tmp_path: Path
             "injected_transport": True,
             "online_policy": "auto",
             "mainchain_entry": True,
+            "online_invoker_provider": "agy",
+            "workforce_bindings": _agy_online_workforce_binding(),
         },
         online_enabled=True,
         online_prompt="task",
@@ -235,14 +249,19 @@ def test_gateway_ask_unified_single_planner_decision(monkeypatch, tmp_path: Path
     check = single_planner_decision_id(receipt)
     assert check["ok"] is True
     assert check["selection_authority"] == MAINCHAIN_AUTHORITY
+    assert receipt["workforce_admission"]["overall_decision"] == "ALLOW"
+    assert receipt["gateway_invocation_authority"]["status"] == "ALLOW"
+    assert receipt["gateway_invocation_authority"]["gate_passed"] is True
+    assert (
+        receipt["capability_evidence_bundle"]["planner_decision_id"]
+        == receipt["planner_decision_id"]
+    )
     assert receipt["claim_boundary"]["public_claim_allowed"] is False
     assert receipt.get("planner_decision_id")
 
 
 def test_mainchain_entry_run_mainchain_contract() -> None:
-    route = stamp_mainchain_route(
-        {"recommended_flow": "direct"}, product_entry="pipeline_repair"
-    )
+    route = stamp_mainchain_route({"recommended_flow": "direct"}, product_entry="pipeline_repair")
     assert route["mainchain_entry"] is True
     receipt = run_mainchain(
         UnifiedRuntimeRequest(
@@ -291,9 +310,10 @@ def test_mainchain_entry_run_mainchain_contract() -> None:
         learning=_learning,
     )
     assert single_planner_decision_id(receipt)["ok"] is True
-    assert receipt["capability_evidence_bundle"]["planner_decision_id"] == receipt[
-        "planner_decision_id"
-    ]
+    assert (
+        receipt["capability_evidence_bundle"]["planner_decision_id"]
+        == receipt["planner_decision_id"]
+    )
 
 
 def test_pipeline_repair_module_wires_unified_runtime() -> None:
@@ -332,7 +352,6 @@ def test_pipeline_repair_runtime_single_planner_decision_id(monkeypatch, tmp_pat
                 "planner_decision_id": "pr-pdid-1",
                 "bundle_hash": "b" * 64,
             },
-            "planner_decision_id": "pr-pdid-1",
             "public_claim_allowed": False,
         }
 
@@ -672,6 +691,8 @@ def test_cli_runtime_gateway_ask_unified_single_planner(monkeypatch, tmp_path: P
             "online_policy": "auto",
             "mainchain_entry": True,
             "with_nexus_armor": True,
+            "online_invoker_provider": "agy",
+            "workforce_bindings": _agy_online_workforce_binding(),
         },
         product_entry="nexus_cli",
     )
@@ -694,9 +715,13 @@ def test_cli_runtime_gateway_ask_unified_single_planner(monkeypatch, tmp_path: P
     check = single_planner_decision_id(receipt)
     assert check["ok"] is True
     assert receipt["planner_decision_id"]
-    assert receipt["capability_evidence_bundle"]["planner_decision_id"] == receipt[
-        "planner_decision_id"
-    ]
+    assert receipt["workforce_admission"]["overall_decision"] == "ALLOW"
+    assert receipt["gateway_invocation_authority"]["status"] == "ALLOW"
+    assert receipt["gateway_invocation_authority"]["gate_passed"] is True
+    assert (
+        receipt["capability_evidence_bundle"]["planner_decision_id"]
+        == receipt["planner_decision_id"]
+    )
     assert receipt["claim_boundary"]["public_claim_allowed"] is False
 
 
@@ -722,7 +747,7 @@ def test_sprint_nightshift_dayshift_research_entries_if_present() -> None:
         # Soft contract: if they select capabilities themselves via a new planner class, fail
         if "class CapabilityPlanner" in text:
             bad.append(f"{rel}:defines_CapabilityPlanner")
-        if 'RouteMode(' in text and "from nexus.contracts.hybrid_route import" not in text:
+        if "RouteMode(" in text and "from nexus.contracts.hybrid_route import" not in text:
             # new RouteMode definition, not import
             if "class RouteMode" in text:
                 bad.append(f"{rel}:defines_RouteMode")
