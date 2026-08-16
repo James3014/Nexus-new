@@ -69,7 +69,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Resolve exact revisions, impact, and worktree
+      - name: Install uv and dependencies
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          uv sync --frozen --all-groups --all-extras
+      - name: Resolve exact revisions and worktree
         id: revisions
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'workflow_dispatch' && inputs.base_sha || github.event.before }}
@@ -83,32 +87,17 @@ jobs:
           git cat-file -e "$BASE_SHA^{commit}"
           git cat-file -e "$HEAD_SHA^{commit}"
           test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          BASE_WORKTREE=$(mktemp -d /tmp/nexus-pyright-base.XXXXXX)
+          git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"
           if git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- pyproject.toml pyrightconfig.json uv.lock; then
             git diff --name-only -z "$BASE_SHA" "$HEAD_SHA" -- 'nexus/core/*.py' 'nexus/core/**/*.py' > .ci-pyright/changed.nul
           else
             { git ls-tree -r -z --name-only "$BASE_SHA" -- nexus/core; git ls-tree -r -z --name-only "$HEAD_SHA" -- nexus/core; } \
-              | python -c 'import sys; data=sys.stdin.buffer.read().split(b"\0"); paths=sorted({p for p in data if p.endswith(b".py")}); sys.stdout.buffer.write(b"\0".join(paths) + (b"\0" if paths else b""))' \
+              | .venv/bin/python -c 'import sys; data=sys.stdin.buffer.read().split(b"\0"); paths=sorted({p for p in data if p.endswith(b".py")}); sys.stdout.buffer.write(b"\0".join(paths) + (b"\0" if paths else b""))' \
               > .ci-pyright/changed.nul
           fi
-          if [ -s .ci-pyright/changed.nul ]; then
-            BASE_WORKTREE=$(mktemp -d /tmp/nexus-pyright-base.XXXXXX)
-            git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"
-            echo "base_worktree=$BASE_WORKTREE" >> "$GITHUB_OUTPUT"
-            echo "impact=required" >> "$GITHUB_OUTPUT"
-          else
-            echo "impact=none" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Record no-impact PASS
-        if: steps.revisions.outputs.impact == 'none'
-        run: |
-          printf '%s\n' '{"classification":"PASS","blocking":false,"reason":"no Pyright-governed nexus/core Python paths changed"}' > .ci-pyright/classification.json
-      - name: Install uv and dependencies
-        if: steps.revisions.outputs.impact == 'required'
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          uv sync --frozen
+          echo "base_worktree=$BASE_WORKTREE" >> "$GITHUB_OUTPUT"
       - name: Run Pyright on exact base and head
-        if: steps.revisions.outputs.impact == 'required'
         id: pyright
         env:
           BASE_WORKTREE: ${{ steps.revisions.outputs.base_worktree }}
@@ -135,7 +124,6 @@ jobs:
           run_pyright "$BASE_WORKTREE" .ci-pyright/base.json base
           run_pyright "$GITHUB_WORKSPACE" .ci-pyright/head.json head
       - name: Classify Pyright regression
-        if: steps.revisions.outputs.impact == 'required'
         run: |
           set +e
           .venv/bin/python scripts/ops/exact_base_tool_gate.py \
