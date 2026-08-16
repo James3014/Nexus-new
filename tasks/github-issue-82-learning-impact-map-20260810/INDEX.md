@@ -57,7 +57,9 @@ PR #83 lineage:
   commits, 4 files / 0 deletions)
 - exact-head live CI: 5/5 success (Nexus Pytest CI `31355967854`, Exact-Base
   Bandit, Exact-Base Ruff, Wiki Exact-Base Governance, Exact-Base Pyright)
-- current `main` `cdf2570ede5ae218f36f886b696c8da45458043a` readback:
+- current `main` `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c` readback (2026-08-16
+  rebind; prior readback at `cdf2570ede5ae218f36f886b696c8da45458043a`
+  historical):
   `docs/testing/test_impact_map.md` row `nexus/learning -> tests/learning
   active high learning_contract`; `tests/ops/test_select_tests.py`
   `test_default_impact_map_covers_new_learning_modules_without_shadowing_specific_rules`;
