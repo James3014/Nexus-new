@@ -6,8 +6,8 @@ campaign_id: github-issue-150-skill-descriptor-impact-map-20260811
 source_issue: https://github.com/James3014/Nexus-new/issues/150
 baseline_main: 02d9ff25b1e5ac2dab12c8cb3d40a7a97416da6c
 historical_baseline: 02d9ff25b1e5ac2dab12c8cb3d40a7a97416da6c
-reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
-current_main: cdf2570ede5ae218f36f886b696c8da45458043a
+reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
 ordered_cards:
   - 01-skill-descriptor-impact-map.md
 current_frontier: TERMINAL_RECONCILIATION
@@ -27,6 +27,9 @@ physical_receipt:
   required_checks: SUCCESS
   tier3: SKIPPED_EXPECTED
 ---
+
+Prior readback binding `cdf2570ede5ae218f36f886b696c8da45458043a`
+(2026-08-14) is retained as historical only.
 
 # Issue 150 Skill Descriptor Impact Mapping
 

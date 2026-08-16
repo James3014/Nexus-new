@@ -7,8 +7,8 @@ campaign_id: github-issue-150-skill-descriptor-impact-map-20260811
 source_issue: https://github.com/James3014/Nexus-new/issues/150
 baseline_main: 02d9ff25b1e5ac2dab12c8cb3d40a7a97416da6c
 historical_baseline: 02d9ff25b1e5ac2dab12c8cb3d40a7a97416da6c
-reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
-current_main: cdf2570ede5ae218f36f886b696c8da45458043a
+reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
 AUTO_CHAIN: false
 worker_may_commit: true
 worker_may_approve: false
@@ -104,3 +104,6 @@ PR #160 head `f5fa2a74aacb8481e1a40b7f1349e258ede73871` merged as
 The terminal claim remains limited to the skill-descriptor artifact contract
 and impact mapping. No #138, runtime, catalog implementation, route,
 Workforce, release, or production claim follows.
+
+Prior readback binding `cdf2570ede5ae218f36f886b696c8da45458043a`
+(2026-08-14) is retained as historical only.
