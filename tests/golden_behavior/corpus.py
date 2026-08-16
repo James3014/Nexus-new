@@ -544,6 +544,7 @@ CASES: tuple[GoldenCase, ...] = (
         "Repeating exact approved integration does not integrate twice.",
         LIFECYCLE,
         (
+            "tests/nexus/orchestrator/test_self_hosted_task_service.py::test_gb042_valid_approved_integration_is_one_side_effect_and_stable_duplicate",
             "tests/nexus/orchestrator/test_self_hosted_task_service.py::test_exact_approved_integration_is_idempotent",
         ),
     ),
