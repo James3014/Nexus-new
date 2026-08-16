@@ -11,8 +11,8 @@ owner: James Chen
 owner_authorization: direct Owner authorization for persistent claim subrecord/recovery under existing SelfHostedTaskService .state.lock
 shared_file_gate: SATISFIED_BY_PR226_MERGE_A787E8E7
 implementation_status: CANDIDATE_PENDING_OWNER_RECONCILIATION
-reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
-current_main: cdf2570ede5ae218f36f886b696c8da45458043a
+reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
 terminal_marker: ATOMIC_READY_ISSUE_WORK_CLAIM_PROVEN
 claim_ceiling: ATOMIC_READY_ISSUE_WORK_CLAIM_PROVEN_EXISTING_SELF_HOSTED_SERVICE_ONLY
 ---
@@ -27,7 +27,7 @@ runtime activation, release, or production claims.
 The historical implementation baseline is `8e0986b40db56016c79b03eb81ff3d03c85c6f32`.
 PR #226 is physically merged as historical merge `a787e8e703cc9f0df6a5bb96024db1f10157b04d`,
 so the shared service/test gate is satisfied for that bounded implementation.
-The current reconciliation baseline is `cdf2570ede5ae218f36f886b696c8da45458043a`;
+The current reconciliation baseline is `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`;
 this metadata candidate does not assert a new Owner closure receipt.
 
 ## Current Frontier
