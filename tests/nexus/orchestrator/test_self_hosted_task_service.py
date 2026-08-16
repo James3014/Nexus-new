@@ -1956,6 +1956,16 @@ def test_symlink_process_temp_root_does_not_authorize_state(tmp_path, monkeypatc
         SelfHostedTaskService(state_dir=symlink_root / "state", auto_reconcile=False)
 
 
+def test_intermediate_symlink_process_temp_root_does_not_authorize_state(tmp_path, monkeypatch):
+    linked_parent = tmp_path / "runner-parent-link"
+    linked_parent.symlink_to(Path.home(), target_is_directory=True)
+    configured_root = linked_parent / "runner-temp"
+    monkeypatch.setenv("RUNNER_TEMP", str(configured_root))
+
+    with pytest.raises(ValueError, match="production tasks must use canonical state root"):
+        SelfHostedTaskService(state_dir=configured_root / "state", auto_reconcile=False)
+
+
 def test_runner_temp_state_symlink_escape_remains_rejected(tmp_path, monkeypatch):
     runner_root = tmp_path / "runner-temp"
     runner_root.mkdir()

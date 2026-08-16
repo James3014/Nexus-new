@@ -118,7 +118,11 @@ def _temporary_state_roots() -> tuple[Path, ...]:
         if not configured:
             continue
         candidate = Path(configured).expanduser()
-        if not candidate.is_absolute() or candidate == Path("/") or candidate.is_symlink():
+        if (
+            not candidate.is_absolute()
+            or candidate == Path("/")
+            or any(part.is_symlink() for part in _path_components(candidate))
+        ):
             continue
         try:
             resolved = candidate.resolve(strict=False)
@@ -127,6 +131,16 @@ def _temporary_state_roots() -> tuple[Path, ...]:
         if resolved != Path("/"):
             roots.append(resolved)
     return tuple(dict.fromkeys(roots))
+
+
+def _path_components(path: Path) -> tuple[Path, ...]:
+    """Return lexical path components so configured symlink parents are rejected."""
+    current = Path(path.anchor or ".")
+    components = [current]
+    for part in path.parts[1:] if path.is_absolute() else path.parts:
+        current /= part
+        components.append(current)
+    return tuple(components)
 
 
 def resolve_contract_identity(
