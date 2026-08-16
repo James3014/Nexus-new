@@ -7,7 +7,8 @@
 **parent_issue:** `79`
 **campaign:** `github-issue-79-developer-feedback-option-a-20260811`
 **source_main:** `70fd467ab0d29f4373616a5e98d85b014efcd4de`
-**reconciled_main:** `cdf2570ede5ae218f36f886b696c8da45458043a`
+**reconciled_main:** `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`
+**previous reconciled snapshot:** `cdf2570ede5ae218f36f886b696c8da45458043a`
 **terminal_marker:** `DEVELOPER_FEEDBACK_V1_STORE_EMITTER_PROVEN`
 **decision:** `OPTION_A_ADDITIVE_COMPATIBILITY`
 **AUTO_CHAIN:** false
@@ -105,7 +106,8 @@ claim runtime adoption.
   physical merge/readback and required-check success.
 - Current-main verification: `tests/events/` plus `tests/core/test_event_bus.py` —
   66 passed.
-- Reconciled current main: `cdf2570ede5ae218f36f886b696c8da45458043a`.
+- Reconciled current main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`.
+- Prior reconciled snapshot `cdf2570ede5ae218f36f886b696c8da45458043a` (2026-08-15) is retained as historical only.
 
 `DEVELOPER_FEEDBACK_V1_STORE_EMITTER_PROVEN` proves only the dedicated typed
 contract/store/emitter and source tests. It does not prove runtime adoption, downstream
