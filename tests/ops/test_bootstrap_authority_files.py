@@ -20,6 +20,19 @@ FORBIDDEN_TOKENS = (
     "/Users/jameschen/Workspace/nexus/",
     '--filter "domain=tech"',
 )
+AUTHORITY_FILES = (
+    "AGENTS.md",
+    "docs/agents/TASK_EXECUTION_CONTRACT.md",
+    "docs/agents/WORKFORCE_EXECUTION_OVERLAY.md",
+)
+
+
+def _norm(text: str) -> str:
+    return " ".join(text.split())
+
+
+def _authority_texts() -> dict[str, str]:
+    return {path: (ROOT / path).read_text(encoding="utf-8") for path in AUTHORITY_FILES}
 
 
 def test_bootstrap_files_use_current_worktree_authority():
@@ -170,3 +183,59 @@ def test_external_bootstrap_recovery_boundary_is_fail_closed():
 
     assert "repair completion performs none of them" in normalized_runbook
     assert "Resume the normal governed path" in normalized_runbook
+
+
+def test_direct_delegated_contract_is_explicit_and_bounded():
+    texts = _authority_texts()
+    agents = _norm(texts["AGENTS.md"])
+    combined = _norm(" ".join(texts.values()))
+
+    assert "DIRECT_DELEGATED" in agents
+    assert "exactly one bounded external worker" in agents
+    assert "No Nexus Task Card, Nexus lifecycle, CapabilityPlanner routing" in agents
+    assert "Delegated implementation alone does not force governed execution" in agents
+    assert "independently inspects the physical diff" in agents
+    assert "AUTO_CHAIN=false" in agents
+    assert "DIRECT_DELEGATED_BLOCKED" in combined
+    assert (
+        "direct external delegation boundary"
+        in _norm(texts["docs/agents/WORKFORCE_EXECUTION_OVERLAY.md"]).lower()
+    )
+    assert (
+        "Direct work becomes governed before mutation if it delegates implementation"
+        not in texts["AGENTS.md"]
+    )
+
+
+def test_task_execution_contract_preserves_direct_delegated_exception():
+    contract = _authority_texts()["docs/agents/TASK_EXECUTION_CONTRACT.md"]
+    normalized = _norm(contract)
+
+    assert "DIRECT_DELEGATED" in contract
+    assert "not required solely because implementation is delegated" in normalized
+    assert "exceeds the `DIRECT_DELEGATED` boundary" in normalized
+    assert "Nexus lifecycle/Candidate authority" in normalized
+    assert "changes route/lifecycle/workforce/security authority" in normalized
+    assert "requires protected integration" in normalized
+    assert "production/public claim" in normalized
+    assert (
+        "Escalate to this governed contract before mutation when implementation is delegated"
+        not in contract
+    )
+
+
+def test_direct_external_delegation_does_not_inherit_nexus_workforce_admission():
+    overlay = _authority_texts()["docs/agents/WORKFORCE_EXECUTION_OVERLAY.md"]
+    normalized = _norm(overlay)
+
+    assert "DIRECT_DELEGATED" in overlay
+    assert "does NOT use Nexus Workforce Admission" in normalized
+    assert (
+        "Nexus runtime model execution always requires fresh Nexus Workforce Admission"
+        in normalized
+    )
+    assert "transport/execution evidence only" in normalized
+    assert "grants no Nexus" in normalized
+    assert "route, admission, approval, integration, merge, release" in normalized
+    assert "non-self-approving" in normalized
+    assert "Local output and delegated output are candidates" in normalized
