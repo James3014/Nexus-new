@@ -458,15 +458,38 @@ def test_formal_callers_use_mainchain_entry_contract() -> None:
                 "injected_transport": True,
                 "online_policy": "auto",
                 "mainchain_entry": True,
+                "online_invoker_provider": "agy",
+                "workforce_bindings": {
+                    "online": {
+                        "worker_id": "agy_flash",
+                        "controls": [
+                            "task_card",
+                            "allowed_files",
+                            "mandatory_commands",
+                            "independent_verification",
+                        ],
+                    }
+                },
             },
             online_enabled=True,
             online_prompt="task",
-            codeintel={"scan_report_present": True, "risk_score": 1},
+            codeintel={
+                "scan_report_present": True,
+                "risk_score": 1,
+                "impact_report_present": True,
+                "workspace_root": "/tmp",
+                "verify_commands": ["echo ok"],
+                "verify_timeout_sec": 10,
+                "mempalace_tenant_id": "caller-tenant",
+                "mempalace_artifact": {
+                    "artifact_id": "caller-1",
+                    "content": "formal caller mainchain contract",
+                },
+                "mempalace_artifact_type": "task_receipt",
+                "mempalace_query": "caller-1",
+            },
         ),
         online_invoker=_online,
-        planner=_SelectPlanner(
-            ["codeintel", "artifact_gate", "claim_gate", "delivery_gate"]
-        ),
         verifier=lambda c: {
             "task_id": c["task_id"],
             "invoked": True,

@@ -531,11 +531,6 @@ def test_p2_shared_hashes_and_consumption_fields() -> None:
     """Local/Online share sealed hashes; receipt.consumed_evidence_ids non-empty after with_nexus."""
     from nexus.services.mainchain_entry import run_mainchain
 
-    planner = _Planner(
-        selected=["codeintel", "memory", "belief", "artifact_gate", "claim_gate", "delivery_gate"],
-        required=["codeintel"],
-    )
-
     def codeintel(ctx):
         return {
             "task_id": ctx["task_id"],
@@ -584,17 +579,43 @@ def test_p2_shared_hashes_and_consumption_fields() -> None:
             task_type="repair",
             route={
                 "recommended_flow": "direct",
-                "provider": "gemini",
+                "provider": "agy",
                 "injected_transport": True,
+                "online_invoker_provider": "agy",
+                "route_features": {"memory_hits": 1},
+                "workforce_bindings": {
+                    "online": {
+                        "worker_id": "agy_flash",
+                        "controls": [
+                            "task_card",
+                            "allowed_files",
+                            "mandatory_commands",
+                            "independent_verification",
+                        ],
+                    }
+                },
             },
             online_prompt="return ok",
             online_payload="payload",
             local_enabled=False,
-            codeintel={"scan_report_present": True, "risk_score": 1},
+            codeintel={
+                "scan_report_present": True,
+                "risk_score": 1,
+                "impact_report_present": True,
+                "workspace_root": "/tmp",
+                "verify_commands": ["echo ok"],
+                "verify_timeout_sec": 10,
+                "mempalace_tenant_id": "cons-tenant",
+                "mempalace_artifact": {
+                    "artifact_id": "cons-1",
+                    "content": "shared consumption proof",
+                },
+                "mempalace_artifact_type": "task_receipt",
+                "mempalace_query": "cons-1",
+            },
             evidence_refs=("t",),
         ),
         online_invoker=_online,
-        planner=planner,
         capability_invokers={
             "codeintel": codeintel,
             "memory": memory,
@@ -1389,18 +1410,6 @@ def test_local_and_online_share_root_bundle_hash(tmp_path: Path) -> None:
     from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
     from nexus.services.mainchain_entry import run_mainchain
 
-    planner = _Planner(
-        selected=[
-            "codeintel",
-            "memory",
-            "belief",
-            "local_model_executor",
-            "artifact_gate",
-            "claim_gate",
-            "delivery_gate",
-        ],
-        required=["codeintel"],
-    )
     captured_local: dict[str, str] = {}
 
     def _gen(req: Any) -> str:
@@ -1440,20 +1449,61 @@ def test_local_and_online_share_root_bundle_hash(tmp_path: Path) -> None:
             task_type="repair",
             route={
                 "recommended_flow": "hybrid",
-                "provider": "gemini",
+                "provider": "agy",
                 "injected_transport": True,
                 "workspace_root": str(tmp_path),
+                "online_invoker_provider": "agy",
+                "workforce_bindings": {
+                    "online": {
+                        "worker_id": "agy_flash",
+                        "controls": [
+                            "task_card",
+                            "allowed_files",
+                            "mandatory_commands",
+                            "independent_verification",
+                        ],
+                    },
+                    "local": {
+                        "worker_id": "local_coder_7b",
+                        "controls": [
+                            "small_scope",
+                            "parser",
+                            "compile",
+                            "focused_tests",
+                            "reversible_application",
+                        ],
+                    },
+                },
             },
             online_prompt="return ok",
             online_payload="payload",
             local_enabled=True,
             local_request=local_request,
             evidence_refs=("t",),
-            codeintel={"scan_report_present": True, "risk_score": 1},
+            codeintel={
+                "scan_report_present": True,
+                "risk_score": 1,
+                "impact_report_present": True,
+                "workspace_root": str(tmp_path),
+                "verify_commands": ["echo ok"],
+                "verify_timeout_sec": 10,
+                "mempalace_tenant_id": "share-hash-tenant",
+                "mempalace_artifact": {
+                    "artifact_id": "share-hash-1",
+                    "content": "shared root bundle hash",
+                },
+                "mempalace_artifact_type": "task_receipt",
+                "mempalace_query": "share-hash-1",
+            },
         ),
         online_invoker=_online,
-        planner=planner,
-        local_service=LocalAssistService(provider=InjectedLocalModelProvider(_gen)),
+        local_service=LocalAssistService(
+            provider=InjectedLocalModelProvider(
+                _gen,
+                provider_identity="ollama",
+                model_identity="qwen2.5-coder:7b-instruct",
+            )
+        ),
         capability_invokers={
             "codeintel": lambda c: _cap_ok("codeintel", c["task_id"]),
             "memory": lambda c: _cap_ok("memory", c["task_id"]),
@@ -2852,6 +2902,9 @@ def test_final_mainchain_canary_receipt_fields(tmp_path: Path, monkeypatch: pyte
     import json
     import os
 
+    # Local Armor receipts land in the test worktree root; ephemeral temp is
+    # expected for pytest, matching the family-canary matrix contract.
+    monkeypatch.setenv("NEXUS_ARMOR_ALLOW_EPHEMERAL", "1")
     from nexus.services.capability_evidence_bundle import verify_capability_evidence_bundle
     from nexus.services.local_assist_service import LocalAssistRequest, LocalAssistService
     from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
@@ -2863,18 +2916,6 @@ def test_final_mainchain_canary_receipt_fields(tmp_path: Path, monkeypatch: pyte
     task_id = "final-canary-001"
     (tmp_path / "target.py").write_text("def target():\n    return 1\n", encoding="utf-8")
 
-    planner = _Planner(
-        selected=[
-            "codeintel",
-            "memory",
-            "belief",
-            "local_model_executor",
-            "artifact_gate",
-            "claim_gate",
-            "delivery_gate",
-        ],
-        required=["codeintel"],
-    )
     local_calls = {"n": 0, "prompts": []}
     online_calls = {"n": 0, "prompts": []}
 
@@ -2895,7 +2936,12 @@ def test_final_mainchain_canary_receipt_fields(tmp_path: Path, monkeypatch: pyte
         prompt = str(ctx.get("online_prompt") or "")
         online_calls["prompts"].append(prompt)
         online_calls["last_prompt"] = prompt
-        return _online(ctx)
+        out = _online(ctx)
+        # Workforce admission resolves the only admitted provider (agy_flash -> agy);
+        # the response must carry that exact provider identity or the runtime fails
+        # closed with online_response_provider_mismatch.
+        out["provider"] = "agy"
+        return out
 
     local_request = LocalAssistRequest(
         schema="nexus.local_assist.request.v1",
@@ -2936,10 +2982,34 @@ def test_final_mainchain_canary_receipt_fields(tmp_path: Path, monkeypatch: pyte
             task_type="repair",
             route={
                 "recommended_flow": "hybrid",
-                "provider": "gemini",
+                "provider": "agy",
                 "injected_transport": True,
                 "workspace_root": str(tmp_path),
                 "mainchain_entry": True,
+                "online_invoker_provider": "agy",
+                "workforce_bindings": {
+                    "online": {
+                        "worker_id": "agy_flash",
+                        "controls": [
+                            "task_card",
+                            "allowed_files",
+                            "mandatory_commands",
+                            "independent_verification",
+                        ],
+                    },
+                    "local": {
+                        "worker_id": "local_coder_7b",
+                        "controls": [
+                            "small_scope",
+                            "parser",
+                            "compile",
+                            "focused_tests",
+                            "reversible_application",
+                        ],
+                    },
+                },
+                "route_features": {"memory_hits": 1},
+                "executor_flags": {},
             },
             online_prompt="return ok",
             online_payload="payload",
@@ -2947,11 +3017,37 @@ def test_final_mainchain_canary_receipt_fields(tmp_path: Path, monkeypatch: pyte
             local_request=local_request,
             online_enabled=True,
             evidence_refs=("canary:final",),
-            codeintel={"scan_report_present": True, "risk_score": 1},
+            codeintel={
+                "scan_report_present": True,
+                "risk_score": 1,
+                "impact_report_present": True,
+                "workspace_root": str(tmp_path),
+                "verify_commands": ["echo ok"],
+                "verify_timeout_sec": 10,
+                "intent_pass": True,
+                "target_files": ["target.py"],
+                "impact_map": {"target.py": {"impact": "canary"}},
+                "acceptance_criteria": ["canary closure complete"],
+                "deliverables": ["canary receipt"],
+                "steps": ["plan", "execute", "verify"],
+                "handoff_readiness": 1.0,
+                "mempalace_tenant_id": "final-canary-tenant",
+                "mempalace_artifact": {
+                    "artifact_id": task_id,
+                    "content": "final canary production receipt",
+                },
+                "mempalace_artifact_type": "task_receipt",
+                "mempalace_query": task_id,
+            },
         ),
         online_invoker=online,
-        planner=planner,
-        local_service=LocalAssistService(provider=InjectedLocalModelProvider(local_gen)),
+        local_service=LocalAssistService(
+            provider=InjectedLocalModelProvider(
+                local_gen,
+                provider_identity="ollama",
+                model_identity="qwen2.5-coder:7b-instruct",
+            )
+        ),
         capability_invokers=production_invokers,
         verifier=_verifier_explicit,
         learning=_learning,
@@ -3044,7 +3140,66 @@ def test_final_mainchain_canary_receipt_fields(tmp_path: Path, monkeypatch: pyte
     assert (ec or {}).get("capability_payload_consumed") is True
     local_ph = str((ec or {}).get("consumer_payload_hash") or "")
     online_ph = str((lineage or {}).get("consumer_payload_hash") or "")
-    assert local_ph and online_ph and local_ph == online_ph
+    from nexus.services.capability_evidence_bundle import hash_consumer_payloads
+
+    local_payloads = list((ec or {}).get("consumed_capability_payloads") or [])
+    online_payloads = list((lineage or {}).get("consumed_capability_payloads") or [])
+    assert local_payloads, "Local must serialize bounded consumer payloads"
+    assert online_payloads, "Online must serialize bounded consumer payloads"
+    local_caps = [str(p.get("capability") or "") for p in local_payloads]
+    online_caps = [str(p.get("capability") or "") for p in online_payloads]
+    assert all(local_caps), local_payloads
+    assert all(online_caps), online_payloads
+    assert len(set(local_caps)) == len(local_caps), local_caps
+    assert len(set(online_caps)) == len(online_caps), online_caps
+    local_cap_set = set(local_caps)
+    online_cap_set = set(online_caps)
+
+    # Each side's physical hash must be recomputed from its own canonical rows.
+    assert hash_consumer_payloads(local_payloads) == local_ph
+    assert hash_consumer_payloads(online_payloads) == online_ph
+
+    # Local consumption basis must be a legal subset of the Online basis, and
+    # every payload Local claims to consume must be byte-identical to the same
+    # capability on the Online serialized basis.
+    assert local_cap_set <= online_cap_set, sorted(local_cap_set - online_cap_set)
+    online_by_cap = {str(p.get("capability") or ""): p for p in online_payloads}
+    bundle_payload_by_cap = {
+        str(e.get("name") or ""): e.get("consumer_payload")
+        for e in (bundle.get("entries") or [])
+        if e.get("success") and e.get("consumer_payload")
+    }
+    for lp in local_payloads:
+        cap = str(lp.get("capability") or "")
+        op = online_by_cap.get(cap)
+        bp = bundle_payload_by_cap.get(cap)
+        assert op is not None, cap
+        assert bp is not None, cap
+        assert hash_consumer_payloads([lp]) == hash_consumer_payloads([op]), cap
+        assert hash_consumer_payloads([lp]) == hash_consumer_payloads([bp]), cap
+    assert local_ph == hash_consumer_payloads(
+        [online_by_cap[c] for c in local_caps]
+    ), "Local basis must exactly match the Online shared-basis serialization"
+    used_set = set(ec.get("selected_capabilities_used") or [])
+    assert local_cap_set <= used_set, sorted(local_cap_set - used_set)
+    # The executor itself may be marked used without a serialized payload; any
+    # other gap would mean the payload basis is not the recorded consumption set.
+    assert used_set - local_cap_set <= {"local_model_executor"}, sorted(
+        used_set - local_cap_set
+    )
+
+    # Online-only canonical-required governance caps must carry real receipts,
+    # so a broader Online full set must hash differently from the Local subset.
+    for cap in ("harness_preflight_sensor", "mempalace_gate"):
+        assert cap in online_cap_set, cap
+        entry = next(e for e in (bundle.get("entries") or []) if e.get("name") == cap)
+        assert entry is not None, cap
+        assert entry.get("success") is True, cap
+        phys = str(entry.get("physical_callable") or "")
+        assert phys and not phys.startswith(("test:", "fixture:")), (cap, phys)
+        assert entry.get("consumer_payload"), cap
+    assert local_cap_set < online_cap_set, local_cap_set
+    assert local_ph != online_ph, "Full-set hash must differ when Online consumes extra payloads"
 
     # Phase C: causal used status on mainchain Local path (not selected=used copy).
     selected_caps = list(
@@ -3081,8 +3236,13 @@ def test_final_mainchain_canary_receipt_fields(tmp_path: Path, monkeypatch: pyte
 
     blockers = list(receipt.get("capability_closure_blockers") or [])
     assert receipt.get("receipt_complete") is True
-    assert receipt.get("capability_closure_complete") is True, blockers
-    assert blockers == []
+    # research_route is a required-but-escalate-only CONTROL_PLANE_REFERENCE
+    # suggestion node: untriggered production policy skips it, and its real
+    # executor is a planner suggestion (never a production executor F path), so
+    # full closure is not claimed. Every other selected capability must have
+    # truly executed and passed, which receipt_complete already enforces.
+    assert receipt.get("capability_closure_complete") is False, blockers
+    assert blockers == ["research_route:SKIPPED:SKIPPED_POLICY_NOT_TRIGGERED"], blockers
 
 
 # --- Phase 0 / truth-seal false-green: consumption + adapter invariants ---

@@ -17,7 +17,6 @@ from typing import Any, Mapping
 
 import pytest
 
-from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.services.capability_registry import build_default_mainchain_invokers
 from nexus.services.mainchain_entry import run_mainchain
 from nexus.services.unified_runtime import UnifiedRuntimeRequest
@@ -34,8 +33,20 @@ def _make_request(task_id: str = "v1-vertical-001") -> UnifiedRuntimeRequest:
         task_type="repair",
         route={
             "recommended_flow": "direct",
-            "provider": "none",
+            "provider": "agy",
             "injected_test_transport": True,
+            "online_invoker_provider": "agy",
+            "workforce_bindings": {
+                "online": {
+                    "worker_id": "agy_flash",
+                    "controls": [
+                        "task_card",
+                        "allowed_files",
+                        "mandatory_commands",
+                        "independent_verification",
+                    ],
+                }
+            },
         },
         online_enabled=True,
         local_enabled=False,
@@ -43,6 +54,18 @@ def _make_request(task_id: str = "v1-vertical-001") -> UnifiedRuntimeRequest:
             "verify_commands": ["echo harness-preflight-v1-ok"],
             "workspace_root": "/tmp",
             "verify_timeout_sec": 10,
+            "intent_pass": True,
+            "risk_score": 1,
+            "target_files": ["tests/services/test_v1_existing_authority_vertical_proof.py"],
+            "impact_map": {
+                "tests/services/test_v1_existing_authority_vertical_proof.py": {
+                    "impact": "proof",
+                }
+            },
+            "acceptance_criteria": ["receipt complete through existing authority"],
+            "deliverables": ["mainchain receipt"],
+            "steps": ["plan", "execute", "verify"],
+            "handoff_readiness": 1.0,
             "mempalace_tenant_id": "v1-proof-tenant",
             "mempalace_artifact": {
                 "artifact_id": task_id,
@@ -60,6 +83,7 @@ def _make_online_invoker(task_id: str = "v1-vertical-001"):
     def online_invoker(ctx: Mapping[str, Any]) -> dict[str, Any]:
         return {
             "task_id": task_id,
+            "provider": "agy",
             "invoked": True,
             "output_delivered": True,
             "gate_passed": True,
@@ -110,7 +134,6 @@ def _run_proof(
     return run_mainchain(
         request=req,
         online_invoker=online_invoker or _make_online_invoker(task_id),
-        planner=CapabilityPlanner(),
         capability_invokers=build_default_mainchain_invokers(),
         verifier=verifier or _make_verifier(task_id),
         learning=learning or _make_learning(task_id),
@@ -241,7 +264,23 @@ def test_nc_v1_7_harness_preflight_failure_blocks_receipt() -> None:
     req = UnifiedRuntimeRequest(
         task_id="nc-v1-7", workspace_revision="rev-nc7",
         task_statement="NC V1-7 preflight block test", task_type="repair",
-        route={"recommended_flow": "direct", "provider": "none", "injected_test_transport": True},
+        route={
+            "recommended_flow": "direct",
+            "provider": "agy",
+            "injected_test_transport": True,
+            "online_invoker_provider": "agy",
+            "workforce_bindings": {
+                "online": {
+                    "worker_id": "agy_flash",
+                    "controls": [
+                        "task_card",
+                        "allowed_files",
+                        "mandatory_commands",
+                        "independent_verification",
+                    ],
+                }
+            },
+        },
         online_enabled=True, local_enabled=False,
         codeintel={"workspace_root": "/tmp", "mempalace_tenant_id": "nc-v1-7-tenant", "mempalace_artifact": {"artifact_id": "nc-v1-7", "content": "test"}, "mempalace_artifact_type": "task_receipt", "mempalace_query": "nc-v1-7"},
         pillars={},

@@ -192,15 +192,40 @@ def test_p0_single_planner_decision_id_on_mainchain_receipt() -> None:
             "injected_transport": True,
             "online_policy": "auto",
             "mainchain_entry": True,
+            "online_invoker_provider": "agy",
+            "workforce_bindings": {
+                "online": {
+                    "worker_id": "agy_flash",
+                    "controls": [
+                        "task_card",
+                        "allowed_files",
+                        "mandatory_commands",
+                        "independent_verification",
+                    ],
+                }
+            },
         },
         online_enabled=True,
         online_prompt="task",
-        codeintel={"scan_report_present": True, "risk_score": 3},
+        codeintel={
+            "scan_report_present": True,
+            "risk_score": 3,
+            "impact_report_present": True,
+            "workspace_root": "/tmp",
+            "verify_commands": ["echo ok"],
+            "verify_timeout_sec": 10,
+            "mempalace_tenant_id": "p0-freeze-tenant",
+            "mempalace_artifact": {
+                "artifact_id": "p0-freeze-001",
+                "content": "p0 single planner decision",
+            },
+            "mempalace_artifact_type": "task_receipt",
+            "mempalace_query": "p0-freeze-001",
+        },
     )
     receipt = run_mainchain(
         req,
         online_invoker=_online,
-        planner=_Planner(),
         verifier=lambda c: {
             "task_id": c["task_id"],
             "invoked": True,
