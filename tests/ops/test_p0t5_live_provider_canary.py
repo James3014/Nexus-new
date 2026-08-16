@@ -10,8 +10,13 @@ import pytest
 
 # Ensure scripts/ops can be imported if needed, or import function directly
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "ops"))
-import p0t5_live_provider_canary
-from p0t5_live_provider_canary import get_provider_executable_identity, run_canary_campaign
+import p0t5_live_provider_canary  # noqa: I001
+from p0t5_live_provider_canary import (
+    _assert_canonical_admission,
+    _canonical_workforce_binding,
+    get_provider_executable_identity,
+    run_canary_campaign,
+)
 from nexus.services.unified_runtime import resolve_registered_online_cli_spec
 
 
@@ -187,18 +192,46 @@ def test_canary_stops_after_two_attempts(tmp_path: Path, monkeypatch):
     assert len(nonces) == 2
 
 
-def test_canary_open_code_failure_fallback_policy_is_bounded(tmp_path: Path, monkeypatch):
+def test_canary_rejects_substituted_provider_binding(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("NEXUS_P0T5_ALLOW_REAL_PROVIDER", "1")
-    # Verify gemini is an allowed alternative
-    nonces = []
-    summary = run_canary_campaign(
-        provider="gemini",
-        project_root=str(tmp_path),
-        receipt_dir=str(tmp_path / "receipts"),
-        runner=_make_fixture_runner(nonces),
-    )
-    assert summary["provider"] == "gemini"
-    assert summary["real_provider_call_count"] == 2
+    with pytest.raises(ValueError, match="provider_not_allowed"):
+        run_canary_campaign(
+            provider="gemini",
+            project_root=str(tmp_path),
+            receipt_dir=str(tmp_path / "receipts"),
+            runner=_make_fixture_runner([]),
+        )
+
+
+def test_canary_admission_binding_hostiles_fail_closed():
+    binding = _canonical_workforce_binding("opencode")
+    decision = {
+        "decision": "ALLOW",
+        "resolved_worker_id": binding["worker_id"],
+        "resolved_provider": binding["provider"],
+        "resolved_model": binding["model"],
+    }
+    valid = {"workforce_admission": {"overall_decision": "ALLOW", "records": [{"decision": decision}]}}
+    _assert_canonical_admission(valid, 1)
+
+    hostile = [
+        {},
+        {"workforce_admission": None},
+        {"workforce_admission": {"overall_decision": "ESCALATE", "records": [{"decision": decision}]}},
+        {"workforce_admission": {"overall_decision": "ALLOW", "records": []}},
+    ]
+    for receipt in hostile:
+        with pytest.raises(RuntimeError, match="workforce_admission_"):
+            _assert_canonical_admission(receipt, 1)
+
+    for field in ("resolved_worker_id", "resolved_provider", "resolved_model"):
+        substituted = dict(decision)
+        substituted[field] = "substituted"
+        with pytest.raises(RuntimeError, match="workforce_admission_"):
+            _assert_canonical_admission(
+                {"workforce_admission": {"overall_decision": "ALLOW", "records": [{"decision": substituted}]}},
+                1,
+            )
 
 
 def test_canary_does_not_automatically_use_codex(tmp_path: Path, monkeypatch):
@@ -337,7 +370,7 @@ def test_canary_reuses_resolved_spec_for_both_attempts(tmp_path: Path, monkeypat
     )
 
     nonces = []
-    summary = run_canary_campaign(
+    run_canary_campaign(
         provider="opencode",
         entrypoint="mainchain",
         project_root=str(tmp_path),
