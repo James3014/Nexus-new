@@ -9,8 +9,8 @@ purpose: Govern Issue #114 Golden evaluator evidence hardening on fresh GitHub m
 
 - Issue: `#114`
 - Historical baseline: `c450c75cedbe7679f564d4eaddb7aa351b8aa0ee`
-- Reconciled main: `cdf2570ede5ae218f36f886b696c8da45458043a`
-- Current main: `cdf2570ede5ae218f36f886b696c8da45458043a`
+- Reconciled main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`
+- Current main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`
 - AUTO_CHAIN: `false`
 - Completed card: `00-golden-evaluator-hardening.md`
 - Terminal marker: `GOLDEN_EVALUATOR_EVIDENCE_HARDENING_PROVEN`
@@ -33,6 +33,9 @@ purpose: Govern Issue #114 Golden evaluator evidence hardening on fresh GitHub m
 - Current-main readback: exact node collection validation, provenance with
   source tree/clean-state binding, and the push-to-main Golden backstop are
   present in source/workflow.
+
+Prior readback binding `cdf2570ede5ae218f36f886b696c8da45458043a`
+(2026-08-15) is retained as historical only.
 
 ## Boundaries
 

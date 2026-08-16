@@ -5,8 +5,8 @@
 COMPLETE / TERMINAL_RECONCILIATION
 
 - Historical baseline: `c450c75cedbe7679f564d4eaddb7aa351b8aa0ee`
-- Reconciled main: `cdf2570ede5ae218f36f886b696c8da45458043a`
-- Current main: `cdf2570ede5ae218f36f886b696c8da45458043a`
+- Reconciled main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`
+- Current main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`
 - Terminal marker: `GOLDEN_EVALUATOR_EVIDENCE_HARDENING_PROVEN`
 - Claim ceiling: `GOLDEN_EVALUATOR_EVIDENCE_HARDENING_PROVEN_ONLY`
 - AUTO_CHAIN: `false`
