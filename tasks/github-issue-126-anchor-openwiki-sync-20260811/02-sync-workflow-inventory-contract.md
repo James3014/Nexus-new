@@ -85,7 +85,7 @@ PR #118 activation remain with the primary agent/Owner authority.
 
 Completed by PR #127 exact head `6d1eb2bf39db537a3f0714dda77ba0c290da11cf`,
 merge `fffc127cb`, required checks successful, reconciled on current `main`
-`cdf2570ede5ae218f36f886b696c8da45458043a`. Historical workflow-count delta
+`46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`. Historical workflow-count delta
 `9` -> `10` remains effective. Markers: `BOOTSTRAP_ANCHOR_INSTALLED`,
 `OPENWIKI_INVENTORY_SYNCHRONIZED`; ceiling: `NO_PROTECTED_PROVENANCE_CLAIM`;
 `AUTO_CHAIN=false`.
