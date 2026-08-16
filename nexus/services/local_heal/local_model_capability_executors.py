@@ -283,15 +283,21 @@ class LocalHealPipelineCapabilityExecutor:
             )
 
         # Pipeline topology requested - actual Path A execution
-        from nexus.services.local_heal.receipt import canonical_run_group
+        from nexus.services.local_heal.receipt import (
+            canonical_run_group,
+            derive_default_run_group,
+        )
 
         route_ctx_for_execution = (
             dict(ctx.route_context) if isinstance(ctx.route_context, dict) else {}
         )
         try:
-            canonical_run_group_value = canonical_run_group(
-                route_ctx_for_execution.get("run_group", "")
-            )
+            if "run_group" not in route_ctx_for_execution:
+                canonical_run_group_value = derive_default_run_group(ctx)
+            else:
+                canonical_run_group_value = canonical_run_group(
+                    route_ctx_for_execution["run_group"]
+                )
         except ValueError as exc:
             return CapabilityExecutionResult(
                 name="repair_loop",
