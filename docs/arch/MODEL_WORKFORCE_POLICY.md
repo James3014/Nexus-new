@@ -9,7 +9,7 @@
 **Machine source:** `nexus/config/model_workforce.yaml`
 
 **Benchmark matrix:** `nexus/config/model_three_arm_matrix.yaml`
-**Last verified:** 2026-07-29
+**Last verified:** 2026-08-15
 
 This file defines workforce eligibility: which model workers Nexus may admit,
 the context each worker may receive, its autonomy ceiling, and the conditions
@@ -35,17 +35,18 @@ existing workforce admission rules.
 
 A CLI being installed, a provider catalog listing a model, or a model producing one good answer does not make it an approved Nexus worker.
 
-Every candidate has two independent dimensions:
+Every candidate is governed across three distinct architectural layers:
 
-1. **Capability state** — what prior governed evidence and the current benchmark support.
-2. **Operational availability** — whether the current CLI, account, model alias, and local runtime can deliver a response now.
-
-Provider/client failure is not scored as model reasoning failure. Conversely, a semantic answer passing the Full arm is not lifecycle closure: the 2026-07-29 matrix did not establish `receipt_complete=true` or `capability_closure_complete=true` for any model.
+1. **Semantic capability lineage** — the underlying model family and reasoning capability lineage (e.g. `gemini-3.7-flash-medium`, `deepseek-v4-flash`). Models sharing lineage share reasoning characteristics but do not share execution identity or admitted authority.
+2. **Exact execution identity** — the specific provider, exact model string, and transport adapter (e.g. `agy` with `gemini-3.7-flash-medium`, `opencode` with `opencode/deepseek-v4-flash-free` vs `opencode` with `opencode-go/deepseek-v4-flash`). Identity matching is exact and fails closed.
+3. **Admitted authority** — the repository-governed state, autonomy ceiling (e.g. L3 for Gemini 3.7 Flash Medium, L2 for DeepSeek V4 Flash), admitted roles, required controls, and forbidden actions recorded in `nexus/config/model_workforce.yaml`. Admitted authority is never automatic from lineage or execution availability.
 
 `CapabilityPlanner` is the sole route and capability-selection authority.
 `HybridRouteDecision` is a Planner-derived decision contract/projection, not a
 second selector, router, or planner. This policy is a workforce eligibility
 constraint consumed after route authorization, not another router or selector.
+Neither Gemini 3.7 Flash Medium nor DeepSeek V4 Flash is a default route.
+Neither worker is granted L4 autonomy; L4 remains experimental and non-admitted.
 
 ## 2. Uniform three-arm benchmark status
 
@@ -66,7 +67,7 @@ The task covered started-call accounting, a bounded Python implementation, and c
 | Models proving Full receipt closure | 0 |
 | Stable promotions proven | 0 |
 
-The matrix is an initial uniform calibration. Stable promotion still requires a second repetition, a role-specific suite, and a physical patch verifier for mutating roles.
+The 2026-07-29 matrix is a historical baseline and comparative diagnostic instrument. Historical 2026-07-29 scores remain frozen and immutable. Future requalification uses cumulative evidence, stable-floor regression, target/current frontier assessment, failure-family/hidden probes, and transport/protocol/isolation verification rather than requiring re-execution of the initial matrix from zero.
 
 ## 3. Current active workforce
 
@@ -74,11 +75,12 @@ The matrix is an initial uniform calibration. Stable promotion still requires a 
 |---|---|---:|---|---|
 | Codex Luna — `gpt-5.6-luna` | Main engineering, milestone closure, integration | Historical L3 | Governed mainchain | Available; Codex CLI 0.146.0 with `gpt-5.6-luna` returned exactly `OK` in a read-only smoke on 2026-07-29 |
 | Agy Flash — `gemini-3.6-flash-high` | Fast bounded implementation and focused verification | L2 | **Nexus-bounded** | Available; benchmark 10/11 → 11/11 → 10/11 |
-| Agy Flash Medium — `gemini-3.6-flash-medium` | Bounded candidate/implementation and focused verification only | L1 | **Nexus-bounded** | Registered conditional; exact Task Card, parser/verifier, and independent verification required; provider/model revision unresolved |
+| Agy Flash Medium — `gemini-3.6-flash-medium` | Bounded candidate/implementation and focused verification only | L1 | **Nexus-bounded** | Existing registered conditional identity preserved for backward compatibility; exact Task Card, parser/verifier, and independent verification required; non-default route |
+| Agy Flash 3.7 Medium — `gemini-3.7-flash-medium` | Bounded candidate/implementation and focused verification | L3 | **Nexus-bounded** | Distinct registered conditional identity; admitted autonomy ceiling L3; exact Task Card, parser/verifier, and independent verification required; non-default route; experimental L4 non-admitted |
 | Grok 4.5 | Independent review, hidden-defect search, evidence audit; bounded candidate generation | L2+ | Bounded or Full semantic context | Available; benchmark 11/11 on all arms |
 | OpenCode MiMo — `opencode/mimo-v2.5-free` | Bounded code candidate | L1 | Bounded isolated prompt | Available; 11/11 all arms; high fixed input-token overhead |
 | OpenCode Ling — `opencode/ling-3.0-flash-free` | Bounded code candidate | Current L1 | Bounded isolated prompt | Available; 11/11 all arms; high fixed input-token overhead. The unapproved v2 proposal would lower it to read-only L0 |
-| OpenCode DeepSeek V4 Flash — `opencode/deepseek-v4-flash-free` | Bounded OpenCode code candidate | L1 | Bounded isolated prompt | Owner-approved 2026-08-11; two comparable 11/11 repetitions and physical evidence; high fixed input-token overhead |
+| OpenCode DeepSeek V4 Flash — `opencode/deepseek-v4-flash-free` | Bounded OpenCode code candidate | L2 | Bounded isolated prompt | Owner-approved 2026-08-15; admitted autonomy ceiling L2; non-default route; experimental L4 non-admitted; shares semantic capability lineage with `opencode-go/deepseek-v4-flash` while execution identities remain exact and separate; high fixed input-token overhead |
 | Cline — `glm-5.2` | Bounded code candidate | L1 | Bounded isolated prompt | Registered conditional; Cline CLI adapter and external-runtime authorization required |
 | Local Advisor — `qwen2.5-s2t-advisor:3b` | Classification, extraction, compression, compact diagnosis | L0.5 | **Nexus-bounded only** | Available; 9/11 → 11/11 → 10/11 |
 | Local Coder — `qwen2.5-coder:7b-instruct` | Small bounded code candidate | L1 | Bounded exact contract | Available; 10/11 on every arm; no measured Nexus uplift |
@@ -94,6 +96,7 @@ The matrix is an initial uniform calibration. Stable promotion still requires a 
 - OpenCode free models are subscription-free, not context-cheap. Typical calls carried roughly 20k+ fixed input tokens. They require isolated execution and external verification.
 - Grok may review or generate a bounded candidate, but cannot be the sole production-readiness adjudicator.
 - Agy should receive a locked task card, exact file scope, and mandatory commands. It should not own architecture authority.
+- The existing Gemini 3.6 Flash Medium identity remains at L1. Gemini 3.7 Flash Medium is a distinct exact worker identity admitted at ceiling L3, and DeepSeek V4 Flash at ceiling L2; none is made a default route and no L4 authority is granted.
 
 ## 4. Conditional, committee-only, and shadow workers
 
@@ -101,7 +104,7 @@ The matrix is an initial uniform calibration. Stable promotion still requires a 
 |---|---|---|
 | `deepseek-coder:6.7b-instruct` | Committee secondary proposer only | 8/11 → 9/11 → 0/11; Full envelope failure |
 | `qwythos:9b` | Bounded second opinion or committee candidate | 10/11 across arms, no uplift, Full latency about 95 s |
-| `opencode/deepseek-v4-flash-free` | L1 bounded OpenCode code candidate | Owner-approved after two comparable repetitions and PR #84/#85 physical evidence; remains candidate-only and externally verified |
+| `opencode/deepseek-v4-flash-free` | L2 bounded OpenCode code candidate | Owner-approved 2026-08-15; admitted ceiling L2; candidate-only and externally verified; shares semantic capability lineage with `opencode-go/deepseek-v4-flash` while execution identity remains exact and separate; `default_route: false` |
 | `deepseek-coder-v2:lite` | Bounded secondary code candidate | 9/11 → 10/11 → 10/11; missed implementation edge case |
 | `qwen2.5:1.5b` | Simple extraction or read-only fixed-schema candidate | 9/11 across arms; no uplift and weak implementation behavior |
 
@@ -216,46 +219,45 @@ Repository authority, not chat memory, is the memory mechanism:
 
 A future agent must refresh runtime discovery when a CLI/model version changes, a blocked provider recovers, the benchmark snapshot is stale, or a high-cost task begins.
 
-## 9. Promotion gate
+## 9. Promotion gate and requalification protocol
 
-Higher autonomy requires all of the following:
+Higher autonomy requires evidence-bound qualification. Rather than re-running the uniform 2026-07-29 three-arm matrix from scratch for every evaluation, the historical three-arm matrix serves as a baseline comparative diagnostic, while future requalification uses cumulative evidence:
 
-- explicit model identity and provider/CLI version;
-- governed adapter and authorization path;
-- two complete comparable three-arm repetitions;
-- role-specific tasks, not only the composite calibration;
-- exact output/schema compliance;
-- physical patch/apply evidence for mutating roles;
-- deterministic verification and receipt completeness;
-- failure classification separating model, transport, permission, quota, and resource pressure;
-- measured token, latency, and retry cost;
-- no unresolved unsafe overclaim, thinking leak, schema drift, or tool-discipline pattern.
+- **Stable-floor regression** — proving lower-tier behaviors have not regressed.
+- **Target and current frontier evaluation** — targeted testing at the required autonomy boundary.
+- **Failure-family and hidden defect probes** — specific checks for known failure modes (e.g. envelope loss, thinking drift).
+- **Transport, protocol, and isolation verification** — adapter preflight, CLI version binding, and workspace containment.
+- **Distinct evidence phases** — `FIRST_PASS` autonomous generation, hidden defect probes, and `VERIFIER_GUIDED_REPAIR` must remain strictly distinct and cannot be conflated.
+- **Experimental boundaries** — observed higher-tier repair or frontier behaviors (such as L4 repair) remain experimental and are NOT admitted autonomy.
 
-Until those gates pass, the lower autonomy level and stricter context policy remain authoritative.
+Until those gates pass and are formally recorded in `nexus/config/model_workforce.yaml`, the lower autonomy level and stricter context policy remain authoritative.
 
-## 10. Dated Owner-approved amendment — 2026-08-11
+## 10. Dated Owner-approved amendment — 2026-08-15
 
-The Owner-approved DeepSeek V4 Flash amendment is active for the registered
-worker `opencode_deepseek_v4_flash`:
+The Owner-approved Model Workforce Lineage Writeback amendment is active:
 
-- Approved role: L1 bounded OpenCode code candidate.
-- Exact active roles: `bounded_candidate_generation` and
-  `compact_code_candidate`.
-- Autonomy remains `L1`; `default_route` remains `false`.
-- Independent parser, focused tests, verifier, bounded context, isolated
-  directory, and JSON event receipt controls remain required.
-- Output is a candidate only. The worker has no route, reviewer, approval,
-  integration, merge, push, production, or public-claim authority and cannot
-  self-approve or self-integrate.
-- OpenCode remains subscription-free but carries high fixed input-token
-  overhead.
-- The `requalification_evidence` record preserves the accepted R2/R3
-  11/11/11 results, exact OpenCode identity, and PR #84/#85 merge evidence;
-  those gates are evidence, not per-dispatch controls.
+1. **Three-Layer Architectural Separation**:
+   - `semantic capability lineage != exact execution identity != admitted authority`.
+   - Lineage calibration evidence does not self-promote or grant admission authority.
+   - `CapabilityPlanner` remains the sole route and capability-selection authority.
 
-The prior DeepSeek L1.5 candidate/reviewer proposal is **NOT APPROVED** and
-does not change this L1 ceiling or grant reviewer authority.
+2. **Gemini Medium exact identities**:
+   - Existing `agy_flash_medium` remains bound to provider `agy`, exact model `gemini-3.6-flash-medium`, autonomy ceiling **L1**. It is not repurposed by this amendment.
+   - New `agy_flash_37_medium` is bound to provider `agy`, exact model `gemini-3.7-flash-medium`.
+   - `agy_flash_37_medium` admitted autonomy ceiling: **L3**.
+   - Both Medium identities keep `default_route`: **`false`**.
+   - L4 autonomy is **NOT GRANTED**; L4 remains experimental and non-admitted.
+   - Exact model matching is fail-closed: 3.6 and 3.7 Medium cannot substitute for one another.
+   - Requires exact Task Card, allowed files, mandatory commands, parser, verifier, and independent verification.
+
+3. **DeepSeek V4 Flash (`opencode_deepseek_v4_flash`)**:
+   - Provider: `opencode`; exact model: `opencode/deepseek-v4-flash-free`.
+   - Admitted autonomy ceiling: **L2**.
+   - `default_route`: **`false`**.
+   - L4 autonomy is **NOT GRANTED**; L4 remains experimental and non-admitted.
+   - `opencode/deepseek-v4-flash-free` and `opencode-go/deepseek-v4-flash` share semantic capability lineage (`deepseek-v4-flash`) only; their workforce and admission execution identities remain exact and separate. Requesting `opencode-go/deepseek-v4-flash` fails closed unless an exact registered worker exists.
+   - Bounded context, isolated directory, JSON event receipt, parser, focused tests, and verifier controls remain mandatory. Output is candidate-only with no route, reviewer, approval, integration, merge, push, or production claim authority.
 
 ## 11. Pending v2 collaboration proposal
 
-`NEXUS_MULTI_MODEL_COLLABORATION_STANDARD_v2.0_20260728` remains `PROPOSED_FOR_OWNER_APPROVAL`. Its proposed changes—including Ling at read-only L0 and DeepSeek V4 Flash at L1.5 candidate/reviewer—are recorded as review inputs, not active authority. This policy and `nexus/config/model_workforce.yaml` remain current until James explicitly approves a replacement or amendment.
+`NEXUS_MULTI_MODEL_COLLABORATION_STANDARD_v2.0_20260728` remains `PROPOSED_FOR_OWNER_APPROVAL`. Its proposed changes—including Ling at read-only L0—are recorded as review inputs, not active authority. This policy and `nexus/config/model_workforce.yaml` remain current until James explicitly approves a replacement or amendment.
