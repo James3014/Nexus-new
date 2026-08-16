@@ -78,7 +78,7 @@ class HealContext:
     violated_invariants: List[str] = field(default_factory=list)
     rewrite_trace: List[str] = field(default_factory=list)
     risk_delta: float = 0.0
-    run_group: str = ""
+    run_group: str | None = None
     route_context: Dict[str, Any] = field(default_factory=dict)
 
     def to_v2(self) -> HealContextV2:

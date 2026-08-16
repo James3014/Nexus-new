@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+from nexus.contracts.learning_experience import build_nexus_learning_episode
 from nexus.learning.learning_episode_projection import project_learning_entries, write_learning_projection
 
 _QUALIFICATION = {
@@ -166,3 +167,80 @@ def test_projection_preserves_occurrence_count_when_reprojected() -> None:
     ])
 
     assert projected[0]["occurrence_count"] == 12
+
+
+def _g3_episode(*, key: str, outcome: str = "SUCCEEDED", disposition: str = "reinforce", targets=()):
+    qualification = _QUALIFICATION if outcome != "RETIRED" else {}
+    episode = build_nexus_learning_episode(
+        task_id=f"task-{key}",
+        attempt_id=f"attempt-{key}",
+        action_id=f"action-{key}",
+        source="local_heal",
+        terminal_outcome=outcome,
+        terminal_evidence={"receipt": f"receipt://{key}", "verifier_status": "PASS" if outcome == "SUCCEEDED" else "FAIL"},
+        retrieved_lesson_ids=list(targets),
+        applied_lesson_ids=list(targets),
+        qualification=qualification,
+        lesson_disposition=disposition,
+        idempotency_key=f"g3-{key}",
+    )
+    episode["classification"] = "verifier_pass" if outcome == "SUCCEEDED" else "verifier_fail"
+    episode["summary"] = "stable repair rule"
+    return episode
+
+
+def test_later_contradict_invalidates_prior_canonical_projection() -> None:
+    prior = _g3_episode(key="prior")
+    invalidator = _g3_episode(
+        key="contradict",
+        outcome="FAILED",
+        disposition="contradict",
+        targets=[prior["episode_id"]],
+    )
+
+    projected = project_learning_entries([prior, invalidator])
+    prior_projection = next(row for row in projected if prior["episode_id"] in row["episode_ids"])
+
+    assert prior_projection["retrieval_eligible"] is False
+    assert prior_projection["validity_state"] == "invalidated"
+    assert prior_projection["invalidated_episode_ids"] == [prior["episode_id"]]
+    assert prior_projection["invalidation_evidence"][0]["invalidated_by_episode_id"] == invalidator["episode_id"]
+    assert prior_projection["invalidation_evidence"][0]["invalidation_disposition"] == "contradict"
+
+
+def test_later_retire_invalidates_but_preceding_control_cannot_preinvalidate() -> None:
+    prior = _g3_episode(key="retired-prior")
+    retire = _g3_episode(
+        key="retire",
+        outcome="RETIRED",
+        disposition="retire",
+        targets=[prior["episode_id"]],
+    )
+
+    later_projection = project_learning_entries([prior, retire])
+    later_prior = next(row for row in later_projection if prior["episode_id"] in row["episode_ids"])
+    assert later_prior["retrieval_eligible"] is False
+    assert later_prior["validity_state"] == "invalidated"
+
+    reversed_projection = project_learning_entries([retire, prior])
+    reversed_prior = next(row for row in reversed_projection if prior["episode_id"] in row["episode_ids"])
+    assert reversed_prior["retrieval_eligible"] is True
+    assert reversed_prior["validity_state"] == "active"
+
+
+def test_tampered_invalidation_episode_cannot_mask_prior_projection() -> None:
+    prior = _g3_episode(key="tamper-prior")
+    invalidator = _g3_episode(
+        key="tamper-control",
+        outcome="FAILED",
+        disposition="contradict",
+        targets=[prior["episode_id"]],
+    )
+    invalidator["episode_id"] = "lep:000000000000000000000000"
+
+    projected = project_learning_entries([prior, invalidator])
+    prior_projection = next(row for row in projected if prior["episode_id"] in row["episode_ids"])
+
+    assert prior_projection["retrieval_eligible"] is True
+    assert prior_projection["validity_state"] == "active"
+    assert prior_projection["invalidated_episode_ids"] == []

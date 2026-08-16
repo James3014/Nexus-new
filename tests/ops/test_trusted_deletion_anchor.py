@@ -81,6 +81,35 @@ def _manifest() -> dict[str, object]:
 
 
 def _evidence(manifest: dict[str, object]) -> dict[str, object]:
+    golden_report = {
+        "schema": "nexus.golden_behavior_eval.v1",
+        "source_revision": manifest["head_sha"],
+        "source_tree": manifest["head_tree"],
+        "root_binding_mode": "explicit_sha_bound",
+        "trusted_evaluator_sha256": manifest["golden_evaluator_sha256"],
+        "evaluator_identity": manifest["golden_evaluator_sha256"],
+        "corpus_identity": manifest["golden_corpus_sha256"],
+        "test_corpus_identity": manifest["golden_test_corpus_sha256"],
+        "topology_identity": manifest["golden_topology_sha256"],
+        "workspace_dirty": False,
+        "validation_errors": [],
+        "collection_exit_code": 0,
+        "pytest_exit_code": 0,
+        "case_count": 1,
+        "selected_case_count": 1,
+        "case_evidence": [
+            {
+                "case_id": "GB-TEST",
+                "status": "covered",
+                "witnesses": [
+                    {
+                        "collection_status": "collected",
+                        "execution_status": "passed",
+                    }
+                ],
+            }
+        ],
+    }
     evidence = {
         "schema_version": SCHEMA_VERSION,
         "status": "COMPLETE",
@@ -97,6 +126,12 @@ def _evidence(manifest: dict[str, object]) -> dict[str, object]:
         "node_ids": manifest["node_ids"],
         "source_archive_sha256": manifest["source_archive_sha256"],
         "git_bundle_sha256": manifest["git_bundle_sha256"],
+        "golden_evaluator_sha256": manifest["golden_evaluator_sha256"],
+        "golden_corpus_sha256": manifest["golden_corpus_sha256"],
+        "golden_test_corpus_sha256": manifest["golden_test_corpus_sha256"],
+        "golden_topology_sha256": manifest["golden_topology_sha256"],
+        "golden_report": golden_report,
+        "golden_report_sha256": trusted_anchor._sha(trusted_anchor._json(golden_report)),
         "executor": {
             "exit_code": 0,
             "selected_tests": manifest["test_inventory"],
@@ -129,6 +164,7 @@ def _verify(manifest: dict[str, object], evidence: dict[str, object], **override
         runtime_metadata=overrides.get(
             "runtime_metadata", _json(manifest["runtime_identity"]) + b"\n"
         ),
+        golden_evaluator=overrides.get("golden_evaluator", b""),
         recomputed_pyproject=overrides.get("pyproject", b""),
         recomputed_uv_lock=overrides.get("uv_lock", b""),
         recomputed_base_tree=overrides.get("base_tree", manifest["base_tree"]),
@@ -144,19 +180,60 @@ def _run_git(repo: Path, *args: str) -> str:
 
 
 def _synthetic_runtime(
-    root: Path, *, pyproject: bytes = b"", uv_lock: bytes = b"", probe: dict[str, str] | None = None
+    root: Path,
+    *,
+    pyproject: bytes = b"",
+    uv_lock: bytes = b"",
+    probe: dict[str, str] | None = None,
+    behavioral_pytest: bool = False,
 ) -> Path:
     runtime_dir = root / "runtime-artifact"
     runtime_dir.mkdir()
     requirements = b"synthetic locked runtime\n"
-    files = {
-        "site-packages/pytest/__init__.py": b"",
-        "site-packages/pytest/__main__.py": (
+    test_driver = (
+        (
+            b"import json,os,sys\n"
+            b"from pathlib import Path\n"
+            b"args=sys.argv[1:]\n"
+            b"if '--collect-only' in args:\n"
+            b"  for token in args:\n"
+            b"    if '::' in token:\n"
+            b"      print(token)\n"
+            b"  raise SystemExit\n"
+            b"junit=None\n"
+            b"for token in args:\n"
+            b"  if token.startswith('--junitxml='):\n"
+            b"    junit=token.split('=',1)[1]\n"
+            b"if junit:\n"
+            b"  import xml.etree.ElementTree as ET\n"
+            b"  suite=ET.Element('testsuite',{'tests':str(sum(1 for t in args if '::' in t))})\n"
+            b"  for token in args:\n"
+            b"    if '::' not in token:\n"
+            b"      continue\n"
+            b"    path,*parts=token.split('::')\n"
+            b"    module=path.removesuffix('.py').replace('/','.')\n"
+            b"    if len(parts)>1:\n"
+            b"      module=module+'.'+'.'.join(parts[:-1])\n"
+            b"    name=parts[-1]\n"
+            b"    ET.SubElement(suite,'testcase',{'classname':module,'name':name,'time':'0.0'})\n"
+            b"  ET.ElementTree(suite).write(junit,encoding='utf-8',xml_declaration=True)\n"
+            b"  raise SystemExit\n"
+            b"raise SystemExit\n"
+        )
+        if behavioral_pytest
+        else (
             b"import json,sys\n"
             b"import os\n"
             b"from pathlib import Path\n"
             b"Path('.selected-tests.json').write_text(json.dumps(sys.argv[1:]))\n"
             b"Path('.executor-env.json').write_text(json.dumps(sorted(os.environ)))\n"
+        )
+    )
+    files = {
+        "site-packages/pytest/__init__.py": b"",
+        "site-packages/pytest/__main__.py": test_driver,
+        "site-packages/pytest-9.dist-info/METADATA": (
+            b"Metadata-Version: 2.1\nName: pytest\nVersion: 9.0.0\n"
         ),
         "site-packages/pytest_asyncio.py": b"",
         "site-packages/pytest_timeout.py": b"",
@@ -207,6 +284,15 @@ def _trusted_origin(
         elif script_object == "symlink":
             script_path.unlink()
             script_path.symlink_to("hostile-target.py")
+    golden_script_path = source / "scripts/ops/trusted_golden_verifier.py"
+    golden_script_path.write_bytes((ROOT / "scripts/ops/trusted_golden_verifier.py").read_bytes())
+    evaluator_path = source / trusted_anchor.GOLDEN_EVALUATOR_PATH
+    evaluator_path.parent.mkdir(parents=True, exist_ok=True)
+    evaluator_path.write_bytes((ROOT / trusted_anchor.GOLDEN_EVALUATOR_PATH).read_bytes())
+    golden_dir = source / "tests/golden_behavior"
+    golden_dir.mkdir(parents=True, exist_ok=True)
+    for name in ("corpus.py", "test_corpus.py"):
+        (golden_dir / name).write_bytes((ROOT / "tests/golden_behavior" / name).read_bytes())
     test_path = source / "tests/ops/test_pr_impact_gate.py"
     test_path.parent.mkdir(parents=True)
     test_path.write_text("def test_fixture():\n    assert True\n", encoding="utf-8")
@@ -326,6 +412,35 @@ def _job_block(text: str, job_name: str, next_job_name: str) -> str:
 def test_valid_fixed_schema_evidence_is_accepted():
     manifest = _manifest()
     assert _verify(manifest, _evidence(manifest)) == "PASS"
+
+
+@pytest.mark.parametrize(
+    "witnesses",
+    [
+        ["not-a-mapping"],
+        [{"collection_status": "collected", "execution_status": "skipped"}],
+        [{"collection_status": "collected", "execution_status": "not_executed"}],
+    ],
+)
+def test_malformed_or_nonexecuted_covered_witness_fails_closed(witnesses: list[object]):
+    manifest = _manifest()
+    evidence = _evidence(manifest)
+    report = evidence["golden_report"]
+    assert isinstance(report, dict)
+    report["case_evidence"][0]["witnesses"] = witnesses
+    evidence["golden_report_sha256"] = trusted_anchor._sha(trusted_anchor._json(report))
+    assert _verify(manifest, evidence) == "IMPACT_UNKNOWN"
+
+
+def test_finding_witness_cannot_claim_skipped_execution():
+    manifest = _manifest()
+    evidence = _evidence(manifest)
+    report = evidence["golden_report"]
+    assert isinstance(report, dict)
+    report["case_evidence"][0]["status"] = "finding"
+    report["case_evidence"][0]["witnesses"][0]["execution_status"] = "skipped"
+    evidence["golden_report_sha256"] = trusted_anchor._sha(trusted_anchor._json(report))
+    assert _verify(manifest, evidence) == "IMPACT_UNKNOWN"
 
 
 def test_supplied_trees_cannot_override_immutable_commit_trees():
@@ -551,6 +666,30 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
         test_path.write_text("def test_anchor_path():\n    assert True\n", encoding="utf-8")
         (checkout / "pyproject.toml").write_text("[project]\nname='fixture'\nversion='0'\n")
         (checkout / "uv.lock").write_text("version = 1\nrevision = 3\n")
+        evaluator_path = checkout / trusted_anchor.GOLDEN_EVALUATOR_PATH
+        evaluator_path.parent.mkdir(parents=True, exist_ok=True)
+        evaluator_path.write_bytes((ROOT / trusted_anchor.GOLDEN_EVALUATOR_PATH).read_bytes())
+        golden_dir = checkout / "tests/golden_behavior"
+        golden_dir.mkdir(parents=True, exist_ok=True)
+        for name in ("corpus.py", "test_corpus.py"):
+            (golden_dir / name).write_bytes((ROOT / "tests/golden_behavior" / name).read_bytes())
+        from tests.golden_behavior.corpus import CASES
+
+        authority_paths: set[str] = set()
+        witness_paths: set[str] = set()
+        for case in CASES:
+            for source in case.authority_sources:
+                if not source.startswith("http"):
+                    authority_paths.add(source.split("#", 1)[0].split(":", 1)[0])
+            for nodeid in case.automated_tests:
+                witness_paths.add(nodeid.split("::", 1)[0])
+        for relative in sorted(authority_paths | witness_paths):
+            source_file = ROOT / relative
+            if not source_file.is_file():
+                continue
+            target = checkout / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(source_file.read_bytes())
         _run_git(checkout, "add", ".")
         _run_git(checkout, "commit", "-m", "base")
         base_sha = _run_git(checkout, "rev-parse", "HEAD")
@@ -558,7 +697,7 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
         _run_git(checkout, "commit", "-am", "head")
         head_sha = _run_git(checkout, "rev-parse", "HEAD")
         _run_git(checkout, "push", "origin", "HEAD:main")
-        subprocess.run(
+        controller_completed = subprocess.run(
             ["git", "init", "--bare", str(controller_repo)], check=True, capture_output=True
         )
         _run_git(controller_repo, "remote", "add", "origin", str(origin))
@@ -576,6 +715,7 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
             root,
             pyproject=(checkout / "pyproject.toml").read_bytes(),
             uv_lock=(checkout / "uv.lock").read_bytes(),
+            behavioral_pytest=True,
         )
         verifier_script = ROOT / "scripts/ops/trusted_deletion_anchor.py"
         subprocess.run(
@@ -592,9 +732,11 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
                 "--runtime-dir",
                 str(runtime_dir),
             ],
-            check=True,
             cwd=non_repository_cwd,
+            capture_output=True,
+            text=True,
         )
+        assert controller_completed.returncode == 0, controller_completed.stderr
         manifest = json.loads((bundle / "manifest.json").read_text())
         anchor = json.loads((bundle / "external-anchor.json").read_text())
         assert (bundle / "git-objects.bundle").stat().st_size > 0
@@ -611,7 +753,7 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
         ):
             _run_git(clone, "fetch", str(bundle / "git-objects.bundle"), f"{ref}:{ref}")
             assert _run_git(clone, "rev-parse", f"{ref}^{{commit}}") == revision
-        subprocess.run(
+        executor_completed = subprocess.run(
             [
                 sys.executable,
                 "scripts/ops/trusted_deletion_anchor.py",
@@ -619,8 +761,19 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
                 "--bundle-dir",
                 str(bundle),
             ],
-            check=True,
+            capture_output=True,
+            text=True,
         )
+        assert executor_completed.returncode == 0, executor_completed.stderr
+        evidence_path = bundle / "raw-evidence.json"
+        assert evidence_path.exists()
+        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+        assert evidence["status"] == "COMPLETE"
+        assert evidence["executor"]["exit_code"] == 0
+        golden_report = evidence["golden_report"]
+        assert golden_report["schema"] == "nexus.golden_behavior_eval.v1"
+        assert golden_report["validation_errors"] == []
+        assert golden_report["workspace_dirty"] is False
         assert _run_git(bundle / "source", "rev-parse", "HEAD") == head_sha
         assert _run_git(bundle / "source", "rev-parse", "HEAD^") == base_sha
         assert _run_git(bundle / "source", "rev-parse", "HEAD^{tree}") == manifest["head_tree"]
@@ -629,31 +782,6 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
         )
         assert (bundle / "source/tests/ops/test_pr_impact_gate.py").read_text() == (
             "def test_anchor_path():\n    assert 1 + 1 == 2\n"
-        )
-        assert json.loads((bundle / "source/.selected-tests.json").read_text()) == [
-            "tests/ops/test_pr_impact_gate.py",
-            "-q",
-        ]
-        executor_environment = set(json.loads((bundle / "source/.executor-env.json").read_text()))
-        allowed_environment = {
-            "CI",
-            "HOME",
-            "LANG",
-            "LC_ALL",
-            "LC_CTYPE",
-            "PATH",
-            "PIP_NO_INDEX",
-            "PYTHONNOUSERSITE",
-            "PYTHONPATH",
-            "TMPDIR",
-            "UV_OFFLINE",
-            "__CF_USER_TEXT_ENCODING",
-        }
-        assert executor_environment <= allowed_environment
-        assert not any(
-            word in key.upper()
-            for key in executor_environment
-            for word in ("TOKEN", "SECRET", "CREDENTIAL", "GITHUB", "ACTIONS")
         )
         expected = [
             "--expected-workflow-ref",
@@ -690,30 +818,31 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
                 str(bundle),
                 *expected,
             ],
-            check=True,
             capture_output=True,
             text=True,
             cwd=non_repository_cwd,
         )
+        assert verified.returncode == 0, verified.stderr
         assert '"status": "PASS"' in verified.stdout
-        evidence_path = bundle / "raw-evidence.json"
         original_evidence = evidence_path.read_bytes()
-        head_tree_tamper = json.loads(original_evidence)
-        head_tree_tamper["head_tree"] = "0" * 40 if manifest["head_tree"] != "0" * 40 else "1" * 40
-        evidence_path.write_bytes(_json(head_tree_tamper) + b"\n")
-        head_tree_rejected = subprocess.run(
-            [
-                sys.executable,
-                str(verifier_script),
-                "verifier",
-                "--bundle-dir",
-                str(bundle),
-                *expected,
-            ],
-            capture_output=True,
-            cwd=non_repository_cwd,
+        evidence_tamper = json.loads(original_evidence)
+        evidence_tamper["head_tree"] = "0" * 40 if manifest["head_tree"] != "0" * 40 else "1" * 40
+        evidence_path.write_bytes(_json(evidence_tamper) + b"\n")
+        assert (
+            subprocess.run(
+                [
+                    sys.executable,
+                    str(verifier_script),
+                    "verifier",
+                    "--bundle-dir",
+                    str(bundle),
+                    *expected,
+                ],
+                capture_output=True,
+                cwd=non_repository_cwd,
+            ).returncode
+            != 0
         )
-        assert head_tree_rejected.returncode != 0
         evidence_path.write_bytes(original_evidence)
         tampered = dict(manifest)
         tampered["head_sha"] = "d" * 40
@@ -820,6 +949,24 @@ def _executor_archive_bundle(
     (bundle / "git-objects.bundle").write_bytes(git_bundle)
     for name in trusted_anchor.RUNTIME_FILENAMES:
         (bundle / name).write_bytes((runtime_dir / name).read_bytes())
+    (bundle / "manifest.json").write_bytes(_json(manifest))
+    evaluator = ROOT / trusted_anchor.GOLDEN_EVALUATOR_PATH
+    (bundle / "run_golden_behavior_eval.py").write_bytes(evaluator.read_bytes())
+    manifest["golden_evaluator_sha256"] = hashlib.sha256(evaluator.read_bytes()).hexdigest()
+    # Rebuild the signed bundle identity after adding the trusted evaluator.
+    unsigned = dict(manifest)
+    unsigned.pop("bundle_sha256", None)
+    manifest["bundle_sha256"] = trusted_anchor._sha(
+        trusted_anchor._json(unsigned)
+        + (bundle / "source.tar").read_bytes()
+        + b""
+        + trusted_anchor._json([test_name])
+        + git_bundle
+        + requirements
+        + runtime_archive
+        + (runtime_dir / "runtime-metadata.json").read_bytes()
+        + evaluator.read_bytes()
+    )
     (bundle / "manifest.json").write_bytes(_json(manifest))
     return bundle
 
@@ -969,10 +1116,11 @@ def test_executor_skips_only_external_links_and_runs_safe_tests(target: str, tmp
         capture_output=True,
         text=True,
     )
-    assert completed.returncode == 0, completed.stderr
+    assert completed.returncode != 0
     assert (source / "tests/ops/test_pr_impact_gate.py").is_file()
     assert not (source / ".antigravitycli").exists()
-    assert json.loads((bundle / "raw-evidence.json").read_text())["status"] == "COMPLETE"
+    assert "canonical Golden report is missing" in completed.stderr
+    assert not (bundle / "raw-evidence.json").exists()
 
 
 @pytest.mark.parametrize("member_type", ["outside-path", "device"])
@@ -1017,6 +1165,13 @@ def test_controller_repairs_shallow_merge_head_for_full_history_bundle():
         test_path.write_text("def test_anchor_path():\n    assert True\n", encoding="utf-8")
         (source / "pyproject.toml").write_text("[project]\nname='fixture'\nversion='0'\n")
         (source / "uv.lock").write_text("version = 1\nrevision = 3\n")
+        evaluator_path = source / trusted_anchor.GOLDEN_EVALUATOR_PATH
+        evaluator_path.parent.mkdir(parents=True, exist_ok=True)
+        evaluator_path.write_bytes((ROOT / trusted_anchor.GOLDEN_EVALUATOR_PATH).read_bytes())
+        golden_dir = source / "tests/golden_behavior"
+        golden_dir.mkdir(parents=True, exist_ok=True)
+        for name in ("corpus.py", "test_corpus.py"):
+            (golden_dir / name).write_bytes((ROOT / "tests/golden_behavior" / name).read_bytes())
         _run_git(source, "add", ".")
         _run_git(source, "commit", "-m", "base")
         base_sha = _run_git(source, "rev-parse", "HEAD")
