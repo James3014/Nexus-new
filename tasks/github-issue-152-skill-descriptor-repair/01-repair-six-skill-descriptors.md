@@ -6,9 +6,9 @@ source_issue: https://github.com/James3014/Nexus-new/issues/152
 baseline_main: 70fd467ab0d29f4373616a5e98d85b014efcd4de
 historical_baseline: 70fd467ab0d29f4373616a5e98d85b014efcd4de
 merge_base: 96f2c8a19a2f3d208a106fa1850bee7ce5a4e863
-historical_reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
-reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
-current_main: cdf2570ede5ae218f36f886b696c8da45458043a
+historical_reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
+reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
 frontier_status: TERMINAL_RECONCILIATION
 terminal_marker: SIX_SKILL_DESCRIPTOR_CONTRACTS_REPAIRED
 claim_ceiling: SIX_SKILL_DESCRIPTOR_CONTRACTS_REPAIRED_ONLY
@@ -66,8 +66,10 @@ release, or production changes.
 - Exact-head workflows: Pytest, Pyright, Bandit, Ruff, and Wiki governance completed
   successfully.
 - Owner receipt: `SIX_SKILL_DESCRIPTOR_CONTRACTS_REPAIRED`.
-- Historical reconciled current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`.
-- Reconciled current main: `cdf2570ede5ae218f36f886b696c8da45458043a`.
+- Historical reconciled current main: `cdf2570ede5ae218f36f886b696c8da45458043a`
+  (earlier historical `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`).
+- Reconciled current main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`
+  (prior reconciled main `cdf2570ede5ae218f36f886b696c8da45458043a`).
 
 The GitHub review surface for PR #154 is empty, so this reconciliation does not claim a
 recorded GitHub independent review. `SIX_SKILL_DESCRIPTOR_CONTRACTS_REPAIRED` is
