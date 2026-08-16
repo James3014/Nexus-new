@@ -13,6 +13,8 @@ from nexus.services.local_heal.armor_artifact_storage import (
 )
 from nexus.services.local_heal.memory_trace import MemoryTrace, get_empty_trace
 
+_RUN_GROUP_UNSET = object()
+
 
 def _extract_memory_trace(ctx: Any) -> dict[str, Any]:
     """Extract only the formal ctx-scoped memory trace."""
@@ -292,8 +294,11 @@ def _classify_env_failure(ctx: Any, reason: str) -> str:
         return "env_fixable_by_agent"
 
 
-def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_group: str = "") -> dict[str, Any]:
-    run_group = canonical_run_group(run_group)
+def build_repair_receipt(ctx: Any, *, model_name: str = "nexus-local-heal", run_group: Any = _RUN_GROUP_UNSET) -> dict[str, Any]:
+    if run_group is _RUN_GROUP_UNSET:
+        run_group = derive_default_run_group(ctx)
+    else:
+        run_group = canonical_run_group(run_group)
     final_patch = str(getattr(ctx, "final_patch", "") or "")
     evaluation_report = str(getattr(ctx, "evaluation_report", "") or "")
     visible_passed = "[FAIL]" not in evaluation_report if evaluation_report else bool(getattr(ctx, "solve_eligible", False))
@@ -755,14 +760,40 @@ def canonical_run_group(value: Any) -> str:
     return value
 
 
+def derive_default_run_group(ctx: Any) -> str:
+    """Single deterministic safe run-group derivation for the receipt seams.
+
+    Used only when a caller omits run_group entirely (sentinel default). The
+    derived identifier is deterministic for the same context identity, stays
+    within the canonical run-group grammar, and never coerces an explicit
+    malformed value: explicit None/empty/unsafe values still fail closed via
+    canonical_run_group.
+    """
+    identity = str(
+        getattr(ctx, "instance_id", "")
+        or getattr(ctx, "task_id", "")
+        or "default"
+    )
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", identity).strip("._-")
+    if not safe:
+        safe = "default"
+    if not safe[0].isalnum():
+        safe = "g" + safe
+    safe = safe[:64]
+    return canonical_run_group(safe)
+
+
 def write_repair_receipt(
     ctx: Any,
     *,
     model_name: str = "nexus-local-heal",
     reports_root: Path | None = None,
-    run_group: str = "",
+    run_group: Any = _RUN_GROUP_UNSET,
 ) -> Path:
-    run_group = canonical_run_group(run_group)
+    if run_group is _RUN_GROUP_UNSET:
+        run_group = derive_default_run_group(ctx)
+    else:
+        run_group = canonical_run_group(run_group)
     report_dir_name = _safe_instance_id(getattr(ctx, "instance_id", ""))
     report_dir_name = f"{report_dir_name}__{run_group}"
     # Production default: workspace .nexus/reports/local_heal (or NEXUS_ARMOR_ARTIFACT_ROOT).
