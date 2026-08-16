@@ -394,10 +394,6 @@ def test_executor_memory_receipt_captures_prompt_influence():
         },
     )
 
-    class _FakeLesson:
-        def __init__(self, summary: str) -> None:
-            self.summary = summary
-
     class _FakeAdapter:
         def __init__(self, enabled: bool = True) -> None:
             self.last_metadata = {
@@ -416,7 +412,32 @@ def test_executor_memory_receipt_captures_prompt_influence():
             }
 
         def retrieve_reranked(self, **kwargs):
-            return [_FakeLesson("Always clamp output, not input")]
+            from nexus.services.local_heal.memory_retrieval_adapter import (
+                RetrievedLesson,
+                _build_existing_retrieval_receipt,
+            )
+
+            lesson = RetrievedLesson(
+                finding_id="lesson-1",
+                summary="Always clamp output, not input",
+                relevance_score=1.0,
+                provenance="receipt://lesson-1",
+                source="LocalJsonlLessonStore",
+                pattern_type="success",
+                task_id="prior-task",
+                evidence_ref="receipt://lesson-1",
+            )
+            receipt, receipt_hash, lineage = _build_existing_retrieval_receipt(
+                kwargs["query_text"], [lesson]
+            )
+            self.last_metadata.update(
+                {
+                    "retrieval_receipt": receipt,
+                    "retrieval_receipt_hash": receipt_hash,
+                    "selected_lesson_lineage": lineage,
+                }
+            )
+            return [lesson]
 
     with patch(
         "nexus.services.local_heal.memory_retrieval_adapter.MemoryRetrievalAdapter",
