@@ -11,7 +11,8 @@ import sys
 import time
 from pathlib import Path
 
-REPO_ROOT = Path("/Users/jameschen/Workspace/nexus")
+from _repo_root import REPO_ROOT
+
 DEFAULT_OUTPUT = REPO_ROOT / "artifacts" / "runtime" / "av_executable_benchmark_substrate_v0" / "execution_results" / "concurrency_001.json"
 
 TASK_ID = "concurrency_001"
@@ -94,7 +95,6 @@ def main():
     args = parser.parse_args()
 
     output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
 
     result = {
         "task_id": TASK_ID,
@@ -111,15 +111,15 @@ def main():
     }
 
     if not args.dry_run:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         verifier = run_verifier()
         result.update(verifier)
+        with open(output_path, "w") as f:
+            json.dump(result, f, indent=2)
     else:
         result["verifier_status"] = "DRY_RUN"
         result["tests_collected"] = 0
         result["tests_executed"] = 0
-
-    with open(output_path, "w") as f:
-        json.dump(result, f, indent=2)
 
     print(json.dumps(result, indent=2))
     return 0 if result.get("verifier_status") in (
