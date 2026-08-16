@@ -13,7 +13,8 @@ worker_may_push: true
 completion_marker: M3_ACCEPTANCE_REPAIR_MERGED
 candidate_head: a2394a39b6a234a3c185e8486e299cc57fccefe8
 merge_commit: f3dc8d28a0f90d5c5fd2f31dbeb0ab2f29f7ca04
-reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
+reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+historical_reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a (2026-08-11 rebind snapshot)
 claim_ceiling: M3_ACCEPTANCE_REPAIR_IMPLEMENTED
 ---
 
