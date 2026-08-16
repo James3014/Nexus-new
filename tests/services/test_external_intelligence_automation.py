@@ -1108,3 +1108,4 @@ def test_authorized_task_card_proceeds_to_complete(tmp_path):
     assert result["state"] == "COMPLETE"
     assert result["semantic_dispatched"] is True
     assert len(sidecar.calls) == 1
+    assert d.calls[0]["main_sha"] == contract["main_sha"]

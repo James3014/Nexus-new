@@ -597,6 +597,7 @@ class ExternalIntelligenceAutomation:
 
             self.state_store.save(item, "CLOSURE_DISPATCHING")
             closure = self.d_runtime.close_task(
+                main_sha=str(contract["main_sha"]),
                 unit_receipts=receipts,
                 unit_verifiers=contract["unit_verifiers"],
                 whole_verifiers=contract["whole_verifiers"],

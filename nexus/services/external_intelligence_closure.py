@@ -31,9 +31,6 @@ CLAIM_CEILING = "TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE"
 EXECUTABLE_TASK_CARD_STATUSES = frozenset({
     "ACTIVE",
     "APPROVED_IN_PROGRESS",
-    "IN_PROGRESS",
-    "READY",
-    "PLANNED",
 })
 _SESSION_PREFIX = "ses_"
 _HEX40 = frozenset("0123456789abcdef")
@@ -247,18 +244,40 @@ def parse_task_card_authority(text: str) -> TaskCardAuthority:
 
     v_lines = _extract_markdown_section(text, "Verification commands")
     commands: set[tuple[str, ...]] = set()
+    in_fence = False
     for raw in v_lines:
         line = raw.strip()
-        if not line or line.startswith("```"):
-            continue
-        if line.startswith(("- ", "* ")):
-            line = line[2:].strip()
-        if line.startswith("`") and line.endswith("`"):
-            line = line[1:-1].strip()
         if not line:
             continue
+        if line.startswith("```"):
+            fence_lang = line[3:].strip().lower()
+            if not in_fence:
+                if fence_lang in ("", "bash", "sh", "shell", "zsh"):
+                    in_fence = True
+            else:
+                in_fence = False
+            continue
+
+        cmd_str: str | None = None
+        if in_fence:
+            if line.startswith("#"):
+                continue
+            if line.startswith(("- ", "* ")):
+                line = line[2:].strip()
+            if line.startswith("`") and line.endswith("`") and len(line) >= 2:
+                line = line[1:-1].strip()
+            cmd_str = line
+        else:
+            m = re.match(r"^(?:[-*]\s*)?`([^`]+)`\s*$", line)
+            if m:
+                cand = m.group(1).strip()
+                if not cand.startswith("#"):
+                    cmd_str = cand
+
+        if not cmd_str:
+            continue
         try:
-            tokens = shlex.split(line)
+            tokens = shlex.split(cmd_str)
         except ValueError:
             continue
         while tokens and _ENV_RE.match(tokens[0]):
@@ -283,28 +302,30 @@ def parse_task_card_authority(text: str) -> TaskCardAuthority:
 
 
 def _verify_task_card_binding(
-    repository_root: Path, task_card_ref: str, task_card_hash: str
+    repository_root: Path, main_sha: str, task_card_ref: str, task_card_hash: str
 ) -> TaskCardAuthority:
-    relative = _safe_relative_path(task_card_ref)
+    if not _is_hex(main_sha, 40):
+        raise ClosureError("INVALID_MAIN_SHA")
     if not _is_hex(task_card_hash, 64):
         raise ClosureError("TASK_CARD_HASH_INVALID")
-    path = (repository_root / relative).resolve()
-    try:
-        path.relative_to(repository_root)
-    except ValueError as exc:
-        raise ClosureError("TASK_CARD_OUTSIDE_REPOSITORY") from exc
-    if not path.is_file():
-        raise ClosureError("TASK_CARD_MISSING")
-    tracked = subprocess.run(
-        ["git", "ls-files", "--error-unmatch", "--", relative],
+    relative = _safe_relative_path(task_card_ref)
+    commit_check = subprocess.run(
+        ["git", "cat-file", "-e", f"{main_sha}^{{commit}}"],
         cwd=repository_root,
         capture_output=True,
-        text=True,
         check=False,
     )
-    if tracked.returncode != 0:
-        raise ClosureError("TASK_CARD_NOT_TRACKED")
-    raw = path.read_bytes()
+    if commit_check.returncode != 0:
+        raise ClosureError("MAIN_SHA_NOT_FOUND")
+    blob_res = subprocess.run(
+        ["git", "cat-file", "blob", f"{main_sha}:{relative}"],
+        cwd=repository_root,
+        capture_output=True,
+        check=False,
+    )
+    if blob_res.returncode != 0:
+        raise ClosureError("TASK_CARD_NOT_FOUND")
+    raw = blob_res.stdout
     if _sha256(raw) != str(task_card_hash).lower():
         raise ClosureError("TASK_CARD_HASH_MISMATCH")
     try:
@@ -1096,6 +1117,7 @@ class ExternalIntelligenceClosureRuntime:
     def close_task(
         self,
         *,
+        main_sha: str,
         unit_receipts: Sequence[Mapping[str, Any]],
         unit_verifiers: Mapping[str, Sequence[Mapping[str, Any] | VerifierSpec]],
         whole_verifiers: Sequence[Mapping[str, Any] | VerifierSpec],
@@ -1105,7 +1127,7 @@ class ExternalIntelligenceClosureRuntime:
     ) -> dict[str, Any]:
         started = time.monotonic()
         task_card_authority = _verify_task_card_binding(
-            self.repository_root, task_card_ref, task_card_hash
+            self.repository_root, main_sha, task_card_ref, task_card_hash
         )
         for unit_id, specs in unit_verifiers.items():
             for spec in specs:
@@ -1121,6 +1143,8 @@ class ExternalIntelligenceClosureRuntime:
         current: dict[str, Mapping[str, Any]] = {}
         for receipt in unit_receipts:
             bound = validate_worker_receipt(receipt)
+            if bound["base_sha"] != main_sha.lower():
+                raise ClosureError("CLOSURE_BASE_SHA_MISMATCH")
             if bound["unit_id"] in current:
                 raise ClosureError("DUPLICATE_UNIT_RECEIPT")
             current[bound["unit_id"]] = receipt
