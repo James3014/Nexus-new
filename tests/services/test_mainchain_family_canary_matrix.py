@@ -52,6 +52,7 @@ SCRATCH = Path(
 )
 RECEIPT_PATH = SCRATCH / "nexus_all_capability_closure_receipt.json"
 RECEIPT_TMP = Path(tempfile.gettempdir()) / "nexus_all_capability_closure_receipt.json"
+CANARY_WORKSPACE_ROOT = SCRATCH / "family_canary_workspaces"
 
 _SHALLOW_ACTIONS = frozenset(
     {
@@ -70,13 +71,14 @@ _SHALLOW_ACTIONS = frozenset(
     }
 )
 
-# Canonical online Workforce Admission bindings mirror the online role map in
-# nexus/config/model_workforce.yaml: ordinary -> agy_flash, independent_review
-# -> grok_review, main_engineering complex -> codex_luna.  Controls below satisfy
-# each worker's `requires` so the demand admits (never weakens the policy).
+# Canonical online Workforce Admission bindings mirror the role map in
+# nexus/config/model_workforce.yaml.  We first derive the Planner role from the
+# same task-description signals as CapabilityPlanner, then bind that role to
+# its enrolled worker.  This keeps the fixture truthful without selecting a
+# worker by provider availability or silently falling back on admission.
 _ONLINE_ROLE_KEYWORDS: dict[str, tuple[str, ...]] = {
-    "grok_review": ("review", "audit"),
-    "codex_luna": (
+    "independent_review": ("review", "audit"),
+    "main_engineering": (
         "architecture",
         "security",
         "irreversible",
@@ -86,6 +88,11 @@ _ONLINE_ROLE_KEYWORDS: dict[str, tuple[str, ...]] = {
         "cross-module",
         "cross_module",
     ),
+}
+_ONLINE_WORKER_BY_ROLE: dict[str, str] = {
+    "fast_bounded_implementation": "agy_flash",
+    "independent_review": "grok_review",
+    "main_engineering": "codex_luna",
 }
 _ONLINE_WORKER_CONTROLS: dict[str, list[str]] = {
     "agy_flash": [
@@ -108,13 +115,12 @@ _ONLINE_WORKER_CONTROLS: dict[str, list[str]] = {
 
 
 def _online_worker_for(text: str) -> str:
-    # The Planner's demand classifier reads task_desc substrings, so the binding
-    # mirrors the same substring test on the actual statement (positive arm
-    # embeds the canonical capability name; negative arm is neutral).
-    for worker, keywords in _ONLINE_ROLE_KEYWORDS.items():
+    # The Planner's demand classifier reads task_desc substrings.  Mirror that
+    # role classification on the exact statement supplied to MainchainEntry.
+    for role, keywords in _ONLINE_ROLE_KEYWORDS.items():
         if any(kw in text for kw in keywords):
-            return worker
-    return "agy_flash"
+            return _ONLINE_WORKER_BY_ROLE[role]
+    return _ONLINE_WORKER_BY_ROLE["fast_bounded_implementation"]
 
 
 def _promotable_names() -> list[str]:
@@ -343,7 +349,10 @@ def _run_family_canary(
     if positive and not family_ctx.get("source_hash"):
         family_ctx["source_hash"] = hashlib.sha256(b"sealed-canary-source-v1").hexdigest()
     task_id = str(task_id_override or f"{'pos' if positive else 'neg'}-{name}")
-    canary_root = Path("/tmp/nexus_family_canary") / task_id
+    # Keep all generated workspace artifacts beneath the caller-selected,
+    # machine-portable scratch root.  The default itself is tempfile-backed;
+    # callers can isolate parallel runs with NEXUS_CLOSURE_SCRATCH.
+    canary_root = CANARY_WORKSPACE_ROOT / task_id
     canary_root.mkdir(parents=True, exist_ok=True)
     canary_target = canary_root / "target.py"
     canary_target.write_text(
