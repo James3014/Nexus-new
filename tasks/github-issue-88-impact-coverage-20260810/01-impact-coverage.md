@@ -2,7 +2,7 @@
 
 - issue: #88
 - task_id: github-issue-88
-- status: COMPLETED
+- status: COMPLETE
 - frontier_status: TERMINAL_RECONCILIATION
 - base_sha: 8f7c75ca08a6c88fad9b791f254d38d79ad8bf29 (historical baseline)
 - worker: agy_flash
