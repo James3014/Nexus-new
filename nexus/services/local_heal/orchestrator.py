@@ -64,6 +64,11 @@ class HealOrchestrator:
     def run(self, ctx: HealContext) -> HealContext:
         """核心修復工作流：線性啟動 -> 迭代修復 -> 審計結算。"""
         import time
+        from nexus.services.local_heal.receipt import (
+            canonical_run_group,
+            derive_default_run_group,
+        )
+
         start_wall = time.time()
         
         ledger = LatencyLedger(
@@ -73,6 +78,17 @@ class HealOrchestrator:
         )
         ctx.op._latency_ledger = ledger
         ctx.op._role_receipts = []
+
+        # Issue356: resolve/validate run_group before any pipeline work. The
+        # context default is None (unset), so only a genuinely unset group
+        # derives the deterministic safe identifier. Explicit values (including
+        # empty string) fail closed through the unchanged canonical_run_group
+        # before phases start.
+        raw_run_group = getattr(ctx.op, "run_group", None)
+        if raw_run_group is None:
+            ctx.op.run_group = derive_default_run_group(ctx.op)
+        else:
+            ctx.op.run_group = canonical_run_group(raw_run_group)
         
         try:
             # 1. 啟動階段 (P1-3)
