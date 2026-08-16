@@ -371,7 +371,17 @@ def verify_evidence(
         if evidence["schema_version"] != SCHEMA_VERSION or evidence["status"] != "COMPLETE":
             raise ValueError("execution did not complete")
         serialized = json.dumps(evidence, ensure_ascii=True, sort_keys=True).lower()
-        if "ghs_" in serialized or "token" in serialized or "authorization" in serialized:
+        credential_markers = (
+            "ghs_",
+            "ghp_",
+            "github_pat_",
+            '"token":',
+            '"authorization":',
+            "authorization: basic",
+            "authorization: bearer",
+            "x-access-token:",
+        )
+        if any(marker in serialized for marker in credential_markers):
             raise ValueError("credential-bearing evidence")
         for key in ("base_sha", "head_sha", "base_tree", "head_tree", "test_tree"):
             if evidence[key] != manifest[key]:
@@ -774,6 +784,8 @@ def _executor(args: argparse.Namespace) -> None:
         cwd=source,
         env=environment,
     )
+    _restore_exact_head_worktree(source, manifest["head_tree"])
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
     golden_report_path = bundle / "golden-report.json"
     golden_result = subprocess.run(
         [
@@ -797,7 +809,11 @@ def _executor(args: argparse.Namespace) -> None:
     if not golden_report_path.is_file():
         raise ValueError("canonical Golden report is missing")
     golden_report = json.loads(golden_report_path.read_text(encoding="utf-8"))
-    evidence = {key: manifest[key] for key in REQUIRED_EVIDENCE_KEYS if key != "executor"}
+    evidence = {
+        key: manifest[key]
+        for key in REQUIRED_EVIDENCE_KEYS
+        if key not in ("executor", "golden_report", "golden_report_sha256")
+    }
     evidence["schema_version"] = SCHEMA_VERSION
     evidence["status"] = (
         "COMPLETE" if result.returncode == 0 and golden_result.returncode == 0 else "FAILED"
@@ -812,6 +828,31 @@ def _executor(args: argparse.Namespace) -> None:
     }
     (bundle / "raw-evidence.json").write_bytes(_json(evidence) + b"\n")
     raise SystemExit(result.returncode or golden_result.returncode)
+
+
+def _restore_exact_head_worktree(source: Path, head_tree: str) -> None:
+    """Restore the unprivileged executor source to the exact clean head tree.
+
+    Pytest and Python bytecode artifacts must never leak into the canonical
+    Golden evaluation, which independently requires a clean explicit repo
+    root.  Only untracked artifacts are removed; the tracked tree is restored
+    to the immutable head tree bound in the manifest.
+    """
+
+    subprocess.run(
+        ["git", "-C", str(source), "restore", "--source=HEAD", "--staged", "--worktree", "--", "."],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(source), "clean", "-fdq"],
+        check=True,
+        capture_output=True,
+    )
+    if _git(source, "rev-parse", "HEAD^{tree}") != head_tree:
+        raise ValueError("executor worktree does not match exact head tree")
+    if _git(source, "status", "--porcelain"):
+        raise ValueError("executor worktree is not clean")
 
 
 def _prepare_executor_git_context(bundle: Path, source: Path, manifest: dict[str, Any]) -> None:

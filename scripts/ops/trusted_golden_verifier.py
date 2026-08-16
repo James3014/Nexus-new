@@ -86,6 +86,14 @@ def verify(
     evidence_path: Path | None = None,
     output: Path | None = None,
 ) -> dict[str, Any]:
+    """Fail-closed exact-head Golden verification requiring sealed evidence.
+
+    ``trusted_source=default-branch-verifier`` is emitted only after the
+    sealed manifest/evidence pair supplied by the trusted default-branch
+    controller validates against the exact head corpus.  Missing, unsealed,
+    or substituted evidence never produces a PASS.
+    """
+
     head_sha = _exact_sha(head_sha, "head_sha")
     if _git(repo_root, "cat-file", "-t", f"{head_sha}^{{commit}}").decode().strip() != "commit":
         raise ValueError("head_sha is not a commit in the trusted fetch")
@@ -96,35 +104,33 @@ def verify(
     duplicates = sorted({case_id for case_id in ids if ids.count(case_id) > 1})
     if duplicates:
         raise ValueError(f"duplicate_case_id: {','.join(duplicates)}")
-    sealed_report_sha256 = None
-    if (manifest_path is None) != (evidence_path is None):
+    if manifest_path is None or evidence_path is None:
         raise ValueError("manifest and evidence must be supplied together")
-    if manifest_path is not None and evidence_path is not None:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
-        golden_report = evidence.get("golden_report")
-        if not isinstance(golden_report, dict):
-            raise ValueError("sealed Golden report is missing")
-        sealed = json.dumps(
-            golden_report, ensure_ascii=True, sort_keys=True, separators=(",", ":")
-        ).encode()
-        sealed_report_sha256 = hashlib.sha256(sealed).hexdigest()
-        report_cases = golden_report.get("case_evidence")
-        if (
-            manifest.get("head_sha") != head_sha
-            or golden_report.get("schema") != "nexus.golden_behavior_eval.v1"
-            or evidence.get("golden_report_sha256") != sealed_report_sha256
-            or evidence.get("golden_evaluator_sha256") != manifest.get("golden_evaluator_sha256")
-            or golden_report.get("source_revision") != head_sha
-            or golden_report.get("source_tree") != manifest.get("head_tree")
-            or golden_report.get("corpus_identity") != hashlib.sha256(blob).hexdigest()
-            or golden_report.get("evaluator_identity") != manifest.get("golden_evaluator_sha256")
-            or golden_report.get("root_binding_mode") != "explicit_sha_bound"
-            or not isinstance(report_cases, list)
-            or not all(isinstance(row, dict) for row in report_cases)
-            or [(row.get("case_id"), row.get("status")) for row in report_cases] != cases
-        ):
-            raise ValueError("sealed Golden evidence does not match the exact corpus contract")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+    golden_report = evidence.get("golden_report")
+    if not isinstance(golden_report, dict):
+        raise ValueError("sealed Golden evidence is missing")
+    sealed = json.dumps(
+        golden_report, ensure_ascii=True, sort_keys=True, separators=(",", ":")
+    ).encode()
+    sealed_report_sha256 = hashlib.sha256(sealed).hexdigest()
+    report_cases = golden_report.get("case_evidence")
+    if (
+        manifest.get("head_sha") != head_sha
+        or golden_report.get("schema") != "nexus.golden_behavior_eval.v1"
+        or evidence.get("golden_report_sha256") != sealed_report_sha256
+        or evidence.get("golden_evaluator_sha256") != manifest.get("golden_evaluator_sha256")
+        or golden_report.get("source_revision") != head_sha
+        or golden_report.get("source_tree") != manifest.get("head_tree")
+        or golden_report.get("corpus_identity") != hashlib.sha256(blob).hexdigest()
+        or golden_report.get("evaluator_identity") != manifest.get("golden_evaluator_sha256")
+        or golden_report.get("root_binding_mode") != "explicit_sha_bound"
+        or not isinstance(report_cases, list)
+        or not all(isinstance(row, dict) for row in report_cases)
+        or [(row.get("case_id"), row.get("status")) for row in report_cases] != cases
+    ):
+        raise ValueError("sealed Golden evidence does not match the exact corpus contract")
     report = {
         "schema": REPORT_SCHEMA,
         "status": "PASS",
@@ -145,8 +151,8 @@ def main() -> int:
     parser.add_argument("--repo-root", type=Path, required=True)
     parser.add_argument("--head-sha", required=True)
     parser.add_argument("--json-report", type=Path, required=True)
-    parser.add_argument("--manifest", type=Path)
-    parser.add_argument("--anchor-evidence", type=Path)
+    parser.add_argument("--manifest", type=Path, required=True)
+    parser.add_argument("--anchor-evidence", type=Path, required=True)
     args = parser.parse_args()
     try:
         report = verify(
