@@ -19,8 +19,8 @@ allowed_files:
   - tasks/github-issue-129-atomic-work-claim-20260813/INDEX.md
   - tasks/github-issue-129-atomic-work-claim-20260813/00-atomic-work-claim.md
 authorized_deletions: []
-reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
-current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+reconciled_main: 9622b24c321d02a59cb5cc2de2d948a60fa90df1
+current_main: 9622b24c321d02a59cb5cc2de2d948a60fa90df1
 terminal_marker: ATOMIC_READY_ISSUE_WORK_CLAIM_PROVEN
 claim_ceiling: ATOMIC_READY_ISSUE_WORK_CLAIM_PROVEN_EXISTING_SELF_HOSTED_SERVICE_ONLY
 shared_file_gate: SATISFIED_BY_PR226_MERGE_A787E8E7
@@ -167,7 +167,7 @@ debt and no hostile behavioral finding.
 
 This historical receipt is preserved as repository-contained physical evidence
 only. The current metadata baseline is
-`46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`; the Issue remains a candidate
+`9622b24c321d02a59cb5cc2de2d948a60fa90df1`; the Issue remains a candidate
 pending Owner reconciliation, and no new terminal/closure receipt is asserted.
 
 `ATOMIC_READY_ISSUE_WORK_CLAIM_PROVEN` covers only the canonical atomic claim
