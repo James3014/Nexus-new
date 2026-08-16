@@ -121,15 +121,7 @@ class PatchSynthesisPhase(IPhase):
             or not spec_gen_allowed
         )
         repair_spec = getattr(input_data, "repair_specification", "")
-        plan_has_repair_strategy = bool(
-            getattr(input_data.plan, "repair_strategy", "").strip()
-        )
-        if (
-            not repair_spec
-            and not plan_has_repair_strategy
-            and patch_decision["model"] != "deterministic"
-            and not _spec_gen_disabled
-        ):
+        if not repair_spec and patch_decision["model"] != "deterministic" and not _spec_gen_disabled:
             spec_decision = LocalModelPolicy.select_model(task_type="swe_repair", phase="planning", context={"mode": "spec_gen"})
             spec_prompt = f"Based on the problem and localized code, output a concise logical specification of the fix (Intents only, no code blocks):\n\nProblem: {input_data.problem_statement[:1000]}\nPlan: {input_data.plan.repair_strategy if input_data.plan else ''}"
             try:
@@ -150,8 +142,6 @@ class PatchSynthesisPhase(IPhase):
                 model_decisions[-1]["repair_spec_status"] = "SUCCESS"
             except Exception:
                 repair_spec = "Apply surgical fix as planned."
-        elif plan_has_repair_strategy:
-            model_decisions[-1]["repair_spec_status"] = "SKIPPED_PLAN_REPAIR_STRATEGY"
         elif _spec_gen_disabled:
             model_decisions[-1]["repair_spec_status"] = "SKIPPED_NEXUS_DISABLE_SPEC_GEN"
 

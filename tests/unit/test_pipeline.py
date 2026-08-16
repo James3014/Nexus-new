@@ -224,6 +224,7 @@ def test_pipeline_records_tsp_model_decisions_for_astropy(tmp_path, monkeypatch)
     from nexus.engine.local_model_policy import LocalModelPolicy
     monkeypatch.setattr(LocalModelPolicy, "OLLAMA_LARGE", "qwen2.5-coder:14b")
     monkeypatch.setattr(LocalModelPolicy, "PATCH_TIMEOUT_SECONDS", 420)
+    monkeypatch.setenv("NEXUS_DISABLE_SPEC_GEN", "1")
 
     file_path = tmp_path / "hello.py"
     file_path.write_text("def hello():\n    return False\n", encoding="utf-8")
@@ -267,6 +268,7 @@ def test_pipeline_passes_phase_timeouts_to_model_calls(tmp_path, monkeypatch):
     from nexus.engine.local_model_policy import LocalModelPolicy
     monkeypatch.setattr(LocalModelPolicy, "OLLAMA_LARGE", "qwen2.5-coder:14b")
     monkeypatch.setattr(LocalModelPolicy, "PATCH_TIMEOUT_SECONDS", 420)
+    monkeypatch.setenv("NEXUS_DISABLE_SPEC_GEN", "1")
 
     file_path = tmp_path / "hello.py"
     file_path.write_text("def hello():\n    return False\n", encoding="utf-8")
@@ -649,12 +651,13 @@ def test_model_failure_reason_rejects_substring_spoofs() -> None:
 
 def test_bare_context_missing_micro_result_stays_fail_closed(tmp_path) -> None:
     from unittest.mock import MagicMock, patch
+
     from nexus.services.local_heal.interface import LocalizedFile, PatchSynthesisInput
     from nexus.services.local_heal.micro_verifier import MicroVerifyResult
-    from nexus.services.local_heal.patcher import Patcher
-    from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
-    from nexus.services.local_heal.phases.patch_synthesis import PatchSynthesisPhase
     from nexus.services.local_heal.patch_applier import PatchApplicationResult
+    from nexus.services.local_heal.patcher import Patcher
+    from nexus.services.local_heal.phases.patch_synthesis import PatchSynthesisPhase
+    from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
 
     target = tmp_path / "hello.py"
     target.write_text("old\n", encoding="utf-8")
