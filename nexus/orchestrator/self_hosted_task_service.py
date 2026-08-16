@@ -104,6 +104,22 @@ PENDING_CANDIDATE_STATUSES = frozenset({
 })
 
 
+def _temporary_state_roots() -> tuple[Path, ...]:
+    """Return trusted ephemeral roots, including process-provided CI roots.
+
+    GitHub-hosted runners expose their isolated scratch directory through
+    ``RUNNER_TEMP`` (and some runners use ``TMPDIR``).  These roots are
+    temporary execution surfaces only; they do not alter the canonical state
+    root or grant production/promotion authority.
+    """
+    roots = [Path("/tmp"), Path("/private/tmp"), Path("/private/var/folders")]
+    for variable in ("TMPDIR", "RUNNER_TEMP"):
+        configured = os.getenv(variable, "").strip()
+        if configured:
+            roots.append(Path(configured).expanduser().resolve())
+    return tuple(dict.fromkeys(roots))
+
+
 def resolve_contract_identity(
     state: Mapping[str, Any],
     *,
@@ -928,7 +944,7 @@ class SelfHostedTaskService:
     ):
         canonical = self.canonical_state_dir()
         self.state_dir = Path(state_dir).expanduser().resolve() if state_dir is not None else canonical
-        temporary_roots = (Path("/tmp"), Path("/private/tmp"), Path("/private/var/folders"))
+        temporary_roots = _temporary_state_roots()
         is_temporary = any(root == self.state_dir or root in self.state_dir.parents for root in temporary_roots)
         if self.state_dir != canonical and not ephemeral and not is_temporary:
             raise ValueError(f"production tasks must use canonical state root: {canonical}")
@@ -1789,7 +1805,7 @@ class SelfHostedTaskService:
         controller = Path(contract.controller_repo_root).expanduser().resolve()
         if not controller.is_dir():
             return f"CONTROLLER_MISSING: {controller}"
-        temporary_roots = (Path("/tmp"), Path("/private/tmp"), Path("/private/var/folders"))
+        temporary_roots = _temporary_state_roots()
         if any(controller == root or root in controller.parents for root in temporary_roots):
             return f"DURABLE_CONTROLLER_REQUIRED: temporary Controller is not promotable: {controller}"
         try:
@@ -7182,7 +7198,7 @@ class SelfHostedTaskService:
         lease_target = str((state_after_integration.get("lease") or {}).get("target_worktree") or "")
         requested_target = str(authorization.get("cleanup_target_path") or lease_target)
         target_path = Path(requested_target).expanduser().resolve() if requested_target else None
-        temp_roots = (Path(tempfile.gettempdir()).resolve(), Path("/private/tmp"))
+        temp_roots = _temporary_state_roots()
         controller_root = Path(str((state_after_integration.get("contract") or {}).get("controller_repo_root") or "")).expanduser().resolve()
         cleanup_allowed = bool(
             self.ephemeral

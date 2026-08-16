@@ -1899,6 +1899,36 @@ def test_custom_runner_rejected_for_canonical_non_ephemeral_state(tmp_path, monk
     assert calls == []
 
 
+@pytest.mark.parametrize("variable", ["TMPDIR", "RUNNER_TEMP"])
+def test_process_provided_runner_temp_root_is_ephemeral_only(tmp_path, monkeypatch, variable):
+    runner_root = tmp_path / "github-runner-temp"
+    state_dir = runner_root / "nexus-self-hosted-state"
+    monkeypatch.setenv(variable, str(runner_root))
+
+    def custom_runner(*args):
+        return {"promotion_status": "PENDING_HUMAN_APPROVAL"}
+
+    service = SelfHostedTaskService(
+        state_dir=state_dir,
+        runner=custom_runner,
+        auto_reconcile=False,
+    )
+
+    assert service.ephemeral is True
+    assert service.state_dir == state_dir.resolve()
+    assert service._promotion_authority_error(
+        request={"task_card_required": True},
+    ) == "EPHEMERAL_PROMOTION_FORBIDDEN: rehearsal state cannot become a promotable Candidate"
+
+
+def test_arbitrary_noncanonical_state_root_remains_rejected_with_runner_temp(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "github-runner-temp"))
+    arbitrary = Path("/nexus-arbitrary-state-root-test")
+
+    with pytest.raises(ValueError, match="production tasks must use canonical state root"):
+        SelfHostedTaskService(state_dir=arbitrary, auto_reconcile=False)
+
+
 def test_explicit_ephemeral_custom_runner_is_test_only_and_cannot_claim(tmp_path):
     calls = []
 
