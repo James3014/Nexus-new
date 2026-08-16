@@ -9,8 +9,8 @@ baseline_main: ea8c15293455575b4312b92eeeebc69daa4abbcf
 historical_baseline: ea8c15293455575b4312b92eeeebc69daa4abbcf
 merge_base: 34fc70af1cd57f7499bf92ecec4926a9716c8de2
 historical_reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
-reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
-current_main: cdf2570ede5ae218f36f886b696c8da45458043a
+reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
 frontier_status: TERMINAL_RECONCILIATION
 terminal_marker: CANDIDATE_GENERATION_ONLY_SEMANTIC_PROVEN
 claim_ceiling: CANDIDATE_GENERATION_ONLY_SEMANTIC_PROVEN_ONLY
@@ -99,7 +99,8 @@ before execution.
 - Head workflows: Pyright, Wiki governance, Ruff, Policy lane, Bandit, and Pytest
   completed successfully.
 - Historical reconciled current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`.
-- Reconciled current main: `cdf2570ede5ae218f36f886b696c8da45458043a`.
+- Prior reconciled snapshot (historical): `cdf2570ede5ae218f36f886b696c8da45458043a`.
+- Reconciled current main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`.
 
 `CANDIDATE_GENERATION_ONLY_SEMANTIC_PROVEN` is limited to the strict canonical
 fact and existing CapabilityPlanner demand projection. It grants no provider/model/
