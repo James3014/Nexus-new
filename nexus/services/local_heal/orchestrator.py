@@ -264,16 +264,14 @@ class HealOrchestrator:
     @staticmethod
     def _model_failure_reason(failure_reason: str) -> str:
         """Return a canonical MODEL_* reason without parser decoration."""
-        reason = str(failure_reason or "")
-        for code in (
+        reason = str(failure_reason or "").strip()
+        canonical = {
             "MODEL_TIMEOUT",
             "MODEL_PROVIDER_ERROR",
             "MODEL_EMPTY_RESPONSE",
             "MODEL_REFUSAL",
-        ):
-            if code in reason:
-                return code
-        return ""
+        }
+        return reason if reason in canonical else ""
 
     def _attempt_fuzzy_healing(self, ctx: HealContext, res: PhaseResult, err: PatchError) -> None:
         metadata = res.error_metadata or {}

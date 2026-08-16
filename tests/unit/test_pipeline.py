@@ -97,7 +97,7 @@ def test_pipeline_classifies_repro_environment_failure(tmp_path):
     assert receipt["failure_reason"] == "REPRO_ENVIRONMENT_FAILURE"
 
 
-def test_pipeline_retries_reproduction_after_env_denoise(tmp_path):
+def test_pipeline_retries_reproduction_after_env_denoise(tmp_path, monkeypatch):
     file_path = tmp_path / "hello.py"
     file_path.write_text("def hello():\n    return False\n", encoding="utf-8")
     calls = {"repro": 0, "denoise": 0}
@@ -161,6 +161,12 @@ def test_pipeline_retries_reproduction_after_env_denoise(tmp_path):
             return Result()
 
     pipeline._make_env_denoiser = lambda repo_dir: FakeDenoiser()
+    # Exercise the legacy denoiser seam directly.  Recipe-based remediation
+    # is a separate path and would short-circuit this bounded behavior test.
+    monkeypatch.setattr(
+        "nexus.services.local_heal.phases.reproduction.EnvRecipeRegistry.match",
+        lambda self, signals: None,
+    )
     class FakeRunner:
         python_executable = "python3"
         run_repro = staticmethod(fake_run_repro)
@@ -620,14 +626,71 @@ def test_pipeline_uses_env_resolved_python_for_visible_verification(tmp_path, mo
         max_tries=1,
         repro_script="from pathlib import Path\nassert 'return True' in Path('hello.py').read_text()\n",
         repro_evidence="AssertionError: return True is missing",
-        python_executable="/opt/python3.9",
+        python_executable=sys.executable,
     )
     ctx.localized_files = [("hello.py", "def hello():\n    return False\n")]
 
     res_ctx = pipeline.run(ctx)
 
     assert res_ctx.solve_eligible is True
-    assert visible_cmds == [["/opt/python3.9", "reproduce_bug.py"]]
+    assert visible_cmds == [[sys.executable, "reproduce_bug.py"]]
+
+
+def test_model_failure_reason_rejects_substring_spoofs() -> None:
+    from nexus.services.local_heal.orchestrator import HealOrchestrator
+
+    assert HealOrchestrator._model_failure_reason("MODEL_TIMEOUT") == "MODEL_TIMEOUT"
+    assert HealOrchestrator._model_failure_reason("MODEL_PROVIDER_ERROR") == "MODEL_PROVIDER_ERROR"
+    assert HealOrchestrator._model_failure_reason("MODEL_EMPTY_RESPONSE") == "MODEL_EMPTY_RESPONSE"
+    assert HealOrchestrator._model_failure_reason("MODEL_REFUSAL") == "MODEL_REFUSAL"
+    assert HealOrchestrator._model_failure_reason("SEARCH_MISMATCH:user text MODEL_TIMEOUT") == ""
+    assert HealOrchestrator._model_failure_reason("XMODEL_REFUSALY") == ""
+
+
+def test_bare_context_missing_micro_result_stays_fail_closed(tmp_path) -> None:
+    from unittest.mock import MagicMock, patch
+    from nexus.services.local_heal.interface import LocalizedFile, PatchSynthesisInput
+    from nexus.services.local_heal.micro_verifier import MicroVerifyResult
+    from nexus.services.local_heal.patcher import Patcher
+    from nexus.services.local_heal.protocol import SolidSearchReplaceProtocol
+    from nexus.services.local_heal.phases.patch_synthesis import PatchSynthesisPhase
+    from nexus.services.local_heal.patch_applier import PatchApplicationResult
+
+    target = tmp_path / "hello.py"
+    target.write_text("old\n", encoding="utf-8")
+
+    class MockLLM:
+        def generate(self, **kwargs):
+            return "<<<<<<< SEARCH\nold\n=======\nnew\n>>>>>>> REPLACE"
+
+    phase = PatchSynthesisPhase(
+        SolidSearchReplaceProtocol(), Patcher(), llm_client=MockLLM()
+    )
+    phase.patch_applier.apply_and_validate = MagicMock(
+        return_value=PatchApplicationResult(
+            success=True, applied_diffs=["+++ b/hello.py\nnew\n"], error_reason=""
+        )
+    )
+    inp = PatchSynthesisInput(
+        instance_id="context-missing-hostile",
+        problem_statement="replace old",
+        repro_evidence="evidence",
+        plan=None,
+        localized_files=[LocalizedFile(path="hello.py", content="old\n")],
+        repo_dir=tmp_path,
+        reasoning_mode="INTUITIVE",
+        attempt=1,
+        max_tries=1,
+    )
+    with patch("nexus.services.local_heal.micro_verifier.MicroVerifier.verify") as verify:
+        verify.return_value = MicroVerifyResult(
+            passed=False, error_message="CONTEXT_MISSING", details="unscoped"
+        )
+        output = phase.run(inp)
+
+    assert output.success is False
+    assert output.final_patch == ""
+    assert output.failure_reason.startswith("MICRO_VERIFY_CONTEXT_MISSING:")
 
 
 def test_verification_phase_prefers_route_context_verifier_command(tmp_path, monkeypatch):
