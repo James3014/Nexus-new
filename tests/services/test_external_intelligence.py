@@ -47,10 +47,20 @@ def record(**updates):
 
 def sources():
     return [
-        {"kind": "task_card", "ref": "tasks/campaign/00-task.md", "revision": "b" * 64,
-         "provenance": "git", "content": "Task contract\nAUTO_CHAIN: false\n"},
-        {"kind": "source", "ref": "nexus/example.py", "revision": "a" * 40,
-         "provenance": "git", "content": "def value():\n    return 1\n"},
+        {
+            "kind": "task_card",
+            "ref": "tasks/campaign/00-task.md",
+            "revision": "b" * 64,
+            "provenance": "git",
+            "content": "Task contract\nAUTO_CHAIN: false\n",
+        },
+        {
+            "kind": "source",
+            "ref": "nexus/example.py",
+            "revision": "a" * 40,
+            "provenance": "git",
+            "content": "def value():\n    return 1\n",
+        },
     ]
 
 
@@ -130,8 +140,12 @@ def test_intake_classification_precedence_and_exact_identity():
     assert len(executable["identity_sha256"]) == 64
 
     assert normalize_intake(record(active_elsewhere=True))["disposition"] == "ACTIVE_ELSEWHERE"
-    assert normalize_intake(record(needs_reconciliation=True))["disposition"] == "NEEDS_RECONCILIATION"
-    assert normalize_intake(record(blocked_reasons=["dependency blocked"]))["disposition"] == "BLOCKED"
+    assert (
+        normalize_intake(record(needs_reconciliation=True))["disposition"] == "NEEDS_RECONCILIATION"
+    )
+    assert (
+        normalize_intake(record(blocked_reasons=["dependency blocked"]))["disposition"] == "BLOCKED"
+    )
     assert normalize_intake(record(ready=False))["disposition"] == "BLOCKED"
     assert normalize_intake(record(contract_ready=False))["disposition"] == "NEEDS_CONTRACT_SLICE"
     assert normalize_intake(record(task_card_hash=""))["disposition"] == "NEEDS_CONTRACT_SLICE"
@@ -158,9 +172,19 @@ def test_context_pack_is_deterministic_bounded_and_preserves_provenance():
 
 
 def test_context_pack_utf8_truncation_never_breaks_encoding():
-    pack = build_context_pack([
-        {"kind": "source", "ref": "x", "revision": "r", "provenance": "git", "content": "雪" * 50}
-    ], max_bytes=17, per_source_bytes=17)
+    pack = build_context_pack(
+        [
+            {
+                "kind": "source",
+                "ref": "x",
+                "revision": "r",
+                "provenance": "git",
+                "content": "雪" * 50,
+            }
+        ],
+        max_bytes=17,
+        per_source_bytes=17,
+    )
     content = pack["entries"][0]["content"]
     assert content.encode("utf-8").decode("utf-8") == content
     assert pack["entries"][0]["included_bytes"] <= 17
@@ -177,7 +201,12 @@ def test_strict_envelope_parser_accepts_contract_and_rejects_drift():
     with pytest.raises(ExternalIntelligenceError, match="INTELLIGENCE_PARSE_FAILED"):
         parse_external_execution_envelope(json.dumps(extra))
 
-    malformed = json.dumps(valid).replace("Implement the bounded task.", "bad\nline").replace("\\n", "\n", 1)
+    malformed = (
+        json
+        .dumps(valid)
+        .replace("Implement the bounded task.", "bad\nline")
+        .replace("\\n", "\n", 1)
+    )
     with pytest.raises(ExternalIntelligenceError, match="INTELLIGENCE_PARSE_FAILED"):
         parse_external_execution_envelope(malformed)
 
@@ -205,9 +234,18 @@ def test_request_and_refresh_projection_reuse_vs_stale():
     previous = {"schema": RECEIPT_SCHEMA, "request": request}
     assert project_refresh(previous, request)["status"] == "REUSE"
 
-    new_pack = build_context_pack(sources() + [
-        {"kind": "test", "ref": "tests/x.py", "revision": "z", "provenance": "git", "content": "assert True"}
-    ])
+    new_pack = build_context_pack(
+        sources()
+        + [
+            {
+                "kind": "test",
+                "ref": "tests/x.py",
+                "revision": "z",
+                "provenance": "git",
+                "content": "assert True",
+            }
+        ]
+    )
     stale_context = build_request(normalize_intake(record()), new_pack)
     projection = project_refresh(previous, stale_context)
     assert projection["status"] == "STALE"
@@ -222,7 +260,9 @@ def test_store_journals_before_dispatch_and_blocks_blind_replay(tmp_path):
     store = ExternalIntelligenceStore(tmp_path)
     attempt = store.prepare(request)
     assert attempt["state"] == "PREPARED" and attempt["retry_safe"] is True
-    durable_request = json.loads((tmp_path / "requests" / f"{request['request_sha256']}.json").read_text())
+    durable_request = json.loads(
+        (tmp_path / "requests" / f"{request['request_sha256']}.json").read_text()
+    )
     assert durable_request == request
     dispatched = store.mark_dispatching(attempt)
     assert dispatched["state"] == "DISPATCHING" and dispatched["retry_safe"] is False
@@ -246,7 +286,9 @@ def test_opencli_transport_uses_stable_detail_not_ask_snapshot(monkeypatch):
 
         def communicate(self, timeout=None):
             if self.args[2] == "ask":
-                return json.dumps([{"conversationId": "conv-1", "response": "ask-snapshot-invalid"}]), ""
+                return json.dumps([
+                    {"conversationId": "conv-1", "response": "ask-snapshot-invalid"}
+                ]), ""
             return json.dumps([
                 {"Role": "Assistant", "Text": stable, "Generating": False, "StableSeconds": 6}
             ]), ""
@@ -310,7 +352,9 @@ def test_sidecar_does_not_dispatch_non_executable_intake(tmp_path):
         def invoke(self, prompt):
             raise AssertionError("transport must not run")
 
-    sidecar = ExternalIntelligenceSidecar(transport=NeverTransport(), store=ExternalIntelligenceStore(tmp_path))
+    sidecar = ExternalIntelligenceSidecar(
+        transport=NeverTransport(), store=ExternalIntelligenceStore(tmp_path)
+    )
     result = sidecar.analyze(record(active_elsewhere=True), sources())
     assert result["status"] == "NOT_DISPATCHED"
     assert result["intake"]["disposition"] == "ACTIVE_ELSEWHERE"
@@ -328,12 +372,17 @@ def test_sidecar_completes_receipt_builds_small_control_capsule_and_reuses(tmp_p
         def invoke(self, prompt):
             self.calls += 1
             return TransportResult(
-                "INTELLIGENCE_COMPLETED", raw, conversation_id="conv-42",
-                retry_safe=False, safe_argv=("opencli", "chatgpt", "ask", "<prompt>"),
+                "INTELLIGENCE_COMPLETED",
+                raw,
+                conversation_id="conv-42",
+                retry_safe=False,
+                safe_argv=("opencli", "chatgpt", "ask", "<prompt>"),
             )
 
     transport = Transport()
-    sidecar = ExternalIntelligenceSidecar(transport=transport, store=ExternalIntelligenceStore(tmp_path))
+    sidecar = ExternalIntelligenceSidecar(
+        transport=transport, store=ExternalIntelligenceStore(tmp_path)
+    )
     receipt = sidecar.analyze(record(), sources())
     assert receipt["status"] == "COMPLETED"
     assert receipt["transport_status"] == "INTELLIGENCE_COMPLETED"
@@ -341,7 +390,9 @@ def test_sidecar_completes_receipt_builds_small_control_capsule_and_reuses(tmp_p
     assert receipt["refresh_projection"]["status"] == "NEW"
     assert receipt["envelope"]["worker_binding"]["assigned_thread"] == "UNASSIGNED"
     assert len(receipt["envelope_sha256"]) == 64
-    durable_envelope = json.loads((tmp_path / "envelopes" / f"{request['request_sha256']}.json").read_text())
+    durable_envelope = json.loads(
+        (tmp_path / "envelopes" / f"{request['request_sha256']}.json").read_text()
+    )
     assert durable_envelope == receipt["envelope"]
     capsule = receipt["control_capsule"]
     assert capsule["schema"] == CONTROL_CAPSULE_SCHEMA
@@ -367,7 +418,9 @@ def test_sidecar_refreshes_stale_material_identity_without_reusing_old_receipt(t
             return TransportResult("INTELLIGENCE_COMPLETED", first_raw, conversation_id="first")
 
     store = ExternalIntelligenceStore(tmp_path)
-    first = ExternalIntelligenceSidecar(transport=FirstTransport(), store=store).analyze(record(), sources())
+    first = ExternalIntelligenceSidecar(transport=FirstTransport(), store=store).analyze(
+        record(), sources()
+    )
 
     changed_record = record(main_sha="c" * 40, overlap_state={"active_prs": [88]})
     second_request = build_request(normalize_intake(changed_record), build_context_pack(sources()))
@@ -381,7 +434,9 @@ def test_sidecar_refreshes_stale_material_identity_without_reusing_old_receipt(t
             return TransportResult("INTELLIGENCE_COMPLETED", second_raw, conversation_id="second")
 
     second_transport = SecondTransport()
-    second = ExternalIntelligenceSidecar(transport=second_transport, store=store).analyze(changed_record, sources())
+    second = ExternalIntelligenceSidecar(transport=second_transport, store=store).analyze(
+        changed_record, sources()
+    )
     assert second_transport.calls == 1
     assert second["receipt_id"] != first["receipt_id"]
     assert second["refresh_projection"]["status"] == "STALE"
@@ -400,7 +455,9 @@ def test_sidecar_rejects_binding_drift_and_worker_dispatch_claims(tmp_path):
 
     class BadBindingTransport:
         def invoke(self, prompt):
-            return TransportResult("INTELLIGENCE_COMPLETED", json.dumps(bad_binding), conversation_id="c")
+            return TransportResult(
+                "INTELLIGENCE_COMPLETED", json.dumps(bad_binding), conversation_id="c"
+            )
 
     with pytest.raises(ExternalIntelligenceError, match="INTELLIGENCE_BINDING_MISMATCH"):
         ExternalIntelligenceSidecar(
@@ -409,13 +466,17 @@ def test_sidecar_rejects_binding_drift_and_worker_dispatch_claims(tmp_path):
 
     bad_worker = envelope_for(request)
     bad_worker["worker_binding"] = {
-        "assigned_thread": "d1", "persistent_thread": True,
-        "create_subagent": False, "fallback_allowed": False,
+        "assigned_thread": "d1",
+        "persistent_thread": True,
+        "create_subagent": False,
+        "fallback_allowed": False,
     }
 
     class BadWorkerTransport:
         def invoke(self, prompt):
-            return TransportResult("INTELLIGENCE_COMPLETED", json.dumps(bad_worker), conversation_id="c")
+            return TransportResult(
+                "INTELLIGENCE_COMPLETED", json.dumps(bad_worker), conversation_id="c"
+            )
 
     with pytest.raises(ExternalIntelligenceError, match="INTELLIGENCE_WORKER_BOUNDARY_VIOLATION"):
         ExternalIntelligenceSidecar(
@@ -426,7 +487,9 @@ def test_sidecar_rejects_binding_drift_and_worker_dispatch_claims(tmp_path):
 def test_sidecar_transport_uncertainty_is_reconciliation_not_retry(tmp_path):
     class UnknownTransport:
         def invoke(self, prompt):
-            return TransportResult("OPENCLI_OUTCOME_UNKNOWN", outcome_unknown=True, retry_safe=False)
+            return TransportResult(
+                "OPENCLI_OUTCOME_UNKNOWN", outcome_unknown=True, retry_safe=False
+            )
 
     store = ExternalIntelligenceStore(tmp_path)
     sidecar = ExternalIntelligenceSidecar(transport=UnknownTransport(), store=store)
@@ -468,10 +531,16 @@ def test_model_adaptation_valid_envelope_parses():
     request, _ = request_and_pack()
     valid = envelope_for(request)
     parsed = parse_external_execution_envelope(json.dumps(valid))
-    assert parsed["model_adaptation"]["role_contract"] == ["DeepSeek V4 Flash L2 Task Engineer, bounded single task"]
+    assert parsed["model_adaptation"]["role_contract"] == [
+        "DeepSeek V4 Flash L2 Task Engineer, bounded single task"
+    ]
     assert set(parsed["model_adaptation"]) == {
-        "role_contract", "task_local_invariants", "known_failure_guards",
-        "execution_strategy", "forbidden_inferences", "repair_policy",
+        "role_contract",
+        "task_local_invariants",
+        "known_failure_guards",
+        "execution_strategy",
+        "forbidden_inferences",
+        "repair_policy",
     }
 
 
@@ -529,9 +598,15 @@ def test_prompt_instructs_deepseek_model_adaptation_brief_not_governance_dump():
     assert "DeepSeek V4 Flash L2 Task Engineer" in prompt
     assert "do not paste broad governance text" in prompt
     assert "model_adaptation must include all six keys" in prompt
-    assert "role_contract, task_local_invariants, known_failure_guards, execution_strategy, forbidden_inferences, repair_policy" in prompt
+    assert (
+        "role_contract, task_local_invariants, known_failure_guards, execution_strategy, forbidden_inferences, repair_policy"
+        in prompt
+    )
     assert "derived from current task-local evidence only" in prompt
-    assert "task-relevant failure families, never mechanically include every historical failure family" in prompt
+    assert (
+        "task-relevant failure families, never mechanically include every historical failure family"
+        in prompt
+    )
     assert "leave bounded task-local engineering judgment" in prompt
     assert "implementation-as-policy" in prompt and "authority overreach" in prompt
     assert "one evidence-guided same-unit repair" in prompt
@@ -609,7 +684,15 @@ def test_nonzero_ask_reconcile_recovers_exactly_one_matching_conversation(monkey
             return [{"Index": 1, "Id": "conv-match", "Title": "t", "Url": "u"}]
 
         def _scan_detail(self, conversation_id):
-            return [{"Index": 1, "Role": "User", "Text": prompt, "Generating": False, "StableSeconds": 0}]
+            return [
+                {
+                    "Index": 1,
+                    "Role": "User",
+                    "Text": prompt,
+                    "Generating": False,
+                    "StableSeconds": 0,
+                }
+            ]
 
         def _stable_detail(self):
             return [{"Role": "Assistant", "Text": stable, "Generating": False, "StableSeconds": 6}]
@@ -633,7 +716,15 @@ def test_timeout_reconcile_recovers_exactly_one_matching_conversation(monkeypatc
             return [{"Index": 1, "Id": "conv-match", "Title": "t", "Url": "u"}]
 
         def _scan_detail(self, conversation_id):
-            return [{"Index": 1, "Role": "User", "Text": prompt, "Generating": False, "StableSeconds": 0}]
+            return [
+                {
+                    "Index": 1,
+                    "Role": "User",
+                    "Text": prompt,
+                    "Generating": False,
+                    "StableSeconds": 0,
+                }
+            ]
 
         def _stable_detail(self):
             return [{"Role": "Assistant", "Text": stable, "Generating": False, "StableSeconds": 6}]
@@ -655,7 +746,15 @@ def test_timeout_reconcile_zero_matches_returns_outcome_unknown(monkeypatch):
             return [{"Index": 1, "Id": "conv-other", "Title": "t", "Url": "u"}]
 
         def _scan_detail(self, conversation_id):
-            return [{"Index": 1, "Role": "User", "Text": "unrelated prompt", "Generating": False, "StableSeconds": 0}]
+            return [
+                {
+                    "Index": 1,
+                    "Role": "User",
+                    "Text": "unrelated prompt",
+                    "Generating": False,
+                    "StableSeconds": 0,
+                }
+            ]
 
         def _stable_detail(self):
             raise AssertionError("stable detail must not be reached")
@@ -678,7 +777,15 @@ def test_timeout_reconcile_multiple_matches_returns_outcome_unknown(monkeypatch)
             ]
 
         def _scan_detail(self, conversation_id):
-            return [{"Index": 1, "Role": "User", "Text": prompt, "Generating": False, "StableSeconds": 0}]
+            return [
+                {
+                    "Index": 1,
+                    "Role": "User",
+                    "Text": prompt,
+                    "Generating": False,
+                    "StableSeconds": 0,
+                }
+            ]
 
         def _stable_detail(self):
             raise AssertionError("stable detail must not be reached for ambiguous match")
@@ -698,10 +805,20 @@ def test_timeout_reconcile_unstable_detail_fails_closed(monkeypatch):
             return [{"Index": 1, "Id": "conv-match", "Title": "t", "Url": "u"}]
 
         def _scan_detail(self, conversation_id):
-            return [{"Index": 1, "Role": "User", "Text": prompt, "Generating": False, "StableSeconds": 0}]
+            return [
+                {
+                    "Index": 1,
+                    "Role": "User",
+                    "Text": prompt,
+                    "Generating": False,
+                    "StableSeconds": 0,
+                }
+            ]
 
         def _stable_detail(self):
-            return [{"Role": "Assistant", "Text": "in progress", "Generating": True, "StableSeconds": 0}]
+            return [
+                {"Role": "Assistant", "Text": "in progress", "Generating": True, "StableSeconds": 0}
+            ]
 
     monkeypatch.setattr(subprocess, "Popen", Fake)
     result = OpenCLIExternalIntelligenceTransport(executable="opencli").invoke(prompt)
@@ -715,10 +832,25 @@ def test_timeout_reconcile_similar_title_but_different_prompt_does_not_match(mon
 
     class Fake(TimeoutReconcileFake):
         def _history_rows(self):
-            return [{"Index": 1, "Id": "conv-similar", "Title": "External Intelligence Pre-Implementation", "Url": "u"}]
+            return [
+                {
+                    "Index": 1,
+                    "Id": "conv-similar",
+                    "Title": "External Intelligence Pre-Implementation",
+                    "Url": "u",
+                }
+            ]
 
         def _scan_detail(self, conversation_id):
-            return [{"Index": 1, "Role": "User", "Text": "completely different prompt text", "Generating": False, "StableSeconds": 0}]
+            return [
+                {
+                    "Index": 1,
+                    "Role": "User",
+                    "Text": "completely different prompt text",
+                    "Generating": False,
+                    "StableSeconds": 0,
+                }
+            ]
 
         def _stable_detail(self):
             raise AssertionError("stable detail must not be reached for non-matching prompt")
@@ -739,14 +871,26 @@ def test_timeout_reconcile_malformed_envelope_still_rejected_by_sidecar(tmp_path
             return [{"Index": 1, "Id": "conv-match", "Title": "t", "Url": "u"}]
 
         def _scan_detail(self, conversation_id):
-            return [{"Index": 1, "Role": "User", "Text": prompt, "Generating": False, "StableSeconds": 0}]
+            return [
+                {
+                    "Index": 1,
+                    "Role": "User",
+                    "Text": prompt,
+                    "Generating": False,
+                    "StableSeconds": 0,
+                }
+            ]
 
         def _stable_detail(self):
-            return [{"Role": "Assistant", "Text": malformed, "Generating": False, "StableSeconds": 6}]
+            return [
+                {"Role": "Assistant", "Text": malformed, "Generating": False, "StableSeconds": 6}
+            ]
 
     monkeypatch.setattr(subprocess, "Popen", Fake)
     store = ExternalIntelligenceStore(tmp_path)
-    sidecar = ExternalIntelligenceSidecar(transport=OpenCLIExternalIntelligenceTransport(executable="opencli"), store=store)
+    sidecar = ExternalIntelligenceSidecar(
+        transport=OpenCLIExternalIntelligenceTransport(executable="opencli"), store=store
+    )
     with pytest.raises(ExternalIntelligenceError, match="INTELLIGENCE_PARSE_FAILED"):
         sidecar.analyze(record(), sources())
     request, _ = request_and_pack()
@@ -774,12 +918,17 @@ def test_sidecar_restart_reconciles_dispatching_attempt_without_second_ask(tmp_p
         def reconcile(self, prompt):
             self.reconcile_calls += 1
             return TransportResult(
-                "INTELLIGENCE_COMPLETED", valid, conversation_id="conv-recovered",
-                retry_safe=False, safe_argv=("opencli", "chatgpt", "ask", "<prompt>"),
+                "INTELLIGENCE_COMPLETED",
+                valid,
+                conversation_id="conv-recovered",
+                retry_safe=False,
+                safe_argv=("opencli", "chatgpt", "ask", "<prompt>"),
             )
 
     transport = Transport()
-    result = ExternalIntelligenceSidecar(transport=transport, store=store).analyze(record(), sources())
+    result = ExternalIntelligenceSidecar(transport=transport, store=store).analyze(
+        record(), sources()
+    )
     assert result["status"] == "COMPLETED"
     assert result["conversation_id"] == "conv-recovered"
     assert transport.invoke_calls == 0
@@ -805,14 +954,24 @@ def test_timeout_reconcile_valid_envelope_completes_with_exactly_one_ask(tmp_pat
             return [{"Index": 1, "Id": "conv-match", "Title": "t", "Url": "u"}]
 
         def _scan_detail(self, conversation_id):
-            return [{"Index": 1, "Role": "User", "Text": prompt, "Generating": False, "StableSeconds": 0}]
+            return [
+                {
+                    "Index": 1,
+                    "Role": "User",
+                    "Text": prompt,
+                    "Generating": False,
+                    "StableSeconds": 0,
+                }
+            ]
 
         def _stable_detail(self):
             return [{"Role": "Assistant", "Text": valid, "Generating": False, "StableSeconds": 6}]
 
     monkeypatch.setattr(subprocess, "Popen", Fake)
     store = ExternalIntelligenceStore(tmp_path)
-    sidecar = ExternalIntelligenceSidecar(transport=OpenCLIExternalIntelligenceTransport(executable="opencli"), store=store)
+    sidecar = ExternalIntelligenceSidecar(
+        transport=OpenCLIExternalIntelligenceTransport(executable="opencli"), store=store
+    )
     result = sidecar.analyze(record(), sources())
     assert result["status"] == "COMPLETED"
     assert result["transport_status"] == "INTELLIGENCE_COMPLETED"
@@ -830,7 +989,7 @@ def test_prompt_emits_exactly_one_request_marker_before_untrusted_context():
     assert prompt.find(marker) < prompt.find("BEGIN_UNTRUSTED_CONTEXT")
     assert prompt.find(marker) > 0
     assert marker.startswith("NEXUS_REQUEST_SHA256=")
-    sha_part = marker[len("NEXUS_REQUEST_SHA256="):]
+    sha_part = marker[len("NEXUS_REQUEST_SHA256=") :]
     assert len(sha_part) == 64
     assert all(c in "0123456789abcdef" for c in sha_part)
 
@@ -903,7 +1062,15 @@ def test_timeout_reconcile_same_marker_two_conversations_returns_outcome_unknown
             ]
 
         def _scan_detail(self, conversation_id):
-            return [{"Index": 1, "Role": "User", "Text": prompt, "Generating": False, "StableSeconds": 0}]
+            return [
+                {
+                    "Index": 1,
+                    "Role": "User",
+                    "Text": prompt,
+                    "Generating": False,
+                    "StableSeconds": 0,
+                }
+            ]
 
         def _stable_detail(self):
             raise AssertionError("stable detail must not be reached for multiple matches")
@@ -930,7 +1097,15 @@ def test_timeout_reconcile_zero_marker_matches_returns_outcome_unknown(monkeypat
             return [{"Index": 1, "Id": "conv-other", "Title": "t", "Url": "u"}]
 
         def _scan_detail(self, conversation_id):
-            return [{"Index": 1, "Role": "User", "Text": "reflowed unrelated prompt 顯示更多", "Generating": False, "StableSeconds": 0}]
+            return [
+                {
+                    "Index": 1,
+                    "Role": "User",
+                    "Text": "reflowed unrelated prompt 顯示更多",
+                    "Generating": False,
+                    "StableSeconds": 0,
+                }
+            ]
 
         def _stable_detail(self):
             raise AssertionError("stable detail must not be reached for zero matches")
@@ -946,7 +1121,6 @@ def test_timeout_reconcile_marker_unique_stable_valid_envelope_completes(tmp_pat
     request, pack = request_and_pack()
     valid = json.dumps(envelope_for(request))
     prompt = build_prompt(request, pack)
-    marker = f"NEXUS_REQUEST_SHA256={request['request_sha256']}"
     ask_seen = []
 
     class Fake(TimeoutReconcileFake):
@@ -959,15 +1133,27 @@ def test_timeout_reconcile_marker_unique_stable_valid_envelope_completes(tmp_pat
             return [{"Index": 1, "Id": "conv-match", "Title": "t", "Url": "u"}]
 
         def _scan_detail(self, conversation_id):
-            reflowed = prompt.replace("`required`", "required").replace("\\n", " ").rstrip() + "\n顯示更多"
-            return [{"Index": 1, "Role": "User", "Text": reflowed, "Generating": False, "StableSeconds": 0}]
+            reflowed = (
+                prompt.replace("`required`", "required").replace("\\n", " ").rstrip() + "\n顯示更多"
+            )
+            return [
+                {
+                    "Index": 1,
+                    "Role": "User",
+                    "Text": reflowed,
+                    "Generating": False,
+                    "StableSeconds": 0,
+                }
+            ]
 
         def _stable_detail(self):
             return [{"Role": "Assistant", "Text": valid, "Generating": False, "StableSeconds": 6}]
 
     monkeypatch.setattr(subprocess, "Popen", Fake)
     store = ExternalIntelligenceStore(tmp_path)
-    sidecar = ExternalIntelligenceSidecar(transport=OpenCLIExternalIntelligenceTransport(executable="opencli"), store=store)
+    sidecar = ExternalIntelligenceSidecar(
+        transport=OpenCLIExternalIntelligenceTransport(executable="opencli"), store=store
+    )
     result = sidecar.analyze(record(), sources())
     assert result["status"] == "COMPLETED"
     assert result["transport_status"] == "INTELLIGENCE_COMPLETED"
@@ -993,14 +1179,26 @@ def test_timeout_reconcile_marker_unique_malformed_envelope_rejected(tmp_path, m
             return [{"Index": 1, "Id": "conv-match", "Title": "t", "Url": "u"}]
 
         def _scan_detail(self, conversation_id):
-            return [{"Index": 1, "Role": "User", "Text": prompt, "Generating": False, "StableSeconds": 0}]
+            return [
+                {
+                    "Index": 1,
+                    "Role": "User",
+                    "Text": prompt,
+                    "Generating": False,
+                    "StableSeconds": 0,
+                }
+            ]
 
         def _stable_detail(self):
-            return [{"Role": "Assistant", "Text": malformed, "Generating": False, "StableSeconds": 6}]
+            return [
+                {"Role": "Assistant", "Text": malformed, "Generating": False, "StableSeconds": 6}
+            ]
 
     monkeypatch.setattr(subprocess, "Popen", Fake)
     store = ExternalIntelligenceStore(tmp_path)
-    sidecar = ExternalIntelligenceSidecar(transport=OpenCLIExternalIntelligenceTransport(executable="opencli"), store=store)
+    sidecar = ExternalIntelligenceSidecar(
+        transport=OpenCLIExternalIntelligenceTransport(executable="opencli"), store=store
+    )
     with pytest.raises(ExternalIntelligenceError, match="INTELLIGENCE_PARSE_FAILED"):
         sidecar.analyze(record(), sources())
     assert len(ask_seen) == 1
@@ -1026,7 +1224,9 @@ def test_normal_ask_path_with_marker_unchanged(monkeypatch):
 
         def communicate(self, timeout=None):
             if self.args[2] == "ask":
-                return json.dumps([{"conversationId": "conv-1", "response": "ask-snapshot-invalid"}]), ""
+                return json.dumps([
+                    {"conversationId": "conv-1", "response": "ask-snapshot-invalid"}
+                ]), ""
             return json.dumps([
                 {"Role": "Assistant", "Text": stable, "Generating": False, "StableSeconds": 6}
             ]), ""

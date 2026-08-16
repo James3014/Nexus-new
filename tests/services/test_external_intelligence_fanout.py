@@ -123,7 +123,9 @@ def make_envelope(
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def unit(base: str, envelope: Path, envelope_sha: str, unit_id: str, paths: list[str], **updates) -> dict:
+def unit(
+    base: str, envelope: Path, envelope_sha: str, unit_id: str, paths: list[str], **updates
+) -> dict:
     value = {
         "task_id": "task-1",
         "unit_id": unit_id,
@@ -138,7 +140,9 @@ def unit(base: str, envelope: Path, envelope_sha: str, unit_id: str, paths: list
     return value
 
 
-def completed_result(task_id: str, unit_id: str, session_id: str, workspace_path: str) -> OpenCodeRunResult:
+def completed_result(
+    task_id: str, unit_id: str, session_id: str, workspace_path: str
+) -> OpenCodeRunResult:
     return OpenCodeRunResult(
         status="COMPLETED",
         session_id=session_id,
@@ -174,7 +178,7 @@ class EditingTransport:
         prefix = name + "="
         for line in prompt.splitlines():
             if line.startswith(prefix):
-                return line[len(prefix):]
+                return line[len(prefix) :]
         raise AssertionError(f"missing {name}")
 
     def run_new(self, *, prompt: str, artifact_path: str, workspace_path: str) -> OpenCodeRunResult:
@@ -188,7 +192,9 @@ class EditingTransport:
             self.sessions[unit_id] = session
         return completed_result(task_id, unit_id, session, workspace_path)
 
-    def continue_session(self, *, session_id: str, prompt: str, artifact_path: str, workspace_path: str) -> OpenCodeRunResult:
+    def continue_session(
+        self, *, session_id: str, prompt: str, artifact_path: str, workspace_path: str
+    ) -> OpenCodeRunResult:
         task_id = self._field(prompt, "task_id")
         unit_id = self._field(prompt, "unit_id")
         with self.lock:
@@ -275,7 +281,9 @@ def test_worker_bootstrap_contains_ref_hash_not_full_envelope_body(tmp_path):
     assert "authorized_mutation_paths" in prompt
 
 
-def test_worker_bootstrap_identifies_deepseek_l2_and_model_adaptation_without_envelope_body(tmp_path):
+def test_worker_bootstrap_identifies_deepseek_l2_and_model_adaptation_without_envelope_body(
+    tmp_path,
+):
     _, base = make_repo(tmp_path)
     envelope = tmp_path / "envelope.json"
     marker = "SHOULD_NOT_ENTER_SOL_CONTEXT_987654"
@@ -285,7 +293,10 @@ def test_worker_bootstrap_identifies_deepseek_l2_and_model_adaptation_without_en
     assert "DeepSeek V4 Flash" in prompt
     assert "bounded L2 Task Engineer" in prompt
     assert "model_adaptation" in prompt
-    assert "role_contract, task_local_invariants, known_failure_guards, execution_strategy, forbidden_inferences, repair_policy" in prompt
+    assert (
+        "role_contract, task_local_invariants, known_failure_guards, execution_strategy, forbidden_inferences, repair_policy"
+        in prompt
+    )
     assert "authorized_mutation_paths" in prompt
     assert "Do not commit, push, merge, approve, integrate, or spawn a replacement model" in prompt
     assert "one evidence-guided same-unit repair and no blind retry or auto-chain" in prompt
@@ -293,7 +304,9 @@ def test_worker_bootstrap_identifies_deepseek_l2_and_model_adaptation_without_en
     assert envelope.read_text(encoding="utf-8") not in prompt
 
 
-def test_export_attestation_accepts_truncated_large_session_after_complete_info(tmp_path, monkeypatch):
+def test_export_attestation_accepts_truncated_large_session_after_complete_info(
+    tmp_path, monkeypatch
+):
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     session_id = "ses_test_export_00000000"
@@ -366,7 +379,9 @@ def test_envelope_sha_scope_and_forbidden_paths_fail_closed(tmp_path):
     envelope_sha = make_envelope(envelope, base, allowed=["a.py"], forbidden=["forbidden"])
     allocator = GitWorktreeAllocator(tmp_path / "repo", tmp_path / "workspaces")
     store = FanoutStore(tmp_path / "state")
-    runtime = AdaptiveDeepSeekFanoutRuntime(allocator=allocator, store=store, transport=EditingTransport())
+    runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=allocator, store=store, transport=EditingTransport()
+    )
 
     widened = runtime.run(
         [unit(base, envelope, envelope_sha, "ub", ["b.py"])],
@@ -386,8 +401,12 @@ def test_worktree_allocator_produces_unique_clean_exact_base_workspaces(tmp_path
     envelope = tmp_path / "envelope.json"
     envelope_sha = make_envelope(envelope, base)
     allocator = GitWorktreeAllocator(repo, tmp_path / "workspaces")
-    a = allocator.allocate(ExecutionUnit.from_mapping(unit(base, envelope, envelope_sha, "ua", ["a.py"])))
-    b = allocator.allocate(ExecutionUnit.from_mapping(unit(base, envelope, envelope_sha, "ub", ["b.py"])))
+    a = allocator.allocate(
+        ExecutionUnit.from_mapping(unit(base, envelope, envelope_sha, "ua", ["a.py"]))
+    )
+    b = allocator.allocate(
+        ExecutionUnit.from_mapping(unit(base, envelope, envelope_sha, "ub", ["b.py"]))
+    )
     assert a.workspace_id != b.workspace_id
     assert a.path != b.path
     assert _git(Path(a.path), "rev-parse", "HEAD") == base
@@ -444,16 +463,30 @@ def test_opencode_transport_parses_1_18_domain_event_stream(monkeypatch, tmp_pat
 
         def communicate(self, timeout=None):
             def part_event(part):
-                return json.dumps({"type": "message.part.updated", "id": "e", "data": {
-                    "sessionID": session, "part": part, "time": 0,
-                }})
+                return json.dumps({
+                    "type": "message.part.updated",
+                    "id": "e",
+                    "data": {
+                        "sessionID": session,
+                        "part": part,
+                        "time": 0,
+                    },
+                })
+
             events = "\n".join([
                 part_event({"type": "step-start", "id": "p1"}),
                 part_event({"type": "reasoning", "text": "thinking", "id": "p2"}),
-                part_event({"type": "text", "text": json.dumps({
-                    "schema": "external_intelligence_worker_result.v1",
-                    "task_id": "task-1", "unit_id": "ua", "status": "BLOCKED", "summary": "no mutation"
-                }), "id": "p3"}),
+                part_event({
+                    "type": "text",
+                    "text": json.dumps({
+                        "schema": "external_intelligence_worker_result.v1",
+                        "task_id": "task-1",
+                        "unit_id": "ua",
+                        "status": "BLOCKED",
+                        "summary": "no mutation",
+                    }),
+                    "id": "p3",
+                }),
                 part_event({"type": "step-finish", "id": "p4", "reason": "completed"}),
             ])
             return events, ""
@@ -468,7 +501,9 @@ def test_opencode_transport_parses_1_18_domain_event_stream(monkeypatch, tmp_pat
                 "model": {"providerID": PROVIDER_ID, "id": MODEL_ID},
             }
         }
-        return SimpleNamespace(returncode=0, stdout="Exporting session\n" + json.dumps(exported), stderr="")
+        return SimpleNamespace(
+            returncode=0, stdout="Exporting session\n" + json.dumps(exported), stderr=""
+        )
 
     monkeypatch.setattr(subprocess, "Popen", FakePopen)
     monkeypatch.setattr(subprocess, "run", fake_run)
@@ -498,10 +533,19 @@ def test_opencode_new_and_continue_bind_exact_model_session_and_directory(monkey
         def communicate(self, timeout=None):
             events = "\n".join([
                 json.dumps({"type": "step_start", "sessionID": session, "part": {}}),
-                json.dumps({"type": "text", "sessionID": session, "part": {"text": json.dumps({
-                    "schema": "external_intelligence_worker_result.v1",
-                    "task_id": "task-1", "unit_id": "ua", "status": "BLOCKED", "summary": "no mutation"
-                })}}),
+                json.dumps({
+                    "type": "text",
+                    "sessionID": session,
+                    "part": {
+                        "text": json.dumps({
+                            "schema": "external_intelligence_worker_result.v1",
+                            "task_id": "task-1",
+                            "unit_id": "ua",
+                            "status": "BLOCKED",
+                            "summary": "no mutation",
+                        })
+                    },
+                }),
                 json.dumps({"type": "step_finish", "sessionID": session, "part": {}}),
             ])
             return events, ""
@@ -516,13 +560,17 @@ def test_opencode_new_and_continue_bind_exact_model_session_and_directory(monkey
                 "model": {"providerID": PROVIDER_ID, "id": MODEL_ID},
             }
         }
-        return SimpleNamespace(returncode=0, stdout="Exporting session\n" + json.dumps(exported), stderr="")
+        return SimpleNamespace(
+            returncode=0, stdout="Exporting session\n" + json.dumps(exported), stderr=""
+        )
 
     monkeypatch.setattr(subprocess, "Popen", FakePopen)
     monkeypatch.setattr(subprocess, "run", fake_run)
     transport = OpenCodeDeepSeekTransport(executable="opencode")
     first = transport.run_new(prompt="p", artifact_path="/tmp/envelope", workspace_path=workspace)
-    second = transport.continue_session(session_id=session, prompt="p2", artifact_path="/tmp/repair", workspace_path=workspace)
+    second = transport.continue_session(
+        session_id=session, prompt="p2", artifact_path="/tmp/repair", workspace_path=workspace
+    )
     assert first.status == "COMPLETED" and second.status == "COMPLETED"
     assert first.session_id == second.session_id == session
     assert first.provider_id == PROVIDER_ID and first.model_id == MODEL_ID
@@ -554,16 +602,24 @@ def test_opencode_model_attestation_mismatch_is_outcome_unknown(monkeypatch, tmp
             ]), ""
 
     def fake_run(argv, **kwargs):
-        return SimpleNamespace(returncode=0, stdout=json.dumps({"info": {
-            "id": session,
-            "directory": workspace,
-            "version": "1.18.18",
-            "model": {"providerID": PROVIDER_ID, "id": "wrong-model"},
-        }}), stderr="")
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps({
+                "info": {
+                    "id": session,
+                    "directory": workspace,
+                    "version": "1.18.18",
+                    "model": {"providerID": PROVIDER_ID, "id": "wrong-model"},
+                }
+            }),
+            stderr="",
+        )
 
     monkeypatch.setattr(subprocess, "Popen", FakePopen)
     monkeypatch.setattr(subprocess, "run", fake_run)
-    result = OpenCodeDeepSeekTransport().run_new(prompt="p", artifact_path="x", workspace_path=workspace)
+    result = OpenCodeDeepSeekTransport().run_new(
+        prompt="p", artifact_path="x", workspace_path=workspace
+    )
     assert result.status == "OPENCODE_ATTESTATION_UNKNOWN"
     assert result.process_started is True
     assert result.outcome_unknown is True
@@ -613,14 +669,21 @@ def test_runtime_outcome_unknown_requires_reconciliation_and_no_second_start(tmp
 
     class UnknownTransport:
         def run_new(self, **kwargs):
-            return OpenCodeRunResult(status="OPENCODE_OUTCOME_UNKNOWN", process_started=True, outcome_unknown=True, retry_safe=False)
+            return OpenCodeRunResult(
+                status="OPENCODE_OUTCOME_UNKNOWN",
+                process_started=True,
+                outcome_unknown=True,
+                retry_safe=False,
+            )
 
     runtime = AdaptiveDeepSeekFanoutRuntime(
         allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
         store=FanoutStore(tmp_path / "state"),
         transport=UnknownTransport(),
     )
-    result = runtime.run([unit(base, envelope, envelope_sha, "ua", ["a.py"])], CapacityLease(1, 1, 1, 1))
+    result = runtime.run(
+        [unit(base, envelope, envelope_sha, "ua", ["a.py"])], CapacityLease(1, 1, 1, 1)
+    )
     assert "FANOUT_RECONCILIATION_REQUIRED" in result["errors"]["ua"]
     attempt_path = next((tmp_path / "state" / "attempts").glob("*.json"))
     attempt = json.loads(attempt_path.read_text())
@@ -690,7 +753,9 @@ def test_runtime_reconciliation_fails_closed_without_terminal_session(tmp_path):
         def reconcile_workspace(self, *, workspace_path):
             raise FanoutError("OPENCODE_RECONCILE_NOT_TERMINAL")
 
-    runtime = AdaptiveDeepSeekFanoutRuntime(allocator=allocator, store=store, transport=NonTerminalTransport())
+    runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=allocator, store=store, transport=NonTerminalTransport()
+    )
     result = runtime.run([parsed], CapacityLease(1, 1, 1, 1))
     assert result["errors"]["ua"] == "OPENCODE_RECONCILE_NOT_TERMINAL"
     attempt = json.loads(next((tmp_path / "state" / "attempts").glob("*.json")).read_text())
@@ -713,7 +778,9 @@ def test_candidate_capture_rejects_out_of_scope_worker_mutation(tmp_path):
         store=FanoutStore(tmp_path / "state"),
         transport=BadTransport(),
     )
-    result = runtime.run([unit(base, envelope, envelope_sha, "ua", ["a.py"])], CapacityLease(1, 1, 1, 1))
+    result = runtime.run(
+        [unit(base, envelope, envelope_sha, "ua", ["a.py"])], CapacityLease(1, 1, 1, 1)
+    )
     assert "OUT_OF_SCOPE_MUTATION:b.py" in result["errors"]["ua"]
 
 
@@ -728,13 +795,17 @@ def test_same_unit_repair_continues_exact_session_and_creates_child_candidate(tm
         store=store,
         transport=transport,
     )
-    initial = runtime.run([unit(base, envelope, envelope_sha, "ua", ["a.py"])], CapacityLease(1, 1, 1, 1))["receipts"]["ua"]
+    initial = runtime.run(
+        [unit(base, envelope, envelope_sha, "ua", ["a.py"])], CapacityLease(1, 1, 1, 1)
+    )["receipts"]["ua"]
     repair = tmp_path / "repair.json"
     repair.write_text('{"schema":"repair_delta.v2","instruction":"repair a.py"}', encoding="utf-8")
     import hashlib
 
     repair_sha = hashlib.sha256(repair.read_bytes()).hexdigest()
-    child = runtime.continue_repair(initial, repair_id="r1", repair_ref=str(repair), repair_sha256=repair_sha)
+    child = runtime.continue_repair(
+        initial, repair_id="r1", repair_ref=str(repair), repair_sha256=repair_sha
+    )
     assert child["status"] == "CANDIDATE_READY_FOR_VERIFICATION"
     assert child["session_id"] == initial["session_id"]
     assert child["workspace_id"] == initial["workspace_id"]

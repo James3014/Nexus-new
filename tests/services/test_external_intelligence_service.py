@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 import pytest
 
@@ -73,13 +72,16 @@ def _complete(reuse=False):
 
 def test_load_config_is_strict_and_profile_is_configurable(tmp_path):
     cfg = tmp_path / "config.json"
-    cfg.write_text(json.dumps({
-        "repositories": ["o/r"],
-        "repository_roots": {"o/r": str(tmp_path / "repo")},
-        "state_root": str(tmp_path / "state"),
-        "workspace_root": str(tmp_path / "workspaces"),
-        "opencli_profile": "profile-alias",
-    }), encoding="utf-8")
+    cfg.write_text(
+        json.dumps({
+            "repositories": ["o/r"],
+            "repository_roots": {"o/r": str(tmp_path / "repo")},
+            "state_root": str(tmp_path / "state"),
+            "workspace_root": str(tmp_path / "workspaces"),
+            "opencli_profile": "profile-alias",
+        }),
+        encoding="utf-8",
+    )
     loaded = load_config(cfg)
     assert loaded.opencli_profile == "profile-alias"
     assert loaded.opencode_executable == "opencode"
@@ -92,10 +94,12 @@ def test_load_config_is_strict_and_profile_is_configurable(tmp_path):
 
 def test_run_once_processes_at_most_one_issue_and_publishes_compact_result(tmp_path):
     config = _config(tmp_path)
-    gh = FakeGh({"o/r": [
-        {"number": 2, "title": "later", "body": "b"},
-        {"number": 1, "title": "first", "body": "a"},
-    ]})
+    gh = FakeGh({
+        "o/r": [
+            {"number": 2, "title": "later", "body": "b"},
+            {"number": 1, "title": "first", "body": "a"},
+        ]
+    })
     automation = FakeAutomation(_complete())
     result = run_once(config, gh=gh, automation_factory=lambda _c, _r: automation)
     assert result["issue_number"] == 1
@@ -127,10 +131,12 @@ def test_run_once_skips_reused_issue_to_reach_eligible_next(tmp_path):
                 return _complete(reuse=True)
             return _complete()
 
-    gh = FakeGh({"o/r": [
-        {"number": 2, "title": "eligible", "body": "b"},
-        {"number": 1, "title": "already-done", "body": "a"},
-    ]})
+    gh = FakeGh({
+        "o/r": [
+            {"number": 2, "title": "eligible", "body": "b"},
+            {"number": 1, "title": "already-done", "body": "a"},
+        ]
+    })
     result = run_once(config, gh=gh, automation_factory=lambda _c, _r: SequencedAutomation())
     assert calls == [1, 2]
     assert result["issue_number"] == 2
@@ -146,13 +152,19 @@ def test_run_once_skips_pre_dispatch_blocked_issue_to_reach_eligible_next(tmp_pa
         def run_issue(self, repository, issue_number, title, body):
             calls.append(issue_number)
             if issue_number == 1:
-                return {"state": "BLOCKED", "error": "TASK_CARD_HASH_MISMATCH", "semantic_dispatched": False}
+                return {
+                    "state": "BLOCKED",
+                    "error": "TASK_CARD_HASH_MISMATCH",
+                    "semantic_dispatched": False,
+                }
             return _complete()
 
-    gh = FakeGh({"o/r": [
-        {"number": 2, "title": "eligible", "body": "b"},
-        {"number": 1, "title": "blocked", "body": "a"},
-    ]})
+    gh = FakeGh({
+        "o/r": [
+            {"number": 2, "title": "eligible", "body": "b"},
+            {"number": 1, "title": "blocked", "body": "a"},
+        ]
+    })
     result = run_once(config, gh=gh, automation_factory=lambda _c, _r: SequencedAutomation())
     assert calls == [1, 2]
     assert result["issue_number"] == 2
@@ -168,13 +180,19 @@ def test_run_once_skips_source_lineage_blocked_issue_to_reach_eligible_next(tmp_
         def run_issue(self, repository, issue_number, title, body):
             calls.append(issue_number)
             if issue_number == 1:
-                return {"state": "BLOCKED", "error": "MAIN_SHA_LINEAGE_MISMATCH", "semantic_dispatched": False}
+                return {
+                    "state": "BLOCKED",
+                    "error": "MAIN_SHA_LINEAGE_MISMATCH",
+                    "semantic_dispatched": False,
+                }
             return _complete()
 
-    gh = FakeGh({"o/r": [
-        {"number": 2, "title": "eligible", "body": "b"},
-        {"number": 1, "title": "blocked-lineage", "body": "a"},
-    ]})
+    gh = FakeGh({
+        "o/r": [
+            {"number": 2, "title": "eligible", "body": "b"},
+            {"number": 1, "title": "blocked-lineage", "body": "a"},
+        ]
+    })
     result = run_once(config, gh=gh, automation_factory=lambda _c, _r: SequencedAutomation())
     assert calls == [1, 2]
     assert result["issue_number"] == 2

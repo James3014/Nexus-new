@@ -4,21 +4,19 @@ import hashlib
 import json
 import subprocess
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
+from nexus.services.external_intelligence import ExternalIntelligenceStore
 from nexus.services.external_intelligence_automation import (
-    AMBIGUOUS_STATES,
+    ISSUE_SCHEMA,
     AutomationError,
     AutomationStateStore,
     ExternalIntelligenceAutomation,
-    ISSUE_SCHEMA,
     IssueWorkItem,
     compact_publication_payload,
     parse_issue_contract,
 )
-from nexus.services.external_intelligence import ExternalIntelligenceStore
 
 
 def _sha(path: Path) -> str:
@@ -59,17 +57,38 @@ def _setup(tmp_path: Path, remote_url: str = "https://github.com/o/r.git", **con
     repo = tmp_path / "repo"
     repo.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init", "-b", "main"], cwd=repo, capture_output=True, check=True)
-    subprocess.run(["git", "config", "user.name", "Test Runner"], cwd=repo, capture_output=True, check=True)
-    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "config", "user.name", "Test Runner"], cwd=repo, capture_output=True, check=True
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    )
     card = repo / "tasks" / "x.md"
     card.parent.mkdir(parents=True, exist_ok=True)
     card.write_text("# task\n", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=repo, capture_output=True, check=True)
-    subprocess.run(["git", "commit", "-m", "initial commit"], cwd=repo, capture_output=True, check=True)
-    head_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+    subprocess.run(
+        ["git", "commit", "-m", "initial commit"], cwd=repo, capture_output=True, check=True
+    )
+    head_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
     if remote_url:
-        subprocess.run(["git", "remote", "add", "origin", remote_url], cwd=repo, capture_output=True, check=True)
-        subprocess.run(["git", "update-ref", "refs/remotes/origin/main", head_sha], cwd=repo, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "remote", "add", "origin", remote_url],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
+        subprocess.run(
+            ["git", "update-ref", "refs/remotes/origin/main", head_sha],
+            cwd=repo,
+            capture_output=True,
+            check=True,
+        )
 
     contract_args = {"main_sha": head_sha}
     contract_args.update(contract_overrides)
@@ -93,8 +112,12 @@ class FakeSidecar:
         request_sha = "b" * 64
         path = self.store.root / "envelopes" / f"{request_sha}.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(envelope, sort_keys=True, separators=(",", ":")), encoding="utf-8")
-        envelope_sha = hashlib.sha256(json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        path.write_text(
+            json.dumps(envelope, sort_keys=True, separators=(",", ":")), encoding="utf-8"
+        )
+        envelope_sha = hashlib.sha256(
+            json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
         return {
             "status": "COMPLETED",
             "receipt_id": "receipt-1",
@@ -179,7 +202,9 @@ def test_full_pipeline_opt_in_is_required_before_semantic_dispatch(tmp_path):
     repo, _, contract, _, store = _setup(tmp_path)
     contract.pop("pipeline_mode")
     sidecar = FakeSidecar(store)
-    result = _automation(tmp_path, repo, store, sidecar=sidecar).run_issue("o/r", 1, "title", _body(contract))
+    result = _automation(tmp_path, repo, store, sidecar=sidecar).run_issue(
+        "o/r", 1, "title", _body(contract)
+    )
     assert result["state"] == "BLOCKED"
     assert result["error"] == "ISSUE_CONTRACT_FULL_PIPELINE_OPT_IN_REQUIRED"
     assert result["semantic_dispatched"] is False
@@ -214,7 +239,9 @@ def test_ready_false_blocks_before_any_semantic_calls(tmp_path):
     sidecar = FakeSidecar(store, non_dispatched=True)
     c = FakeC()
     d = FakeD()
-    result = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d).run_issue("o/r", 2, "title", _body(contract))
+    result = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d).run_issue(
+        "o/r", 2, "title", _body(contract)
+    )
     assert result["state"] == "BLOCKED"
     assert result["stage"] == "INTELLIGENCE"
     assert result["semantic_dispatched"] is False
@@ -227,7 +254,9 @@ def test_not_ready_issue_does_not_reach_fanout(tmp_path):
     sidecar = FakeSidecar(store, non_dispatched=True)
     c = FakeC()
     d = FakeD()
-    result = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d).run_issue("o/r", 2, "title", _body(contract))
+    result = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d).run_issue(
+        "o/r", 2, "title", _body(contract)
+    )
     assert result["state"] == "BLOCKED"
     assert result["stage"] == "INTELLIGENCE"
     assert len(sidecar.calls) == 1
@@ -238,7 +267,9 @@ def test_envelope_artifact_maps_units_without_scope_widening(tmp_path):
     repo, _, contract, body, store = _setup(tmp_path)
     c = FakeC()
     sidecar = FakeSidecar(store)
-    result = _automation(tmp_path, repo, store, sidecar=sidecar, c=c).run_issue("o/r", 3, "title", body)
+    result = _automation(tmp_path, repo, store, sidecar=sidecar, c=c).run_issue(
+        "o/r", 3, "title", body
+    )
     assert result["state"] == "COMPLETE"
     units, lease = c.calls[0]
     assert lease.requested_concurrency == 2
@@ -273,7 +304,9 @@ def test_d_terminal_result_blocks_instead_of_complete(tmp_path):
 def test_incomplete_fanout_blocks_d(tmp_path, mode):
     repo, _, _, body, store = _setup(tmp_path)
     d = FakeD()
-    result = _automation(tmp_path, repo, store, c=FakeC(mode), d=d).run_issue("o/r", 4, "title", body)
+    result = _automation(tmp_path, repo, store, c=FakeC(mode), d=d).run_issue(
+        "o/r", 4, "title", body
+    )
     assert result["state"] in {"RECONCILIATION_REQUIRED", "BLOCKED"}
     assert d.calls == []
 
@@ -407,23 +440,81 @@ def test_e1_accepted_contract_feeds_real_c_execution_units(tmp_path):
         assert built.allow_deletions == unit.get("allow_deletions", False)
 
 
-@pytest.mark.parametrize("mutate,expected", [
-    (lambda c: c["unit_verifiers"].update({"u1": [{"verifier_id": "u1", "argv": ["true"]}]}), "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID"),
-    (lambda c: c["unit_verifiers"].update({"u1": [{"id": "u1", "argv": []}]}), "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID"),
-    (lambda c: c["unit_verifiers"].update({"u1": [{"id": "u1", "argv": [""]}]}), "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID"),
-    (lambda c: c["unit_verifiers"].update({"u1": [{"id": "u1", "argv": ["true"], "timeout": True}]}), "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID"),
-    (lambda c: c["unit_verifiers"].update({"u1": [{"id": "u1", "argv": ["true"], "timeout": 0}]}), "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID"),
-    (lambda c: c["unit_verifiers"].update({"u1": [{"id": "u1", "argv": ["true"], "timeout": 1801}]}), "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID"),
-    (lambda c: c["unit_verifiers"].update({"u1": [{"id": "u1", "argv": ["true"], "owner_unit": 5}]}), "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID"),
-    (lambda c: c["whole_verifiers"].append({"id": "x"}), "ISSUE_CONTRACT_WHOLE_VERIFIERS_INVALID"),
-    (lambda c: c["whole_verifiers"].append({"id": "x", "argv": ["echo", "a\x00b"]}), "ISSUE_CONTRACT_WHOLE_VERIFIERS_INVALID"),
-    (lambda c: c["whole_verifiers"].append({"id": "x", "argv": ["echo"] * 65}), "ISSUE_CONTRACT_WHOLE_VERIFIERS_INVALID"),
-    (lambda c: c["whole_verifiers"].append({"id": "x", "argv": ["a" * 4097]}), "ISSUE_CONTRACT_WHOLE_VERIFIERS_INVALID"),
-    (lambda c: c["unit_verifiers"].update({"u1": [{"id": "bad id", "argv": ["true"]}]}), "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID"),
-    (lambda c: c["unit_verifiers"].update({"u1": [{"id": "bad/id", "argv": ["true"]}]}), "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID"),
-    (lambda c: c["unit_verifiers"].update({"u1": [{"id": "x" * 161, "argv": ["true"]}]}), "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID"),
-    (lambda c: c["unit_verifiers"].update({"u1": [{"id": "u1", "argv": ["true"], "owner_unit": "bad owner"}]}), "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID"),
-])
+@pytest.mark.parametrize(
+    "mutate,expected",
+    [
+        (
+            lambda c: c["unit_verifiers"].update({"u1": [{"verifier_id": "u1", "argv": ["true"]}]}),
+            "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID",
+        ),
+        (
+            lambda c: c["unit_verifiers"].update({"u1": [{"id": "u1", "argv": []}]}),
+            "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID",
+        ),
+        (
+            lambda c: c["unit_verifiers"].update({"u1": [{"id": "u1", "argv": [""]}]}),
+            "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID",
+        ),
+        (
+            lambda c: c["unit_verifiers"].update({
+                "u1": [{"id": "u1", "argv": ["true"], "timeout": True}]
+            }),
+            "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID",
+        ),
+        (
+            lambda c: c["unit_verifiers"].update({
+                "u1": [{"id": "u1", "argv": ["true"], "timeout": 0}]
+            }),
+            "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID",
+        ),
+        (
+            lambda c: c["unit_verifiers"].update({
+                "u1": [{"id": "u1", "argv": ["true"], "timeout": 1801}]
+            }),
+            "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID",
+        ),
+        (
+            lambda c: c["unit_verifiers"].update({
+                "u1": [{"id": "u1", "argv": ["true"], "owner_unit": 5}]
+            }),
+            "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID",
+        ),
+        (
+            lambda c: c["whole_verifiers"].append({"id": "x"}),
+            "ISSUE_CONTRACT_WHOLE_VERIFIERS_INVALID",
+        ),
+        (
+            lambda c: c["whole_verifiers"].append({"id": "x", "argv": ["echo", "a\x00b"]}),
+            "ISSUE_CONTRACT_WHOLE_VERIFIERS_INVALID",
+        ),
+        (
+            lambda c: c["whole_verifiers"].append({"id": "x", "argv": ["echo"] * 65}),
+            "ISSUE_CONTRACT_WHOLE_VERIFIERS_INVALID",
+        ),
+        (
+            lambda c: c["whole_verifiers"].append({"id": "x", "argv": ["a" * 4097]}),
+            "ISSUE_CONTRACT_WHOLE_VERIFIERS_INVALID",
+        ),
+        (
+            lambda c: c["unit_verifiers"].update({"u1": [{"id": "bad id", "argv": ["true"]}]}),
+            "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID",
+        ),
+        (
+            lambda c: c["unit_verifiers"].update({"u1": [{"id": "bad/id", "argv": ["true"]}]}),
+            "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID",
+        ),
+        (
+            lambda c: c["unit_verifiers"].update({"u1": [{"id": "x" * 161, "argv": ["true"]}]}),
+            "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID",
+        ),
+        (
+            lambda c: c["unit_verifiers"].update({
+                "u1": [{"id": "u1", "argv": ["true"], "owner_unit": "bad owner"}]
+            }),
+            "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID",
+        ),
+    ],
+)
 def test_verifier_spec_strict_validation(tmp_path, mutate, expected):
     repo, _, contract, _, _ = _setup(tmp_path)
     mutate(contract)
@@ -432,12 +523,15 @@ def test_verifier_spec_strict_validation(tmp_path, mutate, expected):
     assert str(exc.value) == expected
 
 
-@pytest.mark.parametrize("field,value", [
-    ("task_id", "bad task"),
-    ("unit_id", "bad unit"),
-    ("unit_id", "_starts_underscore"),
-    ("unit_id", "x" * 121),
-])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("task_id", "bad task"),
+        ("unit_id", "bad unit"),
+        ("unit_id", "_starts_underscore"),
+        ("unit_id", "x" * 121),
+    ],
+)
 def test_c_identity_slug_rejection(tmp_path, field, value):
     repo, _, contract, _, _ = _setup(tmp_path)
     if field == "task_id":
@@ -449,13 +543,16 @@ def test_c_identity_slug_rejection(tmp_path, field, value):
         parse_issue_contract(_body(contract))
 
 
-@pytest.mark.parametrize("bad_path", [
-    "../x.py",
-    "a/../x.py",
-    "/x.py",
-    "foo\\bar.py",
-    "a\x00b.py",
-])
+@pytest.mark.parametrize(
+    "bad_path",
+    [
+        "../x.py",
+        "a/../x.py",
+        "/x.py",
+        "foo\\bar.py",
+        "a\x00b.py",
+    ],
+)
 def test_mutation_path_rejection(tmp_path, bad_path):
     repo, _, contract, _, _ = _setup(tmp_path)
     contract["execution_units"][0]["mutation_paths"] = [bad_path]
@@ -470,12 +567,15 @@ def test_duplicate_mutation_path_rejection(tmp_path):
         parse_issue_contract(_body(contract))
 
 
-@pytest.mark.parametrize("field,bad", [
-    ("main_sha", "xyz"),
-    ("main_sha", "a" * 39),
-    ("task_card_hash", "xyz"),
-    ("task_card_hash", "a" * 63),
-])
+@pytest.mark.parametrize(
+    "field,bad",
+    [
+        ("main_sha", "xyz"),
+        ("main_sha", "a" * 39),
+        ("task_card_hash", "xyz"),
+        ("task_card_hash", "a" * 63),
+    ],
+)
 def test_identity_hash_format_rejection(tmp_path, field, bad):
     repo, _, contract, _, _ = _setup(tmp_path)
     contract[field] = bad
@@ -483,13 +583,16 @@ def test_identity_hash_format_rejection(tmp_path, field, bad):
         parse_issue_contract(_body(contract))
 
 
-@pytest.mark.parametrize("field,value", [
-    ("dependencies_ready", "false"),
-    ("allow_deletions", "false"),
-    ("priority", "2"),
-    ("priority", True),
-    ("requested_concurrency", True),
-])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("dependencies_ready", "false"),
+        ("allow_deletions", "false"),
+        ("priority", "2"),
+        ("priority", True),
+        ("requested_concurrency", True),
+    ],
+)
 def test_execution_unit_optional_fields_reject_coercion(tmp_path, field, value):
     repo, _, contract, _, _ = _setup(tmp_path)
     if field == "requested_concurrency":
@@ -502,7 +605,11 @@ def test_execution_unit_optional_fields_reject_coercion(tmp_path, field, value):
 
 def test_valid_optional_unit_fields_parse_without_coercion(tmp_path):
     repo, _, contract, _, _ = _setup(tmp_path)
-    contract["execution_units"][0].update({"dependencies_ready": False, "allow_deletions": True, "priority": 0})
+    contract["execution_units"][0].update({
+        "dependencies_ready": False,
+        "allow_deletions": True,
+        "priority": 0,
+    })
     parsed = parse_issue_contract(_body(contract))
     unit = parsed["execution_units"][0]
     assert unit["dependencies_ready"] is False
@@ -539,7 +646,9 @@ def test_source_does_not_hardcode_profile_id():
 
 
 def test_source_binding_positive_matching_lineage_passes(tmp_path):
-    repo, _, contract, body, store = _setup(tmp_path, remote_url="https://github.com/James3014/Nexus-new.git")
+    repo, _, contract, body, store = _setup(
+        tmp_path, remote_url="https://github.com/James3014/Nexus-new.git"
+    )
     sidecar = FakeSidecar(store)
     c = FakeC()
     d = FakeD()
@@ -553,7 +662,9 @@ def test_source_binding_positive_matching_lineage_passes(tmp_path):
 
 
 def test_source_binding_sha_object_missing_blocks(tmp_path):
-    repo, _, contract, body, store = _setup(tmp_path, remote_url="https://github.com/James3014/Nexus-new.git", main_sha="0" * 40)
+    repo, _, contract, body, store = _setup(
+        tmp_path, remote_url="https://github.com/James3014/Nexus-new.git", main_sha="0" * 40
+    )
     body = _body(contract)
     sidecar = FakeSidecar(store)
     c = FakeC()
@@ -567,7 +678,9 @@ def test_source_binding_sha_object_missing_blocks(tmp_path):
 
 
 def test_source_binding_repository_mismatch_blocks(tmp_path):
-    repo, _, contract, body, store = _setup(tmp_path, remote_url="https://github.com/James3014/Nexus-new.git")
+    repo, _, contract, body, store = _setup(
+        tmp_path, remote_url="https://github.com/James3014/Nexus-new.git"
+    )
     sidecar = FakeSidecar(store)
     c = FakeC()
     d = FakeD()
@@ -580,14 +693,34 @@ def test_source_binding_repository_mismatch_blocks(tmp_path):
 
 
 def test_source_binding_shared_db_unrelated_lineage_blocks_v7_regression(tmp_path):
-    repo, _, contract, _, store = _setup(tmp_path, remote_url="https://github.com/James3014/Nexus-new.git")
+    repo, _, contract, _, store = _setup(
+        tmp_path, remote_url="https://github.com/James3014/Nexus-new.git"
+    )
 
-    subprocess.run(["git", "checkout", "--orphan", "unrelated-branch"], cwd=repo, capture_output=True, check=True)
-    subprocess.run(["git", "commit", "--allow-empty", "-m", "unrelated lineage commit"], cwd=repo, capture_output=True, check=True)
-    unrelated_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+    subprocess.run(
+        ["git", "checkout", "--orphan", "unrelated-branch"],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-m", "unrelated lineage commit"],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    )
+    unrelated_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
     subprocess.run(["git", "checkout", "main"], cwd=repo, capture_output=True, check=True)
 
-    cat_check = subprocess.run(["git", "cat-file", "-t", unrelated_sha], cwd=repo, capture_output=True, text=True, check=True)
+    cat_check = subprocess.run(
+        ["git", "cat-file", "-t", unrelated_sha],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     assert cat_check.stdout.strip() == "commit"
 
     contract["main_sha"] = unrelated_sha
@@ -606,7 +739,12 @@ def test_source_binding_shared_db_unrelated_lineage_blocks_v7_regression(tmp_pat
 
 def test_source_binding_remote_tracking_ref_missing_blocks(tmp_path):
     repo, _, contract, body, store = _setup(tmp_path, remote_url="")
-    subprocess.run(["git", "remote", "add", "origin", "https://github.com/James3014/Nexus-new.git"], cwd=repo, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://github.com/James3014/Nexus-new.git"],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    )
     sidecar = FakeSidecar(store)
     c = FakeC()
     d = FakeD()
@@ -620,8 +758,12 @@ def test_source_binding_remote_tracking_ref_missing_blocks(tmp_path):
 
 
 def test_source_binding_not_a_commit_object_blocks(tmp_path):
-    repo, _, contract, _, store = _setup(tmp_path, remote_url="https://github.com/James3014/Nexus-new.git")
-    tree_sha = subprocess.run(["git", "rev-parse", "HEAD^{tree}"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+    repo, _, contract, _, store = _setup(
+        tmp_path, remote_url="https://github.com/James3014/Nexus-new.git"
+    )
+    tree_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD^{tree}"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
     contract["main_sha"] = tree_sha
     body = _body(contract)
     sidecar = FakeSidecar(store)
@@ -637,14 +779,27 @@ def test_source_binding_not_a_commit_object_blocks(tmp_path):
 
 
 def test_source_binding_ancestor_commit_passes(tmp_path):
-    repo, _, contract, _, store = _setup(tmp_path, remote_url="https://github.com/James3014/Nexus-new.git")
-    first_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
+    repo, _, contract, _, store = _setup(
+        tmp_path, remote_url="https://github.com/James3014/Nexus-new.git"
+    )
+    first_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
     card2 = repo / "tasks" / "y.md"
     card2.write_text("# second\n", encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=repo, capture_output=True, check=True)
-    subprocess.run(["git", "commit", "-m", "second commit"], cwd=repo, capture_output=True, check=True)
-    second_sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True).stdout.strip()
-    subprocess.run(["git", "update-ref", "refs/remotes/origin/main", second_sha], cwd=repo, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "second commit"], cwd=repo, capture_output=True, check=True
+    )
+    second_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", second_sha],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    )
 
     contract["main_sha"] = first_sha
     body = _body(contract)

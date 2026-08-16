@@ -114,9 +114,17 @@ def _advance_receipt(
     candidate_commit = _git(workspace, "rev-parse", "HEAD")
     candidate_tree = _git(workspace, "rev-parse", "HEAD^{tree}")
     diff = _git(workspace, "diff", "--binary", parent_commit, candidate_commit)
-    changed = [line for line in _git(workspace, "diff", "--name-only", parent_commit, candidate_commit, "--").splitlines() if line]
+    changed = [
+        line
+        for line in _git(
+            workspace, "diff", "--name-only", parent_commit, candidate_commit, "--"
+        ).splitlines()
+        if line
+    ]
     deleted: list[str] = []
-    for line in _git(workspace, "diff", "--name-status", parent_commit, candidate_commit, "--").splitlines():
+    for line in _git(
+        workspace, "diff", "--name-status", parent_commit, candidate_commit, "--"
+    ).splitlines():
         parts = line.split("\t")
         if parts and parts[0].startswith("D") and len(parts) >= 2:
             deleted.append(parts[-1])
@@ -191,7 +199,9 @@ def verifier(verifier_id: str, expression: str, *, owner_unit: str = "") -> dict
     return value
 
 
-def runtime(repo: Path, tmp_path: Path, *, c_runtime=None, max_repairs: int = 1) -> ExternalIntelligenceClosureRuntime:
+def runtime(
+    repo: Path, tmp_path: Path, *, c_runtime=None, max_repairs: int = 1
+) -> ExternalIntelligenceClosureRuntime:
     return ExternalIntelligenceClosureRuntime(
         repository_root=repo,
         allocator=CompositionWorkspaceAllocator(repo, tmp_path / "assembly"),
@@ -216,7 +226,11 @@ class RepairingCRuntime:
         assert delta["session_id"] == receipt["session_id"]
         assert delta["workspace_id"] == receipt["workspace_id"]
         target, content = self.replacements[receipt["unit_id"]]
-        self.calls.append({"unit_id": receipt["unit_id"], "repair_id": repair_id, "schema": delta["schema"]})
+        self.calls.append({
+            "unit_id": receipt["unit_id"],
+            "repair_id": repair_id,
+            "schema": delta["schema"],
+        })
         return _advance_receipt(
             repo=self.repo,
             base=self.base,
@@ -237,7 +251,11 @@ def test_unit_verification_binds_physical_receipt_and_hashes(tmp_path):
     assert bound["candidate_commit"] == receipt["candidate_commit"]
     verification = verify_unit_candidate(
         receipt,
-        [verifier("unit-a", "from pathlib import Path; assert Path('a.py').read_text() == 'A = 1\\n'")],
+        [
+            verifier(
+                "unit-a", "from pathlib import Path; assert Path('a.py').read_text() == 'A = 1\\n'"
+            )
+        ],
     )
     assert verification["schema"] == UNIT_VERIFICATION_SCHEMA
     assert verification["status"] == "PASS"
@@ -303,7 +321,14 @@ def test_unit_failure_without_c_runtime_returns_bounded_repair_required(tmp_path
     card_ref, card_hash = make_task_card(repo)
     result = runtime(repo, tmp_path).close_task(
         unit_receipts=[receipt],
-        unit_verifiers={"ua": [verifier("needs-two", "from pathlib import Path; assert 'A = 2' in Path('a.py').read_text()") ]},
+        unit_verifiers={
+            "ua": [
+                verifier(
+                    "needs-two",
+                    "from pathlib import Path; assert 'A = 2' in Path('a.py').read_text()",
+                )
+            ]
+        },
         whole_verifiers=[verifier("whole", "raise SystemExit(0)")],
         task_card_ref=card_ref,
         task_card_hash=card_hash,
@@ -374,7 +399,14 @@ def test_repair_result_cannot_substitute_session_identity(tmp_path):
     with pytest.raises(ClosureError, match="REPAIR_SESSION_ID_MISMATCH"):
         runtime(repo, tmp_path, c_runtime=bad, max_repairs=1).close_task(
             unit_receipts=[receipt],
-            unit_verifiers={"ua": [verifier("needs-two", "from pathlib import Path; assert 'A = 2' in Path('a.py').read_text()") ]},
+            unit_verifiers={
+                "ua": [
+                    verifier(
+                        "needs-two",
+                        "from pathlib import Path; assert 'A = 2' in Path('a.py').read_text()",
+                    )
+                ]
+            },
             whole_verifiers=[verifier("whole", "raise SystemExit(0)")],
             task_card_ref=card_ref,
             task_card_hash=card_hash,
@@ -385,8 +417,12 @@ def test_multi_unit_composition_is_deterministic_and_clean(tmp_path):
     repo, base = make_repo(tmp_path)
     ua = make_receipt(repo, tmp_path, base, "ua", "a.py", "A = 1\n")
     ub = make_receipt(repo, tmp_path, base, "ub", "b.py", "B = 1\n")
-    va = verify_unit_candidate(ua, [verifier("a", "from pathlib import Path; assert 'A = 1' in Path('a.py').read_text()")])
-    vb = verify_unit_candidate(ub, [verifier("b", "from pathlib import Path; assert 'B = 1' in Path('b.py').read_text()")])
+    va = verify_unit_candidate(
+        ua, [verifier("a", "from pathlib import Path; assert 'A = 1' in Path('a.py').read_text()")]
+    )
+    vb = verify_unit_candidate(
+        ub, [verifier("b", "from pathlib import Path; assert 'B = 1' in Path('b.py').read_text()")]
+    )
     candidate, lease = compose_task_candidate(
         repository_root=repo,
         allocator=CompositionWorkspaceAllocator(repo, tmp_path / "assembly"),
@@ -451,7 +487,9 @@ def test_whole_task_verification_records_explicit_owner(tmp_path):
         receipts=[ua],
         verifications=[va],
     )
-    whole = verify_whole_task_candidate(candidate, [verifier("whole-a", "raise SystemExit(3)", owner_unit="ua")])
+    whole = verify_whole_task_candidate(
+        candidate, [verifier("whole-a", "raise SystemExit(3)", owner_unit="ua")]
+    )
     assert whole["schema"] == WHOLE_VERIFICATION_SCHEMA
     assert whole["status"] == "FAIL"
     delta = build_composition_repair_delta(ua, whole, repair_index=1)
@@ -490,8 +528,17 @@ def test_unique_owner_whole_failure_repairs_same_unit_then_closes(tmp_path):
     result = runtime(repo, tmp_path, c_runtime=repairing, max_repairs=1).close_task(
         unit_receipts=[ua, ub],
         unit_verifiers={
-            "ua": [verifier("a-valid", "from pathlib import Path; assert 'A = ' in Path('a.py').read_text()")],
-            "ub": [verifier("b-valid", "from pathlib import Path; assert 'B = 1' in Path('b.py').read_text()")],
+            "ua": [
+                verifier(
+                    "a-valid", "from pathlib import Path; assert 'A = ' in Path('a.py').read_text()"
+                )
+            ],
+            "ub": [
+                verifier(
+                    "b-valid",
+                    "from pathlib import Path; assert 'B = 1' in Path('b.py').read_text()",
+                )
+            ],
         },
         whole_verifiers=[
             verifier(
@@ -505,7 +552,9 @@ def test_unique_owner_whole_failure_repairs_same_unit_then_closes(tmp_path):
         external_intelligence_refs=["receipt://external/task-1"],
     )
     assert result["status"] == CLAIM_CEILING
-    assert repairing.calls == [{"unit_id": "ua", "repair_id": "d001", "schema": COMPOSITION_REPAIR_DELTA_SCHEMA}]
+    assert repairing.calls == [
+        {"unit_id": "ua", "repair_id": "d001", "schema": COMPOSITION_REPAIR_DELTA_SCHEMA}
+    ]
     assert result["telemetry"]["repair_count"] == 1
     assert result["telemetry"]["policy_tuned"] is False
     assert result["task_candidate"]["changed_paths"] == ["a.py", "b.py"]
@@ -520,10 +569,23 @@ def test_success_emits_acceptance_packet_and_compact_capsule_without_approval_cl
     result = runtime(repo, tmp_path).close_task(
         unit_receipts=[ub, ua],
         unit_verifiers={
-            "ua": [verifier("a", "from pathlib import Path; assert 'A = 1' in Path('a.py').read_text()")],
-            "ub": [verifier("b", "from pathlib import Path; assert 'B = 1' in Path('b.py').read_text()")],
+            "ua": [
+                verifier(
+                    "a", "from pathlib import Path; assert 'A = 1' in Path('a.py').read_text()"
+                )
+            ],
+            "ub": [
+                verifier(
+                    "b", "from pathlib import Path; assert 'B = 1' in Path('b.py').read_text()"
+                )
+            ],
         },
-        whole_verifiers=[verifier("whole", "from pathlib import Path; assert 'A = 1' in Path('a.py').read_text() and 'B = 1' in Path('b.py').read_text()")],
+        whole_verifiers=[
+            verifier(
+                "whole",
+                "from pathlib import Path; assert 'A = 1' in Path('a.py').read_text() and 'B = 1' in Path('b.py').read_text()",
+            )
+        ],
         task_card_ref=card_ref,
         task_card_hash=card_hash,
         external_intelligence_refs=["receipt://a", "receipt://b"],

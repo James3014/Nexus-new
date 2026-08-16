@@ -8,10 +8,17 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping
 
-from nexus.services.external_intelligence import ExternalIntelligenceSidecar, ExternalIntelligenceStore
-from nexus.services.external_intelligence_closure import CLAIM_CEILING as CLOSURE_CLAIM_CEILING, ExternalIntelligenceClosureRuntime, VerifierSpec
+from nexus.services.external_intelligence import (
+    ExternalIntelligenceSidecar,
+    ExternalIntelligenceStore,
+)
+from nexus.services.external_intelligence_closure import CLAIM_CEILING as CLOSURE_CLAIM_CEILING
+from nexus.services.external_intelligence_closure import (
+    ExternalIntelligenceClosureRuntime,
+    VerifierSpec,
+)
 from nexus.services.external_intelligence_fanout import AdaptiveDeepSeekFanoutRuntime, CapacityLease
 
 ISSUE_SCHEMA = "nexus.external_intelligence_issue.v1"
@@ -63,7 +70,9 @@ def _sha256_json(value: Any) -> str:
 
 def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = (json.dumps(dict(value), indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode("utf-8")
+    data = (json.dumps(dict(value), indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode(
+        "utf-8"
+    )
     fd, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
     try:
         with os.fdopen(fd, "wb") as handle:
@@ -149,8 +158,15 @@ def parse_issue_contract(body: str) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) - ALLOWED_KEYS:
         raise AutomationError("ISSUE_CONTRACT_KEYS_INVALID")
     required = {
-        "schema", "task_id", "revision", "main_sha", "task_card_ref", "task_card_hash",
-        "execution_units", "unit_verifiers", "whole_verifiers",
+        "schema",
+        "task_id",
+        "revision",
+        "main_sha",
+        "task_card_ref",
+        "task_card_hash",
+        "execution_units",
+        "unit_verifiers",
+        "whole_verifiers",
     }
     if set(value) & required != required or value.get("schema") != ISSUE_SCHEMA:
         raise AutomationError("ISSUE_CONTRACT_REQUIRED_FIELDS_MISSING")
@@ -171,7 +187,13 @@ def parse_issue_contract(body: str) -> dict[str, Any]:
     for unit in units:
         if not isinstance(unit, dict):
             raise AutomationError("ISSUE_CONTRACT_UNIT_INVALID")
-        allowed_unit = {"unit_id", "mutation_paths", "dependencies_ready", "priority", "allow_deletions"}
+        allowed_unit = {
+            "unit_id",
+            "mutation_paths",
+            "dependencies_ready",
+            "priority",
+            "allow_deletions",
+        }
         if set(unit) - allowed_unit:
             raise AutomationError("ISSUE_CONTRACT_UNIT_KEYS_INVALID")
         unit_id = unit.get("unit_id")
@@ -191,7 +213,9 @@ def parse_issue_contract(body: str) -> dict[str, Any]:
         for key in ("dependencies_ready", "allow_deletions"):
             if key in unit and not isinstance(unit[key], bool):
                 raise AutomationError(f"ISSUE_CONTRACT_UNIT_{key.upper()}_INVALID")
-        if "priority" in unit and (not isinstance(unit["priority"], int) or isinstance(unit["priority"], bool)):
+        if "priority" in unit and (
+            not isinstance(unit["priority"], int) or isinstance(unit["priority"], bool)
+        ):
             raise AutomationError("ISSUE_CONTRACT_UNIT_PRIORITY_INVALID")
     unit_verifiers = value.get("unit_verifiers")
     if not isinstance(unit_verifiers, dict) or set(unit_verifiers) != seen:
@@ -206,7 +230,10 @@ def parse_issue_contract(body: str) -> dict[str, Any]:
     for key in ("ready", "contract_ready", "active_elsewhere", "needs_reconciliation"):
         if key in value and not isinstance(value[key], bool):
             raise AutomationError(f"ISSUE_CONTRACT_{key.upper()}_INVALID")
-    if "blocked_reasons" in value and (not isinstance(value["blocked_reasons"], list) or any(not isinstance(x, str) for x in value["blocked_reasons"])):
+    if "blocked_reasons" in value and (
+        not isinstance(value["blocked_reasons"], list)
+        or any(not isinstance(x, str) for x in value["blocked_reasons"])
+    ):
         raise AutomationError("ISSUE_CONTRACT_BLOCKED_REASONS_INVALID")
     return value
 
@@ -390,11 +417,25 @@ class ExternalIntelligenceAutomation:
 
     def _sources(self, item: IssueWorkItem, task_card_text: str) -> list[dict[str, Any]]:
         return [
-            {"kind": "github_issue", "ref": f"github://{item.repository}/issues/{item.issue_number}", "revision": item.contract["revision"], "provenance": "github", "content": f"{item.title}\n\n{item.body}"},
-            {"kind": "task_card", "ref": item.contract["task_card_ref"], "revision": item.contract["task_card_hash"], "provenance": "git", "content": task_card_text},
+            {
+                "kind": "github_issue",
+                "ref": f"github://{item.repository}/issues/{item.issue_number}",
+                "revision": item.contract["revision"],
+                "provenance": "github",
+                "content": f"{item.title}\n\n{item.body}",
+            },
+            {
+                "kind": "task_card",
+                "ref": item.contract["task_card_ref"],
+                "revision": item.contract["task_card_hash"],
+                "provenance": "git",
+                "content": task_card_text,
+            },
         ]
 
-    def _c_units(self, item: IssueWorkItem, intelligence: Mapping[str, Any]) -> list[dict[str, Any]]:
+    def _c_units(
+        self, item: IssueWorkItem, intelligence: Mapping[str, Any]
+    ) -> list[dict[str, Any]]:
         request = intelligence.get("request")
         if not isinstance(request, Mapping):
             raise AutomationError("INTELLIGENCE_REQUEST_MISSING")
@@ -429,12 +470,17 @@ class ExternalIntelligenceAutomation:
         ordered: list[Mapping[str, Any]] = []
         for unit_id in sorted(expected_ids):
             receipt = receipts[unit_id]
-            if not isinstance(receipt, Mapping) or receipt.get("status") != "CANDIDATE_READY_FOR_VERIFICATION":
+            if (
+                not isinstance(receipt, Mapping)
+                or receipt.get("status") != "CANDIDATE_READY_FOR_VERIFICATION"
+            ):
                 raise AutomationError("FANOUT_RECEIPT_NOT_READY")
             ordered.append(receipt)
         return ordered
 
-    def run_issue(self, repository: str, issue_number: int, title: str, body: str) -> dict[str, Any]:
+    def run_issue(
+        self, repository: str, issue_number: int, title: str, body: str
+    ) -> dict[str, Any]:
         try:
             contract = parse_issue_contract(body)
         except AutomationError as exc:
@@ -475,9 +521,19 @@ class ExternalIntelligenceAutomation:
             self.state_store.save(item, "INTELLIGENCE_DISPATCHING")
             intelligence = self.sidecar.analyze(record, self._sources(item, task_card_text))
             if intelligence.get("status") != "COMPLETED":
-                return self.state_store.save(item, "BLOCKED", stage="INTELLIGENCE", result=dict(intelligence), semantic_dispatched=False)
+                return self.state_store.save(
+                    item,
+                    "BLOCKED",
+                    stage="INTELLIGENCE",
+                    result=dict(intelligence),
+                    semantic_dispatched=False,
+                )
             dispatched = True
-            self.state_store.save(item, "INTELLIGENCE_COMPLETED", intelligence_receipt_id=intelligence.get("receipt_id"))
+            self.state_store.save(
+                item,
+                "INTELLIGENCE_COMPLETED",
+                intelligence_receipt_id=intelligence.get("receipt_id"),
+            )
 
             units = self._c_units(item, intelligence)
             self.state_store.save(item, "FANOUT_DISPATCHING")
@@ -499,7 +555,13 @@ class ExternalIntelligenceAutomation:
                 or not isinstance(closure.get("control_capsule"), Mapping)
                 or not closure["control_capsule"]
             ):
-                return self.state_store.save(item, "BLOCKED", stage="CLOSURE", closure_status=closure.get("status"), semantic_dispatched=True)
+                return self.state_store.save(
+                    item,
+                    "BLOCKED",
+                    stage="CLOSURE",
+                    closure_status=closure.get("status"),
+                    semantic_dispatched=True,
+                )
             publication = compact_publication_payload(closure)
             return self.state_store.save(
                 item,
@@ -511,12 +573,22 @@ class ExternalIntelligenceAutomation:
                 semantic_dispatched=True,
             )
         except AutomationError as exc:
-            return self.state_store.save(item, "BLOCKED", error=str(exc), semantic_dispatched=dispatched)
+            return self.state_store.save(
+                item, "BLOCKED", error=str(exc), semantic_dispatched=dispatched
+            )
         except Exception as exc:
             current = self.state_store.load(item) or {}
             if current.get("state") in AMBIGUOUS_STATES:
-                return self.state_store.save(item, "RECONCILIATION_REQUIRED", prior_state=current.get("state"), error=type(exc).__name__, semantic_dispatched=dispatched)
-            return self.state_store.save(item, "BLOCKED", error=type(exc).__name__, semantic_dispatched=dispatched)
+                return self.state_store.save(
+                    item,
+                    "RECONCILIATION_REQUIRED",
+                    prior_state=current.get("state"),
+                    error=type(exc).__name__,
+                    semantic_dispatched=dispatched,
+                )
+            return self.state_store.save(
+                item, "BLOCKED", error=type(exc).__name__, semantic_dispatched=dispatched
+            )
 
 
 __all__ = [

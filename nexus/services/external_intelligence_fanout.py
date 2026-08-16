@@ -19,7 +19,6 @@ from nexus.services.external_intelligence import (
     parse_external_execution_envelope,
 )
 
-
 FANOUT_DECISION_SCHEMA = "external_intelligence_fanout_decision.v1"
 DISPATCH_ATTEMPT_SCHEMA = "external_intelligence_dispatch_attempt.v1"
 WORKER_RESULT_SCHEMA = "external_intelligence_worker_result.v1"
@@ -51,7 +50,9 @@ def _sha256(value: bytes | str) -> str:
 
 def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = (json.dumps(dict(value), sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    payload = (json.dumps(dict(value), sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode(
+        "utf-8"
+    )
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(fd, "wb") as stream:
@@ -199,7 +200,12 @@ class CapacityLease:
         )
         if any(not isinstance(value, int) or value < 0 for value in values):
             raise FanoutError("INVALID_CAPACITY_LEASE")
-        pressure = self.active_workers + self.pending_verifications + self.pending_repairs + self.pending_candidates
+        pressure = (
+            self.active_workers
+            + self.pending_verifications
+            + self.pending_repairs
+            + self.pending_candidates
+        )
         controller_available = max(0, self.controller_attention_limit - pressure)
         provider_free = max(0, self.provider_available - self.active_workers)
         capacity = min(
@@ -242,8 +248,13 @@ class OpenCodeRunResult:
     error: str = ""
 
 
-def plan_fanout(units: Iterable[Mapping[str, Any] | ExecutionUnit], lease: CapacityLease) -> dict[str, Any]:
-    parsed = [unit if isinstance(unit, ExecutionUnit) else ExecutionUnit.from_mapping(unit) for unit in units]
+def plan_fanout(
+    units: Iterable[Mapping[str, Any] | ExecutionUnit], lease: CapacityLease
+) -> dict[str, Any]:
+    parsed = [
+        unit if isinstance(unit, ExecutionUnit) else ExecutionUnit.from_mapping(unit)
+        for unit in units
+    ]
     if not parsed:
         raise FanoutError("EXECUTION_UNITS_REQUIRED")
     task_ids = {unit.task_id for unit in parsed}
@@ -264,7 +275,9 @@ def plan_fanout(units: Iterable[Mapping[str, Any] | ExecutionUnit], lease: Capac
         if not unit.dependencies_ready:
             blocked_dependencies.append(unit.unit_id)
             continue
-        if any(_sets_overlap(unit.mutation_paths, selected.mutation_paths) for selected in admitted):
+        if any(
+            _sets_overlap(unit.mutation_paths, selected.mutation_paths) for selected in admitted
+        ):
             deferred_overlap.append(unit.unit_id)
             continue
         if len(admitted) >= capacity:
@@ -293,7 +306,9 @@ def plan_fanout(units: Iterable[Mapping[str, Any] | ExecutionUnit], lease: Capac
 class GitWorktreeAllocator:
     """Allocate fresh detached worktrees; lifecycle cleanup is intentionally out of scope."""
 
-    def __init__(self, repository_root: str | os.PathLike[str], workspace_root: str | os.PathLike[str]):
+    def __init__(
+        self, repository_root: str | os.PathLike[str], workspace_root: str | os.PathLike[str]
+    ):
         self.repository_root = Path(repository_root).expanduser().resolve()
         self.workspace_root = Path(workspace_root).expanduser().resolve()
 
@@ -314,7 +329,9 @@ class GitWorktreeAllocator:
             check=False,
         )
         if result.returncode != 0:
-            raise FanoutError(f"WORKSPACE_ALLOCATION_FAILED:{(result.stderr or result.stdout).strip()[:1000]}")
+            raise FanoutError(
+                f"WORKSPACE_ALLOCATION_FAILED:{(result.stderr or result.stdout).strip()[:1000]}"
+            )
         observed = _run_git(path, "rev-parse", "HEAD")
         dirty = _run_git(path, "status", "--porcelain=v1")
         if observed != unit.expected_base_sha or dirty:
@@ -347,7 +364,10 @@ class FanoutStore:
         if not path.exists():
             return None
         value = json.loads(path.read_text(encoding="utf-8"))
-        if value.get("schema") != DISPATCH_ATTEMPT_SCHEMA or value.get("unit_identity_sha256") != unit.identity_sha256:
+        if (
+            value.get("schema") != DISPATCH_ATTEMPT_SCHEMA
+            or value.get("unit_identity_sha256") != unit.identity_sha256
+        ):
             raise FanoutError("FANOUT_ATTEMPT_IDENTITY_MISMATCH")
         return value
 
@@ -411,7 +431,12 @@ class FanoutStore:
                 raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
             raise FanoutError("FANOUT_REPLAY_FORBIDDEN")
         session_id = str(previous_receipt.get("session_id") or "")
-        self.assert_session_owner(session_id, task_id=task_id, unit_id=unit_id, workspace_id=str(previous_receipt.get("workspace_id") or ""))
+        self.assert_session_owner(
+            session_id,
+            task_id=task_id,
+            unit_id=unit_id,
+            workspace_id=str(previous_receipt.get("workspace_id") or ""),
+        )
         attempt = {
             "schema": DISPATCH_ATTEMPT_SCHEMA,
             "task_id": task_id,
@@ -432,13 +457,22 @@ class FanoutStore:
         _atomic_json(path, attempt)
         return attempt
 
-    def mark_dispatching(self, attempt: Mapping[str, Any], *, suffix: str = "initial") -> dict[str, Any]:
+    def mark_dispatching(
+        self, attempt: Mapping[str, Any], *, suffix: str = "initial"
+    ) -> dict[str, Any]:
         value = dict(attempt)
         value.update({"state": "DISPATCHING", "retry_safe": False})
         _atomic_json(self._attempt_path(value["task_id"], value["unit_id"], suffix), value)
         return value
 
-    def finish_attempt(self, attempt: Mapping[str, Any], *, state: str, transport_status: str, suffix: str = "initial") -> dict[str, Any]:
+    def finish_attempt(
+        self,
+        attempt: Mapping[str, Any],
+        *,
+        state: str,
+        transport_status: str,
+        suffix: str = "initial",
+    ) -> dict[str, Any]:
         if state not in {"COMPLETED", "TERMINAL_BLOCKED", "FAILED", "OUTCOME_UNKNOWN"}:
             raise FanoutError("INVALID_ATTEMPT_STATE")
         value = dict(attempt)
@@ -446,7 +480,9 @@ class FanoutStore:
         _atomic_json(self._attempt_path(value["task_id"], value["unit_id"], suffix), value)
         return value
 
-    def claim_session(self, session_id: str, *, task_id: str, unit_id: str, workspace_id: str) -> None:
+    def claim_session(
+        self, session_id: str, *, task_id: str, unit_id: str, workspace_id: str
+    ) -> None:
         if not _SESSION_RE.fullmatch(session_id):
             raise FanoutError("INVALID_SESSION_ID")
         path = self._session_path(session_id)
@@ -465,7 +501,9 @@ class FanoutStore:
             return
         _atomic_json(path, binding)
 
-    def assert_session_owner(self, session_id: str, *, task_id: str, unit_id: str, workspace_id: str) -> None:
+    def assert_session_owner(
+        self, session_id: str, *, task_id: str, unit_id: str, workspace_id: str
+    ) -> None:
         path = self._session_path(session_id)
         if not path.exists():
             raise FanoutError("SESSION_BINDING_MISSING")
@@ -497,7 +535,9 @@ class OpenCodeDeepSeekTransport:
         self.timeout = float(timeout)
 
     def run_new(self, *, prompt: str, artifact_path: str, workspace_path: str) -> OpenCodeRunResult:
-        return self._run(prompt=prompt, artifact_path=artifact_path, workspace_path=workspace_path, session_id="")
+        return self._run(
+            prompt=prompt, artifact_path=artifact_path, workspace_path=workspace_path, session_id=""
+        )
 
     def continue_session(
         self,
@@ -509,9 +549,16 @@ class OpenCodeDeepSeekTransport:
     ) -> OpenCodeRunResult:
         if not _SESSION_RE.fullmatch(session_id):
             raise FanoutError("INVALID_SESSION_ID")
-        return self._run(prompt=prompt, artifact_path=artifact_path, workspace_path=workspace_path, session_id=session_id)
+        return self._run(
+            prompt=prompt,
+            artifact_path=artifact_path,
+            workspace_path=workspace_path,
+            session_id=session_id,
+        )
 
-    def _run(self, *, prompt: str, artifact_path: str, workspace_path: str, session_id: str) -> OpenCodeRunResult:
+    def _run(
+        self, *, prompt: str, artifact_path: str, workspace_path: str, session_id: str
+    ) -> OpenCodeRunResult:
         # OpenCode 1.18.x defines --file as a variadic array. Keep the message
         # positional before -f so it cannot be consumed as another file path.
         argv = [
@@ -718,7 +765,10 @@ class OpenCodeDeepSeekTransport:
         model_id = str(model.get("id") or "")
         if provider_id != PROVIDER_ID or model_id != MODEL_ID:
             raise FanoutError("OPENCODE_MODEL_ATTESTATION_MISMATCH")
-        if str(Path(str(session.get("directory") or "")).expanduser().resolve()) != expected_directory:
+        if (
+            str(Path(str(session.get("directory") or "")).expanduser().resolve())
+            != expected_directory
+        ):
             raise FanoutError("OPENCODE_DIRECTORY_ATTESTATION_MISMATCH")
 
         session_sql = self._sql_literal(session_id)
@@ -742,7 +792,10 @@ class OpenCodeDeepSeekTransport:
         response_text = str(latest.get("text") or "")
         if latest.get("finish") != "stop" or not latest_message_id or not response_text:
             raise FanoutError("OPENCODE_RECONCILE_NOT_TERMINAL")
-        if str(latest.get("provider_id") or "") != PROVIDER_ID or str(latest.get("model_id") or "") != MODEL_ID:
+        if (
+            str(latest.get("provider_id") or "") != PROVIDER_ID
+            or str(latest.get("model_id") or "") != MODEL_ID
+        ):
             raise FanoutError("OPENCODE_MODEL_ATTESTATION_MISMATCH")
         evidence = {
             "session": session,
@@ -894,7 +947,9 @@ def build_worker_bootstrap(unit: ExecutionUnit, workspace: WorkspaceLease) -> st
     ])
 
 
-def build_repair_bootstrap(previous_receipt: Mapping[str, Any], *, repair_id: str, repair_ref: str, repair_sha256: str) -> str:
+def build_repair_bootstrap(
+    previous_receipt: Mapping[str, Any], *, repair_id: str, repair_ref: str, repair_sha256: str
+) -> str:
     return "\n".join([
         "Continue the exact same execution unit session for a bounded repair.",
         f"task_id={previous_receipt.get('task_id')}",
@@ -996,11 +1051,23 @@ def _capture_candidate(
     if deleted and not unit.allow_deletions:
         raise FanoutError("DELETION_NOT_AUTHORIZED")
 
-    subprocess.run(["git", "add", "--", *changed], cwd=root, check=True, capture_output=True, text=True)
-    check = subprocess.run(["git", "diff", "--cached", "--check"], cwd=root, capture_output=True, text=True, check=False)
+    subprocess.run(
+        ["git", "add", "--", *changed], cwd=root, check=True, capture_output=True, text=True
+    )
+    check = subprocess.run(
+        ["git", "diff", "--cached", "--check"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     if check.returncode != 0:
-        raise FanoutError(f"CANDIDATE_DIFF_CHECK_FAILED:{(check.stdout or check.stderr).strip()[:1000]}")
-    staged = [line for line in _run_git(root, "diff", "--cached", "--name-only").splitlines() if line]
+        raise FanoutError(
+            f"CANDIDATE_DIFF_CHECK_FAILED:{(check.stdout or check.stderr).strip()[:1000]}"
+        )
+    staged = [
+        line for line in _run_git(root, "diff", "--cached", "--name-only").splitlines() if line
+    ]
     if sorted(staged) != sorted(changed):
         raise FanoutError("CANDIDATE_STAGED_SCOPE_MISMATCH")
     commit = subprocess.run(
@@ -1011,7 +1078,9 @@ def _capture_candidate(
         check=False,
     )
     if commit.returncode != 0:
-        raise FanoutError(f"CANDIDATE_COMMIT_FAILED:{(commit.stderr or commit.stdout).strip()[:1000]}")
+        raise FanoutError(
+            f"CANDIDATE_COMMIT_FAILED:{(commit.stderr or commit.stdout).strip()[:1000]}"
+        )
     candidate_commit = _run_git(root, "rev-parse", "HEAD")
     candidate_tree = _run_git(root, "rev-parse", "HEAD^{tree}")
     diff = _run_git(root, "diff", "--binary", expected_head, candidate_commit)
@@ -1042,7 +1111,10 @@ class AdaptiveDeepSeekFanoutRuntime:
         units: Iterable[Mapping[str, Any] | ExecutionUnit],
         lease: CapacityLease,
     ) -> dict[str, Any]:
-        parsed = [unit if isinstance(unit, ExecutionUnit) else ExecutionUnit.from_mapping(unit) for unit in units]
+        parsed = [
+            unit if isinstance(unit, ExecutionUnit) else ExecutionUnit.from_mapping(unit)
+            for unit in units
+        ]
         decision = plan_fanout(parsed, lease)
         selected_ids = set(decision["admitted_units"])
         selected = [unit for unit in parsed if unit.unit_id in selected_ids]
@@ -1067,7 +1139,11 @@ class AdaptiveDeepSeekFanoutRuntime:
                     path=str(existing_attempt.get("workspace_path") or ""),
                     expected_base_sha=str(existing_attempt.get("expected_base_sha") or ""),
                 )
-                if not workspace.workspace_id or not workspace.path or workspace.expected_base_sha != unit.expected_base_sha:
+                if (
+                    not workspace.workspace_id
+                    or not workspace.path
+                    or workspace.expected_base_sha != unit.expected_base_sha
+                ):
                     errors[unit.unit_id] = "FANOUT_ATTEMPT_WORKSPACE_INVALID"
                     continue
                 actions[unit.unit_id] = "DISPATCH" if state == "PREPARED" else "RECONCILE"
@@ -1083,10 +1159,14 @@ class AdaptiveDeepSeekFanoutRuntime:
 
         pending = [unit for unit in selected if unit.unit_id in leases]
         if pending:
-            with ThreadPoolExecutor(max_workers=len(pending), thread_name_prefix="nexus-ei") as executor:
+            with ThreadPoolExecutor(
+                max_workers=len(pending), thread_name_prefix="nexus-ei"
+            ) as executor:
                 futures = {
                     executor.submit(
-                        self._reconcile_initial if actions[unit.unit_id] == "RECONCILE" else self._dispatch_initial,
+                        self._reconcile_initial
+                        if actions[unit.unit_id] == "RECONCILE"
+                        else self._dispatch_initial,
                         unit,
                         leases[unit.unit_id],
                         actions[unit.unit_id] == "DISPATCH",
@@ -1143,7 +1223,9 @@ class AdaptiveDeepSeekFanoutRuntime:
         attempt = self.store.existing_initial_attempt(unit)
         if attempt is None or attempt.get("state") not in {"DISPATCHING", "OUTCOME_UNKNOWN"}:
             raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
-        result: OpenCodeRunResult = self.transport.reconcile_workspace(workspace_path=workspace.path)
+        result: OpenCodeRunResult = self.transport.reconcile_workspace(
+            workspace_path=workspace.path
+        )
         return self._finalize_initial(unit, workspace, attempt, result)
 
     def _finalize_initial(
@@ -1160,15 +1242,23 @@ class AdaptiveDeepSeekFanoutRuntime:
                 raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
             raise FanoutError(result.status)
         if result.provider_id != PROVIDER_ID or result.model_id != MODEL_ID:
-            self.store.finish_attempt(attempt, state="OUTCOME_UNKNOWN", transport_status="MODEL_ATTESTATION_MISMATCH")
+            self.store.finish_attempt(
+                attempt, state="OUTCOME_UNKNOWN", transport_status="MODEL_ATTESTATION_MISMATCH"
+            )
             raise FanoutError("MODEL_ATTESTATION_MISMATCH")
         if str(Path(result.directory).resolve()) != str(Path(workspace.path).resolve()):
-            self.store.finish_attempt(attempt, state="OUTCOME_UNKNOWN", transport_status="WORKSPACE_ATTESTATION_MISMATCH")
+            self.store.finish_attempt(
+                attempt, state="OUTCOME_UNKNOWN", transport_status="WORKSPACE_ATTESTATION_MISMATCH"
+            )
             raise FanoutError("WORKSPACE_ATTESTATION_MISMATCH")
         try:
-            worker = parse_worker_result(result.response_text, task_id=unit.task_id, unit_id=unit.unit_id)
+            worker = parse_worker_result(
+                result.response_text, task_id=unit.task_id, unit_id=unit.unit_id
+            )
         except FanoutError:
-            self.store.finish_attempt(attempt, state="OUTCOME_UNKNOWN", transport_status="WORKER_RESULT_INVALID")
+            self.store.finish_attempt(
+                attempt, state="OUTCOME_UNKNOWN", transport_status="WORKER_RESULT_INVALID"
+            )
             raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
         self.store.claim_session(
             result.session_id,
@@ -1187,12 +1277,16 @@ class AdaptiveDeepSeekFanoutRuntime:
                 status="WORKER_BLOCKED",
             )
             self.store.write_receipt(receipt)
-            self.store.finish_attempt(attempt, state="TERMINAL_BLOCKED", transport_status=result.status)
+            self.store.finish_attempt(
+                attempt, state="TERMINAL_BLOCKED", transport_status=result.status
+            )
             return receipt
         try:
             candidate = _capture_candidate(unit, workspace, expected_head=unit.expected_base_sha)
         except FanoutError:
-            self.store.finish_attempt(attempt, state="OUTCOME_UNKNOWN", transport_status="CANDIDATE_CAPTURE_FAILED")
+            self.store.finish_attempt(
+                attempt, state="OUTCOME_UNKNOWN", transport_status="CANDIDATE_CAPTURE_FAILED"
+            )
             raise
         receipt = self._build_receipt(
             unit=unit,
@@ -1260,15 +1354,27 @@ class AdaptiveDeepSeekFanoutRuntime:
             workspace_path=workspace.path,
         )
         if result.status != "COMPLETED" or result.session_id != previous_receipt["session_id"]:
-            self.store.finish_attempt(attempt, state="OUTCOME_UNKNOWN", transport_status=result.status, suffix=suffix)
+            self.store.finish_attempt(
+                attempt, state="OUTCOME_UNKNOWN", transport_status=result.status, suffix=suffix
+            )
             raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
         if result.provider_id != PROVIDER_ID or result.model_id != MODEL_ID:
-            self.store.finish_attempt(attempt, state="OUTCOME_UNKNOWN", transport_status="MODEL_ATTESTATION_MISMATCH", suffix=suffix)
+            self.store.finish_attempt(
+                attempt,
+                state="OUTCOME_UNKNOWN",
+                transport_status="MODEL_ATTESTATION_MISMATCH",
+                suffix=suffix,
+            )
             raise FanoutError("MODEL_ATTESTATION_MISMATCH")
         try:
             worker = parse_worker_result(result.response_text, task_id=task_id, unit_id=unit_id)
         except FanoutError:
-            self.store.finish_attempt(attempt, state="OUTCOME_UNKNOWN", transport_status="WORKER_RESULT_INVALID", suffix=suffix)
+            self.store.finish_attempt(
+                attempt,
+                state="OUTCOME_UNKNOWN",
+                transport_status="WORKER_RESULT_INVALID",
+                suffix=suffix,
+            )
             raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
         unit = ExecutionUnit.from_mapping({
             "task_id": task_id,
@@ -1292,9 +1398,13 @@ class AdaptiveDeepSeekFanoutRuntime:
                 repair_id=repair_id,
             )
             self.store.write_receipt(receipt, suffix=suffix)
-            self.store.finish_attempt(attempt, state="TERMINAL_BLOCKED", transport_status=result.status, suffix=suffix)
+            self.store.finish_attempt(
+                attempt, state="TERMINAL_BLOCKED", transport_status=result.status, suffix=suffix
+            )
             return receipt
-        candidate = _capture_candidate(unit, workspace, expected_head=str(previous_receipt["candidate_commit"]))
+        candidate = _capture_candidate(
+            unit, workspace, expected_head=str(previous_receipt["candidate_commit"])
+        )
         receipt = self._build_receipt(
             unit=unit,
             workspace=workspace,
@@ -1307,7 +1417,9 @@ class AdaptiveDeepSeekFanoutRuntime:
             repair_id=repair_id,
         )
         self.store.write_receipt(receipt, suffix=suffix)
-        self.store.finish_attempt(attempt, state="COMPLETED", transport_status=result.status, suffix=suffix)
+        self.store.finish_attempt(
+            attempt, state="COMPLETED", transport_status=result.status, suffix=suffix
+        )
         return receipt
 
     @staticmethod

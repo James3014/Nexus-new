@@ -13,7 +13,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
-
 REQUEST_SCHEMA = "external_intelligence_request.v1"
 ATTEMPT_SCHEMA = "external_intelligence_attempt.v1"
 ENVELOPE_SCHEMA = "external_execution_envelope.v1"
@@ -82,7 +81,9 @@ def _bounded_list(value: Any, field: str, *, max_items: int = MAX_LIST) -> list[
 
 def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = (json.dumps(dict(value), sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    data = (json.dumps(dict(value), sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode(
+        "utf-8"
+    )
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(fd, "wb") as stream:
@@ -237,29 +238,71 @@ def build_context_pack(
 
 
 def external_execution_envelope_contract() -> dict[str, Any]:
-    string_array = {"type": "array", "maxItems": MAX_LIST, "items": {"type": "string", "maxLength": MAX_TEXT}}
+    string_array = {
+        "type": "array",
+        "maxItems": MAX_LIST,
+        "items": {"type": "string", "maxLength": MAX_TEXT},
+    }
     return {
         "type": "object",
         "additionalProperties": False,
         "required": [
-            "schema", "binding", "goal", "root_cause", "scope_signal",
-            "implementation_signal", "verification_signal", "worker_binding", "stop_conditions",
+            "schema",
+            "binding",
+            "goal",
+            "root_cause",
+            "scope_signal",
+            "implementation_signal",
+            "verification_signal",
+            "worker_binding",
+            "stop_conditions",
             "model_adaptation",
         ],
         "properties": {
             "schema": {"const": ENVELOPE_SCHEMA},
             "binding": {
-                "type": "object", "additionalProperties": False,
-                "required": ["repository", "item_type", "item_id", "revision", "main_sha", "task_card_ref", "task_card_hash", "context_pack_sha256"],
-                "properties": {key: {"type": "string", "maxLength": MAX_TEXT} for key in (
-                    "repository", "item_type", "item_id", "revision", "main_sha", "task_card_ref", "task_card_hash", "context_pack_sha256"
-                )},
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "repository",
+                    "item_type",
+                    "item_id",
+                    "revision",
+                    "main_sha",
+                    "task_card_ref",
+                    "task_card_hash",
+                    "context_pack_sha256",
+                ],
+                "properties": {
+                    key: {"type": "string", "maxLength": MAX_TEXT}
+                    for key in (
+                        "repository",
+                        "item_type",
+                        "item_id",
+                        "revision",
+                        "main_sha",
+                        "task_card_ref",
+                        "task_card_hash",
+                        "context_pack_sha256",
+                    )
+                },
             },
             "goal": {"type": "string", "maxLength": MAX_TEXT},
             "root_cause": {"type": "string", "maxLength": MAX_TEXT},
             "scope_signal": {
-                "type": "object", "additionalProperties": False,
-                "required": ["production_edit_paths", "required_test_edit_paths", "conditional_migration_paths", "read_only_authorities", "verification_only_paths", "forbidden_paths", "max_files", "scope_confidence", "scope_block_conditions"],
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "production_edit_paths",
+                    "required_test_edit_paths",
+                    "conditional_migration_paths",
+                    "read_only_authorities",
+                    "verification_only_paths",
+                    "forbidden_paths",
+                    "max_files",
+                    "scope_confidence",
+                    "scope_block_conditions",
+                ],
                 "properties": {
                     "production_edit_paths": string_array,
                     "required_test_edit_paths": string_array,
@@ -273,8 +316,15 @@ def external_execution_envelope_contract() -> dict[str, Any]:
                 },
             },
             "implementation_signal": {
-                "type": "object", "additionalProperties": False,
-                "required": ["inspect_first", "proven_facts", "required_semantics", "suggested_direction", "forbidden_behavior"],
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "inspect_first",
+                    "proven_facts",
+                    "required_semantics",
+                    "suggested_direction",
+                    "forbidden_behavior",
+                ],
                 "properties": {
                     "inspect_first": string_array,
                     "proven_facts": string_array,
@@ -284,8 +334,16 @@ def external_execution_envelope_contract() -> dict[str, Any]:
                 },
             },
             "verification_signal": {
-                "type": "object", "additionalProperties": False,
-                "required": ["red_probe", "positive_probes", "hostile_negative_probes", "impact_suites", "static_checks", "false_green_conditions"],
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "red_probe",
+                    "positive_probes",
+                    "hostile_negative_probes",
+                    "impact_suites",
+                    "static_checks",
+                    "false_green_conditions",
+                ],
                 "properties": {
                     "red_probe": {"type": "string", "maxLength": MAX_TEXT},
                     "positive_probes": string_array,
@@ -296,8 +354,14 @@ def external_execution_envelope_contract() -> dict[str, Any]:
                 },
             },
             "worker_binding": {
-                "type": "object", "additionalProperties": False,
-                "required": ["assigned_thread", "persistent_thread", "create_subagent", "fallback_allowed"],
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "assigned_thread",
+                    "persistent_thread",
+                    "create_subagent",
+                    "fallback_allowed",
+                ],
                 "properties": {
                     "assigned_thread": {"enum": ["UNASSIGNED", "d1", "d2", "d3", "d4"]},
                     "persistent_thread": {"type": "boolean"},
@@ -307,7 +371,8 @@ def external_execution_envelope_contract() -> dict[str, Any]:
             },
             "stop_conditions": string_array,
             "model_adaptation": {
-                "type": "object", "additionalProperties": False,
+                "type": "object",
+                "additionalProperties": False,
                 "required": list(MODEL_ADAPTATION_KEYS),
                 "properties": {key: string_array for key in MODEL_ADAPTATION_KEYS},
             },
@@ -329,8 +394,15 @@ def parse_external_execution_envelope(text: str) -> dict[str, Any]:
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED") from exc
     top = {
-        "schema", "binding", "goal", "root_cause", "scope_signal",
-        "implementation_signal", "verification_signal", "worker_binding", "stop_conditions",
+        "schema",
+        "binding",
+        "goal",
+        "root_cause",
+        "scope_signal",
+        "implementation_signal",
+        "verification_signal",
+        "worker_binding",
+        "stop_conditions",
         "model_adaptation",
     }
     if not isinstance(value, dict) or set(value) != top or value.get("schema") != ENVELOPE_SCHEMA:
@@ -341,14 +413,35 @@ def parse_external_execution_envelope(text: str) -> dict[str, Any]:
         raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
 
     binding = value.get("binding")
-    binding_keys = {"repository", "item_type", "item_id", "revision", "main_sha", "task_card_ref", "task_card_hash", "context_pack_sha256"}
+    binding_keys = {
+        "repository",
+        "item_type",
+        "item_id",
+        "revision",
+        "main_sha",
+        "task_card_ref",
+        "task_card_hash",
+        "context_pack_sha256",
+    }
     if not isinstance(binding, dict) or set(binding) != binding_keys:
         raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
-    if any(not isinstance(binding[key], str) or len(binding[key]) > MAX_TEXT for key in binding_keys):
+    if any(
+        not isinstance(binding[key], str) or len(binding[key]) > MAX_TEXT for key in binding_keys
+    ):
         raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
 
     scope = value.get("scope_signal")
-    scope_keys = {"production_edit_paths", "required_test_edit_paths", "conditional_migration_paths", "read_only_authorities", "verification_only_paths", "forbidden_paths", "max_files", "scope_confidence", "scope_block_conditions"}
+    scope_keys = {
+        "production_edit_paths",
+        "required_test_edit_paths",
+        "conditional_migration_paths",
+        "read_only_authorities",
+        "verification_only_paths",
+        "forbidden_paths",
+        "max_files",
+        "scope_confidence",
+        "scope_block_conditions",
+    }
     if not isinstance(scope, dict) or set(scope) != scope_keys:
         raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
     for field in scope_keys - {"max_files", "scope_confidence"}:
@@ -359,14 +452,27 @@ def parse_external_execution_envelope(text: str) -> dict[str, Any]:
         raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
 
     implementation = value.get("implementation_signal")
-    implementation_keys = {"inspect_first", "proven_facts", "required_semantics", "suggested_direction", "forbidden_behavior"}
+    implementation_keys = {
+        "inspect_first",
+        "proven_facts",
+        "required_semantics",
+        "suggested_direction",
+        "forbidden_behavior",
+    }
     if not isinstance(implementation, dict) or set(implementation) != implementation_keys:
         raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
     for field in implementation_keys:
         _validate_string_list(implementation[field], field)
 
     verification = value.get("verification_signal")
-    verification_keys = {"red_probe", "positive_probes", "hostile_negative_probes", "impact_suites", "static_checks", "false_green_conditions"}
+    verification_keys = {
+        "red_probe",
+        "positive_probes",
+        "hostile_negative_probes",
+        "impact_suites",
+        "static_checks",
+        "false_green_conditions",
+    }
     if not isinstance(verification, dict) or set(verification) != verification_keys:
         raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
     if not isinstance(verification["red_probe"], str) or len(verification["red_probe"]) > MAX_TEXT:
@@ -381,23 +487,41 @@ def parse_external_execution_envelope(text: str) -> dict[str, Any]:
         _validate_string_list(adaptation[field], field)
 
     worker = value.get("worker_binding")
-    if not isinstance(worker, dict) or set(worker) != {"assigned_thread", "persistent_thread", "create_subagent", "fallback_allowed"}:
+    if not isinstance(worker, dict) or set(worker) != {
+        "assigned_thread",
+        "persistent_thread",
+        "create_subagent",
+        "fallback_allowed",
+    }:
         raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
     if worker["assigned_thread"] not in {"UNASSIGNED", "d1", "d2", "d3", "d4"}:
         raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
-    if any(not isinstance(worker[field], bool) for field in ("persistent_thread", "create_subagent", "fallback_allowed")):
+    if any(
+        not isinstance(worker[field], bool)
+        for field in ("persistent_thread", "create_subagent", "fallback_allowed")
+    ):
         raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
     _validate_string_list(value["stop_conditions"], "stop_conditions")
     return value
 
 
-def build_request(intake: Mapping[str, Any], context_pack: Mapping[str, Any], *, semantic_contract_sha256: str | None = None) -> dict[str, Any]:
-    if intake.get("schema") != INTAKE_SCHEMA or intake.get("disposition") != IntakeDisposition.EXECUTABLE.value:
+def build_request(
+    intake: Mapping[str, Any],
+    context_pack: Mapping[str, Any],
+    *,
+    semantic_contract_sha256: str | None = None,
+) -> dict[str, Any]:
+    if (
+        intake.get("schema") != INTAKE_SCHEMA
+        or intake.get("disposition") != IntakeDisposition.EXECUTABLE.value
+    ):
         raise ExternalIntelligenceError("INTAKE_NOT_EXECUTABLE")
     if context_pack.get("schema") != CONTEXT_SCHEMA:
         raise ExternalIntelligenceError("INVALID_CONTEXT_PACK")
     identity = dict(intake["identity"])
-    contract_hash = semantic_contract_sha256 or _sha256(_canonical_json(external_execution_envelope_contract()))
+    contract_hash = semantic_contract_sha256 or _sha256(
+        _canonical_json(external_execution_envelope_contract())
+    )
     request = {
         "schema": REQUEST_SCHEMA,
         "identity": identity,
@@ -410,15 +534,24 @@ def build_request(intake: Mapping[str, Any], context_pack: Mapping[str, Any], *,
     return request
 
 
-def project_refresh(previous: Mapping[str, Any], current_request: Mapping[str, Any]) -> dict[str, Any]:
+def project_refresh(
+    previous: Mapping[str, Any], current_request: Mapping[str, Any]
+) -> dict[str, Any]:
     """Decide reuse vs stale without silently refreshing material identity."""
     if previous.get("schema") != RECEIPT_SCHEMA or current_request.get("schema") != REQUEST_SCHEMA:
         raise ExternalIntelligenceError("INVALID_REFRESH_INPUT")
     previous_request = previous.get("request")
     if not isinstance(previous_request, Mapping):
         raise ExternalIntelligenceError("INVALID_REFRESH_INPUT")
-    fields = ["identity_sha256", "context_pack_sha256", "semantic_contract_sha256", "request_sha256"]
-    changed = [field for field in fields if previous_request.get(field) != current_request.get(field)]
+    fields = [
+        "identity_sha256",
+        "context_pack_sha256",
+        "semantic_contract_sha256",
+        "request_sha256",
+    ]
+    changed = [
+        field for field in fields if previous_request.get(field) != current_request.get(field)
+    ]
     return {
         "status": "REUSE" if not changed else "STALE",
         "changed_fields": changed,
@@ -463,7 +596,11 @@ _HEX64 = frozenset("0123456789abcdef")
 
 
 def _request_marker(request_sha256: Any) -> str:
-    if not isinstance(request_sha256, str) or len(request_sha256) != 64 or any(c not in _HEX64 for c in request_sha256):
+    if (
+        not isinstance(request_sha256, str)
+        or len(request_sha256) != 64
+        or any(c not in _HEX64 for c in request_sha256)
+    ):
         raise ExternalIntelligenceError("INVALID_REQUEST_IDENTITY")
     return f"{_REQUEST_MARKER_PREFIX}{request_sha256}"
 
@@ -478,7 +615,7 @@ def _extract_request_marker(prompt: Any) -> str | None:
     if end < 0:
         end = len(prompt)
     candidate = prompt[start:end]
-    value = candidate[len(_REQUEST_MARKER_PREFIX):]
+    value = candidate[len(_REQUEST_MARKER_PREFIX) :]
     if len(value) == 64 and all(c in _HEX64 for c in value):
         return candidate
     return None
@@ -550,7 +687,15 @@ class OpenCLIExternalIntelligenceTransport:
     A timeout never triggers a second ``ask``.
     """
 
-    def __init__(self, executable: str = "opencli", *, profile: str = "", timeout: int = 120, stable_seconds: int = 6, history_limit: int = 5):
+    def __init__(
+        self,
+        executable: str = "opencli",
+        *,
+        profile: str = "",
+        timeout: int = 120,
+        stable_seconds: int = 6,
+        history_limit: int = 5,
+    ):
         self.executable = executable
         self.profile = profile
         self.timeout = int(timeout)
@@ -559,8 +704,17 @@ class OpenCLIExternalIntelligenceTransport:
 
     def safe_argv(self) -> tuple[str, ...]:
         return (
-            self.executable, "chatgpt", "ask", "<prompt>", "--new", "--timeout", str(self.timeout),
-            "--site-session", "ephemeral", "-f", "json",
+            self.executable,
+            "chatgpt",
+            "ask",
+            "<prompt>",
+            "--new",
+            "--timeout",
+            str(self.timeout),
+            "--site-session",
+            "ephemeral",
+            "-f",
+            "json",
         )
 
     @staticmethod
@@ -581,16 +735,30 @@ class OpenCLIExternalIntelligenceTransport:
 
     def _history_argv(self) -> list[str]:
         return [
-            self.executable, "chatgpt", "history",
-            "--limit", str(self.history_limit),
-            "--site-session", "ephemeral", "-f", "json",
+            self.executable,
+            "chatgpt",
+            "history",
+            "--limit",
+            str(self.history_limit),
+            "--site-session",
+            "ephemeral",
+            "-f",
+            "json",
         ]
 
-    def _run(self, argv: Sequence[str], env: Mapping[str, str]) -> tuple[int | None, str, str, bool]:
+    def _run(
+        self, argv: Sequence[str], env: Mapping[str, str]
+    ) -> tuple[int | None, str, str, bool]:
         try:
             process = subprocess.Popen(
-                list(argv), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, start_new_session=True, shell=False, env=dict(env),
+                list(argv),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                start_new_session=True,
+                shell=False,
+                env=dict(env),
             )
         except FileNotFoundError:
             return None, "", "", False
@@ -624,12 +792,23 @@ class OpenCLIExternalIntelligenceTransport:
         if self.profile:
             env["OPENCLI_PROFILE"] = self.profile
         ask = [
-            self.executable, "chatgpt", "ask", prompt, "--new", "--timeout", str(self.timeout),
-            "--site-session", "ephemeral", "-f", "json",
+            self.executable,
+            "chatgpt",
+            "ask",
+            prompt,
+            "--new",
+            "--timeout",
+            str(self.timeout),
+            "--site-session",
+            "ephemeral",
+            "-f",
+            "json",
         ]
         code, stdout, stderr, timed_out = self._run(ask, env)
         if code is None:
-            return TransportResult("OPENCLI_NOT_FOUND", started_at=started, finished_at=_now(), safe_argv=safe)
+            return TransportResult(
+                "OPENCLI_NOT_FOUND", started_at=started, finished_at=_now(), safe_argv=safe
+            )
         if timed_out or code:
             # Once the ask process starts, timeout or nonzero exit is outcome-ambiguous:
             # ChatGPT may already have accepted the prompt even if OpenCLI lost the
@@ -644,35 +823,68 @@ class OpenCLIExternalIntelligenceTransport:
             if not isinstance(conversation_id, str) or not conversation_id:
                 raise ValueError
         except (TypeError, ValueError, json.JSONDecodeError):
-            return TransportResult("OPENCLI_PROCESS_FAILURE", stdout, retry_safe=False, started_at=started, finished_at=_now(), safe_argv=safe)
+            return TransportResult(
+                "OPENCLI_PROCESS_FAILURE",
+                stdout,
+                retry_safe=False,
+                started_at=started,
+                finished_at=_now(),
+                safe_argv=safe,
+            )
 
         detail = [
-            self.executable, "chatgpt", "detail", conversation_id,
-            "--wait", "--stable", str(self.stable_seconds), "--timeout", str(self.timeout),
-            "--site-session", "ephemeral", "-f", "json",
+            self.executable,
+            "chatgpt",
+            "detail",
+            conversation_id,
+            "--wait",
+            "--stable",
+            str(self.stable_seconds),
+            "--timeout",
+            str(self.timeout),
+            "--site-session",
+            "ephemeral",
+            "-f",
+            "json",
         ]
         detail_code, detail_stdout, detail_stderr, detail_timeout = self._run(detail, env)
         if detail_code is None or detail_timeout or detail_code:
             return TransportResult(
-                "OPENCLI_STABLE_READ_FAILURE", detail_stdout or detail_stderr, conversation_id=conversation_id,
-                retry_safe=False, started_at=started, finished_at=_now(), safe_argv=safe,
+                "OPENCLI_STABLE_READ_FAILURE",
+                detail_stdout or detail_stderr,
+                conversation_id=conversation_id,
+                retry_safe=False,
+                started_at=started,
+                finished_at=_now(),
+                safe_argv=safe,
             )
         raw, matched_id = self._extract_stable(detail_stdout, conversation_id)
         if raw is None:
             return TransportResult(
-                "OPENCLI_STABLE_READ_FAILURE", detail_stdout, conversation_id=conversation_id,
-                retry_safe=False, started_at=started, finished_at=_now(), safe_argv=safe,
+                "OPENCLI_STABLE_READ_FAILURE",
+                detail_stdout,
+                conversation_id=conversation_id,
+                retry_safe=False,
+                started_at=started,
+                finished_at=_now(),
+                safe_argv=safe,
             )
         return TransportResult(
-            "INTELLIGENCE_COMPLETED", raw, conversation_id=matched_id,
-            retry_safe=False, started_at=started, finished_at=_now(), safe_argv=safe,
+            "INTELLIGENCE_COMPLETED",
+            raw,
+            conversation_id=matched_id,
+            retry_safe=False,
+            started_at=started,
+            finished_at=_now(),
+            safe_argv=safe,
         )
 
     def _extract_stable(self, detail_stdout: str, conversation_id: str) -> tuple[str | None, str]:
         try:
             detail_rows = json.loads(detail_stdout)
             stable = [
-                row for row in detail_rows
+                row
+                for row in detail_rows
                 if isinstance(row, dict)
                 and row.get("Role") == "Assistant"
                 and isinstance(row.get("Text"), str)
@@ -699,13 +911,20 @@ class OpenCLIExternalIntelligenceTransport:
             env["OPENCLI_PROFILE"] = self.profile
         return self._reconcile_timeout(prompt, env, started, self.safe_argv())
 
-    def _reconcile_timeout(self, prompt: str, env: Mapping[str, str], started: str, safe: tuple[str, ...]) -> TransportResult:
+    def _reconcile_timeout(
+        self, prompt: str, env: Mapping[str, str], started: str, safe: tuple[str, ...]
+    ) -> TransportResult:
         """READ-ONLY recovery after an ambiguous ask outcome. Never issues a second ask."""
         code, stdout, stderr, timed_out = self._run(self._history_argv(), env)
         if code is None or timed_out or code:
             return TransportResult(
-                "OPENCLI_OUTCOME_UNKNOWN", stdout or stderr, outcome_unknown=True, retry_safe=False,
-                started_at=started, finished_at=_now(), safe_argv=safe,
+                "OPENCLI_OUTCOME_UNKNOWN",
+                stdout or stderr,
+                outcome_unknown=True,
+                retry_safe=False,
+                started_at=started,
+                finished_at=_now(),
+                safe_argv=safe,
             )
         try:
             rows = json.loads(stdout)
@@ -713,8 +932,13 @@ class OpenCLIExternalIntelligenceTransport:
                 raise ValueError
         except (TypeError, ValueError, json.JSONDecodeError):
             return TransportResult(
-                "OPENCLI_OUTCOME_UNKNOWN", stdout, outcome_unknown=True, retry_safe=False,
-                started_at=started, finished_at=_now(), safe_argv=safe,
+                "OPENCLI_OUTCOME_UNKNOWN",
+                stdout,
+                outcome_unknown=True,
+                retry_safe=False,
+                started_at=started,
+                finished_at=_now(),
+                safe_argv=safe,
             )
         matching: list[str] = []
         for row in rows:
@@ -724,8 +948,14 @@ class OpenCLIExternalIntelligenceTransport:
             if not isinstance(conversation_id, str) or not conversation_id:
                 continue
             detail_read = [
-                self.executable, "chatgpt", "detail", conversation_id,
-                "--site-session", "ephemeral", "-f", "json",
+                self.executable,
+                "chatgpt",
+                "detail",
+                conversation_id,
+                "--site-session",
+                "ephemeral",
+                "-f",
+                "json",
             ]
             read_code, read_stdout, read_stderr, read_timeout = self._run(detail_read, env)
             if read_code is None or read_timeout or read_code:
@@ -737,37 +967,70 @@ class OpenCLIExternalIntelligenceTransport:
             except (TypeError, ValueError, json.JSONDecodeError):
                 continue
             user_prompts = [
-                row.get("Text") for row in detail_rows
-                if isinstance(row, dict) and row.get("Role") == "User" and isinstance(row.get("Text"), str)
+                row.get("Text")
+                for row in detail_rows
+                if isinstance(row, dict)
+                and row.get("Role") == "User"
+                and isinstance(row.get("Text"), str)
             ]
             if any(self._prompt_matches(text, prompt) for text in user_prompts):
                 matching.append(conversation_id)
         if len(matching) != 1:
             return TransportResult(
-                "OPENCLI_OUTCOME_UNKNOWN", "", outcome_unknown=True, retry_safe=False,
-                started_at=started, finished_at=_now(), safe_argv=safe,
+                "OPENCLI_OUTCOME_UNKNOWN",
+                "",
+                outcome_unknown=True,
+                retry_safe=False,
+                started_at=started,
+                finished_at=_now(),
+                safe_argv=safe,
             )
         conversation_id = matching[0]
         detail = [
-            self.executable, "chatgpt", "detail", conversation_id,
-            "--wait", "--stable", str(self.stable_seconds), "--timeout", str(self.timeout),
-            "--site-session", "ephemeral", "-f", "json",
+            self.executable,
+            "chatgpt",
+            "detail",
+            conversation_id,
+            "--wait",
+            "--stable",
+            str(self.stable_seconds),
+            "--timeout",
+            str(self.timeout),
+            "--site-session",
+            "ephemeral",
+            "-f",
+            "json",
         ]
         detail_code, detail_stdout, detail_stderr, detail_timeout = self._run(detail, env)
         if detail_code is None or detail_timeout or detail_code:
             return TransportResult(
-                "OPENCLI_STABLE_READ_FAILURE", detail_stdout or detail_stderr, conversation_id=conversation_id,
-                retry_safe=False, started_at=started, finished_at=_now(), safe_argv=safe,
+                "OPENCLI_STABLE_READ_FAILURE",
+                detail_stdout or detail_stderr,
+                conversation_id=conversation_id,
+                retry_safe=False,
+                started_at=started,
+                finished_at=_now(),
+                safe_argv=safe,
             )
         raw, matched_id = self._extract_stable(detail_stdout, conversation_id)
         if raw is None:
             return TransportResult(
-                "OPENCLI_STABLE_READ_FAILURE", detail_stdout, conversation_id=conversation_id,
-                retry_safe=False, started_at=started, finished_at=_now(), safe_argv=safe,
+                "OPENCLI_STABLE_READ_FAILURE",
+                detail_stdout,
+                conversation_id=conversation_id,
+                retry_safe=False,
+                started_at=started,
+                finished_at=_now(),
+                safe_argv=safe,
             )
         return TransportResult(
-            "INTELLIGENCE_COMPLETED", raw, conversation_id=matched_id,
-            retry_safe=False, started_at=started, finished_at=_now(), safe_argv=safe,
+            "INTELLIGENCE_COMPLETED",
+            raw,
+            conversation_id=matched_id,
+            retry_safe=False,
+            started_at=started,
+            finished_at=_now(),
+            safe_argv=safe,
         )
 
 
@@ -809,7 +1072,11 @@ class ExternalIntelligenceStore:
 
     def write_envelope(self, request: Mapping[str, Any], envelope: Mapping[str, Any]) -> Path:
         request_sha = str(request.get("request_sha256") or "")
-        if request.get("schema") != REQUEST_SCHEMA or envelope.get("schema") != ENVELOPE_SCHEMA or len(request_sha) != 64:
+        if (
+            request.get("schema") != REQUEST_SCHEMA
+            or envelope.get("schema") != ENVELOPE_SCHEMA
+            or len(request_sha) != 64
+        ):
             raise ExternalIntelligenceError("INVALID_ENVELOPE_ARTIFACT")
         path = self._envelope_path(request_sha)
         if path.exists():
@@ -846,7 +1113,13 @@ class ExternalIntelligenceStore:
                 matches.append(value)
         if not matches:
             return None
-        return max(matches, key=lambda value: (str(value.get("created_at") or ""), str(value.get("receipt_id") or "")))
+        return max(
+            matches,
+            key=lambda value: (
+                str(value.get("created_at") or ""),
+                str(value.get("receipt_id") or ""),
+            ),
+        )
 
     def existing_receipt(self, request: Mapping[str, Any]) -> dict[str, Any] | None:
         path = self._receipt_path(str(request.get("request_sha256") or ""))
@@ -856,7 +1129,9 @@ class ExternalIntelligenceStore:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError, UnicodeError) as exc:
             raise ExternalIntelligenceError("INTELLIGENCE_RECEIPT_CORRUPT") from exc
-        if value.get("schema") != RECEIPT_SCHEMA or value.get("request", {}).get("request_sha256") != request.get("request_sha256"):
+        if value.get("schema") != RECEIPT_SCHEMA or value.get("request", {}).get(
+            "request_sha256"
+        ) != request.get("request_sha256"):
             raise ExternalIntelligenceError("INTELLIGENCE_RECEIPT_IDENTITY_MISMATCH")
         return value
 
@@ -909,7 +1184,9 @@ class ExternalIntelligenceStore:
         _atomic_json(self._attempt_path(value["request_sha256"]), value)
         return value
 
-    def finish_attempt(self, attempt: Mapping[str, Any], *, state: str, transport_status: str) -> dict[str, Any]:
+    def finish_attempt(
+        self, attempt: Mapping[str, Any], *, state: str, transport_status: str
+    ) -> dict[str, Any]:
         if state not in {"COMPLETED", "FAILED", "OUTCOME_UNKNOWN"}:
             raise ExternalIntelligenceError("INVALID_ATTEMPT_TERMINAL_STATE")
         value = dict(attempt)
@@ -934,7 +1211,9 @@ class ExternalIntelligenceSidecar:
         self.transport = transport
         self.store = store
 
-    def analyze(self, record: Mapping[str, Any], sources: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    def analyze(
+        self, record: Mapping[str, Any], sources: Iterable[Mapping[str, Any]]
+    ) -> dict[str, Any]:
         intake = normalize_intake(record)
         if intake["disposition"] != IntakeDisposition.EXECUTABLE.value:
             return {
@@ -993,7 +1272,9 @@ class ExternalIntelligenceSidecar:
         try:
             envelope = parse_external_execution_envelope(result.raw)
         except ExternalIntelligenceError:
-            self.store.finish_attempt(attempt, state="FAILED", transport_status="INTELLIGENCE_PARSE_FAILED")
+            self.store.finish_attempt(
+                attempt, state="FAILED", transport_status="INTELLIGENCE_PARSE_FAILED"
+            )
             raise
         identity = request["identity"]
         expected_binding = {
@@ -1007,7 +1288,9 @@ class ExternalIntelligenceSidecar:
             "context_pack_sha256": request["context_pack_sha256"],
         }
         if envelope["binding"] != expected_binding:
-            self.store.finish_attempt(attempt, state="FAILED", transport_status="INTELLIGENCE_BINDING_MISMATCH")
+            self.store.finish_attempt(
+                attempt, state="FAILED", transport_status="INTELLIGENCE_BINDING_MISMATCH"
+            )
             raise ExternalIntelligenceError("INTELLIGENCE_BINDING_MISMATCH")
         if envelope["worker_binding"] != {
             "assigned_thread": "UNASSIGNED",
@@ -1015,7 +1298,9 @@ class ExternalIntelligenceSidecar:
             "create_subagent": False,
             "fallback_allowed": False,
         }:
-            self.store.finish_attempt(attempt, state="FAILED", transport_status="INTELLIGENCE_WORKER_BOUNDARY_VIOLATION")
+            self.store.finish_attempt(
+                attempt, state="FAILED", transport_status="INTELLIGENCE_WORKER_BOUNDARY_VIOLATION"
+            )
             raise ExternalIntelligenceError("INTELLIGENCE_WORKER_BOUNDARY_VIOLATION")
         envelope_sha256 = _sha256(_canonical_json(envelope))
         self.store.write_envelope(request, envelope)

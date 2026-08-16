@@ -9,14 +9,13 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from nexus.services.external_intelligence_fanout import (
     MODEL,
     PROVIDER,
     WORKER_RECEIPT_SCHEMA,
 )
-
 
 UNIT_VERIFICATION_SCHEMA = "external_intelligence_unit_verification.v1"
 WHOLE_VERIFICATION_SCHEMA = "external_intelligence_whole_task_verification.v1"
@@ -52,7 +51,14 @@ def _is_hex(value: Any, size: int) -> bool:
 
 def _safe_slug(value: Any, field: str) -> str:
     text = str(value or "").strip()
-    if not text or len(text) > 160 or any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-" for char in text):
+    if (
+        not text
+        or len(text) > 160
+        or any(
+            char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_.-"
+            for char in text
+        )
+    ):
         raise ClosureError(f"INVALID_{field.upper()}")
     return text
 
@@ -88,7 +94,9 @@ def _run_git(root: Path, *args: str, timeout: float = 30.0) -> str:
 
 def _atomic_json(path: Path, value: Mapping[str, Any]) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = (json.dumps(dict(value), ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode("utf-8")
+    payload = (json.dumps(dict(value), ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode(
+        "utf-8"
+    )
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
         with os.fdopen(fd, "wb") as stream:
@@ -144,7 +152,9 @@ def _receipt_identity(receipt: Mapping[str, Any]) -> str:
     return _sha256(_canonical_json(material))
 
 
-def _verify_task_card_binding(repository_root: Path, task_card_ref: str, task_card_hash: str) -> None:
+def _verify_task_card_binding(
+    repository_root: Path, task_card_ref: str, task_card_hash: str
+) -> None:
     relative = _safe_relative_path(task_card_ref)
     if not _is_hex(task_card_hash, 64):
         raise ClosureError("TASK_CARD_HASH_INVALID")
@@ -197,7 +207,9 @@ class VerifierSpec:
         timeout = float(value.get("timeout", 120.0))
         if timeout <= 0 or timeout > 1800:
             raise ClosureError("INVALID_VERIFIER_TIMEOUT")
-        return cls(verifier_id=verifier_id, argv=tuple(argv), owner_unit=owner_unit, timeout=timeout)
+        return cls(
+            verifier_id=verifier_id, argv=tuple(argv), owner_unit=owner_unit, timeout=timeout
+        )
 
 
 @dataclass(frozen=True)
@@ -228,7 +240,11 @@ class ClosureStore:
         prefix = f"{_safe_slug(task_id, 'task_id')}--{_safe_slug(unit_id, 'unit_id')}--"
         if not self.repair_deltas.exists():
             return 0
-        return sum(1 for path in self.repair_deltas.iterdir() if path.is_file() and path.name.startswith(prefix))
+        return sum(
+            1
+            for path in self.repair_deltas.iterdir()
+            if path.is_file() and path.name.startswith(prefix)
+        )
 
     def next_repair_index(self, task_id: str, unit_id: str) -> int:
         return self.repair_count(task_id, unit_id) + 1
@@ -258,7 +274,9 @@ class ClosureStore:
 
 
 class CompositionWorkspaceAllocator:
-    def __init__(self, repository_root: str | os.PathLike[str], workspace_root: str | os.PathLike[str]):
+    def __init__(
+        self, repository_root: str | os.PathLike[str], workspace_root: str | os.PathLike[str]
+    ):
         self.repository_root = Path(repository_root).expanduser().resolve()
         self.workspace_root = Path(workspace_root).expanduser().resolve()
 
@@ -280,8 +298,12 @@ class CompositionWorkspaceAllocator:
             check=False,
         )
         if result.returncode != 0:
-            raise ClosureError(f"ASSEMBLY_WORKSPACE_FAILED:{(result.stderr or result.stdout).strip()[:1200]}")
-        if _run_git(path, "rev-parse", "HEAD") != base_sha or _run_git(path, "status", "--porcelain=v1"):
+            raise ClosureError(
+                f"ASSEMBLY_WORKSPACE_FAILED:{(result.stderr or result.stdout).strip()[:1200]}"
+            )
+        if _run_git(path, "rev-parse", "HEAD") != base_sha or _run_git(
+            path, "status", "--porcelain=v1"
+        ):
             raise ClosureError("ASSEMBLY_WORKSPACE_NOT_FRESH")
         return AssemblyLease(workspace_id=workspace_id, path=str(path), base_sha=base_sha)
 
@@ -307,7 +329,11 @@ def validate_worker_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
     candidate_tree = str(receipt.get("candidate_tree") or "").lower()
     candidate_diff_sha256 = str(receipt.get("candidate_diff_sha256") or "").lower()
     receipt_id = str(receipt.get("receipt_id") or "").lower()
-    if not _is_hex(base_sha, 40) or not _is_hex(candidate_commit, 40) or not _is_hex(candidate_tree, 40):
+    if (
+        not _is_hex(base_sha, 40)
+        or not _is_hex(candidate_commit, 40)
+        or not _is_hex(candidate_tree, 40)
+    ):
         raise ClosureError("INVALID_CANDIDATE_GIT_IDENTITY")
     if not _is_hex(candidate_diff_sha256, 64) or not _is_hex(receipt_id, 64):
         raise ClosureError("INVALID_CANDIDATE_HASH_IDENTITY")
@@ -414,7 +440,9 @@ def _run_verifier_specs(
             "passed": returncode == 0 and not error,
         }
         results.append(row)
-        if _run_git(root, "rev-parse", "HEAD") != candidate_commit or _run_git(root, "status", "--porcelain=v1"):
+        if _run_git(root, "rev-parse", "HEAD") != candidate_commit or _run_git(
+            root, "status", "--porcelain=v1"
+        ):
             raise ClosureError("VERIFIER_MUTATED_WORKSPACE")
     status = "PASS" if all(row["passed"] for row in results) else "FAIL"
     verification = {
@@ -467,9 +495,16 @@ def build_unit_repair_delta(
     repair_index: int,
 ) -> dict[str, Any]:
     bound = validate_worker_receipt(receipt)
-    if verification.get("schema") != UNIT_VERIFICATION_SCHEMA or verification.get("status") != "FAIL":
+    if (
+        verification.get("schema") != UNIT_VERIFICATION_SCHEMA
+        or verification.get("status") != "FAIL"
+    ):
         raise ClosureError("FAILED_UNIT_VERIFICATION_REQUIRED")
-    if verification.get("worker_receipt_id") != bound["receipt_id"] or verification.get("task_id") != bound["task_id"] or verification.get("unit_id") != bound["unit_id"]:
+    if (
+        verification.get("worker_receipt_id") != bound["receipt_id"]
+        or verification.get("task_id") != bound["task_id"]
+        or verification.get("unit_id") != bound["unit_id"]
+    ):
         raise ClosureError("UNIT_VERIFICATION_BINDING_MISMATCH")
     if repair_index <= 0:
         raise ClosureError("INVALID_REPAIR_INDEX")
@@ -519,7 +554,10 @@ def build_composition_repair_delta(
     repair_index: int,
 ) -> dict[str, Any]:
     bound = validate_worker_receipt(receipt)
-    if whole_verification.get("schema") != WHOLE_VERIFICATION_SCHEMA or whole_verification.get("status") != "FAIL":
+    if (
+        whole_verification.get("schema") != WHOLE_VERIFICATION_SCHEMA
+        or whole_verification.get("status") != "FAIL"
+    ):
         raise ClosureError("FAILED_WHOLE_VERIFICATION_REQUIRED")
     failed = [row for row in whole_verification.get("results", []) if not row.get("passed")]
     owners = {str(row.get("owner_unit") or "") for row in failed}
@@ -592,7 +630,10 @@ def compose_task_candidate(
     verification_by_unit: dict[str, Mapping[str, Any]] = {}
     for verification in verifications:
         unit_id = _safe_slug(verification.get("unit_id"), "unit_id")
-        if verification.get("schema") != UNIT_VERIFICATION_SCHEMA or verification.get("status") != "PASS":
+        if (
+            verification.get("schema") != UNIT_VERIFICATION_SCHEMA
+            or verification.get("status") != "PASS"
+        ):
             raise ClosureError("ALL_UNIT_VERIFICATIONS_MUST_PASS")
         if unit_id in verification_by_unit:
             raise ClosureError("DUPLICATE_UNIT_VERIFICATION")
@@ -609,7 +650,10 @@ def compose_task_candidate(
     base_sha = next(iter(bases))
     for unit_id, (receipt, bound) in receipt_by_unit.items():
         verification = verification_by_unit[unit_id]
-        if verification.get("worker_receipt_id") != bound["receipt_id"] or verification.get("candidate_commit") != bound["candidate_commit"]:
+        if (
+            verification.get("worker_receipt_id") != bound["receipt_id"]
+            or verification.get("candidate_commit") != bound["candidate_commit"]
+        ):
             raise ClosureError("UNIT_VERIFICATION_RECEIPT_DRIFT")
     lease = allocator.allocate(task_id, base_sha)
     assembly = Path(lease.path)
@@ -637,7 +681,9 @@ def compose_task_candidate(
             check=False,
         )
         if check.returncode != 0:
-            raise ClosureError(f"COMPOSITION_CONFLICT:{unit_id}:{(check.stderr or check.stdout).strip()[:800]}")
+            raise ClosureError(
+                f"COMPOSITION_CONFLICT:{unit_id}:{(check.stderr or check.stdout).strip()[:800]}"
+            )
         apply = subprocess.run(
             ["git", "apply", "--index"],
             cwd=assembly,
@@ -647,17 +693,29 @@ def compose_task_candidate(
             check=False,
         )
         if apply.returncode != 0:
-            raise ClosureError(f"COMPOSITION_APPLY_FAILED:{unit_id}:{(apply.stderr or apply.stdout).strip()[:800]}")
-    staged = sorted(line for line in _run_git(assembly, "diff", "--cached", "--name-only").splitlines() if line)
+            raise ClosureError(
+                f"COMPOSITION_APPLY_FAILED:{unit_id}:{(apply.stderr or apply.stdout).strip()[:800]}"
+            )
+    staged = sorted(
+        line for line in _run_git(assembly, "diff", "--cached", "--name-only").splitlines() if line
+    )
     if staged != sorted(seen_changed):
         raise ClosureError("COMPOSED_STAGED_PATH_SET_MISMATCH")
     for unit_id, (_, bound) in receipt_by_unit.items():
         for path in cumulative_paths_by_unit[unit_id]:
             if not any(_path_matches(path, boundary) for boundary in bound["mutation_paths"]):
                 raise ClosureError(f"COMPOSED_SCOPE_WIDENING:{unit_id}:{path}")
-    check = subprocess.run(["git", "diff", "--cached", "--check"], cwd=assembly, capture_output=True, text=True, check=False)
+    check = subprocess.run(
+        ["git", "diff", "--cached", "--check"],
+        cwd=assembly,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
     if check.returncode != 0:
-        raise ClosureError(f"COMPOSED_DIFF_CHECK_FAILED:{(check.stdout or check.stderr).strip()[:800]}")
+        raise ClosureError(
+            f"COMPOSED_DIFF_CHECK_FAILED:{(check.stdout or check.stderr).strip()[:800]}"
+        )
     commit = subprocess.run(
         ["git", "commit", "-m", f"candidate: {task_id}/composed"],
         cwd=assembly,
@@ -666,13 +724,19 @@ def compose_task_candidate(
         check=False,
     )
     if commit.returncode != 0:
-        raise ClosureError(f"COMPOSED_COMMIT_FAILED:{(commit.stderr or commit.stdout).strip()[:1000]}")
+        raise ClosureError(
+            f"COMPOSED_COMMIT_FAILED:{(commit.stderr or commit.stdout).strip()[:1000]}"
+        )
     candidate_commit = _run_git(assembly, "rev-parse", "HEAD")
     candidate_tree = _run_git(assembly, "rev-parse", "HEAD^{tree}")
     changed_paths = _changed_paths(assembly, base_sha, candidate_commit)
     deleted_paths = _deleted_paths(assembly, base_sha, candidate_commit)
     for path in deleted_paths:
-        owners = [bound for _, bound in receipt_by_unit.values() if any(_path_matches(path, boundary) for boundary in bound["mutation_paths"])]
+        owners = [
+            bound
+            for _, bound in receipt_by_unit.values()
+            if any(_path_matches(path, boundary) for boundary in bound["mutation_paths"])
+        ]
         if not owners or not all(owner["allow_deletions"] for owner in owners):
             raise ClosureError(f"COMPOSED_DELETION_NOT_AUTHORIZED:{path}")
     task_candidate = {
@@ -755,18 +819,26 @@ def build_acceptance_packet(
 ) -> dict[str, Any]:
     if task_candidate.get("schema") != TASK_CANDIDATE_SCHEMA:
         raise ClosureError("INVALID_TASK_CANDIDATE")
-    if whole_verification.get("schema") != WHOLE_VERIFICATION_SCHEMA or whole_verification.get("status") != "PASS":
+    if (
+        whole_verification.get("schema") != WHOLE_VERIFICATION_SCHEMA
+        or whole_verification.get("status") != "PASS"
+    ):
         raise ClosureError("WHOLE_TASK_PASS_REQUIRED")
     if whole_verification.get("task_candidate_id") != task_candidate.get("task_candidate_id"):
         raise ClosureError("WHOLE_VERIFICATION_CANDIDATE_MISMATCH")
     if not task_card_ref or not _is_hex(task_card_hash, 64):
         raise ClosureError("TASK_CARD_BINDING_REQUIRED")
-    receipt_by_unit = {str(receipt.get("unit_id")): validate_worker_receipt(receipt) for receipt in unit_receipts}
+    receipt_by_unit = {
+        str(receipt.get("unit_id")): validate_worker_receipt(receipt) for receipt in unit_receipts
+    }
     verification_by_unit = {str(value.get("unit_id")): value for value in unit_verifications}
     if set(receipt_by_unit) != set(verification_by_unit):
         raise ClosureError("ACCEPTANCE_UNIT_SET_MISMATCH")
     for unit_id, verification in verification_by_unit.items():
-        if verification.get("schema") != UNIT_VERIFICATION_SCHEMA or verification.get("status") != "PASS":
+        if (
+            verification.get("schema") != UNIT_VERIFICATION_SCHEMA
+            or verification.get("status") != "PASS"
+        ):
             raise ClosureError("ACCEPTANCE_REQUIRES_UNIT_PASS")
         if verification.get("worker_receipt_id") != receipt_by_unit[unit_id]["receipt_id"]:
             raise ClosureError("ACCEPTANCE_UNIT_BINDING_MISMATCH")
@@ -813,7 +885,11 @@ def build_closure_capsule(
     acceptance_packet_ref: str,
     acceptance_packet_sha256: str,
 ) -> dict[str, Any]:
-    if task_candidate.get("schema") != TASK_CANDIDATE_SCHEMA or not acceptance_packet_ref or not _is_hex(acceptance_packet_sha256, 64):
+    if (
+        task_candidate.get("schema") != TASK_CANDIDATE_SCHEMA
+        or not acceptance_packet_ref
+        or not _is_hex(acceptance_packet_sha256, 64)
+    ):
         raise ClosureError("INVALID_CAPSULE_INPUT")
     capsule = {
         "schema": CLOSURE_CAPSULE_SCHEMA,
@@ -917,7 +993,9 @@ class ExternalIntelligenceClosureRuntime:
             latest_verifications: dict[str, dict[str, Any]] = {}
             failing_units: list[str] = []
             for unit_id in sorted(current):
-                verification = self._persist_verification(verify_unit_candidate(current[unit_id], unit_verifiers[unit_id]))
+                verification = self._persist_verification(
+                    verify_unit_candidate(current[unit_id], unit_verifiers[unit_id])
+                )
                 latest_verifications[unit_id] = verification
                 verification_history.append(verification)
                 if verification["status"] != "PASS":
@@ -935,8 +1013,12 @@ class ExternalIntelligenceClosureRuntime:
                             reason=unit_id,
                         )
                     repair_index = self.store.next_repair_index(task_id, unit_id)
-                    delta = build_unit_repair_delta(current[unit_id], latest_verifications[unit_id], repair_index=repair_index)
-                    repaired, persisted = self._repair(receipt=current[unit_id], delta=delta, repair_index=repair_index)
+                    delta = build_unit_repair_delta(
+                        current[unit_id], latest_verifications[unit_id], repair_index=repair_index
+                    )
+                    repaired, persisted = self._repair(
+                        receipt=current[unit_id], delta=delta, repair_index=repair_index
+                    )
                     repair_deltas.append(persisted)
                     repair_counts[unit_id] += 1
                     if repaired is None:
@@ -974,7 +1056,9 @@ class ExternalIntelligenceClosureRuntime:
             task_candidate = dict(task_candidate)
             task_candidate["artifact_ref"] = task_candidate_ref
             task_candidate["artifact_sha256"] = task_candidate_sha
-            whole = self._persist_verification(verify_whole_task_candidate(task_candidate, whole_verifiers))
+            whole = self._persist_verification(
+                verify_whole_task_candidate(task_candidate, whole_verifiers)
+            )
             if whole["status"] == "FAIL":
                 owner = _unique_failed_owner(whole, set(current))
                 if not owner:
@@ -1002,8 +1086,12 @@ class ExternalIntelligenceClosureRuntime:
                         whole_verification=whole,
                     )
                 repair_index = self.store.next_repair_index(task_candidate["task_id"], owner)
-                delta = build_composition_repair_delta(current[owner], whole, repair_index=repair_index)
-                repaired, persisted = self._repair(receipt=current[owner], delta=delta, repair_index=repair_index)
+                delta = build_composition_repair_delta(
+                    current[owner], whole, repair_index=repair_index
+                )
+                repaired, persisted = self._repair(
+                    receipt=current[owner], delta=delta, repair_index=repair_index
+                )
                 repair_deltas.append(persisted)
                 repair_counts[owner] += 1
                 if repaired is None:
@@ -1059,7 +1147,9 @@ class ExternalIntelligenceClosureRuntime:
                 "task_id": task_candidate["task_id"],
                 "task_candidate": task_candidate,
                 "whole_verification": whole,
-                "unit_verifications": [latest_verifications[unit_id] for unit_id in sorted(latest_verifications)],
+                "unit_verifications": [
+                    latest_verifications[unit_id] for unit_id in sorted(latest_verifications)
+                ],
                 "repair_deltas": repair_deltas,
                 "acceptance_packet": packet,
                 "control_capsule": capsule,
@@ -1106,7 +1196,9 @@ class ExternalIntelligenceClosureRuntime:
             "control_capsule": {},
             "telemetry": {
                 "unit_count": len(current),
-                "verified_unit_count": sum(1 for value in verifications.values() if value.get("status") == "PASS"),
+                "verified_unit_count": sum(
+                    1 for value in verifications.values() if value.get("status") == "PASS"
+                ),
                 "repair_count": len(repair_deltas),
                 "composition_conflict_count": composition_conflicts,
                 "whole_task_verifier_count": len((whole_verification or {}).get("results", [])),
