@@ -1,51 +1,118 @@
 ---
 type: Concept
-title: CLI Commands & Cueline Operations
-description: Operational reference for the Click-based nexus CLI entrypoint and the Cueline stdin-to-subprocess adapter.
-tags: [cli, cueline, runtime, execution, commands]
+title: CLI, Self-Hosted Task Service & Cueline Operations
+description: Current operational reference for the Nexus CLI, durable self-hosted task lifecycle, Cueline process adapter, and bounded NightShift candidate queue.
+tags: [cli, cueline, runtime, self-hosted, nightshift, execution]
 openwiki:
   roles: [architecture, domain, operations]
   change_kinds: [public-api, workflow]
   source_paths: [scripts/engine/nexus_cli.py, scripts/ops/nexus_cueline_worker.py, pyproject.toml]
   symbols: [nexus, nexus_group, parse_and_validate_input, build_cli_argv, main]
-  test_paths: [tests/test_cli_commands.py, tests/test_cli_dispatch.py, tests/ops/test_nexus_cueline_worker.py]
-  invariants: [Main CLI entrypoint registered via pyproject.toml as nexus = scripts.engine.nexus_cli:nexus.]
-  validation_commands: [pytest tests/test_cli_commands.py -q]
+  test_paths: [tests/test_cli_commands.py, tests/ops/test_nexus_cueline_worker.py, tests/nexus/orchestrator/test_self_hosted_task_service.py, tests/core/test_task_continuity.py, tests/services/test_nightshift_queue_consumer.py]
+  invariants: [Cueline accepts one JSON object and uses shell-free argv execution. SelfHostedTaskService preserves existing lifecycle and authority contracts. NightShift queue is candidate-generation-only and forbids worker commit, push, approve, and integrate.]
+  validation_commands: [pytest tests/ops/test_nexus_cueline_worker.py tests/nexus/orchestrator/test_self_hosted_task_service.py tests/services/test_nightshift_queue_consumer.py -q]
 ---
 
-# CLI Commands & Cueline Operations
+# CLI, Self-Hosted Task Service & Cueline Operations
 
-The primary command-line interface for Nexus Singularity OS is exposed via the `nexus` CLI entrypoint defined in `pyproject.toml` (`scripts.engine.nexus_cli:nexus`). The separate `nexus-cueline-worker` entrypoint (`scripts.ops.nexus_cueline_worker:main`) adapts one JSON request from stdin into one self-hosted CLI subprocess invocation.
+The repository exposes a Click-based `nexus` CLI and a separate `nexus-cueline-worker` process adapter. Since the previous OpenWiki synchronization, the durable self-hosted task service has expanded materially and the NightShift path now has an explicit fail-closed candidate-queue consumer.
 
 ---
 
-## 🛠️ Main CLI Commands & Subcommand Dispatch
+## 🛠️ Main CLI and Self-Hosted Surface
 
-The `nexus` CLI is built using Click. The registered entrypoint exposes root commands and the nested `nexus` core command group. Use `nexus --help` and `nexus nexus --help` for the current command inventory.
+The primary CLI entrypoint is registered from `scripts.engine.nexus_cli:nexus`. Use `nexus --help`, `nexus nexus --help`, and `nexus self-hosted --help` for the current physical command inventory rather than copying a historical command list into implementation code.
 
-### 1. Root Commands
-- **`nexus status [--json]`**: Shows the direct status surface.
-- **`nexus run TASK_ID`**: Compatibility alias that forwards to the nested core `run` command.
-- **`nexus self-hosted --help`**: Lists self-hosted lifecycle commands.
+The durable lifecycle implementation behind the self-hosted surface lives in `nexus/orchestrator/self_hosted_task_service.py`.
 
-### 2. Nested Core Commands
-- **`nexus nexus status [--json]`**: Shows system status and trust scores.
-- **`nexus nexus run TASK_ID`**: Runs the Nexus master loop for a task identifier.
-- **`nexus nexus acceptance-check`**: Runs the acceptance check and hallucination guard.
-- **`nexus nexus delivery-gate --evidence FILE`**: Runs fail-closed delivery verification.
-- **`nexus nexus delivery-receipt`**: Reads the last machine-generated delivery receipt.
+`SelfHostedTaskService` composes existing contracts for:
+
+- tracked Task Card and Owner Inline task identity;
+- lifecycle action envelopes and idempotency;
+- canonical source/Target roots;
+- workforce admission and worker registry binding;
+- Candidate capture and verification;
+- independent Candidate acceptance;
+- approval/integration lifecycle;
+- recovery, retry, cleanup, reconciliation, and actionable-task projection;
+- task-continuity event projection.
+
+It is a service facade over those contracts, not a replacement for their separate authorities.
+
+### Direct vs Isolated execution lane
+
+The current source contains a bounded fast/direct eligibility check. Direct canonical execution is rejected when the task exceeds the safe bounded surface, including cases such as:
+
+- more than four allowed files;
+- missing verifier commands;
+- deletion authority;
+- migration or schema authority;
+- route-authority mutation;
+- security-policy weakening;
+- public/production claim promotion;
+- dirty canonical checkout or another active mutation task;
+- generated/large changes or lockfile changes.
+
+When blocked from the direct lane, the service projects the work toward an isolated Target instead of silently weakening those conditions.
 
 ---
 
 ## ⚙️ Cueline Worker (`STANDALONE_OPS`)
 
-`nexus-cueline-worker` operates on the `STANDALONE_OPS` surface as a single-request process adapter. It rejects positional CLI text, reads exactly one JSON object from stdin, validates the operation and its fields, and builds an argv list for `python -m scripts.engine.nexus_cli self-hosted <operation>`. It invokes that command with `subprocess.run(..., shell=False)`, forwards captured stdout and stderr, and returns the subprocess exit code. It does not poll a filesystem queue or create completion receipts itself; the `wait` request merely forwards timeout and poll-interval options to the self-hosted `wait` command.
+`nexus-cueline-worker` reads exactly one JSON object from stdin, validates the operation-specific schema, builds an argv list, and invokes:
 
-Supported operations are `submit`, `status`, `wait`, `list-actionable`, `approve`, `integrate`, `dispose`, and `cancel`. For example:
+```text
+python -m scripts.engine.nexus_cli self-hosted <operation>
+```
+
+The adapter uses `subprocess` argv execution with `shell=False`. It rejects positional command-line text and unknown payload keys rather than forwarding arbitrary shell input.
+
+Current allowed operations are:
+
+- `submit`
+- `status`
+- `wait`
+- `list-actionable` / `list_actionable`
+- `approve`
+- `integrate`
+- `dispose`
+- `cancel`
+
+Example:
 
 ```bash
 printf '%s\n' '{"op":"status","task_id":"TASK_ID"}' | nexus-cueline-worker
 ```
+
+Cueline is an adapter into the self-hosted lifecycle; it does not create a parallel task state machine.
+
+---
+
+## 🧠 Cross-Attempt Continuity
+
+`nexus/core/task_continuity.py` projects the existing task/attempt event stream into `ContinuitySnapshot` / `ResumeContext` objects. `SelfHostedTaskService` imports `events_from_attempt_records` from that module.
+
+Continuity preserves evidence references, rejected strategies, unresolved risks, next action, and claim ceiling. The module explicitly states that it is not a task state machine, router, verifier, or lifecycle authority.
+
+---
+
+## 🌙 NightShift Bounded Candidate Queue
+
+`AutoResearchNightShift` remains the research/repair runner, while `NightshiftQueueConsumer` provides a narrow fail-closed consumer for `.nexus/nightshift/pending.json` candidate demands.
+
+A queue item must satisfy the current source contract before dispatch:
+
+- schema `nexus.nightshift_candidate_demand.v1`;
+- role `bounded_candidate_generation`;
+- `mutation_intent=false`;
+- `external_verification_required=true`;
+- required controls include isolated directory, bounded context, JSON event receipt, parser, focused tests, and verifier;
+- worker permissions must explicitly forbid `commit`, `push`, `approve`, and `integrate`;
+- task and source revision identity must be present;
+- `UnifiedRuntime` evidence must report workforce admission `ALLOW`;
+- canonical invocation authority must report `ALLOW` with `gate_passed=true`.
+
+Only then does the consumer call its injected dispatcher and mark the manifest item `DISPATCHED`. Invalid or incomplete evidence returns `BLOCK` rather than guessing a fallback.
 
 ---
 
@@ -62,7 +129,21 @@ authority_roles:
 evidence_basis:
   - pyproject.toml:[tool.poetry.scripts].nexus
   - scripts/engine/nexus_cli.py:nexus
-claim_ceiling: Registered Click command interface for the root and nested Nexus command groups.
+claim_ceiling: Registered Click command interface for Nexus command surfaces.
+```
+
+```yaml
+component: SelfHostedTaskService
+implementation_status: CURRENT
+wiring_status: WIRED
+runtime_surfaces:
+  - LOCAL_RUNTIME
+authority_roles:
+  - EXECUTION_AUTHORITY
+evidence_basis:
+  - nexus/orchestrator/self_hosted_task_service.py:SelfHostedTaskService
+  - scripts/engine/nexus_cli.py:self-hosted
+claim_ceiling: Durable restartable service facade for governed task lifecycle actions; it consumes existing route, workforce, verification, approval, integration, and continuity contracts rather than replacing them.
 ```
 
 ```yaml
@@ -76,42 +157,51 @@ authority_roles:
 evidence_basis:
   - pyproject.toml:[tool.poetry.scripts].nexus-cueline-worker
   - scripts/ops/nexus_cueline_worker.py:main
-claim_ceiling: Single-request stdin adapter that validates a Cueline payload and invokes one self-hosted Nexus CLI subprocess.
+claim_ceiling: Single-request stdin adapter that validates a bounded payload and invokes one self-hosted Nexus CLI subprocess with shell-free argv execution.
 ```
 
----
-
-## 🛠️ Extension Recipe: Adding a Top-Level CLI Command
-
-To add a new command to `scripts/engine/nexus_cli.py`:
-
-1. **Implement Command Function**: Annotate with `@nexus.command(name="your-command")` and standard `@click.option` parameters.
-2. **Handle Subprocesses Safely**: Build argv lists and invoke subprocesses without shell expansion.
-3. **Bind Enforcer**: If the command produces code mutations, write completion envelopes via `[CompletionEnforcer](../governance/gates-and-contracts.md)`.
-4. **Add Command Tests**: Create test functions in `tests/test_cli_commands.py`.
-5. **Run Verification**: `pytest tests/test_cli_commands.py -q`.
+```yaml
+component: NightshiftQueueConsumer
+implementation_status: CURRENT
+wiring_status: UNKNOWN
+runtime_surfaces: []
+authority_roles:
+  - NONE
+evidence_basis:
+  - nexus/services/nightshift_queue_consumer.py:NightshiftQueueConsumer
+claim_ceiling: Current fail-closed bounded-candidate consumer exists; class/source evidence alone does not establish which production scheduler invokes it.
+```
 
 ---
 
 ## 🧭 Change Navigation & Validation
 
 ### When to Consult
-Consult this page when adding CLI flags, changing the registered command inventory, or updating Cueline stdin validation and subprocess forwarding.
+Consult this page when changing CLI commands, self-hosted task actions, execution-lane eligibility, task retry/recovery/cleanup behavior, Cueline payloads, continuity projection, or NightShift queue dispatch.
 
 ### Runtime Invariants
-- The root `nexus` entrypoint and nested `nexus` command group are Click command surfaces.
-- `nexus-cueline-worker` accepts one JSON object on stdin and invokes one self-hosted CLI command with `shell=False`.
+- Cueline accepts one bounded JSON object and never forwards arbitrary shell text.
+- `SelfHostedTaskService` does not create a second route authority.
+- Direct canonical eligibility must remain fail-closed; unsafe scope moves to isolated Target handling.
+- Task continuity remains projection-only.
+- NightShift queued workers cannot commit, push, approve, or integrate.
+- Queue dispatch requires both workforce admission and canonical invocation authority evidence.
 
 ### Exact Source Files & Symbols
-- `scripts/engine/nexus_cli.py` -> `nexus`, `nexus_group` (Click groups)
-- `scripts/ops/nexus_cueline_worker.py` -> `parse_and_validate_input`, `build_cli_argv`, `main`
+- `scripts/engine/nexus_cli.py` → `nexus` and self-hosted command surface
+- `scripts/ops/nexus_cueline_worker.py` → `ALLOWED_OPERATIONS`, `parse_and_validate_input`, `build_cli_argv`, `main`
+- `nexus/orchestrator/self_hosted_task_service.py` → `SelfHostedTaskService`, `check_fast_lane_eligible`, lifecycle/retry/action projections
+- `nexus/core/task_continuity.py` → continuity projection
+- `nexus/app/nightshift_runner_service.py` → `AutoResearchNightShift`
+- `nexus/services/nightshift_queue_consumer.py` → `NightshiftQueueConsumer`
 
 ### Focused Tests
-- `tests/test_cli_commands.py`
-- `tests/test_cli_dispatch.py`
 - `tests/ops/test_nexus_cueline_worker.py`
+- `tests/nexus/orchestrator/test_self_hosted_task_service.py`
+- `tests/core/test_task_continuity.py`
+- `tests/services/test_nightshift_queue_consumer.py`
 
 ### Minimal Validation Command
 ```bash
-pytest tests/test_cli_commands.py -q
+pytest tests/ops/test_nexus_cueline_worker.py tests/nexus/orchestrator/test_self_hosted_task_service.py tests/services/test_nightshift_queue_consumer.py -q
 ```
