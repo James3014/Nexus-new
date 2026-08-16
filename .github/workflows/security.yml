@@ -79,13 +79,21 @@ jobs:
           fi
           if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ || ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
             echo "Exact revisions must be full 40-character lowercase SHAs" >&2
-            exit 1
+            echo "required=true" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
-          git cat-file -e "$BASE_SHA^{commit}"
-          git cat-file -e "$HEAD_SHA^{commit}"
-          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+          if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || ! git cat-file -e "$HEAD_SHA^{commit}" 2>/dev/null; then
+            echo "Exact base or head commit is not present in this repository" >&2
+            echo "required=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]]; then
+            echo "Checked out HEAD does not match the bound HEAD_SHA" >&2
+            echo "required=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           REQUIRED="false"
-          if ! git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- pyproject.toml .bandit bandit.yaml; then
+          if ! git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- pyproject.toml .bandit bandit.yaml uv.lock; then
             REQUIRED="true"
           fi
           if ! git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- .github/workflows/security.yml; then
