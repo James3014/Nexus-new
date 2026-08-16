@@ -10,8 +10,8 @@ baseline_main: 8e05e0827fe913e3e408f87dc274e005bdc0bf92
 current_frontier: TERMINAL_RECONCILIATION
 frontier_status: COMPLETE
 implementation_status: COMPLETE
-reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
-current_main: cdf2570ede5ae218f36f886b696c8da45458043a
+reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
 terminal_marker: OLLAMA_LEDGER_METRICS_PERSISTED
 claim_ceiling: OLLAMA_LEDGER_METRICS_PERSISTED
 AUTO_CHAIN: false
