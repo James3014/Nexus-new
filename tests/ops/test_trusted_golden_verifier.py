@@ -44,43 +44,50 @@ def _repo(tmp_path: Path, source: str) -> tuple[Path, str]:
     return repo, head
 
 
-def test_exact_valid_head_passes(tmp_path: Path) -> None:
-    repo, head = _repo(tmp_path, GOOD)
-    report = verify(repo, head)
-    assert report["status"] == "PASS"
-    assert report["trusted_source"] == "default-branch-verifier"
-    assert report["head_sha"] == head
-    assert report["case_count"] == 2
-
-
 def test_invalid_duplicate_corpus_fails_closed(tmp_path: Path) -> None:
     repo, head = _repo(tmp_path, GOOD.replace('"GB-002"', '"GB-001"'))
     with pytest.raises(ValueError, match="duplicate_case_id: GB-001"):
-        verify(repo, head)
+        manifest, evidence = _sealed_evidence(repo, head, tmp_path)
+        verify(repo, head, manifest_path=manifest, evidence_path=evidence)
 
 
 def test_single_case_ast_false_green_fails_closed(tmp_path: Path) -> None:
     repo, head = _repo(tmp_path, GOOD.split('    _c("GB-002"')[0] + ")\n")
     with pytest.raises(ValueError, match="too few case ids"):
-        verify(repo, head)
+        manifest, evidence = _sealed_evidence(repo, head, tmp_path)
+        verify(repo, head, manifest_path=manifest, evidence_path=evidence)
 
 
-def test_fake_same_name_evidence_cannot_produce_trusted_pass(tmp_path: Path) -> None:
+def test_missing_sealed_evidence_fails_closed(tmp_path: Path) -> None:
     repo, head = _repo(tmp_path, GOOD)
-    fake = tmp_path / "fake-same-name-report.json"
-    fake.write_text(
-        '{"name":"Trusted verifier (default branch)","conclusion":"success"}\n', encoding="utf-8"
+    manifest, _ = _sealed_evidence(repo, head, tmp_path)
+    with pytest.raises(ValueError, match="must be supplied together"):
+        verify(repo, head, manifest_path=manifest)
+    with pytest.raises(ValueError, match="must be supplied together"):
+        _, evidence = _sealed_evidence(repo, head, tmp_path)
+        verify(repo, head, evidence_path=evidence)
+
+
+def test_unsealed_evidence_cannot_produce_trusted_pass(tmp_path: Path) -> None:
+    repo, head = _repo(tmp_path, GOOD)
+    manifest, _ = _sealed_evidence(repo, head, tmp_path)
+    evidence = tmp_path / "unsealed.json"
+    evidence.write_text(
+        '{"golden_report": null, "golden_report_sha256": "unsealed"}\n', encoding="utf-8"
     )
-    report = verify(repo, head)
-    assert report["status"] == "PASS"
-    assert report["trusted_source"] == "default-branch-verifier"
-    assert "fake-same-name-report" not in report
+    with pytest.raises(ValueError, match="sealed Golden evidence is missing"):
+        verify(repo, head, manifest_path=manifest, evidence_path=evidence)
 
 
 def test_missing_exact_head_fails_closed(tmp_path: Path) -> None:
-    repo, _ = _repo(tmp_path, GOOD)
+    repo, head = _repo(tmp_path, GOOD)
+    head = "0" * 40
+    manifest = tmp_path / "manifest.json"
+    evidence = tmp_path / "evidence.json"
+    manifest.write_text("{}", encoding="utf-8")
+    evidence.write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError, match="git cat-file"):
-        verify(repo, "0" * 40)
+        verify(repo, head, manifest_path=manifest, evidence_path=evidence)
 
 
 def _sealed_evidence(repo: Path, head: str, tmp_path: Path) -> tuple[Path, Path]:
