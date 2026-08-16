@@ -106,8 +106,13 @@ immutable envelope or signature.
 
 ## Terminal reconciliation receipt
 
-Reconciled on fresh main `586abbfb459550de912002203ff2911c7a40db58`;
-historical baseline preserved at `84eaa6886e0388a4e15f5b837c89e37768b14307`.
+Reconciled on fresh main `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`;
+historical baselines preserved at
+`84eaa6886e0388a4e15f5b837c89e37768b14307` (original) and
+`586abbfb459550de912002203ff2911c7a40db58` (prior rebind).
+
+PR285 non-destructive rebind onto current main `46e21858...` (2026-08-16);
+scoped metadata blobs byte-identical across rebind.
 
 - Issue #78 CLOSED/completed; Owner receipts `5235366173`, `5235661276`,
   `5236118747`, and `5253054683`
