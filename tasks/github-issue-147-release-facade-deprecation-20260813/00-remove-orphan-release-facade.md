@@ -4,7 +4,7 @@
 - task_id: `github-issue-147-remove-orphan-release-facade`
 - source_issue: `#147`
 - owner: James Chen
-- status: COMPLETED
+- status: COMPLETE
 - frontier_status: TERMINAL_RECONCILIATION
 - baseline_revision: `1d6f7d163276b6b66381504c9a362505d4817a12` (historical baseline)
 - reconciled_main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`
