@@ -15,7 +15,8 @@
 - worker_may_push: false
 - AUTO_CHAIN: false
 - allow_deletions: false
-- main_sha: `8f9b555739f828ae1c65e3d0c6f11e7755c96068`
+- authoring_baseline_main: `8f9b555739f828ae1c65e3d0c6f11e7755c96068`
+- baseline_role: historical authoring baseline and ancestor of any bound main, not a dispatch-time equality claim
 
 ## Objective
 
@@ -54,6 +55,9 @@ not grant merge, approval, integration, release, or production authority.
 ## Exit criteria
 
 Exactly one completion publication is emitted with
-`current_gate=PENDING_INDEPENDENT_ACCEPTANCE`, runtime HEAD remains
-`8f9b555739f828ae1c65e3d0c6f11e7755c96068` and clean, and no manual execution
-substitute was used.
+`current_gate=PENDING_INDEPENDENT_ACCEPTANCE`, the daemon executes from the
+canonical `James3014/Nexus-new` main bound by the arming contract
+`main_sha`, the runtime checkout is clean, and no manual execution substitute
+was used. `8f9b555739f828ae1c65e3d0c6f11e7755c96068` is the historical
+`authoring_baseline_main`, an ancestor of any bound main, not an equality
+claim to the dispatch-time main.

@@ -7,7 +7,7 @@ campaign_id: `external-intelligence-v10-normal-operation-20260816`
 current_frontier: `00-v10-normal-operation`
 completed_cards: []
 AUTO_CHAIN: false
-main_sha: `8f9b555739f828ae1c65e3d0c6f11e7755c96068`
+authoring_baseline_main: `8f9b555739f828ae1c65e3d0c6f11e7755c96068`
 claim_ceiling: `TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE`
 
 ## Campaign Overview
