@@ -64,6 +64,7 @@ class HealOrchestrator:
     def run(self, ctx: HealContext) -> HealContext:
         """核心修復工作流：線性啟動 -> 迭代修復 -> 審計結算。"""
         import time
+
         from nexus.services.local_heal.receipt import (
             canonical_run_group,
             derive_default_run_group,

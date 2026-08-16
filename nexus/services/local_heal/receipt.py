@@ -13,7 +13,6 @@ from nexus.services.local_heal.armor_artifact_storage import (
 )
 from nexus.services.local_heal.memory_trace import MemoryTrace, get_empty_trace
 
-
 _RUN_GROUP_UNSET = object()
 
 
