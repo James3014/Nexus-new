@@ -6,7 +6,8 @@ terminal_state: TERMINAL_RECONCILIATION
 campaign_id: github-issue-77-workforce-decision-validation-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/77
 baseline_main: 84eaa6886e0388a4e15f5b837c89e37768b14307
-reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
+reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+historical_reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a (2026-08-14 rebind snapshot)
 ordered_cards:
   - 01-fail-closed-admission-decision.md
 current_frontier: null
@@ -51,7 +52,9 @@ Completion receipt:
 
 Issue #77 is CLOSED (state_reason: completed). PR #85 was merged on
 2026-08-10 and its merge commit is an ancestor of the reconciled current
-main `cdf2570ede5ae218f36f886b696c8da45458043a`.
+main `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c` (previous reconciled
+snapshot `cdf2570ede5ae218f36f886b696c8da45458043a` retained as
+historical).
 
 - PR: https://github.com/James3014/Nexus-new/pull/85
 - PR base: `84eaa6886e0388a4e15f5b837c89e37768b14307`
