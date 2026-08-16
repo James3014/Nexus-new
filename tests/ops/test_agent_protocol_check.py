@@ -10,7 +10,7 @@ CURRENT_REQUIRED_TERMS = (
     "Direct authority",
     "Governed authority",
     "Completion requires behavioral evidence",
-    "Report evidence in the final response",
+    "report changed files/evidence",
     "docs/agents/TASK_EXECUTION_CONTRACT.md",
     "docs/agents/LEARNING_WRITEBACK_OVERLAY.md",
     "CapabilityPlanner",
