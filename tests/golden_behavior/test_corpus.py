@@ -61,6 +61,14 @@ def test_recently_resolved_findings_are_covered() -> None:
     assert all(case.automated_tests for case in resolved)
 
 
+def test_gb042_binds_positive_integration_and_missing_acceptance_controls() -> None:
+    case = next(case for case in CASES if case.case_id == "GB-042")
+    assert case.automated_tests == (
+        "tests/nexus/orchestrator/test_self_hosted_task_service.py::test_gb042_valid_approved_integration_is_one_side_effect_and_stable_duplicate",
+        "tests/nexus/orchestrator/test_self_hosted_task_service.py::test_exact_approved_integration_is_idempotent",
+    )
+
+
 def test_workforce_policy_wording_is_post_route_only() -> None:
     demand = {
         "member_id": "member-a",

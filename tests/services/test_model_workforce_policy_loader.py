@@ -28,7 +28,7 @@ def test_loader_loads_default_policy_successfully() -> None:
     assert snapshot.status == "current"
     assert snapshot.route_authority == "CapabilityPlanner"
     assert len(snapshot.declared_states) > 0
-    assert len(snapshot.workers) == 24
+    assert len(snapshot.workers) == 25
     for retired_worker_id in ("local_ornith9b", "local_qwythos_v2_9b", "local_gemma12b"):
         assert retired_worker_id not in snapshot.workers
     assert snapshot.policy_hash is not None
@@ -195,11 +195,11 @@ def test_admission_resolution_by_worker_id_and_provider_model() -> None:
 
 def _agy_medium_request(**overrides: object) -> WorkforceAdmissionRequest:
     values: dict[str, object] = {
-        "requested_worker_id": "agy_flash_medium",
+        "requested_worker_id": "agy_flash_37_medium",
         "provider": "agy",
-        "model": "gemini-3.6-flash-medium",
+        "model": "gemini-3.7-flash-medium",
         "role": "fast_bounded_implementation",
-        "autonomy": "L1",
+        "autonomy": "L3",
         "context": "nexus_bounded",
         "route_authorized": True,
         "provided_controls": [
@@ -220,13 +220,13 @@ def test_agy_medium_admission_is_exact_bounded_and_fail_closed() -> None:
 
     by_worker = loader.admit(_agy_medium_request())
     assert by_worker.decision == AdmissionDecision.ALLOW
-    assert by_worker.resolved_worker_id == "agy_flash_medium"
-    assert by_worker.resolved_model == "gemini-3.6-flash-medium"
-    assert by_worker.autonomy_ceiling == "L1"
+    assert by_worker.resolved_worker_id == "agy_flash_37_medium"
+    assert by_worker.resolved_model == "gemini-3.7-flash-medium"
+    assert by_worker.autonomy_ceiling == "L3"
 
     by_identity = loader.admit(_agy_medium_request(requested_worker_id=None))
     assert by_identity.decision == AdmissionDecision.ALLOW
-    assert by_identity.resolved_worker_id == "agy_flash_medium"
+    assert by_identity.resolved_worker_id == "agy_flash_37_medium"
 
     high_through_medium = loader.admit(_agy_medium_request(model="gemini-3.6-flash-high"))
     assert high_through_medium.decision == AdmissionDecision.BLOCK
@@ -236,9 +236,37 @@ def test_agy_medium_admission_is_exact_bounded_and_fail_closed() -> None:
     assert medium_through_high.decision == AdmissionDecision.BLOCK
     assert any("Mismatched model" in reason for reason in medium_through_high.decision_reasons)
 
-    elevated = loader.admit(_agy_medium_request(autonomy="L2"))
-    assert elevated.decision == AdmissionDecision.ESCALATE
-    assert any("exceeds worker autonomy ceiling" in reason for reason in elevated.decision_reasons)
+    medium_37_through_36 = loader.admit(_agy_medium_request(requested_worker_id="agy_flash_medium"))
+    assert medium_37_through_36.decision == AdmissionDecision.BLOCK
+    assert any("Mismatched model" in reason for reason in medium_37_through_36.decision_reasons)
+
+    medium_36 = loader.admit(
+        WorkforceAdmissionRequest(
+            requested_worker_id="agy_flash_medium",
+            provider="agy",
+            model="gemini-3.6-flash-medium",
+            role="fast_bounded_implementation",
+            autonomy="L1",
+            context="nexus_bounded",
+            route_authorized=True,
+            provided_controls=[
+                "task_card",
+                "allowed_files",
+                "mandatory_commands",
+                "parser",
+                "verifier",
+                "independent_verification",
+            ],
+        )
+    )
+    assert medium_36.decision == AdmissionDecision.ALLOW
+    assert medium_36.resolved_worker_id == "agy_flash_medium"
+    assert medium_36.resolved_model == "gemini-3.6-flash-medium"
+    assert medium_36.autonomy_ceiling == "L1"
+
+    elevated = loader.admit(_agy_medium_request(autonomy="L4"))
+    assert elevated.decision == AdmissionDecision.BLOCK
+    assert any("Invalid requested autonomy level" in reason for reason in elevated.decision_reasons)
 
     missing_parser = loader.admit(
         _agy_medium_request(
@@ -362,7 +390,7 @@ def _deepseek_request(**overrides: object) -> WorkforceAdmissionRequest:
         "provider": "opencode",
         "model": "opencode/deepseek-v4-flash-free",
         "role": "bounded_candidate_generation",
-        "autonomy": "L1",
+        "autonomy": "L2",
         "context": "nexus_bounded",
         "route_authorized": True,
         "provided_controls": [
@@ -384,10 +412,16 @@ def test_owner_approved_deepseek_candidate_admission_is_generic_and_fail_closed(
     assert allowed.decision == AdmissionDecision.ALLOW
     assert allowed.resolved_model == "opencode/deepseek-v4-flash-free"
     assert allowed.admitted_role == "bounded_candidate_generation"
-    assert allowed.autonomy_ceiling == "L1"
+    assert allowed.autonomy_ceiling == "L2"
     reviewer = loader.admit(_deepseek_request(role="independent_review"))
     assert reviewer.decision == AdmissionDecision.ESCALATE
     assert reviewer.admitted_role is None
+    l3 = loader.admit(_deepseek_request(autonomy="L3"))
+    assert l3.decision == AdmissionDecision.ESCALATE
+    assert any("exceeds worker autonomy ceiling" in reason for reason in l3.decision_reasons)
+    l4 = loader.admit(_deepseek_request(autonomy="L4"))
+    assert l4.decision == AdmissionDecision.BLOCK
+    assert any("Invalid requested autonomy level" in reason for reason in l4.decision_reasons)
     l15 = loader.admit(_deepseek_request(role="independent_review", autonomy="L1.5"))
     assert l15.decision == AdmissionDecision.BLOCK
     assert any("Invalid requested autonomy level" in reason for reason in l15.decision_reasons)
@@ -404,6 +438,9 @@ def test_owner_approved_deepseek_candidate_admission_is_generic_and_fail_closed(
     )
     assert missing_control.decision == AdmissionDecision.BLOCK
     assert missing_control.missing_controls == ("verifier",)
+    opencode_go_alias = loader.admit(_deepseek_request(model="opencode-go/deepseek-v4-flash"))
+    assert opencode_go_alias.decision == AdmissionDecision.BLOCK
+    assert any("Mismatched model" in reason for reason in opencode_go_alias.decision_reasons)
     wrong_model = loader.admit(_deepseek_request(model="opencode/not-deepseek-v4-flash-free"))
     assert wrong_model.decision == AdmissionDecision.BLOCK
     assert any("Mismatched model" in reason for reason in wrong_model.decision_reasons)
