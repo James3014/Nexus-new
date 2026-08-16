@@ -6,8 +6,9 @@ status: COMPLETE
 baseline: 752d1dec0517b29e1e1179827919e45dac33d131
 historical_baseline: 752d1dec0517b29e1e1179827919e45dac33d131
 merge_base: 752d1dec0517b29e1e1179827919e45dac33d131
-reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
-current_main: cdf2570ede5ae218f36f886b696c8da45458043a
+reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+previous_reconciled_snapshot: cdf2570ede5ae218f36f886b696c8da45458043a
 branch: codex/nexus-issue-execution-capsule-skill
 auto_chain: false
 frontier: TERMINAL_RECONCILIATION
