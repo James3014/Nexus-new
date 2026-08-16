@@ -7,10 +7,12 @@ source_issue: "#65"
 baseline_main: cdf2570ede5ae218f36f886b696c8da45458043a
 reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
 current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
-current_frontier: 00-bound-node-semantic-witnesses.md
-readiness_marker: GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN
-claim_ceiling: GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN_ONLY
+historical_scope_current_frontier: 00-bound-node-semantic-witnesses.md
+readiness_marker: GOLDEN_WITNESS_SEMANTIC_HARDENING_CANDIDATE_PENDING_OWNER_RECONCILIATION
+claim_ceiling: GOLDEN_WITNESS_SEMANTIC_HARDENING_CANDIDATE_ONLY
 AUTO_CHAIN: false
+live_authority: false
+historical_scope: true
 authorized_deletions: []
 ---
 
@@ -45,9 +47,9 @@ baseline.
   `f3a65fadcc6f88449d99c3ef333e599225099874039783162a51fbaa0deb50fd`. No
   repository/GitHub immutable report artifact was located, so this is not
   presented as completion evidence.
-- Marker: `GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN`.
-- Claim ceiling: `GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN_ONLY`
-  (repository-contained source/test/governance evidence only).
+- Marker: `GOLDEN_WITNESS_SEMANTIC_HARDENING_CANDIDATE_PENDING_OWNER_RECONCILIATION`.
+- Claim ceiling: `GOLDEN_WITNESS_SEMANTIC_HARDENING_CANDIDATE_ONLY`
+  (repository-contained candidate evidence only; no terminal proof).
 - `AUTO_CHAIN=false`. No runtime, route, Workforce, provider, approval,
   integration, merge, release, or production authority is granted by this
   reconciliation; no #143 or #191 work.
