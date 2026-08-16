@@ -502,9 +502,16 @@ class PatchSynthesisPhase(IPhase):
                     verifier_env_metadata={"interpreter": input_data.python_executable}
                 )
                 if not micro_result.passed:
-                    if micro_result.error_message == "ENV_BLOCKED":
-                        # MicroVerifier is pre-verifier only — env_blocked means
-                        # interpreter unavailable, not patch incorrect.
+                    if micro_result.error_message in {
+                        "ENV_BLOCKED",
+                        "CONTEXT_MISSING",
+                        "MICRO_VERIFY_CONTEXT_MISSING",
+                    }:
+                        # MicroVerifier is pre-verifier only.  These two
+                        # outcomes mean that the local preflight cannot run,
+                        # not that the candidate is incorrect; preserve the
+                        # candidate for the full verifier.  Syntax, import,
+                        # and target failures remain fail-closed below.
                         model_decisions[-1]["status"] = f"MICRO_VERIFY_{micro_result.error_message}_BYPASSED"
                         model_decisions[-1]["micro_verify_classifications"] = micro_result.classifications
                     else:

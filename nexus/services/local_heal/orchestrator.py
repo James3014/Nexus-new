@@ -235,11 +235,18 @@ class HealOrchestrator:
         """處理 Patch 生成失敗，判定是否重試。"""
         err_kind = self.failure_analyzer.classify_patch_failure(res.failure_reason)
         err = PatchError(kind=err_kind, message=res.failure_reason)
+
+        # Preserve the model/provider failure as the public reason.  The
+        # PatchSynthesis phase has already classified these failures with a
+        # precise MODEL_* code; replacing it with a parser bucket (for
+        # example NO_BLOCKS_FOUND) loses the actual failure provenance.
+        model_failure = self._model_failure_reason(res.failure_reason)
         
         # B4: Set last_failure_class for retry feedback
         ctx.op.last_failure_class = err_kind.name
         
-        self._record_model_status(ctx, err_kind.name, detail=res.failure_reason, phase="patch")
+        if not model_failure:
+            self._record_model_status(ctx, err_kind.name, detail=res.failure_reason, phase="patch")
         
         # 嘗試自動修復 SEARCH_MISMATCH (Fuzzy Match)
         if err_kind == PatchErrorKind.SEARCH_MISMATCH:
@@ -247,12 +254,26 @@ class HealOrchestrator:
 
         # 判定 Fail-fast
         if not self.failure_analyzer.should_retry(res.failure_reason):
-            ctx.op.failure_reason = res.failure_reason
+            ctx.op.failure_reason = model_failure or res.failure_reason
             return False
 
-        ctx.op.failure_reason = f"{err_kind.name}:{res.failure_reason}"
+        ctx.op.failure_reason = model_failure or f"{err_kind.name}:{res.failure_reason}"
         self._handle_retry(ctx, err, res=res)
         return True
+
+    @staticmethod
+    def _model_failure_reason(failure_reason: str) -> str:
+        """Return a canonical MODEL_* reason without parser decoration."""
+        reason = str(failure_reason or "")
+        for code in (
+            "MODEL_TIMEOUT",
+            "MODEL_PROVIDER_ERROR",
+            "MODEL_EMPTY_RESPONSE",
+            "MODEL_REFUSAL",
+        ):
+            if code in reason:
+                return code
+        return ""
 
     def _attempt_fuzzy_healing(self, ctx: HealContext, res: PhaseResult, err: PatchError) -> None:
         metadata = res.error_metadata or {}
