@@ -1,7 +1,7 @@
 schema: nexus.model_workforce.v1
 status: current
 owner: James Chen
-last_verified: '2026-08-11'
+last_verified: '2026-08-15'
 authority_document: docs/arch/MODEL_WORKFORCE_POLICY.md
 benchmark_matrix: nexus/config/model_three_arm_matrix.yaml
 benchmark_harness: scripts/bench/experimental/model_workforce_three_arm.py
@@ -291,6 +291,25 @@ workers:
       status: CONDITIONAL
       provider_model_revision: UNRESOLVED
       inherits_high_evidence: false
+  agy_flash_37_medium:
+    provider: agy
+    model: gemini-3.7-flash-medium
+    state: REGISTERED_CONDITIONAL
+    availability: AVAILABLE
+    autonomy: L3
+    roles: [bounded_candidate_generation, fast_bounded_implementation, focused_verification]
+    preferred_context: nexus_bounded
+    default_route: false
+    requires: [task_card, allowed_files, mandatory_commands, parser, verifier, independent_verification]
+    forbidden_actions: [route_authority, approval, integration, push, release, production_claim, public_claim]
+    calibration_evidence:
+      status: OWNER_APPROVED_CEILING
+      lineage: gemini-3.7-flash-medium
+      stable_floor: L3
+      current_frontier: L4
+      conditional_ceiling: L3
+      experimental_ceiling: L4
+      experimental_l4_admitted: false
   grok_review:
     provider: grok
     model: grok-4.5
@@ -451,7 +470,7 @@ workers:
     model: opencode/deepseek-v4-flash-free
     state: REGISTERED_CONDITIONAL
     availability: AVAILABLE
-    autonomy: L1
+    autonomy: L2
     default_route: false
     roles: [bounded_candidate_generation, compact_code_candidate]
     benchmark_ref: opencode_deepseek_v4_flash
@@ -459,13 +478,14 @@ workers:
     requires: [isolated_directory, bounded_context, json_event_receipt, parser, focused_tests, verifier]
     forbidden_actions: [route_authority, direct_workspace_mutation, production_ready_judgment, approval, integration, push]
     requalification_evidence:
-      date: '2026-08-11'
+      date: '2026-08-15'
       repetitions: 2
       provider: opencode
       model: opencode/deepseek-v4-flash-free
       opencode_version: '1.17.20'
       opencode_binary_sha256: 14a4583c9a3685875f011d6dd4dfbd00498893942be0bb1d2c27e30e70144c89
       provider_model_revision: UNRESOLVED
+      lineage: deepseek-v4-flash
       arm_results:
         R2: {bare: '11/11', nexus_bounded: '11/11', nexus_full: '11/11'}
         R3: {bare: '11/11', nexus_bounded: '11/11', nexus_full: '11/11'}
@@ -476,7 +496,8 @@ workers:
         PR_84_merge_sha: c304e7d98f62f615f7ca44c2ab4451dff9e780e3
         PR_85_merge_sha: 8f7c75ca08a6c88fad9b791f254d38d79ad8bf29
       role_recommendation: bounded_code_candidate
-      autonomy_ceiling: L1
+      autonomy_ceiling: L2
+      experimental_l4_admitted: false
       public_claim: false
   opencode_laguna:
     provider: opencode
@@ -606,6 +627,10 @@ context_policy:
   structured_output_requires_thinking_suppression_when_supported: true
 
 evidence_layers:
+  semantic_layers:
+    distinction: semantic_capability_lineage != exact_execution_identity != admitted_authority
+    exact_identity_matching: strict_fail_closed
+    route_authority: CapabilityPlanner_sole_authority
   bare_model:
     sufficient_for_final_worker_grade: false
   nexus_bounded:
@@ -613,6 +638,16 @@ evidence_layers:
   nexus_full:
     required_for_autonomy_promotion: true
     semantic_pass_is_not_receipt_closure: true
+  three_arm_benchmark:
+    role: historical_baseline_and_comparative_diagnostic
+    historical_scores_immutable: true
+  requalification_protocol:
+    methodology: cumulative_evidence_plus_stable_floor_regression_plus_frontier_plus_failure_family_probes
+    distinct_phases:
+      - FIRST_PASS
+      - HIDDEN_DEFECT_PROBES
+      - VERIFIER_GUIDED_REPAIR
+    experimental_l4_not_admitted: true
   stable_promotion:
     requires_second_repetition: true
     requires_role_specific_suite: true
