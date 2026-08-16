@@ -138,6 +138,9 @@ from scripts.bench.capability_ab_runner import (
 )
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
 def test_benchmark_skill_mount_requests_maps_expected_capabilities(monkeypatch):
     monkeypatch.setenv("NEXUS_BENCH_SKILL_MOUNTS", "1")
     task = CapabilityTask(
@@ -22762,7 +22765,7 @@ def test_h5_49_default_env_blocked(monkeypatch):
 def test_h5_49_collect_only():
     """H5-49 T24: collect-only includes all H5-49 tests."""
     import subprocess, re
-    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h5_49", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h5_49", "--collect-only", "-q"], capture_output=True, text=True, cwd=str(REPO_ROOT))
     count = len(re.findall(r"test_h5_49_", result.stdout))
     assert count >= 24, f"Expected >= 24 H5-49 tests, got {count}"
 
@@ -23025,7 +23028,7 @@ def test_h5_50_default_env_blocked(monkeypatch):
 def test_h5_50_collect_only():
     """H5-50 T23: collect-only includes all H5-50 tests."""
     import subprocess, re
-    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h5_50", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h5_50", "--collect-only", "-q"], capture_output=True, text=True, cwd=str(REPO_ROOT))
     count = len(re.findall(r"test_h5_50_", result.stdout))
     assert count >= 24, f"Expected >= 24 H5-50 tests, got {count}"
 
@@ -23420,7 +23423,7 @@ def test_h5_51_default_env_blocked(monkeypatch):
 def test_h5_51_collect_only():
     """H5-51 T29: collect-only includes all H5-51 tests."""
     import subprocess, re
-    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h5_51", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h5_51", "--collect-only", "-q"], capture_output=True, text=True, cwd=str(REPO_ROOT))
     count = len(re.findall(r"test_h5_51_", result.stdout))
     assert count >= 26, f"Expected >= 26 H5-51 tests, got {count}"
 
@@ -24017,7 +24020,7 @@ def test_h6_0_adapter_preflight_contract_invalid_route_mode(monkeypatch):
 def test_h6_0_adapter_preflight_contract_collect_only():
     """H6-0 T26: collect-only includes all H6-0 tests."""
     import subprocess, re
-    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_0", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_0", "--collect-only", "-q"], capture_output=True, text=True, cwd=str(REPO_ROOT))
     count = len(re.findall(r"test_h6_0_", result.stdout))
     assert count >= 26, f"Expected >= 26 H6-0 tests, got {count}"
 
@@ -24787,7 +24790,7 @@ def test_h6_1_shadow_dry_run_default_env_block(monkeypatch):
 def test_h6_1_shadow_dry_run_collect_only():
     """H6-1 T34: collect-only includes all H6-1 tests."""
     import subprocess, re
-    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_1", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_1", "--collect-only", "-q"], capture_output=True, text=True, cwd=str(REPO_ROOT))
     count = len(re.findall(r"test_h6_1_", result.stdout))
     assert count >= 34, f"Expected >= 34 H6-1 tests, got {count}"
 
@@ -25641,7 +25644,7 @@ def test_h6_2_io_schema_default_env_block(monkeypatch):
 def test_h6_2_io_schema_collect_only():
     """H6-2 T39: collect-only includes all H6-2 tests."""
     import subprocess, re
-    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_2", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_2", "--collect-only", "-q"], capture_output=True, text=True, cwd=str(REPO_ROOT))
     count = len(re.findall(r"test_h6_2_", result.stdout))
     assert count >= 34, f"Expected >= 34 H6-2 tests, got {count}"
 
@@ -26481,7 +26484,7 @@ def test_h6_3_routing_default_env_block(monkeypatch):
 def test_h6_3_routing_collect_only():
     """H6-3 T42: collect-only includes all H6-3 tests."""
     import subprocess, re
-    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_3", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_3", "--collect-only", "-q"], capture_output=True, text=True, cwd=str(REPO_ROOT))
     count = len(re.findall(r"test_h6_3_", result.stdout))
     assert count >= 36, f"Expected >= 36 H6-3 tests, got {count}"
 
@@ -26918,7 +26921,7 @@ def test_h6_4_execution_plan_default_env_block(monkeypatch):
 def test_h6_4_execution_plan_collect_only():
     """H6-4 T21: collect-only includes all H6-4 tests."""
     import subprocess, re
-    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_4", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_4", "--collect-only", "-q"], capture_output=True, text=True, cwd=str(REPO_ROOT))
     count = len(re.findall(r"test_h6_4_", result.stdout))
     assert count >= 20, f"Expected >= 20 H6-4 tests, got {count}"
 
@@ -27277,7 +27280,7 @@ def test_h6_5_invocation_intent_default_env_block(monkeypatch):
 def test_h6_5_invocation_intent_collect_only():
     """H6-5 T18: collect-only includes all H6-5 tests."""
     import subprocess, re
-    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_5", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_5", "--collect-only", "-q"], capture_output=True, text=True, cwd=str(REPO_ROOT))
     count = len(re.findall(r"test_h6_5_", result.stdout))
     assert count >= 15, f"Expected >= 15 H6-5 tests, got {count}"
 
@@ -27692,7 +27695,7 @@ def test_h6_6_stub_output_default_env_block(monkeypatch):
 def test_h6_6_stub_output_collect_only():
     """H6-6 T20: collect-only includes all H6-6 tests."""
     import subprocess, re
-    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_6", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_6", "--collect-only", "-q"], capture_output=True, text=True, cwd=str(REPO_ROOT))
     count = len(re.findall(r"test_h6_6_", result.stdout))
     assert count >= 15, f"Expected >= 15 H6-6 tests, got {count}"
 
@@ -29003,7 +29006,7 @@ def test_h6_7_boundary_preflight_bundle_summary_safety_fields_all_false(monkeypa
 def test_h6_7_boundary_preflight_collect_only():
     """H6-7 T10: collect-only includes all H6-7 tests."""
     import subprocess, re
-    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_7", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_7", "--collect-only", "-q"], capture_output=True, text=True, cwd=str(REPO_ROOT))
     count = len(re.findall(r"test_h6_7_", result.stdout))
     assert count >= 35, f"Expected >= 35 H6-7 tests, got {count}"
 
@@ -29495,7 +29498,7 @@ def test_h6_8_config_contract_missing_model_name(monkeypatch):
 def test_h6_8_config_contract_collect_only():
     """H6-8 T08: collect-only includes all H6-8 tests."""
     import subprocess, re
-    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_8", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_8", "--collect-only", "-q"], capture_output=True, text=True, cwd=str(REPO_ROOT))
     count = len(re.findall(r"test_h6_8_", result.stdout))
     assert count >= 29, f"Expected >= 29 H6-8 tests, got {count}"
 
@@ -29639,7 +29642,7 @@ def test_h6_9_invocation_gate_production_ready_false(monkeypatch):
 def test_h6_9_invocation_gate_collect_only():
     """H6-9 T08: collect-only includes all H6-9 tests."""
     import subprocess, re
-    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_9", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_9", "--collect-only", "-q"], capture_output=True, text=True, cwd=str(REPO_ROOT))
     count = len(re.findall(r"test_h6_9_", result.stdout))
     assert count >= 39, f"Expected >= 39 H6-9 tests, got {count}"
 
@@ -30050,7 +30053,7 @@ def test_h6_9_invocation_gate_bundle_summary_missing_gate_id(monkeypatch):
 def test_h6_9_invocation_gate_collect_only_final_threshold():
     """H6-9 T40: collect-only remains above final threshold after coverage repair."""
     import subprocess, re
-    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_9", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_9", "--collect-only", "-q"], capture_output=True, text=True, cwd=str(REPO_ROOT))
     count = len(re.findall(r"test_h6_9_", result.stdout))
     assert count >= 39, f"Expected >= 39 H6-9 tests, got {count}"
 
@@ -30325,7 +30328,7 @@ def test_h6_10_probe_preflight_report_status(monkeypatch):
 def test_h6_10_probe_preflight_collect_only():
     """H6-10 T30: collect-only includes all H6-10 tests."""
     import subprocess, re
-    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_10", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_10", "--collect-only", "-q"], capture_output=True, text=True, cwd=str(REPO_ROOT))
     count = len(re.findall(r"test_h6_10_", result.stdout))
     assert count >= 30, f"Expected >= 30 H6-10 tests, got {count}"
 
@@ -30883,7 +30886,7 @@ def test_h6_11_denial_replay_not_ready_for_h6_12_on_invalid(monkeypatch):
 def test_h6_11_denial_replay_collect_only():
     """H6-11 T36: collect-only includes all H6-11 tests."""
     import subprocess, re
-    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_11", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    result = subprocess.run(["python3", "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_11", "--collect-only", "-q"], capture_output=True, text=True, cwd=str(REPO_ROOT))
     count = len(re.findall(r"test_h6_11_", result.stdout))
     assert count >= 36, f"Expected >= 36 H6-11 tests, got {count}"
 
@@ -31391,7 +31394,7 @@ def test_h6_12_fixture_contract_not_ready_for_h6_13_on_invalid(monkeypatch):
 def test_h6_12_fixture_contract_collect_only():
     """H6-12 T36: collect-only includes all H6-12 tests."""
     import subprocess, re, sys
-    result = subprocess.run([sys.executable, "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_12", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    result = subprocess.run([sys.executable, "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_12", "--collect-only", "-q"], capture_output=True, text=True, cwd=str(REPO_ROOT))
     count = len(re.findall(r"test_h6_12_", result.stdout))
     assert count >= 36, f"Expected >= 36 H6-12 tests, got {count}"
 
@@ -31939,7 +31942,7 @@ def test_h6_13_provider_probe_denylist_all_safety_false(monkeypatch):
 def test_h6_13_provider_probe_denylist_collect_only():
     """H6-13 T43: collect-only includes all H6-13 tests."""
     import subprocess, re, sys
-    result = subprocess.run([sys.executable, "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_13", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    result = subprocess.run([sys.executable, "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_13", "--collect-only", "-q"], capture_output=True, text=True, cwd=str(REPO_ROOT))
     count = len(re.findall(r"test_h6_13_", result.stdout))
     assert count >= 40, f"Expected >= 40 H6-13 tests, got {count}"
 
@@ -32333,7 +32336,7 @@ def test_h6_14_controlled_probe_preflight_replay_report_status(monkeypatch):
 def test_h6_14_controlled_probe_preflight_replay_collect_only():
     """H6-14 T38: collect-only includes all H6-14 tests."""
     import subprocess, re, sys
-    result = subprocess.run([sys.executable, "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_14", "--collect-only", "-q"], capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus")
+    result = subprocess.run([sys.executable, "-m", "pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_14", "--collect-only", "-q"], capture_output=True, text=True, cwd=str(REPO_ROOT))
     count = len(re.findall(r"test_h6_14_", result.stdout))
     assert count >= 40, f"Expected >= 40 H6-14 tests, got {count}"
 
@@ -32793,7 +32796,7 @@ def test_h6_15_provider_boundary_closure_seal_collect_only():
     result = subprocess.run(
         ["pytest", "tests/benchmark/test_capability_ab_runner.py", "-k", "h6_15",
          "--collect-only", "-q"],
-        capture_output=True, text=True, cwd="/Users/jameschen/Workspace/nexus"
+        capture_output=True, text=True, cwd=str(REPO_ROOT)
     )
     m = re.search(r"(\d+)/\d+ tests? collected", result.stdout)
     count = int(m.group(1)) if m else 0
@@ -33545,6 +33548,5 @@ def test_nexus_with_local_model_adapter_alone_no_call(tmp_path, monkeypatch):
     assert ad["adapter_invoked"] is False
     # Route mode should be fallback/blocked (since local_heal_mode is "disabled")
     assert ad["route_mode"] == "cloud_assisted_by_local_trace_only"
-
 
 

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path("/Users/jameschen/Workspace/nexus")
+REPO_ROOT = Path(__file__).resolve().parents[3]
 SCRIPTS_DIR = REPO_ROOT / "scripts" / "bench"
 C12481_SCRIPT = SCRIPTS_DIR / "run_c12481_regression.py"
 C13453_SCRIPT = SCRIPTS_DIR / "run_c13453_regression.py"
