@@ -34,6 +34,35 @@ class TestIdentityCorrelation:
         d = trace.to_dict()
         assert "shadow_ranking" in d
 
+    def test_memory_trace_preserves_retrieval_receipt_and_lesson_lineage(self):
+        receipt_hash = "sha256:" + "a" * 64
+        trace = build_memory_trace_from_adapter(
+            {
+                "accepted": 1,
+                "selected_ids": ["lep:lesson"],
+                "memory_evidence_ids": ["lep:lesson"],
+                "retrieval_receipt": {"schema": "nexus.retrieval_receipt.v1", "status": "PASS"},
+                "retrieval_receipt_hash": receipt_hash,
+                "selected_lesson_lineage": [
+                    {
+                        "lesson_id": "lep:lesson",
+                        "episode_id": "lep:lesson",
+                        "source_task_id": "task-a",
+                        "source_attempt_id": "attempt-a",
+                        "qualification_status": "QUALIFIED",
+                        "validity_state": "active",
+                        "evidence_ref": "receipt://lesson",
+                    }
+                ],
+            }
+        )
+
+        payload = trace.to_dict()
+        assert payload["retrieval_receipt"]["schema"] == "nexus.retrieval_receipt.v1"
+        assert payload["retrieval_receipt_hash"] == receipt_hash
+        assert payload["selected_lesson_lineage"][0]["source_task_id"] == "task-a"
+        assert payload["selected_lesson_lineage"][0]["evidence_ref"] == "receipt://lesson"
+
     def test_evidence_bundle_and_memory_trace_share_identity(self):
         """EvidenceBundle and MemoryTrace can share same repair identity."""
         harness = EvidenceHarness(output_dir=Path("/tmp/test_identity"))

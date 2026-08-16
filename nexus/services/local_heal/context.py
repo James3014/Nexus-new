@@ -83,7 +83,7 @@ class OperationalContext:
     empty_response: bool = False
     env_denoise: Dict[str, Any] = field(default_factory=dict)
     env_resolution: Dict[str, Any] = field(default_factory=dict)
-    run_group: str = ""
+    run_group: str | None = None
     route_context: Dict[str, Any] = field(default_factory=dict)
 
     # T1.6: Semantic retry telemetry

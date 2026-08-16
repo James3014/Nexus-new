@@ -19,15 +19,18 @@ allowed_files:
   - tasks/github-issue-129-atomic-work-claim-20260813/INDEX.md
   - tasks/github-issue-129-atomic-work-claim-20260813/00-atomic-work-claim.md
 authorized_deletions: []
-claim_ceiling: CLAIM_PROTOCOL_CANDIDATE_PR_ONLY
+reconciled_main: 9622b24c321d02a59cb5cc2de2d948a60fa90df1
+current_main: 9622b24c321d02a59cb5cc2de2d948a60fa90df1
+terminal_marker: ATOMIC_READY_ISSUE_WORK_CLAIM_PROVEN
+claim_ceiling: ATOMIC_READY_ISSUE_WORK_CLAIM_PROVEN_EXISTING_SELF_HOSTED_SERVICE_ONLY
 shared_file_gate: SATISFIED_BY_PR226_MERGE_A787E8E7
-implementation_gate: Owner-authorized bounded implementation active
+implementation_gate: CANDIDATE_PENDING_OWNER_RECONCILIATION
 ---
 
 # Atomic Ready-Issue work claim
 
 - task_id: `github-issue-129-atomic-work-claim`
-- status: `ACTIVE`
+- status: `ACTIVE` (candidate pending Owner Issue reconciliation)
 
 ## Objective
 
@@ -150,3 +153,26 @@ format delta is allowed in changed hunks.
 Stop at an exact four-file Candidate commit/PR with deterministic hostile
 tests, scope/deletion audit, exact-base static evidence, and independent review
 pending. `AUTO_CHAIN=false`.
+
+## Historical Physical Receipt (not current Issue closure)
+
+PR #235 head `3828921cfea8bd924fef7aced016c88f3c56b394` merged as historical
+merge `eb668fb76f0c30d8f025db42cdb8e320d556c037` from the preserved historical
+baseline `8e0986b40db56016c79b03eb81ff3d03c85c6f32`. PR #226's shared service
+gate is the historical merge `a787e8e703cc9f0df6a5bb96024db1f10157b04d`. The exact four-file change
+had zero deletions; required checks were successful with Tier3 skipped as
+expected. Independent post-merge acceptance passed 26 focused work-claim
+tests and all 291 SelfHostedTaskService tests, with no new exact-base Ruff
+debt and no hostile behavioral finding.
+
+This historical receipt is preserved as repository-contained physical evidence
+only. The current metadata baseline is
+`9622b24c321d02a59cb5cc2de2d948a60fa90df1`; the Issue remains a candidate
+pending Owner reconciliation, and no new terminal/closure receipt is asserted.
+
+`ATOMIC_READY_ISSUE_WORK_CLAIM_PROVEN` covers only the canonical atomic claim
+subrecord in the existing SelfHostedTaskService state and `.state.lock`. It
+does not authorize #130 consumer/polling, #98 Target concurrency, another
+store/scheduler/router, route or Workforce selection, approval, integration,
+merge, runtime, release, or production truth. `AUTO_CHAIN=false` remains in
+force.
