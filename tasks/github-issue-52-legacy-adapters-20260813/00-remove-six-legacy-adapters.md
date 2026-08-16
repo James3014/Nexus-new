@@ -86,8 +86,15 @@ Historical verification receipt: `eb668fb76f0c30d8f025db42cdb8e320d556c037`
 - exactly their six stale `muse_nexus.egg-info/SOURCES.txt` rows are absent;
 - PR #215 merge commit is an ancestor of current main.
 
-Reconfirmed at current main `cdf2570ede5ae218f36f886b696c8da45458043a`
+Reconfirmed at historical current main `cdf2570ede5ae218f36f886b696c8da45458043a`
 (post-PR236 rebind, merge commit `663ea1660c4e2db5527472a63d7f720f1cc9ff20`):
+
+- all six authorized `scripts/legacy` adapter paths are absent;
+- exactly their six stale `muse_nexus.egg-info/SOURCES.txt` rows are absent;
+- PR #215 merge commit is an ancestor of current main.
+
+Reconfirmed at current main `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`
+(post-PR333 rebind, merge commit `2fe681f6648263ebad60246bf891259d04303d63`):
 
 - all six authorized `scripts/legacy` adapter paths are absent;
 - exactly their six stale `muse_nexus.egg-info/SOURCES.txt` rows are absent;
