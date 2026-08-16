@@ -14,7 +14,7 @@ It is not a Nexus source of governance authority, route authority, approval auth
 
 `AGENTS.md` remains repository/agent authority.
 
-CapabilityPlanner and HybridRouteDecision remain Nexus route authority.
+`CapabilityPlanner` is the sole route and capability-selection authority. `HybridRouteDecision` is the Planner-derived decision contract/projection, not a second selector, router, or planner.
 
 OpenWiki must not create, infer, promote, or duplicate route authority.
 
@@ -115,7 +115,7 @@ degraded text fence or a `mermaid parse failed` marker.
 
 Do not infer authority from class names, filenames, package metadata, call frequency, tests, or architectural-looking names.
 
-CapabilityPlanner and HybridRouteDecision remain route authority.
+`CapabilityPlanner` is the sole route and capability-selection authority. `HybridRouteDecision` carries Planner-derived route state and does not independently select a route.
 
 A component may be operationally wired while having `authority_roles: [NONE]`.
 

@@ -12,6 +12,8 @@ import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Iterable
 
+from nexus.events.contracts import MAX_CONTINUITY_COLLECTION_ITEMS
+
 SCHEMA = "nexus.task_continuity.v1"
 EVENT_TYPES = frozenset({
     "PLAN_FORMED",
@@ -23,6 +25,7 @@ EVENT_TYPES = frozenset({
     "ESCALATED",
     "COMPLETED",
 })
+REJECTED_STATES = frozenset({"ATTEMPT_REJECTED", "REJECTED"})
 PROTECTED = (
     "task_id",
     "attempt_id",
@@ -31,6 +34,7 @@ PROTECTED = (
     "unresolved_risks",
     "next_action",
     "claim_ceiling",
+    "failure_reason",
 )
 
 
@@ -109,6 +113,8 @@ class ContinuityEvent:
                 not isinstance(v, str) or not v.strip() for v in values
             ):
                 raise ValueError(f"{name} must contain non-empty strings")
+            if len(values) > MAX_CONTINUITY_COLLECTION_ITEMS:
+                raise ValueError(f"{name} exceeds bounded size {MAX_CONTINUITY_COLLECTION_ITEMS}")
         payload = {
             name: getattr(self, name) for name in self.__dataclass_fields__ if name != "event_hash"
         }
@@ -145,6 +151,7 @@ class ContinuitySnapshot:
     evidence_refs: tuple[str, ...]
     next_action: str
     claim_ceiling: str
+    failure_reason: str
     _snapshot_digest: str = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -174,6 +181,7 @@ class ResumeContext:
     snapshot: ContinuitySnapshot
     next_action: str
     claim_ceiling: str
+    failure_reason: str
     do_not_repeat: tuple[str, ...]
     evidence_refs: tuple[str, ...]
     unresolved_risks: tuple[str, ...]
@@ -225,6 +233,7 @@ def project(events: Iterable[ContinuityEvent]) -> ContinuitySnapshot:
     evidence: list[str] = []
     next_action = ""
     claim = ""
+    failure_reason = ""
     source = first.source_revision
     contract = first.contract_revision
     for event in ordered:
@@ -247,6 +256,7 @@ def project(events: Iterable[ContinuityEvent]) -> ContinuitySnapshot:
         unknowns.extend(event.unknowns)
         next_action = event.next_action or next_action
         claim = event.claim_ceiling or claim
+        failure_reason = event.failure_reason or failure_reason
     return ContinuitySnapshot(
         schema=SCHEMA,
         task_id=first.task_id,
@@ -268,6 +278,7 @@ def project(events: Iterable[ContinuityEvent]) -> ContinuitySnapshot:
         evidence_refs=tuple(dict.fromkeys(evidence)),
         next_action=next_action,
         claim_ceiling=claim,
+        failure_reason=failure_reason,
     )
 
 
@@ -322,6 +333,7 @@ def resume(
         merged,
         merged.next_action,
         merged.claim_ceiling,
+        merged.failure_reason,
         merged.rejected_strategies,
         merged.evidence_refs,
         merged.unresolved_risks,
@@ -334,6 +346,19 @@ def events_from_attempt_records(
     records: Iterable[dict[str, Any]], *, task_id: str, attempt_id: str
 ) -> list[ContinuityEvent]:
     """Decode canonical EventBus attempt records without trusting projections."""
+
+    def tuple_field(payload: dict[str, Any], name: str, alias: str = "") -> tuple[str, ...]:
+        value = payload.get(name, payload.get(alias, ()) if alias else ())
+        if value is None:
+            return ()
+        if not isinstance(value, (list, tuple)) or any(
+            not isinstance(item, str) or not item.strip() for item in value
+        ):
+            raise ValueError(f"{name} must be a list of non-empty strings")
+        if len(value) > MAX_CONTINUITY_COLLECTION_ITEMS:
+            raise ValueError(f"{name} exceeds bounded size {MAX_CONTINUITY_COLLECTION_ITEMS}")
+        return tuple(value)
+
     decoded: list[ContinuityEvent] = []
     previous = ""
     record_previous = "0" * 64
@@ -372,14 +397,32 @@ def events_from_attempt_records(
             raise ValueError("continuity record tampered")
         if persisted_parent != record_previous:
             raise ValueError("continuity record parent mismatch")
+        continuity_event_type = payload.get("continuity_event_type")
+        if continuity_event_type is None:
+            # Legacy records may omit the optional projection type, but a
+            # rejected transition must never silently become an observation.
+            if payload["state"] in REJECTED_STATES:
+                raise ValueError("rejected continuity event type is missing")
+            continuity_event_type = "OBSERVATION_RECORDED"
+        if not isinstance(continuity_event_type, str) or not continuity_event_type.strip():
+            raise ValueError("continuity_event_type must be a non-empty string")
+        if payload["state"] in REJECTED_STATES and continuity_event_type != "ATTEMPT_REJECTED":
+            raise ValueError("rejected state requires ATTEMPT_REJECTED continuity type")
         current = ContinuityEvent(
             task_id=task_id,
             attempt_id=attempt_id,
             sequence=payload["sequence"],
-            event_type=payload.get("continuity_event_type", "OBSERVATION_RECORDED"),
+            event_type=continuity_event_type,
             summary=payload["state"],
-            observation=payload.get("reason", ""),
-            evidence_refs=tuple(payload.get("evidence_refs") or ()),
+            observation=payload.get("observation", ""),
+            failure_reason=payload.get("reason", ""),
+            strategy_delta=payload.get("strategy_delta", ""),
+            do_not_repeat=tuple_field(payload, "do_not_repeat", "rejected_strategies"),
+            evidence_refs=tuple_field(payload, "evidence_refs"),
+            unresolved_risks=tuple_field(payload, "unresolved_risks"),
+            unknowns=tuple_field(payload, "unknowns"),
+            next_action=payload.get("next_action", ""),
+            claim_ceiling=payload.get("claim_ceiling", ""),
             source_revision=payload["source_revision"],
             contract_revision=payload["contract_revision"],
             previous_hash=previous,
@@ -402,6 +445,7 @@ def _project_tail(snapshot: ContinuitySnapshot, tail: list[ContinuityEvent]) -> 
     rejected, evidence = list(snapshot.rejected_strategies), list(snapshot.evidence_refs)
     risks, unknowns = list(snapshot.unresolved_risks), list(snapshot.unknowns)
     next_action, claim = snapshot.next_action, snapshot.claim_ceiling
+    failure_reason = snapshot.failure_reason
     for event in tail:
         if event.observation:
             facts.append(event.observation)
@@ -418,6 +462,7 @@ def _project_tail(snapshot: ContinuitySnapshot, tail: list[ContinuityEvent]) -> 
         evidence.extend(event.evidence_refs)
         next_action = event.next_action or next_action
         claim = event.claim_ceiling or claim
+        failure_reason = event.failure_reason or failure_reason
         risks.extend(event.unresolved_risks)
         unknowns.extend(event.unknowns)
 
@@ -445,4 +490,5 @@ def _project_tail(snapshot: ContinuitySnapshot, tail: list[ContinuityEvent]) -> 
         evidence_refs=unique(evidence),
         next_action=next_action,
         claim_ceiling=claim,
+        failure_reason=failure_reason,
     )
