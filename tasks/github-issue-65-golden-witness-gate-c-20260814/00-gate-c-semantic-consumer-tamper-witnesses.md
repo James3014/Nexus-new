@@ -4,8 +4,8 @@ task_id: github-issue-65-gate-c-semantic-consumer-tamper-witnesses
 campaign_id: github-issue-65-golden-witness-gate-c-20260814
 source_issue: "#65"
 owner: James Chen
-status: COMPLETE
-terminal_state: TERMINAL_RECONCILIATION
+status: ACTIVE
+terminal_state: CANDIDATE_PENDING_OWNER_RECONCILIATION
 baseline_revision: eb668fb76f0c30d8f025db42cdb8e320d556c037
 reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
 current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
@@ -97,10 +97,10 @@ report a separate bounded issue. This card grants no self-acceptance authority.
   Maximum later implementation claim:
   `GOLDEN_WITNESS_GATE_C_SEMANTIC_TESTS_CANDIDATE_ONLY`.
 
-## Terminal reconciliation (2026-08-16)
+## Candidate reconciliation (2026-08-16)
 
-This card is terminal. The historical contract above is preserved as the
-implementation baseline.
+This card is a reconciliation candidate pending Owner terminal disposition.
+The historical contract above is preserved as the implementation baseline.
 
 - Physical merge: PR #236 merged as
   `cdf2570ede5ae218f36f886b696c8da45458043a`, an ancestor of current main
@@ -109,9 +109,12 @@ implementation baseline.
   self-hosted-service test serialization) merged as
   `a787e8e703cc9f0df6a5bb96024db1f10157b04d`; PR #290 (GB-042 corpus binding)
   merged as `63becf8462eb1f28bf8e143139157ce82318a07d`.
-- Final evidence: 17/17 golden cases, 20/20 semantic witnesses,
-  `findings_included_in_eval=false`, evaluation report SHA256
-  `f3a65fadcc6f88449d99c3ef333e599225099874039783162a51fbaa0deb50fd`.
+- Closure evidence asserted only (ASSERTED_UNBOUND_PENDING_RECEIPT): 17/17
+  golden cases, 20/20 semantic witnesses, `findings_included_in_eval=false`,
+  report SHA256
+  `f3a65fadcc6f88449d99c3ef333e599225099874039783162a51fbaa0deb50fd`. No
+  repository/GitHub immutable report artifact was located, so this is not
+  presented as completion evidence.
 - Marker: `GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN`; ceiling
   `GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN_ONLY` (repository-contained
   source/test/governance evidence only). `AUTO_CHAIN=false`.

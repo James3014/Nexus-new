@@ -1,8 +1,8 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: COMPLETE
-terminal_state: TERMINAL_RECONCILIATION
+status: ACTIVE
+terminal_state: CANDIDATE_PENDING_OWNER_RECONCILIATION
 source_issue: "#65"
 baseline_main: cdf2570ede5ae218f36f886b696c8da45458043a
 reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
@@ -18,13 +18,14 @@ authorized_deletions: []
 
 This disjoint residual slice strengthens the existing corpus-bound GB-013,
 GB-014, and GB-019 test nodes without changing corpus mappings. PR #290 and
-PR #228 retain ownership of their separate corpus files. This slice is now
-terminal.
+PR #228 retain ownership of their separate corpus files. This slice is
+recorded as a reconciliation candidate pending Owner terminal disposition.
 
-## Terminal reconciliation (2026-08-16)
+## Candidate reconciliation (2026-08-16)
 
-This campaign is terminal. The historical contract above is preserved as the
-implementation baseline.
+This record is a reconciliation candidate; it does not claim Issue #65
+terminal. The historical contract above is preserved as the implementation
+baseline.
 
 - Current main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c` (fresh rebind
   target for this reconciliation).
@@ -38,9 +39,12 @@ implementation baseline.
     `63becf8462eb1f28bf8e143139157ce82318a07d`; PR #226
     (`a787e8e703cc9f0df6a5bb96024db1f10157b04d`) is the #31 task-continuity
     serialization receipt for the shared self-hosted service test.
-- Final evidence: 17/17 golden cases, 20/20 semantic witnesses,
-  `findings_included_in_eval=false`, evaluation report SHA256
-  `f3a65fadcc6f88449d99c3ef333e599225099874039783162a51fbaa0deb50fd`.
+- Closure evidence asserted only (ASSERTED_UNBOUND_PENDING_RECEIPT): 17/17
+  golden cases, 20/20 semantic witnesses, `findings_included_in_eval=false`,
+  report SHA256
+  `f3a65fadcc6f88449d99c3ef333e599225099874039783162a51fbaa0deb50fd`. No
+  repository/GitHub immutable report artifact was located, so this is not
+  presented as completion evidence.
 - Marker: `GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN`.
 - Claim ceiling: `GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN_ONLY`
   (repository-contained source/test/governance evidence only).

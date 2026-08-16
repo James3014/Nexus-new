@@ -4,8 +4,8 @@ campaign_id: github-issue-65-golden-witness-gate-c-20260814
 issue: "#65"
 authority: Ready Issue #65 test-only hardening under the Owner's standing coordinator grant
 owner: James Chen
-status: COMPLETE
-terminal_state: TERMINAL_RECONCILIATION
+status: ACTIVE
+terminal_state: CANDIDATE_PENDING_OWNER_RECONCILIATION
 baseline_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
 reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
 current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
@@ -24,10 +24,11 @@ Historical Gate C test-only hardening campaign. Gate B merged as PR #231 on
 baseline `eb668fb76f0c30d8f025db42cdb8e320d556c037`; historical candidate
 ceiling `GOLDEN_WITNESS_GATE_C_SEMANTIC_TESTS_CANDIDATE_ONLY`.
 
-## Terminal reconciliation (2026-08-16)
+## Candidate reconciliation (2026-08-16)
 
-This campaign is terminal. The historical contract above is preserved as the
-implementation baseline.
+This record is a reconciliation candidate; it does not claim Issue #65
+terminal. The historical contract above is preserved as the implementation
+baseline.
 
 - Current main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c` (fresh rebind
   target for this reconciliation).
@@ -42,9 +43,12 @@ implementation baseline.
     `f507199466d6a87dfec4b145df0211e8a3aa3904`; PR #226
     (`a787e8e703cc9f0df6a5bb96024db1f10157b04d`) is the #31 task-continuity
     serialization receipt for the shared self-hosted service test.
-- Final evidence: 17/17 golden cases, 20/20 semantic witnesses,
-  `findings_included_in_eval=false`, evaluation report SHA256
-  `f3a65fadcc6f88449d99c3ef333e599225099874039783162a51fbaa0deb50fd`.
+- Closure evidence asserted only (ASSERTED_UNBOUND_PENDING_RECEIPT): 17/17
+  golden cases, 20/20 semantic witnesses, `findings_included_in_eval=false`,
+  report SHA256
+  `f3a65fadcc6f88449d99c3ef333e599225099874039783162a51fbaa0deb50fd`. No
+  repository/GitHub immutable report artifact was located, so this is not
+  presented as completion evidence.
 - Marker: `GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN`.
 - Claim ceiling: `GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN_ONLY`
   (repository-contained source/test/governance evidence only).
@@ -52,13 +56,15 @@ implementation baseline.
   integration, merge, release, or production authority is granted by this
   reconciliation; no #143 or #191 work.
 
-## Scope lock
+## Historical scope note
 
-This card authorizes a later, separately executed Gate C test-only Candidate for
-the eight Golden cases `GB-003`, `GB-006`, `GB-029`, `GB-030`, `GB-049`,
-`GB-056`, `GB-072`, and `GB-073`. The later implementation may touch only the
-six mapped test modules listed in the Task Card, plus this INDEX and that card.
-This commit creates no tests and no product changes.
+Historically, this card documented an intended later, separately executed Gate
+C test-only Candidate for the eight Golden cases `GB-003`, `GB-006`, `GB-029`,
+`GB-030`, `GB-049`, `GB-056`, `GB-072`, and `GB-073`, limited to the six mapped
+test modules listed in the Task Card plus this INDEX and that card. That
+description is retained as historical context only; it is not live
+authorization, created no Candidate, and grants no future mutation under this
+reconciliation.
 
 ## Forbidden authority and scope
 

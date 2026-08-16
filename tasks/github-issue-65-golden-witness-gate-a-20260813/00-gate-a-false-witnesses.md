@@ -4,8 +4,8 @@ task_id: github-issue-65-gate-a-false-witnesses
 campaign_id: github-issue-65-golden-witness-gate-a-20260813
 source_issue: "#65"
 owner: James Chen
-status: COMPLETE
-terminal_state: TERMINAL_RECONCILIATION
+status: ACTIVE
+terminal_state: CANDIDATE_PENDING_OWNER_RECONCILIATION
 baseline_revision: 727efaac9a354748a50946b7012c8847afea6ded
 reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
 current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
@@ -70,10 +70,10 @@ Candidate approval semantics, #143, or #191 work.
 Gate A Candidate PR only. Gates B/C remain residual Issue #65 scope.
 Claim ceiling: `GOLDEN_WITNESS_GATE_A_SEMANTIC_TESTS_CANDIDATE_ONLY`.
 
-## Terminal reconciliation (2026-08-16)
+## Candidate reconciliation (2026-08-16)
 
-This card is terminal. The historical contract above is preserved as the
-implementation baseline.
+This card is a reconciliation candidate pending Owner terminal disposition.
+The historical contract above is preserved as the implementation baseline.
 
 - Physical merge: PR #227 merged as
   `80370ab3c5e3c3714cf378de1dba90412d1a2a7f`, an ancestor of current main
@@ -82,9 +82,12 @@ implementation baseline.
   `88a236e3e440052e193aed08f19e996ddab7ed5a`; GB-019 witness
   `4d417fe6c1de4c9fb976b55db7c7c1eec4ff991e`; GB-042 witness
   `f88dba4950cfb606414a83b841ff6a43b4b1a59d`.
-- Final evidence: 17/17 golden cases, 20/20 semantic witnesses,
-  `findings_included_in_eval=false`, evaluation report SHA256
-  `f3a65fadcc6f88449d99c3ef333e599225099874039783162a51fbaa0deb50fd`.
+- Closure evidence asserted only (ASSERTED_UNBOUND_PENDING_RECEIPT): 17/17
+  golden cases, 20/20 semantic witnesses, `findings_included_in_eval=false`,
+  report SHA256
+  `f3a65fadcc6f88449d99c3ef333e599225099874039783162a51fbaa0deb50fd`. No
+  repository/GitHub immutable report artifact was located, so this is not
+  presented as completion evidence.
 - Marker: `GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN`; ceiling
   `GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN_ONLY` (repository-contained
   source/test/governance evidence only). `AUTO_CHAIN=false`.

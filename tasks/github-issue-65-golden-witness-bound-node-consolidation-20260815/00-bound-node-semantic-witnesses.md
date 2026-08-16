@@ -4,8 +4,8 @@ task_id: github-issue-65-bound-node-semantic-witnesses
 campaign_id: github-issue-65-golden-witness-bound-node-consolidation-20260815
 source_issue: "#65"
 owner: James Chen
-status: COMPLETE
-terminal_state: TERMINAL_RECONCILIATION
+status: ACTIVE
+terminal_state: CANDIDATE_PENDING_OWNER_RECONCILIATION
 baseline_revision: cdf2570ede5ae218f36f886b696c8da45458043a
 reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
 current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
@@ -93,10 +93,10 @@ Issue scope.
 Claim ceiling:
 `GOLDEN_WITNESS_BOUND_NODE_SEMANTICS_CANDIDATE_ONLY`.
 
-## Terminal reconciliation (2026-08-16)
+## Candidate reconciliation (2026-08-16)
 
-This card is terminal. The historical contract above is preserved as the
-implementation baseline.
+This card is a reconciliation candidate pending Owner terminal disposition.
+The historical contract above is preserved as the implementation baseline.
 
 - Physical merge: PR #297 merged as
   `f507199466d6a87dfec4b145df0211e8a3aa3904`, an ancestor of current main
@@ -108,9 +108,12 @@ implementation baseline.
   `cdf2570ede5ae218f36f886b696c8da45458043a` (PR #236 merge); PR #290 owns
   the separate GB-042 corpus binding and merged as
   `63becf8462eb1f28bf8e143139157ce82318a07d`.
-- Final evidence: 17/17 golden cases, 20/20 semantic witnesses,
-  `findings_included_in_eval=false`, evaluation report SHA256
-  `f3a65fadcc6f88449d99c3ef333e599225099874039783162a51fbaa0deb50fd`.
+- Closure evidence asserted only (ASSERTED_UNBOUND_PENDING_RECEIPT): 17/17
+  golden cases, 20/20 semantic witnesses, `findings_included_in_eval=false`,
+  report SHA256
+  `f3a65fadcc6f88449d99c3ef333e599225099874039783162a51fbaa0deb50fd`. No
+  repository/GitHub immutable report artifact was located, so this is not
+  presented as completion evidence.
 - Marker: `GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN`; ceiling
   `GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN_ONLY` (repository-contained
   source/test/governance evidence only). `AUTO_CHAIN=false`.
