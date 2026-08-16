@@ -7,8 +7,8 @@ campaign_id: github-issue-95-world-c-executor-projection-20260812
 source_issue: https://github.com/James3014/Nexus-new/issues/95
 baseline_main: ea8c15293455575b4312b92eeeebc69daa4abbcf
 historical_reconciled_main: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
-reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
-current_main: cdf2570ede5ae218f36f886b696c8da45458043a
+reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
 AUTO_CHAIN: false
 worker_may_commit: true
 worker_may_push: true
@@ -77,7 +77,8 @@ release, runtime activation, production/public claim, approval, integration, or 
 - PR #186 head: `d585f43b0b02c3d0f79851f5bcd7f2b359a9d064`.
 - PR #186 merge: `facd84753b42d2a4bc00581cab74c19b075c733a`.
 - Historical reconciled current main: `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`.
-- Reconciled current main: `cdf2570ede5ae218f36f886b696c8da45458043a`.
+- Previous reconciled current main (historical rebind receipt): `cdf2570ede5ae218f36f886b696c8da45458043a`.
+- Reconciled current main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`.
 
 `WORLD_C_EXECUTOR_PROJECTION_WIRING_PROVEN` is limited to the canonical World C
 executor projection source and focused tests. Historical live check-rollup details were
