@@ -5,8 +5,9 @@
 - status: COMPLETE
 - base_sha: 3c4f9065739e7a718bc27e1bf0d0113150946c60
 - historical_baseline: 3c4f9065739e7a718bc27e1bf0d0113150946c60
-- reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
-- current_main: cdf2570ede5ae218f36f886b696c8da45458043a
+- reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+- current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+- historical_reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
 - frontier_status: TERMINAL_RECONCILIATION
 - terminal_marker: R2B3_REPORT_REPLAY_TAMPER_PROVEN
 - claim_ceiling: repository-contained report replay/tamper verifier source/tests only
@@ -97,7 +98,11 @@ git diff --name-only 3c4f9065739e7a718bc27e1bf0d0113150946c60...HEAD
 - Owner receipt: `TERMINAL_REVERIFY_RECEIPT_20260813` on Issue #102; post-#101
   fresh current-main reverify ran report + metrics + e2e suites together,
   65 passed, zero provider/model calls.
-- Reconciled current main: `cdf2570ede5ae218f36f886b696c8da45458043a`.
+- Reconciled current main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`
+  (PR #333 merge); previous reconciled snapshot
+  `cdf2570ede5ae218f36f886b696c8da45458043a` retained as historical;
+  PR #123 merge `73d7437b` verified ancestor via
+  `git merge-base --is-ancestor`.
 
 `R2B3_REPORT_REPLAY_TAMPER_PROVEN` proves only the exact GitHub collaboration
 report replay/tamper verifier source and tests. It grants no benchmark result,

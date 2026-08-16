@@ -5,8 +5,9 @@
 - task_id: github-issue-102
 - base_sha: 3c4f9065739e7a718bc27e1bf0d0113150946c60
 - historical_baseline: 3c4f9065739e7a718bc27e1bf0d0113150946c60
-- reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
-- current_main: cdf2570ede5ae218f36f886b696c8da45458043a
+- reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+- current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+- historical_reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
 - branch: codex/issue-102-report-verifier
 - AUTO_CHAIN: false
 - frontier: TERMINAL_RECONCILIATION
