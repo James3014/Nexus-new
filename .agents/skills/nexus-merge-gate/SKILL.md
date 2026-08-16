@@ -11,10 +11,11 @@ binding is approved.
 
 This skill applies exclusively to a local Nexus lifecycle Candidate and local
 integration. It is not the merge procedure for a GitHub PR Candidate. GitHub
-Ready Issues use the current `AGENTS.md` and
-`docs/agents/TASK_EXECUTION_CONTRACT.md` integration authority; this skill does
-not restate that procedure. Local lifecycle approval cannot bootstrap a Task
-Card or manufacture GitHub merge authority.
+Ready Issues instead use fresh PR/base/head/diff, required CI, independent
+acceptance, `MERGE_INTENT`, a fresh exact PR/head/base-bound Owner
+`MERGE_SLOT_GRANTED`, and expected-head/CAS merge authority. Standing authority
+prepares evidence but cannot manufacture that merge slot. Local lifecycle
+approval cannot bootstrap a Task Card or manufacture GitHub merge authority.
 
 ## Gate sequence
 
