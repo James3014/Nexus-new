@@ -70,16 +70,59 @@ jobs:
       - name: Link persistent evidence directory
         run: ln -s "$RUNNER_TEMP/nexus-ci-ruff" .ci-ruff
 
+      - name: Decide cheap exact-base impact
+        id: impact
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'workflow_dispatch' && inputs.base_sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" != "pull_request" ]]; then
+            echo "required=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ ! "$BASE_SHA" =~ ^[0-9a-f]{40}$ || ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Exact revisions must be full 40-character lowercase SHAs" >&2
+            echo "required=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null || ! git cat-file -e "$HEAD_SHA^{commit}" 2>/dev/null; then
+            echo "Exact base or head commit is not present in this repository" >&2
+            echo "required=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "$(git rev-parse HEAD)" != "$HEAD_SHA" ]]; then
+            echo "Checked out HEAD does not match the bound HEAD_SHA" >&2
+            echo "required=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          REQUIRED="false"
+          if ! git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- pyproject.toml ruff.toml uv.lock; then
+            REQUIRED="true"
+          fi
+          if ! git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- .github/workflows/lint.yml; then
+            REQUIRED="true"
+          fi
+          if ! git diff --quiet "$BASE_SHA" "$HEAD_SHA" -- scripts/ops/exact_base_tool_gate.py; then
+            REQUIRED="true"
+          fi
+          if [[ "$REQUIRED" != "true" ]] && git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- '*.py' | grep -q .; then
+            REQUIRED="true"
+          fi
+          echo "required=$REQUIRED" >> "$GITHUB_OUTPUT"
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
       - name: Install uv and dependencies
+        if: steps.impact.outputs.required == 'true'
         run: |
           curl -LsSf https://astral.sh/uv/install.sh | sh
           uv sync --frozen --all-groups --all-extras
 
       - name: Resolve exact revisions and worktree
+        if: steps.impact.outputs.required == 'true'
         id: revisions
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event_name == 'workflow_dispatch' && inputs.base_sha || github.event.before }}
@@ -106,6 +149,7 @@ jobs:
           echo "base_worktree=$BASE_WORKTREE" >> "$GITHUB_OUTPUT"
 
       - name: Run Ruff on exact base and head
+        if: steps.impact.outputs.required == 'true'
         id: ruff
         env:
           BASE_WORKTREE: ${{ steps.revisions.outputs.base_worktree }}
@@ -150,6 +194,7 @@ jobs:
           run_ruff "$GITHUB_WORKSPACE" .ci-ruff/head.json head
 
       - name: Classify Ruff regression
+        if: steps.impact.outputs.required == 'true'
         run: |
           set +e
           .venv/bin/python scripts/ops/exact_base_tool_gate.py \
@@ -165,6 +210,11 @@ jobs:
           echo '## Exact-base Ruff classification' >> "$GITHUB_STEP_SUMMARY"
           cat .ci-ruff/classification.json >> "$GITHUB_STEP_SUMMARY"
           exit "$STATUS"
+
+      - name: Record no Ruff impact
+        if: steps.impact.outputs.required != 'true'
+        run: |
+          printf '%s\n' '{"classification":"PASS","blocking":false,"reason":"no Ruff-impacted paths changed"}' > .ci-ruff/classification.json
 
       - name: Remove exact base worktree
         if: always() && steps.revisions.outputs.base_worktree != ''

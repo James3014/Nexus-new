@@ -24,6 +24,7 @@ from nexus.services.external_intelligence_closure import (
     build_composition_repair_delta,
     build_unit_repair_delta,
     compose_task_candidate,
+    parse_task_card_authority,
     validate_worker_receipt,
     verify_unit_candidate,
     verify_whole_task_candidate,
@@ -60,14 +61,48 @@ def make_repo(tmp_path: Path) -> tuple[Path, str]:
     return root, _git(root, "rev-parse", "HEAD")
 
 
-def make_task_card(repo: Path) -> tuple[str, str]:
+def make_task_card(repo: Path, commands: list[str] | None = None) -> tuple[str, str, str]:
     ref = "tasks/test-closure/00-test.md"
     path = repo / ref
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("# Test closure task\n", encoding="utf-8")
+    default_cmds = [
+        f'{sys.executable} -c "raise SystemExit(0)"',
+        f'{sys.executable} -c "raise SystemExit(1)"',
+        f'{sys.executable} -c "raise SystemExit(2)"',
+        f'{sys.executable} -c "raise SystemExit(3)"',
+        f'{sys.executable} -c "raise SystemExit(7)"',
+        f"{sys.executable} -c \"from pathlib import Path; assert 'A = 1' in Path('a.py').read_text()\"",
+        f"{sys.executable} -c \"from pathlib import Path; assert 'B = 1' in Path('b.py').read_text()\"",
+        f"{sys.executable} -c \"from pathlib import Path; assert 'A = 2' in Path('a.py').read_text()\"",
+        f"{sys.executable} -c \"from pathlib import Path; Path('a.py').write_text('A = 7\\n')\"",
+        f"{sys.executable} -c \"from pathlib import Path; assert 'A = ' in Path('a.py').read_text()\"",
+        f"{sys.executable} -c \"from pathlib import Path; assert Path('a.py').read_text() == 'A = 2\\n' and Path('b.py').read_text() == 'B = 1\\n'\"",
+        f"{sys.executable} -c \"from pathlib import Path; assert 'A = 1' in Path('a.py').read_text() and 'B = 1' in Path('b.py').read_text()\"",
+    ]
+    if commands:
+        default_cmds.extend(commands)
+    lines = [
+        "# Task Card: test-closure",
+        "",
+        "- task_id: `test-closure`",
+        "- status: ACTIVE",
+        "",
+        "## Allowed files",
+        "- `a.py`",
+        "- `b.py`",
+        "- `c.py`",
+        "",
+        "## Verification commands",
+        "```bash",
+        *default_cmds,
+        "```",
+        "",
+    ]
+    path.write_text("\n".join(lines), encoding="utf-8")
     _git(repo, "add", ref)
     _git(repo, "commit", "-m", "test task card")
-    return ref, _sha256(path.read_bytes())
+    head_sha = _git(repo, "rev-parse", "HEAD")
+    return ref, _sha256(path.read_bytes()), head_sha
 
 
 def _worktree(repo: Path, root: Path, name: str, base: str) -> Path:
@@ -303,10 +338,11 @@ def test_unit_failure_builds_exact_same_session_repair_delta(tmp_path):
 
 def test_close_task_rejects_physical_task_card_hash_mismatch(tmp_path):
     repo, base = make_repo(tmp_path)
-    receipt = make_receipt(repo, tmp_path, base, "ua", "a.py", "A = 1\n")
-    card_ref, _card_hash = make_task_card(repo)
+    card_ref, _card_hash, head_sha = make_task_card(repo)
+    receipt = make_receipt(repo, tmp_path, head_sha, "ua", "a.py", "A = 1\n")
     with pytest.raises(ClosureError, match="TASK_CARD_HASH_MISMATCH"):
         runtime(repo, tmp_path).close_task(
+            main_sha=head_sha,
             unit_receipts=[receipt],
             unit_verifiers={"ua": [verifier("unit", "raise SystemExit(0)")]},
             whole_verifiers=[verifier("whole", "raise SystemExit(0)")],
@@ -317,9 +353,10 @@ def test_close_task_rejects_physical_task_card_hash_mismatch(tmp_path):
 
 def test_unit_failure_without_c_runtime_returns_bounded_repair_required(tmp_path):
     repo, base = make_repo(tmp_path)
-    receipt = make_receipt(repo, tmp_path, base, "ua", "a.py", "A = 1\n")
-    card_ref, card_hash = make_task_card(repo)
+    card_ref, card_hash, head_sha = make_task_card(repo)
+    receipt = make_receipt(repo, tmp_path, head_sha, "ua", "a.py", "A = 1\n")
     result = runtime(repo, tmp_path).close_task(
+        main_sha=head_sha,
         unit_receipts=[receipt],
         unit_verifiers={
             "ua": [
@@ -341,9 +378,10 @@ def test_unit_failure_without_c_runtime_returns_bounded_repair_required(tmp_path
 
 def test_repair_budget_zero_fails_closed_without_dispatch(tmp_path):
     repo, base = make_repo(tmp_path)
-    receipt = make_receipt(repo, tmp_path, base, "ua", "a.py", "A = 1\n")
-    card_ref, card_hash = make_task_card(repo)
+    card_ref, card_hash, head_sha = make_task_card(repo)
+    receipt = make_receipt(repo, tmp_path, head_sha, "ua", "a.py", "A = 1\n")
     result = runtime(repo, tmp_path, max_repairs=0).close_task(
+        main_sha=head_sha,
         unit_receipts=[receipt],
         unit_verifiers={"ua": [verifier("fail", "raise SystemExit(1)")]},
         whole_verifiers=[verifier("whole", "raise SystemExit(0)")],
@@ -356,9 +394,10 @@ def test_repair_budget_zero_fails_closed_without_dispatch(tmp_path):
 
 def test_repair_budget_is_durable_across_runtime_restart(tmp_path):
     repo, base = make_repo(tmp_path)
-    receipt = make_receipt(repo, tmp_path, base, "ua", "a.py", "A = 1\n")
-    card_ref, card_hash = make_task_card(repo)
+    card_ref, card_hash, head_sha = make_task_card(repo)
+    receipt = make_receipt(repo, tmp_path, head_sha, "ua", "a.py", "A = 1\n")
     first = runtime(repo, tmp_path, max_repairs=1).close_task(
+        main_sha=head_sha,
         unit_receipts=[receipt],
         unit_verifiers={"ua": [verifier("fail", "raise SystemExit(1)")]},
         whole_verifiers=[verifier("whole", "raise SystemExit(0)")],
@@ -368,6 +407,7 @@ def test_repair_budget_is_durable_across_runtime_restart(tmp_path):
     assert first["status"] == "UNIT_REPAIR_REQUIRED"
     assert len(first["repair_deltas"]) == 1
     second = runtime(repo, tmp_path, max_repairs=1).close_task(
+        main_sha=head_sha,
         unit_receipts=[receipt],
         unit_verifiers={"ua": [verifier("fail", "raise SystemExit(1)")]},
         whole_verifiers=[verifier("whole", "raise SystemExit(0)")],
@@ -380,8 +420,8 @@ def test_repair_budget_is_durable_across_runtime_restart(tmp_path):
 
 def test_repair_result_cannot_substitute_session_identity(tmp_path):
     repo, base = make_repo(tmp_path)
-    receipt = make_receipt(repo, tmp_path, base, "ua", "a.py", "A = 1\n")
-    card_ref, card_hash = make_task_card(repo)
+    card_ref, card_hash, head_sha = make_task_card(repo)
+    receipt = make_receipt(repo, tmp_path, head_sha, "ua", "a.py", "A = 1\n")
 
     class BadSessionRuntime(RepairingCRuntime):
         def continue_repair(self, receipt, *, repair_id, repair_ref, repair_sha256):
@@ -395,9 +435,10 @@ def test_repair_result_cannot_substitute_session_identity(tmp_path):
             repaired["receipt_id"] = _receipt_identity(repaired)
             return repaired
 
-    bad = BadSessionRuntime(repo, base, {"ua": ("a.py", "A = 2\n")})
+    bad = BadSessionRuntime(repo, head_sha, {"ua": ("a.py", "A = 2\n")})
     with pytest.raises(ClosureError, match="REPAIR_SESSION_ID_MISMATCH"):
         runtime(repo, tmp_path, c_runtime=bad, max_repairs=1).close_task(
+            main_sha=head_sha,
             unit_receipts=[receipt],
             unit_verifiers={
                 "ua": [
@@ -500,10 +541,11 @@ def test_whole_task_verification_records_explicit_owner(tmp_path):
 
 def test_ambiguous_whole_failure_requires_scope_delta_and_no_acceptance(tmp_path):
     repo, base = make_repo(tmp_path)
-    ua = make_receipt(repo, tmp_path, base, "ua", "a.py", "A = 1\n")
-    ub = make_receipt(repo, tmp_path, base, "ub", "b.py", "B = 1\n")
-    card_ref, card_hash = make_task_card(repo)
+    card_ref, card_hash, head_sha = make_task_card(repo)
+    ua = make_receipt(repo, tmp_path, head_sha, "ua", "a.py", "A = 1\n")
+    ub = make_receipt(repo, tmp_path, head_sha, "ub", "b.py", "B = 1\n")
     result = runtime(repo, tmp_path).close_task(
+        main_sha=head_sha,
         unit_receipts=[ua, ub],
         unit_verifiers={
             "ua": [verifier("a", "raise SystemExit(0)")],
@@ -521,11 +563,12 @@ def test_ambiguous_whole_failure_requires_scope_delta_and_no_acceptance(tmp_path
 
 def test_unique_owner_whole_failure_repairs_same_unit_then_closes(tmp_path):
     repo, base = make_repo(tmp_path)
-    ua = make_receipt(repo, tmp_path, base, "ua", "a.py", "A = 1\n")
-    ub = make_receipt(repo, tmp_path, base, "ub", "b.py", "B = 1\n")
-    card_ref, card_hash = make_task_card(repo)
-    repairing = RepairingCRuntime(repo, base, {"ua": ("a.py", "A = 2\n")})
+    card_ref, card_hash, head_sha = make_task_card(repo)
+    ua = make_receipt(repo, tmp_path, head_sha, "ua", "a.py", "A = 1\n")
+    ub = make_receipt(repo, tmp_path, head_sha, "ub", "b.py", "B = 1\n")
+    repairing = RepairingCRuntime(repo, head_sha, {"ua": ("a.py", "A = 2\n")})
     result = runtime(repo, tmp_path, c_runtime=repairing, max_repairs=1).close_task(
+        main_sha=head_sha,
         unit_receipts=[ua, ub],
         unit_verifiers={
             "ua": [
@@ -563,10 +606,11 @@ def test_unique_owner_whole_failure_repairs_same_unit_then_closes(tmp_path):
 
 def test_success_emits_acceptance_packet_and_compact_capsule_without_approval_claim(tmp_path):
     repo, base = make_repo(tmp_path)
-    ua = make_receipt(repo, tmp_path, base, "ua", "a.py", "A = 1\n")
-    ub = make_receipt(repo, tmp_path, base, "ub", "b.py", "B = 1\n")
-    card_ref, card_hash = make_task_card(repo)
+    card_ref, card_hash, head_sha = make_task_card(repo)
+    ua = make_receipt(repo, tmp_path, head_sha, "ua", "a.py", "A = 1\n")
+    ub = make_receipt(repo, tmp_path, head_sha, "ub", "b.py", "B = 1\n")
     result = runtime(repo, tmp_path).close_task(
+        main_sha=head_sha,
         unit_receipts=[ub, ua],
         unit_verifiers={
             "ua": [
@@ -628,3 +672,223 @@ def test_mixed_whole_failure_owners_cannot_build_composition_repair_delta(tmp_pa
     )
     with pytest.raises(ClosureError, match="WHOLE_FAILURE_NOT_UNIQUELY_OWNED"):
         build_composition_repair_delta(ua, whole, repair_index=1)
+
+
+def test_closure_rejects_unauthorized_verifier_before_subprocess(tmp_path, monkeypatch):
+    repo, base = make_repo(tmp_path)
+    card_ref, card_hash, head_sha = make_task_card(repo)
+    ua = make_receipt(repo, tmp_path, head_sha, "ua", "a.py", "A = 1\n")
+    called = []
+    real_run = subprocess.run
+
+    def spy_run(args, **kwargs):
+        called.append(args)
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", spy_run)
+
+    with pytest.raises(ClosureError, match="VERIFIER_NOT_AUTHORIZED"):
+        runtime(repo, tmp_path).close_task(
+            main_sha=head_sha,
+            unit_receipts=[ua],
+            unit_verifiers={
+                "ua": [
+                    {"id": "evil", "argv": ["python3", "-c", "import os; os.system('malicious')"]}
+                ]
+            },
+            whole_verifiers=[verifier("whole", "raise SystemExit(0)")],
+            task_card_ref=card_ref,
+            task_card_hash=card_hash,
+        )
+
+    # Verify the unauthorized verifier command was NEVER executed in subprocess
+    assert not any("malicious" in str(cmd) for cmd in called)
+
+
+def test_real_closure_a_to_b_unattended_freshness_regression(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "nexus-test@example.invalid")
+    _git(repo, "config", "user.name", "Nexus Test")
+    (repo / "a.py").write_text("A = 0\n", encoding="utf-8")
+    _git(repo, "add", "a.py")
+    _git(repo, "commit", "-m", "init")
+
+    # Commit A with Task Card A (authorizes only verifier A)
+    card_ref = "tasks/test-closure/00-test.md"
+    card_path = repo / card_ref
+    card_path.parent.mkdir(parents=True, exist_ok=True)
+    card_a_text = (
+        "# Task Card: test-closure\n\n"
+        "- task_id: `test-closure`\n"
+        "- status: ACTIVE\n\n"
+        "## Allowed files\n"
+        "- `a.py`\n\n"
+        "## Verification commands\n"
+        "```bash\n"
+        f"{sys.executable} -c \"assert False, 'A verifier'\"\n"
+        "```\n"
+    )
+    card_path.write_text(card_a_text, encoding="utf-8")
+    _git(repo, "add", card_ref)
+    _git(repo, "commit", "-m", "commit A - task card A")
+    sha_A = _git(repo, "rev-parse", "HEAD")
+    hash_A = _sha256(card_a_text)
+
+    # Commit B with Task Card B (authorizes verifier B)
+    cmd_b = f"{sys.executable} -c \"from pathlib import Path; assert 'A = 1' in Path('a.py').read_text()\""
+    card_b_text = (
+        "# Task Card: test-closure\n\n"
+        "- task_id: `test-closure`\n"
+        "- status: ACTIVE\n\n"
+        "## Allowed files\n"
+        "- `a.py`\n\n"
+        "## Verification commands\n"
+        "```bash\n"
+        f"{cmd_b}\n"
+        f'{sys.executable} -c "raise SystemExit(0)"\n'
+        "```\n"
+    )
+    card_path.write_text(card_b_text, encoding="utf-8")
+    _git(repo, "add", card_ref)
+    _git(repo, "commit", "-m", "commit B - task card B")
+    sha_B = _git(repo, "rev-parse", "HEAD")
+    hash_B = _sha256(card_b_text)
+
+    # Reset physical checkout back to Commit A (simulating daemon runtime where HEAD=A while remote main=B)
+    _git(repo, "checkout", sha_A)
+    assert _git(repo, "rev-parse", "HEAD") == sha_A
+    assert card_path.read_text(encoding="utf-8") == card_a_text
+
+    # Worker receipt is produced against base commit B
+    receipt_b = make_receipt(repo, tmp_path, sha_B, "ua", "a.py", "A = 1\n")
+
+    # Invoke REAL closure runtime
+    c_runtime = runtime(repo, tmp_path)
+    result = c_runtime.close_task(
+        main_sha=sha_B,
+        unit_receipts=[receipt_b],
+        unit_verifiers={
+            "ua": [
+                {
+                    "id": "b-check",
+                    "argv": [
+                        sys.executable,
+                        "-c",
+                        "from pathlib import Path; assert 'A = 1' in Path('a.py').read_text()",
+                    ],
+                }
+            ]
+        },
+        whole_verifiers=[verifier("whole", "raise SystemExit(0)")],
+        task_card_ref=card_ref,
+        task_card_hash=hash_B,
+    )
+
+    # Assert closure succeeded using Task Card B authority
+    assert result["status"] == CLAIM_CEILING
+    assert result["whole_verification"]["status"] == "PASS"
+
+    # Assert runtime HEAD remained at Commit A and worktree is completely clean
+    assert _git(repo, "rev-parse", "HEAD") == sha_A
+    assert _git(repo, "status", "--porcelain=v1") == ""
+    assert card_path.read_text(encoding="utf-8") == card_a_text
+
+    # Negative Paired Case A: main_sha=B with hash_A => TASK_CARD_HASH_MISMATCH
+    with pytest.raises(ClosureError, match="TASK_CARD_HASH_MISMATCH"):
+        c_runtime.close_task(
+            main_sha=sha_B,
+            unit_receipts=[receipt_b],
+            unit_verifiers={
+                "ua": [
+                    {
+                        "id": "b-check",
+                        "argv": [
+                            sys.executable,
+                            "-c",
+                            "from pathlib import Path; assert 'A = 1' in Path('a.py').read_text()",
+                        ],
+                    }
+                ]
+            },
+            whole_verifiers=[verifier("whole", "raise SystemExit(0)")],
+            task_card_ref=card_ref,
+            task_card_hash=hash_A,
+        )
+
+    # Negative Paired Case B: Stale physical card A commands should NOT authorize execution when main_sha=B
+    with pytest.raises(ClosureError, match="VERIFIER_NOT_AUTHORIZED"):
+        c_runtime.close_task(
+            main_sha=sha_B,
+            unit_receipts=[receipt_b],
+            unit_verifiers={
+                "ua": [
+                    {
+                        "id": "a-fail",
+                        "argv": [sys.executable, "-c", "assert False, 'A verifier'"],
+                    }
+                ]
+            },
+            whole_verifiers=[verifier("whole", "raise SystemExit(0)")],
+            task_card_ref=card_ref,
+            task_card_hash=hash_B,
+        )
+
+    # Negative Paired Case C: receipt.base_sha (sha_A) != main_sha (sha_B) => CLOSURE_BASE_SHA_MISMATCH
+    receipt_a = make_receipt(repo, tmp_path, sha_A, "ua_stale", "a.py", "A = 1\n")
+    with pytest.raises(ClosureError, match="CLOSURE_BASE_SHA_MISMATCH"):
+        c_runtime.close_task(
+            main_sha=sha_B,
+            unit_receipts=[receipt_a],
+            unit_verifiers={
+                "ua_stale": [
+                    {
+                        "id": "b-check",
+                        "argv": [
+                            sys.executable,
+                            "-c",
+                            "from pathlib import Path; assert 'A = 1' in Path('a.py').read_text()",
+                        ],
+                    }
+                ]
+            },
+            whole_verifiers=[verifier("whole", "raise SystemExit(0)")],
+            task_card_ref=card_ref,
+            task_card_hash=hash_B,
+        )
+
+
+def test_task_card_verification_command_parser_rejects_prose():
+    card_text = (
+        "# Task Card: test-grammar\n\n"
+        "- task_id: `test-grammar`\n"
+        "- status: ACTIVE\n\n"
+        "## Allowed files\n"
+        "- `a.py`\n\n"
+        "## Verification commands\n"
+        "Please run the test suite carefully.\n"
+        "Make sure to check git status.\n"
+        "- Note: this is an explanation bullet, not a command.\n"
+        "- python3 -m pytest tests/test_unquoted.py is an unquoted prose mention.\n"
+        "1. First run the tests.\n\n"
+        "```bash\n"
+        "python3 -m pytest -q tests/test_a.py\n"
+        "# this is a comment inside code block\n"
+        "git diff --check\n"
+        "```\n\n"
+        "- `pytest tests/test_b.py`\n"
+    )
+    auth = parse_task_card_authority(card_text)
+    # The authorized commands must ONLY be the exact fenced or backticked commands
+    assert set(auth.verification_commands) == {
+        ("python3", "-m", "pytest", "-q", "tests/test_a.py"),
+        ("git", "diff", "--check"),
+        ("pytest", "tests/test_b.py"),
+    }
+    # Explanations and prose lines must NOT be parsed as commands
+    for cmd in auth.verification_commands:
+        assert "Please" not in cmd
+        assert "Note:" not in cmd
+        assert "explanation" not in cmd
+        assert "First" not in cmd

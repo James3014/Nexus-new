@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
+import shlex
 import subprocess
 import tempfile
 import time
@@ -26,9 +28,27 @@ ACCEPTANCE_PACKET_SCHEMA = "external_intelligence_acceptance_packet.v1"
 CLOSURE_CAPSULE_SCHEMA = "external_intelligence_closure_capsule.v1"
 CLOSURE_RUN_SCHEMA = "external_intelligence_closure_run.v1"
 CLAIM_CEILING = "TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE"
+EXECUTABLE_TASK_CARD_STATUSES = frozenset({
+    "ACTIVE",
+    "APPROVED_IN_PROGRESS",
+})
 _SESSION_PREFIX = "ses_"
 _HEX40 = frozenset("0123456789abcdef")
 _HEX64 = _HEX40
+_ENV_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=.*$")
+
+
+@dataclass(frozen=True)
+class TaskCardAuthority:
+    task_id: str
+    status: str
+    allowed_files: tuple[str, ...]
+    verification_commands: tuple[tuple[str, ...], ...]
+    allow_deletions: bool = False
+
+    @property
+    def is_executable(self) -> bool:
+        return self.status.upper() in EXECUTABLE_TASK_CARD_STATUSES
 
 
 class ClosureError(RuntimeError):
@@ -152,30 +172,167 @@ def _receipt_identity(receipt: Mapping[str, Any]) -> str:
     return _sha256(_canonical_json(material))
 
 
+def _extract_markdown_section(text: str, heading: str) -> list[str]:
+    lines = text.splitlines()
+    marker = f"## {heading}".lower()
+    start = -1
+    for idx, line in enumerate(lines):
+        if line.strip().lower() == marker:
+            start = idx + 1
+            break
+    if start == -1:
+        return []
+    end = len(lines)
+    for idx in range(start, len(lines)):
+        if lines[idx].startswith("## "):
+            end = idx
+            break
+    return lines[start:end]
+
+
+def _frontmatter_value(text: str, key: str) -> str | None:
+    patterns = (
+        rf"^\s*-\s+{re.escape(key)}:\s*`([^`]+)`\s*$",
+        rf"^\s*\*\*{re.escape(key)}:\*\*\s*`([^`]+)`\s*$",
+        rf"^\s*-\s+{re.escape(key)}:\s*([^\s]+)\s*$",
+        rf"^\s*\*\*{re.escape(key)}:\*\*\s*([^\s]+)\s*$",
+        rf"^\s*{re.escape(key)}:\s*`([^`]+)`\s*$",
+        rf"^\s*{re.escape(key)}:\s*([^\s]+)\s*$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.MULTILINE | re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+    return None
+
+
+def parse_task_card_authority(text: str) -> TaskCardAuthority:
+    task_id = _frontmatter_value(text, "task_id") or ""
+    status = _frontmatter_value(text, "status") or ""
+
+    allowed_lines = _extract_markdown_section(text, "Allowed files")
+    allowed_files: list[str] = []
+    if allowed_lines:
+        for raw in allowed_lines:
+            line = raw.strip()
+            if not line or line.startswith("```"):
+                continue
+            matches = re.findall(r"`([^`]+)`", line)
+            if matches:
+                for m in matches:
+                    p = m.strip()
+                    if p and not p.startswith("#"):
+                        allowed_files.append(p)
+            else:
+                if line.startswith(("- ", "* ")):
+                    line = line[2:].strip()
+                if line and not line.startswith("#"):
+                    allowed_files.append(line)
+    else:
+        inline = re.search(r"Allowed files:\s*(.*)", text, re.IGNORECASE)
+        if inline:
+            matches = re.findall(r"`([^`]+)`", inline.group(1))
+            for m in matches:
+                allowed_files.append(m.strip())
+
+    cleaned_allowed: list[str] = []
+    for p in allowed_files:
+        try:
+            cleaned_allowed.append(_safe_relative_path(p))
+        except Exception:
+            continue
+
+    v_lines = _extract_markdown_section(text, "Verification commands")
+    commands: set[tuple[str, ...]] = set()
+    in_fence = False
+    for raw in v_lines:
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("```"):
+            fence_lang = line[3:].strip().lower()
+            if not in_fence:
+                if fence_lang in ("", "bash", "sh", "shell", "zsh"):
+                    in_fence = True
+            else:
+                in_fence = False
+            continue
+
+        cmd_str: str | None = None
+        if in_fence:
+            if line.startswith("#"):
+                continue
+            if line.startswith(("- ", "* ")):
+                line = line[2:].strip()
+            if line.startswith("`") and line.endswith("`") and len(line) >= 2:
+                line = line[1:-1].strip()
+            cmd_str = line
+        else:
+            m = re.match(r"^(?:[-*]\s*)?`([^`]+)`\s*$", line)
+            if m:
+                cand = m.group(1).strip()
+                if not cand.startswith("#"):
+                    cmd_str = cand
+
+        if not cmd_str:
+            continue
+        try:
+            tokens = shlex.split(cmd_str)
+        except ValueError:
+            continue
+        while tokens and _ENV_RE.match(tokens[0]):
+            tokens.pop(0)
+        if tokens:
+            commands.add(tuple(tokens))
+
+    del_val = (
+        _frontmatter_value(text, "allow_deletions")
+        or _frontmatter_value(text, "worker_may_delete")
+        or _frontmatter_value(text, "deletions_allowed")
+    )
+    allow_del = str(del_val).lower() in ("true", "1", "yes") if del_val else False
+
+    return TaskCardAuthority(
+        task_id=task_id,
+        status=status,
+        allowed_files=tuple(sorted(dict.fromkeys(cleaned_allowed))),
+        verification_commands=tuple(sorted(commands)),
+        allow_deletions=allow_del,
+    )
+
+
 def _verify_task_card_binding(
-    repository_root: Path, task_card_ref: str, task_card_hash: str
-) -> None:
-    relative = _safe_relative_path(task_card_ref)
+    repository_root: Path, main_sha: str, task_card_ref: str, task_card_hash: str
+) -> TaskCardAuthority:
+    if not _is_hex(main_sha, 40):
+        raise ClosureError("INVALID_MAIN_SHA")
     if not _is_hex(task_card_hash, 64):
         raise ClosureError("TASK_CARD_HASH_INVALID")
-    path = (repository_root / relative).resolve()
-    try:
-        path.relative_to(repository_root)
-    except ValueError as exc:
-        raise ClosureError("TASK_CARD_OUTSIDE_REPOSITORY") from exc
-    if not path.is_file():
-        raise ClosureError("TASK_CARD_MISSING")
-    tracked = subprocess.run(
-        ["git", "ls-files", "--error-unmatch", "--", relative],
+    relative = _safe_relative_path(task_card_ref)
+    commit_check = subprocess.run(
+        ["git", "cat-file", "-e", f"{main_sha}^{{commit}}"],
         cwd=repository_root,
         capture_output=True,
-        text=True,
         check=False,
     )
-    if tracked.returncode != 0:
-        raise ClosureError("TASK_CARD_NOT_TRACKED")
-    if _sha256(path.read_bytes()) != str(task_card_hash).lower():
+    if commit_check.returncode != 0:
+        raise ClosureError("MAIN_SHA_NOT_FOUND")
+    blob_res = subprocess.run(
+        ["git", "cat-file", "blob", f"{main_sha}:{relative}"],
+        cwd=repository_root,
+        capture_output=True,
+        check=False,
+    )
+    if blob_res.returncode != 0:
+        raise ClosureError("TASK_CARD_NOT_FOUND")
+    raw = blob_res.stdout
+    if _sha256(raw) != str(task_card_hash).lower():
         raise ClosureError("TASK_CARD_HASH_MISMATCH")
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ClosureError("TASK_CARD_DECODE_FAILED") from exc
+    return parse_task_card_authority(text)
 
 
 @dataclass(frozen=True)
@@ -960,6 +1117,7 @@ class ExternalIntelligenceClosureRuntime:
     def close_task(
         self,
         *,
+        main_sha: str,
         unit_receipts: Sequence[Mapping[str, Any]],
         unit_verifiers: Mapping[str, Sequence[Mapping[str, Any] | VerifierSpec]],
         whole_verifiers: Sequence[Mapping[str, Any] | VerifierSpec],
@@ -968,12 +1126,25 @@ class ExternalIntelligenceClosureRuntime:
         external_intelligence_refs: Sequence[str] = (),
     ) -> dict[str, Any]:
         started = time.monotonic()
-        _verify_task_card_binding(self.repository_root, task_card_ref, task_card_hash)
+        task_card_authority = _verify_task_card_binding(
+            self.repository_root, main_sha, task_card_ref, task_card_hash
+        )
+        for unit_id, specs in unit_verifiers.items():
+            for spec in specs:
+                parsed_spec = VerifierSpec.from_value(spec)
+                if parsed_spec.argv not in task_card_authority.verification_commands:
+                    raise ClosureError("VERIFIER_NOT_AUTHORIZED")
+        for spec in whole_verifiers:
+            parsed_spec = VerifierSpec.from_value(spec)
+            if parsed_spec.argv not in task_card_authority.verification_commands:
+                raise ClosureError("VERIFIER_NOT_AUTHORIZED")
         if not unit_receipts:
             raise ClosureError("UNIT_RECEIPTS_REQUIRED")
         current: dict[str, Mapping[str, Any]] = {}
         for receipt in unit_receipts:
             bound = validate_worker_receipt(receipt)
+            if bound["base_sha"] != main_sha.lower():
+                raise ClosureError("CLOSURE_BASE_SHA_MISMATCH")
             if bound["unit_id"] in current:
                 raise ClosureError("DUPLICATE_UNIT_RECEIPT")
             current[bound["unit_id"]] = receipt
