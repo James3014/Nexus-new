@@ -115,8 +115,17 @@ def _temporary_state_roots() -> tuple[Path, ...]:
     roots = [Path("/tmp"), Path("/private/tmp"), Path("/private/var/folders")]
     for variable in ("TMPDIR", "RUNNER_TEMP"):
         configured = os.getenv(variable, "").strip()
-        if configured:
-            roots.append(Path(configured).expanduser().resolve())
+        if not configured:
+            continue
+        candidate = Path(configured).expanduser()
+        if not candidate.is_absolute() or candidate == Path("/") or candidate.is_symlink():
+            continue
+        try:
+            resolved = candidate.resolve(strict=False)
+        except (OSError, RuntimeError):
+            continue
+        if resolved != Path("/"):
+            roots.append(resolved)
     return tuple(dict.fromkeys(roots))
 
 
@@ -943,9 +952,10 @@ class SelfHostedTaskService:
         ephemeral: bool = False,
     ):
         canonical = self.canonical_state_dir()
-        self.state_dir = Path(state_dir).expanduser().resolve() if state_dir is not None else canonical
+        raw_state_dir = Path(state_dir).expanduser() if state_dir is not None else canonical
+        self.state_dir = raw_state_dir.resolve()
         temporary_roots = _temporary_state_roots()
-        is_temporary = any(root == self.state_dir or root in self.state_dir.parents for root in temporary_roots)
+        is_temporary = any(root in self.state_dir.parents for root in temporary_roots)
         if self.state_dir != canonical and not ephemeral and not is_temporary:
             raise ValueError(f"production tasks must use canonical state root: {canonical}")
         self.ephemeral = ephemeral or is_temporary

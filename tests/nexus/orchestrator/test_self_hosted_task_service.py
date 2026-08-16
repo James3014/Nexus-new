@@ -1929,6 +1929,47 @@ def test_arbitrary_noncanonical_state_root_remains_rejected_with_runner_temp(tmp
         SelfHostedTaskService(state_dir=arbitrary, auto_reconcile=False)
 
 
+@pytest.mark.parametrize("configured", ["", ".", "/"])
+def test_invalid_process_temp_root_does_not_authorize_arbitrary_state(tmp_path, monkeypatch, configured):
+    monkeypatch.setenv("RUNNER_TEMP", configured)
+    arbitrary = Path("/nexus-arbitrary-invalid-runner-root-test")
+
+    with pytest.raises(ValueError, match="production tasks must use canonical state root"):
+        SelfHostedTaskService(state_dir=arbitrary, auto_reconcile=False)
+
+
+def test_symlink_process_temp_root_does_not_authorize_state(tmp_path, monkeypatch):
+    real_root = tmp_path / "real-runner-temp"
+    real_root.mkdir()
+    symlink_root = tmp_path / "runner-temp-link"
+    symlink_root.symlink_to(real_root, target_is_directory=True)
+    monkeypatch.setenv("RUNNER_TEMP", str(symlink_root))
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service._temporary_state_roots",
+        lambda: (),
+    )
+
+    with pytest.raises(ValueError, match="production tasks must use canonical state root"):
+        SelfHostedTaskService(state_dir=symlink_root / "state", auto_reconcile=False)
+
+
+def test_runner_temp_state_symlink_escape_remains_rejected(tmp_path, monkeypatch):
+    runner_root = tmp_path / "runner-temp"
+    runner_root.mkdir()
+    outside = tmp_path / "outside-state"
+    outside.mkdir()
+    escaped = runner_root / "state-link"
+    escaped.symlink_to(outside, target_is_directory=True)
+    monkeypatch.setenv("RUNNER_TEMP", str(runner_root))
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service._temporary_state_roots",
+        lambda: (runner_root.resolve(),),
+    )
+
+    with pytest.raises(ValueError, match="production tasks must use canonical state root"):
+        SelfHostedTaskService(state_dir=escaped, auto_reconcile=False)
+
+
 def test_explicit_ephemeral_custom_runner_is_test_only_and_cannot_claim(tmp_path):
     calls = []
 
