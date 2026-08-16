@@ -4,8 +4,13 @@ task_id: github-issue-65-bound-node-semantic-witnesses
 campaign_id: github-issue-65-golden-witness-bound-node-consolidation-20260815
 source_issue: "#65"
 owner: James Chen
-status: ACTIVE
+status: COMPLETE
+terminal_state: TERMINAL_RECONCILIATION
 baseline_revision: cdf2570ede5ae218f36f886b696c8da45458043a
+reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+readiness_marker: GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN
+claim_ceiling: GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN_ONLY
 commit_required: true
 candidate_required: true
 worker_may_commit: false
@@ -13,6 +18,7 @@ worker_may_push: false
 worker_may_approve: false
 worker_may_integrate: false
 AUTO_CHAIN: false
+authorized_deletions: []
 ---
 
 # Bound-node semantic Golden witnesses
@@ -86,3 +92,28 @@ Issue scope.
 
 Claim ceiling:
 `GOLDEN_WITNESS_BOUND_NODE_SEMANTICS_CANDIDATE_ONLY`.
+
+## Terminal reconciliation (2026-08-16)
+
+This card is terminal. The historical contract above is preserved as the
+implementation baseline.
+
+- Physical merge: PR #297 merged as
+  `f507199466d6a87dfec4b145df0211e8a3aa3904`, an ancestor of current main
+  `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`.
+- Historical receipts retained: prior reconciled mains
+  `c75a42279556cd515e8f5d775cecd2ecde7aa301`,
+  `ccd23defe9aa5905d26f34a865746c1eff7d039f`,
+  `586abbfb459550de912002203ff2911c7a40db58`, and
+  `cdf2570ede5ae218f36f886b696c8da45458043a` (PR #236 merge); PR #290 owns
+  the separate GB-042 corpus binding and merged as
+  `63becf8462eb1f28bf8e143139157ce82318a07d`.
+- Final evidence: 17/17 golden cases, 20/20 semantic witnesses,
+  `findings_included_in_eval=false`, evaluation report SHA256
+  `f3a65fadcc6f88449d99c3ef333e599225099874039783162a51fbaa0deb50fd`.
+- Marker: `GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN`; ceiling
+  `GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN_ONLY` (repository-contained
+  source/test/governance evidence only). `AUTO_CHAIN=false`.
+- No runtime, route, Workforce, provider, approval, integration, merge,
+  release, or production authority is granted by this reconciliation; no
+  #143 or #191 work.

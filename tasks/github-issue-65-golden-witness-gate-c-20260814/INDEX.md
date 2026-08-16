@@ -1,16 +1,56 @@
+---
+artifact_authority: current
+campaign_id: github-issue-65-golden-witness-gate-c-20260814
+issue: "#65"
+authority: Ready Issue #65 test-only hardening under the Owner's standing coordinator grant
+owner: James Chen
+status: COMPLETE
+terminal_state: TERMINAL_RECONCILIATION
+baseline_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
+reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+current_frontier: 00-gate-c-semantic-consumer-tamper-witnesses.md
+readiness_marker: GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN
+claim_ceiling: GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN_ONLY
+AUTO_CHAIN: false
+authorized_deletions: []
+maximum_files: 8
+prerequisite: Gate B physically merged as PR #231 at the exact baseline above; Gate C mutation touching the shared self-hosted service test is serialized after PR #226
+---
+
 # Issue #65 Golden Witness Gate C
 
-- campaign_id: github-issue-65-golden-witness-gate-c-20260814
-- issue: #65
-- authority: Ready Issue #65 test-only hardening under the Owner's standing coordinator grant; card preparation only
-- owner: James Chen
-- status: implementation_active
-- baseline_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
-- prerequisite: Gate B physically merged as PR #231 at the exact baseline above; Gate C mutation touching the shared self-hosted service test is serialized after PR #226
-- current_frontier: 00-gate-c-semantic-consumer-tamper-witnesses.md
-- AUTO_CHAIN: false
-- maximum_files: 8
-- claim_ceiling: GOLDEN_WITNESS_GATE_C_TASK_CARD_ONLY
+Historical Gate C test-only hardening campaign. Gate B merged as PR #231 on
+baseline `eb668fb76f0c30d8f025db42cdb8e320d556c037`; historical candidate
+ceiling `GOLDEN_WITNESS_GATE_C_SEMANTIC_TESTS_CANDIDATE_ONLY`.
+
+## Terminal reconciliation (2026-08-16)
+
+This campaign is terminal. The historical contract above is preserved as the
+implementation baseline.
+
+- Current main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c` (fresh rebind
+  target for this reconciliation).
+- Physical implementation receipts, each verified ancestor of current main:
+  - PR #236 (Gate C GB-003/GB-006/GB-029/GB-030/GB-049/GB-056/GB-072/GB-073
+    semantic consumer/tamper witnesses): merge
+    `cdf2570ede5ae218f36f886b696c8da45458043a`.
+  - PR #227 (Gate A) merge `80370ab3c5e3c3714cf378de1dba90412d1a2a7f`; PR #231
+    (Gate B) merge `a74d838cc6bb14af47ce79207181c12a1aed1d35`; PR #290
+    (GB-042 corpus binding) merge `63becf8462eb1f28bf8e143139157ce82318a07d`;
+    PR #297 (bound-node consolidation) merge
+    `f507199466d6a87dfec4b145df0211e8a3aa3904`; PR #226
+    (`a787e8e703cc9f0df6a5bb96024db1f10157b04d`) is the #31 task-continuity
+    serialization receipt for the shared self-hosted service test.
+- Final evidence: 17/17 golden cases, 20/20 semantic witnesses,
+  `findings_included_in_eval=false`, evaluation report SHA256
+  `f3a65fadcc6f88449d99c3ef333e599225099874039783162a51fbaa0deb50fd`.
+- Marker: `GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN`.
+- Claim ceiling: `GOLDEN_WITNESS_SEMANTIC_HARDENING_PROVEN_ONLY`
+  (repository-contained source/test/governance evidence only).
+- `AUTO_CHAIN=false`. No runtime, route, Workforce, provider, approval,
+  integration, merge, release, or production authority is granted by this
+  reconciliation; no #143 or #191 work.
 
 ## Scope lock
 
