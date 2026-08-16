@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import hashlib
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Any
 
-from .learn_models import LearnClaim
-from .protocols import LearnContextProtocol
 from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
 from nexus.services.mem_palace import MemPalace
+
+from .learn_models import LearnClaim
+from .protocols import LearnContextProtocol
 
 
 class IngestService:
@@ -58,9 +61,13 @@ class IngestService:
         max_files: int = 24,
         max_total_chars: int = 400_000,
     ) -> list[tuple[str, str]]:
-        repo_meta = self.ctx._http_get_json(f"https://api.github.com/repos/{owner}/{repo}", timeout=12)
+        repo_meta = self.ctx._http_get_json(
+            f"https://api.github.com/repos/{owner}/{repo}", timeout=12
+        )
         default_branch = str(repo_meta.get("default_branch") or "main")
-        tree_api = f"https://api.github.com/repos/{owner}/{repo}/git/trees/{default_branch}?recursive=1"
+        tree_api = (
+            f"https://api.github.com/repos/{owner}/{repo}/git/trees/{default_branch}?recursive=1"
+        )
         tree_data = self.ctx._http_get_json(tree_api, timeout=15)
         tree_items = tree_data.get("tree", []) if isinstance(tree_data, dict) else []
         if not isinstance(tree_items, list):
@@ -102,7 +109,9 @@ class IngestService:
             docs.append((cleaned, raw_url))
         return docs
 
-    def _load_single_source_documents(self, source: str, source_file: str | None = None) -> list[tuple[str, str]]:
+    def _load_single_source_documents(
+        self, source: str, source_file: str | None = None
+    ) -> list[tuple[str, str]]:
         if source_file:
             src_path = self.ctx._resolve_path(source_file)
             txt = self.ctx._clean_text(src_path.read_text(encoding="utf-8"))
@@ -126,7 +135,9 @@ class IngestService:
         )
         return [(seed, f"keyword://{source}")]
 
-    def _load_source_documents(self, source: str | list[str], source_file: str | None = None) -> list[tuple[str, str]]:
+    def _load_source_documents(
+        self, source: str | list[str], source_file: str | None = None
+    ) -> list[tuple[str, str]]:
         sources = self._normalize_sources(source)
         if source_file and len(sources) != 1:
             raise ValueError("source_file requires exactly one source")
@@ -135,23 +146,65 @@ class IngestService:
             docs.extend(self._load_single_source_documents(src, source_file=source_file))
         return docs
 
-    def ingest(self, source: str | list[str], source_file: str | None = None, topic: str = "") -> dict[str, Any]:
+    def ingest(
+        self, source: str | list[str], source_file: str | None = None, topic: str = ""
+    ) -> dict[str, Any]:
         normalized_sources = self._normalize_sources(source)
         docs = self._load_source_documents(normalized_sources, source_file=source_file)
         snapshot_paths: list[str] = []
-        claims: list[LearnClaim] = []
+        parsed_claims: list[LearnClaim] = []
         source_refs: list[str] = []
+        snapshot_hashes: dict[str, str] = {}
+
         for text, source_ref in docs:
             source_refs.append(source_ref)
             snap = self.ctx._save_source_snapshot(source_ref, text)
             snapshot_paths.append(str(snap))
-            claims.extend(self.ctx._split_to_claims(text, source_ref, topic_hint=topic or source_ref))
-        self.ctx._append_claims(claims)
+            snapshot_hashes[source_ref] = hashlib.sha256(snap.read_bytes()).hexdigest()
+            parsed_claims.extend(
+                self.ctx._split_to_claims(text, source_ref, topic_hint=topic or source_ref)
+            )
 
         palace = MemPalace(str(self.ctx.project_root))
-        verified = palace.verify([c.to_dict() for c in claims])
-        verified_count = len(verified)
-        channel_counts = self._build_channel_counts(claims)
+        try:
+            sync_res = palace.sync()
+            if isinstance(sync_res, dict) and sync_res.get("status") == "SUCCESS":
+                verified = palace.verify([c.to_dict() for c in parsed_claims])
+                verified_keys = {
+                    self.ctx._claim_key(cand) for cand in verified if isinstance(cand, dict)
+                }
+            else:
+                verified_keys = set()
+        except Exception:
+            verified_keys = set()
+
+        admitted_claims: list[LearnClaim] = []
+        verifier_identity = "mempalace.verify"
+        for claim in parsed_claims:
+            c_key = self.ctx._claim_key(claim)
+            if c_key in verified_keys:
+                snap_sha = snapshot_hashes.get(claim.source_url, "")
+                proof = self.ctx._compute_admission_proof(
+                    claim_key=c_key,
+                    source_snapshot_sha256=snap_sha,
+                    verifier=verifier_identity,
+                    status="ADMITTED",
+                )
+                admitted = replace(
+                    claim,
+                    admission_status="ADMITTED",
+                    admission_verifier=verifier_identity,
+                    source_snapshot_sha256=snap_sha,
+                    admission_claim_key=c_key,
+                    admission_proof=proof,
+                )
+                admitted_claims.append(admitted)
+
+        # Append ONLY admitted claims to durable store
+        self.ctx._append_claims(admitted_claims)
+
+        verified_count = len(admitted_claims)
+        channel_counts = self._build_channel_counts(admitted_claims)
 
         store = FindingsMemoryStore(self.ctx.project_root)
         source_hint = ", ".join(normalized_sources[:3])
@@ -164,7 +217,7 @@ class IngestService:
             confidence="medium",
             evidence_paths=[str(self.ctx.claims_path)] + snapshot_paths[:8],
             retrieval_hints=[topic or source_hint],
-            body=f"Ingested {len(claims)} claims from {len(docs)} source docs.",
+            body=f"Ingested {len(admitted_claims)} claims (from {len(parsed_claims)} parsed) from {len(docs)} source docs.",
             task_id=f"learn-{int(datetime.now(timezone.utc).timestamp())}",
             extra={"verified_claims": verified_count, "source_refs": source_refs[:12]},
         )
@@ -175,7 +228,7 @@ class IngestService:
             "source": source,
             "source_ref": source_refs[0] if source_refs else "",
             "source_refs": source_refs[:20],
-            "claims_count": len(claims),
+            "claims_count": len(parsed_claims),
             "verified_claims_count": verified_count,
             "sources_count": len(set(source_refs)),
             "documents_ingested": len(docs),
@@ -191,7 +244,9 @@ class IngestService:
             status=report["status"],
             reason="ingest_completed",
             topic_or_source=topic or source_hint,
-            evidence_paths=[str(self.ctx.claims_path)] + snapshot_paths[:8] + ([card_path] if card_path else []),
+            evidence_paths=[str(self.ctx.claims_path)]
+            + snapshot_paths[:8]
+            + ([card_path] if card_path else []),
             retrieval_hints=[topic or source_hint],
             metrics={
                 "claims_count": report["claims_count"],
@@ -208,7 +263,13 @@ class IngestService:
                 claims_count=report["claims_count"],
             )
 
-        required_fields = ("status", "claims_count", "verified_claims_count", "sources_count", "documents_ingested")
+        required_fields = (
+            "status",
+            "claims_count",
+            "verified_claims_count",
+            "sources_count",
+            "documents_ingested",
+        )
         missing = [field for field in required_fields if field not in report]
         if missing:
             raise RuntimeError(f"learn_ingest_contract_violation: missing={missing}")
