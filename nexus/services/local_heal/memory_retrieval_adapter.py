@@ -98,13 +98,21 @@ def validate_retrieved_lesson_context_binding(
     lessons: list[RetrievedLesson],
     retrieval_receipt: dict[str, Any],
     retrieval_receipt_hash: str,
+    *,
+    query_text: str,
 ) -> bool:
     """Fail closed unless selected lessons exactly match the existing retrieval receipt."""
     if not lessons:
         return not retrieval_receipt and not retrieval_receipt_hash
     if not isinstance(retrieval_receipt, dict) or not retrieval_receipt:
         return False
+    if not isinstance(query_text, str) or not query_text.strip():
+        return False
     if retrieval_receipt.get("schema") != "nexus.retrieval_receipt.v1":
+        return False
+    if str(retrieval_receipt.get("query") or "") != query_text:
+        return False
+    if str(retrieval_receipt.get("index_snapshot_id") or "") != _build_index_snapshot_id(lessons):
         return False
     if str(retrieval_receipt.get("status") or "").upper() != "PASS":
         return False
@@ -148,10 +156,15 @@ def format_retrieved_lesson_context(
     lessons: list[RetrievedLesson],
     retrieval_receipt: dict[str, Any],
     retrieval_receipt_hash: str,
+    *,
+    query_text: str,
 ) -> str:
     """Render advisory memory only when identity/provenance receipt binding validates."""
     if not validate_retrieved_lesson_context_binding(
-        lessons, retrieval_receipt, retrieval_receipt_hash
+        lessons,
+        retrieval_receipt,
+        retrieval_receipt_hash,
+        query_text=query_text,
     ):
         return ""
     lines = ["\n\n=== RELEVANT HISTORICAL LESSONS ==="]
@@ -203,7 +216,12 @@ def _build_existing_retrieval_receipt(
         results=results,
     )
     receipt_hash = _retrieval_receipt_digest(receipt)
-    if not validate_retrieved_lesson_context_binding(lessons, receipt, receipt_hash):
+    if not validate_retrieved_lesson_context_binding(
+        lessons,
+        receipt,
+        receipt_hash,
+        query_text=query_text,
+    ):
         return {}, "", []
     for item in lineage:
         item["retrieval_receipt_hash"] = receipt_hash
@@ -646,11 +664,13 @@ class CanonicalEpisodicMemoryLessonStore:
             state for state in validity.values() if state.get("validity_state") == "invalidated"
         ]
         self.last_metadata["invalidated_episode_count"] = len(invalidated_states)
-        self.last_metadata["invalidation_event_count"] = len({
-            state["invalidated_by_episode_id"]
-            for state in invalidated_states
-            if state.get("invalidated_by_episode_id")
-        })
+        invalidation_event_ids = {
+            str(event.get("invalidated_by_episode_id") or "")
+            for state in validity.values()
+            for event in (state.get("invalidation_events") or [])
+            if isinstance(event, dict) and event.get("invalidated_by_episode_id")
+        }
+        self.last_metadata["invalidation_event_count"] = len(invalidation_event_ids)
         for entry in canonical_entries:
             if not isinstance(entry, dict):
                 continue

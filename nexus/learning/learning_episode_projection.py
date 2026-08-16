@@ -64,6 +64,7 @@ def reduce_learning_episode_validity(
                 "invalidation_disposition": "",
                 "invalidation_evidence_refs": [],
                 "invalidation_position": None,
+                "invalidation_events": [],
             },
         )
         disposition = str(entry.get("lesson_disposition") or "").strip().lower()
@@ -79,13 +80,23 @@ def reduce_learning_episode_validity(
             # control row cannot poison an episode that has not appeared yet.
             if target_id == episode_id or target_id not in states:
                 continue
-            states[target_id] = {
-                "validity_state": "invalidated",
-                "retrieval_eligible": False,
+            prior_events = [
+                dict(item)
+                for item in (states[target_id].get("invalidation_events") or [])
+                if isinstance(item, Mapping)
+            ]
+            event = {
                 "invalidated_by_episode_id": episode_id,
                 "invalidation_disposition": disposition,
                 "invalidation_evidence_refs": _evidence_refs(entry),
                 "invalidation_position": position,
+            }
+            prior_events.append(event)
+            states[target_id] = {
+                "validity_state": "invalidated",
+                "retrieval_eligible": False,
+                **event,
+                "invalidation_events": prior_events,
             }
     return states
 

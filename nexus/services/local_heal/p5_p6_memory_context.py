@@ -70,7 +70,10 @@ def build_p5_p6_memory_context(
         retrieval_receipt = dict(adapter.last_metadata.get("retrieval_receipt") or {})
         retrieval_receipt_hash = str(adapter.last_metadata.get("retrieval_receipt_hash") or "")
         if not validate_retrieved_lesson_context_binding(
-            lessons, retrieval_receipt, retrieval_receipt_hash
+            lessons,
+            retrieval_receipt,
+            retrieval_receipt_hash,
+            query_text=query_text,
         ):
             return P5P6MemoryContext(
                 memory_trace=build_memory_trace_from_adapter(

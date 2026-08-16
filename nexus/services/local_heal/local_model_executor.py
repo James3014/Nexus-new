@@ -1363,6 +1363,7 @@ class LocalModelExecutor:
                 lessons,
                 dict(memory_adapter_metadata.get("retrieval_receipt") or {}),
                 str(memory_adapter_metadata.get("retrieval_receipt_hash") or ""),
+                query_text=request.problem_statement,
             )
         if memory_retrieval_attempted and memory_adapter_metadata:
             memory_adapter_metadata["prompt_included"] = bool(memory_context)

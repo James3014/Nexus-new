@@ -641,6 +641,39 @@ def test_g3_invalidation_event_count_truthful_cardinality_multiple_targets(tmp_p
     assert store.last_metadata["invalidated_episode_count"] == 2
 
 
+def test_g3_invalidation_event_count_preserves_multiple_events_for_one_target(tmp_path):
+    """Two later invalidators of one episode are two events but one invalidated episode."""
+    prior = _episode(idempotency_key="ep-g3-history-prior")
+    first = _episode(
+        task_id="github-issue-g3-history-first",
+        terminal_outcome="FAILED",
+        terminal_evidence={"receipt": "receipt:g3-history-first", "verifier_status": "FAIL"},
+        retrieved_lesson_ids=[prior["episode_id"]],
+        applied_lesson_ids=[prior["episode_id"]],
+        lesson_disposition="contradict",
+        idempotency_key="ep-g3-history-first",
+    )
+    second = _episode(
+        task_id="github-issue-g3-history-second",
+        terminal_outcome="RETIRED",
+        terminal_evidence={"receipt": "receipt:g3-history-second", "verifier_status": "FAIL"},
+        retrieved_lesson_ids=[prior["episode_id"]],
+        applied_lesson_ids=[prior["episode_id"]],
+        qualification={},
+        lesson_disposition="retire",
+        idempotency_key="ep-g3-history-second",
+    )
+    _write_ledger(tmp_path, [json.dumps(prior), json.dumps(first), json.dumps(second)])
+    store = CanonicalEpisodicMemoryLessonStore(project_root=tmp_path)
+
+    rows = store.query(query_text="canonical", limit=5)
+
+    assert rows == []
+    assert store.last_metadata["rejected_invalidated"] == 1
+    assert store.last_metadata["invalidation_event_count"] == 2
+    assert store.last_metadata["invalidated_episode_count"] == 1
+
+
 def test_adapter_fails_closed_when_receipt_binding_fails(tmp_path, monkeypatch):
     """Adapter retrieve/retrieve_reranked must fail closed if receipt binding fails."""
     import nexus.services.local_heal.memory_retrieval_adapter as mra
