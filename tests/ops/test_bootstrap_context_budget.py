@@ -19,6 +19,7 @@ def test_l0_keeps_authority_and_uses_conditional_load_map():
         "docs/agents/LEARNING_WRITEBACK_OVERLAY.md",
         "CapabilityPlanner",
         "HARD_BLOCK",
+        "DIRECT_DELEGATED",
     ):
         assert token in agents
     for legacy_scope in ("max_files_touched", "allowed_paths", "forbidden_paths", "Tool Execution Rules"):

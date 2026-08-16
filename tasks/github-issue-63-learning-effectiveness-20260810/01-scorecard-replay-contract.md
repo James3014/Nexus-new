@@ -1,11 +1,12 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: COMPLETE
 task_id: github-issue-63-scorecard-replay-contract
 campaign_id: github-issue-63-learning-effectiveness-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/63
 AUTO_CHAIN: false
+reconciliation: TERMINAL_RECONCILIATION
 worker_may_commit: false
 worker_may_approve: false
 worker_may_integrate: false
@@ -91,3 +92,42 @@ integration, policy improvement, route improvement, or production readiness.
 `RECOVERABLE_BLOCK` for environment/test infrastructure failures.
 `HARD_BLOCK` for missing identity semantics, required edits outside the two
 allowed implementation files, or any request to weaken the claim boundary.
+
+## Terminal reconciliation (2026-08-14)
+
+This card is terminal. Historical objective, baseline/dependencies, allowed
+implementation files, required contract, forbidden scope, verification,
+exit/claim ceiling, and block class above are preserved unchanged as the
+implementation baseline.
+
+- Issue #63: CLOSED/completed 2026-08-11T00:30:16Z. Owner receipt
+  `5253012285` (`POST_MERGE_RECONCILIATION_20260811`) records disposition
+  `PRODUCT_COMPLETE / STALE_CARD_ONLY` and authorizes exactly this two-card
+  governance reconciliation.
+- Dependency gate: Issue #82 / PR83 impact-map merge preceded the final PR80
+  rebind, satisfying the `ISSUE82_IMPACT_MAP_SETTLE_THEN_PR80_EXACT_BASE_REVERIFY_GATE`.
+- PR80: base `41e5ee06eeecb4abd7df7c15c36af13142a1da56` -> head
+  `46b55c5a28c71e98e5bdd77f25f2b6064b64f70b` -> merge
+  `b025f86a0456d9a7c892368e0fd0fab6d0607614`; delivered exactly
+  `nexus/learning/learning_effectiveness_measurement.py` and
+  `tests/learning/test_learning_effectiveness_measurement.py` plus this card
+  and INDEX (4 files, +1362/-0); merged 2026-08-11T00:30:15Z; closes #63.
+- PR80 head exact-base checks: 5/5 success (Pyright 31445937788, Wiki
+  Governance 31445937753, Ruff 31445937745, Bandit 31445937759, Pytest
+  31445937764). Tier 3 skipped. PR80 evidence: Task Card SHA-256
+  `b5ce286dc94ae73c93f122906eea039f37597da3bb41b3233c44c74ad29385fa`;
+  independent hostile review ACCEPT; `uv run pytest -q tests/learning` 293
+  passed; dedicated hostile matrix 51 passed; `git diff --check` PASS.
+- Current main `63becf8462eb1f28bf8e143139157ce82318a07d` (rebind target,
+  includes PR #244 and later merges); prior reconciled mains
+  `cdf2570ede5ae218f36f886b696c8da45458043a` and
+  `586abbfb459550de912002203ff2911c7a40db58` retained as historical receipts;
+  merge ancestry
+  verified via `git merge-base --is-ancestor`; reducer/tests remain present on
+  current main.
+- Marker: `LEARNING_EFFECTIVENESS_SCORECARD_REPLAYED`.
+- Claim ceiling: deterministic observational replay only. This reconciliation
+  does not prove measured or causal uplift, runtime integration, adaptation,
+  route/policy improvement, Candidate acceptance, or production readiness, and
+  grants no runtime, route, Workforce, provider, approval, integration, merge,
+  release, or production authority.

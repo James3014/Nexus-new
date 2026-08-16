@@ -91,42 +91,27 @@ def test_mainchain_capability_and_current_availability_are_separate() -> None:
     assert agy["availability"] == "AVAILABLE"
     assert agy["preferred_context"] == "nexus_bounded"
 
-    medium = workers["agy_flash_medium"]
-    assert medium == {
-        "provider": "agy",
-        "model": "gemini-3.6-flash-medium",
-        "state": "REGISTERED_CONDITIONAL",
-        "availability": "AVAILABLE",
-        "autonomy": "L1",
-        "roles": [
-            "bounded_candidate_generation",
-            "fast_bounded_implementation",
-            "focused_verification",
-        ],
-        "preferred_context": "nexus_bounded",
-        "default_route": False,
-        "requires": [
-            "task_card",
-            "allowed_files",
-            "mandatory_commands",
-            "parser",
-            "verifier",
-            "independent_verification",
-        ],
-        "forbidden_actions": [
-            "route_authority",
-            "approval",
-            "integration",
-            "push",
-            "release",
-            "production_claim",
-            "public_claim",
-        ],
-        "calibration_evidence": {
-            "status": "CONDITIONAL",
-            "provider_model_revision": "UNRESOLVED",
-            "inherits_high_evidence": False,
-        },
+    medium_36 = workers["agy_flash_medium"]
+    assert medium_36["model"] == "gemini-3.6-flash-medium"
+    assert medium_36["autonomy"] == "L1"
+    assert medium_36["default_route"] is False
+    assert medium_36["calibration_evidence"]["inherits_high_evidence"] is False
+
+    medium_37 = workers["agy_flash_37_medium"]
+    assert medium_37["provider"] == "agy"
+    assert medium_37["model"] == "gemini-3.7-flash-medium"
+    assert medium_37["state"] == "REGISTERED_CONDITIONAL"
+    assert medium_37["availability"] == "AVAILABLE"
+    assert medium_37["autonomy"] == "L3"
+    assert medium_37["default_route"] is False
+    assert medium_37["calibration_evidence"] == {
+        "status": "OWNER_APPROVED_CEILING",
+        "lineage": "gemini-3.7-flash-medium",
+        "stable_floor": "L3",
+        "current_frontier": "L4",
+        "conditional_ceiling": "L3",
+        "experimental_ceiling": "L4",
+        "experimental_l4_admitted": False,
     }
 
     grok = workers["grok_review"]
@@ -150,12 +135,14 @@ def test_required_remote_workers_have_current_fail_closed_states() -> None:
 
 
 def test_owner_approved_deepseek_l1_role_writeback_is_bounded_and_evidence_bound() -> None:
+    # Preserve the historical logical node for exact-base comparison.
+    # The assertions below bind the current L2 policy.
     worker = _manifest()["workers"]["opencode_deepseek_v4_flash"]
     assert worker["provider"] == "opencode"
     assert worker["model"] == "opencode/deepseek-v4-flash-free"
     assert worker["state"] == "REGISTERED_CONDITIONAL"
     assert worker["availability"] == "AVAILABLE"
-    assert worker["autonomy"] == "L1"
+    assert worker["autonomy"] == "L2"
     assert worker["default_route"] is False
     assert worker["roles"] == ["bounded_candidate_generation", "compact_code_candidate"]
     assert {"parser", "focused_tests", "verifier"} <= set(worker["requires"])
@@ -170,12 +157,13 @@ def test_owner_approved_deepseek_l1_role_writeback_is_bounded_and_evidence_bound
         "push",
     } <= set(worker["forbidden_actions"])
     evidence = worker["requalification_evidence"]
-    assert evidence["date"] == "2026-08-11"
+    assert evidence["date"] == "2026-08-15"
     assert evidence["repetitions"] == 2
     assert evidence["provider"] == "opencode"
     assert evidence["model"] == "opencode/deepseek-v4-flash-free"
     assert evidence["opencode_version"] == "1.17.20"
     assert evidence["provider_model_revision"] == "UNRESOLVED"
+    assert evidence["lineage"] == "deepseek-v4-flash"
     assert evidence["arm_results"] == {
         "R2": {"bare": "11/11", "nexus_bounded": "11/11", "nexus_full": "11/11"},
         "R3": {"bare": "11/11", "nexus_bounded": "11/11", "nexus_full": "11/11"},
@@ -189,11 +177,12 @@ def test_owner_approved_deepseek_l1_role_writeback_is_bounded_and_evidence_bound
         "PR_85_merge_sha": "8f7c75ca08a6c88fad9b791f254d38d79ad8bf29",
     }
     assert evidence["role_recommendation"] == "bounded_code_candidate"
-    assert evidence["autonomy_ceiling"] == "L1"
+    assert evidence["autonomy_ceiling"] == "L2"
+    assert evidence["experimental_l4_admitted"] is False
     assert evidence["public_claim"] is False
     policy = POLICY_PATH.read_text(encoding="utf-8")
-    assert "Dated Owner-approved amendment — 2026-08-11" in policy
-    assert "L1.5 candidate/reviewer proposal is **NOT APPROVED**" in policy
+    assert "Dated Owner-approved amendment — 2026-08-15" in policy
+    assert "DeepSeek V4 Flash (`opencode_deepseek_v4_flash`)" in policy
 
 
 def test_local_workers_have_evidence_specific_context_and_autonomy_boundaries() -> None:
@@ -345,3 +334,55 @@ def test_agents_must_read_both_model_workforce_authorities() -> None:
     assert "docs/arch/MODEL_WORKFORCE_POLICY.md" in overlay
     assert "nexus/config/model_workforce.yaml" in overlay
     assert "Local output and delegated output are candidates" in overlay
+
+
+def test_three_layers_lineage_and_ceiling_constraints() -> None:
+    manifest = _manifest()
+    workers = manifest["workers"]
+
+    # Layer distinction
+    semantic_layers = manifest["evidence_layers"]["semantic_layers"]
+    assert (
+        "semantic_capability_lineage != exact_execution_identity != admitted_authority"
+        in semantic_layers["distinction"]
+    )
+    assert semantic_layers["exact_identity_matching"] == "strict_fail_closed"
+    assert semantic_layers["route_authority"] == "CapabilityPlanner_sole_authority"
+
+    # CapabilityPlanner sole route authority
+    assert manifest["route_authority"] == "CapabilityPlanner"
+
+    # Preserve the existing Gemini 3.6 Medium identity and register 3.7 separately.
+    gemini_36_medium = workers["agy_flash_medium"]
+    assert gemini_36_medium["model"] == "gemini-3.6-flash-medium"
+    assert gemini_36_medium["autonomy"] == "L1"
+    assert gemini_36_medium["default_route"] is False
+
+    # Gemini 3.7 Flash Medium: ceiling L3, non-default, no L4.
+    gemini_medium = workers["agy_flash_37_medium"]
+    assert gemini_medium["model"] == "gemini-3.7-flash-medium"
+    assert gemini_medium["autonomy"] == "L3"
+    assert gemini_medium["default_route"] is False
+    assert gemini_medium["calibration_evidence"]["experimental_l4_admitted"] is False
+
+    # DeepSeek V4 Flash: ceiling L2, non-default, no L4
+    deepseek_worker = workers["opencode_deepseek_v4_flash"]
+    assert deepseek_worker["model"] == "opencode/deepseek-v4-flash-free"
+    assert deepseek_worker["autonomy"] == "L2"
+    assert deepseek_worker["default_route"] is False
+    assert deepseek_worker["requalification_evidence"]["lineage"] == "deepseek-v4-flash"
+    assert deepseek_worker["requalification_evidence"]["experimental_l4_admitted"] is False
+
+    # Exact execution identity matching: opencode-go alias shares lineage only
+    registered_models = {w["model"] for w in workers.values()}
+    assert "opencode/deepseek-v4-flash-free" in registered_models
+    assert "opencode-go/deepseek-v4-flash" not in registered_models
+
+    # Requalification protocol and phase separation
+    proto = manifest["evidence_layers"]["requalification_protocol"]
+    assert proto["distinct_phases"] == [
+        "FIRST_PASS",
+        "HIDDEN_DEFECT_PROBES",
+        "VERIFIER_GUIDED_REPAIR",
+    ]
+    assert proto["experimental_l4_not_admitted"] is True
