@@ -94,13 +94,19 @@ authority, evidence-integrity, or specification conflict is `HARD_BLOCK`.
 - Reconciled current main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`
   (prior reconciled main `cdf2570ede5ae218f36f886b696c8da45458043a`;
   historical verification receipt `eb668fb76f0c30d8f025db42cdb8e320d556c037`
-  from the 2026-08-13 snapshot); readback confirms the DeepSeek entry remains
+  from the 2026-08-13 snapshot).
+- Two temporal facts: at PR #110 / Issue #107 merge time, the DeepSeek entry
+  was Owner-approved and read back as
   `REGISTERED_CONDITIONAL`/`AVAILABLE`/`L1`/`default_route: false` with roles
   `bounded_candidate_generation` and `compact_code_candidate`, per-dispatch
   `second_repetition`/`physical_patch_suite` controls removed, dated
   `requalification_evidence` preserving R2/R3 and PR #84/#85 merge SHAs, the
   2026-08-11 policy amendment present, and the L1.5 reviewer proposal
-  explicitly NOT APPROVED.
+  explicitly NOT APPROVED. Current main `46e21858` since commit `eb0c746f`
+  (2026-08-15 writeback) records `autonomy: L2` for
+  `opencode_deepseek_v4_flash`; that later promotion is not authorized by and
+  is not re-claimed by Issue #107 / PR #261, which remain bound to the
+  historical Owner-approved L1 writeback receipt.
 
 `OWNER_APPROVED_DEEPSEEK_L1_ROLE_WRITEBACK_PROVEN` proves only the exact
 Workforce policy/manifest write-back reconciliation. It grants no provider

@@ -30,11 +30,14 @@ PR #110 physically merged exact head
 `89ed130ac5d3ad58106e7d9ba8f0d3a65066fdc2`, with an exact six-file scope
 (policy, manifest, two tests, and this campaign pair) and five exact-head
 workflows completed successfully. The Owner receipt on Issue #107 records
-physical completion. Current main readback confirms
-`opencode_deepseek_v4_flash` remains
-`REGISTERED_CONDITIONAL`/`AVAILABLE`/`L1`/`default_route: false` with bounded
-candidate roles only, the dated 2026-08-11 policy amendment is recorded, and
-the L1.5 reviewer proposal remains NOT APPROVED.
+physical completion. At PR #110 / Issue #107 merge time, the DeepSeek entry
+read back as `REGISTERED_CONDITIONAL`/`AVAILABLE`/`L1`/`default_route: false`
+with bounded candidate roles only, the dated 2026-08-11 policy amendment was
+recorded, and the L1.5 reviewer proposal was NOT APPROVED. Current main
+`46e21858` since commit `eb0c746f` (2026-08-15 writeback) records
+`autonomy: L2` for `opencode_deepseek_v4_flash`; that later promotion is not
+authorized by and is not re-claimed by Issue #107 / PR #261, which remain
+bound to the historical Owner-approved L1 writeback receipt.
 
 `OWNER_APPROVED_DEEPSEEK_L1_ROLE_WRITEBACK_PROVEN` is limited to the exact
 Workforce policy/manifest write-back reconciliation. It grants no provider
