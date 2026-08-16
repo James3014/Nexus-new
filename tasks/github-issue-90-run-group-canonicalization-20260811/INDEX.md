@@ -6,8 +6,8 @@ campaign_id: github-issue-90-run-group-canonicalization-20260811
 source_issue: https://github.com/James3014/Nexus-new/issues/90
 baseline_main: 0b97df90bbebbd90d0811d46ba73c47e46fe1878
 historical_baseline: 0b97df90bbebbd90d0811d46ba73c47e46fe1878
-reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
-current_main: cdf2570ede5ae218f36f886b696c8da45458043a
+reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
 ordered_cards:
   - 01-run-group-canonicalization.md
 current_frontier: TERMINAL_RECONCILIATION
