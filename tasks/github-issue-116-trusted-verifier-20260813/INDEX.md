@@ -5,8 +5,9 @@ status: active
 purpose: Issue #116 trusted default-branch Golden verifier repair.
 authority: Owner standing coordinator grant; issue branch and Draft PR only.
 repository: James3014/Nexus-new
-base: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
-repair_from_head: 2654dd58fa606f7e36271b66a77b71923f5e234a
+base: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+historical_base: 12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601
+historical_repair_from_head: 2654dd58fa606f7e36271b66a77b71923f5e234a
 max_files: 8
 authorized_deletions: []
 AUTO_CHAIN: false
@@ -19,6 +20,12 @@ This campaign adds a default-branch-controlled, fail-closed verifier for the
 exact pull-request head's Golden corpus. It is independent of same-name jobs
 published by a PR branch. It does not mutate `main`, rulesets, branch
 protection, or production behavior.
+
+Binding history: the active base is current live
+`46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`; the earlier
+`12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601` base and
+`2654dd58fa606f7e36271b66a77b71923f5e234a` repair head remain historical
+identity only and are not re-authorized by this card.
 
 Active card: `01-trusted-golden-verifier.md`.
 
