@@ -651,7 +651,9 @@ def test_adapter_fails_closed_when_receipt_binding_fails(tmp_path, monkeypatch):
     )
 
     # Force validate_retrieved_lesson_context_binding to fail
-    monkeypatch.setattr(mra, "validate_retrieved_lesson_context_binding", lambda *args, **kwargs: False)
+    monkeypatch.setattr(
+        mra, "validate_retrieved_lesson_context_binding", lambda *args, **kwargs: False
+    )
 
     lessons = adapter.retrieve(query_text="canonical", limit=5)
     assert lessons == []

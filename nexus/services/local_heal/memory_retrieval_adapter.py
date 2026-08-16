@@ -117,7 +117,9 @@ def validate_retrieved_lesson_context_binding(
             return False
     except Exception:
         return False
-    if not retrieval_receipt_hash or retrieval_receipt_hash != _retrieval_receipt_digest(retrieval_receipt):
+    if not retrieval_receipt_hash or retrieval_receipt_hash != _retrieval_receipt_digest(
+        retrieval_receipt
+    ):
         return False
     results = retrieval_receipt.get("results")
     if not isinstance(results, list) or len(results) != len(lessons):
@@ -644,13 +646,11 @@ class CanonicalEpisodicMemoryLessonStore:
             state for state in validity.values() if state.get("validity_state") == "invalidated"
         ]
         self.last_metadata["invalidated_episode_count"] = len(invalidated_states)
-        self.last_metadata["invalidation_event_count"] = len(
-            {
-                state["invalidated_by_episode_id"]
-                for state in invalidated_states
-                if state.get("invalidated_by_episode_id")
-            }
-        )
+        self.last_metadata["invalidation_event_count"] = len({
+            state["invalidated_by_episode_id"]
+            for state in invalidated_states
+            if state.get("invalidated_by_episode_id")
+        })
         for entry in canonical_entries:
             if not isinstance(entry, dict):
                 continue
