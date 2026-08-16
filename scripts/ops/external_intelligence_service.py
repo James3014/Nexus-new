@@ -20,6 +20,7 @@ from nexus.services.external_intelligence import (
 from nexus.services.external_intelligence_automation import (
     AutomationStateStore,
     ExternalIntelligenceAutomation,
+    _normalize_github_repo,
 )
 from nexus.services.external_intelligence_closure import (
     ClosureStore,
@@ -222,15 +223,78 @@ def render_comment(result: Mapping[str, Any]) -> str:
     )
 
 
+def refresh_remote_main(repo_root: Path, repository: str, timeout: float = 30.0) -> None:
+    remotes_res = subprocess.run(
+        ["git", "remote", "-v"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout,
+    )
+    if remotes_res.returncode != 0:
+        raise ServiceError("REMOTE_MAIN_REFRESH_FAILED")
+    remote_map: dict[str, str] = {}
+    for line in remotes_res.stdout.splitlines():
+        parts = line.strip().split()
+        if len(parts) >= 2:
+            remote_map[parts[0]] = parts[1]
+
+    target_repo = _normalize_github_repo(repository)
+    matching_remote: str | None = None
+    for r_name, r_url in remote_map.items():
+        if _normalize_github_repo(r_url) == target_repo:
+            matching_remote = r_name
+            break
+    if not matching_remote:
+        raise ServiceError("REPOSITORY_IDENTITY_MISMATCH")
+
+    refspec = f"refs/heads/main:refs/remotes/{matching_remote}/main"
+    fetch_res = subprocess.run(
+        ["git", "fetch", "--no-tags", matching_remote, refspec],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout,
+    )
+    if fetch_res.returncode != 0:
+        raise ServiceError("REMOTE_MAIN_REFRESH_FAILED")
+
+
 def run_once(
     config: ServiceConfig,
     gh: GhIssueTransport | Any | None = None,
     automation_factory=build_automation,
+    refresh_fn=refresh_remote_main,
 ) -> dict[str, Any]:
     gh = gh or GhIssueTransport()
     last: dict[str, Any] | None = None
     for repository in config.repositories:
         issues = gh.list_open_labeled(repository, config.label)
+        if not issues:
+            continue
+        repo_root = Path(config.repository_roots[repository]).expanduser().resolve()
+        try:
+            refresh_fn(repo_root, repository)
+        except Exception as exc:
+            err = (
+                str(exc)
+                if str(exc) in {"REPOSITORY_IDENTITY_MISMATCH", "REMOTE_MAIN_REFRESH_FAILED"}
+                else "REMOTE_MAIN_REFRESH_FAILED"
+            )
+            first_issue_num = int(issues[0].get("number") or 0) if issues else 0
+            last = {
+                "status": "BLOCKED",
+                "repository": repository,
+                "issue_number": first_issue_num,
+                "result": {
+                    "state": "BLOCKED",
+                    "error": err,
+                    "semantic_dispatched": False,
+                },
+            }
+            continue
         for issue in sorted(issues, key=lambda row: int(row.get("number") or 0)):
             automation = automation_factory(config, repository)
             result = automation.run_issue(

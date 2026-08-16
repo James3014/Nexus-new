@@ -812,3 +812,84 @@ def test_source_binding_ancestor_commit_passes(tmp_path):
     assert result["state"] == "COMPLETE"
     assert result["semantic_dispatched"] is True
     assert len(sidecar.calls) == 1
+
+
+def test_task_card_read_from_exact_main_sha_not_stale_worktree_file(tmp_path):
+    repo, card, contract, body, store = _setup(
+        tmp_path, remote_url="https://github.com/James3014/Nexus-new.git"
+    )
+    # Deliberately modify the worktree file on disk after commit
+    card.write_text("# corrupted or completely different worktree task card\n", encoding="utf-8")
+
+    sidecar = FakeSidecar(store)
+    c = FakeC()
+    d = FakeD()
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
+
+    result = automation.run_issue("James3014/Nexus-new", 108, "title", body)
+    assert result["state"] == "COMPLETE"
+    assert result["semantic_dispatched"] is True
+    # Verify task card content passed to sidecar was read from Git commit main_sha ("# task\n")
+    sources = sidecar.calls[0][1]
+    task_card_source = next(s for s in sources if s["kind"] == "task_card")
+    assert task_card_source["content"] == "# task\n"
+
+
+def test_task_card_hash_matches_worktree_file_but_not_exact_main_sha_blob(tmp_path):
+    repo, card, contract, body, store = _setup(
+        tmp_path, remote_url="https://github.com/James3014/Nexus-new.git"
+    )
+    # Modify worktree file and use its hash in contract
+    card.write_text("# new modified task card\n", encoding="utf-8")
+    contract["task_card_hash"] = hashlib.sha256(card.read_bytes()).hexdigest()
+    body = _body(contract)
+
+    sidecar = FakeSidecar(store)
+    c = FakeC()
+    d = FakeD()
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
+
+    result = automation.run_issue("James3014/Nexus-new", 109, "title", body)
+    assert result["state"] == "BLOCKED"
+    assert result["error"] == "TASK_CARD_HASH_MISMATCH"
+    assert result["semantic_dispatched"] is False
+    assert sidecar.calls == []
+
+
+def test_task_card_path_missing_at_exact_main_sha_blocks(tmp_path):
+    repo, _, contract, _, store = _setup(
+        tmp_path, remote_url="https://github.com/James3014/Nexus-new.git"
+    )
+    contract["task_card_ref"] = "tasks/missing_in_git.md"
+    body = _body(contract)
+
+    sidecar = FakeSidecar(store)
+    c = FakeC()
+    d = FakeD()
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
+
+    result = automation.run_issue("James3014/Nexus-new", 110, "title", body)
+    assert result["state"] == "BLOCKED"
+    assert result["error"] == "TASK_CARD_NOT_FOUND"
+    assert result["semantic_dispatched"] is False
+    assert sidecar.calls == []
+
+
+@pytest.mark.parametrize("bad_ref", ["/etc/passwd", "../outside.md", "a/../b.md", "c\\d.md"])
+def test_task_card_path_invalid_escape_blocks(tmp_path, bad_ref):
+    repo, _, contract, _, store = _setup(
+        tmp_path, remote_url="https://github.com/James3014/Nexus-new.git"
+    )
+    contract["task_card_ref"] = bad_ref
+    body = _body(contract)
+
+    sidecar = FakeSidecar(store)
+    c = FakeC()
+    d = FakeD()
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
+
+    result = automation.run_issue("James3014/Nexus-new", 111, "title", body)
+    assert result["state"] == "BLOCKED"
+    assert result["error"] == "TASK_CARD_PATH_INVALID"
+    assert result["semantic_dispatched"] is False
+    assert sidecar.calls == []

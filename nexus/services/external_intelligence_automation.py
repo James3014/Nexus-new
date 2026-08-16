@@ -380,21 +380,39 @@ class ExternalIntelligenceAutomation:
             raise AutomationError("MAIN_SHA_LINEAGE_MISMATCH")
 
     def _task_card(self, contract: Mapping[str, Any]) -> tuple[Path, str]:
-        rel = Path(str(contract["task_card_ref"]))
-        if rel.is_absolute() or ".." in rel.parts:
-            raise AutomationError("TASK_CARD_PATH_INVALID")
-        path = (self.repository_root / rel).resolve()
+        rel_str = str(contract.get("task_card_ref") or "")
         try:
-            path.relative_to(self.repository_root)
-        except ValueError as exc:
-            raise AutomationError("TASK_CARD_PATH_ESCAPE") from exc
-        if not path.is_file():
+            rel = PurePosixPath(rel_str.strip())
+        except (TypeError, ValueError) as exc:
+            raise AutomationError("TASK_CARD_PATH_INVALID") from exc
+        if (
+            not rel_str
+            or rel.is_absolute()
+            or ".." in rel.parts
+            or "\\" in rel_str
+            or "\x00" in rel_str
+        ):
+            raise AutomationError("TASK_CARD_PATH_INVALID")
+        main_sha = str(contract.get("main_sha") or "")
+        spec = f"{main_sha}:{rel.as_posix()}"
+        res = subprocess.run(
+            ["git", "cat-file", "blob", spec],
+            cwd=self.repository_root,
+            capture_output=True,
+            check=False,
+            timeout=30.0,
+        )
+        if res.returncode != 0:
             raise AutomationError("TASK_CARD_NOT_FOUND")
-        raw = path.read_bytes()
+        raw = res.stdout
         actual = _sha256_bytes(raw)
         if actual != str(contract["task_card_hash"]).lower():
             raise AutomationError("TASK_CARD_HASH_MISMATCH")
-        return path, raw.decode("utf-8")
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise AutomationError("TASK_CARD_DECODE_FAILED") from exc
+        return Path(rel.as_posix()), text
 
     def _record(self, item: IssueWorkItem) -> dict[str, Any]:
         c = item.contract
@@ -598,6 +616,7 @@ __all__ = [
     "ExternalIntelligenceAutomation",
     "ISSUE_SCHEMA",
     "IssueWorkItem",
+    "_normalize_github_repo",
     "compact_publication_payload",
     "parse_issue_contract",
 ]
