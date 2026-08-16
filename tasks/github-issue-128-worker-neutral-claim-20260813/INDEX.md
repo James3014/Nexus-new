@@ -2,7 +2,7 @@
 
 - authority: Owner-authorized Ready GitHub Issue #128; fresh remote `main`
 - historical baseline: `96bb71e89a0b5112a7b54ab6a3f4ff1ed879f857`
-- reconciled/current main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c` (PR333 merge)
+- reconciled/current main: `3b307d3df5356a4451899a534ea8c10abef155c7` (current main at rebind)
 - status: COMPLETE
 - frontier status: COMPLETE
 - current frontier: terminal reconciliation; `00-worker-neutral-claim-contract.md` completed

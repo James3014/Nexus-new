@@ -2,7 +2,7 @@
 
 - status: COMPLETED
 - historical baseline: `96bb71e89a0b5112a7b54ab6a3f4ff1ed879f857`
-- reconciled/current main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c` (PR333 merge)
+- reconciled/current main: `3b307d3df5356a4451899a534ea8c10abef155c7` (current main at rebind)
 - terminal marker: `WORKER_NEUTRAL_READY_ISSUE_CLAIM_CONTRACT_PROVEN`
 - claim ceiling: `WORKER_NEUTRAL_READY_ISSUE_CLAIM_CONTRACT_PROVEN_PROJECTION_ONLY`
 - AUTO_CHAIN: false
