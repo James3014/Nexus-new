@@ -192,7 +192,9 @@ def test_runtime_eligible_production_beta_physical_executor_success() -> None:
                 )
                 receipt = ex(plan, f"matrix probe {name}")
                 if not bool(getattr(receipt, "invoked", False)):
-                    failures.append(f"{name}:executor_not_invoked:{getattr(receipt,'outcome',{})}")
+                    failures.append(
+                        f"{name}:executor_not_invoked:{getattr(receipt, 'outcome', {})}"
+                    )
                     continue
                 if not str(getattr(receipt, "evidence_id", "") or ""):
                     failures.append(f"{name}:missing_evidence_id")
@@ -258,7 +260,6 @@ def test_runtime_eligible_production_beta_physical_executor_success() -> None:
                 "bundle_hash": "bh",
             },
             "source_hash": "src_hash_for_matrix_probe_01",
-            "task_statement": f"probe {name}",
         }
         if name in ESCALATE_ONLY:
             ctx["escalate_triggered"] = True
@@ -270,7 +271,10 @@ def test_runtime_eligible_production_beta_physical_executor_success() -> None:
             if result.get("skipped") and "POLICY" in str(result.get("skip_reason") or "").upper():
                 failures.append(f"{name}:policy_skip_while_triggered")
         elif name != "local_model_executor":
-            if result.get("skipped") and result.get("skip_reason") == "not_implemented_mainchain_v1":
+            if (
+                result.get("skipped")
+                and result.get("skip_reason") == "not_implemented_mainchain_v1"
+            ):
                 failures.append(f"{name}:not_implemented_skip")
             if not result.get("invoked") and not result.get("skipped"):
                 # postflight may fail gate but must still invoke
@@ -310,13 +314,11 @@ def test_planner_gap_matrix_no_silent_missing_or_stub_success() -> None:
             c += 1
         elif gap == "D_selected_not_executed":
             d += 1
-        result = invokers[name](
-            {
-                "task_id": f"m-{name}",
-                "task_statement": f"probe {name}",
-                "planner": {},
-            }
-        )
+        result = invokers[name]({
+            "task_id": f"m-{name}",
+            "task_statement": f"probe {name}",
+            "planner": {},
+        })
         if result.get("stub"):
             assert result.get("outcome_contributed") is False
         if result.get("skipped"):
@@ -367,9 +369,7 @@ def test_capability_on_off_and_negative_control_for_real_wired() -> None:
     assert "codeintel" not in off_caps
 
     on_receipt = UnifiedRuntime(
-        planner=_SelectPlanner(
-            ["codeintel", "artifact_gate", "claim_gate", "delivery_gate"]
-        )
+        planner=_SelectPlanner(["codeintel", "artifact_gate", "claim_gate", "delivery_gate"])
     ).run(
         UnifiedRuntimeRequest(
             task_id="matrix-on",
@@ -408,9 +408,7 @@ def test_capability_on_off_and_negative_control_for_real_wired() -> None:
 
     bundle = on_receipt["capability_evidence_bundle"]
     assert verify_capability_evidence_bundle(bundle)["ok"] is True
-    cons = record_consumption(
-        bundle=bundle, consumer="Online", consumed_evidence_ids=[]
-    )
+    cons = record_consumption(bundle=bundle, consumer="Online", consumed_evidence_ids=[])
     assert cons["capability_consumed"] is False
 
 
@@ -423,14 +421,12 @@ def test_escalation_trigger_off_and_on() -> None:
     assert off.get("skipped") is True
     assert off.get("skip_reason")
 
-    on = invokers[name](
-        {
-            "task_id": "esc-on",
-            "task_statement": "x",
-            "planner": {},
-            "escalate_triggered": True,
-        }
-    )
+    on = invokers[name]({
+        "task_id": "esc-on",
+        "task_statement": "x",
+        "planner": {},
+        "escalate_triggered": True,
+    })
     assert on.get("stub") is not True
     if on.get("invoked"):
         assert on.get("physical_callable")

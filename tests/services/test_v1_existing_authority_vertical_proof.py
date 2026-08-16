@@ -15,8 +15,6 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-import pytest
-
 from nexus.services.capability_registry import build_default_mainchain_invokers
 from nexus.services.mainchain_entry import run_mainchain
 from nexus.services.unified_runtime import UnifiedRuntimeRequest
@@ -393,8 +391,9 @@ def test_nc_v1_7_harness_preflight_failure_blocks_receipt() -> None:
     receipt = _run_proof(request=req, task_id="nc-v1-7")
     caps_by_name = {c["name"]: c for c in receipt.get("capabilities", []) if c.get("name")}
     harness = caps_by_name.get("harness_preflight_sensor", {})
-    if harness.get("gate_passed"):
-        pytest.skip("harness passed despite missing verify_commands")
+    assert harness.get("gate_passed") is False, (
+        "NC-V1-7: missing verify_commands must fail the harness preflight gate"
+    )
     assert receipt["receipt_complete"] is False, (
         "NC-V1-7: missing verify_commands must block receipt"
     )

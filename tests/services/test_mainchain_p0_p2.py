@@ -110,11 +110,7 @@ def test_p0_no_forbidden_route_literals_in_mainchain_modules() -> None:
 
 def test_p0_red_blocks_new_route_mode_class_and_member() -> None:
     """RED: class RouteMode(Enum): NEW = \"online_local_v2\" must BLOCK."""
-    src = (
-        "from enum import Enum\n"
-        "class RouteMode(Enum):\n"
-        '    NEW = "online_local_v2"\n'
-    )
+    src = 'from enum import Enum\nclass RouteMode(Enum):\n    NEW = "online_local_v2"\n'
     result = scan_source_ast(src, path="tests/fixtures/fake_new_route.py")
     assert result["ok"] is False
     assert result["routing_surface_changed"] is True
@@ -135,30 +131,22 @@ def test_p0_red_blocks_unknown_route_mode_assign() -> None:
 
 def test_p0_red_blocks_unknown_execution_topology_assign() -> None:
     """RED: execution_topology=\"online_local_v2\" must BLOCK."""
-    result = assert_no_forbidden_route_literals(
-        'execution_topology = "online_local_v2"\n'
-    )
+    result = assert_no_forbidden_route_literals('execution_topology = "online_local_v2"\n')
     assert result["ok"] is False
     assert result["routing_surface_changed"] is True
-    assert any(
-        h["kind"] == "unknown_execution_topology" for h in result["hits"]
-    )
+    assert any(h["kind"] == "unknown_execution_topology" for h in result["hits"])
 
 
 def test_p0_red_blocks_unknown_topology_in_dict() -> None:
     """RED: {\"execution_topology\": \"online_local_v2\"} must BLOCK."""
-    result = assert_no_forbidden_route_literals(
-        'cfg = {"execution_topology": "online_local_v2"}\n'
-    )
+    result = assert_no_forbidden_route_literals('cfg = {"execution_topology": "online_local_v2"}\n')
     assert result["ok"] is False
     assert any(h.get("value") == "online_local_v2" for h in result["hits"])
 
 
 def test_p0_red_blocks_unknown_route_mode_call_kwarg() -> None:
     """RED: build(route_mode=\"online_local_v2\") must BLOCK."""
-    result = assert_no_forbidden_route_literals(
-        'build(route_mode="online_local_v2")\n'
-    )
+    result = assert_no_forbidden_route_literals('build(route_mode="online_local_v2")\n')
     assert result["ok"] is False
     assert any(
         h["kind"] == "unknown_route_mode" and h.get("value") == "online_local_v2"
@@ -317,9 +305,9 @@ def test_p1_catalog_covers_planner_nodes_only_planner_authority() -> None:
 
     # Historical 198: 100% terminal classification
     assert catalog["legacy_inventory_reference_count"] > 0
-    assert catalog["legacy_inventory_classified_count"] == catalog[
-        "legacy_inventory_reference_count"
-    ]
+    assert (
+        catalog["legacy_inventory_classified_count"] == catalog["legacy_inventory_reference_count"]
+    )
     assert catalog["legacy_inventory_unclassified_count"] == 0
     for h in catalog["historical_classifications"]:
         assert h["terminal_class"] in {
@@ -460,9 +448,7 @@ def test_p2_shared_evidence_before_local_and_online_same_baseline() -> None:
 
     # Online saw same baseline
     assert _online.last_baseline == bundle["baseline_hash"]
-    assert assert_same_baseline(
-        bundle=bundle, observed_baseline_hash=_online.last_baseline
-    )["ok"]
+    assert assert_same_baseline(bundle=bundle, observed_baseline_hash=_online.last_baseline)["ok"]
     # Local planner_snapshot carried baseline
     assert local.seen_baseline == bundle["baseline_hash"]
     assert receipt["context_trace"]["baseline_hash"] == bundle["baseline_hash"]
@@ -534,9 +520,7 @@ def test_p2_verify_blocks_tamper_and_immutable_alone_insufficient() -> None:
     # modify entry success (flip real success off while keeping old hash)
     tampered = dict(bundle)
     tampered["entries"] = [dict(e) for e in bundle["entries"]]
-    tampered["entries"][0] = dict(
-        tampered["entries"][0], success=False, status="FORGED_FAIL"
-    )
+    tampered["entries"][0] = dict(tampered["entries"][0], success=False, status="FORGED_FAIL")
     # keep old hash → mismatch
     assert verify_capability_evidence_bundle(tampered)["ok"] is False
 
