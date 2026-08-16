@@ -1,0 +1,195 @@
+# Nexus model capability lineage registry.
+#
+# ROLE: calibration evidence ONLY. This file is never Workforce Admission
+# authority. It cannot admit a worker, select a route, promote autonomy, or
+# override nexus/config/model_workforce.yaml. Capability-lineage equivalence
+# must never imply admission equivalence.
+#
+# PROVENANCE RULE: capability calibration evidence must never claim a reference
+# it does not have. As of workforce authority merge 5ce3587a7f3f3c4c1068e1fc9def02bc6f6a104a:
+#   * model_workforce.yaml workers.agy_flash_medium preserves
+#     gemini-3.6-flash-medium at autonomy L1 for backward compatibility;
+#   * model_workforce.yaml workers.agy_flash_37_medium registers
+#     gemini-3.7-flash-medium at autonomy L3;
+#   * model_workforce.yaml workers.opencode_deepseek_v4_flash registers
+#     opencode/deepseek-v4-flash-free at autonomy L2.
+# Those workforce records are current admission authority CONTEXT, not
+# capability calibration evidence. Capability floors/frontiers below are
+# calibration values with their own explicit provenance; where no durable
+# calibration receipt exists they remain marked OWNER_DECISION or
+# EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK rather than being
+# falsely promoted into receipt-backed evidence. No hash or repository path is
+# invented.
+#
+# The three-arm benchmark (scripts/bench/experimental/model_workforce_three_arm.py)
+# remains a baseline/comparative diagnostic instrument. The cumulative
+# requalification path (nexus/services/model_capability_lineage.py and
+# scripts/bench/experimental/model_calibration_plan.py) reuses still-valid
+# lower-tier semantic evidence instead of restarting from L1.
+schema: nexus.model_capability_lineage.v1
+status: current
+owner: James Chen
+last_updated: '2026-08-15'
+role: calibration_evidence_only
+admission_authority: false
+route_authority: none
+benchmark_instrument: scripts/bench/experimental/model_workforce_three_arm.py
+benchmark_role: baseline_comparative_diagnostic
+provenance_statuses:
+  - OWNER_DECISION
+  - EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK
+  - WORKFORCE_AUTHORITY_REF
+  - DURABLE_REPOSITORY_RECEIPT
+lineages:
+  deepseek-v4-flash:
+    lineage_id: deepseek-v4-flash
+    canonical_family: deepseek-v4-flash
+    description: >-
+      DeepSeek V4 Flash semantic capability lineage. The opencode CLI alias
+      (opencode/deepseek-v4-flash-free) and the opencode-go adapter identity
+      (opencode-go/deepseek-v4-flash) resolve to the same semantic lineage.
+    execution_identities:
+      - provider: opencode
+        model: opencode/deepseek-v4-flash-free
+        identity_kind: primary
+        transport: opencode_cli
+      - provider: opencode
+        model: opencode-go/deepseek-v4-flash
+        identity_kind: alias
+        transport: opencode_cli_go_adapter
+    stable_floor: L2
+    current_frontier: L3
+    conditional_ceiling: L3
+    experimental_ceiling: L4
+    frontier_experimental: false
+    experimental_notes:
+      - "L4 verifier-guided repair capability observed by calibration evidence (repair 15/15)"
+      - "autonomous L4 first-pass reliability NOT proven (first pass 9/15)"
+      - "L4 remains experimental and non-admitted"
+      - "first-pass capability and verifier-guided repair are distinct evidence phases"
+    role_evidence:
+      - ref: calibration:owner-settled/deepseek-v4-flash/l2-l3-frontier
+        phase: FIRST_PASS
+        tier: L2
+        scope: SEMANTIC
+        provenance: OWNER_DECISION
+        date: '2026-08-15'
+      - ref: calibration:external/deepseek-v4-flash/l4-first-pass
+        phase: FIRST_PASS
+        tier: L4
+        scope: SEMANTIC
+        provenance: EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK
+        date: '2026-08-15'
+      - ref: calibration:external/deepseek-v4-flash/l4-verifier-guided-repair
+        phase: VERIFIER_GUIDED_REPAIR
+        tier: L4
+        scope: SEMANTIC
+        provenance: EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK
+        date: '2026-08-15'
+    known_failure_families:
+      - family: full_context_envelope_failure
+        ref: calibration:known-failure-family/full_context_envelope_failure
+        status: adjacent_variant_open
+      - family: structured_output_thinking_drift
+        ref: calibration:known-failure-family/structured_output_thinking_drift
+        status: adjacent_variant_open
+    evidence:
+      - id: ds-v4-flash-l2-stable-floor
+        phase: FIRST_PASS
+        tier: L2
+        scope: SEMANTIC
+        status: PASS
+        provenance: OWNER_DECISION
+        date: '2026-08-15'
+        digest: null
+        note: "Owner-settled stable floor; no separate durable calibration receipt hash recorded in this lineage registry"
+      - id: ds-v4-flash-l3-frontier
+        phase: FIRST_PASS
+        tier: L3
+        scope: SEMANTIC
+        status: PASS
+        provenance: OWNER_DECISION
+        date: '2026-08-15'
+        digest: null
+        note: "Owner-settled frontier; no separate durable calibration receipt hash recorded in this lineage registry"
+      - id: ds-v4-flash-l4-first-pass
+        phase: FIRST_PASS
+        tier: L4
+        scope: SEMANTIC
+        status: PARTIAL
+        score: 9/15
+        provenance: EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK
+        date: '2026-08-15'
+        digest: null
+        note: "autonomous L4 first-pass reliability NOT proven"
+      - id: ds-v4-flash-l4-verifier-guided-repair
+        phase: VERIFIER_GUIDED_REPAIR
+        tier: L4
+        scope: SEMANTIC
+        status: PASS
+        score: 15/15
+        provenance: EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK
+        date: '2026-08-15'
+        digest: null
+        note: "L4 verifier-guided repair capability observed by calibration evidence"
+    workforce_authority_refs:
+      - ref: nexus/config/model_workforce.yaml#workers.opencode_deepseek_v4_flash
+        provider: opencode
+        model: opencode/deepseek-v4-flash-free
+        current_autonomy: L2
+        note: >-
+          current workforce admission authority is L2 for
+          opencode/deepseek-v4-flash-free; lineage capability frontier L3 remains
+          separate calibration evidence and does not raise admitted authority
+    evidence_notes:
+      - "capability evidence provenance is OWNER_DECISION or EXTERNAL_CALIBRATION_RECEIPT_PENDING_DURABLE_WRITEBACK; no invented hashes or repository paths"
+      - "workforce_authority_refs are current admission context only and carry no calibration weight"
+  gemini-3.7-flash-medium:
+    lineage_id: gemini-3.7-flash-medium
+    canonical_family: gemini-3.7-flash-medium
+    description: >-
+      Gemini 3.7 Flash Medium exact model family via the agy adapter. The
+      experimental L4 frontier remains conditional and is not admitted autonomy.
+    execution_identities:
+      - provider: agy
+        model: gemini-3.7-flash-medium
+        identity_kind: primary
+        transport: agy_cli
+    stable_floor: L3
+    current_frontier: L4
+    frontier_experimental: true
+    conditional_ceiling: L3
+    experimental_ceiling: L4
+    experimental_notes:
+      - "experimental L4 remains conditional/non-admitted autonomy"
+      - "first-pass capability and verifier-guided repair are distinct evidence phases"
+    role_evidence:
+      - ref: calibration:owner-settled/gemini-3.7-flash-medium/l3-floor
+        phase: FIRST_PASS
+        tier: L3
+        scope: SEMANTIC
+        provenance: OWNER_DECISION
+        date: '2026-08-15'
+    known_failure_families: []
+    evidence:
+      - id: gemini-37-flash-medium-l3-stable-floor
+        phase: FIRST_PASS
+        tier: L3
+        scope: SEMANTIC
+        status: PASS
+        provenance: OWNER_DECISION
+        date: '2026-08-15'
+        digest: null
+        note: "Owner-settled stable floor; no separate durable calibration receipt hash recorded in this lineage registry"
+    workforce_authority_refs:
+      - ref: nexus/config/model_workforce.yaml#workers.agy_flash_37_medium
+        provider: agy
+        model: gemini-3.7-flash-medium
+        current_autonomy: L3
+        note: >-
+          current workforce admission authority registers gemini-3.7-flash-medium
+          as distinct worker agy_flash_37_medium at L3; agy_flash_medium remains
+          a separate gemini-3.6-flash-medium L1 identity for compatibility
+    evidence_notes:
+      - "capability evidence provenance is OWNER_DECISION; no invented hashes or repository paths"
+      - "conditional_ceiling L3 means L4 evidence is experimental and non-admitted"
