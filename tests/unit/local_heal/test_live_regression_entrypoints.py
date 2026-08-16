@@ -216,7 +216,7 @@ class TestFailClosed:
 class TestRestoredEntrypoints:
     """Verify restored concurrency and gap entrypoint scripts."""
 
-    def test_restored_entrypoints_dry_run(self, tmp_path):
+    def test_restored_entrypoints_dry_run(self):
         """All restored scripts run in dry-run mode."""
         restored_ids = [
             "concurrency_001", "concurrency_002", "concurrency_003", "concurrency_004", "concurrency_005",
@@ -229,13 +229,7 @@ class TestRestoredEntrypoints:
             if not script_path.exists():
                 continue
             res = subprocess.run(
-                [
-                    sys.executable,
-                    str(script_path),
-                    "--dry-run",
-                    "--output",
-                    str(tmp_path / f"{tid}.json"),
-                ],
+                [sys.executable, str(script_path), "--dry-run"],
                 capture_output=True,
                 text=True,
                 timeout=30,
@@ -246,3 +240,4 @@ class TestRestoredEntrypoints:
             assert output["task_id"] == tid
             assert output["verifier_status"] == "DRY_RUN"
             assert output["internal_only"] is True
+
