@@ -7,8 +7,9 @@
 - baseline_main: `4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e`
 - historical_baseline: `4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e`
 - merge_base: `4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e`
-- reconciled_main: `cdf2570ede5ae218f36f886b696c8da45458043a`
-- current_main: `cdf2570ede5ae218f36f886b696c8da45458043a`
+- reconciled_main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`
+- current_main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`
+- historical_reconciled_main: `cdf2570ede5ae218f36f886b696c8da45458043a`
 - frontier: TERMINAL_RECONCILIATION
 - frontier_status: COMPLETE
 - completed_cards: `[00-golden-authority-drift.md]`
