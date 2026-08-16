@@ -25,11 +25,87 @@ def semantic_projection_key(entry: Mapping[str, Any]) -> str:
     return "pattern:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
 
 
-def project_learning_entries(entries: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    grouped: dict[str, dict[str, Any]] = {}
-    for raw in entries:
+_INVALIDATING_DISPOSITIONS = frozenset({"contradict", "retire", "quarantine", "quarantined"})
+
+
+def reduce_learning_episode_validity(
+    entries: Iterable[Mapping[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Reduce canonical episode validity in deterministic ledger/input order.
+
+    Only a later, identity-valid canonical episode with terminal evidence may
+    invalidate an already-observed episode that it actually applied.  Unknown
+    targets and tampered/substituted invalidation rows are ignored so future
+    rows cannot be pre-invalidated by forged evidence.
+    """
+    from nexus.contracts.learning_experience import validate_nexus_learning_episode
+
+    states: dict[str, dict[str, Any]] = {}
+    for position, raw in enumerate(entries):
         if not isinstance(raw, Mapping):
             continue
+        entry = dict(raw)
+        if str(entry.get("schema") or "") != "nexus.learning_episode.v1":
+            continue
+        episode_id = str(entry.get("episode_id") or "").strip()
+        if not episode_id:
+            continue
+        try:
+            validate_nexus_learning_episode(entry)
+        except Exception:
+            continue
+
+        states.setdefault(
+            episode_id,
+            {
+                "validity_state": "active",
+                "retrieval_eligible": True,
+                "invalidated_by_episode_id": "",
+                "invalidation_disposition": "",
+                "invalidation_evidence_refs": [],
+                "invalidation_position": None,
+                "invalidation_events": [],
+            },
+        )
+        disposition = str(entry.get("lesson_disposition") or "").strip().lower()
+        if disposition not in _INVALIDATING_DISPOSITIONS or not _has_terminal_evidence(entry):
+            continue
+        targets = [
+            str(item).strip()
+            for item in (entry.get("applied_lesson_ids") or [])
+            if str(item).strip()
+        ]
+        for target_id in targets:
+            # Invalidation is strictly later-evidence-over-prior-evidence.  A
+            # control row cannot poison an episode that has not appeared yet.
+            if target_id == episode_id or target_id not in states:
+                continue
+            prior_events = [
+                dict(item)
+                for item in (states[target_id].get("invalidation_events") or [])
+                if isinstance(item, Mapping)
+            ]
+            event = {
+                "invalidated_by_episode_id": episode_id,
+                "invalidation_disposition": disposition,
+                "invalidation_evidence_refs": _evidence_refs(entry),
+                "invalidation_position": position,
+            }
+            prior_events.append(event)
+            states[target_id] = {
+                "validity_state": "invalidated",
+                "retrieval_eligible": False,
+                **event,
+                "invalidation_events": prior_events,
+            }
+    return states
+
+
+def project_learning_entries(entries: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    materialized = [dict(raw) for raw in entries if isinstance(raw, Mapping)]
+    validity = reduce_learning_episode_validity(materialized)
+    grouped: dict[str, dict[str, Any]] = {}
+    for raw in materialized:
         key = semantic_projection_key(raw)
         event_id = str(raw.get("episode_id") or raw.get("idempotency_key") or "")
         pattern, eligible, reason, disposition = _classify(raw)
@@ -95,6 +171,27 @@ def project_learning_entries(entries: Iterable[Mapping[str, Any]]) -> list[dict[
         current.setdefault("source", _source(raw))
     for row in grouped.values():
         row.pop("_event_ids", None)
+        episode_ids = [str(item) for item in row.get("episode_ids", []) if str(item)]
+        invalidated_ids = [
+            episode_id
+            for episode_id in episode_ids
+            if validity.get(episode_id, {}).get("validity_state") == "invalidated"
+        ]
+        active_ids = [episode_id for episode_id in episode_ids if episode_id not in invalidated_ids]
+        row["invalidated_episode_ids"] = invalidated_ids
+        row["active_episode_ids"] = active_ids
+        if invalidated_ids and not active_ids:
+            row["retrieval_eligible"] = False
+            row["qualification_reason"] = "invalidated_by_later_evidence"
+            row["validity_state"] = "invalidated"
+        elif invalidated_ids:
+            row["validity_state"] = "active_with_invalidated_history"
+        else:
+            row["validity_state"] = "active" if episode_ids else "unversioned"
+        row["invalidation_evidence"] = [
+            {"episode_id": episode_id, **validity[episode_id]}
+            for episode_id in invalidated_ids
+        ]
     return list(grouped.values())
 
 

@@ -1,7 +1,7 @@
-"""BMF3-OBS: Formal ctx-scoped memory trace contract for local_heal.
+"""Formal ctx-scoped memory trace contract for local_heal.
 
-Replaces module-level _last_memory_trace global with explicit data flow.
-No behavior change to retrieval, ranking, or prompt.
+Carries explicit retrieval, provenance, receipt, and presentation lineage without
+adding routing, verifier, approval, or replay authority.
 """
 from __future__ import annotations
 
@@ -46,6 +46,9 @@ class MemoryTrace:
     # BMF10-RSH: shadow ranking telemetry
     shadow_ranking: dict[str, Any] = field(default_factory=dict)
     primary_selected_id: str = ""
+    retrieval_receipt: dict[str, Any] = field(default_factory=dict)
+    retrieval_receipt_hash: str = ""
+    selected_lesson_lineage: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -73,6 +76,9 @@ class MemoryTrace:
             "internal_only": self.internal_only,
             "shadow_ranking": dict(self.shadow_ranking),
             "primary_selected_id": self.primary_selected_id,
+            "retrieval_receipt": dict(self.retrieval_receipt),
+            "retrieval_receipt_hash": self.retrieval_receipt_hash,
+            "selected_lesson_lineage": [dict(item) for item in self.selected_lesson_lineage],
         }
 
 
@@ -125,6 +131,13 @@ def build_memory_trace_from_adapter(
         source_contract="MEMORY_RETRIEVAL_ADAPTER",
         shadow_ranking=dict(adapter_metadata.get("shadow_ranking") or {}),
         primary_selected_id=str(adapter_metadata.get("primary_selected_id") or (ids[0] if ids else "")),
+        retrieval_receipt=dict(adapter_metadata.get("retrieval_receipt") or {}),
+        retrieval_receipt_hash=str(adapter_metadata.get("retrieval_receipt_hash") or ""),
+        selected_lesson_lineage=[
+            dict(item)
+            for item in (adapter_metadata.get("selected_lesson_lineage") or [])
+            if isinstance(item, dict)
+        ],
     )
 
 

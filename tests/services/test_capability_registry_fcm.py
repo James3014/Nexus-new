@@ -195,15 +195,44 @@ def test_mainchain_entry_uses_full_registry_not_partial_handpick() -> None:
         workspace_revision="rev-fcm",
         task_statement="scan impact risk codeintel refactor module",
         task_type="codeintel",
-        route={"recommended_flow": "direct", "injected_transport": True, "online_policy": "auto"},
+        route={
+            "recommended_flow": "direct",
+            "injected_transport": True,
+            "online_policy": "auto",
+            "online_invoker_provider": "agy",
+            "workforce_bindings": {
+                "online": {
+                    "worker_id": "agy_flash",
+                    "controls": [
+                        "task_card",
+                        "allowed_files",
+                        "mandatory_commands",
+                        "independent_verification",
+                    ],
+                }
+            },
+        },
         online_enabled=True,
         online_prompt="task",
-        codeintel={"scan_report_present": True, "risk_score": 4},
+        codeintel={
+            "scan_report_present": True,
+            "risk_score": 4,
+            "impact_report_present": True,
+            "workspace_root": "/tmp",
+            "verify_commands": ["echo ok"],
+            "verify_timeout_sec": 10,
+            "mempalace_tenant_id": "fcm-entry-tenant",
+            "mempalace_artifact": {
+                "artifact_id": "fcm-entry-001",
+                "content": "full registry not partial handpick",
+            },
+            "mempalace_artifact_type": "task_receipt",
+            "mempalace_query": "fcm-entry-001",
+        },
     )
     receipt = run_mainchain(
         req,
         online_invoker=online,
-        planner=_MultiSelectPlanner(),
         verifier=lambda c: {
             "task_id": c["task_id"],
             "invoked": True,
