@@ -23,6 +23,7 @@ from nexus.services.grok_account_pool import (
     GrokAccountPoolError,
     GrokAccountPoolExhaustedError,
     GrokAccountPoolManager,
+    GrokAttemptLineage,
     build_grok_isolated_env,
     classify_grok_failure,
     get_grok_account_pool_manager,
@@ -36,11 +37,14 @@ def _make_manager(tmp_path) -> GrokAccountPoolManager:
     h3 = str(tmp_path / "grok-c")
     for p in (h1, h2, h3):
         Path(p).mkdir(parents=True)
-    return GrokAccountPoolManager([
-        GrokAccount(alias="grok-a", home_dir=h1),
-        GrokAccount(alias="grok-b", home_dir=h2),
-        GrokAccount(alias="grok-c", home_dir=h3),
-    ])
+    return GrokAccountPoolManager(
+        [
+            GrokAccount(alias="grok-a", home_dir=h1),
+            GrokAccount(alias="grok-b", home_dir=h2),
+            GrokAccount(alias="grok-c", home_dir=h3),
+        ],
+        isolated_root=str(tmp_path / "neutral-grok-profiles"),
+    )
 
 
 def test_grok_account_alias_hash_is_non_secret_slug():
@@ -50,16 +54,23 @@ def test_grok_account_alias_hash_is_non_secret_slug():
     assert account.alias_hash.isalnum()
 
 
-def test_isolated_env_does_not_inherit_ambient_process_secrets(monkeypatch):
+def test_isolated_env_requires_alias_hash_and_does_not_inherit_ambient_process_secrets(monkeypatch):
     monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "secret_aws")
     monkeypatch.setenv("MY_SECRET_TOKEN", "secret_token")
     monkeypatch.setenv("CLOUDSQL_PASSWORD", "secret_db")
     monkeypatch.setenv("PATH", "/usr/bin")
     monkeypatch.setenv("HOME", "/original")
 
-    isolated = build_grok_isolated_env(home_dir="/profiles/grok-a")
+    with pytest.raises(GrokAccountPoolError, match="GROK_ALIAS_HASH_REQUIRED"):
+        build_grok_isolated_env(home_dir="/profiles/grok-a")
 
-    assert isolated == {"HOME": "/profiles/grok-a"}
+    isolated = build_grok_isolated_env(
+        home_dir="/profiles/grok-a",
+        alias_hash="abcdef123456",
+        isolated_root="/neutral/grok-profiles",
+    )
+
+    assert isolated == {"HOME": "/neutral/grok-profiles/profile-abcdef123456"}
     assert "AWS_SECRET_ACCESS_KEY" not in isolated
     assert "MY_SECRET_TOKEN" not in isolated
     assert "CLOUDSQL_PASSWORD" not in isolated
@@ -81,6 +92,7 @@ def test_isolated_env_allowlist_passes_only_neutral_base_env_keys():
         home_dir="/profiles/grok-a",
         base_env=base,
         alias_hash="abcdef123456",
+        isolated_root="/neutral/grok-profiles",
     )
 
     assert isolated["PATH"] == "/custom/bin"
@@ -96,10 +108,58 @@ def test_isolated_env_home_is_hash_derived_and_raw_alias_absent():
     isolated = build_grok_isolated_env(
         home_dir="/profiles/grok-a",
         alias_hash="abcdef123456",
+        isolated_root="/neutral/grok-profiles",
     )
 
-    assert isolated["HOME"] == "/profiles/profile-abcdef123456"
+    assert isolated["HOME"] == "/neutral/grok-profiles/profile-abcdef123456"
     assert all("grok-a" not in str(value) for value in isolated.values())
+
+
+def test_isolated_env_rejects_invalid_hash_and_ignores_nested_alias_home(tmp_path):
+    for invalid in (None, "raw-alias", "ABCDEF123456", "abcdef12345"):
+        with pytest.raises(GrokAccountPoolError, match="GROK_ALIAS_HASH_REQUIRED"):
+            build_grok_isolated_env(
+                home_dir=str(tmp_path / "raw-alias" / "nested" / "profile"),
+                alias_hash=invalid,
+                isolated_root=str(tmp_path / "neutral-root"),
+            )
+
+    isolated = build_grok_isolated_env(
+        home_dir=str(tmp_path / "raw-alias" / "nested" / "profile"),
+        alias_hash="abcdef123456",
+        isolated_root=str(tmp_path / "neutral-root"),
+    )
+    assert isolated["HOME"] == str(tmp_path / "neutral-root" / "profile-abcdef123456")
+    assert "raw-alias" not in isolated["HOME"]
+
+
+def test_attempt_lineage_is_immutable_serializable_and_redacted():
+    lineage = GrokAttemptLineage(
+        provider="grok",
+        consumer_id="task-17",
+        attempt=2,
+        account_alias_hash="abcdef123456",
+        failure_kind=AccountFailureKind.QUOTA_EXHAUSTED,
+        previous_lease_id="lease_previous",
+        previous_account_alias_hash="0123456789ab",
+        replacement_lease_id="lease_replacement",
+        replacement_account_alias_hash="fedcba654321",
+        outcome="ROTATED",
+    )
+    public = lineage.to_public_dict()
+    encoded = lineage.serialize_public()
+
+    assert json.loads(encoded) == public
+    assert set(public) == {
+        "provider", "consumer_id", "attempt", "account_alias_hash",
+        "failure_kind", "previous_lease_id", "previous_account_alias_hash",
+        "replacement_lease_id", "replacement_account_alias_hash", "outcome",
+    }
+    assert all(secret not in encoded for secret in ("/home", "raw-alias", "TOKEN", "stderr"))
+    public["outcome"] = "TAMPERED"
+    assert lineage.outcome == "ROTATED"
+    with pytest.raises((AttributeError, TypeError)):
+        lineage.outcome = "TAMPERED"
 
 
 def test_acquire_binds_immutable_lease_and_hash_derived_env(tmp_path):
@@ -109,7 +169,9 @@ def test_acquire_binds_immutable_lease_and_hash_derived_env(tmp_path):
     assert lease.provider == "grok"
     assert lease.consumer_id == "consumer-1"
     assert len(lease.account_alias_hash) == 12
-    expected_home = str(tmp_path / f"profile-{manager._accounts[0].alias_hash}")
+    expected_home = str(
+        tmp_path / "neutral-grok-profiles" / f"profile-{manager._accounts[0].alias_hash}"
+    )
     assert lease.execution_env["HOME"] == expected_home
     assert "grok-a" not in lease.execution_env["HOME"]
 
@@ -123,10 +185,10 @@ def test_concurrent_consumers_are_isolated(tmp_path):
     assert lease_a.account_alias_hash == manager._accounts[0].alias_hash
     assert lease_b.account_alias_hash == manager._accounts[1].alias_hash
     assert lease_a.execution_env["HOME"] == str(
-        tmp_path / f"profile-{manager._accounts[0].alias_hash}"
+        tmp_path / "neutral-grok-profiles" / f"profile-{manager._accounts[0].alias_hash}"
     )
     assert lease_b.execution_env["HOME"] == str(
-        tmp_path / f"profile-{manager._accounts[1].alias_hash}"
+        tmp_path / "neutral-grok-profiles" / f"profile-{manager._accounts[1].alias_hash}"
     )
     assert lease_a.execution_env["HOME"] != lease_b.execution_env["HOME"]
 
@@ -233,7 +295,9 @@ def test_eligible_failure_failover_rotates_to_unheld_profile(tmp_path):
     assert replacement_a.account_alias_hash == manager._accounts[2].alias_hash
     assert replacement_a.account_alias_hash != lease_a.account_alias_hash
     assert replacement_a.lease_id != lease_b.lease_id
-    expected_home = str(tmp_path / f"profile-{manager._accounts[2].alias_hash}")
+    expected_home = str(
+        tmp_path / "neutral-grok-profiles" / f"profile-{manager._accounts[2].alias_hash}"
+    )
     assert replacement_a.execution_env["HOME"] == expected_home
     assert manager._accounts[0].is_active is False
     assert manager._accounts[0].cooldown_until is not None
@@ -395,12 +459,13 @@ def test_env_bound_manager_lease_home_is_hash_derived(monkeypatch, tmp_path):
     set_grok_account_pool_manager(None)
     monkeypatch.setenv("NEXUS_GROK_ACCOUNT_ALIASES", "g1")
     monkeypatch.setenv("NEXUS_GROK_HOME_G1", str(tmp_path / "home-g1"))
+    monkeypatch.setenv("NEXUS_GROK_ISOLATED_ROOT", str(tmp_path / "neutral-grok-profiles"))
 
     manager = get_grok_account_pool_manager()
     lease = manager.acquire("consumer-env")
 
     assert lease.execution_env["HOME"] == str(
-        tmp_path / f"profile-{manager._accounts[0].alias_hash}"
+        tmp_path / "neutral-grok-profiles" / f"profile-{manager._accounts[0].alias_hash}"
     )
     assert "g1" not in lease.execution_env["HOME"]
     set_grok_account_pool_manager(None)

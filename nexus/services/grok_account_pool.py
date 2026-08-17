@@ -13,7 +13,9 @@ lease environments never inherit the ambient process environment.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
+import re
 import threading
 import time
 import uuid
@@ -135,25 +137,92 @@ class GrokAccount:
         return hashlib.sha256(self.alias.encode("utf-8")).hexdigest()[:12]
 
 
-def _isolated_home_dir(home_dir: str, alias_hash: str) -> str:
-    """Return a HOME path that never embeds the raw profile alias."""
+@dataclass(frozen=True)
+class GrokAttemptLineage:
+    """Immutable, pool-only public evidence for one Grok account attempt."""
 
-    home = Path(home_dir)
-    return str(home.parent / f"profile-{alias_hash}")
+    provider: str
+    consumer_id: str
+    attempt: int
+    account_alias_hash: str
+    failure_kind: Optional[AccountFailureKind]
+    previous_lease_id: Optional[str]
+    previous_account_alias_hash: Optional[str]
+    replacement_lease_id: Optional[str]
+    replacement_account_alias_hash: Optional[str]
+    outcome: str
+
+    def __post_init__(self) -> None:
+        if self.provider != GROK_ACCOUNT_POOL_PROVIDER:
+            raise GrokAccountPoolError("GROK_LINEAGE_PROVIDER_MISMATCH")
+        if self.attempt < 1:
+            raise GrokAccountPoolError("GROK_LINEAGE_ATTEMPT_INVALID")
+        for value in (
+            self.account_alias_hash,
+            self.previous_account_alias_hash,
+            self.replacement_account_alias_hash,
+        ):
+            if value is not None and _ALIAS_HASH_RE.fullmatch(value) is None:
+                raise GrokAccountPoolError("GROK_LINEAGE_ALIAS_HASH_INVALID")
+
+    def to_public_dict(self) -> dict[str, Any]:
+        """Project only non-secret pool evidence; no environment or raw output."""
+
+        return {
+            "provider": self.provider,
+            "consumer_id": self.consumer_id,
+            "attempt": self.attempt,
+            "account_alias_hash": self.account_alias_hash,
+            "failure_kind": self.failure_kind.value if self.failure_kind is not None else None,
+            "previous_lease_id": self.previous_lease_id,
+            "previous_account_alias_hash": self.previous_account_alias_hash,
+            "replacement_lease_id": self.replacement_lease_id,
+            "replacement_account_alias_hash": self.replacement_account_alias_hash,
+            "outcome": self.outcome,
+        }
+
+    def serialize_public(self) -> str:
+        return json.dumps(self.to_public_dict(), sort_keys=True, separators=(",", ":"))
+
+
+_ALIAS_HASH_RE = re.compile(r"^[0-9a-f]{12}$")
+
+
+def _isolated_home_dir(
+    home_dir: Optional[str],
+    alias_hash: str,
+    isolated_root: Optional[str] = None,
+) -> str:
+    """Return a hash-only HOME under a neutral configured root.
+
+    ``home_dir`` is intentionally ignored for derivation: profile paths may
+    contain raw aliases in any parent component. The configured root is the
+    only path authority for the public environment binding.
+    """
+
+    if not isinstance(alias_hash, str) or _ALIAS_HASH_RE.fullmatch(alias_hash) is None:
+        raise GrokAccountPoolError("GROK_ALIAS_HASH_REQUIRED")
+    configured_root = isolated_root or os.getenv("NEXUS_GROK_ISOLATED_ROOT", "").strip()
+    root = Path(configured_root).expanduser() if configured_root else Path.home() / ".nexus/grok-account-pool/profiles"
+    if not root.is_absolute():
+        raise GrokAccountPoolError("GROK_ISOLATED_ROOT_MUST_BE_ABSOLUTE")
+    return str(root / f"profile-{alias_hash}")
 
 
 def build_grok_isolated_env(
     home_dir: Optional[str] = None,
     base_env: Optional[Mapping[str, str]] = None,
     alias_hash: Optional[str] = None,
+    isolated_root: Optional[str] = None,
 ) -> dict[str, str]:
     """Build an isolated environment scoped to one Grok profile.
 
     Only the explicit neutral allowlist passes through from ``base_env`` (or an
     empty environment when ``base_env`` is omitted), so a swapped profile cannot
     inherit another profile's credential material or arbitrary process secrets.
-    When ``alias_hash`` is supplied, ``HOME`` is rewritten to a hash-derived
-    binding directory so the raw profile alias never appears in the environment.
+    ``alias_hash`` is mandatory whenever a profile HOME is requested. HOME is
+    always derived under a neutral configured root; the raw profile path is
+    never used as a fallback.
     """
 
     source = {} if base_env is None else dict(base_env)
@@ -161,11 +230,8 @@ def build_grok_isolated_env(
     for key in GROK_NEUTRAL_ENV_KEYS:
         if key in source:
             env[key] = source[key]
-    if home_dir:
-        if alias_hash:
-            env["HOME"] = _isolated_home_dir(home_dir, alias_hash)
-        else:
-            env["HOME"] = str(home_dir)
+    if home_dir is not None or alias_hash is not None:
+        env["HOME"] = _isolated_home_dir(home_dir, alias_hash or "", isolated_root)
     for key in GROK_SENSITIVE_ENV_KEYS:
         env.pop(key, None)
     return env
@@ -181,12 +247,14 @@ class GrokAccountPoolManager:
         manager_root: Optional[str] = None,
         cooldown_seconds: float = 60.0,
         clock: Optional[Callable[[], float]] = None,
+        isolated_root: Optional[str] = None,
     ) -> None:
         self._accounts: list[GrokAccount] = list(accounts or [])
         self._manager_path: Optional[str] = manager_path
         self._manager_root: Optional[str] = manager_root
         self._cooldown_seconds = cooldown_seconds
         self._clock = clock
+        self._isolated_root = isolated_root
         self._lock = threading.RLock()
         self._pool: Optional[ExternalAccountPool] = None
         self._lease_to_raw_alias: dict[str, str] = {}
@@ -275,6 +343,7 @@ class GrokAccountPoolManager:
             env = build_grok_isolated_env(
                 home_dir=acc.home_dir,
                 alias_hash=acc.alias_hash,
+                isolated_root=self._isolated_root,
             )
             records.append(
                 InternalAccountRecord(
