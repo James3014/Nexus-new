@@ -548,7 +548,7 @@ def test_nested_verifier_exact_task_binding_allows_final_contribution() -> None:
 
 
 @pytest.mark.parametrize("nested_verifier_task_id", ["p1-main-001", "wrong-task", ""])
-def test_unified_runtime_local_produces_vap_and_bd_fingerprints(
+def test_unified_runtime_local_produces_vap_and_bd_fingerprints_matrix(
     tmp_path: Path,
     nested_verifier_task_id: str,
 ) -> None:
@@ -676,6 +676,15 @@ def test_unified_runtime_local_produces_vap_and_bd_fingerprints(
         assert gate in receipt["capability_results"], gate
         assert receipt["capability_results"][gate]["invoked"] is True
         assert receipt["capability_results"][gate]["evidence_refs"]
+
+
+def test_unified_runtime_local_produces_vap_and_bd_fingerprints(tmp_path: Path) -> None:
+    """Retain the pre-matrix node id for exact-base impact comparison."""
+
+    test_unified_runtime_local_produces_vap_and_bd_fingerprints_matrix(
+        tmp_path,
+        "p1-main-001",
+    )
 
 
 def test_bare_online_without_local_has_no_vap() -> None:
