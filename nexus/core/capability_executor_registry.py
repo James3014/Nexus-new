@@ -2228,16 +2228,119 @@ def _exec_pregate(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityRe
 def _exec_harness_preflight_sensor(
     plan: CapabilityExecutionPlan, task_desc: str
 ) -> CapabilityReceipt:
-    # Reuse pregate physical path as harness preflight sensor.
-    base = _exec_pregate(plan, task_desc)
-    return _make_receipt(
-        "harness_preflight_sensor",
-        plan,
-        invoked=base.invoked,
-        gate_passed=base.gate_passed,
-        wall_time_ms=(base.telemetries or {}).get("wall_time_ms"),
-        outcome={"delegated": "pregate", **(base.outcome or {})},
-    )
+    """Evaluate feed-forward readiness without consuming the repair verifier."""
+    start = time.monotonic()
+    constraints = plan.constraints
+    if not isinstance(constraints, Mapping):
+        return _make_receipt(
+            "harness_preflight_sensor", plan, invoked=False, gate_passed=False,
+            wall_time_ms=int((time.monotonic() - start) * 1000),
+            outcome=_structured_outcome(
+                action="evaluate_harness_preflight_sensor", semantic_status="BLOCKED",
+                error="MALFORMED_PREFLIGHT_CONSTRAINTS",
+                evidence_refs=[f"ev_harness_preflight_blocked_{plan.task_id}"],
+            ),
+        )
+
+    commands = constraints.get("verify_commands")
+    if (
+        not isinstance(commands, (list, tuple))
+        or not commands
+        or not all(isinstance(item, str) and item.strip() for item in commands)
+    ):
+        return _make_receipt(
+            "harness_preflight_sensor", plan, invoked=True, gate_passed=False,
+            wall_time_ms=int((time.monotonic() - start) * 1000),
+            outcome=_structured_outcome(
+                action="evaluate_harness_preflight_sensor", semantic_status="BLOCKED",
+                error="VERIFY_COMMAND_WIRING_REQUIRED",
+                evidence_refs=[f"ev_harness_preflight_blocked_{plan.task_id}"],
+                verifier_executed=False, command_count=0,
+            ),
+        )
+
+    route = constraints.get("route") or {}
+    if not isinstance(route, Mapping):
+        return _make_receipt(
+            "harness_preflight_sensor", plan, invoked=False, gate_passed=False,
+            wall_time_ms=int((time.monotonic() - start) * 1000),
+            outcome=_structured_outcome(
+                action="evaluate_harness_preflight_sensor", semantic_status="BLOCKED",
+                error="MALFORMED_PREFLIGHT_ROUTE",
+                evidence_refs=[f"ev_harness_preflight_blocked_{plan.task_id}"],
+                verifier_executed=False,
+            ),
+        )
+
+    pending = constraints.get("pending_capabilities", ())
+    selected = constraints.get("selected_capabilities", ())
+    if (
+        not isinstance(pending, (list, tuple))
+        or not all(isinstance(item, str) and item.strip() for item in pending)
+    ):
+        return _make_receipt(
+            "harness_preflight_sensor", plan, invoked=False, gate_passed=False,
+            wall_time_ms=int((time.monotonic() - start) * 1000),
+            outcome=_structured_outcome(
+                action="evaluate_harness_preflight_sensor", semantic_status="BLOCKED",
+                error="MALFORMED_PENDING_CAPABILITIES",
+                evidence_refs=[f"ev_harness_preflight_blocked_{plan.task_id}"],
+                verifier_executed=False,
+            ),
+        )
+    if (
+        not isinstance(selected, (list, tuple))
+        or not all(isinstance(item, str) and item.strip() for item in selected)
+    ):
+        return _make_receipt(
+            "harness_preflight_sensor", plan, invoked=False, gate_passed=False,
+            wall_time_ms=int((time.monotonic() - start) * 1000),
+            outcome=_structured_outcome(
+                action="evaluate_harness_preflight_sensor", semantic_status="BLOCKED",
+                error="MALFORMED_SELECTED_CAPABILITIES",
+                evidence_refs=[f"ev_harness_preflight_blocked_{plan.task_id}"],
+                verifier_executed=False,
+            ),
+        )
+    try:
+        from nexus.engine.harness_sensors import build_harness_preflight_sensor
+
+        sensor = build_harness_preflight_sensor(
+            task_desc=task_desc,
+            task_type=str(constraints.get("task_type") or "repair"),
+            route=dict(route),
+            pending_capabilities=tuple(pending),
+            selected_capabilities=tuple(selected),
+        )
+        if not isinstance(sensor, Mapping) or sensor.get("schema_version") != "nexus_harness_preflight_sensor.v1":
+            raise ValueError("INVALID_HARNESS_PREFLIGHT_SENSOR")
+        required = ("sensor", "capability_wired", "executor_ready", "escalation_required", "reasons")
+        if any(key not in sensor for key in required) or sensor.get("sensor") != "harness_preflight":
+            raise ValueError("INCOMPLETE_HARNESS_PREFLIGHT_SENSOR")
+        passed = bool(sensor.get("capability_wired")) and not bool(sensor.get("escalation_required"))
+        elapsed = int((time.monotonic() - start) * 1000)
+        return _make_receipt(
+            "harness_preflight_sensor", plan, invoked=True, gate_passed=passed,
+            wall_time_ms=elapsed,
+            outcome=_structured_outcome(
+                action="evaluate_harness_preflight_sensor",
+                semantic_status="SUCCEEDED" if passed else "BLOCKED",
+                evidence_refs=[f"ev_harness_preflight_sensor_{plan.task_id}"],
+                result=dict(sensor), verifier_executed=False, candidate_required=True,
+                **dict(sensor),
+            ),
+        )
+    except Exception as exc:
+        return _make_receipt(
+            "harness_preflight_sensor", plan, invoked=False, gate_passed=False,
+            wall_time_ms=int((time.monotonic() - start) * 1000),
+            outcome=_structured_outcome(
+                action="evaluate_harness_preflight_sensor", semantic_status="BLOCKED",
+                error=str(exc)[:300],
+                evidence_refs=[f"ev_harness_preflight_blocked_{plan.task_id}"],
+                verifier_executed=False,
+            ),
+        )
 
 
 def _exec_ddtree(plan: CapabilityExecutionPlan, task_desc: str) -> CapabilityReceipt:
