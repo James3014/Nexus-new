@@ -13,24 +13,29 @@ Integration pipeline:
 Nexus production benchmark package does NOT import research_ledger.
 Research Ledger used only via subprocess (read-only) if available.
 """
+
 import json
 import os
 import subprocess
 import sys
-from typing import Dict, Any, Optional
+from pathlib import Path
+from typing import Dict
 
 import pytest
 
-from nexus.research.epistemic_benchmark.corpus import get_all_oracles, REQUIRED_CASE_IDS
+from nexus.research.epistemic_benchmark.contracts import (
+    CLAIM_CEILING_TEXT,
+    REQUIRED_LIMITATIONS,
+)
+from nexus.research.epistemic_benchmark.corpus import REQUIRED_CASE_IDS, get_all_oracles
 from nexus.research.epistemic_benchmark.observations import (
     build_synthetic_observation,
     import_observation,
 )
 from nexus.research.epistemic_benchmark.packets import (
     prepare_benchmark_run,
-    load_run_manifest,
-    validate_public_run_integrity,
     validate_private_scoring_context,
+    validate_public_run_integrity,
 )
 from nexus.research.epistemic_benchmark.report import (
     build_benchmark_report,
@@ -38,13 +43,26 @@ from nexus.research.epistemic_benchmark.report import (
     verify_benchmark_report,
     write_benchmark_report,
 )
-from nexus.research.epistemic_benchmark.contracts import (
-    CLAIM_CEILING_TEXT,
-    REQUIRED_LIMITATIONS,
-    compute_canonical_sha256,
-)
 
 FIXED_KEY = bytes.fromhex("a1b2c3d4" * 8)  # 32 bytes deterministic test key
+RESEARCH_LEDGER_ROOT_ENV = "NEXUS_RESEARCH_LEDGER_ROOT"
+DEFAULT_RESEARCH_LEDGER_ROOT = Path("/Users/jameschen/Workspace/research-ledger")
+
+
+def _research_ledger_src() -> Path:
+    """Resolve the optional, read-only Research Ledger test checkout."""
+    configured = os.environ.get(RESEARCH_LEDGER_ROOT_ENV)
+    root = Path(configured).expanduser() if configured else DEFAULT_RESEARCH_LEDGER_ROOT
+    if not root.exists():
+        if configured:
+            raise AssertionError(f"{RESEARCH_LEDGER_ROOT_ENV} points to a missing path: {root}")
+        pytest.skip("Research Ledger checkout not present; optional bridge skipped")
+    root = root.resolve()
+    src = root / "src"
+    cli = src / "research_ledger" / "cli.py"
+    if not root.is_dir() or not src.is_dir() or not cli.is_file():
+        raise AssertionError(f"Research Ledger checkout is invalid (expected {cli}): {root}")
+    return src
 
 
 def _prepare(tmp_path, seed: int = 20260802, subdir: str = "run") -> tuple:
@@ -74,8 +92,10 @@ def _load_alias_to_case(priv_path: str) -> Dict[str, str]:
 
 def test_no_research_ledger_import():
     """Production benchmark package must not import research_ledger at runtime."""
+    import importlib
+    import pkgutil
+
     import nexus.research.epistemic_benchmark as pkg
-    import importlib, pkgutil
 
     for importer, modname, ispkg in pkgutil.walk_packages(
         path=pkg.__path__, prefix=pkg.__name__ + ".", onerror=lambda x: None
@@ -98,9 +118,7 @@ def test_no_research_ledger_import():
             assert "import research_ledger" not in source, (
                 f"research_ledger import found in {fpath}"
             )
-            assert "from research_ledger" not in source, (
-                f"research_ledger import found in {fpath}"
-            )
+            assert "from research_ledger" not in source, f"research_ledger import found in {fpath}"
 
 
 # ---------------------------------------------------------------------------
@@ -147,8 +165,12 @@ def test_oracle_not_in_public_packets(tmp_path):
     run_dir, priv_path, manifest = _prepare(tmp_path, seed=98765, subdir="oracle_check_run")
 
     oracle_keys = {
-        "oracle_class", "oracle_decision", "known_defects",
-        "required_detection", "oracle_sha256", "defect_id",
+        "oracle_class",
+        "oracle_decision",
+        "known_defects",
+        "required_detection",
+        "oracle_sha256",
+        "defect_id",
     }
 
     for arm in ("standard_review", "strong_protocol", "epistemic_workflow"):
@@ -163,9 +185,7 @@ def test_oracle_not_in_public_packets(tmp_path):
                 if isinstance(obj, dict):
                     for k, v in obj.items():
                         if k in oracle_keys:
-                            pytest.fail(
-                                f"Oracle key {k!r} found in packet {arm}/{fname} at {path}"
-                            )
+                            pytest.fail(f"Oracle key {k!r} found in packet {arm}/{fname} at {path}")
                         _recursive_check(v, f"{path}.{k}")
                 elif isinstance(obj, list):
                     for i, item in enumerate(obj):
@@ -379,16 +399,11 @@ def test_research_ledger_subprocess_readonly():
     and that we do NOT import it directly in our package.
     This test is skipped if research-ledger is not present.
     """
-    nexus_root = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..")
-    )
-    rl_src = os.path.join(nexus_root, "research-ledger", "src")
-
-    if not os.path.isdir(rl_src):
-        pytest.skip("research-ledger not present — skipping subprocess integration test")
+    rl_src = _research_ledger_src()
 
     # Verify no direct import in benchmark package
     import nexus.research.epistemic_benchmark as pkg
+
     pkg_dir = os.path.dirname(pkg.__file__)
     for root, dirs, files in os.walk(pkg_dir):
         for fname in files:
@@ -401,7 +416,8 @@ def test_research_ledger_subprocess_readonly():
 
     # Try calling research_ledger CLI via subprocess (read-only)
     env = dict(os.environ)
-    env["PYTHONPATH"] = rl_src
+    inherited = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = str(rl_src) if not inherited else os.pathsep.join((str(rl_src), inherited))
 
     result = subprocess.run(
         [sys.executable, "-m", "research_ledger.cli", "--help"],
