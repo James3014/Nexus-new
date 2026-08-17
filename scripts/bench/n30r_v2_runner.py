@@ -283,6 +283,14 @@ def _prepare_tasks(manifest: dict[str, Any], workspace_root: Path) -> list[dict]
     return prepared
 
 
+def _require_task_source(task_dict: dict) -> str:
+    source = task_dict.get("_materialized_source")
+    if source is not None:
+        return source
+    with tempfile.TemporaryDirectory(prefix="n30r-v2-row-materialization-") as root:
+        return _materialize_task_source(task_dict, Path(root))
+
+
 def _run_verifier(source: str, verifier_cmd: tuple[str, ...], work_dir: str) -> tuple[int, str, str]:
     src_path = os.path.join(work_dir, "f.py")
     with open(src_path, "w") as f:
@@ -351,9 +359,7 @@ def _apply_search_replace(source: str, blocks: list[dict]) -> tuple[str, str]:
 
 
 def _verify_original_fails(task_dict: dict, work_dir: str) -> bool:
-    orig = task_dict.get("_materialized_source")
-    if orig is None:
-        raise ExternalFixturePolicyError("N30R task must be materialized before verification")
+    orig = _require_task_source(task_dict)
     verifier_cmd = tuple(task_dict.get("verifier_command", []))
     ec, _, _ = _run_verifier(orig, verifier_cmd, work_dir)
     return ec != 0
@@ -368,9 +374,7 @@ def run_bare_row(task_dict: dict, seed: int, run_id: str) -> dict:
     # === E2E start — includes source read, prompt build, provider call, parse, apply, verifier ===
     t_e2e_start = time.monotonic()
 
-    orig = task_dict.get("_materialized_source")
-    if orig is None:
-        raise ExternalFixturePolicyError("N30R task must be materialized before provider setup")
+    orig = _require_task_source(task_dict)
     task_statement = task_dict.get("task_statement", "")
     verifier_cmd = tuple(task_dict.get("verifier_command", []))
 
@@ -610,12 +614,8 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
     source_relpath = task_dict.get("source_relpath", "")
     task_statement = task_dict.get("task_statement", "")
 
-    source_content = task_dict.get("_materialized_source")
-    if source_content is None:
-        raise ExternalFixturePolicyError("N30R task must be materialized before provider setup")
-    mod: dict = {}
-    exec(source_content, mod)
-    orig = mod.get("ORIGINAL", source_content)
+    source_content = _require_task_source(task_dict)
+    orig = source_content
 
     workspace = tempfile.mkdtemp(prefix=f"n30r-core-{task_id}-")
     target_relpath = "f.py"
