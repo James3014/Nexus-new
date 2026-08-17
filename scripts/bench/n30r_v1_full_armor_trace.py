@@ -17,10 +17,10 @@ import copy
 import hashlib
 import json
 import os
-import shutil
 import sys
 import tempfile
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
@@ -77,9 +77,44 @@ def _invoke_planner(task_desc: str) -> dict:
             os.environ.pop(key, None)
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_ALLOWED_SOURCE_RELPATH = "tests/fixtures/n30r/smoke/semantic_task.py"
+_SYNTHETIC_SOURCE = """\
+def is_even(n):
+    return n % 2 == 1
+"""
+
+
+@contextmanager
+def _materialize_synthetic_source_fixture():
+    """Yield a canonical, repository-contained synthetic source fixture."""
+    with tempfile.TemporaryDirectory(prefix=".n30r-v1-fixture-", dir=_REPO_ROOT) as root:
+        fixture_root = Path(root).resolve()
+        if fixture_root.parent != _REPO_ROOT.resolve():
+            raise RuntimeError("synthetic fixture escaped repository root")
+        fixture_path = fixture_root / "ORIGINAL.py"
+        fixture_path.write_text(_SYNTHETIC_SOURCE, encoding="utf-8")
+        if fixture_path.is_symlink() or fixture_path.resolve() != fixture_path:
+            raise RuntimeError("synthetic fixture path is not canonical")
+        yield fixture_path
+
+
 def _load_source_from_fixture(source_relpath: str) -> str:
-    from scripts.bench.n30r_arm_adapters import _read_fixture_source
-    return _read_fixture_source(source_relpath)
+    """Load only the fixed semantic fixture; reject path injection."""
+    if source_relpath != _ALLOWED_SOURCE_RELPATH:
+        raise ValueError("N30R V1 source fixture path is fixed and repository-bound")
+    with _materialize_synthetic_source_fixture() as fixture_path:
+        return fixture_path.read_text(encoding="utf-8")
+
+
+def _repo_execution_workspace(prefix: str = ".n30r-v1-workspace-") -> tempfile.TemporaryDirectory[str]:
+    """Create an isolated execution workspace directly under the repository."""
+    workspace = tempfile.TemporaryDirectory(prefix=prefix, dir=_REPO_ROOT)
+    workspace_path = Path(workspace.name).resolve()
+    if workspace_path.parent != _REPO_ROOT.resolve():
+        workspace.cleanup()
+        raise RuntimeError("N30R V1 execution workspace escaped repository root")
+    return workspace
 
 
 WRONG_PATCH = """\
@@ -218,7 +253,7 @@ def deterministic_provider(req: LocalModelProviderRequest) -> str:
 
 
 # ── Fixture source paths ──────────────────────────────────────────────
-_SOURCE_RELPATH = "fixtures/python/is_even_wrong_parity/ORIGINAL.py"
+_SOURCE_RELPATH = _ALLOWED_SOURCE_RELPATH
 
 
 def run_v1_trace(custom_source_content: str | None = None) -> dict:
@@ -236,7 +271,8 @@ def run_v1_trace(custom_source_content: str | None = None) -> dict:
     source_sha256 = _sha256_text(source_content)
     source_length = len(source_content)
 
-    workspace = tempfile.mkdtemp(prefix=f"n30r-v1-{task.task_id}-")
+    workspace_holder = _repo_execution_workspace(prefix=f".n30r-v1-{task.task_id}-")
+    workspace = workspace_holder.name
     target_relpath = "f.py"
     with open(os.path.join(workspace, target_relpath), "w") as f:
         f.write(source_content)
@@ -514,7 +550,7 @@ def run_v1_trace(custom_source_content: str | None = None) -> dict:
         + len(projection.unknown_capabilities) + len(projection.dropped_capabilities)
     )
     receipt["wall_time_sec"] = round(time.time() - start, 3)
-    shutil.rmtree(workspace, ignore_errors=True)
+    workspace_holder.cleanup()
     return receipt
 
 

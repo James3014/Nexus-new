@@ -22,6 +22,11 @@ from scripts.bench.n30r_v1_full_armor_trace import (
     classify_provider_prompt,
     WRONG_PATCH,
     CORRECT_PATCH,
+    _ALLOWED_SOURCE_RELPATH,
+    _REPO_ROOT,
+    _load_source_from_fixture,
+    _materialize_synthetic_source_fixture,
+    _repo_execution_workspace,
 )
 
 
@@ -144,6 +149,48 @@ class TestClassifyProviderPrompt:
     def test_semantic_retry_marker_takes_priority_over_failure_class(self):
         prompt = "Failure Class: VERIFIER_FAIL\n[NEXUS SEMANTIC RETRY — VERIFICATION-GUIDED]\n### VERIFICATION FAILURE REPORT"
         assert classify_provider_prompt(prompt) == "SEMANTIC_RETRY_WITH_VERIFIER_EVIDENCE"
+
+
+class TestSyntheticFixtureBoundary:
+    """The vertical slice owns one deterministic, repository-bound fixture."""
+
+    def test_fixture_is_cleaned_up_and_repository_contained(self):
+        with _materialize_synthetic_source_fixture() as fixture:
+            assert _REPO_ROOT.resolve() in fixture.parents
+            assert fixture.is_file()
+            assert not fixture.is_symlink()
+            assert fixture.read_text(encoding="utf-8") == _load_source_from_fixture(
+                _ALLOWED_SOURCE_RELPATH
+            )
+        assert not fixture.exists()
+
+    @pytest.mark.parametrize(
+        "override",
+        [
+            "../outside.py",
+            "/tmp/outside.py",
+            "tests/fixtures/n30r/smoke/../heldout/h_loc_01.py",
+            "tests/fixtures/n30r/smoke/semantic_task.py/../../outside.py",
+        ],
+    )
+    def test_traversal_and_external_override_are_rejected(self, override):
+        with pytest.raises(ValueError, match="fixed and repository-bound"):
+            _load_source_from_fixture(override)
+
+    def test_environment_override_is_ignored(self, monkeypatch):
+        monkeypatch.setenv("N30R_SOURCE_FIXTURE", "/tmp/attacker.py")
+        assert _load_source_from_fixture(_ALLOWED_SOURCE_RELPATH) == (
+            "def is_even(n):\n    return n % 2 == 1\n"
+        )
+
+    def test_execution_workspace_is_contained_and_cleaned_up(self):
+        with _repo_execution_workspace() as workspace:
+            path = Path(workspace)
+            assert _REPO_ROOT.resolve() in path.parents
+            assert path.parent == _REPO_ROOT.resolve()
+            (path / "f.py").write_text("fixture", encoding="utf-8")
+            assert (path / "f.py").exists()
+        assert not path.exists()
 
 
 # ══════════════════════════════════════════════════════════════════════
