@@ -303,6 +303,28 @@ def test_duplicate_artifact_id_rejects_even_with_unique_verifier_ids() -> None:
     assert result.reason_codes == ("artifact_duplicate",)
 
 
+def test_builder_rejects_duplicate_evidence_kinds_before_emission() -> None:
+    payload = build_changeset_certification(
+        change_set=_identity(),
+        evidence=[_evidence(), {**_evidence(), "evidence_id": "ev-002"}],
+    )
+    assert payload["disposition"] == "BLOCKED"
+    assert payload["reasons"] == ["verifier_duplicate"]
+    assert validate_changeset_certification(payload) == ()
+
+
+def test_rejected_disposition_requires_bounded_non_empty_reason_codes() -> None:
+    payload = _envelope()
+    payload["disposition"] = "REJECTED"
+    payload["reasons"] = []
+    _rehash(payload)
+    assert validate_changeset_certification(payload) == ("reason_invalid",)
+
+    payload["reasons"] = ["verifier_failed"] * 17
+    _rehash(payload)
+    assert validate_changeset_certification(payload) == ("reason_invalid",)
+
+
 @pytest.mark.parametrize("field", ["repository", "base", "candidate"])
 def test_repository_base_candidate_manifest_bindings_are_not_substitutable(field: str) -> None:
     payload = _envelope()

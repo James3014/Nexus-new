@@ -15,6 +15,7 @@ CLAIM_CEILING = "LOCAL_CHANGESET_CERTIFICATION_V1_CONTRACT_CANDIDATE_ONLY"
 _STATUSES = frozenset({"CERTIFIED", "REJECTED", "BLOCKED"})
 _VERIFIER_STATUSES = frozenset({"PASS", "FAIL"})
 _HASH_LEN = 71
+_MAX_REASONS = 16
 _REASONS = frozenset({
     "identity_missing",
     "identity_malformed",
@@ -144,6 +145,7 @@ def build_changeset_certification(
         return _minimal_invalid("evidence_missing")
     paths = [f"changeset/{change_set['change_set_id']}"]
     verifiers: list[dict[str, Any]] = []
+    verifier_ids: set[str] = set()
     for item in evidence:
         if (
             not isinstance(item, Mapping)
@@ -151,6 +153,9 @@ def build_changeset_certification(
             or not _hash(item.get("content_hash"))
         ):
             return _minimal_invalid("verifier_artifact_malformed")
+        if item["kind"] in verifier_ids:
+            return _minimal_invalid("verifier_duplicate")
+        verifier_ids.add(item["kind"])
         verifiers.append({
             "verifier_id": item["kind"],
             "artifact_id": f"{item['kind']}:attempt-1",
@@ -394,14 +399,18 @@ def _validate(payload: Mapping[str, Any]) -> tuple[str, ...]:
         if verifier["artifact_id"] != f"{verifier['verifier_id']}:{task['attempt_id']}":
             return ("cross_binding_mismatch",)
     reasons = payload.get("reasons")
-    if (
-        not isinstance(reasons, list)
-        or len(set(reasons)) != len(reasons)
-        or any(not isinstance(r, str) or r not in _REASONS for r in reasons)
+    if not isinstance(reasons, list):
+        return ("reason_invalid",)
+    if len(reasons) > _MAX_REASONS or any(
+        not isinstance(r, str) or r not in _REASONS for r in reasons
     ):
+        return ("reason_invalid",)
+    if len(set(reasons)) != len(reasons):
         return ("reason_invalid",)
     if payload.get("disposition") not in _STATUSES:
         return ("status_invalid",)
+    if payload["disposition"] == "REJECTED" and not reasons:
+        return ("reason_invalid",)
     if payload.get("claim_ceiling") != CLAIM_CEILING:
         return ("cross_binding_mismatch",)
     if not _hash(payload.get("canonical_payload_hash")):
