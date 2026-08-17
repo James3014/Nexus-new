@@ -46,7 +46,9 @@ _REASONS = frozenset({
     "identity_diff_hash_invalid",
     "evidence_0_invalid",
     "evidence_duplicate_id",
+    "evidence_empty",
     "evidence_not_sequence",
+    "canonical_hash_mismatch",
 })
 
 
@@ -550,10 +552,13 @@ def _manifest_input(manifest: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _minimal(result: ChangeSetCertification) -> dict[str, Any]:
-    return _minimal_invalid(result.reason_codes[0] if result.reason_codes else "identity_missing")
+    return _minimal_invalid(
+        result.reason_codes[0] if result.reason_codes else "identity_missing",
+        disposition=result.status.value,
+    )
 
 
-def _minimal_invalid(reason: str) -> dict[str, Any]:
+def _minimal_invalid(reason: str, *, disposition: str = "BLOCKED") -> dict[str, Any]:
     return _new_envelope(
         task={"task_id": "missing", "attempt_id": "missing"},
         repository={"repository": "missing", "source": "missing"},
@@ -569,7 +574,7 @@ def _minimal_invalid(reason: str) -> dict[str, Any]:
                 "status": "FAIL",
             }
         ],
-        disposition="BLOCKED",
+        disposition=disposition,
         reasons=[reason],
     )
 

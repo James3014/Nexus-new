@@ -130,6 +130,37 @@ def test_canonical_hash_binding_rejects_tamper() -> None:
     assert tampered.reason_codes == ("canonical_hash_mismatch",)
 
 
+@pytest.mark.parametrize(
+    ("payload", "status", "reason"),
+    [
+        (
+            {
+                "change_set": _identity(),
+                "evidence": [_evidence()],
+                "canonical_hash": "sha256:" + "c" * 64,
+            },
+            CertificationStatus.REJECTED,
+            "canonical_hash_mismatch",
+        ),
+        (
+            {"change_set": _identity(), "evidence": []},
+            CertificationStatus.BLOCKED,
+            "evidence_empty",
+        ),
+    ],
+)
+def test_compatibility_failures_emit_self_validating_v1_envelopes(
+    payload: dict[str, object], status: CertificationStatus, reason: str
+) -> None:
+    result = certify_changeset(payload)
+    wire = result.to_dict()
+
+    assert result.status is status
+    assert wire["disposition"] == status.value
+    assert wire["reasons"] == [reason]
+    assert validate_changeset_certification(wire) == ()
+
+
 def test_builder_returns_only_contract_data_and_no_execution_authority() -> None:
     payload = build_changeset_certification(change_set=_identity(), evidence=[_evidence()])
 
