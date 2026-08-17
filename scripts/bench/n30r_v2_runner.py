@@ -662,7 +662,6 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
     t_e2e_start = time.monotonic()
 
     task_id = task_dict.get("task_id", "")
-    source_relpath = task_dict.get("source_relpath", "")
     task_statement = task_dict.get("task_statement", "")
 
     source_content = _require_task_source(task_dict)
