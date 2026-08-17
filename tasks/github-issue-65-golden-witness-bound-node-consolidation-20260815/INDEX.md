@@ -5,8 +5,8 @@ status: ACTIVE
 terminal_state: CANDIDATE_PENDING_OWNER_RECONCILIATION
 source_issue: "#65"
 baseline_main: cdf2570ede5ae218f36f886b696c8da45458043a
-reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
-current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+reconciled_main: 9296d68fe19d933cb78b9a0470a054ea5efd4c2f
+current_main: 9296d68fe19d933cb78b9a0470a054ea5efd4c2f
 historical_scope_current_frontier: 00-bound-node-semantic-witnesses.md
 readiness_marker: GOLDEN_WITNESS_SEMANTIC_HARDENING_CANDIDATE_PENDING_OWNER_RECONCILIATION
 claim_ceiling: GOLDEN_WITNESS_SEMANTIC_HARDENING_CANDIDATE_ONLY
@@ -29,7 +29,7 @@ This record is a reconciliation candidate; it does not claim Issue #65
 terminal. The historical contract above is preserved as the implementation
 baseline.
 
-- Current main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c` (fresh rebind
+- Current main: `9296d68fe19d933cb78b9a0470a054ea5efd4c2f` (fresh rebind
   target for this reconciliation).
 - Physical implementation receipts, each verified ancestor of current main:
   - PR #297 (bound-node GB-013/GB-014/GB-019 consolidation): merge

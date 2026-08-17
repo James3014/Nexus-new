@@ -7,8 +7,8 @@ owner: James Chen
 status: ACTIVE
 terminal_state: CANDIDATE_PENDING_OWNER_RECONCILIATION
 baseline_main: eb668fb76f0c30d8f025db42cdb8e320d556c037
-reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
-current_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+reconciled_main: 9296d68fe19d933cb78b9a0470a054ea5efd4c2f
+current_main: 9296d68fe19d933cb78b9a0470a054ea5efd4c2f
 historical_scope_current_frontier: 00-gate-c-semantic-consumer-tamper-witnesses.md
 readiness_marker: GOLDEN_WITNESS_SEMANTIC_HARDENING_CANDIDATE_PENDING_OWNER_RECONCILIATION
 claim_ceiling: GOLDEN_WITNESS_SEMANTIC_HARDENING_CANDIDATE_ONLY
@@ -32,7 +32,7 @@ This record is a reconciliation candidate; it does not claim Issue #65
 terminal. The historical contract above is preserved as the implementation
 baseline.
 
-- Current main: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c` (fresh rebind
+- Current main: `9296d68fe19d933cb78b9a0470a054ea5efd4c2f` (fresh rebind
   target for this reconciliation).
 - Physical implementation receipts, each verified ancestor of current main:
   - PR #236 (Gate C GB-003/GB-006/GB-029/GB-030/GB-049/GB-056/GB-072/GB-073
