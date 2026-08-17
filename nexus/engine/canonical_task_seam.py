@@ -7,21 +7,22 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
+_FEATURE_INTENT_TOKENS = frozenset({"build", "create", "add", "implement", "feature"})
+_FEATURE_INTENT_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])([A-Za-z]+)(?![A-Za-z0-9_])")
+
 
 def infer_task_kind(task_text: str) -> str:
+    """Classify explicit feature intent without matching identifier fragments.
+
+    Task text commonly names repair symbols such as ``add_one`` or
+    ``rebuild_index``.  Those names must remain repair work; only standalone
+    English intent words may enter the feature branch.  The planner remains
+    the authority for the resulting execution decision.
+    """
     text = str(task_text or "").strip().lower()
-    feature_keywords = (
-        "build",
-        "create",
-        "add",
-        "implement",
-        "feature",
-        "新增",
-        "建立",
-        "實作",
-        "開發",
-    )
-    if any(keyword in text for keyword in feature_keywords):
+    if any(match.group(1) in _FEATURE_INTENT_TOKENS for match in _FEATURE_INTENT_TOKEN_RE.finditer(text)):
+        return "feature"
+    if any(keyword in text for keyword in ("新增", "建立", "實作", "開發")):
         return "feature"
     return "bug"
 
