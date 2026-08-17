@@ -188,6 +188,7 @@ def run_mainchain(
         "skills": request.skills,
         "local_request": request.local_request,
         "evidence_refs": request.evidence_refs,
+        "canonical_context": request.canonical_context,
         "canonical_planning_bundle": canonical_bundle,
         "schema": request.schema,
     }
@@ -317,6 +318,7 @@ def run_mainchain_replan(
         "skills": request.skills,
         "local_request": request.local_request,
         "evidence_refs": request.evidence_refs,
+        "canonical_context": request.canonical_context,
         "schema": request.schema,
     }
     stamped = UnifiedRuntimeRequest(**fields)

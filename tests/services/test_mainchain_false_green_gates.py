@@ -2441,6 +2441,212 @@ def test_pregate_executes_non_empty_verifier_command(tmp_path: Path) -> None:
     assert outcome["results"][0]["exit_code"] == 0
 
 
+# fmt: off
+def test_pregate_explicit_failing_verifier_stays_fail_closed(tmp_path: Path) -> None:
+    import sys
+
+    from nexus.services.capability_registry import build_real_executor_invoker
+
+    invoker = build_real_executor_invoker("pregate")
+    assert invoker is not None
+    result = invoker({
+        "task_id": "pregate-failing-command-1",
+        "task_statement": "the verifier must fail closed",
+        "planner": {"plan_hash": "pregate-failing-command-plan"},
+        "codeintel": {
+            "workspace_root": str(tmp_path),
+            "verify_commands": [f"{sys.executable} -c 'raise SystemExit(7)'"],
+        },
+    })
+
+    assert result["status"] == "FAILED"
+    assert result["gate_passed"] is False
+    assert result["response"]["outcome"]["all_passed"] is False
+
+
+def test_harness_preflight_sensor_does_not_execute_known_red_verifier(tmp_path: Path) -> None:
+    """Preflight is structural; the known-red verifier remains post-Candidate."""
+    import sys
+
+    from nexus.services.capability_registry import build_real_executor_invoker
+
+    invoker = build_real_executor_invoker("harness_preflight_sensor")
+    assert invoker is not None
+    marker = tmp_path / "verifier-ran"
+    command = (
+        f"{sys.executable} -c \"from pathlib import Path; Path(r'{marker}').write_text('ran')\""
+    )
+    result = invoker(
+        {
+            "task_id": "harness-preflight-known-red-1",
+            "task_statement": "repair a known-red target",
+            "planner": {"plan_hash": "harness-preflight-plan"},
+            "codeintel": {"workspace_root": str(tmp_path), "verify_commands": [command]},
+        }
+    )
+
+    assert result["gate_passed"] is True
+    assert result["response"]["outcome"]["verifier_executed"] is False
+    assert not marker.exists()
+
+
+def test_harness_preflight_sensor_fails_closed_for_missing_wiring(tmp_path: Path) -> None:
+    from nexus.services.capability_registry import build_real_executor_invoker
+
+    invoker = build_real_executor_invoker("harness_preflight_sensor")
+    assert invoker is not None
+    result = invoker({
+        "task_id": "harness-preflight-missing-wiring-1",
+        "task_statement": "repair without verifier wiring",
+        "planner": {"plan_hash": "harness-preflight-missing-plan"},
+        "codeintel": {"workspace_root": str(tmp_path)},
+    })
+
+    assert result["gate_passed"] is False
+    assert result["response"]["outcome"]["error"] == "VERIFY_COMMAND_WIRING_REQUIRED"
+
+
+def test_real_harness_invoker_propagates_pending_and_bdd_constraints(tmp_path: Path) -> None:
+    from nexus.services.capability_registry import build_real_executor_invoker
+
+    invoker = build_real_executor_invoker("harness_preflight_sensor")
+    assert invoker is not None
+    result = invoker(
+        {
+            "task_id": "harness-real-constraints-1",
+            "task_statement": "Given-When-Then business acceptance",
+            "task_type": "business_acceptance",
+            "planner": {"plan_hash": "harness-real-constraints-plan"},
+            "route": {"bdd_acceptance": True},
+            "pending_capabilities": ["repair_loop"],
+            "selected_capabilities": ["harness_preflight_sensor"],
+            "codeintel": {
+                "workspace_root": str(tmp_path),
+                "verify_commands": ["known-red-verifier"],
+            },
+        }
+    )
+
+    assert result["gate_passed"] is False
+    outcome = result["response"]["outcome"]
+    assert outcome["pending_capabilities"] == ["repair_loop"]
+    assert outcome["bdd_acceptance_required"] is True
+    assert "pending_executor_present" in outcome["reasons"]
+    assert "bdd_acceptance_required" in outcome["reasons"]
+
+
+def test_real_harness_invoker_rejects_complete_contradictory_sensor(monkeypatch, tmp_path: Path) -> None:
+    import nexus.engine.harness_sensors as sensors
+    from nexus.services.capability_registry import build_real_executor_invoker
+
+    monkeypatch.setattr(
+        sensors,
+        "build_harness_preflight_sensor",
+        lambda **_: {
+            "schema_version": "nexus_harness_preflight_sensor.v1",
+            "sensor": "harness_preflight",
+            "capability_wired": True,
+            "executor_ready": True,
+            "pending_capabilities": [],
+            "selected_capabilities": ["harness_preflight_sensor"],
+            "cost_lane": "standard",
+            "escalation_required": False,
+            "bdd_acceptance_required": False,
+            "reasons": ["preflight_clear"],
+        },
+    )
+    invoker = build_real_executor_invoker("harness_preflight_sensor")
+    assert invoker is not None
+    result = invoker(
+        {
+            "task_id": "harness-real-substitution-1",
+            "task_statement": "Given-When-Then business acceptance",
+            "task_type": "business_acceptance",
+            "planner": {"plan_hash": "harness-real-substitution-plan"},
+            "route": {"bdd_acceptance": True},
+            "pending_capabilities": ["repair_loop"],
+            "selected_capabilities": ["harness_preflight_sensor"],
+            "codeintel": {
+                "workspace_root": str(tmp_path),
+                "verify_commands": ["known-red-verifier"],
+            },
+        }
+    )
+
+    assert result["gate_passed"] is False
+    assert result["response"]["status"] == "BLOCKED_EXECUTOR_UNAVAILABLE"
+    assert "INCONSISTENT_HARNESS_PREFLIGHT" in result["response"]["outcome"]["error"]
+
+
+def test_harness_preflight_sensor_rejects_pending_executor_and_missing_bdd() -> None:
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+    from nexus.core.capability_executor_registry import get_executor
+
+    executor = get_executor("harness_preflight_sensor")
+    assert executor is not None
+    plan = CapabilityExecutionPlan(
+        plan_id="harness-hostile-plan",
+        task_id="harness-hostile-1",
+        constraints={
+            "verify_commands": ["known-red-verifier"],
+            "pending_capabilities": ["repair_loop"],
+            "selected_capabilities": ["harness_preflight_sensor"],
+            "route": {"bdd_acceptance": True},
+        },
+    )
+    receipt = executor(plan, "Given-When-Then business acceptance")
+
+    assert receipt.invoked is True
+    assert receipt.gate_passed is False
+    assert receipt.outcome["verifier_executed"] is False
+    assert "pending_executor_present" in receipt.outcome["reasons"]
+    assert "bdd_acceptance_required" in receipt.outcome["reasons"]
+
+
+def test_harness_preflight_sensor_rejects_substituted_sensor_evidence(monkeypatch) -> None:
+    import nexus.engine.harness_sensors as sensors
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+    from nexus.core.capability_executor_registry import get_executor
+
+    monkeypatch.setattr(sensors, "build_harness_preflight_sensor", lambda **_: {"sensor": "fake"})
+    executor = get_executor("harness_preflight_sensor")
+    assert executor is not None
+    receipt = executor(
+        CapabilityExecutionPlan(
+            plan_id="harness-substitution-plan",
+            task_id="harness-substitution-1",
+            constraints={"verify_commands": ["known-red-verifier"]},
+        ),
+        "repair",
+    )
+
+    assert receipt.invoked is False
+    assert receipt.gate_passed is False
+    assert receipt.outcome["error"] == "INVALID_HARNESS_PREFLIGHT_SENSOR"
+
+
+def test_harness_preflight_sensor_rejects_malformed_constraints() -> None:
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+    from nexus.core.capability_executor_registry import get_executor
+
+    executor = get_executor("harness_preflight_sensor")
+    assert executor is not None
+    receipt = executor(
+        CapabilityExecutionPlan(
+            plan_id="harness-malformed-plan",
+            task_id="harness-malformed-1",
+            constraints="not-a-mapping",  # type: ignore[arg-type]
+        ),
+        "repair",
+    )
+
+    assert receipt.invoked is False
+    assert receipt.gate_passed is False
+    assert receipt.outcome["error"] == "MALFORMED_PREFLIGHT_CONSTRAINTS"
+
+# fmt: on
+
+
 def test_semantic_searcher_queries_real_memory_repository(tmp_path: Path) -> None:
     from nexus.services.capability_registry import build_real_executor_invoker
     from nexus.services.memory_repository import MemoryRepository
