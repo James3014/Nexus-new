@@ -242,6 +242,13 @@ def test_non_admitted_block_is_terminal_and_not_replanable():
     receipt = {
         "terminal_status": "BLOCKED",
         "workforce_admission": {"overall_decision": "BLOCK"},
+        "capability_call_count": 0,
+        "local_call_count": 0,
+        "online_call_count": 0,
+        "verifier_call_count": 0,
+        "learning_call_count": 0,
+        "provider_call_count": 0,
+        "invocation_counts": {"capability": 0, "local": 0, "online": 0, "verifier": 0, "learning": 0},
         "stages": [
             {"name": "local", "status": "NOT_REQUESTED", "invoked": False},
             {"name": "online", "status": "NOT_REQUESTED", "invoked": False},
@@ -257,9 +264,46 @@ def test_non_admitted_escalate_is_incomplete_but_not_replanable():
     receipt = {
         "terminal_status": "INCOMPLETE",
         "workforce_admission": {"overall_decision": "ESCALATE"},
+        "capability_call_count": 0,
+        "local_call_count": 0,
+        "online_call_count": 0,
+        "verifier_call_count": 0,
+        "learning_call_count": 0,
+        "provider_call_count": 0,
+        "invocation_counts": {"capability": 0, "local": 0, "online": 0, "verifier": 0, "learning": 0},
         "stages": [
             {"name": "local", "status": "NOT_REQUESTED", "invoked": False},
             {"name": "online", "status": "NOT_REQUESTED", "invoked": False},
+            {"name": "verifier", "status": "NOT_REQUESTED", "invoked": False},
+            {"name": "learning", "status": "NOT_REQUESTED", "invoked": False},
+        ],
+    }
+
+    _assert_non_invoked_admission_terminal(receipt, 1)
+
+
+def test_authority_failure_projection_allows_preparation_but_no_physical_calls():
+    receipt = {
+        "terminal_status": "BLOCKED",
+        "workforce_admission": {"overall_decision": "BLOCK"},
+        "capability_call_count": 1,
+        "local_call_count": 0,
+        "online_call_count": 0,
+        "verifier_call_count": 0,
+        "learning_call_count": 0,
+        "provider_call_count": 0,
+        "invocation_counts": {"capability": 1, "local": 0, "online": 0, "verifier": 0, "learning": 0},
+        "stages": [
+            {"name": "local", "status": "NOT_REQUESTED", "invoked": False},
+            {
+                "name": "online", "status": "FAILED", "invoked": False,
+                "provider_call_count": 0, "model_call_count": 0,
+                "response": {
+                    "invoked": False,
+                    "provider_call_count": 0,
+                    "gateway_invocation_authority": {"status": "BLOCKED"},
+                },
+            },
             {"name": "verifier", "status": "NOT_REQUESTED", "invoked": False},
             {"name": "learning", "status": "NOT_REQUESTED", "invoked": False},
         ],
@@ -273,14 +317,88 @@ def test_replan_requires_admitted_provider_delivery_and_trusted_failure():
         "terminal_status": "INCOMPLETE",
         "workforce_admission": {"overall_decision": "ALLOW"},
         "online": {"invoked": True, "response": {"output_delivered": True}},
+        "verifier": {
+            "status": "FAILED",
+            "invoked": True,
+            "gate_passed": False,
+            "evidence_present": True,
+            "task_identity_shared": True,
+            "evidence_refs": ["verifier:trusted-failure"],
+        },
         "execution_replan_request": {
             "schema": "nexus.execution_replan_request.v1",
+            "trigger": "verifier_failed",
             "replan_required": True,
             "verifier_outcome_trusted": True,
+            "verifier_status": "FAILED",
+            "verifier_evidence_refs": ["verifier:trusted-failure"],
         },
     }
 
     _assert_replanable_provider_failure(receipt, 1)
+
+
+@pytest.mark.parametrize(
+    ("change", "match"),
+    [
+        (lambda r: r.pop("provider_call_count"), "call_count"),
+        (lambda r: r.__setitem__("provider_call_count", 1), "call_count"),
+        (lambda r: r.__setitem__("execution_replan_request", {}), "replan_authority"),
+        (lambda r: r["stages"].__setitem__(1, {"name": "online", "status": "FAILED", "invoked": False}), "stage_requested"),
+    ],
+)
+def test_non_admitted_receipt_hostile_fields_fail_closed(change, match):
+    receipt = {
+        "terminal_status": "BLOCKED",
+        "workforce_admission": {"overall_decision": "BLOCK"},
+        "capability_call_count": 0,
+        "local_call_count": 0,
+        "online_call_count": 0,
+        "verifier_call_count": 0,
+        "learning_call_count": 0,
+        "provider_call_count": 0,
+        "invocation_counts": {"capability": 0, "local": 0, "online": 0, "verifier": 0, "learning": 0},
+        "stages": [
+            {"name": name, "status": "NOT_REQUESTED", "invoked": False}
+            for name in ("local", "online", "verifier", "learning")
+        ],
+    }
+    change(receipt)
+    with pytest.raises(RuntimeError, match=match):
+        _assert_non_invoked_admission_terminal(receipt, 1)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda r: r["verifier"].__setitem__("status", "SUCCEEDED"),
+        lambda r: r["verifier"].__setitem__("evidence_present", False),
+        lambda r: r["verifier"].pop("evidence_refs"),
+        lambda r: r["online"]["response"].__setitem__("output_delivered", False),
+        lambda r: r["workforce_admission"].__setitem__("overall_decision", "ESCALATE"),
+        lambda r: r.pop("execution_replan_request"),
+        lambda r: r["execution_replan_request"].__setitem__("verifier_outcome_trusted", False),
+    ],
+)
+def test_replanable_receipt_hostile_fields_fail_closed(change):
+    receipt = {
+        "terminal_status": "INCOMPLETE",
+        "workforce_admission": {"overall_decision": "ALLOW"},
+        "online": {"invoked": True, "response": {"output_delivered": True}},
+        "verifier": {
+            "status": "FAILED", "invoked": True, "gate_passed": False,
+            "evidence_present": True, "task_identity_shared": True,
+            "evidence_refs": ["verifier:trusted-failure"],
+        },
+        "execution_replan_request": {
+            "schema": "nexus.execution_replan_request.v1", "trigger": "verifier_failed",
+            "replan_required": True, "verifier_outcome_trusted": True,
+            "verifier_status": "FAILED", "verifier_evidence_refs": ["verifier:trusted-failure"],
+        },
+    }
+    change(receipt)
+    with pytest.raises(RuntimeError):
+        _assert_replanable_provider_failure(receipt, 1)
 
 
 def test_canary_does_not_automatically_use_codex(tmp_path: Path, monkeypatch):

@@ -99,6 +99,41 @@ def _assert_non_invoked_admission_terminal(
             f"expected={expected_status}:actual={receipt.get('terminal_status')}"
         )
 
+    # Capability preparation may have run before an authority projection.  The
+    # physical provider boundary and online continuation are the zero-call
+    # invariants this contract protects.
+    zero_count_fields = ("online_call_count", "provider_call_count")
+    for field in zero_count_fields:
+        if field not in receipt or receipt.get(field) != 0:
+            raise RuntimeError(f"non_admitted_call_count_nonzero:{field}:attempt{attempt}")
+    invocation_counts = receipt.get("invocation_counts")
+    if not isinstance(invocation_counts, Mapping):
+        raise RuntimeError(f"non_admitted_invocation_counts_missing:attempt{attempt}")
+    for field in ("online",):
+        if field not in invocation_counts or invocation_counts.get(field) != 0:
+            raise RuntimeError(f"non_admitted_invocation_count_nonzero:{field}:attempt{attempt}")
+
+    def has_replan_authority(value: Any) -> bool:
+        if isinstance(value, Mapping):
+            for key, nested in value.items():
+                key_text = str(key)
+                if key_text in {"execution_replan_request", "replan_authorization"}:
+                    return True
+                if key_text in {
+                    "execution_replan_request_id",
+                    "replan_request_id",
+                    "source_replan_request_id",
+                } and nested:
+                    return True
+                if has_replan_authority(nested):
+                    return True
+        elif isinstance(value, list):
+            return any(has_replan_authority(item) for item in value)
+        return False
+
+    if has_replan_authority(receipt):
+        raise RuntimeError(f"non_admitted_replan_authority_present:attempt{attempt}")
+
     stages = receipt.get("stages")
     if not isinstance(stages, list):
         raise RuntimeError(f"non_admitted_stages_missing:attempt{attempt}")
@@ -109,10 +144,31 @@ def _assert_non_invoked_admission_terminal(
     }
     for name in ("local", "online", "verifier", "learning"):
         stage = stage_map.get(name)
-        if not isinstance(stage, Mapping) or stage.get("status") != "NOT_REQUESTED":
+        if not isinstance(stage, Mapping):
+            raise RuntimeError(f"non_admitted_stage_requested:{name}:attempt{attempt}")
+        status = stage.get("status")
+        authority_projection = stage.get("response")
+        is_authority_projection = (
+            status == "FAILED"
+            and isinstance(authority_projection, Mapping)
+            and (
+                isinstance(authority_projection.get("gateway_invocation_authority"), Mapping)
+                or isinstance(authority_projection.get("local_model_invocation_authority"), Mapping)
+            )
+        )
+        if status != "NOT_REQUESTED" and not is_authority_projection:
             raise RuntimeError(f"non_admitted_stage_requested:{name}:attempt{attempt}")
         if bool(stage.get("invoked")):
             raise RuntimeError(f"non_admitted_stage_invoked:{name}:attempt{attempt}")
+        stage_counts = ("provider_call_count", "model_call_count", "local_model_call_count")
+        for field in stage_counts:
+            if field in stage and stage.get(field) != 0:
+                raise RuntimeError(f"non_admitted_stage_call_count_nonzero:{name}:{field}:attempt{attempt}")
+        if is_authority_projection:
+            if any(field not in stage or stage.get(field) != 0 for field in stage_counts[:2]):
+                raise RuntimeError(f"non_admitted_authority_call_count_missing:{name}:attempt{attempt}")
+            if authority_projection.get("invoked") is not False:
+                raise RuntimeError(f"non_admitted_authority_invoked:{name}:attempt{attempt}")
 
 
 def _assert_replanable_provider_failure(
@@ -130,12 +186,26 @@ def _assert_replanable_provider_failure(
         raise RuntimeError(f"replan_requires_provider_invocation:attempt{attempt}")
     if not isinstance(response, Mapping) or not response.get("output_delivered"):
         raise RuntimeError(f"replan_requires_provider_delivery:attempt{attempt}")
+    verifier = receipt.get("verifier")
+    if (
+        not isinstance(verifier, Mapping)
+        or verifier.get("status") != "FAILED"
+        or verifier.get("invoked") is not True
+        or verifier.get("gate_passed") is not False
+        or verifier.get("evidence_present") is not True
+        or verifier.get("task_identity_shared") is not True
+        or not verifier.get("evidence_refs")
+    ):
+        raise RuntimeError(f"replan_requires_trusted_verifier_failure:attempt{attempt}")
     request = receipt.get("execution_replan_request")
     if (
         not isinstance(request, Mapping)
         or request.get("schema") != "nexus.execution_replan_request.v1"
         or not request.get("replan_required")
         or not request.get("verifier_outcome_trusted")
+        or request.get("verifier_status") != "FAILED"
+        or request.get("trigger") not in {"verifier_failed", "verifier_failed_at_full_depth"}
+        or not request.get("verifier_evidence_refs")
     ):
         raise RuntimeError(f"replan_requires_trusted_verifier_failure:attempt{attempt}")
 
