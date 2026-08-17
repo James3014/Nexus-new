@@ -29,6 +29,7 @@ from nexus.services.external_account_pool import (
     AccountLease,
     is_rotation_eligible,
 )
+from nexus.services.grok_account_pool import classify_grok_failure
 from nexus.services.unified_runtime import resolve_registered_provider_executable
 
 
@@ -218,6 +219,114 @@ class DirectCliWorkerAdapter:
             merge_performed=False,
             push_performed=False,
             failure_reason=None if outcome == WorkerOutcome.EXECUTION_COMPLETED else f"{self.provider} execution did not complete successfully",
+        )
+
+
+class GrokWorkerAdapter(DirectCliWorkerAdapter):
+    """Grok CLI adapter with optional request-scoped profile failover."""
+
+    def __init__(self, executable: str = "grok", account_pool: Optional[Any] = None):
+        super().__init__("grok", executable, "NEXUS_GROK_WORKER_MODEL", "grok-4.5", _grok_args)
+        self._injected_account_pool = account_pool
+
+    def _get_account_pool(self) -> Optional[Any]:
+        if self._injected_account_pool is not None:
+            return self._injected_account_pool
+        if os.getenv("NEXUS_GROK_ACCOUNT_POOL_ENABLED", "").strip().lower() not in {"1", "true", "yes"}:
+            return None
+        from nexus.services.grok_account_pool import get_grok_account_pool_manager
+
+        return get_grok_account_pool_manager()
+
+    def invoke(
+        self,
+        contract: Any,
+        lease: Any,
+        *,
+        prompt: str,
+        timeout_seconds: Optional[float] = None,
+        on_process_group: Any = None,
+        model: Optional[str] = None,
+    ) -> WorkerExecutionReceipt:
+        pool = self._get_account_pool()
+        if pool is None:
+            return super().invoke(
+                contract,
+                lease,
+                prompt=prompt,
+                timeout_seconds=timeout_seconds,
+                on_process_group=on_process_group,
+                model=model,
+            )
+
+        preflight = self.preflight()
+        if not preflight.ready:
+            raise WorkerProviderUnavailable(f"{self.provider}: {preflight.reason}")
+        target = str(Path(lease.target_worktree).resolve())
+        budget = max(1, min(3, int(getattr(contract, "maximum_provider_calls", 1) or 1)))
+        current = pool.acquire(consumer_id=contract.task_id)
+        last_account_alias_hash = current.account_alias_hash
+        last = None
+        attempts = 0
+        failure_reason = None
+        try:
+            for attempt in range(budget):
+                request = CliWorkerRequest(
+                    executable=preflight.executable or self.executable,
+                    argv=self.argv_builder(prompt, model or os.getenv(self.model_env, self.default_model)),
+                    cwd=target,
+                    timeout_seconds=timeout_seconds or 900.0,
+                    env=dict(current.execution_env),
+                )
+                attempts += 1
+                last = run_cli_worker(request, on_process_group=on_process_group)
+                if last.status is CliWorkerStatus.COMPLETED and last.exit_code == 0:
+                    break
+                kind = classify_grok_failure(last.status.value, last.exit_code, last.stdout, last.stderr)
+                if not is_rotation_eligible(kind) or attempt == budget - 1:
+                    break
+                try:
+                    current = pool.report_failure(current, kind)
+                    last_account_alias_hash = current.account_alias_hash
+                except Exception:
+                    # Do not leak provider or credential details when the
+                    # configured pool has no eligible replacement.
+                    current = None
+                    failure_reason = "grok account rotation unavailable"
+                    break
+        finally:
+            if current is not None:
+                pool.release(current)
+
+        if last is None:
+            raise WorkerProviderUnavailable("grok: account pool produced no execution attempt")
+        completed = last.status is CliWorkerStatus.COMPLETED and last.exit_code == 0
+        outcome = WorkerOutcome.EXECUTION_COMPLETED if completed else (
+            WorkerOutcome.INCOMPLETE if last.status is CliWorkerStatus.TIMED_OUT else WorkerOutcome.FAILED
+        )
+        return WorkerExecutionReceipt(
+            provider=self.provider,
+            task_id=contract.task_id,
+            target_worktree=target,
+            worker_status=last.status.value,
+            outcome=outcome.value,
+            exit_code=last.exit_code,
+            executable_identity=last.executable_identity,
+            argv=last.argv,
+            stdout_sha256=last.stdout_sha256,
+            stderr_sha256=last.stderr_sha256,
+            wall_time_ms=last.wall_time_ms,
+            process_group_id=last.process_group_id,
+            process_group_killed=last.process_group_killed,
+            timed_out=last.timed_out,
+            provider_calls=attempts,
+            evidence_complete=completed,
+            commit_created=False,
+            merge_performed=False,
+            push_performed=False,
+            failure_reason=None if completed else failure_reason or f"{self.provider} execution did not complete successfully",
+            account_alias_hash=last_account_alias_hash,
+            provider_attempt_count=attempts,
         )
 
 
@@ -819,7 +928,7 @@ class WorkerRegistry:
             adapters.setdefault("agy", AgyWorkerAdapter())
             adapters.setdefault(
                 "grok",
-                DirectCliWorkerAdapter("grok", "grok", "NEXUS_GROK_WORKER_MODEL", "grok-4.5", _grok_args),
+                GrokWorkerAdapter(),
             )
             adapters.setdefault(
                 "cline",
@@ -844,7 +953,7 @@ class WorkerRegistry:
                 "mimo": DirectCliWorkerAdapter("mimo", "mimo", "NEXUS_MIMO_WORKER_MODEL", "xiaomi/mimo-v2.5", _mimo_args),
                 "ollama": OllamaPatchWorkerAdapter(),
                 "cline": DirectCliWorkerAdapter("cline", "cline", "NEXUS_CLINE_WORKER_MODEL", "glm-5.2", _cline_args),
-                "grok": DirectCliWorkerAdapter("grok", "grok", "NEXUS_GROK_WORKER_MODEL", "grok-4.5", _grok_args),
+                "grok": GrokWorkerAdapter(),
             }
         )
 
