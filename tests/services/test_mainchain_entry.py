@@ -295,6 +295,12 @@ def test_mainchain_replan_delegates_to_unified_runtime_once():
         },
         online_enabled=True,
         local_enabled=False,
+        canonical_context={
+            "execution_world": "product_runtime",
+            "transport_ingress": "direct",
+            "task_facts": {"cross_module": True},
+            "authority_inputs": {"owner_authorized": False},
+        },
     )
     r1 = run_mainchain(
         req,
@@ -317,6 +323,10 @@ def test_mainchain_replan_delegates_to_unified_runtime_once():
     assert r2["terminal_status"] == "SUCCEEDED"
     assert r2["execution_depth"] == "STANDARD"
     assert r2["execution_attempt"]["attempt_number"] == 2
+    assert (
+        r2["canonical_execution"]["context_hash"]
+        == r1["canonical_execution"]["context_hash"]
+    )
 
 
 def test_mainchain_replan_preserves_planner_authority():
