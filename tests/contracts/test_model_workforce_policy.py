@@ -336,6 +336,49 @@ def test_agents_must_read_both_model_workforce_authorities() -> None:
     assert "Local output and delegated output are candidates" in overlay
 
 
+def test_owner_approved_mimo_cumulative_calibration_stays_l1_and_not_promoted() -> None:
+    workers = _manifest()["workers"]
+
+    mimo = workers["opencode_mimo_free"]
+    assert mimo["provider"] == "opencode"
+    assert mimo["model"] == "opencode/mimo-v2.5-free"
+    assert mimo["state"] == "REGISTERED_CONDITIONAL"
+    assert mimo["availability"] == "AVAILABLE"
+    assert mimo["autonomy"] == "L1"
+    assert mimo["roles"] == ["bounded_candidate_generation", "compact_code_candidate"]
+
+    assert mimo["autonomy"] not in ("L2", "L3")
+
+    evidence = mimo["requalification_evidence"]
+    assert evidence["date"] == "2026-08-17"
+    assert evidence["semantic_stable_floor"] == "L1.5"
+    assert evidence["semantic_frontier"] == "L3"
+    assert evidence["trial_count"] == 53
+    assert evidence["semantic_score"] == "51/53"
+    assert evidence["frontier_stress"] == "15/15"
+    assert evidence["verifier_guided_repair"] == "4/5"
+    assert evidence["strict_schema_discipline"] == "CONDITIONAL"
+    assert evidence["tool_scope_discipline"] == "HARD_FAIL"
+    assert evidence["trusted_execution_ceiling"] == "L1"
+    assert evidence["autonomy_ceiling"] == "L1"
+    assert evidence["promotion_status"] == "NOT_PROMOTED"
+    assert evidence["public_claim"] is False
+
+    registered_models = {w["model"] for w in workers.values()}
+    assert "opencode/mimo-v2.5-free" in registered_models
+    assert "opencode-go/mimo-v2.5" not in registered_models
+    assert "opencode-go/mimo-v2.5" not in {w["model"] for w in workers.values()}
+
+    policy = POLICY_PATH.read_text(encoding="utf-8")
+    assert "Dated Owner-approved MiMo calibration amendment — 2026-08-17" in policy
+    assert "NOT_PROMOTED" in policy
+    assert "semantic frontier" in policy
+    assert "HARD FAIL" in policy
+    assert "tool-discipline requalification" in policy
+    assert "FREE_FIRST" in policy
+    assert "opencode-go/mimo-v2.5" in policy
+
+
 def test_three_layers_lineage_and_ceiling_constraints() -> None:
     manifest = _manifest()
     workers = manifest["workers"]

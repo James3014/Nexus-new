@@ -1,7 +1,7 @@
 schema: nexus.model_workforce.v1
 status: current
 owner: James Chen
-last_verified: '2026-08-15'
+last_verified: '2026-08-17'
 authority_document: docs/arch/MODEL_WORKFORCE_POLICY.md
 benchmark_matrix: nexus/config/model_three_arm_matrix.yaml
 benchmark_harness: scripts/bench/experimental/model_workforce_three_arm.py
@@ -342,6 +342,23 @@ workers:
     cost_characteristic: subscription_free_but_high_fixed_input_tokens
     requires: [isolated_directory, bounded_context, json_event_receipt, parser, focused_tests, verifier]
     forbidden_actions: [route_authority, direct_workspace_mutation, production_ready_judgment]
+    requalification_evidence:
+      date: '2026-08-17'
+      provider: opencode
+      model: opencode/mimo-v2.5-free
+      evidence_kind: cumulative_calibration
+      semantic_stable_floor: L1.5
+      semantic_frontier: L3
+      trial_count: 53
+      semantic_score: '51/53'
+      frontier_stress: '15/15'
+      verifier_guided_repair: '4/5'
+      strict_schema_discipline: CONDITIONAL
+      tool_scope_discipline: HARD_FAIL
+      trusted_execution_ceiling: L1
+      autonomy_ceiling: L1
+      promotion_status: NOT_PROMOTED
+      public_claim: false
   opencode_ling_free:
     provider: opencode
     model: opencode/ling-3.0-flash-free
