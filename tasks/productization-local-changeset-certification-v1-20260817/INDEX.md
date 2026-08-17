@@ -2,9 +2,9 @@
 schema: nexus.task_index.v1
 task_id: productization-local-changeset-certification-v1-20260817
 status: ACTIVE
-frontier_status: 00-contract-freeze
+frontier_status: CANDIDATE_PENDING_INDEPENDENT_ACCEPTANCE
 AUTO_CHAIN: false
-claim_ceiling: LOCAL_CHANGESET_CERTIFICATION_CONTRACT_ONLY
+claim_ceiling: LOCAL_CHANGESET_CERTIFICATION_V1_CONTRACT_CANDIDATE_ONLY
 ---
 
 # Local ChangeSet Certification v1

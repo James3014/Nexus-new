@@ -2,10 +2,10 @@
 schema: nexus.task_card.v1
 task_id: productization-local-changeset-certification-v1-20260817
 card_id: 00-contract-freeze
-status: COMPLETE
-frontier_status: TERMINAL_RECONCILIATION
-terminal_marker: LOCAL_CHANGESET_CERTIFICATION_CONTRACT_FROZEN
-claim_ceiling: LOCAL_CHANGESET_CERTIFICATION_CONTRACT_ONLY
+status: ACTIVE
+frontier_status: CANDIDATE_PENDING_INDEPENDENT_ACCEPTANCE
+terminal_marker: null
+claim_ceiling: LOCAL_CHANGESET_CERTIFICATION_V1_CONTRACT_CANDIDATE_ONLY
 AUTO_CHAIN: false
 allowed_files:
   - nexus/contracts/changeset_certification.py
@@ -19,26 +19,28 @@ allowed_files:
 ## Scope
 
 Freeze a deterministic, provider-neutral certification contract for a fully
-materialised local ChangeSet.  The contract exposes exactly three semantic
+materialised local ChangeSet. The contract exposes exactly three semantic
 outcomes: `CERTIFIED`, `REJECTED`, and `BLOCKED`.
 
-Certification binds a ChangeSet identity (`change_set_id`, source revision,
-target revision, and content-addressed diff hash) to content-addressed,
-explicit evidence references.  Canonical JSON serialization and a SHA-256
-canonical hash make the wire representation reproducible.  Missing material
-blocks; malformed, duplicate, contradictory, or substituted identities reject.
+Certification binds task/attempt, repository/source, base commit/tree, diff,
+allowed scope/deletion policy, optional Candidate, verifier manifest and every
+artifact/status/hash to canonical payload and manifest hashes. Missing material
+blocks; malformed, duplicate, contradictory, stale, cross-bound, or substituted
+claims reject.
 
 ## Acceptance
 
-- `nexus.changeset_certification.v1` is the only schema emitted.
-- A complete internally consistent payload is `CERTIFIED`.
-- Missing evidence is `BLOCKED`; malformed or hostile substitutions are
-  `REJECTED`.
-- Canonical serialization is key-order independent and rejects ambiguous
-  object stringification.
+- `nexus.changeset_certification.v1` with version `1` is the only schema emitted.
+- A complete internally consistent envelope is `CERTIFIED`; failed verifiers
+  and hostile substitutions are `REJECTED`; missing material is `BLOCKED`.
+- Canonical serialization is key-order independent, finite, and rejects
+  ambiguous object stringification; set-like collections normalize deterministically.
+- Unknown schema/status/reason and cross-task/attempt/source/tree/Candidate,
+  manifest, artifact, or hash substitutions never certify.
 - The module has no provider, adapter, runtime, filesystem, shell, GitHub, or
   patch/application authority.
-- `AUTO_CHAIN=false`; downstream runtime integration is a separate future task.
+- `AUTO_CHAIN=false`; independent acceptance remains pending and downstream
+  runtime integration is a separate future task.
 
 ## Non-goals
 
