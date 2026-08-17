@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import re
 from pathlib import Path
 from typing import Any, Callable
 
@@ -28,6 +29,11 @@ from nexus.services.local_heal.local_model_provider import (
     LocalModelProviderResponse,
 )
 from scripts.bench.n30r_contracts import sha256_str, sha256_hex
+from scripts.bench.fixture_materialization import (
+    ExternalFixturePolicyError,
+    ExternalFixtureRequest,
+    SandboxedLocalExternalFixtureAdapter,
+)
 
 logger = logging.getLogger(__name__)
 ProviderFn = Callable[[str, str, str], str]
@@ -170,24 +176,111 @@ def _ollama_provider(model: str, system: str, user: str) -> str:
 
 
 def _materialize_task(task_dict: dict) -> Any:
-    """Convert manifest task dict to N30RTaskSpec."""
+    """Convert a validated manifest row into the complete canonical task spec."""
     from scripts.bench.n30r_contracts import N30RTaskSpec
+    task_id = task_dict.get("task_id", "")
+    verifier = tuple(task_dict.get("verifier_command", []))
+    source_hash = task_dict.get("source_fixture_sha256", "")
+    verifier_hash = task_dict.get("verifier_contract_sha256", "")
+    statement = task_dict.get("task_statement", "")
+    statement_hash = task_dict.get("task_statement_sha256", "")
+    if not task_id or not verifier or not source_hash or not verifier_hash or not statement:
+        raise ExternalFixturePolicyError("N30R manifest row is incomplete")
+    if sha256_str(statement) != statement_hash:
+        raise ExternalFixturePolicyError(f"N30R task statement hash mismatch: {task_id}")
+    if sha256_str(json.dumps(list(verifier))) != verifier_hash:
+        raise ExternalFixturePolicyError(f"N30R verifier contract hash mismatch: {task_id}")
+    environment_hash = sha256_str(f"python3:{sys.version}")
     return N30RTaskSpec(
-        task_id=task_dict.get("task_id", ""),
+        task_id=task_id,
+        split=task_dict.get("split", "smoke"),
         source_relpath=task_dict.get("source_relpath", ""),
-        task_statement=task_dict.get("task_statement", ""),
-        verifier_command=tuple(task_dict.get("verifier_command", [])),
+        source_sha256=source_hash,
+        task_statement=statement,
         expected_failure_signature=task_dict.get("expected_failure_signature", ""),
+        verifier_command=verifier,
+        verifier_contract_sha256=verifier_hash,
+        environment_sha256=environment_hash,
+        task_bundle_sha256=sha256_str(f"{source_hash}:{verifier_hash}:{environment_hash}"),
+        golden_patch_sha256="",
+        golden_patch_private_ref="",
+        original_verifier_expected="FAIL",
+        golden_verifier_expected="PASS",
     )
 
 
-def _read_fixture_original(relpath: str) -> str:
+def _read_fixture_original(relpath: str, *, materialized_root: Path | None = None) -> str:
     root = Path(__file__).resolve().parents[2]
-    fixture_path = root / relpath
+    fixture_path = (materialized_root / relpath) if materialized_root else (root / relpath)
     source = fixture_path.read_text(encoding="utf-8")
     mod: dict = {}
     exec(source, mod)
     return mod.get("ORIGINAL", source)
+
+
+def _materialize_task_source(task_dict: dict, workspace_root: Path) -> str:
+    """Materialize and hash-check one manifest fixture before provider setup."""
+    relpath = task_dict.get("source_relpath")
+    task_id = task_dict.get("task_id")
+    expected_hash = task_dict.get("source_fixture_sha256")
+    verifier = task_dict.get("verifier_command")
+    verifier_hash = task_dict.get("verifier_contract_sha256")
+    statement = task_dict.get("task_statement")
+    statement_hash = task_dict.get("task_statement_sha256")
+    if not isinstance(relpath, str) or not relpath:
+        raise ExternalFixturePolicyError("N30R task source_relpath is required")
+    if not isinstance(task_id, str) or not task_id:
+        raise ExternalFixturePolicyError("N30R task task_id is required")
+    if not isinstance(expected_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+        raise ExternalFixturePolicyError("N30R task source_fixture_sha256 must be a SHA-256 hex digest")
+    if not isinstance(verifier, list) or not verifier:
+        raise ExternalFixturePolicyError("N30R task verifier_command is required")
+    if not isinstance(verifier_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", verifier_hash):
+        raise ExternalFixturePolicyError("N30R task verifier_contract_sha256 must be a SHA-256 hex digest")
+    if sha256_str(json.dumps(verifier)) != verifier_hash:
+        raise ExternalFixturePolicyError(f"N30R task verifier contract hash mismatch: {task_id}")
+    if not isinstance(statement, str) or not statement:
+        raise ExternalFixturePolicyError("N30R task task_statement is required")
+    if not isinstance(statement_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", statement_hash):
+        raise ExternalFixturePolicyError("N30R task task_statement_sha256 must be a SHA-256 hex digest")
+    if sha256_str(statement) != statement_hash:
+        raise ExternalFixturePolicyError(f"N30R task statement hash mismatch: {task_id}")
+
+    repo_root = Path(__file__).resolve().parents[2]
+    adapter = SandboxedLocalExternalFixtureAdapter(
+        workspace_root=workspace_root,
+        allowed_source_roots=[repo_root],
+    )
+    result = adapter.resolve(
+        ExternalFixtureRequest(
+            task_id=task_id,
+            repo=str(repo_root),
+            repo_ref="working-tree",
+            fixture_kind="n30r_v2_repository_fixture",
+            target_file=relpath,
+            test_file=relpath,
+        )
+    )
+    materialized = Path(result.target_file).read_text(encoding="utf-8")
+    actual_hash = sha256_str(materialized)
+    if actual_hash != expected_hash:
+        raise ExternalFixturePolicyError(
+            f"N30R task source fixture hash mismatch: {task_id}"
+        )
+    module: dict = {}
+    exec(materialized, module)
+    return module.get("ORIGINAL", materialized)
+
+
+def _prepare_tasks(manifest: dict[str, Any], workspace_root: Path) -> list[dict]:
+    """Validate and materialize every task before any provider is constructed."""
+    prepared = []
+    for task in manifest.get("tasks", []):
+        task_copy = dict(task)
+        task_copy["_materialized_source"] = _materialize_task_source(task_copy, workspace_root)
+        task_copy["_task_spec"] = _materialize_task(task_copy)
+        prepared.append(task_copy)
+    return prepared
 
 
 def _run_verifier(source: str, verifier_cmd: tuple[str, ...], work_dir: str) -> tuple[int, str, str]:
@@ -258,7 +351,9 @@ def _apply_search_replace(source: str, blocks: list[dict]) -> tuple[str, str]:
 
 
 def _verify_original_fails(task_dict: dict, work_dir: str) -> bool:
-    orig = _read_fixture_original(task_dict["source_relpath"])
+    orig = task_dict.get("_materialized_source")
+    if orig is None:
+        raise ExternalFixturePolicyError("N30R task must be materialized before verification")
     verifier_cmd = tuple(task_dict.get("verifier_command", []))
     ec, _, _ = _run_verifier(orig, verifier_cmd, work_dir)
     return ec != 0
@@ -273,7 +368,9 @@ def run_bare_row(task_dict: dict, seed: int, run_id: str) -> dict:
     # === E2E start — includes source read, prompt build, provider call, parse, apply, verifier ===
     t_e2e_start = time.monotonic()
 
-    orig = _read_fixture_original(task_dict["source_relpath"])
+    orig = task_dict.get("_materialized_source")
+    if orig is None:
+        raise ExternalFixturePolicyError("N30R task must be materialized before provider setup")
     task_statement = task_dict.get("task_statement", "")
     verifier_cmd = tuple(task_dict.get("verifier_command", []))
 
@@ -513,9 +610,9 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
     source_relpath = task_dict.get("source_relpath", "")
     task_statement = task_dict.get("task_statement", "")
 
-    root = Path(__file__).resolve().parents[2]
-    fixture_path = root / source_relpath
-    source_content = fixture_path.read_text(encoding="utf-8")
+    source_content = task_dict.get("_materialized_source")
+    if source_content is None:
+        raise ExternalFixturePolicyError("N30R task must be materialized before provider setup")
     mod: dict = {}
     exec(source_content, mod)
     orig = mod.get("ORIGINAL", source_content)
@@ -828,30 +925,30 @@ def run_evaluation(
         print(f"ENVIRONMENT_INVALID: {_json.dumps(env_receipt, indent=2)}")
         return result
 
-    tasks = manifest["tasks"]
-    base_seed = manifest.get("base_seed", 4200)
     run_id = str(int(time.time()))
 
     rows = []
-    for task_dict in tasks:
-        order = task_dict["execution_order"]
-        seed = task_dict["task_seed"]
+    with tempfile.TemporaryDirectory(prefix="n30r-v2-materialization-") as materialization_root:
+        tasks = _prepare_tasks(manifest, Path(materialization_root))
+        for task_dict in tasks:
+            order = task_dict["execution_order"]
+            seed = task_dict["task_seed"]
 
-        for idx, arm_id in enumerate(order):
-            print(f"\n[{arm_id}] {task_dict['task_id']} (seed={seed}, order={idx})")
-            sys.stdout.flush()
+            for idx, arm_id in enumerate(order):
+                print(f"\n[{arm_id}] {task_dict['task_id']} (seed={seed}, order={idx})")
+                sys.stdout.flush()
 
-            if arm_id == "N30R_A_7B_BARE":
-                row = run_bare_row(task_dict, seed, run_id)
-            else:
-                row = run_core_row(task_dict, seed, run_id)
+                if arm_id == "N30R_A_7B_BARE":
+                    row = run_bare_row(task_dict, seed, run_id)
+                else:
+                    row = run_core_row(task_dict, seed, run_id)
 
-            row["env_receipt"] = env_receipt
-            row["env_receipt_sha256"] = env_receipt_sha256
-            rows.append(row)
-            print(f"  terminal={row['terminal_status']} solved={row['solved']} "
-                  f"candidate={row['candidate_hash'][:12] if row['candidate_hash'] else 'none'}")
-            sys.stdout.flush()
+                row["env_receipt"] = env_receipt
+                row["env_receipt_sha256"] = env_receipt_sha256
+                rows.append(row)
+                print(f"  terminal={row['terminal_status']} solved={row['solved']} "
+                      f"candidate={row['candidate_hash'][:12] if row['candidate_hash'] else 'none'}")
+                sys.stdout.flush()
 
     # Write JSONL
     if jsonl_out:
