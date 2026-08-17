@@ -332,6 +332,61 @@ def test_authority_projection_hostile_counts_and_invocation_fail_closed(change):
         _assert_non_invoked_admission_terminal(receipt, 1)
 
 
+def _local_authority_projection_receipt():
+    return {
+        "terminal_status": "BLOCKED",
+        "workforce_admission": {"overall_decision": "BLOCK"},
+        "capability_call_count": 0,
+        "local_call_count": 0,
+        "online_call_count": 0,
+        "verifier_call_count": 0,
+        "learning_call_count": 0,
+        "provider_call_count": 0,
+        "invocation_counts": {"capability": 0, "local": 0, "online": 0, "verifier": 0, "learning": 0},
+        "stages": [
+            {
+                "name": "local", "status": "FAILED", "invoked": False,
+                "local_call_count": 0, "local_model_call_count": 0,
+                "model_call_count": 0, "provider_call_count": 0,
+                "response": {
+                    "task_id": "local-projection",
+                    "invoked": False,
+                    "local_model_invoked": False,
+                    "output_delivered": False,
+                    "local_model_call_count": 0,
+                    "model_call_count": 0,
+                    "provider_call_count": 0,
+                    "local_model_invocation_authority": {"status": "BLOCKED"},
+                },
+            },
+            {"name": "online", "status": "NOT_REQUESTED", "invoked": False},
+            {"name": "verifier", "status": "NOT_REQUESTED", "invoked": False},
+            {"name": "learning", "status": "NOT_REQUESTED", "invoked": False},
+        ],
+    }
+
+
+def test_local_authority_projection_matches_runtime_shape():
+    _assert_non_invoked_admission_terminal(_local_authority_projection_receipt(), 1)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda r: r["stages"][0]["response"].pop("local_model_invoked"),
+        lambda r: r["stages"][0]["response"].__setitem__("local_model_invoked", True),
+        lambda r: r["stages"][0]["response"].__setitem__("local_model_call_count", 1),
+        lambda r: r["stages"][0]["response"].__setitem__("model_call_count", 1),
+        lambda r: r["stages"][0]["response"].__setitem__("provider_call_count", 1),
+    ],
+)
+def test_local_authority_projection_hostile_fields_fail_closed(change):
+    receipt = _local_authority_projection_receipt()
+    change(receipt)
+    with pytest.raises(RuntimeError):
+        _assert_non_invoked_admission_terminal(receipt, 1)
+
+
 def test_replan_requires_admitted_provider_delivery_and_trusted_failure():
     receipt = {
         "terminal_status": "INCOMPLETE",

@@ -191,6 +191,12 @@ def _assert_non_invoked_admission_terminal(
             if field in stage and stage.get(field) != 0:
                 raise RuntimeError(f"non_admitted_stage_call_count_nonzero:{name}:{field}:attempt{attempt}")
         if is_authority_projection:
+            has_gateway_authority = isinstance(
+                authority_projection.get("gateway_invocation_authority"), Mapping
+            )
+            has_local_authority = isinstance(
+                authority_projection.get("local_model_invocation_authority"), Mapping
+            )
             required_stage_counts = (
                 ("local_call_count", "local_model_call_count", "model_call_count", "provider_call_count")
                 if name == "local"
@@ -200,7 +206,7 @@ def _assert_non_invoked_admission_terminal(
                 raise RuntimeError(f"non_admitted_authority_call_count_missing:{name}:attempt{attempt}")
             required_response_counts = (
                 ("local_model_call_count", "model_call_count", "provider_call_count")
-                if name == "local"
+                if has_local_authority
                 else ("provider_call_count",)
             )
             if any(
@@ -208,8 +214,15 @@ def _assert_non_invoked_admission_terminal(
                 for field in required_response_counts
             ):
                 raise RuntimeError(f"non_admitted_authority_response_count_missing:{name}:attempt{attempt}")
-            if authority_projection.get("invoked") is not False:
-                raise RuntimeError(f"non_admitted_authority_invoked:{name}:attempt{attempt}")
+            if has_gateway_authority and authority_projection.get("invoked") is not False:
+                raise RuntimeError(f"non_admitted_gateway_authority_invoked:{name}:attempt{attempt}")
+            if has_local_authority:
+                if "local_model_invoked" not in authority_projection:
+                    raise RuntimeError(f"non_admitted_local_model_invoked_missing:{name}:attempt{attempt}")
+                if authority_projection.get("local_model_invoked") is not False:
+                    raise RuntimeError(f"non_admitted_local_model_invoked:{name}:attempt{attempt}")
+                if "invoked" in authority_projection and authority_projection.get("invoked") is not False:
+                    raise RuntimeError(f"non_admitted_local_authority_invoked:{name}:attempt{attempt}")
     if not capability_zero and not any(
         isinstance(stage, Mapping)
         and stage.get("status") == "FAILED"
