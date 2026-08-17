@@ -319,10 +319,30 @@ def test_rejected_disposition_requires_bounded_non_empty_reason_codes() -> None:
     payload["reasons"] = []
     _rehash(payload)
     assert validate_changeset_certification(payload) == ("reason_invalid",)
-
     payload["reasons"] = ["verifier_failed"] * 17
     _rehash(payload)
     assert validate_changeset_certification(payload) == ("reason_invalid",)
+
+
+def test_certified_missing_candidate_blocks_even_when_manifest_uses_none() -> None:
+    payload = _envelope()
+    payload["candidate"] = None
+    manifest = payload["verifier_manifest"]
+    assert isinstance(manifest, dict)
+    manifest["candidate_commit"] = "none"
+    manifest["candidate_tree"] = "none"
+    _rehash(payload)
+    result = certify_changeset(payload)
+    assert result.status is CertificationStatus.BLOCKED
+    assert result.reason_codes == ("candidate_missing",)
+
+
+def test_nonfinite_input_returns_structured_fail_closed_result() -> None:
+    payload = _envelope()
+    payload["task"]["task_id"] = float("nan")
+    result = certify_changeset(payload)
+    assert result.status is CertificationStatus.BLOCKED
+    assert result.reason_codes == ("identity_malformed",)
 
 
 @pytest.mark.parametrize("field", ["repository", "base", "candidate"])

@@ -109,6 +109,8 @@ def canonical_hash(value: Any) -> str:
 def certify_changeset(payload: Mapping[str, Any]) -> ChangeSetCertification:
     if not isinstance(payload, Mapping):
         return _blocked("identity_missing")
+    if _contains_nonfinite(payload):
+        return _blocked("identity_malformed")
     if "change_set" in payload:
         return _certify_compatibility_input(payload)
     if any(key not in payload for key in ("task", "repository", "base", "diff")):
@@ -409,6 +411,8 @@ def _validate(payload: Mapping[str, Any]) -> tuple[str, ...]:
         return ("reason_invalid",)
     if payload.get("disposition") not in _STATUSES:
         return ("status_invalid",)
+    if payload["disposition"] == "CERTIFIED" and candidate is None:
+        return ("candidate_missing",)
     if payload["disposition"] == "REJECTED" and not reasons:
         return ("reason_invalid",)
     if payload.get("claim_ceiling") != CLAIM_CEILING:
@@ -631,6 +635,16 @@ def _normalize(value: Any, path: tuple[str, ...]) -> Any:
             else items
         )
     raise TypeError(f"unsupported canonical JSON value: {type(value).__name__}")
+
+
+def _contains_nonfinite(value: Any) -> bool:
+    if isinstance(value, float):
+        return not math.isfinite(value)
+    if isinstance(value, Mapping):
+        return any(_contains_nonfinite(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_nonfinite(item) for item in value)
+    return False
 
 
 def _copy(value: Any) -> dict[str, Any]:
