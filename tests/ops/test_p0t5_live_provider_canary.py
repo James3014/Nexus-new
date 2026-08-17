@@ -282,8 +282,8 @@ def test_non_admitted_escalate_is_incomplete_but_not_replanable():
     _assert_non_invoked_admission_terminal(receipt, 1)
 
 
-def test_authority_failure_projection_allows_preparation_but_no_physical_calls():
-    receipt = {
+def _authority_projection_receipt():
+    return {
         "terminal_status": "BLOCKED",
         "workforce_admission": {"overall_decision": "BLOCK"},
         "capability_call_count": 1,
@@ -309,7 +309,27 @@ def test_authority_failure_projection_allows_preparation_but_no_physical_calls()
         ],
     }
 
+
+def test_authority_failure_projection_allows_preparation_but_no_physical_calls():
+    receipt = _authority_projection_receipt()
+
     _assert_non_invoked_admission_terminal(receipt, 1)
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda r: r["stages"][1].__setitem__("provider_call_count", 1),
+        lambda r: r["stages"][1]["response"].__setitem__("provider_call_count", 1),
+        lambda r: r["stages"][1]["response"].__setitem__("invoked", True),
+        lambda r: r["stages"][1]["response"].pop("provider_call_count"),
+    ],
+)
+def test_authority_projection_hostile_counts_and_invocation_fail_closed(change):
+    receipt = _authority_projection_receipt()
+    change(receipt)
+    with pytest.raises(RuntimeError):
+        _assert_non_invoked_admission_terminal(receipt, 1)
 
 
 def test_replan_requires_admitted_provider_delivery_and_trusted_failure():
@@ -346,6 +366,9 @@ def test_replan_requires_admitted_provider_delivery_and_trusted_failure():
         (lambda r: r.pop("verifier_call_count"), "call_count"),
         (lambda r: r.pop("learning_call_count"), "call_count"),
         (lambda r: r.__setitem__("provider_call_count", 1), "call_count"),
+        (lambda r: r["stages"][0].__setitem__("provider_call_count", 1), "stage_call_count"),
+        (lambda r: r["stages"][1].__setitem__("model_call_count", 1), "stage_call_count"),
+        (lambda r: r["stages"][2].__setitem__("local_model_call_count", 1), "stage_call_count"),
         (lambda r: r.__setitem__("execution_replan_request", {}), "replan_authority"),
         (lambda r: r.__setitem__("source_replan_request_id", ""), "replan_authority"),
         (lambda r: r["stages"].__setitem__(1, {"name": "online", "status": "FAILED", "invoked": False}), "stage_requested"),

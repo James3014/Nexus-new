@@ -186,28 +186,28 @@ def _assert_non_invoked_admission_terminal(
             raise RuntimeError(f"non_admitted_stage_requested:{name}:attempt{attempt}")
         if bool(stage.get("invoked")):
             raise RuntimeError(f"non_admitted_stage_invoked:{name}:attempt{attempt}")
-            stage_counts = ("provider_call_count", "model_call_count", "local_model_call_count")
-            for field in stage_counts:
-                if field in stage and stage.get(field) != 0:
-                    raise RuntimeError(f"non_admitted_stage_call_count_nonzero:{name}:{field}:attempt{attempt}")
-            if is_authority_projection:
-                required_stage_counts = (
-                    ("local_call_count", "local_model_call_count", "model_call_count", "provider_call_count")
-                    if name == "local"
-                    else ("provider_call_count",)
-                )
-                if any(field not in stage or stage.get(field) != 0 for field in required_stage_counts):
-                    raise RuntimeError(f"non_admitted_authority_call_count_missing:{name}:attempt{attempt}")
-                required_response_counts = (
-                    ("local_model_call_count", "model_call_count", "provider_call_count")
-                    if name == "local"
-                    else ("provider_call_count",)
-                )
-                if any(
-                    field not in authority_projection or authority_projection.get(field) != 0
-                    for field in required_response_counts
-                ):
-                    raise RuntimeError(f"non_admitted_authority_response_count_missing:{name}:attempt{attempt}")
+        stage_counts = ("provider_call_count", "model_call_count", "local_model_call_count")
+        for field in stage_counts:
+            if field in stage and stage.get(field) != 0:
+                raise RuntimeError(f"non_admitted_stage_call_count_nonzero:{name}:{field}:attempt{attempt}")
+        if is_authority_projection:
+            required_stage_counts = (
+                ("local_call_count", "local_model_call_count", "model_call_count", "provider_call_count")
+                if name == "local"
+                else ("provider_call_count",)
+            )
+            if any(field not in stage or stage.get(field) != 0 for field in required_stage_counts):
+                raise RuntimeError(f"non_admitted_authority_call_count_missing:{name}:attempt{attempt}")
+            required_response_counts = (
+                ("local_model_call_count", "model_call_count", "provider_call_count")
+                if name == "local"
+                else ("provider_call_count",)
+            )
+            if any(
+                field not in authority_projection or authority_projection.get(field) != 0
+                for field in required_response_counts
+            ):
+                raise RuntimeError(f"non_admitted_authority_response_count_missing:{name}:attempt{attempt}")
             if authority_projection.get("invoked") is not False:
                 raise RuntimeError(f"non_admitted_authority_invoked:{name}:attempt{attempt}")
     if not capability_zero and not any(
