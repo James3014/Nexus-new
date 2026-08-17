@@ -25,21 +25,63 @@ repo_root = str(Path(__file__).resolve().parents[2])
 if repo_root not in sys.path:
     sys.path.insert(0, repo_root)
 
-from nexus.evidence.receipt_base import validate_receipt_base
-from nexus.services.mainchain_entry import (
-    run_mainchain,
-    run_mainchain_replan,
-    summarize_arm_receipt,
-)
-from nexus.services.unified_runtime import (
+from nexus.evidence.receipt_base import validate_receipt_base  # noqa: E402
+from nexus.services.mainchain_entry import summarize_arm_receipt  # noqa: E402
+from nexus.services.unified_runtime import (  # noqa: E402
     UnifiedRuntime,
     UnifiedRuntimeRequest,
-    build_registered_online_invoker,
+    build_registered_online_invoker,  # noqa: F401
     build_subprocess_online_invoker,
     resolve_registered_online_cli_spec,
 )
 
-ALLOWED_PROVIDERS = {"opencode", "gemini"}
+ALLOWED_PROVIDERS = {"opencode"}
+CANONICAL_WORKFORCE_BINDING = {
+    "worker_id": "opencode_deepseek_v4_flash",
+    "provider": "opencode",
+    "model": "opencode/deepseek-v4-flash-free",
+    "controls": (
+        "isolated_directory",
+        "bounded_context",
+        "json_event_receipt",
+        "parser",
+        "focused_tests",
+        "verifier",
+    ),
+}
+
+
+def _canonical_workforce_binding(provider: str) -> dict[str, Any]:
+    """Return the sole enrolled read-only canary binding or fail closed."""
+    if str(provider).strip().lower() != CANONICAL_WORKFORCE_BINDING["provider"]:
+        raise ValueError("workforce_binding_provider_mismatch")
+    return {
+        "worker_id": CANONICAL_WORKFORCE_BINDING["worker_id"],
+        "provider": CANONICAL_WORKFORCE_BINDING["provider"],
+        "model": CANONICAL_WORKFORCE_BINDING["model"],
+        "controls": list(CANONICAL_WORKFORCE_BINDING["controls"]),
+    }
+
+
+def _assert_canonical_admission(receipt: Mapping[str, Any], attempt: int) -> None:
+    admission = receipt.get("workforce_admission")
+    if not isinstance(admission, Mapping) or admission.get("overall_decision") != "ALLOW":
+        raise RuntimeError(f"workforce_admission_not_allow:attempt{attempt}")
+    records = admission.get("records")
+    if not isinstance(records, list) or len(records) != 1:
+        raise RuntimeError(f"workforce_admission_record_invalid:attempt{attempt}")
+    record = records[0]
+    decision = record.get("decision") if isinstance(record, Mapping) else None
+    expected = _canonical_workforce_binding("opencode")
+    if not isinstance(decision, Mapping) or decision.get("decision") != "ALLOW":
+        raise RuntimeError(f"workforce_admission_record_not_allow:attempt{attempt}")
+    for field, expected_value in (
+        ("resolved_worker_id", expected["worker_id"]),
+        ("resolved_provider", expected["provider"]),
+        ("resolved_model", expected["model"]),
+    ):
+        if decision.get(field) != expected_value:
+            raise RuntimeError(f"workforce_admission_{field}_mismatch:attempt{attempt}")
 
 
 def get_git_status(project_root: str) -> str:
@@ -161,9 +203,33 @@ def run_canary_campaign(
                 "recommended_flow": "baseline",
                 "route_features": {"risk_score": 10},
                 "capability_stack": {"selected_capabilities": ["baseline"]},
+                # This canary is a read-only candidate-generation probe.  Bind
+                # the exact enrolled worker explicitly so the normal Planner
+                # demand reaches Workforce admission (and never falls back to
+                # a provider/model default).
+                "workforce_admission_enabled": True,
+                "mutation_requested": False,
+                "topology_facts": {
+                    "candidate_generation_only": True,
+                    "mutation_requested": False,
+                },
+                "workforce_bindings": {
+                    "online": _canonical_workforce_binding(prov_clean),
+                },
+                "mainchain_entry": True,
+                "route_freeze": True,
+                "mainchain_route_version": "mainchain.v1",
+                "with_nexus_armor": True,
+                "product_entry": "mainchain",
             },
             online_enabled=True,
             local_enabled=False,
+            canonical_context={
+                "task_facts": {
+                    "candidate_generation_only": True,
+                    "mutation_requested": False,
+                }
+            },
         )
 
         runtime = UnifiedRuntime()
@@ -216,6 +282,7 @@ def run_canary_campaign(
                 "invoked": True,
                 "gate_passed": False,
                 "status": "FAILED",
+                "evidence_present": True,
                 "evidence": "p0t5_canary_forced_replan_after_provider_delivery",
                 "evidence_refs": ["canary:provider_output_verified", "canary:forced_replan"],
             }
@@ -225,28 +292,19 @@ def run_canary_campaign(
             spec,
             runner=runner,
         )
-        if entry_clean == "mainchain":
-            r1 = run_mainchain(
-                req,
-                online_invoker=online_invoker1,
-                capability_invokers=cap_invokers,
-                verifier=verifier_attempt1,
-                learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence": "l1", "evidence_refs": ["l:1"], "gate_passed": True},
-                receipt_path=receipt1_path,
-            )
-        else:
-            r1 = runtime.run(
-                req,
-                online_invoker=online_invoker1,
-                capability_invokers=cap_invokers,
-                verifier=verifier_attempt1,
-                learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence": "l1", "evidence_refs": ["l:1"], "gate_passed": True},
-                receipt_path=receipt1_path,
-            )
+        r1 = runtime.run(
+            req,
+            online_invoker=online_invoker1,
+            capability_invokers=cap_invokers,
+            verifier=verifier_attempt1,
+            learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence": "l1", "evidence_refs": ["l:1"], "gate_passed": True},
+            receipt_path=receipt1_path,
+        )
 
         v1_check = validate_receipt_base(r1, mode="strict")
         if not v1_check.get("ok"):
             raise RuntimeError(f"Attempt 1 strict receipt validation failed: {v1_check.get('blockers')}")
+        _assert_canonical_admission(r1, 1)
 
         if r1.get("terminal_status") != "INCOMPLETE":
             raise RuntimeError(f"Attempt 1 terminal status unexpected: {r1.get('terminal_status')}")
@@ -273,6 +331,7 @@ def run_canary_campaign(
                 "invoked": True,
                 "gate_passed": True,
                 "status": "SUCCEEDED",
+                "evidence_present": True,
                 "evidence": "p0t5_canary_attempt_2_pass",
                 "evidence_refs": ["canary:attempt2_verified"],
             }
@@ -282,30 +341,20 @@ def run_canary_campaign(
             spec,
             runner=runner,
         )
-        if entry_clean == "mainchain":
-            r2 = run_mainchain_replan(
-                previous_receipt,
-                req,
-                online_invoker=online_invoker2,
-                capability_invokers=cap_invokers,
-                verifier=verifier_attempt2,
-                learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence": "l2", "evidence_refs": ["l:2"], "gate_passed": True},
-                receipt_path=receipt2_path,
-            )
-        else:
-            r2 = runtime.run_replan(
-                previous_receipt,
-                req,
-                online_invoker=online_invoker2,
-                capability_invokers=cap_invokers,
-                verifier=verifier_attempt2,
-                learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence": "l2", "evidence_refs": ["l:2"], "gate_passed": True},
-                receipt_path=receipt2_path,
-            )
+        r2 = runtime.run_replan(
+            previous_receipt,
+            req,
+            online_invoker=online_invoker2,
+            capability_invokers=cap_invokers,
+            verifier=verifier_attempt2,
+            learning=lambda ctx: {"status": "SUCCEEDED", "invoked": True, "evidence": "l2", "evidence_refs": ["l:2"], "gate_passed": True},
+            receipt_path=receipt2_path,
+        )
 
         v2_check = validate_receipt_base(r2, mode="strict")
         if not v2_check.get("ok"):
             raise RuntimeError(f"Attempt 2 strict receipt validation failed: {v2_check.get('blockers')}")
+        _assert_canonical_admission(r2, 2)
 
         if r2.get("terminal_status") != "SUCCEEDED":
             raise RuntimeError(f"Attempt 2 terminal status unexpected: {r2.get('terminal_status')}")
@@ -383,7 +432,7 @@ def run_canary_campaign(
 
 def main():
     parser = argparse.ArgumentParser(description="P0-T5B Real Provider Canary Operator")
-    parser.add_argument("--provider", default="opencode", choices=["opencode", "gemini"])
+    parser.add_argument("--provider", default="opencode", choices=["opencode"])
     parser.add_argument("--entrypoint", default="runtime", choices=["runtime", "mainchain"])
     parser.add_argument("--project-root", default=os.getcwd())
     parser.add_argument("--receipt-dir", required=True)
