@@ -8,7 +8,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
 _FEATURE_INTENT_TOKENS = frozenset({"build", "create", "add", "implement", "feature"})
-_FEATURE_INTENT_TOKEN_RE = re.compile(r"(?<![A-Za-z0-9_])([A-Za-z]+)(?![A-Za-z0-9_])")
+_FEATURE_INTENT_TOKEN_RE = re.compile(r"(?<!\w)([A-Za-z]+)(?!\w)")
 
 
 def infer_task_kind(task_text: str) -> str:
