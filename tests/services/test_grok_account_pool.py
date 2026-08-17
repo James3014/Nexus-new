@@ -162,6 +162,62 @@ def test_attempt_lineage_is_immutable_serializable_and_redacted():
         lineage.outcome = "TAMPERED"
 
 
+def test_real_pool_flows_emit_monotonic_lineage_and_isolated_public_snapshots(tmp_path):
+    manager = _make_manager(tmp_path)
+    lease_a = manager.acquire("consumer-lineage-a")
+    lease_b = manager.acquire("consumer-lineage-b")
+
+    assert manager.report_failure(lease_a, AccountFailureKind.MODEL_OR_TASK_ERROR) is None
+    replacement = manager.report_failure(lease_a, AccountFailureKind.QUOTA_EXHAUSTED)
+    assert replacement is not None
+    manager.release(replacement)
+
+    records_a = manager.get_attempt_lineage(consumer_id="consumer-lineage-a")
+    assert [record.attempt for record in records_a] == [1, 2, 3, 4]
+    assert [record.outcome for record in records_a] == [
+        "ACQUIRED", "NO_ROTATION", "ROTATED", "RELEASED"
+    ]
+    rotated = records_a[2]
+    assert rotated.failure_kind is AccountFailureKind.QUOTA_EXHAUSTED
+    assert rotated.previous_lease_id == lease_a.lease_id
+    assert rotated.replacement_lease_id == replacement.lease_id
+    assert rotated.previous_account_alias_hash == lease_a.account_alias_hash
+    assert rotated.replacement_account_alias_hash == replacement.account_alias_hash
+    assert manager.get_attempt_lineage(lease_id=replacement.lease_id)[0] is rotated
+
+    records_b = manager.get_attempt_lineage(consumer_id="consumer-lineage-b")
+    assert len(records_b) == 1
+    assert records_b[0].account_alias_hash == lease_b.account_alias_hash
+    public = manager.get_public_attempt_lineage(consumer_id="consumer-lineage-a")
+    public[0]["outcome"] = "TAMPERED"
+    assert manager.get_attempt_lineage("consumer-lineage-a")[0].outcome == "ACQUIRED"
+    assert all(
+        forbidden not in record.serialize_public()
+        for record in records_a
+        for forbidden in ("grok-a", "grok-b", "home_dir", "execution_env", "stderr", "TOKEN")
+    )
+
+
+def test_exhaustion_flow_emits_final_lineage_without_replacement(tmp_path):
+    root = tmp_path / "neutral-grok-profiles"
+    manager = GrokAccountPoolManager(
+        [
+            GrokAccount("grok-a", str(tmp_path / "grok-a")),
+            GrokAccount("grok-b", str(tmp_path / "grok-b")),
+        ],
+        isolated_root=str(root),
+    )
+    lease_a = manager.acquire("consumer-exhaustion-a")
+    manager.acquire("consumer-exhaustion-b")
+    with pytest.raises(GrokAccountPoolExhaustedError):
+        manager.report_failure(lease_a, AccountFailureKind.RATE_LIMITED)
+
+    records = manager.get_attempt_lineage("consumer-exhaustion-a")
+    assert [record.outcome for record in records] == ["ACQUIRED", "EXHAUSTED"]
+    assert records[-1].replacement_lease_id is None
+    assert records[-1].replacement_account_alias_hash is None
+
+
 def test_acquire_binds_immutable_lease_and_hash_derived_env(tmp_path):
     manager = _make_manager(tmp_path)
     lease = manager.acquire("consumer-1")

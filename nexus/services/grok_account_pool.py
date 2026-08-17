@@ -144,7 +144,7 @@ class GrokAttemptLineage:
     provider: str
     consumer_id: str
     attempt: int
-    account_alias_hash: str
+    account_alias_hash: Optional[str]
     failure_kind: Optional[AccountFailureKind]
     previous_lease_id: Optional[str]
     previous_account_alias_hash: Optional[str]
@@ -259,6 +259,7 @@ class GrokAccountPoolManager:
         self._pool: Optional[ExternalAccountPool] = None
         self._lease_to_raw_alias: dict[str, str] = {}
         self._consumer_to_lease: dict[str, str] = {}
+        self._lineage_by_consumer: dict[str, list[GrokAttemptLineage]] = {}
 
     def _now(self) -> float:
         if self._clock is not None:
@@ -396,6 +397,64 @@ class GrokAccountPoolManager:
         self._consumer_to_lease[str(consumer_id)] = lease_id
         return lease
 
+    def _record_lineage(
+        self,
+        *,
+        consumer_id: str,
+        account_alias_hash: Optional[str],
+        failure_kind: Optional[AccountFailureKind],
+        previous_lease_id: Optional[str],
+        previous_account_alias_hash: Optional[str],
+        replacement_lease_id: Optional[str],
+        replacement_account_alias_hash: Optional[str],
+        outcome: str,
+    ) -> GrokAttemptLineage:
+        records = self._lineage_by_consumer.setdefault(str(consumer_id), [])
+        record = GrokAttemptLineage(
+            provider=GROK_ACCOUNT_POOL_PROVIDER,
+            consumer_id=str(consumer_id),
+            attempt=len(records) + 1,
+            account_alias_hash=account_alias_hash,
+            failure_kind=failure_kind,
+            previous_lease_id=previous_lease_id,
+            previous_account_alias_hash=previous_account_alias_hash,
+            replacement_lease_id=replacement_lease_id,
+            replacement_account_alias_hash=replacement_account_alias_hash,
+            outcome=outcome,
+        )
+        records.append(record)
+        return record
+
+    def get_attempt_lineage(
+        self,
+        consumer_id: Optional[str] = None,
+        lease_id: Optional[str] = None,
+    ) -> tuple[GrokAttemptLineage, ...]:
+        """Return immutable snapshots filtered by consumer and/or lease."""
+
+        with self._lock:
+            consumers = [str(consumer_id)] if consumer_id is not None else sorted(self._lineage_by_consumer)
+            records = [record for consumer in consumers for record in self._lineage_by_consumer.get(consumer, ())]
+            if lease_id is not None:
+                records = [
+                    record
+                    for record in records
+                    if lease_id in {
+                        record.previous_lease_id,
+                        record.replacement_lease_id,
+                    }
+                ]
+            return tuple(records)
+
+    def get_public_attempt_lineage(
+        self,
+        consumer_id: Optional[str] = None,
+        lease_id: Optional[str] = None,
+    ) -> tuple[Mapping[str, Any], ...]:
+        """Return detached public projections, never manager-owned mappings."""
+
+        return tuple(record.to_public_dict() for record in self.get_attempt_lineage(consumer_id, lease_id))
+
     def acquire(self, consumer_id: str) -> AccountLease:
         with self._lock:
             consumer = str(consumer_id)
@@ -406,9 +465,29 @@ class GrokAccountPoolManager:
             try:
                 lease = pool.acquire(consumer)
             except ExternalAccountPoolExhaustedError as exc:
+                self._record_lineage(
+                    consumer_id=consumer,
+                    account_alias_hash=None,
+                    failure_kind=None,
+                    previous_lease_id=None,
+                    previous_account_alias_hash=None,
+                    replacement_lease_id=None,
+                    replacement_account_alias_hash=None,
+                    outcome="EXHAUSTED",
+                )
                 raise GrokAccountPoolExhaustedError(f"GROK_ACCOUNT_POOL_EXHAUSTED: {exc}") from exc
             self._lease_to_raw_alias[lease.lease_id] = pool._require_active_lease(lease)
             self._consumer_to_lease[consumer] = lease.lease_id
+            self._record_lineage(
+                consumer_id=consumer,
+                account_alias_hash=lease.account_alias_hash,
+                failure_kind=None,
+                previous_lease_id=None,
+                previous_account_alias_hash=None,
+                replacement_lease_id=None,
+                replacement_account_alias_hash=None,
+                outcome="ACQUIRED",
+            )
             return lease
 
     def release(self, lease: AccountLease) -> None:
@@ -418,6 +497,16 @@ class GrokAccountPoolManager:
             self._lease_to_raw_alias.pop(lease.lease_id, None)
             if self._consumer_to_lease.get(lease.consumer_id) == lease.lease_id:
                 self._consumer_to_lease.pop(lease.consumer_id, None)
+            self._record_lineage(
+                consumer_id=lease.consumer_id,
+                account_alias_hash=lease.account_alias_hash,
+                failure_kind=None,
+                previous_lease_id=lease.lease_id,
+                previous_account_alias_hash=lease.account_alias_hash,
+                replacement_lease_id=None,
+                replacement_account_alias_hash=None,
+                outcome="RELEASED",
+            )
 
     def report_failure(
         self,
@@ -428,6 +517,16 @@ class GrokAccountPoolManager:
             self._refresh_pool_health()
             pool = self._ensure_pool()
             if not is_rotation_eligible(failure_kind):
+                self._record_lineage(
+                    consumer_id=lease.consumer_id,
+                    account_alias_hash=lease.account_alias_hash,
+                    failure_kind=failure_kind,
+                    previous_lease_id=lease.lease_id,
+                    previous_account_alias_hash=lease.account_alias_hash,
+                    replacement_lease_id=None,
+                    replacement_account_alias_hash=None,
+                    outcome="NO_ROTATION",
+                )
                 return None
             failed_alias = self._lease_to_raw_alias.get(lease.lease_id)
             if failed_alias is None:
@@ -451,12 +550,33 @@ class GrokAccountPoolManager:
                 if acc.is_active and acc.alias in pool._accounts and acc.alias not in held_aliases
             ]
             if not candidates:
+                self._record_lineage(
+                    consumer_id=lease.consumer_id,
+                    account_alias_hash=lease.account_alias_hash,
+                    failure_kind=failure_kind,
+                    previous_lease_id=lease.lease_id,
+                    previous_account_alias_hash=lease.account_alias_hash,
+                    replacement_lease_id=None,
+                    replacement_account_alias_hash=None,
+                    outcome="EXHAUSTED",
+                )
                 raise GrokAccountPoolExhaustedError(
                     "GROK_ACCOUNT_POOL_EXHAUSTED: no isolated Grok profile available for failover"
                 )
             candidates.sort(key=lambda acc: pool._accounts[acc.alias].load)
             chosen = candidates[0]
-            return self._acquire_from_account(lease.consumer_id, chosen)
+            replacement = self._acquire_from_account(lease.consumer_id, chosen)
+            self._record_lineage(
+                consumer_id=lease.consumer_id,
+                account_alias_hash=replacement.account_alias_hash,
+                failure_kind=failure_kind,
+                previous_lease_id=lease.lease_id,
+                previous_account_alias_hash=lease.account_alias_hash,
+                replacement_lease_id=replacement.lease_id,
+                replacement_account_alias_hash=replacement.account_alias_hash,
+                outcome="ROTATED",
+            )
+            return replacement
 
 
 _GLOBAL_GROK_POOL_MANAGER: Optional[GrokAccountPoolManager] = None
