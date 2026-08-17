@@ -169,7 +169,7 @@ def _envelope(*, verifier_status: str = "PASS") -> dict[str, object]:
         "candidate": {
             "commit": "candidate-1",
             "tree": "tree-candidate-1",
-            "diff_hash": "sha256:" + "b" * 64,
+            "diff_hash": "sha256:" + "a" * 64,
         },
         "verifier_manifest": manifest,
         "disposition": "CERTIFIED",
@@ -204,6 +204,7 @@ def test_full_envelope_certifies_and_validates() -> None:
         ),
         (lambda value: value.__setitem__("reasons", ["not-a-reason"]), "reason_invalid"),
         (lambda value: value.__setitem__("unknown", True), "unknown_field"),
+        (lambda value: value["task"].__setitem__("unknown", True), "identity_malformed"),
     ],
 )
 def test_hostile_envelope_substitutions_never_certify(mutation, reason: str) -> None:

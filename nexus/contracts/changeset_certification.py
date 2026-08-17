@@ -194,14 +194,27 @@ def _validate_envelope(payload: Mapping[str, Any]) -> tuple[str, ...]:
     )
     if task is None:
         return ("identity_missing",)
-    if not isinstance(task, Mapping) or not _texts(task, ("task_id", "attempt_id")):
+    if (
+        not isinstance(task, Mapping)
+        or not _exact_keys(task, {"task_id", "attempt_id"})
+        or not _texts(task, ("task_id", "attempt_id"))
+    ):
         return ("identity_malformed",)
-    if not isinstance(repo, Mapping) or not _texts(repo, ("repository", "source")):
+    if (
+        not isinstance(repo, Mapping)
+        or not _exact_keys(repo, {"repository", "source"})
+        or not _texts(repo, ("repository", "source"))
+    ):
         return ("identity_malformed",)
-    if not isinstance(base, Mapping) or not _texts(base, ("commit", "tree")):
+    if (
+        not isinstance(base, Mapping)
+        or not _exact_keys(base, {"commit", "tree"})
+        or not _texts(base, ("commit", "tree"))
+    ):
         return ("identity_malformed",)
     if (
         not isinstance(diff, Mapping)
+        or not _exact_keys(diff, {"hash", "paths"})
         or not _hash(diff.get("hash"))
         or not _paths(diff.get("paths"))
     ):
@@ -210,6 +223,7 @@ def _validate_envelope(payload: Mapping[str, Any]) -> tuple[str, ...]:
         return ("scope_missing",)
     if (
         not isinstance(scope, Mapping)
+        or not _exact_keys(scope, {"paths", "deletion_policy"})
         or not _paths(scope.get("paths"))
         or scope.get("deletion_policy") not in {"FORBID", "ALLOW"}
     ):
@@ -219,15 +233,30 @@ def _validate_envelope(payload: Mapping[str, Any]) -> tuple[str, ...]:
     candidate = payload.get("candidate")
     if candidate is not None and (
         not isinstance(candidate, Mapping)
+        or not _exact_keys(candidate, {"commit", "tree", "diff_hash"})
         or not _texts(candidate, ("commit", "tree"))
         or not _hash(candidate.get("diff_hash"))
     ):
         return ("candidate_malformed",)
+    if candidate is not None and candidate["diff_hash"] != diff["hash"]:
+        return ("cross_binding_mismatch",)
     manifest = payload.get("verifier_manifest")
     if manifest is None:
         return ("verifier_manifest_missing",)
     if (
         not isinstance(manifest, Mapping)
+        or not _exact_keys(
+            manifest,
+            {
+                "manifest_id",
+                "task_id",
+                "attempt_id",
+                "source",
+                "tree",
+                "verifiers",
+                "manifest_hash",
+            },
+        )
         or not _texts(manifest, ("manifest_id", "task_id", "attempt_id", "source", "tree"))
         or not _hash(manifest.get("manifest_hash"))
     ):
@@ -245,8 +274,10 @@ def _validate_envelope(payload: Mapping[str, Any]) -> tuple[str, ...]:
     for verifier in verifiers:
         if not isinstance(verifier, Mapping):
             return ("verifier_artifact_malformed",)
-        if not _texts(verifier, ("verifier_id", "artifact_id")) or not _hash(
-            verifier.get("artifact_hash")
+        if (
+            not _exact_keys(verifier, {"verifier_id", "artifact_id", "artifact_hash", "status"})
+            or not _texts(verifier, ("verifier_id", "artifact_id"))
+            or not _hash(verifier.get("artifact_hash"))
         ):
             return ("verifier_artifact_missing",)
         if verifier.get("status") not in _VERIFIER_STATUSES:
@@ -386,6 +417,10 @@ def _manifest_hash_input(manifest: Mapping[str, Any]) -> dict[str, Any]:
 
 def _texts(value: Mapping[str, Any], keys: tuple[str, ...]) -> bool:
     return all(isinstance(value.get(key), str) and bool(value[key].strip()) for key in keys)
+
+
+def _exact_keys(value: Mapping[str, Any], expected: set[str]) -> bool:
+    return set(value) == expected
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:
