@@ -83,6 +83,77 @@ def _tag_online_invoker(invoker: Any, provider: str) -> Any:
     return tagged
 
 
+def _candidate_generation_request(task_id: str = "mc-opencode-candidate") -> UnifiedRuntimeRequest:
+    """Build the real product-path bounded-candidate request used by Issue #382."""
+    return UnifiedRuntimeRequest(
+        task_id=task_id,
+        workspace_revision="rev-opencode-candidate",
+        task_statement="Generate one isolated candidate without applying a mutation.",
+        task_type="candidate_generation",
+        route={
+            "recommended_flow": "direct",
+            "route_features": {"risk_score": 0},
+            "topology_facts": {
+                "candidate_generation_only": True,
+                "mutation_requested": False,
+            },
+            "candidate_generation_only": True,
+            "mutation_requested": False,
+            "workforce_admission_enabled": True,
+            "provider": "opencode",
+            "online_transport_binding": {"provider": "opencode"},
+            "online_invoker_provider": "opencode",
+            "workforce_bindings": {
+                "online": {
+                    "worker_id": "opencode_deepseek_v4_flash",
+                    "controls": [
+                        "isolated_directory",
+                        "bounded_context",
+                        "json_event_receipt",
+                        "parser",
+                        "focused_tests",
+                        "verifier",
+                    ],
+                }
+            },
+        },
+        online_enabled=True,
+        online_model_name="opencode/deepseek-v4-flash-free",
+        canonical_context={
+            "execution_world": "product_runtime",
+            "transport_ingress": "direct",
+            "task_facts": {
+                "candidate_generation_only": True,
+                "mutation_requested": False,
+            },
+            "authority_inputs": {"owner_authorized": False},
+        },
+    )
+
+
+def _candidate_capability_invokers() -> dict[str, Any]:
+    names = (
+        "baseline",
+        "harness_preflight_sensor",
+        "delivery_gate",
+        "mempalace_gate",
+        "artifact_gate",
+        "claim_gate",
+    )
+    return {
+        name: lambda context, capability=name: {
+            "task_id": context["task_id"],
+            "status": "SUCCEEDED",
+            "invoked": True,
+            "evidence": f"candidate:{capability}",
+            "evidence_refs": [f"candidate:{capability}"],
+            "gate_passed": True,
+            "outcome_contributed": True,
+        }
+        for name in names
+    }
+
+
 def run_mainchain(request: UnifiedRuntimeRequest, **kwargs: Any) -> dict[str, Any]:
     admitted = _admit_mainchain_request(request)
     provider = _mainchain_workforce_binding(admitted)[1]
@@ -327,6 +398,143 @@ def test_mainchain_replan_delegates_to_unified_runtime_once():
         r2["canonical_execution"]["context_hash"]
         == r1["canonical_execution"]["context_hash"]
     )
+
+
+def test_product_candidate_generation_replan_preserves_registered_workforce_and_context():
+    """Exercise the product entry, not the test-only admission wrapper."""
+    calls: list[dict[str, Any]] = []
+
+    def online(context: dict[str, Any]) -> dict[str, Any]:
+        calls.append(dict(context))
+        return normalize_online_invoker_payload(
+            provider="opencode",
+            task_id=context["task_id"],
+            invoked=True,
+            output_delivered=True,
+            gate_passed=True,
+            provider_call_count=1,
+            response={"candidate": "isolated"},
+            raw_response="candidate",
+            evidence_refs=[f"online:{len(calls)}"],
+        )
+
+    online.provider = "opencode"
+    online.online_invoker_provider = "opencode"
+    request = _candidate_generation_request()
+    verifier_calls = 0
+
+    def verifier(context: dict[str, Any]) -> dict[str, Any]:
+        nonlocal verifier_calls
+        verifier_calls += 1
+        return {
+            "task_id": context["task_id"],
+            "invoked": True,
+            "gate_passed": verifier_calls == 2,
+            "status": "SUCCEEDED" if verifier_calls == 2 else "FAILED",
+            "evidence": f"candidate-verifier-{verifier_calls}",
+            "evidence_refs": [f"verifier:{verifier_calls}"],
+        }
+
+    def learning(context: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "task_id": context["task_id"],
+            "invoked": True,
+            "gate_passed": True,
+            "status": "SUCCEEDED",
+            "evidence_refs": ["learning:candidate"],
+        }
+
+    first = _product_run_mainchain(
+        request,
+        online_invoker=online,
+        capability_invokers=_candidate_capability_invokers(),
+        verifier=verifier,
+        learning=learning,
+    )
+    second = _product_run_mainchain_replan(
+        first,
+        request,
+        online_invoker=online,
+        capability_invokers=_candidate_capability_invokers(),
+        verifier=verifier,
+        learning=learning,
+    )
+
+    assert first["terminal_status"] == "INCOMPLETE"
+    assert second["terminal_status"] == "SUCCEEDED"
+    assert second["execution_attempt"]["attempt_number"] == 2
+    assert len(calls) == 2
+    for receipt in (first, second):
+        admission = receipt["workforce_admission"]
+        assert admission["overall_decision"] == "ALLOW"
+        record = admission["records"][0]
+        assert record["decision"]["resolved_worker_id"] == "opencode_deepseek_v4_flash"
+        assert record["decision"]["resolved_provider"] == "opencode"
+        assert record["decision"]["admitted_role"] == "bounded_candidate_generation"
+        assert record["demand"]["mutation_intent"] is False
+        assert receipt["gateway_invocation_authority"]["status"] == "ALLOW"
+        assert (
+            receipt["gateway_invocation_authority"]["online_model_name"]
+            == "opencode/deepseek-v4-flash-free"
+        )
+        assert receipt["canonical_execution_topology"] == "ISOLATED_TARGET"
+        assert receipt["canonical_execution"]["canonical_execution_topology"] == "ISOLATED_TARGET"
+    assert (
+        first["canonical_execution"]["context_hash"]
+        == second["canonical_execution"]["context_hash"]
+    )
+    assert first["planner_decision_id"] != second["planner_decision_id"]
+    assert all(call["online_model_name"] == "opencode/deepseek-v4-flash-free" for call in calls)
+
+
+@pytest.mark.parametrize(
+    ("task_facts", "route_mutation"),
+    [
+        ({"candidate_generation_only": True}, False),
+        ({"candidate_generation_only": "true", "mutation_requested": False}, False),
+        ({"candidate_generation_only": True, "mutation_requested": True}, False),
+    ],
+)
+def test_product_candidate_generation_hostile_facts_fail_closed_without_provider_call(
+    task_facts: dict[str, Any], route_mutation: Any
+):
+    request = _candidate_generation_request("mc-opencode-hostile")
+    route = dict(request.route)
+    route["topology_facts"] = task_facts
+    route["mutation_requested"] = route_mutation
+    hostile = UnifiedRuntimeRequest(
+        task_id=request.task_id,
+        workspace_revision=request.workspace_revision,
+        task_statement=request.task_statement,
+        task_type=request.task_type,
+        route=route,
+        online_enabled=True,
+        online_model_name=request.online_model_name,
+        canonical_context={
+            "execution_world": "product_runtime",
+            "transport_ingress": "direct",
+            "task_facts": task_facts,
+            "authority_inputs": {"owner_authorized": False},
+        },
+    )
+    calls = 0
+
+    def online(_context: dict[str, Any]) -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        raise AssertionError("hostile candidate facts must block before provider")
+
+    online.provider = "opencode"
+    online.online_invoker_provider = "opencode"
+    with pytest.raises(ValueError):
+        _product_run_mainchain(
+            hostile,
+            online_invoker=online,
+            capability_invokers=_candidate_capability_invokers(),
+            verifier=lambda _context: {},
+            learning=lambda _context: {},
+        )
+    assert calls == 0
 
 
 def test_mainchain_replan_preserves_planner_authority():
