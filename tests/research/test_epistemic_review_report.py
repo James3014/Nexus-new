@@ -22,14 +22,16 @@ from nexus.research.epistemic_profile.report import (
     verify_epistemic_review_report,
     write_epistemic_review_report,
 )
-from nexus.research.epistemic_profile.io import verify_epistemic_profile_export
-from nexus.research.epistemic_profile.contracts import EpistemicIntegrityStatus
-
-RESEARCH_LEDGER_SRC = os.path.abspath("research-ledger/src")
+from tests.research.test_epistemic_profile_bridge_e2e import (
+    _research_ledger_src,
+)
 
 
 def _run_rl_cli(args: list) -> subprocess.CompletedProcess:
-    env = {**os.environ, "PYTHONPATH": RESEARCH_LEDGER_SRC}
+    src = _research_ledger_src()
+    inherited = os.environ.get("PYTHONPATH")
+    pythonpath = str(src) if not inherited else os.pathsep.join((str(src), inherited))
+    env = {**os.environ, "PYTHONPATH": pythonpath}
     cmd = [sys.executable, "-m", "research_ledger.cli"] + args
     return subprocess.run(cmd, env=env, capture_output=True, text=True)
 
@@ -47,15 +49,23 @@ def _build_valid_export(tmpdir: str) -> Dict[str, Any]:
     res_syn = _run_rl_cli(["run-gate-a-synthetic", "--state-dir", state_dir])
     assert res_syn.returncode == 0, f"run-gate-a-synthetic failed: {res_syn.stderr}"
 
-    res_exp = _run_rl_cli([
-        "export-nexus-profile",
-        "--state-dir", state_dir,
-        "--run-id", "run_s1",
-        "--task-id", "task_rpt_001",
-        "--attempt-id", "att_rpt_001",
-        "--profile-id", "prof_rpt_001",
-        "--output", export_file,
-    ])
+    res_exp = _run_rl_cli(
+        [
+            "export-nexus-profile",
+            "--state-dir",
+            state_dir,
+            "--run-id",
+            "run_s1",
+            "--task-id",
+            "task_rpt_001",
+            "--attempt-id",
+            "att_rpt_001",
+            "--profile-id",
+            "prof_rpt_001",
+            "--output",
+            export_file,
+        ]
+    )
     assert res_exp.returncode == 0, f"export-nexus-profile failed: {res_exp.stderr}"
 
     with open(export_file, "r", encoding="utf-8") as f:
@@ -72,6 +82,7 @@ def _rehash_export(payload: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Test 1: Positive report build
 # ---------------------------------------------------------------------------
+
 
 def test_01_positive_report_build():
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -93,6 +104,7 @@ def test_01_positive_report_build():
 # Test 2: Deterministic repeated build
 # ---------------------------------------------------------------------------
 
+
 def test_02_deterministic_repeated_build():
     with tempfile.TemporaryDirectory() as tmpdir:
         _, export_file = _build_valid_export(tmpdir)
@@ -105,6 +117,7 @@ def test_02_deterministic_repeated_build():
 # Test 3: Claim IDs sorted
 # ---------------------------------------------------------------------------
 
+
 def test_03_claim_ids_sorted():
     with tempfile.TemporaryDirectory() as tmpdir:
         _, export_file = _build_valid_export(tmpdir)
@@ -116,6 +129,7 @@ def test_03_claim_ids_sorted():
 # ---------------------------------------------------------------------------
 # Test 4: Correct direction counts
 # ---------------------------------------------------------------------------
+
 
 def test_04_correct_direction_counts():
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -139,6 +153,7 @@ def test_04_correct_direction_counts():
 # Test 5: Correct scope counts
 # ---------------------------------------------------------------------------
 
+
 def test_05_correct_scope_counts():
     with tempfile.TemporaryDirectory() as tmpdir:
         _, export_file = _build_valid_export(tmpdir)
@@ -160,6 +175,7 @@ def test_05_correct_scope_counts():
 # ---------------------------------------------------------------------------
 # Test 6: Correct lineage counts
 # ---------------------------------------------------------------------------
+
 
 def test_06_correct_lineage_counts():
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -183,6 +199,7 @@ def test_06_correct_lineage_counts():
 # ---------------------------------------------------------------------------
 # Test 7: Conflict detection (manipulate export to add contradicting record)
 # ---------------------------------------------------------------------------
+
 
 def test_07_conflict_detection():
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -216,6 +233,7 @@ def test_07_conflict_detection():
 # Test 8: No conflict false positive
 # ---------------------------------------------------------------------------
 
+
 def test_08_no_conflict_false_positive():
     with tempfile.TemporaryDirectory() as tmpdir:
         _, export_file = _build_valid_export(tmpdir)
@@ -230,6 +248,7 @@ def test_08_no_conflict_false_positive():
 # ---------------------------------------------------------------------------
 # Test 9: Cannot-establish coverage
 # ---------------------------------------------------------------------------
+
 
 def test_09_cannot_establish_coverage():
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -260,6 +279,7 @@ def test_09_cannot_establish_coverage():
 # Test 10: Unique evidence ref count
 # ---------------------------------------------------------------------------
 
+
 def test_10_unique_evidence_ref_count():
     with tempfile.TemporaryDirectory() as tmpdir:
         _, export_file = _build_valid_export(tmpdir)
@@ -280,6 +300,7 @@ def test_10_unique_evidence_ref_count():
 # Test 11: Unique receipt ref count
 # ---------------------------------------------------------------------------
 
+
 def test_11_unique_receipt_ref_count():
     with tempfile.TemporaryDirectory() as tmpdir:
         _, export_file = _build_valid_export(tmpdir)
@@ -298,6 +319,7 @@ def test_11_unique_receipt_ref_count():
 # ---------------------------------------------------------------------------
 # Test 12: Report contains ClaimBoundary locks
 # ---------------------------------------------------------------------------
+
 
 def test_12_report_contains_claim_boundary_locks():
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -320,6 +342,7 @@ def test_12_report_contains_claim_boundary_locks():
 # Test 13: Report contains exact source export hash
 # ---------------------------------------------------------------------------
 
+
 def test_13_report_contains_exact_source_export_hash():
     with tempfile.TemporaryDirectory() as tmpdir:
         _, export_file = _build_valid_export(tmpdir)
@@ -335,6 +358,7 @@ def test_13_report_contains_exact_source_export_hash():
 # Test 14: Report excludes forbidden keys
 # ---------------------------------------------------------------------------
 
+
 def test_14_report_excludes_forbidden_keys():
     with tempfile.TemporaryDirectory() as tmpdir:
         _, export_file = _build_valid_export(tmpdir)
@@ -342,9 +366,13 @@ def test_14_report_excludes_forbidden_keys():
         report_str = json.dumps(report).lower()
 
         forbidden = [
-            "original_text", "user_position", "salt",
-            "can_establish\":", "cannot_establish\":",
-            "reasoning_steps", "chain_of_thought",
+            "original_text",
+            "user_position",
+            "salt",
+            'can_establish":',
+            'cannot_establish":',
+            "reasoning_steps",
+            "chain_of_thought",
         ]
         for f in forbidden:
             assert f not in report_str, f"Forbidden content found in report: {f!r}"
@@ -354,6 +382,7 @@ def test_14_report_excludes_forbidden_keys():
 # Test 15: Markdown excludes forbidden content
 # ---------------------------------------------------------------------------
 
+
 def test_15_markdown_excludes_forbidden_content():
     with tempfile.TemporaryDirectory() as tmpdir:
         _, export_file = _build_valid_export(tmpdir)
@@ -362,9 +391,14 @@ def test_15_markdown_excludes_forbidden_content():
         md_lower = md.lower()
 
         forbidden = [
-            "original_text", "user_position", "salt",
-            "can_establish", "reasoning_steps",
-            "accepted", "proven", "production_ready: true",
+            "original_text",
+            "user_position",
+            "salt",
+            "can_establish",
+            "reasoning_steps",
+            "accepted",
+            "proven",
+            "production_ready: true",
         ]
         for f in forbidden:
             assert f not in md_lower, f"Forbidden content in Markdown: {f!r}"
@@ -373,6 +407,7 @@ def test_15_markdown_excludes_forbidden_content():
 # ---------------------------------------------------------------------------
 # Test 16: Report hash tamper detected
 # ---------------------------------------------------------------------------
+
 
 def test_16_report_hash_tamper_detected():
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -391,6 +426,7 @@ def test_16_report_hash_tamper_detected():
 # ---------------------------------------------------------------------------
 # Test 17: Count tamper + recomputed hash still detected
 # ---------------------------------------------------------------------------
+
 
 def test_17_count_tamper_recomputed_hash_still_detected():
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -416,6 +452,7 @@ def test_17_count_tamper_recomputed_hash_still_detected():
 # Test 18: Source export mismatch detected
 # ---------------------------------------------------------------------------
 
+
 def test_18_source_export_mismatch_detected():
     with tempfile.TemporaryDirectory() as tmpdir:
         _, export_file = _build_valid_export(tmpdir)
@@ -438,6 +475,7 @@ def test_18_source_export_mismatch_detected():
 # Test 19: RETURN export cannot produce report
 # ---------------------------------------------------------------------------
 
+
 def test_19_return_export_cannot_produce_report():
     with tempfile.TemporaryDirectory() as tmpdir:
         _, export_file = _build_valid_export(tmpdir)
@@ -458,6 +496,7 @@ def test_19_return_export_cannot_produce_report():
 # Test 20: Report cannot contain accepted/proven status
 # ---------------------------------------------------------------------------
 
+
 def test_20_report_cannot_contain_accepted_or_proven():
     with tempfile.TemporaryDirectory() as tmpdir:
         _, export_file = _build_valid_export(tmpdir)
@@ -472,14 +511,20 @@ def test_20_report_cannot_contain_accepted_or_proven():
 
         # Authority flags must all be False (never True)
         auth = report["authority"]
-        for key in ("runtime_update_allowed", "public_claim_allowed",
-                    "public_benchmark_allowed", "production_ready", "integration_approved"):
+        for key in (
+            "runtime_update_allowed",
+            "public_claim_allowed",
+            "public_benchmark_allowed",
+            "production_ready",
+            "integration_approved",
+        ):
             assert auth.get(key) is False, f"Authority key {key} must be False"
 
 
 # ---------------------------------------------------------------------------
 # Test 21: JSON/Markdown outputs atomic
 # ---------------------------------------------------------------------------
+
 
 def test_21_json_markdown_outputs_atomic():
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -500,6 +545,7 @@ def test_21_json_markdown_outputs_atomic():
 # ---------------------------------------------------------------------------
 # Test 22: Existing outputs survive failure
 # ---------------------------------------------------------------------------
+
 
 def test_22_existing_outputs_survive_failure():
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -528,12 +574,14 @@ def test_22_existing_outputs_survive_failure():
 # Test 23: Verify does not mutate source or report
 # ---------------------------------------------------------------------------
 
+
 def test_23_verify_does_not_mutate_source_or_report():
     with tempfile.TemporaryDirectory() as tmpdir:
         _, export_file = _build_valid_export(tmpdir)
         report = build_epistemic_review_report(export_file)
 
         import copy
+
         report_before = copy.deepcopy(report)
 
         # Read export file hash before
@@ -553,18 +601,24 @@ def test_23_verify_does_not_mutate_source_or_report():
 # Test 24: CLI render-report positive
 # ---------------------------------------------------------------------------
 
+
 def test_24_cli_render_report_positive():
     with tempfile.TemporaryDirectory() as tmpdir:
         _, export_file = _build_valid_export(tmpdir)
         json_out = os.path.join(tmpdir, "report.json")
         md_out = os.path.join(tmpdir, "report.md")
 
-        res = _run_nexus_cli([
-            "render-report",
-            "--input", export_file,
-            "--json-output", json_out,
-            "--markdown-output", md_out,
-        ])
+        res = _run_nexus_cli(
+            [
+                "render-report",
+                "--input",
+                export_file,
+                "--json-output",
+                json_out,
+                "--markdown-output",
+                md_out,
+            ]
+        )
         assert res.returncode == 0, f"render-report failed: {res.stderr}"
 
         out = json.loads(res.stdout)
@@ -581,24 +635,34 @@ def test_24_cli_render_report_positive():
 # Test 25: CLI verify-report positive
 # ---------------------------------------------------------------------------
 
+
 def test_25_cli_verify_report_positive():
     with tempfile.TemporaryDirectory() as tmpdir:
         _, export_file = _build_valid_export(tmpdir)
         json_out = os.path.join(tmpdir, "report.json")
         md_out = os.path.join(tmpdir, "report.md")
 
-        _run_nexus_cli([
-            "render-report",
-            "--input", export_file,
-            "--json-output", json_out,
-            "--markdown-output", md_out,
-        ])
+        _run_nexus_cli(
+            [
+                "render-report",
+                "--input",
+                export_file,
+                "--json-output",
+                json_out,
+                "--markdown-output",
+                md_out,
+            ]
+        )
 
-        res = _run_nexus_cli([
-            "verify-report",
-            "--input", json_out,
-            "--source-export", export_file,
-        ])
+        res = _run_nexus_cli(
+            [
+                "verify-report",
+                "--input",
+                json_out,
+                "--source-export",
+                export_file,
+            ]
+        )
         assert res.returncode == 0, f"verify-report failed: {res.stderr}"
 
         out = json.loads(res.stdout)
@@ -610,6 +674,7 @@ def test_25_cli_verify_report_positive():
 # Test 26: CLI invalid report → nonzero exit
 # ---------------------------------------------------------------------------
 
+
 def test_26_cli_invalid_report_nonzero_exit():
     with tempfile.TemporaryDirectory() as tmpdir:
         _, export_file = _build_valid_export(tmpdir)
@@ -619,9 +684,13 @@ def test_26_cli_invalid_report_nonzero_exit():
         with open(bad_report, "w") as f:
             json.dump({"schema": "wrong", "report_sha256": "0" * 64}, f)
 
-        res = _run_nexus_cli([
-            "verify-report",
-            "--input", bad_report,
-            "--source-export", export_file,
-        ])
+        res = _run_nexus_cli(
+            [
+                "verify-report",
+                "--input",
+                bad_report,
+                "--source-export",
+                export_file,
+            ]
+        )
         assert res.returncode != 0
