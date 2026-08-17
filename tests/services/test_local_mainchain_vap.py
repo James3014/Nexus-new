@@ -5,11 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from nexus.engine.capability_contracts import CapabilityPlan
 from nexus.services.online_nexus_context import (
     NEXUS_CODEINTEL_MARKER,
     NEXUS_ROUTE_MARKER,
     build_codeintel_preflight_invoker,
+    build_online_nexus_context_from_runtime,
     build_plan_gated_postflight_invokers,
     make_with_nexus_online_invoker,
 )
@@ -20,7 +23,9 @@ from nexus.services.unified_runtime import (
 )
 from nexus.services.verified_assist_contract import (
     build_vap_from_local_receipt,
+    build_verified_assist_packet,
     packet_is_substantive,
+    validate_vap_runtime_binding,
 )
 
 
@@ -112,7 +117,441 @@ def test_build_vap_from_local_receipt_uses_physical_fields_not_handwritten() -> 
     assert "hand written" not in pkt.bounded_diagnosis.lower()
 
 
-def test_unified_runtime_local_produces_vap_and_bd_fingerprints(tmp_path: Path) -> None:
+def test_vap_runtime_binding_is_identity_bound_and_fail_closed() -> None:
+    packet = build_verified_assist_packet(
+        task_id="vap-bind-001",
+        target_files=("mod.py",),
+        bounded_diagnosis="bounded",
+        canonical_execution={"context_hash": "ctx-1", "decision_hash": "dec-1"},
+        execution_attempt={"attempt_id": "attempt-1", "attempt_number": 1},
+        source_hash="source-1",
+        execution_world="world-c",
+    )
+    expected = validate_vap_runtime_binding(
+        packet,
+        task_id="vap-bind-001",
+        canonical_execution={"context_hash": "ctx-1", "decision_hash": "dec-1"},
+        execution_attempt={"attempt_id": "attempt-1", "attempt_number": 1},
+        source_hash="source-1",
+        execution_world="world-c",
+    )
+    assert expected["ok"] is True
+
+    tampered = packet.to_dict()
+    tampered["source_hash"] = "substituted"
+    rejected = validate_vap_runtime_binding(
+        tampered,
+        task_id="vap-bind-001",
+        canonical_execution={"context_hash": "ctx-1", "decision_hash": "dec-1"},
+        execution_attempt={"attempt_id": "attempt-1", "attempt_number": 1},
+        source_hash="source-1",
+        execution_world="world-c",
+    )
+    assert rejected["ok"] is False
+    assert rejected["reason"] == "source_hash_mismatch"
+
+    integrity_tampered = packet.to_dict()
+    integrity_tampered["bounded_diagnosis"] = "caller forged"
+    integrity_rejected = validate_vap_runtime_binding(
+        integrity_tampered,
+        task_id="vap-bind-001",
+        canonical_execution={"context_hash": "ctx-1", "decision_hash": "dec-1"},
+        execution_attempt={"attempt_id": "attempt-1", "attempt_number": 1},
+        source_hash="source-1",
+        execution_world="world-c",
+    )
+    assert integrity_rejected["ok"] is False
+    assert integrity_rejected["reason"] == "packet_hash_mismatch"
+
+    for field, value, reason in (
+        ("task_id", "other-task", "task_id_mismatch"),
+        ("execution_attempt", {"attempt_id": "other-attempt", "attempt_number": 1}, "execution_attempt_mismatch"),
+        ("canonical_execution", {"context_hash": "route-override"}, "canonical_execution_mismatch"),
+        ("source_hash", "stale-source", "source_hash_mismatch"),
+    ):
+        mismatched = packet.to_dict()
+        mismatched[field] = value
+        verdict = validate_vap_runtime_binding(
+            mismatched,
+            task_id="vap-bind-001",
+            canonical_execution={"context_hash": "ctx-1", "decision_hash": "dec-1"},
+            execution_attempt={"attempt_id": "attempt-1", "attempt_number": 1},
+            source_hash="source-1",
+            execution_world="world-c",
+        )
+        assert verdict == {"ok": False, "reason": reason}
+
+
+def test_tampered_vap_is_not_forwarded_to_online_prompt() -> None:
+    packet = build_verified_assist_packet(
+        task_id="vap-bind-002",
+        target_files=("mod.py",),
+        bounded_diagnosis="bounded",
+        canonical_execution={"context_hash": "ctx-2", "execution_world": "world-c"},
+        execution_attempt={"attempt_id": "attempt-2", "attempt_number": 1},
+        source_hash="source-2",
+        execution_world="world-c",
+    ).to_dict()
+    packet["execution_attempt"] = {"attempt_id": "substituted", "attempt_number": 1}
+    with pytest.raises(ValueError, match="execution_attempt_mismatch"):
+        build_online_nexus_context_from_runtime(
+            {
+                "task_id": "vap-bind-002",
+                "task_statement": "use local evidence",
+                "task_type": "repair",
+                "online_prompt": "online body",
+                "source_hash": "source-2",
+                "canonical_execution": {"context_hash": "ctx-2", "execution_world": "world-c"},
+                "execution_attempt": {"attempt_id": "attempt-2", "attempt_number": 1},
+                "local": {"invoked": True, "response": {"task_id": "vap-bind-002", "verified_assist_packet": packet}},
+                "planner": {},
+            }
+        )
+
+
+def test_declared_vap_without_packet_blocks_before_online_provider() -> None:
+    calls: list[dict[str, Any]] = []
+
+    def base(context: dict[str, Any]) -> dict[str, Any]:
+        calls.append(context)
+        return {"response": "must not run"}
+
+    invoker = make_with_nexus_online_invoker(base, provider="fixture")
+    with pytest.raises(ValueError, match="vap_runtime_binding_failed|packet"):
+        invoker(
+            {
+                "task_id": "vap-bind-003",
+                "task_statement": "declared local evidence",
+                "task_type": "repair",
+                "online_prompt": "online body",
+                "source_hash": "source-3",
+                "canonical_execution": {"context_hash": "ctx-3", "execution_world": "world-c"},
+                "execution_attempt": {"attempt_id": "attempt-3", "attempt_number": 1},
+                "local": {
+                    "invoked": True,
+                    "response": {
+                        "task_id": "vap-bind-003",
+                        "consume_verified_assist": True,
+                    },
+                },
+            }
+        )
+    assert calls == []
+
+
+def test_expected_packet_hash_substitution_blocks_before_online_provider() -> None:
+    calls: list[dict[str, Any]] = []
+
+    def base(context: dict[str, Any]) -> dict[str, Any]:
+        calls.append(context)
+        return {"response": "must not run"}
+
+    packet = build_verified_assist_packet(
+        task_id="vap-bind-004",
+        target_files=("mod.py",),
+        bounded_diagnosis="bounded",
+        canonical_execution={},
+        execution_attempt={},
+        source_hash="source-4",
+        execution_world="product_runtime",
+    ).to_dict()
+    invoker = make_with_nexus_online_invoker(base, provider="fixture")
+    with pytest.raises(ValueError, match="packet_hash_substitution"):
+        invoker(
+            {
+                "task_id": "vap-bind-004",
+                "task_statement": "substituted packet",
+                "task_type": "repair",
+                "online_prompt": "online body",
+                "source_hash": "source-4",
+                "local": {
+                    "invoked": True,
+                    "verified_assist_packet_expected_hash": "expected-runtime-hash",
+                    "response": {"task_id": "vap-bind-004", "verified_assist_packet": packet},
+                },
+            }
+        )
+    assert calls == []
+
+
+def test_expected_packet_id_substitution_blocks_before_online_provider() -> None:
+    calls: list[dict[str, Any]] = []
+
+    def custom(context: dict[str, Any]) -> dict[str, Any]:
+        calls.append(context)
+        return {"response": "must not run"}
+
+    packet = build_verified_assist_packet(
+        task_id="vap-bind-id",
+        packet_id="runtime-id",
+        target_files=("mod.py",),
+        bounded_diagnosis="bounded",
+        canonical_execution={},
+        execution_attempt={},
+        source_hash="source-id",
+        execution_world="product_runtime",
+    ).to_dict()
+    stage = {
+        "invoked": True,
+        "verified_assist_packet_expected_hash": packet["packet_hash"],
+        "verified_assist_packet_id": "substituted-id",
+        "response": {"task_id": "vap-bind-id", "verified_assist_packet": packet},
+    }
+    request = UnifiedRuntimeRequest(
+        task_id="vap-bind-id",
+        workspace_revision="rev-id",
+        task_statement="packet id substitution",
+        task_type="repair",
+        route={},
+        online_enabled=True,
+    )
+    result = UnifiedRuntime._run_online(
+        request,
+        custom,
+        {
+            "task_id": request.task_id,
+            "local": stage,
+            "source_hash": "source-id",
+            "canonical_execution": {},
+            "execution_attempt": {},
+        },
+    )
+    assert result["status"] == "FAILED"
+    assert result["response"]["provider_call_count"] == 0
+    assert calls == []
+
+
+def test_runtime_owned_custom_packet_id_is_accepted() -> None:
+    packet = build_verified_assist_packet(
+        task_id="vap-bind-id-ok",
+        packet_id="runtime-custom-id",
+        target_files=("mod.py",),
+        bounded_diagnosis="bounded",
+        canonical_execution={},
+        execution_attempt={},
+        source_hash="source-id-ok",
+        execution_world="product_runtime",
+    ).to_dict()
+    calls: list[dict[str, Any]] = []
+
+    def custom(context: dict[str, Any]) -> dict[str, Any]:
+        calls.append(context)
+        return {"task_id": context["task_id"], "invoked": True, "output_delivered": True, "gate_passed": True}
+
+    request = UnifiedRuntimeRequest(
+        task_id="vap-bind-id-ok",
+        workspace_revision="rev-id-ok",
+        task_statement="packet id accepted",
+        task_type="repair",
+        route={},
+        online_enabled=True,
+    )
+    result = UnifiedRuntime._run_online(
+        request,
+        custom,
+        {
+            "task_id": request.task_id,
+            "local": {
+                "invoked": True,
+                "verified_assist_packet_expected_hash": packet["packet_hash"],
+                "verified_assist_packet_id": "runtime-custom-id",
+                "response": {"task_id": request.task_id, "verified_assist_packet": packet},
+            },
+            "source_hash": "source-id-ok",
+            "canonical_execution": {},
+            "execution_attempt": {},
+        },
+    )
+    assert result["invoked"] is True
+    assert len(calls) == 1
+
+
+def test_runtime_preprovider_gate_blocks_custom_invoker_for_missing_vap() -> None:
+    calls: list[dict[str, Any]] = []
+
+    def custom(context: dict[str, Any]) -> dict[str, Any]:
+        calls.append(context)
+        return {"task_id": context["task_id"], "response": "must not run"}
+
+    request = UnifiedRuntimeRequest(
+        task_id="vap-bind-005",
+        workspace_revision="rev-5",
+        task_statement="missing declared packet",
+        task_type="repair",
+        route={},
+        online_enabled=True,
+    )
+    stage = UnifiedRuntime._run_online(
+        request,
+        custom,
+        {
+            "task_id": request.task_id,
+            "local": {
+                "invoked": True,
+                "response": {"task_id": request.task_id, "consume_verified_assist": True},
+            },
+            "source_hash": "source-5",
+            "canonical_execution": {},
+            "execution_attempt": {},
+        },
+    )
+    assert stage["status"] == "FAILED"
+    assert stage["invoked"] is False
+    assert stage["response"]["provider_call_count"] == 0
+    assert calls == []
+
+
+def test_runtime_preprovider_gate_preserves_online_only_custom_invoker() -> None:
+    calls: list[dict[str, Any]] = []
+
+    def custom(context: dict[str, Any]) -> dict[str, Any]:
+        calls.append(context)
+        return {
+            "task_id": context["task_id"],
+            "invoked": True,
+            "output_delivered": True,
+            "gate_passed": True,
+            "evidence_refs": ["online:ordinary"],
+        }
+
+    request = UnifiedRuntimeRequest(
+        task_id="vap-bind-006",
+        workspace_revision="rev-6",
+        task_statement="ordinary online only",
+        task_type="content",
+        route={},
+        online_enabled=True,
+    )
+    stage = UnifiedRuntime._run_online(request, custom, {"task_id": request.task_id})
+    assert stage["invoked"] is True
+    assert len(calls) == 1
+
+
+def _receipt_for_nested_verifier_binding() -> dict[str, Any]:
+    stage = {
+        "status": "SUCCEEDED",
+        "invoked": True,
+        "evidence_present": True,
+        "gate_passed": True,
+        "evidence_refs": ["stage:evidence"],
+        "outcome_contributed": True,
+    }
+    return {
+        "schema": "nexus.unified_runtime.receipt.v1",
+        "task_id": "vap-bind-final",
+        "planner_decision_id": "planner-final",
+        "execution_depth": "LIGHT",
+        "execution_attempt": {"attempt_id": "attempt-final", "attempt_number": 1},
+        "context_trace": {},
+        "planner": dict(stage),
+        "local": {**stage, "substitution_trace": {"online_consumed": True}},
+        "online": dict(stage),
+        "stages": [],
+        "capability_results": {},
+        "capability_evidence_bundle": {"source_hash": "source-final"},
+        "verified_assist": {"credit": {"assist_credited": True}},
+        "claim_boundary": {},
+        "evidence_refs": ["stage:evidence"],
+    }
+
+
+@pytest.mark.parametrize("local_stage", [{"status": "NOT_REQUESTED"}, {}])
+def test_online_only_or_not_requested_local_does_not_require_vap_credit(
+    local_stage: dict[str, Any],
+) -> None:
+    receipt = _receipt_for_nested_verifier_binding()
+    receipt["local"] = local_stage
+    receipt.pop("verified_assist", None)
+    finalized = UnifiedRuntime().finalize_receipt(
+        receipt,
+        verifier={
+            "task_id": receipt["task_id"],
+            "invoked": True,
+            "gate_passed": True,
+            "evidence_refs": ["verifier:evidence"],
+            "response": {
+                "task_id": receipt["task_id"],
+                "attempt_id": "attempt-final",
+                "source_hash": "source-final",
+            },
+        },
+        learning={"task_id": receipt["task_id"], "invoked": True, "gate_passed": True, "evidence_refs": ["learning:evidence"]},
+    )
+    assert finalized["claim_boundary"]["outcome_contributed"] is True
+
+
+def test_invoked_local_vap_without_physical_credit_stays_false() -> None:
+    receipt = _receipt_for_nested_verifier_binding()
+    receipt.pop("verified_assist", None)
+    receipt["local"]["verified_assist_packet_expected_hash"] = "expected"
+    finalized = UnifiedRuntime().finalize_receipt(
+        receipt,
+        verifier={
+            "task_id": receipt["task_id"],
+            "invoked": True,
+            "gate_passed": True,
+            "evidence_refs": ["verifier:evidence"],
+            "response": {
+                "task_id": receipt["task_id"],
+                "attempt_id": "attempt-final",
+                "source_hash": "source-final",
+            },
+        },
+        learning={"task_id": receipt["task_id"], "invoked": True, "gate_passed": True, "evidence_refs": ["learning:evidence"]},
+    )
+    assert finalized["claim_boundary"]["outcome_contributed"] is False
+    assert finalized["local"]["substitution_trace"]["final_outcome_contributed"] is False
+@pytest.mark.parametrize("nested_task_id", ["other-task", ""])
+def test_nested_verifier_task_binding_is_required_for_final_contribution(
+    nested_task_id: str,
+) -> None:
+    receipt = _receipt_for_nested_verifier_binding()
+    verifier = {
+        "task_id": "vap-bind-final",
+        "invoked": True,
+        "gate_passed": True,
+        "evidence_refs": ["verifier:evidence"],
+        "response": {
+            "task_id": nested_task_id,
+            "attempt_id": "attempt-final",
+            "source_hash": "source-final",
+        },
+    }
+    finalized = UnifiedRuntime().finalize_receipt(
+        receipt,
+        verifier=verifier,
+        learning={"task_id": "vap-bind-final", "invoked": True, "gate_passed": True, "evidence_refs": ["learning:evidence"]},
+    )
+    assert finalized["claim_boundary"]["outcome_contributed"] is False
+    assert finalized["local"]["substitution_trace"]["final_outcome_contributed"] is False
+
+
+def test_nested_verifier_exact_task_binding_allows_final_contribution() -> None:
+    receipt = _receipt_for_nested_verifier_binding()
+    verifier = {
+        "task_id": "vap-bind-final",
+        "invoked": True,
+        "gate_passed": True,
+        "evidence_refs": ["verifier:evidence"],
+        "response": {
+            "task_id": "vap-bind-final",
+            "attempt_id": "attempt-final",
+            "source_hash": "source-final",
+        },
+    }
+    finalized = UnifiedRuntime().finalize_receipt(
+        receipt,
+        verifier=verifier,
+        learning={"task_id": "vap-bind-final", "invoked": True, "gate_passed": True, "evidence_refs": ["learning:evidence"]},
+    )
+    assert finalized["claim_boundary"]["outcome_contributed"] is True
+
+
+@pytest.mark.parametrize("nested_verifier_task_id", ["p1-main-001", "wrong-task", ""])
+def test_unified_runtime_local_produces_vap_and_bd_fingerprints(
+    tmp_path: Path,
+    nested_verifier_task_id: str,
+) -> None:
     captured: dict[str, str] = {}
 
     def base_online(context: dict[str, Any]) -> dict[str, Any]:
@@ -175,6 +614,13 @@ def test_unified_runtime_local_produces_vap_and_bd_fingerprints(tmp_path: Path) 
             "task_id": c["task_id"],
             "invoked": True,
             "gate_passed": True,
+            "attempt_id": c["execution_attempt"]["attempt_id"],
+            "source_hash": c["source_hash"],
+            "response": {
+                "task_id": nested_verifier_task_id,
+                "attempt_id": c["execution_attempt"]["attempt_id"],
+                "source_hash": c["source_hash"],
+            },
             "evidence_refs": [f"verifier:{c['task_id']}"],
         },
         learning=lambda c: {
@@ -216,6 +662,12 @@ def test_unified_runtime_local_produces_vap_and_bd_fingerprints(tmp_path: Path) 
     assert va.get("packet", {}).get("packet_hash") == packet_hash
     assert va.get("credit", {}).get("assist_credited") is True
     assert receipt["local"]["substitution_trace"]["online_consumed"] is True
+    assert receipt["claim_boundary"]["outcome_contributed"] is (
+        nested_verifier_task_id == "p1-main-001"
+    )
+    assert receipt["local"]["substitution_trace"]["final_outcome_contributed"] is (
+        nested_verifier_task_id == "p1-main-001"
+    )
 
     # P2: plan-selected gates invoked
     assert "codeintel" in receipt["capability_results"]

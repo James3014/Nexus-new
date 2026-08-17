@@ -233,6 +233,10 @@ class VerifiedAssistPacket:
     treatment_run_id: str = ""
     planner_decision_id: str = ""
     task_contract_hash: str = ""
+    canonical_execution: dict[str, Any] = field(default_factory=dict)
+    execution_attempt: dict[str, Any] = field(default_factory=dict)
+    source_hash: str = ""
+    execution_world: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -273,6 +277,10 @@ def build_verified_assist_packet(
     verifier_evidence: str = "",
     producer_verification: ProducerVerification | Mapping[str, Any] | None = None,
     packet_id: str = "",
+    canonical_execution: Mapping[str, Any] | None = None,
+    execution_attempt: Mapping[str, Any] | None = None,
+    source_hash: str = "",
+    execution_world: str = "",
 ) -> VerifiedAssistPacket:
     """Build a packet with deterministic packet_hash over content fields."""
     prod = str(producer or "local_armor").strip().lower()
@@ -305,6 +313,10 @@ def build_verified_assist_packet(
         "treatment_run_id": str(treatment_run_id or "").strip(),
         "planner_decision_id": str(planner_decision_id or "").strip(),
         "task_contract_hash": str(task_contract_hash or "").strip(),
+        "canonical_execution": dict(canonical_execution or {}),
+        "execution_attempt": dict(execution_attempt or {}),
+        "source_hash": str(source_hash or "").strip(),
+        "execution_world": str(execution_world or "").strip(),
     }
     if not content["task_id"]:
         raise ValueError("verified_assist_packet_requires_task_id")
@@ -326,7 +338,59 @@ def build_verified_assist_packet(
         treatment_run_id=content["treatment_run_id"],
         planner_decision_id=content["planner_decision_id"],
         task_contract_hash=content["task_contract_hash"],
+        canonical_execution=content["canonical_execution"],
+        execution_attempt=content["execution_attempt"],
+        source_hash=content["source_hash"],
+        execution_world=content["execution_world"],
     )
+
+
+def validate_vap_runtime_binding(
+    packet: VerifiedAssistPacket | Mapping[str, Any] | None,
+    *,
+    task_id: str,
+    canonical_execution: Mapping[str, Any] | None,
+    execution_attempt: Mapping[str, Any] | None,
+    source_hash: str,
+    execution_world: str,
+) -> dict[str, Any]:
+    """Validate a VAP against runtime-owned identity before Online use."""
+    data = packet.to_dict() if isinstance(packet, VerifiedAssistPacket) else dict(packet or {})
+    if str(data.get("task_id") or "") != str(task_id or ""):
+        return {"ok": False, "reason": "task_id_mismatch"}
+    if dict(data.get("canonical_execution") or {}) != dict(canonical_execution or {}):
+        return {"ok": False, "reason": "canonical_execution_mismatch"}
+    if dict(data.get("execution_attempt") or {}) != dict(execution_attempt or {}):
+        return {"ok": False, "reason": "execution_attempt_mismatch"}
+    if str(data.get("source_hash") or "") != str(source_hash or ""):
+        return {"ok": False, "reason": "source_hash_mismatch"}
+    if str(data.get("execution_world") or "") != str(execution_world or ""):
+        return {"ok": False, "reason": "execution_world_mismatch"}
+    try:
+        rebuilt = build_verified_assist_packet(
+            task_id=str(data.get("task_id") or ""),
+            treatment_run_id=str(data.get("treatment_run_id") or ""),
+            planner_decision_id=str(data.get("planner_decision_id") or ""),
+            task_contract_hash=str(data.get("task_contract_hash") or ""),
+            producer=str(data.get("producer") or "local_armor"),
+            reproduction_evidence=str(data.get("reproduction_evidence") or ""),
+            target_files=tuple(data.get("target_files") or ()),
+            exact_spans=tuple(data.get("exact_spans") or ()),
+            semantic_assertions=tuple(data.get("semantic_assertions") or ()),
+            failure_class=str(data.get("failure_class") or ""),
+            bounded_diagnosis=str(data.get("bounded_diagnosis") or ""),
+            verifier_evidence=str(data.get("verifier_evidence") or ""),
+            producer_verification=data.get("producer_verification") if isinstance(data.get("producer_verification"), Mapping) else None,
+            canonical_execution=data.get("canonical_execution") if isinstance(data.get("canonical_execution"), Mapping) else None,
+            execution_attempt=data.get("execution_attempt") if isinstance(data.get("execution_attempt"), Mapping) else None,
+            source_hash=str(data.get("source_hash") or ""),
+            execution_world=str(data.get("execution_world") or ""),
+        )
+    except (TypeError, ValueError):
+        return {"ok": False, "reason": "packet_integrity_invalid"}
+    if str(data.get("packet_hash") or "") != rebuilt.packet_hash:
+        return {"ok": False, "reason": "packet_hash_mismatch"}
+    return {"ok": True, "reason": "runtime_binding_verified"}
 
 
 def packet_is_substantive(packet: VerifiedAssistPacket | Mapping[str, Any] | None) -> bool:
@@ -353,6 +417,10 @@ def build_vap_from_local_receipt(
     treatment_run_id: str = "",
     codeintel_hash: str = "",
     plan_hash: str = "",
+    canonical_execution: Mapping[str, Any] | None = None,
+    execution_attempt: Mapping[str, Any] | None = None,
+    source_hash: str = "",
+    execution_world: str = "",
 ) -> VerifiedAssistPacket | None:
     """Build VerifiedAssistPacket from a real LocalAssist/Local stage receipt.
 
@@ -486,6 +554,10 @@ def build_vap_from_local_receipt(
             bounded_diagnosis=concise[:400],
             verifier_evidence=f"verifier_status={verifier_status}",
             producer_verification=producer_verification,
+            canonical_execution=canonical_execution,
+            execution_attempt=execution_attempt,
+            source_hash=source_hash,
+            execution_world=execution_world,
         )
     except ValueError:
         return None
@@ -787,6 +859,10 @@ def attach_verified_assist_to_forward(
                 verifier_evidence=str(raw.get("verifier_evidence") or ""),
                 producer_verification=pv if isinstance(pv, Mapping) else None,
                 packet_id=str(raw.get("packet_id") or ""),
+                canonical_execution=raw.get("canonical_execution") if isinstance(raw.get("canonical_execution"), Mapping) else None,
+                execution_attempt=raw.get("execution_attempt") if isinstance(raw.get("execution_attempt"), Mapping) else None,
+                source_hash=str(raw.get("source_hash") or ""),
+                execution_world=str(raw.get("execution_world") or ""),
             )
         except (TypeError, ValueError):
             consumption = record_packet_consumption(None)
