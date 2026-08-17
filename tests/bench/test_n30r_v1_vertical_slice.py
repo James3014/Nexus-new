@@ -29,6 +29,22 @@ from scripts.bench.n30r_v1_full_armor_trace import (
 )
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _cleanup_generated_trace_artifacts():
+    """Remove only trace artifacts created by this test session."""
+    artifacts_root = _REPO_ROOT / "docs" / "bench" / "n30r" / "v1_artifacts"
+    before = (
+        {child.resolve() for child in artifacts_root.iterdir() if child.is_dir()}
+        if artifacts_root.is_dir()
+        else set()
+    )
+    yield
+    if artifacts_root.is_dir():
+        for child in artifacts_root.iterdir():
+            if child.is_dir() and child.resolve() not in before:
+                shutil.rmtree(child)
+
+
 def _run_trace():
     from scripts.bench.n30r_v1_full_armor_trace import run_v1_trace
     return run_v1_trace()
