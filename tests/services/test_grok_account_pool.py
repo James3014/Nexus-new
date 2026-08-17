@@ -9,6 +9,7 @@ consistent typed exhaustion error on both the initial and failover paths.
 from __future__ import annotations
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,7 @@ from nexus.services.grok_account_pool import (
     GrokAccountPoolExhaustedError,
     GrokAccountPoolManager,
     build_grok_isolated_env,
+    classify_grok_failure,
     get_grok_account_pool_manager,
     set_grok_account_pool_manager,
 )
@@ -172,6 +174,47 @@ def test_non_eligible_failure_does_not_rotate_or_cooldown(tmp_path):
         assert manager._accounts[0].cooldown_until is None
     assert lease.account_alias_hash == original_hash
     assert lease.lease_id in manager._pool._active_leases
+
+
+@pytest.mark.parametrize(
+    ("status", "exit_code", "output", "expected"),
+    [
+        ("FAILED", 1, "authentication failed; quota exceeded", AccountFailureKind.AUTH_OR_SESSION_INVALID),
+        ("FAILED", 1, "session expired", AccountFailureKind.TOKEN_EXPIRED),
+        ("FAILED", 1, "token refresh failed", AccountFailureKind.TOKEN_REFRESH_FAILED),
+        ("FAILED", 1, "resource_exhausted", AccountFailureKind.QUOTA_EXHAUSTED),
+        ("FAILED", 1, "429 rate limit", AccountFailureKind.RATE_LIMITED),
+        ("FAILED", 1, "503 service unavailable", AccountFailureKind.ACCOUNT_UNAVAILABLE),
+        ("FAILED", 1, "account disabled", AccountFailureKind.ACCOUNT_DISABLED),
+        ("TIMED_OUT", 1, "quota exceeded", AccountFailureKind.TIMEOUT),
+        ("CANCELLED", 1, "cancelled", AccountFailureKind.CANCELLED),
+        ("FAILED", 1, "permission denied", AccountFailureKind.PERMISSION_OR_SCOPE_ERROR),
+        ("FAILED", 2, "syntax error", AccountFailureKind.SYNTAX_OR_IMPLEMENTATION_ERROR),
+        ("FAILED", 1, "model task malformed", AccountFailureKind.MODEL_OR_TASK_ERROR),
+        ("FAILED", 1, "verifier failed", AccountFailureKind.VERIFIER_FAILED),
+        ("FAILED", 1, "unrecognized provider output", AccountFailureKind.UNKNOWN),
+    ],
+)
+def test_classifier_precedence_and_nonrotating_failures(status, exit_code, output, expected):
+    assert classify_grok_failure(status, exit_code, output, "") is expected
+
+
+def test_same_consumer_cannot_hold_two_leases_under_threads(tmp_path):
+    manager = _make_manager(tmp_path)
+
+    def acquire():
+        try:
+            return ("ok", manager.acquire("consumer-race").lease_id)
+        except GrokAccountPoolError as exc:
+            return ("error", str(exc))
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        outcomes = list(executor.map(lambda _: acquire(), range(2)))
+
+    assert sorted(outcome[0] for outcome in outcomes) == ["error", "ok"]
+    assert [outcome[1] for outcome in outcomes if outcome[0] == "error"] == [
+        "GROK_CONSUMER_ALREADY_BOUND"
+    ]
 
 
 def test_eligible_failure_failover_rotates_to_unheld_profile(tmp_path):

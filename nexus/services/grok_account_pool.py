@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -48,6 +49,61 @@ GROK_NEUTRAL_ENV_KEYS = (
 )
 
 GROK_ACCOUNT_POOL_PROVIDER = "grok"
+
+
+def classify_grok_failure(
+    status: str,
+    exit_code: Optional[int],
+    stdout: bytes | str = b"",
+    stderr: bytes | str = b"",
+) -> AccountFailureKind:
+    """Classify provider output without treating task failures as account faults."""
+
+    status_text = str(status or "").upper()
+    text = "\n".join(
+        value.decode("utf-8", errors="replace") if isinstance(value, bytes) else str(value or "")
+        for value in (stdout, stderr)
+    ).lower()
+    normalized_status = status_text.replace("_", " ").lower()
+    if "timeout" in normalized_status or "timed out" in normalized_status:
+        return AccountFailureKind.TIMEOUT
+    if "cancel" in status_text or "cancel" in text:
+        return AccountFailureKind.CANCELLED
+    if any(marker in text for marker in ("token refresh failed", "refresh token failed", "refresh failed")):
+        return AccountFailureKind.TOKEN_REFRESH_FAILED
+    if any(marker in text for marker in ("token expired", "expired token", "session expired")):
+        return AccountFailureKind.TOKEN_EXPIRED
+    if any(
+        marker in text
+        for marker in (
+            "authentication failed",
+            "authentication error",
+            "unauthorized",
+            "invalid api key",
+            "invalid_api_key",
+            "session invalid",
+            "login required",
+            "401",
+        )
+    ):
+        return AccountFailureKind.AUTH_OR_SESSION_INVALID
+    if any(marker in text for marker in ("quota", "resource_exhausted", "insufficient_quota")):
+        return AccountFailureKind.QUOTA_EXHAUSTED
+    if any(marker in text for marker in ("rate limit", "rate_limit", "ratelimit", "429")):
+        return AccountFailureKind.RATE_LIMITED
+    if any(marker in text for marker in ("account disabled", "account_disabled", "disabled")):
+        return AccountFailureKind.ACCOUNT_DISABLED
+    if any(marker in text for marker in ("account unavailable", "service unavailable", "unavailable", "503")):
+        return AccountFailureKind.ACCOUNT_UNAVAILABLE
+    if "permission" in text or "forbidden" in text or "403" in text:
+        return AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
+    if "verifier" in text:
+        return AccountFailureKind.VERIFIER_FAILED
+    if "syntax" in text or "implementation" in text or exit_code == 2:
+        return AccountFailureKind.SYNTAX_OR_IMPLEMENTATION_ERROR
+    if "model" in text or "task" in text:
+        return AccountFailureKind.MODEL_OR_TASK_ERROR
+    return AccountFailureKind.UNKNOWN
 
 
 class GrokAccountPoolError(RuntimeError):
@@ -131,8 +187,10 @@ class GrokAccountPoolManager:
         self._manager_root: Optional[str] = manager_root
         self._cooldown_seconds = cooldown_seconds
         self._clock = clock
+        self._lock = threading.RLock()
         self._pool: Optional[ExternalAccountPool] = None
         self._lease_to_raw_alias: dict[str, str] = {}
+        self._consumer_to_lease: dict[str, str] = {}
 
     def _now(self) -> float:
         if self._clock is not None:
@@ -266,59 +324,70 @@ class GrokAccountPoolManager:
         pool._lease_to_account_id[lease_id] = account.alias
         pool._active_leases[lease_id] = lease
         self._lease_to_raw_alias[lease_id] = account.alias
+        self._consumer_to_lease[str(consumer_id)] = lease_id
         return lease
 
     def acquire(self, consumer_id: str) -> AccountLease:
-        self._refresh_pool_health()
-        pool = self._ensure_pool()
-        try:
-            lease = pool.acquire(consumer_id)
-        except ExternalAccountPoolExhaustedError as exc:
-            raise GrokAccountPoolExhaustedError(f"GROK_ACCOUNT_POOL_EXHAUSTED: {exc}") from exc
-        self._lease_to_raw_alias[lease.lease_id] = pool._require_active_lease(lease)
-        return lease
+        with self._lock:
+            consumer = str(consumer_id)
+            if consumer in self._consumer_to_lease:
+                raise GrokAccountPoolError("GROK_CONSUMER_ALREADY_BOUND")
+            self._refresh_pool_health()
+            pool = self._ensure_pool()
+            try:
+                lease = pool.acquire(consumer)
+            except ExternalAccountPoolExhaustedError as exc:
+                raise GrokAccountPoolExhaustedError(f"GROK_ACCOUNT_POOL_EXHAUSTED: {exc}") from exc
+            self._lease_to_raw_alias[lease.lease_id] = pool._require_active_lease(lease)
+            self._consumer_to_lease[consumer] = lease.lease_id
+            return lease
 
     def release(self, lease: AccountLease) -> None:
-        pool = self._ensure_pool()
-        pool.release(lease)
-        self._lease_to_raw_alias.pop(lease.lease_id, None)
+        with self._lock:
+            pool = self._ensure_pool()
+            pool.release(lease)
+            self._lease_to_raw_alias.pop(lease.lease_id, None)
+            if self._consumer_to_lease.get(lease.consumer_id) == lease.lease_id:
+                self._consumer_to_lease.pop(lease.consumer_id, None)
 
     def report_failure(
         self,
         lease: AccountLease,
         failure_kind: AccountFailureKind,
     ) -> Optional[AccountLease]:
-        self._refresh_pool_health()
-        pool = self._ensure_pool()
-        if not is_rotation_eligible(failure_kind):
-            return None
-        failed_alias = self._lease_to_raw_alias.get(lease.lease_id)
-        if failed_alias is None:
-            try:
-                failed_alias = pool._require_active_lease(lease)
-            except Exception:
+        with self._lock:
+            self._refresh_pool_health()
+            pool = self._ensure_pool()
+            if not is_rotation_eligible(failure_kind):
                 return None
-        for acc in self._accounts:
-            if acc.alias == failed_alias:
-                acc.is_active = False
-                acc.cooldown_until = self._now() + self._cooldown_seconds
-        self._refresh_pool_health()
-        pool.release(lease)
-        self._lease_to_raw_alias.pop(lease.lease_id, None)
+            failed_alias = self._lease_to_raw_alias.get(lease.lease_id)
+            if failed_alias is None:
+                try:
+                    failed_alias = pool._require_active_lease(lease)
+                except Exception:
+                    return None
+            for acc in self._accounts:
+                if acc.alias == failed_alias:
+                    acc.is_active = False
+                    acc.cooldown_until = self._now() + self._cooldown_seconds
+            self._refresh_pool_health()
+            pool.release(lease)
+            self._lease_to_raw_alias.pop(lease.lease_id, None)
+            self._consumer_to_lease.pop(lease.consumer_id, None)
 
-        held_aliases = set(self._lease_to_raw_alias.values())
-        candidates = [
-            acc
-            for acc in self._accounts
-            if acc.is_active and acc.alias in pool._accounts and acc.alias not in held_aliases
-        ]
-        if not candidates:
-            raise GrokAccountPoolExhaustedError(
-                "GROK_ACCOUNT_POOL_EXHAUSTED: no isolated Grok profile available for failover"
-            )
-        candidates.sort(key=lambda acc: pool._accounts[acc.alias].load)
-        chosen = candidates[0]
-        return self._acquire_from_account(lease.consumer_id, chosen)
+            held_aliases = set(self._lease_to_raw_alias.values())
+            candidates = [
+                acc
+                for acc in self._accounts
+                if acc.is_active and acc.alias in pool._accounts and acc.alias not in held_aliases
+            ]
+            if not candidates:
+                raise GrokAccountPoolExhaustedError(
+                    "GROK_ACCOUNT_POOL_EXHAUSTED: no isolated Grok profile available for failover"
+                )
+            candidates.sort(key=lambda acc: pool._accounts[acc.alias].load)
+            chosen = candidates[0]
+            return self._acquire_from_account(lease.consumer_id, chosen)
 
 
 _GLOBAL_GROK_POOL_MANAGER: Optional[GrokAccountPoolManager] = None
