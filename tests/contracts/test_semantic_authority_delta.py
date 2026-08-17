@@ -186,7 +186,10 @@ def test_non_authoritative_descriptive_correction_is_direct():
 @pytest.mark.parametrize("field", ("write_kind", "evidence_change"))
 def test_str_subclasses_cannot_spoof_exact_tokens(field: str):
     token = "evidence_provenance_writeback" if field == "write_kind" else "additive_append_only"
-    assert classify_semantic_authority_delta(valid_delta(**{field: SpoofStr(token)})) == GOVERNED_REQUIRED
+    assert (
+        classify_semantic_authority_delta(valid_delta(**{field: SpoofStr(token)}))
+        == GOVERNED_REQUIRED
+    )
 
 
 @pytest.mark.parametrize("mapping", (ExplodingOuterMapping(),))
