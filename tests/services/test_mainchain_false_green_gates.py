@@ -2441,6 +2441,7 @@ def test_pregate_executes_non_empty_verifier_command(tmp_path: Path) -> None:
     assert outcome["results"][0]["exit_code"] == 0
 
 
+# fmt: off
 def test_pregate_explicit_failing_verifier_stays_fail_closed(tmp_path: Path) -> None:
     import sys
 
@@ -2472,13 +2473,17 @@ def test_harness_preflight_sensor_does_not_execute_known_red_verifier(tmp_path: 
     invoker = build_real_executor_invoker("harness_preflight_sensor")
     assert invoker is not None
     marker = tmp_path / "verifier-ran"
-    command = f"{sys.executable} -c \"from pathlib import Path; Path(r'{marker}').write_text('ran')\""
-    result = invoker({
-        "task_id": "harness-preflight-known-red-1",
-        "task_statement": "repair a known-red target",
-        "planner": {"plan_hash": "harness-preflight-plan"},
-        "codeintel": {"workspace_root": str(tmp_path), "verify_commands": [command]},
-    })
+    command = (
+        f"{sys.executable} -c \"from pathlib import Path; Path(r'{marker}').write_text('ran')\""
+    )
+    result = invoker(
+        {
+            "task_id": "harness-preflight-known-red-1",
+            "task_statement": "repair a known-red target",
+            "planner": {"plan_hash": "harness-preflight-plan"},
+            "codeintel": {"workspace_root": str(tmp_path), "verify_commands": [command]},
+        }
+    )
 
     assert result["gate_passed"] is True
     assert result["response"]["outcome"]["verifier_executed"] is False
@@ -2566,6 +2571,8 @@ def test_harness_preflight_sensor_rejects_malformed_constraints() -> None:
     assert receipt.invoked is False
     assert receipt.gate_passed is False
     assert receipt.outcome["error"] == "MALFORMED_PREFLIGHT_CONSTRAINTS"
+
+# fmt: on
 
 
 def test_semantic_searcher_queries_real_memory_repository(tmp_path: Path) -> None:
