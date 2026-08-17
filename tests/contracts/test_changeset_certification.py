@@ -82,16 +82,7 @@ def test_missing_evidence_is_blocked_not_certified() -> None:
             "candidate_malformed",
         ),
         (
-            lambda: {
-                **_envelope(),
-                "verifier_manifest": {
-                    **_envelope()["verifier_manifest"],
-                    "verifiers": [
-                        _envelope()["verifier_manifest"]["verifiers"][0],
-                        _envelope()["verifier_manifest"]["verifiers"][0],
-                    ],
-                },
-            },
+            lambda: _duplicate_verifier_envelope(),
             "verifier_duplicate",
         ),
         (lambda: {**_envelope(), "verifier_manifest": None}, "verifier_manifest_missing"),
@@ -205,6 +196,17 @@ def _envelope(*, verifier_status: str = "PASS") -> dict[str, object]:
     return payload
 
 
+def _duplicate_verifier_envelope() -> dict[str, object]:
+    payload = _envelope()
+    manifest = payload["verifier_manifest"]
+    assert isinstance(manifest, dict)
+    verifiers = manifest["verifiers"]
+    assert isinstance(verifiers, list)
+    verifier = verifiers[0]
+    manifest["verifiers"] = [verifier, verifier]
+    return payload
+
+
 def test_full_envelope_certifies_and_validates() -> None:
     payload = _envelope()
     result = certify_changeset(payload)
@@ -280,7 +282,9 @@ def test_every_disposition_is_deeply_hash_validated(disposition: str) -> None:
     payload["reasons"] = ["verifier_failed"]
     _rehash(payload)
     assert validate_changeset_certification(payload) == ()
-    payload["base"]["tree"] = "tampered-tree"
+    base = payload["base"]
+    assert isinstance(base, dict)
+    base["tree"] = "tampered-tree"
     assert validate_changeset_certification(payload) in {
         ("payload_hash_mismatch",),
         ("cross_binding_mismatch",),
@@ -339,7 +343,9 @@ def test_certified_missing_candidate_blocks_even_when_manifest_uses_none() -> No
 
 def test_nonfinite_input_returns_structured_fail_closed_result() -> None:
     payload = _envelope()
-    payload["task"]["task_id"] = float("nan")
+    task = payload["task"]
+    assert isinstance(task, dict)
+    task["task_id"] = float("nan")
     result = certify_changeset(payload)
     assert result.status is CertificationStatus.BLOCKED
     assert result.reason_codes == ("identity_malformed",)
