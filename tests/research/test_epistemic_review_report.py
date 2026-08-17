@@ -22,25 +22,9 @@ from nexus.research.epistemic_profile.report import (
     verify_epistemic_review_report,
     write_epistemic_review_report,
 )
-
-RESEARCH_LEDGER_ROOT_ENV = "NEXUS_RESEARCH_LEDGER_ROOT"
-DEFAULT_RESEARCH_LEDGER_ROOT = Path("/Users/jameschen/Workspace/research-ledger")
-
-
-def _research_ledger_src() -> Path:
-    """Resolve the optional, read-only Research Ledger test checkout."""
-    configured = os.environ.get(RESEARCH_LEDGER_ROOT_ENV)
-    root = Path(configured).expanduser() if configured else DEFAULT_RESEARCH_LEDGER_ROOT
-    if not root.exists():
-        if configured:
-            raise AssertionError(f"{RESEARCH_LEDGER_ROOT_ENV} points to a missing path: {root}")
-        pytest.skip("Research Ledger checkout not present; optional bridge skipped")
-    root = root.resolve()
-    src = root / "src"
-    cli = src / "research_ledger" / "cli.py"
-    if not root.is_dir() or not src.is_dir() or not cli.is_file():
-        raise AssertionError(f"Research Ledger checkout is invalid (expected {cli}): {root}")
-    return src
+from tests.research.test_epistemic_profile_bridge_e2e import (
+    _research_ledger_src,
+)
 
 
 def _run_rl_cli(args: list) -> subprocess.CompletedProcess:

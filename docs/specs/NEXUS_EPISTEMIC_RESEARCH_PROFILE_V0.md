@@ -108,9 +108,10 @@ runtime dependency or authority.  Local bridge tests resolve it from
 `/Users/jameschen/Workspace/research-ledger` by default.  To use another
 checkout, set `NEXUS_RESEARCH_LEDGER_ROOT` to its repository root; an explicit
 missing, malformed, or CLI-incompatible path fails closed.  When neither the
-default nor an override exists, optional integration tests skip.  The bridge
-only invokes the external CLI in a subprocess and never imports it into Nexus
-production code.
+default nor an override exists, the mapped tests use a deterministic local
+subprocess fixture for the same export contract; they never silently turn
+meaningful bridge coverage green.  The bridge only invokes the external CLI in
+a subprocess and never imports it into Nexus production code.
 
 ```bash
 # 1. Research Ledger Export

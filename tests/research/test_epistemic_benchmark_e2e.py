@@ -18,7 +18,6 @@ import json
 import os
 import subprocess
 import sys
-from pathlib import Path
 from typing import Dict
 
 import pytest
@@ -43,26 +42,11 @@ from nexus.research.epistemic_benchmark.report import (
     verify_benchmark_report,
     write_benchmark_report,
 )
+from tests.research.test_epistemic_profile_bridge_e2e import (
+    _research_ledger_src,
+)
 
 FIXED_KEY = bytes.fromhex("a1b2c3d4" * 8)  # 32 bytes deterministic test key
-RESEARCH_LEDGER_ROOT_ENV = "NEXUS_RESEARCH_LEDGER_ROOT"
-DEFAULT_RESEARCH_LEDGER_ROOT = Path("/Users/jameschen/Workspace/research-ledger")
-
-
-def _research_ledger_src() -> Path:
-    """Resolve the optional, read-only Research Ledger test checkout."""
-    configured = os.environ.get(RESEARCH_LEDGER_ROOT_ENV)
-    root = Path(configured).expanduser() if configured else DEFAULT_RESEARCH_LEDGER_ROOT
-    if not root.exists():
-        if configured:
-            raise AssertionError(f"{RESEARCH_LEDGER_ROOT_ENV} points to a missing path: {root}")
-        pytest.skip("Research Ledger checkout not present; optional bridge skipped")
-    root = root.resolve()
-    src = root / "src"
-    cli = src / "research_ledger" / "cli.py"
-    if not root.is_dir() or not src.is_dir() or not cli.is_file():
-        raise AssertionError(f"Research Ledger checkout is invalid (expected {cli}): {root}")
-    return src
 
 
 def _prepare(tmp_path, seed: int = 20260802, subdir: str = "run") -> tuple:
@@ -426,4 +410,20 @@ def test_research_ledger_subprocess_readonly():
         env=env,
         timeout=30,
     )
-    assert result is not None  # subprocess ran
+    assert result.returncode == 0, result.stderr
+
+
+def test_research_ledger_subprocess_failure_fails_closed():
+    """A failing external CLI command must remain an explicit test failure."""
+    rl_src = _research_ledger_src()
+    env = dict(os.environ)
+    inherited = env.get("PYTHONPATH")
+    env["PYTHONPATH"] = str(rl_src) if not inherited else os.pathsep.join((str(rl_src), inherited))
+    result = subprocess.run(
+        [sys.executable, "-m", "research_ledger.cli", "unknown-command"],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=30,
+    )
+    assert result.returncode != 0
