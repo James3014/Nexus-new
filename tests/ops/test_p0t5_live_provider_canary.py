@@ -295,14 +295,14 @@ def test_authority_failure_projection_allows_preparation_but_no_physical_calls()
         "invocation_counts": {"capability": 1, "local": 0, "online": 0, "verifier": 0, "learning": 0},
         "stages": [
             {"name": "local", "status": "NOT_REQUESTED", "invoked": False},
-            {
-                "name": "online", "status": "FAILED", "invoked": False,
-                "provider_call_count": 0, "model_call_count": 0,
-                "response": {
+                {
+                    "name": "online", "status": "FAILED", "invoked": False,
+                    "provider_call_count": 0,
+                    "response": {
                     "invoked": False,
                     "provider_call_count": 0,
                     "gateway_invocation_authority": {"status": "BLOCKED"},
-                },
+                    },
             },
             {"name": "verifier", "status": "NOT_REQUESTED", "invoked": False},
             {"name": "learning", "status": "NOT_REQUESTED", "invoked": False},
@@ -316,7 +316,7 @@ def test_replan_requires_admitted_provider_delivery_and_trusted_failure():
     receipt = {
         "terminal_status": "INCOMPLETE",
         "workforce_admission": {"overall_decision": "ALLOW"},
-        "online": {"invoked": True, "response": {"output_delivered": True}},
+        "online": {"invoked": True, "response": {"invoked": True, "output_delivered": True}},
         "verifier": {
             "status": "FAILED",
             "invoked": True,
@@ -342,9 +342,15 @@ def test_replan_requires_admitted_provider_delivery_and_trusted_failure():
     ("change", "match"),
     [
         (lambda r: r.pop("provider_call_count"), "call_count"),
+        (lambda r: r.pop("local_call_count"), "call_count"),
+        (lambda r: r.pop("verifier_call_count"), "call_count"),
+        (lambda r: r.pop("learning_call_count"), "call_count"),
         (lambda r: r.__setitem__("provider_call_count", 1), "call_count"),
         (lambda r: r.__setitem__("execution_replan_request", {}), "replan_authority"),
+        (lambda r: r.__setitem__("source_replan_request_id", ""), "replan_authority"),
         (lambda r: r["stages"].__setitem__(1, {"name": "online", "status": "FAILED", "invoked": False}), "stage_requested"),
+        (lambda r: r["stages"].append({"name": "online", "status": "NOT_REQUESTED", "invoked": False}), "duplicate_stage"),
+        (lambda r: r["invocation_counts"].__setitem__("local", 1), "invocation_count"),
     ],
 )
 def test_non_admitted_receipt_hostile_fields_fail_closed(change, match):
@@ -375,6 +381,7 @@ def test_non_admitted_receipt_hostile_fields_fail_closed(change, match):
         lambda r: r["verifier"].__setitem__("evidence_present", False),
         lambda r: r["verifier"].pop("evidence_refs"),
         lambda r: r["online"]["response"].__setitem__("output_delivered", False),
+        lambda r: r["online"]["response"].__setitem__("invoked", False),
         lambda r: r["workforce_admission"].__setitem__("overall_decision", "ESCALATE"),
         lambda r: r.pop("execution_replan_request"),
         lambda r: r["execution_replan_request"].__setitem__("verifier_outcome_trusted", False),
@@ -384,7 +391,7 @@ def test_replanable_receipt_hostile_fields_fail_closed(change):
     receipt = {
         "terminal_status": "INCOMPLETE",
         "workforce_admission": {"overall_decision": "ALLOW"},
-        "online": {"invoked": True, "response": {"output_delivered": True}},
+        "online": {"invoked": True, "response": {"invoked": True, "output_delivered": True}},
         "verifier": {
             "status": "FAILED", "invoked": True, "gate_passed": False,
             "evidence_present": True, "task_identity_shared": True,
