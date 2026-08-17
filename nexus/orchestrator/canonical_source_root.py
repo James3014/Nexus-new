@@ -7,9 +7,11 @@ import subprocess
 from pathlib import Path
 from typing import Mapping, Optional
 
-
 CANONICAL_SOURCE_ROOT_ENV = "NEXUS_CANONICAL_SOURCE_ROOT"
-DEFAULT_CANONICAL_SOURCE_ROOT = Path("/Users/jameschen/Workspace/nexus")
+# Derive the repository root from this module's own location instead of a
+# machine-specific developer path. parents: [0]=orchestrator, [1]=nexus,
+# [2]=repository root.
+DEFAULT_CANONICAL_SOURCE_ROOT = Path(__file__).resolve().parents[2]
 
 
 def resolve_canonical_source_root(

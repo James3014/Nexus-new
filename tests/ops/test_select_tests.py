@@ -63,6 +63,31 @@ def test_issue153_event_feedback_rows_map_without_fallback():
     ]
 
 
+def test_repository_secret_hygiene_paths_map_without_fallback():
+    details = select_target_details(
+        [".gitignore", "tests/ops/test_repository_secret_hygiene.py"],
+        load_impact_rules(),
+        index_path=Path("/tmp/missing-secret-hygiene-impact-index.json"),
+        history_path=Path("/tmp/missing-secret-hygiene-history.jsonl"),
+    )
+
+    assert details.targets == [
+        "tests/ops/test_repository_secret_hygiene.py",
+        "tests/ops/test_select_tests.py",
+        "tests/services/test_policy_gate.py",
+    ]
+    assert details.unmatched_paths == []
+    assert details.fallback_used is False
+    assert details.risk == "high"
+    assert details.high_risk_escalated is True
+    assert details.risk_reasons == ["repository_secret_hygiene_contract"]
+    assert details.reasons == [
+        ".gitignore: matched .gitignore",
+        "tests/ops/test_repository_secret_hygiene.py: matched tests/ops/test_repository_secret_hygiene.py",
+        "high-risk escalation",
+    ]
+
+
 def test_worker_registry_contract_maps_exact_targets_without_fallback():
     details = select_target_details(
         ["nexus/executors/worker_registry.py"],
