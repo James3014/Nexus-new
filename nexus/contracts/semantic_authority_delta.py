@@ -34,8 +34,7 @@ _DIMENSIONS: Final = frozenset(
     "production_data",
     "production",
     "public_claim",
-    }
-)
+})
 
 
 @dataclass(frozen=True, slots=True)

@@ -177,9 +177,10 @@ def test_additive_calibration_provenance_writeback_is_direct():
 
 
 def test_non_authoritative_descriptive_correction_is_direct():
-    assert classify_semantic_authority_delta(
-        valid_delta(write_kind="descriptive_correction")
-    ) == DIRECT_CANONICAL
+    assert (
+        classify_semantic_authority_delta(valid_delta(write_kind="descriptive_correction"))
+        == DIRECT_CANONICAL
+    )
 
 
 @pytest.mark.parametrize("field", ("write_kind", "evidence_change"))
