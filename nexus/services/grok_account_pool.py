@@ -71,7 +71,10 @@ def classify_grok_failure(
         return AccountFailureKind.TIMEOUT
     if "cancel" in status_text or "cancel" in text:
         return AccountFailureKind.CANCELLED
-    if any(marker in text for marker in ("token refresh failed", "refresh token failed", "refresh failed")):
+    if any(
+        marker in text
+        for marker in ("token refresh failed", "refresh token failed", "refresh failed")
+    ):
         return AccountFailureKind.TOKEN_REFRESH_FAILED
     if any(marker in text for marker in ("token expired", "expired token", "session expired")):
         return AccountFailureKind.TOKEN_EXPIRED
@@ -95,7 +98,10 @@ def classify_grok_failure(
         return AccountFailureKind.RATE_LIMITED
     if any(marker in text for marker in ("account disabled", "account_disabled", "disabled")):
         return AccountFailureKind.ACCOUNT_DISABLED
-    if any(marker in text for marker in ("account unavailable", "service unavailable", "unavailable", "503")):
+    if any(
+        marker in text
+        for marker in ("account unavailable", "service unavailable", "unavailable", "503")
+    ):
         return AccountFailureKind.ACCOUNT_UNAVAILABLE
     if "permission" in text or "forbidden" in text or "403" in text:
         return AccountFailureKind.PERMISSION_OR_SCOPE_ERROR
@@ -203,7 +209,11 @@ def _isolated_home_dir(
     if not isinstance(alias_hash, str) or _ALIAS_HASH_RE.fullmatch(alias_hash) is None:
         raise GrokAccountPoolError("GROK_ALIAS_HASH_REQUIRED")
     configured_root = isolated_root or os.getenv("NEXUS_GROK_ISOLATED_ROOT", "").strip()
-    root = Path(configured_root).expanduser() if configured_root else Path.home() / ".nexus/grok-account-pool/profiles"
+    root = (
+        Path(configured_root).expanduser()
+        if configured_root
+        else Path.home() / ".nexus/grok-account-pool/profiles"
+    )
     if not root.is_absolute():
         raise GrokAccountPoolError("GROK_ISOLATED_ROOT_MUST_BE_ABSOLUTE")
     return str(root / f"profile-{alias_hash}")
@@ -433,13 +443,20 @@ class GrokAccountPoolManager:
         """Return immutable snapshots filtered by consumer and/or lease."""
 
         with self._lock:
-            consumers = [str(consumer_id)] if consumer_id is not None else sorted(self._lineage_by_consumer)
-            records = [record for consumer in consumers for record in self._lineage_by_consumer.get(consumer, ())]
+            consumers = (
+                [str(consumer_id)] if consumer_id is not None else sorted(self._lineage_by_consumer)
+            )
+            records = [
+                record
+                for consumer in consumers
+                for record in self._lineage_by_consumer.get(consumer, ())
+            ]
             if lease_id is not None:
                 records = [
                     record
                     for record in records
-                    if lease_id in {
+                    if lease_id
+                    in {
                         record.previous_lease_id,
                         record.replacement_lease_id,
                     }
@@ -453,7 +470,9 @@ class GrokAccountPoolManager:
     ) -> tuple[Mapping[str, Any], ...]:
         """Return detached public projections, never manager-owned mappings."""
 
-        return tuple(record.to_public_dict() for record in self.get_attempt_lineage(consumer_id, lease_id))
+        return tuple(
+            record.to_public_dict() for record in self.get_attempt_lineage(consumer_id, lease_id)
+        )
 
     def acquire(self, consumer_id: str) -> AccountLease:
         with self._lock:

@@ -151,9 +151,16 @@ def test_attempt_lineage_is_immutable_serializable_and_redacted():
 
     assert json.loads(encoded) == public
     assert set(public) == {
-        "provider", "consumer_id", "attempt", "account_alias_hash",
-        "failure_kind", "previous_lease_id", "previous_account_alias_hash",
-        "replacement_lease_id", "replacement_account_alias_hash", "outcome",
+        "provider",
+        "consumer_id",
+        "attempt",
+        "account_alias_hash",
+        "failure_kind",
+        "previous_lease_id",
+        "previous_account_alias_hash",
+        "replacement_lease_id",
+        "replacement_account_alias_hash",
+        "outcome",
     }
     assert all(secret not in encoded for secret in ("/home", "raw-alias", "TOKEN", "stderr"))
     public["outcome"] = "TAMPERED"
@@ -175,7 +182,10 @@ def test_real_pool_flows_emit_monotonic_lineage_and_isolated_public_snapshots(tm
     records_a = manager.get_attempt_lineage(consumer_id="consumer-lineage-a")
     assert [record.attempt for record in records_a] == [1, 2, 3, 4]
     assert [record.outcome for record in records_a] == [
-        "ACQUIRED", "NO_ROTATION", "ROTATED", "RELEASED"
+        "ACQUIRED",
+        "NO_ROTATION",
+        "ROTATED",
+        "RELEASED",
     ]
     rotated = records_a[2]
     assert rotated.failure_kind is AccountFailureKind.QUOTA_EXHAUSTED
@@ -297,7 +307,12 @@ def test_non_eligible_failure_does_not_rotate_or_cooldown(tmp_path):
 @pytest.mark.parametrize(
     ("status", "exit_code", "output", "expected"),
     [
-        ("FAILED", 1, "authentication failed; quota exceeded", AccountFailureKind.AUTH_OR_SESSION_INVALID),
+        (
+            "FAILED",
+            1,
+            "authentication failed; quota exceeded",
+            AccountFailureKind.AUTH_OR_SESSION_INVALID,
+        ),
         ("FAILED", 1, "session expired", AccountFailureKind.TOKEN_EXPIRED),
         ("FAILED", 1, "token refresh failed", AccountFailureKind.TOKEN_REFRESH_FAILED),
         ("FAILED", 1, "resource_exhausted", AccountFailureKind.QUOTA_EXHAUSTED),
