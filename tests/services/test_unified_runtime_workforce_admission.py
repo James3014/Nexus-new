@@ -406,6 +406,53 @@ def test_conflicting_local_request_identity_cannot_override_admitted_identity() 
     assert local.calls == 1
 
 
+@pytest.mark.parametrize(
+    "candidate_models",
+    [
+        ["qwen2.5-coder:7b-instruct", "deepseek-coder:6.7b-instruct"],
+        ["deepseek-coder:6.7b-instruct", "qwen2.5-coder:7b-instruct"],
+        ["qwen2.5-coder:7b-instruct", "qwen2.5-coder:7b-instruct"],
+        [],
+        None,
+        "deepseek-coder:6.7b-instruct",
+        ["attacker-model"],
+    ],
+)
+def test_workforce_projection_binds_delegated_retry_candidates_to_admitted_model(
+    candidate_models: object,
+) -> None:
+    receipt, local = _local_case(
+        planner_snapshot={"delegated_retry_candidate_models": candidate_models}
+    )
+
+    admitted_model = "qwen2.5-coder:7b-instruct"
+    assert receipt["local_model_invocation_authority"]["gate_passed"] is True
+    assert local.calls == 1
+    assert local.seen_request["planner_snapshot"]["executor_model"] == admitted_model
+    assert local.seen_request["planner_snapshot"]["delegated_retry_candidate_models"] == [
+        admitted_model
+    ]
+
+
+def test_workforce_projection_binds_delegated_retry_candidates_for_dataclass_request() -> None:
+    request = _DataclassLocalRequest(
+        task_id="workforce-admission-runtime-test",
+        planner_snapshot={
+            "delegated_retry_candidate_models": [
+                "deepseek-coder:6.7b-instruct",
+                "attacker-model",
+            ],
+        },
+    )
+    receipt, local = _local_case(binding=_bindings()["local"], local_request=request)
+
+    assert receipt["local_model_invocation_authority"]["gate_passed"] is True
+    assert isinstance(local.seen_request, _DataclassLocalRequest)
+    assert local.seen_request.planner_snapshot["delegated_retry_candidate_models"] == [
+        "qwen2.5-coder:7b-instruct"
+    ]
+
+
 def _formal_local_request(tmp_path: Path, *, task_id: str = "workforce-admission-runtime-test") -> LocalAssistRequest:
     target = tmp_path / "target.py"
     target.write_text("def target():\n    return 1\n", encoding="utf-8")
