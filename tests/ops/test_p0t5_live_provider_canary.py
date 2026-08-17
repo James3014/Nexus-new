@@ -13,6 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "ops"))
 import p0t5_live_provider_canary  # noqa: I001
 from p0t5_live_provider_canary import (
     _assert_canonical_admission,
+    _assert_non_invoked_admission_terminal,
+    _assert_replanable_provider_failure,
     _canonical_workforce_binding,
     get_provider_executable_identity,
     run_canary_campaign,
@@ -234,6 +236,51 @@ def test_canary_admission_binding_hostiles_fail_closed():
                 {"workforce_admission": {"overall_decision": "ALLOW", "records": [{"decision": substituted}]}},
                 1,
             )
+
+
+def test_non_admitted_block_is_terminal_and_not_replanable():
+    receipt = {
+        "terminal_status": "BLOCKED",
+        "workforce_admission": {"overall_decision": "BLOCK"},
+        "stages": [
+            {"name": "local", "status": "NOT_REQUESTED", "invoked": False},
+            {"name": "online", "status": "NOT_REQUESTED", "invoked": False},
+            {"name": "verifier", "status": "NOT_REQUESTED", "invoked": False},
+            {"name": "learning", "status": "NOT_REQUESTED", "invoked": False},
+        ],
+    }
+
+    _assert_non_invoked_admission_terminal(receipt, 1)
+
+
+def test_non_admitted_escalate_is_incomplete_but_not_replanable():
+    receipt = {
+        "terminal_status": "INCOMPLETE",
+        "workforce_admission": {"overall_decision": "ESCALATE"},
+        "stages": [
+            {"name": "local", "status": "NOT_REQUESTED", "invoked": False},
+            {"name": "online", "status": "NOT_REQUESTED", "invoked": False},
+            {"name": "verifier", "status": "NOT_REQUESTED", "invoked": False},
+            {"name": "learning", "status": "NOT_REQUESTED", "invoked": False},
+        ],
+    }
+
+    _assert_non_invoked_admission_terminal(receipt, 1)
+
+
+def test_replan_requires_admitted_provider_delivery_and_trusted_failure():
+    receipt = {
+        "terminal_status": "INCOMPLETE",
+        "workforce_admission": {"overall_decision": "ALLOW"},
+        "online": {"invoked": True, "response": {"output_delivered": True}},
+        "execution_replan_request": {
+            "schema": "nexus.execution_replan_request.v1",
+            "replan_required": True,
+            "verifier_outcome_trusted": True,
+        },
+    }
+
+    _assert_replanable_provider_failure(receipt, 1)
 
 
 def test_canary_does_not_automatically_use_codex(tmp_path: Path, monkeypatch):

@@ -84,6 +84,62 @@ def _assert_canonical_admission(receipt: Mapping[str, Any], attempt: int) -> Non
             raise RuntimeError(f"workforce_admission_{field}_mismatch:attempt{attempt}")
 
 
+def _assert_non_invoked_admission_terminal(
+    receipt: Mapping[str, Any], attempt: int
+) -> None:
+    """Validate a non-admitted attempt without granting replan authority."""
+    admission = receipt.get("workforce_admission")
+    decision = admission.get("overall_decision") if isinstance(admission, Mapping) else ""
+    expected_status = {"BLOCK": "BLOCKED", "ESCALATE": "INCOMPLETE"}.get(str(decision))
+    if expected_status is None:
+        raise RuntimeError(f"workforce_admission_decision_invalid:attempt{attempt}")
+    if receipt.get("terminal_status") != expected_status:
+        raise RuntimeError(
+            f"non_admitted_terminal_status_mismatch:attempt{attempt}:"
+            f"expected={expected_status}:actual={receipt.get('terminal_status')}"
+        )
+
+    stages = receipt.get("stages")
+    if not isinstance(stages, list):
+        raise RuntimeError(f"non_admitted_stages_missing:attempt{attempt}")
+    stage_map = {
+        str(stage.get("name")): stage
+        for stage in stages
+        if isinstance(stage, Mapping) and stage.get("name")
+    }
+    for name in ("local", "online", "verifier", "learning"):
+        stage = stage_map.get(name)
+        if not isinstance(stage, Mapping) or stage.get("status") != "NOT_REQUESTED":
+            raise RuntimeError(f"non_admitted_stage_requested:{name}:attempt{attempt}")
+        if bool(stage.get("invoked")):
+            raise RuntimeError(f"non_admitted_stage_invoked:{name}:attempt{attempt}")
+
+
+def _assert_replanable_provider_failure(
+    receipt: Mapping[str, Any], attempt: int
+) -> None:
+    """Require admitted provider delivery and trusted verifier failure for replan."""
+    admission = receipt.get("workforce_admission")
+    if not isinstance(admission, Mapping) or admission.get("overall_decision") != "ALLOW":
+        raise RuntimeError(f"replan_requires_admitted_workforce:attempt{attempt}")
+    if receipt.get("terminal_status") != "INCOMPLETE":
+        raise RuntimeError(f"replan_requires_incomplete_attempt:attempt{attempt}")
+    online = receipt.get("online")
+    response = online.get("response") if isinstance(online, Mapping) else None
+    if not isinstance(online, Mapping) or not online.get("invoked"):
+        raise RuntimeError(f"replan_requires_provider_invocation:attempt{attempt}")
+    if not isinstance(response, Mapping) or not response.get("output_delivered"):
+        raise RuntimeError(f"replan_requires_provider_delivery:attempt{attempt}")
+    request = receipt.get("execution_replan_request")
+    if (
+        not isinstance(request, Mapping)
+        or request.get("schema") != "nexus.execution_replan_request.v1"
+        or not request.get("replan_required")
+        or not request.get("verifier_outcome_trusted")
+    ):
+        raise RuntimeError(f"replan_requires_trusted_verifier_failure:attempt{attempt}")
+
+
 def get_git_status(project_root: str) -> str:
     res = subprocess.run(
         ["git", "status", "--porcelain"],
@@ -304,10 +360,17 @@ def run_canary_campaign(
         v1_check = validate_receipt_base(r1, mode="strict")
         if not v1_check.get("ok"):
             raise RuntimeError(f"Attempt 1 strict receipt validation failed: {v1_check.get('blockers')}")
-        _assert_canonical_admission(r1, 1)
+        admission = r1.get("workforce_admission")
+        admission_decision = admission.get("overall_decision") if isinstance(admission, Mapping) else ""
+        if admission_decision != "ALLOW":
+            _assert_non_invoked_admission_terminal(r1, 1)
+            raise RuntimeError(
+                f"Attempt 1 admission {admission_decision}: terminal "
+                f"{r1.get('terminal_status')}; provider call and replan not allowed"
+            )
 
-        if r1.get("terminal_status") != "INCOMPLETE":
-            raise RuntimeError(f"Attempt 1 terminal status unexpected: {r1.get('terminal_status')}")
+        _assert_canonical_admission(r1, 1)
+        _assert_replanable_provider_failure(r1, 1)
 
         previous_receipt = json.loads(receipt1_path.read_text(encoding="utf-8"))
 
