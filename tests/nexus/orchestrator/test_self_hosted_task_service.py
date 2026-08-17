@@ -2775,6 +2775,28 @@ def test_noncanonical_state_root_requires_ephemeral_mode(tmp_path):
         SelfHostedTaskService(state_dir="/Users/jameschen/Workspace/nexus-sibling-state", auto_reconcile=False)
 
 
+def test_ci_isolated_state_root_requires_explicit_ephemeral_mode(monkeypatch):
+    isolated_state = Path(
+        "/home/runner/work/_temp/trusted-anchor/source-self-hosted-state"
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service._temporary_state_roots",
+        lambda: (),
+    )
+
+    with pytest.raises(ValueError, match="canonical state root"):
+        SelfHostedTaskService(state_dir=isolated_state, auto_reconcile=False)
+
+    service = SelfHostedTaskService(
+        state_dir=isolated_state,
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+
+    assert service.state_dir == isolated_state.resolve()
+    assert service.ephemeral is True
+
+
 def test_default_state_root_uses_configured_canonical_root(tmp_path, monkeypatch):
     canonical = tmp_path / "canonical"
     monkeypatch.setenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", str(canonical))
