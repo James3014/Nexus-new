@@ -11,29 +11,29 @@ ClassifierResult = Literal["DIRECT_CANONICAL", "GOVERNED_REQUIRED"]
 
 _DIMENSIONS: Final = frozenset(
     {
-        "autonomy",
-        "roles_capabilities",
-        "workforce_admission",
-        "provider_model_worker_authority",
-        "default_route",
-        "semantic_authority_lineage",
-        "parser_verifier",
-        "independent_review",
-        "forbidden_actions",
-        "protected_ref_actions",
-        "claim_ceilings",
-        "capability_planner",
-        "lifecycle",
-        "candidate",
-        "approval",
-        "integration",
-        "merge",
-        "release",
-        "security",
-        "migration_schema",
-        "production_data",
-        "production",
-        "public_claim",
+    "autonomy",
+    "roles_capabilities",
+    "workforce_admission",
+    "provider_model_worker_authority",
+    "default_route",
+    "semantic_authority_lineage",
+    "parser_verifier",
+    "independent_review",
+    "forbidden_actions",
+    "protected_ref_actions",
+    "claim_ceilings",
+    "capability_planner",
+    "lifecycle",
+    "candidate",
+    "approval",
+    "integration",
+    "merge",
+    "release",
+    "security",
+    "migration_schema",
+    "production_data",
+    "production",
+    "public_claim",
     }
 )
 
@@ -71,7 +71,9 @@ SemanticAuthorityDeltaEnvelope = SemanticAuthorityDelta
 _REQUIRED_FIELDS: Final = frozenset(SemanticAuthorityDelta.__dataclass_fields__)
 
 
-def _typed_envelope(value: SemanticAuthorityDelta | Mapping[str, Any]) -> SemanticAuthorityDelta | None:
+def _typed_envelope(
+    value: SemanticAuthorityDelta | Mapping[str, Any],
+) -> SemanticAuthorityDelta | None:
     if isinstance(value, SemanticAuthorityDelta):
         return value
     if not isinstance(value, Mapping):

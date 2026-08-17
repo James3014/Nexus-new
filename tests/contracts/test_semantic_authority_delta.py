@@ -120,13 +120,29 @@ class SpoofFilesTuple(tuple[str, ...]):
 def test_independent_authority_dimension_oracle_is_complete():
     assert EXPECTED_AUTHORITY_DIMENSION_COUNT == len(EXPECTED_AUTHORITY_DIMENSIONS)
     assert EXPECTED_AUTHORITY_DIMENSIONS == {
-        "autonomy", "roles_capabilities", "workforce_admission",
-        "provider_model_worker_authority", "default_route",
-        "semantic_authority_lineage", "parser_verifier", "independent_review",
-        "forbidden_actions", "protected_ref_actions", "claim_ceilings",
-        "capability_planner", "lifecycle", "candidate", "approval",
-        "integration", "merge", "release", "security", "migration_schema",
-        "production_data", "production", "public_claim",
+        "autonomy",
+        "roles_capabilities",
+        "workforce_admission",
+        "provider_model_worker_authority",
+        "default_route",
+        "semantic_authority_lineage",
+        "parser_verifier",
+        "independent_review",
+        "forbidden_actions",
+        "protected_ref_actions",
+        "claim_ceilings",
+        "capability_planner",
+        "lifecycle",
+        "candidate",
+        "approval",
+        "integration",
+        "merge",
+        "release",
+        "security",
+        "migration_schema",
+        "production_data",
+        "production",
+        "public_claim",
     }
 
 
