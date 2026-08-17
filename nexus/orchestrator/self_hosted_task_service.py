@@ -104,6 +104,45 @@ PENDING_CANDIDATE_STATUSES = frozenset({
 })
 
 
+def _temporary_state_roots() -> tuple[Path, ...]:
+    """Return trusted ephemeral roots, including process-provided CI roots.
+
+    GitHub-hosted runners expose their isolated scratch directory through
+    ``RUNNER_TEMP`` (and some runners use ``TMPDIR``).  These roots are
+    temporary execution surfaces only; they do not alter the canonical state
+    root or grant production/promotion authority.
+    """
+    roots = [Path("/tmp"), Path("/private/tmp"), Path("/private/var/folders")]
+    for variable in ("TMPDIR", "RUNNER_TEMP"):
+        configured = os.getenv(variable, "").strip()
+        if not configured:
+            continue
+        candidate = Path(configured).expanduser()
+        if (
+            not candidate.is_absolute()
+            or candidate == Path("/")
+            or any(part.is_symlink() for part in _path_components(candidate))
+        ):
+            continue
+        try:
+            resolved = candidate.resolve(strict=False)
+        except (OSError, RuntimeError):
+            continue
+        if resolved != Path("/"):
+            roots.append(resolved)
+    return tuple(dict.fromkeys(roots))
+
+
+def _path_components(path: Path) -> tuple[Path, ...]:
+    """Return lexical path components so configured symlink parents are rejected."""
+    current = Path(path.anchor or ".")
+    components = [current]
+    for part in path.parts[1:] if path.is_absolute() else path.parts:
+        current /= part
+        components.append(current)
+    return tuple(components)
+
+
 def resolve_contract_identity(
     state: Mapping[str, Any],
     *,
@@ -927,9 +966,10 @@ class SelfHostedTaskService:
         ephemeral: bool = False,
     ):
         canonical = self.canonical_state_dir()
-        self.state_dir = Path(state_dir).expanduser().resolve() if state_dir is not None else canonical
-        temporary_roots = (Path("/tmp"), Path("/private/tmp"), Path("/private/var/folders"))
-        is_temporary = any(root == self.state_dir or root in self.state_dir.parents for root in temporary_roots)
+        raw_state_dir = Path(state_dir).expanduser() if state_dir is not None else canonical
+        self.state_dir = raw_state_dir.resolve()
+        temporary_roots = _temporary_state_roots()
+        is_temporary = any(root in self.state_dir.parents for root in temporary_roots)
         if self.state_dir != canonical and not ephemeral and not is_temporary:
             raise ValueError(f"production tasks must use canonical state root: {canonical}")
         self.ephemeral = ephemeral or is_temporary
@@ -1789,7 +1829,7 @@ class SelfHostedTaskService:
         controller = Path(contract.controller_repo_root).expanduser().resolve()
         if not controller.is_dir():
             return f"CONTROLLER_MISSING: {controller}"
-        temporary_roots = (Path("/tmp"), Path("/private/tmp"), Path("/private/var/folders"))
+        temporary_roots = _temporary_state_roots()
         if any(controller == root or root in controller.parents for root in temporary_roots):
             return f"DURABLE_CONTROLLER_REQUIRED: temporary Controller is not promotable: {controller}"
         try:
@@ -2015,10 +2055,49 @@ class SelfHostedTaskService:
         # must remain visible to the caller; silently dropping them creates a
         # false lifecycle receipt while leaving the lifecycle authority intact.
         request = result.get("request") if isinstance(result.get("request"), Mapping) else {}
+        status = str(result.get("status"))
+        rejected_states = frozenset({"ATTEMPT_REJECTED", "REJECTED"})
+        explicit_type = result.get("continuity_event_type") or request.get("continuity_event_type")
+        if explicit_type is not None:
+            if not isinstance(explicit_type, str) or not explicit_type.strip():
+                raise ValueError("continuity_event_type must be a non-empty string")
+            if status in rejected_states and explicit_type != "ATTEMPT_REJECTED":
+                raise ValueError("rejected state requires ATTEMPT_REJECTED continuity type")
+            continuity_event_type = explicit_type
+        else:
+            continuity_event_type = (
+                "ATTEMPT_REJECTED" if status in rejected_states else "OBSERVATION_RECORDED"
+            )
+
+        def continuity_list(name: str, alias: str = "") -> tuple[str, ...]:
+            value = result.get(name)
+            if value is None and alias:
+                value = result.get(alias)
+            if value is None:
+                value = request.get(name)
+            if value is None and alias:
+                value = request.get(alias)
+            if value is None:
+                return ()
+            if isinstance(value, str):
+                return (value,)
+            if not isinstance(value, (list, tuple)):
+                raise ValueError(f"{name} must be a list/tuple of non-empty strings")
+            if any(not isinstance(item, str) or not item.strip() for item in value):
+                raise ValueError(f"{name} must contain non-empty strings")
+            return tuple(value)
+
         NexusEventBus.emit_attempt_transition(build_attempt_transition_event(
             task_id=str(result.get("task_id") or task_id),
             attempt_id=str(result.get("attempt_id")), sequence=sequence,
-            state=str(result.get("status")), reason=str(result.get("error") or ""),
+            state=status, reason=str(result.get("error") or result.get("reason") or ""),
+            continuity_event_type=continuity_event_type,
+            strategy_delta=str(result.get("strategy_delta") or request.get("strategy_delta") or ""),
+            do_not_repeat=continuity_list("do_not_repeat", "rejected_strategies"),
+            unresolved_risks=continuity_list("unresolved_risks"),
+            unknowns=continuity_list("unknowns"),
+            next_action=str(result.get("next_action") or request.get("next_action") or ""),
+            claim_ceiling=str(result.get("claim_ceiling") or request.get("claim_ceiling") or ""),
             candidate_refs=candidate_refs, evidence_refs=evidence_refs,
             source_revision=str(result.get("source_revision") or request.get("controller_revision") or "unknown"),
             contract_revision=str(result.get("contract_revision") or request.get("contract_hash") or "unknown"),
@@ -7143,7 +7222,7 @@ class SelfHostedTaskService:
         lease_target = str((state_after_integration.get("lease") or {}).get("target_worktree") or "")
         requested_target = str(authorization.get("cleanup_target_path") or lease_target)
         target_path = Path(requested_target).expanduser().resolve() if requested_target else None
-        temp_roots = (Path(tempfile.gettempdir()).resolve(), Path("/private/tmp"))
+        temp_roots = _temporary_state_roots()
         controller_root = Path(str((state_after_integration.get("contract") or {}).get("controller_repo_root") or "")).expanduser().resolve()
         cleanup_allowed = bool(
             self.ephemeral

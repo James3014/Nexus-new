@@ -24,7 +24,6 @@ from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     _action_contract_fingerprint,
     _evaluate_freshness,
     _hash_source_paths,
-    _loaded_runtime_source_paths,
     _permission_enforcement_fingerprint,
 )
 
@@ -76,9 +75,12 @@ def test_gateway_process_binds_explicit_canonical_source_root():
     assert payload["guard"] == str(root)
     assert payload["service"] == str(root)
     assert payload["gateway"] == str(root)
-    assert payload["head"] == subprocess.run(
-        ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=True
-    ).stdout.strip()
+    assert (
+        payload["head"]
+        == subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=True
+        ).stdout.strip()
+    )
     assert payload["runtime_paths"] > 0
 
 
@@ -118,6 +120,27 @@ def test_head_drift_only_is_informational():
     assert result["reload_required"] is False
     assert result["action_review_required"] is False
     assert result["reload_reasons"] == []
+
+
+def test_tampered_head_only_signal_cannot_invent_action_review():
+    inputs = {
+        "repo_head_at_start": SHA40_A,
+        "repo_head_current": SHA40_A,
+        "runtime_sha_at_start": DIGEST_1,
+        "runtime_sha_current": DIGEST_1,
+        "action_sha_at_start": DIGEST_2,
+        "action_sha_current": DIGEST_2,
+    }
+    baseline = _evaluate_freshness(**inputs)
+
+    # Mutate only the untrusted repository-HEAD signal.  The consumer must
+    # project that change solely as informational repository drift; it cannot
+    # manufacture an action/permission review or a runtime reload.
+    inputs["repo_head_current"] = SHA40_B
+    tampered = _evaluate_freshness(**inputs)
+
+    assert baseline["repository_drift"] is False
+    assert tampered == {**baseline, "repository_drift": True}
 
 
 def test_runtime_drift_triggers_reload_only():
@@ -216,14 +239,18 @@ class UnifiedMCPGateway:
 
 def test_action_contract_digest_is_sensitive_to_permission_policy():
     base = _action_contract_digest(_SAMPLE_SOURCE)
-    changed = _action_contract_digest(_SAMPLE_SOURCE.replace('"revision": "v1"', '"revision": "v2"'))
+    changed = _action_contract_digest(
+        _SAMPLE_SOURCE.replace('"revision": "v1"', '"revision": "v2"')
+    )
     assert base is not None
     assert base != changed
 
 
 def test_action_contract_digest_is_sensitive_to_tool_specs():
     base = _action_contract_digest(_SAMPLE_SOURCE)
-    changed = _action_contract_digest(_SAMPLE_SOURCE.replace("nexus_gateway_status", "nexus_gateway_status_v2"))
+    changed = _action_contract_digest(
+        _SAMPLE_SOURCE.replace("nexus_gateway_status", "nexus_gateway_status_v2")
+    )
     assert base is not None
     assert base != changed
 
@@ -270,14 +297,32 @@ def test_hash_source_paths_detects_missing_file(tmp_path):
 
 def test_loaded_runtime_source_paths_are_canonical_python_sources():
     root = gateway_module.CANONICAL_SOURCE_ROOT.resolve()
-    paths = _loaded_runtime_source_paths()
+    # ``RUNTIME_SOURCE_PATHS`` is the import-time snapshot.  The live module
+    # registry may legitimately contain additional canonical modules after
+    # pytest has collected another suite, so do not compare it with a later
+    # enumeration of ``sys.modules`` here.
+    paths = gateway_module.RUNTIME_SOURCE_PATHS
     assert paths
     for path in paths:
         assert path.suffix == ".py"
         path.relative_to(root)
         assert "__pycache__" not in path.parts
         assert "tests" not in path.parts
-    assert gateway_module.RUNTIME_SOURCE_PATHS == paths
+    assert paths == tuple(sorted(set(paths), key=lambda path: path.as_posix()))
+
+
+def test_late_canonical_import_cannot_mutate_frozen_runtime_source_snapshot():
+    before_paths = gateway_module.RUNTIME_SOURCE_PATHS
+    before_digest = gateway_module.RUNTIME_SOURCE_SHA256_AT_START
+
+    # This is the hostile collection-order case: importing the EIA automation
+    # surface after Gateway startup adds canonical modules to ``sys.modules``.
+    # Those later imports must not rewrite the Gateway's frozen baseline.
+    __import__("nexus.services.external_intelligence_automation")
+
+    assert gateway_module.RUNTIME_SOURCE_PATHS == before_paths
+    assert gateway_module.RUNTIME_SOURCE_SHA256_AT_START == before_digest
+    assert _hash_source_paths(gateway_module.RUNTIME_SOURCE_PATHS) == before_digest
 
 
 def test_gateway_status_has_freshness_fields_and_is_stable():
@@ -311,9 +356,18 @@ def test_gateway_status_has_freshness_fields_and_is_stable():
     assert status["action_review_required"] is False
     assert status["runtime_source_sha256_at_start"] == status["runtime_source_sha256_current"]
     assert status["action_contract_sha256_at_start"] == status["action_contract_sha256_current"]
-    assert status["action_definition_sha256_at_start"] == gateway_module.ACTION_CONTRACT_SHA256_AT_START
-    assert status["permission_enforcement_sha256_at_start"] == status["permission_enforcement_sha256_current"]
-    assert status["permission_enforcement_sha256_at_start"] == gateway_module.PERMISSION_ENFORCEMENT_SHA256_AT_START
+    assert (
+        status["action_definition_sha256_at_start"]
+        == gateway_module.ACTION_CONTRACT_SHA256_AT_START
+    )
+    assert (
+        status["permission_enforcement_sha256_at_start"]
+        == status["permission_enforcement_sha256_current"]
+    )
+    assert (
+        status["permission_enforcement_sha256_at_start"]
+        == gateway_module.PERMISSION_ENFORCEMENT_SHA256_AT_START
+    )
 
 
 def test_gateway_status_reflects_runtime_drift(monkeypatch):
@@ -333,7 +387,9 @@ def test_gateway_status_reflects_runtime_drift(monkeypatch):
 
 def test_gateway_status_reflects_action_contract_drift(monkeypatch):
     monkeypatch.setattr(gateway_module, "_hash_source_paths", lambda paths: DIGEST_4)
-    monkeypatch.setattr(gateway_module, "_action_contract_fingerprint", lambda **kw: (DIGEST_3, True, ()))
+    monkeypatch.setattr(
+        gateway_module, "_action_contract_fingerprint", lambda **kw: (DIGEST_3, True, ())
+    )
     gateway = UnifiedMCPGateway(service=_StubService())
     status = gateway._gateway_status()
     assert status["runtime_source_drift"] is True
@@ -358,7 +414,9 @@ def test_gateway_status_action_contract_fail_closed(monkeypatch):
     assert "action_contract_source_unreadable:OSError" not in status["reload_reasons"]
 
 
-def _write_permission_tree(tmp_path, guard_body: str, action_body: str = "class LifecycleAction:\n    pass\n") -> None:
+def _write_permission_tree(
+    tmp_path, guard_body: str, action_body: str = "class LifecycleAction:\n    pass\n"
+) -> None:
     guards_dir = tmp_path / "nexus" / "orchestrator"
     contracts_dir = tmp_path / "nexus" / "contracts"
     guards_dir.mkdir(parents=True, exist_ok=True)
@@ -379,10 +437,14 @@ def test_permission_enforcement_digest_is_sensitive_to_semantic_ast_change(tmp_p
 
 
 def test_permission_enforcement_digest_ignores_comments_and_formatting(tmp_path):
-    _write_permission_tree(tmp_path, "# header comment\ndef pre_action_guard(*, action, target):\n    return True\n")
+    _write_permission_tree(
+        tmp_path, "# header comment\ndef pre_action_guard(*, action, target):\n    return True\n"
+    )
     base, ok, _ = _permission_enforcement_fingerprint(root=tmp_path)
     assert ok is True
-    _write_permission_tree(tmp_path, "\n\ndef pre_action_guard(*,action,target):\n    return True\n")
+    _write_permission_tree(
+        tmp_path, "\n\ndef pre_action_guard(*,action,target):\n    return True\n"
+    )
     changed, ok, _ = _permission_enforcement_fingerprint(root=tmp_path)
     assert ok is True
     assert base == changed

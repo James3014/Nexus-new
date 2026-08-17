@@ -63,6 +63,31 @@ def test_issue153_event_feedback_rows_map_without_fallback():
     ]
 
 
+def test_repository_secret_hygiene_paths_map_without_fallback():
+    details = select_target_details(
+        [".gitignore", "tests/ops/test_repository_secret_hygiene.py"],
+        load_impact_rules(),
+        index_path=Path("/tmp/missing-secret-hygiene-impact-index.json"),
+        history_path=Path("/tmp/missing-secret-hygiene-history.jsonl"),
+    )
+
+    assert details.targets == [
+        "tests/ops/test_repository_secret_hygiene.py",
+        "tests/ops/test_select_tests.py",
+        "tests/services/test_policy_gate.py",
+    ]
+    assert details.unmatched_paths == []
+    assert details.fallback_used is False
+    assert details.risk == "high"
+    assert details.high_risk_escalated is True
+    assert details.risk_reasons == ["repository_secret_hygiene_contract"]
+    assert details.reasons == [
+        ".gitignore: matched .gitignore",
+        "tests/ops/test_repository_secret_hygiene.py: matched tests/ops/test_repository_secret_hygiene.py",
+        "high-risk escalation",
+    ]
+
+
 def test_worker_registry_contract_maps_exact_targets_without_fallback():
     details = select_target_details(
         ["nexus/executors/worker_registry.py"],
@@ -306,6 +331,32 @@ def test_model_workforce_policy_uses_exact_contract_targets_without_fallback(tmp
     assert details.high_risk_escalated is False
     assert details.fallback_used is False
     assert details.unmatched_paths == []
+
+
+def test_model_capability_lineage_uses_exact_calibration_targets_without_fallback(tmp_path):
+    rules = load_impact_rules()
+    lineage_rule = next(
+        rule for rule in rules if rule.code_path == "nexus/config/model_capability_lineage.yaml"
+    )
+    details = select_target_details(
+        ["nexus/config/model_capability_lineage.yaml"],
+        rules,
+        index_path=tmp_path / "missing_impact_index.json",
+        stats_path=tmp_path / "missing_impact_stats.json",
+        history_path=tmp_path / "missing_test_history.jsonl",
+    )
+
+    assert details.targets == [
+        "tests/services/test_model_capability_lineage.py",
+        "tests/bench/test_model_calibration_plan.py",
+        "tests/nexus/orchestrator/test_unified_mcp_gateway.py",
+    ]
+    assert lineage_rule.risk_reason == "model_capability_lineage_calibration_contract"
+    assert details.risk == "medium"
+    assert details.high_risk_escalated is False
+    assert details.fallback_used is False
+    assert details.unmatched_paths == []
+    assert details.sources == ["impact_map"]
 
 
 def test_select_targets_uses_fallback_when_no_paths_match():

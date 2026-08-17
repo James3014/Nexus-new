@@ -1,5 +1,12 @@
 # Worker-neutral Ready-Issue claim contract
 
+- status: COMPLETED
+- historical baseline: `96bb71e89a0b5112a7b54ab6a3f4ff1ed879f857`
+- reconciled/current main: `3b307d3df5356a4451899a534ea8c10abef155c7` (current main at rebind)
+- terminal marker: `WORKER_NEUTRAL_READY_ISSUE_CLAIM_CONTRACT_PROVEN`
+- claim ceiling: `WORKER_NEUTRAL_READY_ISSUE_CLAIM_CONTRACT_PROVEN_PROJECTION_ONLY`
+- AUTO_CHAIN: false
+
 ## Objective
 
 Replace Codex-specific Ready-Issue ownership prose with a worker-neutral,
@@ -33,6 +40,19 @@ or #143.
 Scoped commit and issue-branch PR only. The resulting contract proves that
 `PROJECTION_ONLY`/`UNKNOWN` cannot authorize autonomous mutation and that a
 future atomic claim must bind the exact Issue/attempt before mutation.
+
+## Completion receipt
+
+PR #225 head `f045bce3984fecfd498a603e3b311b0de284f0d5` merged as
+`82b904a730095494213ad1dc6c54bcb09b798a47`. The exact five-file change had
+zero deletions; required checks completed successfully with Tier3 skipped as
+expected, and an independent post-merge acceptance confirmed the bounded
+worker-neutral vocabulary and fail-closed `MANUAL_DISPATCH` semantics.
+
+This marker does not prove or authorize #129 atomic claim enforcement, a #130
+consumer, #98 Target concurrency, autonomous mutation, route or Workforce
+selection, lifecycle approval, integration, merge, runtime, release, or
+production truth.
 
 ## Block class
 

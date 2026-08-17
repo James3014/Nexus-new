@@ -7,10 +7,10 @@ from scripts.ops.agent_protocol_check import check_protocol, evaluate_completion
 
 ROOT = Path(__file__).resolve().parents[2]
 CURRENT_REQUIRED_TERMS = (
-    "Direct execution authority",
-    "Governed execution authority",
+    "Direct authority",
+    "Governed authority",
     "Completion requires behavioral evidence",
-    "Report evidence in the final response",
+    "report changed files/evidence",
     "docs/agents/TASK_EXECUTION_CONTRACT.md",
     "docs/agents/LEARNING_WRITEBACK_OVERLAY.md",
     "CapabilityPlanner",
