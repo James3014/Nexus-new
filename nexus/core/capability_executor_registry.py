@@ -2305,9 +2305,47 @@ def _exec_harness_preflight_sensor(
     try:
         from nexus.engine.harness_sensors import build_harness_preflight_sensor
 
+        task_type = str(constraints.get("task_type") or "repair")
+        features = route.get("route_features", {})
+        if not isinstance(features, Mapping):
+            raise ValueError("MALFORMED_PREFLIGHT_ROUTE_FEATURES")
+        text = f"{task_desc} {task_type}".lower()
+        risk_score = int(features.get("risk_score") or 0)
+        candidate_count = int(features.get("candidate_count") or 1)
+        simple_hidden = bool(features.get("simple_hidden_bugfix"))
+        governance = bool(
+            features.get("has_governance_signal")
+            or "governance" in text
+            or "policy" in text
+        )
+        bdd_required = bool(
+            route.get("bdd_acceptance")
+            or features.get("bdd_acceptance_required")
+            or "given-when-then" in text
+            or "business acceptance" in text
+        )
+        expected_lane = (
+            "lite"
+            if simple_hidden and risk_score < 30 and candidate_count <= 1
+            else "hardened"
+            if risk_score >= 70 or governance
+            else "standard"
+        )
+        expected_reasons = []
+        if pending:
+            expected_reasons.append("pending_executor_present")
+        if bdd_required and "bdd_acceptance_skill" not in selected:
+            expected_reasons.append("bdd_acceptance_required")
+        if not expected_reasons:
+            expected_reasons.append("preflight_clear")
+        expected_wired = not bool(pending)
+        expected_escalation = bool(pending) or (
+            bdd_required and "bdd_acceptance_skill" not in selected
+        )
+
         sensor = build_harness_preflight_sensor(
             task_desc=task_desc,
-            task_type=str(constraints.get("task_type") or "repair"),
+            task_type=task_type,
             route=dict(route),
             pending_capabilities=tuple(pending),
             selected_capabilities=tuple(selected),
@@ -2317,7 +2355,19 @@ def _exec_harness_preflight_sensor(
         required = ("sensor", "capability_wired", "executor_ready", "escalation_required", "reasons")
         if any(key not in sensor for key in required) or sensor.get("sensor") != "harness_preflight":
             raise ValueError("INCOMPLETE_HARNESS_PREFLIGHT_SENSOR")
-        passed = bool(sensor.get("capability_wired")) and not bool(sensor.get("escalation_required"))
+        if any(not isinstance(sensor.get(key), bool) for key in ("capability_wired", "executor_ready", "escalation_required", "bdd_acceptance_required")):
+            raise ValueError("MALFORMED_HARNESS_PREFLIGHT_SENSOR_TYPES")
+        if sensor.get("pending_capabilities") != list(pending) or sensor.get("selected_capabilities") != list(selected):
+            raise ValueError("INCONSISTENT_HARNESS_PREFLIGHT_CAPABILITIES")
+        if sensor.get("capability_wired") is not expected_wired or sensor.get("executor_ready") is not expected_wired:
+            raise ValueError("INCONSISTENT_HARNESS_PREFLIGHT_READINESS")
+        if sensor.get("bdd_acceptance_required") is not bdd_required:
+            raise ValueError("INCONSISTENT_HARNESS_PREFLIGHT_BDD")
+        if sensor.get("escalation_required") is not expected_escalation:
+            raise ValueError("INCONSISTENT_HARNESS_PREFLIGHT_ESCALATION")
+        if sensor.get("reasons") != expected_reasons or sensor.get("cost_lane") != expected_lane:
+            raise ValueError("INCONSISTENT_HARNESS_PREFLIGHT_PROJECTION")
+        passed = expected_wired and not expected_escalation
         elapsed = int((time.monotonic() - start) * 1000)
         return _make_receipt(
             "harness_preflight_sensor", plan, invoked=True, gate_passed=passed,
