@@ -15,40 +15,38 @@ CLAIM_CEILING = "LOCAL_CHANGESET_CERTIFICATION_V1_CONTRACT_CANDIDATE_ONLY"
 _STATUSES = frozenset({"CERTIFIED", "REJECTED", "BLOCKED"})
 _VERIFIER_STATUSES = frozenset({"PASS", "FAIL"})
 _HASH_LEN = 71
-_REASONS = frozenset(
-    {
-        "identity_missing",
-        "identity_malformed",
-        "evidence_missing",
-        "evidence_malformed",
-        "scope_missing",
-        "scope_malformed",
-        "candidate_missing",
-        "candidate_malformed",
-        "verifier_manifest_missing",
-        "verifier_manifest_malformed",
-        "verifier_missing",
-        "verifier_failed",
-        "verifier_artifact_missing",
-        "verifier_artifact_malformed",
-        "verifier_duplicate",
-        "artifact_duplicate",
-        "hash_mismatch",
-        "manifest_hash_mismatch",
-        "payload_hash_mismatch",
-        "cross_binding_mismatch",
-        "status_invalid",
-        "reason_invalid",
-        "schema_invalid",
-        "unknown_field",
-        "status_substitution",
-        "change_set_missing",
-        "identity_diff_hash_invalid",
-        "evidence_0_invalid",
-        "evidence_duplicate_id",
-        "evidence_not_sequence",
-    }
-)
+_REASONS = frozenset({
+    "identity_missing",
+    "identity_malformed",
+    "evidence_missing",
+    "evidence_malformed",
+    "scope_missing",
+    "scope_malformed",
+    "candidate_missing",
+    "candidate_malformed",
+    "verifier_manifest_missing",
+    "verifier_manifest_malformed",
+    "verifier_missing",
+    "verifier_failed",
+    "verifier_artifact_missing",
+    "verifier_artifact_malformed",
+    "verifier_duplicate",
+    "artifact_duplicate",
+    "hash_mismatch",
+    "manifest_hash_mismatch",
+    "payload_hash_mismatch",
+    "cross_binding_mismatch",
+    "status_invalid",
+    "reason_invalid",
+    "schema_invalid",
+    "unknown_field",
+    "status_substitution",
+    "change_set_missing",
+    "identity_diff_hash_invalid",
+    "evidence_0_invalid",
+    "evidence_duplicate_id",
+    "evidence_not_sequence",
+})
 
 
 class CertificationStatus(str, Enum):
@@ -153,14 +151,12 @@ def build_changeset_certification(
             or not _hash(item.get("content_hash"))
         ):
             return _minimal_invalid("verifier_artifact_malformed")
-        verifiers.append(
-            {
-                "verifier_id": item["kind"],
-                "artifact_id": f"{item['kind']}:attempt-1",
-                "artifact_hash": item["content_hash"],
-                "status": "PASS",
-            }
-        )
+        verifiers.append({
+            "verifier_id": item["kind"],
+            "artifact_id": f"{item['kind']}:attempt-1",
+            "artifact_hash": item["content_hash"],
+            "status": "PASS",
+        })
     source = str(change_set["source_revision"])
     target = str(change_set["target_revision"])
     return _new_envelope(

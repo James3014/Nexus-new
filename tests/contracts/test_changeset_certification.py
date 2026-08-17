@@ -110,13 +110,11 @@ def test_hostile_identity_or_evidence_substitution_rejects(payload_factory, reas
 
 
 def test_explicit_status_cannot_override_derived_certification() -> None:
-    result = certify_changeset(
-        {
-            "change_set": _identity(),
-            "evidence": [_evidence()],
-            "status": "BLOCKED",
-        }
-    )
+    result = certify_changeset({
+        "change_set": _identity(),
+        "evidence": [_evidence()],
+        "status": "BLOCKED",
+    })
 
     assert result.status is CertificationStatus.REJECTED
     assert result.reason_codes == ("status_substitution",)
@@ -131,13 +129,11 @@ def test_missing_change_set_is_blocked() -> None:
 
 def test_canonical_hash_binding_rejects_tamper() -> None:
     result = certify_changeset({"change_set": _identity(), "evidence": [_evidence()]})
-    tampered = certify_changeset(
-        {
-            "change_set": _identity(),
-            "evidence": [_evidence()],
-            "canonical_hash": result.canonical_hash().replace("a", "c", 1),
-        }
-    )
+    tampered = certify_changeset({
+        "change_set": _identity(),
+        "evidence": [_evidence()],
+        "canonical_hash": result.canonical_hash().replace("a", "c", 1),
+    })
 
     assert tampered.status is CertificationStatus.REJECTED
     assert tampered.reason_codes == ("canonical_hash_mismatch",)
@@ -295,14 +291,12 @@ def test_duplicate_artifact_id_rejects_even_with_unique_verifier_ids() -> None:
     payload = _envelope()
     manifest = payload["verifier_manifest"]
     assert isinstance(manifest, dict)
-    manifest["verifiers"].append(
-        {
-            "verifier_id": "bandit",
-            "artifact_id": "pytest:attempt-1",
-            "artifact_hash": "sha256:" + "e" * 64,
-            "status": "PASS",
-        }
-    )
+    manifest["verifiers"].append({
+        "verifier_id": "bandit",
+        "artifact_id": "pytest:attempt-1",
+        "artifact_hash": "sha256:" + "e" * 64,
+        "status": "PASS",
+    })
     _rehash(payload)
     result = certify_changeset(payload)
     assert result.status is CertificationStatus.REJECTED
