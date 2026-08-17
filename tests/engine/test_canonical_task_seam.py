@@ -10,6 +10,29 @@ def _write_runtime_receipt(receipt_path, receipt):
     path.write_text(json.dumps(receipt), encoding="utf-8")
 
 
+@pytest.mark.parametrize(
+    ("task_text", "expected"),
+    (
+        ("repair add_one so the verifier passes", "bug"),
+        ("fix address parsing in the repair target", "bug"),
+        ("repair additional validation", "bug"),
+        ("fix rebuild_index regression", "bug"),
+        ("repair create_cache regression", "bug"),
+        ("repair éadd parser", "bug"),
+        ("repair addé parser", "bug"),
+        ("修理add錯誤", "bug"),
+        ("add a dashboard feature", "feature"),
+        ("Create a dashboard", "feature"),
+        ("Implement the export feature", "feature"),
+        ("build a new report", "feature"),
+    ),
+)
+def test_infer_task_kind_uses_identifier_safe_feature_intent(task_text, expected):
+    from nexus.engine.canonical_task_seam import infer_task_kind
+
+    assert infer_task_kind(task_text) == expected
+
+
 def test_build_command_service_constructs_engine_once(monkeypatch, tmp_path):
     from nexus.engine.canonical_task_seam import build_command_service
 

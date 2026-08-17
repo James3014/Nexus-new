@@ -4688,6 +4688,13 @@ class UnifiedRuntime:
                     shared_snapshot[key] = value
             shared_snapshot["executor_provider"] = str(local_authority["resolved_provider"])
             shared_snapshot["executor_model"] = str(local_authority["resolved_model"])
+            # Workforce admission is the sole authority for the physical Local
+            # model edge.  Keep delegated retry candidate discovery bounded to
+            # that exact admitted identity; a Planner/default/request list must
+            # never widen the authority-bound provider guard's input set.
+            shared_snapshot["delegated_retry_candidate_models"] = [
+                str(local_authority["resolved_model"])
+            ]
             shared_snapshot["route_truth_source"] = "CapabilityPlanner"
             shared_snapshot["local_model_invocation_authority"] = dict(local_authority)
         else:
