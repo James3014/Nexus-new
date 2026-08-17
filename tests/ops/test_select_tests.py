@@ -74,14 +74,17 @@ def test_repository_secret_hygiene_paths_map_without_fallback():
     assert details.targets == [
         "tests/ops/test_repository_secret_hygiene.py",
         "tests/ops/test_select_tests.py",
+        "tests/services/test_policy_gate.py",
     ]
     assert details.unmatched_paths == []
     assert details.fallback_used is False
-    assert details.risk == "medium"
-    assert details.risk_reasons == []
+    assert details.risk == "high"
+    assert details.high_risk_escalated is True
+    assert details.risk_reasons == ["repository_secret_hygiene_contract"]
     assert details.reasons == [
         ".gitignore: matched .gitignore",
         "tests/ops/test_repository_secret_hygiene.py: matched tests/ops/test_repository_secret_hygiene.py",
+        "high-risk escalation",
     ]
 
 
