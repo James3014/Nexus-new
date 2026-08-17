@@ -13,7 +13,6 @@ from nexus.contracts.semantic_authority_delta import (
     classify_semantic_authority_delta,
 )
 
-
 AUTHORITY_DIMENSIONS = (
     "autonomy",
     "roles_capabilities",
@@ -199,7 +198,10 @@ def test_hostile_outer_mapping_is_governed(mapping: Mapping[str, object]):
 
 @pytest.mark.parametrize("unchanged", (ExplodingNestedMapping(),))
 def test_hostile_nested_mapping_is_governed(unchanged: Mapping[str, bool]):
-    assert classify_semantic_authority_delta(valid_delta(authority_unchanged=unchanged)) == GOVERNED_REQUIRED
+    assert (
+        classify_semantic_authority_delta(valid_delta(authority_unchanged=unchanged))
+        == GOVERNED_REQUIRED
+    )
 
 
 @pytest.mark.parametrize(
@@ -210,13 +212,19 @@ def test_hostile_nested_mapping_is_governed(unchanged: Mapping[str, bool]):
     ),
 )
 def test_untrusted_nested_views_are_not_consulted(unchanged: Mapping[str, bool]):
-    assert classify_semantic_authority_delta(valid_delta(authority_unchanged=unchanged)) == DIRECT_CANONICAL
+    assert (
+        classify_semantic_authority_delta(valid_delta(authority_unchanged=unchanged))
+        == DIRECT_CANONICAL
+    )
 
 
 def test_inconsistent_nested_mapping_snapshot_is_governed():
-    assert classify_semantic_authority_delta(
-        valid_delta(authority_unchanged=InconsistentNestedMapping())
-    ) == GOVERNED_REQUIRED
+    assert (
+        classify_semantic_authority_delta(
+            valid_delta(authority_unchanged=InconsistentNestedMapping())
+        )
+        == GOVERNED_REQUIRED
+    )
 
 
 @pytest.mark.parametrize(
@@ -252,7 +260,8 @@ def test_changed_files_requires_exact_builtin_tuple_and_paths(changed_files: tup
 def test_any_unsafe_top_level_assertion_is_governed(field: str):
     value = (
         False
-        if field in {
+        if field
+        in {
             "owner_authorized",
             "bounded_scope_declared",
             "focused_verifier_declared",
@@ -269,9 +278,10 @@ def test_any_unsafe_top_level_assertion_is_governed(field: str):
 def test_every_authority_dimension_must_be_explicitly_unchanged(dimension: str):
     unchanged = dict(valid_delta().authority_unchanged)
     unchanged[dimension] = False
-    assert classify_semantic_authority_delta(
-        valid_delta(authority_unchanged=unchanged)
-    ) == GOVERNED_REQUIRED
+    assert (
+        classify_semantic_authority_delta(valid_delta(authority_unchanged=unchanged))
+        == GOVERNED_REQUIRED
+    )
 
 
 @pytest.mark.parametrize(
@@ -285,9 +295,12 @@ def test_missing_bound_identity_is_governed(field: str):
 def test_contradictory_evidence_only_and_authority_change_is_governed():
     unchanged = dict(valid_delta().authority_unchanged)
     unchanged["default_route"] = False
-    assert classify_semantic_authority_delta(
-        valid_delta(write_kind="evidence_provenance_writeback", authority_unchanged=unchanged)
-    ) == GOVERNED_REQUIRED
+    assert (
+        classify_semantic_authority_delta(
+            valid_delta(write_kind="evidence_provenance_writeback", authority_unchanged=unchanged)
+        )
+        == GOVERNED_REQUIRED
+    )
 
 
 @pytest.mark.parametrize(
@@ -304,16 +317,23 @@ def test_missing_unknown_or_malformed_mapping_is_governed(payload: dict[str, obj
 
 
 def test_filename_or_tiny_diff_never_decides_result():
-    assert classify_semantic_authority_delta(
-        valid_delta(changed_files=("AGENTS.md",), diff_lines=1)
-    ) == DIRECT_CANONICAL
-    assert classify_semantic_authority_delta(
-        valid_delta(changed_files=("protected.py",), diff_lines=1, owner_authorized=False)
-    ) == GOVERNED_REQUIRED
+    assert (
+        classify_semantic_authority_delta(valid_delta(changed_files=("AGENTS.md",), diff_lines=1))
+        == DIRECT_CANONICAL
+    )
+    assert (
+        classify_semantic_authority_delta(
+            valid_delta(changed_files=("protected.py",), diff_lines=1, owner_authorized=False)
+        )
+        == GOVERNED_REQUIRED
+    )
 
 
 def test_malformed_descriptive_metadata_is_governed():
-    assert classify_semantic_authority_delta(valid_delta(changed_files=["README.md"])) == GOVERNED_REQUIRED
+    assert (
+        classify_semantic_authority_delta(valid_delta(changed_files=["README.md"]))
+        == GOVERNED_REQUIRED
+    )
     assert classify_semantic_authority_delta(valid_delta(diff_lines=-1)) == GOVERNED_REQUIRED
 
 

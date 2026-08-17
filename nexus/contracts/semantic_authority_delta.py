@@ -9,8 +9,7 @@ DIRECT_CANONICAL: Final = "DIRECT_CANONICAL"
 GOVERNED_REQUIRED: Final = "GOVERNED_REQUIRED"
 ClassifierResult = Literal["DIRECT_CANONICAL", "GOVERNED_REQUIRED"]
 
-_DIMENSIONS: Final = frozenset(
-    {
+_DIMENSIONS: Final = frozenset({
     "autonomy",
     "roles_capabilities",
     "workforce_admission",
@@ -129,9 +128,7 @@ def classify_semantic_authority_delta(
         return GOVERNED_REQUIRED
     if not _changed_files_valid(item.changed_files):
         return GOVERNED_REQUIRED
-    if item.diff_lines is not None and (
-        type(item.diff_lines) is not int or item.diff_lines < 0
-    ):
+    if item.diff_lines is not None and (type(item.diff_lines) is not int or item.diff_lines < 0):
         return GOVERNED_REQUIRED
     if not _authority_dimensions_unchanged(item.authority_unchanged):
         return GOVERNED_REQUIRED
