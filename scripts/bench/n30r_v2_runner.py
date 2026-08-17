@@ -148,15 +148,13 @@ def _ollama_provider_with_metrics(
     import urllib.request as _urllib
 
     opts = _make_provider_options(seed)
-    payload = _json.dumps(
-        {
-            "model": model,
-            "system": system,
-            "prompt": user,
-            "stream": False,
-            "options": opts,
-        }
-    )
+    payload = _json.dumps({
+        "model": model,
+        "system": system,
+        "prompt": user,
+        "stream": False,
+        "options": opts,
+    })
     req = _urllib.Request(
         "http://localhost:11434/api/generate",
         data=payload.encode("utf-8"),
