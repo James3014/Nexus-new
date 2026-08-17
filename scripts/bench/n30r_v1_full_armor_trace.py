@@ -53,24 +53,57 @@ def _sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def _invoke_planner(task_desc: str) -> dict:
-    from nexus.engine.capability_planner import CapabilityPlanner
-    planner = CapabilityPlanner()
+def _invoke_planner(*, task_id: str, task_desc: str, source_hash: str) -> dict:
+    from nexus.contracts.canonical_execution import CanonicalTaskContext
+    from nexus.engine.canonical_execution import plan_canonical_task_bundle
+    from nexus.services.capability_evidence_bundle import (
+        build_capability_evidence_bundle,
+    )
+    from nexus.services.unified_runtime import canonical_execution_identity
+
     os.environ["NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR"] = "1"
     os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY"] = "localheal_pipeline"
     os.environ["NEXUS_LOCAL_MODEL_CALL_ALLOWED"] = "1"
     os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER"] = "ollama"
     os.environ["NEXUS_LOCAL_MODEL_EXECUTOR_MODEL"] = "qwen2.5-coder:7b-instruct"
     try:
-        plan = planner.plan(
-            task_desc=task_desc,
-            task_type="swe_bounded_repair",
-            route={"task_id": "v1_slice", "task_desc": task_desc, "task_type": "swe_bounded_repair",
-                   "difficulty": "medium", "route_features": {}},
-            pillars={}, codeintel={}, phase_trace={},
-            budget={"max_cost": 20}, skills=[],
+        canonical_bundle = plan_canonical_task_bundle(
+            CanonicalTaskContext(
+                task_id=task_id,
+                task_desc=task_desc,
+                task_type="swe_bounded_repair",
+                execution_world="local_armor",
+                execution_channels=("local",),
+                task_facts={"mutation_requested": True},
+                authority_inputs={"isolation_required": True},
+                route_features={
+                    "difficulty": "medium",
+                    "deterministic_verifier_available": True,
+                },
+                budget={"max_cost": 20},
+            )
         )
-        return plan.signal_snapshot
+        plan = canonical_bundle.plan
+        signal_snapshot = dict(plan.signal_snapshot)
+        planner_decision_id = canonical_bundle.decision.decision_hash
+        signal_snapshot["planner_decision_id"] = planner_decision_id
+        signal_snapshot["canonical_execution"] = canonical_execution_identity(
+            canonical_bundle
+        )
+        signal_snapshot["capability_evidence_bundle"] = (
+            build_capability_evidence_bundle(
+                task_id=task_id,
+                workspace_revision=source_hash,
+                task_statement=task_desc,
+                plan_payload=plan.to_dict(),
+                plan_hash=canonical_bundle.plan_hash,
+                planner_decision_id=planner_decision_id,
+                capability_results={},
+                selected_capabilities=list(plan.selected_capabilities),
+                source_hash=source_hash,
+            )
+        )
+        return signal_snapshot
     finally:
         for key in ("NEXUS_ENABLE_LOCAL_MODEL_EXECUTOR", "NEXUS_LOCAL_MODEL_EXECUTOR_TOPOLOGY",
                      "NEXUS_LOCAL_MODEL_CALL_ALLOWED", "NEXUS_LOCAL_MODEL_EXECUTOR_PROVIDER",
@@ -268,7 +301,11 @@ def run_v1_trace(custom_source_content: str | None = None) -> dict:
     source_sha256 = _sha256_text(source_content)
     source_length = len(source_content)
 
-    workspace = tempfile.mkdtemp(prefix=f"n30r-v1-{task.task_id}-")
+    # World C requires synthetic source/workspaces to remain inside the
+    # repository-owned root; an OS-temp root is intentionally rejected.
+    workspace = tempfile.mkdtemp(
+        prefix=f".n30r-v1-{task.task_id}-", dir=_REPO_ROOT
+    )
     target_relpath = "f.py"
     with open(os.path.join(workspace, target_relpath), "w") as f:
         f.write(source_content)
@@ -278,7 +315,11 @@ def run_v1_trace(custom_source_content: str | None = None) -> dict:
     # Record canonical source before any mutation
     canonical_source_sha256 = _sha256_text(source_content)
 
-    signal_snapshot = _invoke_planner(task.task_statement)
+    signal_snapshot = _invoke_planner(
+        task_id=task.task_id,
+        task_desc=task.task_statement,
+        source_hash=source_sha256,
+    )
     planner_snapshot_sha256 = _sha256_json(signal_snapshot)
     planner_caps = list(signal_snapshot.get("ssd_route_map", {}).get("capability_reasons", {}).keys())
 

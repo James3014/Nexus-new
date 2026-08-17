@@ -368,8 +368,14 @@ class TestV1TracePipelineStages:
         assert "local_model_executor" in receipt["planner_capabilities"]
 
     def test_executor_capabilities_present(self, receipt):
-        assert len(receipt["executor_capabilities"]) == 5
-        assert "repair_loop" in receipt["executor_capabilities"]
+        assert set(receipt["executor_capabilities"]) == {
+            "artifact_gate",
+            "claim_gate",
+            "delivery_gate",
+            "local_model_executor",
+            "mempalace_gate",
+            "repair_loop",
+        }
 
     def test_planner_to_projection_accounted(self, receipt):
         assert receipt["planner_to_projection_accounted"] is True
@@ -602,6 +608,10 @@ class TestV1TraceFailClosedGuards:
 
     def test_shadow_outcome_exists(self, receipt):
         assert os.path.exists(receipt["shadow_outcome_path"])
+
+    def test_trace_workspace_is_repository_contained(self, receipt):
+        workspace = Path(receipt["workspace_reset"]["workspace_first_candidate"])
+        assert _REPO_ROOT.resolve() in workspace.resolve().parents
 
     def test_shadow_outcome_structure(self, receipt):
         with open(receipt["shadow_outcome_path"]) as f:
