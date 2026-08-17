@@ -4,12 +4,13 @@ import subprocess
 from pathlib import Path
 
 PRIVATE_KEY_SUFFIXES = (".key",)
-PEM_PRIVATE_KEY_HEADERS = (
-    "-----BEGIN PRIVATE KEY-----",
-    "-----BEGIN RSA PRIVATE KEY-----",
-    "-----BEGIN EC PRIVATE KEY-----",
-    "-----BEGIN OPENSSH PRIVATE KEY-----",
+_PEM_PRIVATE_KEY_LABELS = (
+    "PRIVATE KEY",
+    "RSA PRIVATE KEY",
+    "EC PRIVATE KEY",
+    "OPENSSH PRIVATE KEY",
 )
+PEM_PRIVATE_KEY_HEADERS = tuple(f"-----BEGIN {label}-----" for label in _PEM_PRIVATE_KEY_LABELS)
 
 
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess[str]:
