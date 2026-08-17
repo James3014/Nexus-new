@@ -3,6 +3,7 @@
 Bare lane: direct Ollama call → parse SEARCH/REPLACE → apply → verifier
 Core lane: production LocalModelExecutor with OllamaLocalModelProvider
 """
+
 from __future__ import annotations
 
 import json
@@ -68,11 +69,14 @@ def _check_environment() -> dict:
     if not venv_match:
         logger.error(
             "Python interpreter mismatch: expected %s (resolved %s), got %s",
-            expected_venv_python, expected_resolved, actual_python,
+            expected_venv_python,
+            expected_resolved,
+            actual_python,
         )
         return receipt
 
     import warnings
+
     warning_count = 0
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
@@ -80,13 +84,17 @@ def _check_environment() -> dict:
             import importlib.metadata as _im
 
             import lancedb as _l
+
             receipt["lancedb_available"] = True
             receipt["lancedb_version"] = _l.__version__
             import requests as _r
+
             receipt["requests_version"] = _r.__version__
             import urllib3 as _u
+
             receipt["urllib3_version"] = _u.__version__
             import charset_normalizer as _cn
+
             receipt["charset_normalizer_version"] = _cn.__version__
 
             for warning in w:
@@ -132,18 +140,23 @@ def _make_provider_options(seed: int) -> dict:
     return opts
 
 
-def _ollama_provider_with_metrics(model: str, system: str, user: str, seed: int) -> tuple[str, dict]:
+def _ollama_provider_with_metrics(
+    model: str, system: str, user: str, seed: int
+) -> tuple[str, dict]:
     """Direct Ollama provider for bare arm — returns (response_text, ollama_metrics_dict)."""
     import json as _json
     import urllib.request as _urllib
+
     opts = _make_provider_options(seed)
-    payload = _json.dumps({
-        "model": model,
-        "system": system,
-        "prompt": user,
-        "stream": False,
-        "options": opts,
-    })
+    payload = _json.dumps(
+        {
+            "model": model,
+            "system": system,
+            "prompt": user,
+            "stream": False,
+            "options": opts,
+        }
+    )
     req = _urllib.Request(
         "http://localhost:11434/api/generate",
         data=payload.encode("utf-8"),
@@ -176,6 +189,7 @@ def _ollama_provider(model: str, system: str, user: str) -> str:
 def _materialize_task(task_dict: dict) -> Any:
     """Convert a validated manifest row into the complete canonical task spec."""
     from scripts.bench.n30r_contracts import N30RTaskSpec
+
     task_id = task_dict.get("task_id", "")
     verifier = tuple(task_dict.get("verifier_command", []))
     source_hash = task_dict.get("source_fixture_sha256", "")
@@ -216,7 +230,7 @@ def _read_fixture_original(relpath: str, *, materialized_root: Path | None = Non
     return mod.get("ORIGINAL", source)
 
 
-def _materialize_task_source(task_dict: dict, workspace_root: Path) -> str:
+def _materialize_task_source(task_dict: dict, workspace_root: Path) -> tuple[str, str]:
     """Materialize and hash-check one manifest fixture before provider setup."""
     relpath = task_dict.get("source_relpath")
     task_id = task_dict.get("task_id")
@@ -230,21 +244,36 @@ def _materialize_task_source(task_dict: dict, workspace_root: Path) -> str:
     if not isinstance(task_id, str) or not task_id:
         raise ExternalFixturePolicyError("N30R task task_id is required")
     if not isinstance(expected_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
-        raise ExternalFixturePolicyError("N30R task source_fixture_sha256 must be a SHA-256 hex digest")
+        raise ExternalFixturePolicyError(
+            "N30R task source_fixture_sha256 must be a SHA-256 hex digest"
+        )
     if not isinstance(verifier, list) or not verifier:
         raise ExternalFixturePolicyError("N30R task verifier_command is required")
     if not isinstance(verifier_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", verifier_hash):
-        raise ExternalFixturePolicyError("N30R task verifier_contract_sha256 must be a SHA-256 hex digest")
+        raise ExternalFixturePolicyError(
+            "N30R task verifier_contract_sha256 must be a SHA-256 hex digest"
+        )
     if sha256_str(json.dumps(verifier)) != verifier_hash:
         raise ExternalFixturePolicyError(f"N30R task verifier contract hash mismatch: {task_id}")
     if not isinstance(statement, str) or not statement:
         raise ExternalFixturePolicyError("N30R task task_statement is required")
     if not isinstance(statement_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", statement_hash):
-        raise ExternalFixturePolicyError("N30R task task_statement_sha256 must be a SHA-256 hex digest")
+        raise ExternalFixturePolicyError(
+            "N30R task task_statement_sha256 must be a SHA-256 hex digest"
+        )
     if sha256_str(statement) != statement_hash:
         raise ExternalFixturePolicyError(f"N30R task statement hash mismatch: {task_id}")
 
     repo_root = Path(__file__).resolve().parents[2]
+    supplied_repo = task_dict.get("repo", str(repo_root))
+    supplied_ref = task_dict.get("repo_ref", "working-tree")
+    if supplied_repo != str(repo_root) or supplied_ref != "working-tree":
+        raise ExternalFixturePolicyError("N30R fixture repository/ref is not allowed")
+    source_path = repo_root / relpath
+    if any(path.is_symlink() for path in (source_path, *source_path.parents)):
+        raise ExternalFixturePolicyError("N30R source fixture symlink is not allowed")
+    if source_path.resolve() != source_path.absolute():
+        raise ExternalFixturePolicyError("N30R source fixture symlink is not allowed")
     adapter = SandboxedLocalExternalFixtureAdapter(
         workspace_root=workspace_root,
         allowed_source_roots=[repo_root],
@@ -262,41 +291,61 @@ def _materialize_task_source(task_dict: dict, workspace_root: Path) -> str:
     materialized = Path(result.target_file).read_text(encoding="utf-8")
     actual_hash = sha256_str(materialized)
     if actual_hash != expected_hash:
-        raise ExternalFixturePolicyError(
-            f"N30R task source fixture hash mismatch: {task_id}"
-        )
+        raise ExternalFixturePolicyError(f"N30R task source fixture hash mismatch: {task_id}")
     module: dict = {}
     exec(materialized, module)
-    return module.get("ORIGINAL", materialized)
+    return materialized, module.get("ORIGINAL", materialized)
 
 
 def _prepare_tasks(manifest: dict[str, Any], workspace_root: Path) -> list[dict]:
     """Validate and materialize every task before any provider is constructed."""
+    tasks = manifest.get("tasks", [])
+    task_ids = [task.get("task_id") for task in tasks if isinstance(task, dict)]
+    if len(task_ids) != len(set(task_ids)):
+        raise ExternalFixturePolicyError("N30R manifest contains duplicate task_id")
     prepared = []
-    for task in manifest.get("tasks", []):
+    for task in tasks:
         task_copy = dict(task)
-        task_copy["_materialized_source"] = _materialize_task_source(task_copy, workspace_root)
+        fixture, source = _materialize_task_source(task_copy, workspace_root)
+        task_copy["_materialized_fixture"] = fixture
+        task_copy["_materialized_source"] = source
         task_copy["_task_spec"] = _materialize_task(task_copy)
         prepared.append(task_copy)
     return prepared
 
 
 def _require_task_source(task_dict: dict) -> str:
+    fixture = task_dict.get("_materialized_fixture")
+    expected_hash = task_dict.get("source_fixture_sha256")
+    if fixture is not None:
+        if sha256_str(fixture) != expected_hash:
+            raise ExternalFixturePolicyError("N30R materialized fixture hash mismatch")
+        module: dict = {}
+        exec(fixture, module)
+        return module.get("ORIGINAL", fixture)
     source = task_dict.get("_materialized_source")
     if source is not None:
+        if sha256_str(source) != expected_hash:
+            raise ExternalFixturePolicyError("N30R direct-row fixture hash mismatch")
         return source
     with tempfile.TemporaryDirectory(prefix="n30r-v2-row-materialization-") as root:
-        return _materialize_task_source(task_dict, Path(root))
+        _, source = _materialize_task_source(task_dict, Path(root))
+        return source
 
 
-def _run_verifier(source: str, verifier_cmd: tuple[str, ...], work_dir: str) -> tuple[int, str, str]:
+def _run_verifier(
+    source: str, verifier_cmd: tuple[str, ...], work_dir: str
+) -> tuple[int, str, str]:
     src_path = os.path.join(work_dir, "f.py")
     with open(src_path, "w") as f:
         f.write(source)
     actual_cmd = _patch_verifier_command(verifier_cmd)
     result = subprocess.run(
-        actual_cmd, capture_output=True, text=True,
-        cwd=work_dir, timeout=30,
+        actual_cmd,
+        capture_output=True,
+        text=True,
+        cwd=work_dir,
+        timeout=30,
     )
     return result.returncode, result.stdout, result.stderr
 
@@ -328,16 +377,16 @@ def _parse_search_replace(output: str) -> tuple[list[dict], str]:
         replace_start = remaining.find("REPLACE:", search_start)
         if replace_start == -1:
             break
-        search_text = _strip_fences(remaining[search_start + 7:replace_start])
+        search_text = _strip_fences(remaining[search_start + 7 : replace_start])
         block_end = remaining.find("```", replace_start + 8)
         if block_end == -1:
-            bare_replace = remaining[replace_start + 8:].strip()
+            bare_replace = remaining[replace_start + 8 :].strip()
             replace_text = _strip_fences(bare_replace)
             remaining = ""
         else:
-            replace_text = _strip_fences(remaining[replace_start + 8:block_end])
+            replace_text = _strip_fences(remaining[replace_start + 8 : block_end])
             next_start = remaining.find("```", block_end + 3)
-            remaining = remaining[next_start + 3:] if next_start != -1 else ""
+            remaining = remaining[next_start + 3 :] if next_start != -1 else ""
         blocks.append({"search": search_text, "replace": replace_text})
     parser_status = "success" if blocks else "no_blocks"
     return blocks, parser_status
@@ -395,10 +444,14 @@ def run_bare_row(task_dict: dict, seed: int, run_id: str) -> dict:
     # === Provider call ===
     t_provider_start = time.monotonic()
     ollama_metrics: dict = {
-        "ollama_total_duration": 0, "ollama_load_duration": 0,
-        "ollama_prompt_eval_count": 0, "ollama_prompt_eval_duration": 0,
-        "ollama_eval_count": 0, "ollama_eval_duration": 0,
-        "ollama_done_reason": "", "ollama_metrics_available": False,
+        "ollama_total_duration": 0,
+        "ollama_load_duration": 0,
+        "ollama_prompt_eval_count": 0,
+        "ollama_prompt_eval_duration": 0,
+        "ollama_eval_count": 0,
+        "ollama_eval_duration": 0,
+        "ollama_done_reason": "",
+        "ollama_metrics_available": False,
     }
     try:
         raw_output, ollama_metrics = _ollama_provider_with_metrics(
@@ -543,7 +596,9 @@ def run_bare_row(task_dict: dict, seed: int, run_id: str) -> dict:
 
     t_e2e_end = time.monotonic()
     end_to_end_sec = round(t_e2e_end - t_e2e_start, 4)
-    result_finalize_sec = round(t_e2e_end - (t_provider_end + parse_sec + apply_sec + verifier_sec), 4)
+    result_finalize_sec = round(
+        t_e2e_end - (t_provider_end + parse_sec + apply_sec + verifier_sec), 4
+    )
 
     return {
         "task_id": task_dict["task_id"],
@@ -626,6 +681,7 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
     # Planner
     t_planner_start = time.monotonic()
     from nexus.engine.capability_planner import CapabilityPlanner
+
     planner = CapabilityPlanner()
 
     # Back up environment variables
@@ -653,11 +709,18 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
         plan = planner.plan(
             task_desc=task_statement,
             task_type="swe_bounded_repair",
-            route={"task_id": task_id, "task_desc": task_statement,
-                   "task_type": "swe_bounded_repair",
-                   "difficulty": task_dict.get("difficulty", "medium"), "route_features": {}},
-            pillars={}, codeintel={}, phase_trace={},
-            budget={"max_cost": 20}, skills=[],
+            route={
+                "task_id": task_id,
+                "task_desc": task_statement,
+                "task_type": "swe_bounded_repair",
+                "difficulty": task_dict.get("difficulty", "medium"),
+                "route_features": {},
+            },
+            pillars={},
+            codeintel={},
+            phase_trace={},
+            budget={"max_cost": 20},
+            skills=[],
         )
         signal_snapshot = plan.signal_snapshot
         signal_snapshot["provider_timeout_sec"] = _SHARED_PROVIDER_TIMEOUT
@@ -681,13 +744,15 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
     source_anchor_hash = ""
     try:
         anchor = build_local_model_source_anchor(
-            source_root=workspace, target_file=target_relpath,
-            target_symbol=target_symbol, locked_search="",
+            source_root=workspace,
+            target_file=target_relpath,
+            target_symbol=target_symbol,
+            locked_search="",
         )
         source_anchor_hash = anchor.span_hash
         if anchor.span_start and anchor.span_end:
             lines = orig.splitlines()
-            locked_search = "\n".join(lines[anchor.span_start - 1:anchor.span_end])
+            locked_search = "\n".join(lines[anchor.span_start - 1 : anchor.span_end])
     except Exception:
         pass
     anchor_localization_sec = round(time.monotonic() - t_localization_start, 4)
@@ -722,9 +787,7 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
 
     try:
         t_executor_start = time.monotonic()
-        executor_response = LocalModelExecutor.run(
-            executor_request, provider=provider
-        )
+        executor_response = LocalModelExecutor.run(executor_request, provider=provider)
         t_executor_end = time.monotonic()
         executor_sec = round(t_executor_end - t_executor_start, 4)
 
@@ -770,7 +833,11 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
         prompt_total_chars = meta.get("prompt_total_chars", 0)
         response_chars = len(raw_output)
 
-        non_provider_sec = round(end_to_end_sec - provider_wall_sec, 4) if provider_wall_sec > 0 else end_to_end_sec
+        non_provider_sec = (
+            round(end_to_end_sec - provider_wall_sec, 4)
+            if provider_wall_sec > 0
+            else end_to_end_sec
+        )
 
         verifier_reached = bool(verifier_result)
         if verifier_result == "pass":
@@ -789,9 +856,11 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
             terminal = "INFRA_INVALID"
             solved = False
 
-        armor_oracle_status = "FULL_ARMOR_PATH_ACCEPTED" if (
-            raw_output and candidate_hash
-        ) else "DETERMINISTIC_PATH_ACCEPTED_LIVE_PENDING"
+        armor_oracle_status = (
+            "FULL_ARMOR_PATH_ACCEPTED"
+            if (raw_output and candidate_hash)
+            else "DETERMINISTIC_PATH_ACCEPTED_LIVE_PENDING"
+        )
 
         profile_selected = meta.get("initial_execution_profile", "unknown")
         profile_final = meta.get("final_execution_profile", "unknown")
@@ -823,7 +892,9 @@ def run_core_row(task_dict: dict, seed: int, run_id: str) -> dict:
             "verifier_contract_sha256": task_dict.get("verifier_contract_sha256", ""),
             "execution_completed": True,
             "contract_valid": True,
-            "model_call_count": max(1 + semantic_retry_count, llm_call_total) if llm_call_total else 1 + semantic_retry_count,
+            "model_call_count": max(1 + semantic_retry_count, llm_call_total)
+            if llm_call_total
+            else 1 + semantic_retry_count,
             "model_response_received": bool(raw_output),
             "raw_output_length": len(raw_output),
             "raw_output_sha256": sha256_str(raw_output) if raw_output else "",
@@ -944,8 +1015,10 @@ def run_evaluation(
                 row["env_receipt"] = env_receipt
                 row["env_receipt_sha256"] = env_receipt_sha256
                 rows.append(row)
-                print(f"  terminal={row['terminal_status']} solved={row['solved']} "
-                      f"candidate={row['candidate_hash'][:12] if row['candidate_hash'] else 'none'}")
+                print(
+                    f"  terminal={row['terminal_status']} solved={row['solved']} "
+                    f"candidate={row['candidate_hash'][:12] if row['candidate_hash'] else 'none'}"
+                )
                 sys.stdout.flush()
 
     # Write JSONL
@@ -962,6 +1035,7 @@ def run_evaluation(
         compute_metrics,
         validate_results,
     )
+
     task_map = {t["task_id"]: t for t in tasks}
 
     # Write temp JSONL for validation

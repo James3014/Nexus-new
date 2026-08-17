@@ -25,9 +25,10 @@ def test_prepare_tasks_uses_one_hash_complete_materialized_source(tmp_path: Path
     assert len(prepared) == 4
     for original, task in zip(manifest["tasks"], prepared):
         assert task["_materialized_source"]
-        assert hashlib.sha256(
-            (ROOT / original["source_relpath"]).read_bytes()
-        ).hexdigest() == original["source_fixture_sha256"]
+        assert (
+            hashlib.sha256((ROOT / original["source_relpath"]).read_bytes()).hexdigest()
+            == original["source_fixture_sha256"]
+        )
         case_dir = tmp_path / ".nexus" / "bench_cases" / original["task_id"]
         assert case_dir.is_dir()
         assert task["_materialized_source"] == runner._read_fixture_original(
@@ -40,6 +41,43 @@ def test_prepare_tasks_uses_one_hash_complete_materialized_source(tmp_path: Path
         assert spec.task_bundle_sha256
 
 
+def test_prepare_tasks_rejects_duplicate_ids_before_materialization(tmp_path: Path):
+    manifest = _manifest()
+    manifest["tasks"] = [manifest["tasks"][0], copy.deepcopy(manifest["tasks"][0])]
+    with pytest.raises(ExternalFixturePolicyError, match="duplicate task_id"):
+        runner._prepare_tasks(manifest, tmp_path)
+
+
+@pytest.mark.parametrize(
+    "field,value", [("repo", "https://attacker.invalid/repo"), ("repo_ref", "HEAD")]
+)
+def test_prepare_tasks_rejects_hostile_repo_binding(tmp_path: Path, field: str, value: str):
+    task = copy.deepcopy(_manifest()["tasks"][0])
+    task[field] = value
+    with pytest.raises(ExternalFixturePolicyError, match="repository/ref"):
+        runner._prepare_tasks({"tasks": [task]}, tmp_path)
+
+
+def test_prepare_tasks_rejects_symlink_fixture(tmp_path: Path, monkeypatch):
+    fake_root = tmp_path / "repo"
+    fixture = fake_root / "tests/fixtures/n30r/smoke/syntax_task.py"
+    fixture.parent.mkdir(parents=True)
+    outside = tmp_path / "outside.py"
+    outside.write_text("ORIGINAL = 'bad'\n", encoding="utf-8")
+    fixture.symlink_to(outside)
+    monkeypatch.setattr(runner, "__file__", str(fake_root / "scripts/bench/n30r_v2_runner.py"))
+    task = copy.deepcopy(_manifest()["tasks"][0])
+    with pytest.raises(ExternalFixturePolicyError, match="symlink"):
+        runner._prepare_tasks({"tasks": [task]}, tmp_path / "workspace")
+
+
+def test_direct_row_source_hash_is_revalidated(tmp_path: Path):
+    task = copy.deepcopy(_manifest()["tasks"][0])
+    task["_materialized_source"] = "tampered"
+    with pytest.raises(ExternalFixturePolicyError, match="direct-row fixture hash"):
+        runner._require_task_source(task)
+
+
 @pytest.mark.parametrize(
     "mutator",
     [
@@ -49,9 +87,7 @@ def test_prepare_tasks_uses_one_hash_complete_materialized_source(tmp_path: Path
         lambda task: task.update(source_fixture_sha256="not-a-sha"),
     ],
 )
-def test_malformed_materialization_fails_before_provider_setup(
-    tmp_path: Path, mutator
-):
+def test_malformed_materialization_fails_before_provider_setup(tmp_path: Path, mutator):
     task = copy.deepcopy(_manifest()["tasks"][0])
     mutator(task)
     called = []
