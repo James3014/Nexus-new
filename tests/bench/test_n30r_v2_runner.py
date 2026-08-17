@@ -6,10 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from scripts.bench.fixture_materialization import ExternalFixturePolicyError
 from scripts.bench import n30r_v2_runner as runner
+from scripts.bench.fixture_materialization import ExternalFixturePolicyError
 from scripts.bench.n30r_v2_paired_eval import load_manifest
-
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "docs/bench/n30r/v2_four_task_paired_manifest.json"

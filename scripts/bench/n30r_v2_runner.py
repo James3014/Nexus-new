@@ -5,15 +5,14 @@ Core lane: production LocalModelExecutor with OllamaLocalModelProvider
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
 import time
-import re
 from pathlib import Path
 from typing import Any, Callable
 
@@ -25,15 +24,13 @@ from nexus.services.local_heal.local_model_executor import (
 )
 from nexus.services.local_heal.local_model_provider import (
     OllamaLocalModelProvider,
-    LocalModelProviderRequest,
-    LocalModelProviderResponse,
 )
-from scripts.bench.n30r_contracts import sha256_str, sha256_hex
 from scripts.bench.fixture_materialization import (
     ExternalFixturePolicyError,
     ExternalFixtureRequest,
     SandboxedLocalExternalFixtureAdapter,
 )
+from scripts.bench.n30r_contracts import sha256_str
 
 logger = logging.getLogger(__name__)
 ProviderFn = Callable[[str, str, str], str]
@@ -81,6 +78,7 @@ def _check_environment() -> dict:
         warnings.simplefilter("always")
         try:
             import importlib.metadata as _im
+
             import lancedb as _l
             receipt["lancedb_available"] = True
             receipt["lancedb_version"] = _l.__version__
@@ -960,7 +958,9 @@ def run_evaluation(
 
     # Compute summary metrics
     from scripts.bench.n30r_v2_paired_eval import (
-        validate_results, compute_metrics, classify_effectiveness,
+        classify_effectiveness,
+        compute_metrics,
+        validate_results,
     )
     task_map = {t["task_id"]: t for t in tasks}
 
