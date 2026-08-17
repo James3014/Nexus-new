@@ -39,12 +39,13 @@ def _evidence(**overrides: str) -> dict[str, str]:
 
 
 def test_complete_payload_certifies_with_stable_wire_contract() -> None:
-    result = certify_changeset({"change_set": _identity(), "evidence": [_evidence()]})
+    result = certify_changeset(_envelope())
 
     assert result.status is CertificationStatus.CERTIFIED
     payload = result.to_dict()
     assert payload["schema"] == CHANGESET_CERTIFICATION_SCHEMA
-    assert payload["reason_codes"] == []
+    assert payload["disposition"] == "CERTIFIED"
+    assert "status" not in payload and "change_set" not in payload
     assert validate_changeset_certification(result) == ()
 
 
@@ -58,45 +59,64 @@ def test_canonical_serialization_and_hash_are_order_independent() -> None:
 
 
 def test_missing_evidence_is_blocked_not_certified() -> None:
-    result = certify_changeset({"change_set": _identity()})
+    payload = _envelope()
+    payload.pop("verifier_manifest")
+    result = certify_changeset(payload)
 
     assert result.status is CertificationStatus.BLOCKED
-    assert result.reason_codes == ("evidence_missing",)
+    assert result.reason_codes == ("verifier_manifest_missing",)
 
 
 @pytest.mark.parametrize(
-    ("payload", "reason"),
+    ("payload_factory", "reason"),
     [
         (
-            {"change_set": _identity(diff_hash="not-a-hash"), "evidence": [_evidence()]},
-            "identity_diff_hash_invalid",
+            lambda: {**_envelope(), "diff": {"hash": "not-a-hash", "paths": ["x.py"]}},
+            "identity_malformed",
         ),
         (
-            {"change_set": _identity(), "evidence": [{**_evidence(), "content_hash": "wrong"}]},
-            "evidence_0_invalid",
+            lambda: {
+                **_envelope(),
+                "candidate": {"commit": "c", "tree": "t", "diff_hash": "wrong"},
+            },
+            "candidate_malformed",
         ),
         (
-            {"change_set": _identity(), "evidence": [_evidence(), _evidence()]},
-            "evidence_duplicate_id",
+            lambda: {
+                **_envelope(),
+                "verifier_manifest": {
+                    **_envelope()["verifier_manifest"],
+                    "verifiers": [
+                        _envelope()["verifier_manifest"]["verifiers"][0],
+                        _envelope()["verifier_manifest"]["verifiers"][0],
+                    ],
+                },
+            },
+            "verifier_duplicate",
         ),
-        ({"change_set": _identity(), "evidence": "not-a-list"}, "evidence_not_sequence"),
+        (lambda: {**_envelope(), "verifier_manifest": None}, "verifier_manifest_missing"),
     ],
 )
-def test_hostile_identity_or_evidence_substitution_rejects(
-    payload: dict[str, object], reason: str
-) -> None:
+def test_hostile_identity_or_evidence_substitution_rejects(payload_factory, reason: str) -> None:
+    payload = payload_factory()
     result = certify_changeset(payload)
 
-    assert result.status is CertificationStatus.REJECTED
+    assert result.status is (
+        CertificationStatus.BLOCKED
+        if reason == "verifier_manifest_missing"
+        else CertificationStatus.REJECTED
+    )
     assert reason in result.reason_codes
 
 
 def test_explicit_status_cannot_override_derived_certification() -> None:
-    result = certify_changeset({
-        "change_set": _identity(),
-        "evidence": [_evidence()],
-        "status": "BLOCKED",
-    })
+    result = certify_changeset(
+        {
+            "change_set": _identity(),
+            "evidence": [_evidence()],
+            "status": "BLOCKED",
+        }
+    )
 
     assert result.status is CertificationStatus.REJECTED
     assert result.reason_codes == ("status_substitution",)
@@ -106,16 +126,18 @@ def test_missing_change_set_is_blocked() -> None:
     result = certify_changeset({"evidence": [_evidence()]})
 
     assert result.status is CertificationStatus.BLOCKED
-    assert result.reason_codes == ("change_set_missing",)
+    assert result.reason_codes == ("identity_missing",)
 
 
 def test_canonical_hash_binding_rejects_tamper() -> None:
     result = certify_changeset({"change_set": _identity(), "evidence": [_evidence()]})
-    tampered = certify_changeset({
-        "change_set": _identity(),
-        "evidence": [_evidence()],
-        "canonical_hash": result.canonical_hash().replace("a", "c", 1),
-    })
+    tampered = certify_changeset(
+        {
+            "change_set": _identity(),
+            "evidence": [_evidence()],
+            "canonical_hash": result.canonical_hash().replace("a", "c", 1),
+        }
+    )
 
     assert tampered.status is CertificationStatus.REJECTED
     assert tampered.reason_codes == ("canonical_hash_mismatch",)
@@ -124,10 +146,12 @@ def test_canonical_hash_binding_rejects_tamper() -> None:
 def test_builder_returns_only_contract_data_and_no_execution_authority() -> None:
     payload = build_changeset_certification(change_set=_identity(), evidence=[_evidence()])
 
-    assert payload["status"] == "CERTIFIED"
+    assert payload["schema"] == CHANGESET_CERTIFICATION_SCHEMA
+    assert payload["disposition"] == "CERTIFIED"
     assert "runtime" not in payload
     assert "apply" not in payload
-    assert payload["claim_boundary"]
+    assert payload["claim_ceiling"] == CLAIM_CEILING
+    assert validate_changeset_certification(payload) == ()
 
 
 def test_canonical_json_rejects_ambiguous_object_stringification() -> None:
@@ -140,8 +164,13 @@ def _envelope(*, verifier_status: str = "PASS") -> dict[str, object]:
         "manifest_id": "manifest-1",
         "task_id": "task-367",
         "attempt_id": "attempt-1",
+        "repository": "James3014/Nexus-new",
         "source": "source-tree-1",
-        "tree": "tree-base-1",
+        "base_commit": "base-commit-1",
+        "base_tree": "tree-base-1",
+        "candidate_commit": "candidate-1",
+        "candidate_tree": "tree-candidate-1",
+        "diff_hash": "sha256:" + "a" * 64,
         "verifiers": [
             {
                 "verifier_id": "pytest",
@@ -236,3 +265,62 @@ def test_semantically_unordered_envelope_lists_have_same_hash() -> None:
     left_diff["paths"] = ["z.py", "a.py"]
     right_diff["paths"] = ["a.py", "z.py"]
     assert canonical_json(left_diff) == canonical_json(right_diff)
+
+
+def _rehash(payload: dict[str, object]) -> dict[str, object]:
+    manifest = payload["verifier_manifest"]
+    assert isinstance(manifest, dict)
+    manifest.pop("manifest_hash", None)
+    manifest["manifest_hash"] = canonical_hash(manifest)
+    payload.pop("canonical_payload_hash", None)
+    payload["canonical_payload_hash"] = canonical_hash(payload)
+    return payload
+
+
+@pytest.mark.parametrize("disposition", ["REJECTED", "BLOCKED"])
+def test_every_disposition_is_deeply_hash_validated(disposition: str) -> None:
+    payload = _envelope()
+    payload["disposition"] = disposition
+    payload["reasons"] = ["verifier_failed"]
+    _rehash(payload)
+    assert validate_changeset_certification(payload) == ()
+    payload["base"]["tree"] = "tampered-tree"
+    assert validate_changeset_certification(payload) in {
+        ("payload_hash_mismatch",),
+        ("cross_binding_mismatch",),
+    }
+
+
+def test_duplicate_artifact_id_rejects_even_with_unique_verifier_ids() -> None:
+    payload = _envelope()
+    manifest = payload["verifier_manifest"]
+    assert isinstance(manifest, dict)
+    manifest["verifiers"].append(
+        {
+            "verifier_id": "bandit",
+            "artifact_id": "pytest:attempt-1",
+            "artifact_hash": "sha256:" + "e" * 64,
+            "status": "PASS",
+        }
+    )
+    _rehash(payload)
+    result = certify_changeset(payload)
+    assert result.status is CertificationStatus.REJECTED
+    assert result.reason_codes == ("artifact_duplicate",)
+
+
+@pytest.mark.parametrize("field", ["repository", "base", "candidate"])
+def test_repository_base_candidate_manifest_bindings_are_not_substitutable(field: str) -> None:
+    payload = _envelope()
+    manifest = payload["verifier_manifest"]
+    assert isinstance(manifest, dict)
+    if field == "repository":
+        manifest["repository"] = "other/repository"
+    elif field == "base":
+        manifest["base_commit"] = "other-base"
+    else:
+        manifest["candidate_commit"] = "other-candidate"
+    _rehash(payload)
+    result = certify_changeset(payload)
+    assert result.status is CertificationStatus.REJECTED
+    assert result.reason_codes == ("cross_binding_mismatch",)

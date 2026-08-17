@@ -1,4 +1,4 @@
-"""Strict, provider-neutral ChangeSet certification wire contract."""
+"""Provider-neutral v1 ChangeSet certification wire contract."""
 
 from __future__ import annotations
 
@@ -15,29 +15,40 @@ CLAIM_CEILING = "LOCAL_CHANGESET_CERTIFICATION_V1_CONTRACT_CANDIDATE_ONLY"
 _STATUSES = frozenset({"CERTIFIED", "REJECTED", "BLOCKED"})
 _VERIFIER_STATUSES = frozenset({"PASS", "FAIL"})
 _HASH_LEN = 71
-_REASONS = frozenset({
-    "identity_missing",
-    "identity_malformed",
-    "evidence_missing",
-    "evidence_malformed",
-    "scope_missing",
-    "scope_malformed",
-    "candidate_malformed",
-    "verifier_manifest_missing",
-    "verifier_manifest_malformed",
-    "verifier_missing",
-    "verifier_failed",
-    "verifier_artifact_missing",
-    "verifier_artifact_malformed",
-    "hash_mismatch",
-    "manifest_hash_mismatch",
-    "payload_hash_mismatch",
-    "cross_binding_mismatch",
-    "status_invalid",
-    "reason_invalid",
-    "schema_invalid",
-    "unknown_field",
-})
+_REASONS = frozenset(
+    {
+        "identity_missing",
+        "identity_malformed",
+        "evidence_missing",
+        "evidence_malformed",
+        "scope_missing",
+        "scope_malformed",
+        "candidate_missing",
+        "candidate_malformed",
+        "verifier_manifest_missing",
+        "verifier_manifest_malformed",
+        "verifier_missing",
+        "verifier_failed",
+        "verifier_artifact_missing",
+        "verifier_artifact_malformed",
+        "verifier_duplicate",
+        "artifact_duplicate",
+        "hash_mismatch",
+        "manifest_hash_mismatch",
+        "payload_hash_mismatch",
+        "cross_binding_mismatch",
+        "status_invalid",
+        "reason_invalid",
+        "schema_invalid",
+        "unknown_field",
+        "status_substitution",
+        "change_set_missing",
+        "identity_diff_hash_invalid",
+        "evidence_0_invalid",
+        "evidence_duplicate_id",
+        "evidence_not_sequence",
+    }
+)
 
 
 class CertificationStatus(str, Enum):
@@ -72,7 +83,8 @@ class ChangeSetCertification:
     schema: str = CHANGESET_CERTIFICATION_SCHEMA
 
     def to_dict(self) -> dict[str, Any]:
-        return _copy(self.envelope) if self.envelope is not None else _legacy_wire(self)
+        # Compatibility dataclasses never emit the superseded legacy wire form.
+        return _copy(self.envelope) if self.envelope is not None else _minimal(self)
 
     def canonical_json(self) -> str:
         return canonical_json(self.to_dict())
@@ -82,7 +94,6 @@ class ChangeSetCertification:
 
 
 def canonical_json(value: Any) -> str:
-    """Canonical finite JSON; known set-like lists are semantically unordered."""
     return json.dumps(
         _normalize(value, ()),
         ensure_ascii=False,
@@ -99,35 +110,24 @@ def canonical_hash(value: Any) -> str:
 def certify_changeset(payload: Mapping[str, Any]) -> ChangeSetCertification:
     if not isinstance(payload, Mapping):
         return _blocked("identity_missing")
-    if _is_legacy(payload):
-        return _certify_legacy(payload)
-    errors = _validate_envelope(payload)
+    if "change_set" in payload:
+        return _certify_compatibility_input(payload)
+    if any(key not in payload for key in ("task", "repository", "base", "diff")):
+        return _result(payload, CertificationStatus.BLOCKED, ("identity_missing",))
+    errors = _validate(payload)
     if errors:
-        return _result(
-            payload,
-            CertificationStatus.BLOCKED
-            if errors[0]
-            in {
-                "identity_missing",
-                "evidence_missing",
-                "scope_missing",
-                "verifier_manifest_missing",
-                "verifier_missing",
-                "verifier_artifact_missing",
-            }
-            else CertificationStatus.REJECTED,
-            errors,
-        )
+        return _result(payload, _status_for(errors), errors)
     manifest = payload["verifier_manifest"]
-    if any(v["status"] == "FAIL" for v in manifest["verifiers"]):
+    disposition = payload["disposition"]
+    if disposition == "CERTIFIED" and any(v["status"] == "FAIL" for v in manifest["verifiers"]):
         return _result(payload, CertificationStatus.REJECTED, ("verifier_failed",))
-    if payload["disposition"] != "CERTIFIED":
+    if disposition == "CERTIFIED" and payload["reasons"]:
         return _result(payload, CertificationStatus.REJECTED, ("status_invalid",))
-    if payload["canonical_payload_hash"] != canonical_hash(_payload_hash_input(payload)):
-        return _result(payload, CertificationStatus.REJECTED, ("payload_hash_mismatch",))
-    if manifest["manifest_hash"] != canonical_hash(_manifest_hash_input(manifest)):
-        return _result(payload, CertificationStatus.REJECTED, ("manifest_hash_mismatch",))
-    return _result(payload, CertificationStatus.CERTIFIED, ())
+    if disposition == "BLOCKED" and not payload["reasons"]:
+        return _result(payload, CertificationStatus.REJECTED, ("reason_invalid",))
+    if not _hashes_match(payload):
+        return _result(payload, CertificationStatus.REJECTED, _hash_errors(payload))
+    return _result(payload, CertificationStatus(disposition), tuple(payload["reasons"]))
 
 
 def build_changeset_certification(
@@ -135,7 +135,81 @@ def build_changeset_certification(
     change_set: Mapping[str, Any],
     evidence: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...] | None,
 ) -> dict[str, Any]:
-    return _certify_legacy({"change_set": change_set, "evidence": evidence}).to_dict()
+    """Build a complete v1 envelope from the compatibility convenience API."""
+    if (
+        not isinstance(change_set, Mapping)
+        or not _texts(change_set, ("change_set_id", "source_revision", "target_revision"))
+        or not _hash(change_set.get("diff_hash"))
+    ):
+        return _minimal_invalid("identity_missing")
+    if not isinstance(evidence, (list, tuple)) or not evidence:
+        return _minimal_invalid("evidence_missing")
+    paths = [f"changeset/{change_set['change_set_id']}"]
+    verifiers: list[dict[str, Any]] = []
+    for item in evidence:
+        if (
+            not isinstance(item, Mapping)
+            or not _texts(item, ("evidence_id", "kind", "source"))
+            or not _hash(item.get("content_hash"))
+        ):
+            return _minimal_invalid("verifier_artifact_malformed")
+        verifiers.append(
+            {
+                "verifier_id": item["kind"],
+                "artifact_id": f"{item['kind']}:attempt-1",
+                "artifact_hash": item["content_hash"],
+                "status": "PASS",
+            }
+        )
+    source = str(change_set["source_revision"])
+    target = str(change_set["target_revision"])
+    return _new_envelope(
+        task={"task_id": str(change_set["change_set_id"]), "attempt_id": "attempt-1"},
+        repository={"repository": "local", "source": source},
+        base={"commit": source, "tree": source},
+        diff={"hash": change_set["diff_hash"], "paths": paths},
+        allowed_scope={"paths": paths, "deletion_policy": "FORBID"},
+        candidate={"commit": target, "tree": target, "diff_hash": change_set["diff_hash"]},
+        verifiers=verifiers,
+        disposition="CERTIFIED",
+        reasons=[],
+    )
+
+
+def _certify_compatibility_input(payload: Mapping[str, Any]) -> ChangeSetCertification:
+    """Parse the retired convenience shape, but never emit it on the wire."""
+    identity = payload.get("change_set")
+    if not isinstance(identity, Mapping):
+        return _blocked("change_set_missing")
+    if payload.get("status") is not None:
+        return _reject("status_substitution")
+    if payload.get("canonical_hash") is not None:
+        return _reject("canonical_hash_mismatch")
+    if not _texts(identity, ("change_set_id", "source_revision", "target_revision")):
+        return _blocked("identity_malformed")
+    if not _hash(identity.get("diff_hash")):
+        return _reject("identity_diff_hash_invalid")
+    evidence = payload.get("evidence")
+    if evidence is None:
+        return _blocked("evidence_missing")
+    if not isinstance(evidence, (list, tuple)):
+        return _reject("evidence_not_sequence")
+    if not evidence:
+        return _blocked("evidence_empty")
+    ids = []
+    for item in evidence:
+        if (
+            not isinstance(item, Mapping)
+            or not _texts(item, ("evidence_id", "kind", "source"))
+            or not _hash(item.get("content_hash"))
+        ):
+            return _reject("evidence_0_invalid")
+        ids.append(item["evidence_id"])
+    if len(ids) != len(set(ids)):
+        return _reject("evidence_duplicate_id")
+    built = build_changeset_certification(change_set=identity, evidence=evidence)
+    result = certify_changeset(built)
+    return result
 
 
 def validate_changeset_certification(
@@ -148,28 +222,21 @@ def validate_changeset_certification(
     )
     if not isinstance(payload, Mapping):
         return ("identity_malformed",)
-    if _is_legacy(payload):
-        return (
-            ()
-            if payload.get("status") == "CERTIFIED" and payload.get("evidence")
-            else ("evidence_missing",)
-        )
-    errors = _validate_envelope(payload)
+    errors = _validate(payload)
     if errors:
         return errors
-    if payload["disposition"] == "CERTIFIED":
-        if any(v["status"] == "FAIL" for v in payload["verifier_manifest"]["verifiers"]):
-            return ("verifier_failed",)
-        if payload["canonical_payload_hash"] != canonical_hash(_payload_hash_input(payload)):
-            return ("payload_hash_mismatch",)
-        if payload["verifier_manifest"]["manifest_hash"] != canonical_hash(
-            _manifest_hash_input(payload["verifier_manifest"])
-        ):
-            return ("manifest_hash_mismatch",)
-    return ()
+    if payload["disposition"] == "CERTIFIED" and any(
+        v["status"] == "FAIL" for v in payload["verifier_manifest"]["verifiers"]
+    ):
+        return ("verifier_failed",)
+    if payload["disposition"] == "CERTIFIED" and payload["reasons"]:
+        return ("status_invalid",)
+    if payload["disposition"] == "BLOCKED" and not payload["reasons"]:
+        return ("reason_invalid",)
+    return _hash_errors(payload) if not _hashes_match(payload) else ()
 
 
-def _validate_envelope(payload: Mapping[str, Any]) -> tuple[str, ...]:
+def _validate(payload: Mapping[str, Any]) -> tuple[str, ...]:
     allowed = {
         "schema",
         "version",
@@ -187,34 +254,37 @@ def _validate_envelope(payload: Mapping[str, Any]) -> tuple[str, ...]:
     }
     if set(payload) - allowed:
         return ("unknown_field",)
-    if payload.get("schema") != CHANGESET_CERTIFICATION_SCHEMA or payload.get("version") != 1:
+    if (
+        payload.get("schema") != CHANGESET_CERTIFICATION_SCHEMA
+        or payload.get("version") != CHANGESET_CERTIFICATION_VERSION
+    ):
         return ("schema_invalid",)
     task, repo, base, diff, scope = (
         payload.get(k) for k in ("task", "repository", "base", "diff", "allowed_scope")
     )
-    if task is None:
+    if any(v is None for v in (task, repo, base, diff)):
         return ("identity_missing",)
     if (
         not isinstance(task, Mapping)
-        or not _exact_keys(task, {"task_id", "attempt_id"})
+        or not _exact(task, {"task_id", "attempt_id"})
         or not _texts(task, ("task_id", "attempt_id"))
     ):
         return ("identity_malformed",)
     if (
         not isinstance(repo, Mapping)
-        or not _exact_keys(repo, {"repository", "source"})
+        or not _exact(repo, {"repository", "source"})
         or not _texts(repo, ("repository", "source"))
     ):
         return ("identity_malformed",)
     if (
         not isinstance(base, Mapping)
-        or not _exact_keys(base, {"commit", "tree"})
+        or not _exact(base, {"commit", "tree"})
         or not _texts(base, ("commit", "tree"))
     ):
         return ("identity_malformed",)
     if (
         not isinstance(diff, Mapping)
-        or not _exact_keys(diff, {"hash", "paths"})
+        or not _exact(diff, {"hash", "paths"})
         or not _hash(diff.get("hash"))
         or not _paths(diff.get("paths"))
     ):
@@ -223,7 +293,7 @@ def _validate_envelope(payload: Mapping[str, Any]) -> tuple[str, ...]:
         return ("scope_missing",)
     if (
         not isinstance(scope, Mapping)
-        or not _exact_keys(scope, {"paths", "deletion_policy"})
+        or not _exact(scope, {"paths", "deletion_policy"})
         or not _paths(scope.get("paths"))
         or scope.get("deletion_policy") not in {"FORBID", "ALLOW"}
     ):
@@ -233,7 +303,7 @@ def _validate_envelope(payload: Mapping[str, Any]) -> tuple[str, ...]:
     candidate = payload.get("candidate")
     if candidate is not None and (
         not isinstance(candidate, Mapping)
-        or not _exact_keys(candidate, {"commit", "tree", "diff_hash"})
+        or not _exact(candidate, {"commit", "tree", "diff_hash"})
         or not _texts(candidate, ("commit", "tree"))
         or not _hash(candidate.get("diff_hash"))
     ):
@@ -243,50 +313,95 @@ def _validate_envelope(payload: Mapping[str, Any]) -> tuple[str, ...]:
     manifest = payload.get("verifier_manifest")
     if manifest is None:
         return ("verifier_manifest_missing",)
+    mkeys = {
+        "manifest_id",
+        "task_id",
+        "attempt_id",
+        "repository",
+        "source",
+        "base_commit",
+        "base_tree",
+        "candidate_commit",
+        "candidate_tree",
+        "diff_hash",
+        "verifiers",
+        "manifest_hash",
+    }
     if (
         not isinstance(manifest, Mapping)
-        or not _exact_keys(
+        or not _exact(manifest, mkeys)
+        or not _texts(
             manifest,
-            {
+            (
                 "manifest_id",
                 "task_id",
                 "attempt_id",
+                "repository",
                 "source",
-                "tree",
-                "verifiers",
-                "manifest_hash",
-            },
+                "base_commit",
+                "base_tree",
+                "candidate_commit",
+                "candidate_tree",
+            ),
         )
-        or not _texts(manifest, ("manifest_id", "task_id", "attempt_id", "source", "tree"))
+        or not _hash(manifest.get("diff_hash"))
         or not _hash(manifest.get("manifest_hash"))
     ):
         return ("verifier_manifest_malformed",)
-    if (manifest["task_id"], manifest["attempt_id"], manifest["source"], manifest["tree"]) != (
+    expected = candidate or {"commit": "none", "tree": "none"}
+    bindings = (
+        manifest["task_id"],
+        manifest["attempt_id"],
+        manifest["repository"],
+        manifest["source"],
+        manifest["base_commit"],
+        manifest["base_tree"],
+        manifest["candidate_commit"],
+        manifest["candidate_tree"],
+        manifest["diff_hash"],
+    )
+    actual = (
         task["task_id"],
         task["attempt_id"],
+        repo["repository"],
         repo["source"],
+        base["commit"],
         base["tree"],
-    ):
+        expected["commit"],
+        expected["tree"],
+        diff["hash"],
+    )
+    if bindings != actual:
         return ("cross_binding_mismatch",)
     verifiers = manifest.get("verifiers")
     if not isinstance(verifiers, list) or not verifiers:
         return ("verifier_missing",)
+    verifier_ids: set[str] = set()
+    artifact_ids: set[str] = set()
     for verifier in verifiers:
         if not isinstance(verifier, Mapping):
             return ("verifier_artifact_malformed",)
         if (
-            not _exact_keys(verifier, {"verifier_id", "artifact_id", "artifact_hash", "status"})
+            not _exact(verifier, {"verifier_id", "artifact_id", "artifact_hash", "status"})
             or not _texts(verifier, ("verifier_id", "artifact_id"))
             or not _hash(verifier.get("artifact_hash"))
         ):
             return ("verifier_artifact_missing",)
+        if verifier["verifier_id"] in verifier_ids:
+            return ("verifier_duplicate",)
+        if verifier["artifact_id"] in artifact_ids:
+            return ("artifact_duplicate",)
+        verifier_ids.add(verifier["verifier_id"])
+        artifact_ids.add(verifier["artifact_id"])
         if verifier.get("status") not in _VERIFIER_STATUSES:
             return ("verifier_artifact_malformed",)
         if verifier["artifact_id"] != f"{verifier['verifier_id']}:{task['attempt_id']}":
             return ("cross_binding_mismatch",)
     reasons = payload.get("reasons")
-    if not isinstance(reasons, list) or any(
-        not isinstance(reason, str) or reason not in _REASONS for reason in reasons
+    if (
+        not isinstance(reasons, list)
+        or len(set(reasons)) != len(reasons)
+        or any(not isinstance(r, str) or r not in _REASONS for r in reasons)
     ):
         return ("reason_invalid",)
     if payload.get("disposition") not in _STATUSES:
@@ -298,133 +413,180 @@ def _validate_envelope(payload: Mapping[str, Any]) -> tuple[str, ...]:
     return ()
 
 
+def _new_envelope(
+    *,
+    task: dict[str, Any],
+    repository: dict[str, Any],
+    base: dict[str, Any],
+    diff: dict[str, Any],
+    allowed_scope: dict[str, Any],
+    candidate: dict[str, Any] | None,
+    verifiers: list[dict[str, Any]],
+    disposition: str,
+    reasons: list[str],
+) -> dict[str, Any]:
+    candidate = candidate or {"commit": "none", "tree": "none"}
+    manifest = {
+        "manifest_id": f"manifest:{task['attempt_id']}",
+        "task_id": task["task_id"],
+        "attempt_id": task["attempt_id"],
+        "repository": repository["repository"],
+        "source": repository["source"],
+        "base_commit": base["commit"],
+        "base_tree": base["tree"],
+        "candidate_commit": candidate["commit"],
+        "candidate_tree": candidate["tree"],
+        "diff_hash": diff["hash"],
+        "verifiers": verifiers,
+    }
+    manifest["manifest_hash"] = canonical_hash(manifest)
+    payload = {
+        "schema": CHANGESET_CERTIFICATION_SCHEMA,
+        "version": CHANGESET_CERTIFICATION_VERSION,
+        "task": task,
+        "repository": repository,
+        "base": base,
+        "diff": diff,
+        "allowed_scope": allowed_scope,
+        "candidate": None if candidate["commit"] == "none" else candidate,
+        "verifier_manifest": manifest,
+        "disposition": disposition,
+        "reasons": reasons,
+        "claim_ceiling": CLAIM_CEILING,
+    }
+    payload["canonical_payload_hash"] = canonical_hash(payload)
+    return payload
+
+
 def _result(
     payload: Mapping[str, Any], status: CertificationStatus, reasons: tuple[str, ...]
 ) -> ChangeSetCertification:
-    task = _mapping(payload.get("task"))
-    base = _mapping(payload.get("base"))
-    candidate = _mapping(payload.get("candidate"))
-    diff = _mapping(payload.get("diff"))
+    result = _copy(payload)
+    result["schema"] = CHANGESET_CERTIFICATION_SCHEMA
+    result["version"] = CHANGESET_CERTIFICATION_VERSION
+    result["disposition"] = status.value
+    result["reasons"] = list(sorted(set(reasons)))
+    if isinstance(result.get("verifier_manifest"), dict):
+        result["verifier_manifest"]["manifest_hash"] = canonical_hash(
+            _manifest_input(result["verifier_manifest"])
+        )
+    result["canonical_payload_hash"] = canonical_hash(_payload_input(result))
+    task = _as_mapping(result.get("task"))
+    base = _as_mapping(result.get("base"))
+    candidate = _as_mapping(result.get("candidate"))
+    diff = _as_mapping(result.get("diff"))
     identity = ChangeSetIdentity(
         str(task.get("task_id", "")),
         str(base.get("commit", "")),
         str(candidate.get("commit", "")),
         str(diff.get("hash", "")),
     )
-    result_payload = _copy(payload)
-    result_payload["disposition"] = status.value
-    result_payload["reasons"] = list(sorted(set(reasons)))
     return ChangeSetCertification(
-        identity, status=status, reason_codes=tuple(sorted(set(reasons))), envelope=result_payload
+        identity, status=status, reason_codes=tuple(sorted(set(reasons))), envelope=result
     )
 
 
-def _is_legacy(payload: Mapping[str, Any]) -> bool:
-    return "task" not in payload
+def _status_for(errors: tuple[str, ...]) -> CertificationStatus:
+    return (
+        CertificationStatus.BLOCKED
+        if errors[0]
+        in {
+            "identity_missing",
+            "evidence_missing",
+            "scope_missing",
+            "candidate_missing",
+            "verifier_manifest_missing",
+            "verifier_missing",
+            "verifier_artifact_missing",
+        }
+        else CertificationStatus.REJECTED
+    )
 
 
-def _certify_legacy(payload: Mapping[str, Any]) -> ChangeSetCertification:
-    identity = payload.get("change_set")
-    if not isinstance(identity, Mapping):
-        return _blocked("change_set_missing")
-    if not _texts(identity, ("change_set_id", "source_revision", "target_revision")):
-        return _rejected(("identity_malformed",), ChangeSetIdentity("", "", "", ""))
-    if not _hash(identity.get("diff_hash")):
-        return _rejected(("identity_diff_hash_invalid",), ChangeSetIdentity("", "", "", ""))
-    parsed = ChangeSetIdentity(
-        *(
-            str(identity[k])
-            for k in ("change_set_id", "source_revision", "target_revision", "diff_hash")
-        )
+def _as_mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _hashes_match(payload: Mapping[str, Any]) -> bool:
+    manifest = payload.get("verifier_manifest")
+    return (
+        isinstance(manifest, Mapping)
+        and payload.get("canonical_payload_hash") == canonical_hash(_payload_input(payload))
+        and manifest.get("manifest_hash") == canonical_hash(_manifest_input(manifest))
     )
-    evidence = payload.get("evidence")
-    if evidence is None:
-        return _blocked("evidence_missing", parsed)
-    if not isinstance(evidence, (list, tuple)):
-        return _rejected(("evidence_not_sequence",), parsed)
-    if not evidence:
-        return _blocked("evidence_empty", parsed)
-    refs = tuple(
-        EvidenceRef(
-            str(item["evidence_id"]),
-            str(item["kind"]),
-            str(item["content_hash"]),
-            str(item["source"]),
-        )
-        for item in evidence
-        if isinstance(item, Mapping)
-        and _texts(item, ("evidence_id", "kind", "source"))
-        and _hash(item.get("content_hash"))
-    )
-    if len(refs) != len(evidence) or len({ref.evidence_id for ref in refs}) != len(refs):
-        if any(
-            not isinstance(item, Mapping)
-            or not _texts(item, ("evidence_id", "kind", "source"))
-            or not _hash(item.get("content_hash"))
-            for item in evidence
-        ):
-            return _rejected(("evidence_0_invalid",), parsed)
-        return _rejected(("evidence_duplicate_id",), parsed)
-    result = ChangeSetCertification(parsed, refs, CertificationStatus.CERTIFIED)
-    if payload.get("status") in {"BLOCKED", "REJECTED"}:
-        return _rejected(("status_substitution",), parsed, refs)
-    if (
-        payload.get("canonical_hash") is not None
-        and payload["canonical_hash"] != result.canonical_hash()
+
+
+def _hash_errors(payload: Mapping[str, Any]) -> tuple[str, ...]:
+    out = []
+    manifest = payload.get("verifier_manifest")
+    if not isinstance(manifest, Mapping) or manifest.get("manifest_hash") != canonical_hash(
+        _manifest_input(manifest)
     ):
-        return _rejected(("canonical_hash_mismatch",), parsed, refs)
-    return result
+        out.append("manifest_hash_mismatch")
+    if payload.get("canonical_payload_hash") != canonical_hash(_payload_input(payload)):
+        out.append("payload_hash_mismatch")
+    return tuple(out) or ("hash_mismatch",)
 
 
-def _legacy_wire(result: ChangeSetCertification) -> dict[str, Any]:
-    return {
-        "schema": result.schema,
-        "status": result.status.value,
-        "change_set": {
-            "change_set_id": result.change_set.change_set_id,
-            "source_revision": result.change_set.source_revision,
-            "target_revision": result.change_set.target_revision,
-            "diff_hash": result.change_set.diff_hash,
-        },
-        "evidence": [
-            {
-                "evidence_id": item.evidence_id,
-                "kind": item.kind,
-                "content_hash": item.content_hash,
-                "source": item.source,
-            }
-            for item in result.evidence
-        ],
-        "reason_codes": list(result.reason_codes),
-        "claim_boundary": [
-            "Certification describes supplied ChangeSet identities and evidence only.",
-            "It does not apply a patch or authorize runtime, GitHub, provider, or shell actions.",
-        ],
-    }
-
-
-def _payload_hash_input(payload: Mapping[str, Any]) -> dict[str, Any]:
+def _payload_input(payload: Mapping[str, Any]) -> dict[str, Any]:
     value = _copy(payload)
     value.pop("canonical_payload_hash", None)
     return value
 
 
-def _manifest_hash_input(manifest: Mapping[str, Any]) -> dict[str, Any]:
+def _manifest_input(manifest: Mapping[str, Any]) -> dict[str, Any]:
     value = _copy(manifest)
     value.pop("manifest_hash", None)
     return value
 
 
+def _minimal(result: ChangeSetCertification) -> dict[str, Any]:
+    return _minimal_invalid(result.reason_codes[0] if result.reason_codes else "identity_missing")
+
+
+def _minimal_invalid(reason: str) -> dict[str, Any]:
+    return _new_envelope(
+        task={"task_id": "missing", "attempt_id": "missing"},
+        repository={"repository": "missing", "source": "missing"},
+        base={"commit": "missing", "tree": "missing"},
+        diff={"hash": "sha256:" + "0" * 64, "paths": ["missing"]},
+        allowed_scope={"paths": ["missing"], "deletion_policy": "FORBID"},
+        candidate=None,
+        verifiers=[
+            {
+                "verifier_id": "missing",
+                "artifact_id": "missing:missing",
+                "artifact_hash": "sha256:" + "0" * 64,
+                "status": "FAIL",
+            }
+        ],
+        disposition="BLOCKED",
+        reasons=[reason],
+    )
+
+
+def _blocked(reason: str) -> ChangeSetCertification:
+    return ChangeSetCertification(
+        ChangeSetIdentity("", "", "", ""),
+        status=CertificationStatus.BLOCKED,
+        reason_codes=(reason,),
+    )
+
+
+def _reject(reason: str) -> ChangeSetCertification:
+    return ChangeSetCertification(
+        ChangeSetIdentity("", "", "", ""),
+        status=CertificationStatus.REJECTED,
+        reason_codes=(reason,),
+    )
+
+
 def _texts(value: Mapping[str, Any], keys: tuple[str, ...]) -> bool:
-    return all(isinstance(value.get(key), str) and bool(value[key].strip()) for key in keys)
+    return all(isinstance(value.get(k), str) and bool(value[k].strip()) for k in keys)
 
 
-def _exact_keys(value: Mapping[str, Any], expected: set[str]) -> bool:
+def _exact(value: Mapping[str, Any], expected: set[str]) -> bool:
     return set(value) == expected
-
-
-def _mapping(value: Any) -> Mapping[str, Any]:
-    return value if isinstance(value, Mapping) else {}
 
 
 def _hash(value: Any) -> bool:
@@ -441,7 +603,7 @@ def _paths(value: Any) -> bool:
         isinstance(value, list)
         and bool(value)
         and len(set(value)) == len(value)
-        and all(isinstance(item, str) and item and not item.startswith("/") for item in value)
+        and all(isinstance(p, str) and p and not p.startswith("/") for p in value)
     )
 
 
@@ -453,34 +615,18 @@ def _normalize(value: Any, path: tuple[str, ...]) -> Any:
             raise TypeError("canonical JSON values must be finite")
         return value
     if isinstance(value, Mapping):
-        if any(not isinstance(key, str) for key in value):
+        if any(not isinstance(k, str) for k in value):
             raise TypeError("canonical JSON keys must be strings")
-        return {key: _normalize(value[key], path + (key,)) for key in sorted(value)}
+        return {k: _normalize(value[k], path + (k,)) for k in sorted(value)}
     if isinstance(value, list):
-        normalized = [_normalize(item, path) for item in value]
+        items = [_normalize(item, path) for item in value]
         return (
-            sorted(normalized, key=canonical_json)
+            sorted(items, key=canonical_json)
             if path and path[-1] in {"paths", "reasons", "verifiers", "evidence"}
-            else normalized
+            else items
         )
     raise TypeError(f"unsupported canonical JSON value: {type(value).__name__}")
 
 
 def _copy(value: Any) -> dict[str, Any]:
     return json.loads(json.dumps(value, ensure_ascii=False, allow_nan=False))
-
-
-def _blocked(reason: str, identity: ChangeSetIdentity | None = None) -> ChangeSetCertification:
-    return ChangeSetCertification(
-        identity or ChangeSetIdentity("", "", "", ""),
-        status=CertificationStatus.BLOCKED,
-        reason_codes=(reason,),
-    )
-
-
-def _rejected(
-    reasons: tuple[str, ...], identity: ChangeSetIdentity, evidence: tuple[EvidenceRef, ...] = ()
-) -> ChangeSetCertification:
-    return ChangeSetCertification(
-        identity, evidence, CertificationStatus.REJECTED, tuple(sorted(set(reasons)))
-    )
