@@ -192,7 +192,9 @@ def test_canary_stops_after_two_attempts(tmp_path: Path, monkeypatch):
     assert len(nonces) == 2
 
 
-def test_canary_rejects_substituted_provider_binding(tmp_path: Path, monkeypatch):
+def test_canary_open_code_failure_fallback_policy_is_bounded(
+    tmp_path: Path, monkeypatch
+):
     monkeypatch.setenv("NEXUS_P0T5_ALLOW_REAL_PROVIDER", "1")
     with pytest.raises(ValueError, match="provider_not_allowed"):
         run_canary_campaign(
