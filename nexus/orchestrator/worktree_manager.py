@@ -418,8 +418,23 @@ class WorktreeManager:
 
     @contextmanager
     def _reservation_lock(self, controller_root: Path):
-        lock_path = controller_root / ".git" / "nexus-target-admission.lock"
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            resolved_root = Path(
+                self._run_git(["rev-parse", "--show-toplevel"], cwd=controller_root)
+            ).resolve()
+            if resolved_root != controller_root.resolve():
+                raise RuntimeError("controller identity does not match Git toplevel")
+            raw_common = self._run_git(["rev-parse", "--git-common-dir"], cwd=controller_root)
+            common_dir = Path(raw_common)
+            if not common_dir.is_absolute():
+                common_dir = (controller_root / common_dir).resolve()
+            else:
+                common_dir = common_dir.resolve()
+            if not common_dir.is_dir() or common_dir.name != ".git":
+                raise RuntimeError("Git common directory is not a valid .git directory")
+        except Exception as exc:
+            raise RuntimeError("TARGET_ADMISSION_LOCK_UNRESOLVED") from exc
+        lock_path = common_dir / "nexus-target-admission.lock"
         with lock_path.open("a+", encoding="utf-8") as handle:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
             try:

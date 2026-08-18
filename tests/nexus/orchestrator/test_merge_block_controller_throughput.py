@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import subprocess
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -217,8 +220,23 @@ def test_real_create_lease_allows_disjoint_and_blocks_exact_parent(tmp_path):
     state_a["a"]["attempt_id"] = "a-attempt"
     lease_b = manager.create_lease(b, task_states=state_a)
     assert Path(lease_a.target_worktree) != Path(lease_b.target_worktree)
+    b_branch = f"refs/heads/{lease_b.target_branch}"
+    b_ref_before = _git(controller, "rev-parse", b_branch)
+    b_head_before = _git(Path(lease_b.target_worktree), "rev-parse", "HEAD")
+    b_lease_bytes = json.dumps(lease_b.__dict__, sort_keys=True).encode()
+    b_lease_hash = hashlib.sha256(b_lease_bytes).hexdigest()
+    evidence = tmp_path / "b-evidence.json"
+    evidence.write_bytes(b_lease_bytes)
+    evidence_hash = hashlib.sha256(evidence.read_bytes()).hexdigest()
     assert manager.cleanup_terminal_target(a, lease_a).decision == "REMOVED"
     assert Path(lease_b.target_worktree).exists()
+    assert _git(controller, "rev-parse", b_branch) == b_ref_before
+    assert _git(Path(lease_b.target_worktree), "rev-parse", "HEAD") == b_head_before
+    assert (
+        hashlib.sha256(json.dumps(lease_b.__dict__, sort_keys=True).encode()).hexdigest()
+        == b_lease_hash
+    )
+    assert hashlib.sha256(evidence.read_bytes()).hexdigest() == evidence_hash
     overlapping = _real_contract(controller, target_root, "overlap", ["scope"])
     with pytest.raises(RuntimeError, match="serial Target budget exceeded"):
         manager.create_lease(
@@ -254,7 +272,20 @@ def test_real_create_lease_rejects_bad_revision_and_ambiguous_scope(tmp_path):
         manager.create_lease(malformed)
 
 
-def test_create_lease_reservation_lock_allows_one_overlapping_request(tmp_path):
+def test_create_lease_uses_shared_common_git_dir_for_linked_worktree(tmp_path):
+    controller, target_root = _real_repo(tmp_path)
+    linked = tmp_path / "linked"
+    _git(controller, "worktree", "add", "--detach", str(linked), "HEAD")
+    assert (linked / ".git").is_file()
+    manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
+    contract = _real_contract(linked, target_root, "linked", ["scope/linked.txt"])
+    lease = manager.create_lease(contract)
+    assert Path(lease.target_worktree).exists()
+    assert (controller / ".git" / "nexus-target-admission.lock").exists()
+
+
+@pytest.mark.parametrize("first,second", [("a", "b"), ("b", "a")])
+def test_create_lease_reservation_lock_has_controlled_order(tmp_path, first, second):
     controller, target_root = _real_repo(tmp_path)
     manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
     contracts = [
@@ -272,6 +303,18 @@ def test_create_lease_reservation_lock_allows_one_overlapping_request(tmp_path):
         for contract in contracts
     }
 
+    original = manager._create_lease_locked
+    entered = threading.Event()
+    release = threading.Event()
+
+    def controlled(contract, *, task_states=None):
+        if contract.task_id == first:
+            entered.set()
+            assert release.wait(timeout=5)
+        return original(contract, task_states=task_states)
+
+    manager._create_lease_locked = controlled
+
     def acquire(contract):
         try:
             return ("ok", manager.create_lease(contract, task_states=states).task_id)
@@ -279,8 +322,20 @@ def test_create_lease_reservation_lock_allows_one_overlapping_request(tmp_path):
             return ("blocked", str(exc))
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(acquire, contracts))
-    assert sorted(item[0] for item in results) == ["blocked", "ok"]
+        first_future = pool.submit(
+            acquire, next(item for item in contracts if item.task_id == first)
+        )
+        assert entered.wait(timeout=5)
+        second_future = pool.submit(
+            acquire, next(item for item in contracts if item.task_id == second)
+        )
+        time.sleep(0.05)
+        assert not second_future.done()
+        release.set()
+        first_result = first_future.result(timeout=5)
+        second_result = second_future.result(timeout=5)
+    assert first_result == ("ok", first)
+    assert second_result[0] == "blocked"
 
 
 def test_public_service_admission_allows_disjoint_and_blocks_overlap(tmp_path):
