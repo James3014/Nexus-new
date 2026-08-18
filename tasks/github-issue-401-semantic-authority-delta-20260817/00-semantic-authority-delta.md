@@ -58,8 +58,9 @@ to `GOVERNED`.
 - **Rebind/correction worker:** Luna (`codex_luna`) performed the current-main
   rebind and provenance correction; this does not rewrite the original
   implementer identity.
-- **Starting branch:** `codex/issue-401-semantic-authority-delta` at the exact
-  rebind baseline above, clean before this rebind correction.
+- **Starting branch:** `codex/issue-401-semantic-authority-delta` was rebound
+  from PR/base `8c2584d6053dd1f04dc87333f807fbea1726545e`; this correction
+  started at `correction_start_revision=63b9f75f6a446a06246fc2c2c6cfa7dcf2b395ab`.
 - **Execution authority:** this Git-tracked card authorizes one bounded Luna
   rebind/provenance-correction attempt after the primary commits and re-reads
   the card hash; Luna did not implement the semantic contract.
