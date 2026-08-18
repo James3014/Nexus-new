@@ -1732,8 +1732,8 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
     name = str(capability_name)
     registry_key = _resolve_executor_registry_key(name)
     try:
-        from nexus.core.capability_executor_registry import get_executor
         from nexus.core.belief_contracts import CapabilityExecutionPlan
+        from nexus.core.capability_executor_registry import get_executor
     except Exception:
         return None
 
@@ -1785,6 +1785,17 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
     _MEMORY_CONSTRAINT_KEYS = frozenset({"workspace_root", "memory_query"})
     _PREGATE_CONSTRAINT_KEYS = frozenset(
         {"workspace_root", "verify_commands", "verify_timeout_sec"}
+    )
+    _HARNESS_PREFLIGHT_CONSTRAINT_KEYS = frozenset(
+        {
+            "workspace_root",
+            "verify_commands",
+            "verify_timeout_sec",
+            "route",
+            "task_type",
+            "pending_capabilities",
+            "selected_capabilities",
+        }
     )
     _SEMANTIC_SEARCH_CONSTRAINT_KEYS = frozenset(
         {"workspace_root", "search_query", "search_table", "search_limit"}
@@ -1846,8 +1857,10 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
             keys = _CODEINTEL_CONSTRAINT_KEYS
         elif name == "memory":
             keys = _MEMORY_CONSTRAINT_KEYS
-        elif name in {"pregate", "harness_preflight_sensor"}:
+        elif name == "pregate":
             keys = _PREGATE_CONSTRAINT_KEYS
+        elif name == "harness_preflight_sensor":
+            keys = _HARNESS_PREFLIGHT_CONSTRAINT_KEYS
         elif name in {"lancedb", "semantic_searcher"}:
             keys = _SEMANTIC_SEARCH_CONSTRAINT_KEYS
         elif name == "jit_validation":
@@ -1902,7 +1915,7 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
                 out["workspace_root"] = route.get("workspace_root")
             if "memory_query" not in out and context.get("task_statement") not in (None, ""):
                 out["memory_query"] = context.get("task_statement")
-        if name in {"pregate", "harness_preflight_sensor"}:
+        if name == "pregate":
             route = context.get("route") if isinstance(context.get("route"), Mapping) else {}
             codeintel = (
                 context.get("codeintel")
@@ -1914,6 +1927,25 @@ def build_real_executor_invoker(capability_name: str) -> CapabilityInvoker | Non
                     out[k] = codeintel.get(k)
                 if k == "workspace_root" and k not in out and route.get(k) not in (None, ""):
                     out[k] = route.get(k)
+        if name == "harness_preflight_sensor":
+            route = context.get("route") if isinstance(context.get("route"), Mapping) else {}
+            codeintel = (
+                context.get("codeintel")
+                if isinstance(context.get("codeintel"), Mapping)
+                else {}
+            )
+            for key in ("workspace_root", "verify_commands", "verify_timeout_sec"):
+                if key not in out and codeintel.get(key) not in (None, ""):
+                    out[key] = codeintel.get(key)
+            if "route" not in out and route:
+                out["route"] = dict(route)
+            for key in ("task_type", "pending_capabilities", "selected_capabilities"):
+                if key not in out and context.get(key) is not None:
+                    out[key] = context.get(key)
+                if key not in out and codeintel.get(key) is not None:
+                    out[key] = codeintel.get(key)
+            if "workspace_root" not in out and route.get("workspace_root") not in (None, ""):
+                out["workspace_root"] = route.get("workspace_root")
         if name in {"lancedb", "semantic_searcher"}:
             route = context.get("route") if isinstance(context.get("route"), Mapping) else {}
             codeintel = (

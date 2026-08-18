@@ -71,6 +71,8 @@ scratch/qwen3b_s2t_adapter.tar.gz
 .nexus/training/adapters/
 
 # Machine-local credentials and generated TLS material
+/*.ts.net.key
+/*.ts.net.crt
 vault/tenants/*/*.key
 nexus_swarm/certs/*.crt
 nexus_swarm/certs/*.csr

@@ -4,7 +4,7 @@
 import json, sys, yaml
 from pathlib import Path
 
-NEXUS_ROOT = Path("/Users/jameschen/Workspace/nexus")
+NEXUS_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_registry_requires_evidence_tier():

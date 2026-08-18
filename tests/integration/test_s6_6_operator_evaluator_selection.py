@@ -4,7 +4,7 @@
 import json, sys
 from pathlib import Path
 
-NEXUS_ROOT = Path("/Users/jameschen/Workspace/nexus")
+NEXUS_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_decision_request_exists():
