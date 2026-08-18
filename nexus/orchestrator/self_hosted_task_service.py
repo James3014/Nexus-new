@@ -89,7 +89,11 @@ from nexus.orchestrator.task_contract import (
     MutationMode,
 )
 from nexus.orchestrator.worker_escalation import WorkerEscalationPolicy
-from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager
+from nexus.orchestrator.worktree_manager import (
+    TargetWorktreeLease,
+    WorktreeManager,
+    mutation_domains_conflict,
+)
 from nexus.services.model_workforce_policy import WorkforcePolicyLoader
 from nexus.services.runtime_workforce_admission import evaluate_runtime_workforce_admission
 
@@ -5064,9 +5068,15 @@ class SelfHostedTaskService:
             if (
                 current.get("task_id") != contract.task_id
                 and current.get("status") in {"TARGET_LEASED", "WORKER_RUNNING", "WORKER_COMPLETED", "CANDIDATE_CAPTURED", "VERIFIED"}
-                and not request.get("competition_id")
             ):
-                raise RuntimeError("serial Target budget exceeded: another task owns the active Target")
+                try:
+                    conflict = mutation_domains_conflict(current, contract)
+                except ValueError as exc:
+                    raise RuntimeError(
+                        "serial Target budget exceeded: active Target identity or scope is ambiguous"
+                    ) from exc
+                if conflict:
+                    raise RuntimeError("serial Target budget exceeded: another task owns the overlapping Target")
         attempt_id = attempt_id_hint if action else uuid4().hex
         now = _utc_now()
         state: dict[str, Any] = {

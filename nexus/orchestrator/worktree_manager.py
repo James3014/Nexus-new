@@ -4,11 +4,10 @@ import subprocess
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
-from typing import Callable, Dict, Mapping, Optional, Sequence
+from typing import Any, Callable, Dict, Mapping, Optional, Sequence
 
 from nexus.orchestrator.collaboration_realm import CollaborationRealmVerifier
 from nexus.orchestrator.task_contract import ApprovalStatus, SelfHostedTaskContract
-
 
 NEXUS_SALVAGE_BOT_NAME = "Nexus Salvage Bot"
 NEXUS_SALVAGE_BOT_EMAIL = "nexus-salvage-bot@nexus.local"
@@ -17,6 +16,113 @@ _DIRECT_TERMINAL_STATUSES = frozenset({
     "INTEGRATED", "INTEGRATION_FAILED", "CANCELLED", "REHEARSAL_VERIFIED",
     "DIRECT_COMPLETED", "DIRECT_RECONCILE_REQUIRED", "INTEGRATED_AND_CLEANED",
 })
+
+
+def _record_value(record: Any, key: str, default: Any = None) -> Any:
+    if isinstance(record, Mapping):
+        return record.get(key, default)
+    return getattr(record, key, default)
+
+
+def _record_contract(record: Any) -> Any:
+    contract = _record_value(record, "contract")
+    return contract if contract is not None else record
+
+
+def _normalized_mutation_paths(record: Any) -> tuple[str, ...]:
+    contract = _record_contract(record)
+    raw = _record_value(contract, "allowed_files")
+    if raw is None:
+        raw = _record_value(contract, "allowed_paths")
+    if not isinstance(raw, (list, tuple)) or not raw:
+        raise ValueError("MUTATION_DOMAIN_INVALID: allowed paths are required")
+    normalized: list[str] = []
+    for item in raw:
+        if not isinstance(item, str) or not item.strip():
+            raise ValueError("MUTATION_DOMAIN_INVALID: path is not a string")
+        path = item.strip()
+        if path.startswith("/") or "\\" in path or "//" in path:
+            raise ValueError("MUTATION_DOMAIN_INVALID: path is not repository-relative")
+        parts = path.split("/")
+        if any(part in {"", ".", ".."} for part in parts):
+            raise ValueError("MUTATION_DOMAIN_INVALID: path is ambiguous")
+        if path in normalized or any(
+            path == other or path.startswith(other + "/") or other.startswith(path + "/")
+            for other in normalized
+        ):
+            raise ValueError("MUTATION_DOMAIN_INVALID: overlapping allowed paths")
+        normalized.append(path)
+    return tuple(sorted(normalized))
+
+
+def _validate_mutation_identity(record: Any) -> None:
+    task_id = str(_record_value(record, "task_id") or _record_value(_record_contract(record), "task_id") or "").strip()
+    if not task_id:
+        raise ValueError("MUTATION_IDENTITY_INVALID: task id is missing")
+    contract = _record_contract(record)
+    controller = str(
+        _record_value(record, "controller_worktree")
+        or _record_value(contract, "controller_repo_root")
+        or ""
+    ).strip()
+    revision = str(
+        _record_value(record, "controller_revision")
+        or _record_value(contract, "controller_revision")
+        or ""
+    ).strip()
+    if not controller or not controller.startswith("/") or len(revision) != 40:
+        raise ValueError("MUTATION_IDENTITY_INVALID: controller binding is incomplete")
+    status = str(_record_value(record, "status") or "").upper()
+    lease = _record_value(record, "lease")
+    for key in ("attempt_id", "lease_id"):
+        value = _record_value(record, key)
+        if value is None and key == "lease_id" and isinstance(lease, Mapping):
+            value = lease.get(key)
+        if value is None and status in {
+            "TARGET_LEASED", "WORKER_RUNNING", "WORKER_COMPLETED", "CANDIDATE_CAPTURED", "VERIFIED",
+        }:
+            raise ValueError(f"MUTATION_IDENTITY_INVALID: {key} is missing")
+        if value is not None and not str(value).strip():
+            raise ValueError(f"MUTATION_IDENTITY_INVALID: {key} is empty")
+        expected = _record_value(record, f"expected_{key}")
+        if expected is not None and value != expected:
+            raise ValueError(f"MUTATION_IDENTITY_INVALID: {key} is stale")
+    for key, value in (
+        ("controller_revision", revision),
+        ("controller_worktree", controller),
+    ):
+        expected = _record_value(record, f"expected_{key}")
+        if expected is not None and value != expected:
+            raise ValueError(f"MUTATION_IDENTITY_INVALID: {key} is stale")
+    if _record_value(record, "competition_id") is not None:
+        raise ValueError("MUTATION_IDENTITY_INVALID: forged competition identity")
+
+
+def mutation_domains_conflict(left: Any, right: Any) -> bool:
+    """Fail-closed conflict predicate for two isolated mutation domains."""
+    _validate_mutation_identity(left)
+    _validate_mutation_identity(right)
+    left_contract = _record_contract(left)
+    right_contract = _record_contract(right)
+    left_mode = str(_record_value(left_contract, "mutation_mode") or "ISOLATED_TARGET").upper()
+    right_mode = str(_record_value(right_contract, "mutation_mode") or "ISOLATED_TARGET").upper()
+    if left_mode == "DIRECT_CANONICAL" or right_mode == "DIRECT_CANONICAL":
+        return True
+    left_controller = str(_record_value(left, "controller_worktree") or _record_value(left_contract, "controller_repo_root") or "")
+    right_controller = str(_record_value(right, "controller_worktree") or _record_value(right_contract, "controller_repo_root") or "")
+    left_revision = str(_record_value(left, "controller_revision") or _record_value(left_contract, "controller_revision") or "")
+    right_revision = str(_record_value(right, "controller_revision") or _record_value(right_contract, "controller_revision") or "")
+    if left_controller != right_controller or left_revision != right_revision:
+        return True
+    left_paths = _normalized_mutation_paths(left)
+    right_paths = _normalized_mutation_paths(right)
+    return any(
+        left_path == right_path
+        or left_path.startswith(right_path + "/")
+        or right_path.startswith(left_path + "/")
+        for left_path in left_paths
+        for right_path in right_paths
+    )
 
 
 @dataclass(frozen=True)
@@ -326,12 +432,7 @@ class WorktreeManager:
         target_detached = False
         target_created_this_call = False
         branch_created_this_call = False
-        active_targets = self._active_target_worktrees(
-            controller_root,
-            target_path,
-            task_states=task_states,
-        )
-        if active_targets:
+        if self.target_conflict(contract, task_states=task_states):
             raise RuntimeError("serial Target budget exceeded: active Target limit is 1")
         if target_path.exists():
             entry = self._worktree_entry(controller_root, target_path)
@@ -460,6 +561,34 @@ class WorktreeManager:
             target_detached=target_detached,
             collaboration_provenance=collaboration_provenance or None,
         )
+
+    def target_conflict(
+        self,
+        contract: SelfHostedTaskContract,
+        *,
+        task_states: Optional[Mapping[str, dict]] = None,
+    ) -> bool:
+        """Return whether an existing active Target overlaps this contract."""
+        controller_root, target_path, _ = self._resolved_paths(contract)
+        active = self._active_target_worktrees(
+            controller_root, target_path, task_states=task_states,
+        )
+        if not active:
+            return False
+        states = task_states or {}
+        for entry in active:
+            branch = entry.get("branch", "")
+            task_id = ""
+            if branch.startswith("refs/heads/nexus/task/"):
+                task_id = branch.removeprefix("refs/heads/nexus/task/")
+            elif branch.startswith("nexus/task/"):
+                task_id = branch.removeprefix("nexus/task/")
+            existing = states.get(task_id)
+            if not isinstance(existing, Mapping):
+                return True
+            if mutation_domains_conflict(existing, contract):
+                return True
+        return False
 
     def protect_candidate(
         self,
