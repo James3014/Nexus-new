@@ -338,8 +338,10 @@ def test_create_lease_reservation_lock_has_controlled_order(tmp_path, first, sec
     assert second_result[0] == "blocked"
 
 
-def test_public_service_admission_allows_disjoint_and_blocks_overlap(tmp_path):
+def test_public_service_admission_allows_disjoint_and_blocks_overlap(tmp_path, monkeypatch):
     calls = []
+    monkeypatch.delenv("NEXUS_TARGET_ROOT_OVERRIDE", raising=False)
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(tmp_path / "targets"))
 
     def runner(contract, request, update):
         calls.append((contract.task_id, contract.target_repo_root))
