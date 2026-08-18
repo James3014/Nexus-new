@@ -5,8 +5,8 @@ status: ACTIVE
 terminal_state: CANDIDATE_PENDING_OWNER_RECONCILIATION
 source_issue: "#65"
 baseline_main: 727efaac9a354748a50946b7012c8847afea6ded
-reconciled_main: 9296d68fe19d933cb78b9a0470a054ea5efd4c2f
-current_main: 9296d68fe19d933cb78b9a0470a054ea5efd4c2f
+reconciled_main: 8c2584d6053dd1f04dc87333f807fbea1726545e
+current_main: 8c2584d6053dd1f04dc87333f807fbea1726545e
 historical_scope_current_frontier: 00-gate-a-false-witnesses.md
 readiness_marker: GOLDEN_WITNESS_SEMANTIC_HARDENING_CANDIDATE_PENDING_OWNER_RECONCILIATION
 claim_ceiling: GOLDEN_WITNESS_SEMANTIC_HARDENING_CANDIDATE_ONLY
@@ -28,7 +28,7 @@ This record is a reconciliation candidate; it does not claim Issue #65
 terminal. The historical contract above is preserved as the implementation
 baseline.
 
-- Current main: `9296d68fe19d933cb78b9a0470a054ea5efd4c2f` (fresh rebind
+- Current main: `8c2584d6053dd1f04dc87333f807fbea1726545e` (fresh rebind
   target for this reconciliation).
 - Physical implementation receipts, each verified ancestor of current main:
   - PR #227 (Gate A GB-019/GB-042 semantic witnesses): merge
