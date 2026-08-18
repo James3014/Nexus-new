@@ -5,8 +5,9 @@ campaign_id: github-issue-98-merge-block-controller-throughput-20260818
 source_issue: "#98"
 owner: James Chen
 status: ACTIVE
-baseline_revision: 8c2584d6053dd1f04dc87333f807fbea1726545e
+baseline_revision: 71ae533ec9f795477131645f96cea1c93b4f4d40
 historical_baseline_revision: 1ee1c69332514bdbaa5a98f5ed29fad109425c32
+rebound_from_current_main: 8c2584d6053dd1f04dc87333f807fbea1726545e
 commit_required: true
 candidate_required: true
 worker_may_commit: true
