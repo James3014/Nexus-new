@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,7 @@ from nexus.services.grok_account_pool import (
     GrokAccount,
     GrokAccountPoolError,
     GrokAccountPoolExhaustedError,
+    GrokAccountPoolLeaseError,
     GrokAccountPoolManager,
     GrokAttemptLineage,
     build_grok_isolated_env,
@@ -302,6 +304,33 @@ def test_non_eligible_failure_does_not_rotate_or_cooldown(tmp_path):
         assert manager._accounts[0].cooldown_until is None
     assert lease.account_alias_hash == original_hash
     assert lease.lease_id in manager._pool._active_leases
+
+
+def test_equal_but_unowned_lease_cannot_release_or_rotate(tmp_path):
+    manager = _make_manager(tmp_path)
+    lease = manager.acquire("consumer-clone")
+    clone = replace(lease)
+
+    assert clone == lease
+    assert clone is not lease
+    with pytest.raises(GrokAccountPoolLeaseError, match="GROK_INVALID_ACCOUNT_LEASE"):
+        manager.release(clone)
+    with pytest.raises(GrokAccountPoolLeaseError, match="GROK_INVALID_ACCOUNT_LEASE"):
+        manager.report_failure(clone, AccountFailureKind.QUOTA_EXHAUSTED)
+
+    assert lease.lease_id in manager._active_leases
+    assert manager._accounts[0].is_active is True
+
+
+def test_released_or_replayed_lease_fails_closed(tmp_path):
+    manager = _make_manager(tmp_path)
+    lease = manager.acquire("consumer-replay")
+    manager.release(lease)
+
+    with pytest.raises(GrokAccountPoolLeaseError, match="GROK_INVALID_ACCOUNT_LEASE"):
+        manager.release(lease)
+    with pytest.raises(GrokAccountPoolLeaseError, match="GROK_INVALID_ACCOUNT_LEASE"):
+        manager.report_failure(lease, AccountFailureKind.QUOTA_EXHAUSTED)
 
 
 @pytest.mark.parametrize(
