@@ -47,10 +47,13 @@ def test_merge_waiting_disjoint_task_reaches_distinct_admission_domain():
     ],
 )
 def test_exact_and_parent_child_overlap_blocks_before_provider(left, right):
-    assert mutation_domains_conflict(
-        _task(task_id="a", allowed_files=left),
-        _task(task_id="b", allowed_files=right, status="SUBMITTED"),
-    ) is True
+    assert (
+        mutation_domains_conflict(
+            _task(task_id="a", allowed_files=left),
+            _task(task_id="b", allowed_files=right, status="SUBMITTED"),
+        )
+        is True
+    )
 
 
 @pytest.mark.parametrize(
