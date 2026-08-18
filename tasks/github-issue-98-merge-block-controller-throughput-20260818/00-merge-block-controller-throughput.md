@@ -5,7 +5,8 @@ campaign_id: github-issue-98-merge-block-controller-throughput-20260818
 source_issue: "#98"
 owner: James Chen
 status: ACTIVE
-baseline_revision: 1ee1c69332514bdbaa5a98f5ed29fad109425c32
+baseline_revision: 8c2584d6053dd1f04dc87333f807fbea1726545e
+historical_baseline_revision: 1ee1c69332514bdbaa5a98f5ed29fad109425c32
 commit_required: true
 candidate_required: true
 worker_may_commit: true
@@ -32,7 +33,10 @@ block before provider invocation.
 
 ## Authority and dependencies
 
-- GitHub main baseline is the exact revision above.
+- GitHub main baseline is the exact rebound revision above. The historical
+  baseline is provenance only and grants no stale source authority.
+- Issue #163 is physically closed at current main; standing-grant changes are a
+  settled predecessor and remain outside this Candidate's scope.
 - Issue #96 completed `POST_30_LOCAL_DELTA_FULLY_ACCOUNTED` in comment
   `#5323785365`; the #98 semantic prerequisite is cleared for source mutation.
 - Issues #7 and #8 are closed; their historical moving-blocker text is stale.

@@ -3,7 +3,8 @@ artifact_authority: current
 owner: James Chen
 status: active
 source_issue: "#98"
-baseline_main: 1ee1c69332514bdbaa5a98f5ed29fad109425c32
+baseline_main: 8c2584d6053dd1f04dc87333f807fbea1726545e
+rebound_from_main: 1ee1c69332514bdbaa5a98f5ed29fad109425c32
 current_frontier: 00-merge-block-controller-throughput.md
 AUTO_CHAIN: false
 ---
