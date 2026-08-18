@@ -57,7 +57,7 @@ jobs:
           test "$DEFAULT_BRANCH" = main
           test "$WORKFLOW_REF" = "$REPOSITORY/$workflow_path@refs/heads/$DEFAULT_BRANCH"
           test "$WORKFLOW_SHA" = "$(printf '%s' "$WORKFLOW_SHA" | grep -E '^[0-9a-f]{40}$')"
-          basic_auth="$(printf 'x-access-token:%s' "$TRUSTED_TOKEN" | base64 | tr -d '\n')"
+          basic_auth="$(printf '%s' "x-access-token:$TRUSTED_TOKEN" | base64 | tr -d '\n')"
           test -n "$basic_auth"
           test "$(printf '%s' "$basic_auth" | tr -cd '\n' | wc -c)" -eq 0
           git init --bare "$bare_repo"
@@ -86,6 +86,17 @@ jobs:
           test "$(git hash-object "$trusted_script")" = "$script_blob_id"
           script_sha256="$(sha256sum "$trusted_script" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$trusted_script" | cut -d' ' -f1)"
           printf '%s\n' "commit=$WORKFLOW_SHA" "path=$script_path" "blob=$script_blob_id" "sha256=$script_sha256" > "$trusted_dir/trusted-source.receipt"
+          golden_script_path='scripts/ops/trusted_golden_verifier.py'
+          golden_script_entry="$(git -C "$bare_repo" ls-tree "$WORKFLOW_SHA" -- "$golden_script_path")"
+          golden_script_blob_id="$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA:$golden_script_path")"
+          test "$golden_script_entry" = "100644 blob $golden_script_blob_id	$golden_script_path"
+          test "$(git -C "$bare_repo" cat-file -t "$WORKFLOW_SHA:$golden_script_path")" = blob
+          trusted_golden_script="$trusted_dir/trusted_golden_verifier.py"
+          git -C "$bare_repo" cat-file blob "$WORKFLOW_SHA:$golden_script_path" > "$trusted_golden_script"
+          test "$(stat -c '%a' "$trusted_golden_script" 2>/dev/null || stat -f '%Lp' "$trusted_golden_script")" = 644
+          test "$(git hash-object "$trusted_golden_script")" = "$golden_script_blob_id"
+          golden_script_sha256="$(sha256sum "$trusted_golden_script" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$trusted_golden_script" | cut -d' ' -f1)"
+          printf '%s\n' "commit=$WORKFLOW_SHA" "path=$golden_script_path" "blob=$golden_script_blob_id" "sha256=$golden_script_sha256" >> "$trusted_dir/trusted-source.receipt"
           test "$(git -C "$bare_repo" config --get remote.origin.url)" = "https://github.com/$REPOSITORY.git"
           python -c 'import json, os; event=json.loads(os.environ["EVENT_JSON"]); event.update(event_name=os.environ["EVENT_NAME"], workflow_ref=os.environ["WORKFLOW_REF"], workflow_sha=os.environ["WORKFLOW_SHA"], run_id=int(os.environ["RUN_ID"])); json.dump(event, open(os.environ["RUNNER_TEMP"] + "/anchor-event.json", "w"))'
           python "$trusted_script" runtime-builder --repo-root "$bare_repo" --workflow-sha "$WORKFLOW_SHA" --uv-executable "$(command -v uv)" --output-dir "$runtime_dir"
@@ -210,6 +221,17 @@ jobs:
           test "$(stat -c '%a' "$trusted_script" 2>/dev/null || stat -f '%Lp' "$trusted_script")" = 644
           script_sha256="$(sha256sum "$trusted_script" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$trusted_script" | cut -d' ' -f1)"
           printf '%s\n' "commit=$WORKFLOW_SHA" "path=$script_path" "blob=$script_blob_id" "sha256=$script_sha256" > "$trusted_dir/trusted-source.receipt"
+          golden_script_path='scripts/ops/trusted_golden_verifier.py'
+          golden_script_entry="$(git -C "$bare_repo" ls-tree "$WORKFLOW_SHA" -- "$golden_script_path")"
+          golden_script_blob_id="$(git -C "$bare_repo" rev-parse "$WORKFLOW_SHA:$golden_script_path")"
+          test "$golden_script_entry" = "100644 blob $golden_script_blob_id	$golden_script_path"
+          test "$(git -C "$bare_repo" cat-file -t "$WORKFLOW_SHA:$golden_script_path")" = blob
+          trusted_golden_script="$trusted_dir/trusted_golden_verifier.py"
+          git -C "$bare_repo" cat-file blob "$WORKFLOW_SHA:$golden_script_path" > "$trusted_golden_script"
+          test "$(stat -c '%a' "$trusted_golden_script" 2>/dev/null || stat -f '%Lp' "$trusted_golden_script")" = 644
+          test "$(git hash-object "$trusted_golden_script")" = "$golden_script_blob_id"
+          golden_script_sha256="$(sha256sum "$trusted_golden_script" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$trusted_golden_script" | cut -d' ' -f1)"
+          printf '%s\n' "commit=$WORKFLOW_SHA" "path=$golden_script_path" "blob=$golden_script_blob_id" "sha256=$golden_script_sha256" >> "$trusted_dir/trusted-source.receipt"
           test "$(git -C "$bare_repo" config --get remote.origin.url)" = "https://github.com/$REPOSITORY.git"
       - name: Download controller bundle
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -239,6 +261,28 @@ jobs:
           test -f "$RUNNER_TEMP/trusted-anchor/evidence/raw-evidence.json"
           cp "$RUNNER_TEMP/trusted-anchor/evidence/raw-evidence.json" "$RUNNER_TEMP/trusted-anchor/raw-evidence.json"
           python "$RUNNER_TEMP/trusted-verifier-source/trusted_deletion_anchor.py" verifier --bundle-dir "$RUNNER_TEMP/trusted-anchor" --expected-workflow-ref "$EXPECTED_WORKFLOW_REF" --expected-workflow-sha "$EXPECTED_WORKFLOW_SHA" --expected-run-id "$EXPECTED_RUN_ID" --verify-evidence "$RUNNER_TEMP/trusted-anchor/raw-evidence.json" --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256" --expected-external-anchor-sha256 "$EXPECTED_EXTERNAL_ANCHOR_SHA256" --expected-event-name "$EXPECTED_EVENT_NAME" --expected-repository "$EXPECTED_REPOSITORY" --expected-default-branch "$EXPECTED_DEFAULT_BRANCH" --expected-pull-request-number "$EXPECTED_PULL_REQUEST_NUMBER" --expected-base-sha "$EXPECTED_BASE_SHA" --expected-head-sha "$EXPECTED_HEAD_SHA"
+      - name: Verify exact-head Golden corpus with trusted default-branch source
+        env:
+          REPOSITORY: ${{ github.repository }}
+          TRUSTED_TOKEN: ${{ github.token }}
+          EXPECTED_PR_NUMBER: ${{ github.event.pull_request.number }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          candidate_repo="$RUNNER_TEMP/trusted-golden-candidate.git"
+          cleanup_candidate() {
+            rm -rf -- "$candidate_repo"
+          }
+          trap cleanup_candidate EXIT
+          git init --bare "$candidate_repo"
+          git -C "$candidate_repo" remote add origin "https://github.com/$REPOSITORY.git"
+          basic_auth="$(printf 'x-access-token:%s' "$TRUSTED_TOKEN" | base64 | tr -d '\n')"
+          GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader GIT_CONFIG_VALUE_0="Authorization: basic $basic_auth" \
+            git -C "$candidate_repo" fetch --no-tags --depth=1 origin "refs/pull/$EXPECTED_PR_NUMBER/head"
+          test "$(git -C "$candidate_repo" rev-parse "$EXPECTED_HEAD_SHA^{commit}")" = "$EXPECTED_HEAD_SHA"
+          test "$(git -C "$candidate_repo" cat-file -t "$EXPECTED_HEAD_SHA")" = commit
+          python "$RUNNER_TEMP/trusted-verifier-source/trusted_golden_verifier.py" --repo-root "$candidate_repo" --head-sha "$EXPECTED_HEAD_SHA" --manifest "$RUNNER_TEMP/trusted-anchor/manifest.json" --anchor-evidence "$RUNNER_TEMP/trusted-anchor/raw-evidence.json" --json-report "$RUNNER_TEMP/trusted-anchor/trusted-golden-verifier.json"
+          test "$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["trusted_source"])' "$RUNNER_TEMP/trusted-anchor/trusted-golden-verifier.json")" = "default-branch-verifier"
       - name: Cleanup trusted verifier source
         if: always()
         run: |

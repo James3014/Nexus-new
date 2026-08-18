@@ -413,7 +413,18 @@ def test_critical_regression_eia_unattended_freshness_end_to_end(tmp_path):
     )
 
     # Upstream actor advances remote main to commit B with task card B
-    card_b_text = "# task card B - advanced\n"
+    card_b_text = (
+        "# Task Card: task-b\n\n"
+        "- task_id: `task-b`\n"
+        "- status: ACTIVE\n\n"
+        "## Allowed files\n"
+        "- `nexus/a.py`\n\n"
+        "## Verification commands\n"
+        "```bash\n"
+        "python3 --version\n"
+        "git status\n"
+        "```\n"
+    )
     (card_dir / "x.md").write_text(card_b_text, encoding="utf-8")
     subprocess.run(["git", "add", "."], cwd=work, check=True, capture_output=True)
     subprocess.run(["git", "commit", "-m", "commit B"], cwd=work, check=True, capture_output=True)

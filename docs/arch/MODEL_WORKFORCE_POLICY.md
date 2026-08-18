@@ -9,7 +9,7 @@
 **Machine source:** `nexus/config/model_workforce.yaml`
 
 **Benchmark matrix:** `nexus/config/model_three_arm_matrix.yaml`
-**Last verified:** 2026-08-15
+**Last verified:** 2026-08-17
 
 This file defines workforce eligibility: which model workers Nexus may admit,
 the context each worker may receive, its autonomy ceiling, and the conditions
@@ -78,7 +78,7 @@ The 2026-07-29 matrix is a historical baseline and comparative diagnostic instru
 | Agy Flash Medium — `gemini-3.6-flash-medium` | Bounded candidate/implementation and focused verification only | L1 | **Nexus-bounded** | Existing registered conditional identity preserved for backward compatibility; exact Task Card, parser/verifier, and independent verification required; non-default route |
 | Agy Flash 3.7 Medium — `gemini-3.7-flash-medium` | Bounded candidate/implementation and focused verification | L3 | **Nexus-bounded** | Distinct registered conditional identity; admitted autonomy ceiling L3; exact Task Card, parser/verifier, and independent verification required; non-default route; experimental L4 non-admitted |
 | Grok 4.5 | Independent review, hidden-defect search, evidence audit; bounded candidate generation | L2+ | Bounded or Full semantic context | Available; benchmark 11/11 on all arms |
-| OpenCode MiMo — `opencode/mimo-v2.5-free` | Bounded code candidate | L1 | Bounded isolated prompt | Available; 11/11 all arms; high fixed input-token overhead |
+| OpenCode MiMo — `opencode/mimo-v2.5-free` | Bounded code candidate | L1 | Bounded isolated prompt | Available; admitted ceiling stays L1; 2026-08-17 cumulative calibration records semantic stable floor L1.5 and semantic frontier L3 separately; NOT_PROMOTED; tool-discipline requalification pending; high fixed input-token overhead |
 | OpenCode Ling — `opencode/ling-3.0-flash-free` | Bounded code candidate | Current L1 | Bounded isolated prompt | Available; 11/11 all arms; high fixed input-token overhead. The unapproved v2 proposal would lower it to read-only L0 |
 | OpenCode DeepSeek V4 Flash — `opencode/deepseek-v4-flash-free` | Bounded OpenCode code candidate | L2 | Bounded isolated prompt | Owner-approved 2026-08-15; admitted autonomy ceiling L2; non-default route; experimental L4 non-admitted; shares semantic capability lineage with `opencode-go/deepseek-v4-flash` while execution identities remain exact and separate; high fixed input-token overhead |
 | Cline — `glm-5.2` | Bounded code candidate | L1 | Bounded isolated prompt | Registered conditional; Cline CLI adapter and external-runtime authorization required |
@@ -258,6 +258,63 @@ The Owner-approved Model Workforce Lineage Writeback amendment is active:
    - `opencode/deepseek-v4-flash-free` and `opencode-go/deepseek-v4-flash` share semantic capability lineage (`deepseek-v4-flash`) only; their workforce and admission execution identities remain exact and separate. Requesting `opencode-go/deepseek-v4-flash` fails closed unless an exact registered worker exists.
    - Bounded context, isolated directory, JSON event receipt, parser, focused tests, and verifier controls remain mandatory. Output is candidate-only with no route, reviewer, approval, integration, merge, push, or production claim authority.
 
-## 11. Pending v2 collaboration proposal
+## 11. Dated Owner-approved MiMo calibration amendment — 2026-08-17
+
+The Owner-approved MiMo cumulative calibration / governance writeback amendment is active:
+
+1. **Exact execution identity** stays bound: provider `opencode`, exact model
+   `opencode/mimo-v2.5-free`, state `REGISTERED_CONDITIONAL`, admitted autonomy
+   ceiling **L1**, current bounded candidate roles unchanged.
+2. **Measured semantic evidence (2026-08-17 cumulative calibration)**: semantic
+   stable floor **L1.5**, current semantic frontier **L3**, 53 new non-baseline
+   trials, semantic score **51/53**, frontier stress **15/15**, verifier-guided
+   repair **4/5**, strict schema/protocol discipline **CONDITIONAL**, tool/scope
+   discipline **HARD FAIL**.
+3. **Critical invariant**: semantic capability frontier **L3** != trusted
+   execution ceiling **L1** != admitted workforce authority **L1**. MiMo is
+   **NOT_PROMOTED**; it is not promoted to L2 or L3.
+4. **Authority conclusion**: trusted mutation/execution ceiling **L1**, admitted
+   autonomy **L1**, state stays `REGISTERED_CONDITIONAL`, current bounded
+   candidate roles stay unchanged, external independent verification remains
+   required.
+5. **Tool-discipline blocker**: MiMo previously violated an answer-only / bounded
+   calibration by performing unauthorized filesystem/tool mutation in an
+   isolated temporary scope. This counts as a real tool-discipline failure even
+   though canonical Nexus was not touched.
+6. **Promotion gate**: dedicated MiMo Tool Discipline Requalification under
+   durable DevSpace execution contracts, checking at minimum `expectedHead`,
+   exact `writePaths`, `maxFiles`, final physical reconciliation, deliberate
+   out-of-scope write rejection/violation detection, and external independent
+   verification. GitHub Issue #400 tracks the durable DevSpace
+   profile/follow-on transport gate; it is **NOT** claimed completed.
+7. **Free-first paid-Go policy** (Owner policy = **FREE_FIRST**): Free `opencode/mimo-v2.5-free` is always first
+   when eligible/runnable. Paid `opencode-go/mimo-v2.5` is a paid fallback only
+   — only before any Free mutation, and only for provider / transport /
+   capacity / quota / exact-model availability blockers, with a fresh Go
+   preflight. Once Free has mutated, created a patch, or physical state is
+   UNKNOWN, no automatic Go switch; reconcile first. Semantic/verifier failure
+   is not an in-place paid fallback trigger. No hidden fallback; no paid-first
+   because Go may be faster/stronger.
+8. `opencode-go/mimo-v2.5` is **NOT** admitted as a workforce worker; Free and
+   Go are **NOT** asserted to be one semantic capability lineage (that relation
+   remains unresolved unless exact current authoritative evidence proves
+   otherwise); no second route selector is created; `CapabilityPlanner`
+   authority is unchanged.
+
+9. **Evidence provenance and transport enforcement:** the 2026-08-17 aggregate
+   is an `OWNER_APPROVED_CUMULATIVE_SUMMARY` only. Its raw trial receipts are
+   `NOT_REPOSITORY_BOUND`; the claim ceiling is
+   `OWNER_APPROVED_CUMULATIVE_SUMMARY_ONLY`, and the baseline is GitHub `main`
+   `9296d68fe19d933cb78b9a0470a054ea5efd4c2f`. The supplied source artifact
+   full SHA-256 identities are recorded in the machine policy. These bind the
+   Owner-supplied source artifacts and OpenCode binary, but do not turn the
+   absent per-trial receipts into an independently reproducible raw benchmark.
+10. **Transport policy enforcement belongs to DevSpace Issue #400**, whose local
+    Candidate is `65103307a014d5e51534828ab5e3c8469b60b732` and whose durable
+    receipt is recorded in the machine policy. `CapabilityPlanner` remains the
+    sole route/capability authority; it does not implement or relax this
+    Free-first pre-mutation fallback contract.
+
+## 12. Pending v2 collaboration proposal
 
 `NEXUS_MULTI_MODEL_COLLABORATION_STANDARD_v2.0_20260728` remains `PROPOSED_FOR_OWNER_APPROVAL`. Its proposed changes—including Ling at read-only L0—are recorded as review inputs, not active authority. This policy and `nexus/config/model_workforce.yaml` remain current until James explicitly approves a replacement or amendment.
