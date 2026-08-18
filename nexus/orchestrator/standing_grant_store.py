@@ -14,12 +14,14 @@ never select an alternative authority root.
 from __future__ import annotations
 
 import errno
+import fcntl
 import json
 import os
 import pwd
 import re
 import stat
 import tempfile
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -257,6 +259,31 @@ def _read_current_hash_nofollow(path: Path) -> str:
     return stored_hash
 
 
+@contextmanager
+def _coordination_lock(directory: Path):
+    """Hold the authority-directory lock across the complete receipt CAS."""
+    lock_path = directory / ".standing-grant.lock"
+    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(str(lock_path), flags, 0o600)
+    except OSError as exc:
+        if exc.errno == errno.ELOOP:
+            raise StandingGrantReceiptError("LOCK_NOT_REGULAR_FILE") from exc
+        raise StandingGrantReceiptError("LOCK_OPEN_FAILED") from exc
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid():
+            raise StandingGrantReceiptError("LOCK_NOT_REGULAR_FILE")
+        if stat.S_IMODE(st.st_mode) != 0o600:
+            raise StandingGrantReceiptError("LOCK_UNSAFE_PERMISSIONS")
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    except OSError as exc:
+        raise StandingGrantReceiptError("LOCK_FAILED") from exc
+    finally:
+        os.close(fd)
+
+
 def _write_bytes(
     canonical: str,
     supersedes_grant_hash: str | None,
@@ -264,43 +291,46 @@ def _write_bytes(
     expected: str | None,
 ) -> None:
     _assert_dir_chain_safe(destination.parent, create=True)
-    present = os.path.lexists(destination)
-    if present:
-        # Replacing an existing receipt requires exact predecessor binding.
-        if supersedes_grant_hash is None:
-            raise StandingGrantReceiptError("SUPERSEDES_HASH_REQUIRED_FOR_REPLACE")
-        if expected is None:
-            raise StandingGrantReceiptError("EXISTS_NO_CAS")
-        if supersedes_grant_hash != expected:
-            raise StandingGrantReceiptError("SUPERSEDES_CAS_MISMATCH")
-        current = _read_current_hash_nofollow(destination)
-        if current != expected:
-            raise StandingGrantReceiptError("STALE_WRITER_CAS_MISMATCH")
-    else:
-        # Initial write: neither a predecessor hash nor a CAS may be supplied.
-        if supersedes_grant_hash is not None or expected is not None:
-            raise StandingGrantReceiptError("INITIAL_WRITE_NO_SUPERSEDES")
-    fd, tmp_name = tempfile.mkstemp(prefix=".standing-grant-", dir=str(destination.parent))
-    try:
-        os.fchmod(fd, 0o600)
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(canonical.encode("utf-8") + b"\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp_name, destination)
-        os.chmod(destination, 0o600)
-        # fsync the parent directory so the rename survives a crash.
-        parent_fd = os.open(str(destination.parent), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    with _coordination_lock(destination.parent):
+        present = os.path.lexists(destination)
+        if present:
+            # Replacing an existing receipt requires exact predecessor binding.
+            if supersedes_grant_hash is None:
+                raise StandingGrantReceiptError("SUPERSEDES_HASH_REQUIRED_FOR_REPLACE")
+            if expected is None:
+                raise StandingGrantReceiptError("EXISTS_NO_CAS")
+            if supersedes_grant_hash != expected:
+                raise StandingGrantReceiptError("SUPERSEDES_CAS_MISMATCH")
+            current = _read_current_hash_nofollow(destination)
+            if current != expected:
+                raise StandingGrantReceiptError("STALE_WRITER_CAS_MISMATCH")
+        else:
+            # Initial write: neither a predecessor hash nor a CAS may be supplied.
+            if supersedes_grant_hash is not None or expected is not None:
+                raise StandingGrantReceiptError("INITIAL_WRITE_NO_SUPERSEDES")
+        fd, tmp_name = tempfile.mkstemp(prefix=".standing-grant-", dir=str(destination.parent))
         try:
-            os.fsync(parent_fd)
-        finally:
-            os.close(parent_fd)
-    except BaseException:
-        try:
-            os.unlink(tmp_name)
-        except FileNotFoundError:
-            pass
-        raise
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(canonical.encode("utf-8") + b"\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp_name, destination)
+            os.chmod(destination, 0o600)
+            # fsync the parent directory so the rename survives a crash.
+            parent_fd = os.open(
+                str(destination.parent), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+            )
+            try:
+                os.fsync(parent_fd)
+            finally:
+                os.close(parent_fd)
+        except BaseException:
+            try:
+                os.unlink(tmp_name)
+            except FileNotFoundError:
+                pass
+            raise
 
 
 def write_standing_grant_receipt(

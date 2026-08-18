@@ -1,3 +1,6 @@
+import json
+import os
+import subprocess
 from datetime import timedelta
 from pathlib import Path
 
@@ -128,6 +131,182 @@ def test_durable_receipt_missing_or_malformed_is_invalid(tmp_path):
     )
     assert decision.outcome is StandingGrantOutcome.GRANT_INVALID
     assert decision.mutation_authorized is False
+
+
+def test_durable_resolution_uses_effective_now_not_old_request_time(tmp_path):
+    ctx = context(
+        allowed_actions=(AutonomyActionClass.GITHUB_MERGE,),
+        expires_at=NOW + timedelta(minutes=5),
+    )
+    receipt = StandingGrantReceipt.issue(grant_id="grant-effective-now", context=ctx)
+    path = Path(_receipt_path(tmp_path))
+    _write_standing_grant_receipt_at(receipt, path)
+    merge_request = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    snap = evidence(fresh_until=NOW + timedelta(hours=1))
+    intent = prepare_merge_intent(ctx, merge_request, snap, now=NOW)
+
+    decision = _resolve_durable_merge_authorization_at(
+        intent,
+        merge_request,
+        snap,
+        receipt_path=path,
+        now=NOW + timedelta(minutes=10),
+    )
+
+    assert decision.outcome is StandingGrantOutcome.GRANT_INVALID
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"owner_id": "other-owner"},
+        {"coordinator_id": "other-coordinator"},
+        {
+            "repository": RepositoryIdentity(
+                repository_id="other/repo",
+                canonical_remote="https://github.com/other/repo.git",
+            )
+        },
+        {"thread_id": "other-thread"},
+        {"goal_id": "other-goal"},
+        {"action": AutonomyActionClass.RUNTIME_ACTIVATE},
+    ],
+)
+def test_durable_explicit_path_rejects_request_scope_mismatches(tmp_path, override):
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    receipt = StandingGrantReceipt.issue(grant_id="grant-scope", context=ctx)
+    path = Path(_receipt_path(tmp_path))
+    _write_standing_grant_receipt_at(receipt, path)
+    original = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    snap = evidence()
+    intent = prepare_merge_intent(ctx, original, snap, now=NOW)
+    changed = request(ctx, **override)
+
+    decision = _resolve_durable_merge_authorization_at(
+        intent, changed, snap, receipt_path=path, now=NOW
+    )
+
+    assert decision.outcome is StandingGrantOutcome.GRANT_OUT_OF_SCOPE
+
+
+def test_durable_explicit_path_preserves_platform_approval_boundary(tmp_path):
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    receipt = StandingGrantReceipt.issue(grant_id="grant-platform", context=ctx)
+    path = Path(_receipt_path(tmp_path))
+    _write_standing_grant_receipt_at(receipt, path)
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    snap = evidence()
+    intent = prepare_merge_intent(ctx, req, snap, now=NOW)
+
+    decision = _resolve_durable_merge_authorization_at(
+        intent,
+        req,
+        snap,
+        receipt_path=path,
+        now=NOW,
+        platform_approval_required=True,
+    )
+
+    assert decision.outcome is StandingGrantOutcome.PLATFORM_APPROVAL_REQUIRED
+
+
+def test_two_fresh_durable_evaluators_reuse_unchanged_receipt(tmp_path):
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    receipt = StandingGrantReceipt.issue(grant_id="grant-fresh-reuse", context=ctx)
+    path = Path(_receipt_path(tmp_path))
+    _write_standing_grant_receipt_at(receipt, path)
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    snap = evidence()
+    intent = prepare_merge_intent(ctx, req, snap, now=NOW)
+    inputs = {}
+    for name, value in (("intent", intent), ("request", req), ("evidence", snap)):
+        item = tmp_path / f"{name}.json"
+        item.write_text(json.dumps(value.model_dump(mode="json")), encoding="utf-8")
+        inputs[name] = item
+    before = path.read_bytes(), path.stat().st_mtime_ns
+    code = (
+        "import json,sys; from datetime import datetime; from pathlib import Path; "
+        "from nexus.contracts.autonomy_goal import StandingGrantContext; "
+        "from nexus.contracts.github_orchestration import GitHubOrchestrationEvidence,MergeIntent; "
+        "from nexus.orchestrator.autonomy_policy import StandingGrantRequest; "
+        "from nexus.orchestrator.github_orchestration import _resolve_durable_merge_authorization_at; "
+        "load=lambda p: json.loads(Path(p).read_text()); "
+        "d=_resolve_durable_merge_authorization_at(MergeIntent.model_validate(load(sys.argv[2])),StandingGrantRequest.model_validate(load(sys.argv[3])),GitHubOrchestrationEvidence.model_validate(load(sys.argv[4])),receipt_path=Path(sys.argv[1]),now=datetime.fromisoformat(sys.argv[5])); print(d.outcome.value)"
+    )
+    env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[3]))
+    results = [
+        subprocess.run(
+            [
+                os.sys.executable,
+                "-c",
+                code,
+                str(path),
+                str(inputs["intent"]),
+                str(inputs["request"]),
+                str(inputs["evidence"]),
+                NOW.isoformat(),
+            ],
+            capture_output=True,
+            text=True,
+            env=env,
+            check=False,
+        )
+        for _ in range(2)
+    ]
+    assert [result.stdout.strip() for result in results] == ["GRANT_MATCH", "GRANT_MATCH"]
+    assert all(result.returncode == 0 for result in results)
+    assert (path.read_bytes(), path.stat().st_mtime_ns) == before
+
+
+@pytest.mark.parametrize(
+    "mutation,expected",
+    [
+        (
+            lambda intent, snap: (
+                {**intent.model_dump(mode="json"), "intent_hash": "0" * 64},
+                snap,
+            ),
+            "MALFORMED_INPUT",
+        ),
+        (lambda intent, snap: (intent, evidence(diff_hash="7" * 64)), "DRIFT_"),
+        (
+            lambda intent, snap: (intent, {**snap.model_dump(mode="json"), "checks_passed": False}),
+            "MALFORMED_INPUT",
+        ),
+        (
+            lambda intent, snap: (intent, {**snap.model_dump(mode="json"), "required_checks": []}),
+            "MALFORMED_INPUT",
+        ),
+        (
+            lambda intent, snap: (
+                intent,
+                {**snap.model_dump(mode="json"), "reviews_resolved": False},
+            ),
+            "MALFORMED_INPUT",
+        ),
+        (
+            lambda intent, snap: (
+                intent,
+                {**snap.model_dump(mode="json"), "independent_acceptance": False},
+            ),
+            "MALFORMED_INPUT",
+        ),
+    ],
+)
+def test_durable_wrapper_keeps_evidence_failures_fail_closed(tmp_path, mutation, expected):
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    receipt = StandingGrantReceipt.issue(grant_id="grant-evidence", context=ctx)
+    path = Path(_receipt_path(tmp_path))
+    _write_standing_grant_receipt_at(receipt, path)
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    snap = evidence()
+    intent = prepare_merge_intent(ctx, req, snap, now=NOW)
+    changed_intent, changed_snap = mutation(intent, snap)
+
+    with pytest.raises(ValueError, match=expected):
+        _resolve_durable_merge_authorization_at(
+            changed_intent, req, changed_snap, receipt_path=path, now=NOW
+        )
 
 
 def test_production_durable_authorization_uses_canonical_path_only(tmp_path):

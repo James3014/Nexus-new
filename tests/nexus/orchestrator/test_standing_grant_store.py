@@ -354,6 +354,46 @@ def test_replacement_rejects_predecessor_cas_mismatch(tmp_path):
         _write_standing_grant_receipt_at(successor, path, expected_receipt_hash="0" * 64)
 
 
+def test_interprocess_cas_race_allows_exactly_one_successor(tmp_path):
+    predecessor, path = _make_receipt(tmp_path, grant_id="race-predecessor")
+    successors = []
+    for name in ("race-a", "race-b"):
+        successor = StandingGrantReceipt.issue(
+            grant_id=name,
+            context=_make_context(),
+            supersedes_grant_hash=predecessor.receipt_hash,
+        )
+        payload = tmp_path / f"{name}.json"
+        payload.write_text(json.dumps(successor.model_dump(mode="json")), encoding="utf-8")
+        successors.append(payload)
+    code = (
+        "import json,sys; from pathlib import Path; "
+        "from nexus.orchestrator.standing_grant_store import StandingGrantReceipt,_write_standing_grant_receipt_at; "
+        "r=StandingGrantReceipt.model_validate(json.loads(Path(sys.argv[2]).read_text())); "
+        "_write_standing_grant_receipt_at(r,Path(sys.argv[1]),expected_receipt_hash=sys.argv[3]); print(r.grant_id)"
+    )
+    env = dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parents[3]))
+    processes = [
+        subprocess.Popen(
+            [os.sys.executable, "-c", code, str(path), str(payload), predecessor.receipt_hash],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+        for payload in successors
+    ]
+    results = [process.communicate(timeout=10) for process in processes]
+    assert sum(process.returncode == 0 for process in processes) == 1
+    assert sum(process.returncode != 0 for process in processes) == 1
+    assert any(
+        "SUPERSEDES_CAS_MISMATCH" in stderr or "STALE_WRITER_CAS_MISMATCH" in stderr
+        for (_stdout, stderr) in results
+    )
+    winner = _load_receipt_at(path)
+    assert winner.grant_id in {"race-a", "race-b"}
+
+
 def test_exact_mode_and_size(tmp_path):
     receipt, path = _make_receipt(tmp_path)
     mode = stat.S_IMODE(os.stat(path).st_mode)

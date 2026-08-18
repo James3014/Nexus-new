@@ -58,6 +58,8 @@ def _check(evidence, now):
         for r in evidence.reviews
     ):
         raise ValueError("REVIEW_UNRESOLVED")
+    if not evidence.reviews_resolved:
+        raise ValueError("REVIEW_UNRESOLVED")
     if evidence.impact and (not evidence.impact.known or not evidence.impact.regression_free):
         raise ValueError("IMPACT_UNKNOWN_OR_REGRESSION")
     if not evidence.independent_acceptance:
@@ -132,14 +134,15 @@ def resolve_durable_merge_authorization(
     ``PLATFORM_APPROVAL_REQUIRED``, never a grant mismatch.
     """
     safe_request = _safe(request, StandingGrantRequest)
+    effective_now = now or datetime.now(timezone.utc)
     try:
-        receipt = load_standing_grant_receipt(now=now or safe_request.requested_at)
+        receipt = load_standing_grant_receipt(now=effective_now)
     except StandingGrantReceiptError:
         return evaluate_action({}, {}, platform_approval_required=platform_approval_required)
     if receipt is None:
         return evaluate_action({}, {}, platform_approval_required=platform_approval_required)
     try:
-        revalidate_merge_intent(intent, receipt.context, safe_request, evidence, now=now)
+        revalidate_merge_intent(intent, receipt.context, safe_request, evidence, now=effective_now)
     except ValueError as exc:
         # A receipt/context mismatch is a grant decision, not an evidence
         # failure. Keep evidence failures (drift, checks, reviews, acceptance)
@@ -167,12 +170,13 @@ def _resolve_durable_merge_authorization_at(
 ):
     """Test/internal-only variant bound to an explicit path (never production)."""
     safe_request = _safe(request, StandingGrantRequest)
+    effective_now = now or datetime.now(timezone.utc)
     try:
-        receipt = _load_receipt_at(receipt_path, now=now or safe_request.requested_at)
+        receipt = _load_receipt_at(receipt_path, now=effective_now)
     except StandingGrantReceiptError:
         return evaluate_action({}, {}, platform_approval_required=platform_approval_required)
     try:
-        revalidate_merge_intent(intent, receipt.context, safe_request, evidence, now=now)
+        revalidate_merge_intent(intent, receipt.context, safe_request, evidence, now=effective_now)
     except ValueError as exc:
         if str(exc) not in {
             StandingGrantOutcome.INVALID.value,
