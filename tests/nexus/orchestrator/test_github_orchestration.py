@@ -12,6 +12,7 @@ from nexus.contracts.autonomy_goal import (
     RepositoryIdentity,
     StandingGrantContext,
 )
+from nexus.contracts.github_orchestration import canonical_hash
 from nexus.orchestrator.autonomy_policy import StandingGrantOutcome, StandingGrantRequest
 from nexus.orchestrator.github_orchestration import (
     _resolve_durable_merge_authorization_at,
@@ -474,6 +475,39 @@ def test_intent_replay_and_snapshot_drift_rejected():
     tampered["intent_hash"] = "0" * 64
     with pytest.raises(ValueError, match="MALFORMED_INPUT|INTENT_REPLAY_OR_TAMPER"):
         revalidate_merge_intent(tampered, ctx, req, snap, now=NOW)
+
+
+def test_recomputed_hash_cannot_change_intent_semantics():
+    ctx = context()
+    req = request(ctx)
+    snap = evidence()
+    intent = prepare_merge_intent(ctx, req, snap, now=NOW)
+    tampered = intent.model_dump(mode="json")
+    tampered["claim_ceiling"] = "NO_MUTATION_AUTHORITY"
+    tampered["intent_hash"] = canonical_hash(
+        {key: value for key, value in tampered.items() if key != "intent_hash"}
+    )
+
+    with pytest.raises(ValueError, match="INTENT_SEMANTIC_MISMATCH"):
+        resolve_merge_authorization(tampered, ctx, req, snap, now=NOW)
+
+
+def test_durable_resolver_rejects_recomputed_semantic_tamper(tmp_path):
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    receipt = StandingGrantReceipt.issue(grant_id="grant-semantic", context=ctx)
+    path = Path(_receipt_path(tmp_path))
+    _write_standing_grant_receipt_at(receipt, path)
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    snap = evidence()
+    intent = prepare_merge_intent(ctx, req, snap, now=NOW)
+    tampered = intent.model_dump(mode="json")
+    tampered["grant_outcome"] = "GRANT_INVALID"
+    tampered["intent_hash"] = canonical_hash(
+        {key: value for key, value in tampered.items() if key != "intent_hash"}
+    )
+
+    with pytest.raises(ValueError, match="INTENT_SEMANTIC_MISMATCH"):
+        _resolve_durable_merge_authorization_at(tampered, req, snap, receipt_path=path, now=NOW)
 
 
 def test_protocol_surface_is_pure_and_no_provider_is_required():

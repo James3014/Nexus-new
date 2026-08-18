@@ -187,14 +187,17 @@ def test_loader_rejects_duplicate_keys_and_noncanonical_bytes(tmp_path):
         _load_receipt_at(garbage)
 
     duplicate = tmp_path / "duplicate.json"
-    duplicate.write_text(
-        '{"context":{},"context":{},"grant_id":"x",'
-        '"receipt_hash":"' + "0" * 64 + '","schema":"nexus.standing_grant_receipt.v1"}',
-        encoding="utf-8",
+    valid = json.dumps(
+        receipt.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":"), sort_keys=True
     )
+    marker = '"grant_id":"grant-test-1",'
+    assert marker in valid
+    duplicate.write_text(valid.replace(marker, marker + marker, 1), encoding="utf-8")
     os.chmod(duplicate, 0o600)
-    with pytest.raises(StandingGrantReceiptError, match="MALFORMED"):
+    with pytest.raises(StandingGrantReceiptError, match="MALFORMED") as raised:
         _load_receipt_at(duplicate)
+    assert raised.value.__cause__ is not None
+    assert "DUPLICATE_KEY" in str(raised.value.__cause__)
 
 
 def test_loader_validates_receipt_hash_and_rejects_tamper(tmp_path):

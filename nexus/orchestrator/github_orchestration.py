@@ -95,7 +95,10 @@ def revalidate_merge_intent(intent, context, request, evidence, *, now: datetime
         intent.model_dump(mode="json", exclude={"intent_hash"})
     ):
         raise ValueError("INTENT_REPLAY_OR_TAMPER")
-    return prepare_merge_intent(context, request, evidence, now=now)
+    prepared = prepare_merge_intent(context, request, evidence, now=now)
+    if intent != prepared:
+        raise ValueError("INTENT_SEMANTIC_MISMATCH")
+    return prepared
 
 
 def resolve_merge_authorization(
