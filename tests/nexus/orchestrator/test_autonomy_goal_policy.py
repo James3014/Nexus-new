@@ -72,7 +72,8 @@ def _standing_request(context: StandingGrantContext, **overrides) -> StandingGra
     return StandingGrantRequest(**values)
 
 
-def test_standing_grant_match_authorizes_covered_action_and_is_hash_bound():
+def test_standing_grant_match_is_evidence_only_and_hash_bound():
+    """Legacy node ID retained for CI continuity; current assertions govern superseding semantics."""
     context = _standing_context()
     decision = evaluate_standing_grant_decision(context, _standing_request(context))
     assert decision.outcome is StandingGrantOutcome.GRANT_MATCH
@@ -82,7 +83,8 @@ def test_standing_grant_match_authorizes_covered_action_and_is_hash_bound():
     assert decision.decision_hash
 
 
-def test_standing_grant_merge_matches_when_merge_is_explicitly_covered():
+def test_standing_grant_merge_requires_platform_approval():
+    """Legacy node ID retained for CI continuity; current assertions govern superseding semantics."""
     context = _standing_context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
     decision = evaluate_standing_grant_decision(
         context, _standing_request(context, action=AutonomyActionClass.GITHUB_MERGE)

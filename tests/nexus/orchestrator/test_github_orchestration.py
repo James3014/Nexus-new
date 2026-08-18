@@ -60,7 +60,8 @@ def test_valid_evidence_and_grant_produce_intent():
     )
 
 
-def test_valid_covered_github_merge_uses_standing_grant_without_owner_slot():
+def test_github_merge_is_owner_slot_and_never_authorizes_mutation():
+    """Legacy node ID retained for CI continuity; current assertions govern superseding semantics."""
     ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
     merge_request = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
 

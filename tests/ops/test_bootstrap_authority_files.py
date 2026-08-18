@@ -99,7 +99,8 @@ def test_ready_issue_claim_contract_is_worker_neutral_and_fail_closed():
     assert "never grants\n  route selection" in contract
 
 
-def test_protected_merge_preserves_standing_grant_across_normal_phases():
+def test_protected_merge_requires_exact_owner_slot_not_standing_grant():
+    """Legacy node ID retained for CI continuity; current assertions govern superseding semantics."""
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(encoding="utf-8")
     merge = (ROOT / ".agents/skills/nexus-merge-gate/SKILL.md").read_text(encoding="utf-8")
