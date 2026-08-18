@@ -301,6 +301,20 @@ The Owner-approved MiMo cumulative calibration / governance writeback amendment 
    otherwise); no second route selector is created; `CapabilityPlanner`
    authority is unchanged.
 
+9. **Evidence provenance and transport enforcement:** the 2026-08-17 aggregate
+   is an `OWNER_APPROVED_CUMULATIVE_SUMMARY` only. Its raw trial receipts are
+   `NOT_REPOSITORY_BOUND`; the claim ceiling is
+   `OWNER_APPROVED_CUMULATIVE_SUMMARY_ONLY`, and the baseline is GitHub `main`
+   `9296d68fe19d933cb78b9a0470a054ea5efd4c2f`. The supplied source artifact
+   SHA256 prefixes and their `PREFIX_ONLY_NOT_RECOVERED` status are recorded in
+   the machine policy; this is not an independently reproducible raw-trial
+   benchmark claim.
+10. **Transport policy enforcement belongs to DevSpace Issue #400**, whose local
+    Candidate is `65103307a014d5e51534828ab5e3c8469b60b732` and whose durable
+    receipt is recorded in the machine policy. `CapabilityPlanner` remains the
+    sole route/capability authority; it does not implement or relax this
+    Free-first pre-mutation fallback contract.
+
 ## 12. Pending v2 collaboration proposal
 
 `NEXUS_MULTI_MODEL_COLLABORATION_STANDARD_v2.0_20260728` remains `PROPOSED_FOR_OWNER_APPROVAL`. Its proposed changes—including Ling at read-only L0—are recorded as review inputs, not active authority. This policy and `nexus/config/model_workforce.yaml` remain current until James explicitly approves a replacement or amendment.

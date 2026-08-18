@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -363,6 +364,24 @@ def test_owner_approved_mimo_cumulative_calibration_stays_l1_and_not_promoted() 
     assert evidence["autonomy_ceiling"] == "L1"
     assert evidence["promotion_status"] == "NOT_PROMOTED"
     assert evidence["public_claim"] is False
+    assert evidence["evidence_status"] == "OWNER_APPROVED_CUMULATIVE_SUMMARY"
+    assert evidence["raw_trial_receipt_status"] == "NOT_REPOSITORY_BOUND"
+    assert evidence["raw_trial_evidence"] == "NOT_IN_REPOSITORY_AUTHORITY"
+    assert evidence["claim_ceiling"] == "OWNER_APPROVED_CUMULATIVE_SUMMARY_ONLY"
+    assert evidence["baseline_main"] == "9296d68fe19d933cb78b9a0470a054ea5efd4c2f"
+    assert {a["name"] for a in evidence["source_artifacts"]} == {
+        "MODEL_WORKFORCE_POLICY_20260817.md",
+        "NEXUS_MULTI_MODEL_V2.9.md",
+        "opencode-1.18.18",
+    }
+    assert [a["sha256"] for a in evidence["source_artifacts"]] == [
+        "6cefe1...",
+        "67bd05...",
+        "4f5979...",
+    ]
+    assert {a["digest_status"] for a in evidence["source_artifacts"]} == {
+        "PREFIX_ONLY_NOT_RECOVERED"
+    }
 
     registered_models = {w["model"] for w in workers.values()}
     assert "opencode/mimo-v2.5-free" in registered_models
@@ -377,6 +396,57 @@ def test_owner_approved_mimo_cumulative_calibration_stays_l1_and_not_promoted() 
     assert "tool-discipline requalification" in policy
     assert "FREE_FIRST" in policy
     assert "opencode-go/mimo-v2.5" in policy
+
+
+@pytest.mark.parametrize(
+    ("field", "expected"),
+    [
+        ("strategy", "FREE_FIRST"),
+        ("free_identity", {"provider": "opencode", "model": "opencode/mimo-v2.5-free", "order": 1}),
+        (
+            "paid_go_identity",
+            {
+                "provider": "opencode-go",
+                "model": "opencode-go/mimo-v2.5",
+                "order": 2,
+                "workforce_admission": "NOT_ADMITTED",
+            },
+        ),
+        (
+            "allowed_pre_mutation_blocker_classes",
+            ["PROVIDER", "TRANSPORT", "CAPACITY", "QUOTA", "EXACT_MODEL_AVAILABILITY"],
+        ),
+        ("forbidden_fallback_classes", ["UNKNOWN", "POST_MUTATION", "SEMANTIC", "VERIFIER"]),
+        ("lineage_equivalence", "UNRESOLVED"),
+    ],
+)
+def test_mimo_transport_policy_is_free_first_and_fail_closed(field: str, expected: object) -> None:
+    transport = _manifest()["workers"]["opencode_mimo_free"]["transport_policy"]
+    assert transport[field] == expected
+
+
+def test_mimo_transport_policy_requires_clean_pre_mutation_go_and_devspace_enforcement() -> None:
+    transport = _manifest()["workers"]["opencode_mimo_free"]["transport_policy"]
+    assert transport["require_clean_no_mutation"] is True
+    assert transport["fresh_go_preflight_required"] is True
+    assert set(transport["allowed_pre_mutation_blocker_classes"]).isdisjoint(
+        transport["forbidden_fallback_classes"]
+    )
+    enforcement = transport["enforcement"]
+    assert enforcement["authority"] == "DevSpace"
+    assert enforcement["not_capability_planner"] is True
+    assert enforcement["issue"] == 400
+    assert enforcement["candidate_commit"] == "65103307a014d5e51534828ab5e3c8469b60b732"
+    assert enforcement["durable_receipt_url"] == (
+        "https://github.com/James3014/Nexus-new/issues/400#issuecomment-5320083668"
+    )
+
+
+@pytest.mark.parametrize("forbidden", ["UNKNOWN", "POST_MUTATION", "SEMANTIC", "VERIFIER"])
+def test_mimo_transport_policy_rejects_non_pre_mutation_go_fallbacks(forbidden: str) -> None:
+    transport = _manifest()["workers"]["opencode_mimo_free"]["transport_policy"]
+    assert forbidden in transport["forbidden_fallback_classes"]
+    assert forbidden not in transport["allowed_pre_mutation_blocker_classes"]
 
 
 def test_three_layers_lineage_and_ceiling_constraints() -> None:

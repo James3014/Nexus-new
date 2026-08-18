@@ -199,6 +199,21 @@ relation remains unresolved unless exact current authoritative evidence proves
 otherwise. No second route selector is created and `CapabilityPlanner` authority
 is unchanged.
 
+## Provenance and claim ceiling
+
+The 2026-08-17 aggregate is an **`OWNER_APPROVED_CUMULATIVE_SUMMARY`**, not a
+repository-bound raw benchmark receipt set. `raw_trial_receipt_status` is
+`NOT_REPOSITORY_BOUND`, so this report does not claim independently reproducible
+raw-trial evidence. Its claim ceiling is
+`OWNER_APPROVED_CUMULATIVE_SUMMARY_ONLY`, with GitHub `main` baseline
+`9296d68fe19d933cb78b9a0470a054ea5efd4c2f`; the supplied source artifact SHA256
+prefixes and their `PREFIX_ONLY_NOT_RECOVERED` status are recorded in the
+machine policy.
+
+Transport fallback enforcement belongs to DevSpace Issue #400, not
+`CapabilityPlanner`. The latter remains the sole route/capability authority;
+DevSpace owns the Free-first pre-mutation resolver and its clean-state gates.
+
 ## Tool-discipline blocker and promotion gate
 
 MiMo previously violated an answer-only / bounded calibration by performing

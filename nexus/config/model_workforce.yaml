@@ -359,6 +359,52 @@ workers:
       autonomy_ceiling: L1
       promotion_status: NOT_PROMOTED
       public_claim: false
+      evidence_status: OWNER_APPROVED_CUMULATIVE_SUMMARY
+      raw_trial_receipt_status: NOT_REPOSITORY_BOUND
+      claim_ceiling: OWNER_APPROVED_CUMULATIVE_SUMMARY_ONLY
+      source_artifacts:
+        - name: MODEL_WORKFORCE_POLICY_20260817.md
+          sha256: 6cefe1...
+          digest_status: PREFIX_ONLY_NOT_RECOVERED
+        - name: NEXUS_MULTI_MODEL_V2.9.md
+          sha256: 67bd05...
+          digest_status: PREFIX_ONLY_NOT_RECOVERED
+        - name: opencode-1.18.18
+          sha256: 4f5979...
+          digest_status: PREFIX_ONLY_NOT_RECOVERED
+      baseline_main: 9296d68fe19d933cb78b9a0470a054ea5efd4c2f
+      raw_trial_evidence: NOT_IN_REPOSITORY_AUTHORITY
+    transport_policy:
+      strategy: FREE_FIRST
+      free_identity:
+        provider: opencode
+        model: opencode/mimo-v2.5-free
+        order: 1
+      paid_go_identity:
+        provider: opencode-go
+        model: opencode-go/mimo-v2.5
+        order: 2
+        workforce_admission: NOT_ADMITTED
+      allowed_pre_mutation_blocker_classes:
+        - PROVIDER
+        - TRANSPORT
+        - CAPACITY
+        - QUOTA
+        - EXACT_MODEL_AVAILABILITY
+      require_clean_no_mutation: true
+      fresh_go_preflight_required: true
+      forbidden_fallback_classes:
+        - UNKNOWN
+        - POST_MUTATION
+        - SEMANTIC
+        - VERIFIER
+      lineage_equivalence: UNRESOLVED
+      enforcement:
+        authority: DevSpace
+        not_capability_planner: true
+        issue: 400
+        candidate_commit: 65103307a014d5e51534828ab5e3c8469b60b732
+        durable_receipt_url: https://github.com/James3014/Nexus-new/issues/400#issuecomment-5320083668
   opencode_ling_free:
     provider: opencode
     model: opencode/ling-3.0-flash-free
