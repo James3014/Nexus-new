@@ -15,6 +15,11 @@ from nexus.orchestrator.autonomy_policy import (
     StandingGrantRequest,
     evaluate_standing_grant_decision,
 )
+from nexus.orchestrator.standing_grant_store import (
+    StandingGrantReceiptError,
+    _evaluate_durable_standing_grant_at,
+    evaluate_durable_standing_grant,
+)
 
 
 def _safe(model, typ):
@@ -107,3 +112,63 @@ def resolve_merge_authorization(
         request,
         platform_approval_required=platform_approval_required,
     )
+
+
+def resolve_durable_merge_authorization(
+    intent,
+    request,
+    evidence,
+    *,
+    now: datetime | None = None,
+    platform_approval_required: bool = False,
+):
+    """Revalidate exact merge evidence, then load the durable receipt and
+    resolve the same evaluator decision.
+
+    The durable receipt is only a carrier; the existing pure evaluator decides.
+    A missing/tampered/malformed receipt fails closed to ``GRANT_INVALID``.
+    A valid receipt that does not cover ``GITHUB_MERGE`` reports
+    ``GRANT_OUT_OF_SCOPE``. Genuine external platform approval reports
+    ``PLATFORM_APPROVAL_REQUIRED``, never a grant mismatch.
+    """
+    safe_request = _safe(request, StandingGrantRequest)
+    try:
+        return evaluate_durable_standing_grant(
+            requested_owner_id=safe_request.owner_id,
+            requested_coordinator_id=safe_request.coordinator_id,
+            repository=safe_request.repository,
+            thread_id=safe_request.thread_id,
+            goal_id=safe_request.goal_id,
+            action=safe_request.action,
+            requested_at=safe_request.requested_at,
+            platform_approval_required=platform_approval_required,
+        )
+    except StandingGrantReceiptError:
+        return evaluate_action({}, {}, platform_approval_required=platform_approval_required)
+
+
+def resolve_durable_merge_authorization_at(
+    intent,
+    request,
+    evidence,
+    *,
+    receipt_path,
+    now: datetime | None = None,
+    platform_approval_required: bool = False,
+):
+    """Test/internal-only variant bound to an explicit path (never production)."""
+    safe_request = _safe(request, StandingGrantRequest)
+    try:
+        return _evaluate_durable_standing_grant_at(
+            receipt_path,
+            requested_owner_id=safe_request.owner_id,
+            requested_coordinator_id=safe_request.coordinator_id,
+            repository=safe_request.repository,
+            thread_id=safe_request.thread_id,
+            goal_id=safe_request.goal_id,
+            action=safe_request.action,
+            requested_at=safe_request.requested_at,
+            platform_approval_required=platform_approval_required,
+        )
+    except StandingGrantReceiptError:
+        return evaluate_action({}, {}, platform_approval_required=platform_approval_required)

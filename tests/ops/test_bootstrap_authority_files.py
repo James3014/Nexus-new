@@ -156,6 +156,19 @@ def test_current_standing_grant_contract_is_non_self_attesting():
     assert "separate physical, machine-bound Owner receipt" in current
 
 
+def test_standing_grant_receipt_path_is_machine_local_and_loader_is_required():
+    contract = (
+        ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md"
+    ).read_text(encoding="utf-8")
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    store = (ROOT / "nexus/orchestrator/standing_grant_store.py").read_text(encoding="utf-8")
+
+    assert ".local/state/nexus/authority/standing-grant.json" in contract
+    assert "durable" in agents
+    assert "load_standing_grant_receipt" in store
+    assert "Atomic durable write" in store
+
+
 def test_bootstrap_file_set_is_complete_and_tracked():
     for path in BOOTSTRAP_FILES:
         assert (ROOT / path).is_file(), path

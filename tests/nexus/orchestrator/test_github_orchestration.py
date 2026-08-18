@@ -1,4 +1,5 @@
 from datetime import timedelta
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -12,10 +13,19 @@ from nexus.orchestrator.autonomy_policy import StandingGrantOutcome, StandingGra
 from nexus.orchestrator.github_orchestration import (
     evaluate_action,
     prepare_merge_intent,
+    resolve_durable_merge_authorization_at,
     resolve_merge_authorization,
     revalidate_merge_intent,
 )
+from nexus.orchestrator.standing_grant_store import (
+    StandingGrantReceipt,
+    _write_standing_grant_receipt_at,
+)
 from tests.contracts.test_github_orchestration import NOW, evidence
+
+
+def _receipt_path(tmp_path) -> str:
+    return str(tmp_path / "authority" / "standing-grant.json")
 
 
 def context(**overrides):
@@ -58,6 +68,84 @@ def test_valid_evidence_and_grant_produce_intent():
         and intent.grant_outcome == "GRANT_MATCH"
         and intent.mutation_authorized is False
     )
+
+
+def test_durable_receipt_loads_and_authorizes_without_caller_context(tmp_path):
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    receipt = StandingGrantReceipt.issue(grant_id="grant-durable-1", context=ctx)
+    _write_standing_grant_receipt_at(receipt, Path(_receipt_path(tmp_path)))
+    merge_request = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    snap = evidence()
+    intent = prepare_merge_intent(ctx, merge_request, snap, now=NOW)
+
+    decision = resolve_durable_merge_authorization_at(
+        intent,
+        merge_request,
+        snap,
+        receipt_path=_receipt_path(tmp_path),
+        now=NOW,
+    )
+
+    assert decision.outcome is StandingGrantOutcome.GRANT_MATCH
+    assert decision.mutation_authorized is True
+
+
+def test_durable_receipt_without_github_merge_is_out_of_scope(tmp_path):
+    # The caller's in-memory context covers GITHUB_MERGE; the durable receipt
+    # does not. Only the durable receipt decides.
+    caller_ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    receipt_ctx = context()  # allowed_actions lacks GITHUB_MERGE
+    receipt = StandingGrantReceipt.issue(grant_id="grant-nomerge-1", context=receipt_ctx)
+    _write_standing_grant_receipt_at(receipt, Path(_receipt_path(tmp_path)))
+    merge_request = request(caller_ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    snap = evidence()
+    intent = prepare_merge_intent(caller_ctx, merge_request, snap, now=NOW)
+
+    decision = resolve_durable_merge_authorization_at(
+        intent,
+        merge_request,
+        snap,
+        receipt_path=_receipt_path(tmp_path),
+        now=NOW,
+    )
+
+    assert decision.outcome is StandingGrantOutcome.GRANT_OUT_OF_SCOPE
+    assert decision.mutation_authorized is False
+
+
+def test_durable_receipt_missing_or_malformed_is_invalid(tmp_path):
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    merge_request = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    snap = evidence()
+    intent = prepare_merge_intent(ctx, merge_request, snap, now=NOW)
+
+    decision = resolve_durable_merge_authorization_at(
+        intent,
+        merge_request,
+        snap,
+        receipt_path=_receipt_path(tmp_path),
+        now=NOW,
+    )
+    assert decision.outcome is StandingGrantOutcome.GRANT_INVALID
+    assert decision.mutation_authorized is False
+
+
+def test_production_durable_authorization_uses_canonical_path_only(tmp_path):
+    """Production does not accept an explicit alternate receipt path."""
+    import inspect
+
+    from nexus.orchestrator.github_orchestration import resolve_durable_merge_authorization
+
+    sig = inspect.signature(resolve_durable_merge_authorization)
+    assert "receipt_path" not in sig.parameters
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    merge_request = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    snap = evidence()
+    intent = prepare_merge_intent(ctx, merge_request, snap, now=NOW)
+    # No live canonical receipt: production resolves INVALID (fail closed).
+    decision = resolve_durable_merge_authorization(intent, merge_request, snap, now=NOW)
+    assert decision.outcome is StandingGrantOutcome.GRANT_INVALID
+    assert decision.mutation_authorized is False
 
 
 def test_github_merge_is_owner_slot_and_never_authorizes_mutation():
