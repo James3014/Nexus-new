@@ -4,8 +4,10 @@ import argparse
 import hashlib
 import html
 import json
+import math
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -43,6 +45,9 @@ SERVICE_LABEL = "com.nexus.external-intelligence"
 DEFAULT_CONFIG = Path.home() / ".config" / "nexus-external-intelligence" / "config.json"
 READINESS_SUCCESS_THRESHOLD = 2
 SERVICE_HEARTBEAT_STALE_SECONDS = 180.0
+SERVICE_RECEIPT_SCHEMA = "nexus.external_intelligence_daemon_receipt.v1"
+_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 class ServiceReadiness(str, Enum):
@@ -99,6 +104,7 @@ def _config_identity(config_path: Path) -> tuple[str, str]:
 def write_service_receipt(path: Path, payload: Mapping[str, Any]) -> None:
     """Atomically write a restrictive daemon observability receipt."""
 
+    _validate_service_receipt(payload)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with tempfile.NamedTemporaryFile(
@@ -114,12 +120,74 @@ def write_service_receipt(path: Path, payload: Mapping[str, Any]) -> None:
     path.chmod(0o600)
 
 
+def _validate_service_receipt(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError("RECEIPT_MAPPING_INVALID")
+    required = {
+        "schema",
+        "status",
+        "run_id",
+        "pid",
+        "source_path",
+        "source_sha256",
+        "config_path",
+        "config_sha256",
+        "started_at",
+        "heartbeat_at",
+        "successful_polls",
+        "last_error",
+    }
+    if set(value) != required:
+        raise ValueError("RECEIPT_SCHEMA_INVALID")
+    if value["schema"] != SERVICE_RECEIPT_SCHEMA:
+        raise ValueError("RECEIPT_SCHEMA_INVALID")
+    if not isinstance(value["status"], str) or value["status"] not in {
+        state.value for state in ServiceReadiness
+    }:
+        raise ValueError("RECEIPT_STATUS_INVALID")
+    if not isinstance(value["run_id"], str) or _RUN_ID_RE.fullmatch(value["run_id"]) is None:
+        raise ValueError("RECEIPT_RUN_ID_INVALID")
+    if not isinstance(value["pid"], int) or isinstance(value["pid"], bool) or value["pid"] <= 0:
+        raise ValueError("RECEIPT_PID_INVALID")
+    for key in ("source_path", "config_path"):
+        if not isinstance(value[key], str) or not value[key] or "\x00" in value[key]:
+            raise ValueError("RECEIPT_IDENTITY_PATH_INVALID")
+    for key in ("source_sha256", "config_sha256"):
+        if not isinstance(value[key], str) or _SHA256_RE.fullmatch(value[key]) is None:
+            raise ValueError("RECEIPT_IDENTITY_HASH_INVALID")
+    for key in ("started_at", "heartbeat_at"):
+        if (
+            not isinstance(value[key], (int, float))
+            or isinstance(value[key], bool)
+            or not math.isfinite(value[key])
+            or value[key] < 0
+        ):
+            raise ValueError("RECEIPT_TIMESTAMP_INVALID")
+    if (
+        not isinstance(value["successful_polls"], int)
+        or isinstance(value["successful_polls"], bool)
+        or value["successful_polls"] < 0
+    ):
+        raise ValueError("RECEIPT_POLL_COUNT_INVALID")
+    error = value["last_error"]
+    if error is not None and (
+        not isinstance(error, Mapping)
+        or set(error) != {"type", "code"}
+        or not all(isinstance(error[key], str) and error[key] for key in ("type", "code"))
+    ):
+        raise ValueError("RECEIPT_ERROR_INVALID")
+    return dict(value)
+
+
 def _read_service_receipt(path: Path) -> dict[str, Any] | None:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (FileNotFoundError, OSError, json.JSONDecodeError):
         return None
-    return dict(value) if isinstance(value, Mapping) else None
+    try:
+        return _validate_service_receipt(value)
+    except ValueError:
+        return None
 
 
 def _safe_error(exc: Exception) -> dict[str, str]:
@@ -141,6 +209,24 @@ def _process_snapshot() -> list[tuple[int, str]]:
         if match:
             rows.append((int(match.group(1)), match.group(2).strip()))
     return rows
+
+
+def _expected_process_argv(config_path: Path) -> list[str]:
+    return [
+        str(Path(sys.executable).resolve()),
+        "-m",
+        "scripts.ops.external_intelligence_service",
+        "daemon",
+        "--config",
+        str(config_path.resolve()),
+    ]
+
+
+def _process_matches(command: str, config_path: Path) -> bool:
+    try:
+        return shlex.split(command) == _expected_process_argv(config_path)
+    except ValueError:
+        return False
 
 
 def _parse_launchctl(result: Any) -> dict[str, Any]:
@@ -188,7 +274,11 @@ def service_status(
     if not launch["registered"]:
         return result
     if receipt is None:
-        result["status"] = ServiceReadiness.STARTING.value
+        result["status"] = (
+            ServiceReadiness.DEGRADED.value
+            if receipt_file.exists()
+            else ServiceReadiness.STARTING.value
+        )
         return result
     result.update({
         key: receipt.get(key)
@@ -221,18 +311,11 @@ def service_status(
     matching = [
         pid
         for pid, command in processes
-        if "scripts.ops.external_intelligence_service" in command
-        and " daemon" in command
-        and pid == receipt.get("pid")
+        if _process_matches(command, config_file) and pid == receipt.get("pid")
     ]
     if (
         len(matching) != 1
-        or sum(
-            1
-            for _pid, command in processes
-            if "scripts.ops.external_intelligence_service" in command and " daemon" in command
-        )
-        != 1
+        or sum(1 for _pid, command in processes if _process_matches(command, config_file)) != 1
     ):
         result["status"] = ServiceReadiness.DUPLICATE_PROCESS.value
         return result
