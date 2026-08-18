@@ -6,7 +6,7 @@ source_issue: "#76"
 owner: James Chen
 status: COMPLETE
 baseline_revision: f3dc8d28a0f90d5c5fd2f31dbeb0ab2f29f7ca04
-reconciled_main: 46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c
+reconciled_main: 8c2584d6053dd1f04dc87333f807fbea1726545e
 frontier_status: COMPLETE
 terminal_marker: OPERATOR_OUTCOME_RECEIPT_CONTRACT_AND_TASK_STATE_PERSISTENCE_VERIFIED
 commit_required: true
@@ -28,7 +28,8 @@ receipt projection. The receipt is observational and grants no authority.
 
 ## Inputs and dependencies
 
-- Current main at the exact baseline above.
+- Historical implementation baseline is preserved below; current-main
+  reconciliation is bound in the completion receipt.
 - #7 ordered task/attempt event and persistence seam, physically merged.
 - Issue #76 live contract; #31 is not a dependency.
 
@@ -70,7 +71,7 @@ or public-readiness claim. Claim ceiling:
 
 - Historical baseline preserved exactly: `f3dc8d28a0f90d5c5fd2f31dbeb0ab2f29f7ca04`.
 - Historical original receipt recorded reconciled/current `main`: `eb668fb76f0c30d8f025db42cdb8e320d556c037`.
-- Reconciled/current `main`: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`.
+- Reconciled/current `main`: `8c2584d6053dd1f04dc87333f807fbea1726545e`.
 - PR #224: head `78df547667c9682ab403ef4ed05c4eeb9f7dca85`, merge
   `96bb71e89a0b5112a7b54ab6a3f4ff1ed879f857`; historical receipt records an
   exact six-file, zero-deletion scope and 36 independent tests/check refs.
