@@ -114,12 +114,10 @@ class StandingGrantReceipt(_FrozenModel):
             "context": context.model_dump(mode="json"),
             "supersedes_grant_hash": supersedes_grant_hash,
         }
-        return cls.model_validate(
-            {
-                **payload,
-                "receipt_hash": canonical_autonomy_hash(payload),
-            }
-        )
+        return cls.model_validate({
+            **payload,
+            "receipt_hash": canonical_autonomy_hash(payload),
+        })
 
 
 def _canonical_json(payload: dict[str, Any]) -> str:

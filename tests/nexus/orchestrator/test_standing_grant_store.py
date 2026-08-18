@@ -109,12 +109,10 @@ def test_receipt_hash_covers_context_and_supersedes(tmp_path):
     # Tampering with a nested context field changes the receipt hash.
     tampered = {**payload, "context": {**payload["context"], "goal_id": "other"}}
     with pytest.raises(Exception):
-        StandingGrantReceipt.model_validate(
-            {
-                **tampered,
-                "receipt_hash": "0" * 64,
-            }
-        )
+        StandingGrantReceipt.model_validate({
+            **tampered,
+            "receipt_hash": "0" * 64,
+        })
 
 
 def test_supersedes_hash_is_sha256_hex_and_self_reference_is_documented_limitation():

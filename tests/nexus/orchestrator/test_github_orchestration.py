@@ -484,9 +484,9 @@ def test_recomputed_hash_cannot_change_intent_semantics():
     intent = prepare_merge_intent(ctx, req, snap, now=NOW)
     tampered = intent.model_dump(mode="json")
     tampered["claim_ceiling"] = "NO_MUTATION_AUTHORITY"
-    tampered["intent_hash"] = canonical_hash(
-        {key: value for key, value in tampered.items() if key != "intent_hash"}
-    )
+    tampered["intent_hash"] = canonical_hash({
+        key: value for key, value in tampered.items() if key != "intent_hash"
+    })
 
     with pytest.raises(ValueError, match="INTENT_SEMANTIC_MISMATCH"):
         resolve_merge_authorization(tampered, ctx, req, snap, now=NOW)
@@ -502,9 +502,9 @@ def test_durable_resolver_rejects_recomputed_semantic_tamper(tmp_path):
     intent = prepare_merge_intent(ctx, req, snap, now=NOW)
     tampered = intent.model_dump(mode="json")
     tampered["grant_outcome"] = "GRANT_INVALID"
-    tampered["intent_hash"] = canonical_hash(
-        {key: value for key, value in tampered.items() if key != "intent_hash"}
-    )
+    tampered["intent_hash"] = canonical_hash({
+        key: value for key, value in tampered.items() if key != "intent_hash"
+    })
 
     with pytest.raises(ValueError, match="INTENT_SEMANTIC_MISMATCH"):
         _resolve_durable_merge_authorization_at(tampered, req, snap, receipt_path=path, now=NOW)
@@ -527,9 +527,9 @@ def test_recomputed_hash_semantic_tamper_matrix(durable, field, value, expected,
     intent = prepare_merge_intent(ctx, req, snap, now=NOW)
     tampered = intent.model_dump(mode="json")
     tampered[field] = value
-    tampered["intent_hash"] = canonical_hash(
-        {key: item for key, item in tampered.items() if key != "intent_hash"}
-    )
+    tampered["intent_hash"] = canonical_hash({
+        key: item for key, item in tampered.items() if key != "intent_hash"
+    })
 
     if durable:
         receipt = StandingGrantReceipt.issue(grant_id="grant-matrix", context=ctx)
@@ -551,9 +551,9 @@ def test_recomputed_hash_nested_evidence_tamper_is_rejected(durable, tmp_path):
     intent = prepare_merge_intent(ctx, req, original, now=NOW)
     tampered = intent.model_dump(mode="json")
     tampered["evidence"] = changed.model_dump(mode="json")
-    tampered["intent_hash"] = canonical_hash(
-        {key: item for key, item in tampered.items() if key != "intent_hash"}
-    )
+    tampered["intent_hash"] = canonical_hash({
+        key: item for key, item in tampered.items() if key != "intent_hash"
+    })
 
     if durable:
         receipt = StandingGrantReceipt.issue(grant_id="grant-nested-matrix", context=ctx)
