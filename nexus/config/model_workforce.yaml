@@ -364,14 +364,14 @@ workers:
       claim_ceiling: OWNER_APPROVED_CUMULATIVE_SUMMARY_ONLY
       source_artifacts:
         - name: MODEL_WORKFORCE_POLICY_20260817.md
-          sha256: 6cefe1...
-          digest_status: PREFIX_ONLY_NOT_RECOVERED
+          sha256: 6cefe1aabb58a43b2fea39c1e6365e03efd1191034310634352ee997604edfc3
+          digest_status: FULL_SHA256_VERIFIED
         - name: NEXUS_MULTI_MODEL_V2.9.md
-          sha256: 67bd05...
-          digest_status: PREFIX_ONLY_NOT_RECOVERED
+          sha256: 67bd054cfd2b5eb636524c552837f6cb692f2c5a88436f3de67be8f38e38185a
+          digest_status: FULL_SHA256_VERIFIED
         - name: opencode-1.18.18
-          sha256: 4f5979...
-          digest_status: PREFIX_ONLY_NOT_RECOVERED
+          sha256: 4f5979c2dadb06fbff1335335afaaea274e58f92e79aa43cf2ed98618d555422
+          digest_status: FULL_SHA256_VERIFIED
       baseline_main: 9296d68fe19d933cb78b9a0470a054ea5efd4c2f
       raw_trial_evidence: NOT_IN_REPOSITORY_AUTHORITY
     transport_policy:

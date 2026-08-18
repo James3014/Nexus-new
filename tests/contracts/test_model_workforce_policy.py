@@ -375,13 +375,11 @@ def test_owner_approved_mimo_cumulative_calibration_stays_l1_and_not_promoted() 
         "opencode-1.18.18",
     }
     assert [a["sha256"] for a in evidence["source_artifacts"]] == [
-        "6cefe1...",
-        "67bd05...",
-        "4f5979...",
+        "6cefe1aabb58a43b2fea39c1e6365e03efd1191034310634352ee997604edfc3",
+        "67bd054cfd2b5eb636524c552837f6cb692f2c5a88436f3de67be8f38e38185a",
+        "4f5979c2dadb06fbff1335335afaaea274e58f92e79aa43cf2ed98618d555422",
     ]
-    assert {a["digest_status"] for a in evidence["source_artifacts"]} == {
-        "PREFIX_ONLY_NOT_RECOVERED"
-    }
+    assert {a["digest_status"] for a in evidence["source_artifacts"]} == {"FULL_SHA256_VERIFIED"}
 
     registered_models = {w["model"] for w in workers.values()}
     assert "opencode/mimo-v2.5-free" in registered_models

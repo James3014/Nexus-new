@@ -206,9 +206,10 @@ repository-bound raw benchmark receipt set. `raw_trial_receipt_status` is
 `NOT_REPOSITORY_BOUND`, so this report does not claim independently reproducible
 raw-trial evidence. Its claim ceiling is
 `OWNER_APPROVED_CUMULATIVE_SUMMARY_ONLY`, with GitHub `main` baseline
-`9296d68fe19d933cb78b9a0470a054ea5efd4c2f`; the supplied source artifact SHA256
-prefixes and their `PREFIX_ONLY_NOT_RECOVERED` status are recorded in the
-machine policy.
+`9296d68fe19d933cb78b9a0470a054ea5efd4c2f`; the supplied source artifacts and
+OpenCode binary are bound by full SHA-256 identities in the machine policy.
+Those content digests bind the aggregate source documents; they do not replace
+the absent per-trial receipts.
 
 Transport fallback enforcement belongs to DevSpace Issue #400, not
 `CapabilityPlanner`. The latter remains the sole route/capability authority;

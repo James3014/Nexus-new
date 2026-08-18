@@ -306,9 +306,9 @@ The Owner-approved MiMo cumulative calibration / governance writeback amendment 
    `NOT_REPOSITORY_BOUND`; the claim ceiling is
    `OWNER_APPROVED_CUMULATIVE_SUMMARY_ONLY`, and the baseline is GitHub `main`
    `9296d68fe19d933cb78b9a0470a054ea5efd4c2f`. The supplied source artifact
-   SHA256 prefixes and their `PREFIX_ONLY_NOT_RECOVERED` status are recorded in
-   the machine policy; this is not an independently reproducible raw-trial
-   benchmark claim.
+   full SHA-256 identities are recorded in the machine policy. These bind the
+   Owner-supplied source artifacts and OpenCode binary, but do not turn the
+   absent per-trial receipts into an independently reproducible raw benchmark.
 10. **Transport policy enforcement belongs to DevSpace Issue #400**, whose local
     Candidate is `65103307a014d5e51534828ab5e3c8469b60b732` and whose durable
     receipt is recorded in the machine policy. `CapabilityPlanner` remains the
