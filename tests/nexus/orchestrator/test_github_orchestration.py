@@ -79,9 +79,7 @@ def test_verified_merge_intent_resolves_to_authorized_grant_match():
     snap = evidence()
     intent = prepare_merge_intent(ctx, merge_request, snap, now=NOW)
 
-    decision = resolve_merge_authorization(
-        intent, ctx, merge_request, snap, now=NOW
-    )
+    decision = resolve_merge_authorization(intent, ctx, merge_request, snap, now=NOW)
 
     assert decision.outcome is StandingGrantOutcome.GRANT_MATCH
     assert decision.mutation_authorized is True

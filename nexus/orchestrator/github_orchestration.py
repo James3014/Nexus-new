@@ -66,10 +66,7 @@ def prepare_merge_intent(
     now = now or datetime.now(timezone.utc)
     _check(evidence, now)
     decision = evaluate_action(context, request)
-    if (
-        decision.outcome is not StandingGrantOutcome.GRANT_MATCH
-        or not decision.mutation_authorized
-    ):
+    if decision.outcome is not StandingGrantOutcome.GRANT_MATCH or not decision.mutation_authorized:
         raise ValueError(decision.outcome.value)
     payload = {
         "schema": "nexus.github_merge_intent.v2",

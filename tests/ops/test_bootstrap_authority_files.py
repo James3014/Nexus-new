@@ -123,9 +123,7 @@ def test_protected_merge_preserves_standing_grant_across_normal_phases():
 
 
 def test_current_standing_grant_contract_is_non_self_attesting():
-    index = (ROOT / "tasks/standing-owner-autonomy-20260811/INDEX.md").read_text(
-        encoding="utf-8"
-    )
+    index = (ROOT / "tasks/standing-owner-autonomy-20260811/INDEX.md").read_text(encoding="utf-8")
     current = (
         ROOT / "tasks/standing-owner-autonomy-20260811/02-standing-grant-normal-phase-authority.md"
     ).read_text(encoding="utf-8")

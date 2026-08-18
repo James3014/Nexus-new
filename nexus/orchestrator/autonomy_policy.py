@@ -140,9 +140,7 @@ class StandingGrantDecision(_FrozenModel):
     context_hash: StrictStr
     decision_hash: StrictStr
     mutation_authorized: StrictBool
-    claim_ceiling: Literal[
-        "AUTHORIZATION_ONLY_VERIFICATION_REQUIRED", "NO_MUTATION_AUTHORITY"
-    ]
+    claim_ceiling: Literal["AUTHORIZATION_ONLY_VERIFICATION_REQUIRED", "NO_MUTATION_AUTHORITY"]
 
     @field_validator("context_hash", "decision_hash")
     @classmethod
@@ -155,9 +153,7 @@ class StandingGrantDecision(_FrozenModel):
         if self.mutation_authorized is not matched:
             raise ValueError("STANDING_DECISION_AUTHORITY_INVALID")
         expected_ceiling = (
-            "AUTHORIZATION_ONLY_VERIFICATION_REQUIRED"
-            if matched
-            else "NO_MUTATION_AUTHORITY"
+            "AUTHORIZATION_ONLY_VERIFICATION_REQUIRED" if matched else "NO_MUTATION_AUTHORITY"
         )
         if self.claim_ceiling != expected_ceiling:
             raise ValueError("STANDING_DECISION_CEILING_INVALID")
@@ -175,9 +171,7 @@ def _standing_decision(outcome: StandingGrantOutcome, context_hash: str) -> Stan
         "context_hash": context_hash,
         "mutation_authorized": matched,
         "claim_ceiling": (
-            "AUTHORIZATION_ONLY_VERIFICATION_REQUIRED"
-            if matched
-            else "NO_MUTATION_AUTHORITY"
+            "AUTHORIZATION_ONLY_VERIFICATION_REQUIRED" if matched else "NO_MUTATION_AUTHORITY"
         ),
     }
     return StandingGrantDecision.model_validate({
@@ -234,9 +228,7 @@ def evaluate_standing_grant_decision(
         or now >= grant.expires_at
         or grant.revoked_at is not None
     ):
-        return _standing_decision(
-            StandingGrantOutcome.GRANT_OUT_OF_SCOPE, grant.context_hash
-        )
+        return _standing_decision(StandingGrantOutcome.GRANT_OUT_OF_SCOPE, grant.context_hash)
     if platform_approval_required:
         return _standing_decision(
             StandingGrantOutcome.PLATFORM_APPROVAL_REQUIRED, grant.context_hash
