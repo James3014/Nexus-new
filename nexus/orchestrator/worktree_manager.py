@@ -1,6 +1,9 @@
+import fcntl
 import json
 import os
+import re
 import subprocess
+from contextlib import contextmanager
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
@@ -40,7 +43,9 @@ def _normalized_mutation_paths(record: Any) -> tuple[str, ...]:
     for item in raw:
         if not isinstance(item, str) or not item.strip():
             raise ValueError("MUTATION_DOMAIN_INVALID: path is not a string")
-        path = item.strip()
+        path = item.strip().rstrip("/")
+        if not path:
+            raise ValueError("MUTATION_DOMAIN_INVALID: path is ambiguous")
         if path.startswith("/") or "\\" in path or "//" in path:
             raise ValueError("MUTATION_DOMAIN_INVALID: path is not repository-relative")
         parts = path.split("/")
@@ -411,7 +416,28 @@ class WorktreeManager:
     def prune(self):
         self._run_git(["worktree", "prune"])
 
+    @contextmanager
+    def _reservation_lock(self, controller_root: Path):
+        lock_path = controller_root / ".git" / "nexus-target-admission.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+", encoding="utf-8") as handle:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
     def create_lease(
+        self,
+        contract: SelfHostedTaskContract,
+        *,
+        task_states: Optional[Mapping[str, dict]] = None,
+    ) -> TargetWorktreeLease:
+        controller_root = Path(contract.controller_repo_root).resolve()
+        with self._reservation_lock(controller_root):
+            return self._create_lease_locked(contract, task_states=task_states)
+
+    def _create_lease_locked(
         self,
         contract: SelfHostedTaskContract,
         *,
@@ -419,6 +445,7 @@ class WorktreeManager:
     ) -> TargetWorktreeLease:
         controller_root, target_path, target_root = self._resolved_paths(contract)
         self._verify_target_boundary(controller_root, target_path, target_root)
+        _normalized_mutation_paths(contract)
         CollaborationRealmVerifier.verify_submission(contract)
         controller_status = self._verify_controller(contract)
         resolved_target_revision = self._run_git(
@@ -1176,6 +1203,8 @@ class WorktreeManager:
 
     def _verify_controller(self, contract: SelfHostedTaskContract) -> bytes:
         controller_root = Path(contract.controller_repo_root).resolve()
+        if not re.fullmatch(r"[0-9a-f]{40}", contract.controller_revision):
+            raise RuntimeError("Controller revision must be a lowercase 40-hex SHA")
         head = self._run_git(["rev-parse", "HEAD"], cwd=controller_root)
         if head != contract.controller_revision:
             raise RuntimeError("Controller revision does not match the contract")

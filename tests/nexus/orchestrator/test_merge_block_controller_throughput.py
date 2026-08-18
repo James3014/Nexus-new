@@ -1,10 +1,19 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from nexus.orchestrator.self_hosted_task_service import mutation_domains_conflict
+from nexus.orchestrator.self_hosted_task_service import (
+    SelfHostedTaskService,
+    mutation_domains_conflict,
+)
+from nexus.orchestrator.task_contract import MutationMode, SelfHostedTaskContract
 from nexus.orchestrator.worktree_manager import WorktreeManager
 
 
@@ -129,3 +138,213 @@ def test_worktree_manager_uses_same_disjoint_predicate_before_target_creation(tm
     assert manager.target_conflict(contract, task_states=states) is False
     states["a"]["contract"]["allowed_files"] = ["scope"]
     assert manager.target_conflict(contract, task_states=states) is True
+
+
+def _git(cwd: Path, *args: str) -> str:
+    env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"}
+    result = subprocess.run(
+        ["git", *args],
+        cwd=cwd,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def _real_contract(
+    controller: Path, target_root: Path, task_id: str, allowed
+) -> SelfHostedTaskContract:
+    base = _git(controller, "rev-parse", "HEAD")
+    return SelfHostedTaskContract(
+        task_id=task_id,
+        objective="real throughput admission",
+        controller_revision=base,
+        target_base_revision=base,
+        controller_repo_root=str(controller),
+        target_repo_root=str(target_root / task_id),
+        target_worktree_root=str(target_root),
+        allowed_files=list(allowed),
+        forbidden_files=[],
+        verifier_commands=[],
+        protected_contracts=[],
+        preferred_provider=None,
+        fallback_provider=None,
+        maximum_provider_calls=0,
+        maximum_replans=0,
+        mutation_mode=MutationMode.WORKING_TREE_ONLY,
+        human_approval_required=True,
+    )
+
+
+def _real_repo(tmp_path: Path):
+    controller = tmp_path / "controller"
+    target_root = tmp_path / "targets"
+    controller.mkdir()
+    target_root.mkdir()
+    _git(controller, "init", "-b", "main")
+    _git(controller, "config", "user.email", "test@example.test")
+    _git(controller, "config", "user.name", "Test")
+    (controller / "base.txt").write_text("base\n", encoding="utf-8")
+    _git(controller, "add", "base.txt")
+    _git(controller, "commit", "-m", "base")
+    return controller, target_root
+
+
+def test_real_create_lease_allows_disjoint_and_blocks_exact_parent(tmp_path):
+    controller, target_root = _real_repo(tmp_path)
+    manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
+    a = _real_contract(controller, target_root, "a", ["scope/a.txt"])
+    b = _real_contract(controller, target_root, "b", ["scope/b.txt"])
+    lease_a = manager.create_lease(a)
+    state_a = {
+        "a": {
+            "task_id": "a",
+            "status": "CANDIDATE_CAPTURED",
+            "attempt_id": "a-attempt",
+            "lease_id": lease_a.lease_id,
+            "controller_revision": a.controller_revision,
+            "controller_worktree": a.controller_repo_root,
+            "contract": a.model_dump(mode="json"),
+            "lease": lease_a.__dict__,
+            "expected_attempt_id": "a-attempt",
+        }
+    }
+    state_a["a"]["attempt_id"] = "stale-attempt"
+    with pytest.raises(ValueError, match="stale"):
+        manager.target_conflict(b, task_states=state_a)
+    state_a["a"]["attempt_id"] = "a-attempt"
+    lease_b = manager.create_lease(b, task_states=state_a)
+    assert Path(lease_a.target_worktree) != Path(lease_b.target_worktree)
+    assert manager.cleanup_terminal_target(a, lease_a).decision == "REMOVED"
+    assert Path(lease_b.target_worktree).exists()
+    overlapping = _real_contract(controller, target_root, "overlap", ["scope"])
+    with pytest.raises(RuntimeError, match="serial Target budget exceeded"):
+        manager.create_lease(
+            overlapping,
+            task_states={
+                **state_a,
+                "b": {
+                    "task_id": "b",
+                    "status": "CANDIDATE_CAPTURED",
+                    "attempt_id": "b-attempt",
+                    "lease_id": lease_b.lease_id,
+                    "controller_revision": b.controller_revision,
+                    "controller_worktree": b.controller_repo_root,
+                    "contract": b.model_dump(mode="json"),
+                    "lease": lease_b.__dict__,
+                },
+            },
+        )
+
+
+def test_real_create_lease_rejects_bad_revision_and_ambiguous_scope(tmp_path):
+    controller, target_root = _real_repo(tmp_path)
+    manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
+    bad = _real_contract(controller, target_root, "bad", ["scope/a.txt"])
+    with pytest.raises(RuntimeError, match="lowercase 40-hex"):
+        manager.create_lease(
+            bad.model_copy(update={"controller_revision": bad.controller_revision.upper()})
+        )
+    malformed = _real_contract(controller, target_root, "malformed", ["scope/a.txt"]).model_copy(
+        update={"allowed_files": ["scope//a.txt"]}
+    )
+    with pytest.raises(ValueError, match="MUTATION_DOMAIN_INVALID"):
+        manager.create_lease(malformed)
+
+
+def test_create_lease_reservation_lock_allows_one_overlapping_request(tmp_path):
+    controller, target_root = _real_repo(tmp_path)
+    manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
+    contracts = [
+        _real_contract(controller, target_root, str(i), ["scope/a.txt"]) for i in ("a", "b")
+    ]
+    states = {
+        contract.task_id: {
+            "task_id": contract.task_id,
+            "status": "SUBMITTED",
+            "attempt_id": f"{contract.task_id}-attempt",
+            "controller_revision": contract.controller_revision,
+            "controller_worktree": contract.controller_repo_root,
+            "contract": contract.model_dump(mode="json"),
+        }
+        for contract in contracts
+    }
+
+    def acquire(contract):
+        try:
+            return ("ok", manager.create_lease(contract, task_states=states).task_id)
+        except RuntimeError as exc:
+            return ("blocked", str(exc))
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(acquire, contracts))
+    assert sorted(item[0] for item in results) == ["blocked", "ok"]
+
+
+def test_public_service_admission_allows_disjoint_and_blocks_overlap(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append((contract.task_id, contract.target_repo_root))
+        return {"promotion_status": "PENDING_HUMAN_APPROVAL"}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        runner=runner,
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    base = _task(task_id="a", allowed_files=["scope/a.txt"])
+    base["controller_worktree"] = str(tmp_path / "controller")
+    base["expected_controller_worktree"] = str(tmp_path / "controller")
+    service._write_state(
+        "a",
+        {
+            **base,
+            "request": {"task_id": "a", "allowed_files": ["scope/a.txt"]},
+            "contract": {
+                "controller_repo_root": str(tmp_path / "controller"),
+                "controller_revision": "a" * 40,
+                "allowed_files": ["scope/a.txt"],
+                "target_repo_root": str(tmp_path / "targets" / "a"),
+            },
+        },
+    )
+    request_b = {
+        "task_id": "b",
+        "what": "disjoint",
+        "why": "throughput",
+        "controller_revision": "a" * 40,
+        "target_base_revision": "b" * 40,
+        "controller_repo_root": str(tmp_path / "controller"),
+        "target_repo_root": str(tmp_path / "targets" / "b"),
+        "target_worktree_root": str(tmp_path / "targets"),
+        "allowed_files": ["scope/b.txt"],
+        "forbidden_files": [],
+        "verifier_commands": [],
+        "protected_contracts": [],
+        "execution_lane": "ISOLATED_TARGET",
+        "worker": "codex",
+        "allow_unbound_test_identity": True,
+        "task_card_path": str(tmp_path / "missing-card-b.txt"),
+        "idempotency_key": "b-idempotent",
+    }
+    service.submit_task(request_b)
+    for _ in range(100):
+        if calls:
+            break
+        time.sleep(0.01)
+    assert calls == [("b", str(tmp_path / "targets" / "b"))]
+    request_overlap = {
+        **request_b,
+        "task_id": "c",
+        "target_repo_root": str(tmp_path / "targets" / "c"),
+        "allowed_files": ["scope"],
+    }
+    with pytest.raises(RuntimeError, match="overlapping Target"):
+        service.submit_task(request_overlap)
+    assert calls == [("b", str(tmp_path / "targets" / "b"))]
+    assert service.submit_task(request_b).get("duplicate") is True
+    assert calls == [("b", str(tmp_path / "targets" / "b"))]
