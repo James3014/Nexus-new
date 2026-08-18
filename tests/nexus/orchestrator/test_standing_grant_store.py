@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+import nexus.orchestrator.standing_grant_store as standing_grant_store
 from nexus.contracts.autonomy_goal import (
     AutonomyActionClass,
     RepositoryIdentity,
@@ -67,8 +68,10 @@ def test_red_default_receipt_path_is_canonical_machine_local(tmp_path):
     assert path.name == "standing-grant.json"
 
 
-def test_default_receipt_is_absent_without_operator_issuance(tmp_path):
-    assert not Path(DEFAULT_RECEIPT_PATH).exists()
+def test_default_receipt_is_absent_without_operator_issuance(tmp_path, monkeypatch):
+    missing_path = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(standing_grant_store, "DEFAULT_RECEIPT_PATH", missing_path)
+    assert not missing_path.exists()
     outcome = load_standing_grant_receipt()
     assert outcome is None
 
@@ -110,10 +113,12 @@ def test_receipt_hash_covers_context_and_supersedes(tmp_path):
     # Tampering with a nested context field changes the receipt hash.
     tampered = {**payload, "context": {**payload["context"], "goal_id": "other"}}
     with pytest.raises(Exception):
-        StandingGrantReceipt.model_validate({
-            **tampered,
-            "receipt_hash": "0" * 64,
-        })
+        StandingGrantReceipt.model_validate(
+            {
+                **tampered,
+                "receipt_hash": "0" * 64,
+            }
+        )
 
 
 def test_supersedes_hash_is_sha256_hex_and_self_reference_is_documented_limitation():
@@ -265,7 +270,9 @@ def test_two_requests_and_fresh_reader_reuse_same_grant_without_mutation(tmp_pat
     assert path.read_text(encoding="utf-8") == before
 
 
-def test_expired_or_revoked_receipt_fails_closed_without_mutation(tmp_path):
+def test_expired_or_revoked_receipt_fails_closed_without_mutation(tmp_path, monkeypatch):
+    missing_path = tmp_path / "missing-authority" / "standing-grant.json"
+    monkeypatch.setattr(standing_grant_store, "DEFAULT_RECEIPT_PATH", missing_path)
     _receipt, expired_path = _make_receipt(
         tmp_path, grant_id="expired", expires_at=(NOW - timedelta(minutes=1))
     )
