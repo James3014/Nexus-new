@@ -83,6 +83,20 @@ def test_standing_grant_match_is_evidence_only_and_hash_bound():
     assert decision.decision_hash
 
 
+def test_evaluator_is_the_single_semantic_grant_decider_and_durable_store_does_not_add_authority():
+    """Durable store is a loader/carrier only; the evaluator remains the one semantic authority."""
+    import inspect
+
+    from nexus.orchestrator import standing_grant_store
+
+    source = inspect.getsource(standing_grant_store)
+    # The store carries and validates the receipt, then calls the existing pure
+    # evaluator. It must not define its own outcome enum / decider.
+    assert "evaluate_standing_grant_decision" in source
+    assert "GRANT_MATCH =" not in source
+    assert "class StandingGrantOutcome" not in source
+
+
 def test_standing_grant_merge_requires_platform_approval():
     """Legacy node ID retained for CI continuity; current assertions govern superseding semantics."""
     context = _standing_context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
