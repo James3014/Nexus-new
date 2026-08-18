@@ -26,11 +26,13 @@ def _safe(model, typ):
         raise ValueError("MALFORMED_INPUT") from exc
 
 
-def evaluate_action(context, request):
-    """Return policy outcome; GITHUB_MERGE is always owner-slot only."""
+def evaluate_action(context, request, *, platform_approval_required: bool = False):
+    """Return the one standing-grant decision for an exact GitHub action."""
     try:
         return evaluate_standing_grant_decision(
-            _safe(context, StandingGrantContext), _safe(request, StandingGrantRequest)
+            _safe(context, StandingGrantContext),
+            _safe(request, StandingGrantRequest),
+            platform_approval_required=platform_approval_required,
         )
     except ValueError:
         return evaluate_standing_grant_decision({}, {})
@@ -64,7 +66,7 @@ def prepare_merge_intent(
     now = now or datetime.now(timezone.utc)
     _check(evidence, now)
     decision = evaluate_action(context, request)
-    if decision.outcome is not StandingGrantOutcome.GRANT_MATCH:
+    if decision.outcome is not StandingGrantOutcome.GRANT_MATCH or not decision.mutation_authorized:
         raise ValueError(decision.outcome.value)
     payload = {
         "schema": "nexus.github_merge_intent.v2",
@@ -87,3 +89,21 @@ def revalidate_merge_intent(intent, context, request, evidence, *, now: datetime
     ):
         raise ValueError("INTENT_REPLAY_OR_TAMPER")
     return prepare_merge_intent(context, request, evidence, now=now)
+
+
+def resolve_merge_authorization(
+    intent,
+    context,
+    request,
+    evidence,
+    *,
+    now: datetime | None = None,
+    platform_approval_required: bool = False,
+):
+    """Revalidate exact merge evidence, then return its typed authority result."""
+    revalidate_merge_intent(intent, context, request, evidence, now=now)
+    return evaluate_action(
+        context,
+        request,
+        platform_approval_required=platform_approval_required,
+    )

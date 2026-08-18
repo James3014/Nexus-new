@@ -142,3 +142,100 @@ For subsequent workforce updates and candidate requalification:
 3. Autonomous `FIRST_PASS` reliability, hidden defect checks, and `VERIFIER_GUIDED_REPAIR` remain distinct evidence phases and must not be conflated.
 4. Observed higher-tier repair capabilities (such as L4 repair) remain experimental and are NOT admitted autonomy.
 5. Autonomy ceilings (e.g. Gemini 3.7 Flash Medium at L3, DeepSeek V4 Flash at L2) and non-default routing are governed by `nexus/config/model_workforce.yaml` and Owner authority. Lineage sharing (such as between `opencode/deepseek-v4-flash-free` and `opencode-go/deepseek-v4-flash`) does not collapse exact execution identity matching.
+
+---
+
+# 2026-08-17 MiMo cumulative calibration amendment
+
+This is a dated, Owner-approved cumulative calibration and governance amendment
+for OpenCode MiMo V2.5. It is **separate** from the original 2026-07-29
+three-arm run above: the 2026-08-17 suite was not part of that run, and it does
+not pretend to be. Historical 2026-07-29 scores remain frozen and unchanged.
+
+## Exact identity and measured semantic evidence
+
+- **Exact Free identity:** `opencode/mimo-v2.5-free`
+- **Evidence date:** 2026-08-17
+- **Evidence kind:** cumulative calibration (Owner-approved 2026-08-17 OpenCode MiMo V2.5 cumulative calibration / governance evidence)
+- **Trials:** 53 new non-baseline trials
+- **Semantic stable floor:** L1.5
+- **Current semantic frontier:** L3
+- **Semantic score:** 51/53
+- **Frontier stress:** 15/15
+- **Verifier-guided repair:** 4/5
+- **Strict schema/protocol discipline:** CONDITIONAL
+- **Tool/scope discipline:** HARD FAIL
+
+## Authority conclusion
+
+- **Trusted mutation/execution ceiling:** L1
+- **Admitted autonomy:** L1
+- **Promotion status:** NOT_PROMOTED
+- **State:** `REGISTERED_CONDITIONAL` (unchanged)
+- **Current bounded candidate roles:** unchanged
+- **External independent verification:** remains required
+
+**Critical invariant:** semantic capability frontier **L3** != trusted execution
+ceiling **L1** != admitted workforce authority **L1**. MiMo is **not** promoted
+to L2 or L3.
+
+## Free / Go policy
+
+Owner policy is **FREE_FIRST**:
+
+- **Free:** `opencode/mimo-v2.5-free` — always first when eligible/runnable.
+- **Paid Go:** `opencode-go/mimo-v2.5` — paid fallback only.
+- Go fallback is permitted only before any Free mutation, and only for
+  provider / transport / capacity / quota / exact-model availability blockers,
+  with a fresh Go preflight.
+- Once Free has mutated, created a patch, or physical state is UNKNOWN: no
+  automatic Go switch; reconcile first.
+- Semantic/verifier failure is not an in-place paid fallback trigger.
+- No hidden fallback; no paid-first because Go may be faster/stronger.
+
+`opencode-go/mimo-v2.5` is **not** registered as an admitted workforce worker.
+Free and Go are **not** asserted to be one semantic capability lineage; that
+relation remains unresolved unless exact current authoritative evidence proves
+otherwise. No second route selector is created and `CapabilityPlanner` authority
+is unchanged.
+
+## Provenance and claim ceiling
+
+The 2026-08-17 aggregate is an **`OWNER_APPROVED_CUMULATIVE_SUMMARY`**, not a
+repository-bound raw benchmark receipt set. `raw_trial_receipt_status` is
+`NOT_REPOSITORY_BOUND`, so this report does not claim independently reproducible
+raw-trial evidence. Its claim ceiling is
+`OWNER_APPROVED_CUMULATIVE_SUMMARY_ONLY`, with GitHub `main` baseline
+`9296d68fe19d933cb78b9a0470a054ea5efd4c2f`; the supplied source artifacts and
+OpenCode binary are bound by full SHA-256 identities in the machine policy.
+Those content digests bind the aggregate source documents; they do not replace
+the absent per-trial receipts.
+
+Transport fallback enforcement belongs to DevSpace Issue #400, not
+`CapabilityPlanner`. The latter remains the sole route/capability authority;
+DevSpace owns the Free-first pre-mutation resolver and its clean-state gates.
+
+## Tool-discipline blocker and promotion gate
+
+MiMo previously violated an answer-only / bounded calibration by performing
+unauthorized filesystem/tool mutation in an isolated temporary scope. This
+counts as a real tool-discipline failure even though canonical Nexus was not
+touched.
+
+Promotion requires a dedicated **MiMo Tool Discipline Requalification** under
+durable DevSpace execution contracts, checking at minimum:
+
+- `expectedHead`
+- exact `writePaths`
+- `maxFiles`
+- final physical reconciliation
+- deliberate out-of-scope write rejection / violation detection
+- external independent verification
+
+GitHub Issue #400 tracks the durable DevSpace profile / follow-on transport
+gate. **Issue #400 is not claimed completed.**
+
+## Historical baseline unchanged
+
+The frozen 2026-07-29 `opencode_mimo_free` scores (Bare 11/11, Nexus-bounded
+11/11, Nexus-full 11/11) are not rewritten by this amendment.
