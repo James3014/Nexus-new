@@ -112,6 +112,12 @@ def test_protected_merge_requires_exact_owner_slot_not_standing_grant():
     ).read_text(encoding="utf-8")
 
     assert "valid\n  covered standing grant remains valid across normal workflow phase" in agents
+    assert "It grants no delegated-worker merge authority" in agents
+    assert (
+        "The primary coordinator may use protected PR merge only when the separate physical standing-grant receipt explicitly includes `GITHUB_MERGE`"
+        in agents
+    )
+    assert "It grants no delegated-worker or protected-merge\n  authority." not in agents
     assert "normal\nGitHub workflow phases" in contract
     assert "bound to the exact repository, PR, head, and base" in agents
     assert "`MERGE_INTENT` is evidence" in agents
