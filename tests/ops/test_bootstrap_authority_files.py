@@ -122,6 +122,35 @@ def test_protected_merge_preserves_standing_grant_across_normal_phases():
     assert "per-phase merge-slot restriction is historical and superseded" in historical_card
 
 
+def test_current_standing_grant_contract_is_non_self_attesting():
+    index = (ROOT / "tasks/standing-owner-autonomy-20260811/INDEX.md").read_text(
+        encoding="utf-8"
+    )
+    current = (
+        ROOT / "tasks/standing-owner-autonomy-20260811/02-standing-grant-normal-phase-authority.md"
+    ).read_text(encoding="utf-8")
+
+    assert "frontier: 02-standing-grant-normal-phase-authority.md" in index
+    assert "normative CURRENT AUTHORITY CONTRACT" in current
+    assert "does not itself attest" in current
+    assert "does not itself authorize a merge" in current
+    for field in (
+        "grant_id",
+        "owner",
+        "primary coordinator",
+        "repository",
+        "source_thread",
+        "Goal",
+        "issued_at",
+        "expiry",
+        "revocation_state",
+        "context_hash",
+    ):
+        assert f"`{field}`" in current
+    assert "`GITHUB_MERGE`" in current
+    assert "separate physical, machine-bound Owner receipt" in current
+
+
 def test_bootstrap_file_set_is_complete_and_tracked():
     for path in BOOTSTRAP_FILES:
         assert (ROOT / path).is_file(), path

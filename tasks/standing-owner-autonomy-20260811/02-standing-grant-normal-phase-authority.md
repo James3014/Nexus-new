@@ -11,14 +11,20 @@ supersedes:
 AUTO_CHAIN: false
 ---
 
-# Current standing-grant normal-phase authority
+# Current standing-grant normal-phase authority contract
 
-The current Owner standing grant is machine-bound to the exact repository,
-Goal, coordinator, source thread, allowed GitHub actions, issuance, expiry, and
-revocation state. A valid grant that explicitly covers normal GitHub protected
-merge remains valid across the ordinary phases from Task Card through main
-readback and Issue reconciliation. Reaching the merge phase alone is not a
-new authority boundary and must not trigger redundant Owner authorization.
+This file is a normative CURRENT AUTHORITY CONTRACT. It does not itself attest
+that a standing grant exists or issue a grant. It does not itself authorize a merge. A standing
+grant is current and valid only when a separate physical, machine-bound Owner receipt contains all of these exact bindings: `grant_id`, `owner`, `primary coordinator`, `repository`, `source_thread`, `Goal`, an allowed action set explicitly including `GITHUB_MERGE` for a protected merge, `issued_at`, `expiry`, `revocation_state` (or an equivalent revocation rule), and `context_hash`. The receipt must be independently read back and verified
+against the current execution context; this document is not that receipt.
+
+After that exact receipt matches, a valid grant that explicitly covers normal
+GitHub protected merge remains valid across the ordinary phases from Task Card through main readback and Issue reconciliation. Reaching the merge phase alone
+is not a new authority boundary and must not trigger redundant Owner
+authorization. This contract does not authorize a merge by itself: the exact
+merge gate and all independent acceptance, repository/PR/head/base, checks,
+branch-protection, scope, deletion, and expected-head/CAS evidence remain
+mandatory.
 
 The grant authorizes only the exact covered action. Independent acceptance,
 exact PR/head/base binding, required checks, branch protection,
