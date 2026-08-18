@@ -143,6 +143,11 @@ def test_loader_rejects_symlink_and_non_regular_file(tmp_path):
     with pytest.raises(StandingGrantReceiptError, match="NOT_REGULAR_FILE"):
         _load_receipt_at(directory)
 
+    dangling = tmp_path / "dangling.json"
+    dangling.symlink_to(tmp_path / "does-not-exist.json")
+    with pytest.raises(StandingGrantReceiptError, match="NOT_REGULAR_FILE"):
+        _load_receipt_at(dangling)
+
 
 def test_loader_rejects_unsafe_file_permissions(tmp_path):
     receipt, path = _make_receipt(tmp_path)
@@ -180,6 +185,16 @@ def test_loader_rejects_duplicate_keys_and_noncanonical_bytes(tmp_path):
     os.chmod(garbage, 0o600)
     with pytest.raises(StandingGrantReceiptError, match="NONCANONICAL_SERIALIZATION"):
         _load_receipt_at(garbage)
+
+    duplicate = tmp_path / "duplicate.json"
+    duplicate.write_text(
+        '{"context":{},"context":{},"grant_id":"x",'
+        '"receipt_hash":"' + "0" * 64 + '","schema":"nexus.standing_grant_receipt.v1"}',
+        encoding="utf-8",
+    )
+    os.chmod(duplicate, 0o600)
+    with pytest.raises(StandingGrantReceiptError, match="MALFORMED"):
+        _load_receipt_at(duplicate)
 
 
 def test_loader_validates_receipt_hash_and_rejects_tamper(tmp_path):
@@ -265,7 +280,8 @@ def test_superseded_receipt_returns_rebinding_pointer(tmp_path):
         grant_id="grant-1", context=base, supersedes_grant_hash=first.receipt_hash
     )
     path = tmp_path / "authority" / "standing-grant.json"
-    _write_standing_grant_receipt_at(second, path)
+    _write_standing_grant_receipt_at(first, path)
+    _write_standing_grant_receipt_at(second, path, expected_receipt_hash=first.receipt_hash)
     loaded = _load_receipt_at(path)
     assert loaded.supersedes_grant_hash == first.receipt_hash
     assert loaded.grant_id == "grant-1"
@@ -274,8 +290,10 @@ def test_superseded_receipt_returns_rebinding_pointer(tmp_path):
 def test_stale_writer_cas_rejects_revive_overwrite(tmp_path):
     receipt, path = _make_receipt(tmp_path)
     base = _make_context()
-    replacement = StandingGrantReceipt.issue(grant_id="grant-new", context=base)
-    with pytest.raises(StandingGrantReceiptError, match="STALE_WRITER_CAS_MISMATCH"):
+    replacement = StandingGrantReceipt.issue(
+        grant_id="grant-new", context=base, supersedes_grant_hash=receipt.receipt_hash
+    )
+    with pytest.raises(StandingGrantReceiptError, match="SUPERSEDES_CAS_MISMATCH"):
         _write_standing_grant_receipt_at(replacement, path, expected_receipt_hash="0" * 64)
     # Correct CAS (predecessor receipt hash) allows the write.
     _write_standing_grant_receipt_at(replacement, path, expected_receipt_hash=receipt.receipt_hash)
@@ -292,6 +310,7 @@ def test_supersedes_hash_binds_current_cas_on_write(tmp_path):
     )
     path = tmp_path / "authority" / "standing-grant.json"
     # Writing the successor requires the predecessor's current hash as CAS.
+    _write_standing_grant_receipt_at(predecessor, path)
     _write_standing_grant_receipt_at(
         successor, path, expected_receipt_hash=predecessor.receipt_hash
     )
@@ -302,9 +321,37 @@ def test_supersedes_hash_binds_current_cas_on_write(tmp_path):
 
 def test_write_requires_cas_when_file_exists(tmp_path):
     receipt, path = _make_receipt(tmp_path)
-    replacement = StandingGrantReceipt.issue(grant_id="grant-new-2", context=_make_context())
+    replacement = StandingGrantReceipt.issue(
+        grant_id="grant-new-2", context=_make_context(), supersedes_grant_hash=receipt.receipt_hash
+    )
     with pytest.raises(StandingGrantReceiptError, match="EXISTS_NO_CAS"):
         _write_standing_grant_receipt_at(replacement, path)
+
+
+def test_initial_write_rejects_predecessor_or_cas(tmp_path):
+    context = _make_context()
+    successor = StandingGrantReceipt.issue(
+        grant_id="grant-initial-successor",
+        context=context,
+        supersedes_grant_hash="0" * 64,
+    )
+    with pytest.raises(StandingGrantReceiptError, match="INITIAL_WRITE_NO_SUPERSEDES"):
+        _write_standing_grant_receipt_at(
+            successor,
+            tmp_path / "authority" / "standing-grant.json",
+            expected_receipt_hash="0" * 64,
+        )
+
+
+def test_replacement_rejects_predecessor_cas_mismatch(tmp_path):
+    predecessor, path = _make_receipt(tmp_path)
+    successor = StandingGrantReceipt.issue(
+        grant_id="grant-cas-mismatch",
+        context=_make_context(),
+        supersedes_grant_hash=predecessor.receipt_hash,
+    )
+    with pytest.raises(StandingGrantReceiptError, match="SUPERSEDES_CAS_MISMATCH"):
+        _write_standing_grant_receipt_at(successor, path, expected_receipt_hash="0" * 64)
 
 
 def test_exact_mode_and_size(tmp_path):

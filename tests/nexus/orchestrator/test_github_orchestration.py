@@ -11,9 +11,9 @@ from nexus.contracts.autonomy_goal import (
 )
 from nexus.orchestrator.autonomy_policy import StandingGrantOutcome, StandingGrantRequest
 from nexus.orchestrator.github_orchestration import (
+    _resolve_durable_merge_authorization_at,
     evaluate_action,
     prepare_merge_intent,
-    resolve_durable_merge_authorization_at,
     resolve_merge_authorization,
     revalidate_merge_intent,
 )
@@ -78,7 +78,7 @@ def test_durable_receipt_loads_and_authorizes_without_caller_context(tmp_path):
     snap = evidence()
     intent = prepare_merge_intent(ctx, merge_request, snap, now=NOW)
 
-    decision = resolve_durable_merge_authorization_at(
+    decision = _resolve_durable_merge_authorization_at(
         intent,
         merge_request,
         snap,
@@ -101,7 +101,7 @@ def test_durable_receipt_without_github_merge_is_out_of_scope(tmp_path):
     snap = evidence()
     intent = prepare_merge_intent(caller_ctx, merge_request, snap, now=NOW)
 
-    decision = resolve_durable_merge_authorization_at(
+    decision = _resolve_durable_merge_authorization_at(
         intent,
         merge_request,
         snap,
@@ -109,7 +109,7 @@ def test_durable_receipt_without_github_merge_is_out_of_scope(tmp_path):
         now=NOW,
     )
 
-    assert decision.outcome is StandingGrantOutcome.GRANT_OUT_OF_SCOPE
+    assert decision.outcome is StandingGrantOutcome.GRANT_INVALID
     assert decision.mutation_authorized is False
 
 
@@ -119,7 +119,7 @@ def test_durable_receipt_missing_or_malformed_is_invalid(tmp_path):
     snap = evidence()
     intent = prepare_merge_intent(ctx, merge_request, snap, now=NOW)
 
-    decision = resolve_durable_merge_authorization_at(
+    decision = _resolve_durable_merge_authorization_at(
         intent,
         merge_request,
         snap,

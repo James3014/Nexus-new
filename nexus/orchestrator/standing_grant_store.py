@@ -22,7 +22,7 @@ import stat
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -40,7 +40,6 @@ from nexus.contracts.autonomy_goal import (
 )
 from nexus.orchestrator.autonomy_policy import (
     StandingGrantDecision,
-    StandingGrantOutcome,
     StandingGrantRequest,
     evaluate_standing_grant_decision,
 )
@@ -63,7 +62,7 @@ class _FrozenModel(BaseModel):
 class StandingGrantReceipt(_FrozenModel):
     """Validated machine-local receipt binding one immutable granting context."""
 
-    schema: str = "nexus.standing_grant_receipt.v1"
+    schema: Literal["nexus.standing_grant_receipt.v1"] = "nexus.standing_grant_receipt.v1"
     grant_id: StrictStr
     context: StandingGrantContext
     receipt_hash: StrictStr
@@ -147,11 +146,13 @@ def _assert_dir_chain_safe(directory: Path, *, create: bool) -> None:
         if parent == current:
             break
         current = parent
-    # Walk from the first existing ancestor up to root with the generic check.
-    node = current.parent
+    # Validate the first existing ancestor itself, then every ancestor to root.
+    node = current
     while True:
-        _check_dir(node)
+        _check_dir(node, strict_leaf=(node == directory))
         if node == node.parent:
+            break
+        if node.parent == node:
             break
         node = node.parent
     if create:
@@ -210,7 +211,11 @@ def _open_receipt_fd(path: Path) -> int:
 
 
 def _read_current_hash_nofollow(path: Path) -> str:
-    """Read the existing receipt's hash via a no-follow fd (never Path.read_text)."""
+    """Read and fully validate the existing receipt, returning its real hash.
+
+    Uses a no-follow fd (never Path.read_text) and re-validates canonical JSON,
+    the body receipt hash, and the stored 64-char hash before returning it.
+    """
     fd = _open_receipt_fd(path)
     try:
         fst = os.fstat(fd)
@@ -226,29 +231,55 @@ def _read_current_hash_nofollow(path: Path) -> str:
     if fst.st_size > _MAX_RECEIPT_BYTES:
         os.close(fd)
         raise StandingGrantReceiptError("RECEIPT_TOO_LARGE")
-    raw = os.read(fd, _MAX_RECEIPT_BYTES + 1)
+    raw = _read_all_fd(fd, _MAX_RECEIPT_BYTES + 1)
     os.close(fd)
     try:
-        text = raw.decode("utf-8").rstrip("\n")
-        parsed = json.loads(text)
+        text = raw.decode("utf-8")
+        parsed = json.loads(text, object_pairs_hook=_reject_duplicates)
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
         raise StandingGrantReceiptError("MALFORMED") from exc
     if not isinstance(parsed, dict):
         raise StandingGrantReceiptError("MALFORMED")
+    if parsed.get("schema") != "nexus.standing_grant_receipt.v1":
+        raise StandingGrantReceiptError("MALFORMED")
+    if text.endswith("\n"):
+        text = text[:-1]
+    if "\x00" in text or "\n" in text:
+        raise StandingGrantReceiptError("NONCANONICAL_SERIALIZATION")
+    if _canonical_json(parsed) != text:
+        raise StandingGrantReceiptError("NONCANONICAL_SERIALIZATION")
     stored_hash = parsed.get("receipt_hash")
     if not isinstance(stored_hash, str) or len(stored_hash) != 64:
+        raise StandingGrantReceiptError("TAMPERED")
+    body = {k: v for k, v in parsed.items() if k != "receipt_hash"}
+    if canonical_autonomy_hash(body) != stored_hash:
         raise StandingGrantReceiptError("TAMPERED")
     return stored_hash
 
 
-def _write_bytes(canonical: str, destination: Path, expected: str | None) -> None:
+def _write_bytes(
+    canonical: str,
+    supersedes_grant_hash: str | None,
+    destination: Path,
+    expected: str | None,
+) -> None:
     _assert_dir_chain_safe(destination.parent, create=True)
-    if destination.exists() or destination.is_symlink():
+    present = os.path.lexists(destination)
+    if present:
+        # Replacing an existing receipt requires exact predecessor binding.
+        if supersedes_grant_hash is None:
+            raise StandingGrantReceiptError("SUPERSEDES_HASH_REQUIRED_FOR_REPLACE")
         if expected is None:
             raise StandingGrantReceiptError("EXISTS_NO_CAS")
+        if supersedes_grant_hash != expected:
+            raise StandingGrantReceiptError("SUPERSEDES_CAS_MISMATCH")
         current = _read_current_hash_nofollow(destination)
         if current != expected:
             raise StandingGrantReceiptError("STALE_WRITER_CAS_MISMATCH")
+    else:
+        # Initial write: neither a predecessor hash nor a CAS may be supplied.
+        if supersedes_grant_hash is not None or expected is not None:
+            raise StandingGrantReceiptError("INITIAL_WRITE_NO_SUPERSEDES")
     fd, tmp_name = tempfile.mkstemp(prefix=".standing-grant-", dir=str(destination.parent))
     try:
         os.fchmod(fd, 0o600)
@@ -289,7 +320,9 @@ def write_standing_grant_receipt(
         raise TypeError("receipt must be a validated StandingGrantReceipt")
     payload = receipt.model_dump(mode="json")
     canonical = _canonical_json(payload)
-    _write_bytes(canonical, DEFAULT_RECEIPT_PATH, expected_receipt_hash)
+    _write_bytes(
+        canonical, receipt.supersedes_grant_hash, DEFAULT_RECEIPT_PATH, expected_receipt_hash
+    )
     return DEFAULT_RECEIPT_PATH
 
 
@@ -302,7 +335,7 @@ def _write_standing_grant_receipt_at(
     """Test/internal-only writer bound to an explicit path (never production)."""
     payload = receipt.model_dump(mode="json")
     canonical = _canonical_json(payload)
-    _write_bytes(canonical, path, expected_receipt_hash)
+    _write_bytes(canonical, receipt.supersedes_grant_hash, path, expected_receipt_hash)
     return path
 
 
@@ -406,32 +439,18 @@ def load_standing_grant_receipt(*, now: datetime | None = None) -> StandingGrant
     malformed, tampered, unsafe, expired, or revoked receipt raises
     :class:`StandingGrantReceiptError` rather than returning partial evidence.
     """
-    if not DEFAULT_RECEIPT_PATH.exists():
+    try:
+        # Use a no-follow lstat so a dangling symlink is a typed unsafe error,
+        # never silently treated as "no receipt".
+        st = DEFAULT_RECEIPT_PATH.lstat()
+    except FileNotFoundError:
         return None
+    except OSError as exc:
+        raise StandingGrantReceiptError("RECEIPT_READ_FAILED") from exc
+    if stat.S_ISLNK(st.st_mode):
+        raise StandingGrantReceiptError("NOT_REGULAR_FILE")
     _assert_dir_chain_safe(DEFAULT_RECEIPT_PATH.parent, create=False)
     return _load_receipt_at(DEFAULT_RECEIPT_PATH, now=now)
-
-
-def _decision(
-    outcome: StandingGrantOutcome, context_hash: str, mutation_authorized: bool
-) -> StandingGrantDecision:
-    payload = {
-        "schema": "nexus.standing_grant_decision.v2",
-        "outcome": outcome.value,
-        "context_hash": context_hash,
-        "mutation_authorized": mutation_authorized,
-        "claim_ceiling": (
-            "AUTHORIZATION_ONLY_VERIFICATION_REQUIRED"
-            if mutation_authorized
-            else "NO_MUTATION_AUTHORITY"
-        ),
-    }
-    return StandingGrantDecision.model_validate(
-        {
-            **payload,
-            "decision_hash": canonical_autonomy_hash(payload),
-        }
-    )
 
 
 def evaluate_durable_standing_grant(
@@ -457,9 +476,9 @@ def evaluate_durable_standing_grant(
     try:
         receipt = load_standing_grant_receipt(now=requested_at)
     except StandingGrantReceiptError:
-        return _decision(StandingGrantOutcome.GRANT_INVALID, "0" * 64, False)
+        return evaluate_standing_grant_decision({}, {})
     if receipt is None:
-        return _decision(StandingGrantOutcome.GRANT_INVALID, "0" * 64, False)
+        return evaluate_standing_grant_decision({}, {})
     context = receipt.context
     try:
         request = StandingGrantRequest(
@@ -478,7 +497,7 @@ def evaluate_durable_standing_grant(
             platform_approval_required=platform_approval_required,
         )
     except Exception:
-        return _decision(StandingGrantOutcome.GRANT_INVALID, context.context_hash, False)
+        return evaluate_standing_grant_decision({}, {})
 
 
 def _evaluate_durable_standing_grant_at(
@@ -497,7 +516,7 @@ def _evaluate_durable_standing_grant_at(
     try:
         receipt = _load_receipt_at(path, now=requested_at)
     except StandingGrantReceiptError:
-        return _decision(StandingGrantOutcome.GRANT_INVALID, "0" * 64, False)
+        return evaluate_standing_grant_decision({}, {})
     context = receipt.context
     try:
         request = StandingGrantRequest(
@@ -516,4 +535,4 @@ def _evaluate_durable_standing_grant_at(
             platform_approval_required=platform_approval_required,
         )
     except Exception:
-        return _decision(StandingGrantOutcome.GRANT_INVALID, context.context_hash, False)
+        return evaluate_standing_grant_decision({}, {})

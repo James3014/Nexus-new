@@ -17,8 +17,8 @@ from nexus.orchestrator.autonomy_policy import (
 )
 from nexus.orchestrator.standing_grant_store import (
     StandingGrantReceiptError,
-    _evaluate_durable_standing_grant_at,
-    evaluate_durable_standing_grant,
+    _load_receipt_at,
+    load_standing_grant_receipt,
 )
 
 
@@ -133,21 +133,30 @@ def resolve_durable_merge_authorization(
     """
     safe_request = _safe(request, StandingGrantRequest)
     try:
-        return evaluate_durable_standing_grant(
-            requested_owner_id=safe_request.owner_id,
-            requested_coordinator_id=safe_request.coordinator_id,
-            repository=safe_request.repository,
-            thread_id=safe_request.thread_id,
-            goal_id=safe_request.goal_id,
-            action=safe_request.action,
-            requested_at=safe_request.requested_at,
-            platform_approval_required=platform_approval_required,
-        )
+        receipt = load_standing_grant_receipt(now=now or safe_request.requested_at)
     except StandingGrantReceiptError:
         return evaluate_action({}, {}, platform_approval_required=platform_approval_required)
+    if receipt is None:
+        return evaluate_action({}, {}, platform_approval_required=platform_approval_required)
+    try:
+        revalidate_merge_intent(intent, receipt.context, safe_request, evidence, now=now)
+    except ValueError as exc:
+        # A receipt/context mismatch is a grant decision, not an evidence
+        # failure. Keep evidence failures (drift, checks, reviews, acceptance)
+        # as typed exceptions for the caller's fail-closed gate.
+        if str(exc) not in {
+            StandingGrantOutcome.INVALID.value,
+            StandingGrantOutcome.OUT_OF_SCOPE.value,
+        }:
+            raise
+    return evaluate_action(
+        receipt.context,
+        safe_request,
+        platform_approval_required=platform_approval_required,
+    )
 
 
-def resolve_durable_merge_authorization_at(
+def _resolve_durable_merge_authorization_at(
     intent,
     request,
     evidence,
@@ -159,16 +168,19 @@ def resolve_durable_merge_authorization_at(
     """Test/internal-only variant bound to an explicit path (never production)."""
     safe_request = _safe(request, StandingGrantRequest)
     try:
-        return _evaluate_durable_standing_grant_at(
-            receipt_path,
-            requested_owner_id=safe_request.owner_id,
-            requested_coordinator_id=safe_request.coordinator_id,
-            repository=safe_request.repository,
-            thread_id=safe_request.thread_id,
-            goal_id=safe_request.goal_id,
-            action=safe_request.action,
-            requested_at=safe_request.requested_at,
-            platform_approval_required=platform_approval_required,
-        )
+        receipt = _load_receipt_at(receipt_path, now=now or safe_request.requested_at)
     except StandingGrantReceiptError:
         return evaluate_action({}, {}, platform_approval_required=platform_approval_required)
+    try:
+        revalidate_merge_intent(intent, receipt.context, safe_request, evidence, now=now)
+    except ValueError as exc:
+        if str(exc) not in {
+            StandingGrantOutcome.INVALID.value,
+            StandingGrantOutcome.OUT_OF_SCOPE.value,
+        }:
+            raise
+    return evaluate_action(
+        receipt.context,
+        safe_request,
+        platform_approval_required=platform_approval_required,
+    )

@@ -157,9 +157,7 @@ def test_current_standing_grant_contract_is_non_self_attesting():
 
 
 def test_standing_grant_receipt_path_is_machine_local_and_loader_is_required():
-    contract = (
-        ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md"
-    ).read_text(encoding="utf-8")
+    contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(encoding="utf-8")
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     store = (ROOT / "nexus/orchestrator/standing_grant_store.py").read_text(encoding="utf-8")
 
