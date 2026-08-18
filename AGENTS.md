@@ -39,14 +39,13 @@ source behavior, tests, and required verifiers remain authoritative.
   covered standing grant remains valid across normal workflow phase
   transitions; a fresh Owner decision is required only at a real authority
   boundary such as scope, validity, security, irreversible external effect,
-  release, production, or external-platform approval.
+  release, production, or external-platform approval. The primary coordinator may use protected PR merge only when the separate physical standing-grant receipt explicitly includes `GITHUB_MERGE` and all exact verification, CAS, acceptance, checks, review, scope, deletion, and branch-protection gates pass.
 - Never merge runtime history into GitHub `main` to align SHAs; synchronize only
   reviewed deltas without secrets or generated/runtime state.
 - The Owner may give the primary coordinator a non-transferable standing grant
   for bounded Ready Issues in one thread. Its active Task Card receipt binds the
   grant/Goal, parties, repository/thread, scope/actions, eligibility, issuance,
-  expiry, and revocation. It grants no delegated-worker or protected-merge
-  authority.
+  expiry, and revocation. It grants no delegated-worker merge authority.
 - Under that standing grant, the primary coordinator may create/commit a missing
   Task Card/INDEX only when the Issue is Ready, paths and claim ceiling are
   frozen, gates pass, and `AUTO_CHAIN=false`; workers cannot create, widen, or
