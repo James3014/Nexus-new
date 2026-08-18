@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import html
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
+import tempfile
 import time
+import uuid
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping
 
 from nexus.services.external_intelligence import (
     ExternalIntelligenceSidecar,
@@ -36,6 +41,18 @@ from nexus.services.external_intelligence_fanout import (
 
 SERVICE_LABEL = "com.nexus.external-intelligence"
 DEFAULT_CONFIG = Path.home() / ".config" / "nexus-external-intelligence" / "config.json"
+READINESS_SUCCESS_THRESHOLD = 2
+SERVICE_HEARTBEAT_STALE_SECONDS = 180.0
+
+
+class ServiceReadiness(str, Enum):
+    READY = "READY"
+    STARTING = "STARTING"
+    DEGRADED = "DEGRADED"
+    STALE = "STALE"
+    IDENTITY_MISMATCH = "IDENTITY_MISMATCH"
+    DUPLICATE_PROCESS = "DUPLICATE_PROCESS"
+    STOPPED = "STOPPED"
 
 
 class ServiceError(RuntimeError):
@@ -59,6 +76,179 @@ class ServiceConfig:
     workspace_available: int = 2
     controller_attention_limit: int = 2
     max_repairs_per_unit: int = 1
+
+
+def _service_receipt_path(config: ServiceConfig) -> Path:
+    return config.state_root / "service" / "daemon.json"
+
+
+def _sha256_path(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _source_identity() -> tuple[str, str]:
+    source = Path(__file__).resolve()
+    return str(source), _sha256_path(source)
+
+
+def _config_identity(config_path: Path) -> tuple[str, str]:
+    path = config_path.expanduser().resolve()
+    return str(path), _sha256_path(path)
+
+
+def write_service_receipt(path: Path, payload: Mapping[str, Any]) -> None:
+    """Atomically write a restrictive daemon observability receipt."""
+
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with tempfile.NamedTemporaryFile(
+        "w", encoding="utf-8", dir=path.parent, prefix=".daemon-", suffix=".tmp", delete=False
+    ) as handle:
+        temporary = Path(handle.name)
+        json.dump(dict(payload), handle, sort_keys=True, separators=(",", ":"))
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    temporary.chmod(0o600)
+    os.replace(temporary, path)
+    path.chmod(0o600)
+
+
+def _read_service_receipt(path: Path) -> dict[str, Any] | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return None
+    return dict(value) if isinstance(value, Mapping) else None
+
+
+def _safe_error(exc: Exception) -> dict[str, str]:
+    code = str(exc) if isinstance(exc, ServiceError) else type(exc).__name__
+    if not re.fullmatch(r"[A-Z0-9_:-]{1,120}", code):
+        code = type(exc).__name__
+    return {"type": type(exc).__name__, "code": code}
+
+
+def _process_snapshot() -> list[tuple[int, str]]:
+    result = subprocess.run(
+        ["ps", "-axo", "pid=,command="], capture_output=True, text=True, check=False, timeout=5
+    )
+    if result.returncode != 0:
+        return []
+    rows: list[tuple[int, str]] = []
+    for line in result.stdout.splitlines():
+        match = re.match(r"\s*(\d+)\s+(.*)", line)
+        if match:
+            rows.append((int(match.group(1)), match.group(2).strip()))
+    return rows
+
+
+def _parse_launchctl(result: Any) -> dict[str, Any]:
+    text = str(getattr(result, "stdout", "") or "")
+    state = re.search(r"^\s*state\s*=\s*(\S+)", text, re.MULTILINE)
+    pid = re.search(r"^\s*pid\s*=\s*(\d+)", text, re.MULTILINE)
+    exit_code = re.search(r"^\s*last exit code\s*=\s*(-?\d+)", text, re.MULTILINE)
+    return {
+        "registered": getattr(result, "returncode", 1) == 0,
+        "state": state.group(1) if state else None,
+        "pid": int(pid.group(1)) if pid else None,
+        "last_exit_code": int(exit_code.group(1)) if exit_code else None,
+    }
+
+
+def service_status(
+    config_path: str | os.PathLike[str],
+    *,
+    launchctl_runner: Callable[..., Any] | None = None,
+    process_snapshot: Callable[[], list[tuple[int, str]]]
+    | list[tuple[int, str]] = _process_snapshot,
+    now: float | None = None,
+    receipt_path: Path | None = None,
+) -> dict[str, Any]:
+    """Reconcile LaunchAgent registration with the daemon's durable identity."""
+
+    config_file = Path(config_path).expanduser().resolve()
+    config = load_config(config_file)
+    receipt_file = receipt_path or _service_receipt_path(config)
+    receipt = _read_service_receipt(receipt_file)
+    launchctl = launchctl_runner or _launchctl
+    launch = _parse_launchctl(launchctl("print", f"gui/{os.getuid()}/{SERVICE_LABEL}"))
+    source_path, source_sha = _source_identity()
+    bound_config_path, config_sha = _config_identity(config_file)
+    result: dict[str, Any] = {
+        "service": SERVICE_LABEL,
+        "status": ServiceReadiness.STOPPED.value,
+        "ready": False,
+        "source_path": source_path,
+        "source_sha256": source_sha,
+        "config_path": bound_config_path,
+        "config_sha256": config_sha,
+        "launchctl": launch,
+    }
+    if not launch["registered"]:
+        return result
+    if receipt is None:
+        result["status"] = ServiceReadiness.STARTING.value
+        return result
+    result.update({
+        key: receipt.get(key)
+        for key in ("run_id", "pid", "heartbeat_at", "last_error", "started_at", "successful_polls")
+    })
+    if (
+        receipt.get("source_path") not in (None, source_path)
+        or receipt.get("source_sha256") != source_sha
+        or receipt.get("config_path") not in (None, bound_config_path)
+        or receipt.get("config_sha256") != config_sha
+    ):
+        result["status"] = ServiceReadiness.IDENTITY_MISMATCH.value
+        return result
+    if launch.get("state") != "running":
+        result["status"] = ServiceReadiness.STOPPED.value
+        return result
+    if receipt.get("status") == ServiceReadiness.STOPPED.value:
+        result["status"] = ServiceReadiness.STOPPED.value
+        return result
+    if receipt.get("status") == ServiceReadiness.DEGRADED.value:
+        result["status"] = ServiceReadiness.DEGRADED.value
+        return result
+    if launch.get("last_exit_code") != 0:
+        result["status"] = ServiceReadiness.DEGRADED.value
+        return result
+    if launch.get("pid") != receipt.get("pid"):
+        result["status"] = ServiceReadiness.IDENTITY_MISMATCH.value
+        return result
+    processes = process_snapshot() if callable(process_snapshot) else process_snapshot
+    matching = [
+        pid
+        for pid, command in processes
+        if "scripts.ops.external_intelligence_service" in command
+        and " daemon" in command
+        and pid == receipt.get("pid")
+    ]
+    if (
+        len(matching) != 1
+        or sum(
+            1
+            for _pid, command in processes
+            if "scripts.ops.external_intelligence_service" in command and " daemon" in command
+        )
+        != 1
+    ):
+        result["status"] = ServiceReadiness.DUPLICATE_PROCESS.value
+        return result
+    heartbeat = receipt.get("heartbeat_at")
+    if (
+        not isinstance(heartbeat, (int, float))
+        or (now if now is not None else time.time()) - heartbeat > SERVICE_HEARTBEAT_STALE_SECONDS
+    ):
+        result["status"] = ServiceReadiness.STALE.value
+        return result
+    if receipt.get("successful_polls", 0) < READINESS_SUCCESS_THRESHOLD:
+        result["status"] = ServiceReadiness.STARTING.value
+        return result
+    result["status"] = ServiceReadiness.READY.value
+    result["ready"] = True
+    return result
 
 
 def load_config(path: str | os.PathLike[str]) -> ServiceConfig:
@@ -268,7 +458,8 @@ def run_once(
     automation_factory=build_automation,
     refresh_fn=refresh_remote_main,
 ) -> dict[str, Any]:
-    gh = gh or GhIssueTransport()
+    if gh is None:
+        gh = GhIssueTransport()
     last: dict[str, Any] | None = None
     for repository in config.repositories:
         issues = gh.list_open_labeled(repository, config.label)
@@ -330,7 +521,7 @@ def launch_agent_path() -> Path:
     return Path.home() / "Library" / "LaunchAgents" / f"{SERVICE_LABEL}.plist"
 
 
-def plist_xml(config_path: Path) -> str:
+def plist_xml(config_path: Path, state_root: Path | None = None) -> str:
     args = [
         sys.executable,
         "-m",
@@ -341,15 +532,17 @@ def plist_xml(config_path: Path) -> str:
     ]
     arg_xml = "".join(f"<string>{html.escape(value)}</string>" for value in args)
     root = Path(__file__).resolve().parents[2]
-    return f"""<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>{SERVICE_LABEL}</string>\n<key>ProgramArguments</key><array>{arg_xml}</array>\n<key>WorkingDirectory</key><string>{html.escape(str(root))}</string>\n<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>\n<key>ProcessType</key><string>Background</string><key>ThrottleInterval</key><integer>30</integer>\n<key>StandardOutPath</key><string>/dev/null</string><key>StandardErrorPath</key><string>/dev/null</string>\n<key>EnvironmentVariables</key><dict><key>PYTHONDONTWRITEBYTECODE</key><string>1</string><key>PYTHONPATH</key><string>{html.escape(str(root))}</string><key>PATH</key><string>/Users/jameschen/.opencode/bin:/Users/jameschen/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>\n</dict></plist>\n"""
+    logs = (state_root or config_path.parent / "state") / "service"
+    return f"""<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>\n<key>Label</key><string>{SERVICE_LABEL}</string>\n<key>ProgramArguments</key><array>{arg_xml}</array>\n<key>WorkingDirectory</key><string>{html.escape(str(root))}</string>\n<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>\n<key>ProcessType</key><string>Background</string><key>ThrottleInterval</key><integer>30</integer>\n<key>StandardOutPath</key><string>{html.escape(str(logs / "daemon.stdout.log"))}</string><key>StandardErrorPath</key><string>{html.escape(str(logs / "daemon.stderr.log"))}</string>\n<key>EnvironmentVariables</key><dict><key>PYTHONDONTWRITEBYTECODE</key><string>1</string><key>PYTHONPATH</key><string>{html.escape(str(root))}</string><key>PATH</key><string>/Users/jameschen/.opencode/bin:/Users/jameschen/.npm-global/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/usr/sbin:/sbin</string></dict>\n</dict></plist>\n"""
 
 
 def install(config_path: str | os.PathLike[str]) -> Path:
     path = Path(config_path).expanduser().resolve()
-    load_config(path)
+    config = load_config(path)
+    (config.state_root / "service").mkdir(parents=True, exist_ok=True, mode=0o700)
     target = launch_agent_path()
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(plist_xml(path), encoding="utf-8")
+    target.write_text(plist_xml(path, state_root=config.state_root), encoding="utf-8")
     target.chmod(0o600)
     return target
 
@@ -378,8 +571,34 @@ def stop():
     return _launchctl("bootout", f"gui/{os.getuid()}/{SERVICE_LABEL}")
 
 
-def daemon(config: ServiceConfig) -> None:
+def daemon(config: ServiceConfig, config_path: Path | None = None) -> None:
     stopping = False
+    started = time.time()
+    run_id = uuid.uuid4().hex
+    source_path, source_sha = _source_identity()
+    bound_config_path = str(config_path.resolve()) if config_path is not None else ""
+    config_sha = _sha256_path(config_path) if config_path is not None else ""
+    receipt = _service_receipt_path(config)
+    successful_polls = 0
+
+    def write_status(status: ServiceReadiness, *, error: dict[str, str] | None = None) -> None:
+        write_service_receipt(
+            receipt,
+            {
+                "schema": "nexus.external_intelligence_daemon_receipt.v1",
+                "status": status.value,
+                "run_id": run_id,
+                "pid": os.getpid(),
+                "source_path": source_path,
+                "source_sha256": source_sha,
+                "config_path": bound_config_path,
+                "config_sha256": config_sha,
+                "started_at": started,
+                "heartbeat_at": time.time(),
+                "successful_polls": successful_polls,
+                "last_error": error,
+            },
+        )
 
     def halt(_sig, _frame):
         nonlocal stopping
@@ -387,11 +606,23 @@ def daemon(config: ServiceConfig) -> None:
 
     signal.signal(signal.SIGTERM, halt)
     signal.signal(signal.SIGINT, halt)
+    write_status(ServiceReadiness.STARTING)
     while not stopping:
-        run_once(config)
+        try:
+            run_once(config)
+            successful_polls += 1
+            write_status(
+                ServiceReadiness.READY
+                if successful_polls >= READINESS_SUCCESS_THRESHOLD
+                else ServiceReadiness.STARTING
+            )
+        except Exception as exc:
+            successful_polls = 0
+            write_status(ServiceReadiness.DEGRADED, error=_safe_error(exc))
         deadline = time.monotonic() + config.poll_interval_seconds
         while not stopping and time.monotonic() < deadline:
             time.sleep(min(1.0, deadline - time.monotonic()))
+    write_status(ServiceReadiness.STOPPED)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -405,7 +636,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "run-once":
         value = run_once(config)
     elif args.command == "daemon":
-        daemon(config)
+        daemon(config, Path(args.config).expanduser().resolve())
         return 0
     elif args.command == "install":
         value = {"status": "INSTALLED", "path": str(install(args.config))}
@@ -429,8 +660,7 @@ def main(argv: list[str] | None = None) -> int:
             "detail": r.stderr.strip(),
         }
     else:
-        r = _launchctl("print", f"gui/{os.getuid()}/{SERVICE_LABEL}")
-        value = {"status": "RUNNING" if r.returncode == 0 else "STOPPED", "service": SERVICE_LABEL}
+        value = service_status(args.config)
     print(json.dumps(value, sort_keys=True))
     return 0
 
