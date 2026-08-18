@@ -34,8 +34,12 @@ source behavior, tests, and required verifiers remain authoritative.
   authorize autonomous mutation.
 - No agent direct-pushes, force-pushes, or deletes `main`; delegated workers
   never approve or merge their Candidate. Only the primary coordinator may use
-  protected PR merge after the Owner grants a fresh, exact PR/head-bound merge
-  slot. A standing grant is never a protected-merge slot.
+  protected PR merge after the current Owner standing grant is validated for
+  the exact repository, Goal, coordinator, and normal GitHub action. A valid
+  covered standing grant remains valid across normal workflow phase
+  transitions; a fresh Owner decision is required only at a real authority
+  boundary such as scope, validity, security, irreversible external effect,
+  release, production, or external-platform approval.
 - Never merge runtime history into GitHub `main` to align SHAs; synchronize only
   reviewed deltas without secrets or generated/runtime state.
 - The Owner may give the primary coordinator a non-transferable standing grant
@@ -47,11 +51,13 @@ source behavior, tests, and required verifiers remain authoritative.
   Task Card/INDEX only when the Issue is Ready, paths and claim ceiling are
   frozen, gates pass, and `AUTO_CHAIN=false`; workers cannot create, widen, or
   self-authorize cards.
-- Every coordinator merge requires a fresh Owner `MERGE_SLOT_GRANTED` decision
-  bound to the exact repository, PR, head, and base, plus a fresh SHA-bound
-  PR/head/base/diff, Issue/card, independent acceptance, resolved blockers,
-  current `main`, terminal-success required checks, and expected-head/CAS.
-  `MERGE_INTENT` is evidence and a request for that slot, never authorization.
+- Every coordinator merge requires a fresh SHA-bound PR/head/base/diff,
+  Issue/card, independent acceptance, resolved blockers, current `main`,
+  terminal-success required checks, branch protection, scope/deletion checks,
+  and expected-head/CAS, all bound to the exact repository, PR, head, and base.
+  `MERGE_INTENT` is evidence, not a substitute for
+  these verification gates; a normal phase transition does not require a
+  redundant Owner merge-slot request.
   Drift, conflict, unexpected deletion, or unknown/failed checks fail closed.
 - The coordinator handles ordinary implementation, rebind, retry, and evidence
   autonomously. It asks again only for contract widening/change, weaker
@@ -85,9 +91,9 @@ source behavior, tests, and required verifiers remain authoritative.
   a PR, but cannot convert its own implementation or Candidate into approval,
   integration, merge, release, or production truth. For autonomy-enabled Goals,
   a separate designated integration action may perform only the exact
-  Owner-slot-authorized merge after independent acceptance and fresh merge-gate
-  verification. The primary coordinator acting under a valid, exact
-  `MERGE_SLOT_GRANTED` decision is that separate integration action; a delegated
+  standing-grant-authorized merge after independent acceptance and fresh
+  merge-gate verification. The primary coordinator acting under a valid, exact
+  standing grant is that separate integration action; a delegated
   implementer or reviewer is not.
 - GitHub review/merge does not silently perform Nexus lifecycle approval or
   runtime integration. Local Nexus runtime actions keep their existing formal
@@ -96,8 +102,10 @@ source behavior, tests, and required verifiers remain authoritative.
 ## Safety and completion
 
 - Do not hand-edit lifecycle JSON or protected control-plane state. Use formal
-  APIs/CLI/service surfaces. Protected PR merge requires a fresh exact Owner
-  merge slot and never permits bypassing required checks. Standing coordinator authority covers pre-merge work only.
+  APIs/CLI/service surfaces. Protected PR merge requires a valid current
+  covered Owner standing grant plus exact verification and never permits
+  bypassing required checks. Standing coordinator authority remains bounded by
+  its explicit repository, Goal, coordinator, action, and validity scope.
 - Completion requires behavioral evidence, structural conformance, and the
   applicable request- or card-defined verifier. A report or green subset is not
   solve truth.

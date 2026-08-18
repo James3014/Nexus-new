@@ -72,21 +72,33 @@ def _standing_request(context: StandingGrantContext, **overrides) -> StandingGra
     return StandingGrantRequest(**values)
 
 
-def test_standing_grant_match_is_evidence_only_and_hash_bound():
+def test_standing_grant_match_authorizes_covered_action_and_is_hash_bound():
     context = _standing_context()
     decision = evaluate_standing_grant_decision(context, _standing_request(context))
     assert decision.outcome is StandingGrantOutcome.GRANT_MATCH
-    assert decision.mutation_authorized is False
+    assert decision.mutation_authorized is True
+    assert decision.claim_ceiling == "AUTHORIZATION_ONLY_VERIFICATION_REQUIRED"
     assert decision.context_hash == context.context_hash
     assert decision.decision_hash
 
 
-def test_standing_grant_merge_requires_platform_approval():
+def test_standing_grant_merge_matches_when_merge_is_explicitly_covered():
     context = _standing_context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
     decision = evaluate_standing_grant_decision(
         context, _standing_request(context, action=AutonomyActionClass.GITHUB_MERGE)
     )
-    assert decision.outcome is StandingGrantOutcome.OWNER_MERGE_SLOT_REQUIRED
+    assert decision.outcome is StandingGrantOutcome.GRANT_MATCH
+    assert decision.mutation_authorized is True
+
+
+def test_platform_approval_is_distinct_from_grant_mismatch():
+    context = _standing_context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    decision = evaluate_standing_grant_decision(
+        context,
+        _standing_request(context, action=AutonomyActionClass.GITHUB_MERGE),
+        platform_approval_required=True,
+    )
+    assert decision.outcome is StandingGrantOutcome.PLATFORM_APPROVAL_REQUIRED
     assert decision.mutation_authorized is False
 
 
