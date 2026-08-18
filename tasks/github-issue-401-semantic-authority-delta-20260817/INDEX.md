@@ -4,6 +4,8 @@ issue: 401
 repository: James3014/Nexus-new
 status: READY_FOR_EXECUTION
 baseline_revision: 8c2584d6053dd1f04dc87333f807fbea1726545e
+rebind_base_revision: 8c2584d6053dd1f04dc87333f807fbea1726545e
+correction_start_revision: 63b9f75f6a446a06246fc2c2c6cfa7dcf2b395ab
 rebind_lineage:
   original_candidate_implementer: Antigravity
   original_candidate_identity: antigravity@gemini.local

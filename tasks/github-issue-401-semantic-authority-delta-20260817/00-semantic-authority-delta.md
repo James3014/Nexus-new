@@ -4,6 +4,8 @@ issue: 401
 repository: James3014/Nexus-new
 status: ACTIVE
 baseline_revision: 8c2584d6053dd1f04dc87333f807fbea1726545e
+rebind_base_revision: 8c2584d6053dd1f04dc87333f807fbea1726545e
+correction_start_revision: 63b9f75f6a446a06246fc2c2c6cfa7dcf2b395ab
 execution_lane: GOVERNED_GITHUB_ISSUE_BRANCH
 worker_role: rebind_correction_worker
 worker_identity: codex_luna
@@ -59,7 +61,8 @@ to `GOVERNED`.
 - **Starting branch:** `codex/issue-401-semantic-authority-delta` at the exact
   rebind baseline above, clean before this rebind correction.
 - **Execution authority:** this Git-tracked card authorizes one bounded Luna
-  implementation attempt after the primary commits and re-reads the card hash.
+  rebind/provenance-correction attempt after the primary commits and re-reads
+  the card hash; Luna did not implement the semantic contract.
 - **Verification authority:** focused executable tests plus primary physical
   diff verification and independent spec/code-quality review.
 - **Integration authority:** excluded. PR #113 overlap, exact-head CI,
