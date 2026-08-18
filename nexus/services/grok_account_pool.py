@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess  # nosec B404 - fixed executable path is invoked without a shell
 import threading
 import time
 import uuid
@@ -333,11 +334,17 @@ class GrokAccountPoolManager:
         if not mgr or not Path(mgr).is_file():
             raise GrokAccountPoolError("Grok account pool manager binary not found")
         root = self._manager_root or self.resolve_manager_root(manager_path=mgr)
-        import subprocess
-
         cmd = [mgr, "--root", root] + args
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=30.0)
+            # ``mgr`` is an existing file; argv is a list and shell execution
+            # is disabled, with a bounded timeout.
+            res = subprocess.run(  # nosec B603 - validated executable and argv list
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30.0,
+                shell=False,
+            )
         except Exception as exc:
             raise GrokAccountPoolError("Failed to execute grok-cli-manager") from exc
         if res.returncode != 0:
@@ -345,8 +352,6 @@ class GrokAccountPoolManager:
         if not expect_json:
             return res.stdout
         try:
-            import json
-
             return json.loads(res.stdout)
         except json.JSONDecodeError as exc:
             raise GrokAccountPoolError("Invalid JSON returned by grok-cli-manager") from exc
@@ -414,7 +419,13 @@ class GrokAccountPoolManager:
         return lease
 
     def _require_owned_active_lease(self, lease: AccountLease) -> None:
-        owned = self._active_leases.get(getattr(lease, "lease_id", None))
+        lease_id = getattr(lease, "lease_id", None)
+        if not isinstance(lease_id, str):
+            raise GrokAccountPoolLeaseError(
+                "GROK_INVALID_ACCOUNT_LEASE: lease is not the active capability "
+                "issued by this manager"
+            )
+        owned = self._active_leases.get(lease_id)
         if owned is not lease:
             raise GrokAccountPoolLeaseError(
                 "GROK_INVALID_ACCOUNT_LEASE: lease is not the active capability "

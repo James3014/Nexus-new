@@ -50,7 +50,10 @@ def _make_manager(tmp_path) -> GrokAccountPoolManager:
 
 
 def test_grok_account_alias_hash_is_non_secret_slug():
-    account = GrokAccount(alias="profile-1", home_dir="/tmp/grok-profile-1")
+    account = GrokAccount(
+        alias="profile-1",
+        home_dir="/tmp/grok-profile-1",  # nosec B108 - literal test fixture path is not executed
+    )
     assert len(account.alias_hash) == 12
     assert account.alias_hash != account.alias
     assert account.alias_hash.isalnum()
@@ -168,7 +171,7 @@ def test_attempt_lineage_is_immutable_serializable_and_redacted():
     public["outcome"] = "TAMPERED"
     assert lineage.outcome == "ROTATED"
     with pytest.raises((AttributeError, TypeError)):
-        lineage.outcome = "TAMPERED"
+        setattr(lineage, "outcome", "TAMPERED")
 
 
 def test_real_pool_flows_emit_monotonic_lineage_and_isolated_public_snapshots(tmp_path):
@@ -200,7 +203,10 @@ def test_real_pool_flows_emit_monotonic_lineage_and_isolated_public_snapshots(tm
     records_b = manager.get_attempt_lineage(consumer_id="consumer-lineage-b")
     assert len(records_b) == 1
     assert records_b[0].account_alias_hash == lease_b.account_alias_hash
-    public = manager.get_public_attempt_lineage(consumer_id="consumer-lineage-a")
+    public = [
+        dict(record)
+        for record in manager.get_public_attempt_lineage(consumer_id="consumer-lineage-a")
+    ]
     public[0]["outcome"] = "TAMPERED"
     assert manager.get_attempt_lineage("consumer-lineage-a")[0].outcome == "ACQUIRED"
     assert all(
@@ -303,6 +309,7 @@ def test_non_eligible_failure_does_not_rotate_or_cooldown(tmp_path):
         assert manager._accounts[0].is_active is True
         assert manager._accounts[0].cooldown_until is None
     assert lease.account_alias_hash == original_hash
+    assert manager._pool is not None
     assert lease.lease_id in manager._pool._active_leases
 
 
@@ -404,6 +411,7 @@ def test_eligible_failure_failover_rotates_to_unheld_profile(tmp_path):
     assert manager._accounts[1].is_active is True
     assert lease_b.account_alias_hash == b_hash_before
     assert dict(lease_b.execution_env) == b_env_before
+    assert manager._pool is not None
     assert lease_b.lease_id in manager._pool._active_leases
     assert lease_a.lease_id not in manager._pool._active_leases
 
@@ -424,6 +432,7 @@ def test_failover_never_reuses_profile_held_by_another_consumer(tmp_path):
         manager.report_failure(lease_a, AccountFailureKind.QUOTA_EXHAUSTED)
 
     assert "GROK_ACCOUNT_POOL_EXHAUSTED" in str(exc_info.value)
+    assert manager._pool is not None
     assert lease_b.lease_id in manager._pool._active_leases
     assert lease_b.account_alias_hash == manager._accounts[1].alias_hash
 
@@ -486,6 +495,7 @@ def test_release_only_affects_supplied_lease(tmp_path):
 
     manager.release(lease_a)
 
+    assert manager._pool is not None
     assert lease_a.lease_id not in manager._pool._active_leases
     assert lease_b.lease_id in manager._pool._active_leases
     assert lease_b.account_alias_hash == b_hash_before
@@ -507,6 +517,7 @@ def test_failover_exhaustion_when_all_remaining_profiles_held(tmp_path):
     with pytest.raises(GrokAccountPoolExhaustedError):
         manager.report_failure(replacement_a, AccountFailureKind.TOKEN_EXPIRED)
 
+    assert manager._pool is not None
     assert lease_b.lease_id in manager._pool._active_leases
     assert lease_b.account_alias_hash == manager._accounts[1].alias_hash
 
@@ -605,5 +616,6 @@ def test_manager_path_resolution_uses_home_without_user_specific_absolute_path(
 
     resolved = GrokAccountPoolManager.resolve_manager_path()
 
+    assert resolved is not None
     assert resolved == str(tmp_path / ".nexus/grok-account-pool/bin/grok-cli-manager")
     assert "/Users/jameschen/" not in resolved
