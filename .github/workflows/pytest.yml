@@ -279,7 +279,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: exact-base-impact-${{ github.sha }}
+          name: exact-base-impact-${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}/nexus-ci-impact/
           if-no-files-found: error
           retention-days: 7
