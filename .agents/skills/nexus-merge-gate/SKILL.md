@@ -12,10 +12,14 @@ binding is approved.
 This skill applies exclusively to a local Nexus lifecycle Candidate and local
 integration. It is not the merge procedure for a GitHub PR Candidate. GitHub
 Ready Issues instead use fresh PR/base/head/diff, required CI, independent
-acceptance, `MERGE_INTENT`, a fresh exact PR/head/base-bound Owner
-`MERGE_SLOT_GRANTED`, and expected-head/CAS merge authority. Standing authority
-prepares evidence but cannot manufacture that merge slot. Local lifecycle
-approval cannot bootstrap a Task Card or manufacture GitHub merge authority.
+acceptance, `MERGE_INTENT`, and expected-head/CAS merge authority. A valid
+current standing grant explicitly covering the exact repository, Goal,
+coordinator, and normal GitHub action remains valid across ordinary phase
+transitions; do not request redundant Owner reauthorization. Reauthorize only
+for a real authority boundary or genuine external-platform approval. Standing
+authority never bypasses verification, branch protection, or CAS. Local
+lifecycle approval cannot bootstrap a Task Card or manufacture GitHub merge
+authority.
 
 ## Gate sequence
 

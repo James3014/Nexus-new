@@ -1,4 +1,8 @@
-# Issue #163 Phase B — Evidence-only standing-grant decision
+# Issue #163 Phase B — Evidence-only standing-grant decision (Historical)
+
+artifact_authority: historical
+status: superseded
+superseded_by: tasks/standing-owner-autonomy-20260811/02-standing-grant-normal-phase-authority.md
 
 ## Objective
 
