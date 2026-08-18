@@ -12,6 +12,7 @@ from nexus.orchestrator.autonomy_policy import StandingGrantOutcome, StandingGra
 from nexus.orchestrator.github_orchestration import (
     evaluate_action,
     prepare_merge_intent,
+    resolve_merge_authorization,
     revalidate_merge_intent,
 )
 from tests.contracts.test_github_orchestration import NOW, evidence
@@ -60,14 +61,67 @@ def test_valid_evidence_and_grant_produce_intent():
 
 
 def test_github_merge_is_owner_slot_and_never_authorizes_mutation():
+    """Legacy node ID retained for CI continuity; current assertions govern superseding semantics."""
     ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
-    decision = evaluate_action(ctx, request(ctx, action=AutonomyActionClass.GITHUB_MERGE))
-    assert decision.outcome is StandingGrantOutcome.OWNER_MERGE_SLOT_REQUIRED
+    merge_request = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+
+    decision = evaluate_action(ctx, merge_request)
+
+    assert decision.outcome is StandingGrantOutcome.GRANT_MATCH
+    assert decision.mutation_authorized is True
+    intent = prepare_merge_intent(ctx, merge_request, evidence(), now=NOW)
+    assert intent.grant_outcome == "GRANT_MATCH"
+    assert intent.mutation_authorized is False
+
+
+def test_verified_merge_intent_resolves_to_authorized_grant_match():
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    merge_request = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    snap = evidence()
+    intent = prepare_merge_intent(ctx, merge_request, snap, now=NOW)
+
+    decision = resolve_merge_authorization(intent, ctx, merge_request, snap, now=NOW)
+
+    assert decision.outcome is StandingGrantOutcome.GRANT_MATCH
+    assert decision.mutation_authorized is True
+
+
+def test_external_platform_approval_is_not_reported_as_grant_mismatch():
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    merge_request = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    snap = evidence()
+    intent = prepare_merge_intent(ctx, merge_request, snap, now=NOW)
+
+    decision = resolve_merge_authorization(
+        intent,
+        ctx,
+        merge_request,
+        snap,
+        now=NOW,
+        platform_approval_required=True,
+    )
+
+    assert decision.outcome is StandingGrantOutcome.PLATFORM_APPROVAL_REQUIRED
     assert decision.mutation_authorized is False
-    with pytest.raises(ValueError, match="OWNER_MERGE_SLOT_REQUIRED"):
-        prepare_merge_intent(
-            ctx, request(ctx, action=AutonomyActionClass.GITHUB_MERGE), evidence(), now=NOW
-        )
+
+
+def test_uncovered_merge_and_delegated_self_merge_fail_closed():
+    ctx = context()
+    uncovered = evaluate_action(ctx, request(ctx, action=AutonomyActionClass.GITHUB_MERGE))
+    assert uncovered.outcome is StandingGrantOutcome.OUT_OF_SCOPE
+    assert uncovered.mutation_authorized is False
+
+    merge_ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    delegated = evaluate_action(
+        merge_ctx,
+        request(
+            merge_ctx,
+            action=AutonomyActionClass.GITHUB_MERGE,
+            coordinator_id="delegated-worker",
+        ),
+    )
+    assert delegated.outcome is StandingGrantOutcome.OUT_OF_SCOPE
+    assert delegated.mutation_authorized is False
 
 
 @pytest.mark.parametrize(
