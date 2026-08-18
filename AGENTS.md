@@ -159,6 +159,9 @@ classification or bundle a protected push, merge, release, or other authority
 action. Any changed, missing, malformed, contradictory, unknown, or otherwise
 unprovable dimension resolves to existing `GOVERNED` handling. This rule is
 future-only: it never rewrites or retroactively authorizes historical work.
+A historical or separately required `MERGE_SLOT_GRANTED` decision remains
+evidence of its own authority boundary; it is not a redundant requirement for
+a normal phase transition covered by a valid standing grant.
 
 ### DIRECT_DELEGATED
 
