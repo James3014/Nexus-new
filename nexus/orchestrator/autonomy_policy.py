@@ -1,11 +1,11 @@
-"""Pure SHADOW evaluator for goal-scoped autonomy policy.
+"""Goal-policy shadow evaluation and exact standing-grant authorization.
 
-The evaluator is deliberately incapable of mutation.  Its positive result is
-evidence about a hypothetical continuation only; it is not an approval grant.
-M0 inputs remain caller-bound until later milestones wire authoritative Nexus
-state, receipts, ledgers, clocks, and repository/runtime identity.  Consumers
-must not use a decision with ``authority_inputs_verified=False`` as machine
-authorization.
+The broader goal evaluator remains a non-authorizing shadow surface.  The
+standing-grant resolver is different: after validating the Owner, coordinator,
+repository, thread, Goal, action, time, revocation, and context hash, a
+``GRANT_MATCH`` authorizes only that exact action.  Program verification,
+independent acceptance, protected-branch checks, and expected-head/CAS remain
+separate mandatory gates.
 """
 
 from __future__ import annotations
@@ -105,10 +105,11 @@ class AutonomyDecisionState(str, Enum):
 
 class StandingGrantOutcome(str, Enum):
     GRANT_MATCH = "GRANT_MATCH"
+    GRANT_OUT_OF_SCOPE = "OUT_OF_SCOPE"
     OUT_OF_SCOPE = "OUT_OF_SCOPE"
+    GRANT_INVALID = "INVALID"
     INVALID = "INVALID"
     PLATFORM_APPROVAL_REQUIRED = "PLATFORM_APPROVAL_REQUIRED"
-    OWNER_MERGE_SLOT_REQUIRED = "OWNER_MERGE_SLOT_REQUIRED"
 
 
 class StandingGrantRequest(_FrozenModel):
@@ -134,12 +135,12 @@ class StandingGrantRequest(_FrozenModel):
 
 
 class StandingGrantDecision(_FrozenModel):
-    schema: Literal["nexus.standing_grant_decision.v1"] = "nexus.standing_grant_decision.v1"
+    schema: Literal["nexus.standing_grant_decision.v2"] = "nexus.standing_grant_decision.v2"
     outcome: StandingGrantOutcome
     context_hash: StrictStr
     decision_hash: StrictStr
-    mutation_authorized: Literal[False] = False
-    claim_ceiling: Literal["EVIDENCE_ONLY_PLATFORM_BOUND"] = "EVIDENCE_ONLY_PLATFORM_BOUND"
+    mutation_authorized: StrictBool
+    claim_ceiling: Literal["AUTHORIZATION_ONLY_VERIFICATION_REQUIRED", "NO_MUTATION_AUTHORITY"]
 
     @field_validator("context_hash", "decision_hash")
     @classmethod
@@ -148,6 +149,14 @@ class StandingGrantDecision(_FrozenModel):
 
     @model_validator(mode="after")
     def validate_decision_hash(self) -> "StandingGrantDecision":
+        matched = self.outcome is StandingGrantOutcome.GRANT_MATCH
+        if self.mutation_authorized is not matched:
+            raise ValueError("STANDING_DECISION_AUTHORITY_INVALID")
+        expected_ceiling = (
+            "AUTHORIZATION_ONLY_VERIFICATION_REQUIRED" if matched else "NO_MUTATION_AUTHORITY"
+        )
+        if self.claim_ceiling != expected_ceiling:
+            raise ValueError("STANDING_DECISION_CEILING_INVALID")
         payload = self.model_dump(mode="json", exclude={"decision_hash"})
         if self.decision_hash != canonical_autonomy_hash(payload):
             raise ValueError("STANDING_DECISION_HASH_INVALID")
@@ -155,12 +164,15 @@ class StandingGrantDecision(_FrozenModel):
 
 
 def _standing_decision(outcome: StandingGrantOutcome, context_hash: str) -> StandingGrantDecision:
+    matched = outcome is StandingGrantOutcome.GRANT_MATCH
     payload = {
-        "schema": "nexus.standing_grant_decision.v1",
+        "schema": "nexus.standing_grant_decision.v2",
         "outcome": outcome.value,
         "context_hash": context_hash,
-        "mutation_authorized": False,
-        "claim_ceiling": "EVIDENCE_ONLY_PLATFORM_BOUND",
+        "mutation_authorized": matched,
+        "claim_ceiling": (
+            "AUTHORIZATION_ONLY_VERIFICATION_REQUIRED" if matched else "NO_MUTATION_AUTHORITY"
+        ),
     }
     return StandingGrantDecision.model_validate({
         **payload,
@@ -171,8 +183,10 @@ def _standing_decision(outcome: StandingGrantOutcome, context_hash: str) -> Stan
 def evaluate_standing_grant_decision(
     context: StandingGrantContext | Mapping[str, Any],
     request: StandingGrantRequest | Mapping[str, Any],
+    *,
+    platform_approval_required: bool = False,
 ) -> StandingGrantDecision:
-    """Match a coordinator standing grant without authorizing mutation."""
+    """Resolve one exact Owner standing grant without bypassing verification."""
     raw_context_hash = (
         context.context_hash
         if isinstance(context, StandingGrantContext)
@@ -185,6 +199,8 @@ def evaluate_standing_grant_decision(
         if isinstance(raw_context_hash, str) and _SHA64.fullmatch(raw_context_hash)
         else "0" * 64
     )
+    if type(platform_approval_required) is not bool:
+        return _standing_decision(StandingGrantOutcome.GRANT_INVALID, context_hash)
     try:
         grant = StandingGrantContext.model_validate(
             context.model_dump(mode="json")
@@ -197,13 +213,9 @@ def evaluate_standing_grant_decision(
             else request
         )
     except (ValidationError, AttributeError, TypeError, ValueError):
-        return _standing_decision(StandingGrantOutcome.INVALID, context_hash)
+        return _standing_decision(StandingGrantOutcome.GRANT_INVALID, context_hash)
     if asked.context_hash != grant.context_hash:
-        return _standing_decision(StandingGrantOutcome.INVALID, grant.context_hash)
-    if asked.action is AutonomyActionClass.GITHUB_MERGE:
-        return _standing_decision(
-            StandingGrantOutcome.OWNER_MERGE_SLOT_REQUIRED, grant.context_hash
-        )
+        return _standing_decision(StandingGrantOutcome.GRANT_INVALID, grant.context_hash)
     now = asked.requested_at
     if (
         asked.owner_id != grant.owner_id
@@ -216,7 +228,11 @@ def evaluate_standing_grant_decision(
         or now >= grant.expires_at
         or grant.revoked_at is not None
     ):
-        return _standing_decision(StandingGrantOutcome.OUT_OF_SCOPE, grant.context_hash)
+        return _standing_decision(StandingGrantOutcome.GRANT_OUT_OF_SCOPE, grant.context_hash)
+    if platform_approval_required:
+        return _standing_decision(
+            StandingGrantOutcome.PLATFORM_APPROVAL_REQUIRED, grant.context_hash
+        )
     return _standing_decision(StandingGrantOutcome.GRANT_MATCH, grant.context_hash)
 
 
