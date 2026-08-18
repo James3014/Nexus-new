@@ -115,7 +115,11 @@ When the Owner has granted standing coordinator authority and its durable grant
 receipt is current, the primary Codex coordinator may create and commit a
 missing Task Card/INDEX for an already Ready Issue after freezing the effective
 Issue contract, current baseline, overlap, Workforce receipt, verification,
-and claim ceiling. Delegated workers cannot create or widen their own
+and claim ceiling. The canonical active machine-local receipt is read from the
+single durable path `.local/state/nexus/authority/standing-grant.json` (the
+`nexus.orchestrator.standing_grant_store` loader); there is no
+environment-selected second authority root. A missing, malformed, tampered,
+unsafe-permission, expired, or revoked receipt fails closed. Delegated workers cannot create or widen their own
 authority; they begin only after the card is physically committed and its hash
 is read back. The grant does not authorize local runtime/lifecycle actions,
 direct protected-main push, force-push, ref deletion, successor work outside
