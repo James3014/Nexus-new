@@ -510,6 +510,64 @@ def test_durable_resolver_rejects_recomputed_semantic_tamper(tmp_path):
         _resolve_durable_merge_authorization_at(tampered, req, snap, receipt_path=path, now=NOW)
 
 
+@pytest.mark.parametrize("durable", [False, True])
+@pytest.mark.parametrize(
+    "field, value, expected",
+    [
+        ("grant_outcome", "GRANT_INVALID", "INTENT_SEMANTIC_MISMATCH"),
+        ("claim_ceiling", "NO_MUTATION_AUTHORITY", "INTENT_SEMANTIC_MISMATCH"),
+        ("schema", "nexus.github_merge_intent.v999", "INTENT_SEMANTIC_MISMATCH"),
+        ("mutation_authorized", True, "MALFORMED_INPUT"),
+    ],
+)
+def test_recomputed_hash_semantic_tamper_matrix(durable, field, value, expected, tmp_path):
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    snap = evidence()
+    intent = prepare_merge_intent(ctx, req, snap, now=NOW)
+    tampered = intent.model_dump(mode="json")
+    tampered[field] = value
+    tampered["intent_hash"] = canonical_hash(
+        {key: item for key, item in tampered.items() if key != "intent_hash"}
+    )
+
+    if durable:
+        receipt = StandingGrantReceipt.issue(grant_id="grant-matrix", context=ctx)
+        path = Path(_receipt_path(tmp_path))
+        _write_standing_grant_receipt_at(receipt, path)
+        with pytest.raises(ValueError, match=expected):
+            _resolve_durable_merge_authorization_at(tampered, req, snap, receipt_path=path, now=NOW)
+    else:
+        with pytest.raises(ValueError, match=expected):
+            resolve_merge_authorization(tampered, ctx, req, snap, now=NOW)
+
+
+@pytest.mark.parametrize("durable", [False, True])
+def test_recomputed_hash_nested_evidence_tamper_is_rejected(durable, tmp_path):
+    ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
+    req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+    original = evidence()
+    changed = evidence(diff_hash="7" * 64)
+    intent = prepare_merge_intent(ctx, req, original, now=NOW)
+    tampered = intent.model_dump(mode="json")
+    tampered["evidence"] = changed.model_dump(mode="json")
+    tampered["intent_hash"] = canonical_hash(
+        {key: item for key, item in tampered.items() if key != "intent_hash"}
+    )
+
+    if durable:
+        receipt = StandingGrantReceipt.issue(grant_id="grant-nested-matrix", context=ctx)
+        path = Path(_receipt_path(tmp_path))
+        _write_standing_grant_receipt_at(receipt, path)
+        with pytest.raises(ValueError, match="DRIFT_"):
+            _resolve_durable_merge_authorization_at(
+                tampered, req, original, receipt_path=path, now=NOW
+            )
+    else:
+        with pytest.raises(ValueError, match="DRIFT_"):
+            resolve_merge_authorization(tampered, ctx, req, original, now=NOW)
+
+
 def test_protocol_surface_is_pure_and_no_provider_is_required():
     class ExplodingProvider:
         def snapshot(self, *args, **kwargs):
