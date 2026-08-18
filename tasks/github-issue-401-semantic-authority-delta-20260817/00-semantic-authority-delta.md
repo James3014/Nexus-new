@@ -3,10 +3,14 @@ task_id: ISSUE-401-SEMANTIC-AUTHORITY-DELTA-01
 issue: 401
 repository: James3014/Nexus-new
 status: ACTIVE
-baseline_revision: 9296d68fe19d933cb78b9a0470a054ea5efd4c2f
+baseline_revision: 8c2584d6053dd1f04dc87333f807fbea1726545e
 execution_lane: GOVERNED_GITHUB_ISSUE_BRANCH
-worker_role: primary_implementer
+worker_role: rebind_correction_worker
 worker_identity: codex_luna
+original_candidate_implementer: Antigravity
+original_candidate_identity: antigravity@gemini.local
+independent_reviewer_role: separate_current_reviewer
+independent_reviewer_identity: distinct_from_implementers
 claim_intent: MANUAL_DISPATCH
 claim_enforcement_state: PROJECTION_ONLY
 claim_mode: MANUAL_DISPATCH
@@ -44,10 +48,16 @@ to `GOVERNED`.
 
 - **Owner decision:** current Owner direction makes #401 P0, selects Luna, and
   authorizes parallel work in isolated, non-overlapping worktrees.
-- **Issue contract:** GitHub Issue #401, open and `READY_NOW`, observed
-  2026-08-17 at `main=9296d68fe19d933cb78b9a0470a054ea5efd4c2f`.
+- **Issue contract:** GitHub Issue #401, open and `READY_NOW`, rebound to
+  `main=8c2584d6053dd1f04dc87333f807fbea1726545e`.
+- **Original Candidate lineage:** the implementation and formatting commits
+  through `53190a32` were authored by Antigravity
+  (`antigravity@gemini.local`).
+- **Rebind/correction worker:** Luna (`codex_luna`) performed the current-main
+  rebind and provenance correction; this does not rewrite the original
+  implementer identity.
 - **Starting branch:** `codex/issue-401-semantic-authority-delta` at the exact
-  baseline above, clean before this Task Card bootstrap.
+  rebind baseline above, clean before this rebind correction.
 - **Execution authority:** this Git-tracked card authorizes one bounded Luna
   implementation attempt after the primary commits and re-reads the card hash.
 - **Verification authority:** focused executable tests plus primary physical

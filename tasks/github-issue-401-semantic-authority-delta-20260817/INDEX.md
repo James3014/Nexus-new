@@ -3,7 +3,13 @@ campaign_id: CAMPAIGN-NEXUS-401-SEMANTIC-AUTHORITY-DELTA-20260817
 issue: 401
 repository: James3014/Nexus-new
 status: READY_FOR_EXECUTION
-baseline_revision: 9296d68fe19d933cb78b9a0470a054ea5efd4c2f
+baseline_revision: 8c2584d6053dd1f04dc87333f807fbea1726545e
+rebind_lineage:
+  original_candidate_implementer: Antigravity
+  original_candidate_identity: antigravity@gemini.local
+  rebind_worker: Luna
+  rebind_worker_identity: codex_luna
+  independent_reviewer: separate_current_reviewer
 current_frontier: ISSUE-401-SEMANTIC-AUTHORITY-DELTA-01
 AUTO_CHAIN: false
 parallel_execution: true
@@ -35,6 +41,11 @@ contradictory, or unprovable authority dimension resolves to existing
   this historical execution.
 - Implementation is isolated on
   `codex/issue-401-semantic-authority-delta`; `AUTO_CHAIN=false`.
+- The original Candidate commits (`b5ef0755`, `078611cb`, `44ef467f`,
+  `5ba9542b`, `bbef2abe`, `53190a32`) were authored by Antigravity
+  (`antigravity@gemini.local`). This rebind and correction are performed by
+  Luna (`codex_luna`); Git commit author metadata is not used to relabel that
+  lineage. Independent review remains a separate current reviewer identity.
 - PR #113 currently overlaps `AGENTS.md` but is stale/conflicting and is not an
   active mutation owner in this worktree. Candidate formation may proceed;
   acceptance/integration/merge remain blocked until that overlap is freshly
