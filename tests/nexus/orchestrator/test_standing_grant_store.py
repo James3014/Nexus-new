@@ -18,6 +18,7 @@ from nexus.orchestrator.standing_grant_store import (
     DEFAULT_RECEIPT_PATH,
     StandingGrantReceipt,
     StandingGrantReceiptError,
+    _check_dir,
     _load_receipt_at,
     _write_standing_grant_receipt_at,
     load_standing_grant_receipt,
@@ -171,6 +172,14 @@ def test_parent_symlink_and_world_writable_rejected(tmp_path):
     leaf.mkdir(mode=0o700)
     with pytest.raises(StandingGrantReceiptError, match="PARENT_GROUP_OR_WORLD_WRITABLE"):
         _write_standing_grant_receipt_at(receipt, leaf / "standing-grant.json")
+
+
+def test_root_owned_sticky_generic_ancestor_is_allowed():
+    candidate = Path("/tmp")
+    st = candidate.stat()
+    if candidate.is_symlink() or st.st_uid != 0 or not st.st_mode & stat.S_ISVTX:
+        pytest.skip("host has no standard root-owned sticky /tmp")
+    _check_dir(candidate, strict_leaf=False)
 
 
 def test_loader_rejects_duplicate_keys_and_noncanonical_bytes(tmp_path):

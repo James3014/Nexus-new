@@ -186,7 +186,7 @@ def _check_dir(directory: Path, *, strict_leaf: bool = False) -> None:
     # Generic ancestor: uid or root, never group/world writable.
     if st.st_uid not in (uid, 0):
         raise StandingGrantReceiptError("PARENT_OWNER_MISMATCH")
-    if stat.S_IMODE(st.st_mode) & 0o022:
+    if stat.S_IMODE(st.st_mode) & 0o022 and not (st.st_uid == 0 and st.st_mode & stat.S_ISVTX):
         raise StandingGrantReceiptError("PARENT_GROUP_OR_WORLD_WRITABLE")
 
 
