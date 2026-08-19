@@ -1550,14 +1550,25 @@ class PipelineRepairMixin:
                 "audit_success": False,
                 "status": normalized.status,
                 "phantom_reason": reason,
+                "terminal_rejection": normalized.status == "REJECTED",
             }
-        return {"audit_success": True, "status": normalized.status or "APPROVED", "phantom_reason": ""}
+        return {
+            "audit_success": True,
+            "status": normalized.status or "APPROVED",
+            "phantom_reason": "",
+            "terminal_rejection": False,
+        }
 
     def _missing_composed_audit_result(self, ctx: PipelineContextProtocol, *, reason: str) -> dict:
         ctx.state.metadata["composition_audit_phase_status"] = "MISSING"
         ctx.state.metadata["composition_audit_phase_rejection"] = reason
         ctx.state.metadata["evidence_trust_rejection"] = True
-        return {"audit_success": False, "status": "RECOVERABLE_BLOCK", "phantom_reason": reason}
+        return {
+            "audit_success": False,
+            "status": "RECOVERABLE_BLOCK",
+            "phantom_reason": reason,
+            "terminal_rejection": False,
+        }
 
     def _normalize_composed_audit_result(self, ctx: PipelineContextProtocol, result: Any) -> ComposedAuditResult:
         """Normalize composed A output without treating executor success as audit success."""
@@ -1768,10 +1779,11 @@ class PipelineRepairMixin:
                 a_out = self._evaluate_audit_result(ctx, eval_ctx)
             # Audit failures produced by evidence/phantom checks are repairable
             # unless the reviewer supplied an explicit terminal disposition.
+            terminal_rejection = bool(a_out.get("terminal_rejection"))
             if (
                 not a_out.get("audit_success")
                 and a_out.get("status") == "REJECTED"
-                and r_out.get("status") != "REJECTED"
+                and not terminal_rejection
             ):
                 a_out = {**a_out, "status": "RECOVERABLE_BLOCK"}
             if rlm_loop is not None:
@@ -1786,8 +1798,8 @@ class PipelineRepairMixin:
                     status=str(a_out.get("status") or ("SUCCESS" if a_out.get("audit_success") else "FAILED")),
                     transition="A:start->end",
                     output_payload=a_out,
-                    block_class="" if a_out.get("audit_success") else "RECOVERABLE_BLOCK",
-                    next_action="crystallize" if a_out.get("audit_success") else "repair_or_replan",
+                    block_class="" if a_out.get("audit_success") else ("TERMINAL_BLOCKED" if terminal_rejection else "RECOVERABLE_BLOCK"),
+                    next_action="crystallize" if a_out.get("audit_success") else ("none" if terminal_rejection else "repair_or_replan"),
                 )
             self._phase_observer(
                 ctx,
@@ -1798,6 +1810,9 @@ class PipelineRepairMixin:
 
             if a_out["audit_success"]:
                 success = True
+                break
+
+            if terminal_rejection:
                 break
 
             if rlm_loop is not None and rlm_loop.state.exhausted:
