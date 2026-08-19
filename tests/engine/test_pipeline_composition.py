@@ -386,7 +386,7 @@ def test_repair_audit_loop_composed_r_rejection_skips_pregate_and_evidence(tmp_p
 
     assert pipeline._repair_audit_loop(ctx, tracer) is False
     assert executors["R"].calls == 1
-    assert ctx.state.metadata["composition_repair_phase_status"] == "REJECTED_NO_RED_TEST"
+    assert ctx.state.metadata["composition_repair_phase_status"] == "RECOVERABLE_BLOCK"
     assert ctx.state.metadata["phase_decisions"]["R"] == "dec-r"
     assert ctx.state.metadata["phase_skills"]["R"] == "composition-repair"
 
@@ -519,7 +519,7 @@ def test_repair_audit_loop_composed_r_without_review_status_fails_closed(tmp_pat
 
     assert pipeline._repair_audit_loop(ctx, tracer) is False
     assert executors["R"].calls == 1
-    assert ctx.state.metadata["composition_repair_phase_status"] == "REJECTED"
+    assert ctx.state.metadata["composition_repair_phase_status"] == "RECOVERABLE_BLOCK"
     assert ctx.state.metadata["phase_decisions"]["R"] == "dec-r-fail-closed"
     assert ctx.state.metadata["phase_skills"]["R"] == "composition-repair"
 
@@ -613,6 +613,44 @@ def test_repair_audit_loop_composed_a_accepts_without_legacy_audit(tmp_path, mon
     assert executors["A"].calls == 1
     assert ctx.state.metadata["composition_audit_phase_status"] == "APPROVED"
     assert ctx.state.metadata["phase_decisions"]["A"] == "dec-a-pass"
+
+
+def test_repair_audit_loop_composed_a_executor_success_without_decision_is_blocked(tmp_path, monkeypatch):
+    executors = {"A": FakeExecutor("A", {})}
+    pipeline = NexusPipeline(_engine(tmp_path, executors))
+    pipeline.engine.max_retries = 1
+    ctx = SimpleNamespace(
+        dry_run=False,
+        task_id="composition-audit-executor-only",
+        task_type="bug",
+        kwargs={},
+        bayesian_params={},
+        pack={},
+        decision_counter=0,
+        event_store=SimpleNamespace(append=lambda *_args, **_kwargs: None),
+        state=NexusState(task_id="composition-audit-executor-only"),
+    )
+    tracer = SimpleNamespace(phase_span=lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pipeline, "_check_external_interrupt", lambda _ctx: False)
+    monkeypatch.setattr(
+        pipeline,
+        "_execute_single_repair",
+        lambda *_args, **_kwargs: {
+            "status": "APPROVED",
+            "result": {"patch_generated": True, "patch_apply_success": True},
+            "current_decision_id": "dec-r",
+            "current_skill_id": "repair",
+        },
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_evaluate_audit_result",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("executor-only A must block legacy audit")),
+    )
+
+    assert pipeline._repair_audit_loop(ctx, tracer) is False
+    assert ctx.state.metadata["composition_audit_phase_status"] == "RECOVERABLE_BLOCK"
+    assert ctx.state.metadata["composition_audit_phase_rejection"] == "composition_audit_recoverable_block"
 
 
 def test_repair_audit_loop_composed_a_rejects_status_without_fail_flag(tmp_path, monkeypatch):
@@ -713,7 +751,7 @@ def test_repair_audit_loop_composed_a_rejects_false_audit_success(tmp_path, monk
     monkeypatch.setattr(pipeline, "_handle_escalation", lambda *_args, **_kwargs: False)
 
     assert pipeline._repair_audit_loop(ctx, tracer) is False
-    assert ctx.state.metadata["composition_audit_phase_status"] == "REJECTED"
+    assert ctx.state.metadata["composition_audit_phase_status"] == "RECOVERABLE_BLOCK"
     assert ctx.state.metadata["composition_audit_phase_rejection"] == "evidence_low_trust"
 
 

@@ -1548,7 +1548,7 @@ class PipelineRepairMixin:
             self._record_composed_audit_rejection(ctx, r_out, normalized, repair_attempts, reason)
             return {
                 "audit_success": False,
-                "status": "REJECTED" if normalized.status == "REJECTED" else "RECOVERABLE_BLOCK",
+                "status": normalized.status,
                 "phantom_reason": reason,
             }
         return {"audit_success": True, "status": normalized.status or "APPROVED", "phantom_reason": ""}
@@ -1562,10 +1562,17 @@ class PipelineRepairMixin:
     def _normalize_composed_audit_result(self, ctx: PipelineContextProtocol, result: Any) -> ComposedAuditResult:
         """Normalize composed A output without treating executor success as audit success."""
         mutations = dict(getattr(result, "mutations", None) or {})
-        raw_status = mutations.get("status") or getattr(result, "status", "")
-        status = str(raw_status or "REJECTED").strip().upper()
+        # PhaseResult.status is executor progress (usually SUCCESS), not a
+        # reviewer decision. Without an explicit payload decision, fail closed
+        # as a repairable block and never grant audit acceptance.
+        raw_status = mutations.get("status")
+        status = str(raw_status or "").strip().upper()
         if bool(mutations.get("fail")) or mutations.get("audit_success") is False:
-            status = "REJECTED"
+            status = "RECOVERABLE_BLOCK"
+        elif status in {"FAIL", "FAILED", "REVISE", "RECOVERABLE_BLOCK", "UNKNOWN"}:
+            status = "RECOVERABLE_BLOCK"
+        elif status not in {"APPROVED", "SKIPPED_QUOTA", "REJECTED"}:
+            status = "RECOVERABLE_BLOCK"
 
         phase_decisions = ctx.state.metadata.setdefault("phase_decisions", {})
         phase_skills = ctx.state.metadata.setdefault("phase_skills", {})

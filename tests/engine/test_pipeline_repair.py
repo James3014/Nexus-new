@@ -143,7 +143,7 @@ def test_repair_audit_loop_success(mock_ctx, mock_tracer):
     audit_plugin = MagicMock()
     audit_plugin.name = "A"
     audit_plugin.should_run.return_value = True
-    audit_plugin.execute.return_value = MagicMock(status="APPROVED", mutations={"audit_success": True})
+    audit_plugin.execute.return_value = MagicMock(status="APPROVED", mutations={"status": "APPROVED", "audit_success": True})
     pipeline.registry = MagicMock()
     pipeline.registry.get_ordered_plugins.return_value = [audit_plugin]
     
