@@ -471,10 +471,13 @@ def test_failover_never_reuses_profile_held_by_another_consumer(tmp_path):
     h2 = str(tmp_path / "grok-b")
     for p in (h1, h2):
         Path(p).mkdir(parents=True)
-    manager = GrokAccountPoolManager([
-        GrokAccount(alias="grok-a", home_dir=h1),
-        GrokAccount(alias="grok-b", home_dir=h2),
-    ], isolated_root=str(tmp_path / "neutral-grok-profiles"))
+    manager = GrokAccountPoolManager(
+        [
+            GrokAccount(alias="grok-a", home_dir=h1),
+            GrokAccount(alias="grok-b", home_dir=h2),
+        ],
+        isolated_root=str(tmp_path / "neutral-grok-profiles"),
+    )
     lease_a = manager.acquire("consumer-A")
     lease_b = manager.acquire("consumer-B")
 
@@ -492,10 +495,13 @@ def test_released_profile_becomes_eligible_for_failover(tmp_path):
     h2 = str(tmp_path / "grok-b")
     for p in (h1, h2):
         Path(p).mkdir(parents=True)
-    manager = GrokAccountPoolManager([
-        GrokAccount(alias="grok-a", home_dir=h1),
-        GrokAccount(alias="grok-b", home_dir=h2),
-    ], isolated_root=str(tmp_path / "neutral-grok-profiles"))
+    manager = GrokAccountPoolManager(
+        [
+            GrokAccount(alias="grok-a", home_dir=h1),
+            GrokAccount(alias="grok-b", home_dir=h2),
+        ],
+        isolated_root=str(tmp_path / "neutral-grok-profiles"),
+    )
     lease_a = manager.acquire("consumer-A")
     lease_b = manager.acquire("consumer-B")
     manager.release(lease_b)
