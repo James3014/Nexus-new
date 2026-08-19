@@ -58,6 +58,9 @@ source behavior, tests, and required verifiers remain authoritative.
   these verification gates; a normal phase transition does not require a
   redundant Owner merge-slot request.
   Drift, conflict, unexpected deletion, or unknown/failed checks fail closed.
+  A standing grant is durable and machine-bound only when validated from the
+  single canonical local receipt path (see Task Execution Contract); it is
+  never a projection of this document.
 - The coordinator handles ordinary implementation, rebind, retry, and evidence
   autonomously. It asks again only for contract widening/change, weaker
   security, a new irreversible external effect, or release/production claims.
