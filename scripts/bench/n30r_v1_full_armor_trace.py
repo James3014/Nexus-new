@@ -14,6 +14,7 @@ Changes from prior:
 from __future__ import annotations
 
 import copy
+import functools
 import hashlib
 import json
 import os
@@ -83,6 +84,32 @@ _SYNTHETIC_SOURCE = """\
 def is_even(n):
     return n % 2 == 1
 """
+
+
+def _cleanup_workspace_on_exception(func):
+    """Clean the per-trace workspace when the trace aborts unexpectedly.
+
+    The trace body is intentionally kept as one receipt-building flow.  The
+    wrapper supplies the same exception boundary as a lexical ``finally``
+    without changing the receipt's success-path control flow: if any planner,
+    provider, verifier, or artifact operation raises after workspace creation,
+    the active ``TemporaryDirectory`` is cleaned before the exception escapes.
+    """
+    @functools.wraps(func)
+    def guarded(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except BaseException:
+            traceback = sys.exc_info()[2]
+            while traceback is not None:
+                workspace_holder = traceback.tb_frame.f_locals.get("workspace_holder")
+                if workspace_holder is not None:
+                    workspace_holder.cleanup()
+                    break
+                traceback = traceback.tb_next
+            raise
+
+    return guarded
 
 
 @contextmanager
@@ -256,6 +283,7 @@ def deterministic_provider(req: LocalModelProviderRequest) -> str:
 _SOURCE_RELPATH = _ALLOWED_SOURCE_RELPATH
 
 
+@_cleanup_workspace_on_exception
 def run_v1_trace(custom_source_content: str | None = None) -> dict:
     """Run the V1 full armor trace and return the receipt."""
     global _provider_call_count, _prompt_telemetry

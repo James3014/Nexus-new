@@ -398,6 +398,22 @@ class TestV1TracePipelineStages:
     def test_target_file_is_f_py(self, receipt):
         assert receipt["target_file"] == "f.py"
 
+    def test_trace_workspace_is_cleaned_when_planner_raises(self, monkeypatch):
+        """An exception after workspace creation must not leak .n30r-v1-* dirs."""
+        import scripts.bench.n30r_v1_full_armor_trace as trace
+
+        before = {p for p in _REPO_ROOT.glob(".n30r-v1-*") if p.is_dir()}
+
+        def raise_after_workspace_creation(_task_desc):
+            raise RuntimeError("injected planner failure")
+
+        monkeypatch.setattr(trace, "_invoke_planner", raise_after_workspace_creation)
+        with pytest.raises(RuntimeError, match="injected planner failure"):
+            trace.run_v1_trace()
+
+        leaked = {p for p in _REPO_ROOT.glob(".n30r-v1-*") if p.is_dir()} - before
+        assert not leaked
+
 
 class TestV1TraceSourceEvidence:
     """Verify source evidence is loaded from real fixture."""
