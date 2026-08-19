@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 import json
+from types import SimpleNamespace
 from nexus.engine.pipeline_repair import ComposedAuditResult, ComposedRepairResult, PipelineRepairMixin, AuditEvalContext
 from nexus.engine.repair.composed_phase_result import ComposedAuditResult as SplitComposedAuditResult
 from nexus.engine.repair.composed_phase_result import ComposedRepairResult as SplitComposedRepairResult
@@ -40,6 +41,31 @@ def test_reviewer_failure_domains_keep_terminal_rejection_separate():
     assert pipeline._is_rejected_repair_status("REJECTED")
     assert pipeline._is_repair_failure_status("RECOVERABLE_BLOCK")
     assert pipeline._is_repair_failure_status("REJECTED")
+
+
+@pytest.mark.parametrize("result", [
+    SimpleNamespace(status="SUCCESS", mutations={}),
+    SimpleNamespace(status="FAILED", mutations={"status": "mystery"}),
+])
+def test_composed_repair_missing_or_unknown_status_is_recoverable(result, mock_ctx):
+    pipeline = MockPipeline()
+    mock_ctx.state.metadata["phase_decisions"] = {"R": "attempt-2"}
+    mock_ctx.state.metadata["candidate_status"] = "REJECTED"
+
+    normalized = pipeline._normalize_composed_repair_result(mock_ctx, result, 2)
+
+    assert normalized.status == "RECOVERABLE_BLOCK"
+    assert normalized.current_decision_id == "attempt-2"
+    assert mock_ctx.state.metadata["candidate_status"] == "REJECTED"
+
+
+def test_composed_repair_explicit_rejection_is_preserved(mock_ctx):
+    pipeline = MockPipeline()
+    result = SimpleNamespace(status="SUCCESS", mutations={"status": "REJECTED"})
+
+    normalized = pipeline._normalize_composed_repair_result(mock_ctx, result, 1)
+
+    assert normalized.status == "REJECTED"
 
 @pytest.fixture
 def mock_ctx():

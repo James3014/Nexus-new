@@ -1282,11 +1282,14 @@ class PipelineRepairMixin:
         result_object = dict(raw_result_object) if isinstance(raw_result_object, dict) else mutations
 
         raw_status = mutations.get("status") or result_object.get("status")
-        if raw_status is None:
-            # PhaseResult.status describes plugin execution, not repair review approval.
-            phase_status = str(getattr(result, "status", "") or "").strip().upper()
-            raw_status = phase_status if self._is_rejected_repair_status(phase_status) else "REJECTED"
-        status = str(raw_status or "REJECTED").strip().upper()
+        # PhaseResult.status describes executor progress, not reviewer authority.
+        # A missing/unknown reviewer decision is a repairable block; only an
+        # explicit status in the result payload can preserve terminal REJECTED.
+        status = str(raw_status or "").strip().upper()
+        if status in {"FAIL", "FAILED", "REVISE", "RECOVERABLE_BLOCK", "UNKNOWN"}:
+            status = "RECOVERABLE_BLOCK"
+        elif status not in {"APPROVED", "SKIPPED_QUOTA", "REJECTED"}:
+            status = "RECOVERABLE_BLOCK"
 
         phase_decisions = ctx.state.metadata.setdefault("phase_decisions", {})
         phase_skills = ctx.state.metadata.setdefault("phase_skills", {})
