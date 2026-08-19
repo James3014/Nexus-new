@@ -19,7 +19,8 @@ from nexus.engine.repair.escalation_manager import handle_escalation, perform_es
 
 logger = logging.getLogger(__name__)
 
-REJECTED_REPAIR_STATUSES = frozenset({"FAIL", "FAILED", "REJECTED", "REJECTED_NO_RED_TEST"})
+REJECTED_REPAIR_STATUSES = frozenset({"REJECTED"})
+RECOVERABLE_REPAIR_STATUSES = frozenset({"FAIL", "FAILED", "RECOVERABLE_BLOCK", "REVISE", "UNKNOWN", "REJECTED_NO_RED_TEST"})
 
 @dataclass
 class AuditEvalContext:
@@ -62,6 +63,14 @@ class PipelineRepairMixin:
     @staticmethod
     def _is_rejected_repair_status(status: Any) -> bool:
         return str(status or "").strip().upper() in REJECTED_REPAIR_STATUSES
+
+    @staticmethod
+    def _is_recoverable_repair_status(status: Any) -> bool:
+        return str(status or "").strip().upper() in RECOVERABLE_REPAIR_STATUSES
+
+    @classmethod
+    def _is_repair_failure_status(cls, status: Any) -> bool:
+        return cls._is_rejected_repair_status(status) or cls._is_recoverable_repair_status(status)
 
     def _local_assist_mode(self, ctx: PipelineContextProtocol) -> str:
         meta = getattr(ctx.state, "metadata", {}) or {}
@@ -1177,11 +1186,11 @@ class PipelineRepairMixin:
         r_out = self._process_repair_response(ctx, res, repair_attempts)
         
         # 🚀 [v24.0] Immediate Intra-loop learning trigger
-        if self._is_rejected_repair_status(r_out["status"]):
+        if self._is_repair_failure_status(r_out["status"]):
             self._record_intra_loop_trauma(ctx, r_out)
 
         # CLI Pregate validation
-        if not self._is_rejected_repair_status(r_out["status"]):
+        if not self._is_repair_failure_status(r_out["status"]):
             r_out["status"] = self._run_pregate_if_needed(ctx, r_out["status"], r_out["result"])
             
             # === NEW: T11 產生 Evidence Bundle 給 Verifier ===
@@ -1232,7 +1241,7 @@ class PipelineRepairMixin:
         result_object = normalized.result_object
         ctx.state.metadata["last_review_status"] = status
         self._map_repair_metadata(ctx, result_object)
-        if self._is_rejected_repair_status(status):
+        if self._is_repair_failure_status(status):
             self._record_intra_loop_trauma(ctx, {"status": status, "result": result_object})
         else:
             status = self._run_pregate_if_needed(ctx, status, result_object)
@@ -1273,11 +1282,14 @@ class PipelineRepairMixin:
         result_object = dict(raw_result_object) if isinstance(raw_result_object, dict) else mutations
 
         raw_status = mutations.get("status") or result_object.get("status")
-        if raw_status is None:
-            # PhaseResult.status describes plugin execution, not repair review approval.
-            phase_status = str(getattr(result, "status", "") or "").strip().upper()
-            raw_status = phase_status if self._is_rejected_repair_status(phase_status) else "REJECTED"
-        status = str(raw_status or "REJECTED").strip().upper()
+        # PhaseResult.status describes executor progress, not reviewer authority.
+        # A missing/unknown reviewer decision is a repairable block; only an
+        # explicit status in the result payload can preserve terminal REJECTED.
+        status = str(raw_status or "").strip().upper()
+        if status in {"FAIL", "FAILED", "REVISE", "RECOVERABLE_BLOCK", "UNKNOWN"}:
+            status = "RECOVERABLE_BLOCK"
+        elif status not in {"APPROVED", "SKIPPED_QUOTA", "REJECTED"}:
+            status = "RECOVERABLE_BLOCK"
 
         phase_decisions = ctx.state.metadata.setdefault("phase_decisions", {})
         phase_skills = ctx.state.metadata.setdefault("phase_skills", {})
@@ -1530,26 +1542,48 @@ class PipelineRepairMixin:
         normalized = self._normalize_composed_audit_result(ctx, result)
         ctx.state.metadata["composition_audit_phase_status"] = normalized.status
         ctx.state.metadata["composition_audit_phase_mutations"] = normalized.mutations
-        if self._is_rejected_repair_status(normalized.status) or bool(normalized.mutations.get("fail")) or normalized.mutations.get("audit_success") is False:
+        if self._is_repair_failure_status(normalized.status) or bool(normalized.mutations.get("fail")) or normalized.mutations.get("audit_success") is False:
             reason = normalized.rejection_reason
             ctx.state.metadata["composition_audit_phase_rejection"] = reason
             self._record_composed_audit_rejection(ctx, r_out, normalized, repair_attempts, reason)
-            return {"audit_success": False, "status": "REJECTED", "phantom_reason": reason}
-        return {"audit_success": True, "status": normalized.status or "APPROVED", "phantom_reason": ""}
+            return {
+                "audit_success": False,
+                "status": normalized.status,
+                "phantom_reason": reason,
+                "terminal_rejection": normalized.status == "REJECTED",
+            }
+        return {
+            "audit_success": True,
+            "status": normalized.status or "APPROVED",
+            "phantom_reason": "",
+            "terminal_rejection": False,
+        }
 
     def _missing_composed_audit_result(self, ctx: PipelineContextProtocol, *, reason: str) -> dict:
         ctx.state.metadata["composition_audit_phase_status"] = "MISSING"
         ctx.state.metadata["composition_audit_phase_rejection"] = reason
         ctx.state.metadata["evidence_trust_rejection"] = True
-        return {"audit_success": False, "status": "REJECTED", "phantom_reason": reason}
+        return {
+            "audit_success": False,
+            "status": "RECOVERABLE_BLOCK",
+            "phantom_reason": reason,
+            "terminal_rejection": False,
+        }
 
     def _normalize_composed_audit_result(self, ctx: PipelineContextProtocol, result: Any) -> ComposedAuditResult:
         """Normalize composed A output without treating executor success as audit success."""
         mutations = dict(getattr(result, "mutations", None) or {})
-        raw_status = mutations.get("status") or getattr(result, "status", "")
-        status = str(raw_status or "REJECTED").strip().upper()
+        # PhaseResult.status is executor progress (usually SUCCESS), not a
+        # reviewer decision. Without an explicit payload decision, fail closed
+        # as a repairable block and never grant audit acceptance.
+        raw_status = mutations.get("status")
+        status = str(raw_status or "").strip().upper()
         if bool(mutations.get("fail")) or mutations.get("audit_success") is False:
-            status = "REJECTED"
+            status = "RECOVERABLE_BLOCK"
+        elif status in {"FAIL", "FAILED", "REVISE", "RECOVERABLE_BLOCK", "UNKNOWN"}:
+            status = "RECOVERABLE_BLOCK"
+        elif status not in {"APPROVED", "SKIPPED_QUOTA", "REJECTED"}:
+            status = "RECOVERABLE_BLOCK"
 
         phase_decisions = ctx.state.metadata.setdefault("phase_decisions", {})
         phase_skills = ctx.state.metadata.setdefault("phase_skills", {})
@@ -1707,6 +1741,7 @@ class PipelineRepairMixin:
 
             # Step 1: Repair
             r_out = self._execute_single_repair(ctx, tracer, repair_attempts)
+            terminal_rejection = self._is_rejected_repair_status(r_out.get("status"))
             record_receipt = getattr(self, "_record_phase_receipt", None)
             if callable(record_receipt):
                 record_receipt(
@@ -1715,7 +1750,7 @@ class PipelineRepairMixin:
                     status=str(r_out.get("status") or "FAILED"),
                     transition="R:start->end",
                     output_payload=r_out.get("result") or {},
-                    next_action="audit",
+                    next_action="none" if terminal_rejection else "audit",
                 )
             self._phase_observer(ctx, "R", "on_phase_end", status=str(r_out.get("status") or "FAILED"))
             if rlm_loop is not None:
@@ -1725,6 +1760,8 @@ class PipelineRepairMixin:
                     result=r_out["result"],
                     metadata=ctx.state.metadata,
                 )
+            if terminal_rejection:
+                break
 
             # Step 2: Audit
             self._enter_runtime_phase(ctx, "A", reason="audit_entry")
@@ -1740,6 +1777,15 @@ class PipelineRepairMixin:
             a_out = self._run_composition_audit_phase(ctx, r_out, repair_attempts)
             if a_out is None:
                 a_out = self._evaluate_audit_result(ctx, eval_ctx)
+            # Audit failures produced by evidence/phantom checks are repairable
+            # unless the reviewer supplied an explicit terminal disposition.
+            terminal_rejection = bool(a_out.get("terminal_rejection"))
+            if (
+                not a_out.get("audit_success")
+                and a_out.get("status") == "REJECTED"
+                and not terminal_rejection
+            ):
+                a_out = {**a_out, "status": "RECOVERABLE_BLOCK"}
             if rlm_loop is not None:
                 rlm_loop.record_audit(iteration=repair_attempts, audit_result=a_out)
                 budget_state = rlm_loop.consume_iteration()
@@ -1752,8 +1798,8 @@ class PipelineRepairMixin:
                     status=str(a_out.get("status") or ("SUCCESS" if a_out.get("audit_success") else "FAILED")),
                     transition="A:start->end",
                     output_payload=a_out,
-                    block_class="" if a_out.get("audit_success") else "RECOVERABLE_BLOCK",
-                    next_action="crystallize" if a_out.get("audit_success") else "repair_or_replan",
+                    block_class="" if a_out.get("audit_success") else ("TERMINAL_BLOCKED" if terminal_rejection else "RECOVERABLE_BLOCK"),
+                    next_action="crystallize" if a_out.get("audit_success") else ("none" if terminal_rejection else "repair_or_replan"),
                 )
             self._phase_observer(
                 ctx,
@@ -1766,6 +1812,9 @@ class PipelineRepairMixin:
                 success = True
                 break
 
+            if terminal_rejection:
+                break
+
             if rlm_loop is not None and rlm_loop.state.exhausted:
                 ctx.state.metadata["rlm_budget_exhausted"] = True
                 ctx.state.metadata["rlm_budget_exhausted_reasons"] = rlm_loop.state.exhausted_reasons
@@ -1773,7 +1822,7 @@ class PipelineRepairMixin:
                 break
 
             # Step 3: Handle Failure
-            if a_out["status"] == "REJECTED" and repair_attempts < max_retries:
+            if self._is_recoverable_repair_status(a_out["status"]) and repair_attempts < max_retries:
                 esc_ret = self._handle_escalation(ctx, repair_attempts, r_out["status"], a_out["phantom_reason"])
                 
                 # Check for tuple signature
