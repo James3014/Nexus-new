@@ -60,7 +60,7 @@ to `GOVERNED`.
   implementer identity.
 - **Starting branch:** `codex/issue-401-semantic-authority-delta` was rebound
   from PR/base `71ae533ec9f795477131645f96cea1c93b4f4d40`; this correction
-  started at `correction_start_revision=63b9f75f6a446a06246fc2c2c6cfa7dcf2b395ab`.
+  started at `correction_start_revision=b39a9e722068bfc93a4a58aaf97888c57c6486b3`.
 - **Execution authority:** this Git-tracked card authorizes one bounded Luna
   rebind/provenance-correction attempt after the primary commits and re-reads
   the card hash; Luna did not implement the semantic contract.
@@ -170,7 +170,7 @@ python3 -m pytest -q tests/contracts/test_semantic_authority_delta.py tests/ops/
 python3 -m compileall -q nexus/contracts/semantic_authority_delta.py tests/contracts/test_semantic_authority_delta.py
 python3 scripts/ops/agent_protocol_check.py --task-card tasks/github-issue-401-semantic-authority-delta-20260817/00-semantic-authority-delta.md --strict-boundary --check-files AGENTS.md,docs/agents/TASK_EXECUTION_CONTRACT.md,nexus/contracts/semantic_authority_delta.py,tests/contracts/test_semantic_authority_delta.py,tests/ops/test_bootstrap_authority_files.py
 git diff --check
-git diff --name-status 9296d68fe19d933cb78b9a0470a054ea5efd4c2f HEAD
+git diff --name-status 71ae533ec9f795477131645f96cea1c93b4f4d40 HEAD
 git grep -n 'MERGE_SLOT_GRANTED\|MERGE_INTENT' AGENTS.md docs/agents/TASK_EXECUTION_CONTRACT.md tests/ops/test_bootstrap_authority_files.py
 ```
 
