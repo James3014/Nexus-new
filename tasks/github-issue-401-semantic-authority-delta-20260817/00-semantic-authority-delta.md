@@ -51,7 +51,7 @@ to `GOVERNED`.
 - **Owner decision:** current Owner direction makes #401 P0, selects Luna, and
   authorizes parallel work in isolated, non-overlapping worktrees.
 - **Issue contract:** GitHub Issue #401, open and `READY_NOW`, rebound to
-  `main=8c2584d6053dd1f04dc87333f807fbea1726545e`.
+  `main=71ae533ec9f795477131645f96cea1c93b4f4d40`.
 - **Original Candidate lineage:** the implementation and formatting commits
   through `53190a32` were authored by Antigravity
   (`antigravity@gemini.local`).
@@ -59,7 +59,7 @@ to `GOVERNED`.
   rebind and provenance correction; this does not rewrite the original
   implementer identity.
 - **Starting branch:** `codex/issue-401-semantic-authority-delta` was rebound
-  from PR/base `8c2584d6053dd1f04dc87333f807fbea1726545e`; this correction
+  from PR/base `71ae533ec9f795477131645f96cea1c93b4f4d40`; this correction
   started at `correction_start_revision=63b9f75f6a446a06246fc2c2c6cfa7dcf2b395ab`.
 - **Execution authority:** this Git-tracked card authorizes one bounded Luna
   rebind/provenance-correction attempt after the primary commits and re-reads
