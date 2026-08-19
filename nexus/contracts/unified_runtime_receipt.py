@@ -190,15 +190,55 @@ def _failure_signal(receipt: Mapping[str, Any]) -> tuple[str, str, str, str]:
 
     stages = [stage for stage in receipt.get("stages", []) or [] if isinstance(stage, Mapping)]
 
+    workforce_stage = next(
+        (
+            stage
+            for stage in stages
+            if str(stage.get("name") or "").strip().lower() == "workforce_admission"
+        ),
+        None,
+    )
+    if workforce_stage is not None:
+        workforce_status = str(workforce_stage.get("status") or "").upper()
+        workforce_decision = str(
+            workforce_stage.get("overall_decision") or workforce_stage.get("decision") or ""
+        ).upper()
+        if (
+            workforce_status in {"BLOCKED", "FAILED", "INCOMPLETE"}
+            or workforce_decision in {"BLOCK", "ESCALATE"}
+        ) and not bool(workforce_stage.get("gate_passed")):
+            return "workforce_admission_blocked", "workforce_admission", "workforce_admission", ""
+
     # Verifier/evidence is a required gate.  It must be evaluated before the
     # optional Local/Online stages because disabled providers are context, not
     # the cause, when verification was never observed or its evidence is not
     # trustworthy.  Do this as a targeted lookup rather than relying on the
     # serialized stage order.
     verifier = next(
-        (stage for stage in stages if str(stage.get("name") or "").lower() == "verifier"),
+        (stage for stage in stages if str(stage.get("name") or "").strip().lower() == "verifier"),
         None,
     )
+    provider_stages = [
+        stage
+        for stage in stages
+        if str(stage.get("name") or "").strip().lower() in {"local", "online"}
+    ]
+    for stage in provider_stages:
+        status = str(stage.get("status") or "").upper()
+        reason_text = str(stage.get("reason") or stage.get("skip_reason") or "").lower()
+        if status in {"FAILED", "BLOCKED"} and any(
+            token in reason_text for token in ("authoriz", "authority", "admission", "unauthoriz")
+        ):
+            name = str(stage.get("name") or "provider").strip().lower()
+            return "authorization_blocked", name, "authorization", ""
+    provider_unavailable_explicit = any(
+        "unavailable" in str(stage.get("reason") or stage.get("skip_reason") or "").lower()
+        for stage in provider_stages
+    )
+    if verifier is None and provider_stages and not provider_unavailable_explicit and all(
+        str(stage.get("status") or "").upper() == "NOT_REQUESTED" for stage in provider_stages
+    ):
+        return "verifier_evidence_untrusted", "verifier", "verifier_not_observed", ""
     if verifier is not None:
         verifier_status = str(verifier.get("status") or "").upper()
         verifier_invoked = bool(verifier.get("invoked"))
@@ -229,7 +269,7 @@ def _failure_signal(receipt: Mapping[str, Any]) -> tuple[str, str, str, str]:
             return "verifier_failed", "verifier", _stable_reason_code(verifier_reason, default="verifier"), ""
 
     for stage in stages:
-        name = str(stage.get("name") or "")
+        name = str(stage.get("name") or "").strip().lower()
         status = str(stage.get("status") or "").upper()
         reason = stage.get("reason") or stage.get("skip_reason") or ""
         if status == "SKIPPED" or bool(stage.get("skipped")):

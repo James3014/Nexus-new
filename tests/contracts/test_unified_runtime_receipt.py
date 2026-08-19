@@ -124,3 +124,100 @@ def test_provider_unavailable_is_preserved_when_verifier_passed() -> None:
 
     assert diagnostics["failure_class"] == "provider_unavailable"
     assert diagnostics["source_stage"] == "online"
+
+
+def test_missing_verifier_stage_is_not_reported_as_disabled_provider() -> None:
+    diagnostics = build_failure_diagnostics(
+        {
+            "terminal_status": "INCOMPLETE",
+            "stages": [
+                {"name": "local", "status": "NOT_REQUESTED", "reason": "local_route_disabled"},
+                {"name": "online", "status": "NOT_REQUESTED", "reason": "online_route_disabled"},
+            ],
+        }
+    )
+
+    assert diagnostics["failure_class"] == "verifier_evidence_untrusted"
+    assert diagnostics["source_stage"] == "verifier"
+    assert diagnostics["reason_code"] == "verifier_not_observed"
+
+
+def test_explicit_provider_unavailable_is_not_reclassified_as_missing_verifier() -> None:
+    diagnostics = build_failure_diagnostics(
+        {
+            "terminal_status": "INCOMPLETE",
+            "stages": [
+                {"name": "local", "status": "NOT_REQUESTED", "reason": "provider unavailable"},
+                {"name": "online", "status": "NOT_REQUESTED", "reason": "provider unavailable"},
+            ],
+        }
+    )
+
+    assert diagnostics["failure_class"] == "provider_unavailable"
+    assert diagnostics["source_stage"] == "local"
+
+
+def test_workforce_admission_failure_is_not_generic_authority_failure() -> None:
+    diagnostics = build_failure_diagnostics(
+        {
+            "terminal_status": "INCOMPLETE",
+            "stages": [
+                {
+                    "name": "workforce_admission",
+                    "status": "BLOCKED",
+                    "decision": "BLOCK",
+                    "gate_passed": False,
+                },
+                {"name": "local", "status": "FAILED", "reason": "authorization_required"},
+            ],
+        }
+    )
+
+    assert diagnostics["failure_class"] == "workforce_admission_blocked"
+    assert diagnostics["source_stage"] == "workforce_admission"
+
+
+def test_authority_failure_remains_distinct_from_workforce_admission() -> None:
+    diagnostics = build_failure_diagnostics(
+        {
+            "terminal_status": "BLOCKED",
+            "stages": [
+                {"name": "local", "status": "FAILED", "reason": "local_model_invocation_authority_blocked"},
+                {"name": "verifier", "status": "NOT_REQUESTED", "reason": "blocked_by_authority"},
+            ],
+        }
+    )
+
+    assert diagnostics["failure_class"] == "authorization_blocked"
+    assert diagnostics["source_stage"] == "local"
+
+
+def test_unknown_incomplete_without_stage_evidence_fails_closed() -> None:
+    diagnostics = build_failure_diagnostics(
+        {"terminal_status": "INCOMPLETE", "stages": []}
+    )
+
+    assert diagnostics["failure_class"] == "unknown_incomplete"
+    assert diagnostics["source_stage"] == "runtime"
+
+
+def test_verifier_name_spacing_cannot_be_used_to_mask_failure() -> None:
+    diagnostics = build_failure_diagnostics(
+        {
+            "terminal_status": "INCOMPLETE",
+            "stages": [
+                {"name": "online", "status": "NOT_REQUESTED", "reason": "online_route_disabled"},
+                {
+                    "name": " verifier ",
+                    "status": "FAILED",
+                    "invoked": True,
+                    "evidence_present": False,
+                    "gate_passed": False,
+                    "reason": "evidence_untrusted",
+                },
+            ],
+        }
+    )
+
+    assert diagnostics["failure_class"] == "verifier_evidence_untrusted"
+    assert diagnostics["source_stage"] == "verifier"
