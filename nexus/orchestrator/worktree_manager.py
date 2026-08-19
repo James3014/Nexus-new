@@ -508,7 +508,11 @@ class WorktreeManager:
         entry: Mapping[str, str],
         task_id: str,
     ) -> dict[str, Any] | None:
-        path = self._ownership_record_path(controller_root, task_id)
+        try:
+            path = self._ownership_record_path(controller_root, task_id)
+        except (OSError, subprocess.SubprocessError):
+            # An unresolved common Git directory cannot establish ownership.
+            return None
         if not path.is_file():
             return None
         try:
@@ -699,7 +703,6 @@ class WorktreeManager:
         )
         if not active:
             return False
-        states = task_states or {}
         for entry in active:
             branch = entry.get("branch", "")
             task_id = ""
@@ -707,9 +710,15 @@ class WorktreeManager:
                 task_id = branch.removeprefix("refs/heads/nexus/task/")
             elif branch.startswith("nexus/task/"):
                 task_id = branch.removeprefix("nexus/task/")
-            existing = states.get(task_id)
-            if not isinstance(existing, Mapping):
-                existing = self._read_target_ownership(controller_root, entry, task_id)
+            snapshot = (task_states or {}).get(task_id)
+            if isinstance(snapshot, Mapping):
+                # Reject malformed or stale caller evidence, but never use it
+                # as ownership.  The durable record remains authoritative.
+                _validate_mutation_identity(snapshot)
+            # The durable ownership record is authoritative once a live Target
+            # exists.  A caller snapshot may not substitute for it or change
+            # its mutation domain.
+            existing = self._read_target_ownership(controller_root, entry, task_id)
             if not isinstance(existing, Mapping):
                 return True
             if mutation_domains_conflict(existing, contract):

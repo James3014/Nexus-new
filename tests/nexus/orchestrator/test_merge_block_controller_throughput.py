@@ -138,7 +138,8 @@ def test_worktree_manager_uses_same_disjoint_predicate_before_target_creation(tm
     manager._active_target_worktrees = lambda *args, **kwargs: [
         {"worktree": str(tmp_path / "targets" / "a"), "branch": "refs/heads/nexus/task/a"}
     ]
-    assert manager.target_conflict(contract, task_states=states) is False
+    # A caller snapshot cannot substitute for durable ownership.
+    assert manager.target_conflict(contract, task_states=states) is True
     states["a"]["contract"]["allowed_files"] = ["scope"]
     assert manager.target_conflict(contract, task_states=states) is True
 
@@ -362,14 +363,54 @@ def test_missing_authoritative_ownership_keeps_live_target_fail_closed(tmp_path)
     manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
     contract = _real_contract(controller, target_root, "a", ["scope/a.txt"])
     lease = manager.create_lease(contract, task_states={})
+    valid_state = {
+        "a": {
+            "task_id": "a",
+            "status": "CANDIDATE_CAPTURED",
+            "attempt_id": lease.lease_id,
+            "lease_id": lease.lease_id,
+            "controller_revision": contract.controller_revision,
+            "controller_worktree": str(controller),
+            "contract": contract.model_dump(mode="json"),
+            "lease": lease.__dict__,
+        }
+    }
     ownership = manager._ownership_record_path(controller, contract.task_id)
     ownership.unlink()
     with pytest.raises(RuntimeError, match="serial Target budget exceeded"):
         manager.create_lease(
             _real_contract(controller, target_root, "b", ["scope/b.txt"]),
-            task_states={},
+            task_states=valid_state,
         )
     assert Path(lease.target_worktree).exists()
+
+
+def test_tampered_durable_scope_cannot_be_overridden_by_valid_snapshot(tmp_path):
+    controller, target_root = _real_repo(tmp_path)
+    manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
+    contract_a = _real_contract(controller, target_root, "a", ["scope/a.txt"])
+    lease_a = manager.create_lease(contract_a, task_states={})
+    ownership = manager._ownership_record_path(controller, contract_a.task_id)
+    record = json.loads(ownership.read_text(encoding="utf-8"))
+    record["contract"]["allowed_files"] = ["scope"]
+    ownership.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+    valid_snapshot = {
+        "a": {
+            "task_id": "a",
+            "status": "CANDIDATE_CAPTURED",
+            "attempt_id": lease_a.lease_id,
+            "lease_id": lease_a.lease_id,
+            "controller_revision": contract_a.controller_revision,
+            "controller_worktree": str(controller),
+            "contract": contract_a.model_dump(mode="json"),
+            "lease": lease_a.__dict__,
+        }
+    }
+    with pytest.raises(RuntimeError, match="serial Target budget exceeded"):
+        manager.create_lease(
+            _real_contract(controller, target_root, "b", ["scope/b.txt"]),
+            task_states=valid_snapshot,
+        )
 
 
 def test_public_service_admission_allows_disjoint_and_blocks_overlap(tmp_path, monkeypatch):
