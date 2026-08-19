@@ -218,6 +218,8 @@ def test_real_pool_flows_emit_monotonic_lineage_and_isolated_public_snapshots(tm
 
 def test_exhaustion_flow_emits_final_lineage_without_replacement(tmp_path):
     root = tmp_path / "neutral-grok-profiles"
+    (tmp_path / "grok-a").mkdir()
+    (tmp_path / "grok-b").mkdir()
     manager = GrokAccountPoolManager(
         [
             GrokAccount("grok-a", str(tmp_path / "grok-a")),
@@ -282,6 +284,20 @@ def test_duplicate_configured_profiles_fail_closed(tmp_path):
 
     with pytest.raises(GrokAccountPoolError, match="GROK_PROFILE_HOME_BINDING_CONFLICT"):
         manager.acquire("consumer-duplicate-profile")
+
+
+@pytest.mark.parametrize("source_kind", ["missing", "file"])
+def test_invalid_configured_profile_home_fails_closed(tmp_path, source_kind):
+    profile_home = tmp_path / "invalid-profile"
+    if source_kind == "file":
+        profile_home.write_text("not-a-profile-directory")
+    manager = GrokAccountPoolManager(
+        [GrokAccount(alias="grok-invalid", home_dir=str(profile_home))],
+        isolated_root=str(tmp_path / "neutral-grok-profiles"),
+    )
+
+    with pytest.raises(GrokAccountPoolError, match="GROK_PROFILE_HOME_NOT_DIRECTORY"):
+        manager.acquire("consumer-invalid-profile")
 
 
 def test_concurrent_consumers_are_isolated(tmp_path):
@@ -602,6 +618,7 @@ def test_get_grok_account_pool_manager_env_binding(monkeypatch, tmp_path):
 
 def test_env_bound_manager_lease_home_is_hash_derived(monkeypatch, tmp_path):
     set_grok_account_pool_manager(None)
+    (tmp_path / "home-g1").mkdir()
     monkeypatch.setenv("NEXUS_GROK_ACCOUNT_ALIASES", "g1")
     monkeypatch.setenv("NEXUS_GROK_HOME_G1", str(tmp_path / "home-g1"))
     monkeypatch.setenv("NEXUS_GROK_ISOLATED_ROOT", str(tmp_path / "neutral-grok-profiles"))

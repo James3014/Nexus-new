@@ -241,6 +241,8 @@ def _ensure_isolated_home_binding(
     source = Path(home_dir).expanduser()
     if not source.is_absolute():
         raise GrokAccountPoolError("GROK_PROFILE_HOME_MUST_BE_ABSOLUTE")
+    if not source.exists() or not source.is_dir():
+        raise GrokAccountPoolError("GROK_PROFILE_HOME_NOT_DIRECTORY")
     opaque = Path(_isolated_home_dir(home_dir, alias_hash, isolated_root))
     opaque.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
 
