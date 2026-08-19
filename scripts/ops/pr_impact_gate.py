@@ -68,6 +68,10 @@ CI_MACHINERY_TARGETS = (
     "tests/ops/test_pr_impact_gate.py",
     "tests/ops/test_ci_gate_report_trust_audit.py",
 )
+EXACT_CONFIG_TARGETS: dict[str, tuple[str, ...]] = {
+    "configs/codex_dx_failure_prevention.json": ("tests/ops/test_codex_dx_failure_prevention.py",),
+    "configs/codex_task_context_index.json": ("tests/ops/test_codex_task_context_index.py",),
+}
 
 EXACT_GIT_EVIDENCE_ONLY = "EXACT_GIT_EVIDENCE_ONLY"
 _UNKNOWN = "IMPACT_UNKNOWN"
@@ -541,10 +545,43 @@ def build_impact_plan(
         path for path in normalized if path.endswith(".py") and not path.startswith("tests/")
     ]
     wiki_required = any(path.startswith(("openwiki/", "nexus_wiki_vault/")) for path in normalized)
-    details = select_target_details(normalized, load_impact_rules())
+
+    exact_config_paths = [
+        path for path in normalized if path in EXACT_CONFIG_TARGETS and (root / path).is_file()
+    ]
+    exact_config_targets: list[str] = []
+    exact_config_reasons: list[str] = []
+    for path in exact_config_paths:
+        for target in EXACT_CONFIG_TARGETS[path]:
+            if target not in exact_config_targets:
+                exact_config_targets.append(target)
+        exact_config_reasons.append(f"{path}: matched exact config contract")
+
+    other_paths = [
+        path
+        for path in normalized
+        if path not in exact_config_paths and path not in exact_config_targets
+    ]
+
+    if other_paths:
+        details = select_target_details(other_paths, load_impact_rules())
+        details_targets = list(details.targets)
+        details_reasons = list(details.reasons)
+        details_confidence = details.confidence
+        details_unmatched = list(details.unmatched_paths)
+        details_high_risk = details.high_risk_escalated
+        details_fallback_used = details.fallback_used
+    else:
+        details_targets = []
+        details_reasons = []
+        details_confidence = 0.9
+        details_unmatched = []
+        details_high_risk = False
+        details_fallback_used = False
+
     unknown_unmatched = [
         path
-        for path in details.unmatched_paths
+        for path in details_unmatched
         if not (
             _is_docs_or_governance(path)
             or _is_workflow_or_ci(path)
@@ -556,15 +593,17 @@ def build_impact_plan(
         )
     ]
 
-    targets = list(details.targets)
-    reasons = list(details.reasons)
+    targets = list(exact_config_targets) + [
+        t for t in details_targets if t not in exact_config_targets
+    ]
+    reasons = list(exact_config_reasons) + list(details_reasons)
     impact_class = "SCOPED_IMPLEMENTATION"
     tier = 1
-    confidence = details.confidence
+    confidence = min(0.9, details_confidence) if other_paths else 0.9
 
     if docs_only:
         impact_class = "DOCS_GOVERNANCE"
-        mapped_docs_targets = [] if details.fallback_used else targets
+        mapped_docs_targets = [] if details_fallback_used else targets
         targets = _unique_existing([*mapped_docs_targets, *DOC_GOVERNANCE_TARGETS], root=root)
         confidence = max(confidence, 0.8)
         reasons.append("docs/governance-only diff selects governance verification")
@@ -578,7 +617,7 @@ def build_impact_plan(
             [*targets, *CI_MACHINERY_TARGETS, *MANDATORY_TIER2_TARGETS], root=root
         )
         reasons.append("CI/workflow change requires CI machinery regression set")
-    elif dependency_change or sensitive_change or contract_change or details.high_risk_escalated:
+    elif dependency_change or sensitive_change or contract_change or details_high_risk:
         impact_class = "HIGH_RISK_INTEGRATION"
         tier = 2
         targets = _unique_existing([*targets, *MANDATORY_TIER2_TARGETS], root=root)
