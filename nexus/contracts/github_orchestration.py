@@ -320,8 +320,7 @@ class MainMovementEvidence(_Frozen):
     def safe_paths(cls, value, info):
         values = tuple(value)
         if values != tuple(sorted(set(values))) or any(
-            not item or item.startswith("/") or ".." in item.split("/")
-            for item in values
+            not item or item.startswith("/") or ".." in item.split("/") for item in values
         ):
             raise ValueError(f"{info.field_name.upper()}_INVALID")
         return values
@@ -353,8 +352,12 @@ class MainMovementDimensionResult(_Frozen):
         if self.action not in {"REUSE_UNAFFECTED", "RECHECK_AFFECTED", "IMPACT_UNKNOWN"}:
             raise ValueError("REQUALIFICATION_ACTION_INVALID")
         if self.classification not in {
-            "SOURCE_IDENTITY_DRIFT", "SEMANTIC_OVERLAP", "TEST_IMPACT",
-            "AUTHORITY_DRIFT", "TRANSPORT_DRIFT", "IRRELEVANT_MAIN_MOVEMENT",
+            "SOURCE_IDENTITY_DRIFT",
+            "SEMANTIC_OVERLAP",
+            "TEST_IMPACT",
+            "AUTHORITY_DRIFT",
+            "TRANSPORT_DRIFT",
+            "IRRELEVANT_MAIN_MOVEMENT",
             "IMPACT_UNKNOWN",
         }:
             raise ValueError("REQUALIFICATION_CLASSIFICATION_INVALID")
@@ -376,8 +379,12 @@ class MainMovementRequalification(_Frozen):
     @model_validator(mode="after")
     def valid(self):
         expected = {
-            "SOURCE_IDENTITY", "SEMANTIC_OVERLAP", "TEST_IMPACT", "AUTHORITY_DRIFT",
-            "TRANSPORT_DRIFT", "IRRELEVANT_MAIN_MOVEMENT",
+            "SOURCE_IDENTITY",
+            "SEMANTIC_OVERLAP",
+            "TEST_IMPACT",
+            "AUTHORITY_DRIFT",
+            "TRANSPORT_DRIFT",
+            "IRRELEVANT_MAIN_MOVEMENT",
         }
         if {item.dimension for item in self.dimensions} != expected:
             raise ValueError("REQUALIFICATION_DIMENSIONS_INCOMPLETE")

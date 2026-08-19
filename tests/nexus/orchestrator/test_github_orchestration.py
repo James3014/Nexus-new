@@ -12,7 +12,7 @@ from nexus.contracts.autonomy_goal import (
     RepositoryIdentity,
     StandingGrantContext,
 )
-from nexus.contracts.github_orchestration import canonical_hash, MainMovementEvidence
+from nexus.contracts.github_orchestration import MainMovementEvidence, canonical_hash
 from nexus.orchestrator.autonomy_policy import StandingGrantOutcome, StandingGrantRequest
 from nexus.orchestrator.github_orchestration import (
     _resolve_durable_merge_authorization_at,
@@ -94,7 +94,9 @@ def movement_for(snap, **overrides):
 
 
 def _plan(**overrides):
-    values = dict(impact_class="DOCS_GOVERNANCE", unmatched_paths=[], changed_paths=["docs/unrelated.md"])
+    values = dict(
+        impact_class="DOCS_GOVERNANCE", unmatched_paths=[], changed_paths=["docs/unrelated.md"]
+    )
     values.update(overrides)
     return type("Plan", (), values)()
 
@@ -123,9 +125,7 @@ def test_main_movement_rechecks_overlap_and_authority(monkeypatch):
 def test_main_movement_tamper_fails_closed(monkeypatch):
     snap = evidence()
     monkeypatch.setattr("scripts.ops.pr_impact_gate.build_impact_plan", lambda *a, **k: _plan())
-    result = requalify_main_movement(
-        snap, movement_for(snap, candidate_head_sha="a" * 40)
-    )
+    result = requalify_main_movement(snap, movement_for(snap, candidate_head_sha="a" * 40))
     assert result.blocked is True
     source = next(item for item in result.dimensions if item.dimension == "SOURCE_IDENTITY")
     assert source.action == "IMPACT_UNKNOWN"

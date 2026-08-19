@@ -70,7 +70,8 @@ def requalify_main_movement(
     main_paths = set(movement.changed_main_paths)
     direct_overlap = bool(candidate_paths & main_paths)
     semantic_overlap = direct_overlap or bool(
-        plan is not None and plan.impact_class == "HIGH_RISK_INTEGRATION"
+        plan is not None
+        and plan.impact_class == "HIGH_RISK_INTEGRATION"
         and any(path.startswith(("nexus/", "scripts/")) for path in candidate_paths)
     )
     test_impact = any(
@@ -81,7 +82,8 @@ def requalify_main_movement(
     from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
 
     authority_paths = tuple(
-        path for path in main_paths
+        path
+        for path in main_paths
         if RepositoryContractGate._drift_kind(path) is not None
         or path in {"AGENTS.md", "MUSE_PROTO.md"}
         or path.startswith(("tasks/", "docs/agents/", "nexus/verifiers/"))
@@ -91,7 +93,8 @@ def requalify_main_movement(
         or "verifier" in path.lower()
     )
     transport_paths = tuple(
-        path for path in main_paths
+        path
+        for path in main_paths
         if RepositoryContractGate._drift_kind(path) == "ci_workflow_authority_drift"
         or path.startswith((".github/workflows/", "scripts/ops/"))
         or any(token in path.lower() for token in ("provider", "transport", "mcp"))
@@ -121,18 +124,28 @@ def requalify_main_movement(
 
     dimensions = (
         result("SOURCE_IDENTITY", "SOURCE_IDENTITY_DRIFT", bool(unknown_reasons), unknown_reasons),
-        result("SEMANTIC_OVERLAP", "SEMANTIC_OVERLAP", semantic_overlap, ("candidate path/dependency overlap",)),
-        result("TEST_IMPACT", "TEST_IMPACT", test_impact, ("test inventory or dependency changed",)),
+        result(
+            "SEMANTIC_OVERLAP",
+            "SEMANTIC_OVERLAP",
+            semantic_overlap,
+            ("candidate path/dependency overlap",),
+        ),
+        result(
+            "TEST_IMPACT", "TEST_IMPACT", test_impact, ("test inventory or dependency changed",)
+        ),
         result("AUTHORITY_DRIFT", "AUTHORITY_DRIFT", bool(authority_paths), tuple(authority_paths)),
         result("TRANSPORT_DRIFT", "TRANSPORT_DRIFT", bool(transport_paths), tuple(transport_paths)),
         result("IRRELEVANT_MAIN_MOVEMENT", "IRRELEVANT_MAIN_MOVEMENT", False),
     )
     if impact_unknown:
         dimensions = tuple(
-            item if item.dimension in {"SOURCE_IDENTITY", "AUTHORITY_DRIFT", "SEMANTIC_OVERLAP"}
+            item
+            if item.dimension in {"SOURCE_IDENTITY", "AUTHORITY_DRIFT", "SEMANTIC_OVERLAP"}
             else MainMovementDimensionResult(
-                dimension=item.dimension, classification=item.classification,
-                action=item.action, reasons=item.reasons,
+                dimension=item.dimension,
+                classification=item.classification,
+                action=item.action,
+                reasons=item.reasons,
             )
             for item in dimensions
         )
@@ -142,10 +155,16 @@ def requalify_main_movement(
                 classification="IMPACT_UNKNOWN",
                 action="IMPACT_UNKNOWN",
                 reasons=("impact universe is unknown",),
-            ) if item.dimension == "SEMANTIC_OVERLAP" else item
+            )
+            if item.dimension == "SEMANTIC_OVERLAP"
+            else item
             for item in dimensions
         )
-    blocked = bool(unknown_reasons or authority_paths or any(item.action == "IMPACT_UNKNOWN" for item in dimensions))
+    blocked = bool(
+        unknown_reasons
+        or authority_paths
+        or any(item.action == "IMPACT_UNKNOWN" for item in dimensions)
+    )
     return MainMovementRequalification(
         old_main_sha=movement.old_main_sha,
         new_main_sha=movement.new_main_sha,
