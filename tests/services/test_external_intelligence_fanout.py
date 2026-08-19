@@ -695,6 +695,9 @@ def test_prestart_retry_safe_failure_allows_one_fresh_exact_attempt(tmp_path):
     failed = json.loads(next((tmp_path / "state" / "attempts").glob("*.json")).read_text())
     assert failed["state"] == "RETRY_SAFE"
     assert failed["retry_safe"] is True
+    first_attempt_id = failed["attempt_id"]
+    first_workspace_id = failed["workspace_id"]
+    first_workspace_path = failed["workspace_path"]
 
     second = runtime.run(args, CapacityLease(1, 1, 1, 1))
     assert second["errors"] == {}
@@ -702,6 +705,9 @@ def test_prestart_retry_safe_failure_allows_one_fresh_exact_attempt(tmp_path):
     attempt = json.loads(next((tmp_path / "state" / "attempts").glob("*.json")).read_text())
     assert attempt["state"] == "COMPLETED"
     assert attempt["retry_count"] == 1
+    assert attempt["retry_of_attempt_id"] == first_attempt_id
+    assert attempt["workspace_id"] != first_workspace_id
+    assert attempt["workspace_path"] != first_workspace_path
     assert transport.calls == 2
 
 
@@ -728,7 +734,6 @@ def test_completed_units_do_not_starve_deferred_capacity_on_next_run(tmp_path):
     assert set(second["receipts"]) == {"ua", "ub"}
     assert second["decision"]["completed_units"] == ["ua"]
     assert second["decision"]["admitted_units"] == ["ub"]
-
 
 
 def test_runtime_outcome_unknown_requires_reconciliation_and_no_second_start(tmp_path):
@@ -758,6 +763,43 @@ def test_runtime_outcome_unknown_requires_reconciliation_and_no_second_start(tmp
     attempt = json.loads(attempt_path.read_text())
     assert attempt["state"] == "OUTCOME_UNKNOWN"
     assert attempt["retry_safe"] is False
+
+
+def test_second_outcome_unknown_run_reconciles_without_new_provider_start(tmp_path):
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py"])
+
+    class UnknownThenReconcile:
+        run_new_calls = 0
+        reconcile_calls = 0
+
+        def run_new(self, **kwargs):
+            self.run_new_calls += 1
+            return OpenCodeRunResult(
+                status="OPENCODE_OUTCOME_UNKNOWN",
+                process_started=True,
+                outcome_unknown=True,
+                retry_safe=False,
+            )
+
+        def reconcile_workspace(self, *, workspace_path):
+            self.reconcile_calls += 1
+            raise FanoutError("RECONCILE_STILL_UNKNOWN")
+
+    transport = UnknownThenReconcile()
+    runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
+        store=FanoutStore(tmp_path / "state"),
+        transport=transport,
+    )
+    args = [unit(base, envelope, envelope_sha, "ua", ["a.py"])]
+    first = runtime.run(args, CapacityLease(1, 1, 1, 1))
+    assert first["errors"]["ua"] == "FANOUT_RECONCILIATION_REQUIRED"
+    second = runtime.run(args, CapacityLease(1, 1, 1, 1))
+    assert second["errors"]["ua"] == "RECONCILE_STILL_UNKNOWN"
+    assert transport.run_new_calls == 1
+    assert transport.reconcile_calls == 1
 
 
 def test_runtime_recovers_dispatching_attempt_from_durable_session_without_second_start(tmp_path):

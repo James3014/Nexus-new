@@ -277,9 +277,7 @@ def plan_fanout(
     deferred_overlap: list[str] = []
     deferred_capacity: list[str] = []
 
-    completed_paths = [
-        unit.mutation_paths for unit in ordered if unit.unit_id in completed_ids
-    ]
+    completed_paths = [unit.mutation_paths for unit in ordered if unit.unit_id in completed_ids]
     for unit in ordered:
         if unit.unit_id in completed_ids:
             continue
