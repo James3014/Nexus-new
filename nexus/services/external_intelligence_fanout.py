@@ -249,7 +249,10 @@ class OpenCodeRunResult:
 
 
 def plan_fanout(
-    units: Iterable[Mapping[str, Any] | ExecutionUnit], lease: CapacityLease
+    units: Iterable[Mapping[str, Any] | ExecutionUnit],
+    lease: CapacityLease,
+    *,
+    completed_unit_ids: Iterable[str] = (),
 ) -> dict[str, Any]:
     parsed = [
         unit if isinstance(unit, ExecutionUnit) else ExecutionUnit.from_mapping(unit)
@@ -265,15 +268,26 @@ def plan_fanout(
         raise FanoutError("DUPLICATE_UNIT_ID")
 
     capacity, pressure = lease.effective_capacity()
+    completed_ids = set(completed_unit_ids)
+    if not completed_ids.issubset(unit_ids):
+        raise FanoutError("COMPLETED_UNIT_UNKNOWN")
     ordered = sorted(parsed, key=lambda unit: (-unit.priority, unit.unit_id))
     admitted: list[ExecutionUnit] = []
     blocked_dependencies: list[str] = []
     deferred_overlap: list[str] = []
     deferred_capacity: list[str] = []
 
+    completed_paths = [
+        unit.mutation_paths for unit in ordered if unit.unit_id in completed_ids
+    ]
     for unit in ordered:
+        if unit.unit_id in completed_ids:
+            continue
         if not unit.dependencies_ready:
             blocked_dependencies.append(unit.unit_id)
+            continue
+        if any(_sets_overlap(unit.mutation_paths, paths) for paths in completed_paths):
+            deferred_overlap.append(unit.unit_id)
             continue
         if any(
             _sets_overlap(unit.mutation_paths, selected.mutation_paths) for selected in admitted
@@ -292,6 +306,7 @@ def plan_fanout(
         "effective_capacity": capacity,
         "control_pressure": pressure,
         "admitted_units": [unit.unit_id for unit in admitted],
+        "completed_units": sorted(completed_ids),
         "blocked_dependencies": blocked_dependencies,
         "deferred_mutation_overlap": deferred_overlap,
         "deferred_capacity": deferred_capacity,
@@ -389,11 +404,15 @@ class FanoutStore:
 
     def prepare_initial(self, unit: ExecutionUnit, workspace: WorkspaceLease) -> dict[str, Any]:
         path = self._attempt_path(unit.task_id, unit.unit_id)
+        previous: dict[str, Any] | None = None
         if path.exists():
             value = json.loads(path.read_text(encoding="utf-8"))
-            if value.get("state") in {"PREPARED", "DISPATCHING", "OUTCOME_UNKNOWN"}:
+            if value.get("state") == "RETRY_SAFE" and value.get("retry_safe") is True:
+                previous = value
+            elif value.get("state") in {"PREPARED", "DISPATCHING", "OUTCOME_UNKNOWN"}:
                 raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
-            raise FanoutError("FANOUT_REPLAY_FORBIDDEN")
+            else:
+                raise FanoutError("FANOUT_REPLAY_FORBIDDEN")
         attempt = {
             "schema": DISPATCH_ATTEMPT_SCHEMA,
             "task_id": unit.task_id,
@@ -409,6 +428,11 @@ class FanoutStore:
             "envelope_ref": unit.envelope_ref,
             "envelope_sha256": unit.envelope_sha256,
         }
+        if previous is not None:
+            attempt.update({
+                "retry_of_attempt_id": previous.get("attempt_id"),
+                "retry_count": int(previous.get("retry_count", 0)) + 1,
+            })
         _atomic_json(path, attempt)
         return attempt
 
@@ -473,10 +497,20 @@ class FanoutStore:
         transport_status: str,
         suffix: str = "initial",
     ) -> dict[str, Any]:
-        if state not in {"COMPLETED", "TERMINAL_BLOCKED", "FAILED", "OUTCOME_UNKNOWN"}:
+        if state not in {
+            "COMPLETED",
+            "TERMINAL_BLOCKED",
+            "FAILED",
+            "RETRY_SAFE",
+            "OUTCOME_UNKNOWN",
+        }:
             raise FanoutError("INVALID_ATTEMPT_STATE")
         value = dict(attempt)
-        value.update({"state": state, "retry_safe": False, "transport_status": transport_status})
+        value.update({
+            "state": state,
+            "retry_safe": state == "RETRY_SAFE",
+            "transport_status": transport_status,
+        })
         _atomic_json(self._attempt_path(value["task_id"], value["unit_id"], suffix), value)
         return value
 
@@ -1115,12 +1149,21 @@ class AdaptiveDeepSeekFanoutRuntime:
             unit if isinstance(unit, ExecutionUnit) else ExecutionUnit.from_mapping(unit)
             for unit in units
         ]
-        decision = plan_fanout(parsed, lease)
+        completed_ids: set[str] = set()
+        for unit in parsed:
+            existing_receipt = self.store.existing_initial_receipt(unit)
+            if existing_receipt is not None:
+                completed_ids.add(unit.unit_id)
+        decision = plan_fanout(parsed, lease, completed_unit_ids=completed_ids)
         selected_ids = set(decision["admitted_units"])
         selected = [unit for unit in parsed if unit.unit_id in selected_ids]
         leases: dict[str, WorkspaceLease] = {}
         actions: dict[str, str] = {}
-        receipts: dict[str, Any] = {}
+        receipts: dict[str, Any] = {
+            unit.unit_id: self.store.existing_initial_receipt(unit)
+            for unit in parsed
+            if unit.unit_id in completed_ids
+        }
         errors: dict[str, str] = {}
         seen_paths: set[str] = set()
         for unit in selected:
@@ -1131,14 +1174,24 @@ class AdaptiveDeepSeekFanoutRuntime:
             existing_attempt = self.store.existing_initial_attempt(unit)
             if existing_attempt is not None:
                 state = str(existing_attempt.get("state") or "")
-                if state not in {"PREPARED", "DISPATCHING", "OUTCOME_UNKNOWN"}:
+                if state not in {
+                    "PREPARED",
+                    "DISPATCHING",
+                    "RETRY_SAFE",
+                    "OUTCOME_UNKNOWN",
+                }:
                     errors[unit.unit_id] = "FANOUT_REPLAY_FORBIDDEN"
                     continue
-                workspace = WorkspaceLease(
-                    workspace_id=str(existing_attempt.get("workspace_id") or ""),
-                    path=str(existing_attempt.get("workspace_path") or ""),
-                    expected_base_sha=str(existing_attempt.get("expected_base_sha") or ""),
-                )
+                if state == "RETRY_SAFE":
+                    # No provider process was started; retry with a fresh exact-base
+                    # workspace so the new attempt cannot inherit stale residue.
+                    workspace = self.allocator.allocate(unit)
+                else:
+                    workspace = WorkspaceLease(
+                        workspace_id=str(existing_attempt.get("workspace_id") or ""),
+                        path=str(existing_attempt.get("workspace_path") or ""),
+                        expected_base_sha=str(existing_attempt.get("expected_base_sha") or ""),
+                    )
                 if (
                     not workspace.workspace_id
                     or not workspace.path
@@ -1146,7 +1199,13 @@ class AdaptiveDeepSeekFanoutRuntime:
                 ):
                     errors[unit.unit_id] = "FANOUT_ATTEMPT_WORKSPACE_INVALID"
                     continue
-                actions[unit.unit_id] = "DISPATCH" if state == "PREPARED" else "RECONCILE"
+                actions[unit.unit_id] = (
+                    "DISPATCH"
+                    if state == "PREPARED"
+                    else "RETRY"
+                    if state == "RETRY_SAFE"
+                    else "RECONCILE"
+                )
             else:
                 workspace = self.allocator.allocate(unit)
                 actions[unit.unit_id] = "NEW"
@@ -1236,7 +1295,10 @@ class AdaptiveDeepSeekFanoutRuntime:
         result: OpenCodeRunResult,
     ) -> dict[str, Any]:
         if result.status != "COMPLETED":
-            state = "OUTCOME_UNKNOWN" if result.process_started else "FAILED"
+            if not result.process_started and result.retry_safe:
+                state = "RETRY_SAFE"
+            else:
+                state = "OUTCOME_UNKNOWN" if result.process_started else "FAILED"
             self.store.finish_attempt(attempt, state=state, transport_status=result.status)
             if result.process_started:
                 raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
@@ -1283,7 +1345,31 @@ class AdaptiveDeepSeekFanoutRuntime:
             return receipt
         try:
             candidate = _capture_candidate(unit, workspace, expected_head=unit.expected_base_sha)
-        except FanoutError:
+        except FanoutError as exc:
+            hard_block = (
+                str(exc) == "EMPTY_IMPLEMENTATION_RESULT"
+                or str(exc) == "DELETION_NOT_AUTHORIZED"
+                or str(exc).startswith("OUT_OF_SCOPE_MUTATION:")
+            )
+            if hard_block:
+                blocked_worker = {
+                    "status": "BLOCKED",
+                    "summary": str(exc),
+                }
+                receipt = self._build_receipt(
+                    unit=unit,
+                    workspace=workspace,
+                    attempt=attempt,
+                    result=result,
+                    worker=blocked_worker,
+                    candidate=None,
+                    status="WORKER_BLOCKED",
+                )
+                self.store.write_receipt(receipt)
+                self.store.finish_attempt(
+                    attempt, state="TERMINAL_BLOCKED", transport_status=str(exc)
+                )
+                return receipt
             self.store.finish_attempt(
                 attempt, state="OUTCOME_UNKNOWN", transport_status="CANDIDATE_CAPTURE_FAILED"
             )
