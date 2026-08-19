@@ -277,3 +277,110 @@ class MergeIntent(_Frozen):
 
 
 GitHubSnapshot = GitHubOrchestrationEvidence
+
+
+class MainMovementEvidence(_Frozen):
+    """Immutable inputs for dimension-scoped main-movement requalification.
+
+    This is a projection over an already verified GitHub evidence packet.  It
+    deliberately contains no merge or approval authority.
+    """
+
+    old_main_sha: StrictStr
+    old_main_tree_sha: StrictStr
+    new_main_sha: StrictStr
+    new_main_tree_sha: StrictStr
+    candidate_head_sha: StrictStr
+    candidate_tree_sha: StrictStr
+    candidate_diff_hash: StrictStr
+    candidate_changed_paths: tuple[StrictStr, ...]
+    changed_main_paths: tuple[StrictStr, ...]
+    prior_impact_hash: StrictStr
+    prior_verifier_hash: StrictStr
+
+    @field_validator(
+        "old_main_sha",
+        "old_main_tree_sha",
+        "new_main_sha",
+        "new_main_tree_sha",
+        "candidate_head_sha",
+        "candidate_tree_sha",
+    )
+    @classmethod
+    def git_sha(cls, value, info):
+        return _sha(value, info.field_name, 40)
+
+    @field_validator("candidate_diff_hash", "prior_impact_hash", "prior_verifier_hash")
+    @classmethod
+    def digest(cls, value, info):
+        return _sha(value, info.field_name)
+
+    @field_validator("candidate_changed_paths", "changed_main_paths")
+    @classmethod
+    def safe_paths(cls, value, info):
+        values = tuple(value)
+        if values != tuple(sorted(set(values))) or any(
+            not item or item.startswith("/") or ".." in item.split("/")
+            for item in values
+        ):
+            raise ValueError(f"{info.field_name.upper()}_INVALID")
+        return values
+
+    @model_validator(mode="after")
+    def bound(self):
+        if self.old_main_sha == self.new_main_sha:
+            raise ValueError("MAIN_MOVEMENT_SHA_UNCHANGED")
+        if (
+            self.old_main_tree_sha == self.new_main_tree_sha
+            and self.old_main_sha != self.new_main_sha
+        ):
+            raise ValueError("MAIN_MOVEMENT_TREE_SHA_BINDING_INVALID")
+        if not self.candidate_changed_paths:
+            raise ValueError("CANDIDATE_PATH_MAP_MISSING")
+        if not self.changed_main_paths:
+            raise ValueError("MAIN_MOVEMENT_PATHS_MISSING")
+        return self
+
+
+class MainMovementDimensionResult(_Frozen):
+    dimension: StrictStr
+    classification: StrictStr
+    action: StrictStr
+    reasons: tuple[StrictStr, ...] = ()
+
+    @model_validator(mode="after")
+    def valid(self):
+        if self.action not in {"REUSE_UNAFFECTED", "RECHECK_AFFECTED", "IMPACT_UNKNOWN"}:
+            raise ValueError("REQUALIFICATION_ACTION_INVALID")
+        if self.classification not in {
+            "SOURCE_IDENTITY_DRIFT", "SEMANTIC_OVERLAP", "TEST_IMPACT",
+            "AUTHORITY_DRIFT", "TRANSPORT_DRIFT", "IRRELEVANT_MAIN_MOVEMENT",
+            "IMPACT_UNKNOWN",
+        }:
+            raise ValueError("REQUALIFICATION_CLASSIFICATION_INVALID")
+        return self
+
+
+class MainMovementRequalification(_Frozen):
+    """Fail-closed evidence reuse projection; never merge authority."""
+
+    schema: StrictStr = "nexus.main_movement_requalification.v1"
+    old_main_sha: StrictStr
+    new_main_sha: StrictStr
+    candidate_head_sha: StrictStr
+    candidate_tree_sha: StrictStr
+    dimensions: tuple[MainMovementDimensionResult, ...]
+    blocked: StrictBool
+    claim_ceiling: StrictStr = "COMPLETION_PATH_COMPRESSION_TARGET_B_CANDIDATE_ONLY"
+
+    @model_validator(mode="after")
+    def valid(self):
+        expected = {
+            "SOURCE_IDENTITY", "SEMANTIC_OVERLAP", "TEST_IMPACT", "AUTHORITY_DRIFT",
+            "TRANSPORT_DRIFT", "IRRELEVANT_MAIN_MOVEMENT",
+        }
+        if {item.dimension for item in self.dimensions} != expected:
+            raise ValueError("REQUALIFICATION_DIMENSIONS_INCOMPLETE")
+        if any(item.action == "IMPACT_UNKNOWN" for item in self.dimensions) and not self.blocked:
+            raise ValueError("UNKNOWN_IMPACT_MUST_BLOCK")
+        return self

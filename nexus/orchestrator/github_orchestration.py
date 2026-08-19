@@ -7,6 +7,9 @@ from datetime import datetime, timezone
 from nexus.contracts.autonomy_goal import StandingGrantContext
 from nexus.contracts.github_orchestration import (
     GitHubOrchestrationEvidence,
+    MainMovementDimensionResult,
+    MainMovementEvidence,
+    MainMovementRequalification,
     MergeIntent,
     canonical_hash,
 )
@@ -20,6 +23,137 @@ from nexus.orchestrator.standing_grant_store import (
     _load_receipt_at,
     load_standing_grant_receipt,
 )
+
+
+def requalify_main_movement(
+    evidence: GitHubOrchestrationEvidence,
+    movement: MainMovementEvidence,
+) -> MainMovementRequalification:
+    """Classify main movement against one verified Candidate evidence packet.
+
+    The function only projects which evidence dimensions must be rechecked.
+    Existing impact, repository-contract, GitHub-evidence, review, check, CAS,
+    and merge gates remain the authorities that decide integration.
+    """
+    evidence = _safe(evidence, GitHubOrchestrationEvidence)
+    movement = _safe(movement, MainMovementEvidence)
+    unknown_reasons: list[str] = []
+    if (
+        evidence.base_sha != movement.old_main_sha
+        or evidence.current_main_sha != movement.old_main_sha
+        or evidence.head_sha != movement.candidate_head_sha
+        or evidence.tree_sha != movement.candidate_tree_sha
+        or evidence.diff_hash != movement.candidate_diff_hash
+        or tuple(evidence.changed_paths) != tuple(movement.candidate_changed_paths)
+        or evidence.impact_hash != movement.prior_impact_hash
+        or evidence.verifier_hash != movement.prior_verifier_hash
+    ):
+        unknown_reasons.append("candidate_evidence_identity_or_digest_tamper")
+
+    # Reuse the canonical exact-base classifier.  A malformed/unreadable
+    # impact universe is intentionally converted to IMPACT_UNKNOWN here.
+    try:
+        from scripts.ops.pr_impact_gate import build_impact_plan
+
+        plan = build_impact_plan(
+            list(movement.changed_main_paths),
+            base_sha=movement.old_main_sha,
+            head_sha=movement.new_main_sha,
+        )
+        impact_unknown = plan.impact_class == "IMPACT_UNKNOWN" or bool(plan.unmatched_paths)
+    except Exception as exc:  # pragma: no cover - defensive fail-closed boundary
+        plan = None
+        impact_unknown = True
+        unknown_reasons.append(f"impact_classifier_unavailable:{type(exc).__name__}")
+
+    candidate_paths = set(movement.candidate_changed_paths)
+    main_paths = set(movement.changed_main_paths)
+    direct_overlap = bool(candidate_paths & main_paths)
+    semantic_overlap = direct_overlap or bool(
+        plan is not None and plan.impact_class == "HIGH_RISK_INTEGRATION"
+        and any(path.startswith(("nexus/", "scripts/")) for path in candidate_paths)
+    )
+    test_impact = any(
+        path.startswith("tests/")
+        or path in {"pyproject.toml", "uv.lock", "pytest.ini", "pyrightconfig.json", "ruff.toml"}
+        for path in main_paths
+    )
+    from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
+
+    authority_paths = tuple(
+        path for path in main_paths
+        if RepositoryContractGate._drift_kind(path) is not None
+        or path in {"AGENTS.md", "MUSE_PROTO.md"}
+        or path.startswith(("tasks/", "docs/agents/", "nexus/verifiers/"))
+        or "merge" in path.lower()
+        or "governance" in path.lower()
+        or "authority" in path.lower()
+        or "verifier" in path.lower()
+    )
+    transport_paths = tuple(
+        path for path in main_paths
+        if RepositoryContractGate._drift_kind(path) == "ci_workflow_authority_drift"
+        or path.startswith((".github/workflows/", "scripts/ops/"))
+        or any(token in path.lower() for token in ("provider", "transport", "mcp"))
+    )
+
+    def result(dimension: str, classification: str, affected: bool, reasons=()):
+        if unknown_reasons and dimension in {"SOURCE_IDENTITY", "AUTHORITY_DRIFT"}:
+            return MainMovementDimensionResult(
+                dimension=dimension,
+                classification="IMPACT_UNKNOWN",
+                action="IMPACT_UNKNOWN",
+                reasons=tuple(unknown_reasons),
+            )
+        if affected:
+            return MainMovementDimensionResult(
+                dimension=dimension,
+                classification=classification,
+                action="RECHECK_AFFECTED",
+                reasons=tuple(reasons),
+            )
+        return MainMovementDimensionResult(
+            dimension=dimension,
+            classification="IRRELEVANT_MAIN_MOVEMENT",
+            action="REUSE_UNAFFECTED",
+            reasons=tuple(reasons),
+        )
+
+    dimensions = (
+        result("SOURCE_IDENTITY", "SOURCE_IDENTITY_DRIFT", bool(unknown_reasons), unknown_reasons),
+        result("SEMANTIC_OVERLAP", "SEMANTIC_OVERLAP", semantic_overlap, ("candidate path/dependency overlap",)),
+        result("TEST_IMPACT", "TEST_IMPACT", test_impact, ("test inventory or dependency changed",)),
+        result("AUTHORITY_DRIFT", "AUTHORITY_DRIFT", bool(authority_paths), tuple(authority_paths)),
+        result("TRANSPORT_DRIFT", "TRANSPORT_DRIFT", bool(transport_paths), tuple(transport_paths)),
+        result("IRRELEVANT_MAIN_MOVEMENT", "IRRELEVANT_MAIN_MOVEMENT", False),
+    )
+    if impact_unknown:
+        dimensions = tuple(
+            item if item.dimension in {"SOURCE_IDENTITY", "AUTHORITY_DRIFT", "SEMANTIC_OVERLAP"}
+            else MainMovementDimensionResult(
+                dimension=item.dimension, classification=item.classification,
+                action=item.action, reasons=item.reasons,
+            )
+            for item in dimensions
+        )
+        dimensions = tuple(
+            MainMovementDimensionResult(
+                dimension=item.dimension,
+                classification="IMPACT_UNKNOWN",
+                action="IMPACT_UNKNOWN",
+                reasons=("impact universe is unknown",),
+            ) if item.dimension == "SEMANTIC_OVERLAP" else item
+            for item in dimensions
+        )
+    blocked = bool(unknown_reasons or authority_paths or any(item.action == "IMPACT_UNKNOWN" for item in dimensions))
+    return MainMovementRequalification(
+        old_main_sha=movement.old_main_sha,
+        new_main_sha=movement.new_main_sha,
+        candidate_head_sha=movement.candidate_head_sha,
+        candidate_tree_sha=movement.candidate_tree_sha,
+        dimensions=dimensions,
+        blocked=blocked,
+    )
 
 
 def _safe(model, typ):

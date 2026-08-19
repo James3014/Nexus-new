@@ -12,7 +12,7 @@ from nexus.contracts.autonomy_goal import (
     RepositoryIdentity,
     StandingGrantContext,
 )
-from nexus.contracts.github_orchestration import canonical_hash
+from nexus.contracts.github_orchestration import MainMovementEvidence, canonical_hash
 from nexus.orchestrator.autonomy_policy import StandingGrantOutcome, StandingGrantRequest
 from nexus.orchestrator.github_orchestration import (
     _resolve_durable_merge_authorization_at,
@@ -20,6 +20,7 @@ from nexus.orchestrator.github_orchestration import (
     prepare_merge_intent,
     resolve_merge_authorization,
     revalidate_merge_intent,
+    requalify_main_movement,
 )
 from nexus.orchestrator.standing_grant_store import (
     StandingGrantReceipt,
@@ -72,6 +73,62 @@ def test_valid_evidence_and_grant_produce_intent():
         and intent.grant_outcome == "GRANT_MATCH"
         and intent.mutation_authorized is False
     )
+
+
+def movement_for(snap, **overrides):
+    value = dict(
+        old_main_sha=snap.base_sha,
+        old_main_tree_sha="1" * 40,
+        new_main_sha="e" * 40,
+        new_main_tree_sha="2" * 40,
+        candidate_head_sha=snap.head_sha,
+        candidate_tree_sha=snap.tree_sha,
+        candidate_diff_hash=snap.diff_hash,
+        candidate_changed_paths=snap.changed_paths,
+        changed_main_paths=("docs/unrelated.md",),
+        prior_impact_hash=snap.impact_hash,
+        prior_verifier_hash=snap.verifier_hash,
+    )
+    value.update(overrides)
+    return MainMovementEvidence.model_validate(value)
+
+
+def _plan(**overrides):
+    values = dict(impact_class="DOCS_GOVERNANCE", unmatched_paths=[], changed_paths=["docs/unrelated.md"])
+    values.update(overrides)
+    return type("Plan", (), values)()
+
+
+def test_main_movement_reuses_unaffected_dimensions(monkeypatch):
+    snap = evidence()
+    monkeypatch.setattr("scripts.ops.pr_impact_gate.build_impact_plan", lambda *a, **k: _plan())
+    result = requalify_main_movement(snap, movement_for(snap))
+    assert result.blocked is False
+    assert {item.action for item in result.dimensions} == {"REUSE_UNAFFECTED"}
+
+
+def test_main_movement_rechecks_overlap_and_authority(monkeypatch):
+    snap = evidence()
+    monkeypatch.setattr("scripts.ops.pr_impact_gate.build_impact_plan", lambda *a, **k: _plan())
+    result = requalify_main_movement(
+        snap,
+        movement_for(snap, changed_main_paths=("AGENTS.md", "nexus/a.py")),
+    )
+    by_name = {item.dimension: item for item in result.dimensions}
+    assert by_name["SEMANTIC_OVERLAP"].action == "RECHECK_AFFECTED"
+    assert by_name["AUTHORITY_DRIFT"].action == "RECHECK_AFFECTED"
+    assert result.blocked is True
+
+
+def test_main_movement_tamper_fails_closed(monkeypatch):
+    snap = evidence()
+    monkeypatch.setattr("scripts.ops.pr_impact_gate.build_impact_plan", lambda *a, **k: _plan())
+    result = requalify_main_movement(
+        snap, movement_for(snap, candidate_head_sha="a" * 40)
+    )
+    assert result.blocked is True
+    source = next(item for item in result.dimensions if item.dimension == "SOURCE_IDENTITY")
+    assert source.action == "IMPACT_UNKNOWN"
 
 
 def test_durable_receipt_loads_and_authorizes_without_caller_context(tmp_path):

@@ -8,6 +8,7 @@ from nexus.contracts.github_orchestration import (
     CheckResult,
     GitHubOrchestrationEvidence,
     ImpactResult,
+    MainMovementEvidence,
     MergeIntent,
     ReviewResult,
     canonical_hash,
@@ -182,3 +183,28 @@ def test_merge_intent_hash_tamper_and_mutation_authorization_fail():
             "mutation_authorized": True,
             "intent_hash": canonical_hash(payload),
         })
+
+
+def movement(**overrides):
+    value = dict(
+        old_main_sha="d" * 40,
+        old_main_tree_sha="1" * 40,
+        new_main_sha="e" * 40,
+        new_main_tree_sha="2" * 40,
+        candidate_head_sha="b" * 40,
+        candidate_tree_sha="c" * 40,
+        candidate_diff_hash="e" * 64,
+        candidate_changed_paths=("nexus/a.py",),
+        changed_main_paths=("docs/unrelated.md",),
+        prior_impact_hash="f" * 64,
+        prior_verifier_hash="4" * 64,
+    )
+    value.update(overrides)
+    return MainMovementEvidence.model_validate(value)
+
+
+def test_main_movement_requires_bound_sha_and_paths():
+    with pytest.raises(ValidationError, match="TREE_SHA_BINDING"):
+        movement(new_main_tree_sha="1" * 40)
+    with pytest.raises(ValidationError, match="PATHS_MISSING"):
+        movement(changed_main_paths=())
