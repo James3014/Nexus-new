@@ -71,6 +71,10 @@ CI_MACHINERY_TARGETS = (
 EXACT_CONFIG_TARGETS: dict[str, tuple[str, ...]] = {
     "configs/codex_dx_failure_prevention.json": ("tests/ops/test_codex_dx_failure_prevention.py",),
     "configs/codex_task_context_index.json": ("tests/ops/test_codex_task_context_index.py",),
+    "configs/benchmarks/codex_dx_before_v1.json": (
+        "tests/benchmark/test_codex_dx_benchmark.py",
+        "tests/benchmark/test_codex_dx_history.py",
+    ),
 }
 
 EXACT_GIT_EVIDENCE_ONLY = "EXACT_GIT_EVIDENCE_ONLY"
