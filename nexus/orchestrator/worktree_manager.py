@@ -1420,10 +1420,20 @@ class WorktreeManager:
                 task_id = branch.removeprefix("nexus/task/")
             state = states.get(task_id) if task_id else None
             status = str(state.get("status")) if state else None
+            if task_id:
+                # A caller status cannot hide a clean live Target.  Require
+                # the durable ownership record before considering any
+                # terminal/review disposition; dirty retained evidence remains
+                # conservatively reusable only for the existing forensic path.
+                self._read_target_ownership(controller, entry, task_id)
             if task_id and (status not in terminal and status not in review):
                 # A managed nexus/task branch without durable lifecycle
                 # ownership is intentionally active; its disposition cannot
                 # be proven passive.
+                active.append(entry)
+            elif task_id and not self._status_bytes(path):
+                # Clean live worktrees have no independently visible terminal
+                # evidence, so caller-controlled terminal status is ignored.
                 active.append(entry)
         return active
 

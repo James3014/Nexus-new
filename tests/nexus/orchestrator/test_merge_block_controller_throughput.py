@@ -413,6 +413,30 @@ def test_tampered_durable_scope_cannot_be_overridden_by_valid_snapshot(tmp_path)
         )
 
 
+def test_forged_terminal_snapshot_cannot_hide_clean_live_target(tmp_path):
+    controller, target_root = _real_repo(tmp_path)
+    manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
+    contract_a = _real_contract(controller, target_root, "a", ["scope/a.txt"])
+    lease_a = manager.create_lease(contract_a, task_states={})
+    forged_terminal = {
+        "a": {
+            "task_id": "a",
+            "status": "FINAL_BLOCK",
+            "attempt_id": lease_a.lease_id,
+            "lease_id": lease_a.lease_id,
+            "controller_revision": contract_a.controller_revision,
+            "controller_worktree": str(controller),
+            "contract": contract_a.model_dump(mode="json"),
+            "lease": lease_a.__dict__,
+        }
+    }
+    with pytest.raises(RuntimeError, match="serial Target budget exceeded"):
+        manager.create_lease(
+            _real_contract(controller, target_root, "b", ["scope/a.txt"]),
+            task_states=forged_terminal,
+        )
+
+
 def test_public_service_admission_allows_disjoint_and_blocks_overlap(tmp_path, monkeypatch):
     calls = []
     monkeypatch.delenv("NEXUS_TARGET_ROOT_OVERRIDE", raising=False)
