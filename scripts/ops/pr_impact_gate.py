@@ -77,6 +77,7 @@ EXACT_CONFIG_TARGETS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+OPTIONAL_BROWSER_EXCLUSION = "tests/core/test_web_dom_mapper.py"
 EXACT_GIT_EVIDENCE_ONLY = "EXACT_GIT_EVIDENCE_ONLY"
 _UNKNOWN = "IMPACT_UNKNOWN"
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -1020,6 +1021,25 @@ def _git_changed_paths(base_sha: str, head_sha: str, *, root: Path) -> list[str]
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
+def _validate_optional_browser_exclusion(cwd: Path) -> str | None:
+    """Return a diagnostic when the exact optional exclusion is unsafe."""
+    try:
+        resolved_cwd = cwd.resolve(strict=True)
+        exclusion = cwd / OPTIONAL_BROWSER_EXCLUSION
+        resolved_exclusion = exclusion.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return f"missing declared optional exclusion: {OPTIONAL_BROWSER_EXCLUSION}"
+    if exclusion.is_symlink():
+        return f"declared optional exclusion must not be a symlink: {OPTIONAL_BROWSER_EXCLUSION}"
+    try:
+        resolved_exclusion.relative_to(resolved_cwd)
+    except ValueError:
+        return f"declared optional exclusion resolves outside cwd: {OPTIONAL_BROWSER_EXCLUSION}"
+    if not resolved_exclusion.is_file():
+        return f"declared optional exclusion is not a regular file: {OPTIONAL_BROWSER_EXCLUSION}"
+    return None
+
+
 def run_pytest_plan(
     plan_path: Path,
     result_path: Path,
@@ -1161,7 +1181,66 @@ def run_pytest_plan(
         )
         result_path.write_text(json.dumps(asdict(result), indent=2) + "\n", encoding="utf-8")
         return 0
-    command = [sys.executable, "-m", "pytest", *existing_targets, "-q", f"--junitxml={junit_path}"]
+    if "tests/core" in existing_targets:
+        diagnostic = _validate_optional_browser_exclusion(cwd)
+        if diagnostic is not None:
+            diagnostic += "\n"
+            stdout_path.write_text(diagnostic, encoding="utf-8")
+            status = "CI_BOOTSTRAP_DEFECT"
+            result = PytestRunResult(
+                2,
+                status,
+                [],
+                str(junit_path),
+                str(stdout_path),
+                executed_targets=existing_targets,
+                missing_targets=missing_targets,
+                revision=revision,
+                plan_digest=plan_digest,
+                selected_targets=targets,
+                impact_class=impact_class,
+                unexpected_missing_targets=unexpected_missing,
+                verifier_digest=verifier_digest,
+                source_tree=source_tree,
+                test_inventory_tree=test_inventory_tree,
+                bound_source_tree=expected_source_tree,
+                bound_test_inventory_tree=expected_test_inventory_tree,
+                collection_count=0,
+                node_ids=[],
+                passed_node_ids=[],
+                failed_node_ids=[],
+                error_node_ids=[],
+                skipped_node_ids=[],
+                terminal_status=status,
+                provenance_digest=compute_test_provenance_digest(
+                    revision=revision,
+                    source_tree=source_tree,
+                    test_inventory_tree=test_inventory_tree,
+                    plan_digest=plan_digest,
+                    verifier_digest=verifier_digest,
+                    collection_count=0,
+                    node_ids=[],
+                    passed_node_ids=[],
+                    failed_node_ids=[],
+                    error_node_ids=[],
+                    skipped_node_ids=[],
+                    terminal_status=status,
+                    exit_code=2,
+                    status=status,
+                    failures=[],
+                    executed_targets=existing_targets,
+                    missing_targets=missing_targets,
+                    selected_targets=targets,
+                    unexpected_missing_targets=unexpected_missing,
+                    impact_class=impact_class,
+                ),
+            )
+            result_path.write_text(json.dumps(asdict(result), indent=2) + "\n", encoding="utf-8")
+            return 2
+    pytest_args = list(existing_targets)
+    if "tests/core" in existing_targets:
+        pytest_args.append(f"--ignore={OPTIONAL_BROWSER_EXCLUSION}")
+    command = [sys.executable, "-m", "pytest", *pytest_args, "-q", f"--junitxml={junit_path}"]
     completed = subprocess.run(command, cwd=cwd, text=True, capture_output=True, check=False)
     stdout_path.write_text(completed.stdout + completed.stderr, encoding="utf-8")
     status = (

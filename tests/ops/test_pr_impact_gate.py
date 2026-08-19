@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -155,6 +156,24 @@ def _with_node_outcomes(
             impact_class=run.impact_class,
         ),
     )
+
+
+def _write_pytest_plan(tmp_path: Path, targets: list[str]) -> Path:
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_text(
+        json.dumps({
+            "base_sha": "a" * 40,
+            "head_sha": "b" * 40,
+            "base_source_tree": "9" * 40,
+            "base_test_inventory_tree": "8" * 40,
+            "source_tree": "c" * 40,
+            "test_inventory_tree": "d" * 40,
+            "impact_class": "SCOPED_IMPLEMENTATION",
+            "pytest_targets": targets,
+        }),
+        encoding="utf-8",
+    )
+    return plan_path
 
 
 def _make_exact_git_repo(tmp_path: Path, *, include_addition: bool) -> dict[str, object]:
@@ -1189,6 +1208,214 @@ def test_pytest_run_rejects_missing_or_drifted_plan_tree_binding(monkeypatch, tm
     assert status == 5
     assert payload["status"] == "IMPACT_UNKNOWN"
     assert "drifted" in stdout_path.read_text(encoding="utf-8")
+
+
+def test_pytest_plan_with_exact_core_adds_single_optional_browser_exclusion(
+    monkeypatch, tmp_path: Path
+):
+    (tmp_path / "tests" / "core").mkdir(parents=True)
+    (tmp_path / "tests" / "core" / "test_web_dom_mapper.py").write_text(
+        "# optional browser test\n", encoding="utf-8"
+    )
+    (tmp_path / "tests" / "core" / "test_other.py").write_text(
+        "def test_other(): pass\n", encoding="utf-8"
+    )
+    (tmp_path / "tests" / "ops").mkdir(parents=True)
+    (tmp_path / "tests" / "ops" / "test_select_tests.py").write_text(
+        "def test_select(): pass\n", encoding="utf-8"
+    )
+
+    targets = ["tests/ops/test_select_tests.py", "tests/core"]
+    plan_path = _write_pytest_plan(tmp_path, targets)
+    junit_path = tmp_path / "result.xml"
+    result_path = tmp_path / "run.json"
+    stdout_path = tmp_path / "stdout.log"
+
+    captured_commands: list[list[str]] = []
+
+    def fake_run(command, **_kwargs):
+        if Path(command[0]).name == "git" and command[1] == "rev-parse":
+            values = {
+                f"{'b' * 40}^{{commit}}": "b" * 40,
+                f"{'b' * 40}^{{tree}}": "c" * 40,
+                f"{'b' * 40}:tests": "d" * 40,
+            }
+            return SimpleNamespace(
+                returncode=0,
+                stdout=values[command[2]] + "\n",
+                stderr="",
+            )
+        captured_commands.append(list(command))
+        junit_path.write_text(
+            '<testsuite tests="2" failures="0">'
+            '<testcase classname="tests.ops.test_select_tests" name="test_select"/>'
+            '<testcase classname="tests.core.test_other" name="test_other"/>'
+            "</testsuite>",
+            encoding="utf-8",
+        )
+        return SimpleNamespace(returncode=0, stdout="..", stderr="")
+
+    monkeypatch.setattr("scripts.ops.pr_impact_gate.subprocess.run", fake_run)
+
+    status = run_pytest_plan(
+        plan_path,
+        result_path,
+        junit_path,
+        stdout_path,
+        cwd=tmp_path,
+        revision="b" * 40,
+    )
+
+    assert status == 0
+    assert len(captured_commands) == 1
+    cmd = captured_commands[0]
+    assert cmd[0] == sys.executable
+    assert cmd[1:3] == ["-m", "pytest"]
+    assert "tests/ops/test_select_tests.py" in cmd
+    assert "tests/core" in cmd
+    exclusion_arg = "--ignore=tests/core/test_web_dom_mapper.py"
+    assert exclusion_arg in cmd
+    assert cmd.count(exclusion_arg) == 1
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "COMPLETE"
+    assert payload["executed_targets"] == targets
+    assert payload["missing_targets"] == []
+
+
+def test_pytest_plan_without_exact_core_does_not_add_browser_exclusion(monkeypatch, tmp_path: Path):
+    (tmp_path / "tests" / "core").mkdir(parents=True)
+    (tmp_path / "tests" / "core" / "test_web_dom_mapper.py").write_text(
+        "# optional browser test\n", encoding="utf-8"
+    )
+    (tmp_path / "tests" / "core" / "test_other.py").write_text(
+        "def test_other(): pass\n", encoding="utf-8"
+    )
+    (tmp_path / "tests" / "ops").mkdir(parents=True)
+    (tmp_path / "tests" / "ops" / "test_select_tests.py").write_text(
+        "def test_select(): pass\n", encoding="utf-8"
+    )
+
+    targets = ["tests/ops/test_select_tests.py", "tests/core/test_other.py"]
+    plan_path = _write_pytest_plan(tmp_path, targets)
+    junit_path = tmp_path / "result.xml"
+    result_path = tmp_path / "run.json"
+    stdout_path = tmp_path / "stdout.log"
+
+    captured_commands: list[list[str]] = []
+
+    def fake_run(command, **_kwargs):
+        if Path(command[0]).name == "git" and command[1] == "rev-parse":
+            values = {
+                f"{'b' * 40}^{{commit}}": "b" * 40,
+                f"{'b' * 40}^{{tree}}": "c" * 40,
+                f"{'b' * 40}:tests": "d" * 40,
+            }
+            return SimpleNamespace(
+                returncode=0,
+                stdout=values[command[2]] + "\n",
+                stderr="",
+            )
+        captured_commands.append(list(command))
+        junit_path.write_text(
+            '<testsuite tests="2" failures="0">'
+            '<testcase classname="tests.ops.test_select_tests" name="test_select"/>'
+            '<testcase classname="tests.core.test_other" name="test_other"/>'
+            "</testsuite>",
+            encoding="utf-8",
+        )
+        return SimpleNamespace(returncode=0, stdout="..", stderr="")
+
+    monkeypatch.setattr("scripts.ops.pr_impact_gate.subprocess.run", fake_run)
+
+    status = run_pytest_plan(
+        plan_path,
+        result_path,
+        junit_path,
+        stdout_path,
+        cwd=tmp_path,
+        revision="b" * 40,
+    )
+
+    assert status == 0
+    assert len(captured_commands) == 1
+    cmd = captured_commands[0]
+    assert cmd[0] == sys.executable
+    assert cmd[1:3] == ["-m", "pytest"]
+    assert "tests/ops/test_select_tests.py" in cmd
+    assert "tests/core/test_other.py" in cmd
+    assert "--ignore=tests/core/test_web_dom_mapper.py" not in cmd
+    assert not any(arg.startswith("--ignore=") for arg in cmd)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "COMPLETE"
+    assert payload["executed_targets"] == targets
+    assert payload["missing_targets"] == []
+
+
+@pytest.mark.parametrize(
+    ("invalid_exclusion", "diagnostic"),
+    [
+        ("missing", "missing declared optional exclusion"),
+        ("directory", "not a regular file"),
+        ("outside_symlink", "must not be a symlink"),
+    ],
+)
+def test_pytest_plan_with_exact_core_fails_closed_for_invalid_exclusion(
+    monkeypatch, tmp_path: Path, invalid_exclusion: str, diagnostic: str
+):
+    (tmp_path / "tests" / "core").mkdir(parents=True)
+    (tmp_path / "tests" / "core" / "test_other.py").write_text(
+        "def test_other(): pass\n", encoding="utf-8"
+    )
+    exclusion = tmp_path / "tests" / "core" / "test_web_dom_mapper.py"
+    if invalid_exclusion == "directory":
+        exclusion.mkdir()
+    elif invalid_exclusion == "outside_symlink":
+        outside = tmp_path.parent / f"{tmp_path.name}-outside.py"
+        outside.write_text("# outside exclusion\n", encoding="utf-8")
+        exclusion.symlink_to(outside)
+
+    targets = ["tests/core"]
+    plan_path = _write_pytest_plan(tmp_path, targets)
+    junit_path = tmp_path / "result.xml"
+    result_path = tmp_path / "run.json"
+    stdout_path = tmp_path / "stdout.log"
+
+    captured_pytest_invocations: list[list[str]] = []
+
+    def fake_run(command, **_kwargs):
+        if Path(command[0]).name == "git" and command[1] == "rev-parse":
+            values = {
+                f"{'b' * 40}^{{commit}}": "b" * 40,
+                f"{'b' * 40}^{{tree}}": "c" * 40,
+                f"{'b' * 40}:tests": "d" * 40,
+            }
+            return SimpleNamespace(
+                returncode=0,
+                stdout=values[command[2]] + "\n",
+                stderr="",
+            )
+        captured_pytest_invocations.append(list(command))
+        junit_path.write_text('<testsuite tests="0" failures="0"/>', encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("scripts.ops.pr_impact_gate.subprocess.run", fake_run)
+
+    status = run_pytest_plan(
+        plan_path,
+        result_path,
+        junit_path,
+        stdout_path,
+        cwd=tmp_path,
+        revision="b" * 40,
+    )
+
+    assert len(captured_pytest_invocations) == 0
+    assert status != 0
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert payload["status"] in {"CI_BOOTSTRAP_DEFECT", "IMPACT_UNKNOWN"}
+    assert payload["exit_code"] != 0
+    stdout = stdout_path.read_text(encoding="utf-8")
+    assert diagnostic in stdout
 
 
 def test_raw_diff_parser_rejects_malformed_duplicate_and_divergent_streams():
