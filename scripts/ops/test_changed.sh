@@ -14,6 +14,7 @@ else
   SELECTOR=(uv run python scripts/ops/select_tests.py)
   PYTEST=(uv run python -m pytest)
 fi
+OPTIONAL_EXCLUSION=tests/core/test_web_dom_mapper.py
 
 if (( $# == 0 )); then
   echo "[L2] no changed paths; using documented core fallback"
@@ -47,5 +48,17 @@ for target in "${targets[@]}"; do
     exit 2
   fi
 done
+pytest_args=("${targets[@]}")
+for target in "${targets[@]}"; do
+  if [[ "$target" == "tests/core" ]]; then
+    if [[ ! -e "$OPTIONAL_EXCLUSION" ]]; then
+      echo "[L2] missing declared optional exclusion: $OPTIONAL_EXCLUSION" >&2
+      exit 2
+    fi
+    printf '[L2] excluded target: %s (requires browser extra; covered by full)\n' "$OPTIONAL_EXCLUSION"
+    pytest_args+=(--ignore="$OPTIONAL_EXCLUSION")
+    break
+  fi
+done
 printf '[L2] selected targets: %s\n' "${targets[*]}"
-"${PYTEST[@]}" "${targets[@]}" -q
+"${PYTEST[@]}" "${pytest_args[@]}" -q
