@@ -248,6 +248,41 @@ def test_task_execution_contract_preserves_direct_delegated_exception():
     )
 
 
+def test_semantic_authority_delta_contract_is_fail_closed_and_future_only():
+    texts = _authority_texts()
+    agents = _norm(texts["AGENTS.md"])
+    contract = _norm(texts["docs/agents/TASK_EXECUTION_CONTRACT.md"])
+
+    for text in (agents, contract):
+        assert "AUTHORITY_PRESERVING_EVIDENCE_WRITEBACK" in text
+        assert "semantic authority" in text.lower()
+        assert "not a fourth lane" in text.lower() or "not a new execution lane" in text.lower()
+        assert "DIRECT_CANONICAL" in text
+        assert "GOVERNED" in text
+        assert "filename" in text.lower()
+        assert "line-count" in text.lower()
+        assert "autonomy" in text.lower()
+        assert "worker/provider/model" in text or "provider/model/worker" in text
+        assert "default route" in text.lower() or "route/default" in text.lower()
+        assert "CapabilityPlanner" in text
+        assert "parser" in text.lower()
+        assert "verifier" in text.lower()
+        assert "claim" in text.lower()
+        assert "security" in text.lower()
+        assert "migration/schema" in text.lower()
+        assert "production-data" in text.lower()
+        assert "future" in text.lower()
+        assert "retroactive" in text.lower()
+
+    normalized_agents = _norm(texts["AGENTS.md"])
+    assert "Any changed, missing, malformed, contradictory, unknown" in normalized_agents
+    assert "GOVERNED_REQUIRED" in texts["docs/agents/TASK_EXECUTION_CONTRACT.md"]
+    assert "cannot be mechanically compared" in texts["docs/agents/TASK_EXECUTION_CONTRACT.md"]
+    assert "does not approve a diff" in texts["docs/agents/TASK_EXECUTION_CONTRACT.md"]
+    assert "MERGE_SLOT_GRANTED" in texts["AGENTS.md"]
+    assert "MERGE_INTENT" in texts["AGENTS.md"]
+
+
 def test_direct_external_delegation_does_not_inherit_nexus_workforce_admission():
     overlay = _authority_texts()["docs/agents/WORKFORCE_EXECUTION_OVERLAY.md"]
     normalized = _norm(overlay)

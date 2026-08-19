@@ -35,6 +35,41 @@ or auto-chain without exact Owner authority. The standing coordinator grant does
 not expand `DIRECT_CANONICAL`; it applies only to the governed GitHub Ready-Issue
 actions defined below.
 
+### Semantic authority delta for evidence writeback
+
+`AUTHORITY_PRESERVING_EVIDENCE_WRITEBACK` is an eligibility class within
+`DIRECT_CANONICAL`; it is not a new execution lane, Router, Planner, admission
+surface, or authority source. Classification depends on the semantic authority
+delta, never a filename/path whitelist, document-versus-code label, patch size,
+or line-count threshold.
+
+The machine contract is the pure predicate in
+`nexus/contracts/semantic_authority_delta.py`. Its only outcomes are
+`DIRECT_CANONICAL` and `GOVERNED_REQUIRED`. Direct eligibility requires an
+explicit current Owner authorization; bounded reviewable scope; an additive,
+identity-bound evidence/provenance writeback; no deletion, historical rewrite,
+receipt mutation, or authority transition; and explicit proof that every
+enumerated authority dimension remains unchanged. The request must retain
+focused verifier, exact changed-file, zero-deletion, and `git diff --check`
+gates and must not bundle a protected action.
+
+Autonomy, role/capability, Workforce admission, provider/model/worker
+authority, route/default, authority-transferring lineage, parser/verifier,
+independent review, forbidden actions, claim ceilings, CapabilityPlanner,
+lifecycle, Candidate, approval, integration, merge, release, security,
+migration/schema, production-data, production, and public-claim changes all
+require governed handling. The same applies when a field is missing, unknown,
+malformed, contradictory, cannot be mechanically compared, or would require a
+loader/schema redesign to make the writeback appear safe. Evidence of a
+stronger semantic frontier never raises a lower trusted execution/admission
+ceiling by itself.
+
+The predicate is a pre-mutation evidence gate. It does not approve a diff,
+create a Candidate, authorize commit/push/merge, or weaken independent
+verification. It applies only to future classifications after the governing
+change is independently accepted and integrated; it cannot retroactively
+legalize or rewrite prior execution lineage.
+
 ## Direct delegated boundary
 
 This governed contract is not required solely because implementation is

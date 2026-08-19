@@ -144,6 +144,29 @@ claim, or otherwise exceeds `DIRECT_CANONICAL` or `DIRECT_DELEGATED`. Delegated
 implementation alone does not force governed execution when all
 `DIRECT_DELEGATED` conditions are satisfied.
 
+`AUTHORITY_PRESERVING_EVIDENCE_WRITEBACK` is a fail-closed eligibility
+classification inside the existing `DIRECT_CANONICAL` lane, not a fourth lane
+or a policy bypass. Merely touching an authority filename/path, or satisfying a
+small line-count threshold, neither proves nor disproves an authority change. A
+future bounded writeback may use this classification only when current Owner
+authorization, bounded scope, additive evidence/provenance identity, exact
+changed-file and deletion audits, focused contract tests, and `git diff --check`
+are present, and a semantic authority-delta comparison proves every effective
+authority invariant unchanged. Those invariants include autonomy;
+roles/capabilities; worker/provider/model admission; default route and
+authority-transferring lineage; parser, verifier, independent-review,
+forbidden-action, and claim ceilings; CapabilityPlanner, lifecycle, Candidate,
+approval, integration, merge, release, security, migration/schema,
+production-data, production, and public-claim authority. It must not redesign a
+loader/schema merely to fit the classification or bundle a protected push,
+merge, release, or other authority action. Any changed, missing, malformed,
+contradictory, unknown, or otherwise unprovable dimension resolves to existing
+`GOVERNED` handling. This rule is future-only: it never rewrites or
+retroactively authorizes historical work. A historical or separately required
+`MERGE_SLOT_GRANTED` decision remains evidence of its own authority boundary; it
+is not a redundant requirement for a normal phase transition covered by a valid
+standing grant.
+
 ### DIRECT_DELEGATED
 
 Owner -> primary coordinator -> approved non-Nexus control plane (such as
