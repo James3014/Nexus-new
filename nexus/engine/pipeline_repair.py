@@ -19,7 +19,8 @@ from nexus.engine.repair.escalation_manager import handle_escalation, perform_es
 
 logger = logging.getLogger(__name__)
 
-REJECTED_REPAIR_STATUSES = frozenset({"FAIL", "FAILED", "REJECTED", "REJECTED_NO_RED_TEST"})
+REJECTED_REPAIR_STATUSES = frozenset({"REJECTED"})
+RECOVERABLE_REPAIR_STATUSES = frozenset({"FAIL", "FAILED", "RECOVERABLE_BLOCK", "REVISE", "UNKNOWN", "REJECTED_NO_RED_TEST"})
 
 @dataclass
 class AuditEvalContext:
@@ -62,6 +63,14 @@ class PipelineRepairMixin:
     @staticmethod
     def _is_rejected_repair_status(status: Any) -> bool:
         return str(status or "").strip().upper() in REJECTED_REPAIR_STATUSES
+
+    @staticmethod
+    def _is_recoverable_repair_status(status: Any) -> bool:
+        return str(status or "").strip().upper() in RECOVERABLE_REPAIR_STATUSES
+
+    @classmethod
+    def _is_repair_failure_status(cls, status: Any) -> bool:
+        return cls._is_rejected_repair_status(status) or cls._is_recoverable_repair_status(status)
 
     def _local_assist_mode(self, ctx: PipelineContextProtocol) -> str:
         meta = getattr(ctx.state, "metadata", {}) or {}
@@ -1177,11 +1186,11 @@ class PipelineRepairMixin:
         r_out = self._process_repair_response(ctx, res, repair_attempts)
         
         # 🚀 [v24.0] Immediate Intra-loop learning trigger
-        if self._is_rejected_repair_status(r_out["status"]):
+        if self._is_repair_failure_status(r_out["status"]):
             self._record_intra_loop_trauma(ctx, r_out)
 
         # CLI Pregate validation
-        if not self._is_rejected_repair_status(r_out["status"]):
+        if not self._is_repair_failure_status(r_out["status"]):
             r_out["status"] = self._run_pregate_if_needed(ctx, r_out["status"], r_out["result"])
             
             # === NEW: T11 產生 Evidence Bundle 給 Verifier ===
@@ -1232,7 +1241,7 @@ class PipelineRepairMixin:
         result_object = normalized.result_object
         ctx.state.metadata["last_review_status"] = status
         self._map_repair_metadata(ctx, result_object)
-        if self._is_rejected_repair_status(status):
+        if self._is_repair_failure_status(status):
             self._record_intra_loop_trauma(ctx, {"status": status, "result": result_object})
         else:
             status = self._run_pregate_if_needed(ctx, status, result_object)
@@ -1530,18 +1539,22 @@ class PipelineRepairMixin:
         normalized = self._normalize_composed_audit_result(ctx, result)
         ctx.state.metadata["composition_audit_phase_status"] = normalized.status
         ctx.state.metadata["composition_audit_phase_mutations"] = normalized.mutations
-        if self._is_rejected_repair_status(normalized.status) or bool(normalized.mutations.get("fail")) or normalized.mutations.get("audit_success") is False:
+        if self._is_repair_failure_status(normalized.status) or bool(normalized.mutations.get("fail")) or normalized.mutations.get("audit_success") is False:
             reason = normalized.rejection_reason
             ctx.state.metadata["composition_audit_phase_rejection"] = reason
             self._record_composed_audit_rejection(ctx, r_out, normalized, repair_attempts, reason)
-            return {"audit_success": False, "status": "REJECTED", "phantom_reason": reason}
+            return {
+                "audit_success": False,
+                "status": "REJECTED" if normalized.status == "REJECTED" else "RECOVERABLE_BLOCK",
+                "phantom_reason": reason,
+            }
         return {"audit_success": True, "status": normalized.status or "APPROVED", "phantom_reason": ""}
 
     def _missing_composed_audit_result(self, ctx: PipelineContextProtocol, *, reason: str) -> dict:
         ctx.state.metadata["composition_audit_phase_status"] = "MISSING"
         ctx.state.metadata["composition_audit_phase_rejection"] = reason
         ctx.state.metadata["evidence_trust_rejection"] = True
-        return {"audit_success": False, "status": "REJECTED", "phantom_reason": reason}
+        return {"audit_success": False, "status": "RECOVERABLE_BLOCK", "phantom_reason": reason}
 
     def _normalize_composed_audit_result(self, ctx: PipelineContextProtocol, result: Any) -> ComposedAuditResult:
         """Normalize composed A output without treating executor success as audit success."""
@@ -1740,6 +1753,14 @@ class PipelineRepairMixin:
             a_out = self._run_composition_audit_phase(ctx, r_out, repair_attempts)
             if a_out is None:
                 a_out = self._evaluate_audit_result(ctx, eval_ctx)
+            # Audit failures produced by evidence/phantom checks are repairable
+            # unless the reviewer supplied an explicit terminal disposition.
+            if (
+                not a_out.get("audit_success")
+                and a_out.get("status") == "REJECTED"
+                and r_out.get("status") != "REJECTED"
+            ):
+                a_out = {**a_out, "status": "RECOVERABLE_BLOCK"}
             if rlm_loop is not None:
                 rlm_loop.record_audit(iteration=repair_attempts, audit_result=a_out)
                 budget_state = rlm_loop.consume_iteration()
@@ -1773,7 +1794,7 @@ class PipelineRepairMixin:
                 break
 
             # Step 3: Handle Failure
-            if a_out["status"] == "REJECTED" and repair_attempts < max_retries:
+            if self._is_recoverable_repair_status(a_out["status"]) and repair_attempts < max_retries:
                 esc_ret = self._handle_escalation(ctx, repair_attempts, r_out["status"], a_out["phantom_reason"])
                 
                 # Check for tuple signature

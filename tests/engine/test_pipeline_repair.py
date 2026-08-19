@@ -30,6 +30,17 @@ def test_pipeline_repair_reexports_split_composed_phase_results():
 
     assert repair.status == "APPROVED"
 
+
+def test_reviewer_failure_domains_keep_terminal_rejection_separate():
+    pipeline = MockPipeline()
+
+    assert pipeline._is_recoverable_repair_status("RECOVERABLE_BLOCK")
+    assert pipeline._is_recoverable_repair_status("FAILED")
+    assert not pipeline._is_recoverable_repair_status("REJECTED")
+    assert pipeline._is_rejected_repair_status("REJECTED")
+    assert pipeline._is_repair_failure_status("RECOVERABLE_BLOCK")
+    assert pipeline._is_repair_failure_status("REJECTED")
+
 @pytest.fixture
 def mock_ctx():
     ctx = MagicMock()
