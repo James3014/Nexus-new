@@ -12,15 +12,15 @@ from nexus.contracts.autonomy_goal import (
     RepositoryIdentity,
     StandingGrantContext,
 )
-from nexus.contracts.github_orchestration import MainMovementEvidence, canonical_hash
+from nexus.contracts.github_orchestration import canonical_hash, MainMovementEvidence
 from nexus.orchestrator.autonomy_policy import StandingGrantOutcome, StandingGrantRequest
 from nexus.orchestrator.github_orchestration import (
     _resolve_durable_merge_authorization_at,
     evaluate_action,
     prepare_merge_intent,
+    requalify_main_movement,
     resolve_merge_authorization,
     revalidate_merge_intent,
-    requalify_main_movement,
 )
 from nexus.orchestrator.standing_grant_store import (
     StandingGrantReceipt,
