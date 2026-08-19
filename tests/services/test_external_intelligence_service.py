@@ -2,19 +2,28 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
+import sys
+import time
+from pathlib import Path
 
 import pytest
 
 from scripts.ops.external_intelligence_service import (
+    READINESS_SUCCESS_THRESHOLD,
     ServiceConfig,
     ServiceError,
+    ServiceReadiness,
+    _safe_error,
     build_automation,
     load_config,
     plist_xml,
     refresh_remote_main,
     render_comment,
     run_once,
+    service_status,
+    write_service_receipt,
 )
 
 
@@ -53,6 +62,20 @@ def _config(tmp_path, **overrides):
     )
     values.update(overrides)
     return ServiceConfig(**values)
+
+
+def _config_file(tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text(
+        json.dumps({
+            "repositories": ["o/r"],
+            "repository_roots": {"o/r": str(tmp_path / "repo")},
+            "state_root": str(tmp_path / "state"),
+            "workspace_root": str(tmp_path / "workspaces"),
+        }),
+        encoding="utf-8",
+    )
+    return path
 
 
 def _complete(reuse=False):
@@ -563,6 +586,262 @@ def test_plist_is_local_launchagent_daemon_and_has_no_hardcoded_profile(tmp_path
     assert "daemon" in xml
     assert "64b57tak" not in xml
     assert "/Users/jameschen/.opencode/bin" in xml
+
+
+def test_plist_derives_logs_from_state_root(tmp_path):
+    state_root = tmp_path / "state"
+    xml = plist_xml(tmp_path / "config.json", state_root=state_root)
+    assert f"{state_root}/service/daemon.stdout.log" in xml
+    assert f"{state_root}/service/daemon.stderr.log" in xml
+    assert "/dev/null" not in xml
+
+
+def test_service_receipt_is_atomic_restrictive_and_identity_bound(tmp_path):
+    path = tmp_path / "state" / "service" / "daemon.json"
+    write_service_receipt(
+        path,
+        {
+            "schema": "nexus.external_intelligence_daemon_receipt.v1",
+            "status": ServiceReadiness.STARTING.value,
+            "run_id": "run-1",
+            "pid": 123,
+            "source_path": "/tmp/service.py",
+            "source_sha256": "a" * 64,
+            "config_path": "/tmp/config.json",
+            "config_sha256": "b" * 64,
+            "started_at": 99.0,
+            "heartbeat_at": 100.0,
+            "successful_polls": 1,
+            "last_error": None,
+        },
+    )
+    assert json.loads(path.read_text(encoding="utf-8"))["run_id"] == "run-1"
+    assert os.stat(path).st_mode & 0o077 == 0
+    assert not list(path.parent.glob("*.tmp"))
+
+
+def test_service_error_surface_is_bounded_and_redacted():
+    safe = _safe_error(ServiceError("GH_COMMAND_FAILED"))
+    assert safe == {"type": "ServiceError", "code": "GH_COMMAND_FAILED"}
+    redacted = _safe_error(ServiceError("token=secret-value"))
+    assert redacted["code"] == "ServiceError"
+    assert "secret-value" not in json.dumps(redacted)
+
+
+def test_service_status_registered_alone_never_ready(tmp_path):
+    config = _config_file(tmp_path)
+
+    def launchctl(*_args):
+        return subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = 0\n", ""
+        )
+
+    result = service_status(config, launchctl_runner=launchctl, process_snapshot=lambda: [])
+    assert result["status"] == ServiceReadiness.STARTING.value
+    assert result["ready"] is False
+
+
+def test_service_status_reconciles_identity_heartbeat_and_last_exit(tmp_path):
+    config = _config_file(tmp_path)
+    receipt = tmp_path / "state" / "service" / "daemon.json"
+    source_sha = hashlib.sha256(
+        Path(__file__)
+        .resolve()
+        .parents[2]
+        .joinpath("scripts/ops/external_intelligence_service.py")
+        .read_bytes()
+    ).hexdigest()
+    config_sha = hashlib.sha256(config.read_bytes()).hexdigest()
+    write_service_receipt(
+        receipt,
+        {
+            "schema": "nexus.external_intelligence_daemon_receipt.v1",
+            "status": ServiceReadiness.READY.value,
+            "run_id": "run-1",
+            "pid": 123,
+            "source_path": str(
+                Path(__file__).resolve().parents[2] / "scripts/ops/external_intelligence_service.py"
+            ),
+            "source_sha256": source_sha,
+            "config_path": str(config.resolve()),
+            "config_sha256": config_sha,
+            "started_at": 99.0,
+            "heartbeat_at": 100.0,
+            "successful_polls": READINESS_SUCCESS_THRESHOLD,
+            "last_error": None,
+        },
+    )
+
+    def launchctl(*_args):
+        return subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = 0\n", ""
+        )
+
+    expected_command = (
+        f"{Path(sys.executable).resolve()} -m scripts.ops.external_intelligence_service daemon "
+        f"--config {config.resolve()}"
+    )
+
+    good = service_status(
+        config,
+        launchctl_runner=launchctl,
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert good["status"] == ServiceReadiness.READY.value
+    assert good["ready"] is True
+
+    bad_exit = service_status(
+        config,
+        launchctl_runner=lambda *_args: subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = 1\n", ""
+        ),
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert bad_exit["status"] == ServiceReadiness.DEGRADED.value
+
+    stale = service_status(
+        config,
+        launchctl_runner=launchctl,
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.0 + 10_000,
+        receipt_path=receipt,
+    )
+    assert stale["status"] == ServiceReadiness.STALE.value
+
+
+def test_service_status_rejects_identity_mismatch_and_duplicate_processes(tmp_path):
+    config = _config_file(tmp_path)
+    receipt = tmp_path / "state" / "service" / "daemon.json"
+    write_service_receipt(
+        receipt,
+        {
+            "schema": "nexus.external_intelligence_daemon_receipt.v1",
+            "status": ServiceReadiness.READY.value,
+            "run_id": "run-1",
+            "pid": 123,
+            "source_path": str(
+                Path(__file__).resolve().parents[2] / "scripts/ops/external_intelligence_service.py"
+            ),
+            "source_sha256": "0" * 64,
+            "config_path": str(config.resolve()),
+            "config_sha256": "0" * 64,
+            "started_at": time.time(),
+            "heartbeat_at": time.time(),
+            "successful_polls": READINESS_SUCCESS_THRESHOLD,
+            "last_error": None,
+        },
+    )
+
+    def launchctl(*_args):
+        return subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = 0\n", ""
+        )
+
+    expected_command = (
+        f"{Path(sys.executable).resolve()} -m scripts.ops.external_intelligence_service daemon "
+        f"--config {config.resolve()}"
+    )
+
+    mismatch = service_status(
+        config,
+        launchctl_runner=launchctl,
+        process_snapshot=lambda: [(123, expected_command.replace("daemon", "daemon-worker", 1))],
+        receipt_path=receipt,
+    )
+    assert mismatch["status"] == ServiceReadiness.IDENTITY_MISMATCH.value
+    write_service_receipt(
+        receipt,
+        {
+            "schema": "nexus.external_intelligence_daemon_receipt.v1",
+            "status": ServiceReadiness.READY.value,
+            "run_id": "run-1",
+            "pid": 123,
+            "source_path": mismatch["source_path"],
+            "source_sha256": mismatch["source_sha256"],
+            "config_path": mismatch["config_path"],
+            "config_sha256": mismatch["config_sha256"],
+            "started_at": time.time(),
+            "heartbeat_at": time.time(),
+            "successful_polls": READINESS_SUCCESS_THRESHOLD,
+            "last_error": None,
+        },
+    )
+    duplicate = service_status(
+        config,
+        launchctl_runner=launchctl,
+        process_snapshot=lambda: [(123, expected_command), (456, expected_command)],
+        receipt_path=receipt,
+    )
+    assert duplicate["status"] == ServiceReadiness.DUPLICATE_PROCESS.value
+    wrong_config = service_status(
+        config,
+        launchctl_runner=launchctl,
+        process_snapshot=lambda: [
+            (123, expected_command.replace(str(config.resolve()), str(tmp_path / "other.json")))
+        ],
+        receipt_path=receipt,
+    )
+    assert wrong_config["status"] == ServiceReadiness.DUPLICATE_PROCESS.value
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("run_id", None),
+        ("run_id", ""),
+        ("run_id", 123),
+        ("successful_polls", "two"),
+        ("pid", "123"),
+        ("heartbeat_at", "now"),
+        ("schema", "wrong.schema"),
+        ("source_sha256", "not-a-hash"),
+        ("last_error", {"code": "only"}),
+    ],
+)
+def test_service_status_malformed_receipt_fails_degraded_without_exception(tmp_path, field, value):
+    config = _config_file(tmp_path)
+    receipt = tmp_path / "state" / "service" / "daemon.json"
+    payload = {
+        "schema": "nexus.external_intelligence_daemon_receipt.v1",
+        "status": ServiceReadiness.READY.value,
+        "run_id": "run-1",
+        "pid": 123,
+        "source_path": str(
+            Path(__file__).resolve().parents[2] / "scripts/ops/external_intelligence_service.py"
+        ),
+        "source_sha256": hashlib.sha256(
+            (
+                Path(__file__).resolve().parents[2] / "scripts/ops/external_intelligence_service.py"
+            ).read_bytes()
+        ).hexdigest(),
+        "config_path": str(config.resolve()),
+        "config_sha256": hashlib.sha256(config.read_bytes()).hexdigest(),
+        "started_at": 100.0,
+        "heartbeat_at": 100.0,
+        "successful_polls": READINESS_SUCCESS_THRESHOLD,
+        "last_error": None,
+    }
+    payload[field] = value
+    receipt.parent.mkdir(parents=True)
+    receipt.write_text(json.dumps(payload), encoding="utf-8")
+
+    def launchctl(*_args):
+        return subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = 0\n", ""
+        )
+
+    result = service_status(
+        config,
+        launchctl_runner=launchctl,
+        process_snapshot=lambda: [],
+        receipt_path=receipt,
+    )
+    assert result["status"] == ServiceReadiness.DEGRADED.value
+    assert result["ready"] is False
 
 
 def test_render_comment_contains_only_compact_fields():
