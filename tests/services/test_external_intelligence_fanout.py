@@ -711,6 +711,52 @@ def test_prestart_retry_safe_failure_allows_one_fresh_exact_attempt(tmp_path):
     assert transport.calls == 2
 
 
+def test_prestart_retry_safe_failure_budget_exhaustion_blocks_third_attempt(tmp_path):
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py"])
+
+    class AlwaysRetrySafeTransport:
+        def __init__(self):
+            self.calls = 0
+
+        def run_new(self, **kwargs):
+            self.calls += 1
+            return OpenCodeRunResult(
+                status="OPENCODE_NOT_FOUND",
+                process_started=False,
+                retry_safe=True,
+            )
+
+    store = FanoutStore(tmp_path / "state")
+    transport = AlwaysRetrySafeTransport()
+    runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
+        store=store,
+        transport=transport,
+    )
+    args = [unit(base, envelope, envelope_sha, "ua", ["a.py"])]
+
+    first = runtime.run(args, CapacityLease(1, 1, 1, 1))
+    assert first["errors"]["ua"] == "OPENCODE_NOT_FOUND"
+    first_attempt = json.loads(next((tmp_path / "state" / "attempts").glob("*.json")).read_text())
+    assert first_attempt["state"] == "RETRY_SAFE"
+    assert first_attempt["retry_safe"] is True
+    assert transport.calls == 1
+
+    second = runtime.run(args, CapacityLease(1, 1, 1, 1))
+    assert second["errors"]["ua"] == "OPENCODE_NOT_FOUND"
+    second_attempt = json.loads(next((tmp_path / "state" / "attempts").glob("*.json")).read_text())
+    assert second_attempt["state"] == "RETRY_SAFE"
+    assert second_attempt["retry_safe"] is True
+    assert second_attempt["retry_count"] == 1
+    assert transport.calls == 2
+
+    third = runtime.run(args, CapacityLease(1, 1, 1, 1))
+    assert "FANOUT_REPLAY_FORBIDDEN" in third["errors"]["ua"]
+    assert transport.calls == 2
+
+
 def test_completed_units_do_not_starve_deferred_capacity_on_next_run(tmp_path):
     repo, base = make_repo(tmp_path)
     envelope = tmp_path / "envelope.json"

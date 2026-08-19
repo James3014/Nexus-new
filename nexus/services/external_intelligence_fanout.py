@@ -406,6 +406,8 @@ class FanoutStore:
         if path.exists():
             value = json.loads(path.read_text(encoding="utf-8"))
             if value.get("state") == "RETRY_SAFE" and value.get("retry_safe") is True:
+                if int(value.get("retry_count", 0)) >= 1:
+                    raise FanoutError("FANOUT_REPLAY_FORBIDDEN")
                 previous = value
             elif value.get("state") in {"PREPARED", "DISPATCHING", "OUTCOME_UNKNOWN"}:
                 raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
@@ -1181,6 +1183,9 @@ class AdaptiveDeepSeekFanoutRuntime:
                     errors[unit.unit_id] = "FANOUT_REPLAY_FORBIDDEN"
                     continue
                 if state == "RETRY_SAFE":
+                    if int(existing_attempt.get("retry_count", 0)) >= 1:
+                        errors[unit.unit_id] = "FANOUT_REPLAY_FORBIDDEN"
+                        continue
                     # No provider process was started; retry with a fresh exact-base
                     # workspace so the new attempt cannot inherit stale residue.
                     workspace = self.allocator.allocate(unit)
