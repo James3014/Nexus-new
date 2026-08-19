@@ -338,6 +338,40 @@ def test_create_lease_reservation_lock_has_controlled_order(tmp_path, first, sec
     assert second_result[0] == "blocked"
 
 
+def test_concurrent_disjoint_create_lease_refreshes_ownership_under_lock(tmp_path):
+    controller, target_root = _real_repo(tmp_path)
+    manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
+    contracts = [
+        _real_contract(controller, target_root, task_id, [f"scope/{task_id}.txt"])
+        for task_id in ("a", "b")
+    ]
+    barrier = threading.Barrier(2)
+
+    def acquire(contract):
+        barrier.wait(timeout=5)
+        return manager.create_lease(contract, task_states={}).task_id
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = sorted(pool.map(acquire, contracts))
+    assert results == ["a", "b"]
+    assert all((target_root / task_id).is_dir() for task_id in ("a", "b"))
+
+
+def test_missing_authoritative_ownership_keeps_live_target_fail_closed(tmp_path):
+    controller, target_root = _real_repo(tmp_path)
+    manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
+    contract = _real_contract(controller, target_root, "a", ["scope/a.txt"])
+    lease = manager.create_lease(contract, task_states={})
+    ownership = manager._ownership_record_path(controller, contract.task_id)
+    ownership.unlink()
+    with pytest.raises(RuntimeError, match="serial Target budget exceeded"):
+        manager.create_lease(
+            _real_contract(controller, target_root, "b", ["scope/b.txt"]),
+            task_states={},
+        )
+    assert Path(lease.target_worktree).exists()
+
+
 def test_public_service_admission_allows_disjoint_and_blocks_overlap(tmp_path, monkeypatch):
     calls = []
     monkeypatch.delenv("NEXUS_TARGET_ROOT_OVERRIDE", raising=False)

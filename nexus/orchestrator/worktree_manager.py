@@ -452,6 +452,86 @@ class WorktreeManager:
         with self._reservation_lock(controller_root):
             return self._create_lease_locked(contract, task_states=task_states)
 
+    @staticmethod
+    def _ownership_record_path(controller_root: Path, task_id: str) -> Path:
+        raw_common = Path(
+            subprocess.run(
+                ["git", "-c", "core.hooksPath=/dev/null", "rev-parse", "--git-common-dir"],
+                cwd=controller_root,
+                check=True,
+                capture_output=True,
+                text=True,
+                env={**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"},
+            ).stdout.strip()
+        )
+        common_dir = (controller_root / raw_common).resolve() if not raw_common.is_absolute() else raw_common.resolve()
+        return common_dir / "nexus-target-ownership" / f"{sha256(task_id.encode()).hexdigest()}.json"
+
+    def _write_target_ownership(
+        self,
+        contract: SelfHostedTaskContract,
+        lease: TargetWorktreeLease,
+    ) -> None:
+        path = self._ownership_record_path(Path(contract.controller_repo_root).resolve(), contract.task_id)
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        record = {
+            "schema": "nexus.target_ownership.v1",
+            "task_id": contract.task_id,
+            "attempt_id": lease.lease_id,
+            "lease_id": lease.lease_id,
+            "controller_revision": contract.controller_revision,
+            "controller_worktree": str(Path(contract.controller_repo_root).resolve()),
+            "expected_attempt_id": lease.lease_id,
+            "expected_lease_id": lease.lease_id,
+            "expected_controller_revision": contract.controller_revision,
+            "expected_controller_worktree": str(Path(contract.controller_repo_root).resolve()),
+            "status": "TARGET_LEASED",
+            "contract": {
+                "task_id": contract.task_id,
+                "controller_repo_root": str(Path(contract.controller_repo_root).resolve()),
+                "controller_revision": contract.controller_revision,
+                "target_repo_root": lease.target_worktree,
+                "target_base_revision": contract.target_base_revision,
+                "allowed_files": list(contract.allowed_files),
+                "mutation_mode": str(contract.mutation_mode),
+            },
+            "lease": lease.__dict__,
+        }
+        temp = path.with_suffix(f".{os.getpid()}.tmp")
+        temp.write_text(json.dumps(record, sort_keys=True, separators=(",", ":")), encoding="utf-8")
+        temp.chmod(0o600)
+        os.replace(temp, path)
+
+    def _read_target_ownership(
+        self,
+        controller_root: Path,
+        entry: Mapping[str, str],
+        task_id: str,
+    ) -> dict[str, Any] | None:
+        path = self._ownership_record_path(controller_root, task_id)
+        if not path.is_file():
+            return None
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise ValueError("MUTATION_IDENTITY_INVALID: ownership record is unreadable") from exc
+        if not isinstance(record, dict) or record.get("schema") != "nexus.target_ownership.v1":
+            raise ValueError("MUTATION_IDENTITY_INVALID: ownership record schema is invalid")
+        branch = entry.get("branch", "")
+        expected_branch = f"refs/heads/nexus/task/{task_id}"
+        lease = record.get("lease")
+        if (
+            record.get("task_id") != task_id
+            or record.get("controller_worktree") != str(controller_root)
+            or record.get("expected_controller_worktree") != str(controller_root)
+            or branch != expected_branch
+            or not isinstance(lease, Mapping)
+            or Path(str(lease.get("target_worktree", ""))).resolve() != Path(str(entry.get("worktree", ""))).resolve()
+        ):
+            raise ValueError("MUTATION_IDENTITY_INVALID: ownership record is stale")
+        _validate_mutation_identity(record)
+        return record
+
     def _create_lease_locked(
         self,
         contract: SelfHostedTaskContract,
@@ -586,7 +666,7 @@ class WorktreeManager:
                     ) from verification_error
             raise
 
-        return TargetWorktreeLease(
+        lease = TargetWorktreeLease(
             schema="nexus.target_worktree_lease.v1",
             lease_id=self._lease_id(contract, target_path, target_branch),
             task_id=contract.task_id,
@@ -603,6 +683,8 @@ class WorktreeManager:
             target_detached=target_detached,
             collaboration_provenance=collaboration_provenance or None,
         )
+        self._write_target_ownership(contract, lease)
+        return lease
 
     def target_conflict(
         self,
@@ -626,6 +708,8 @@ class WorktreeManager:
             elif branch.startswith("nexus/task/"):
                 task_id = branch.removeprefix("nexus/task/")
             existing = states.get(task_id)
+            if not isinstance(existing, Mapping):
+                existing = self._read_target_ownership(controller_root, entry, task_id)
             if not isinstance(existing, Mapping):
                 return True
             if mutation_domains_conflict(existing, contract):
