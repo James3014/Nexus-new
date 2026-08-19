@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from scripts.ops.validate_codex_dx_failure_prevention import PreventionRegistryError, validate_registry
+from scripts.ops.validate_codex_dx_failure_prevention import (
+    PreventionRegistryError,
+    validate_registry,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 REGISTRY = ROOT / "configs/codex_dx_failure_prevention.json"
@@ -26,14 +29,22 @@ def test_canonical_registry_has_exact_bounded_coverage(payload: dict[str, object
     [
         (lambda p: p["entries"].append(copy.deepcopy(p["entries"][0])), "duplicate"),
         (lambda p: p["entries"][0].update(owner="unassigned"), "owner"),
-        (lambda p: p["entries"][0]["prevention_seam"].update(path="tests/ops/no_such.py"), "does not exist"),
-        (lambda p: p["entries"][0]["prevention_seam"].update(anchor="narrative explanation"), "anchor"),
+        (
+            lambda p: p["entries"][0]["prevention_seam"].update(path="tests/ops/no_such.py"),
+            "does not exist",
+        ),
+        (
+            lambda p: p["entries"][0]["prevention_seam"].update(anchor="narrative explanation"),
+            "anchor",
+        ),
         (lambda p: p["entries"][0].update(removal_condition=""), "removal"),
         (lambda p: p["entries"][0].update(failure_class="unsupported"), "unsupported"),
         (lambda p: p["entries"][0].update(extra="unknown"), "keys"),
     ],
 )
-def test_registry_negative_controls_fail_closed(payload: dict[str, object], mutate, message: str) -> None:
+def test_registry_negative_controls_fail_closed(
+    payload: dict[str, object], mutate, message: str
+) -> None:
     mutate(payload)
     with pytest.raises(PreventionRegistryError, match=message):
         validate_registry(payload, root=ROOT)
@@ -45,7 +56,9 @@ def test_symlink_escape_is_rejected(payload: dict[str, object], tmp_path: Path) 
     link = ROOT / "tests/ops/_prevention_escape.py"
     try:
         link.symlink_to(outside)
-        payload["entries"][0]["prevention_seam"].update(path="tests/ops/_prevention_escape.py", anchor="anchor")
+        payload["entries"][0]["prevention_seam"].update(
+            path="tests/ops/_prevention_escape.py", anchor="anchor"
+        )
         with pytest.raises(PreventionRegistryError, match="escapes"):
             validate_registry(payload, root=ROOT)
     finally:
@@ -53,8 +66,18 @@ def test_symlink_escape_is_rejected(payload: dict[str, object], tmp_path: Path) 
             link.unlink()
 
 
-@pytest.mark.parametrize("ref", ["tests/ops/no_such.py#anchor", "tests/ops/test_repo_doctor.py#missing", "tests/ops/test_repo_doctor.py", "../outside.py#anchor"])
-def test_evidence_reference_negative_controls_fail_closed(payload: dict[str, object], ref: str) -> None:
+@pytest.mark.parametrize(
+    "ref",
+    [
+        "tests/ops/no_such.py#anchor",
+        "tests/ops/test_repo_doctor.py#missing",
+        "tests/ops/test_repo_doctor.py",
+        "../outside.py#anchor",
+    ],
+)
+def test_evidence_reference_negative_controls_fail_closed(
+    payload: dict[str, object], ref: str
+) -> None:
     payload["entries"][0]["evidence_refs"] = [ref]
     with pytest.raises(PreventionRegistryError):
         validate_registry(payload, root=ROOT)
@@ -83,7 +106,9 @@ def test_duplicate_physical_seam_is_rejected(payload: dict[str, object]) -> None
 
 
 def test_alias_and_oversize_registry_fail_closed(payload: dict[str, object]) -> None:
-    payload["entries"][0]["prevention_seam"]["path"] = "./tests/ops/test_bootstrap_authority_files.py"
+    payload["entries"][0]["prevention_seam"]["path"] = (
+        "./tests/ops/test_bootstrap_authority_files.py"
+    )
     with pytest.raises(PreventionRegistryError, match="relative"):
         validate_registry(payload, root=ROOT)
     payload["entries"][0]["prevention_seam"]["path"] = "tests/ops/test_bootstrap_authority_files.py"
