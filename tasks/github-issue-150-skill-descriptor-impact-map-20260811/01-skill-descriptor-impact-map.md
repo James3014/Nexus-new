@@ -1,19 +1,33 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: COMPLETE
 task_id: github-issue-150-skill-descriptor-impact-map
 campaign_id: github-issue-150-skill-descriptor-impact-map-20260811
 source_issue: https://github.com/James3014/Nexus-new/issues/150
 baseline_main: 02d9ff25b1e5ac2dab12c8cb3d40a7a97416da6c
+historical_baseline: 02d9ff25b1e5ac2dab12c8cb3d40a7a97416da6c
+reconciled_main: 71ae533ec9f795477131645f96cea1c93b4f4d40
+current_main: 71ae533ec9f795477131645f96cea1c93b4f4d40
 AUTO_CHAIN: false
 worker_may_commit: true
 worker_may_approve: false
 worker_may_integrate: false
 worker_may_push: true
-block_class: RECOVERABLE_BLOCK
-claim_ceiling: ISSUE_150_SKILL_DESCRIPTOR_IMPACT_MAP_CANDIDATE_ONLY
+block_class: NONE
+completion_marker: SKILL_DESCRIPTOR_IMPACT_MAP_PROVEN
+claim_ceiling: SKILL_DESCRIPTOR_ARTIFACT_CONTRACT_AND_IMPACT_MAP_ONLY
+physical_receipt:
+  pull_request: 160
+  candidate_head: f5fa2a74aacb8481e1a40b7f1349e258ede73871
+  merge_commit: c7e60f4c6798554e51cbc322ebfaf89e2c5cc346
+  changed_files: 5
+  focused_tests: 52
+  required_checks: SUCCESS
+  tier3: SKIPPED_EXPECTED
 ---
+
+Historical source-PR current-main binding: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`; retained as historical evidence after the Issue #428 active rebind.
 
 # Add Skill Descriptor Artifact Contract and Impact Mapping
 
@@ -86,5 +100,12 @@ approval, integration, merge, release, or production/public claim.
 
 ## Exit
 
-Scoped card and implementation commits are pushed to the Issue branch and a
-reviewable PR is opened to `main`. The worker stops before approval or merge.
+PR #160 head `f5fa2a74aacb8481e1a40b7f1349e258ede73871` merged as
+`c7e60f4c6798554e51cbc322ebfaf89e2c5cc346` with the exact five-file scope,
+52 focused tests, required checks successful, and Tier3 skipped as expected.
+The terminal claim remains limited to the skill-descriptor artifact contract
+and impact mapping. No #138, runtime, catalog implementation, route,
+Workforce, release, or production claim follows.
+
+Prior readback binding `cdf2570ede5ae218f36f886b696c8da45458043a`
+(2026-08-14) is retained as historical only.

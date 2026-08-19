@@ -1,11 +1,13 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: superseded
+status: superseded (terminally reconciled)
 purpose: Synchronize the derived OpenWiki workflow table with the Issue #124 trusted anchor candidate.
 issue: 126
 superseded_by: 02-sync-workflow-inventory-contract.md
 ---
+
+Historical source-PR current-main binding: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`; retained as historical evidence after the Issue #428 active rebind.
 
 ## Objective
 
@@ -70,3 +72,7 @@ additional file requirement is a `HARD_BLOCK`.
 The worker may implement and commit only this scoped docs/Task-Card change.
 Push, PR creation, review, merge, Issue closure, protected-proof claims, and
 post-merge PR #118 activation remain with the primary agent/Owner authority.
+
+## Reconciliation record
+
+This card remains superseded by the contract-delta successor. Completed successor PR #127 exact head `6d1eb2bf39db537a3f0714dda77ba0c290da11cf`, merge `fffc127cb`, reconciled on current `main` `71ae533ec9f795477131645f96cea1c93b4f4d40`. No implementation scope is reopened.

@@ -1,11 +1,22 @@
 # Task Card: Golden authority drift checker
 
+Historical source-PR current-main binding: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`; retained as historical evidence after the Issue #428 active rebind.
+
 - artifact_authority: current
 - task_id: `github-issue-115-golden-authority-drift`
 - source_issue: `#115`
 - owner: James Chen
-- status: ACTIVE
+- status: COMPLETE / TERMINAL_RECONCILIATION
 - baseline_revision: `4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e`
+- historical_baseline: `4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e`
+- merge_base: `4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e`
+- reconciled_main: `71ae533ec9f795477131645f96cea1c93b4f4d40`
+- current_main: `71ae533ec9f795477131645f96cea1c93b4f4d40`
+- historical_reconciled_main: `cdf2570ede5ae218f36f886b696c8da45458043a`
+- block_class: NONE
+- frontier_status: TERMINAL_RECONCILIATION
+- terminal_marker: `GOLDEN_AUTHORITY_DRIFT_GATE_PROVEN`
+- claim_ceiling: `GOLDEN_AUTHORITY_DRIFT_GATE_PROVEN_ONLY`
 - commit_required: true
 - candidate_required: true
 - worker_may_commit: true
@@ -57,12 +68,29 @@ second evaluator or persistent report authority.
 - `uv run ruff format --check scripts/ops/check_golden_authority_drift.py tests/ops/test_golden_authority_drift.py`
 - `git diff --check`
 
-## Exit, block, and residual debt
+## Physical evidence and terminal boundary
 
-Exit only with the exact four-file Candidate and independent exact-head review.
-`RECOVERABLE_BLOCK` covers test/format defects; `HARD_BLOCK` covers ambiguous
-authority, overlap, baseline drift, or required scope widening. CI integration
-is residual and requires a separately bounded owner after Candidate behavior is
-accepted.
+- Historical card baseline: `4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e`.
+- PR #210 head: `89f4115a392239787d2928d5bc530817d812cfd1`.
+- PR #210 merge: `e0289e8baa27df445858d51e09dc758d45fb9c8a`.
+- Exact scope: `scripts/ops/check_golden_authority_drift.py`,
+  `tests/ops/test_golden_authority_drift.py`, and this card plus INDEX.
+- Exact-head workflows: Pytest, Pyright, Bandit, Ruff, and Wiki governance
+  completed successfully.
+- Focused verification: 21 passed; Ruff check/preview-format, compileall, and
+  `git diff --check` passed.
+- Owner receipt on Issue #115 records `COMPLETION_RECONCILIATION` /
+  `DONE_NO_FOLLOW_UP` with independent exact-head Luna acceptance ACCEPT; the
+  PR #210 GitHub review surface records no review.
+- Reconciled current main: `71ae533ec9f795477131645f96cea1c93b4f4d40`
+  (PR #333 merge); previous reconciled snapshot
+  `cdf2570ede5ae218f36f886b696c8da45458043a` retained as historical, along
+  with historical verification receipts `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`
+  pre-PR236 rebind and `eb668fb76f0c30d8f025db42cdb8e320d556c037`
+  from the 2026-08-13 snapshot.
 
-Claim ceiling: `GOLDEN_AUTHORITY_DRIFT_GATE_CANDIDATE_ONLY`.
+`GOLDEN_AUTHORITY_DRIFT_GATE_PROVEN` proves only the read-only authority-drift
+detection gate and its focused tests. It grants no Golden evaluator or corpus
+semantics change, no #114 or #65 ownership, no runtime, route, Planner,
+lifecycle, Workforce, Candidate acceptance, approval, integration, merge,
+release, or production authority. `AUTO_CHAIN=false`.

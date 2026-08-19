@@ -1,10 +1,19 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: COMPLETE
 task_id: github-issue-51-delete-proven-orphans
 campaign_id: github-issue-51-orphan-files-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/51
+baseline_main: 61ea89a85ad0e8cb453ec642293a2da9df072a4c
+historical_baseline: 61ea89a85ad0e8cb453ec642293a2da9df072a4c
+reconciled_main: 71ae533ec9f795477131645f96cea1c93b4f4d40
+current_main: 71ae533ec9f795477131645f96cea1c93b4f4d40
+frontier_status: TERMINAL_RECONCILIATION
+terminal_marker: ISSUE_51_ORPHAN_CLEANUP_PROVEN
+claim_ceiling: ISSUE_51_ORPHAN_CLEANUP_PROVEN_ONLY
+implementation_commit: 4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e
+rebind_lineage_commit: 7bfadd2f1fd2cb4fd8b951d4568a2818121827f3
 AUTO_CHAIN: false
 worker_may_commit: false
 worker_may_approve: false
@@ -12,15 +21,17 @@ worker_may_integrate: false
 worker_may_push: false
 ---
 
+Historical source-PR current-main binding: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`; retained as historical evidence after the Issue #428 active rebind.
+
 # Delete Thirteen Proven Orphan Files
 
 ## Objective
 
 Delete exactly the thirteen currently proven Issue #51 orphan paths without replacement or reachable behavior change. Remove the stale Wiki inventory row for the duplicate root transaction module. Preserve `legacy/logmemory.py`.
 
-## Baseline
+## Historical baseline
 
-- GitHub main: `61ea89a85ad0e8cb453ec642293a2da9df072a4c`
+- GitHub main (historical baseline): `61ea89a85ad0e8cb453ec642293a2da9df072a4c`
 - prerequisites: #75, #104, #105, #106, #204, and #207 physically completed
 - existing PR: #71, rebound to this exact baseline before verification
 
@@ -70,4 +81,16 @@ Delete exactly the thirteen currently proven Issue #51 orphan paths without repl
 
 Every physical deletion is individually supported, no executable test behavior is deleted, no current caller remains, no new regression is introduced, and an independent exact-head acceptance accepts the bounded diff.
 
-Maximum candidate claim: `ISSUE_51_ORPHAN_CLEANUP_CANDIDATE`.
+## Physical evidence and terminal boundary
+
+- Historical baseline: `61ea89a85ad0e8cb453ec642293a2da9df072a4c`.
+- Implementation commit: `4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e`.
+- Rebind lineage: `7bfadd2f1fd2cb4fd8b951d4568a2818121827f3`.
+- PR #71 head: `7bfadd2f1fd2cb4fd8b951d4568a2818121827f3`.
+- PR #71 base parent: `892369a93a5c540042f0b4b35d1ee8d81a9de2b2`.
+- PR #71 merge: `4cf1a3519d7937f71a664bd347efd7c4eb0b4d1e`.
+- Exact scope: thirteen deletions, one Wiki stale row, this card, and INDEX.
+- Exact-head workflows: Trusted verifier, Unprivileged executor, Impact gate, Ruff, Wiki, Pyright, Policy Lane, Bandit, and Trusted controller completed successfully; Tier3 workflow skipped, all pre-merge.
+- Reconciled current main: `71ae533ec9f795477131645f96cea1c93b4f4d40`; readback confirms all thirteen paths absent, `legacy/logmemory.py` present byte-identical (blob `4c3d4a90a8dacc14626d264b7d2223f4870536f1`), `nexus/core/engine/nexus_transaction.py` retained (blob `3a94beb605f4ba627f7a243e5c89888087631448`), and the stale Wiki row absent.
+
+`ISSUE_51_ORPHAN_CLEANUP_PROVEN` proves only the exact GitHub collaboration physical-deletion reconciliation. It grants no runtime, route, Workforce, lifecycle, claim, approval, integration, merge, release, or production authority. `AUTO_CHAIN=false`.
