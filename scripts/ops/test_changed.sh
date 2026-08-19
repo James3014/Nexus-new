@@ -1,20 +1,51 @@
-#!/bin/bash
-# L2: 變更關聯層 (Impacted Verification)
-set -e
+#!/usr/bin/env bash
+# Canonical impacted (L2) verification. Targets are always passed as an argv
+# array; an empty invocation explicitly uses the documented core fallback.
+set -uo pipefail
 
-CHANGED_PATHS=("$@")
-
-if [ ${#CHANGED_PATHS[@]} -eq 0 ]; then
-    echo "⚠️  No path provided. Running core smoke tests..."
-    uv run python -m pytest tests/core tests/services/test_policy_gate.py -q
-    exit 0
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT" || exit 1
+: "${UV_CACHE_DIR:="$ROOT/.tmp/uv-cache"}"
+export UV_CACHE_DIR
+if [[ "${NEXUS_TEST_FORCE_UV:-0}" != 1 && -x .venv/bin/python ]]; then
+  SELECTOR=(.venv/bin/python scripts/ops/select_tests.py)
+  PYTEST=(.venv/bin/python -m pytest)
+else
+  SELECTOR=(uv run python scripts/ops/select_tests.py)
+  PYTEST=(uv run python -m pytest)
 fi
 
-echo "🔍 Analyzing impact for: ${CHANGED_PATHS[*]}"
+if (( $# == 0 )); then
+  echo "[L2] no changed paths; using documented core fallback"
+  exec "$ROOT/scripts/ops/test_fast.sh"
+fi
 
-TEST_TARGETS=$(uv run python scripts/ops/select_tests.py "${CHANGED_PATHS[@]}")
+for path in "$@"; do
+  if [[ ! -e "$path" ]]; then
+    echo "[L2] changed path is missing: $path" >&2
+    exit 2
+  fi
+done
 
-echo "🎯 [L2] Selected targets: $TEST_TARGETS"
-uv run python -m pytest $TEST_TARGETS -q
-
-echo "✅ [L2] Impacted verification complete."
+selection="$("${SELECTOR[@]}" "$@")"
+if [[ -z "${selection//[[:space:]]/}" ]]; then
+  echo "[L2] selector returned no targets; refusing empty success" >&2
+  exit 2
+fi
+if [[ "$selection" == *$'\n'* ]]; then
+  echo "[L2] selector returned multiple target lines; refusing ambiguous selection" >&2
+  exit 2
+fi
+read -r -a targets <<< "$selection"
+if (( ${#targets[@]} == 0 )); then
+  echo "[L2] selector returned no targets; refusing empty success" >&2
+  exit 2
+fi
+for target in "${targets[@]}"; do
+  if [[ ! -e "$target" ]]; then
+    echo "[L2] selected target is missing: $target" >&2
+    exit 2
+  fi
+done
+printf '[L2] selected targets: %s\n' "${targets[*]}"
+"${PYTEST[@]}" "${targets[@]}" -q
