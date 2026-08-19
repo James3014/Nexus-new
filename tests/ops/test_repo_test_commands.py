@@ -163,3 +163,38 @@ def test_changed_rejects_multiple_selector_lines(tmp_path: Path) -> None:
     )
     assert result.returncode != 0
     assert not marker.exists()
+
+
+def test_changed_ignores_optional_browser_target_when_core_selected(tmp_path: Path) -> None:
+    fake_uv = tmp_path / "uv"
+    recorded_args = tmp_path / "pytest_args.txt"
+    fake_uv.write_text(
+        "#!/bin/sh\n"
+        "shift; shift\n"
+        'case "$1" in\n'
+        "  scripts/ops/select_tests.py)\n"
+        "    printf '%s\\n' 'tests/services tests/core tests/services/test_policy_gate.py'\n"
+        "    ;;\n"
+        "  *)\n"
+        f"    printf '%s\\n' \"$@\" > '{recorded_args}'\n"
+        "    exit 0\n"
+        "    ;;\n"
+        "esac\n"
+    )
+    fake_uv.chmod(0o755)
+    result = subprocess.run(
+        ("bash", "scripts/ops/test_repo.sh", "changed", "pyproject.toml"),
+        cwd=ROOT,
+        env={**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "NEXUS_TEST_FORCE_UV": "1"},
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert recorded_args.exists()
+    pytest_args = recorded_args.read_text().splitlines()
+    assert "-m" in pytest_args
+    assert "pytest" in pytest_args
+    assert "tests/services" in pytest_args
+    assert "tests/core" in pytest_args
+    assert "tests/services/test_policy_gate.py" in pytest_args
+    assert "--ignore=tests/core/test_web_dom_mapper.py" in pytest_args
