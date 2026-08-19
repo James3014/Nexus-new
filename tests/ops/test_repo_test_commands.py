@@ -1,5 +1,7 @@
 import os
+import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -27,8 +29,9 @@ def test_fast_prints_targets(tmp_path: Path) -> None:
     # Keep this contract test independent of a host uv cache; C3 exercises the
     # real tool in the isolated target.
     fake_uv = tmp_path / "uv"
+    python_bin = shlex.quote(sys.executable)
     fake_uv.write_text(
-        '#!/bin/sh\nshift\n[ "$1" = python ] && shift && set -- python3 "$@"\nexec "$@"\n'
+        f'#!/bin/sh\nshift\n[ "$1" = python ] && shift && set -- {python_bin} "$@"\nexec "$@"\n'
     )
     fake_uv.chmod(0o755)
     result = subprocess.run(
