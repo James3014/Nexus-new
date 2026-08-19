@@ -15,6 +15,11 @@ from nexus.orchestrator.autonomy_policy import (
     StandingGrantRequest,
     evaluate_standing_grant_decision,
 )
+from nexus.orchestrator.standing_grant_store import (
+    StandingGrantReceiptError,
+    _load_receipt_at,
+    load_standing_grant_receipt,
+)
 
 
 def _safe(model, typ):
@@ -53,6 +58,8 @@ def _check(evidence, now):
         for r in evidence.reviews
     ):
         raise ValueError("REVIEW_UNRESOLVED")
+    if not evidence.reviews_resolved:
+        raise ValueError("REVIEW_UNRESOLVED")
     if evidence.impact and (not evidence.impact.known or not evidence.impact.regression_free):
         raise ValueError("IMPACT_UNKNOWN_OR_REGRESSION")
     if not evidence.independent_acceptance:
@@ -88,7 +95,10 @@ def revalidate_merge_intent(intent, context, request, evidence, *, now: datetime
         intent.model_dump(mode="json", exclude={"intent_hash"})
     ):
         raise ValueError("INTENT_REPLAY_OR_TAMPER")
-    return prepare_merge_intent(context, request, evidence, now=now)
+    prepared = prepare_merge_intent(context, request, evidence, now=now)
+    if intent != prepared:
+        raise ValueError("INTENT_SEMANTIC_MISMATCH")
+    return prepared
 
 
 def resolve_merge_authorization(
@@ -105,5 +115,79 @@ def resolve_merge_authorization(
     return evaluate_action(
         context,
         request,
+        platform_approval_required=platform_approval_required,
+    )
+
+
+def resolve_durable_merge_authorization(
+    intent,
+    request,
+    evidence,
+    *,
+    now: datetime | None = None,
+    platform_approval_required: bool = False,
+):
+    """Revalidate exact merge evidence, then load the durable receipt and
+    resolve the same evaluator decision.
+
+    The durable receipt is only a carrier; the existing pure evaluator decides.
+    A missing/tampered/malformed receipt fails closed to ``GRANT_INVALID``.
+    A valid receipt that does not cover ``GITHUB_MERGE`` reports
+    ``GRANT_OUT_OF_SCOPE``. Genuine external platform approval reports
+    ``PLATFORM_APPROVAL_REQUIRED``, never a grant mismatch.
+    """
+    safe_request = _safe(request, StandingGrantRequest)
+    effective_now = now or datetime.now(timezone.utc)
+    try:
+        receipt = load_standing_grant_receipt(now=effective_now)
+    except StandingGrantReceiptError:
+        return evaluate_action({}, {}, platform_approval_required=platform_approval_required)
+    if receipt is None:
+        return evaluate_action({}, {}, platform_approval_required=platform_approval_required)
+    try:
+        revalidate_merge_intent(intent, receipt.context, safe_request, evidence, now=effective_now)
+    except ValueError as exc:
+        # A receipt/context mismatch is a grant decision, not an evidence
+        # failure. Keep evidence failures (drift, checks, reviews, acceptance)
+        # as typed exceptions for the caller's fail-closed gate.
+        if str(exc) not in {
+            StandingGrantOutcome.INVALID.value,
+            StandingGrantOutcome.OUT_OF_SCOPE.value,
+        }:
+            raise
+    return evaluate_action(
+        receipt.context,
+        safe_request,
+        platform_approval_required=platform_approval_required,
+    )
+
+
+def _resolve_durable_merge_authorization_at(
+    intent,
+    request,
+    evidence,
+    *,
+    receipt_path,
+    now: datetime | None = None,
+    platform_approval_required: bool = False,
+):
+    """Test/internal-only variant bound to an explicit path (never production)."""
+    safe_request = _safe(request, StandingGrantRequest)
+    effective_now = now or datetime.now(timezone.utc)
+    try:
+        receipt = _load_receipt_at(receipt_path, now=effective_now)
+    except StandingGrantReceiptError:
+        return evaluate_action({}, {}, platform_approval_required=platform_approval_required)
+    try:
+        revalidate_merge_intent(intent, receipt.context, safe_request, evidence, now=effective_now)
+    except ValueError as exc:
+        if str(exc) not in {
+            StandingGrantOutcome.INVALID.value,
+            StandingGrantOutcome.OUT_OF_SCOPE.value,
+        }:
+            raise
+    return evaluate_action(
+        receipt.context,
+        safe_request,
         platform_approval_required=platform_approval_required,
     )
