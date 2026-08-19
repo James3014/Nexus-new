@@ -1730,6 +1730,7 @@ class PipelineRepairMixin:
 
             # Step 1: Repair
             r_out = self._execute_single_repair(ctx, tracer, repair_attempts)
+            terminal_rejection = self._is_rejected_repair_status(r_out.get("status"))
             record_receipt = getattr(self, "_record_phase_receipt", None)
             if callable(record_receipt):
                 record_receipt(
@@ -1738,7 +1739,7 @@ class PipelineRepairMixin:
                     status=str(r_out.get("status") or "FAILED"),
                     transition="R:start->end",
                     output_payload=r_out.get("result") or {},
-                    next_action="audit",
+                    next_action="none" if terminal_rejection else "audit",
                 )
             self._phase_observer(ctx, "R", "on_phase_end", status=str(r_out.get("status") or "FAILED"))
             if rlm_loop is not None:
@@ -1748,6 +1749,8 @@ class PipelineRepairMixin:
                     result=r_out["result"],
                     metadata=ctx.state.metadata,
                 )
+            if terminal_rejection:
+                break
 
             # Step 2: Audit
             self._enter_runtime_phase(ctx, "A", reason="audit_entry")

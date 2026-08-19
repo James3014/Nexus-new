@@ -391,6 +391,62 @@ def test_repair_audit_loop_composed_r_rejection_skips_pregate_and_evidence(tmp_p
     assert ctx.state.metadata["phase_skills"]["R"] == "composition-repair"
 
 
+def test_repair_audit_loop_composed_r_explicit_rejection_is_absorbing(tmp_path, monkeypatch):
+    executors = {
+        "R": FakeExecutor(
+            "R",
+            {
+                "status": "REJECTED",
+                "reason": "terminal_disposition",
+                "decision_id": "dec-r-terminal",
+                "skill_id": "composition-repair",
+            },
+        ),
+        "A": FakeExecutor(
+            "A",
+            {
+                "status": "APPROVED",
+                "decision_id": "dec-a-must-not-run",
+                "skill_id": "composition-audit",
+            },
+        ),
+    }
+    pipeline = NexusPipeline(_engine(tmp_path, executors))
+    pipeline.engine.max_retries = 2
+    escalation_calls = []
+    ctx = SimpleNamespace(
+        dry_run=False,
+        task_id="composition-repair-terminal-rejection",
+        task_desc="preserve terminal composed repair rejection",
+        task_type="bug",
+        kwargs={},
+        bayesian_params={},
+        pack={},
+        decision_counter=0,
+        accumulator=SimpleNamespace(record=lambda *_args, **_kwargs: None),
+        event_store=SimpleNamespace(append=lambda *_args, **_kwargs: None),
+        state=NexusState(task_id="composition-repair-terminal-rejection"),
+    )
+    tracer = SimpleNamespace(phase_span=lambda *_args, **_kwargs: _Span())
+    monkeypatch.setattr(pipeline, "_check_external_interrupt", lambda _ctx: False)
+    monkeypatch.setattr(
+        pipeline,
+        "_build_hallucination_evidence_bundle",
+        lambda _ctx: {"code_artifacts": ["must-not-be-audited.py"]},
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "_handle_escalation",
+        lambda *args, **kwargs: escalation_calls.append((args, kwargs)) or False,
+    )
+
+    assert pipeline._repair_audit_loop(ctx, tracer) is False
+    assert ctx.state.metadata["composition_repair_phase_status"] == "REJECTED"
+    assert executors["R"].calls == 1
+    assert executors["A"].calls == 0
+    assert escalation_calls == []
+
+
 def test_repair_audit_loop_composed_r_uses_nested_result_status(tmp_path, monkeypatch):
     nested_result = {
         "status": "APPROVED",
