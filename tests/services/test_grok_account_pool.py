@@ -250,6 +250,40 @@ def test_acquire_binds_immutable_lease_and_hash_derived_env(tmp_path):
     assert "grok-a" not in lease.execution_env["HOME"]
 
 
+def test_acquire_binds_opaque_home_to_configured_profile(tmp_path):
+    profile_home = tmp_path / "credential-bearing-grok-a"
+    profile_home.mkdir()
+    (profile_home / "profile-state.json").write_text("profile-state")
+    manager = GrokAccountPoolManager(
+        [GrokAccount(alias="grok-a", home_dir=str(profile_home))],
+        isolated_root=str(tmp_path / "neutral-grok-profiles"),
+    )
+
+    lease = manager.acquire("consumer-profile-binding")
+    isolated_home = Path(lease.execution_env["HOME"])
+
+    assert isolated_home.is_symlink()
+    assert isolated_home.resolve() == profile_home.resolve()
+    assert (isolated_home / "profile-state.json").read_text() == "profile-state"
+    assert str(profile_home) not in lease.execution_env["HOME"]
+    assert "credential-bearing-grok-a" not in json.dumps(dict(lease.execution_env))
+
+
+def test_duplicate_configured_profiles_fail_closed(tmp_path):
+    profile_home = tmp_path / "shared-profile"
+    profile_home.mkdir()
+    manager = GrokAccountPoolManager(
+        [
+            GrokAccount(alias="grok-a", home_dir=str(profile_home)),
+            GrokAccount(alias="grok-b", home_dir=str(profile_home)),
+        ],
+        isolated_root=str(tmp_path / "neutral-grok-profiles"),
+    )
+
+    with pytest.raises(GrokAccountPoolError, match="GROK_PROFILE_HOME_BINDING_CONFLICT"):
+        manager.acquire("consumer-duplicate-profile")
+
+
 def test_concurrent_consumers_are_isolated(tmp_path):
     manager = _make_manager(tmp_path)
     lease_a = manager.acquire("consumer-A")
@@ -424,7 +458,7 @@ def test_failover_never_reuses_profile_held_by_another_consumer(tmp_path):
     manager = GrokAccountPoolManager([
         GrokAccount(alias="grok-a", home_dir=h1),
         GrokAccount(alias="grok-b", home_dir=h2),
-    ])
+    ], isolated_root=str(tmp_path / "neutral-grok-profiles"))
     lease_a = manager.acquire("consumer-A")
     lease_b = manager.acquire("consumer-B")
 
@@ -445,7 +479,7 @@ def test_released_profile_becomes_eligible_for_failover(tmp_path):
     manager = GrokAccountPoolManager([
         GrokAccount(alias="grok-a", home_dir=h1),
         GrokAccount(alias="grok-b", home_dir=h2),
-    ])
+    ], isolated_root=str(tmp_path / "neutral-grok-profiles"))
     lease_a = manager.acquire("consumer-A")
     lease_b = manager.acquire("consumer-B")
     manager.release(lease_b)

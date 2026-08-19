@@ -224,6 +224,37 @@ def _isolated_home_dir(
     return str(root / f"profile-{alias_hash}")
 
 
+def _ensure_isolated_home_binding(
+    home_dir: str,
+    alias_hash: str,
+    isolated_root: Optional[str] = None,
+) -> str:
+    """Expose the configured profile through an opaque, hash-only HOME path.
+
+    The lease environment must not publish the configured profile path, but
+    the provider still needs the credential-bearing profile behind ``HOME``.
+    A symlink under the neutral root provides that binding without copying
+    credential bytes into the repository or the evidence surface. Existing
+    non-symlink paths fail closed to avoid binding the wrong profile.
+    """
+
+    source = Path(home_dir).expanduser()
+    if not source.is_absolute():
+        raise GrokAccountPoolError("GROK_PROFILE_HOME_MUST_BE_ABSOLUTE")
+    opaque = Path(_isolated_home_dir(home_dir, alias_hash, isolated_root))
+    opaque.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+    source_resolved = source.resolve(strict=False)
+    if opaque.is_symlink():
+        if opaque.resolve(strict=False) != source_resolved:
+            raise GrokAccountPoolError("GROK_PROFILE_HOME_BINDING_CONFLICT")
+    elif opaque.exists():
+        raise GrokAccountPoolError("GROK_PROFILE_HOME_BINDING_CONFLICT")
+    else:
+        opaque.symlink_to(source_resolved, target_is_directory=True)
+    return str(opaque)
+
+
 def build_grok_isolated_env(
     home_dir: Optional[str] = None,
     base_env: Optional[Mapping[str, str]] = None,
@@ -360,7 +391,17 @@ class GrokAccountPoolManager:
         if self._pool is not None:
             return self._pool
         records: list[InternalAccountRecord] = []
+        bound_profile_paths: set[Path] = set()
         for acc in self._accounts:
+            profile_path = Path(acc.home_dir).expanduser().resolve(strict=False)
+            if profile_path in bound_profile_paths:
+                raise GrokAccountPoolError("GROK_PROFILE_HOME_BINDING_CONFLICT")
+            bound_profile_paths.add(profile_path)
+            _ensure_isolated_home_binding(
+                home_dir=acc.home_dir,
+                alias_hash=acc.alias_hash,
+                isolated_root=self._isolated_root,
+            )
             env = build_grok_isolated_env(
                 home_dir=acc.home_dir,
                 alias_hash=acc.alias_hash,
