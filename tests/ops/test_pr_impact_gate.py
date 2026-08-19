@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.ops.pr_impact_gate import (
+    EXACT_CONFIG_TARGETS,
     EXACT_GIT_EVIDENCE_ONLY,
     PytestRunResult,
     _git_changed_paths,
@@ -314,6 +315,360 @@ def test_unknown_impact_fails_closed_to_broader_verification():
     assert plan.pytest_required is True
     assert plan.unmatched_paths == ["mystery/runtime.surface"]
     assert "tests/ops/test_pr_impact_gate.py" in plan.pytest_targets
+
+
+def test_codex_dx_failure_prevention_config_selects_exact_test(tmp_path: Path):
+    config = tmp_path / "configs" / "codex_dx_failure_prevention.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.touch()
+    target = tmp_path / "tests" / "ops" / "test_codex_dx_failure_prevention.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.touch()
+
+    plan = build_impact_plan(
+        ["configs/codex_dx_failure_prevention.json"],
+        root=tmp_path,
+    )
+
+    assert plan.tier == 1
+    assert plan.impact_class == "SCOPED_IMPLEMENTATION"
+    assert plan.confidence == 0.9
+    assert plan.pytest_required is True
+    assert plan.pytest_targets == ["tests/ops/test_codex_dx_failure_prevention.py"]
+    assert plan.unmatched_paths == []
+    assert plan.reasons == [
+        "configs/codex_dx_failure_prevention.json: matched exact config contract"
+    ]
+    assert plan.workflow_validation_required is False
+    assert plan.wiki_required is False
+
+
+def test_codex_task_context_index_config_selects_exact_test(tmp_path: Path):
+    config = tmp_path / "configs" / "codex_task_context_index.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.touch()
+    target = tmp_path / "tests" / "ops" / "test_codex_task_context_index.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.touch()
+
+    plan = build_impact_plan(
+        ["configs/codex_task_context_index.json"],
+        root=tmp_path,
+    )
+
+    assert plan.tier == 1
+    assert plan.impact_class == "SCOPED_IMPLEMENTATION"
+    assert plan.confidence == 0.9
+    assert plan.pytest_required is True
+    assert plan.pytest_targets == ["tests/ops/test_codex_task_context_index.py"]
+    assert plan.unmatched_paths == []
+    assert plan.reasons == ["configs/codex_task_context_index.json: matched exact config contract"]
+
+
+def test_codex_dx_both_exact_configs_cooccur_in_plan(tmp_path: Path):
+    config1 = tmp_path / "configs" / "codex_dx_failure_prevention.json"
+    config2 = tmp_path / "configs" / "codex_task_context_index.json"
+    config1.parent.mkdir(parents=True, exist_ok=True)
+    config1.touch()
+    config2.touch()
+    target1 = tmp_path / "tests" / "ops" / "test_codex_dx_failure_prevention.py"
+    target2 = tmp_path / "tests" / "ops" / "test_codex_task_context_index.py"
+    target1.parent.mkdir(parents=True, exist_ok=True)
+    target1.touch()
+    target2.touch()
+
+    plan = build_impact_plan(
+        [
+            "configs/codex_dx_failure_prevention.json",
+            "configs/codex_task_context_index.json",
+        ],
+        root=tmp_path,
+    )
+
+    assert plan.tier == 1
+    assert plan.impact_class == "SCOPED_IMPLEMENTATION"
+    assert plan.pytest_required is True
+    assert set(plan.pytest_targets) == {
+        "tests/ops/test_codex_dx_failure_prevention.py",
+        "tests/ops/test_codex_task_context_index.py",
+    }
+    assert plan.unmatched_paths == []
+
+
+def test_codex_dx_config_and_mapped_test_diff_selects_only_exact_target(tmp_path: Path):
+    config = tmp_path / "configs" / "codex_dx_failure_prevention.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.touch()
+    target = tmp_path / "tests" / "ops" / "test_codex_dx_failure_prevention.py"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.touch()
+
+    plan = build_impact_plan(
+        [
+            "configs/codex_dx_failure_prevention.json",
+            "tests/ops/test_codex_dx_failure_prevention.py",
+        ],
+        root=tmp_path,
+    )
+
+    assert plan.tier == 1
+    assert plan.impact_class == "SCOPED_IMPLEMENTATION"
+    assert plan.pytest_required is True
+    assert plan.pytest_targets == ["tests/ops/test_codex_dx_failure_prevention.py"]
+    assert plan.unmatched_paths == []
+
+
+def test_codex_dx_before_v1_benchmark_config_selects_exact_tests(tmp_path: Path):
+    config = tmp_path / "configs" / "benchmarks" / "codex_dx_before_v1.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.touch()
+    target1 = tmp_path / "tests" / "benchmark" / "test_codex_dx_benchmark.py"
+    target2 = tmp_path / "tests" / "benchmark" / "test_codex_dx_history.py"
+    target1.parent.mkdir(parents=True, exist_ok=True)
+    target1.touch()
+    target2.touch()
+
+    plan = build_impact_plan(
+        ["configs/benchmarks/codex_dx_before_v1.json"],
+        root=tmp_path,
+    )
+
+    assert plan.tier == 1
+    assert plan.impact_class == "SCOPED_IMPLEMENTATION"
+    assert plan.confidence == 0.9
+    assert plan.pytest_required is True
+    assert plan.pytest_targets == [
+        "tests/benchmark/test_codex_dx_benchmark.py",
+        "tests/benchmark/test_codex_dx_history.py",
+    ]
+    assert plan.unmatched_paths == []
+    assert plan.reasons == [
+        "configs/benchmarks/codex_dx_before_v1.json: matched exact config contract"
+    ]
+    assert plan.workflow_validation_required is False
+    assert plan.wiki_required is False
+
+
+def test_codex_dx_all_exact_configs_cooccur_in_plan(tmp_path: Path):
+    config1 = tmp_path / "configs" / "codex_dx_failure_prevention.json"
+    config2 = tmp_path / "configs" / "codex_task_context_index.json"
+    config3 = tmp_path / "configs" / "benchmarks" / "codex_dx_before_v1.json"
+    config1.parent.mkdir(parents=True, exist_ok=True)
+    config3.parent.mkdir(parents=True, exist_ok=True)
+    config1.touch()
+    config2.touch()
+    config3.touch()
+    target1 = tmp_path / "tests" / "ops" / "test_codex_dx_failure_prevention.py"
+    target2 = tmp_path / "tests" / "ops" / "test_codex_task_context_index.py"
+    target3 = tmp_path / "tests" / "benchmark" / "test_codex_dx_benchmark.py"
+    target4 = tmp_path / "tests" / "benchmark" / "test_codex_dx_history.py"
+    target1.parent.mkdir(parents=True, exist_ok=True)
+    target3.parent.mkdir(parents=True, exist_ok=True)
+    target1.touch()
+    target2.touch()
+    target3.touch()
+    target4.touch()
+
+    plan = build_impact_plan(
+        [
+            "configs/codex_dx_failure_prevention.json",
+            "configs/codex_task_context_index.json",
+            "configs/benchmarks/codex_dx_before_v1.json",
+        ],
+        root=tmp_path,
+    )
+
+    assert plan.tier == 1
+    assert plan.impact_class == "SCOPED_IMPLEMENTATION"
+    assert plan.pytest_required is True
+    assert set(plan.pytest_targets) == {
+        "tests/ops/test_codex_dx_failure_prevention.py",
+        "tests/ops/test_codex_task_context_index.py",
+        "tests/benchmark/test_codex_dx_benchmark.py",
+        "tests/benchmark/test_codex_dx_history.py",
+    }
+    assert plan.unmatched_paths == []
+
+
+def test_codex_dx_before_v1_config_and_single_mapped_test_diff_selects_exact_targets(
+    tmp_path: Path,
+):
+    config = tmp_path / "configs" / "benchmarks" / "codex_dx_before_v1.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.touch()
+    target1 = tmp_path / "tests" / "benchmark" / "test_codex_dx_benchmark.py"
+    target2 = tmp_path / "tests" / "benchmark" / "test_codex_dx_history.py"
+    target1.parent.mkdir(parents=True, exist_ok=True)
+    target1.touch()
+    target2.touch()
+
+    plan = build_impact_plan(
+        [
+            "configs/benchmarks/codex_dx_before_v1.json",
+            "tests/benchmark/test_codex_dx_benchmark.py",
+        ],
+        root=tmp_path,
+    )
+
+    assert plan.tier == 1
+    assert plan.impact_class == "SCOPED_IMPLEMENTATION"
+    assert plan.pytest_required is True
+    assert plan.pytest_targets == [
+        "tests/benchmark/test_codex_dx_benchmark.py",
+        "tests/benchmark/test_codex_dx_history.py",
+    ]
+    assert plan.unmatched_paths == []
+
+
+def test_codex_dx_before_v1_config_and_both_mapped_tests_diff_selects_exact_targets(
+    tmp_path: Path,
+):
+    config = tmp_path / "configs" / "benchmarks" / "codex_dx_before_v1.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.touch()
+    target1 = tmp_path / "tests" / "benchmark" / "test_codex_dx_benchmark.py"
+    target2 = tmp_path / "tests" / "benchmark" / "test_codex_dx_history.py"
+    target1.parent.mkdir(parents=True, exist_ok=True)
+    target1.touch()
+    target2.touch()
+
+    plan = build_impact_plan(
+        [
+            "configs/benchmarks/codex_dx_before_v1.json",
+            "tests/benchmark/test_codex_dx_benchmark.py",
+            "tests/benchmark/test_codex_dx_history.py",
+        ],
+        root=tmp_path,
+    )
+
+    assert plan.tier == 1
+    assert plan.impact_class == "SCOPED_IMPLEMENTATION"
+    assert plan.pytest_required is True
+    assert plan.pytest_targets == [
+        "tests/benchmark/test_codex_dx_benchmark.py",
+        "tests/benchmark/test_codex_dx_history.py",
+    ]
+    assert plan.unmatched_paths == []
+
+
+@pytest.mark.parametrize(
+    "unknown_config",
+    [
+        "configs/codex_unknown.json",
+        "configs/codex_dx_unknown.json",
+        "configs/codex_task_context_index_v2.json",
+        "configs/benchmarks/codex_dx_unknown.json",
+        "configs/benchmarks/codex_dx_after_v1.json",
+        "configs/benchmarks/codex_dx_before_v2.json",
+        "configs/benchmarks/unknown_benchmark.json",
+        "configs/benchmarks/benchmark_manifest.json",
+        "configs/ask_policy.yaml",
+        "configs/model_candidates/t4_1_frozen_model_candidate_registry.yaml",
+    ],
+)
+def test_unknown_sibling_and_unrelated_configs_fail_closed(unknown_config, tmp_path: Path):
+    plan = build_impact_plan([unknown_config], root=tmp_path)
+
+    assert plan.tier == 2
+    assert plan.impact_class == "IMPACT_UNKNOWN"
+    assert plan.confidence <= 0.4
+    assert plan.pytest_required is True
+    assert plan.unmatched_paths == [unknown_config]
+    assert "unmatched paths fail closed to broader verification" in plan.reasons
+
+
+@pytest.mark.parametrize(
+    "absent_config",
+    [
+        "configs/codex_dx_failure_prevention.json",
+        "configs/codex_task_context_index.json",
+        "configs/benchmarks/codex_dx_before_v1.json",
+    ],
+)
+@pytest.mark.parametrize("materialize_target", [False, True])
+def test_absent_or_deleted_exact_config_fails_closed_as_unmatched(
+    absent_config: str, materialize_target: bool, tmp_path: Path
+):
+    if materialize_target:
+        for target_path in EXACT_CONFIG_TARGETS[absent_config]:
+            target = tmp_path / target_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.touch()
+
+    plan = build_impact_plan([absent_config], root=tmp_path)
+
+    assert plan.tier == 2
+    assert plan.impact_class == "IMPACT_UNKNOWN"
+    assert plan.confidence <= 0.4
+    assert plan.pytest_required is True
+    assert plan.unmatched_paths == [absent_config]
+    assert "unmatched paths fail closed to broader verification" in plan.reasons
+
+
+@pytest.mark.parametrize(
+    "malformed_path",
+    [
+        "configs/codex_dx_failure_prevention.json.bak",
+        "configs/codex_dx_failure_prevention.json/nested",
+        "nested/configs/codex_dx_failure_prevention.json",
+        "configs/codex_task_context_index.json.tmp",
+        "configs/benchmarks/codex_dx_before_v1.json.bak",
+        "configs/benchmarks/codex_dx_before_v1.json/nested",
+        "nested/configs/benchmarks/codex_dx_before_v1.json",
+        "configs/benchmarks/codex_dx_before_v1.json.tmp",
+        "configs/benchmarks/codex_dx_before_v1.json.patch",
+    ],
+)
+def test_malformed_and_spoofed_config_paths_fail_closed(malformed_path, tmp_path: Path):
+    plan = build_impact_plan([malformed_path], root=tmp_path)
+
+    assert plan.tier == 2
+    assert plan.impact_class == "IMPACT_UNKNOWN"
+    assert plan.unmatched_paths == [malformed_path]
+
+
+def test_codex_dx_exact_config_cross_wiring_prevented():
+    assert EXACT_CONFIG_TARGETS["configs/codex_dx_failure_prevention.json"] == (
+        "tests/ops/test_codex_dx_failure_prevention.py",
+    )
+    assert EXACT_CONFIG_TARGETS["configs/codex_task_context_index.json"] == (
+        "tests/ops/test_codex_task_context_index.py",
+    )
+    assert EXACT_CONFIG_TARGETS["configs/benchmarks/codex_dx_before_v1.json"] == (
+        "tests/benchmark/test_codex_dx_benchmark.py",
+        "tests/benchmark/test_codex_dx_history.py",
+    )
+    assert len(EXACT_CONFIG_TARGETS) == 3
+
+
+def test_codex_dx_target_omission_fails_closed(tmp_path: Path):
+    config = tmp_path / "configs" / "codex_dx_failure_prevention.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.touch()
+
+    plan = build_impact_plan(
+        ["configs/codex_dx_failure_prevention.json"],
+        root=tmp_path,
+    )
+
+    assert plan.tier == 2
+    assert plan.impact_class == "IMPACT_UNKNOWN"
+    assert "empty verification set failed closed" in plan.reasons
+
+
+def test_codex_dx_before_v1_target_omission_fails_closed(tmp_path: Path):
+    config = tmp_path / "configs" / "benchmarks" / "codex_dx_before_v1.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.touch()
+
+    plan = build_impact_plan(
+        ["configs/benchmarks/codex_dx_before_v1.json"],
+        root=tmp_path,
+    )
+
+    assert plan.tier == 2
+    assert plan.impact_class == "IMPACT_UNKNOWN"
+    assert "empty verification set failed closed" in plan.reasons
 
 
 def test_preexisting_exact_base_failure_is_distinguished_from_new_regression():
