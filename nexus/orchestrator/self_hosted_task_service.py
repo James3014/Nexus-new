@@ -92,6 +92,7 @@ from nexus.orchestrator.worker_escalation import WorkerEscalationPolicy
 from nexus.orchestrator.worktree_manager import (
     TargetWorktreeLease,
     WorktreeManager,
+    _source_identity,
     mutation_domains_conflict,
 )
 from nexus.services.model_workforce_policy import WorkforcePolicyLoader
@@ -5195,6 +5196,27 @@ class SelfHostedTaskService:
                 "EPHEMERAL_TEST_RUNNER"
                 if self._custom_runner is not None
                 else "WORKER_REGISTRY"
+            ),
+            "source_identity": _source_identity(
+                str(Path(contract.controller_repo_root).resolve()),
+                contract.controller_revision,
+                contract.contract_hash,
+                execution_authority=(
+                    "EPHEMERAL_TEST_RUNNER"
+                    if self._custom_runner is not None
+                    else "WORKER_REGISTRY"
+                ),
+                worker_id=(
+                    dispatch_binding["worker_id"]
+                    if dispatch_binding
+                    else None if tracked_dispatch_required else request.get("worker_id")
+                ),
+                provider=(
+                    dispatch_binding["provider"]
+                    if dispatch_binding
+                    else None if tracked_dispatch_required else contract.preferred_provider
+                ),
+                lifecycle_revision=identity.get("lifecycle_revision"),
             ),
             "provider_receipt_authoritative": self._custom_runner is None,
             "workforce_admission_authoritative": self._custom_runner is None,

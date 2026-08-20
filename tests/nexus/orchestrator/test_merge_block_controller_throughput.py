@@ -17,7 +17,12 @@ from nexus.orchestrator.self_hosted_task_service import (
     mutation_domains_conflict,
 )
 from nexus.orchestrator.task_contract import MutationMode, SelfHostedTaskContract
-from nexus.orchestrator.worktree_manager import WorktreeManager
+from nexus.orchestrator.worktree_manager import (
+    WorktreeManager,
+    _contract_digest,
+    _domain_fingerprint,
+    _source_identity,
+)
 
 
 def _task(*, task_id: str, allowed_files, status="CANDIDATE_CAPTURED", **extra):
@@ -201,7 +206,7 @@ def test_real_create_lease_allows_disjoint_and_blocks_exact_parent(tmp_path):
     manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
     a = _real_contract(controller, target_root, "a", ["scope/a.txt"])
     b = _real_contract(controller, target_root, "b", ["scope/b.txt"])
-    lease_a = manager.create_lease(a)
+    lease_a = manager.create_lease(a, attempt_id="a-attempt")
     state_a = {
         "a": {
             "task_id": "a",
@@ -218,7 +223,7 @@ def test_real_create_lease_allows_disjoint_and_blocks_exact_parent(tmp_path):
     state_a["a"]["attempt_id"] = "stale-attempt"
     assert manager.target_conflict(b, task_states=state_a) is True
     state_a["a"]["attempt_id"] = "a-attempt"
-    lease_b = manager.create_lease(b, task_states=state_a)
+    lease_b = manager.create_lease(b, task_states=state_a, attempt_id="b-attempt")
     assert Path(lease_a.target_worktree) != Path(lease_b.target_worktree)
     b_branch = f"refs/heads/{lease_b.target_branch}"
     b_ref_before = _git(controller, "rev-parse", b_branch)
@@ -345,11 +350,34 @@ def test_concurrent_disjoint_create_lease_refreshes_ownership_under_lock(tmp_pat
         _real_contract(controller, target_root, task_id, [f"scope/{task_id}.txt"])
         for task_id in ("a", "b")
     ]
+    states = {}
+    for c in contracts:
+        c_hash = _contract_digest(c)
+        src_id = _source_identity(
+            str(controller.resolve()),
+            c.controller_revision,
+            c_hash,
+            execution_authority="WORKER_REGISTRY",
+        )
+        states[c.task_id] = {
+            "task_id": c.task_id,
+            "status": "SUBMITTED",
+            "attempt_id": f"attempt-{c.task_id}",
+            "contract_hash": c_hash,
+            "source_identity": src_id,
+            "controller_revision": c.controller_revision,
+            "controller_worktree": str(controller.resolve()),
+            "contract": c.model_dump(mode="json"),
+        }
     barrier = threading.Barrier(2)
 
     def acquire(contract):
         barrier.wait(timeout=5)
-        return manager.create_lease(contract, task_states={}).task_id
+        return manager.create_lease(
+            contract,
+            task_states=states,
+            attempt_id=f"attempt-{contract.task_id}",
+        ).task_id
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = sorted(pool.map(acquire, contracts))
@@ -741,3 +769,214 @@ def test_direct_service_admission_blocks_when_retained_target_exists(tmp_path, m
         time.sleep(0.01)
     assert len(calls) == 1
     assert calls[0][0] == "overlap-task"
+
+
+def test_service_submission_binds_source_identity_and_attempt_id(tmp_path, monkeypatch):
+    controller, target_root = _real_repo(tmp_path)
+    state_dir = tmp_path / "state"
+    monkeypatch.delenv("NEXUS_TARGET_ROOT_OVERRIDE", raising=False)
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(target_root))
+    calls = []
+
+    def runner(contract, state, progress_cb):
+        calls.append((contract.task_id, state.get("attempt_id"), state.get("source_identity")))
+        return {"status": "SUCCESS"}
+
+    service = SelfHostedTaskService(
+        state_dir=state_dir,
+        runner=runner,
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    rev = _git(controller, "rev-parse", "HEAD")
+    request = {
+        "task_id": "bind-task",
+        "what": "testing source identity binding",
+        "why": "test",
+        "controller_revision": rev,
+        "target_base_revision": rev,
+        "controller_repo_root": str(controller),
+        "target_repo_root": str(target_root / "bind-task"),
+        "target_worktree_root": str(target_root),
+        "allowed_files": ["scope/bind.txt"],
+        "forbidden_files": [],
+        "verifier_commands": [],
+        "protected_contracts": [],
+        "execution_lane": "ISOLATED_TARGET",
+        "worker": "codex",
+        "allow_unbound_test_identity": True,
+        "task_card_path": str(tmp_path / "card.txt"),
+        "idempotency_key": "bind-idempotent",
+    }
+    result = service.submit_task(request)
+    assert result["task_id"] == "bind-task"
+    state = service._read_state_snapshot("bind-task")
+    assert state["attempt_id"] == result["attempt_id"]
+    assert "source_identity" in state
+    assert state["source_identity"].startswith(f"controller:{controller.resolve()}:{rev}:")
+    assert "authority:EPHEMERAL_TEST_RUNNER" in state["source_identity"]
+
+
+def test_lingering_ownership_record_after_abrupt_worktree_deletion_blocks_service_admission(
+    tmp_path, monkeypatch
+):
+    controller, target_root = _real_repo(tmp_path)
+    monkeypatch.delenv("NEXUS_TARGET_ROOT_OVERRIDE", raising=False)
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(target_root))
+    manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
+    contract_a = _real_contract(controller, target_root, "lingering-a", ["scope/common.txt"])
+    lease_a = manager.create_lease(contract_a)
+    assert Path(lease_a.target_worktree).exists()
+
+    record_path = manager._ownership_record_path(controller, "lingering-a")
+    assert record_path.exists()
+
+    # Abruptly remove worktree without CAS record cleanup
+    _git(controller, "worktree", "remove", "--force", str(lease_a.target_worktree))
+    assert not Path(lease_a.target_worktree).exists()
+    assert record_path.exists()
+
+    # Attempt to submit new task with overlapping scope through service
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        runner=lambda c, s, p: {"status": "SUCCESS"},
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    request_b = {
+        "task_id": "lingering-b",
+        "what": "conflicting with lingering record",
+        "why": "test",
+        "controller_revision": contract_a.controller_revision,
+        "target_base_revision": contract_a.target_base_revision,
+        "controller_repo_root": str(controller),
+        "target_repo_root": str(target_root / "lingering-b"),
+        "target_worktree_root": str(target_root),
+        "allowed_files": ["scope/common.txt"],
+        "forbidden_files": [],
+        "verifier_commands": [],
+        "protected_contracts": [],
+        "execution_lane": "ISOLATED_TARGET",
+        "worker": "codex",
+        "allow_unbound_test_identity": True,
+        "task_card_path": str(tmp_path / "card.txt"),
+        "idempotency_key": "lingering-idempotent",
+    }
+    with pytest.raises(RuntimeError, match="overlapping Target"):
+        service.submit_task(request_b)
+
+
+def test_orphan_record_tampered_allowed_files_recomputed_hashes_blocks_throughput_admission(
+    tmp_path,
+):
+    controller, target_root = _real_repo(tmp_path)
+    manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
+    contract_a = _real_contract(controller, target_root, "a", ["scope/a.txt"])
+    lease_a = manager.create_lease(contract_a)
+    assert Path(lease_a.target_worktree).exists()
+
+    record_path = manager._ownership_record_path(controller, "a")
+    assert record_path.exists()
+
+    _git(controller, "worktree", "remove", "--force", str(lease_a.target_worktree))
+    assert not Path(lease_a.target_worktree).exists()
+
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["contract"]["allowed_files"] = ["scope/tampered_disjoint.txt"]
+    new_contract_hash = _contract_digest(record["contract"])
+    record["contract_hash"] = new_contract_hash
+    record["expected_contract_hash"] = new_contract_hash
+    record["domain_fingerprint"] = _domain_fingerprint(record)
+    record["expected_domain_fingerprint"] = record["domain_fingerprint"]
+    record["source_identity"] = _source_identity(
+        str(controller.resolve()),
+        contract_a.controller_revision,
+        new_contract_hash,
+        execution_authority="WORKER_REGISTRY",
+    )
+    record["expected_source_identity"] = record["source_identity"]
+    record["integrity_sha256"] = manager._ownership_digest(record)
+    record_path.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+
+    state_a = {
+        "a": {
+            "task_id": "a",
+            "status": "CANDIDATE_CAPTURED",
+            "attempt_id": lease_a.attempt_id,
+            "lease_id": lease_a.lease_id,
+            "controller_revision": contract_a.controller_revision,
+            "controller_worktree": str(controller.resolve()),
+            "contract": contract_a.model_dump(mode="json"),
+            "lease": lease_a.__dict__,
+            "expected_attempt_id": lease_a.attempt_id,
+            "expected_lease_id": lease_a.lease_id,
+            "expected_controller_revision": contract_a.controller_revision,
+            "expected_controller_worktree": str(controller.resolve()),
+        }
+    }
+
+    contract_b = _real_contract(controller, target_root, "b", ["scope/b.txt"])
+    # Tampered orphan record fails closed when cross-checked against unchanged snapshot
+    assert manager.target_conflict(contract_b, task_states=state_a) is True
+    with pytest.raises(RuntimeError, match="serial Target budget exceeded"):
+        manager.create_lease(contract_b, task_states=state_a)
+
+
+def test_orphan_record_without_snapshot_fails_closed_even_when_paths_disjoint(tmp_path):
+    controller, target_root = _real_repo(tmp_path)
+    manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
+    contract_a = _real_contract(controller, target_root, "a", ["scope/a.txt"])
+    lease_a = manager.create_lease(contract_a)
+    assert Path(lease_a.target_worktree).exists()
+
+    record_path = manager._ownership_record_path(controller, "a")
+    assert record_path.exists()
+
+    _git(controller, "worktree", "remove", "--force", str(lease_a.target_worktree))
+    assert not Path(lease_a.target_worktree).exists()
+
+    contract_b = _real_contract(controller, target_root, "b", ["scope/b.txt"])
+    # Orphan record without snapshot in task_states fails closed
+    assert manager.target_conflict(contract_b, task_states={}) is True
+    with pytest.raises(RuntimeError, match="serial Target budget exceeded"):
+        manager.create_lease(contract_b, task_states={})
+
+
+def test_valid_orphan_record_with_matching_snapshot_allows_disjoint_concurrency(tmp_path):
+    controller, target_root = _real_repo(tmp_path)
+    manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
+    contract_a = _real_contract(controller, target_root, "a", ["scope/a.txt"])
+    lease_a = manager.create_lease(contract_a)
+    assert Path(lease_a.target_worktree).exists()
+
+    record_path = manager._ownership_record_path(controller, "a")
+    assert record_path.exists()
+
+    _git(controller, "worktree", "remove", "--force", str(lease_a.target_worktree))
+    assert not Path(lease_a.target_worktree).exists()
+
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    state_a = {
+        "a": {
+            "task_id": "a",
+            "status": "CANDIDATE_CAPTURED",
+            "attempt_id": lease_a.attempt_id,
+            "lease_id": lease_a.lease_id,
+            "controller_revision": contract_a.controller_revision,
+            "controller_worktree": str(controller.resolve()),
+            "contract": contract_a.model_dump(mode="json"),
+            "lease": lease_a.__dict__,
+            "expected_attempt_id": lease_a.attempt_id,
+            "expected_lease_id": lease_a.lease_id,
+            "expected_controller_revision": contract_a.controller_revision,
+            "expected_controller_worktree": str(controller.resolve()),
+            "contract_hash": record.get("contract_hash"),
+            "source_identity": record.get("source_identity"),
+        }
+    }
+
+    contract_b = _real_contract(controller, target_root, "b", ["scope/b.txt"])
+    assert manager.target_conflict(contract_b, task_states=state_a) is False
+    lease_b = manager.create_lease(contract_b, task_states=state_a)
+    assert lease_b.task_id == "b"
+    assert Path(lease_b.target_worktree).exists()

@@ -11,7 +11,12 @@ from nexus.orchestrator.task_contract import (
     MutationMode,
     SelfHostedTaskContract,
 )
-from nexus.orchestrator.worktree_manager import WorktreeManager
+from nexus.orchestrator.worktree_manager import (
+    WorktreeManager,
+    _contract_digest,
+    _domain_fingerprint,
+    _source_identity,
+)
 
 
 @pytest.fixture
@@ -1672,3 +1677,237 @@ def test_cleanup_terminal_target_cas_swap_race_preserves_record(sh2_repo, monkey
     assert "ownership record" in (receipt.blocker or "")
     # The swapped record must be preserved
     assert record_path.exists()
+
+
+def test_ownership_record_distinct_attempt_id_binding(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-attempt-binding")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+    assert record_path.exists()
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record.get("attempt_id") == lease.attempt_id
+    assert record.get("lease_id") == lease.lease_id
+
+    record["attempt_id"] = "attempt-forged-9999"
+    record["integrity_sha256"] = manager._ownership_digest(record)
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    entry = {"branch": f"refs/heads/nexus/task/{contract.task_id}", "worktree": str(target)}
+    with pytest.raises(ValueError, match="MUTATION_IDENTITY_INVALID: attempt_id is stale"):
+        manager._read_target_ownership(controller, entry, contract.task_id)
+
+
+def test_ownership_recomputed_digest_after_allowed_files_tamper_fails_closed(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-tamper-allowed")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+    assert record_path.exists()
+
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["contract"]["allowed_files"] = ["src/forged.txt"]
+    record["integrity_sha256"] = manager._ownership_digest(record)
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    entry = {"branch": f"refs/heads/nexus/task/{contract.task_id}", "worktree": str(target)}
+    with pytest.raises(ValueError, match="MUTATION_IDENTITY_INVALID"):
+        manager._read_target_ownership(controller, entry, contract.task_id)
+
+
+def test_cleanup_cas_staging_swap_never_deletes_replacement_file(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-cas-no-replace-del")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+    assert record_path.exists()
+
+    _, original_record, expected_identity, expected_digest = manager._validate_exact_ownership_for_cleanup(
+        controller, contract, lease
+    )
+
+    replacement_content = json.dumps({"schema": "nexus.target_ownership.v1", "task_id": "replacement-b"})
+    orig_replace = os.replace
+
+    def hooked_replace(src, dst):
+        orig_replace(src, dst)
+        if str(src) == str(record_path):
+            record_path.write_text(replacement_content, encoding="utf-8")
+
+    import unittest.mock as mock
+    with mock.patch("os.replace", side_effect=hooked_replace):
+        manager._delete_ownership_record_cas(
+            record_path,
+            expected_identity,
+            expected_digest,
+            lease.lease_id,
+            contract.task_id,
+            expected_attempt_id=lease.attempt_id,
+        )
+
+    assert record_path.exists()
+    assert record_path.read_text(encoding="utf-8") == replacement_content
+
+
+def test_orphan_ownership_record_after_failed_cleanup_blocks_later_admission(sh2_repo):
+    contract_a, manager, lease_a, target_a = _prepare_candidate(sh2_repo, task_id="task-held-a")
+    controller = Path(contract_a.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract_a.task_id)
+    assert record_path.exists()
+
+    _git(controller, "worktree", "remove", "--force", str(target_a))
+    assert not target_a.exists()
+    assert record_path.exists()
+
+    contract_b = _contract(sh2_repo, task_id="task-held-b", allowed_files=["src/allowed.txt"])
+
+    assert manager.target_conflict(contract_b) is True
+    with pytest.raises(RuntimeError, match="serial Target budget exceeded: active Target limit is 1"):
+        manager.create_lease(contract_b)
+
+
+def test_ownership_source_identity_mismatch_fails_closed(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-source-id")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+    assert record_path.exists()
+
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record.get("source_identity", "").startswith("controller:")
+
+    record["source_identity"] = "controller:/wrong/path:badrev:badhash;authority:FORGED"
+    record["integrity_sha256"] = manager._ownership_digest(record)
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    entry = {"branch": f"refs/heads/nexus/task/{contract.task_id}", "worktree": str(target)}
+    with pytest.raises(ValueError, match="MUTATION_IDENTITY_INVALID"):
+        manager._read_target_ownership(controller, entry, contract.task_id)
+
+
+def test_orphan_ownership_tampered_allowed_files_recomputed_hashes_blocks_with_unchanged_snapshot(sh2_repo):
+    contract_a, manager, lease_a, target_a = _prepare_candidate(
+        sh2_repo, task_id="task-tamper-orphan", allowed_files=["src/overlap.txt"]
+    )
+    controller = Path(contract_a.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract_a.task_id)
+    assert record_path.exists()
+
+    _git(controller, "worktree", "remove", "--force", str(target_a))
+    assert not target_a.exists()
+    assert record_path.exists()
+
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["contract"]["allowed_files"] = ["src/disjoint_tampered.txt"]
+    new_contract_hash = _contract_digest(record["contract"])
+    record["contract_hash"] = new_contract_hash
+    record["expected_contract_hash"] = new_contract_hash
+    record["domain_fingerprint"] = _domain_fingerprint(record)
+    record["expected_domain_fingerprint"] = record["domain_fingerprint"]
+    record["source_identity"] = _source_identity(
+        str(controller),
+        contract_a.controller_revision,
+        new_contract_hash,
+        execution_authority="WORKER_REGISTRY",
+    )
+    record["expected_source_identity"] = record["source_identity"]
+    record["integrity_sha256"] = manager._ownership_digest(record)
+    record_path.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+
+    snapshot_a = {
+        "task_id": contract_a.task_id,
+        "status": "CANDIDATE_CAPTURED",
+        "attempt_id": lease_a.attempt_id,
+        "lease_id": lease_a.lease_id,
+        "controller_revision": contract_a.controller_revision,
+        "controller_worktree": str(controller),
+        "contract": contract_a.model_dump(mode="json"),
+        "lease": lease_a.__dict__,
+        "expected_attempt_id": lease_a.attempt_id,
+        "expected_lease_id": lease_a.lease_id,
+        "expected_controller_revision": contract_a.controller_revision,
+        "expected_controller_worktree": str(controller),
+    }
+
+    contract_b = _contract(sh2_repo, task_id="task-b", allowed_files=["src/disjoint_b.txt"])
+
+    # Even though tampered orphan record claims disjoint path, mismatch with snapshot fails closed
+    assert manager.target_conflict(contract_b, task_states={contract_a.task_id: snapshot_a}) is True
+    with pytest.raises(RuntimeError, match="serial Target budget exceeded: active Target limit is 1"):
+        manager.create_lease(contract_b, task_states={contract_a.task_id: snapshot_a})
+
+
+def test_orphan_ownership_without_authoritative_snapshot_fails_closed_even_if_path_disjoint(sh2_repo):
+    contract_a, manager, lease_a, target_a = _prepare_candidate(
+        sh2_repo, task_id="task-orphan-no-snap", allowed_files=["src/a_scope.txt"]
+    )
+    controller = Path(contract_a.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract_a.task_id)
+    assert record_path.exists()
+
+    _git(controller, "worktree", "remove", "--force", str(target_a))
+    assert not target_a.exists()
+    assert record_path.exists()
+
+    contract_b = _contract(sh2_repo, task_id="task-b-disjoint", allowed_files=["src/b_scope.txt"])
+
+    # With no snapshot for task A in task_states, must fail closed even though paths appear disjoint
+    assert manager.target_conflict(contract_b, task_states={}) is True
+    with pytest.raises(RuntimeError, match="serial Target budget exceeded: active Target limit is 1"):
+        manager.create_lease(contract_b, task_states={})
+
+
+def test_valid_orphan_ownership_with_matching_snapshot_allows_genuinely_disjoint_target(sh2_repo):
+    contract_a, manager, lease_a, target_a = _prepare_candidate(
+        sh2_repo, task_id="task-orphan-valid", allowed_files=["src/a_scope.txt"]
+    )
+    controller = Path(contract_a.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract_a.task_id)
+    assert record_path.exists()
+
+    _git(controller, "worktree", "remove", "--force", str(target_a))
+    assert not target_a.exists()
+    assert record_path.exists()
+
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    snapshot_a = {
+        "task_id": contract_a.task_id,
+        "status": "CANDIDATE_CAPTURED",
+        "attempt_id": lease_a.attempt_id,
+        "lease_id": lease_a.lease_id,
+        "controller_revision": contract_a.controller_revision,
+        "controller_worktree": str(controller),
+        "contract": contract_a.model_dump(mode="json"),
+        "lease": lease_a.__dict__,
+        "expected_attempt_id": lease_a.attempt_id,
+        "expected_lease_id": lease_a.lease_id,
+        "expected_controller_revision": contract_a.controller_revision,
+        "expected_controller_worktree": str(controller),
+        "contract_hash": record.get("contract_hash"),
+        "source_identity": record.get("source_identity"),
+    }
+
+    # Genuinely disjoint task B can proceed
+    contract_b = _contract(sh2_repo, task_id="task-b-allowed", allowed_files=["src/b_scope.txt"])
+    assert manager.target_conflict(contract_b, task_states={contract_a.task_id: snapshot_a}) is False
+    lease_b = manager.create_lease(contract_b, task_states={contract_a.task_id: snapshot_a})
+    assert lease_b.task_id == "task-b-allowed"
+    assert Path(lease_b.target_worktree).exists()
+
+    # But overlapping task C remains blocked
+    contract_c = _contract(sh2_repo, task_id="task-c-overlap", allowed_files=["src/a_scope.txt"])
+    assert (
+        manager.target_conflict(
+            contract_c,
+            task_states={
+                contract_a.task_id: snapshot_a,
+                "task-b-allowed": {
+                    "task_id": "task-b-allowed",
+                    "status": "CANDIDATE_CAPTURED",
+                    "attempt_id": lease_b.attempt_id,
+                    "lease_id": lease_b.lease_id,
+                    "controller_revision": contract_b.controller_revision,
+                    "controller_worktree": str(controller),
+                    "contract": contract_b.model_dump(mode="json"),
+                    "lease": lease_b.__dict__,
+                },
+            },
+        )
+        is True
+    )

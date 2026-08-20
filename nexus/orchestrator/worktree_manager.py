@@ -1,4 +1,5 @@
 import fcntl
+import inspect
 import json
 import os
 import re
@@ -9,6 +10,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence
+from uuid import uuid4
 
 from nexus.orchestrator.collaboration_realm import CollaborationRealmVerifier
 from nexus.orchestrator.task_contract import ApprovalStatus, SelfHostedTaskContract
@@ -31,6 +33,49 @@ def _record_value(record: Any, key: str, default: Any = None) -> Any:
 def _record_contract(record: Any) -> Any:
     contract = _record_value(record, "contract")
     return contract if contract is not None else record
+
+
+def _contract_digest(contract: Any) -> str:
+    if hasattr(contract, "model_dump"):
+        payload = contract.model_dump(mode="json", exclude={"contract_hash"})
+    elif isinstance(contract, Mapping):
+        payload = {
+            key: value
+            for key, value in contract.items()
+            if key not in {"contract_hash", "expected_contract_hash"}
+        }
+    else:
+        return ""
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return sha256(canonical).hexdigest()
+
+
+def _source_identity(
+    controller_root: str,
+    controller_revision: str,
+    contract_hash: str,
+    *,
+    execution_authority: Optional[str] = None,
+    worker_id: Optional[str] = None,
+    provider: Optional[str] = None,
+    lifecycle_revision: Optional[str] = None,
+) -> str:
+    parts = [
+        f"controller:{controller_root}:{controller_revision}:{contract_hash}",
+        f"authority:{execution_authority or 'WORKER_REGISTRY'}",
+    ]
+    if provider:
+        parts.append(f"provider:{provider}")
+    if worker_id:
+        parts.append(f"worker:{worker_id}")
+    if lifecycle_revision:
+        parts.append(f"lifecycle:{lifecycle_revision}")
+    return ";".join(parts)
 
 
 def _normalized_mutation_paths(record: Any) -> tuple[str, ...]:
@@ -59,6 +104,31 @@ def _normalized_mutation_paths(record: Any) -> tuple[str, ...]:
             raise ValueError("MUTATION_DOMAIN_INVALID: overlapping allowed paths")
         normalized.append(path)
     return tuple(sorted(normalized))
+
+
+def _domain_fingerprint(record_or_contract: Any) -> str:
+    contract = _record_contract(record_or_contract)
+    paths = _normalized_mutation_paths(contract)
+    mode = str(_record_value(contract, "mutation_mode") or "WORKING_TREE_ONLY").upper()
+    task_id = str(_record_value(contract, "task_id") or _record_value(record_or_contract, "task_id") or "").strip()
+    controller = str(_record_value(record_or_contract, "controller_worktree") or _record_value(contract, "controller_repo_root") or "").strip()
+    controller_revision = str(_record_value(record_or_contract, "controller_revision") or _record_value(contract, "controller_revision") or "").strip()
+    target_base_revision = str(_record_value(contract, "target_base_revision") or _record_value(record_or_contract, "target_base_revision") or "").strip()
+    payload = {
+        "task_id": task_id,
+        "controller_repo_root": controller,
+        "controller_revision": controller_revision,
+        "target_base_revision": target_base_revision,
+        "mutation_mode": mode,
+        "allowed_paths": list(paths),
+    }
+    canonical = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return sha256(canonical).hexdigest()
 
 
 def _validate_mutation_identity(record: Any) -> None:
@@ -100,8 +170,165 @@ def _validate_mutation_identity(record: Any) -> None:
         expected = _record_value(record, f"expected_{key}")
         if expected is not None and value != expected:
             raise ValueError(f"MUTATION_IDENTITY_INVALID: {key} is stale")
+
+    contract_hash = str(
+        _record_value(record, "contract_hash")
+        or _record_value(contract, "contract_hash")
+        or ""
+    ).strip()
+    expected_contract_hash = _record_value(record, "expected_contract_hash")
+    if expected_contract_hash is not None and contract_hash != expected_contract_hash:
+        raise ValueError("MUTATION_IDENTITY_INVALID: contract_hash is stale")
+
+    domain_fingerprint = str(
+        _record_value(record, "domain_fingerprint")
+        or _record_value(contract, "domain_fingerprint")
+        or ""
+    ).strip()
+    expected_domain_fingerprint = _record_value(record, "expected_domain_fingerprint")
+    if expected_domain_fingerprint is not None and domain_fingerprint != str(expected_domain_fingerprint).strip():
+        raise ValueError("MUTATION_IDENTITY_INVALID: domain_fingerprint is stale")
+
+    source_identity = str(
+        _record_value(record, "source_identity")
+        or _record_value(record, "controller_source")
+        or _record_value(contract, "source_identity")
+        or ""
+    ).strip()
+    expected_source_identity = _record_value(record, "expected_source_identity")
+    if expected_source_identity is not None and source_identity != str(expected_source_identity).strip():
+        raise ValueError("MUTATION_IDENTITY_INVALID: source_identity is stale")
+
     if _record_value(record, "competition_id") is not None:
         raise ValueError("MUTATION_IDENTITY_INVALID: forged competition identity")
+
+
+def _validate_ownership_record(
+    record: Mapping[str, Any],
+    *,
+    task_state: Optional[Mapping[str, Any]] = None,
+    controller_root: Optional[Path | str] = None,
+) -> None:
+    if not isinstance(record, Mapping) or record.get("schema") != "nexus.target_ownership.v1":
+        raise ValueError("MUTATION_IDENTITY_INVALID: ownership record schema is invalid")
+
+    payload = {key: value for key, value in record.items() if key != "integrity_sha256"}
+    computed_integrity = sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    if record.get("integrity_sha256") != computed_integrity:
+        raise ValueError("MUTATION_IDENTITY_INVALID: ownership record integrity is invalid")
+
+    _validate_mutation_identity(record)
+
+    rec_contract = record.get("contract") or {}
+    computed_contract_hash = _contract_digest(rec_contract)
+    if record.get("contract_hash") and record.get("contract_hash") != computed_contract_hash:
+        raise ValueError("MUTATION_IDENTITY_INVALID: record contract hash mismatch")
+
+    resolved_controller = (
+        Path(controller_root).resolve()
+        if controller_root is not None
+        else (Path(str(record.get("controller_worktree") or "")).resolve() if record.get("controller_worktree") else None)
+    )
+
+    record_src = str(record.get("source_identity") or "")
+    if record_src and resolved_controller is not None:
+        controller_str = str(resolved_controller)
+        expected_prefix = f"controller:{controller_str}:{record.get('controller_revision')}:{record.get('contract_hash')}"
+        if not record_src.startswith(expected_prefix):
+            raise ValueError("MUTATION_IDENTITY_INVALID: record source identity mismatch")
+
+    if task_state is not None:
+        if not isinstance(task_state, Mapping):
+            raise ValueError("MUTATION_IDENTITY_INVALID: authoritative task state is invalid")
+        _validate_mutation_identity(task_state)
+
+        # Task ID cross-check
+        state_task_id = str(
+            task_state.get("task_id")
+            or (task_state.get("contract", {}).get("task_id") if isinstance(task_state.get("contract"), Mapping) else "")
+            or ""
+        ).strip()
+        rec_task_id = str(record.get("task_id") or "").strip()
+        if state_task_id and rec_task_id and state_task_id != rec_task_id:
+            raise ValueError("MUTATION_IDENTITY_INVALID: task id mismatch with authoritative service state")
+
+        # Controller worktree cross-check
+        rec_ctrl = str(
+            record.get("controller_worktree")
+            or (rec_contract.get("controller_repo_root") if isinstance(rec_contract, Mapping) else "")
+            or ""
+        ).strip()
+        state_contract = task_state.get("contract") or {}
+        state_ctrl = str(
+            task_state.get("controller_worktree")
+            or (state_contract.get("controller_repo_root") if isinstance(state_contract, Mapping) else "")
+            or ""
+        ).strip()
+        if rec_ctrl and state_ctrl and Path(rec_ctrl).resolve() != Path(state_ctrl).resolve():
+            raise ValueError("MUTATION_IDENTITY_INVALID: controller worktree mismatch with authoritative service state")
+
+        # Controller revision cross-check
+        rec_rev = str(
+            record.get("controller_revision")
+            or (rec_contract.get("controller_revision") if isinstance(rec_contract, Mapping) else "")
+            or ""
+        ).strip()
+        state_rev = str(
+            task_state.get("controller_revision")
+            or (state_contract.get("controller_revision") if isinstance(state_contract, Mapping) else "")
+            or ""
+        ).strip()
+        if rec_rev and state_rev and rec_rev != state_rev:
+            raise ValueError("MUTATION_IDENTITY_INVALID: controller revision mismatch with authoritative service state")
+
+        # Full canonical contract hash cross-check
+        state_contract_hash = str(
+            task_state.get("contract_hash")
+            or (state_contract.get("contract_hash") if isinstance(state_contract, Mapping) else "")
+            or _contract_digest(state_contract)
+            or ""
+        ).strip()
+        if state_contract_hash and computed_contract_hash != state_contract_hash:
+            raise ValueError("MUTATION_IDENTITY_INVALID: contract hash mismatch with authoritative service state")
+
+        # Allowed paths / domain fingerprint cross-check
+        if (
+            (isinstance(state_contract, Mapping) and ("allowed_files" in state_contract or "allowed_paths" in state_contract))
+            or (isinstance(task_state, Mapping) and ("allowed_files" in task_state or "allowed_paths" in task_state))
+        ):
+            try:
+                state_paths = _normalized_mutation_paths(state_contract if state_contract else task_state)
+                record_paths = _normalized_mutation_paths(rec_contract if rec_contract else record)
+                if state_paths != record_paths:
+                    raise ValueError("MUTATION_IDENTITY_INVALID: allowed paths mismatch with authoritative service state")
+            except ValueError as exc:
+                raise ValueError(f"MUTATION_IDENTITY_INVALID: mutation domain invalid: {exc}") from exc
+
+        rec_df = str(
+            record.get("domain_fingerprint")
+            or (rec_contract.get("domain_fingerprint") if isinstance(rec_contract, Mapping) else "")
+            or ""
+        ).strip()
+        state_df = str(
+            task_state.get("domain_fingerprint")
+            or (state_contract.get("domain_fingerprint") if isinstance(state_contract, Mapping) else "")
+            or ""
+        ).strip()
+        if rec_df and state_df and rec_df != state_df:
+            raise ValueError("MUTATION_IDENTITY_INVALID: domain fingerprint mismatch with authoritative service state")
+
+        # Actual attempt ID cross-check
+        state_attempt = str(task_state.get("attempt_id") or "").strip()
+        rec_attempt = str(record.get("attempt_id") or "").strip()
+        if state_attempt and rec_attempt and rec_attempt != state_attempt:
+            raise ValueError("MUTATION_IDENTITY_INVALID: attempt id mismatch with authoritative service state")
+
+        # Source identity cross-check
+        state_source = str(task_state.get("source_identity") or task_state.get("controller_source") or "").strip()
+        if state_source and record_src and record_src != state_source:
+            raise ValueError("MUTATION_IDENTITY_INVALID: source identity mismatch with authoritative service state")
 
 
 def mutation_domains_conflict(left: Any, right: Any) -> bool:
@@ -148,6 +375,7 @@ class TargetWorktreeLease:
     merge_performed: bool
     target_detached: bool = False
     collaboration_provenance: Optional[dict[str, object]] = None
+    attempt_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -448,9 +676,13 @@ class WorktreeManager:
         contract: SelfHostedTaskContract,
         *,
         task_states: Optional[Mapping[str, dict]] = None,
+        attempt_id: Optional[str] = None,
     ) -> TargetWorktreeLease:
         controller_root = Path(contract.controller_repo_root).resolve()
         with self._reservation_lock(controller_root):
+            sig = inspect.signature(self._create_lease_locked)
+            if "attempt_id" in sig.parameters:
+                return self._create_lease_locked(contract, task_states=task_states, attempt_id=attempt_id)
             return self._create_lease_locked(contract, task_states=task_states)
 
     @staticmethod
@@ -472,34 +704,69 @@ class WorktreeManager:
         self,
         contract: SelfHostedTaskContract,
         lease: TargetWorktreeLease,
+        *,
+        attempt_id: Optional[str] = None,
+        task_states: Optional[Mapping[str, dict]] = None,
     ) -> None:
-        path = self._ownership_record_path(Path(contract.controller_repo_root).resolve(), contract.task_id)
+        controller_root = Path(contract.controller_repo_root).resolve()
+        path = self._ownership_record_path(controller_root, contract.task_id)
         path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        contract_hash = _contract_digest(contract)
+        controller_root_str = str(controller_root)
+        snapshot = (task_states.get(contract.task_id) if isinstance(task_states, Mapping) else {}) or {}
+        execution_authority = snapshot.get("execution_authority") or "WORKER_REGISTRY"
+        worker_id = snapshot.get("selected_worker_id") or getattr(contract, "selected_worker_id", None)
+        provider = snapshot.get("selected_provider") or getattr(contract, "preferred_provider", None)
+        lifecycle_revision = snapshot.get("lifecycle_revision")
+        src_identity = snapshot.get("source_identity") or _source_identity(
+            controller_root_str,
+            contract.controller_revision,
+            contract_hash,
+            execution_authority=execution_authority,
+            worker_id=worker_id,
+            provider=provider,
+            lifecycle_revision=lifecycle_revision,
+        )
+        actual_attempt_id = attempt_id or lease.attempt_id or snapshot.get("attempt_id") or f"attempt-{contract.task_id}"
+        if hasattr(contract, "model_dump"):
+            contract_payload = contract.model_dump(mode="json", exclude={"contract_hash"})
+        elif isinstance(contract, Mapping):
+            contract_payload = {
+                key: value
+                for key, value in contract.items()
+                if key not in {"contract_hash", "expected_contract_hash"}
+            }
+        else:
+            contract_payload = {}
         record = {
             "schema": "nexus.target_ownership.v1",
             "task_id": contract.task_id,
-            "attempt_id": lease.lease_id,
+            "attempt_id": actual_attempt_id,
             "lease_id": lease.lease_id,
+            "contract_hash": contract_hash,
+            "source_identity": src_identity,
             "controller_revision": contract.controller_revision,
-            "controller_worktree": str(Path(contract.controller_repo_root).resolve()),
-            "expected_attempt_id": lease.lease_id,
+            "controller_worktree": controller_root_str,
+            "expected_attempt_id": actual_attempt_id,
             "expected_lease_id": lease.lease_id,
+            "expected_contract_hash": contract_hash,
+            "expected_source_identity": src_identity,
             "expected_controller_revision": contract.controller_revision,
-            "expected_controller_worktree": str(Path(contract.controller_repo_root).resolve()),
+            "expected_controller_worktree": controller_root_str,
             "status": "TARGET_LEASED",
-            "contract": {
-                "task_id": contract.task_id,
-                "controller_repo_root": str(Path(contract.controller_repo_root).resolve()),
+            "controller_source": {
+                "controller_repo_root": controller_root_str,
                 "controller_revision": contract.controller_revision,
-                "target_repo_root": lease.target_worktree,
-                "target_base_revision": contract.target_base_revision,
-                "allowed_files": list(contract.allowed_files),
-                "mutation_mode": str(contract.mutation_mode),
+                "contract_hash": contract_hash,
+                "execution_authority": execution_authority,
+                "selected_provider": provider,
+                "selected_worker_id": worker_id,
             },
+            "contract": contract_payload,
             "lease": lease.__dict__,
         }
         record["integrity_sha256"] = self._ownership_digest(record)
-        temp = path.with_suffix(f".{os.getpid()}.tmp")
+        temp = path.with_suffix(f".{os.getpid()}.{uuid4().hex}.tmp")
         temp.write_text(json.dumps(record, sort_keys=True, separators=(",", ":")), encoding="utf-8")
         temp.chmod(0o600)
         os.replace(temp, path)
@@ -509,11 +776,23 @@ class WorktreeManager:
         payload = {key: value for key, value in record.items() if key != "integrity_sha256"}
         return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
+    _validate_ownership_record = staticmethod(_validate_ownership_record)
+
+    @staticmethod
+    def _restore_staged_ownership_record(staging_path: Path, path: Path) -> None:
+        if staging_path.exists():
+            try:
+                os.replace(staging_path, path)
+            except OSError:
+                pass
+
     def _read_target_ownership(
         self,
         controller_root: Path,
         entry: Mapping[str, str],
         task_id: str,
+        *,
+        task_state: Optional[Mapping[str, Any]] = None,
     ) -> dict[str, Any] | None:
         try:
             path = self._ownership_record_path(controller_root, task_id)
@@ -541,10 +820,12 @@ class WorktreeManager:
                     os.close(fd)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             raise ValueError("MUTATION_IDENTITY_INVALID: ownership record is unreadable") from exc
-        if not isinstance(record, dict) or record.get("schema") != "nexus.target_ownership.v1":
-            raise ValueError("MUTATION_IDENTITY_INVALID: ownership record schema is invalid")
-        if record.get("integrity_sha256") != self._ownership_digest(record):
-            raise ValueError("MUTATION_IDENTITY_INVALID: ownership record integrity is invalid")
+        _validate_ownership_record(
+            record,
+            task_state=task_state,
+            controller_root=controller_root,
+        )
+
         branch = entry.get("branch", "")
         expected_branch = f"refs/heads/nexus/task/{task_id}"
         lease = record.get("lease")
@@ -557,14 +838,51 @@ class WorktreeManager:
             or Path(str(lease.get("target_worktree", ""))).resolve() != Path(str(entry.get("worktree", ""))).resolve()
         ):
             raise ValueError("MUTATION_IDENTITY_INVALID: ownership record is stale")
-        _validate_mutation_identity(record)
         return record
+
+    def _all_ownership_records(self, controller_root: Path) -> list[dict[str, Any]]:
+        try:
+            raw_common = self._run_git(["rev-parse", "--git-common-dir"], cwd=controller_root)
+            common_dir = Path(raw_common)
+            if not common_dir.is_absolute():
+                common_dir = (controller_root / common_dir).resolve()
+            else:
+                common_dir = common_dir.resolve()
+        except Exception:
+            return []
+        records_dir = common_dir / "nexus-target-ownership"
+        if not records_dir.is_dir():
+            return []
+        records: list[dict[str, Any]] = []
+        for path in sorted(records_dir.iterdir()):
+            if path.name.endswith(".released"):
+                continue
+            if path.name.startswith(".") or not path.name.endswith(".json"):
+                records.append({"task_id": path.stem, "invalid": True, "path": str(path)})
+                continue
+            if not path.is_file() or path.is_symlink():
+                records.append({"task_id": path.stem, "invalid": True, "path": str(path)})
+                continue
+            try:
+                flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+                fd = os.open(path, flags)
+                with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                    data = json.load(handle)
+                if isinstance(data, dict):
+                    records.append(data)
+                else:
+                    records.append({"task_id": path.stem, "invalid": True})
+            except Exception:
+                records.append({"task_id": path.stem, "invalid": True})
+        return records
 
     def _validate_exact_ownership_for_cleanup(
         self,
         controller_root: Path,
         contract: SelfHostedTaskContract,
         lease: TargetWorktreeLease,
+        *,
+        attempt_id: Optional[str] = None,
     ) -> tuple[Path, dict[str, Any] | None, tuple[int, int], str]:
         path = self._ownership_record_path(controller_root, contract.task_id)
         try:
@@ -601,10 +919,11 @@ class WorktreeManager:
         target_path = Path(lease.target_worktree).resolve()
         record_contract = record.get("contract") or {}
         record_lease = record.get("lease") or {}
+        expected_attempt = attempt_id or lease.attempt_id or record.get("expected_attempt_id") or record.get("attempt_id")
         if (
             record.get("task_id") != contract.task_id
             or record.get("lease_id") != lease.lease_id
-            or record.get("attempt_id") != lease.lease_id
+            or (expected_attempt is not None and record.get("attempt_id") != expected_attempt)
             or Path(str(record.get("controller_worktree", ""))).resolve() != controller_root
             or Path(str(record_contract.get("target_repo_root", ""))).resolve() != target_path
             or Path(str(record_lease.get("target_worktree", ""))).resolve() != target_path
@@ -624,53 +943,73 @@ class WorktreeManager:
         expected_digest: str,
         expected_lease_id: str,
         expected_task_id: str,
+        expected_attempt_id: Optional[str] = None,
     ) -> None:
+        staging_path = path.with_suffix(f".del.{os.getpid()}.{uuid4().hex}.tmp")
         try:
-            lst = os.lstat(path)
+            os.replace(path, staging_path)
         except FileNotFoundError:
             return
         except OSError as exc:
-            raise RuntimeError(f"ownership record lstat failed during CAS deletion: {exc}") from exc
-
-        if not stat.S_ISREG(lst.st_mode) or stat.S_ISLNK(lst.st_mode):
-            raise RuntimeError("ownership record changed to non-regular file before deletion")
-        if (lst.st_dev, lst.st_ino) != expected_identity:
-            raise RuntimeError("ownership record inode changed before deletion")
+            raise RuntimeError(f"ownership record atomic staging failed during CAS deletion: {exc}") from exc
 
         flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-        fd = os.open(path, flags)
+        fd = -1
         try:
+            try:
+                lst = os.lstat(staging_path)
+            except OSError as exc:
+                self._restore_staged_ownership_record(staging_path, path)
+                raise RuntimeError(f"ownership record lstat failed during CAS deletion: {exc}") from exc
+
+            if not stat.S_ISREG(lst.st_mode) or stat.S_ISLNK(lst.st_mode):
+                self._restore_staged_ownership_record(staging_path, path)
+                raise RuntimeError("ownership record changed to non-regular file before deletion")
+            if (lst.st_dev, lst.st_ino) != expected_identity:
+                self._restore_staged_ownership_record(staging_path, path)
+                raise RuntimeError("ownership record inode changed before deletion")
+
+            fd = os.open(staging_path, flags)
             fst = os.fstat(fd)
             if not stat.S_ISREG(fst.st_mode) or (fst.st_dev, fst.st_ino) != expected_identity:
+                self._restore_staged_ownership_record(staging_path, path)
                 raise RuntimeError("ownership record fstat mismatch before deletion")
+
             with os.fdopen(fd, "r", encoding="utf-8") as handle:
                 fd = -1
                 record = json.load(handle)
-        except Exception as exc:
-            raise RuntimeError(f"ownership record unreadable before CAS deletion: {exc}") from exc
-        finally:
+
+            if not isinstance(record, dict) or record.get("schema") != "nexus.target_ownership.v1":
+                self._restore_staged_ownership_record(staging_path, path)
+                raise RuntimeError("ownership record schema changed before deletion")
+            if record.get("integrity_sha256") != expected_digest:
+                self._restore_staged_ownership_record(staging_path, path)
+                raise RuntimeError("ownership record digest changed before deletion")
+            if record.get("lease_id") != expected_lease_id or record.get("task_id") != expected_task_id:
+                self._restore_staged_ownership_record(staging_path, path)
+                raise RuntimeError("ownership record lease/task identity changed before deletion")
+            if expected_attempt_id is not None and record.get("attempt_id") != expected_attempt_id:
+                self._restore_staged_ownership_record(staging_path, path)
+                raise RuntimeError("ownership record attempt identity changed before deletion")
+
+            tombstone_path = path.with_suffix(f".{os.getpid()}.{uuid4().hex}.released")
+            os.replace(staging_path, tombstone_path)
+            tombstone_path.chmod(0o600)
+        except Exception:
             if fd != -1:
-                os.close(fd)
-
-        if not isinstance(record, dict) or record.get("schema") != "nexus.target_ownership.v1":
-            raise RuntimeError("ownership record schema changed before deletion")
-        if record.get("integrity_sha256") != expected_digest:
-            raise RuntimeError("ownership record digest changed before deletion")
-        if record.get("lease_id") != expected_lease_id or record.get("task_id") != expected_task_id:
-            raise RuntimeError("ownership record lease/task identity changed before deletion")
-
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            pass
-        if path.exists():
-            raise RuntimeError("ownership record deletion verification failed")
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            self._restore_staged_ownership_record(staging_path, path)
+            raise
 
     def _create_lease_locked(
         self,
         contract: SelfHostedTaskContract,
         *,
         task_states: Optional[Mapping[str, dict]] = None,
+        attempt_id: Optional[str] = None,
     ) -> TargetWorktreeLease:
         controller_root, target_path, target_root = self._resolved_paths(contract)
         self._verify_target_boundary(controller_root, target_path, target_root)
@@ -683,6 +1022,17 @@ class WorktreeManager:
         )
         if resolved_target_revision != contract.target_base_revision:
             raise RuntimeError("Target base revision did not resolve to the exact contract SHA")
+
+        resolved_attempt_id = (
+            attempt_id
+            or (
+                task_states.get(contract.task_id, {}).get("attempt_id")
+                if isinstance(task_states, Mapping) and isinstance(task_states.get(contract.task_id), Mapping)
+                else None
+            )
+            or getattr(contract, "attempt_id", None)
+            or f"attempt-{contract.task_id}"
+        )
 
         target_branch = f"nexus/task/{contract.task_id}"
         target_detached = False
@@ -816,8 +1166,14 @@ class WorktreeManager:
             merge_performed=False,
             target_detached=target_detached,
             collaboration_provenance=collaboration_provenance or None,
+            attempt_id=resolved_attempt_id,
         )
-        self._write_target_ownership(contract, lease)
+        self._write_target_ownership(
+            contract,
+            lease,
+            attempt_id=resolved_attempt_id,
+            task_states=task_states,
+        )
         return lease
 
     def target_conflict(
@@ -831,8 +1187,6 @@ class WorktreeManager:
         active = self._active_target_worktrees(
             controller_root, target_path, task_states=task_states,
         )
-        if not active:
-            return False
         for entry in active:
             branch = entry.get("branch", "")
             task_id = ""
@@ -841,19 +1195,20 @@ class WorktreeManager:
             elif branch.startswith("nexus/task/"):
                 task_id = branch.removeprefix("nexus/task/")
             snapshot = (task_states or {}).get(task_id)
-            if isinstance(snapshot, Mapping):
-                # Caller snapshot is not ownership authority. Malformed or
-                # insufficient caller snapshots cannot override physical reservation;
-                # treat uncertainty as fail-closed conflict.
-                try:
-                    _validate_mutation_identity(snapshot)
-                except ValueError:
-                    return True
+            if not isinstance(snapshot, Mapping):
+                # An active registered Target without authoritative task state must fail closed.
+                return True
+            try:
+                _validate_mutation_identity(snapshot)
+            except ValueError:
+                return True
             # The durable ownership record is authoritative once a live Target
             # exists.  A caller snapshot may not substitute for it or change
             # its mutation domain.
             try:
-                existing = self._read_target_ownership(controller_root, entry, task_id)
+                existing = self._read_target_ownership(
+                    controller_root, entry, task_id, task_state=snapshot,
+                )
             except ValueError:
                 # Any malformed, stale, swapped, or integrity-invalid record
                 # keeps the registered Target reserved; caller evidence cannot
@@ -866,6 +1221,33 @@ class WorktreeManager:
                     return True
             except ValueError:
                 return True
+
+        records = self._all_ownership_records(controller_root)
+        active_task_ids = {
+            (entry.get("branch", "").removeprefix("refs/heads/nexus/task/").removeprefix("nexus/task/"))
+            for entry in active
+        }
+        for record in records:
+            rec_task_id = str(record.get("task_id") or "")
+            if not rec_task_id or rec_task_id in active_task_ids or rec_task_id == contract.task_id:
+                continue
+            if record.get("invalid"):
+                return True
+            snapshot = (task_states or {}).get(rec_task_id)
+            if not isinstance(snapshot, Mapping):
+                # An orphan ownership record without matching authoritative task state must fail closed.
+                return True
+            try:
+                _validate_ownership_record(
+                    record,
+                    task_state=snapshot,
+                    controller_root=controller_root,
+                )
+                if mutation_domains_conflict(record, contract):
+                    return True
+            except ValueError:
+                return True
+
         return False
 
     def protect_candidate(
@@ -1064,6 +1446,7 @@ class WorktreeManager:
                         expected_digest,
                         lease.lease_id,
                         contract.task_id,
+                        expected_attempt_id=lease.attempt_id or ownership_record.get("attempt_id"),
                     )
                 except RuntimeError as exc:
                     return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", str(exc), False, False)
@@ -1101,6 +1484,7 @@ class WorktreeManager:
                             expected_digest,
                             lease.lease_id,
                             contract.task_id,
+                            expected_attempt_id=lease.attempt_id or ownership_record.get("attempt_id"),
                         )
                     except RuntimeError as exc:
                         return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", str(exc), False, False)
@@ -1137,6 +1521,7 @@ class WorktreeManager:
                         expected_digest,
                         lease.lease_id,
                         contract.task_id,
+                        expected_attempt_id=lease.attempt_id or ownership_record.get("attempt_id"),
                     )
                 except RuntimeError as exc:
                     return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", str(exc), False, False)
