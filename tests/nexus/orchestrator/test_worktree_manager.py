@@ -973,7 +973,7 @@ def test_restore_rejects_wrong_salvage_parent(sh2_repo):
         manager.restore_task_branch_for_retry(contract, lease, wrong_salvage, salvage_ref)
 
 
-def test_restore_rejects_registered_target(sh2_repo):
+def test_restore_rejects_registered_target_lc2(sh2_repo):
     """LC2 test 7: Target still registered → fail closed."""
     contract = _contract(sh2_repo, task_id="reg-target-lc2")
     manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
