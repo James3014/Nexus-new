@@ -19,6 +19,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from nexus.core.exit_codes import NexusExitCode
 from nexus.services.external_intelligence import (
     ExternalIntelligenceSidecar,
     ExternalIntelligenceStore,
@@ -749,7 +750,18 @@ def main(argv: list[str] | None = None) -> int:
     else:
         value = service_status(args.config)
     print(json.dumps(value, sort_keys=True))
-    return 0
+    status = str(value.get("status") or "")
+    if args.command == "run-once":
+        if status in {"IDLE", "COMPLETE"}:
+            return NexusExitCode.SUCCESS
+        if status in TERMINAL_DISPOSITIONS | {"ESCALATED", "RECONCILIATION_REQUIRED"}:
+            return NexusExitCode.ESCALATED
+        if status in {"BLOCKED", "HUMAN_REVIEW"}:
+            return NexusExitCode.HUMAN_REVIEW
+        return NexusExitCode.FAILED
+    if status in {"START_FAILED", "STOP_FAILED", "RESTART_FAILED"}:
+        return NexusExitCode.FAILED
+    return NexusExitCode.SUCCESS
 
 
 if __name__ == "__main__":

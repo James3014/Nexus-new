@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+import scripts.ops.external_intelligence_service as service_module
+from nexus.core.exit_codes import NexusExitCode
 from scripts.ops.external_intelligence_service import (
     READINESS_SUCCESS_THRESHOLD,
     ServiceConfig,
@@ -931,3 +933,61 @@ def test_render_comment_contains_only_compact_fields():
     assert "SECRET_PROMPT" not in body
     assert "SECRET_ENVELOPE" not in body
     assert "TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE" in body
+
+
+@pytest.mark.parametrize(
+    ("command", "returncode", "expected_status", "expected_exit"),
+    [
+        ("start", 0, "STARTED", NexusExitCode.SUCCESS),
+        ("start", 1, "START_FAILED", NexusExitCode.FAILED),
+        ("stop", 0, "STOPPED", NexusExitCode.SUCCESS),
+        ("stop", 1, "STOP_FAILED", NexusExitCode.FAILED),
+        ("restart", 0, "RESTARTED", NexusExitCode.SUCCESS),
+        ("restart", 1, "RESTART_FAILED", NexusExitCode.FAILED),
+    ],
+)
+def test_main_maps_service_control_outcomes_to_canonical_exit_codes(
+    monkeypatch, capsys, command, returncode, expected_status, expected_exit
+):
+    monkeypatch.setattr(service_module, "load_config", lambda _path: object())
+    result = subprocess.CompletedProcess(["launchctl"], returncode, "", "bounded-detail")
+    monkeypatch.setattr(service_module, "start", lambda _path: result)
+    monkeypatch.setattr(service_module, "stop", lambda: result)
+
+    exit_code = service_module.main([command, "--config", "/tmp/config.json"])
+
+    assert exit_code == expected_exit
+    assert json.loads(capsys.readouterr().out) == {
+        "detail": "bounded-detail",
+        "status": expected_status,
+    }
+
+
+@pytest.mark.parametrize(
+    ("status", "expected_exit"),
+    [
+        ("IDLE", NexusExitCode.SUCCESS),
+        ("COMPLETE", NexusExitCode.SUCCESS),
+        ("FAILED", NexusExitCode.FAILED),
+        ("UNRECOGNIZED_NON_SUCCESS", NexusExitCode.FAILED),
+        ("REPAIR_BUDGET_EXHAUSTED", NexusExitCode.ESCALATED),
+        ("UNIT_REPAIR_REQUIRED", NexusExitCode.ESCALATED),
+        ("COMPOSITION_REPAIR_REQUIRED", NexusExitCode.ESCALATED),
+        ("SCOPE_DELTA_REQUIRED", NexusExitCode.ESCALATED),
+        ("RECONCILIATION_REQUIRED", NexusExitCode.ESCALATED),
+        ("ESCALATED", NexusExitCode.ESCALATED),
+        ("HUMAN_REVIEW", NexusExitCode.HUMAN_REVIEW),
+        ("BLOCKED", NexusExitCode.HUMAN_REVIEW),
+    ],
+)
+def test_main_maps_run_once_typed_outcomes_without_changing_payload(
+    monkeypatch, capsys, status, expected_exit
+):
+    payload = {"status": status, "result": {"state": status}}
+    monkeypatch.setattr(service_module, "load_config", lambda _path: object())
+    monkeypatch.setattr(service_module, "run_once", lambda _config: payload)
+
+    exit_code = service_module.main(["run-once", "--config", "/tmp/config.json"])
+
+    assert exit_code == expected_exit
+    assert json.loads(capsys.readouterr().out) == payload
