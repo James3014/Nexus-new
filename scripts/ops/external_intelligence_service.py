@@ -30,6 +30,7 @@ from nexus.services.external_intelligence_automation import (
     AutomationStateStore,
     ExternalIntelligenceAutomation,
     _normalize_github_repo,
+    compute_publication_id,
 )
 from nexus.services.external_intelligence_closure import (
     ClosureStore,
@@ -411,6 +412,37 @@ class GhIssueTransport:
             raise ServiceError("GH_ISSUE_LIST_INVALID")
         return [dict(row) for row in value if isinstance(row, Mapping)]
 
+    def list_comments(self, repository: str, issue_number: int) -> list[dict[str, Any]]:
+        clean_repo = repository.strip().strip("/")
+        out = self._run([
+            "gh",
+            "api",
+            f"repos/{clean_repo}/issues/{issue_number}/comments",
+            "--paginate",
+            "--slurp",
+        ])
+        try:
+            value = json.loads(out)
+        except Exception as exc:
+            raise ServiceError("GH_COMMENTS_LIST_INVALID") from exc
+        comments: list[dict[str, Any]] = []
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, list):
+                    for elem in item:
+                        if isinstance(elem, Mapping):
+                            comments.append(dict(elem))
+                elif isinstance(item, Mapping):
+                    comments.append(dict(item))
+            return comments
+        elif (
+            isinstance(value, Mapping)
+            and "comments" in value
+            and isinstance(value["comments"], list)
+        ):
+            return [dict(row) for row in value["comments"] if isinstance(row, Mapping)]
+        raise ServiceError("GH_COMMENTS_LIST_INVALID")
+
     def comment(self, repository: str, issue_number: int, body: str) -> None:
         self._run([
             "gh",
@@ -481,11 +513,18 @@ def build_automation(config: ServiceConfig, repository: str) -> ExternalIntellig
     )
 
 
-def render_comment(result: Mapping[str, Any]) -> str:
+def render_comment(result: Mapping[str, Any], publication_id: str | None = None) -> str:
     publication = result.get("publication") or {}
+    pub_id = publication_id or publication.get("publication_id") or ""
+    if not pub_id and isinstance(result.get("publication_record"), Mapping):
+        pub_id = result["publication_record"].get("publication_id") or ""
+    header = (
+        f"<!-- nexus-external-intelligence:{pub_id} -->\n"
+        if pub_id
+        else "<!-- nexus-external-intelligence -->\n"
+    )
     return (
-        "<!-- nexus-external-intelligence -->\n"
-        "External Intelligence automation completed.\n\n"
+        header + "External Intelligence automation completed.\n\n"
         f"- Task: `{publication.get('task_id')}`\n"
         f"- Candidate: `{publication.get('candidate_commit')}`\n"
         f"- Tree: `{publication.get('candidate_tree')}`\n"
@@ -496,6 +535,210 @@ def render_comment(result: Mapping[str, Any]) -> str:
         f"- Stop condition: `{publication.get('stop_condition')}`\n"
         f"- Claim ceiling: `{publication.get('claim_ceiling')}`\n"
     )
+
+
+def reconcile_publication(
+    *,
+    repository: str,
+    issue_number: int,
+    result: dict[str, Any],
+    gh: Any,
+    config: ServiceConfig,
+    state_store: AutomationStateStore | None = None,
+    identity_hash: str | None = None,
+) -> dict[str, Any]:
+    if not config.publication_enabled:
+        return result
+
+    publication = result.get("publication")
+    if not isinstance(publication, Mapping) or not publication:
+        return result
+
+    id_hash = identity_hash or str(result.get("identity_hash") or "")
+
+    pub_record = result.get("publication_record")
+    if not isinstance(pub_record, Mapping) or "state" not in pub_record:
+        return {
+            **result,
+            "state": "RECONCILIATION_REQUIRED",
+            "error": "PUBLICATION_RECORD_MISSING",
+            "reconcile_only": True,
+        }
+
+    current_pub_state = str(pub_record.get("state") or "")
+    if current_pub_state not in {"PREPARED", "DISPATCHING", "OUTCOME_UNKNOWN", "COMPLETED"}:
+        return {
+            **result,
+            "state": "RECONCILIATION_REQUIRED",
+            "prior_state": current_pub_state,
+            "error": "PUBLICATION_STATE_INVALID",
+            "reconcile_only": True,
+        }
+
+    pub_id = (
+        pub_record.get("publication_id")
+        or result.get("publication_id")
+        or compute_publication_id(repository, issue_number, id_hash, publication)
+    )
+    marker = f"<!-- nexus-external-intelligence:{pub_id} -->"
+
+    def _persist(new_state: str, **extra: Any) -> bool:
+        rec = {
+            "publication_id": pub_id,
+            "state": new_state,
+            "marker": marker,
+            "payload": dict(publication),
+            **extra,
+        }
+        result["publication_record"] = rec
+        if state_store is not None:
+            if not id_hash:
+                return False
+            try:
+                updated = state_store.update_publication_record(
+                    repository, issue_number, id_hash, rec
+                )
+                if updated is None:
+                    return False
+            except Exception:
+                return False
+        return True
+
+    def _find_markers(comments: list[dict[str, Any]]) -> tuple[int, list[dict[str, Any]]]:
+        matching = []
+        pattern = re.compile(rf"<!--\s*nexus-external-intelligence:{re.escape(pub_id)}\s*-->")
+        for c in comments:
+            b = str(c.get("body") or "")
+            if marker in b or pattern.search(b):
+                matching.append(c)
+        return len(matching), matching
+
+    def _list_comments() -> list[dict[str, Any]] | None:
+        if not hasattr(gh, "list_comments"):
+            return None
+        try:
+            return gh.list_comments(repository, issue_number)
+        except Exception:
+            return None
+
+    if current_pub_state == "COMPLETED":
+        return result
+
+    if current_pub_state in {"DISPATCHING", "OUTCOME_UNKNOWN"}:
+        comments = _list_comments()
+        if comments is None:
+            _persist("OUTCOME_UNKNOWN", error="GH_COMMENTS_LIST_FAILED")
+            return {
+                **result,
+                "state": "RECONCILIATION_REQUIRED",
+                "prior_state": current_pub_state,
+                "error": "GH_COMMENTS_LIST_FAILED",
+                "reconcile_only": True,
+            }
+        count, matching = _find_markers(comments)
+        if count == 1:
+            _persist("COMPLETED", comment_id=matching[0].get("id"))
+            return {**result, "state": "COMPLETE"}
+        elif count > 1:
+            _persist("OUTCOME_UNKNOWN", error="DUPLICATE_PUBLICATION_MARKER")
+            return {
+                **result,
+                "state": "RECONCILIATION_REQUIRED",
+                "prior_state": current_pub_state,
+                "error": "DUPLICATE_PUBLICATION_MARKER",
+                "reconcile_only": True,
+            }
+        else:
+            _persist("OUTCOME_UNKNOWN", error="PUBLICATION_UNCONFIRMED_ZERO_MARKER")
+            return {
+                **result,
+                "state": "RECONCILIATION_REQUIRED",
+                "prior_state": current_pub_state,
+                "error": "PUBLICATION_UNCONFIRMED_ZERO_MARKER",
+                "reconcile_only": True,
+            }
+
+    comments = _list_comments()
+    if comments is None:
+        _persist("OUTCOME_UNKNOWN", error="GH_COMMENTS_LIST_FAILED")
+        return {
+            **result,
+            "state": "RECONCILIATION_REQUIRED",
+            "prior_state": "PREPARED",
+            "error": "GH_COMMENTS_LIST_FAILED",
+            "reconcile_only": True,
+        }
+
+    count, matching = _find_markers(comments)
+    if count == 1:
+        _persist("COMPLETED", comment_id=matching[0].get("id"))
+        return {**result, "state": "COMPLETE"}
+    elif count > 1:
+        _persist("OUTCOME_UNKNOWN", error="DUPLICATE_PUBLICATION_MARKER")
+        return {
+            **result,
+            "state": "RECONCILIATION_REQUIRED",
+            "prior_state": "PREPARED",
+            "error": "DUPLICATE_PUBLICATION_MARKER",
+            "reconcile_only": True,
+        }
+
+    ok = _persist("DISPATCHING")
+    if not ok:
+        return {
+            **result,
+            "state": "RECONCILIATION_REQUIRED",
+            "prior_state": "PREPARED",
+            "error": "PUBLICATION_PERSISTENCE_FAILED",
+            "reconcile_only": True,
+        }
+
+    body = render_comment(result, publication_id=pub_id)
+    try:
+        gh.comment(repository, issue_number, body)
+    except Exception as exc:
+        _persist("OUTCOME_UNKNOWN", error=type(exc).__name__)
+        return {
+            **result,
+            "state": "RECONCILIATION_REQUIRED",
+            "prior_state": "DISPATCHING",
+            "error": type(exc).__name__,
+            "reconcile_only": True,
+        }
+
+    comments_after = _list_comments()
+    if comments_after is None:
+        _persist("OUTCOME_UNKNOWN", error="GH_COMMENTS_READBACK_FAILED")
+        return {
+            **result,
+            "state": "RECONCILIATION_REQUIRED",
+            "prior_state": "DISPATCHING",
+            "error": "GH_COMMENTS_READBACK_FAILED",
+            "reconcile_only": True,
+        }
+
+    count_after, matching_after = _find_markers(comments_after)
+    if count_after == 1:
+        _persist("COMPLETED", comment_id=matching_after[0].get("id"))
+        return {**result, "state": "COMPLETE"}
+    elif count_after > 1:
+        _persist("OUTCOME_UNKNOWN", error="DUPLICATE_PUBLICATION_MARKER")
+        return {
+            **result,
+            "state": "RECONCILIATION_REQUIRED",
+            "prior_state": "DISPATCHING",
+            "error": "DUPLICATE_PUBLICATION_MARKER",
+            "reconcile_only": True,
+        }
+    else:
+        _persist("OUTCOME_UNKNOWN", error="PUBLICATION_OUTCOME_UNKNOWN")
+        return {
+            **result,
+            "state": "RECONCILIATION_REQUIRED",
+            "prior_state": "DISPATCHING",
+            "error": "PUBLICATION_OUTCOME_UNKNOWN",
+            "reconcile_only": True,
+        }
 
 
 def refresh_remote_main(repo_root: Path, repository: str, timeout: float = 30.0) -> None:
@@ -580,8 +823,7 @@ def run_once(
                 str(issue.get("body") or ""),
             )
             if (
-                result.get("reuse")
-                or result.get("state") in TERMINAL_DISPOSITIONS
+                result.get("state") in TERMINAL_DISPOSITIONS
                 or result.get("state") == "RECONCILIATION_REQUIRED"
                 or result.get("state") == "BLOCKED"
             ):
@@ -592,14 +834,50 @@ def run_once(
                     "result": result,
                 }
                 continue
-            if result.get("state") == "COMPLETE" and config.publication_enabled:
-                gh.comment(repository, int(issue["number"]), render_comment(result))
-            return {
-                "status": result.get("state"),
-                "repository": repository,
-                "issue_number": int(issue["number"]),
-                "result": result,
-            }
+            if result.get("state") == "COMPLETE":
+                state_store = getattr(automation, "state_store", None)
+                pub_result = reconcile_publication(
+                    repository=repository,
+                    issue_number=int(issue["number"]),
+                    result=result,
+                    gh=gh,
+                    config=config,
+                    state_store=state_store,
+                    identity_hash=result.get("identity_hash"),
+                )
+                if pub_result.get("state") in {"RECONCILIATION_REQUIRED", "BLOCKED"}:
+                    last = {
+                        "status": pub_result.get("state"),
+                        "repository": repository,
+                        "issue_number": int(issue["number"]),
+                        "result": pub_result,
+                    }
+                    continue
+                if result.get("reuse") and (
+                    not config.publication_enabled
+                    or (pub_result.get("publication_record") or {}).get("state") == "COMPLETED"
+                ):
+                    last = {
+                        "status": "COMPLETE",
+                        "repository": repository,
+                        "issue_number": int(issue["number"]),
+                        "result": pub_result,
+                    }
+                    continue
+                return {
+                    "status": pub_result.get("state"),
+                    "repository": repository,
+                    "issue_number": int(issue["number"]),
+                    "result": pub_result,
+                }
+            if result.get("reuse"):
+                last = {
+                    "status": result.get("state"),
+                    "repository": repository,
+                    "issue_number": int(issue["number"]),
+                    "result": result,
+                }
+                continue
     if last is not None:
         return last
     return {"status": "IDLE"}

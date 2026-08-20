@@ -269,6 +269,30 @@ class IssueWorkItem:
         })
 
 
+PUBLICATION_STATES = {
+    "PREPARED",
+    "DISPATCHING",
+    "OUTCOME_UNKNOWN",
+    "COMPLETED",
+}
+
+
+def compute_publication_id(
+    repository: str,
+    issue_number: int,
+    identity_hash: str | None,
+    publication: Mapping[str, Any],
+) -> str:
+    body: dict[str, Any] = {
+        "repository": repository,
+        "issue_number": int(issue_number),
+        "payload": dict(publication),
+    }
+    if identity_hash:
+        body["identity_hash"] = str(identity_hash)
+    return _sha256_json(body)
+
+
 class AutomationStateStore:
     def __init__(self, root: str | os.PathLike[str]):
         self.root = Path(root).expanduser().resolve()
@@ -276,6 +300,10 @@ class AutomationStateStore:
     def path_for(self, item: IssueWorkItem) -> Path:
         repo = re.sub(r"[^A-Za-z0-9_.-]+", "_", item.repository)
         return self.root / repo / f"issue-{item.issue_number}-{item.identity_hash}.json"
+
+    def path_for_keys(self, repository: str, issue_number: int, identity_hash: str) -> Path:
+        repo = re.sub(r"[^A-Za-z0-9_.-]+", "_", repository)
+        return self.root / repo / f"issue-{issue_number}-{identity_hash}.json"
 
     def load(self, item: IssueWorkItem) -> dict[str, Any] | None:
         path = self.path_for(item)
@@ -296,6 +324,21 @@ class AutomationStateStore:
             **extra,
         }
         _atomic_json(self.path_for(item), value)
+        return value
+
+    def update_publication_record(
+        self,
+        repository: str,
+        issue_number: int,
+        identity_hash: str,
+        publication_record: Mapping[str, Any],
+    ) -> dict[str, Any] | None:
+        path = self.path_for_keys(repository, issue_number, identity_hash)
+        if not path.exists():
+            return None
+        value = json.loads(path.read_text(encoding="utf-8"))
+        value["publication_record"] = dict(publication_record)
+        _atomic_json(path, value)
         return value
 
 
@@ -550,6 +593,8 @@ class ExternalIntelligenceAutomation:
         resume_from = previous_state
         if previous_state == "COMPLETE" or previous_state in TERMINAL_DISPOSITIONS:
             return {**previous, "reuse": True, "semantic_dispatched": True}
+        if previous_state == "BLOCKED" and bool((previous or {}).get("semantic_dispatched")):
+            return {**previous, "reuse": True, "semantic_dispatched": True}
         if previous_state == "RECONCILIATION_REQUIRED":
             if (previous or {}).get("reconcile_only"):
                 return {**previous, "reuse": True, "semantic_dispatched": True}
@@ -636,6 +681,15 @@ class ExternalIntelligenceAutomation:
                     semantic_dispatched=True,
                 )
             publication = compact_publication_payload(closure)
+            pub_id = compute_publication_id(
+                item.repository, item.issue_number, item.identity_hash, publication
+            )
+            publication_record = {
+                "publication_id": pub_id,
+                "state": "PREPARED",
+                "marker": f"<!-- nexus-external-intelligence:{pub_id} -->",
+                "payload": publication,
+            }
             return self.state_store.save(
                 item,
                 "COMPLETE",
@@ -643,6 +697,7 @@ class ExternalIntelligenceAutomation:
                 fanout_run_sha256=fanout.get("run_sha256"),
                 closure_run_id=closure.get("run_id"),
                 publication=publication,
+                publication_record=publication_record,
                 semantic_dispatched=True,
             )
         except AutomationError as exc:
@@ -672,8 +727,10 @@ __all__ = [
     "ExternalIntelligenceAutomation",
     "ISSUE_SCHEMA",
     "IssueWorkItem",
+    "PUBLICATION_STATES",
     "TERMINAL_DISPOSITIONS",
     "_normalize_github_repo",
     "compact_publication_payload",
+    "compute_publication_id",
     "parse_issue_contract",
 ]
