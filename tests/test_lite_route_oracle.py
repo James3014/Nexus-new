@@ -1,8 +1,8 @@
 import os
 import unittest
 from unittest.mock import patch
+
 from nexus.core.lite_route_oracle import (
-    LiteRouteDecision,
     lite_route_safety_blockers,
     should_use_lite_route,
 )
@@ -86,17 +86,160 @@ class TestLiteRouteOracle(unittest.TestCase):
         self.assertFalse(decision.is_lite)
 
     @patch.dict(os.environ, {"NEXUS_LIGHT_ROUTE_FORCE": "1"})
-    def test_env_override_light_route_force(self):
-        # 🚀 Environment override NEXUS_LIGHT_ROUTE_FORCE=1 regardless of risk/complexity
+    def test_force_override_preserved_for_safe_input(self):
+        # 🚀 Environment override NEXUS_LIGHT_ROUTE_FORCE=1 preserved for safe input
+        decision = should_use_lite_route(
+            risk_level="LOW",
+            impact_complexity=1.0,
+            belief_confidence=0.95,
+            lane_name="standard",
+            capability_name="codeintel",
+            cross_module=False,
+            hard_signal=False,
+            candidate_count=1,
+            task_desc="simple bounded task",
+        )
+        self.assertTrue(decision.is_lite)
+        self.assertEqual(decision.reason, "env_override_light_route_force")
+        self.assertEqual(decision.skipped_phases, ["X", "D", "A"])
+
+    @patch.dict(os.environ, {"NEXUS_LIGHT_ROUTE_FORCE": "1"})
+    def test_force_override_cannot_bypass_safety_blockers(self):
+        # 🛡️ Environment override NEXUS_LIGHT_ROUTE_FORCE=1 cannot bypass safety blockers
         decision = should_use_lite_route(
             risk_level="CRITICAL",
             impact_complexity=5.0,
             belief_confidence=0.1,
             lane_name="standard",
-            capability_name="codeintel"
+            capability_name="codeintel",
+        )
+        self.assertFalse(decision.is_lite)
+        self.assertEqual(decision.reason, "standard_heavy_route_blocked_lite")
+        self.assertEqual(decision.skipped_phases, [])
+
+    @patch.dict(os.environ, {"NEXUS_LIGHT_ROUTE_FORCE": "1"})
+    def test_h1_critical_risk_blocks_force(self):
+        decision = should_use_lite_route(
+            risk_level="CRITICAL",
+            impact_complexity=1.0,
+            belief_confidence=0.95,
+        )
+        self.assertFalse(decision.is_lite)
+        self.assertEqual(decision.reason, "standard_heavy_route_blocked_lite")
+
+    @patch.dict(os.environ, {"NEXUS_LIGHT_ROUTE_FORCE": "1"})
+    def test_h2_high_risk_blocks_force(self):
+        decision = should_use_lite_route(
+            risk_level="HIGH",
+            impact_complexity=1.0,
+            belief_confidence=0.95,
+        )
+        self.assertFalse(decision.is_lite)
+        self.assertEqual(decision.reason, "standard_heavy_route_blocked_lite")
+
+    @patch.dict(os.environ, {"NEXUS_LIGHT_ROUTE_FORCE": "1"})
+    def test_h3_excessive_complexity_blocks_force(self):
+        decision = should_use_lite_route(
+            risk_level="NORMAL",
+            impact_complexity=4.0,
+            belief_confidence=0.95,
+        )
+        self.assertFalse(decision.is_lite)
+        self.assertEqual(decision.reason, "standard_heavy_route_blocked_lite")
+
+    @patch.dict(os.environ, {"NEXUS_LIGHT_ROUTE_FORCE": "1"})
+    def test_h4_low_confidence_blocks_force(self):
+        decision = should_use_lite_route(
+            risk_level="LOW",
+            impact_complexity=1.0,
+            belief_confidence=0.80,
+        )
+        self.assertFalse(decision.is_lite)
+        self.assertEqual(decision.reason, "standard_heavy_route_blocked_lite")
+
+    @patch.dict(os.environ, {"NEXUS_LIGHT_ROUTE_FORCE": "1"})
+    def test_h5_cross_module_blocks_force(self):
+        decision = should_use_lite_route(
+            risk_level="LOW",
+            impact_complexity=1.0,
+            belief_confidence=0.95,
+            cross_module=True,
+        )
+        self.assertFalse(decision.is_lite)
+        self.assertEqual(decision.reason, "standard_heavy_route_blocked_lite")
+
+    @patch.dict(os.environ, {"NEXUS_LIGHT_ROUTE_FORCE": "1"})
+    def test_h6_hard_signal_blocks_force(self):
+        decision = should_use_lite_route(
+            risk_level="LOW",
+            impact_complexity=1.0,
+            belief_confidence=0.95,
+            hard_signal=True,
+        )
+        self.assertFalse(decision.is_lite)
+        self.assertEqual(decision.reason, "standard_heavy_route_blocked_lite")
+
+    @patch.dict(os.environ, {"NEXUS_LIGHT_ROUTE_FORCE": "1"})
+    def test_h7_multiple_candidates_blocks_force(self):
+        decision = should_use_lite_route(
+            risk_level="LOW",
+            impact_complexity=1.0,
+            belief_confidence=0.95,
+            candidate_count=2,
+        )
+        self.assertFalse(decision.is_lite)
+        self.assertEqual(decision.reason, "standard_heavy_route_blocked_lite")
+
+    @patch.dict(os.environ, {"NEXUS_LIGHT_ROUTE_FORCE": "1"})
+    def test_h8_stateful_or_recursive_task_blocks_force(self):
+        d_rec = should_use_lite_route(
+            risk_level="LOW",
+            impact_complexity=1.0,
+            belief_confidence=0.95,
+            task_desc="Handle recursive tree traversal",
+        )
+        self.assertFalse(d_rec.is_lite)
+        self.assertEqual(d_rec.reason, "standard_heavy_route_blocked_lite")
+
+        d_state = should_use_lite_route(
+            risk_level="LOW",
+            impact_complexity=1.0,
+            belief_confidence=0.95,
+            task_desc="Execute stateful workflow migration",
+        )
+        self.assertFalse(d_state.is_lite)
+        self.assertEqual(d_state.reason, "standard_heavy_route_blocked_lite")
+
+    @patch.dict(os.environ, {"NEXUS_LIGHT_ROUTE_FORCE": "1"})
+    def test_h9_safe_sanctioned_force_produces_lite(self):
+        decision = should_use_lite_route(
+            risk_level="LOW",
+            impact_complexity=1.0,
+            belief_confidence=0.95,
+            cross_module=False,
+            hard_signal=False,
+            candidate_count=1,
+            task_desc="simple bounded task",
         )
         self.assertTrue(decision.is_lite)
         self.assertEqual(decision.reason, "env_override_light_route_force")
+        self.assertEqual(decision.skipped_phases, ["X", "D", "A"])
+
+    @patch.dict(os.environ, {"NEXUS_LIGHT_ROUTE_FORCE": "1"})
+    def test_d3_learn_ingest_cli_shape_does_not_skip_heavy_ingestion(self):
+        """D3: learn_ingest CLI decision shape (difficulty != easy -> complexity 4.5) blocks forced light route."""
+        difficulty = "hard"
+        complexity = 1.0 if difficulty.lower() == "easy" else (2.5 if difficulty.lower() == "medium" else 4.5)
+        risk_level = "LOW" if difficulty.lower() == "easy" else "NORMAL"
+
+        decision = should_use_lite_route(
+            risk_level=risk_level,
+            impact_complexity=complexity,
+            belief_confidence=1.0,
+            task_desc="learn ingest source",
+        )
+        self.assertFalse(decision.is_lite)
+        self.assertEqual(decision.reason, "standard_heavy_route_blocked_lite")
 
     def test_normal_risk_high_confidence_returns_lite(self):
         decision = should_use_lite_route(
