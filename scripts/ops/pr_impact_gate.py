@@ -771,6 +771,53 @@ def _logical_node_set(raw_nodes: Iterable[str]) -> set[LogicalNodeKey] | None:
     return None if index is None else set(index)
 
 
+def _parameterized_family(raw_node: str) -> str | None:
+    """Return the unparameterized pytest node name for a parameterized node."""
+    component_start = raw_node.rfind("::") + 2
+    parameter_start = raw_node.find("[", component_start)
+    if parameter_start <= component_start or not raw_node.endswith("]"):
+        return None
+    return raw_node[:parameter_start]
+
+
+def _expanded_node_keys(
+    base: PytestRunResult,
+    head: PytestRunResult,
+    base_index: Mapping[LogicalNodeKey, str],
+    head_index: Mapping[LogicalNodeKey, str],
+) -> tuple[set[LogicalNodeKey], set[LogicalNodeKey], bool]:
+    """Map unparameterized base nodes to their head parameterizations.
+
+    Expansion is accepted only when the test inventory changed.  A retained
+    unparameterized head node alongside parameterizations is ambiguous and is
+    therefore rejected instead of being treated as a successful replacement.
+    """
+    if base.test_inventory_tree == head.test_inventory_tree:
+        return set(), set(), False
+    base_passed = _logical_node_set(base.passed_node_ids)
+    if base_passed is None:
+        return set(), set(), True
+    head_by_family: dict[str, list[LogicalNodeKey]] = {}
+    for key, raw_node in head_index.items():
+        family = _parameterized_family(raw_node)
+        if family is not None:
+            head_by_family.setdefault(family, []).append(key)
+
+    expanded_base: set[LogicalNodeKey] = set()
+    expanded_head: set[LogicalNodeKey] = set()
+    for base_key, raw_node in base_index.items():
+        if base_key not in base_passed or _parameterized_family(raw_node) is not None:
+            continue
+        candidates = head_by_family.get(raw_node, [])
+        if not candidates:
+            continue
+        if base_key in head_index:
+            return set(), set(), True
+        expanded_base.add(base_key)
+        expanded_head.update(candidates)
+    return expanded_base, expanded_head, False
+
+
 def _metadata_mismatch(base: PytestRunResult, head: PytestRunResult) -> bool:
     base_index = _logical_node_index(base.node_ids)
     head_index = _logical_node_index(head.node_ids)
@@ -801,18 +848,27 @@ def _metadata_mismatch(base: PytestRunResult, head: PytestRunResult) -> bool:
     head_nodes = set(head_index)
     if not base_nodes and not head_nodes:
         return False
-    if not base_nodes or not head_nodes or not base_nodes <= head_nodes:
+    expanded_base, expanded_head, expansion_ambiguous = _expanded_node_keys(
+        base, head, base_index, head_index
+    )
+    if expansion_ambiguous:
+        return True
+    if not base_nodes or not head_nodes or not (base_nodes - expanded_base) <= head_nodes:
         return True
 
     head_only = head_nodes - base_nodes
     if head_only and base.test_inventory_tree == head.test_inventory_tree:
         return True
-    if not head_only <= head_passed:
+    ordinary_head_only = head_only - expanded_head
+    if not ordinary_head_only <= head_passed:
+        return True
+    expanded_nonpassing = expanded_head - head_passed
+    if expanded_nonpassing - (head_failed | head_errors):
         return True
     if not head_skipped <= base_skipped:
         return True
 
-    downgraded = base_passed - head_passed
+    downgraded = (base_passed - expanded_base) - head_passed
     classified_failures = head_failed | head_errors
     return bool(downgraded - classified_failures)
 
