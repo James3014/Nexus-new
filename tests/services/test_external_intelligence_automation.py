@@ -10,6 +10,7 @@ import pytest
 from nexus.services.external_intelligence import ExternalIntelligenceStore
 from nexus.services.external_intelligence_automation import (
     ISSUE_SCHEMA,
+    TERMINAL_DISPOSITIONS,
     AutomationError,
     AutomationStateStore,
     ExternalIntelligenceAutomation,
@@ -294,7 +295,16 @@ def test_envelope_artifact_maps_units_without_scope_widening(tmp_path):
     assert {u["unit_id"] for u in units} == {"u1", "u2"}
 
 
-def test_d_terminal_result_blocks_instead_of_complete(tmp_path):
+@pytest.mark.parametrize(
+    "disposition",
+    [
+        "REPAIR_BUDGET_EXHAUSTED",
+        "UNIT_REPAIR_REQUIRED",
+        "COMPOSITION_REPAIR_REQUIRED",
+        "SCOPE_DELTA_REQUIRED",
+    ],
+)
+def test_d_terminal_result_blocks_instead_of_complete(tmp_path, disposition):
     repo, _, contract, body, store = _setup(tmp_path)
 
     class TerminalD:
@@ -303,14 +313,60 @@ def test_d_terminal_result_blocks_instead_of_complete(tmp_path):
 
         def close_task(self, **kwargs):
             self.calls.append(kwargs)
-            return {"status": "REPAIR_BUDGET_EXHAUSTED", "run_id": "x" * 64, "control_capsule": {}}
+            return {"status": disposition, "run_id": "x" * 64, "control_capsule": {}}
 
     d = TerminalD()
     result = _automation(tmp_path, repo, store, d=d).run_issue("o/r", 5, "title", body)
-    assert result["state"] == "BLOCKED"
-    assert result["stage"] == "CLOSURE"
+    assert result["state"] == disposition
+    assert result["closure_status"] == disposition
     assert result["semantic_dispatched"] is True
-    assert result["closure_status"] == "REPAIR_BUDGET_EXHAUSTED"
+
+
+@pytest.mark.parametrize(
+    "disposition",
+    [
+        "REPAIR_BUDGET_EXHAUSTED",
+        "UNIT_REPAIR_REQUIRED",
+        "COMPOSITION_REPAIR_REQUIRED",
+        "SCOPE_DELTA_REQUIRED",
+    ],
+)
+def test_terminal_closure_is_absorbing_and_not_redispatched(tmp_path, disposition):
+    repo, _, contract, body, store = _setup(tmp_path)
+
+    class TerminalD:
+        def __init__(self):
+            self.calls = []
+
+        def close_task(self, **kwargs):
+            self.calls.append(kwargs)
+            return {
+                "status": disposition,
+                "run_id": "x" * 64,
+                "control_capsule": {},
+            }
+
+    d = TerminalD()
+    sidecar = FakeSidecar(store)
+    c = FakeC()
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
+
+    first = automation.run_issue("o/r", 5, "title", body)
+    second = automation.run_issue("o/r", 5, "title", body)
+
+    assert first["state"] == disposition
+    assert second["state"] == disposition
+    assert second["reuse"] is True
+    assert len(sidecar.calls) == len(c.calls) == len(d.calls) == 1
+
+
+def test_terminal_dispositions_set_members():
+    assert TERMINAL_DISPOSITIONS == {
+        "REPAIR_BUDGET_EXHAUSTED",
+        "UNIT_REPAIR_REQUIRED",
+        "COMPOSITION_REPAIR_REQUIRED",
+        "SCOPE_DELTA_REQUIRED",
+    }
 
 
 @pytest.mark.parametrize("mode", ["missing", "failed"])
@@ -412,6 +468,29 @@ def test_closure_dispatching_remains_fail_closed_and_d_is_not_replayed(tmp_path)
     assert second["state"] == "RECONCILIATION_REQUIRED"
     assert second["prior_state"] == "CLOSURE_DISPATCHING"
     assert sidecar.calls == [] and c.calls == [] and d.calls == []
+
+
+def test_process_started_uncertainty_remains_reconcile_only_on_repoll(tmp_path):
+    repo, _, contract, body, store = _setup(tmp_path)
+
+    class UncertainSidecar(FakeSidecar):
+        def analyze(self, record, sources):
+            self.calls.append((record, list(sources)))
+            raise RuntimeError("process exited after start")
+
+    sidecar = UncertainSidecar(store)
+    c = FakeC()
+    d = FakeD()
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
+
+    first = automation.run_issue("o/r", 10, "title", body)
+    second = automation.run_issue("o/r", 10, "title", body)
+
+    assert first["state"] == "RECONCILIATION_REQUIRED"
+    assert second["state"] == "RECONCILIATION_REQUIRED"
+    assert second["reconcile_only"] is True
+    assert len(sidecar.calls) == 1
+    assert c.calls == [] and d.calls == []
 
 
 def test_verifier_specs_use_d_compatible_id_key(tmp_path):
