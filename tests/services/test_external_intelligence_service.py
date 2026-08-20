@@ -814,6 +814,7 @@ def test_service_status_reconciles_identity_heartbeat_and_last_exit(tmp_path):
     )
     assert stale["status"] == ServiceReadiness.STALE.value
 
+
 def test_parse_launchctl_handles_numeric_never_exited_and_missing():
     parsed_zero = _parse_launchctl(
         subprocess.CompletedProcess(
@@ -846,9 +847,7 @@ def test_parse_launchctl_handles_numeric_never_exited_and_missing():
     assert parsed_nonzero["last_exit_state"] == "EXITED_WITH_CODE"
 
     parsed_missing = _parse_launchctl(
-        subprocess.CompletedProcess(
-            ["launchctl"], 0, "state = running\npid = 123\n", ""
-        )
+        subprocess.CompletedProcess(["launchctl"], 0, "state = running\npid = 123\n", "")
     )
     assert parsed_missing["last_exit_code"] is None
     assert parsed_missing["last_exit_state"] == "UNKNOWN_OR_MISSING"
@@ -889,7 +888,8 @@ def test_service_status_handles_launchd_never_exited_and_regression_cases(tmp_pa
                 "run_id": "run-1",
                 "pid": pid,
                 "source_path": str(
-                    Path(__file__).resolve().parents[2] / "scripts/ops/external_intelligence_service.py"
+                    Path(__file__).resolve().parents[2]
+                    / "scripts/ops/external_intelligence_service.py"
                 ),
                 "source_sha256": source_sha,
                 "config_path": str(config.resolve()),
