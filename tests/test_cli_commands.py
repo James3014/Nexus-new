@@ -694,7 +694,9 @@ def test_d3_learn_ingest_hard_difficulty_blocks_forced_light_route(tmp_path, mon
         return HeavyResult()
 
     monkeypatch.setattr("scripts.engine.nexus_cli.run_learn_ingest", fake_run_learn_ingest)
-    monkeypatch.setattr("scripts.engine.nexus_cli.enforce_learn_ingest_semantic_contract", lambda res: None)
+    monkeypatch.setattr(
+        "scripts.engine.nexus_cli.enforce_learn_ingest_semantic_contract", lambda res: None
+    )
 
     source_file = tmp_path / "source.md"
     source_file.write_text(

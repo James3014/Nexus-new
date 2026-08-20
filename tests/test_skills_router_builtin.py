@@ -106,9 +106,13 @@ def test_d2_skills_router_route_candidates_safety_blocked_force_preserves_full_p
         captured_plans.append(plan)
         return []
 
-    monkeypatch.setattr("nexus.core.executor_controls.ExecutorControls.execute_plan", fake_execute_plan)
+    monkeypatch.setattr(
+        "nexus.core.executor_controls.ExecutorControls.execute_plan", fake_execute_plan
+    )
 
-    router = SkillsRouter(project_root=str(tmp_path), run_dir=str(tmp_path / ".nexus" / "runs" / "t_d2"))
+    router = SkillsRouter(
+        project_root=str(tmp_path), run_dir=str(tmp_path / ".nexus" / "runs" / "t_d2")
+    )
     context = {
         "task_id": "d2_safety_task",
         "task_desc": "High risk task execution",
