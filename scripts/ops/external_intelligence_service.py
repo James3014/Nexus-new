@@ -435,7 +435,11 @@ class GhIssueTransport:
                 elif isinstance(item, Mapping):
                     comments.append(dict(item))
             return comments
-        elif isinstance(value, Mapping) and "comments" in value and isinstance(value["comments"], list):
+        elif (
+            isinstance(value, Mapping)
+            and "comments" in value
+            and isinstance(value["comments"], list)
+        ):
             return [dict(row) for row in value["comments"] if isinstance(row, Mapping)]
         raise ServiceError("GH_COMMENTS_LIST_INVALID")
 
@@ -520,8 +524,7 @@ def render_comment(result: Mapping[str, Any], publication_id: str | None = None)
         else "<!-- nexus-external-intelligence -->\n"
     )
     return (
-        header
-        + "External Intelligence automation completed.\n\n"
+        header + "External Intelligence automation completed.\n\n"
         f"- Task: `{publication.get('task_id')}`\n"
         f"- Candidate: `{publication.get('candidate_commit')}`\n"
         f"- Tree: `{publication.get('candidate_tree')}`\n"
@@ -850,12 +853,9 @@ def run_once(
                         "result": pub_result,
                     }
                     continue
-                if (
-                    result.get("reuse")
-                    and (
-                        not config.publication_enabled
-                        or (pub_result.get("publication_record") or {}).get("state") == "COMPLETED"
-                    )
+                if result.get("reuse") and (
+                    not config.publication_enabled
+                    or (pub_result.get("publication_record") or {}).get("state") == "COMPLETED"
                 ):
                     last = {
                         "status": "COMPLETE",
