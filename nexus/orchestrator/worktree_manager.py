@@ -2,6 +2,7 @@ import fcntl
 import json
 import os
 import re
+import stat
 import subprocess
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -497,10 +498,16 @@ class WorktreeManager:
             },
             "lease": lease.__dict__,
         }
+        record["integrity_sha256"] = self._ownership_digest(record)
         temp = path.with_suffix(f".{os.getpid()}.tmp")
         temp.write_text(json.dumps(record, sort_keys=True, separators=(",", ":")), encoding="utf-8")
         temp.chmod(0o600)
         os.replace(temp, path)
+
+    @staticmethod
+    def _ownership_digest(record: Mapping[str, Any]) -> str:
+        payload = {key: value for key, value in record.items() if key != "integrity_sha256"}
+        return sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
 
     def _read_target_ownership(
         self,
@@ -513,14 +520,31 @@ class WorktreeManager:
         except (OSError, subprocess.SubprocessError):
             # An unresolved common Git directory cannot establish ownership.
             return None
-        if not path.is_file():
+        try:
+            lst = os.lstat(path)
+        except FileNotFoundError:
             return None
         try:
-            record = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError) as exc:
+            if not stat.S_ISREG(lst.st_mode) or stat.S_ISLNK(lst.st_mode):
+                raise ValueError("ownership record is not a regular file")
+            flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            fd = os.open(path, flags)
+            try:
+                fst = os.fstat(fd)
+                if not stat.S_ISREG(fst.st_mode) or (fst.st_dev, fst.st_ino) != (lst.st_dev, lst.st_ino):
+                    raise ValueError("ownership record changed while reading")
+                with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                    fd = -1
+                    record = json.load(handle)
+            finally:
+                if fd != -1:
+                    os.close(fd)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
             raise ValueError("MUTATION_IDENTITY_INVALID: ownership record is unreadable") from exc
         if not isinstance(record, dict) or record.get("schema") != "nexus.target_ownership.v1":
             raise ValueError("MUTATION_IDENTITY_INVALID: ownership record schema is invalid")
+        if record.get("integrity_sha256") != self._ownership_digest(record):
+            raise ValueError("MUTATION_IDENTITY_INVALID: ownership record integrity is invalid")
         branch = entry.get("branch", "")
         expected_branch = f"refs/heads/nexus/task/{task_id}"
         lease = record.get("lease")
@@ -535,6 +559,112 @@ class WorktreeManager:
             raise ValueError("MUTATION_IDENTITY_INVALID: ownership record is stale")
         _validate_mutation_identity(record)
         return record
+
+    def _validate_exact_ownership_for_cleanup(
+        self,
+        controller_root: Path,
+        contract: SelfHostedTaskContract,
+        lease: TargetWorktreeLease,
+    ) -> tuple[Path, dict[str, Any] | None, tuple[int, int], str]:
+        path = self._ownership_record_path(controller_root, contract.task_id)
+        try:
+            lst = os.lstat(path)
+        except FileNotFoundError:
+            return path, None, (0, 0), ""
+        except OSError as exc:
+            raise ValueError(f"ownership record lstat failed: {exc}") from exc
+
+        if not stat.S_ISREG(lst.st_mode) or stat.S_ISLNK(lst.st_mode):
+            raise ValueError("ownership record is not a regular file")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(path, flags)
+        try:
+            fst = os.fstat(fd)
+            if not stat.S_ISREG(fst.st_mode) or (fst.st_dev, fst.st_ino) != (lst.st_dev, lst.st_ino):
+                raise ValueError("ownership record changed while reading")
+            with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                fd = -1
+                record = json.load(handle)
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"ownership record unreadable: {exc}") from exc
+        finally:
+            if fd != -1:
+                os.close(fd)
+
+        if not isinstance(record, dict) or record.get("schema") != "nexus.target_ownership.v1":
+            raise ValueError("ownership record schema is invalid")
+        digest = self._ownership_digest(record)
+        if record.get("integrity_sha256") != digest:
+            raise ValueError("ownership record integrity is invalid")
+        _validate_mutation_identity(record)
+
+        target_path = Path(lease.target_worktree).resolve()
+        record_contract = record.get("contract") or {}
+        record_lease = record.get("lease") or {}
+        if (
+            record.get("task_id") != contract.task_id
+            or record.get("lease_id") != lease.lease_id
+            or record.get("attempt_id") != lease.lease_id
+            or Path(str(record.get("controller_worktree", ""))).resolve() != controller_root
+            or Path(str(record_contract.get("target_repo_root", ""))).resolve() != target_path
+            or Path(str(record_lease.get("target_worktree", ""))).resolve() != target_path
+            or str(record_contract.get("target_base_revision", "")) != contract.target_base_revision
+            or str(record_lease.get("initial_head", "")) != lease.initial_head
+            or str(record.get("controller_revision", "")) != contract.controller_revision
+        ):
+            raise ValueError("ownership record identity binding mismatch")
+
+        expected_identity = (fst.st_dev, fst.st_ino)
+        return path, record, expected_identity, digest
+
+    def _delete_ownership_record_cas(
+        self,
+        path: Path,
+        expected_identity: tuple[int, int],
+        expected_digest: str,
+        expected_lease_id: str,
+        expected_task_id: str,
+    ) -> None:
+        try:
+            lst = os.lstat(path)
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise RuntimeError(f"ownership record lstat failed during CAS deletion: {exc}") from exc
+
+        if not stat.S_ISREG(lst.st_mode) or stat.S_ISLNK(lst.st_mode):
+            raise RuntimeError("ownership record changed to non-regular file before deletion")
+        if (lst.st_dev, lst.st_ino) != expected_identity:
+            raise RuntimeError("ownership record inode changed before deletion")
+
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(path, flags)
+        try:
+            fst = os.fstat(fd)
+            if not stat.S_ISREG(fst.st_mode) or (fst.st_dev, fst.st_ino) != expected_identity:
+                raise RuntimeError("ownership record fstat mismatch before deletion")
+            with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                fd = -1
+                record = json.load(handle)
+        except Exception as exc:
+            raise RuntimeError(f"ownership record unreadable before CAS deletion: {exc}") from exc
+        finally:
+            if fd != -1:
+                os.close(fd)
+
+        if not isinstance(record, dict) or record.get("schema") != "nexus.target_ownership.v1":
+            raise RuntimeError("ownership record schema changed before deletion")
+        if record.get("integrity_sha256") != expected_digest:
+            raise RuntimeError("ownership record digest changed before deletion")
+        if record.get("lease_id") != expected_lease_id or record.get("task_id") != expected_task_id:
+            raise RuntimeError("ownership record lease/task identity changed before deletion")
+
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        if path.exists():
+            raise RuntimeError("ownership record deletion verification failed")
 
     def _create_lease_locked(
         self,
@@ -712,16 +842,29 @@ class WorktreeManager:
                 task_id = branch.removeprefix("nexus/task/")
             snapshot = (task_states or {}).get(task_id)
             if isinstance(snapshot, Mapping):
-                # Reject malformed or stale caller evidence, but never use it
-                # as ownership.  The durable record remains authoritative.
-                _validate_mutation_identity(snapshot)
+                # Caller snapshot is not ownership authority. Malformed or
+                # insufficient caller snapshots cannot override physical reservation;
+                # treat uncertainty as fail-closed conflict.
+                try:
+                    _validate_mutation_identity(snapshot)
+                except ValueError:
+                    return True
             # The durable ownership record is authoritative once a live Target
             # exists.  A caller snapshot may not substitute for it or change
             # its mutation domain.
-            existing = self._read_target_ownership(controller_root, entry, task_id)
+            try:
+                existing = self._read_target_ownership(controller_root, entry, task_id)
+            except ValueError:
+                # Any malformed, stale, swapped, or integrity-invalid record
+                # keeps the registered Target reserved; caller evidence cannot
+                # downgrade an identity failure into an admission.
+                return True
             if not isinstance(existing, Mapping):
                 return True
-            if mutation_domains_conflict(existing, contract):
+            try:
+                if mutation_domains_conflict(existing, contract):
+                    return True
+            except ValueError:
                 return True
         return False
 
@@ -858,6 +1001,29 @@ class WorktreeManager:
         salvage_ref: Optional[str] = None,
         dry_run: bool = False,
     ) -> TargetCleanupReceipt:
+        controller = Path(contract.controller_repo_root).resolve()
+        with self._reservation_lock(controller):
+            return self._cleanup_terminal_target_locked(
+                contract,
+                lease,
+                candidate_commit=candidate_commit,
+                candidate_ref=candidate_ref,
+                salvage_commit=salvage_commit,
+                salvage_ref=salvage_ref,
+                dry_run=dry_run,
+            )
+
+    def _cleanup_terminal_target_locked(
+        self,
+        contract: SelfHostedTaskContract,
+        lease: TargetWorktreeLease,
+        *,
+        candidate_commit: Optional[str] = None,
+        candidate_ref: Optional[str] = None,
+        salvage_commit: Optional[str] = None,
+        salvage_ref: Optional[str] = None,
+        dry_run: bool = False,
+    ) -> TargetCleanupReceipt:
         self.validate_lease_identity(contract, lease)
         target = Path(lease.target_worktree).resolve()
         controller = Path(contract.controller_repo_root).resolve()
@@ -870,6 +1036,17 @@ class WorktreeManager:
                 contract, lease, "BLOCKED_BY_MISSING_REF",
                 "candidate and salvage durable bindings cannot be combined", False, False,
             )
+
+        try:
+            ownership_path, ownership_record, expected_identity, expected_digest = self._validate_exact_ownership_for_cleanup(
+                controller, contract, lease,
+            )
+        except ValueError as exc:
+            return self._cleanup_receipt(
+                contract, lease, "BLOCKED_BY_UNSAVED_CHANGES",
+                f"ownership record validation failed: {exc}", False, False,
+            )
+
         durable_commit = candidate_commit or salvage_commit
         durable_ref = candidate_ref or salvage_ref
         missing_ref_blocker = (
@@ -879,7 +1056,19 @@ class WorktreeManager:
         )
         entry = self._worktree_entry(controller, target)
         if not target.exists() and entry is None:
+            if ownership_record is not None and not dry_run:
+                try:
+                    self._delete_ownership_record_cas(
+                        ownership_path,
+                        expected_identity,
+                        expected_digest,
+                        lease.lease_id,
+                        contract.task_id,
+                    )
+                except RuntimeError as exc:
+                    return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", str(exc), False, False)
             return self._cleanup_receipt(contract, lease, "ALREADY_REMOVED", None, False, True)
+
         if entry is None:
             if self.process_checker(target):
                 return self._cleanup_receipt(contract, lease, "BLOCKED_BY_PROCESS", "active process uses Target", False, False)
@@ -902,7 +1091,21 @@ class WorktreeManager:
                     return self._cleanup_receipt(contract, lease, "BLOCKED_BY_MISSING_REF", missing_ref_blocker, False, False)
             if not dry_run:
                 target.rmdir()
+                if target.exists():
+                    return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "failed to remove unregistered target directory", False, False)
+                if ownership_record is not None:
+                    try:
+                        self._delete_ownership_record_cas(
+                            ownership_path,
+                            expected_identity,
+                            expected_digest,
+                            lease.lease_id,
+                            contract.task_id,
+                        )
+                    except RuntimeError as exc:
+                        return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", str(exc), False, False)
             return self._cleanup_receipt(contract, lease, "REMOVED", None, not dry_run, True)
+
         if self.process_checker(target):
             return self._cleanup_receipt(contract, lease, "BLOCKED_BY_PROCESS", "active process uses Target", False, False)
         status = self._status_bytes(target)
@@ -920,9 +1123,24 @@ class WorktreeManager:
                 return self._cleanup_receipt(contract, lease, "BLOCKED_BY_MISSING_REF", missing_ref_blocker, False, False)
         elif head != lease.initial_head:
             return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "Target HEAD changed without durable snapshot", False, False)
+
         if not dry_run:
             self._run_git(["worktree", "remove", "--", str(target)], cwd=controller)
             self._run_git(["worktree", "prune"], cwd=controller)
+            if self._worktree_entry(controller, target) is not None or target.exists():
+                return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", "registered worktree removal verification failed", False, False)
+            if ownership_record is not None:
+                try:
+                    self._delete_ownership_record_cas(
+                        ownership_path,
+                        expected_identity,
+                        expected_digest,
+                        lease.lease_id,
+                        contract.task_id,
+                    )
+                except RuntimeError as exc:
+                    return self._cleanup_receipt(contract, lease, "BLOCKED_BY_UNSAVED_CHANGES", str(exc), False, False)
+
         return self._cleanup_receipt(contract, lease, "REMOVED", None, not dry_run, True)
 
     def restore_task_branch_for_retry(
@@ -1385,9 +1603,6 @@ class WorktreeManager:
         process/lock evidence always wins; unavailable process evidence fails
         closed rather than allowing a concurrent lease.
         """
-        terminal = _DIRECT_TERMINAL_STATUSES
-        review = {"RETAINED_FOR_REVIEW", "FINAL_BLOCK"}
-        states = task_states or {}
         active: list[dict[str, str]] = []
         root = self.root_dir.resolve()
         controller = controller_root.resolve()
@@ -1418,22 +1633,17 @@ class WorktreeManager:
                 task_id = branch.removeprefix("refs/heads/nexus/task/")
             elif branch.startswith("nexus/task/"):
                 task_id = branch.removeprefix("nexus/task/")
-            state = states.get(task_id) if task_id else None
-            status = str(state.get("status")) if state else None
             if task_id:
-                # A caller status cannot hide a clean live Target.  Require
-                # the durable ownership record before considering any
-                # terminal/review disposition; dirty retained evidence remains
-                # conservatively reusable only for the existing forensic path.
-                self._read_target_ownership(controller, entry, task_id)
-            if task_id and (status not in terminal and status not in review):
-                # A managed nexus/task branch without durable lifecycle
-                # ownership is intentionally active; its disposition cannot
-                # be proven passive.
-                active.append(entry)
-            elif task_id and not self._status_bytes(path):
-                # Clean live worktrees have no independently visible terminal
-                # evidence, so caller-controlled terminal status is ignored.
+                # Lifecycle status is descriptive only.  A registered Target
+                # remains owned until the verified cleanup transition releases
+                # its durable record; terminal/review caller snapshots cannot
+                # suppress either clean or dirty ownership.
+                try:
+                    self._read_target_ownership(controller, entry, task_id)
+                except ValueError:
+                    # Identity uncertainty is itself an active reservation.
+                    active.append(entry)
+                    continue
                 active.append(entry)
         return active
 

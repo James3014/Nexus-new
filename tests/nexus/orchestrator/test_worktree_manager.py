@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -379,10 +380,11 @@ def test_serial_target_budget_ignores_retained_dirty_target(sh2_repo):
     Path(retained_lease.target_worktree, "retained.txt").write_text("evidence\n", encoding="utf-8")
 
     second = _contract(sh2_repo, task_id="second")
-    manager.create_lease(
-        second,
-        task_states={"retained": {"status": "FINAL_BLOCK", "lease": retained_lease.__dict__}},
-    )
+    with pytest.raises(RuntimeError, match="serial Target budget"):
+        manager.create_lease(
+            second,
+            task_states={"retained": {"status": "FINAL_BLOCK", "lease": retained_lease.__dict__}},
+        )
     assert Path(retained_lease.target_worktree, "retained.txt").exists()
 
 
@@ -1483,3 +1485,190 @@ def test_different_base_slot_reuse_blocks_until_verified_release(sh2_repo):
     )
     assert blocked_lease.status == "BLOCKED"
     assert "BLOCKED_UNPROTECTED_UNIQUE_COMMIT" in (blocked_lease.blocker or "")
+
+
+# ---------------------------------------------------------------------------
+# Physical Ownership Record Lifecycle & Safety Tests
+# ---------------------------------------------------------------------------
+
+def test_cleanup_terminal_target_successful_exact_release_removes_ownership_record(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-release")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+
+    assert target.exists()
+    assert record_path.exists()
+
+    receipt = manager.cleanup_terminal_target(contract, lease)
+    assert receipt.decision == "REMOVED"
+    assert receipt.performed is True
+    assert not target.exists()
+    assert not record_path.exists()
+
+    # Idempotent second cleanup call
+    second = manager.cleanup_terminal_target(contract, lease)
+    assert second.decision == "ALREADY_REMOVED"
+    assert not record_path.exists()
+
+
+def test_cleanup_terminal_target_failed_release_preserves_ownership_record(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-failed")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+    (target / "src" / "allowed.txt").write_text("uncommitted dirty\n", encoding="utf-8")
+
+    receipt = manager.cleanup_terminal_target(contract, lease)
+    assert receipt.decision == "BLOCKED_BY_UNSAVED_CHANGES"
+    assert receipt.performed is False
+    assert target.exists()
+    assert record_path.exists()
+
+
+def test_cleanup_terminal_target_process_blocked_preserves_ownership_record(sh2_repo):
+    contract = _contract(sh2_repo, task_id="owner-process")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]), process_checker=lambda _: True)
+    lease = manager.create_lease(contract)
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+
+    receipt = manager.cleanup_terminal_target(contract, lease)
+    assert receipt.decision == "BLOCKED_BY_PROCESS"
+    assert receipt.performed is False
+    assert record_path.exists()
+
+
+def test_cleanup_terminal_target_rejects_symlink_or_non_regular_ownership_record(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-symlink")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+
+    # Replace ownership record with a symlink to outside file
+    outside = controller / "outside.txt"
+    record_path.unlink()
+    record_path.symlink_to(outside)
+
+    receipt = manager.cleanup_terminal_target(contract, lease)
+    assert receipt.decision == "BLOCKED_BY_UNSAVED_CHANGES"
+    assert "not a regular file" in (receipt.blocker or "")
+    assert target.exists()
+
+
+def test_cleanup_terminal_target_rejects_tampered_integrity_ownership_record(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-tamper")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["integrity_sha256"] = "0" * 64
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    receipt = manager.cleanup_terminal_target(contract, lease)
+    assert receipt.decision == "BLOCKED_BY_UNSAVED_CHANGES"
+    assert "integrity is invalid" in (receipt.blocker or "")
+    assert target.exists()
+
+
+def test_cleanup_terminal_target_rejects_mismatched_lease_binding(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-mismatch")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    record["lease_id"] = "different-lease-id"
+    record["attempt_id"] = "different-lease-id"
+    record["expected_lease_id"] = "different-lease-id"
+    record["expected_attempt_id"] = "different-lease-id"
+    record["integrity_sha256"] = manager._ownership_digest(record)
+    record_path.write_text(json.dumps(record), encoding="utf-8")
+
+    receipt = manager.cleanup_terminal_target(contract, lease)
+    assert receipt.decision == "BLOCKED_BY_UNSAVED_CHANGES"
+    assert "identity binding mismatch" in (receipt.blocker or "")
+    assert target.exists()
+
+
+def test_cleanup_terminal_target_dry_run_preserves_worktree_and_ownership_record(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-dryrun")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+
+    receipt = manager.cleanup_terminal_target(contract, lease, dry_run=True)
+    assert receipt.decision == "REMOVED"
+    assert receipt.performed is False
+    assert receipt.eligible is True
+    assert target.exists()
+    assert record_path.exists()
+
+
+def test_cleanup_terminal_target_with_salvage_removes_ownership_record(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-salvage")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+
+    (target / "src" / "allowed.txt").write_text("salvaged\n", encoding="utf-8")
+    _git(target, "add", "src/allowed.txt")
+    _git(target, "commit", "-m", "salvage commit")
+    salvage_sha = _git(target, "rev-parse", "HEAD")
+    salvage_ref = manager.salvage_ref_for(contract.task_id, "attempt-1")
+    _git(controller, "update-ref", salvage_ref, salvage_sha)
+
+    receipt = manager.cleanup_terminal_target(
+        contract,
+        lease,
+        salvage_commit=salvage_sha,
+        salvage_ref=salvage_ref,
+    )
+    assert receipt.decision == "REMOVED"
+    assert receipt.performed is True
+    assert not target.exists()
+    assert not record_path.exists()
+
+
+def test_cleanup_terminal_target_with_candidate_removes_ownership_record(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-candidate")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+
+    (target / "src" / "allowed.txt").write_text("candidate\n", encoding="utf-8")
+    _git(target, "add", "src/allowed.txt")
+    _git(target, "commit", "-m", "candidate commit")
+    candidate_sha = _git(target, "rev-parse", "HEAD")
+    candidate_ref = manager.protect_candidate(contract, lease, candidate_sha)
+
+    receipt = manager.cleanup_terminal_target(
+        contract,
+        lease,
+        candidate_commit=candidate_sha,
+        candidate_ref=candidate_ref,
+    )
+    assert receipt.decision == "REMOVED"
+    assert receipt.performed is True
+    assert not target.exists()
+    assert not record_path.exists()
+
+
+def test_cleanup_terminal_target_cas_swap_race_preserves_record(sh2_repo, monkeypatch):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="owner-cas-swap")
+    controller = Path(contract.controller_repo_root).resolve()
+    record_path = manager._ownership_record_path(controller, contract.task_id)
+
+    orig_run_git = manager._run_git
+
+    def swapped_run_git(args, **kwargs):
+        res = orig_run_git(args, **kwargs)
+        if args and args[0] == "worktree" and args[1] == "remove":
+            # Simulate a swap race: unlink and recreate a new file with different content/inode
+            record = json.loads(record_path.read_text(encoding="utf-8"))
+            record["lease_id"] = "swapped-lease-id"
+            record["integrity_sha256"] = manager._ownership_digest(record)
+            record_path.unlink()
+            record_path.write_text(json.dumps(record), encoding="utf-8")
+        return res
+
+    monkeypatch.setattr(manager, "_run_git", swapped_run_git)
+
+    receipt = manager.cleanup_terminal_target(contract, lease)
+    assert receipt.decision == "BLOCKED_BY_UNSAVED_CHANGES"
+    assert "ownership record" in (receipt.blocker or "")
+    # The swapped record must be preserved
+    assert record_path.exists()

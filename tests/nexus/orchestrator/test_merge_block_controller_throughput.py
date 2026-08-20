@@ -216,8 +216,7 @@ def test_real_create_lease_allows_disjoint_and_blocks_exact_parent(tmp_path):
         }
     }
     state_a["a"]["attempt_id"] = "stale-attempt"
-    with pytest.raises(ValueError, match="stale"):
-        manager.target_conflict(b, task_states=state_a)
+    assert manager.target_conflict(b, task_states=state_a) is True
     state_a["a"]["attempt_id"] = "a-attempt"
     lease_b = manager.create_lease(b, task_states=state_a)
     assert Path(lease_a.target_worktree) != Path(lease_b.target_worktree)
@@ -437,6 +436,33 @@ def test_forged_terminal_snapshot_cannot_hide_clean_live_target(tmp_path):
         )
 
 
+def test_forged_terminal_snapshot_cannot_hide_dirty_live_target(tmp_path):
+    controller, target_root = _real_repo(tmp_path)
+    manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
+    contract_a = _real_contract(controller, target_root, "a", ["scope/a.txt"])
+    lease_a = manager.create_lease(contract_a, task_states={})
+    target = Path(lease_a.target_worktree)
+    (target / "scope").mkdir()
+    (target / "scope" / "a.txt").write_text("uncommitted\n", encoding="utf-8")
+    forged_terminal = {
+        "a": {
+            "task_id": "a",
+            "status": "RETAINED_FOR_REVIEW",
+            "attempt_id": lease_a.lease_id,
+            "lease_id": lease_a.lease_id,
+            "controller_revision": contract_a.controller_revision,
+            "controller_worktree": str(controller),
+            "contract": contract_a.model_dump(mode="json"),
+            "lease": lease_a.__dict__,
+        }
+    }
+    with pytest.raises(RuntimeError, match="serial Target budget exceeded"):
+        manager.create_lease(
+            _real_contract(controller, target_root, "b", ["scope/a.txt"]),
+            task_states=forged_terminal,
+        )
+
+
 def test_public_service_admission_allows_disjoint_and_blocks_overlap(tmp_path, monkeypatch):
     calls = []
     monkeypatch.delenv("NEXUS_TARGET_ROOT_OVERRIDE", raising=False)
@@ -504,3 +530,214 @@ def test_public_service_admission_allows_disjoint_and_blocks_overlap(tmp_path, m
     assert calls == [("b", str(tmp_path / "targets" / "b"))]
     assert service.submit_task(request_b).get("duplicate") is True
     assert calls == [("b", str(tmp_path / "targets" / "b"))]
+
+
+def test_final_block_and_retained_review_targets_remain_reserved_in_worktree_manager(tmp_path):
+    controller, target_root = _real_repo(tmp_path)
+    manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
+    contract_a = _real_contract(controller, target_root, "a", ["scope/a.txt"])
+    lease_a = manager.create_lease(contract_a, task_states={})
+
+    # Status FINAL_BLOCK or RETAINED_FOR_REVIEW is descriptive only; physical Target remains reserved
+    final_block_state = {
+        "a": {
+            "task_id": "a",
+            "status": "FINAL_BLOCK",
+            "attempt_id": lease_a.lease_id,
+            "lease_id": lease_a.lease_id,
+            "controller_revision": contract_a.controller_revision,
+            "controller_worktree": str(controller),
+            "contract": contract_a.model_dump(mode="json"),
+            "lease": lease_a.__dict__,
+        }
+    }
+    with pytest.raises(RuntimeError, match="serial Target budget exceeded"):
+        manager.create_lease(
+            _real_contract(controller, target_root, "b", ["scope/a.txt"]),
+            task_states=final_block_state,
+        )
+
+    # Perform verified cleanup of a
+    cleanup_receipt = manager.cleanup_terminal_target(contract_a, lease_a)
+    assert cleanup_receipt.decision == "REMOVED"
+    assert cleanup_receipt.performed is True
+
+    # Now b can be admitted cleanly
+    lease_b = manager.create_lease(
+        _real_contract(controller, target_root, "b", ["scope/a.txt"]),
+        task_states={"a": {**final_block_state["a"], "cleanup_decision": "REMOVED"}},
+    )
+    assert lease_b.task_id == "b"
+    assert Path(lease_b.target_worktree).exists()
+
+
+def test_symlink_ownership_record_fails_closed_in_target_conflict(tmp_path):
+    controller, target_root = _real_repo(tmp_path)
+    manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
+    contract_a = _real_contract(controller, target_root, "a", ["scope/a.txt"])
+    manager.create_lease(contract_a, task_states={})
+
+    ownership = manager._ownership_record_path(controller, contract_a.task_id)
+    outside = controller / "base.txt"
+    ownership.unlink()
+    ownership.symlink_to(outside)
+
+    contract_b = _real_contract(controller, target_root, "b", ["scope/b.txt"])
+    # Symlink ownership record fails closed -> target_conflict is True
+    assert manager.target_conflict(contract_b) is True
+
+
+def test_malformed_json_ownership_record_fails_closed_in_target_conflict(tmp_path):
+    controller, target_root = _real_repo(tmp_path)
+    manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
+    contract_a = _real_contract(controller, target_root, "a", ["scope/a.txt"])
+    manager.create_lease(contract_a, task_states={})
+
+    ownership = manager._ownership_record_path(controller, contract_a.task_id)
+    ownership.write_text("{malformed:json", encoding="utf-8")
+
+    contract_b = _real_contract(controller, target_root, "b", ["scope/b.txt"])
+    assert manager.target_conflict(contract_b) is True
+
+
+def test_swap_race_tampered_task_id_fails_closed_in_target_conflict(tmp_path):
+    controller, target_root = _real_repo(tmp_path)
+    manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
+    contract_a = _real_contract(controller, target_root, "a", ["scope/a.txt"])
+    manager.create_lease(contract_a, task_states={})
+
+    ownership = manager._ownership_record_path(controller, contract_a.task_id)
+    record = json.loads(ownership.read_text(encoding="utf-8"))
+    record["task_id"] = "forged-task-id"
+    record["integrity_sha256"] = manager._ownership_digest(record)
+    ownership.write_text(json.dumps(record, sort_keys=True), encoding="utf-8")
+
+    contract_b = _real_contract(controller, target_root, "b", ["scope/b.txt"])
+    assert manager.target_conflict(contract_b) is True
+
+
+def test_cleanup_and_admission_share_same_reservation_lock(tmp_path):
+    controller, target_root = _real_repo(tmp_path)
+    manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
+    contract_a = _real_contract(controller, target_root, "a", ["scope/a.txt"])
+    lease_a = manager.create_lease(contract_a, task_states={})
+
+    lock_acquired = threading.Event()
+    release_lock = threading.Event()
+    cleanup_done = threading.Event()
+
+    def hold_lock():
+        with manager._reservation_lock(controller):
+            lock_acquired.set()
+            assert release_lock.wait(timeout=5)
+
+    holder = threading.Thread(target=hold_lock)
+    holder.start()
+    assert lock_acquired.wait(timeout=5)
+
+    def do_cleanup():
+        receipt = manager.cleanup_terminal_target(contract_a, lease_a)
+        assert receipt.decision == "REMOVED"
+        cleanup_done.set()
+
+    cleaner = threading.Thread(target=do_cleanup)
+    cleaner.start()
+
+    # Cleanup must be blocked while lock is held
+    time.sleep(0.05)
+    assert not cleanup_done.is_set()
+
+    # Release lock -> cleanup completes
+    release_lock.set()
+    holder.join(timeout=5)
+    cleaner.join(timeout=5)
+    assert cleanup_done.is_set()
+
+
+def test_direct_service_admission_blocks_when_retained_target_exists(tmp_path, monkeypatch):
+    calls = []
+    controller, target_root = _real_repo(tmp_path)
+    monkeypatch.delenv("NEXUS_TARGET_ROOT_OVERRIDE", raising=False)
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(target_root))
+
+    manager = WorktreeManager(root_dir=target_root, process_checker=lambda _: False)
+    contract_retained = _real_contract(controller, target_root, "retained", ["scope/a.txt"])
+    retained_lease = manager.create_lease(contract_retained, task_states={})
+
+    # Real registered worktree and real durable ownership record exist on disk
+    assert Path(retained_lease.target_worktree).exists()
+    assert manager._ownership_record_path(controller, contract_retained.task_id).exists()
+
+    def runner(contract, request, update):
+        calls.append((contract.task_id, contract.target_repo_root))
+        return {"promotion_status": "PENDING_HUMAN_APPROVAL"}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        runner=runner,
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    # Set descriptive FINAL_BLOCK lifecycle state for task 'retained'
+    base = _task(task_id="retained", allowed_files=["scope/a.txt"], status="FINAL_BLOCK")
+    base["controller_worktree"] = str(controller)
+    base["expected_controller_worktree"] = str(controller)
+    service._write_state(
+        "retained",
+        {
+            **base,
+            "attempt_id": retained_lease.lease_id,
+            "expected_attempt_id": retained_lease.lease_id,
+            "lease_id": retained_lease.lease_id,
+            "expected_lease_id": retained_lease.lease_id,
+            "request": {"task_id": "retained", "allowed_files": ["scope/a.txt"]},
+            "contract": contract_retained.model_dump(mode="json"),
+            "lease": retained_lease.__dict__,
+        },
+    )
+
+    request_overlap = {
+        "task_id": "overlap-task",
+        "what": "overlapping",
+        "why": "test",
+        "controller_revision": contract_retained.controller_revision,
+        "target_base_revision": contract_retained.target_base_revision,
+        "controller_repo_root": str(controller),
+        "target_repo_root": str(target_root / "overlap-task"),
+        "target_worktree_root": str(target_root),
+        "allowed_files": ["scope/a.txt"],
+        "forbidden_files": [],
+        "verifier_commands": [],
+        "protected_contracts": [],
+        "execution_lane": "ISOLATED_TARGET",
+        "worker": "codex",
+        "allow_unbound_test_identity": True,
+        "task_card_path": str(tmp_path / "missing-card.txt"),
+        "idempotency_key": "overlap-idempotent",
+    }
+    # Direct service admission must block because physical Target and durable ownership remain reserved
+    with pytest.raises(RuntimeError, match="overlapping Target"):
+        service.submit_task(request_overlap)
+    assert calls == []
+
+    # Perform verified physical cleanup
+    receipt = manager.cleanup_terminal_target(contract_retained, retained_lease)
+    assert receipt.decision == "REMOVED"
+
+    # Update lifecycle state cleanup_decision
+    service._write_state(
+        "retained",
+        {
+            **service._read_state_snapshot("retained"),
+            "cleanup_decision": "REMOVED",
+        },
+    )
+
+    # Now submission succeeds and invokes runner
+    service.submit_task(request_overlap)
+    for _ in range(100):
+        if calls:
+            break
+        time.sleep(0.01)
+    assert len(calls) == 1
+    assert calls[0][0] == "overlap-task"

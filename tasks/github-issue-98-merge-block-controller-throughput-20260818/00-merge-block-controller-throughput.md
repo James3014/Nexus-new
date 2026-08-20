@@ -5,9 +5,11 @@ campaign_id: github-issue-98-merge-block-controller-throughput-20260818
 source_issue: "#98"
 owner: James Chen
 status: ACTIVE
-baseline_revision: 71ae533ec9f795477131645f96cea1c93b4f4d40
-historical_baseline_revision: 1ee1c69332514bdbaa5a98f5ed29fad109425c32
-rebound_from_current_main: 8c2584d6053dd1f04dc87333f807fbea1726545e
+baseline_revision: f9899121c6b691fd7a66a391a2055a2c78bd387b
+rebound_from_current_main: f9899121c6b691fd7a66a391a2055a2c78bd387b
+rebind_head_before_edits: cd4056039915a2517d20815e4003920f021aaf07
+historical_baseline_revision: 71ae533ec9f795477131645f96cea1c93b4f4d40
+claim_ceiling: SOURCE_CANDIDATE_ONLY
 commit_required: true
 candidate_required: true
 worker_may_commit: true
@@ -34,8 +36,9 @@ block before provider invocation.
 
 ## Authority and dependencies
 
-- GitHub main baseline is the exact rebound revision above. The historical
-  baseline is provenance only and grants no stale source authority.
+- GitHub main baseline is the exact current main `f9899121c6b691fd7a66a391a2055a2c78bd387b`.
+  The historical baselines (`71ae533e`, `8c2584d6`, `1ee1c693`, and partial rebind
+  head `cd405603`) are provenance only and grant no stale source authority.
 - Issue #163 is physically closed at current main; standing-grant changes are a
   settled predecessor and remain outside this Candidate's scope.
 - Issue #96 completed `POST_30_LOCAL_DELTA_FULLY_ACCOUNTED` in comment
@@ -46,15 +49,33 @@ block before provider invocation.
 - The running Gateway is observation-only and currently reports
   `reload_required=true`; no live mutation or completion claim may consume it.
 
+## Contract Delta (Ownership Authority Unification)
+
+- Physical release and cleanup share the exact same reservation lock
+  (`nexus-target-admission.lock`) as admission in `WorktreeManager`.
+- Exact ownership records (`nexus-target-ownership/<task_hash>.json`) are safely
+  read and validated with `O_NOFOLLOW`, regular file checks, inode matching,
+  schema validation, integrity digest verification, and exact
+  task/attempt/lease/controller/target bindings before removal.
+- Ownership records are removed only after verified physical removal of the
+  registered worktree (or directory).
+- Failed cleanup, live process/lock, dirty worktree, or corrupted/mismatched
+  records preserve the ownership record and fail closed.
+- Direct service admission consumes the same durable physical ownership
+  snapshot and `WorktreeManager` decision. Caller lifecycle status (including
+  `FINAL_BLOCK` and `RETAINED_FOR_REVIEW`) is descriptive only and never releases
+  physical ownership.
+
 ## Allowed files
 
-- `tasks/github-issue-98-merge-block-controller-throughput-20260818/INDEX.md`
-- `tasks/github-issue-98-merge-block-controller-throughput-20260818/00-merge-block-controller-throughput.md`
 - `nexus/orchestrator/self_hosted_task_service.py`
 - `nexus/orchestrator/worktree_manager.py`
+- `tasks/github-issue-98-merge-block-controller-throughput-20260818/00-merge-block-controller-throughput.md`
+- `tasks/github-issue-98-merge-block-controller-throughput-20260818/INDEX.md`
 - `tests/nexus/orchestrator/test_merge_block_controller_throughput.py`
+- `tests/nexus/orchestrator/test_worktree_manager.py`
 
-Maximum: exactly the five paths above. No deletions.
+Maximum: exactly the six paths above. No deletions.
 
 ## Required red-first witnesses
 
@@ -81,7 +102,10 @@ Maximum: exactly the five paths above. No deletions.
 - forged competition identity is not a bypass;
 - integration expected-HEAD/CAS movement remains fail-closed;
 - ordering of two admission attempts is deterministic;
-- one merge-blocked Candidate does not reduce throughput for unrelated READY work.
+- one merge-blocked Candidate does not reduce throughput for unrelated READY work;
+- FINAL_BLOCK and RETAINED_FOR_REVIEW targets remain reserved until verified release;
+- failed release preserves ownership record and keeps target reserved;
+- exact cleanup removes ownership record and releases target for reuse.
 
 ## Forbidden scope
 
@@ -99,7 +123,7 @@ Maximum: exactly the five paths above. No deletions.
 .venv/bin/python -m pytest -q tests/nexus/orchestrator/test_worktree_manager.py
 .venv/bin/python -m pytest -q tests/nexus/orchestrator/test_self_hosted_task_service.py
 .venv/bin/python -m pytest -q tests/nexus/orchestrator/test_target_integration_authority_closure.py
-.venv/bin/ruff check nexus/orchestrator/self_hosted_task_service.py nexus/orchestrator/worktree_manager.py tests/nexus/orchestrator/test_merge_block_controller_throughput.py
+.venv/bin/ruff check nexus/orchestrator/self_hosted_task_service.py nexus/orchestrator/worktree_manager.py tests/nexus/orchestrator/test_merge_block_controller_throughput.py tests/nexus/orchestrator/test_worktree_manager.py
 git diff --check
 git diff --diff-filter=D --name-status
 ```
@@ -107,10 +131,10 @@ git diff --diff-filter=D --name-status
 ## Exit and claim ceiling
 
 Exit with one scoped issue-branch Candidate commit and primary verification.
-Independent exact-head review is required. Physical E2E requires a post-merge,
-freshly loaded runtime where Candidate A waits at the merge boundary while
-disjoint B reaches Candidate; source tests alone cannot claim
-`MERGE_BLOCK_NO_LONGER_GLOBAL_CONTROLLER_BLOCK`.
+Independent exact-head review is required. Claim ceiling: `SOURCE_CANDIDATE_ONLY`.
+Physical E2E requires a post-merge, freshly loaded runtime where Candidate A waits
+at the merge boundary while disjoint B reaches Candidate; source tests alone
+cannot claim `MERGE_BLOCK_NO_LONGER_GLOBAL_CONTROLLER_BLOCK`.
 
 `HARD_BLOCK` on scope expansion, missing identity, overlap ambiguity, false-green
 guard removal, or integration-safety regression. `RECOVERABLE_BLOCK` on a
