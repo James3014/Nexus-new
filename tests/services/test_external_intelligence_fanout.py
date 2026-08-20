@@ -662,6 +662,126 @@ def test_runtime_parallel_units_get_fresh_sessions_workspaces_and_candidate_rece
     assert _git(Path(b["workspace_path"]), "status", "--porcelain=v1") == ""
 
 
+def test_prestart_retry_safe_failure_allows_one_fresh_exact_attempt(tmp_path):
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py"])
+
+    class RetryOnceTransport(EditingTransport):
+        def __init__(self):
+            super().__init__()
+            self.calls = 0
+
+        def run_new(self, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return OpenCodeRunResult(
+                    status="OPENCODE_NOT_FOUND",
+                    process_started=False,
+                    retry_safe=True,
+                )
+            return super().run_new(**kwargs)
+
+    store = FanoutStore(tmp_path / "state")
+    transport = RetryOnceTransport()
+    runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
+        store=store,
+        transport=transport,
+    )
+    args = [unit(base, envelope, envelope_sha, "ua", ["a.py"])]
+    first = runtime.run(args, CapacityLease(1, 1, 1, 1))
+    assert first["errors"]["ua"] == "OPENCODE_NOT_FOUND"
+    failed = json.loads(next((tmp_path / "state" / "attempts").glob("*.json")).read_text())
+    assert failed["state"] == "RETRY_SAFE"
+    assert failed["retry_safe"] is True
+    first_attempt_id = failed["attempt_id"]
+    first_workspace_id = failed["workspace_id"]
+    first_workspace_path = failed["workspace_path"]
+
+    second = runtime.run(args, CapacityLease(1, 1, 1, 1))
+    assert second["errors"] == {}
+    assert second["receipts"]["ua"]["status"] == "CANDIDATE_READY_FOR_VERIFICATION"
+    attempt = json.loads(next((tmp_path / "state" / "attempts").glob("*.json")).read_text())
+    assert attempt["state"] == "COMPLETED"
+    assert attempt["retry_count"] == 1
+    assert attempt["retry_of_attempt_id"] == first_attempt_id
+    assert attempt["workspace_id"] != first_workspace_id
+    assert attempt["workspace_path"] != first_workspace_path
+    assert transport.calls == 2
+
+
+def test_prestart_retry_safe_failure_budget_exhaustion_blocks_third_attempt(tmp_path):
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py"])
+
+    class AlwaysRetrySafeTransport:
+        def __init__(self):
+            self.calls = 0
+
+        def run_new(self, **kwargs):
+            self.calls += 1
+            return OpenCodeRunResult(
+                status="OPENCODE_NOT_FOUND",
+                process_started=False,
+                retry_safe=True,
+            )
+
+    store = FanoutStore(tmp_path / "state")
+    transport = AlwaysRetrySafeTransport()
+    runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
+        store=store,
+        transport=transport,
+    )
+    args = [unit(base, envelope, envelope_sha, "ua", ["a.py"])]
+
+    first = runtime.run(args, CapacityLease(1, 1, 1, 1))
+    assert first["errors"]["ua"] == "OPENCODE_NOT_FOUND"
+    first_attempt = json.loads(next((tmp_path / "state" / "attempts").glob("*.json")).read_text())
+    assert first_attempt["state"] == "RETRY_SAFE"
+    assert first_attempt["retry_safe"] is True
+    assert transport.calls == 1
+
+    second = runtime.run(args, CapacityLease(1, 1, 1, 1))
+    assert second["errors"]["ua"] == "OPENCODE_NOT_FOUND"
+    second_attempt = json.loads(next((tmp_path / "state" / "attempts").glob("*.json")).read_text())
+    assert second_attempt["state"] == "RETRY_SAFE"
+    assert second_attempt["retry_safe"] is True
+    assert second_attempt["retry_count"] == 1
+    assert transport.calls == 2
+
+    third = runtime.run(args, CapacityLease(1, 1, 1, 1))
+    assert "FANOUT_REPLAY_FORBIDDEN" in third["errors"]["ua"]
+    assert transport.calls == 2
+
+
+def test_completed_units_do_not_starve_deferred_capacity_on_next_run(tmp_path):
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py", "b.py"])
+    transport = EditingTransport()
+    runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
+        store=FanoutStore(tmp_path / "state"),
+        transport=transport,
+    )
+    args = [
+        unit(base, envelope, envelope_sha, "ua", ["a.py"], priority=10),
+        unit(base, envelope, envelope_sha, "ub", ["b.py"]),
+    ]
+    first = runtime.run(args, CapacityLease(1, 1, 1, 1))
+    assert set(first["receipts"]) == {"ua"}
+    assert first["decision"]["deferred_capacity"] == ["ub"]
+
+    second = runtime.run(args, CapacityLease(1, 1, 1, 1))
+    assert second["errors"] == {}
+    assert set(second["receipts"]) == {"ua", "ub"}
+    assert second["decision"]["completed_units"] == ["ua"]
+    assert second["decision"]["admitted_units"] == ["ub"]
+
+
 def test_runtime_outcome_unknown_requires_reconciliation_and_no_second_start(tmp_path):
     repo, base = make_repo(tmp_path)
     envelope = tmp_path / "envelope.json"
@@ -689,6 +809,43 @@ def test_runtime_outcome_unknown_requires_reconciliation_and_no_second_start(tmp
     attempt = json.loads(attempt_path.read_text())
     assert attempt["state"] == "OUTCOME_UNKNOWN"
     assert attempt["retry_safe"] is False
+
+
+def test_second_outcome_unknown_run_reconciles_without_new_provider_start(tmp_path):
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py"])
+
+    class UnknownThenReconcile:
+        run_new_calls = 0
+        reconcile_calls = 0
+
+        def run_new(self, **kwargs):
+            self.run_new_calls += 1
+            return OpenCodeRunResult(
+                status="OPENCODE_OUTCOME_UNKNOWN",
+                process_started=True,
+                outcome_unknown=True,
+                retry_safe=False,
+            )
+
+        def reconcile_workspace(self, *, workspace_path):
+            self.reconcile_calls += 1
+            raise FanoutError("RECONCILE_STILL_UNKNOWN")
+
+    transport = UnknownThenReconcile()
+    runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
+        store=FanoutStore(tmp_path / "state"),
+        transport=transport,
+    )
+    args = [unit(base, envelope, envelope_sha, "ua", ["a.py"])]
+    first = runtime.run(args, CapacityLease(1, 1, 1, 1))
+    assert first["errors"]["ua"] == "FANOUT_RECONCILIATION_REQUIRED"
+    second = runtime.run(args, CapacityLease(1, 1, 1, 1))
+    assert second["errors"]["ua"] == "RECONCILE_STILL_UNKNOWN"
+    assert transport.run_new_calls == 1
+    assert transport.reconcile_calls == 1
 
 
 def test_runtime_recovers_dispatching_attempt_from_durable_session_without_second_start(tmp_path):
@@ -781,7 +938,56 @@ def test_candidate_capture_rejects_out_of_scope_worker_mutation(tmp_path):
     result = runtime.run(
         [unit(base, envelope, envelope_sha, "ua", ["a.py"])], CapacityLease(1, 1, 1, 1)
     )
-    assert "OUT_OF_SCOPE_MUTATION:b.py" in result["errors"]["ua"]
+    assert result["errors"] == {}
+    assert result["receipts"]["ua"]["status"] == "WORKER_BLOCKED"
+    attempt = json.loads(next((tmp_path / "state" / "attempts").glob("*.json")).read_text())
+    assert attempt["state"] == "TERMINAL_BLOCKED"
+    assert result["receipts"]["ua"]["worker_summary"] == "OUT_OF_SCOPE_MUTATION:b.py"
+
+
+def test_empty_and_unauthorized_deletion_are_terminal_hard_blocks(tmp_path):
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py"])
+
+    class NoChangeTransport(EditingTransport):
+        def run_new(self, **kwargs):
+            task_id = self._field(kwargs["prompt"], "task_id")
+            unit_id = self._field(kwargs["prompt"], "unit_id")
+            session = f"ses_test_{unit_id}_00000000"
+            return completed_result(task_id, unit_id, session, kwargs["workspace_path"])
+
+    runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
+        store=FanoutStore(tmp_path / "state-empty"),
+        transport=NoChangeTransport(),
+    )
+    empty = runtime.run(
+        [unit(base, envelope, envelope_sha, "ua", ["a.py"])], CapacityLease(1, 1, 1, 1)
+    )
+    assert empty["errors"] == {}
+    assert empty["receipts"]["ua"]["worker_summary"] == "EMPTY_IMPLEMENTATION_RESULT"
+
+    class DeleteTransport(EditingTransport):
+        def run_new(self, **kwargs):
+            Path(kwargs["workspace_path"], "a.py").unlink()
+            return completed_result(
+                self._field(kwargs["prompt"], "task_id"),
+                self._field(kwargs["prompt"], "unit_id"),
+                "ses_test_delete_00000000",
+                kwargs["workspace_path"],
+            )
+
+    delete_runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces-delete"),
+        store=FanoutStore(tmp_path / "state-delete"),
+        transport=DeleteTransport(),
+    )
+    deleted = delete_runtime.run(
+        [unit(base, envelope, envelope_sha, "ua", ["a.py"])], CapacityLease(1, 1, 1, 1)
+    )
+    assert deleted["errors"] == {}
+    assert deleted["receipts"]["ua"]["worker_summary"] == "DELETION_NOT_AUTHORIZED"
 
 
 def test_same_unit_repair_continues_exact_session_and_creates_child_candidate(tmp_path):
