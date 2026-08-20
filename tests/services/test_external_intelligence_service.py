@@ -7,6 +7,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -14,6 +15,7 @@ import scripts.ops.external_intelligence_service as service_module
 from nexus.core.exit_codes import NexusExitCode
 from scripts.ops.external_intelligence_service import (
     READINESS_SUCCESS_THRESHOLD,
+    GhIssueTransport,
     ServiceConfig,
     ServiceError,
     ServiceReadiness,
@@ -30,14 +32,21 @@ from scripts.ops.external_intelligence_service import (
 
 
 class FakeGh:
-    def __init__(self, issues):
+    def __init__(self, issues, comments=None):
         self.issues = issues
-        self.comments = []
+        self.comments = list(comments or [])
         self.calls = []
 
     def list_open_labeled(self, repository, label):
         self.calls.append((repository, label))
         return list(self.issues.get(repository, []))
+
+    def list_comments(self, repository, issue_number):
+        return [
+            {"id": i + 1, "body": c[2]}
+            for i, c in enumerate(self.comments)
+            if c[0] == repository and c[1] == issue_number
+        ]
 
     def comment(self, repository, issue_number, body):
         self.comments.append((repository, issue_number, body))
@@ -80,21 +89,32 @@ def _config_file(tmp_path):
     return path
 
 
-def _complete(reuse=False):
+def _complete(reuse=False, publication_state="COMPLETED"):
+    pub_payload = {
+        "task_id": "t1",
+        "candidate_commit": "a" * 40,
+        "candidate_tree": "b" * 40,
+        "verification_state": "PASS",
+        "current_gate": "PENDING_INDEPENDENT_ACCEPTANCE",
+        "acceptance_packet_ref": "state/a.json",
+        "acceptance_packet_sha256": "c" * 64,
+        "next_action": "independent_acceptance",
+        "stop_condition": "acceptance_failed",
+        "claim_ceiling": "TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE",
+    }
+    from nexus.services.external_intelligence_automation import compute_publication_id
+
+    pub_id = compute_publication_id("o/r", 1, "h" * 64, pub_payload)
     return {
         "state": "COMPLETE",
         "reuse": reuse,
-        "publication": {
-            "task_id": "t1",
-            "candidate_commit": "a" * 40,
-            "candidate_tree": "b" * 40,
-            "verification_state": "PASS",
-            "current_gate": "PENDING_INDEPENDENT_ACCEPTANCE",
-            "acceptance_packet_ref": "state/a.json",
-            "acceptance_packet_sha256": "c" * 64,
-            "next_action": "independent_acceptance",
-            "stop_condition": "acceptance_failed",
-            "claim_ceiling": "TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE",
+        "identity_hash": "h" * 64,
+        "publication": pub_payload,
+        "publication_record": {
+            "publication_id": pub_id,
+            "state": publication_state if reuse else "PREPARED",
+            "marker": f"<!-- nexus-external-intelligence:{pub_id} -->",
+            "payload": pub_payload,
         },
     }
 
@@ -991,3 +1011,327 @@ def test_main_maps_run_once_typed_outcomes_without_changing_payload(
 
     assert exit_code == expected_exit
     assert json.loads(capsys.readouterr().out) == payload
+
+
+def test_t3_prepared_persists_dispatching_posts_reads_back_and_next_poll_no_extra(tmp_path):
+    config = _config(tmp_path)
+    events: list[str] = []
+
+    class SpyingStateStore:
+        def __init__(self):
+            self.records: dict[str, Any] = {}
+
+        def update_publication_record(self, repository, issue_number, identity_hash, record):
+            state = record.get("state")
+            events.append(f"store:{state}")
+            self.records[f"{repository}:{issue_number}"] = dict(record)
+            return dict(record)
+
+    class SpyingGh(FakeGh):
+        def comment(self, repository, issue_number, body):
+            events.append("gh:comment")
+            super().comment(repository, issue_number, body)
+
+    spy_store = SpyingStateStore()
+    spying_gh = SpyingGh({"o/r": [{"number": 1, "title": "t", "body": "b"}]})
+
+    automation = FakeAutomation(_complete(reuse=False))
+    automation.state_store = spy_store
+
+    # First poll: PREPARED -> persisted DISPATCHING -> one POST -> readback -> COMPLETED
+    r1 = run_once(
+        config,
+        gh=spying_gh,
+        automation_factory=lambda _c, _r: automation,
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert r1["status"] == "COMPLETE"
+    assert len(spying_gh.comments) == 1
+    assert "<!-- nexus-external-intelligence:" in spying_gh.comments[0][2]
+    assert events == ["store:DISPATCHING", "gh:comment", "store:COMPLETED"]
+    assert spy_store.records["o/r:1"]["state"] == "COMPLETED"
+
+    # Second poll: next poll sees already completed publication -> no extra comments
+    automation_reuse = FakeAutomation({
+        **_complete(reuse=True),
+        "publication_record": spy_store.records["o/r:1"],
+    })
+    automation_reuse.state_store = spy_store
+    r2 = run_once(
+        config,
+        gh=spying_gh,
+        automation_factory=lambda _c, _r: automation_reuse,
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert r2["status"] == "COMPLETE"
+    assert len(spying_gh.comments) == 1
+
+
+def test_t4_remote_accepted_before_local_confirm_reconciles_without_post(tmp_path):
+    config = _config(tmp_path)
+    pub_payload = _complete()["publication"]
+    from nexus.services.external_intelligence_automation import compute_publication_id
+
+    pub_id = compute_publication_id("o/r", 1, "", pub_payload)
+    existing_comment_body = (
+        f"<!-- nexus-external-intelligence:{pub_id} -->\n"
+        "External Intelligence automation completed.\n"
+    )
+    gh = FakeGh(
+        {"o/r": [{"number": 1, "title": "t", "body": "b"}]},
+        comments=[("o/r", 1, existing_comment_body)],
+    )
+    # Restart from DISPATCHING/OUTCOME_UNKNOWN with marker present
+    automation = FakeAutomation({
+        "state": "COMPLETE",
+        "publication": pub_payload,
+        "publication_record": {
+            "publication_id": pub_id,
+            "state": "DISPATCHING",
+            "payload": pub_payload,
+        },
+    })
+    r = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: automation,
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert r["status"] == "COMPLETE"
+    assert len(gh.comments) == 1  # create=0 (no new comment added)
+    assert r["result"]["publication_record"]["state"] == "COMPLETED"
+
+
+def test_t5_dispatching_or_outcome_unknown_with_zero_marker_fails_closed(tmp_path):
+    config = _config(tmp_path)
+    pub_payload = _complete()["publication"]
+    from nexus.services.external_intelligence_automation import compute_publication_id
+
+    pub_id = compute_publication_id("o/r", 1, "", pub_payload)
+    gh = FakeGh({"o/r": [{"number": 1, "title": "t", "body": "b"}]})
+
+    automation = FakeAutomation({
+        "state": "COMPLETE",
+        "publication": pub_payload,
+        "publication_record": {
+            "publication_id": pub_id,
+            "state": "DISPATCHING",
+            "payload": pub_payload,
+        },
+    })
+    r = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: automation,
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert r["status"] == "RECONCILIATION_REQUIRED"
+    assert r["result"]["error"] == "PUBLICATION_UNCONFIRMED_ZERO_MARKER"
+    assert len(gh.comments) == 0  # create=0
+
+
+def test_t6_duplicate_marker_fails_closed(tmp_path):
+    config = _config(tmp_path)
+    pub_payload = _complete()["publication"]
+    from nexus.services.external_intelligence_automation import compute_publication_id
+
+    pub_id = compute_publication_id("o/r", 1, "", pub_payload)
+    dup_body = (
+        f"<!-- nexus-external-intelligence:{pub_id} -->\n"
+        "External Intelligence automation completed.\n"
+    )
+    gh = FakeGh(
+        {"o/r": [{"number": 1, "title": "t", "body": "b"}]},
+        comments=[("o/r", 1, dup_body), ("o/r", 1, dup_body)],
+    )
+    automation = FakeAutomation({
+        "state": "COMPLETE",
+        "publication": pub_payload,
+        "publication_record": {
+            "publication_id": pub_id,
+            "state": "PREPARED",
+            "payload": pub_payload,
+        },
+    })
+    r = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: automation,
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert r["status"] == "RECONCILIATION_REQUIRED"
+    assert r["result"]["error"] == "DUPLICATE_PUBLICATION_MARKER"
+    assert len(gh.comments) == 2  # create=0 (no extra comments posted)
+
+
+def test_persistence_failure_before_dispatching_causes_zero_comment(tmp_path):
+    config = _config(tmp_path)
+    gh = FakeGh({"o/r": [{"number": 1, "title": "t", "body": "b"}]})
+
+    class FailingStateStore:
+        def update_publication_record(self, repository, issue_number, identity_hash, record):
+            return None
+
+    automation = FakeAutomation(_complete(reuse=False))
+    automation.state_store = FailingStateStore()
+
+    r = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: automation,
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert r["status"] == "RECONCILIATION_REQUIRED"
+    assert r["result"]["error"] == "PUBLICATION_PERSISTENCE_FAILED"
+    assert len(gh.comments) == 0
+
+
+def test_legacy_reuse_without_publication_record_fails_closed_without_starving_next(tmp_path):
+    config = _config(tmp_path)
+    calls: list[int] = []
+
+    class SequencedLegacyAutomation:
+        def run_issue(self, repository, issue_number, title, body):
+            calls.append(issue_number)
+            if issue_number == 1:
+                return {
+                    "state": "COMPLETE",
+                    "reuse": True,
+                    "publication": {"task_id": "t1"},
+                }
+            return _complete(reuse=False)
+
+    gh = FakeGh({
+        "o/r": [
+            {"number": 2, "title": "eligible", "body": "b"},
+            {"number": 1, "title": "legacy", "body": "a"},
+        ]
+    })
+    r = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: SequencedLegacyAutomation(),
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert calls == [1, 2]
+    assert r["issue_number"] == 2
+    assert len(gh.comments) == 1
+    assert gh.comments[0][1] == 2
+
+
+def test_missing_list_comments_capability_fails_closed(tmp_path):
+    config = _config(tmp_path)
+
+    class BareGh:
+        def list_open_labeled(self, repository, label):
+            return [{"number": 1, "title": "t", "body": "b"}]
+
+        def comment(self, repository, issue_number, body):
+            pass
+
+    r = run_once(
+        config,
+        gh=BareGh(),
+        automation_factory=lambda _c, _r: FakeAutomation(_complete(reuse=False)),
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert r["status"] == "RECONCILIATION_REQUIRED"
+    assert r["result"]["error"] == "GH_COMMENTS_LIST_FAILED"
+
+
+def test_invalid_publication_state_fails_closed(tmp_path):
+    config = _config(tmp_path)
+    gh = FakeGh({"o/r": [{"number": 1, "title": "t", "body": "b"}]})
+    invalid_res = _complete(reuse=False)
+    invalid_res["publication_record"]["state"] = "CORRUPTED_STATE"
+
+    r = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: FakeAutomation(invalid_res),
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert r["status"] == "RECONCILIATION_REQUIRED"
+    assert r["result"]["error"] == "PUBLICATION_STATE_INVALID"
+    assert len(gh.comments) == 0
+
+
+def test_post_readback_duplicate_marker_fails_closed(tmp_path):
+    config = _config(tmp_path)
+    pub_payload = _complete()["publication"]
+    from nexus.services.external_intelligence_automation import compute_publication_id
+
+    pub_id = compute_publication_id("o/r", 1, "h" * 64, pub_payload)
+    dup_comment = f"<!-- nexus-external-intelligence:{pub_id} -->\ncompleted\n"
+
+    class DuplicateOnReadbackGh(FakeGh):
+        def comment(self, repository, issue_number, body):
+            self.comments.append((repository, issue_number, dup_comment))
+            self.comments.append((repository, issue_number, dup_comment))
+
+    gh = DuplicateOnReadbackGh({"o/r": [{"number": 1, "title": "t", "body": "b"}]})
+    r = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: FakeAutomation(_complete(reuse=False)),
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert r["status"] == "RECONCILIATION_REQUIRED"
+    assert r["result"]["error"] == "DUPLICATE_PUBLICATION_MARKER"
+
+
+def test_gh_issue_transport_list_comments_paginated_api(monkeypatch):
+    gh = GhIssueTransport()
+    recorded_argv: list[list[str]] = []
+
+    def fake_run(argv):
+        recorded_argv.append(argv)
+        return json.dumps([
+            [{"id": 10, "body": "comment 1"}, {"id": 11, "body": "comment 2"}],
+            [{"id": 12, "body": "comment 3"}],
+        ])
+
+    monkeypatch.setattr(gh, "_run", fake_run)
+    comments = gh.list_comments("James3014/Nexus-new", 438)
+
+    assert len(recorded_argv) == 1
+    argv = recorded_argv[0]
+    assert argv == [
+        "gh",
+        "api",
+        "repos/James3014/Nexus-new/issues/438/comments",
+        "--paginate",
+        "--slurp",
+    ]
+    assert len(comments) == 3
+    assert [c["id"] for c in comments] == [10, 11, 12]
+
+
+def test_publication_disabled_reused_complete_does_not_starve_next_eligible_issue(tmp_path):
+    config = _config(tmp_path, publication_enabled=False)
+    calls: list[int] = []
+
+    class SequencedDisabledAutomation:
+        def run_issue(self, repository, issue_number, title, body):
+            calls.append(issue_number)
+            if issue_number == 1:
+                return _complete(reuse=True, publication_state="PREPARED")
+            return _complete(reuse=False, publication_state="PREPARED")
+
+    gh = FakeGh({
+        "o/r": [
+            {"number": 2, "title": "eligible", "body": "b"},
+            {"number": 1, "title": "already-done", "body": "a"},
+        ]
+    })
+    r = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: SequencedDisabledAutomation(),
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert calls == [1, 2]
+    assert r["status"] == "COMPLETE"
+    assert r["issue_number"] == 2
+    assert len(gh.comments) == 0
+    assert r["result"]["publication_record"]["state"] == "PREPARED"

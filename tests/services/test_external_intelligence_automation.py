@@ -16,6 +16,7 @@ from nexus.services.external_intelligence_automation import (
     ExternalIntelligenceAutomation,
     IssueWorkItem,
     compact_publication_payload,
+    compute_publication_id,
     parse_issue_contract,
 )
 
@@ -1188,3 +1189,104 @@ def test_authorized_task_card_proceeds_to_complete(tmp_path):
     assert result["semantic_dispatched"] is True
     assert len(sidecar.calls) == 1
     assert d.calls[0]["main_sha"] == contract["main_sha"]
+
+
+def test_t1_post_dispatch_blocked_second_poll_reuses_without_extra_calls(tmp_path):
+    repo, _, contract, body, store = _setup(
+        tmp_path, remote_url="https://github.com/James3014/Nexus-new.git"
+    )
+
+    class NonTerminalBlockedD:
+        def __init__(self):
+            self.calls = []
+
+        def close_task(self, **kwargs):
+            self.calls.append(kwargs)
+            return {
+                "status": "NON_TERMINAL_CLOSURE_FAILURE",
+                "run_id": "d" * 64,
+                "control_capsule": {},
+            }
+
+    sidecar = FakeSidecar(store)
+    c = FakeC()
+    d = NonTerminalBlockedD()
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
+
+    first = automation.run_issue("James3014/Nexus-new", 119, "title", body)
+    assert first["state"] == "BLOCKED"
+    assert first["stage"] == "CLOSURE"
+    assert first["semantic_dispatched"] is True
+    assert len(sidecar.calls) == 1
+    assert len(c.calls) == 1
+    assert len(d.calls) == 1
+
+    item = IssueWorkItem("James3014/Nexus-new", 119, "title", body, contract)
+    saved_state = automation.state_store.load(item)
+    assert saved_state["state"] == "BLOCKED"
+    assert saved_state["semantic_dispatched"] is True
+
+    # Second poll should reuse durable result without running semantic steps
+    second = automation.run_issue("James3014/Nexus-new", 119, "title", body)
+    assert second["state"] == "BLOCKED"
+    assert second["reuse"] is True
+    assert second["semantic_dispatched"] is True
+    assert len(sidecar.calls) == 1
+    assert len(c.calls) == 1
+    assert len(d.calls) == 1
+
+    state_after = automation.state_store.load(item)
+    assert state_after["state"] == "BLOCKED"
+    assert state_after["semantic_dispatched"] is True
+
+
+def test_t2_pre_dispatch_blocked_remains_retryable(tmp_path):
+    repo, _, contract, body, store = _setup(
+        tmp_path, remote_url="https://github.com/James3014/Nexus-new.git", ready=False
+    )
+    sidecar = FakeSidecar(store, non_dispatched=True)
+    c = FakeC()
+    d = FakeD()
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
+
+    first = automation.run_issue("James3014/Nexus-new", 120, "title", body)
+    assert first["state"] == "BLOCKED"
+    assert first["semantic_dispatched"] is False
+    assert len(sidecar.calls) == 1
+    assert len(c.calls) == 0
+    assert len(d.calls) == 0
+
+    # Now make it ready and retry
+    contract["ready"] = True
+    body_ready = _body(contract)
+    sidecar.non_dispatched = False
+
+    second = automation.run_issue("James3014/Nexus-new", 120, "title", body_ready)
+    assert second["state"] == "COMPLETE"
+    assert second["semantic_dispatched"] is True
+    assert len(sidecar.calls) == 2
+    assert len(c.calls) == 1
+    assert len(d.calls) == 1
+
+
+def test_deterministic_publication_id_and_marker_stability():
+    pub = {
+        "task_id": "task-1",
+        "candidate_commit": "1" * 40,
+        "candidate_tree": "2" * 40,
+        "verification_state": "PASS",
+        "current_gate": "GATE_A",
+        "acceptance_packet_ref": "ref/a",
+        "acceptance_packet_sha256": "3" * 64,
+        "next_action": "none",
+        "stop_condition": "none",
+        "claim_ceiling": "CEILING",
+    }
+    id1 = compute_publication_id("o/r", 1, "h" * 64, pub)
+    id2 = compute_publication_id("o/r", 1, "h" * 64, pub)
+    assert id1 == id2
+    assert len(id1) == 64
+    # Change payload -> distinct publication_id
+    pub2 = dict(pub, candidate_commit="0" * 40)
+    id3 = compute_publication_id("o/r", 1, "h" * 64, pub2)
+    assert id3 != id1
