@@ -19,6 +19,7 @@ from scripts.ops.external_intelligence_service import (
     ServiceConfig,
     ServiceError,
     ServiceReadiness,
+    _parse_launchctl,
     _safe_error,
     build_automation,
     load_config,
@@ -812,6 +813,220 @@ def test_service_status_reconciles_identity_heartbeat_and_last_exit(tmp_path):
         receipt_path=receipt,
     )
     assert stale["status"] == ServiceReadiness.STALE.value
+
+
+def test_parse_launchctl_handles_numeric_never_exited_and_missing():
+    parsed_zero = _parse_launchctl(
+        subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = 0\n", ""
+        )
+    )
+    assert parsed_zero["registered"] is True
+    assert parsed_zero["state"] == "running"
+    assert parsed_zero["pid"] == 123
+    assert parsed_zero["last_exit_code"] == 0
+    assert parsed_zero["last_exit_state"] == "EXITED_WITH_CODE"
+
+    parsed_never = _parse_launchctl(
+        subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = (never exited)\n", ""
+        )
+    )
+    assert parsed_never["registered"] is True
+    assert parsed_never["state"] == "running"
+    assert parsed_never["pid"] == 123
+    assert parsed_never["last_exit_code"] is None
+    assert parsed_never["last_exit_state"] == "NEVER_EXITED"
+
+    parsed_nonzero = _parse_launchctl(
+        subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = 256\n", ""
+        )
+    )
+    assert parsed_nonzero["last_exit_code"] == 256
+    assert parsed_nonzero["last_exit_state"] == "EXITED_WITH_CODE"
+
+    parsed_missing = _parse_launchctl(
+        subprocess.CompletedProcess(["launchctl"], 0, "state = running\npid = 123\n", "")
+    )
+    assert parsed_missing["last_exit_code"] is None
+    assert parsed_missing["last_exit_state"] == "UNKNOWN_OR_MISSING"
+
+    parsed_malformed = _parse_launchctl(
+        subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = unknown_status\n", ""
+        )
+    )
+    assert parsed_malformed["last_exit_code"] is None
+    assert parsed_malformed["last_exit_state"] == "UNKNOWN_OR_MISSING"
+
+
+def test_service_status_handles_launchd_never_exited_and_regression_cases(tmp_path):
+    config = _config_file(tmp_path)
+    receipt = tmp_path / "state" / "service" / "daemon.json"
+    source_sha = hashlib.sha256(
+        Path(__file__)
+        .resolve()
+        .parents[2]
+        .joinpath("scripts/ops/external_intelligence_service.py")
+        .read_bytes()
+    ).hexdigest()
+    config_sha = hashlib.sha256(config.read_bytes()).hexdigest()
+
+    def make_receipt(
+        *,
+        status=ServiceReadiness.READY.value,
+        pid=123,
+        polls=READINESS_SUCCESS_THRESHOLD,
+        heartbeat=100.0,
+    ):
+        write_service_receipt(
+            receipt,
+            {
+                "schema": "nexus.external_intelligence_daemon_receipt.v1",
+                "status": status,
+                "run_id": "run-1",
+                "pid": pid,
+                "source_path": str(
+                    Path(__file__).resolve().parents[2]
+                    / "scripts/ops/external_intelligence_service.py"
+                ),
+                "source_sha256": source_sha,
+                "config_path": str(config.resolve()),
+                "config_sha256": config_sha,
+                "started_at": 99.0,
+                "heartbeat_at": heartbeat,
+                "successful_polls": polls,
+                "last_error": None,
+            },
+        )
+
+    make_receipt()
+    expected_command = (
+        f"{Path(sys.executable).resolve()} -m scripts.ops.external_intelligence_service daemon "
+        f"--config {config.resolve()}"
+    )
+
+    # CASE A — explicit never exited: READY when all other gates pass
+    never_exited = service_status(
+        config,
+        launchctl_runner=lambda *_args: subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = (never exited)\n", ""
+        ),
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert never_exited["status"] == ServiceReadiness.READY.value
+    assert never_exited["ready"] is True
+
+    # CASE B — numeric zero: READY
+    num_zero = service_status(
+        config,
+        launchctl_runner=lambda *_args: subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = 0\n", ""
+        ),
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert num_zero["status"] == ServiceReadiness.READY.value
+    assert num_zero["ready"] is True
+
+    # CASE C — numeric nonzero: DEGRADED
+    num_nonzero = service_status(
+        config,
+        launchctl_runner=lambda *_args: subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = 1\n", ""
+        ),
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert num_nonzero["status"] == ServiceReadiness.DEGRADED.value
+    assert num_nonzero["ready"] is False
+
+    # CASE D — missing last exit code: DEGRADED (fail-closed)
+    missing_exit = service_status(
+        config,
+        launchctl_runner=lambda *_args: subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\n", ""
+        ),
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert missing_exit["status"] == ServiceReadiness.DEGRADED.value
+    assert missing_exit["ready"] is False
+
+    # CASE D.2 — malformed last exit code: DEGRADED (fail-closed)
+    malformed_exit = service_status(
+        config,
+        launchctl_runner=lambda *_args: subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = abnormal_term\n", ""
+        ),
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert malformed_exit["status"] == ServiceReadiness.DEGRADED.value
+    assert malformed_exit["ready"] is False
+
+    # Negative checks: never_exited does NOT bypass other gates
+    # 1. Stale heartbeat
+    stale_heartbeat = service_status(
+        config,
+        launchctl_runner=lambda *_args: subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = (never exited)\n", ""
+        ),
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.0 + 10_000,
+        receipt_path=receipt,
+    )
+    assert stale_heartbeat["status"] == ServiceReadiness.STALE.value
+    assert stale_heartbeat["ready"] is False
+
+    # 2. PID mismatch
+    make_receipt(pid=999)
+    pid_mismatch = service_status(
+        config,
+        launchctl_runner=lambda *_args: subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = (never exited)\n", ""
+        ),
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert pid_mismatch["status"] == ServiceReadiness.IDENTITY_MISMATCH.value
+    assert pid_mismatch["ready"] is False
+
+    # 3. Successful polls below threshold
+    make_receipt(polls=0)
+    starting = service_status(
+        config,
+        launchctl_runner=lambda *_args: subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = (never exited)\n", ""
+        ),
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert starting["status"] == ServiceReadiness.STARTING.value
+    assert starting["ready"] is False
+
+    # 4. Receipt DEGRADED
+    make_receipt(status=ServiceReadiness.DEGRADED.value)
+    receipt_degraded = service_status(
+        config,
+        launchctl_runner=lambda *_args: subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = (never exited)\n", ""
+        ),
+        process_snapshot=lambda: [(123, expected_command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert receipt_degraded["status"] == ServiceReadiness.DEGRADED.value
+    assert receipt_degraded["ready"] is False
 
 
 def test_service_status_rejects_identity_mismatch_and_duplicate_processes(tmp_path):

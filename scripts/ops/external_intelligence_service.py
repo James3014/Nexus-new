@@ -236,12 +236,22 @@ def _parse_launchctl(result: Any) -> dict[str, Any]:
     text = str(getattr(result, "stdout", "") or "")
     state = re.search(r"^\s*state\s*=\s*(\S+)", text, re.MULTILINE)
     pid = re.search(r"^\s*pid\s*=\s*(\d+)", text, re.MULTILINE)
-    exit_code = re.search(r"^\s*last exit code\s*=\s*(-?\d+)", text, re.MULTILINE)
+    exit_match = re.search(r"^\s*last exit code\s*=\s*(.+)$", text, re.MULTILINE)
+    last_exit_code: int | None = None
+    last_exit_state = "UNKNOWN_OR_MISSING"
+    if exit_match:
+        raw_exit = exit_match.group(1).strip()
+        if raw_exit == "(never exited)":
+            last_exit_state = "NEVER_EXITED"
+        elif re.fullmatch(r"-?\d+", raw_exit):
+            last_exit_state = "EXITED_WITH_CODE"
+            last_exit_code = int(raw_exit)
     return {
         "registered": getattr(result, "returncode", 1) == 0,
         "state": state.group(1) if state else None,
         "pid": int(pid.group(1)) if pid else None,
-        "last_exit_code": int(exit_code.group(1)) if exit_code else None,
+        "last_exit_code": last_exit_code,
+        "last_exit_state": last_exit_state,
     }
 
 
@@ -304,7 +314,14 @@ def service_status(
     if receipt.get("status") == ServiceReadiness.DEGRADED.value:
         result["status"] = ServiceReadiness.DEGRADED.value
         return result
-    if launch.get("last_exit_code") != 0:
+    last_exit_state = launch.get("last_exit_state")
+    if last_exit_state == "EXITED_WITH_CODE":
+        if launch.get("last_exit_code") != 0:
+            result["status"] = ServiceReadiness.DEGRADED.value
+            return result
+    elif last_exit_state == "NEVER_EXITED":
+        pass
+    else:
         result["status"] = ServiceReadiness.DEGRADED.value
         return result
     if launch.get("pid") != receipt.get("pid"):
