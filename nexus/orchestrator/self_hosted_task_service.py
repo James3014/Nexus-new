@@ -98,14 +98,28 @@ from nexus.orchestrator.worktree_manager import (
 from nexus.services.model_workforce_policy import WorkforcePolicyLoader
 from nexus.services.runtime_workforce_admission import evaluate_runtime_workforce_admission
 
-Runner = Callable[[ArchitectTaskContract, Mapping[str, Any], Callable[[str, dict[str, Any]], None]], dict[str, Any]]
+Runner = Callable[
+    [ArchitectTaskContract, Mapping[str, Any], Callable[[str, dict[str, Any]], None]],
+    dict[str, Any],
+]
 TERMINAL_STATUSES = frozenset({
-    "FINAL_BLOCK", "RETAINED_FOR_REVIEW", "REJECTED", "SUPERSEDED",
-    "INTEGRATED", "INTEGRATION_FAILED", "CANCELLED", "REHEARSAL_VERIFIED",
-    "DIRECT_COMPLETED", "DIRECT_RECONCILE_REQUIRED", "INTEGRATED_AND_CLEANED",
+    "FINAL_BLOCK",
+    "RETAINED_FOR_REVIEW",
+    "REJECTED",
+    "SUPERSEDED",
+    "INTEGRATED",
+    "INTEGRATION_FAILED",
+    "CANCELLED",
+    "REHEARSAL_VERIFIED",
+    "DIRECT_COMPLETED",
+    "DIRECT_RECONCILE_REQUIRED",
+    "INTEGRATED_AND_CLEANED",
 })
 PENDING_CANDIDATE_STATUSES = frozenset({
-    "PENDING_HUMAN_APPROVAL", "APPROVED", "APPROVAL_INVALIDATED", "INTEGRATING",
+    "PENDING_HUMAN_APPROVAL",
+    "APPROVED",
+    "APPROVAL_INVALIDATED",
+    "INTEGRATING",
 })
 
 
@@ -184,6 +198,8 @@ def resolve_contract_identity(
         "task_card_hash": task_card_hash,
         "owner_inline_contract": owner_inline_contract,
     }
+
+
 RESUMABLE_STATUSES = frozenset({
     "WORKER_COMPLETED",
     "WORKER_ESCALATING",
@@ -266,8 +282,7 @@ def _tracked_dispatch_required(
 ) -> bool:
     tracked = ContractKind.TRACKED_TASK_CARD.value
     return str(request.get("contract_kind") or "") == tracked or (
-        isinstance(state, Mapping)
-        and str(state.get("contract_kind") or "") == tracked
+        isinstance(state, Mapping) and str(state.get("contract_kind") or "") == tracked
     )
 
 
@@ -345,13 +360,23 @@ def validate_workforce_dispatch_binding(
             "binding_hash": fresh_records[0].get("binding_hash"),
             "aggregate_binding_hash": fresh.get("aggregate_binding_hash"),
         }
-        if any(not isinstance(binding[field], str) or not binding[field].strip() for field in (
-            "worker_id", "provider", "model", "policy_hash", "binding_hash", "aggregate_binding_hash"
-        )):
+        if any(
+            not isinstance(binding[field], str) or not binding[field].strip()
+            for field in (
+                "worker_id",
+                "provider",
+                "model",
+                "policy_hash",
+                "binding_hash",
+                "aggregate_binding_hash",
+            )
+        ):
             raise ValueError("workforce admission resolved identity missing")
     except (TypeError, ValueError, KeyError) as exc:
         raise RuntimeError(f"WORKFORCE_ADMISSION_BINDING_INVALID:{exc}") from exc
-    fallback = str(request.get("fallback_worker", request.get("fallback_provider")) or "").strip().lower()
+    fallback = (
+        str(request.get("fallback_worker", request.get("fallback_provider")) or "").strip().lower()
+    )
     if fallback and fallback != str(binding["provider"]).strip().lower():
         raise RuntimeError("WORKFORCE_ADMISSION_FALLBACK_UNADMITTED")
     raw_envelope = request.get("canonical_dispatch_envelope")
@@ -542,7 +567,9 @@ def _retry_request(state: Mapping[str, Any]) -> dict[str, Any]:
             action_type=LifecycleActionType.TASK_RETRY.value,
             request_hash=canonical_request_hash(bound),
         )
-        retry_action = LifecycleActionEnvelope.model_validate(action_payload).model_dump(mode="json")
+        retry_action = LifecycleActionEnvelope.model_validate(action_payload).model_dump(
+            mode="json"
+        )
         return {
             **bound,
             "action": retry_action,
@@ -601,14 +628,18 @@ def _validate_retry_predecessor(
             or predecessor.get("candidate_ref")
         )
     )
-    retryable_terminal = status in {
-        "FINAL_BLOCK",
-        "REJECTED",
-        "SUPERSEDED",
-        "CANCELLED",
-        "INTEGRATION_FAILED",
-        "INTEGRATED",
-    } or retained_retry
+    retryable_terminal = (
+        status
+        in {
+            "FINAL_BLOCK",
+            "REJECTED",
+            "SUPERSEDED",
+            "CANCELLED",
+            "INTEGRATION_FAILED",
+            "INTEGRATED",
+        }
+        or retained_retry
+    )
     if not retryable_terminal:
         raise ValueError("RETRY_REQUIRES_TERMINAL_TASK")
     if cleanup_decision not in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}:
@@ -616,19 +647,13 @@ def _validate_retry_predecessor(
 
     attempts = predecessor.get("attempts") or ()
     used_attempt_ids = {
-        str(item.get("attempt_id") or "")
-        for item in attempts
-        if isinstance(item, Mapping)
+        str(item.get("attempt_id") or "") for item in attempts if isinstance(item, Mapping)
     }
     used_action_ids = {
-        str(item.get("action_id") or "")
-        for item in attempts
-        if isinstance(item, Mapping)
+        str(item.get("action_id") or "") for item in attempts if isinstance(item, Mapping)
     }
     used_idempotency_keys = {
-        str(item.get("idempotency_key") or "")
-        for item in attempts
-        if isinstance(item, Mapping)
+        str(item.get("idempotency_key") or "") for item in attempts if isinstance(item, Mapping)
     }
     used_attempt_ids.add(str(predecessor.get("attempt_id") or ""))
     used_action_ids.add(str(predecessor.get("action_id") or ""))
@@ -658,7 +683,11 @@ def resolve_canonical_target_roots(
     override = os.getenv("NEXUS_TARGET_ROOT_OVERRIDE", "").strip()
     if override:
         base_worktree_root = Path(override).expanduser().resolve()
-    elif requested_target_worktree_root and "/private/tmp" not in requested_target_worktree_root and "/tmp" not in requested_target_worktree_root:
+    elif (
+        requested_target_worktree_root
+        and "/private/tmp" not in requested_target_worktree_root
+        and "/tmp" not in requested_target_worktree_root
+    ):
         base_worktree_root = Path(requested_target_worktree_root).expanduser().resolve()
     else:
         workspace_root = Path.cwd().resolve()
@@ -666,26 +695,38 @@ def resolve_canonical_target_roots(
             base_worktree_root = CANONICAL_SOURCE_ROOT.parent / "nexus-runtime-targets"
         elif "nexus-runtime-targets" in workspace_root.parts:
             idx = workspace_root.parts.index("nexus-runtime-targets")
-            base_worktree_root = Path(*workspace_root.parts[:idx + 1])
+            base_worktree_root = Path(*workspace_root.parts[: idx + 1])
         else:
             base_worktree_root = workspace_root.parent / "nexus-runtime-targets"
         if campaign_id:
             base_worktree_root = base_worktree_root / campaign_id
 
-    if requested_target_repo_root and "/private/tmp" not in requested_target_repo_root and "/tmp" not in requested_target_repo_root:
+    if (
+        requested_target_repo_root
+        and "/private/tmp" not in requested_target_repo_root
+        and "/tmp" not in requested_target_repo_root
+    ):
         target_repo_root = Path(requested_target_repo_root).expanduser().resolve()
     else:
         target_repo_root = base_worktree_root / task_id
 
     disabled_parts = {"nexus-worktrees"}
-    if disabled_parts.intersection(base_worktree_root.parts) or disabled_parts.intersection(target_repo_root.parts):
-        raise ValueError("DISABLED_TARGET_ROOT: nexus-worktrees is retired; use /Users/jameschen/Workspace/nexus-runtime-targets")
+    if disabled_parts.intersection(base_worktree_root.parts) or disabled_parts.intersection(
+        target_repo_root.parts
+    ):
+        raise ValueError(
+            "DISABLED_TARGET_ROOT: nexus-worktrees is retired; use /Users/jameschen/Workspace/nexus-runtime-targets"
+        )
     return base_worktree_root, target_repo_root
 
 
-def validate_task_card_binding(contract: ArchitectTaskContract, request: Mapping[str, Any], *, is_ephemeral: bool = False) -> None:
+def validate_task_card_binding(
+    contract: ArchitectTaskContract, request: Mapping[str, Any], *, is_ephemeral: bool = False
+) -> None:
     if request.get("allow_unbound_test_identity") is True and not is_ephemeral:
-        raise RuntimeError("TASK_CARD_BINDING_MISMATCH: allow_unbound_test_identity is only permitted when ephemeral=True")
+        raise RuntimeError(
+            "TASK_CARD_BINDING_MISMATCH: allow_unbound_test_identity is only permitted when ephemeral=True"
+        )
 
     allow_unbound = (
         is_ephemeral
@@ -716,25 +757,40 @@ def validate_task_card_binding(contract: ArchitectTaskContract, request: Mapping
         if possible.exists():
             card_path = possible
         else:
-            matches = list(Path.cwd().glob(f"tasks/*/{task_id}.md")) + list(Path.cwd().glob(f"tasks/*/*{task_id}*.md"))
+            matches = list(Path.cwd().glob(f"tasks/*/{task_id}.md")) + list(
+                Path.cwd().glob(f"tasks/*/*{task_id}*.md")
+            )
             card_path = matches[0] if matches else None
 
     if not card_path or not card_path.exists():
         if not allow_unbound:
-            raise RuntimeError(f"TASK_CARD_BINDING_MISMATCH: task card does not exist for task_id '{task_id}'")
+            raise RuntimeError(
+                f"TASK_CARD_BINDING_MISMATCH: task card does not exist for task_id '{task_id}'"
+            )
         return
 
     content = card_path.read_text(encoding="utf-8")
-    if f"task_id: `{task_id}`" not in content and f"task_id: {task_id}" not in content and f"`{task_id}`" not in content and f"task_id: '{task_id}'" not in content:
-        raise RuntimeError(f"TASK_CARD_BINDING_MISMATCH: task card task_id does not match lifecycle task_id '{task_id}'")
+    if (
+        f"task_id: `{task_id}`" not in content
+        and f"task_id: {task_id}" not in content
+        and f"`{task_id}`" not in content
+        and f"task_id: '{task_id}'" not in content
+    ):
+        raise RuntimeError(
+            f"TASK_CARD_BINDING_MISMATCH: task card task_id does not match lifecycle task_id '{task_id}'"
+        )
 
     if "AUTO_CHAIN: true" in content or "AUTO_CHAIN=true" in content:
         raise RuntimeError("TASK_CARD_BINDING_MISMATCH: AUTO_CHAIN must be false")
 
 
-def resolve_lifecycle_identity(contract: ArchitectTaskContract, request: Mapping[str, Any], *, is_ephemeral: bool = False) -> dict[str, Any]:
+def resolve_lifecycle_identity(
+    contract: ArchitectTaskContract, request: Mapping[str, Any], *, is_ephemeral: bool = False
+) -> dict[str, Any]:
     if request.get("allow_unbound_test_identity") is True and not is_ephemeral:
-        raise RuntimeError("LIFECYCLE_REVISION_MISMATCH: allow_unbound_test_identity is only permitted when ephemeral=True")
+        raise RuntimeError(
+            "LIFECYCLE_REVISION_MISMATCH: allow_unbound_test_identity is only permitted when ephemeral=True"
+        )
 
     allow_unbound = (
         is_ephemeral
@@ -750,7 +806,9 @@ def resolve_lifecycle_identity(contract: ArchitectTaskContract, request: Mapping
     req_rev = request.get("required_lifecycle_revision")
     if req_rev:
         if current_rev != req_rev and not current_rev.startswith(req_rev):
-            raise RuntimeError(f"LIFECYCLE_REVISION_MISMATCH: current revision {current_rev} does not match required {req_rev}")
+            raise RuntimeError(
+                f"LIFECYCLE_REVISION_MISMATCH: current revision {current_rev} does not match required {req_rev}"
+            )
 
     if str(request.get("contract_kind") or "") == ContractKind.OWNER_INLINE.value:
         inline = request.get("owner_inline_contract")
@@ -784,7 +842,9 @@ def resolve_lifecycle_identity(contract: ArchitectTaskContract, request: Mapping
         if possible.exists():
             card_path = possible
         else:
-            matches = list(Path.cwd().glob(f"tasks/*/{task_id}.md")) + list(Path.cwd().glob(f"tasks/*/*{task_id}*.md"))
+            matches = list(Path.cwd().glob(f"tasks/*/{task_id}.md")) + list(
+                Path.cwd().glob(f"tasks/*/*{task_id}*.md")
+            )
             card_path = matches[0] if matches else None
 
     card_path_res = str(card_path.resolve()) if card_path and card_path.exists() else None
@@ -793,15 +853,24 @@ def resolve_lifecycle_identity(contract: ArchitectTaskContract, request: Mapping
         card_hash = hashlib.sha256(card_path.read_bytes()).hexdigest()
 
     if not allow_unbound:
-        if not current_rev or not card_path_res or not card_hash or not contract.controller_revision:
-            raise RuntimeError("LIFECYCLE_REVISION_MISMATCH: missing required lifecycle identity binding fields")
+        if (
+            not current_rev
+            or not card_path_res
+            or not card_hash
+            or not contract.controller_revision
+        ):
+            raise RuntimeError(
+                "LIFECYCLE_REVISION_MISMATCH: missing required lifecycle identity binding fields"
+            )
 
     return {
         "lifecycle_revision": current_rev,
         "lifecycle_executable_path": str(Path(sys.executable).resolve()),
         "worker_module_path": str(Path(__file__).resolve()),
         "controller_revision": contract.controller_revision,
-        "contract_kind": ContractKind.TRACKED_TASK_CARD.value if card_hash else ContractKind.NONE.value,
+        "contract_kind": ContractKind.TRACKED_TASK_CARD.value
+        if card_hash
+        else ContractKind.NONE.value,
         "contract_hash": None,
         "task_card_path": card_path_res,
         "task_card_hash": card_hash,
@@ -819,11 +888,15 @@ def _resolve_task_card_path(value: str | Path) -> Path:
     return (CANONICAL_SOURCE_ROOT / raw).resolve()
 
 
-def validate_lifecycle_revision(contract: ArchitectTaskContract, request: Mapping[str, Any]) -> None:
+def validate_lifecycle_revision(
+    contract: ArchitectTaskContract, request: Mapping[str, Any]
+) -> None:
     resolve_lifecycle_identity(contract, request)
 
 
-def check_fast_lane_eligible(contract: ArchitectTaskContract, request: Optional[Mapping[str, Any]] = None) -> bool:
+def check_fast_lane_eligible(
+    contract: ArchitectTaskContract, request: Optional[Mapping[str, Any]] = None
+) -> bool:
     req = request or {}
     allowed_files = getattr(contract, "allowed_files", ()) or ()
     verifier_commands = getattr(contract, "verifier_commands", ()) or ()
@@ -844,9 +917,14 @@ def check_fast_lane_eligible(contract: ArchitectTaskContract, request: Optional[
         return False
     if req.get("security_policy_weakening"):
         return False
-    if getattr(contract, "public_claim_allowed", False) or getattr(contract, "production_ready", False):
+    if getattr(contract, "public_claim_allowed", False) or getattr(
+        contract, "production_ready", False
+    ):
         return False
-    if getattr(contract, "controller_clean", None) is False or getattr(contract, "target_isolated", None) is False:
+    if (
+        getattr(contract, "controller_clean", None) is False
+        or getattr(contract, "target_isolated", None) is False
+    ):
         return False
 
     return True
@@ -875,7 +953,11 @@ def resolve_execution_lane(
         }
 
     blockers: list[str] = []
-    controller = Path(str(request.get("controller_repo_root") or CANONICAL_SOURCE_ROOT)).expanduser().resolve()
+    controller = (
+        Path(str(request.get("controller_repo_root") or CANONICAL_SOURCE_ROOT))
+        .expanduser()
+        .resolve()
+    )
     if controller != CANONICAL_SOURCE_ROOT:
         blockers.append("controller_is_not_canonical_source")
     if request.get("primary_agent") is not True:
@@ -885,14 +967,20 @@ def resolve_execution_lane(
         blockers.append("delegated_worker_forbidden")
     try:
         branch = subprocess.run(
-            ["git", "branch", "--show-current"], cwd=controller,
-            capture_output=True, text=True, check=False,
+            ["git", "branch", "--show-current"],
+            cwd=controller,
+            capture_output=True,
+            text=True,
+            check=False,
         ).stdout.strip()
         if branch != CANONICAL_SOURCE_BRANCH:
             blockers.append("canonical_branch_mismatch")
         dirty = subprocess.run(
-            ["git", "status", "--porcelain=v1"], cwd=controller,
-            capture_output=True, text=True, check=False,
+            ["git", "status", "--porcelain=v1"],
+            cwd=controller,
+            capture_output=True,
+            text=True,
+            check=False,
         ).stdout.strip()
         if dirty:
             blockers.append("canonical_checkout_dirty")
@@ -907,17 +995,31 @@ def resolve_execution_lane(
     if request.get("generated_change") or request.get("large_change"):
         blockers.append("generated_or_large_change_forbidden")
     lockfile_names = {
-        "uv.lock", "poetry.lock", "package-lock.json", "pnpm-lock.yaml",
-        "yarn.lock", "Cargo.lock", "Gemfile.lock",
+        "uv.lock",
+        "poetry.lock",
+        "package-lock.json",
+        "pnpm-lock.yaml",
+        "yarn.lock",
+        "Cargo.lock",
+        "Gemfile.lock",
     }
     for raw_path in request.get("allowed_files") or []:
         path = str(raw_path).strip().rstrip("/")
         name = Path(path).name
         if name in lockfile_names:
             blockers.append("lockfile_change_forbidden")
-        if path.startswith(("generated/", "dist/", "build/", ".next/")) or name.endswith(".generated.json"):
+        if path.startswith(("generated/", "dist/", "build/", ".next/")) or name.endswith(
+            ".generated.json"
+        ):
             blockers.append("generated_or_large_change_forbidden")
-    for flag in ("migration_authority", "schema_authority", "route_authority_mutation", "security_policy_weakening", "public_claim_allowed", "production_ready"):
+    for flag in (
+        "migration_authority",
+        "schema_authority",
+        "route_authority_mutation",
+        "security_policy_weakening",
+        "public_claim_allowed",
+        "production_ready",
+    ):
         if request.get(flag):
             blockers.append(f"{flag}_forbidden")
     return {
@@ -953,7 +1055,9 @@ class SelfHostedTaskService:
         source_root = Path(__file__).resolve().parents[2]
         result = subprocess.run(
             ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
-            cwd=source_root, capture_output=True, text=True,
+            cwd=source_root,
+            capture_output=True,
+            text=True,
         )
         if result.returncode == 0:
             repository_root = Path(result.stdout.strip()).resolve().parent
@@ -1042,7 +1146,11 @@ class SelfHostedTaskService:
 
     @classmethod
     def _terminal_failure_blocker(cls, state: Mapping[str, Any]) -> Optional[dict[str, Any]]:
-        if str(state.get("status") or "") not in {"FINAL_BLOCK", "RETAINED_FOR_REVIEW", "INTEGRATION_FAILED"}:
+        if str(state.get("status") or "") not in {
+            "FINAL_BLOCK",
+            "RETAINED_FOR_REVIEW",
+            "INTEGRATION_FAILED",
+        }:
             return None
         raw_error = str(state.get("error") or "")
         error = raw_error.strip()
@@ -1108,7 +1216,9 @@ class SelfHostedTaskService:
         )
         if any(state.get(field) for field in candidate_fields):
             return False
-        if isinstance(candidate, Mapping) and any(candidate.get(field) for field in candidate_fields):
+        if isinstance(candidate, Mapping) and any(
+            candidate.get(field) for field in candidate_fields
+        ):
             return False
         return True
 
@@ -1123,7 +1233,10 @@ class SelfHostedTaskService:
             attention_required = True
             next_action = "inspect_lifecycle_state"
             recommended_tool = None
-        elif status == "DIRECT_RECONCILE_REQUIRED" and state.get("reconciliation_decision") == "RETAINED_FOR_REVIEW":
+        elif (
+            status == "DIRECT_RECONCILE_REQUIRED"
+            and state.get("reconciliation_decision") == "RETAINED_FOR_REVIEW"
+        ):
             action_state = "FINAL_BLOCK"
             attention_required = True
             next_action = "inspect_receipt_and_candidate"
@@ -1138,7 +1251,13 @@ class SelfHostedTaskService:
             attention_required = False
             next_action = "none"
             recommended_tool = None
-        elif status in {"DIRECT_INTENT_RECORDED", "DIRECT_STARTED", "DIRECT_APPLIED", "DIRECT_VERIFIED", "DIRECT_COMMITTED"}:
+        elif status in {
+            "DIRECT_INTENT_RECORDED",
+            "DIRECT_STARTED",
+            "DIRECT_APPLIED",
+            "DIRECT_VERIFIED",
+            "DIRECT_COMMITTED",
+        }:
             action_state = "IN_PROGRESS"
             attention_required = False
             next_action = "nexus_task_finish"
@@ -1166,7 +1285,11 @@ class SelfHostedTaskService:
         elif status in {"FINAL_BLOCK", "RETAINED_FOR_REVIEW", "INTEGRATION_FAILED"}:
             action_state = "FINAL_BLOCK"
             attention_required = True
-            cleanup_removed = state.get("cleanup_decision") in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
+            cleanup_removed = state.get("cleanup_decision") in {
+                "REMOVED",
+                "ALREADY_REMOVED",
+                "TARGET_CLEANED",
+            }
             verified_uncommitted = bool(
                 (state.get("verified_receipt") or {}).get("verified")
                 and (state.get("attempt_resolution") or {}).get("verdict") == "PROVEN"
@@ -1179,10 +1302,18 @@ class SelfHostedTaskService:
             elif verified_uncommitted:
                 next_action = "recover_verified_candidate"
                 recommended_tool = "nexus_self_hosted_recover_verified_uncommitted_candidate"
-            elif status == "RETAINED_FOR_REVIEW" and state.get("cleanup_decision") == "BLOCKED_BY_UNSAVED_CHANGES":
+            elif (
+                status == "RETAINED_FOR_REVIEW"
+                and state.get("cleanup_decision") == "BLOCKED_BY_UNSAVED_CHANGES"
+            ):
                 next_action = "salvage_or_dispose_retained_target"
                 recommended_tool = "nexus_self_hosted_cleanup"
-            elif status in {"FINAL_BLOCK", "RETAINED_FOR_REVIEW"} and not candidate_commit and promotion_status == "NOT_CREATED" and cleanup_removed:
+            elif (
+                status in {"FINAL_BLOCK", "RETAINED_FOR_REVIEW"}
+                and not candidate_commit
+                and promotion_status == "NOT_CREATED"
+                and cleanup_removed
+            ):
                 next_action = "retry_same_task"
                 recommended_tool = "nexus_self_hosted_retry"
             else:
@@ -1191,7 +1322,11 @@ class SelfHostedTaskService:
             if cls._settled_candidate_less_final_block(state):
                 action_state = "TERMINAL"
                 attention_required = False
-        elif status in (PENDING_CANDIDATE_STATUSES - {"INTEGRATING"}) or promotion_status in {"PENDING_HUMAN_APPROVAL", "APPROVED", "APPROVAL_INVALIDATED"}:
+        elif status in (PENDING_CANDIDATE_STATUSES - {"INTEGRATING"}) or promotion_status in {
+            "PENDING_HUMAN_APPROVAL",
+            "APPROVED",
+            "APPROVAL_INVALIDATED",
+        }:
             action_state = "ACTION_REQUIRED"
             attention_required = True
             if promotion_status == "APPROVED" or status == "APPROVED":
@@ -1228,9 +1363,12 @@ class SelfHostedTaskService:
             "candidate_ref": state.get("candidate_ref"),
             "candidate": {
                 "candidate_commit_sha": candidate_commit,
-                "candidate_tree_sha": state.get("candidate_tree_sha") or packet.get("candidate_tree_sha"),
-                "candidate_state_hash": state.get("candidate_state_hash") or packet.get("candidate_state_hash"),
-                "verified_receipt_hash": state.get("verified_receipt_hash") or packet.get("verified_receipt_hash"),
+                "candidate_tree_sha": state.get("candidate_tree_sha")
+                or packet.get("candidate_tree_sha"),
+                "candidate_state_hash": state.get("candidate_state_hash")
+                or packet.get("candidate_state_hash"),
+                "verified_receipt_hash": state.get("verified_receipt_hash")
+                or packet.get("verified_receipt_hash"),
             },
             "cleanup_status": {
                 "cleanup_eligible": state.get("cleanup_eligible", False),
@@ -1460,17 +1598,15 @@ class SelfHostedTaskService:
         }
         if approval_requirements_reasons:
             blocker["approval_requirements_reasons"] = sorted(set(approval_requirements_reasons))
-        return cls._with_task_action(
-            {
-                "schema": "nexus.self_hosted_task_status.v1",
-                "task_id": task_id,
-                "status": "BLOCKED_INVALID_STATE",
-                "found": True,
-                "state_valid": False,
-                "retry_authorized": False,
-                "blocker": blocker,
-            }
-        )
+        return cls._with_task_action({
+            "schema": "nexus.self_hosted_task_status.v1",
+            "task_id": task_id,
+            "status": "BLOCKED_INVALID_STATE",
+            "found": True,
+            "state_valid": False,
+            "retry_authorized": False,
+            "blocker": blocker,
+        })
 
     @classmethod
     def _load_state_path(cls, path: Path, task_id: str) -> Optional[dict[str, Any]]:
@@ -1560,7 +1696,9 @@ class SelfHostedTaskService:
             )
         return cls._with_task_action(state)
 
-    def _latest_archived_state(self, task_id: str) -> tuple[Optional[Path], Optional[dict[str, Any]]]:
+    def _latest_archived_state(
+        self, task_id: str
+    ) -> tuple[Optional[Path], Optional[dict[str, Any]]]:
         latest_path: Optional[Path] = None
         latest_state: Optional[dict[str, Any]] = None
         latest_key: tuple[str, int] = ("", -1)
@@ -1660,12 +1798,13 @@ class SelfHostedTaskService:
             raise KeyError(f"unknown task: {task_id}")
         contract = state.get("contract") if isinstance(state.get("contract"), Mapping) else {}
         expected_action_id = str(state.get("action_id") or "").strip() or None
-        expected_source_revision = str(
-            state.get("controller_revision") or contract.get("controller_revision") or ""
-        ).strip() or None
-        expected_runtime_receipt_hash = str(
-            state.get("runtime_receipt_hash") or ""
-        ).strip() or None
+        expected_source_revision = (
+            str(
+                state.get("controller_revision") or contract.get("controller_revision") or ""
+            ).strip()
+            or None
+        )
+        expected_runtime_receipt_hash = str(state.get("runtime_receipt_hash") or "").strip() or None
         normalized = validate_operator_outcome_receipt(
             receipt,
             task_id=task_id,
@@ -1687,19 +1826,20 @@ class SelfHostedTaskService:
 
         def mutate(current: dict[str, Any]) -> None:
             current_contract = (
-                current.get("contract")
-                if isinstance(current.get("contract"), Mapping)
-                else {}
+                current.get("contract") if isinstance(current.get("contract"), Mapping) else {}
             )
             current_action_id = str(current.get("action_id") or "").strip() or None
-            current_source_revision = str(
-                current.get("controller_revision")
-                or current_contract.get("controller_revision")
-                or ""
-            ).strip() or None
-            current_runtime_receipt_hash = str(
-                current.get("runtime_receipt_hash") or ""
-            ).strip() or None
+            current_source_revision = (
+                str(
+                    current.get("controller_revision")
+                    or current_contract.get("controller_revision")
+                    or ""
+                ).strip()
+                or None
+            )
+            current_runtime_receipt_hash = (
+                str(current.get("runtime_receipt_hash") or "").strip() or None
+            )
             validate_operator_outcome_receipt(
                 normalized,
                 task_id=task_id,
@@ -1785,7 +1925,10 @@ class SelfHostedTaskService:
                     for item in existing
                     if item.get("receipt_id") == normalized.supersedes_receipt_id
                 )
-                if target.get("task_id") != task_id or target.get("attempt_id") != normalized.attempt_id:
+                if (
+                    target.get("task_id") != task_id
+                    or target.get("attempt_id") != normalized.attempt_id
+                ):
                     raise ValueError("OPERATOR_OUTCOME_SUPERSESSION_ATTEMPT_MISMATCH")
                 if normalized.observed_at <= parsed[normalized.supersedes_receipt_id].observed_at:
                     raise ValueError("OPERATOR_OUTCOME_SUPERSESSION_ORDER_INVALID")
@@ -1830,13 +1973,17 @@ class SelfHostedTaskService:
         if not production_bound or contract is None:
             return None
         if self.state_dir != self.canonical_state_dir():
-            return "CANONICAL_STATE_REQUIRED: production Candidate must use the canonical state root"
+            return (
+                "CANONICAL_STATE_REQUIRED: production Candidate must use the canonical state root"
+            )
         controller = Path(contract.controller_repo_root).expanduser().resolve()
         if not controller.is_dir():
             return f"CONTROLLER_MISSING: {controller}"
         temporary_roots = _temporary_state_roots()
         if any(controller == root or root in controller.parents for root in temporary_roots):
-            return f"DURABLE_CONTROLLER_REQUIRED: temporary Controller is not promotable: {controller}"
+            return (
+                f"DURABLE_CONTROLLER_REQUIRED: temporary Controller is not promotable: {controller}"
+            )
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "--show-toplevel"],
@@ -1875,7 +2022,9 @@ class SelfHostedTaskService:
                 raise RuntimeError("archived task receipt disappeared before retry")
             return self._write_state_locked(task_id, state)
 
-    def _mutate_state(self, task_id: str, mutator: Callable[[dict[str, Any]], None]) -> Optional[dict[str, Any]]:
+    def _mutate_state(
+        self, task_id: str, mutator: Callable[[dict[str, Any]], None]
+    ) -> Optional[dict[str, Any]]:
         with self._state_lock():
             path = self._state_path(task_id)
             if not path.exists():
@@ -1904,38 +2053,69 @@ class SelfHostedTaskService:
             "model": str(request.get("model") or "").strip(),
             "role": str(request.get("role") or request.get("worker_role") or "").strip(),
             "claim_ceiling": str(request.get("claim_ceiling") or "").strip(),
-            "base_revision": str(request.get("base_revision") or request.get("target_base_revision") or "").strip(),
-            "source_hash": str(request.get("source_hash") or request.get("source_revision") or "").strip(),
+            "base_revision": str(
+                request.get("base_revision") or request.get("target_base_revision") or ""
+            ).strip(),
+            "source_hash": str(
+                request.get("source_hash") or request.get("source_revision") or ""
+            ).strip(),
             "task_card_path": str(request.get("task_card_path") or "").strip(),
             "allowed_files": sorted({str(item).strip() for item in allowed if str(item).strip()}),
-            "admission_identity": hashlib.sha256(json.dumps(_jsonable(admission), sort_keys=True, separators=(",", ":")).encode()).hexdigest() if admission is not None else "",
-            "provider_preflight_identity": hashlib.sha256(json.dumps(_jsonable(preflight), sort_keys=True, separators=(",", ":")).encode()).hexdigest() if preflight is not None else "",
+            "admission_identity": hashlib.sha256(
+                json.dumps(_jsonable(admission), sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            if admission is not None
+            else "",
+            "provider_preflight_identity": hashlib.sha256(
+                json.dumps(_jsonable(preflight), sort_keys=True, separators=(",", ":")).encode()
+            ).hexdigest()
+            if preflight is not None
+            else "",
         }
         return identity
 
     @classmethod
     def _claim_hash(cls, identity: Mapping[str, Any]) -> str:
-        return hashlib.sha256(json.dumps(_jsonable(identity), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+        return hashlib.sha256(
+            json.dumps(_jsonable(identity), sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
 
     @staticmethod
     def _claim_request(request: Mapping[str, Any]) -> dict[str, Any]:
         identity = SelfHostedTaskService._claim_identity(request)
-        return {"identity": identity, "identity_hash": SelfHostedTaskService._claim_hash(identity),
-                "claim_id": str(request.get("claim_id") or uuid4()),
-                "generation": int(request.get("generation") or 1),
-                "fencing_token": str(request.get("fencing_token") or "")}
+        return {
+            "identity": identity,
+            "identity_hash": SelfHostedTaskService._claim_hash(identity),
+            "claim_id": str(request.get("claim_id") or uuid4()),
+            "generation": int(request.get("generation") or 1),
+            "fencing_token": str(request.get("fencing_token") or ""),
+        }
 
     @classmethod
     def _validate_claim_record(cls, record: Mapping[str, Any]) -> None:
-        if not isinstance(record, Mapping) or not isinstance(record.get("identity"), Mapping) or not record.get("identity"):
+        if (
+            not isinstance(record, Mapping)
+            or not isinstance(record.get("identity"), Mapping)
+            or not record.get("identity")
+        ):
             raise RuntimeError("WORK_CLAIM_MALFORMED")
-        if not isinstance(record.get("identity_hash"), str) or record.get("identity_hash") != cls._claim_hash(record["identity"]):
+        if not isinstance(record.get("identity_hash"), str) or record.get(
+            "identity_hash"
+        ) != cls._claim_hash(record["identity"]):
             raise RuntimeError("WORK_CLAIM_TAMPERED")
-        if not isinstance(record.get("generation"), int) or isinstance(record.get("generation"), bool) or record["generation"] < 1 or not isinstance(record.get("claim_id"), str) or not record["claim_id"]:
+        if (
+            not isinstance(record.get("generation"), int)
+            or isinstance(record.get("generation"), bool)
+            or record["generation"] < 1
+            or not isinstance(record.get("claim_id"), str)
+            or not record["claim_id"]
+        ):
             raise RuntimeError("WORK_CLAIM_MALFORMED")
 
     @classmethod
-    def _validate_claim_locked(cls, state: Mapping[str, Any], request: Mapping[str, Any]) -> Mapping[str, Any]:
+    def _validate_claim_locked(
+        cls, state: Mapping[str, Any], request: Mapping[str, Any]
+    ) -> Mapping[str, Any]:
         record = state.get("work_claim")
         cls._validate_claim_record(record)
         expected = cls._claim_identity(request)
@@ -2001,7 +2181,9 @@ class SelfHostedTaskService:
             self._write_state_locked(task_id, state)
         return {"status": "RELEASED", "task_id": task_id}
 
-    def recover_work_claim(self, request: Mapping[str, Any], *, reason: str = "RECOVERY") -> dict[str, Any]:
+    def recover_work_claim(
+        self, request: Mapping[str, Any], *, reason: str = "RECOVERY"
+    ) -> dict[str, Any]:
         task_id = str(request["task_id"])
         with self._state_lock():
             state = json.loads(self._state_path(task_id).read_text(encoding="utf-8"))
@@ -2048,14 +2230,22 @@ class SelfHostedTaskService:
         sequence = NexusEventBus.next_attempt_sequence(
             str(result.get("task_id") or task_id), str(result.get("attempt_id"))
         )
-        candidate_refs = tuple(str(value) for value in (
-            result.get("candidate_commit_sha"),
-            (result.get("promotion_packet") or {}).get("candidate_tree_sha"),
-        ) if value)
-        evidence_refs = tuple(str(value) for value in (
-            result.get("verified_receipt_hash"),
-            (result.get("verified_receipt") or {}).get("receipt_ref"),
-        ) if value)
+        candidate_refs = tuple(
+            str(value)
+            for value in (
+                result.get("candidate_commit_sha"),
+                (result.get("promotion_packet") or {}).get("candidate_tree_sha"),
+            )
+            if value
+        )
+        evidence_refs = tuple(
+            str(value)
+            for value in (
+                result.get("verified_receipt_hash"),
+                (result.get("verified_receipt") or {}).get("receipt_ref"),
+            )
+            if value
+        )
         # Persistence/sequence failures are deterministic event blocks.  They
         # must remain visible to the caller; silently dropping them creates a
         # false lifecycle receipt while leaving the lifecycle authority intact.
@@ -2092,21 +2282,34 @@ class SelfHostedTaskService:
                 raise ValueError(f"{name} must contain non-empty strings")
             return tuple(value)
 
-        NexusEventBus.emit_attempt_transition(build_attempt_transition_event(
-            task_id=str(result.get("task_id") or task_id),
-            attempt_id=str(result.get("attempt_id")), sequence=sequence,
-            state=status, reason=str(result.get("error") or result.get("reason") or ""),
-            continuity_event_type=continuity_event_type,
-            strategy_delta=str(result.get("strategy_delta") or request.get("strategy_delta") or ""),
-            do_not_repeat=continuity_list("do_not_repeat", "rejected_strategies"),
-            unresolved_risks=continuity_list("unresolved_risks"),
-            unknowns=continuity_list("unknowns"),
-            next_action=str(result.get("next_action") or request.get("next_action") or ""),
-            claim_ceiling=str(result.get("claim_ceiling") or request.get("claim_ceiling") or ""),
-            candidate_refs=candidate_refs, evidence_refs=evidence_refs,
-            source_revision=str(result.get("source_revision") or request.get("controller_revision") or "unknown"),
-            contract_revision=str(result.get("contract_revision") or request.get("contract_hash") or "unknown"),
-        ))
+        NexusEventBus.emit_attempt_transition(
+            build_attempt_transition_event(
+                task_id=str(result.get("task_id") or task_id),
+                attempt_id=str(result.get("attempt_id")),
+                sequence=sequence,
+                state=status,
+                reason=str(result.get("error") or result.get("reason") or ""),
+                continuity_event_type=continuity_event_type,
+                strategy_delta=str(
+                    result.get("strategy_delta") or request.get("strategy_delta") or ""
+                ),
+                do_not_repeat=continuity_list("do_not_repeat", "rejected_strategies"),
+                unresolved_risks=continuity_list("unresolved_risks"),
+                unknowns=continuity_list("unknowns"),
+                next_action=str(result.get("next_action") or request.get("next_action") or ""),
+                claim_ceiling=str(
+                    result.get("claim_ceiling") or request.get("claim_ceiling") or ""
+                ),
+                candidate_refs=candidate_refs,
+                evidence_refs=evidence_refs,
+                source_revision=str(
+                    result.get("source_revision") or request.get("controller_revision") or "unknown"
+                ),
+                contract_revision=str(
+                    result.get("contract_revision") or request.get("contract_hash") or "unknown"
+                ),
+            )
+        )
 
     @staticmethod
     def read_canonical_attempt_events(task_id: str, attempt_id: str) -> list[dict[str, Any]]:
@@ -2116,7 +2319,9 @@ class SelfHostedTaskService:
         # integrity failures; continuity recovery must preserve those errors.
         if NexusEventBus._log_store.event_log_path != NexusEventBus._event_log_path:
             NexusEventBus._log_store.event_log_path = NexusEventBus._event_log_path
-        records = NexusEventBus._log_store.read_recent(event_type="attempt_transition", limit=10_000)
+        records = NexusEventBus._log_store.read_recent(
+            event_type="attempt_transition", limit=10_000
+        )
         selected = []
         for record in records:
             payload = record.get("payload") if isinstance(record, Mapping) else None
@@ -2140,10 +2345,14 @@ class SelfHostedTaskService:
     @staticmethod
     def _request_hash(request: Mapping[str, Any]) -> str:
         return hashlib.sha256(
-            json.dumps(dict(request), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+            json.dumps(
+                dict(request), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")
         ).hexdigest()
 
-    def _record_direct_failure(self, task_id: str, blocker: str, error: str = "") -> Optional[dict[str, Any]]:
+    def _record_direct_failure(
+        self, task_id: str, blocker: str, error: str = ""
+    ) -> Optional[dict[str, Any]]:
         """Persist an uncertain Direct/Assisted outcome without allocating a Target."""
         now = _utc_now()
 
@@ -2170,7 +2379,9 @@ class SelfHostedTaskService:
         self._emit_bound_attempt_transition(result, task_id)
         return result
 
-    def record_canonical_action_failure(self, task_id: str, blocker: str, error: str = "") -> Optional[dict[str, Any]]:
+    def record_canonical_action_failure(
+        self, task_id: str, blocker: str, error: str = ""
+    ) -> Optional[dict[str, Any]]:
         """Public observer-safe hook for an Assisted provider/apply failure."""
         return self._record_direct_failure(task_id, blocker, error)
 
@@ -2203,11 +2414,23 @@ class SelfHostedTaskService:
             started_at = _parse_time(state.get("worker_started_at"))
             if submitted_at is not None:
                 wall_time_ms = max(0, int((time.time() - submitted_at) * 1000))
-                worker_wall_time_ms = max(0, int((time.time() - started_at) * 1000)) if started_at is not None else 0
+                worker_wall_time_ms = (
+                    max(0, int((time.time() - started_at) * 1000)) if started_at is not None else 0
+                )
                 previous_telemetry = state.get("telemetry") or {}
-                executions = state.get("executions") or ([state.get("execution")] if state.get("execution") else [])
-                provider_time_ms = sum(int(item.get("wall_time_ms") or 0) for item in executions if isinstance(item, Mapping))
-                provider_calls = sum(int(item.get("provider_calls") or 0) for item in executions if isinstance(item, Mapping))
+                executions = state.get("executions") or (
+                    [state.get("execution")] if state.get("execution") else []
+                )
+                provider_time_ms = sum(
+                    int(item.get("wall_time_ms") or 0)
+                    for item in executions
+                    if isinstance(item, Mapping)
+                )
+                provider_calls = sum(
+                    int(item.get("provider_calls") or 0)
+                    for item in executions
+                    if isinstance(item, Mapping)
+                )
                 provider_attempts = sum(
                     int(item.get("provider_attempt_count"))
                     if item.get("provider_attempt_count") is not None
@@ -2216,11 +2439,21 @@ class SelfHostedTaskService:
                     if isinstance(item, Mapping)
                 )
                 verified = state.get("verified_receipt") or {}
-                verifier_time_ms = sum(int(item.get("wall_time_ms") or 0) for item in verified.get("verifier_evidence") or [] if isinstance(item, Mapping))
+                verifier_time_ms = sum(
+                    int(item.get("wall_time_ms") or 0)
+                    for item in verified.get("verifier_evidence") or []
+                    if isinstance(item, Mapping)
+                )
                 worktree_time_ms = int(previous_telemetry.get("worktree_time_ms") or 0)
                 commit_hook_time_ms = int(previous_telemetry.get("commit_hook_time_ms") or 0)
                 cleanup_time_ms = int(previous_telemetry.get("cleanup_time_ms") or 0)
-                measured_ms = provider_time_ms + verifier_time_ms + worktree_time_ms + commit_hook_time_ms + cleanup_time_ms
+                measured_ms = (
+                    provider_time_ms
+                    + verifier_time_ms
+                    + worktree_time_ms
+                    + commit_hook_time_ms
+                    + cleanup_time_ms
+                )
                 state["telemetry"] = {
                     "wall_time_ms": wall_time_ms,
                     "worker_wall_time_ms": worker_wall_time_ms,
@@ -2250,7 +2483,9 @@ class SelfHostedTaskService:
             lease = state.get("lease") or {}
             if lease:
                 state.update({
-                    "controller_worktree": (state.get("contract") or {}).get("controller_repo_root"),
+                    "controller_worktree": (state.get("contract") or {}).get(
+                        "controller_repo_root"
+                    ),
                     "controller_status_sha256": lease.get("controller_status_sha256"),
                     "target_worktree": lease.get("target_worktree"),
                     "target_initial_revision": lease.get("initial_head"),
@@ -2266,11 +2501,15 @@ class SelfHostedTaskService:
             packet = state.get("promotion_packet") or {}
             if packet:
                 for field in (
-                    "candidate_commit_sha", "candidate_tree_sha",
-                    "candidate_state_hash", "verified_receipt_hash",
+                    "candidate_commit_sha",
+                    "candidate_tree_sha",
+                    "candidate_state_hash",
+                    "verified_receipt_hash",
                 ):
                     state[field] = packet.get(field)
-            action_id = str(state.get("action_id") or f"action-{state.get('attempt_id') or task_id}")
+            action_id = str(
+                state.get("action_id") or f"action-{state.get('attempt_id') or task_id}"
+            )
             promotion_status = str(state.get("promotion_status") or "NOT_CREATED")
             integrated = state.get("status") == "INTEGRATED" or promotion_status == "INTEGRATED"
             runtime_phase = str(state.get("runtime_phase") or "").strip().upper()
@@ -2282,9 +2521,7 @@ class SelfHostedTaskService:
                 runtime_phase=runtime_phase,
                 runtime_terminal_state=runtime_terminal_state,
                 development_status=str(state.get("status") or "UNKNOWN"),
-                runtime_success=(
-                    runtime_phase == "C" and runtime_terminal_state == "COMPLETE"
-                ),
+                runtime_success=(runtime_phase == "C" and runtime_terminal_state == "COMPLETE"),
                 candidate_status=str(state.get("candidate_status") or promotion_status),
                 candidate_accepted=promotion_status in {"APPROVED", "INTEGRATED"},
                 integration_status=promotion_status,
@@ -2350,14 +2587,15 @@ class SelfHostedTaskService:
         provider_order = request.get("worker_order")
         if provider_order is None:
             provider_order = (
-                list(SUPPORTED_WORKER_PROVIDERS)
-                if requested_worker == "auto"
-                else [worker]
+                list(SUPPORTED_WORKER_PROVIDERS) if requested_worker == "auto" else [worker]
             )
         provider_order = [str(provider).strip().lower() for provider in provider_order]
         if worker == "auto" and not provider_order:
             raise ValueError("worker_order must be non-empty for auto selection")
-        if worker == "auto" and (set(provider_order) - set(SUPPORTED_WORKER_PROVIDERS) or len(set(provider_order)) != len(provider_order)):
+        if worker == "auto" and (
+            set(provider_order) - set(SUPPORTED_WORKER_PROVIDERS)
+            or len(set(provider_order)) != len(provider_order)
+        ):
             raise ValueError("worker_order contains an unknown or duplicate provider")
         if worker == "auto":
             worker = provider_order[0]
@@ -2402,7 +2640,11 @@ class SelfHostedTaskService:
             if marker_present != authority_confirmation:
                 raise RuntimeError("AUTHORITY_CHANGE_CONFIRMATION_MARKER_MISMATCH")
             inline = request.get("owner_inline_contract")
-            if not isinstance(inline, Mapping) or inline.get("authority_change_candidate_confirmation", False) is not authority_confirmation:
+            if (
+                not isinstance(inline, Mapping)
+                or inline.get("authority_change_candidate_confirmation", False)
+                is not authority_confirmation
+            ):
                 raise RuntimeError("AUTHORITY_CHANGE_CONFIRMATION_CONTRACT_MISMATCH")
         authorized_deletions = [str(item) for item in request.get("authorized_deletions", [])]
         base_worktree_root, target_repo_root = resolve_canonical_target_roots(
@@ -2419,7 +2661,12 @@ class SelfHostedTaskService:
 
         controller_revision = request.get("controller_revision")
         if not controller_revision:
-            res = subprocess.run(["git", "rev-parse", "HEAD"], cwd=controller_repo_root, capture_output=True, text=True)
+            res = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=controller_repo_root,
+                capture_output=True,
+                text=True,
+            )
             controller_revision = res.stdout.strip() if res.returncode == 0 else "HEAD"
         else:
             controller_revision = str(controller_revision)
@@ -2436,7 +2683,9 @@ class SelfHostedTaskService:
             if not isinstance(raw_collaboration_realm, Mapping):
                 raise ValueError("COLLABORATION_REALM_INVALID")
             try:
-                collaboration_realm = CollaborationExecutionRealm.model_validate(raw_collaboration_realm)
+                collaboration_realm = CollaborationExecutionRealm.model_validate(
+                    raw_collaboration_realm
+                )
             except Exception as exc:
                 raise ValueError("COLLABORATION_REALM_INVALID") from exc
 
@@ -2449,7 +2698,11 @@ class SelfHostedTaskService:
                 verifier_commands=verifier_commands,
                 protected_contracts=protected_contracts,
                 authorized_deletions=authorized_deletions,
-                required_evidence=["candidate_state_hash", "controller_unchanged", "verified_candidate_receipt"],
+                required_evidence=[
+                    "candidate_state_hash",
+                    "controller_unchanged",
+                    "verified_candidate_receipt",
+                ],
             ),
             human_approval_policy=HumanApprovalPolicy(
                 approver_roles=list(request.get("approver_roles", ["James"])),
@@ -2465,9 +2718,12 @@ class SelfHostedTaskService:
             verifier_commands=verifier_commands,
             protected_contracts=protected_contracts,
             preferred_provider=worker,
-            fallback_provider=fallback_worker or (provider_order[1] if len(provider_order) > 1 else None),
+            fallback_provider=fallback_worker
+            or (provider_order[1] if len(provider_order) > 1 else None),
             provider_order=provider_order,
-            maximum_provider_calls=len(provider_order) if requested_worker == "auto" else (2 if fallback_worker else 1),
+            maximum_provider_calls=len(provider_order)
+            if requested_worker == "auto"
+            else (2 if fallback_worker else 1),
             maximum_replans=0,
             maximum_attempts_per_task=int(request.get("maximum_attempts_per_task", 5) or 5),
             maximum_wall_time_seconds=float(request.get("maximum_wall_time_seconds", 0) or 0),
@@ -2511,7 +2767,8 @@ class SelfHostedTaskService:
                 cwd=controller_root,
                 capture_output=True,
                 text=True,
-            ).returncode == 0
+            ).returncode
+            == 0
             for old, new in revisions
         )
 
@@ -2541,7 +2798,10 @@ class SelfHostedTaskService:
 
     def _set_child_pgid(self, task_id: str, attempt_id: str, pgid: Optional[int]) -> None:
         def mutate(state: dict[str, Any]) -> None:
-            if state.get("attempt_id") == attempt_id and state.get("status") not in TERMINAL_STATUSES:
+            if (
+                state.get("attempt_id") == attempt_id
+                and state.get("status") not in TERMINAL_STATUSES
+            ):
                 state["worker_child_pgid"] = pgid
                 state["updated_at"] = _utc_now()
 
@@ -2562,7 +2822,10 @@ class SelfHostedTaskService:
     ):
         candidate = controller.collect_candidate(contract, lease)
         stored = state.get("candidate") or {}
-        if stored.get("candidate_state_hash") and stored["candidate_state_hash"] != candidate.candidate_state_hash:
+        if (
+            stored.get("candidate_state_hash")
+            and stored["candidate_state_hash"] != candidate.candidate_state_hash
+        ):
             raise RuntimeError("candidate state changed during recovery")
         return candidate
 
@@ -2586,7 +2849,9 @@ class SelfHostedTaskService:
         return WorkerEscalationPolicy(
             cheap_provider=contract.preferred_provider,
             strong_provider=contract.fallback_provider,
-            provider_order=tuple(contract.provider_order or (contract.preferred_provider, contract.fallback_provider)),
+            provider_order=tuple(
+                contract.provider_order or (contract.preferred_provider, contract.fallback_provider)
+            ),
         )
 
     def _select_initial_provider(
@@ -2635,7 +2900,9 @@ class SelfHostedTaskService:
         if not isinstance(persisted, Mapping):
             raise RuntimeError("WORKFORCE_DISPATCH_STATE_DRIFT")
         original_demands, original_admission = _workforce_dispatch_inputs(request)
-        if persisted.get("demands") != _jsonable(original_demands) or persisted.get("admission") != _jsonable(original_admission):
+        if persisted.get("demands") != _jsonable(original_demands) or persisted.get(
+            "admission"
+        ) != _jsonable(original_admission):
             raise RuntimeError("WORKFORCE_DISPATCH_STATE_DRIFT")
         expected = {
             "selected_worker_id": binding["worker_id"],
@@ -2645,12 +2912,16 @@ class SelfHostedTaskService:
             "workforce_binding_hash": binding["binding_hash"],
             "workforce_aggregate_binding_hash": binding["aggregate_binding_hash"],
         }
-        if any(str(state.get(field) or "") != str(value or "") for field, value in expected.items()):
+        if any(
+            str(state.get(field) or "") != str(value or "") for field, value in expected.items()
+        ):
             raise RuntimeError("WORKFORCE_DISPATCH_STATE_DRIFT")
         expected_envelope = binding.get("canonical_dispatch_envelope")
         persisted_envelope = state.get("canonical_dispatch_envelope")
         if isinstance(expected_envelope, Mapping) or "canonical_dispatch_envelope" in request:
-            if not isinstance(expected_envelope, Mapping) or dict(persisted_envelope or {}) != dict(expected_envelope):
+            if not isinstance(expected_envelope, Mapping) or dict(persisted_envelope or {}) != dict(
+                expected_envelope
+            ):
                 raise RuntimeError("WORKFORCE_DISPATCH_ENVELOPE_STATE_DRIFT")
             persisted_identity = {
                 "task_id": state.get("task_id"),
@@ -2658,7 +2929,9 @@ class SelfHostedTaskService:
                 "task_card_path": state.get("task_card_path"),
                 "task_card_hash": state.get("task_card_hash"),
             }
-            if any(expected_envelope.get(field) != value for field, value in persisted_identity.items()):
+            if any(
+                expected_envelope.get(field) != value for field, value in persisted_identity.items()
+            ):
                 raise RuntimeError("WORKFORCE_DISPATCH_ENVELOPE_IDENTITY_DRIFT")
         if active_provider is not None and str(active_provider) != str(binding["provider"]):
             raise RuntimeError("WORKFORCE_DISPATCH_ACTIVE_PROVIDER_DRIFT")
@@ -2906,13 +3179,12 @@ class SelfHostedTaskService:
         execution = state.get("execution")
         while status in {"WORKER_RUNNING", "WORKER_COMPLETED"}:
             if status == "WORKER_RUNNING":
+
                 def on_process_group(pgid: Optional[int]) -> None:
                     self._set_child_pgid(task_id, attempt_id, pgid)
 
                 provider = str(
-                    state.get("active_provider")
-                    or contract.preferred_provider
-                    or "codex"
+                    state.get("active_provider") or contract.preferred_provider or "codex"
                 )
                 self._assert_persisted_workforce_dispatch(
                     state, request, dispatch_binding, active_provider=provider
@@ -2925,8 +3197,7 @@ class SelfHostedTaskService:
                 )
                 consumed_calls = sum(max(0, int(item.provider_calls or 0)) for item in attempts)
                 consumed_attempts = sum(
-                    max(0, int(item.provider_attempt_count or 0))
-                    for item in attempts
+                    max(0, int(item.provider_attempt_count or 0)) for item in attempts
                 )
                 configured_budget = int(fast_lane_values["maximum_provider_calls"])
                 remaining_calls = configured_budget - consumed_calls
@@ -2934,9 +3205,7 @@ class SelfHostedTaskService:
                 # provider calls.  The task-level attempt budget is the
                 # durable cap and is intentionally measured across retained
                 # execution receipts from every retry/fallback.
-                attempt_ceiling = int(
-                    getattr(contract, "maximum_attempts_per_task", 1) or 1
-                )
+                attempt_ceiling = int(getattr(contract, "maximum_attempts_per_task", 1) or 1)
                 remaining_attempts = attempt_ceiling - consumed_attempts
                 if remaining_calls <= 0:
                     raise RuntimeError("maximum_provider_calls aggregate budget exhausted")
@@ -2946,7 +3215,9 @@ class SelfHostedTaskService:
                     raise RuntimeError("WALL_TIME_BUDGET_EXHAUSTED")
                 invoke_contract = contract
                 if remaining_calls != configured_budget and hasattr(contract, "model_copy"):
-                    invoke_contract = contract.model_copy(update={"maximum_provider_calls": remaining_calls})
+                    invoke_contract = contract.model_copy(
+                        update={"maximum_provider_calls": remaining_calls}
+                    )
                 self._revalidate_provider_boundary(
                     contract,
                     request,
@@ -2984,10 +3255,11 @@ class SelfHostedTaskService:
                 if reported_calls < 0 or reported_calls > remaining_calls:
                     raise RuntimeError("provider execution receipt exceeded aggregate call budget")
                 if reported_attempts is not None and (
-                    int(reported_attempts) < 0
-                    or int(reported_attempts) > remaining_attempts
+                    int(reported_attempts) < 0 or int(reported_attempts) > remaining_attempts
                 ):
-                    raise RuntimeError("provider execution receipt exceeded aggregate attempt budget")
+                    raise RuntimeError(
+                        "provider execution receipt exceeded aggregate attempt budget"
+                    )
                 attempts.append(execution_receipt)
                 execution = execution_receipt
                 update(
@@ -3006,11 +3278,17 @@ class SelfHostedTaskService:
             latest = attempts[-1] if attempts else self._receipt_from_state(execution)
             if latest is None:
                 raise RuntimeError("worker execution receipt is missing common outcome evidence")
-            if latest.outcome == WorkerOutcome.EXECUTION_COMPLETED.value and latest.evidence_complete:
+            if (
+                latest.outcome == WorkerOutcome.EXECUTION_COMPLETED.value
+                and latest.evidence_complete
+            ):
                 break
 
             if is_fast_lane:
-                raise RuntimeError(latest.failure_reason or f"Fast Lane provider execution failed with outcome {latest.outcome}; escalation/fallback disabled")
+                raise RuntimeError(
+                    latest.failure_reason
+                    or f"Fast Lane provider execution failed with outcome {latest.outcome}; escalation/fallback disabled"
+                )
 
             decision = policy.decide(attempts) if policy else None
             if decision is not None and decision.action in ("VERIFY", "ACCEPT"):
@@ -3040,14 +3318,17 @@ class SelfHostedTaskService:
                     "executions": attempts,
                     "next_provider": next_provider,
                     "escalation_reason": decision.reason,
-                    "fallback_lineage": list(state.get("fallback_lineage") or []) + [{
-                        "from_provider": str(latest.provider),
-                        "to_provider": next_provider,
-                        "reason": decision.reason,
-                        "admission_binding_hash": (
-                            dispatch_binding.get("binding_hash") if dispatch_binding else None
-                        ),
-                    }],
+                    "fallback_lineage": list(state.get("fallback_lineage") or [])
+                    + [
+                        {
+                            "from_provider": str(latest.provider),
+                            "to_provider": next_provider,
+                            "reason": decision.reason,
+                            "admission_binding_hash": (
+                                dispatch_binding.get("binding_hash") if dispatch_binding else None
+                            ),
+                        }
+                    ],
                 },
             )
             self._revalidate_provider_boundary(
@@ -3106,10 +3387,13 @@ class SelfHostedTaskService:
             raise RuntimeError("worker execution receipt is missing for attempt resolution")
         resolution = resolve_attempt(latest_execution, candidate, verified)
 
-        update("VERIFIED", {
-            "verified_receipt": verified,
-            "attempt_resolution": resolution,
-        })
+        update(
+            "VERIFIED",
+            {
+                "verified_receipt": verified,
+                "attempt_resolution": resolution,
+            },
+        )
 
         if resolution.verdict != AttemptResolutionVerdict.PROVEN.value:
             reasons = ", ".join(resolution.failure_reasons) or f"verdict is {resolution.verdict}"
@@ -3129,29 +3413,36 @@ class SelfHostedTaskService:
                 if cleanup.decision == "BLOCKED_BY_UNSAVED_CHANGES"
                 else "FINAL_BLOCK"
             )
-            update(terminal_status, {
-                "error": authority_error,
-                "candidate_status": "REHEARSAL_VERIFIED" if self.ephemeral and cleanup_ok else terminal_status,
-                "promotion_status": "NOT_CREATED",
-                "promotion_eligible": False,
-                "verification_verdict": "PROVEN" if self.ephemeral and cleanup_ok else "FAILED",
-                "verified_receipt": verified,
-                "attempt_resolution": resolution,
-                "cleanup_decision": cleanup.decision,
-                "cleanup_blocker": cleanup.blocker,
-                "cleanup_performed": cleanup.performed,
-                "cleanup_performed_at": _utc_now() if cleanup.performed else None,
-                "cleanup_eligible": cleanup.eligible,
-                "terminal_status": terminal_status,
-                "state_retention_status": "TERMINAL",
-                "archive_eligible": False,
-            })
+            update(
+                terminal_status,
+                {
+                    "error": authority_error,
+                    "candidate_status": "REHEARSAL_VERIFIED"
+                    if self.ephemeral and cleanup_ok
+                    else terminal_status,
+                    "promotion_status": "NOT_CREATED",
+                    "promotion_eligible": False,
+                    "verification_verdict": "PROVEN" if self.ephemeral and cleanup_ok else "FAILED",
+                    "verified_receipt": verified,
+                    "attempt_resolution": resolution,
+                    "cleanup_decision": cleanup.decision,
+                    "cleanup_blocker": cleanup.blocker,
+                    "cleanup_performed": cleanup.performed,
+                    "cleanup_performed_at": _utc_now() if cleanup.performed else None,
+                    "cleanup_eligible": cleanup.eligible,
+                    "terminal_status": terminal_status,
+                    "state_retention_status": "TERMINAL",
+                    "archive_eligible": False,
+                },
+            )
             return {
                 "execution": execution,
                 "candidate": candidate,
                 "verified_receipt": verified,
                 "attempt_resolution": resolution,
-                "candidate_status": "REHEARSAL_VERIFIED" if self.ephemeral and cleanup_ok else terminal_status,
+                "candidate_status": "REHEARSAL_VERIFIED"
+                if self.ephemeral and cleanup_ok
+                else terminal_status,
                 "promotion_status": "NOT_CREATED",
                 "promotion_eligible": False,
                 "cleanup_decision": cleanup.decision,
@@ -3182,14 +3473,17 @@ class SelfHostedTaskService:
             candidate_ref = manager.protect_candidate(contract, lease, packet.candidate_commit_sha)
             update("CANDIDATE_REF_PROTECTED", {"candidate_ref": candidate_ref})
         except Exception as exc:
-            update("RETAINED_FOR_REVIEW", {
-                "error": f"candidate ref protection failed: {exc}",
-                "promotion_status": "NOT_CREATED",
-                "candidate_status": "RETAINED_FOR_REVIEW",
-                "terminal_status": "RETAINED_FOR_REVIEW",
-                "state_retention_status": "ACTIVE",
-                "recovery_action": "recover_retained_candidate",
-            })
+            update(
+                "RETAINED_FOR_REVIEW",
+                {
+                    "error": f"candidate ref protection failed: {exc}",
+                    "promotion_status": "NOT_CREATED",
+                    "candidate_status": "RETAINED_FOR_REVIEW",
+                    "terminal_status": "RETAINED_FOR_REVIEW",
+                    "state_retention_status": "ACTIVE",
+                    "recovery_action": "recover_retained_candidate",
+                },
+            )
             raise RuntimeError(f"candidate ref protection failed: {exc}")
         cleanup_started = time.perf_counter()
         cleanup = manager.cleanup_terminal_target(
@@ -3201,14 +3495,17 @@ class SelfHostedTaskService:
         cleanup_time_ms = max(0, int((time.perf_counter() - cleanup_started) * 1000))
         if cleanup.decision != "REMOVED":
             raise RuntimeError(f"candidate Target cleanup failed: {cleanup.decision}")
-        update("TARGET_CLEANED", {
-            "cleanup_eligible": cleanup.eligible,
-            "cleanup_decision": cleanup.decision,
-            "cleanup_blocker": cleanup.blocker,
-            "cleanup_performed": cleanup.performed,
-            "cleanup_performed_at": _utc_now(),
-            "telemetry": {"cleanup_time_ms": cleanup_time_ms},
-        })
+        update(
+            "TARGET_CLEANED",
+            {
+                "cleanup_eligible": cleanup.eligible,
+                "cleanup_decision": cleanup.decision,
+                "cleanup_blocker": cleanup.blocker,
+                "cleanup_performed": cleanup.performed,
+                "cleanup_performed_at": _utc_now(),
+                "telemetry": {"cleanup_time_ms": cleanup_time_ms},
+            },
+        )
         result = {
             **candidate_values,
             "candidate_ref": candidate_ref,
@@ -3241,7 +3538,9 @@ class SelfHostedTaskService:
         if state.get("worker_pid") not in (None, owner_pid):
             return
         stop = threading.Event()
-        heartbeat = threading.Thread(target=self._heartbeat, args=(task_id, attempt_id, stop), daemon=True)
+        heartbeat = threading.Thread(
+            target=self._heartbeat, args=(task_id, attempt_id, stop), daemon=True
+        )
         heartbeat.start()
 
         def update(status: str, values: dict[str, Any]) -> None:
@@ -3264,14 +3563,20 @@ class SelfHostedTaskService:
                 result = self._bound_custom_runner_values(result)
             current = self._read_state(task_id) or {}
             if current.get("status") not in TERMINAL_STATUSES:
-                final_status = "PENDING_HUMAN_APPROVAL" if result.get("promotion_status") == "PENDING_HUMAN_APPROVAL" else "CANDIDATE_COMMITTED"
+                final_status = (
+                    "PENDING_HUMAN_APPROVAL"
+                    if result.get("promotion_status") == "PENDING_HUMAN_APPROVAL"
+                    else "CANDIDATE_COMMITTED"
+                )
                 self._checkpoint(task_id, final_status, result, attempt_id=attempt_id)
         except Exception as exc:
             self._terminate_owned_processes(task_id, exclude_pid=owner_pid)
             current = self._read_state(task_id) or {}
             verified_rcpt = current.get("verified_receipt") or {}
             attempt_res = current.get("attempt_resolution") or {}
-            is_verified = bool(verified_rcpt.get("verified")) and attempt_res.get("verdict") == "PROVEN"
+            is_verified = (
+                bool(verified_rcpt.get("verified")) and attempt_res.get("verdict") == "PROVEN"
+            )
 
             if is_verified:
                 self._checkpoint(
@@ -3313,11 +3618,14 @@ class SelfHostedTaskService:
                         if cleanup.decision == "BLOCKED_BY_UNSAVED_CHANGES":
                             cleanup_values["terminal_status"] = "RETAINED_FOR_REVIEW"
                             try:
-                                salvage = manager.create_salvage_snapshot(contract, lease, attempt_id)
+                                salvage = manager.create_salvage_snapshot(
+                                    contract, lease, attempt_id
+                                )
                                 salvage_commit = str(salvage.get("salvage_commit_sha", "") or "")
                                 salvage_ref = str(salvage.get("salvage_ref", "") or "")
                                 cleanup = manager.cleanup_terminal_target(
-                                    contract, lease,
+                                    contract,
+                                    lease,
                                     salvage_commit=salvage_commit,
                                     salvage_ref=salvage_ref,
                                 )
@@ -3325,17 +3633,30 @@ class SelfHostedTaskService:
                                     "cleanup_decision": cleanup.decision,
                                     "cleanup_blocker": cleanup.blocker,
                                     "cleanup_performed": cleanup.performed,
-                                    "cleanup_performed_at": _utc_now() if cleanup.performed else None,
+                                    "cleanup_performed_at": _utc_now()
+                                    if cleanup.performed
+                                    else None,
                                     **salvage,
                                 })
-                                if cleanup.decision in {"REMOVED", "ALREADY_REMOVED"} and salvage_commit and salvage_ref:
+                                if (
+                                    cleanup.decision in {"REMOVED", "ALREADY_REMOVED"}
+                                    and salvage_commit
+                                    and salvage_ref
+                                ):
                                     try:
                                         restore_result = manager.restore_task_branch_for_retry(
-                                            contract, lease, salvage_commit, salvage_ref,
+                                            contract,
+                                            lease,
+                                            salvage_commit,
+                                            salvage_ref,
                                         )
                                         cleanup_values.update({
-                                            "task_branch_restore_decision": restore_result["decision"],
-                                            "task_branch_restored_to": restore_result["restored_to"],
+                                            "task_branch_restore_decision": restore_result[
+                                                "decision"
+                                            ],
+                                            "task_branch_restored_to": restore_result[
+                                                "restored_to"
+                                            ],
                                             "task_branch_restore_performed": True,
                                             "task_branch_restore_verified": True,
                                             "terminal_status": "FINAL_BLOCK",
@@ -3388,7 +3709,9 @@ class SelfHostedTaskService:
         if state.get("worker_pid") and self._pid_alive(int(state["worker_pid"])):
             return state
         if self._custom_runner is not None:
-            thread = threading.Thread(target=self._run_owned_task, args=(task_id, attempt_id), daemon=True)
+            thread = threading.Thread(
+                target=self._run_owned_task, args=(task_id, attempt_id), daemon=True
+            )
             self._threads[task_id] = thread
             self._mutate_state(
                 task_id,
@@ -3447,7 +3770,9 @@ class SelfHostedTaskService:
             return False
         return True
 
-    def _terminate_owned_processes(self, task_id: str, *, exclude_pid: Optional[int] = None) -> None:
+    def _terminate_owned_processes(
+        self, task_id: str, *, exclude_pid: Optional[int] = None
+    ) -> None:
         state = self._read_state(task_id) or {}
         current_pgid = os.getpgrp()
         for raw_pgid in (state.get("worker_child_pgid"), state.get("worker_pgid")):
@@ -3484,18 +3809,35 @@ class SelfHostedTaskService:
         }
         try:
             observed["current_head"] = subprocess.run(
-                ["git", "rev-parse", "HEAD"], cwd=controller, capture_output=True, text=True, check=False,
+                ["git", "rev-parse", "HEAD"],
+                cwd=controller,
+                capture_output=True,
+                text=True,
+                check=False,
             ).stdout.strip()
-            observed["dirty"] = bool(subprocess.run(
-                ["git", "status", "--porcelain=v1"], cwd=controller, capture_output=True, text=True, check=False,
-            ).stdout.strip())
+            observed["dirty"] = bool(
+                subprocess.run(
+                    ["git", "status", "--porcelain=v1"],
+                    cwd=controller,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                ).stdout.strip()
+            )
             if len(base) == 40:
                 observed["commits_since_base"] = subprocess.run(
-                    ["git", "diff", "--name-only", f"{base}..HEAD"], cwd=controller,
-                    capture_output=True, text=True, check=False,
+                    ["git", "diff", "--name-only", f"{base}..HEAD"],
+                    cwd=controller,
+                    capture_output=True,
+                    text=True,
+                    check=False,
                 ).stdout.splitlines()
             observed["working_tree_changes"] = subprocess.run(
-                ["git", "diff", "--name-only"], cwd=controller, capture_output=True, text=True, check=False,
+                ["git", "diff", "--name-only"],
+                cwd=controller,
+                capture_output=True,
+                text=True,
+                check=False,
             ).stdout.splitlines()
         except OSError as exc:
             observed["probe_error"] = str(exc)
@@ -3513,11 +3855,25 @@ class SelfHostedTaskService:
         if state.get("status") != "DIRECT_RECONCILE_REQUIRED":
             return state
         request = state.get("request") if isinstance(state.get("request"), Mapping) else {}
-        controller = Path(
-            str(request.get("controller_repo_root") or state.get("controller_worktree") or CANONICAL_SOURCE_ROOT)
-        ).expanduser().resolve()
-        expected_head = str(request.get("controller_revision") or state.get("controller_revision") or "").strip()
-        allowed = {str(path).rstrip("/") for path in request.get("allowed_files") or () if str(path).strip()}
+        controller = (
+            Path(
+                str(
+                    request.get("controller_repo_root")
+                    or state.get("controller_worktree")
+                    or CANONICAL_SOURCE_ROOT
+                )
+            )
+            .expanduser()
+            .resolve()
+        )
+        expected_head = str(
+            request.get("controller_revision") or state.get("controller_revision") or ""
+        ).strip()
+        allowed = {
+            str(path).rstrip("/")
+            for path in request.get("allowed_files") or ()
+            if str(path).strip()
+        }
         observed: dict[str, Any] = {
             "controller_repo_root": str(controller),
             "expected_head": expected_head,
@@ -3528,29 +3884,57 @@ class SelfHostedTaskService:
             "staged_changes": [],
             "allowed_paths": sorted(allowed),
             "target_created": bool(state.get("target_worktree") or state.get("lease")),
-            "candidate_created": bool(state.get("candidate_ref") or state.get("candidate_commit_sha") or state.get("promotion_packet")),
+            "candidate_created": bool(
+                state.get("candidate_ref")
+                or state.get("candidate_commit_sha")
+                or state.get("promotion_packet")
+            ),
         }
         probe_error = ""
         try:
             observed["current_head"] = subprocess.run(
-                ["git", "rev-parse", "HEAD"], cwd=controller, capture_output=True, text=True, check=False,
+                ["git", "rev-parse", "HEAD"],
+                cwd=controller,
+                capture_output=True,
+                text=True,
+                check=False,
             ).stdout.strip()
             if len(expected_head) == 40 and observed["current_head"]:
                 ancestor = subprocess.run(
-                    ["git", "merge-base", "--is-ancestor", expected_head, str(observed["current_head"])],
-                    cwd=controller, capture_output=True, text=True, check=False,
+                    [
+                        "git",
+                        "merge-base",
+                        "--is-ancestor",
+                        expected_head,
+                        str(observed["current_head"]),
+                    ],
+                    cwd=controller,
+                    capture_output=True,
+                    text=True,
+                    check=False,
                 )
                 observed["expected_head_is_ancestor"] = ancestor.returncode == 0
                 if observed["expected_head_is_ancestor"]:
                     observed["commits_since_base"] = subprocess.run(
                         ["git", "diff", "--name-only", f"{expected_head}..HEAD"],
-                        cwd=controller, capture_output=True, text=True, check=False,
+                        cwd=controller,
+                        capture_output=True,
+                        text=True,
+                        check=False,
                     ).stdout.splitlines()
             observed["working_tree_changes"] = subprocess.run(
-                ["git", "diff", "--name-only"], cwd=controller, capture_output=True, text=True, check=False,
+                ["git", "diff", "--name-only"],
+                cwd=controller,
+                capture_output=True,
+                text=True,
+                check=False,
             ).stdout.splitlines()
             observed["staged_changes"] = subprocess.run(
-                ["git", "diff", "--cached", "--name-only"], cwd=controller, capture_output=True, text=True, check=False,
+                ["git", "diff", "--cached", "--name-only"],
+                cwd=controller,
+                capture_output=True,
+                text=True,
+                check=False,
             ).stdout.splitlines()
         except OSError as exc:
             probe_error = str(exc)
@@ -3567,7 +3951,10 @@ class SelfHostedTaskService:
         allowed_touched = sorted(
             path
             for path in touched
-            if any(path == boundary or boundary.endswith("/") and path.startswith(boundary) for boundary in allowed)
+            if any(
+                path == boundary or boundary.endswith("/") and path.startswith(boundary)
+                for boundary in allowed
+            )
         )
         observed["allowed_paths_touched"] = allowed_touched
         safe_no_mutation = bool(
@@ -3678,8 +4065,7 @@ class SelfHostedTaskService:
             execution.get("stage") != "PRE_APPLY"
             or execution.get("merge_performed") is not False
             or execution.get("post_apply_verified") is not False
-            or execution.get("branch_head_before")
-            != execution.get("branch_head_after")
+            or execution.get("branch_head_before") != execution.get("branch_head_after")
             or not closure.get("binding_hash")
             or not grant.get("approval_id")
             or not grant.get("consumed_at")
@@ -3693,13 +4079,17 @@ class SelfHostedTaskService:
             "candidate_state_hash": str(packet.get("candidate_state_hash") or ""),
             "verified_receipt_hash": str(packet.get("verified_receipt_hash") or ""),
         }
-        if not identity["task_id"] or not identity["attempt_id"] or any(
-            not identity[key]
-            for key in (
-                "candidate_commit_sha",
-                "candidate_tree_sha",
-                "candidate_state_hash",
-                "verified_receipt_hash",
+        if (
+            not identity["task_id"]
+            or not identity["attempt_id"]
+            or any(
+                not identity[key]
+                for key in (
+                    "candidate_commit_sha",
+                    "candidate_tree_sha",
+                    "candidate_state_hash",
+                    "verified_receipt_hash",
+                )
             )
         ):
             return None
@@ -3719,7 +4109,10 @@ class SelfHostedTaskService:
             if key.startswith("candidate_") or key == "verified_receipt_hash":
                 if str(approved.get(key) or "") != expected:
                     return None
-        if str(execution.get("candidate_commit_sha") or identity["candidate_commit_sha"]) != identity["candidate_commit_sha"]:
+        if (
+            str(execution.get("candidate_commit_sha") or identity["candidate_commit_sha"])
+            != identity["candidate_commit_sha"]
+        ):
             return None
         acceptance_hash = str(closure.get("acceptance_receipt_hash") or "")
         authorization_hash = str(closure.get("authorization_hash") or "")
@@ -3730,28 +4123,22 @@ class SelfHostedTaskService:
             != LifecycleActionType.CANDIDATE_INTEGRATE.value
             or str(acceptance.get("task_id") or "") != identity["task_id"]
             or str(acceptance.get("attempt_id") or "") != identity["attempt_id"]
-            or str(acceptance.get("candidate_commit") or "")
-            != identity["candidate_commit_sha"]
+            or str(acceptance.get("candidate_commit") or "") != identity["candidate_commit_sha"]
             or acceptance.get("passed") is not True
             or str(acceptance.get("receipt_hash") or "") != acceptance_hash
             or str(preview.get("task_id") or "") != identity["task_id"]
-            or str(preview.get("candidate_commit") or "")
-            != identity["candidate_commit_sha"]
+            or str(preview.get("candidate_commit") or "") != identity["candidate_commit_sha"]
             or str(preview.get("acceptance_receipt_hash") or "") != acceptance_hash
             or str(authorization.get("task_id") or "") != identity["task_id"]
             or str(authorization.get("attempt_id") or "") != identity["attempt_id"]
-            or str(authorization.get("candidate_commit") or "")
-            != identity["candidate_commit_sha"]
-            or str(authorization.get("candidate_tree_sha") or "")
-            != identity["candidate_tree_sha"]
+            or str(authorization.get("candidate_commit") or "") != identity["candidate_commit_sha"]
+            or str(authorization.get("candidate_tree_sha") or "") != identity["candidate_tree_sha"]
             or str(authorization.get("candidate_state_hash") or "")
             != identity["candidate_state_hash"]
             or str(authorization.get("candidate_receipt_hash") or "")
             != identity["verified_receipt_hash"]
-            or str(authorization.get("acceptance_receipt_hash") or "")
-            != acceptance_hash
-            or str(authorization.get("authorization_hash") or "")
-            != authorization_hash
+            or str(authorization.get("acceptance_receipt_hash") or "") != acceptance_hash
+            or str(authorization.get("authorization_hash") or "") != authorization_hash
         ):
             return None
         for key, expected in {
@@ -3803,7 +4190,9 @@ class SelfHostedTaskService:
             if history is None:
                 history = []
                 current["integration_reconciliation_history"] = history
-            if history and history[-1].get("projection_sha256") == evidence.get("projection_sha256"):
+            if history and history[-1].get("projection_sha256") == evidence.get(
+                "projection_sha256"
+            ):
                 return
             history.append({
                 "schema": "nexus.pre_apply_reconciliation.v1",
@@ -3843,7 +4232,12 @@ class SelfHostedTaskService:
             return state
         if state.get("status") == "DIRECT_RECONCILE_REQUIRED":
             return self._reconcile_direct_failure(task_id)
-        if state.get("status") in {"DIRECT_STARTED", "DIRECT_APPLIED", "DIRECT_VERIFIED", "DIRECT_COMMITTED"}:
+        if state.get("status") in {
+            "DIRECT_STARTED",
+            "DIRECT_APPLIED",
+            "DIRECT_VERIFIED",
+            "DIRECT_COMMITTED",
+        }:
             return self._reconcile_direct_action(task_id)
         projected_pre_apply = self._projected_pre_apply_recovery_evidence(state)
         if projected_pre_apply is not None:
@@ -3861,10 +4255,17 @@ class SelfHostedTaskService:
             return state
         if state.get("status") in PENDING_CANDIDATE_STATUSES:
             return state
-        if state.get("status") in {"CANDIDATE_COMMITTED", "CANDIDATE_REF_PROTECTED", "TARGET_CLEANED"}:
+        if state.get("status") in {
+            "CANDIDATE_COMMITTED",
+            "CANDIDATE_REF_PROTECTED",
+            "TARGET_CLEANED",
+        }:
             owner_pid = state.get("worker_pid")
             owner_heartbeat = _parse_time(state.get("heartbeat_at"))
-            owner_fresh = owner_heartbeat is not None and time.time() - owner_heartbeat <= self.stale_after_seconds
+            owner_fresh = (
+                owner_heartbeat is not None
+                and time.time() - owner_heartbeat <= self.stale_after_seconds
+            )
             if owner_pid and self._pid_alive(int(owner_pid)) and owner_fresh:
                 return state
             if owner_pid and self._pid_alive(int(owner_pid)):
@@ -3873,7 +4274,8 @@ class SelfHostedTaskService:
             candidate_commit = packet.get("candidate_commit_sha")
             if not candidate_commit:
                 return self._checkpoint(
-                    task_id, "FINAL_BLOCK",
+                    task_id,
+                    "FINAL_BLOCK",
                     {
                         "error": "candidate checkpoint is missing its promotion packet",
                         "cleanup_decision": "BLOCKED_BY_MISSING_REF",
@@ -3890,39 +4292,68 @@ class SelfHostedTaskService:
                 candidate_ref = state.get("candidate_ref")
                 if not candidate_ref:
                     candidate_ref = manager.protect_candidate(contract, lease, candidate_commit)
-                    state = self._checkpoint(
-                        task_id, "CANDIDATE_REF_PROTECTED",
-                        {"candidate_ref": candidate_ref},
-                        attempt_id=state.get("attempt_id"),
-                    ) or state
+                    state = (
+                        self._checkpoint(
+                            task_id,
+                            "CANDIDATE_REF_PROTECTED",
+                            {"candidate_ref": candidate_ref},
+                            attempt_id=state.get("attempt_id"),
+                        )
+                        or state
+                    )
                 cleanup = manager.cleanup_terminal_target(
-                    contract, lease,
+                    contract,
+                    lease,
                     candidate_commit=candidate_commit,
                     candidate_ref=str(candidate_ref),
                 )
                 if cleanup.decision not in {"REMOVED", "ALREADY_REMOVED"}:
-                    terminal = "RETAINED_FOR_REVIEW" if cleanup.decision == "BLOCKED_BY_UNSAVED_CHANGES" else "FINAL_BLOCK"
-                    return self._checkpoint(task_id, terminal, {
-                        "cleanup_decision": cleanup.decision,
-                        "cleanup_blocker": cleanup.blocker,
-                        "cleanup_performed": cleanup.performed,
-                        "cleanup_eligible": cleanup.eligible,
-                        "terminal_status": terminal,
-                    }, attempt_id=state.get("attempt_id"))
-                state = self._checkpoint(task_id, "TARGET_CLEANED", {
-                    "cleanup_decision": cleanup.decision,
-                    "cleanup_blocker": cleanup.blocker,
-                    "cleanup_performed": cleanup.performed,
-                    "cleanup_eligible": cleanup.eligible,
-                    "cleanup_performed_at": _utc_now() if cleanup.performed else state.get("cleanup_performed_at"),
-                }, attempt_id=state.get("attempt_id")) or state
-            return self._checkpoint(task_id, "PENDING_HUMAN_APPROVAL", {
-                "promotion_status": "PENDING_HUMAN_APPROVAL",
-                "candidate_status": "PENDING_HUMAN_APPROVAL",
-                "terminal_status": "PENDING_HUMAN_APPROVAL",
-                "state_retention_status": "ACTIVE",
-                "archive_eligible": False,
-            }, attempt_id=state.get("attempt_id"))
+                    terminal = (
+                        "RETAINED_FOR_REVIEW"
+                        if cleanup.decision == "BLOCKED_BY_UNSAVED_CHANGES"
+                        else "FINAL_BLOCK"
+                    )
+                    return self._checkpoint(
+                        task_id,
+                        terminal,
+                        {
+                            "cleanup_decision": cleanup.decision,
+                            "cleanup_blocker": cleanup.blocker,
+                            "cleanup_performed": cleanup.performed,
+                            "cleanup_eligible": cleanup.eligible,
+                            "terminal_status": terminal,
+                        },
+                        attempt_id=state.get("attempt_id"),
+                    )
+                state = (
+                    self._checkpoint(
+                        task_id,
+                        "TARGET_CLEANED",
+                        {
+                            "cleanup_decision": cleanup.decision,
+                            "cleanup_blocker": cleanup.blocker,
+                            "cleanup_performed": cleanup.performed,
+                            "cleanup_eligible": cleanup.eligible,
+                            "cleanup_performed_at": _utc_now()
+                            if cleanup.performed
+                            else state.get("cleanup_performed_at"),
+                        },
+                        attempt_id=state.get("attempt_id"),
+                    )
+                    or state
+                )
+            return self._checkpoint(
+                task_id,
+                "PENDING_HUMAN_APPROVAL",
+                {
+                    "promotion_status": "PENDING_HUMAN_APPROVAL",
+                    "candidate_status": "PENDING_HUMAN_APPROVAL",
+                    "terminal_status": "PENDING_HUMAN_APPROVAL",
+                    "state_retention_status": "ACTIVE",
+                    "archive_eligible": False,
+                },
+                attempt_id=state.get("attempt_id"),
+            )
         pid = state.get("worker_pid")
         heartbeat_at = _parse_time(state.get("heartbeat_at"))
         stale = heartbeat_at is not None and time.time() - heartbeat_at > self.stale_after_seconds
@@ -3933,7 +4364,10 @@ class SelfHostedTaskService:
             return self._checkpoint(
                 task_id,
                 "FINAL_BLOCK",
-                {"error": "stale task heartbeat; owned process group terminated", "promotion_status": "NOT_CREATED"},
+                {
+                    "error": "stale task heartbeat; owned process group terminated",
+                    "promotion_status": "NOT_CREATED",
+                },
                 attempt_id=state.get("attempt_id"),
             )
         if state.get("status") == "TARGET_LEASED":
@@ -3941,8 +4375,14 @@ class SelfHostedTaskService:
             target = Path(str(contract.get("target_repo_root", ""))).expanduser().resolve()
             controller = Path(str(contract.get("controller_repo_root", ""))).expanduser().resolve()
             target_exists = target.is_dir()
-            manager = WorktreeManager(root_dir=str(contract.get("target_worktree_root") or target.parent))
-            entry = manager._worktree_entry(controller, target) if target_exists and controller.is_dir() else None
+            manager = WorktreeManager(
+                root_dir=str(contract.get("target_worktree_root") or target.parent)
+            )
+            entry = (
+                manager._worktree_entry(controller, target)
+                if target_exists and controller.is_dir()
+                else None
+            )
             head = manager._run_git(["rev-parse", "HEAD"], cwd=target) if entry else None
             dirty = bool(manager._status_bytes(target)) if entry else None
             evidence = {
@@ -3955,32 +4395,43 @@ class SelfHostedTaskService:
                 "candidate_exists": bool(head and head != contract.get("target_base_revision")),
             }
             if entry and dirty:
-                return self._checkpoint(task_id, "RETAINED_FOR_REVIEW", {
-                    **evidence,
-                    "reconcile_decision": "RETAINED_FOR_REVIEW",
-                    "cleanup_decision": "BLOCKED_BY_UNSAVED_CHANGES",
-                    "cleanup_blocker": "dirty target has no durable snapshot",
-                    "cleanup_performed": False,
-                    "terminal_status": "RETAINED_FOR_REVIEW",
-                    "state_retention_status": "TERMINAL",
-                }, attempt_id=state.get("attempt_id"))
+                return self._checkpoint(
+                    task_id,
+                    "RETAINED_FOR_REVIEW",
+                    {
+                        **evidence,
+                        "reconcile_decision": "RETAINED_FOR_REVIEW",
+                        "cleanup_decision": "BLOCKED_BY_UNSAVED_CHANGES",
+                        "cleanup_blocker": "dirty target has no durable snapshot",
+                        "cleanup_performed": False,
+                        "terminal_status": "RETAINED_FOR_REVIEW",
+                        "state_retention_status": "TERMINAL",
+                    },
+                    attempt_id=state.get("attempt_id"),
+                )
             if entry and head != contract.get("target_base_revision"):
                 if state.get("candidate") and state.get("execution"):
                     resumed = self._checkpoint(
-                        task_id, "CANDIDATE_CAPTURED",
+                        task_id,
+                        "CANDIDATE_CAPTURED",
                         {**evidence, "reconcile_decision": "RESUME_CANDIDATE_VERIFICATION"},
                         attempt_id=state.get("attempt_id"),
                     )
                     return self._launch_worker(task_id, str(state.get("attempt_id"))) or resumed
-                return self._checkpoint(task_id, "RETAINED_FOR_REVIEW", {
-                    **evidence,
-                    "reconcile_decision": "RETAINED_FOR_REVIEW",
-                    "cleanup_decision": "BLOCKED_BY_MISSING_REF",
-                    "cleanup_blocker": "candidate HEAD lacks recoverable receipt evidence",
-                    "cleanup_performed": False,
-                    "terminal_status": "RETAINED_FOR_REVIEW",
-                    "state_retention_status": "TERMINAL",
-                }, attempt_id=state.get("attempt_id"))
+                return self._checkpoint(
+                    task_id,
+                    "RETAINED_FOR_REVIEW",
+                    {
+                        **evidence,
+                        "reconcile_decision": "RETAINED_FOR_REVIEW",
+                        "cleanup_decision": "BLOCKED_BY_MISSING_REF",
+                        "cleanup_blocker": "candidate HEAD lacks recoverable receipt evidence",
+                        "cleanup_performed": False,
+                        "terminal_status": "RETAINED_FOR_REVIEW",
+                        "state_retention_status": "TERMINAL",
+                    },
+                    attempt_id=state.get("attempt_id"),
+                )
             cleanup_decision = "ALREADY_REMOVED"
             cleanup_performed = entry is None
             cleanup_blocker = None
@@ -4013,18 +4464,23 @@ class SelfHostedTaskService:
                 cleanup_performed = cleanup.performed
                 cleanup_blocker = cleanup.blocker
                 cleanup_eligible = cleanup.eligible
-            return self._checkpoint(task_id, "FINAL_BLOCK", {
-                **evidence,
-                "reconcile_decision": cleanup_decision,
-                "cleanup_decision": cleanup_decision,
-                "cleanup_blocker": cleanup_blocker,
-                "cleanup_eligible": cleanup_eligible,
-                "cleanup_performed": cleanup_performed,
-                "cleanup_performed_at": _utc_now() if cleanup_performed else None,
-                "terminal_status": "FINAL_BLOCK",
-                "state_retention_status": "TERMINAL",
-                "archive_eligible": True,
-            }, attempt_id=state.get("attempt_id"))
+            return self._checkpoint(
+                task_id,
+                "FINAL_BLOCK",
+                {
+                    **evidence,
+                    "reconcile_decision": cleanup_decision,
+                    "cleanup_decision": cleanup_decision,
+                    "cleanup_blocker": cleanup_blocker,
+                    "cleanup_eligible": cleanup_eligible,
+                    "cleanup_performed": cleanup_performed,
+                    "cleanup_performed_at": _utc_now() if cleanup_performed else None,
+                    "terminal_status": "FINAL_BLOCK",
+                    "state_retention_status": "TERMINAL",
+                    "archive_eligible": True,
+                },
+                attempt_id=state.get("attempt_id"),
+            )
         if state.get("status") == "SUBMITTED" or state.get("status") in RESUMABLE_STATUSES:
             return {
                 **self._with_task_action(state),
@@ -4038,7 +4494,10 @@ class SelfHostedTaskService:
         return self._checkpoint(
             task_id,
             "FINAL_BLOCK",
-            {"error": "worker lost before recoverable execution evidence", "promotion_status": "NOT_CREATED"},
+            {
+                "error": "worker lost before recoverable execution evidence",
+                "promotion_status": "NOT_CREATED",
+            },
             attempt_id=state.get("attempt_id"),
         )
 
@@ -4069,16 +4528,21 @@ class SelfHostedTaskService:
             raise RuntimeError("retained candidate HEAD does not match promotion packet")
         if manager._run_git(["rev-parse", "HEAD^{tree}"], cwd=target) != candidate_tree:
             raise RuntimeError("retained candidate tree does not match promotion packet")
-        self._checkpoint(task_id, "CANDIDATE_COMMITTED", {
-            "error": None,
-            "promotion_status": str(packet.get("promotion_status") or "PENDING_HUMAN_APPROVAL"),
-            "cleanup_decision": None,
-            "cleanup_blocker": None,
-            "cleanup_performed": False,
-            "terminal_status": None,
-            "state_retention_status": "ACTIVE",
-            "archive_eligible": False,
-        }, attempt_id=state.get("attempt_id"))
+        self._checkpoint(
+            task_id,
+            "CANDIDATE_COMMITTED",
+            {
+                "error": None,
+                "promotion_status": str(packet.get("promotion_status") or "PENDING_HUMAN_APPROVAL"),
+                "cleanup_decision": None,
+                "cleanup_blocker": None,
+                "cleanup_performed": False,
+                "terminal_status": None,
+                "state_retention_status": "ACTIVE",
+                "archive_eligible": False,
+            },
+            attempt_id=state.get("attempt_id"),
+        )
         recovered = self.reconcile_task(task_id)
         if recovered is None:
             raise RuntimeError("retained candidate recovery lost task state")
@@ -4144,18 +4608,22 @@ class SelfHostedTaskService:
             detailed_state.pop("operator_outcome_receipts", None)
             if envelope.get("action_state") != "IN_PROGRESS":
                 result = {
-                    **(detailed_state if include_details else {
-                        "schema": "nexus.self_hosted_task_status.v1",
-                        "task_id": state.get("task_id"),
-                        "status": state.get("status"),
-                        "promotion_status": state.get("promotion_status"),
-                        "verification_verdict": state.get("verification_verdict"),
-                        "found": state.get("found", True),
-                        "state_valid": state.get("state_valid", True),
-                        "blocker": self._projected_blocker(state),
-                        "retry_authorized": state.get("retry_authorized"),
-                        "task_action": envelope,
-                    }),
+                    **(
+                        detailed_state
+                        if include_details
+                        else {
+                            "schema": "nexus.self_hosted_task_status.v1",
+                            "task_id": state.get("task_id"),
+                            "status": state.get("status"),
+                            "promotion_status": state.get("promotion_status"),
+                            "verification_verdict": state.get("verification_verdict"),
+                            "found": state.get("found", True),
+                            "state_valid": state.get("state_valid", True),
+                            "blocker": self._projected_blocker(state),
+                            "retry_authorized": state.get("retry_authorized"),
+                            "task_action": envelope,
+                        }
+                    ),
                     "wait": {
                         "timed_out": False,
                         "timeout_seconds": timeout_seconds,
@@ -4166,18 +4634,22 @@ class SelfHostedTaskService:
             if time.monotonic() >= deadline:
                 envelope = {**envelope, "wait_timed_out": True}
                 return {
-                    **(detailed_state if include_details else {
-                        "schema": "nexus.self_hosted_task_status.v1",
-                        "task_id": state.get("task_id"),
-                        "status": state.get("status"),
-                        "promotion_status": state.get("promotion_status"),
-                        "verification_verdict": state.get("verification_verdict"),
-                        "found": state.get("found", True),
-                        "state_valid": state.get("state_valid", True),
-                        "blocker": self._projected_blocker(state),
-                        "retry_authorized": state.get("retry_authorized"),
-                        "task_action": envelope,
-                    }),
+                    **(
+                        detailed_state
+                        if include_details
+                        else {
+                            "schema": "nexus.self_hosted_task_status.v1",
+                            "task_id": state.get("task_id"),
+                            "status": state.get("status"),
+                            "promotion_status": state.get("promotion_status"),
+                            "verification_verdict": state.get("verification_verdict"),
+                            "found": state.get("found", True),
+                            "state_valid": state.get("state_valid", True),
+                            "blocker": self._projected_blocker(state),
+                            "retry_authorized": state.get("retry_authorized"),
+                            "task_action": envelope,
+                        }
+                    ),
                     "task_action": envelope,
                     "wait": {
                         "timed_out": True,
@@ -4228,20 +4700,14 @@ class SelfHostedTaskService:
     def _submission_task_states(self) -> dict[str, dict[str, Any]]:
         """Fail closed when submission authority cannot trust durable state."""
         states = self._workspace_task_states()
-        invalid = [
-            state
-            for state in states.values()
-            if state.get("state_valid") is False
-        ]
+        invalid = [state for state in states.values() if state.get("state_valid") is False]
         if invalid:
             blockers = ",".join(
                 f"{state.get('task_id') or 'unknown'}:"
                 f"{(state.get('blocker') or {}).get('code') or 'STATE_INVALID'}"
                 for state in invalid
             )
-            raise RuntimeError(
-                f"INVALID_DURABLE_STATE_BLOCKS_SUBMISSION:{blockers}"
-            )
+            raise RuntimeError(f"INVALID_DURABLE_STATE_BLOCKS_SUBMISSION:{blockers}")
         return states
 
     def workspace_inventory(
@@ -4252,7 +4718,9 @@ class SelfHostedTaskService:
         """Read-only inventory of registered worktrees and lifecycle ownership."""
         states = self._workspace_task_states()
         root = Path(controller_root or Path.cwd()).resolve()
-        manager = WorktreeManager(root_dir=str(root.parent / "nexus-runtime-targets"), create_root=False)
+        manager = WorktreeManager(
+            root_dir=str(root.parent / "nexus-runtime-targets"), create_root=False
+        )
         inventory = manager.get_workspace_inventory(
             controller_root=root,
             task_states=states,
@@ -4303,8 +4771,14 @@ class SelfHostedTaskService:
             task_id: sum(1 for value in values if value["authority"] == "CANONICAL_AUTHORITY")
             for task_id, values in by_task.items()
         }
-        conflicts = sorted(task_id for task_id, count in canonical_authority_counts.items() if count > 1)
-        evidence_duplicates = sorted(task_id for task_id, values in by_task.items() if len(values) > 1 and task_id not in conflicts)
+        conflicts = sorted(
+            task_id for task_id, count in canonical_authority_counts.items() if count > 1
+        )
+        evidence_duplicates = sorted(
+            task_id
+            for task_id, values in by_task.items()
+            if len(values) > 1 and task_id not in conflicts
+        )
         return {
             "schema": "nexus.lifecycle_state_root_inventory.v1",
             "canonical_state_root": str(canonical),
@@ -4328,7 +4802,9 @@ class SelfHostedTaskService:
         """Build a stable dry-run plan; no state or workspace mutation occurs."""
         states = self._workspace_task_states()
         root = Path(controller_root or Path.cwd()).resolve()
-        manager = WorktreeManager(root_dir=str(root.parent / "nexus-runtime-targets"), create_root=False)
+        manager = WorktreeManager(
+            root_dir=str(root.parent / "nexus-runtime-targets"), create_root=False
+        )
         inventory = manager.get_workspace_inventory(
             controller_root=root,
             task_states=states,
@@ -4347,7 +4823,9 @@ class SelfHostedTaskService:
         """Read-only reusable-slot readiness check."""
         states = self._workspace_task_states()
         root = Path(controller_root or Path.cwd()).resolve()
-        manager = WorktreeManager(root_dir=str(root.parent / "nexus-runtime-targets"), create_root=False)
+        manager = WorktreeManager(
+            root_dir=str(root.parent / "nexus-runtime-targets"), create_root=False
+        )
         status = manager.get_reusable_slot_status(
             campaign_id=campaign_id,
             slot_index=slot_index,
@@ -4452,17 +4930,31 @@ class SelfHostedTaskService:
         if str(request.get("contract_kind") or "") == ContractKind.OWNER_INLINE.value:
             try:
                 inline_contract = validate_owner_inline_contract(
-                    request.get("owner_inline_contract") if isinstance(request.get("owner_inline_contract"), Mapping) else {},
+                    request.get("owner_inline_contract")
+                    if isinstance(request.get("owner_inline_contract"), Mapping)
+                    else {},
                     expected_task_id=task_id,
                     expected_head=str(request.get("controller_revision") or ""),
                 )
             except ValueError as exc:
                 raise RuntimeError(str(exc)) from exc
         action = request.get("action") if isinstance(request.get("action"), Mapping) else {}
-        action_id = str(request.get("action_id") or action.get("action_id") or f"action-{uuid4().hex}")
-        attempt_id = str(request.get("attempt_id") or action.get("attempt_id") or f"attempt-{uuid4().hex}")
-        idempotency_key = str(request.get("idempotency_key") or action.get("idempotency_key") or f"{task_id}:{self._request_hash(request)}")
-        request_hash = str(request.get("action_request_hash") or action.get("request_hash") or self._request_hash(request))
+        action_id = str(
+            request.get("action_id") or action.get("action_id") or f"action-{uuid4().hex}"
+        )
+        attempt_id = str(
+            request.get("attempt_id") or action.get("attempt_id") or f"attempt-{uuid4().hex}"
+        )
+        idempotency_key = str(
+            request.get("idempotency_key")
+            or action.get("idempotency_key")
+            or f"{task_id}:{self._request_hash(request)}"
+        )
+        request_hash = str(
+            request.get("action_request_hash")
+            or action.get("request_hash")
+            or self._request_hash(request)
+        )
         canonical_execution = (
             _jsonable(dict(request["canonical_execution_identity"]))
             if isinstance(request.get("canonical_execution_identity"), Mapping)
@@ -4485,7 +4977,9 @@ class SelfHostedTaskService:
             for current in self._submission_task_states().values():
                 if str(current.get("idempotency_key") or "") != idempotency_key:
                     continue
-                current_hash = str(current.get("action_request_hash") or current.get("request_hash") or "")
+                current_hash = str(
+                    current.get("action_request_hash") or current.get("request_hash") or ""
+                )
                 if current_hash and current_hash != request_hash:
                     raise ValueError("IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST")
                 return {
@@ -4501,11 +4995,12 @@ class SelfHostedTaskService:
                     "attempt_id": current.get("attempt_id"),
                     "idempotency_key": current.get("idempotency_key"),
                     "action_request_hash": current.get("action_request_hash"),
-                    "canonical_execution_identity": current.get(
-                        "canonical_execution_identity"
+                    "canonical_execution_identity": current.get("canonical_execution_identity"),
+                    "task_action": current.get("task_action")
+                    or self._task_action_envelope(current),
+                    "next_action": (current.get("task_action") or {}).get(
+                        "next_action", "nexus_task_finish"
                     ),
-                    "task_action": current.get("task_action") or self._task_action_envelope(current),
-                    "next_action": (current.get("task_action") or {}).get("next_action", "nexus_task_finish"),
                 }
         state = self._read_state_snapshot(task_id)
         if state is not None:
@@ -4513,7 +5008,12 @@ class SelfHostedTaskService:
             existing_hash = str(state.get("action_request_hash") or state.get("request_hash") or "")
             if existing_key == idempotency_key and existing_hash and existing_hash != request_hash:
                 raise ValueError("IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_REQUEST")
-            if existing_key and existing_key != idempotency_key and existing_hash and existing_hash != request_hash:
+            if (
+                existing_key
+                and existing_key != idempotency_key
+                and existing_hash
+                and existing_hash != request_hash
+            ):
                 raise ValueError("DIRECT_TASK_ID_REUSED_WITH_DIFFERENT_REQUEST")
             return {
                 "schema": "nexus.self_hosted_direct_handoff.v1",
@@ -4528,11 +5028,11 @@ class SelfHostedTaskService:
                 "attempt_id": state.get("attempt_id"),
                 "idempotency_key": state.get("idempotency_key"),
                 "action_request_hash": state.get("action_request_hash"),
-                "canonical_execution_identity": state.get(
-                    "canonical_execution_identity"
-                ),
+                "canonical_execution_identity": state.get("canonical_execution_identity"),
                 "task_action": state.get("task_action") or self._task_action_envelope(state),
-                "next_action": (state.get("task_action") or {}).get("next_action", "nexus_task_finish"),
+                "next_action": (state.get("task_action") or {}).get(
+                    "next_action", "nexus_task_finish"
+                ),
             }
         now = _utc_now()
         base = str(request.get("controller_revision") or "")
@@ -4568,19 +5068,23 @@ class SelfHostedTaskService:
             "action": _jsonable(dict(action)) if action else None,
             "action_id": action_id,
             "attempt_id": attempt_id,
-            "attempts": [{
-                "attempt_id": attempt_id,
-                "action_id": action_id or None,
-                "idempotency_key": idempotency_key or None,
-                "action_request_hash": request_hash or None,
-                "started_at": now,
-            }],
+            "attempts": [
+                {
+                    "attempt_id": attempt_id,
+                    "action_id": action_id or None,
+                    "idempotency_key": idempotency_key or None,
+                    "action_request_hash": request_hash or None,
+                    "started_at": now,
+                }
+            ],
             "idempotency_key": idempotency_key,
             "action_request_hash": request_hash,
             "request_hash": request_hash,
             "canonical_execution_identity": canonical_execution,
             "canonical_execution_hashes": canonical_execution_hashes,
-            "controller_worktree": str(request.get("controller_repo_root") or CANONICAL_SOURCE_ROOT),
+            "controller_worktree": str(
+                request.get("controller_repo_root") or CANONICAL_SOURCE_ROOT
+            ),
             "controller_revision": base,
             "contract_kind": str(request.get("contract_kind") or ContractKind.NONE.value),
             "contract_hash": str(request.get("contract_hash") or "") or None,
@@ -4610,7 +5114,9 @@ class SelfHostedTaskService:
             "status": "DIRECT_CANONICAL_READY",
             "durable_status": created_state.get("status"),
             "execution_lane": "DIRECT_CANONICAL",
-            "controller_repo_root": str(request.get("controller_repo_root") or CANONICAL_SOURCE_ROOT),
+            "controller_repo_root": str(
+                request.get("controller_repo_root") or CANONICAL_SOURCE_ROOT
+            ),
             "controller_branch": CANONICAL_SOURCE_BRANCH,
             "target_created": False,
             "state_created": created,
@@ -4619,13 +5125,17 @@ class SelfHostedTaskService:
             "attempt_id": created_state.get("attempt_id"),
             "idempotency_key": created_state.get("idempotency_key"),
             "action_request_hash": created_state.get("action_request_hash"),
-            "canonical_execution_identity": created_state.get(
-                "canonical_execution_identity"
-            ),
+            "canonical_execution_identity": created_state.get("canonical_execution_identity"),
             "next_action": "nexus_task_finish",
             "required_surface": "nexus_self_hosted_direct_complete",
-            "required_gate": ["scoped_verifiers", "git_diff_check", "staged_review", "scoped_commit"],
-            "task_action": created_state.get("task_action") or self._task_action_envelope(created_state),
+            "required_gate": [
+                "scoped_verifiers",
+                "git_diff_check",
+                "staged_review",
+                "scoped_commit",
+            ],
+            "task_action": created_state.get("task_action")
+            or self._task_action_envelope(created_state),
         }
 
     def complete_direct_canonical(
@@ -4644,7 +5154,9 @@ class SelfHostedTaskService:
         if state.get("status") == "DIRECT_COMPLETED":
             receipt = dict(state.get("direct_receipt") or {})
             if expected_commit_sha and receipt.get("commit_sha") != expected_commit_sha:
-                raise RuntimeError("DIRECT_CANONICAL_COMMIT_MISMATCH: duplicate finish commit differs")
+                raise RuntimeError(
+                    "DIRECT_CANONICAL_COMMIT_MISMATCH: duplicate finish commit differs"
+                )
             receipt.update({"duplicate": True, "state_created": True, "target_created": False})
             return receipt
         if state.get("status") == "DIRECT_RECONCILE_REQUIRED":
@@ -4654,30 +5166,45 @@ class SelfHostedTaskService:
         effective_request.update(dict(request))
         action = dict(state.get("canonical_action") or {})
         now = _utc_now()
-        self._mutate_state(task_id, lambda current: (
-            current.update({
-                "status": "DIRECT_STARTED",
-                "updated_at": now,
-                "heartbeat_at": now,
-                "canonical_action": {
-                    **dict(current.get("canonical_action") or {}),
-                    "application": {"status": "STARTED", "at": now},
-                },
-            }),
-            current.setdefault("status_history", []).append({"status": "DIRECT_STARTED", "at": now}),
-        ))
+        self._mutate_state(
+            task_id,
+            lambda current: (
+                current.update({
+                    "status": "DIRECT_STARTED",
+                    "updated_at": now,
+                    "heartbeat_at": now,
+                    "canonical_action": {
+                        **dict(current.get("canonical_action") or {}),
+                        "application": {"status": "STARTED", "at": now},
+                    },
+                }),
+                current.setdefault("status_history", []).append({
+                    "status": "DIRECT_STARTED",
+                    "at": now,
+                }),
+            ),
+        )
         try:
-            receipt = dict(self._complete_direct_canonical_physical(effective_request, expected_commit_sha=expected_commit_sha))
+            receipt = dict(
+                self._complete_direct_canonical_physical(
+                    effective_request, expected_commit_sha=expected_commit_sha
+                )
+            )
         except Exception as exc:
             self._record_direct_failure(task_id, "DIRECT_CANONICAL_FAILED", str(exc))
             raise
         commit_sha = str(receipt.get("commit_sha") or "")
-        controller = Path(str(effective_request.get("controller_repo_root") or CANONICAL_SOURCE_ROOT)).resolve()
+        controller = Path(
+            str(effective_request.get("controller_repo_root") or CANONICAL_SOURCE_ROOT)
+        ).resolve()
         tree_sha = ""
         if commit_sha:
             tree_sha = subprocess.run(
-                ["git", "rev-parse", f"{commit_sha}^{{tree}}"], cwd=controller,
-                capture_output=True, text=True, check=False,
+                ["git", "rev-parse", f"{commit_sha}^{{tree}}"],
+                cwd=controller,
+                capture_output=True,
+                text=True,
+                check=False,
             ).stdout.strip()
         completed_at = _utc_now()
         action = dict(state.get("canonical_action") or action)
@@ -4688,7 +5215,12 @@ class SelfHostedTaskService:
                 "at": completed_at,
                 "evidence": receipt.get("verifier_evidence") or {},
             },
-            "commit": {"status": "COMMITTED", "at": completed_at, "sha": commit_sha, "tree_sha": tree_sha},
+            "commit": {
+                "status": "COMMITTED",
+                "at": completed_at,
+                "sha": commit_sha,
+                "tree_sha": tree_sha,
+            },
             "reconciliation": {"status": "RECONCILED", "at": completed_at},
         })
         receipt.update({
@@ -4703,20 +5235,26 @@ class SelfHostedTaskService:
             "candidate_tree_sha": tree_sha,
             "reconciliation_status": "RECONCILED",
         })
-        self._mutate_state(task_id, lambda current: (
-            current.update({
-                "status": "DIRECT_COMPLETED",
-                "updated_at": completed_at,
-                "heartbeat_at": completed_at,
-                "canonical_action": action,
-                "direct_receipt": receipt,
-                "commit_sha": commit_sha,
-                "candidate_tree_sha": tree_sha,
-                "reconciliation_required": False,
-                "terminal_status": "DIRECT_COMPLETED",
-            }),
-            current.setdefault("status_history", []).append({"status": "DIRECT_COMPLETED", "at": completed_at}),
-        ))
+        self._mutate_state(
+            task_id,
+            lambda current: (
+                current.update({
+                    "status": "DIRECT_COMPLETED",
+                    "updated_at": completed_at,
+                    "heartbeat_at": completed_at,
+                    "canonical_action": action,
+                    "direct_receipt": receipt,
+                    "commit_sha": commit_sha,
+                    "candidate_tree_sha": tree_sha,
+                    "reconciliation_required": False,
+                    "terminal_status": "DIRECT_COMPLETED",
+                }),
+                current.setdefault("status_history", []).append({
+                    "status": "DIRECT_COMPLETED",
+                    "at": completed_at,
+                }),
+            ),
+        )
         return receipt
 
     def _complete_direct_canonical_physical(
@@ -4747,23 +5285,36 @@ class SelfHostedTaskService:
         controller = CANONICAL_SOURCE_ROOT
         started = time.perf_counter()
         status = subprocess.run(
-            ["git", "status", "--porcelain=v1"], cwd=controller,
-            capture_output=True, text=True, check=False,
+            ["git", "status", "--porcelain=v1"],
+            cwd=controller,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         if status.returncode != 0 or status.stdout.strip():
-            raise RuntimeError("DIRECT_CANONICAL_BLOCKED: canonical checkout must be clean after commit")
+            raise RuntimeError(
+                "DIRECT_CANONICAL_BLOCKED: canonical checkout must be clean after commit"
+            )
         branch = subprocess.run(
-            ["git", "branch", "--show-current"], cwd=controller,
-            capture_output=True, text=True, check=False,
+            ["git", "branch", "--show-current"],
+            cwd=controller,
+            capture_output=True,
+            text=True,
+            check=False,
         ).stdout.strip()
         if branch != CANONICAL_SOURCE_BRANCH:
             raise RuntimeError("DIRECT_CANONICAL_BLOCKED: canonical branch drift")
         head = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=controller,
-            capture_output=True, text=True, check=False,
+            ["git", "rev-parse", "HEAD"],
+            cwd=controller,
+            capture_output=True,
+            text=True,
+            check=False,
         ).stdout.strip()
         if expected_commit_sha and head != expected_commit_sha:
-            raise RuntimeError("DIRECT_CANONICAL_COMMIT_MISMATCH: HEAD differs from expected commit")
+            raise RuntimeError(
+                "DIRECT_CANONICAL_COMMIT_MISMATCH: HEAD differs from expected commit"
+            )
         worktree_manager = WorktreeManager(
             root_dir=str(controller.parent / "nexus-runtime-targets"),
             create_root=False,
@@ -4776,52 +5327,80 @@ class SelfHostedTaskService:
             task_states=self._workspace_task_states(),
         )
         if worktree_audit["blockers"]:
-            raise RuntimeError(
-                "DIRECT_CANONICAL_BLOCKED: "
-                + ",".join(worktree_audit["blockers"])
-            )
+            raise RuntimeError("DIRECT_CANONICAL_BLOCKED: " + ",".join(worktree_audit["blockers"]))
         base = str(request.get("controller_revision") or "").strip()
         if len(base) != 40:
-            raise RuntimeError("DIRECT_CANONICAL_REVISION_REQUIRED: controller_revision must be an exact SHA")
+            raise RuntimeError(
+                "DIRECT_CANONICAL_REVISION_REQUIRED: controller_revision must be an exact SHA"
+            )
         ancestry = subprocess.run(
-            ["git", "merge-base", "--is-ancestor", base, head], cwd=controller,
-            capture_output=True, check=False,
+            ["git", "merge-base", "--is-ancestor", base, head],
+            cwd=controller,
+            capture_output=True,
+            check=False,
         )
         if ancestry.returncode != 0:
-            raise RuntimeError("DIRECT_CANONICAL_BLOCKED: commit is not descended from controller_revision")
+            raise RuntimeError(
+                "DIRECT_CANONICAL_BLOCKED: commit is not descended from controller_revision"
+            )
         changed = subprocess.run(
-            ["git", "diff", "--name-only", f"{base}..{head}"], cwd=controller,
-            capture_output=True, text=True, check=False,
+            ["git", "diff", "--name-only", f"{base}..{head}"],
+            cwd=controller,
+            capture_output=True,
+            text=True,
+            check=False,
         ).stdout.splitlines()
         deleted = subprocess.run(
-            ["git", "diff", "--diff-filter=D", "--name-only", f"{base}..{head}"], cwd=controller,
-            capture_output=True, text=True, check=False,
+            ["git", "diff", "--diff-filter=D", "--name-only", f"{base}..{head}"],
+            cwd=controller,
+            capture_output=True,
+            text=True,
+            check=False,
         ).stdout.splitlines()
         allowed = tuple(str(path).rstrip("/") for path in request.get("allowed_files") or ())
         if not changed:
             raise RuntimeError("DIRECT_CANONICAL_BLOCKED: commit has no scoped changes")
         if deleted or any(
-            not any(path == boundary or boundary.endswith("/") and path.startswith(boundary) for boundary in allowed)
+            not any(
+                path == boundary or boundary.endswith("/") and path.startswith(boundary)
+                for boundary in allowed
+            )
             for path in changed
         ):
-            raise RuntimeError("DIRECT_CANONICAL_SCOPE_MISMATCH: commit changed files outside allowed scope")
+            raise RuntimeError(
+                "DIRECT_CANONICAL_SCOPE_MISMATCH: commit changed files outside allowed scope"
+            )
         diff_check = subprocess.run(
-            ["git", "diff", "--check", f"{base}..{head}"], cwd=controller,
-            capture_output=True, text=True, check=False,
+            ["git", "diff", "--check", f"{base}..{head}"],
+            cwd=controller,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         if diff_check.returncode != 0:
             raise RuntimeError("DIRECT_CANONICAL_DIFF_CHECK_FAILED: " + diff_check.stdout.strip())
         commit_shape = subprocess.run(
-            ["git", "rev-list", "--parents", "-n", "1", head], cwd=controller,
-            capture_output=True, text=True, check=False,
+            ["git", "rev-list", "--parents", "-n", "1", head],
+            cwd=controller,
+            capture_output=True,
+            text=True,
+            check=False,
         ).stdout.split()
         if len(commit_shape) != 2:
             raise RuntimeError("DIRECT_CANONICAL_BLOCKED: merge commit is not allowed")
         verifier_started = time.perf_counter()
-        verifier_contract = type("DirectVerifierContract", (), {
-            "verifier_commands": tuple(str(command) for command in request.get("verifier_commands") or ())
-        })()
-        passed, evidence, failures = CandidateVerifier._run_verifiers(verifier_contract, str(controller))
+        verifier_contract = type(
+            "DirectVerifierContract",
+            (),
+            {
+                "verifier_commands": tuple(
+                    str(command) for command in request.get("verifier_commands") or ()
+                )
+            },
+        )()
+        passed, evidence, failures = CandidateVerifier._run_verifiers(
+            verifier_contract, str(controller)
+        )
         verifier_time_ms = max(0, int((time.perf_counter() - verifier_started) * 1000))
         if not passed:
             raise RuntimeError("DIRECT_CANONICAL_VERIFIER_FAILED: " + ",".join(failures))
@@ -4904,7 +5483,9 @@ class SelfHostedTaskService:
             # state, Target, or worker mutation is allowed.
             trusted_manifest = trusted_runtime_manifest_hash()
             if trusted_manifest is None:
-                raise RuntimeError("TOOL_MANIFEST_UNAVAILABLE: service cannot accept an unbound runtime manifest")
+                raise RuntimeError(
+                    "TOOL_MANIFEST_UNAVAILABLE: service cannot accept an unbound runtime manifest"
+                )
             pre_action_guard(
                 action,
                 request=request,
@@ -4924,22 +5505,44 @@ class SelfHostedTaskService:
             if current.get("task_id") != task_id:
                 continue
             _validate_existing_autonomy_binding(current, autonomy_grant)
-        if request.get("worker_candidate_ingress") and str(request.get("contract_kind") or "") == ContractKind.OWNER_INLINE.value:
+        if (
+            request.get("worker_candidate_ingress")
+            and str(request.get("contract_kind") or "") == ContractKind.OWNER_INLINE.value
+        ):
             semantic_fields = (
-                "what", "why", "allowed_files", "verifier_commands", "worker", "worker_id",
-                "provider", "model", "controller_revision", "target_base_revision",
-                "controller_repo_root", "target_repo_root", "target_worktree_root",
-                "collaboration_realm", "authority_change_candidate_confirmation",
+                "what",
+                "why",
+                "allowed_files",
+                "verifier_commands",
+                "worker",
+                "worker_id",
+                "provider",
+                "model",
+                "controller_revision",
+                "target_base_revision",
+                "controller_repo_root",
+                "target_repo_root",
+                "target_worktree_root",
+                "collaboration_realm",
+                "authority_change_candidate_confirmation",
                 "protected_contracts",
-                "provider_probe_evidence_hash", "provider_binary_path",
-                "provider_binary_sha256", "provider_cli_version_sha256",
-                "provider_probe_expires_at", "provider_authentication_evidence",
+                "provider_probe_evidence_hash",
+                "provider_binary_path",
+                "provider_binary_sha256",
+                "provider_cli_version_sha256",
+                "provider_probe_expires_at",
+                "provider_authentication_evidence",
             )
             for current in states.values():
                 if current.get("task_id") != task_id or not current.get("request"):
                     continue
-                prior = current.get("request") if isinstance(current.get("request"), Mapping) else {}
-                if prior.get("worker_candidate_ingress") is not True or str(prior.get("contract_kind") or "") != ContractKind.OWNER_INLINE.value:
+                prior = (
+                    current.get("request") if isinstance(current.get("request"), Mapping) else {}
+                )
+                if (
+                    prior.get("worker_candidate_ingress") is not True
+                    or str(prior.get("contract_kind") or "") != ContractKind.OWNER_INLINE.value
+                ):
                     raise ValueError("WORKER_CANDIDATE_TASK_ID_CONFLICT")
                 if all(
                     (bool(prior.get(field)) == bool(request.get(field)))
@@ -4947,7 +5550,12 @@ class SelfHostedTaskService:
                     else prior.get(field) == request.get(field)
                     for field in semantic_fields
                 ):
-                    return {**self._with_task_action(current), "duplicate": True, "duplicate_action_id": current.get("action_id"), "idempotency_key": current.get("idempotency_key")}
+                    return {
+                        **self._with_task_action(current),
+                        "duplicate": True,
+                        "duplicate_action_id": current.get("action_id"),
+                        "idempotency_key": current.get("idempotency_key"),
+                    }
                 raise ValueError("WORKER_CANDIDATE_TASK_ID_CONFLICT")
         if action and idempotency_key:
             for current in states.values():
@@ -4965,14 +5573,16 @@ class SelfHostedTaskService:
         if action.get("action_type") == LifecycleActionType.TASK_RETRY.value:
             _validate_retry_predecessor(request, self._read_state_snapshot(task_id))
         active_mutations = sum(
-            1 for state in states.values()
+            1
+            for state in states.values()
             if state.get("task_id") != task_id
             if not idempotency_key or str(state.get("idempotency_key") or "") != idempotency_key
             if (
                 state.get("status") not in TERMINAL_STATUSES
                 or (
                     state.get("status") in {"FINAL_BLOCK", "RETAINED_FOR_REVIEW"}
-                    and state.get("cleanup_decision") not in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
+                    and state.get("cleanup_decision")
+                    not in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
                 )
             )
             and state.get("status") not in {"PENDING_HUMAN_APPROVAL", "APPROVED"}
@@ -4986,7 +5596,9 @@ class SelfHostedTaskService:
                 if autonomy_grant is not None:
                     raise ValueError("AUTONOMY_DIRECT_CANONICAL_UNSUPPORTED")
                 return self._submit_direct_canonical(request, task_id)
-            if requested_lane == "DIRECT_CANONICAL" and str(request.get("worker", "primary")).strip().lower() in {"", "primary", "codex"}:
+            if requested_lane == "DIRECT_CANONICAL" and str(
+                request.get("worker", "primary")
+            ).strip().lower() in {"", "primary", "codex"}:
                 raise RuntimeError("DIRECT_CANONICAL_BLOCKED: " + ",".join(lane["blockers"]))
         contract = self.build_contract(request)
         dispatch_binding = validate_workforce_dispatch_binding(request)
@@ -5015,7 +5627,8 @@ class SelfHostedTaskService:
                 raise RuntimeError("TASK_CARD_BINDING_MISMATCH: tracked path/hash pair required")
             if (
                 identity.get("contract_kind") != ContractKind.TRACKED_TASK_CARD.value
-                or identity.get("task_card_path") != str(_resolve_task_card_path(requested_card_path))
+                or identity.get("task_card_path")
+                != str(_resolve_task_card_path(requested_card_path))
                 or identity.get("task_card_hash") != request.get("task_card_hash")
             ):
                 raise RuntimeError("TASK_CARD_BINDING_MISMATCH: tracked identity drifted")
@@ -5064,25 +5677,40 @@ class SelfHostedTaskService:
                         "code": "DUPLICATE_LOGICAL_TASK",
                         "existing_task_id": current.get("task_id"),
                         "next_action": (existing.get("task_action") or {}).get("next_action"),
-                        "recommended_tool": (existing.get("task_action") or {}).get("recommended_tool"),
+                        "recommended_tool": (existing.get("task_action") or {}).get(
+                            "recommended_tool"
+                        ),
                     },
                 }
             if current.get("status") in TERMINAL_STATUSES:
                 if current.get("status") not in {"FINAL_BLOCK", "RETAINED_FOR_REVIEW"}:
                     continue
-                if current.get("cleanup_decision") in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}:
+                if current.get("cleanup_decision") in {
+                    "REMOVED",
+                    "ALREADY_REMOVED",
+                    "TARGET_CLEANED",
+                }:
                     continue
             current_controller = (current.get("contract") or {}).get("controller_repo_root")
-            if current_controller and Path(current_controller).resolve() != Path(contract.controller_repo_root).resolve():
-                raise RuntimeError("active Controller lease belongs to a different controller worktree")
             if (
-                current.get("task_id") != contract.task_id
-                and (
-                    current.get("status") in {
-                        "TARGET_LEASED", "WORKER_RUNNING", "WORKER_COMPLETED", "CANDIDATE_CAPTURED", "VERIFIED",
-                        "FINAL_BLOCK", "RETAINED_FOR_REVIEW",
-                    }
+                current_controller
+                and Path(current_controller).resolve()
+                != Path(contract.controller_repo_root).resolve()
+            ):
+                raise RuntimeError(
+                    "active Controller lease belongs to a different controller worktree"
                 )
+            if current.get("task_id") != contract.task_id and (
+                current.get("status")
+                in {
+                    "TARGET_LEASED",
+                    "WORKER_RUNNING",
+                    "WORKER_COMPLETED",
+                    "CANDIDATE_CAPTURED",
+                    "VERIFIED",
+                    "FINAL_BLOCK",
+                    "RETAINED_FOR_REVIEW",
+                }
             ):
                 try:
                     conflict = mutation_domains_conflict(current, contract)
@@ -5091,12 +5719,16 @@ class SelfHostedTaskService:
                         "serial Target budget exceeded: active Target identity or scope is ambiguous"
                     ) from exc
                 if conflict:
-                    raise RuntimeError("serial Target budget exceeded: another task owns the overlapping Target")
+                    raise RuntimeError(
+                        "serial Target budget exceeded: another task owns the overlapping Target"
+                    )
         controller_path = Path(contract.controller_repo_root).resolve()
         if controller_path.exists() and (controller_path / ".git").exists():
             manager = WorktreeManager(root_dir=contract.target_worktree_root, create_root=False)
             if manager.target_conflict(contract, task_states=self._submission_task_states()):
-                raise RuntimeError("serial Target budget exceeded: another task owns the overlapping Target")
+                raise RuntimeError(
+                    "serial Target budget exceeded: another task owns the overlapping Target"
+                )
         attempt_id = attempt_id_hint if action else uuid4().hex
         now = _utc_now()
         state: dict[str, Any] = {
@@ -5142,17 +5774,23 @@ class SelfHostedTaskService:
             "selected_worker_id": (
                 dispatch_binding["worker_id"]
                 if dispatch_binding
-                else None if tracked_dispatch_required else request.get("worker_id")
+                else None
+                if tracked_dispatch_required
+                else request.get("worker_id")
             ),
             "selected_provider": (
                 dispatch_binding["provider"]
                 if dispatch_binding
-                else None if tracked_dispatch_required else contract.preferred_provider
+                else None
+                if tracked_dispatch_required
+                else contract.preferred_provider
             ),
             "selected_model": (
                 dispatch_binding["model"]
                 if dispatch_binding
-                else None if tracked_dispatch_required else str(request.get("model") or "")
+                else None
+                if tracked_dispatch_required
+                else str(request.get("model") or "")
             ),
             "provider_order": (
                 []
@@ -5161,29 +5799,36 @@ class SelfHostedTaskService:
             ),
             "workforce_dispatch": dispatch_binding,
             "canonical_dispatch_envelope": (
-                dispatch_binding.get("canonical_dispatch_envelope")
-                if dispatch_binding else None
+                dispatch_binding.get("canonical_dispatch_envelope") if dispatch_binding else None
             ),
             "workforce_policy_hash": dispatch_binding["policy_hash"] if dispatch_binding else None,
-            "workforce_binding_hash": dispatch_binding["binding_hash"] if dispatch_binding else None,
-            "workforce_aggregate_binding_hash": dispatch_binding["aggregate_binding_hash"] if dispatch_binding else None,
+            "workforce_binding_hash": dispatch_binding["binding_hash"]
+            if dispatch_binding
+            else None,
+            "workforce_aggregate_binding_hash": dispatch_binding["aggregate_binding_hash"]
+            if dispatch_binding
+            else None,
             "fallback_lineage": [],
             "execution_lane": lane["execution_lane"],
             "execution_lane_blockers": lane["blockers"],
             "worker_selection_mode": str(
                 request.get(
                     "worker_selection_mode",
-                    "auto" if str(request.get("worker", "codex")).strip().lower() == "auto" else "explicit",
+                    "auto"
+                    if str(request.get("worker", "codex")).strip().lower() == "auto"
+                    else "explicit",
                 )
             ),
             "attempt_id": attempt_id,
-            "attempts": [{
-                "attempt_id": attempt_id,
-                "action_id": action_id or None,
-                "idempotency_key": idempotency_key or None,
-                "action_request_hash": action_request_hash or None,
-                "started_at": now,
-            }],
+            "attempts": [
+                {
+                    "attempt_id": attempt_id,
+                    "action_id": action_id or None,
+                    "idempotency_key": idempotency_key or None,
+                    "action_request_hash": action_request_hash or None,
+                    "started_at": now,
+                }
+            ],
             "worker_pid": None,
             "worker_pgid": None,
             "worker_child_pgid": None,
@@ -5193,9 +5838,7 @@ class SelfHostedTaskService:
             "updated_at": now,
             "promotion_status": "NOT_CREATED",
             "execution_authority": (
-                "EPHEMERAL_TEST_RUNNER"
-                if self._custom_runner is not None
-                else "WORKER_REGISTRY"
+                "EPHEMERAL_TEST_RUNNER" if self._custom_runner is not None else "WORKER_REGISTRY"
             ),
             "source_identity": _source_identity(
                 str(Path(contract.controller_repo_root).resolve()),
@@ -5209,12 +5852,16 @@ class SelfHostedTaskService:
                 worker_id=(
                     dispatch_binding["worker_id"]
                     if dispatch_binding
-                    else None if tracked_dispatch_required else request.get("worker_id")
+                    else None
+                    if tracked_dispatch_required
+                    else request.get("worker_id")
                 ),
                 provider=(
                     dispatch_binding["provider"]
                     if dispatch_binding
-                    else None if tracked_dispatch_required else contract.preferred_provider
+                    else None
+                    if tracked_dispatch_required
+                    else contract.preferred_provider
                 ),
                 lifecycle_revision=identity.get("lifecycle_revision"),
             ),
@@ -5250,7 +5897,8 @@ class SelfHostedTaskService:
             "push_performed": False,
             "collaboration_realm": (
                 contract.collaboration_realm.model_dump(mode="json")
-                if contract.collaboration_realm is not None else None
+                if contract.collaboration_realm is not None
+                else None
             ),
             "submission_collaboration_provenance": collaboration_provenance or None,
             "collaboration_provenance": collaboration_provenance or None,
@@ -5264,9 +5912,7 @@ class SelfHostedTaskService:
                 controller_revision=contract.controller_revision,
                 repository=autonomy_grant.repository,
                 collaboration_base=autonomy_grant.collaboration_base,
-                allowed_paths=tuple(
-                    str(path).rstrip("/") for path in contract.allowed_files
-                ),
+                allowed_paths=tuple(str(path).rstrip("/") for path in contract.allowed_files),
                 goal_id=autonomy_grant.goal_id,
                 grant_hash=autonomy_grant.grant_hash,
             )
@@ -5274,9 +5920,7 @@ class SelfHostedTaskService:
                 "autonomy_goal_id": autonomy_grant.goal_id,
                 "autonomy_goal_grant_hash": autonomy_grant.grant_hash,
                 "autonomy_mode": "SHADOW",
-                "autonomy_submission_binding": autonomy_binding.model_dump(
-                    mode="json"
-                ),
+                "autonomy_submission_binding": autonomy_binding.model_dump(mode="json"),
             })
         existing, created = self._create_state(contract.task_id, state)
         if not created:
@@ -5284,27 +5928,48 @@ class SelfHostedTaskService:
             retained_retry = (
                 existing.get("status") == "RETAINED_FOR_REVIEW"
                 and existing.get("promotion_status") == "NOT_CREATED"
-                and existing.get("cleanup_decision") in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
-                and not (existing.get("promotion_packet") or existing.get("candidate_commit_sha") or existing.get("candidate_ref"))
+                and existing.get("cleanup_decision")
+                in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
+                and not (
+                    existing.get("promotion_packet")
+                    or existing.get("candidate_commit_sha")
+                    or existing.get("candidate_ref")
+                )
             )
-            terminal_retry = existing.get("status") in {
-                "FINAL_BLOCK", "REJECTED", "SUPERSEDED", "CANCELLED",
-                "INTEGRATION_FAILED", "INTEGRATED",
-            } or retained_retry
+            terminal_retry = (
+                existing.get("status")
+                in {
+                    "FINAL_BLOCK",
+                    "REJECTED",
+                    "SUPERSEDED",
+                    "CANCELLED",
+                    "INTEGRATION_FAILED",
+                    "INTEGRATED",
+                }
+                or retained_retry
+            )
             contract_refreshed = existing.get("contract_hash") != contract.contract_hash
             if contract_refreshed and not (
                 terminal_retry
-                and existing.get("cleanup_decision") in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
+                and existing.get("cleanup_decision")
+                in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
                 and self._terminal_retry_revision_refresh_allowed(existing, request, contract)
             ):
                 raise ValueError("task_id already exists with a different contract")
-            if existing.get("status") in PENDING_CANDIDATE_STATUSES or existing.get("promotion_status") in {"PENDING_HUMAN_APPROVAL", "APPROVED"}:
+            if existing.get("status") in PENDING_CANDIDATE_STATUSES or existing.get(
+                "promotion_status"
+            ) in {"PENDING_HUMAN_APPROVAL", "APPROVED"}:
                 return existing
             if terminal_retry:
-                if existing.get("cleanup_decision") not in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}:
+                if existing.get("cleanup_decision") not in {
+                    "REMOVED",
+                    "ALREADY_REMOVED",
+                    "TARGET_CLEANED",
+                }:
                     raise RuntimeError("terminal retry blocked until previous Target disposition")
                 existing = self._reactivate_archived_state(contract.task_id, existing)
                 attempt_id = attempt_id_hint or uuid4().hex
+
                 def retry(current: dict[str, Any]) -> None:
                     packet = current.get("promotion_packet") or {}
                     if packet.get("candidate_commit_sha") or current.get("candidate_ref"):
@@ -5316,7 +5981,8 @@ class SelfHostedTaskService:
                             "approval_binding": current.get("approved_binding"),
                             "integration_branch": current.get("integration_branch"),
                             "integration_commit": current.get("integration_result_sha"),
-                            "final_disposition": current.get("final_disposition") or current.get("status"),
+                            "final_disposition": current.get("final_disposition")
+                            or current.get("status"),
                         })
                     if contract_refreshed:
                         previous_contract = current.get("contract") or {}
@@ -5328,7 +5994,8 @@ class SelfHostedTaskService:
                             "contract_hash": current.get("contract_hash"),
                             "controller_revision": previous_contract.get("controller_revision"),
                             "target_base_revision": previous_contract.get("target_base_revision"),
-                            "final_disposition": current.get("final_disposition") or current.get("status"),
+                            "final_disposition": current.get("final_disposition")
+                            or current.get("status"),
                         })
                         current.update({
                             "request": _jsonable(dict(request)),
@@ -5344,7 +6011,8 @@ class SelfHostedTaskService:
                             "worker_provider": contract.preferred_provider,
                             "collaboration_realm": (
                                 contract.collaboration_realm.model_dump(mode="json")
-                                if contract.collaboration_realm is not None else None
+                                if contract.collaboration_realm is not None
+                                else None
                             ),
                             "submission_collaboration_provenance": retry_collaboration_provenance,
                             "collaboration_provenance": retry_collaboration_provenance,
@@ -5395,7 +6063,10 @@ class SelfHostedTaskService:
                         "started_at": now,
                     })
                     current["status"] = "SUBMITTED"
-                    current.setdefault("status_history", []).append({"status": "ATTEMPT_INCREMENTED", "at": now})
+                    current.setdefault("status_history", []).append({
+                        "status": "ATTEMPT_INCREMENTED",
+                        "at": now,
+                    })
                     current["lease"] = None
                     current["worker_pid"] = None
                     current["worker_pgid"] = None
@@ -5444,8 +6115,11 @@ class SelfHostedTaskService:
                     current["archive_location"] = None
                     current["merge_performed"] = False
                     current["push_performed"] = False
+
                 self._mutate_state(contract.task_id, retry)
-                return self._launch_worker(contract.task_id, attempt_id) or self._with_task_action(existing)
+                return self._launch_worker(contract.task_id, attempt_id) or self._with_task_action(
+                    existing
+                )
             return self.reconcile_task(contract.task_id) or existing
         return self._launch_worker(contract.task_id, attempt_id) or self._with_task_action(state)
 
@@ -5492,7 +6166,11 @@ class SelfHostedTaskService:
             status == "RETAINED_FOR_REVIEW"
             and state.get("promotion_status") == "NOT_CREATED"
             and cleanup_decision in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
-            and not (state.get("promotion_packet") or state.get("candidate_commit_sha") or state.get("candidate_ref"))
+            and not (
+                state.get("promotion_packet")
+                or state.get("candidate_commit_sha")
+                or state.get("candidate_ref")
+            )
         )
         if status == "RETAINED_FOR_REVIEW" and not retained_retry:
             retry_meta.update(
@@ -5527,14 +6205,30 @@ class SelfHostedTaskService:
         if str(state.get("acceptance_decision") or "") == "REPAIRABLE":
             planner = request.get("planner_output")
             if not isinstance(planner, Mapping):
-                return {**state, "retry": {**retry_meta, "decision": "BLOCK", "blocker": "WORKFORCE_ADMISSION_BINDING_MISSING"}}
+                return {
+                    **state,
+                    "retry": {
+                        **retry_meta,
+                        "decision": "BLOCK",
+                        "blocker": "WORKFORCE_ADMISSION_BINDING_MISSING",
+                    },
+                }
             try:
-                dispatch = validate_workforce_dispatch_binding({**request, "planner_output": planner}, require_binding=True)
+                dispatch = validate_workforce_dispatch_binding(
+                    {**request, "planner_output": planner}, require_binding=True
+                )
             except RuntimeError as exc:
                 return {**state, "retry": {**retry_meta, "decision": "BLOCK", "blocker": str(exc)}}
             worker_id = str((dispatch or {}).get("worker_id") or "")
             if not worker_id:
-                return {**state, "retry": {**retry_meta, "decision": "BLOCK", "blocker": "WORKFORCE_REPAIR_WORKER_MISSING"}}
+                return {
+                    **state,
+                    "retry": {
+                        **retry_meta,
+                        "decision": "BLOCK",
+                        "blocker": "WORKFORCE_REPAIR_WORKER_MISSING",
+                    },
+                }
             request = dict(request)
             request["repair_worker_id"] = worker_id
             repair_dispatch = dict(dispatch or {})
@@ -5562,12 +6256,26 @@ class SelfHostedTaskService:
                     task_card_hash=str(retry_request.get("task_card_hash") or ""),
                 ).to_dict()
             except (TypeError, ValueError) as exc:
-                return {**state, "retry": {**retry_meta, "decision": "BLOCK", "blocker": f"WORKFORCE_REBIND_FAILED:{exc}"}}
+                return {
+                    **state,
+                    "retry": {
+                        **retry_meta,
+                        "decision": "BLOCK",
+                        "blocker": f"WORKFORCE_REBIND_FAILED:{exc}",
+                    },
+                }
             fresh_dispatch = validate_workforce_dispatch_binding(
                 retry_request, require_binding=True
             )
             if not isinstance(fresh_dispatch, Mapping):
-                return {**state, "retry": {**retry_meta, "decision": "BLOCK", "blocker": "WORKFORCE_REBIND_FAILED"}}
+                return {
+                    **state,
+                    "retry": {
+                        **retry_meta,
+                        "decision": "BLOCK",
+                        "blocker": "WORKFORCE_REBIND_FAILED",
+                    },
+                }
             retry_request.update({
                 "worker": fresh_dispatch["provider"],
                 "provider": fresh_dispatch["provider"],
@@ -5673,12 +6381,9 @@ class SelfHostedTaskService:
             "verified_receipt_hash": str(packet.get("verified_receipt_hash") or ""),
         }
         candidate_ref = str(state.get("candidate_ref") or "")
-        if (
-            not all(identity.values())
-            or not re.fullmatch(
-                rf"refs/nexus-candidates/{re.escape(identity['task_id'])}/{re.escape(identity['candidate_commit_sha'])}",
-                candidate_ref,
-            )
+        if not all(identity.values()) or not re.fullmatch(
+            rf"refs/nexus-candidates/{re.escape(identity['task_id'])}/{re.escape(identity['candidate_commit_sha'])}",
+            candidate_ref,
         ):
             return None
         for key in (
@@ -5691,7 +6396,8 @@ class SelfHostedTaskService:
                 return None
         if (
             str(approved.get("bound_task_id") or identity["task_id"]) != identity["task_id"]
-            or str(approved.get("bound_attempt_id") or identity["attempt_id"]) != identity["attempt_id"]
+            or str(approved.get("bound_attempt_id") or identity["attempt_id"])
+            != identity["attempt_id"]
         ):
             return None
         return {
@@ -5721,7 +6427,11 @@ class SelfHostedTaskService:
             raise RuntimeError("CLOSURE_TASK_ID_DRIFT")
         if disposition == "REJECTED" and state.get("status") == "REJECTED":
             history = state.get("candidate_history") or []
-            if history and isinstance(history[-1], Mapping) and history[-1].get("pre_apply_disposition_basis"):
+            if (
+                history
+                and isinstance(history[-1], Mapping)
+                and history[-1].get("pre_apply_disposition_basis")
+            ):
                 return {**state, "duplicate": True}
         pre_apply_basis = None
         if disposition == "REJECTED" and state.get("status") == "INTEGRATION_FAILED_PRE_APPLY":
@@ -5734,8 +6444,12 @@ class SelfHostedTaskService:
         candidate_record = {
             "candidate_commit": (state.get("promotion_packet") or {}).get("candidate_commit_sha"),
             "candidate_ref": state.get("candidate_ref"),
-            "candidate_state_hash": (state.get("promotion_packet") or {}).get("candidate_state_hash"),
-            "verified_receipt_hash": (state.get("promotion_packet") or {}).get("verified_receipt_hash"),
+            "candidate_state_hash": (state.get("promotion_packet") or {}).get(
+                "candidate_state_hash"
+            ),
+            "verified_receipt_hash": (state.get("promotion_packet") or {}).get(
+                "verified_receipt_hash"
+            ),
             "approval_binding": state.get("approved_binding"),
             "final_disposition": disposition,
             "supersedes": state.get("supersedes"),
@@ -5743,18 +6457,26 @@ class SelfHostedTaskService:
         }
         if pre_apply_basis is not None:
             candidate_record["pre_apply_disposition_basis"] = pre_apply_basis
-        return self._checkpoint(task_id, disposition, {
-            "promotion_status": disposition,
-            "candidate_status": disposition,
-            "final_disposition": disposition,
-            "superseded_by": superseded_by if disposition == "SUPERSEDED" else None,
-            "candidate_history": [*state.get("candidate_history", []), candidate_record],
-            "terminal_status": disposition,
-            "cleanup_decision": state.get("cleanup_decision", "REMOVED"),
-            "cleanup_performed": state.get("cleanup_performed", True),
-            "state_retention_status": "TERMINAL",
-            "archive_eligible": True,
-        }, attempt_id=state.get("attempt_id")) or state
+        return (
+            self._checkpoint(
+                task_id,
+                disposition,
+                {
+                    "promotion_status": disposition,
+                    "candidate_status": disposition,
+                    "final_disposition": disposition,
+                    "superseded_by": superseded_by if disposition == "SUPERSEDED" else None,
+                    "candidate_history": [*state.get("candidate_history", []), candidate_record],
+                    "terminal_status": disposition,
+                    "cleanup_decision": state.get("cleanup_decision", "REMOVED"),
+                    "cleanup_performed": state.get("cleanup_performed", True),
+                    "state_retention_status": "TERMINAL",
+                    "archive_eligible": True,
+                },
+                attempt_id=state.get("attempt_id"),
+            )
+            or state
+        )
 
     def close_task_without_candidate(
         self,
@@ -5771,7 +6493,9 @@ class SelfHostedTaskService:
             raise KeyError(f"unknown task_id: {task_id}")
 
         if state.get("status") not in {"RETAINED_FOR_REVIEW", "FINAL_BLOCK"}:
-            raise RuntimeError(f"task {task_id} is not in RETAINED_FOR_REVIEW or FINAL_BLOCK status")
+            raise RuntimeError(
+                f"task {task_id} is not in RETAINED_FOR_REVIEW or FINAL_BLOCK status"
+            )
 
         if state.get("promotion_status") != "NOT_CREATED":
             raise RuntimeError("promotion_status must be NOT_CREATED")
@@ -5785,12 +6509,7 @@ class SelfHostedTaskService:
             or packet.get("candidate_commit_created")
             or candidate_dict.get("commit_created")
         )
-        if (
-            packet
-            or candidate_commit
-            or candidate_ref
-            or candidate_created
-        ):
+        if packet or candidate_commit or candidate_ref or candidate_created:
             raise RuntimeError("task has candidate evidence present")
 
         worker_pid = state.get("worker_pid")
@@ -5803,7 +6522,11 @@ class SelfHostedTaskService:
 
         contract = state.get("contract") or {}
         lease = state.get("lease") or {}
-        target_raw = state.get("target_worktree") or lease.get("target_worktree") or contract.get("target_repo_root")
+        target_raw = (
+            state.get("target_worktree")
+            or lease.get("target_worktree")
+            or contract.get("target_repo_root")
+        )
         cleanup_values: dict[str, Any] = {
             "cleanup_decision": state.get("cleanup_decision") or "ALREADY_REMOVED",
             "cleanup_eligible": state.get("cleanup_eligible", True),
@@ -5812,7 +6535,9 @@ class SelfHostedTaskService:
         }
         if target_raw:
             target_path = Path(str(target_raw)).expanduser().resolve()
-            controller_raw = state.get("controller_worktree") or contract.get("controller_repo_root")
+            controller_raw = state.get("controller_worktree") or contract.get(
+                "controller_repo_root"
+            )
             lease_object = TargetWorktreeLease(**dict(lease)) if lease else None
             if target_path.exists() and (not controller_raw or not lease_object):
                 raise RuntimeError(f"recorded Target path exists: {target_path}")
@@ -5854,7 +6579,10 @@ class SelfHostedTaskService:
                                 )
                             else:
                                 salvage = {}
-                        elif salvage["salvage_only"] is not True or salvage["promotion_eligible"] is not False:
+                        elif (
+                            salvage["salvage_only"] is not True
+                            or salvage["promotion_eligible"] is not False
+                        ):
                             raise RuntimeError("recorded salvage metadata is invalid")
                         if salvage:
                             self._checkpoint(
@@ -5884,38 +6612,44 @@ class SelfHostedTaskService:
                                 lease_object,
                             )
                     except Exception as exc:
-                        retained = self._checkpoint(
-                            task_id,
-                            "RETAINED_FOR_REVIEW",
-                            {
-                                **salvage,
-                                "promotion_status": "NOT_CREATED",
-                                "superseded_by": superseded_by,
-                                "cleanup_decision": "CLEANUP_BLOCKED",
-                                "cleanup_blocker": str(exc),
-                                "cleanup_performed": False,
-                                "cleanup_eligible": False,
-                                "state_retention_status": "TERMINAL",
-                            },
-                            attempt_id=state.get("attempt_id"),
-                        ) or state
+                        retained = (
+                            self._checkpoint(
+                                task_id,
+                                "RETAINED_FOR_REVIEW",
+                                {
+                                    **salvage,
+                                    "promotion_status": "NOT_CREATED",
+                                    "superseded_by": superseded_by,
+                                    "cleanup_decision": "CLEANUP_BLOCKED",
+                                    "cleanup_blocker": str(exc),
+                                    "cleanup_performed": False,
+                                    "cleanup_eligible": False,
+                                    "state_retention_status": "TERMINAL",
+                                },
+                                attempt_id=state.get("attempt_id"),
+                            )
+                            or state
+                        )
                         return retained
                     if cleanup.decision not in {"REMOVED", "ALREADY_REMOVED"}:
-                        return self._checkpoint(
-                            task_id,
-                            "RETAINED_FOR_REVIEW",
-                            {
-                                **salvage,
-                                "promotion_status": "NOT_CREATED",
-                                "superseded_by": superseded_by,
-                                "cleanup_decision": cleanup.decision,
-                                "cleanup_blocker": cleanup.blocker,
-                                "cleanup_performed": cleanup.performed,
-                                "cleanup_eligible": cleanup.eligible,
-                                "state_retention_status": "TERMINAL",
-                            },
-                            attempt_id=state.get("attempt_id"),
-                        ) or state
+                        return (
+                            self._checkpoint(
+                                task_id,
+                                "RETAINED_FOR_REVIEW",
+                                {
+                                    **salvage,
+                                    "promotion_status": "NOT_CREATED",
+                                    "superseded_by": superseded_by,
+                                    "cleanup_decision": cleanup.decision,
+                                    "cleanup_blocker": cleanup.blocker,
+                                    "cleanup_performed": cleanup.performed,
+                                    "cleanup_eligible": cleanup.eligible,
+                                    "state_retention_status": "TERMINAL",
+                                },
+                                attempt_id=state.get("attempt_id"),
+                            )
+                            or state
+                        )
                     cleanup_values = {
                         "cleanup_decision": cleanup.decision,
                         "cleanup_eligible": cleanup.eligible,
@@ -5937,22 +6671,25 @@ class SelfHostedTaskService:
                         "cleanup_performed_at": _utc_now() if cleanup.performed else None,
                     }
 
-        return self._checkpoint(
-            task_id,
-            "SUPERSEDED",
-            {
-                "promotion_status": "NOT_CREATED",
-                "final_disposition": "SUPERSEDED",
-                "superseded_by": superseded_by,
-                "terminal_status": "SUPERSEDED",
-                "state_retention_status": "TERMINAL",
-                "archive_eligible": True,
-                "merge_performed": False,
-                "push_performed": False,
-                **cleanup_values,
-            },
-            attempt_id=state.get("attempt_id"),
-        ) or state
+        return (
+            self._checkpoint(
+                task_id,
+                "SUPERSEDED",
+                {
+                    "promotion_status": "NOT_CREATED",
+                    "final_disposition": "SUPERSEDED",
+                    "superseded_by": superseded_by,
+                    "terminal_status": "SUPERSEDED",
+                    "state_retention_status": "TERMINAL",
+                    "archive_eligible": True,
+                    "merge_performed": False,
+                    "push_performed": False,
+                    **cleanup_values,
+                },
+                attempt_id=state.get("attempt_id"),
+            )
+            or state
+        )
 
     close_without_candidate = close_task_without_candidate
 
@@ -5980,21 +6717,30 @@ class SelfHostedTaskService:
         pid = state.get("worker_pid")
         if pid and self._pid_alive(int(pid)):
             raise RuntimeError("active process must stop before cancellation cleanup")
-        cancelled = self._checkpoint(task_id, "CANCELLED", {
-            "promotion_status": "CANCELLED",
-            "terminal_status": "CANCELLED",
-            "final_disposition": "CANCELLED",
-            "state_retention_status": "TERMINAL",
-            "archive_eligible": True,
-            "push_performed": False,
-        }, attempt_id=state.get("attempt_id")) or state
+        cancelled = (
+            self._checkpoint(
+                task_id,
+                "CANCELLED",
+                {
+                    "promotion_status": "CANCELLED",
+                    "terminal_status": "CANCELLED",
+                    "final_disposition": "CANCELLED",
+                    "state_retention_status": "TERMINAL",
+                    "archive_eligible": True,
+                    "push_performed": False,
+                },
+                attempt_id=state.get("attempt_id"),
+            )
+            or state
+        )
         result = self.cleanup_tasks(task_id=task_id, dry_run=False)
         return self._read_state(task_id) or {**cancelled, "cleanup": result}
 
     def lifecycle_status(self) -> dict[str, Any]:
         states = [
             state
-            for path in sorted(self.state_dir.glob("*.json")) if self.state_dir.exists()
+            for path in sorted(self.state_dir.glob("*.json"))
+            if self.state_dir.exists()
             if (state := self._read_state_snapshot(path.stem)) is not None
         ]
         invalid_states = [state for state in states if state.get("state_valid") is False]
@@ -6011,7 +6757,9 @@ class SelfHostedTaskService:
         return {
             "canonical_state_root": str(self.state_dir),
             "tasks": len(states),
-            "active_tasks": sum(state.get("status") not in TERMINAL_STATUSES for state in valid_states),
+            "active_tasks": sum(
+                state.get("status") not in TERMINAL_STATUSES for state in valid_states
+            ),
             "active_targets": sum(has_active_target(state) for state in valid_states),
             "invalid_states": len(invalid_states),
             "blockers": [state["blocker"] for state in invalid_states],
@@ -6026,40 +6774,88 @@ class SelfHostedTaskService:
         """Revalidate persisted acceptance, authorization, integration, and refs."""
         if state.get("status") != "INTEGRATED" or state.get("promotion_status") != "INTEGRATED":
             return "cleanup requires INTEGRATED lifecycle state"
-        packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
-        binding = state.get("approved_binding") if isinstance(state.get("approved_binding"), Mapping) else {}
+        packet = (
+            state.get("promotion_packet")
+            if isinstance(state.get("promotion_packet"), Mapping)
+            else {}
+        )
+        binding = (
+            state.get("approved_binding")
+            if isinstance(state.get("approved_binding"), Mapping)
+            else {}
+        )
         raw_acceptance = state.get("external_acceptance") or binding.get("external_acceptance")
-        raw_authorization = state.get("integration_authorization") or binding.get("integration_authorization")
+        raw_authorization = state.get("integration_authorization") or binding.get(
+            "integration_authorization"
+        )
         if raw_acceptance is None:
             return "external acceptance receipt is missing"
         if raw_authorization is None:
             return "Owner cleanup authorization is missing"
         try:
-            acceptance = raw_acceptance if isinstance(raw_acceptance, ExternalAcceptanceReceipt) else ExternalAcceptanceReceipt(**dict(raw_acceptance))
-            authorization = raw_authorization if isinstance(raw_authorization, IntegrationAuthorizationEnvelope) else IntegrationAuthorizationEnvelope(**{key: value for key, value in dict(raw_authorization).items() if key != "authorization_hash"})
+            acceptance = (
+                raw_acceptance
+                if isinstance(raw_acceptance, ExternalAcceptanceReceipt)
+                else ExternalAcceptanceReceipt(**dict(raw_acceptance))
+            )
+            authorization = (
+                raw_authorization
+                if isinstance(raw_authorization, IntegrationAuthorizationEnvelope)
+                else IntegrationAuthorizationEnvelope(**{
+                    key: value
+                    for key, value in dict(raw_authorization).items()
+                    if key != "authorization_hash"
+                })
+            )
         except (TypeError, ValueError) as exc:
             return f"cleanup authority binding invalid: {exc}"
-        if acceptance.task_id != state.get("task_id") or acceptance.candidate_commit != packet.get("candidate_commit_sha"):
+        if acceptance.task_id != state.get("task_id") or acceptance.candidate_commit != packet.get(
+            "candidate_commit_sha"
+        ):
             return "external acceptance binding mismatch"
-        if authorization.task_id != state.get("task_id") or authorization.candidate_commit != packet.get("candidate_commit_sha"):
+        if authorization.task_id != state.get(
+            "task_id"
+        ) or authorization.candidate_commit != packet.get("candidate_commit_sha"):
             return "cleanup authorization candidate mismatch"
         if authorization.attempt_id not in {"", str(state.get("attempt_id") or "")}:
             return "cleanup authorization attempt mismatch"
         if authorization.acceptance_receipt_hash != acceptance.receipt_hash:
             return "cleanup authorization acceptance mismatch"
-        if state.get("task_card_hash") and authorization.task_card_hash != state.get("task_card_hash"):
+        if state.get("task_card_hash") and authorization.task_card_hash != state.get(
+            "task_card_hash"
+        ):
             return "cleanup authorization task card mismatch"
         if authorization.candidate_tree_sha != str(packet.get("candidate_tree_sha") or ""):
             return "cleanup authorization candidate tree mismatch"
         if authorization.candidate_state_hash != str(packet.get("candidate_state_hash") or ""):
             return "cleanup authorization candidate state mismatch"
-        if "CLEANUP_OWNED_TARGET" not in authorization.action_set or not authorization.cleanup_requested:
+        if (
+            "CLEANUP_OWNED_TARGET" not in authorization.action_set
+            or not authorization.cleanup_requested
+        ):
             return "cleanup authorization does not include CLEANUP_OWNED_TARGET"
-        grant = binding.get("approval_grant") if isinstance(binding.get("approval_grant"), Mapping) else None
-        if not grant or not grant.get("consumed_at") or grant.get("approval_scope") != "ALLOW_ACTION_ONCE":
+        grant = (
+            binding.get("approval_grant")
+            if isinstance(binding.get("approval_grant"), Mapping)
+            else None
+        )
+        if (
+            not grant
+            or not grant.get("consumed_at")
+            or grant.get("approval_scope") != "ALLOW_ACTION_ONCE"
+        ):
             return "one-shot Owner approval grant is missing or invalid"
-        receipt = state.get("integration_receipt") if isinstance(state.get("integration_receipt"), Mapping) else None
-        if not receipt or not receipt.get("verifier_passed") or not receipt.get("merge_performed") or not receipt.get("post_apply_verified"):
+        receipt = (
+            state.get("integration_receipt")
+            if isinstance(state.get("integration_receipt"), Mapping)
+            else None
+        )
+        if (
+            not receipt
+            or not receipt.get("verifier_passed")
+            or not receipt.get("merge_performed")
+            or not receipt.get("post_apply_verified")
+        ):
             return "post-apply integration receipt is missing or incomplete"
         if receipt.get("acceptance_receipt_hash") != acceptance.receipt_hash:
             return "integration receipt acceptance mismatch"
@@ -6078,24 +6874,47 @@ class SelfHostedTaskService:
             return "cleanup authorization durable ref mismatch"
         if Path(authorization.canonical_root).resolve() != controller:
             return "cleanup authorization canonical root mismatch"
-        if str(state.get("integration_branch") or authorization.canonical_branch) != authorization.canonical_branch:
+        if (
+            str(state.get("integration_branch") or authorization.canonical_branch)
+            != authorization.canonical_branch
+        ):
             return "cleanup authorization integration branch mismatch"
         try:
-            if manager._run_git(["rev-parse", f"{candidate_ref}^{{commit}}"], cwd=controller) != candidate_sha:
+            if (
+                manager._run_git(["rev-parse", f"{candidate_ref}^{{commit}}"], cwd=controller)
+                != candidate_sha
+            ):
                 return "candidate durable ref mismatch"
-            if manager._run_git(["merge-base", "--is-ancestor", candidate_sha, integration_sha], cwd=controller) is None:
+            if (
+                manager._run_git(
+                    ["merge-base", "--is-ancestor", candidate_sha, integration_sha], cwd=controller
+                )
+                is None
+            ):
                 return "candidate is not an ancestor of integration result"
             branch = str(state.get("integration_branch") or authorization.canonical_branch)
-            if manager._run_git(["merge-base", "--is-ancestor", integration_sha, branch], cwd=controller) is None:
+            if (
+                manager._run_git(
+                    ["merge-base", "--is-ancestor", integration_sha, branch], cwd=controller
+                )
+                is None
+            ):
                 return "canonical branch does not contain integration result"
         except RuntimeError as exc:
             return f"integration ancestry/ref verification failed: {exc}"
-        if Path(lease.target_worktree).resolve() != Path(authorization.cleanup_target_path).resolve():
+        if (
+            Path(lease.target_worktree).resolve()
+            != Path(authorization.cleanup_target_path).resolve()
+        ):
             return "cleanup target path binding mismatch"
         return None
 
-    def cleanup_tasks(self, *, task_id: Optional[str] = None, dry_run: bool = True) -> dict[str, Any]:
-        ids = [task_id] if task_id else [path.stem for path in sorted(self.state_dir.glob("*.json"))]
+    def cleanup_tasks(
+        self, *, task_id: Optional[str] = None, dry_run: bool = True
+    ) -> dict[str, Any]:
+        ids = (
+            [task_id] if task_id else [path.stem for path in sorted(self.state_dir.glob("*.json"))]
+        )
         decisions = []
         for item in ids:
             state = (self._read_state_snapshot(item) if dry_run else self._read_state(item)) or {}
@@ -6104,7 +6923,12 @@ class SelfHostedTaskService:
                 if archived and archived.get("status") == "INTEGRATED":
                     state = self._reactivate_archived_state(item, archived)
             if not state:
-                decisions.append({"task_id": item, "cleanup_decision": "ALREADY_REMOVED", "cleanup_blocker": "task state not found", "cleanup_performed": False})
+                decisions.append({
+                    "task_id": item,
+                    "cleanup_decision": "ALREADY_REMOVED",
+                    "cleanup_blocker": "task state not found",
+                    "cleanup_performed": False,
+                })
                 continue
             if state.get("status") == "INTEGRATION_VERIFY_FAILED_AFTER_APPLY":
                 decision = {
@@ -6118,7 +6942,9 @@ class SelfHostedTaskService:
                 }
                 decisions.append(decision)
                 if not dry_run:
-                    self._checkpoint(item, str(state.get("status")), decision, attempt_id=state.get("attempt_id"))
+                    self._checkpoint(
+                        item, str(state.get("status")), decision, attempt_id=state.get("attempt_id")
+                    )
                 continue
             if state.get("status") == "INTEGRATION_FAILED_PRE_APPLY":
                 decision = {
@@ -6132,26 +6958,33 @@ class SelfHostedTaskService:
                 }
                 decisions.append(decision)
                 if not dry_run:
-                    self._checkpoint(item, str(state.get("status")), decision, attempt_id=state.get("attempt_id"))
+                    self._checkpoint(
+                        item, str(state.get("status")), decision, attempt_id=state.get("attempt_id")
+                    )
                 continue
             if state.get("status") == "RETAINED_FOR_REVIEW":
                 worker_pid = state.get("worker_pid")
                 child_pgid = state.get("worker_child_pgid")
-                if ((worker_pid and self._pid_alive(int(worker_pid))) or
-                        (child_pgid and self._pid_alive(int(child_pgid)))):
+                if (worker_pid and self._pid_alive(int(worker_pid))) or (
+                    child_pgid and self._pid_alive(int(child_pgid))
+                ):
                     decisions.append({
-                        "task_id": item, "status": "RETAINED_FOR_REVIEW",
+                        "task_id": item,
+                        "status": "RETAINED_FOR_REVIEW",
                         "cleanup_decision": "BLOCKED_BY_PROCESS",
                         "cleanup_blocker": "active process uses Target",
-                        "cleanup_performed": False, "cleanup_eligible": False,
+                        "cleanup_performed": False,
+                        "cleanup_eligible": False,
                     })
                     continue
                 if not state.get("lease") or not state.get("request"):
                     decisions.append({
-                        "task_id": item, "status": "RETAINED_FOR_REVIEW",
+                        "task_id": item,
+                        "status": "RETAINED_FOR_REVIEW",
                         "cleanup_decision": "BLOCKED_BY_UNSAVED_CHANGES",
                         "cleanup_blocker": "retained task lacks lease or request authority",
-                        "cleanup_performed": False, "cleanup_eligible": False,
+                        "cleanup_performed": False,
+                        "cleanup_eligible": False,
                     })
                     continue
                 contract = self.build_contract(state["request"])
@@ -6162,10 +6995,12 @@ class SelfHostedTaskService:
                 attempt_id = str(state.get("attempt_id") or "")
                 if not attempt_id:
                     decisions.append({
-                        "task_id": item, "status": "RETAINED_FOR_REVIEW",
+                        "task_id": item,
+                        "status": "RETAINED_FOR_REVIEW",
                         "cleanup_decision": "BLOCKED_BY_UNSAVED_CHANGES",
                         "cleanup_blocker": "retained task lacks attempt identity",
-                        "cleanup_performed": False, "cleanup_eligible": False,
+                        "cleanup_performed": False,
+                        "cleanup_eligible": False,
                     })
                     continue
                 if dry_run:
@@ -6186,13 +7021,13 @@ class SelfHostedTaskService:
                         else:
                             planned = "WOULD_REMOVE"
                     decisions.append({
-                        "task_id": item, "status": "RETAINED_FOR_REVIEW",
+                        "task_id": item,
+                        "status": "RETAINED_FOR_REVIEW",
                         "cleanup_decision": planned,
                         "cleanup_blocker": None,
                         "cleanup_performed": False,
-                        "cleanup_eligible": planned not in {
-                            "BLOCKED_BY_PROCESS", "BLOCKED_BY_UNSAVED_CHANGES"
-                        },
+                        "cleanup_eligible": planned
+                        not in {"BLOCKED_BY_PROCESS", "BLOCKED_BY_UNSAVED_CHANGES"},
                     })
                     continue
 
@@ -6212,9 +7047,12 @@ class SelfHostedTaskService:
                         head = manager._run_git(["rev-parse", "HEAD"], cwd=target)
                         deterministic_ref = manager.salvage_ref_for(item, attempt_id)
                         if salvage_commit or salvage_ref:
-                            if (state.get("salvage_only") is not True or
-                                    state.get("promotion_eligible") is not False or
-                                    not salvage_commit or not salvage_ref):
+                            if (
+                                state.get("salvage_only") is not True
+                                or state.get("promotion_eligible") is not False
+                                or not salvage_commit
+                                or not salvage_ref
+                            ):
                                 raise RuntimeError("recorded salvage metadata is invalid")
                             protected = manager._run_git(
                                 ["rev-parse", f"{salvage_ref}^{{commit}}"], cwd=controller
@@ -6251,9 +7089,7 @@ class SelfHostedTaskService:
                                     contract, lease, attempt_id
                                 )
                             elif head != lease.initial_head:
-                                salvage = manager.protect_salvage_head(
-                                    contract, lease, attempt_id
-                                )
+                                salvage = manager.protect_salvage_head(contract, lease, attempt_id)
                         cleanup = manager.cleanup_terminal_target(
                             contract,
                             lease,
@@ -6273,27 +7109,50 @@ class SelfHostedTaskService:
                     }
                 except Exception as exc:
                     decision = {
-                        "task_id": item, "status": "RETAINED_FOR_REVIEW",
+                        "task_id": item,
+                        "status": "RETAINED_FOR_REVIEW",
                         "promotion_status": "NOT_CREATED",
                         "cleanup_decision": "CLEANUP_BLOCKED",
                         "cleanup_blocker": str(exc),
-                        "cleanup_performed": False, "cleanup_eligible": False,
+                        "cleanup_performed": False,
+                        "cleanup_eligible": False,
                         **salvage,
                     }
                 decisions.append(decision)
                 self._checkpoint(
-                    item, "RETAINED_FOR_REVIEW", decision,
+                    item,
+                    "RETAINED_FOR_REVIEW",
+                    decision,
                     attempt_id=state.get("attempt_id"),
                 )
                 continue
-            if state.get("status") not in TERMINAL_STATUSES and state.get("status") not in {"CANDIDATE_COMMITTED", "TARGET_CLEANED", "PENDING_HUMAN_APPROVAL"}:
-                decisions.append({"task_id": item, "status": state.get("status"), "cleanup_decision": "BLOCKED_BY_PROCESS", "cleanup_blocker": "task is active", "cleanup_performed": False})
+            if state.get("status") not in TERMINAL_STATUSES and state.get("status") not in {
+                "CANDIDATE_COMMITTED",
+                "TARGET_CLEANED",
+                "PENDING_HUMAN_APPROVAL",
+            }:
+                decisions.append({
+                    "task_id": item,
+                    "status": state.get("status"),
+                    "cleanup_decision": "BLOCKED_BY_PROCESS",
+                    "cleanup_blocker": "task is active",
+                    "cleanup_performed": False,
+                })
                 continue
             if not state.get("lease"):
-                decision = {"task_id": item, "status": state.get("status"), "cleanup_decision": "ALREADY_REMOVED", "cleanup_blocker": None, "cleanup_performed": False, "cleanup_eligible": True}
+                decision = {
+                    "task_id": item,
+                    "status": state.get("status"),
+                    "cleanup_decision": "ALREADY_REMOVED",
+                    "cleanup_blocker": None,
+                    "cleanup_performed": False,
+                    "cleanup_eligible": True,
+                }
                 decisions.append(decision)
                 if not dry_run:
-                    self._checkpoint(item, str(state.get("status")), decision, attempt_id=state.get("attempt_id"))
+                    self._checkpoint(
+                        item, str(state.get("status")), decision, attempt_id=state.get("attempt_id")
+                    )
                 continue
             contract = self.build_contract(state["request"])
             lease = TargetWorktreeLease(**state["lease"])
@@ -6313,18 +7172,24 @@ class SelfHostedTaskService:
             if state.get("promotion_status") in {"APPROVED", "INTEGRATED"} and any(
                 binding.get(field) != packet.get(field)
                 for field in (
-                    "candidate_commit_sha", "candidate_tree_sha",
-                    "candidate_state_hash", "verified_receipt_hash",
+                    "candidate_commit_sha",
+                    "candidate_tree_sha",
+                    "candidate_state_hash",
+                    "verified_receipt_hash",
                 )
             ):
                 decisions.append({
-                    "task_id": item, "status": state.get("status"),
+                    "task_id": item,
+                    "status": state.get("status"),
                     "cleanup_decision": "BLOCKED_BY_MISSING_REF",
                     "cleanup_blocker": "approval binding mismatch",
-                    "cleanup_performed": False, "cleanup_eligible": False,
+                    "cleanup_performed": False,
+                    "cleanup_eligible": False,
                 })
                 continue
-            cleanup = WorktreeManager(root_dir=contract.target_worktree_root).cleanup_terminal_target(
+            cleanup = WorktreeManager(
+                root_dir=contract.target_worktree_root
+            ).cleanup_terminal_target(
                 contract,
                 lease,
                 candidate_commit=packet.get("candidate_commit_sha"),
@@ -6365,7 +7230,11 @@ class SelfHostedTaskService:
             decision["target_present_after"] = cleanup_receipt["target_present_after"]
             decisions.append(decision)
             if not dry_run:
-                terminal = "RETAINED_FOR_REVIEW" if cleanup.decision == "BLOCKED_BY_UNSAVED_CHANGES" else str(state.get("status"))
+                terminal = (
+                    "RETAINED_FOR_REVIEW"
+                    if cleanup.decision == "BLOCKED_BY_UNSAVED_CHANGES"
+                    else str(state.get("status"))
+                )
                 self._checkpoint(item, terminal, decision, attempt_id=state.get("attempt_id"))
         return {"dry_run": dry_run, "decisions": decisions}
 
@@ -6375,19 +7244,34 @@ class SelfHostedTaskService:
         for path in sorted(self.state_dir.glob("*.json")) if self.state_dir.exists() else []:
             payload = path.read_bytes()
             state = json.loads(payload)
-            if state.get("status") not in {"FINAL_BLOCK", "INTEGRATED", "INTEGRATED_AND_CLEANED", "REJECTED", "SUPERSEDED", "CANCELLED"}:
+            if state.get("status") not in {
+                "FINAL_BLOCK",
+                "INTEGRATED",
+                "INTEGRATED_AND_CLEANED",
+                "REJECTED",
+                "SUPERSEDED",
+                "CANCELLED",
+            }:
                 continue
-            if state.get("status") == "INTEGRATED" and state.get("cleanup_status") not in {None, "CLEANED"}:
+            if state.get("status") == "INTEGRATED" and state.get("cleanup_status") not in {
+                None,
+                "CLEANED",
+            }:
                 continue
             digest = hashlib.sha256(payload).hexdigest()
             destination = archive_root / path.name
-            if destination.exists() and hashlib.sha256(destination.read_bytes()).hexdigest() != digest:
+            if (
+                destination.exists()
+                and hashlib.sha256(destination.read_bytes()).hexdigest() != digest
+            ):
                 attempt_id = str(state.get("attempt_id") or "unknown")
                 destination = archive_root / f"{path.stem}--attempt-{attempt_id}.json"
             entries.append({
                 "task_id": path.stem,
                 "terminal_status": state.get("terminal_status") or state.get("status"),
-                "candidate_commit": (state.get("promotion_packet") or {}).get("candidate_commit_sha"),
+                "candidate_commit": (state.get("promotion_packet") or {}).get(
+                    "candidate_commit_sha"
+                ),
                 "source": str(path),
                 "archive_location": str(destination),
                 "receipt_hash": digest,
@@ -6402,7 +7286,10 @@ class SelfHostedTaskService:
                 source = Path(entry["source"])
                 destination = Path(entry["archive_location"])
                 if destination.exists():
-                    if hashlib.sha256(destination.read_bytes()).hexdigest() != entry["receipt_hash"]:
+                    if (
+                        hashlib.sha256(destination.read_bytes()).hexdigest()
+                        != entry["receipt_hash"]
+                    ):
                         raise RuntimeError(f"archive receipt hash mismatch: {destination}")
                     source.unlink(missing_ok=True)
                 else:
@@ -6415,16 +7302,23 @@ class SelfHostedTaskService:
                 "entries": entries,
             }
             with tempfile.NamedTemporaryFile(
-                mode="w", encoding="utf-8", dir=archive_root,
-                prefix=".manifest.", suffix=".tmp", delete=False,
+                mode="w",
+                encoding="utf-8",
+                dir=archive_root,
+                prefix=".manifest.",
+                suffix=".tmp",
+                delete=False,
             ) as handle:
                 json.dump(manifest_payload, handle, sort_keys=True, indent=2)
                 handle.write("\n")
                 temporary = Path(handle.name)
             temporary.replace(manifest_path)
-        return {"dry_run": dry_run, "entries": entries, "manifest_hash": manifest_hash, "manifest_path": str(manifest_path)}
-
-
+        return {
+            "dry_run": dry_run,
+            "entries": entries,
+            "manifest_hash": manifest_hash,
+            "manifest_path": str(manifest_path),
+        }
 
     def get_task(self, task_id: str) -> Optional[dict[str, Any]]:
         result = self.get_task_snapshot(task_id, include_details=True)
@@ -6477,9 +7371,8 @@ class SelfHostedTaskService:
             or packet.get("collaboration_provenance")
             or lease.get("collaboration_provenance")
         )
-        collaboration_provenance = (
-            candidate_collaboration_provenance
-            or state.get("collaboration_provenance")
+        collaboration_provenance = candidate_collaboration_provenance or state.get(
+            "collaboration_provenance"
         )
         archived_path, _ = self._latest_archived_state(task_id)
         return {
@@ -6489,11 +7382,18 @@ class SelfHostedTaskService:
             "submitted_at": state.get("submitted_at"),
             "telemetry": state.get("telemetry") or {"wall_time_ms": 0, "overhead_ms": 0},
             "contract_hash": state.get("contract_hash"),
-            "controller_worktree": state.get("controller_worktree") or contract.get("controller_repo_root"),
-            "controller_revision": state.get("controller_revision") or contract.get("controller_revision"),
-            "controller_status_sha256": state.get("controller_status_sha256") or lease.get("controller_status_sha256"),
-            "target_worktree": state.get("target_worktree") or lease.get("target_worktree") or contract.get("target_repo_root"),
-            "target_initial_revision": state.get("target_initial_revision") or lease.get("initial_head") or contract.get("target_base_revision"),
+            "controller_worktree": state.get("controller_worktree")
+            or contract.get("controller_repo_root"),
+            "controller_revision": state.get("controller_revision")
+            or contract.get("controller_revision"),
+            "controller_status_sha256": state.get("controller_status_sha256")
+            or lease.get("controller_status_sha256"),
+            "target_worktree": state.get("target_worktree")
+            or lease.get("target_worktree")
+            or contract.get("target_repo_root"),
+            "target_initial_revision": state.get("target_initial_revision")
+            or lease.get("initial_head")
+            or contract.get("target_base_revision"),
             "target_branch": state.get("target_branch") or lease.get("target_branch"),
             "target_created_at": state.get("target_created_at"),
             "worker_provider": state.get("worker_provider"),
@@ -6501,11 +7401,15 @@ class SelfHostedTaskService:
             "heartbeat_at": state.get("heartbeat_at"),
             "execution_outcome": state.get("execution_outcome"),
             "verification_verdict": state.get("verification_verdict"),
-            "candidate_commit_sha": state.get("candidate_commit_sha") or packet.get("candidate_commit_sha"),
-            "candidate_tree_sha": state.get("candidate_tree_sha") or packet.get("candidate_tree_sha"),
+            "candidate_commit_sha": state.get("candidate_commit_sha")
+            or packet.get("candidate_commit_sha"),
+            "candidate_tree_sha": state.get("candidate_tree_sha")
+            or packet.get("candidate_tree_sha"),
             "candidate_ref": state.get("candidate_ref"),
-            "candidate_state_hash": state.get("candidate_state_hash") or packet.get("candidate_state_hash"),
-            "verified_receipt_hash": state.get("verified_receipt_hash") or packet.get("verified_receipt_hash"),
+            "candidate_state_hash": state.get("candidate_state_hash")
+            or packet.get("candidate_state_hash"),
+            "verified_receipt_hash": state.get("verified_receipt_hash")
+            or packet.get("verified_receipt_hash"),
             "salvage_commit_sha": state.get("salvage_commit_sha"),
             "salvage_ref": state.get("salvage_ref"),
             "salvage_only": state.get("salvage_only", False),
@@ -6522,21 +7426,24 @@ class SelfHostedTaskService:
             "cleanup_blocker": state.get("cleanup_blocker"),
             "cleanup_performed": state.get("cleanup_performed"),
             "cleanup_performed_at": state.get("cleanup_performed_at"),
-            "state_retention_status": "ARCHIVED" if archived_path is not None else state.get("state_retention_status"),
+            "state_retention_status": "ARCHIVED"
+            if archived_path is not None
+            else state.get("state_retention_status"),
             "archive_eligible": state.get("archive_eligible"),
-            "archive_location": str(archived_path) if archived_path is not None else state.get("archive_location"),
+            "archive_location": str(archived_path)
+            if archived_path is not None
+            else state.get("archive_location"),
             "execution": state.get("execution"),
             "candidate": state.get("candidate"),
             "verified_receipt": state.get("verified_receipt"),
             "execution_authority": state.get("execution_authority"),
-            "provider_receipt_authoritative": state.get(
-                "provider_receipt_authoritative", False
-            ),
+            "provider_receipt_authoritative": state.get("provider_receipt_authoritative", False),
             "workforce_admission_authoritative": state.get(
                 "workforce_admission_authoritative", False
             ),
             "runtime_development_mapping": state.get("runtime_development_mapping"),
-            "collaboration_realm": state.get("collaboration_realm") or contract.get("collaboration_realm"),
+            "collaboration_realm": state.get("collaboration_realm")
+            or contract.get("collaboration_realm"),
             "submission_collaboration_provenance": (
                 state.get("submission_collaboration_provenance")
                 or state.get("collaboration_provenance")
@@ -6587,7 +7494,9 @@ class SelfHostedTaskService:
             for root, dirs, files in os.walk(target_path, topdown=True, followlinks=False):
                 dirs.sort()
                 files.sort()
-                for name, kind in [(name, "dir") for name in dirs] + [(name, "file") for name in files]:
+                for name, kind in [(name, "dir") for name in dirs] + [
+                    (name, "file") for name in files
+                ]:
                     path = Path(root) / name
                     relative = path.relative_to(target_path).as_posix()
                     try:
@@ -6603,9 +7512,14 @@ class SelfHostedTaskService:
                     )
                     if stat.S_ISLNK(metadata.st_mode):
                         try:
-                            digest.update(os.readlink(path).encode("utf-8", errors="surrogateescape"))
+                            digest.update(
+                                os.readlink(path).encode("utf-8", errors="surrogateescape")
+                            )
                         except OSError as exc:
-                            return f"UNREADABLE:{relative}", f"unable to read link {relative}: {exc}"
+                            return (
+                                f"UNREADABLE:{relative}",
+                                f"unable to read link {relative}: {exc}",
+                            )
                     elif stat.S_ISREG(metadata.st_mode):
                         try:
                             digest.update(path.read_bytes())
@@ -6748,12 +7662,17 @@ class SelfHostedTaskService:
                 target_integrity_after = "DURABLE_CANDIDATE"
                 import re
 
-                candidate_tree = state_mid.get("candidate_tree_sha") or promotion_packet.get("candidate_tree_sha")
-                candidate_state_hash = state_mid.get("candidate_state_hash") or promotion_packet.get("candidate_state_hash")
-                verified_receipt_hash = state_mid.get("verified_receipt_hash") or promotion_packet.get("verified_receipt_hash")
-                controller_root = (
-                    state_mid.get("controller_worktree")
-                    or (contract_data.get("controller_repo_root") if contract_data else None)
+                candidate_tree = state_mid.get("candidate_tree_sha") or promotion_packet.get(
+                    "candidate_tree_sha"
+                )
+                candidate_state_hash = state_mid.get(
+                    "candidate_state_hash"
+                ) or promotion_packet.get("candidate_state_hash")
+                verified_receipt_hash = state_mid.get(
+                    "verified_receipt_hash"
+                ) or promotion_packet.get("verified_receipt_hash")
+                controller_root = state_mid.get("controller_worktree") or (
+                    contract_data.get("controller_repo_root") if contract_data else None
                 )
                 candidate_ref_pattern = re.compile(
                     rf"refs/nexus-(?:candidates|candidate-commits)/{re.escape(task_id)}/[0-9a-f]{{40}}"
@@ -6842,8 +7761,12 @@ class SelfHostedTaskService:
                     expected = {
                         "task_id": task_id,
                         "contract_hash": contract_hash,
-                        "controller_revision": contract_data.get("controller_revision") if contract_data else None,
-                        "target_base_revision": contract_data.get("target_base_revision") if contract_data else None,
+                        "controller_revision": contract_data.get("controller_revision")
+                        if contract_data
+                        else None,
+                        "target_base_revision": contract_data.get("target_base_revision")
+                        if contract_data
+                        else None,
                         "candidate_commit_sha": candidate_commit,
                         "candidate_tree_sha": candidate_tree,
                         "candidate_state_hash": candidate_state_hash,
@@ -6862,37 +7785,44 @@ class SelfHostedTaskService:
                         list(target_path.iterdir())
                     except PermissionError:
                         failures.append("target_unreadable")
-                    target_integrity_before, target_integrity_error_before = self._snapshot_target_integrity(target_path)
+                    target_integrity_before, target_integrity_error_before = (
+                        self._snapshot_target_integrity(target_path)
+                    )
                     if target_integrity_error_before:
                         failures.append(
                             f"target_integrity_before_verification:{target_integrity_error_before}"
                         )
             else:
                 failures.append("target_missing")
-                target_integrity_before, target_integrity_error_before = self._snapshot_target_integrity(target_path)
+                target_integrity_before, target_integrity_error_before = (
+                    self._snapshot_target_integrity(target_path)
+                )
 
         # --- Phase 5: Integration SHA validation (actual ancestor check) ---
         integration_result_sha = state_mid.get("integration_result_sha")
         if integration_result_sha:
             import re
+
             if not re.fullmatch(r"[0-9a-f]{40}", integration_result_sha):
                 failures.append("integration_sha_invalid_format")
             else:
-                controller_root = (
-                    state_mid.get("controller_worktree")
-                    or (contract_data.get("controller_repo_root") if contract_data else None)
+                controller_root = state_mid.get("controller_worktree") or (
+                    contract_data.get("controller_repo_root") if contract_data else None
                 )
-                controller_rev = (
-                    state_mid.get("controller_revision")
-                    or (contract_data.get("controller_revision") if contract_data else None)
+                controller_rev = state_mid.get("controller_revision") or (
+                    contract_data.get("controller_revision") if contract_data else None
                 )
                 if controller_root and controller_rev:
                     try:
                         anc_result = subprocess.run(
                             [
-                                "git", "-c", "core.hooksPath=/dev/null",
-                                "merge-base", "--is-ancestor",
-                                integration_result_sha, controller_rev,
+                                "git",
+                                "-c",
+                                "core.hooksPath=/dev/null",
+                                "merge-base",
+                                "--is-ancestor",
+                                integration_result_sha,
+                                controller_rev,
                             ],
                             cwd=controller_root,
                             capture_output=True,
@@ -6904,9 +7834,7 @@ class SelfHostedTaskService:
                         failures.append(f"integration_ancestry_error:{exc}")
 
         # --- Phase 6: Verifier command execution via CandidateVerifier._run_verifiers ---
-        verifier_commands = (
-            contract_data.get("verifier_commands") if contract_data else []
-        ) or []
+        verifier_commands = (contract_data.get("verifier_commands") if contract_data else []) or []
         verifier_evidence: list[dict[str, Any]] = []
         verifier_commands_executed: list[str] = []
 
@@ -6918,14 +7846,17 @@ class SelfHostedTaskService:
             and verifier_commands
             and target_integrity_error_before is None
         ):
+
             class _MinimalContract:
                 pass
+
             _min = _MinimalContract()
             _min.verifier_commands = verifier_commands
 
             try:
                 passed, evidence_tuple, ver_failures = CandidateVerifier._run_verifiers(
-                    _min, target_worktree,
+                    _min,
+                    target_worktree,
                 )
                 for ev in evidence_tuple:
                     verifier_evidence.append({
@@ -6986,7 +7917,8 @@ class SelfHostedTaskService:
             "contract_hash": contract_hash,
             "attempt_id": attempt_id,
             "state_digest_before": state_digest_before,
-            "state_intact": state_after is not None and state_after.get("contract_hash") == contract_hash,
+            "state_intact": state_after is not None
+            and state_after.get("contract_hash") == contract_hash,
             "target_integrity_before": target_integrity_before,
             "target_integrity_after": target_integrity_after,
             "target_integrity_error": target_integrity_error_before or target_integrity_error_after,
@@ -6996,7 +7928,6 @@ class SelfHostedTaskService:
             "next_action": action_state.get("next_action"),
             "recommended_tool": action_state.get("recommended_tool"),
         }
-
 
     def approve_promotion(
         self,
@@ -7065,10 +7996,22 @@ class SelfHostedTaskService:
                 lifecycle_revision=str(grant.get("lifecycle_revision") or ""),
                 server_instance_id=str(grant.get("server_instance_id") or ""),
             )
-        architecture_approval = grant.get("architecture_approval") if isinstance(grant, Mapping) else None
-        receipt = state.get("verified_receipt") if isinstance(state.get("verified_receipt"), Mapping) else {}
-        authority_required = bool(packet.get("authority_change_required") or receipt.get("authority_change_required"))
-        authority_hash = str(packet.get("authority_findings_sha256") or receipt.get("authority_findings_sha256") or "")
+        architecture_approval = (
+            grant.get("architecture_approval") if isinstance(grant, Mapping) else None
+        )
+        receipt = (
+            state.get("verified_receipt")
+            if isinstance(state.get("verified_receipt"), Mapping)
+            else {}
+        )
+        authority_required = bool(
+            packet.get("authority_change_required") or receipt.get("authority_change_required")
+        )
+        authority_hash = str(
+            packet.get("authority_findings_sha256")
+            or receipt.get("authority_findings_sha256")
+            or ""
+        )
         validate_architecture_approval(
             architecture_approval,
             required=authority_required,
@@ -7092,15 +8035,35 @@ class SelfHostedTaskService:
             if (raw_acceptance is None) != (raw_authorization is None):
                 raise RuntimeError("AUTHORIZED_CLOSURE_BINDING_INCOMPLETE")
             if raw_acceptance is not None and raw_authorization is not None:
-                acceptance_obj = raw_acceptance if isinstance(raw_acceptance, ExternalAcceptanceReceipt) else ExternalAcceptanceReceipt(**dict(raw_acceptance))
-                authorization_obj = raw_authorization if isinstance(raw_authorization, IntegrationAuthorizationEnvelope) else IntegrationAuthorizationEnvelope(**{key: value for key, value in dict(raw_authorization).items() if key != "authorization_hash"})
-                if acceptance_obj.task_id != task_id or acceptance_obj.candidate_commit != candidate_commit_sha:
+                acceptance_obj = (
+                    raw_acceptance
+                    if isinstance(raw_acceptance, ExternalAcceptanceReceipt)
+                    else ExternalAcceptanceReceipt(**dict(raw_acceptance))
+                )
+                authorization_obj = (
+                    raw_authorization
+                    if isinstance(raw_authorization, IntegrationAuthorizationEnvelope)
+                    else IntegrationAuthorizationEnvelope(**{
+                        key: value
+                        for key, value in dict(raw_authorization).items()
+                        if key != "authorization_hash"
+                    })
+                )
+                if (
+                    acceptance_obj.task_id != task_id
+                    or acceptance_obj.candidate_commit != candidate_commit_sha
+                ):
                     raise RuntimeError("EXTERNAL_ACCEPTANCE_BINDING_MISMATCH")
-                if authorization_obj.task_id != task_id or authorization_obj.candidate_commit != candidate_commit_sha:
+                if (
+                    authorization_obj.task_id != task_id
+                    or authorization_obj.candidate_commit != candidate_commit_sha
+                ):
                     raise RuntimeError("INTEGRATION_AUTHORIZATION_BINDING_MISMATCH")
                 expected_authorization = {
                     "attempt_id": str(state.get("attempt_id") or ""),
-                    "task_card_hash": str(state.get("task_card_hash") or grant.get("task_card_hash") or ""),
+                    "task_card_hash": str(
+                        state.get("task_card_hash") or grant.get("task_card_hash") or ""
+                    ),
                     "candidate_tree_sha": candidate_tree_sha,
                     "candidate_state_hash": candidate_state_hash,
                     "candidate_receipt_hash": verified_receipt_hash,
@@ -7113,7 +8076,8 @@ class SelfHostedTaskService:
                     "candidate_receipt_hash": authorization_obj.candidate_receipt_hash,
                 }
                 authorization_drift = [
-                    key for key, expected_value in expected_authorization.items()
+                    key
+                    for key, expected_value in expected_authorization.items()
                     if str(authorization_values[key]) != str(expected_value)
                 ]
                 if authorization_drift:
@@ -7125,7 +8089,9 @@ class SelfHostedTaskService:
                     raise RuntimeError("INTEGRATION_AUTHORIZATION_ACCEPTANCE_MISMATCH")
                 external_acceptance = acceptance_obj.to_dict()
                 integration_authorization = authorization_obj.to_dict()
-                integration_authorization["authorization_hash"] = authorization_obj.authorization_hash
+                integration_authorization["authorization_hash"] = (
+                    authorization_obj.authorization_hash
+                )
         now = _utc_now()
         duplicate = False
         initial_status = state.get("status")
@@ -7178,13 +8144,28 @@ class SelfHostedTaskService:
                 != receipt_snapshot
             ):
                 raise RuntimeError("APPROVAL_BINDING_CONCURRENCY_DRIFT")
-            existing = current.get("approved_binding") if isinstance(current.get("approved_binding"), Mapping) else {}
-            existing_grant = existing.get("approval_grant") if isinstance(existing.get("approval_grant"), Mapping) else None
-            if grant is not None and current.get("promotion_status") == "APPROVED" and existing_grant:
+            existing = (
+                current.get("approved_binding")
+                if isinstance(current.get("approved_binding"), Mapping)
+                else {}
+            )
+            existing_grant = (
+                existing.get("approval_grant")
+                if isinstance(existing.get("approval_grant"), Mapping)
+                else None
+            )
+            if (
+                grant is not None
+                and current.get("promotion_status") == "APPROVED"
+                and existing_grant
+            ):
                 same_request = (
                     str(existing_grant.get("approval_id")) == str(grant.get("approval_id"))
                     and all(existing.get(key) == value for key, value in expected.items())
-                    and all(existing_grant.get(key) == grant.get(key) for key in ("contract_kind", "contract_hash", "task_card_hash"))
+                    and all(
+                        existing_grant.get(key) == grant.get(key)
+                        for key in ("contract_kind", "contract_hash", "task_card_hash")
+                    )
                 )
                 if same_request:
                     duplicate = True
@@ -7202,16 +8183,24 @@ class SelfHostedTaskService:
                 "status": status,
                 "promotion_status": status,
                 "candidate_status": status,
-                "approved_binding": ({
-                    **expected,
-                    "approval_grant": consumed,
-                    "external_acceptance": external_acceptance,
-                    "integration_authorization": integration_authorization,
-                    "architecture_approval": (consumed or {}).get("architecture_approval") if consumed is not None else architecture_approval,
-                } if valid else None),
+                "approved_binding": (
+                    {
+                        **expected,
+                        "approval_grant": consumed,
+                        "external_acceptance": external_acceptance,
+                        "integration_authorization": integration_authorization,
+                        "architecture_approval": (consumed or {}).get("architecture_approval")
+                        if consumed is not None
+                        else architecture_approval,
+                    }
+                    if valid
+                    else None
+                ),
                 "external_acceptance": external_acceptance,
                 "integration_authorization": integration_authorization,
-                "approval_error": None if valid else "promotion binding does not match candidate packet",
+                "approval_error": None
+                if valid
+                else "promotion binding does not match candidate packet",
                 "merge_performed": False,
                 "push_performed": False,
                 "updated_at": now,
@@ -7241,9 +8230,15 @@ class SelfHostedTaskService:
         if external_acceptance is None or integration_authorization is None:
             raise RuntimeError("owner finish requires external acceptance and Owner authorization")
         existing = self._read_state(task_id)
-        if existing and existing.get("finalization_receipt") and existing.get("status") in {
-            "INTEGRATED_AND_CLEANED", "INTEGRATED_TARGET_RETAINED",
-        }:
+        if (
+            existing
+            and existing.get("finalization_receipt")
+            and existing.get("status")
+            in {
+                "INTEGRATED_AND_CLEANED",
+                "INTEGRATED_TARGET_RETAINED",
+            }
+        ):
             return {
                 **existing,
                 "duplicate": True,
@@ -7270,11 +8265,22 @@ class SelfHostedTaskService:
         integrated = self.integrate_approved(task_id, integration_branch=integration_branch)
         authorization = dict(integration_authorization)
         state_after_integration = self._read_state(task_id) or integrated
-        lease_target = str((state_after_integration.get("lease") or {}).get("target_worktree") or "")
+        lease_target = str(
+            (state_after_integration.get("lease") or {}).get("target_worktree") or ""
+        )
         requested_target = str(authorization.get("cleanup_target_path") or lease_target)
         target_path = Path(requested_target).expanduser().resolve() if requested_target else None
         temp_roots = _temporary_state_roots()
-        controller_root = Path(str((state_after_integration.get("contract") or {}).get("controller_repo_root") or "")).expanduser().resolve()
+        controller_root = (
+            Path(
+                str(
+                    (state_after_integration.get("contract") or {}).get("controller_repo_root")
+                    or ""
+                )
+            )
+            .expanduser()
+            .resolve()
+        )
         cleanup_allowed = bool(
             self.ephemeral
             and authorization.get("cleanup_requested") is True
@@ -7288,23 +8294,31 @@ class SelfHostedTaskService:
         else:
             cleanup_result = {
                 "dry_run": False,
-                "decisions": [{
-                    "task_id": task_id,
-                    "cleanup_decision": "RETAINED_OUTSIDE_EPHEMERAL_SCOPE",
-                    "cleanup_blocker": "live or non-ephemeral cleanup authority is disabled",
-                    "cleanup_performed": False,
-                    "cleanup_eligible": False,
-                    "target_present_after": True,
-                }],
+                "decisions": [
+                    {
+                        "task_id": task_id,
+                        "cleanup_decision": "RETAINED_OUTSIDE_EPHEMERAL_SCOPE",
+                        "cleanup_blocker": "live or non-ephemeral cleanup authority is disabled",
+                        "cleanup_performed": False,
+                        "cleanup_eligible": False,
+                        "target_present_after": True,
+                    }
+                ],
             }
-        decisions = [d for d in cleanup_result.get("decisions", []) if d.get("task_id", task_id) == task_id]
-        decision = decisions[0] if decisions else {
-            "cleanup_decision": "CLEANUP_BLOCKED",
-            "cleanup_blocker": "cleanup authority returned no decision",
-            "cleanup_performed": False,
-            "cleanup_eligible": False,
-            "target_present_after": True,
-        }
+        decisions = [
+            d for d in cleanup_result.get("decisions", []) if d.get("task_id", task_id) == task_id
+        ]
+        decision = (
+            decisions[0]
+            if decisions
+            else {
+                "cleanup_decision": "CLEANUP_BLOCKED",
+                "cleanup_blocker": "cleanup authority returned no decision",
+                "cleanup_performed": False,
+                "cleanup_eligible": False,
+                "target_present_after": True,
+            }
+        )
         cleanup_receipt = dict(decision.get("cleanup_receipt") or {})
         cleanup_receipt.setdefault("schema", "nexus.target_cleanup_receipt.v1")
         cleanup_receipt.setdefault("task_id", task_id)
@@ -7314,31 +8328,127 @@ class SelfHostedTaskService:
         cleanup_receipt.setdefault("eligible", bool(decision.get("cleanup_eligible")))
         cleanup_receipt.setdefault(
             "target_present_after",
-            bool(decision.get("target_present_after", decision.get("cleanup_decision") != "ALREADY_REMOVED")),
+            bool(
+                decision.get(
+                    "target_present_after", decision.get("cleanup_decision") != "ALREADY_REMOVED"
+                )
+            ),
         )
-        cleanup_receipt_hash = hashlib.sha256(json.dumps(cleanup_receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
-        cleaned = (
-            not bool(cleanup_receipt.get("target_present_after"))
-            and (bool(cleanup_receipt.get("performed")) or cleanup_receipt.get("decision") == "ALREADY_REMOVED")
+        cleanup_receipt_hash = hashlib.sha256(
+            json.dumps(
+                cleanup_receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")
+        ).hexdigest()
+        cleaned = not bool(cleanup_receipt.get("target_present_after")) and (
+            bool(cleanup_receipt.get("performed"))
+            or cleanup_receipt.get("decision") == "ALREADY_REMOVED"
         )
         final_status = "INTEGRATED_AND_CLEANED" if cleaned else "INTEGRATED_TARGET_RETAINED"
         finalization_status = "CLEANED" if cleaned else "RETAINED"
-        retention_reason = None if cleaned else str(cleanup_receipt.get("blocker") or cleanup_receipt.get("decision") or "cleanup was not performed")
+        retention_reason = (
+            None
+            if cleaned
+            else str(
+                cleanup_receipt.get("blocker")
+                or cleanup_receipt.get("decision")
+                or "cleanup was not performed"
+            )
+        )
         integration_receipt = integrated.get("integration_receipt") or {}
         finalization = {
             "schema": "nexus.task_finalization_receipt.v1",
-            "identity": {"task_id": task_id, "campaign_id": (state_after_integration.get("request") or {}).get("campaign_id"), "attempt_id": state_after_integration.get("attempt_id"), "task_card_hash": state_after_integration.get("task_card_hash")},
-            "candidate": {"commit_sha": candidate_commit_sha, "tree_sha": candidate_tree_sha, "state_hash": candidate_state_hash, "verified_receipt_hash": verified_receipt_hash},
-            "acceptance": {"receipt_hash": authorization.get("acceptance_receipt_hash") or dict(external_acceptance).get("receipt_hash"), "reviewer_id": dict(external_acceptance).get("reviewer_id")},
-            "authorization": {"authorization_hash": authorization.get("authorization_hash"), "approval_id": ((state_after_integration.get("approved_binding") or {}).get("approval_grant") or {}).get("approval_id"), "consumed_at": ((state_after_integration.get("approved_binding") or {}).get("approval_grant") or {}).get("consumed_at"), "action_set": list(authorization.get("action_set") or [])},
-            "integration": {"status": "INTEGRATED", "branch": integrated.get("integration_branch") or integration_branch, "head_before": integrated.get("integration_base_sha"), "staging_commit": integration_receipt.get("staging_commit_sha"), "head_after": integrated.get("integration_result_sha"), "candidate_is_ancestor": True, "merge_performed": bool(integrated.get("merge_performed", True)), "staging_verified": bool(integration_receipt.get("staging_verified", True)), "post_apply_verified": bool(integration_receipt.get("post_apply_verified", True)), "receipt_hash": hashlib.sha256(json.dumps(integration_receipt, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest(), "failure_reason": None},
-            "cleanup": {"status": finalization_status, "target_id": authorization.get("cleanup_target_id"), "target_path": requested_target, "target_present_after": bool(cleanup_receipt.get("target_present_after")), "performed": bool(cleanup_receipt.get("performed")), "eligible": bool(cleanup_receipt.get("eligible")), "blocker": cleanup_receipt.get("blocker"), "receipt_hash": cleanup_receipt_hash},
-            "terminal": {"final_status": final_status, "retention_reason": retention_reason, "next_action": "none" if cleaned else "retry_cleanup", "archive_eligible": cleaned},
+            "identity": {
+                "task_id": task_id,
+                "campaign_id": (state_after_integration.get("request") or {}).get("campaign_id"),
+                "attempt_id": state_after_integration.get("attempt_id"),
+                "task_card_hash": state_after_integration.get("task_card_hash"),
+            },
+            "candidate": {
+                "commit_sha": candidate_commit_sha,
+                "tree_sha": candidate_tree_sha,
+                "state_hash": candidate_state_hash,
+                "verified_receipt_hash": verified_receipt_hash,
+            },
+            "acceptance": {
+                "receipt_hash": authorization.get("acceptance_receipt_hash")
+                or dict(external_acceptance).get("receipt_hash"),
+                "reviewer_id": dict(external_acceptance).get("reviewer_id"),
+            },
+            "authorization": {
+                "authorization_hash": authorization.get("authorization_hash"),
+                "approval_id": (
+                    (state_after_integration.get("approved_binding") or {}).get("approval_grant")
+                    or {}
+                ).get("approval_id"),
+                "consumed_at": (
+                    (state_after_integration.get("approved_binding") or {}).get("approval_grant")
+                    or {}
+                ).get("consumed_at"),
+                "action_set": list(authorization.get("action_set") or []),
+            },
+            "integration": {
+                "status": "INTEGRATED",
+                "branch": integrated.get("integration_branch") or integration_branch,
+                "head_before": integrated.get("integration_base_sha"),
+                "staging_commit": integration_receipt.get("staging_commit_sha"),
+                "head_after": integrated.get("integration_result_sha"),
+                "candidate_is_ancestor": True,
+                "merge_performed": bool(integrated.get("merge_performed", True)),
+                "staging_verified": bool(integration_receipt.get("staging_verified", True)),
+                "post_apply_verified": bool(integration_receipt.get("post_apply_verified", True)),
+                "receipt_hash": hashlib.sha256(
+                    json.dumps(
+                        integration_receipt,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        ensure_ascii=False,
+                    ).encode("utf-8")
+                ).hexdigest(),
+                "failure_reason": None,
+            },
+            "cleanup": {
+                "status": finalization_status,
+                "target_id": authorization.get("cleanup_target_id"),
+                "target_path": requested_target,
+                "target_present_after": bool(cleanup_receipt.get("target_present_after")),
+                "performed": bool(cleanup_receipt.get("performed")),
+                "eligible": bool(cleanup_receipt.get("eligible")),
+                "blocker": cleanup_receipt.get("blocker"),
+                "receipt_hash": cleanup_receipt_hash,
+            },
+            "terminal": {
+                "final_status": final_status,
+                "retention_reason": retention_reason,
+                "next_action": "none" if cleaned else "retry_cleanup",
+                "archive_eligible": cleaned,
+            },
             "created_at": _utc_now(),
         }
-        finalization["receipt_hash"] = hashlib.sha256(json.dumps(finalization, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
-        values = {"status": final_status, "promotion_status": "INTEGRATED", "candidate_status": "INTEGRATED", "integration_status": "INTEGRATED", "cleanup_status": finalization_status, "target_present": bool(cleanup_receipt.get("target_present_after")), "cleanup_receipt": cleanup_receipt, "cleanup_receipt_hash": cleanup_receipt_hash, "finalization_receipt": finalization, "retention_reason": retention_reason, "next_action": "none" if cleaned else "retry_cleanup", "terminal_status": final_status, "final_disposition": final_status, "archive_eligible": cleaned, "state_retention_status": "TERMINAL" if cleaned else "ACTIONABLE"}
-        persisted = self._checkpoint(task_id, final_status, values, attempt_id=state_after_integration.get("attempt_id"))
+        finalization["receipt_hash"] = hashlib.sha256(
+            json.dumps(
+                finalization, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode("utf-8")
+        ).hexdigest()
+        values = {
+            "status": final_status,
+            "promotion_status": "INTEGRATED",
+            "candidate_status": "INTEGRATED",
+            "integration_status": "INTEGRATED",
+            "cleanup_status": finalization_status,
+            "target_present": bool(cleanup_receipt.get("target_present_after")),
+            "cleanup_receipt": cleanup_receipt,
+            "cleanup_receipt_hash": cleanup_receipt_hash,
+            "finalization_receipt": finalization,
+            "retention_reason": retention_reason,
+            "next_action": "none" if cleaned else "retry_cleanup",
+            "terminal_status": final_status,
+            "final_disposition": final_status,
+            "archive_eligible": cleaned,
+            "state_retention_status": "TERMINAL" if cleaned else "ACTIONABLE",
+        }
+        persisted = self._checkpoint(
+            task_id, final_status, values, attempt_id=state_after_integration.get("attempt_id")
+        )
         if persisted is None:
             persisted = dict(state_after_integration)
             persisted.update(values)
@@ -7348,16 +8458,27 @@ class SelfHostedTaskService:
         if cleaned:
             archive = self.archive_states(dry_run=False)
         fresh = self._read_state(task_id) or persisted
-        return {**fresh, "duplicate": False, "owner_finish": {"approval_status": "APPROVED", "integration_status": "INTEGRATED", "cleanup_status": finalization_status, "archive": archive}}
+        return {
+            **fresh,
+            "duplicate": False,
+            "owner_finish": {
+                "approval_status": "APPROVED",
+                "integration_status": "INTEGRATED",
+                "cleanup_status": finalization_status,
+                "archive": archive,
+            },
+        }
 
     def recover_verified_uncommitted_candidate(self, task_id: str) -> dict[str, Any]:
         state = self._read_state(task_id)
         if state is None:
             raise KeyError(f"unknown task_id: {task_id}")
-        
+
         status = state.get("status")
         if status not in {"RETAINED_FOR_REVIEW", "FINAL_BLOCK"}:
-            raise RuntimeError(f"task status '{status}' is not eligible for uncommitted recovery; status must be RETAINED_FOR_REVIEW or FINAL_BLOCK")
+            raise RuntimeError(
+                f"task status '{status}' is not eligible for uncommitted recovery; status must be RETAINED_FOR_REVIEW or FINAL_BLOCK"
+            )
 
         verified_receipt = state.get("verified_receipt") or {}
         if not verified_receipt.get("verified"):
@@ -7384,10 +8505,22 @@ class SelfHostedTaskService:
 
         contract_dict = state.get("contract") or {}
         lease_dict = state.get("lease") or {}
-        contract_fields = set(ArchitectTaskContract.model_fields.keys()) if hasattr(ArchitectTaskContract, "model_fields") else set()
-        lease_fields = set(TargetWorktreeLease.model_fields.keys()) if hasattr(TargetWorktreeLease, "model_fields") else set()
+        contract_fields = (
+            set(ArchitectTaskContract.model_fields.keys())
+            if hasattr(ArchitectTaskContract, "model_fields")
+            else set()
+        )
+        lease_fields = (
+            set(TargetWorktreeLease.model_fields.keys())
+            if hasattr(TargetWorktreeLease, "model_fields")
+            else set()
+        )
 
-        clean_lease = {k: v for k, v in lease_dict.items() if k in lease_fields} if lease_fields else lease_dict
+        clean_lease = (
+            {k: v for k, v in lease_dict.items() if k in lease_fields}
+            if lease_fields
+            else lease_dict
+        )
 
         if isinstance(contract_dict, dict):
             c_dict = contract_dict.copy()
@@ -7408,7 +8541,9 @@ class SelfHostedTaskService:
         controller_root = Path(contract.controller_repo_root).resolve()
         entry = manager._worktree_entry(controller_root, target_path)
         if entry is None:
-            raise RuntimeError(f"target path is not a registered Git worktree under controller {controller_root}")
+            raise RuntimeError(
+                f"target path is not a registered Git worktree under controller {controller_root}"
+            )
 
         if manager._path_has_process(target_path):
             raise RuntimeError("target worktree has active running process")
@@ -7417,10 +8552,14 @@ class SelfHostedTaskService:
         receipt_obj = VerifiedCandidateReceipt(**verified_receipt)
 
         if target_head != lease.initial_head:
-            raise RuntimeError("verified-uncommitted recovery rejected: target HEAD moved from initial_head; use recover_retained_candidate()")
+            raise RuntimeError(
+                "verified-uncommitted recovery rejected: target HEAD moved from initial_head; use recover_retained_candidate()"
+            )
 
         current = manager.capture_candidate(contract, lease)
-        expected_state_hash = state.get("candidate_state_hash") or verified_receipt.get("candidate_state_hash")
+        expected_state_hash = state.get("candidate_state_hash") or verified_receipt.get(
+            "candidate_state_hash"
+        )
         if current.candidate_state_hash != expected_state_hash:
             raise RuntimeError("candidate state hash changed after verification")
         committer = CandidateCommitter(manager)
@@ -7442,7 +8581,9 @@ class SelfHostedTaskService:
             "cleanup_decision": "PROTECTED_BY_CANDIDATE_REF",
             "cleanup_eligible": False,
         }
-        res = self._checkpoint(task_id, "PENDING_HUMAN_APPROVAL", updates, attempt_id=state.get("attempt_id"))
+        res = self._checkpoint(
+            task_id, "PENDING_HUMAN_APPROVAL", updates, attempt_id=state.get("attempt_id")
+        )
         return res or self._read_state(task_id) or state
 
     def bind_candidate_integration_closure(
@@ -7465,7 +8606,32 @@ class SelfHostedTaskService:
         """
         if not isinstance(external_acceptance, ExternalAcceptanceReceipt):
             raise RuntimeError("EXTERNAL_ACCEPTANCE_TYPED_REQUIRED")
-        approval_keys = {"schema", "approval_id", "approved_by", "issued_at", "expires_at", "bound_task_id", "bound_attempt_id", "bound_action_type", "approval_scope", "contract_kind", "contract_hash", "task_card_hash", "tool_manifest_hash", "full_tool_schema_hash", "permission_policy_hash", "lifecycle_revision", "server_instance_id", "expected_canonical_head", "integration_branch", "candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash", "acceptance_receipt_hash"}
+        approval_keys = {
+            "schema",
+            "approval_id",
+            "approved_by",
+            "issued_at",
+            "expires_at",
+            "bound_task_id",
+            "bound_attempt_id",
+            "bound_action_type",
+            "approval_scope",
+            "contract_kind",
+            "contract_hash",
+            "task_card_hash",
+            "tool_manifest_hash",
+            "full_tool_schema_hash",
+            "permission_policy_hash",
+            "lifecycle_revision",
+            "server_instance_id",
+            "expected_canonical_head",
+            "integration_branch",
+            "candidate_commit_sha",
+            "candidate_tree_sha",
+            "candidate_state_hash",
+            "verified_receipt_hash",
+            "acceptance_receipt_hash",
+        }
         if set(approval) - approval_keys:
             raise RuntimeError("CLOSURE_APPROVAL_SCHEMA_CLOSED")
         state = self._read_state(task_id)
@@ -7488,8 +8654,7 @@ class SelfHostedTaskService:
             and state.get("promotion_status") == "INTEGRATION_FAILED_PRE_APPLY"
         )
         if not failed_pre_apply and (
-            state.get("status") != "APPROVED"
-            or state.get("promotion_status") != "APPROVED"
+            state.get("status") != "APPROVED" or state.get("promotion_status") != "APPROVED"
         ):
             raise RuntimeError("CLOSURE_APPROVED_CANDIDATE_REQUIRED")
         if failed_pre_apply:
@@ -7505,90 +8670,228 @@ class SelfHostedTaskService:
                 != failed_execution.get("branch_head_after")
             ):
                 raise RuntimeError("CLOSURE_PRE_APPLY_FAILURE_REQUIRED")
-        if "integration_closure_binding" in state and (not isinstance(state.get("integration_closure_binding"), Mapping) or not state.get("integration_closure_binding")):
+        if "integration_closure_binding" in state and (
+            not isinstance(state.get("integration_closure_binding"), Mapping)
+            or not state.get("integration_closure_binding")
+        ):
             raise RuntimeError("CLOSURE_BINDING_MALFORMED")
-        existing = state.get("integration_closure_binding") if isinstance(state.get("integration_closure_binding"), Mapping) else None
+        existing = (
+            state.get("integration_closure_binding")
+            if isinstance(state.get("integration_closure_binding"), Mapping)
+            else None
+        )
         if existing:
-            if "integration_approval_grant" not in state or not isinstance(state.get("integration_approval_grant"), Mapping) or not state.get("integration_approval_grant"):
+            if (
+                "integration_approval_grant" not in state
+                or not isinstance(state.get("integration_approval_grant"), Mapping)
+                or not state.get("integration_approval_grant")
+            ):
                 raise RuntimeError("CLOSURE_BINDING_MALFORMED")
-            if state.get("merge_performed") or state.get("integration_receipt") or state.get("integration_result_sha") or (state.get("integration_execution") and not failed_pre_apply) or state.get("status") in {"INTEGRATED", "INTEGRATED_AND_CLEANED", "INTEGRATED_TARGET_RETAINED", "INTEGRATION_VERIFY_FAILED_AFTER_APPLY"}:
+            if (
+                state.get("merge_performed")
+                or state.get("integration_receipt")
+                or state.get("integration_result_sha")
+                or (state.get("integration_execution") and not failed_pre_apply)
+                or state.get("status")
+                in {
+                    "INTEGRATED",
+                    "INTEGRATED_AND_CLEANED",
+                    "INTEGRATED_TARGET_RETAINED",
+                    "INTEGRATION_VERIFY_FAILED_AFTER_APPLY",
+                }
+            ):
                 raise RuntimeError("CLOSURE_REBIND_AFTER_INTEGRATION_FORBIDDEN")
             prior_history = state.get("integration_closure_history")
             if "integration_closure_history" in state and not isinstance(prior_history, list):
                 raise RuntimeError("CLOSURE_HISTORY_MALFORMED")
-            persisted_grant = state.get("integration_approval_grant") if isinstance(state.get("integration_approval_grant"), Mapping) else {}
-            packet_for_rebind = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
+            persisted_grant = (
+                state.get("integration_approval_grant")
+                if isinstance(state.get("integration_approval_grant"), Mapping)
+                else {}
+            )
+            packet_for_rebind = (
+                state.get("promotion_packet")
+                if isinstance(state.get("promotion_packet"), Mapping)
+                else {}
+            )
             immutable_state = {
                 "task_id": task_id,
                 "attempt_id": str(state.get("attempt_id") or ""),
-                "candidate_commit_sha": str(packet_for_rebind.get("candidate_commit_sha") or state.get("candidate_commit_sha") or ""),
-                "candidate_tree_sha": str(packet_for_rebind.get("candidate_tree_sha") or state.get("candidate_tree_sha") or ""),
-                "candidate_state_hash": str(packet_for_rebind.get("candidate_state_hash") or state.get("candidate_state_hash") or ""),
-                "verified_receipt_hash": str(packet_for_rebind.get("verified_receipt_hash") or state.get("verified_receipt_hash") or ""),
+                "candidate_commit_sha": str(
+                    packet_for_rebind.get("candidate_commit_sha")
+                    or state.get("candidate_commit_sha")
+                    or ""
+                ),
+                "candidate_tree_sha": str(
+                    packet_for_rebind.get("candidate_tree_sha")
+                    or state.get("candidate_tree_sha")
+                    or ""
+                ),
+                "candidate_state_hash": str(
+                    packet_for_rebind.get("candidate_state_hash")
+                    or state.get("candidate_state_hash")
+                    or ""
+                ),
+                "verified_receipt_hash": str(
+                    packet_for_rebind.get("verified_receipt_hash")
+                    or state.get("verified_receipt_hash")
+                    or ""
+                ),
                 "contract_kind": identity["contract_kind"],
                 "contract_hash": identity["contract_hash"] or "",
                 "task_card_hash": identity["task_card_hash"] or "",
             }
             for field, value in immutable_state.items():
                 prior_value = existing.get(field)
-                if field not in existing and field not in {"contract_kind", "contract_hash", "task_card_hash"}:
+                if field not in existing and field not in {
+                    "contract_kind",
+                    "contract_hash",
+                    "task_card_hash",
+                }:
                     raise RuntimeError("CLOSURE_IMMUTABLE_BINDING_DRIFT")
                 if not prior_value and field == "contract_kind":
-                    prior_value = persisted_grant.get("contract_kind") or ContractKind.TRACKED_TASK_CARD.value
+                    prior_value = (
+                        persisted_grant.get("contract_kind") or ContractKind.TRACKED_TASK_CARD.value
+                    )
                 if not prior_value and field == "contract_hash":
                     prior_value = persisted_grant.get("contract_hash") or ""
                 if not prior_value and field == "task_card_hash":
                     prior_value = persisted_grant.get("task_card_hash") or ""
                 if prior_value is not None and str(prior_value or "") != value:
                     raise RuntimeError("CLOSURE_IMMUTABLE_BINDING_DRIFT")
-            if str(existing.get("acceptance_receipt_hash") or "") != str(external_acceptance.receipt_hash) or str(existing.get("canonical_branch") or "") != str(integration_branch) or str(existing.get("bound_action_type") or persisted_grant.get("bound_action_type") or "") != LifecycleActionType.CANDIDATE_INTEGRATE.value or str(existing.get("approval_scope") or persisted_grant.get("approval_scope") or "") != "ALLOW_ACTION_ONCE":
+            if (
+                str(existing.get("acceptance_receipt_hash") or "")
+                != str(external_acceptance.receipt_hash)
+                or str(existing.get("canonical_branch") or "") != str(integration_branch)
+                or str(
+                    existing.get("bound_action_type")
+                    or persisted_grant.get("bound_action_type")
+                    or ""
+                )
+                != LifecycleActionType.CANDIDATE_INTEGRATE.value
+                or str(
+                    existing.get("approval_scope") or persisted_grant.get("approval_scope") or ""
+                )
+                != "ALLOW_ACTION_ONCE"
+            ):
                 raise RuntimeError("CLOSURE_IMMUTABLE_BINDING_DRIFT")
             persisted_acceptance = state.get("external_acceptance")
-            if not isinstance(persisted_acceptance, Mapping) or dict(persisted_acceptance) != external_acceptance.to_dict():
+            if (
+                not isinstance(persisted_acceptance, Mapping)
+                or dict(persisted_acceptance) != external_acceptance.to_dict()
+            ):
                 raise RuntimeError("CLOSURE_IMMUTABLE_BINDING_DRIFT")
             replay = (
                 str(existing.get("task_id") or "") == task_id
                 and str(existing.get("attempt_id") or "") == str(state.get("attempt_id") or "")
-                and str(existing.get("candidate_commit_sha") or "") == immutable_state["candidate_commit_sha"]
-                and str(existing.get("candidate_tree_sha") or "") == immutable_state["candidate_tree_sha"]
-                and str(existing.get("candidate_state_hash") or "") == immutable_state["candidate_state_hash"]
-                and str(existing.get("verified_receipt_hash") or "") == immutable_state["verified_receipt_hash"]
-                and str(existing.get("acceptance_receipt_hash") or "") == str(external_acceptance.receipt_hash)
+                and str(existing.get("candidate_commit_sha") or "")
+                == immutable_state["candidate_commit_sha"]
+                and str(existing.get("candidate_tree_sha") or "")
+                == immutable_state["candidate_tree_sha"]
+                and str(existing.get("candidate_state_hash") or "")
+                == immutable_state["candidate_state_hash"]
+                and str(existing.get("verified_receipt_hash") or "")
+                == immutable_state["verified_receipt_hash"]
+                and str(existing.get("acceptance_receipt_hash") or "")
+                == str(external_acceptance.receipt_hash)
                 and str(existing.get("canonical_branch") or "") == str(integration_branch)
-                and str(existing.get("expected_canonical_head") or existing.get("canonical_head") or "") == str(expected_canonical_head)
+                and str(
+                    existing.get("expected_canonical_head") or existing.get("canonical_head") or ""
+                )
+                == str(expected_canonical_head)
                 and dict(existing.get("runtime_identity") or {}) == dict(runtime_identity)
-                and str(existing.get("approval_id") or persisted_grant.get("approval_id") or "") == str(approval.get("approval_id") or "")
-                and str(existing.get("approval_issued_at") or persisted_grant.get("issued_at") or "") == str(approval.get("issued_at") or "")
-                and str(existing.get("approval_expires_at") or persisted_grant.get("expires_at") or "") == str(approval.get("expires_at") or "")
-                and dict(existing.get("approval_projection") or {key: persisted_grant.get(key) for key in approval_keys}) == {key: approval.get(key) for key in approval_keys}
+                and str(existing.get("approval_id") or persisted_grant.get("approval_id") or "")
+                == str(approval.get("approval_id") or "")
+                and str(
+                    existing.get("approval_issued_at") or persisted_grant.get("issued_at") or ""
+                )
+                == str(approval.get("issued_at") or "")
+                and str(
+                    existing.get("approval_expires_at") or persisted_grant.get("expires_at") or ""
+                )
+                == str(approval.get("expires_at") or "")
+                and dict(
+                    existing.get("approval_projection")
+                    or {key: persisted_grant.get(key) for key in approval_keys}
+                )
+                == {key: approval.get(key) for key in approval_keys}
             )
-            projection = dict(existing.get("approval_projection") or {key: persisted_grant.get(key) for key in approval_keys})
-            same_approval_id = str(existing.get("approval_id") or persisted_grant.get("approval_id") or "") == str(approval.get("approval_id") or "")
+            projection = dict(
+                existing.get("approval_projection")
+                or {key: persisted_grant.get(key) for key in approval_keys}
+            )
+            same_approval_id = str(
+                existing.get("approval_id") or persisted_grant.get("approval_id") or ""
+            ) == str(approval.get("approval_id") or "")
             if failed_pre_apply and same_approval_id:
                 raise RuntimeError("CLOSURE_FAILED_APPROVAL_REUSE")
             if same_approval_id and projection != {key: approval.get(key) for key in approval_keys}:
                 raise RuntimeError("CLOSURE_APPROVAL_REPLAY_DRIFT")
             if replay and not failed_pre_apply:
-                return {**state, "closure_binding": dict(existing), "duplicate": True, "integration_performed": False}
+                return {
+                    **state,
+                    "closure_binding": dict(existing),
+                    "duplicate": True,
+                    "integration_performed": False,
+                }
         attempt_id = str(state.get("attempt_id") or "")
-        packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
-        candidate_commit = str(packet.get("candidate_commit_sha") or state.get("candidate_commit_sha") or "")
-        candidate_tree = str(packet.get("candidate_tree_sha") or state.get("candidate_tree_sha") or "")
-        candidate_state = str(packet.get("candidate_state_hash") or state.get("candidate_state_hash") or "")
-        verified_receipt_hash = str(packet.get("verified_receipt_hash") or state.get("verified_receipt_hash") or "")
-        approved_binding = state.get("approved_binding") if isinstance(state.get("approved_binding"), Mapping) else {}
-        old_approval = approved_binding.get("approval_grant") if isinstance(approved_binding.get("approval_grant"), Mapping) else {}
-        if not approved_binding or not old_approval.get("consumed_at") or old_approval.get("approval_scope") != "ALLOW_ACTION_ONCE":
+        packet = (
+            state.get("promotion_packet")
+            if isinstance(state.get("promotion_packet"), Mapping)
+            else {}
+        )
+        candidate_commit = str(
+            packet.get("candidate_commit_sha") or state.get("candidate_commit_sha") or ""
+        )
+        candidate_tree = str(
+            packet.get("candidate_tree_sha") or state.get("candidate_tree_sha") or ""
+        )
+        candidate_state = str(
+            packet.get("candidate_state_hash") or state.get("candidate_state_hash") or ""
+        )
+        verified_receipt_hash = str(
+            packet.get("verified_receipt_hash") or state.get("verified_receipt_hash") or ""
+        )
+        approved_binding = (
+            state.get("approved_binding")
+            if isinstance(state.get("approved_binding"), Mapping)
+            else {}
+        )
+        old_approval = (
+            approved_binding.get("approval_grant")
+            if isinstance(approved_binding.get("approval_grant"), Mapping)
+            else {}
+        )
+        if (
+            not approved_binding
+            or not old_approval.get("consumed_at")
+            or old_approval.get("approval_scope") != "ALLOW_ACTION_ONCE"
+        ):
             raise RuntimeError("CLOSURE_APPROVED_BINDING_REQUIRED")
-        for field in ("candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash"):
-            if not approved_binding.get(field) or str(approved_binding.get(field)) != str(packet.get(field)):
+        for field in (
+            "candidate_commit_sha",
+            "candidate_tree_sha",
+            "candidate_state_hash",
+            "verified_receipt_hash",
+        ):
+            if not approved_binding.get(field) or str(approved_binding.get(field)) != str(
+                packet.get(field)
+            ):
                 raise RuntimeError("CLOSURE_CANDIDATE_BINDING_DRIFT")
         if external_acceptance.task_id != task_id or external_acceptance.attempt_id != attempt_id:
             raise RuntimeError("EXTERNAL_ACCEPTANCE_BINDING_MISMATCH")
         if external_acceptance.candidate_commit != candidate_commit:
             raise RuntimeError("EXTERNAL_ACCEPTANCE_BINDING_MISMATCH")
-        approval_binding = {"candidate_commit_sha": candidate_commit, "candidate_tree_sha": candidate_tree, "candidate_state_hash": candidate_state, "verified_receipt_hash": verified_receipt_hash, "acceptance_receipt_hash": external_acceptance.receipt_hash}
-        if any(str(approval.get(key) or "") != str(value) for key, value in approval_binding.items()):
+        approval_binding = {
+            "candidate_commit_sha": candidate_commit,
+            "candidate_tree_sha": candidate_tree,
+            "candidate_state_hash": candidate_state,
+            "verified_receipt_hash": verified_receipt_hash,
+            "acceptance_receipt_hash": external_acceptance.receipt_hash,
+        }
+        if any(
+            str(approval.get(key) or "") != str(value) for key, value in approval_binding.items()
+        ):
             raise RuntimeError("CLOSURE_CANDIDATE_BINDING_DRIFT")
         artifact_path = Path(external_acceptance.verifier_artifact).expanduser()
         evidence_root = (self.state_dir / "acceptance-artifacts" / task_id).resolve()
@@ -7596,7 +8899,11 @@ class SelfHostedTaskService:
             artifact_path.resolve().relative_to(evidence_root)
         except ValueError as exc:
             raise RuntimeError("EXTERNAL_ACCEPTANCE_ARTIFACT_REQUIRED") from exc
-        if not artifact_path.is_absolute() or ".git" in artifact_path.parts or not artifact_path.is_file():
+        if (
+            not artifact_path.is_absolute()
+            or ".git" in artifact_path.parts
+            or not artifact_path.is_file()
+        ):
             raise RuntimeError("EXTERNAL_ACCEPTANCE_ARTIFACT_REQUIRED")
         try:
             artifact_digest = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
@@ -7637,27 +8944,47 @@ class SelfHostedTaskService:
                 separators=(",", ":"),
             ).encode()
         ).hexdigest()
-        controller_root = Path(str(contract_data.get("controller_repo_root") or CANONICAL_SOURCE_ROOT)).expanduser().resolve()
-        manager = WorktreeManager(root_dir=str(contract_data.get("target_worktree_root") or controller_root))
+        controller_root = (
+            Path(str(contract_data.get("controller_repo_root") or CANONICAL_SOURCE_ROOT))
+            .expanduser()
+            .resolve()
+        )
+        manager = WorktreeManager(
+            root_dir=str(contract_data.get("target_worktree_root") or controller_root)
+        )
         current_head = manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
-        if not re.fullmatch(r"[0-9a-f]{40}", expected_canonical_head) or current_head != expected_canonical_head:
+        if (
+            not re.fullmatch(r"[0-9a-f]{40}", expected_canonical_head)
+            or current_head != expected_canonical_head
+        ):
             raise RuntimeError("CLOSURE_CANONICAL_HEAD_DRIFT")
-        if str(approval.get("expected_canonical_head") or expected_canonical_head) != expected_canonical_head:
+        if (
+            str(approval.get("expected_canonical_head") or expected_canonical_head)
+            != expected_canonical_head
+        ):
             raise RuntimeError("CLOSURE_HEAD_BINDING_MISMATCH")
-        status = manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root)
+        status = manager._run_git(
+            ["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root
+        )
         if status:
             raise RuntimeError("CLOSURE_CANONICAL_DIRTY")
-        if not approval.get("integration_branch") or integration_branch != str(approval.get("integration_branch")):
+        if not approval.get("integration_branch") or integration_branch != str(
+            approval.get("integration_branch")
+        ):
             raise RuntimeError("CLOSURE_BRANCH_BINDING_MISMATCH")
         current_branch = manager._run_git(["branch", "--show-current"], cwd=controller_root)
         if current_branch != integration_branch:
             raise RuntimeError("CLOSURE_CANONICAL_BRANCH_DRIFT")
         lease = state.get("lease") if isinstance(state.get("lease"), Mapping) else {}
         target_id = str(lease.get("lease_id") or state.get("target_id") or task_id)
-        target_path = str(lease.get("target_worktree") or contract_data.get("target_repo_root") or "")
+        target_path = str(
+            lease.get("target_worktree") or contract_data.get("target_repo_root") or ""
+        )
         if not target_path:
             raise RuntimeError("CLOSURE_TARGET_BINDING_REQUIRED")
-        verification_commands = tuple(str(command) for command in contract_data.get("verifier_commands") or ())
+        verification_commands = tuple(
+            str(command) for command in contract_data.get("verifier_commands") or ()
+        )
         preview = TargetIntegrationLifecycle.build_preview(
             task_id=task_id,
             target_id=target_id,
@@ -7722,13 +9049,30 @@ class SelfHostedTaskService:
             "preview": preview.to_dict(),
             "authorization_hash": authorization.authorization_hash,
         }
-        closure_hash = hashlib.sha256(json.dumps(closure, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        closure_hash = hashlib.sha256(
+            json.dumps(closure, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+        ).hexdigest()
         closure["binding_hash"] = closure_hash
         now = _utc_now()
         duplicate = False
-        expected_prior_snapshot = json.dumps(_jsonable(dict(existing)) if existing else None, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        expected_history_snapshot = json.dumps(_jsonable(state.get("integration_closure_history")), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-        expected_grant_snapshot = json.dumps(_jsonable(state.get("integration_approval_grant")), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        expected_prior_snapshot = json.dumps(
+            _jsonable(dict(existing)) if existing else None,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        expected_history_snapshot = json.dumps(
+            _jsonable(state.get("integration_closure_history")),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        expected_grant_snapshot = json.dumps(
+            _jsonable(state.get("integration_approval_grant")),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
         expected_failure_snapshot = json.dumps(
             _jsonable(state.get("integration_execution")),
             sort_keys=True,
@@ -7739,9 +9083,7 @@ class SelfHostedTaskService:
 
         def mutate(current: dict[str, Any]) -> None:
             nonlocal duplicate
-            expected_status = (
-                "INTEGRATION_FAILED_PRE_APPLY" if failed_pre_apply else "APPROVED"
-            )
+            expected_status = "INTEGRATION_FAILED_PRE_APPLY" if failed_pre_apply else "APPROVED"
             if (
                 str(current.get("task_id") or "") != task_id
                 or current.get("status") != expected_status
@@ -7750,7 +9092,11 @@ class SelfHostedTaskService:
                 raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
             if current.get("attempt_id") != attempt_id:
                 raise RuntimeError("CLOSURE_ATTEMPT_DRIFT")
-            current_packet = current.get("promotion_packet") if isinstance(current.get("promotion_packet"), Mapping) else {}
+            current_packet = (
+                current.get("promotion_packet")
+                if isinstance(current.get("promotion_packet"), Mapping)
+                else {}
+            )
             for key, expected in {
                 "candidate_commit_sha": candidate_commit,
                 "candidate_tree_sha": candidate_tree,
@@ -7770,21 +9116,62 @@ class SelfHostedTaskService:
             ):
                 raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
             persisted_current_acceptance = current.get("external_acceptance")
-            if not isinstance(persisted_current_acceptance, Mapping) or dict(persisted_current_acceptance) != external_acceptance.to_dict():
+            if (
+                not isinstance(persisted_current_acceptance, Mapping)
+                or dict(persisted_current_acceptance) != external_acceptance.to_dict()
+            ):
                 if existing or persisted_current_acceptance is not None:
                     raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
             if not existing and current.get("integration_approval_grant"):
                 raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
-            prior = current.get("integration_closure_binding") if isinstance(current.get("integration_closure_binding"), Mapping) else None
-            if json.dumps(_jsonable(dict(prior)) if prior else None, sort_keys=True, separators=(",", ":"), ensure_ascii=False) != expected_prior_snapshot:
+            prior = (
+                current.get("integration_closure_binding")
+                if isinstance(current.get("integration_closure_binding"), Mapping)
+                else None
+            )
+            if (
+                json.dumps(
+                    _jsonable(dict(prior)) if prior else None,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                )
+                != expected_prior_snapshot
+            ):
                 raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
-            if json.dumps(_jsonable(current.get("integration_closure_history")), sort_keys=True, separators=(",", ":"), ensure_ascii=False) != expected_history_snapshot:
+            if (
+                json.dumps(
+                    _jsonable(current.get("integration_closure_history")),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                )
+                != expected_history_snapshot
+            ):
                 raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
-            if json.dumps(_jsonable(current.get("integration_approval_grant")), sort_keys=True, separators=(",", ":"), ensure_ascii=False) != expected_grant_snapshot:
+            if (
+                json.dumps(
+                    _jsonable(current.get("integration_approval_grant")),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                )
+                != expected_grant_snapshot
+            ):
                 raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
-            if json.dumps(_jsonable(current.get("integration_execution")), sort_keys=True, separators=(",", ":"), ensure_ascii=False) != expected_failure_snapshot:
+            if (
+                json.dumps(
+                    _jsonable(current.get("integration_execution")),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    ensure_ascii=False,
+                )
+                != expected_failure_snapshot
+            ):
                 raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
-            current_contract = current.get("contract") if isinstance(current.get("contract"), Mapping) else {}
+            current_contract = (
+                current.get("contract") if isinstance(current.get("contract"), Mapping) else {}
+            )
             current_manifest = ControlledIntegrationManager._admitted_manifest(
                 current,
                 current_contract,
@@ -7792,16 +9179,33 @@ class SelfHostedTaskService:
             if list(current_manifest) != verifier_manifest_payload:
                 raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
             live_branch = manager._run_git(["branch", "--show-current"], cwd=controller_root)
-            live_status = manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root)
+            live_status = manager._run_git(
+                ["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root
+            )
             if live_branch != integration_branch or live_status:
                 raise RuntimeError("CLOSURE_CANONICAL_REBIND_DRIFT")
             try:
-                if hashlib.sha256(artifact_path.read_bytes()).hexdigest() != external_acceptance.receipt_hash:
+                if (
+                    hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+                    != external_acceptance.receipt_hash
+                ):
                     raise RuntimeError("EXTERNAL_ACCEPTANCE_ARTIFACT_HASH_MISMATCH")
             except OSError as exc:
                 raise RuntimeError("EXTERNAL_ACCEPTANCE_ARTIFACT_UNREADABLE") from exc
             if prior:
-                if current.get("merge_performed") or current.get("integration_receipt") or current.get("integration_result_sha") or (current.get("integration_execution") and not failed_pre_apply) or current.get("status") in {"INTEGRATED", "INTEGRATED_AND_CLEANED", "INTEGRATED_TARGET_RETAINED", "INTEGRATION_VERIFY_FAILED_AFTER_APPLY"}:
+                if (
+                    current.get("merge_performed")
+                    or current.get("integration_receipt")
+                    or current.get("integration_result_sha")
+                    or (current.get("integration_execution") and not failed_pre_apply)
+                    or current.get("status")
+                    in {
+                        "INTEGRATED",
+                        "INTEGRATED_AND_CLEANED",
+                        "INTEGRATED_TARGET_RETAINED",
+                        "INTEGRATION_VERIFY_FAILED_AFTER_APPLY",
+                    }
+                ):
                     raise RuntimeError("CLOSURE_REBIND_AFTER_INTEGRATION_FORBIDDEN")
                 history = current.get("integration_closure_history")
                 if "integration_closure_history" in current and not isinstance(history, list):
@@ -7834,7 +9238,9 @@ class SelfHostedTaskService:
             current["integration_verifier_manifest"] = verifier_manifest_payload
             if failed_pre_apply:
                 failure_history = current.get("integration_failure_history")
-                if "integration_failure_history" in current and not isinstance(failure_history, list):
+                if "integration_failure_history" in current and not isinstance(
+                    failure_history, list
+                ):
                     raise RuntimeError("CLOSURE_FAILURE_HISTORY_MALFORMED")
                 if failure_history is None:
                     failure_history = []
@@ -7871,7 +9277,12 @@ class SelfHostedTaskService:
         persisted = self._mutate_state(task_id, mutate)
         if persisted is None:
             raise KeyError(f"unknown task_id: {task_id}")
-        return {**persisted, "closure_binding": closure, "duplicate": duplicate, "integration_performed": False}
+        return {
+            **persisted,
+            "closure_binding": closure,
+            "duplicate": duplicate,
+            "integration_performed": False,
+        }
 
     def integrate_approved(
         self,
@@ -7887,30 +9298,61 @@ class SelfHostedTaskService:
         if self.ephemeral and (
             request.get("task_card_required") or request.get("lifecycle_identity_required")
         ):
-            raise RuntimeError("EPHEMERAL_INTEGRATION_FORBIDDEN: rehearsal state cannot be integrated")
-        if state.get("status") in {"INTEGRATED", "INTEGRATED_AND_CLEANED", "INTEGRATED_TARGET_RETAINED"} and state.get("promotion_status") == "INTEGRATED":
+            raise RuntimeError(
+                "EPHEMERAL_INTEGRATION_FORBIDDEN: rehearsal state cannot be integrated"
+            )
+        if (
+            state.get("status")
+            in {"INTEGRATED", "INTEGRATED_AND_CLEANED", "INTEGRATED_TARGET_RETAINED"}
+            and state.get("promotion_status") == "INTEGRATED"
+        ):
             return state
         promotion_status = state.get("promotion_status") or state.get("status")
-        if state.get("merge_performed") or state.get("status") == "INTEGRATION_VERIFY_FAILED_AFTER_APPLY":
+        if (
+            state.get("merge_performed")
+            or state.get("status") == "INTEGRATION_VERIFY_FAILED_AFTER_APPLY"
+        ):
             raise RuntimeError("INTEGRATION_ALREADY_APPLIED_RETRY_FORBIDDEN")
-        if state.get("status") not in {"APPROVED", "INTEGRATING"} and promotion_status not in {"APPROVED", "INTEGRATING"}:
+        if state.get("status") not in {"APPROVED", "INTEGRATING"} and promotion_status not in {
+            "APPROVED",
+            "INTEGRATING",
+        }:
             raise RuntimeError(
                 "exact approved binding is required before integration; "
                 f"task status must be APPROVED or INTEGRATING to integrate, got {state.get('status')}"
             )
 
         if runtime_identity is not None:
-            approved = state.get("approved_binding") if isinstance(state.get("approved_binding"), Mapping) else {}
-            integration_grant = state.get("integration_approval_grant") if isinstance(state.get("integration_approval_grant"), Mapping) else None
-            grant = integration_grant or (approved.get("approval_grant") if isinstance(approved.get("approval_grant"), Mapping) else None)
+            approved = (
+                state.get("approved_binding")
+                if isinstance(state.get("approved_binding"), Mapping)
+                else {}
+            )
+            integration_grant = (
+                state.get("integration_approval_grant")
+                if isinstance(state.get("integration_approval_grant"), Mapping)
+                else None
+            )
+            grant = integration_grant or (
+                approved.get("approval_grant")
+                if isinstance(approved.get("approval_grant"), Mapping)
+                else None
+            )
             if not grant or not grant.get("consumed_at"):
-                raise RuntimeError("APPROVAL_REVALIDATION_REQUIRED: persisted approval grant is missing consume evidence")
+                raise RuntimeError(
+                    "APPROVAL_REVALIDATION_REQUIRED: persisted approval grant is missing consume evidence"
+                )
             identity = resolve_contract_identity(
                 state,
                 expected_task_id=task_id,
                 expected_head=str(state.get("controller_revision") or ""),
             )
-            for key in ("contract_kind", "contract_hash", "task_card_hash", "owner_inline_contract"):
+            for key in (
+                "contract_kind",
+                "contract_hash",
+                "task_card_hash",
+                "owner_inline_contract",
+            ):
                 if key in runtime_identity and runtime_identity[key] != identity[key]:
                     raise RuntimeError("APPROVAL_RUNTIME_IDENTITY_MISMATCH")
             contract_kind = identity["contract_kind"]
@@ -7929,7 +9371,9 @@ class SelfHostedTaskService:
                     owner_inline_contract=owner_inline_contract,
                     tool_manifest_hash=str(runtime_identity.get("tool_manifest_hash") or ""),
                     full_tool_schema_hash=str(runtime_identity.get("full_tool_schema_hash") or ""),
-                    permission_policy_hash=str(runtime_identity.get("permission_policy_hash") or ""),
+                    permission_policy_hash=str(
+                        runtime_identity.get("permission_policy_hash") or ""
+                    ),
                     lifecycle_revision=str(runtime_identity.get("lifecycle_revision") or ""),
                     server_instance_id=str(runtime_identity.get("server_instance_id") or ""),
                     allow_consumed=True,
@@ -7950,35 +9394,101 @@ class SelfHostedTaskService:
                 if str(grant.get(key)) != str(value)
             }
             if drift:
-                code = "APPROVAL_BINDING_MISMATCH" if set(drift) & {"contract_kind", "contract_hash", "task_card_hash"} else "APPROVAL_DEFINITION_DRIFT"
+                code = (
+                    "APPROVAL_BINDING_MISMATCH"
+                    if set(drift) & {"contract_kind", "contract_hash", "task_card_hash"}
+                    else "APPROVAL_DEFINITION_DRIFT"
+                )
                 raise RuntimeError(f"{code}: {json.dumps(drift, sort_keys=True)}")
-            packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
-            binding_fields = ("candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash")
+            packet = (
+                state.get("promotion_packet")
+                if isinstance(state.get("promotion_packet"), Mapping)
+                else {}
+            )
+            binding_fields = (
+                "candidate_commit_sha",
+                "candidate_tree_sha",
+                "candidate_state_hash",
+                "verified_receipt_hash",
+            )
             if any(approved.get(field) != packet.get(field) for field in binding_fields):
                 raise RuntimeError("APPROVAL_CANDIDATE_BINDING_DRIFT")
 
-        approved = state.get("approved_binding") if isinstance(state.get("approved_binding"), Mapping) else {}
+        approved = (
+            state.get("approved_binding")
+            if isinstance(state.get("approved_binding"), Mapping)
+            else {}
+        )
         raw_acceptance = state.get("external_acceptance") or approved.get("external_acceptance")
-        raw_authorization = state.get("integration_authorization") or approved.get("integration_authorization")
+        raw_authorization = state.get("integration_authorization") or approved.get(
+            "integration_authorization"
+        )
         if raw_acceptance is None:
-            raise RuntimeError("EXTERNAL_ACCEPTANCE_REQUIRED: persisted acceptance receipt is missing")
+            raise RuntimeError(
+                "EXTERNAL_ACCEPTANCE_REQUIRED: persisted acceptance receipt is missing"
+            )
         if raw_authorization is None:
-            raise RuntimeError("OWNER_AUTHORIZATION_REQUIRED: persisted integration authorization is missing")
-        acceptance_obj = raw_acceptance if isinstance(raw_acceptance, ExternalAcceptanceReceipt) else ExternalAcceptanceReceipt(**dict(raw_acceptance))
-        authorization_obj = raw_authorization if isinstance(raw_authorization, IntegrationAuthorizationEnvelope) else IntegrationAuthorizationEnvelope(**{key: value for key, value in dict(raw_authorization).items() if key != "authorization_hash"})
-        if acceptance_obj.task_id != task_id or acceptance_obj.candidate_commit != str((state.get("promotion_packet") or {}).get("candidate_commit_sha") or ""):
+            raise RuntimeError(
+                "OWNER_AUTHORIZATION_REQUIRED: persisted integration authorization is missing"
+            )
+        acceptance_obj = (
+            raw_acceptance
+            if isinstance(raw_acceptance, ExternalAcceptanceReceipt)
+            else ExternalAcceptanceReceipt(**dict(raw_acceptance))
+        )
+        authorization_obj = (
+            raw_authorization
+            if isinstance(raw_authorization, IntegrationAuthorizationEnvelope)
+            else IntegrationAuthorizationEnvelope(**{
+                key: value
+                for key, value in dict(raw_authorization).items()
+                if key != "authorization_hash"
+            })
+        )
+        if acceptance_obj.task_id != task_id or acceptance_obj.candidate_commit != str(
+            (state.get("promotion_packet") or {}).get("candidate_commit_sha") or ""
+        ):
             raise RuntimeError("EXTERNAL_ACCEPTANCE_BINDING_MISMATCH")
-        if authorization_obj.task_id != task_id or authorization_obj.attempt_id not in {"", str(state.get("attempt_id") or "")}:
+        if authorization_obj.task_id != task_id or authorization_obj.attempt_id not in {
+            "",
+            str(state.get("attempt_id") or ""),
+        }:
             raise RuntimeError("INTEGRATION_AUTHORIZATION_BINDING_MISMATCH")
-        if authorization_obj.candidate_commit != acceptance_obj.candidate_commit or authorization_obj.acceptance_receipt_hash != acceptance_obj.receipt_hash:
+        if (
+            authorization_obj.candidate_commit != acceptance_obj.candidate_commit
+            or authorization_obj.acceptance_receipt_hash != acceptance_obj.receipt_hash
+        ):
             raise RuntimeError("INTEGRATION_AUTHORIZATION_ACCEPTANCE_MISMATCH")
         if authorization_obj.canonical_branch != integration_branch:
             raise RuntimeError("INTEGRATION_AUTHORIZATION_BRANCH_DRIFT")
-        if "INTEGRATION_STAGING" not in authorization_obj.action_set or "APPLY_VERIFIED_INTEGRATION" not in authorization_obj.action_set:
+        if (
+            "INTEGRATION_STAGING" not in authorization_obj.action_set
+            or "APPLY_VERIFIED_INTEGRATION" not in authorization_obj.action_set
+        ):
             raise RuntimeError("INTEGRATION_AUTHORIZATION_ACTION_SET_INCOMPLETE")
-        grant = (state.get("integration_approval_grant") if isinstance(state.get("integration_approval_grant"), Mapping) else None) or (approved.get("approval_grant") if isinstance(approved.get("approval_grant"), Mapping) else None)
+        persisted_auth_hash = str(
+            (isinstance(raw_authorization, Mapping) and raw_authorization.get("authorization_hash"))
+            or (
+                isinstance(state.get("integration_closure_binding"), Mapping)
+                and state["integration_closure_binding"].get("authorization_hash")
+            )
+            or ""
+        )
+        if persisted_auth_hash and authorization_obj.authorization_hash != persisted_auth_hash:
+            raise RuntimeError("INTEGRATION_AUTHORIZATION_TAMPERED: authorization hash mismatch")
+        grant = (
+            state.get("integration_approval_grant")
+            if isinstance(state.get("integration_approval_grant"), Mapping)
+            else None
+        ) or (
+            approved.get("approval_grant")
+            if isinstance(approved.get("approval_grant"), Mapping)
+            else None
+        )
         if not grant or not grant.get("consumed_at"):
-            raise RuntimeError("APPROVAL_REVALIDATION_REQUIRED: one-shot approval grant is not consumed")
+            raise RuntimeError(
+                "APPROVAL_REVALIDATION_REQUIRED: one-shot approval grant is not consumed"
+            )
         if grant.get("consumed_at") and grant.get("approval_scope") != "ALLOW_ACTION_ONCE":
             raise RuntimeError("APPROVAL_SCOPE_UNSUPPORTED")
 
@@ -8000,6 +9510,67 @@ class SelfHostedTaskService:
             "target_base_revision": c_dict.get("target_base_revision", "a" * 40),
         }
         contract = self.build_contract(request_dict)
+        current_universe = {
+            "task_id": task_id,
+            "campaign_id": str(
+                state.get("campaign_id")
+                or (state.get("contract") or {}).get("campaign_id")
+                or authorization_obj.campaign_id
+            ),
+            "task_card_hash": str(
+                state.get("task_card_hash")
+                or (state.get("contract") or {}).get("task_card_hash")
+                or boundary_identity.get("task_card_hash")
+                or authorization_obj.task_card_hash
+            ),
+            "candidate_commit": str(
+                (state.get("promotion_packet") or {}).get("candidate_commit_sha")
+                or authorization_obj.candidate_commit
+            ),
+            "candidate_receipt_hash": str(
+                (state.get("promotion_packet") or {}).get("candidate_receipt_hash")
+                or authorization_obj.candidate_receipt_hash
+            ),
+            "acceptance_receipt_hash": acceptance_obj.receipt_hash,
+            "canonical_root": str(authorization_obj.canonical_root),
+            "canonical_branch": integration_branch,
+            "expected_canonical_head": authorization_obj.expected_canonical_head,
+            "canonical_dirty_baseline": str(authorization_obj.canonical_dirty_baseline),
+            "integration_plan_hash": str(authorization_obj.integration_plan_hash),
+            "cleanup_target_id": str(
+                (state.get("lease") or {}).get("target_id") or authorization_obj.cleanup_target_id
+            ),
+            "cleanup_target_path": str(
+                (state.get("lease") or {}).get("target_path")
+                or authorization_obj.cleanup_target_path
+            ),
+            "durable_ref": str(state.get("candidate_ref") or authorization_obj.durable_ref),
+            "attempt_id": str(state.get("attempt_id") or authorization_obj.attempt_id),
+            "candidate_tree_sha": str(
+                (state.get("promotion_packet") or {}).get("candidate_tree_sha")
+                or authorization_obj.candidate_tree_sha
+            ),
+            "candidate_state_hash": str(
+                (state.get("promotion_packet") or {}).get("candidate_state_hash")
+                or authorization_obj.candidate_state_hash
+            ),
+            "reviewer_id": acceptance_obj.reviewer_id,
+            "verifier_artifact_hash": str(authorization_obj.verifier_artifact_hash),
+            "require_clean": authorization_obj.require_clean,
+            "strategy": authorization_obj.strategy,
+            "verification_commands_hash": authorization_obj.verification_commands_hash,
+            "post_apply_commands_hash": authorization_obj.post_apply_commands_hash,
+            "cleanup_requested": authorization_obj.cleanup_requested,
+            "approval_scope": authorization_obj.approval_scope,
+        }
+        try:
+            authorization_obj.validate_current(current_universe)
+        except ValueError as exc:
+            raise RuntimeError(
+                f"INTEGRATION_AUTHORIZATION_EXPIRED: {exc}"
+                if "expired" in str(exc)
+                else f"INTEGRATION_AUTHORIZATION_DRIFT: {exc}"
+            ) from exc
         protected_binding_fields = (
             "task_id",
             "attempt_id",
@@ -8022,9 +9593,7 @@ class SelfHostedTaskService:
         )
 
         def binding_hash(bound_state: Mapping[str, Any]) -> str:
-            payload = {
-                key: _jsonable(bound_state.get(key)) for key in protected_binding_fields
-            }
+            payload = {key: _jsonable(bound_state.get(key)) for key in protected_binding_fields}
             return hashlib.sha256(
                 json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
             ).hexdigest()
@@ -8033,12 +9602,16 @@ class SelfHostedTaskService:
             bound_state: Mapping[str, Any],
             bound_contract: ArchitectTaskContract,
         ) -> Any:
-            packet = bound_state.get("promotion_packet") if isinstance(
-                bound_state.get("promotion_packet"), Mapping
-            ) else {}
-            verified_receipt = bound_state.get("verified_receipt") if isinstance(
-                bound_state.get("verified_receipt"), Mapping
-            ) else {}
+            packet = (
+                bound_state.get("promotion_packet")
+                if isinstance(bound_state.get("promotion_packet"), Mapping)
+                else {}
+            )
+            verified_receipt = (
+                bound_state.get("verified_receipt")
+                if isinstance(bound_state.get("verified_receipt"), Mapping)
+                else {}
+            )
             expected_policy_revision_hash = str(
                 verified_receipt.get("repository_contract_policy_revision_hash") or ""
             )
@@ -8057,7 +9630,11 @@ class SelfHostedTaskService:
                 candidate_commit=str(packet.get("candidate_commit_sha") or ""),
                 candidate_tree_sha=str(packet.get("candidate_tree_sha") or ""),
                 expected_policy_revision_hash=expected_policy_revision_hash,
-                architecture_approval=(bound_state.get("approved_binding") or {}).get("architecture_approval") if isinstance(bound_state.get("approved_binding"), Mapping) else None,
+                architecture_approval=(bound_state.get("approved_binding") or {}).get(
+                    "architecture_approval"
+                )
+                if isinstance(bound_state.get("approved_binding"), Mapping)
+                else None,
                 task_id=str(bound_state.get("task_id") or task_id),
                 attempt_id=str(bound_state.get("attempt_id") or ""),
             )
@@ -8081,9 +9658,7 @@ class SelfHostedTaskService:
             {
                 "integration_branch": integration_branch,
                 "push_performed": False,
-                "repository_contract_integration_recheck": _jsonable(
-                    integration_recheck
-                ),
+                "repository_contract_integration_recheck": _jsonable(integration_recheck),
             },
             attempt_id=state.get("attempt_id"),
         )
@@ -8107,9 +9682,7 @@ class SelfHostedTaskService:
                 final_request = integrating.get("request") or request_dict
                 final_contract = self.build_contract(final_request)
                 final_recheck = repository_recheck(integrating, final_contract)
-                integrating["repository_contract_integration_recheck"] = _jsonable(
-                    final_recheck
-                )
+                integrating["repository_contract_integration_recheck"] = _jsonable(final_recheck)
                 receipt = ControlledIntegrationManager(
                     integration_root=final_contract.controller_repo_root
                 ).integrate_authorized_task_state(
@@ -8124,8 +9697,7 @@ class SelfHostedTaskService:
                     ),
                     apply=True,
                     post_apply_commands=tuple(
-                        tuple(command)
-                        for command in integrating.get("post_apply_commands") or ()
+                        tuple(command) for command in integrating.get("post_apply_commands") or ()
                     ),
                 )
         except IntegrationExecutionError as exc:
@@ -8190,14 +9762,22 @@ class SelfHostedTaskService:
             raise
         return self._record_integration(receipt, task_id=task_id)
 
-    def retry_integration(self, task_id: str, *, integration_branch: Optional[str] = None) -> dict[str, Any]:
+    def retry_integration(
+        self, task_id: str, *, integration_branch: Optional[str] = None
+    ) -> dict[str, Any]:
         """Retry only the integration phase after a non-merge integration failure."""
         state = self._read_state(task_id)
         if state is None:
             raise KeyError(f"unknown task_id: {task_id}")
-        if state.get("merge_performed") or state.get("status") == "INTEGRATION_VERIFY_FAILED_AFTER_APPLY":
+        if (
+            state.get("merge_performed")
+            or state.get("status") == "INTEGRATION_VERIFY_FAILED_AFTER_APPLY"
+        ):
             raise RuntimeError("INTEGRATION_ALREADY_APPLIED_RETRY_FORBIDDEN")
-        if state.get("status") not in {"INTEGRATION_FAILED", "INTEGRATION_FAILED_PRE_APPLY"} or not state.get("approved_binding"):
+        if state.get("status") not in {
+            "INTEGRATION_FAILED",
+            "INTEGRATION_FAILED_PRE_APPLY",
+        } or not state.get("approved_binding"):
             raise RuntimeError("integration retry requires the original approved binding")
         branch = integration_branch or state.get("integration_branch") or "nexus/integration/main"
         self._checkpoint(
@@ -8215,6 +9795,7 @@ class SelfHostedTaskService:
         task_id: Optional[str] = None,
     ) -> dict[str, Any]:
         from nexus.orchestrator.governed_integration import IntegrationReceipt
+
         if not isinstance(receipt, IntegrationReceipt):
             raise TypeError("receipt must be an IntegrationReceipt instance")
         rec_task_id = getattr(receipt, "task_id", None) or task_id
@@ -8236,20 +9817,41 @@ class SelfHostedTaskService:
             raise RuntimeError("post-apply verification is required before integration recording")
         if getattr(receipt, "staging_commit_sha", None) != receipt.integration_commit_sha:
             raise RuntimeError("integration result must equal the verified staging commit")
-        acceptance_state = state.get("external_acceptance") if isinstance(state.get("external_acceptance"), Mapping) else {}
-        authorization_state = state.get("integration_authorization") if isinstance(state.get("integration_authorization"), Mapping) else {}
+        acceptance_state = (
+            state.get("external_acceptance")
+            if isinstance(state.get("external_acceptance"), Mapping)
+            else {}
+        )
+        authorization_state = (
+            state.get("integration_authorization")
+            if isinstance(state.get("integration_authorization"), Mapping)
+            else {}
+        )
         if acceptance_state or authorization_state:
-            if getattr(receipt, "acceptance_receipt_hash", None) != acceptance_state.get("receipt_hash"):
+            if getattr(receipt, "acceptance_receipt_hash", None) != acceptance_state.get(
+                "receipt_hash"
+            ):
                 raise RuntimeError("integration receipt acceptance binding mismatch")
-            if getattr(receipt, "authorization_hash", None) != authorization_state.get("authorization_hash"):
+            if getattr(receipt, "authorization_hash", None) != authorization_state.get(
+                "authorization_hash"
+            ):
                 raise RuntimeError("integration receipt authorization binding mismatch")
 
-        packet = state.get("promotion_packet") or {"candidate_commit_sha": receipt.integration_commit_sha}
+        packet = state.get("promotion_packet") or {
+            "candidate_commit_sha": receipt.integration_commit_sha
+        }
         binding = state.get("approved_binding") or packet
         if not binding or not packet:
             raise RuntimeError("exact approved binding is required for integration recording")
-        binding_fields = ("candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash")
-        if state.get("approved_binding") and any(binding.get(f) != packet.get(f) for f in binding_fields):
+        binding_fields = (
+            "candidate_commit_sha",
+            "candidate_tree_sha",
+            "candidate_state_hash",
+            "verified_receipt_hash",
+        )
+        if state.get("approved_binding") and any(
+            binding.get(f) != packet.get(f) for f in binding_fields
+        ):
             raise RuntimeError("approved binding mismatch")
         rcpt_cand_sha = getattr(receipt, "candidate_commit_sha", None)
         if rcpt_cand_sha and rcpt_cand_sha != binding.get("candidate_commit_sha"):
@@ -8271,19 +9873,30 @@ class SelfHostedTaskService:
         manager = WorktreeManager(root_dir=contract.target_worktree_root)
 
         try:
-            actual = manager._run_git(["rev-parse", "--verify", f"{receipt.integration_commit_sha}^{{commit}}"], cwd=controller_root)
+            actual = manager._run_git(
+                ["rev-parse", "--verify", f"{receipt.integration_commit_sha}^{{commit}}"],
+                cwd=controller_root,
+            )
             if actual != receipt.integration_commit_sha:
                 raise RuntimeError("integration result sha not present in controller")
             candidate_sha = binding.get("candidate_commit_sha")
             if candidate_sha:
                 res = subprocess.run(
-                    ["git", "merge-base", "--is-ancestor", candidate_sha, receipt.integration_commit_sha],
+                    [
+                        "git",
+                        "merge-base",
+                        "--is-ancestor",
+                        candidate_sha,
+                        receipt.integration_commit_sha,
+                    ],
                     cwd=controller_root,
                     capture_output=True,
                     text=True,
                 )
                 if res.returncode != 0:
-                    raise RuntimeError("integration result commit does not contain candidate commit")
+                    raise RuntimeError(
+                        "integration result commit does not contain candidate commit"
+                    )
         except Exception as exc:
             if not self.ephemeral:
                 raise RuntimeError(f"integration result SHA verification failed: {exc}")
