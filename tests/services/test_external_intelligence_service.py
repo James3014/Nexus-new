@@ -1550,3 +1550,252 @@ def test_publication_disabled_reused_complete_does_not_starve_next_eligible_issu
     assert r["issue_number"] == 2
     assert len(gh.comments) == 0
     assert r["result"]["publication_record"]["state"] == "PREPARED"
+
+
+def test_process_matches_accepts_current_executable_and_exact_argv(tmp_path):
+    config = tmp_path / "config.json"
+    config.write_text("{}", encoding="utf-8")
+    expected = (
+        f"{Path(sys.executable).resolve()} -m scripts.ops.external_intelligence_service daemon "
+        f"--config {config.resolve()}"
+    )
+    assert service_module._process_matches(expected, config) is True
+
+
+def test_process_matches_accepts_equivalent_macos_framework_app_executable(tmp_path, monkeypatch):
+    config = tmp_path / "config.json"
+    config.write_text("{}", encoding="utf-8")
+
+    simulated_bin = Path(
+        "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/bin/python3.14"
+    )
+    simulated_app = Path(
+        "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
+    )
+
+    monkeypatch.setattr(sys, "executable", str(simulated_bin))
+    orig_resolve = Path.resolve
+    monkeypatch.setattr(
+        Path,
+        "resolve",
+        lambda self, *args, **kwargs: (
+            self
+            if "Frameworks/Python.framework" in str(self)
+            else orig_resolve(self, *args, **kwargs)
+        ),
+    )
+
+    cmd_bin = f"{simulated_bin} -m scripts.ops.external_intelligence_service daemon --config {config.resolve()}"
+    cmd_app = f"{simulated_app} -m scripts.ops.external_intelligence_service daemon --config {config.resolve()}"
+
+    assert service_module._process_matches(cmd_bin, config) is True
+    assert service_module._process_matches(cmd_app, config) is True
+
+
+def test_process_matches_rejects_arbitrary_or_unrelated_interpreter(tmp_path, monkeypatch):
+    config = tmp_path / "config.json"
+    config.write_text("{}", encoding="utf-8")
+
+    simulated_bin = Path(
+        "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/bin/python3.14"
+    )
+    monkeypatch.setattr(sys, "executable", str(simulated_bin))
+    orig_resolve = Path.resolve
+    monkeypatch.setattr(
+        Path,
+        "resolve",
+        lambda self, *args, **kwargs: (
+            self
+            if "Frameworks/Python.framework" in str(self)
+            else orig_resolve(self, *args, **kwargs)
+        ),
+    )
+
+    unrelated_app = "/opt/homebrew/Cellar/python@3.13/3.13.0/Frameworks/Python.framework/Versions/3.13/Resources/Python.app/Contents/MacOS/Python"
+    unrelated_bin = "/usr/local/bin/python3"
+    fake_app = "/tmp/fake/Resources/Python.app/Contents/MacOS/Python"
+
+    for bad_exe in (unrelated_app, unrelated_bin, fake_app):
+        cmd = f"{bad_exe} -m scripts.ops.external_intelligence_service daemon --config {config.resolve()}"
+        assert service_module._process_matches(cmd, config) is False
+
+
+def test_process_matches_rejects_wrong_config_or_extra_arguments(tmp_path):
+    config = tmp_path / "config.json"
+    config.write_text("{}", encoding="utf-8")
+    other_config = tmp_path / "other_config.json"
+    other_config.write_text("{}", encoding="utf-8")
+
+    current_exe = Path(sys.executable).resolve()
+    wrong_config_cmd = (
+        f"{current_exe} -m scripts.ops.external_intelligence_service daemon "
+        f"--config {other_config.resolve()}"
+    )
+    assert service_module._process_matches(wrong_config_cmd, config) is False
+
+    extra_arg_cmd = (
+        f"{current_exe} -m scripts.ops.external_intelligence_service daemon "
+        f"--config {config.resolve()} --verbose"
+    )
+    assert service_module._process_matches(extra_arg_cmd, config) is False
+
+    missing_arg_cmd = f"{current_exe} -m scripts.ops.external_intelligence_service daemon"
+    assert service_module._process_matches(missing_arg_cmd, config) is False
+
+
+def test_process_matches_rejects_malformed_command(tmp_path):
+    config = tmp_path / "config.json"
+    config.write_text("{}", encoding="utf-8")
+    malformed_cmd = f'{sys.executable} -m "unclosed quote'
+    assert service_module._process_matches(malformed_cmd, config) is False
+
+
+def test_process_matches_preserves_exact_executable_behavior_on_non_framework_layout(
+    tmp_path, monkeypatch
+):
+    config = tmp_path / "config.json"
+    config.write_text("{}", encoding="utf-8")
+
+    simulated_bin = Path("/usr/bin/python3")
+    monkeypatch.setattr(sys, "executable", str(simulated_bin))
+    orig_resolve = Path.resolve
+    monkeypatch.setattr(
+        Path,
+        "resolve",
+        lambda self, *args, **kwargs: (
+            self if str(self) == "/usr/bin/python3" else orig_resolve(self, *args, **kwargs)
+        ),
+    )
+
+    matching_cmd = (
+        f"/usr/bin/python3 -m scripts.ops.external_intelligence_service daemon "
+        f"--config {config.resolve()}"
+    )
+    app_cmd = (
+        f"/usr/Resources/Python.app/Contents/MacOS/Python -m scripts.ops.external_intelligence_service daemon "
+        f"--config {config.resolve()}"
+    )
+
+    assert service_module._process_matches(matching_cmd, config) is True
+    assert service_module._process_matches(app_cmd, config) is False
+
+
+def test_service_status_accepts_macos_framework_python_app_process(tmp_path):
+    config = _config_file(tmp_path)
+    receipt = tmp_path / "state" / "service" / "daemon.json"
+    source_sha = hashlib.sha256(
+        Path(__file__)
+        .resolve()
+        .parents[2]
+        .joinpath("scripts/ops/external_intelligence_service.py")
+        .read_bytes()
+    ).hexdigest()
+    config_sha = hashlib.sha256(config.read_bytes()).hexdigest()
+    write_service_receipt(
+        receipt,
+        {
+            "schema": "nexus.external_intelligence_daemon_receipt.v1",
+            "status": ServiceReadiness.READY.value,
+            "run_id": "run-1",
+            "pid": 41257,
+            "source_path": str(
+                Path(__file__).resolve().parents[2] / "scripts/ops/external_intelligence_service.py"
+            ),
+            "source_sha256": source_sha,
+            "config_path": str(config.resolve()),
+            "config_sha256": config_sha,
+            "started_at": 99.0,
+            "heartbeat_at": 100.0,
+            "successful_polls": READINESS_SUCCESS_THRESHOLD,
+            "last_error": None,
+        },
+    )
+
+    def launchctl(*_args):
+        return subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 41257\nlast exit code = (never exited)\n", ""
+        )
+
+    current_exe = Path(sys.executable).resolve()
+    framework_root = current_exe.parent.parent
+    app_exe = framework_root / "Resources" / "Python.app" / "Contents" / "MacOS" / "Python"
+    proc_exe = app_exe if app_exe.is_file() else current_exe
+    command = f"{proc_exe} -m scripts.ops.external_intelligence_service daemon --config {config.resolve()}"
+
+    result = service_status(
+        config,
+        launchctl_runner=launchctl,
+        process_snapshot=lambda: [(41257, command)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert result["status"] == ServiceReadiness.READY.value
+    assert result["ready"] is True
+
+
+def test_service_status_duplicate_detection_fails_closed_across_bin_and_app(tmp_path, monkeypatch):
+    config = _config_file(tmp_path)
+    receipt = tmp_path / "state" / "service" / "daemon.json"
+    source_sha = hashlib.sha256(
+        Path(__file__)
+        .resolve()
+        .parents[2]
+        .joinpath("scripts/ops/external_intelligence_service.py")
+        .read_bytes()
+    ).hexdigest()
+    config_sha = hashlib.sha256(config.read_bytes()).hexdigest()
+    write_service_receipt(
+        receipt,
+        {
+            "schema": "nexus.external_intelligence_daemon_receipt.v1",
+            "status": ServiceReadiness.READY.value,
+            "run_id": "run-1",
+            "pid": 123,
+            "source_path": str(
+                Path(__file__).resolve().parents[2] / "scripts/ops/external_intelligence_service.py"
+            ),
+            "source_sha256": source_sha,
+            "config_path": str(config.resolve()),
+            "config_sha256": config_sha,
+            "started_at": 99.0,
+            "heartbeat_at": 100.0,
+            "successful_polls": READINESS_SUCCESS_THRESHOLD,
+            "last_error": None,
+        },
+    )
+
+    def launchctl(*_args):
+        return subprocess.CompletedProcess(
+            ["launchctl"], 0, "state = running\npid = 123\nlast exit code = 0\n", ""
+        )
+
+    simulated_bin = Path(
+        "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/bin/python3.14"
+    )
+    simulated_app = Path(
+        "/opt/homebrew/Cellar/python@3.14/3.14.0/Frameworks/Python.framework/Versions/3.14/Resources/Python.app/Contents/MacOS/Python"
+    )
+    monkeypatch.setattr(sys, "executable", str(simulated_bin))
+    orig_resolve = Path.resolve
+    monkeypatch.setattr(
+        Path,
+        "resolve",
+        lambda self, *args, **kwargs: (
+            self
+            if "Frameworks/Python.framework" in str(self)
+            else orig_resolve(self, *args, **kwargs)
+        ),
+    )
+
+    cmd1 = f"{simulated_bin} -m scripts.ops.external_intelligence_service daemon --config {config.resolve()}"
+    cmd2 = f"{simulated_app} -m scripts.ops.external_intelligence_service daemon --config {config.resolve()}"
+
+    result = service_status(
+        config,
+        launchctl_runner=launchctl,
+        process_snapshot=lambda: [(123, cmd1), (456, cmd2)],
+        now=100.5,
+        receipt_path=receipt,
+    )
+    assert result["status"] == ServiceReadiness.DUPLICATE_PROCESS.value
+    assert result["ready"] is False
