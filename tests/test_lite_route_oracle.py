@@ -225,22 +225,6 @@ class TestLiteRouteOracle(unittest.TestCase):
         self.assertEqual(decision.reason, "env_override_light_route_force")
         self.assertEqual(decision.skipped_phases, ["X", "D", "A"])
 
-    @patch.dict(os.environ, {"NEXUS_LIGHT_ROUTE_FORCE": "1"})
-    def test_d3_learn_ingest_cli_shape_does_not_skip_heavy_ingestion(self):
-        """D3: learn_ingest CLI decision shape (difficulty != easy -> complexity 4.5) blocks forced light route."""
-        difficulty = "hard"
-        complexity = 1.0 if difficulty.lower() == "easy" else (2.5 if difficulty.lower() == "medium" else 4.5)
-        risk_level = "LOW" if difficulty.lower() == "easy" else "NORMAL"
-
-        decision = should_use_lite_route(
-            risk_level=risk_level,
-            impact_complexity=complexity,
-            belief_confidence=1.0,
-            task_desc="learn ingest source",
-        )
-        self.assertFalse(decision.is_lite)
-        self.assertEqual(decision.reason, "standard_heavy_route_blocked_lite")
-
     def test_normal_risk_high_confidence_returns_lite(self):
         decision = should_use_lite_route(
             risk_level="NORMAL",

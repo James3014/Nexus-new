@@ -145,9 +145,7 @@ def test_d1_force_override_cannot_bypass_safety_in_capability_selector(
         skills_triggered=[],
         tenant_id="tenant_d1",
     )
-    plan = _make_selector(tmp_path).select_capabilities(
-        signal, _make_constraints(tmp_path)
-    )
+    plan = _make_selector(tmp_path).select_capabilities(signal, _make_constraints(tmp_path))
     assert isinstance(plan, CapabilityExecutionPlan)
     assert "X" in plan.phases
     assert "D" in plan.phases

@@ -669,6 +669,64 @@ def test_research_route_writes_route_decision_report_when_requested(tmp_path, mo
     assert payload["signal_snapshot"]["pillar_signals"]["Claim"]["active"] is True
 
 
+def test_d3_learn_ingest_hard_difficulty_blocks_forced_light_route(tmp_path, monkeypatch):
+    """D3: Real CLI invocation of nexus learn:ingest with FORCE=1 and difficulty=hard (complexity 4.5 > 3.0) must NOT skip heavy ingestion."""
+    runner = CliRunner()
+    monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)
+    monkeypatch.setenv("NEXUS_LIGHT_ROUTE_FORCE", "1")
+
+    heavy_ingest_called = []
+
+    class HeavyResult:
+        def __init__(self):
+            self.payload = {
+                "status": "success",
+                "semantic_status": "VERIFIED",
+                "claims_count": 5,
+            }
+            self.claims_count = 5
+            self.hallucination_pass = True
+            self.semantic_status = "VERIFIED"
+            self.claims_file = tmp_path / "claims.jsonl"
+
+    def fake_run_learn_ingest(*args, **kwargs):
+        heavy_ingest_called.append((args, kwargs))
+        return HeavyResult()
+
+    monkeypatch.setattr("scripts.engine.nexus_cli.run_learn_ingest", fake_run_learn_ingest)
+    monkeypatch.setattr("scripts.engine.nexus_cli.enforce_learn_ingest_semantic_contract", lambda res: None)
+
+    source_file = tmp_path / "source.md"
+    source_file.write_text(
+        "Nexus governance principles require fail-closed execution on high complexity tasks.",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "learn:ingest",
+            "--source",
+            "repo:nexus",
+            "--source-file",
+            str(source_file),
+            "--topic",
+            "nexus",
+            "--difficulty",
+            "hard",
+            "--output-json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    # Positive witness: heavy ingestion seam was called
+    assert len(heavy_ingest_called) == 1
+    # Negative witnesses: light route skip was NOT triggered
+    assert "Skipping heavy ingestion" not in result.output
+    assert "SKIPPED_LIGHT_ROUTE" not in result.output
+    assert os.environ.get("NEXUS_LIGHT_ROUTE") == "0"
+
+
 def test_research_auto_flow_baseline(tmp_path, monkeypatch):
     runner = CliRunner()
     monkeypatch.setattr("scripts.engine.nexus_cli.repo_root", tmp_path)

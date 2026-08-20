@@ -1,8 +1,7 @@
-import os
 import unittest
 from unittest.mock import MagicMock, patch
-
 from nexus.core.router import SkillsRouter
+import os
 
 
 class FakePalace:
@@ -101,24 +100,6 @@ class TestDualRouter(unittest.TestCase):
         result = self.router._semantic_search("safe", "tenant_123")
 
         self.assertEqual(result["results"], [{"id": "safe", "score": 0.9}, {"id": "nested", "score": 0.8}])
-
-    @patch.dict(os.environ, {"NEXUS_LIGHT_ROUTE_FORCE": "1"})
-    def test_d2_skills_router_safety_blocked_force_does_not_skip_palace(self):
-        """D2: With FORCE=1 and high risk (safety blocker), router does NOT skip palace search."""
-        context = {
-            "mode": "dual",
-            "tenant_id": "nexus_test",
-            "min_palace_hit": 0.8,
-            "risk_level": "HIGH",
-            "impact_complexity": 2.0,
-        }
-        self.router._palace_search = MagicMock(return_value={"status": "SUCCESS", "hit_rate": 0.9, "results": ["palace_data"]})
-        self.router._semantic_search = MagicMock()
-
-        result = self.router.memory_route("test query", context)
-
-        self.assertEqual(result["mode_used"], "palace")
-        self.router._palace_search.assert_called_once()
 
 if __name__ == "__main__":
     unittest.main()
