@@ -221,16 +221,14 @@ def parse_raw_diff_z(stream: bytes) -> list[dict[str, str]]:
         if path in seen:
             raise ValueError("raw diff contains a duplicate path")
         seen.add(path)
-        parsed.append(
-            {
-                "old_mode": old_mode,
-                "new_mode": new_mode,
-                "old_sha": old_sha,
-                "new_sha": new_sha,
-                "status": status,
-                "path": path,
-            }
-        )
+        parsed.append({
+            "old_mode": old_mode,
+            "new_mode": new_mode,
+            "old_sha": old_sha,
+            "new_sha": new_sha,
+            "status": status,
+            "path": path,
+        })
     if not parsed:
         raise ValueError("raw diff stream is empty")
     return parsed
@@ -729,9 +727,9 @@ def build_impact_plan(
             source_tree, test_inventory_tree = _git_revision_trees(root, head_sha)
         except ValueError as exc:
             provenance_error = str(exc)
-    normalized = sorted(
-        {path.strip().replace("\\", "/").strip("/") for path in changed_paths if path.strip()}
-    )
+    normalized = sorted({
+        path.strip().replace("\\", "/").strip("/") for path in changed_paths if path.strip()
+    })
     if not normalized:
         return ImpactPlan(
             base_sha=base_sha,

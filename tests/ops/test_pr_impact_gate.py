@@ -163,18 +163,16 @@ def _with_node_outcomes(
 def _write_pytest_plan(tmp_path: Path, targets: list[str]) -> Path:
     plan_path = tmp_path / "plan.json"
     plan_path.write_text(
-        json.dumps(
-            {
-                "base_sha": "a" * 40,
-                "head_sha": "b" * 40,
-                "base_source_tree": "9" * 40,
-                "base_test_inventory_tree": "8" * 40,
-                "source_tree": "c" * 40,
-                "test_inventory_tree": "d" * 40,
-                "impact_class": "SCOPED_IMPLEMENTATION",
-                "pytest_targets": targets,
-            }
-        ),
+        json.dumps({
+            "base_sha": "a" * 40,
+            "head_sha": "b" * 40,
+            "base_source_tree": "9" * 40,
+            "base_test_inventory_tree": "8" * 40,
+            "source_tree": "c" * 40,
+            "test_inventory_tree": "d" * 40,
+            "impact_class": "SCOPED_IMPLEMENTATION",
+            "pytest_targets": targets,
+        }),
         encoding="utf-8",
     )
     return plan_path
@@ -1230,18 +1228,16 @@ def test_pytest_execution_does_not_fail_fast_after_baseline_failure(monkeypatch,
     test_path.write_text("def test_contract(): pass\n", encoding="utf-8")
     plan_path = tmp_path / "plan.json"
     plan_path.write_text(
-        json.dumps(
-            {
-                "base_sha": "a" * 40,
-                "head_sha": "b" * 40,
-                "base_source_tree": "9" * 40,
-                "base_test_inventory_tree": "8" * 40,
-                "source_tree": "c" * 40,
-                "test_inventory_tree": "d" * 40,
-                "impact_class": "SCOPED_IMPLEMENTATION",
-                "pytest_targets": ["tests/test_contract.py"],
-            }
-        ),
+        json.dumps({
+            "base_sha": "a" * 40,
+            "head_sha": "b" * 40,
+            "base_source_tree": "9" * 40,
+            "base_test_inventory_tree": "8" * 40,
+            "source_tree": "c" * 40,
+            "test_inventory_tree": "d" * 40,
+            "impact_class": "SCOPED_IMPLEMENTATION",
+            "pytest_targets": ["tests/test_contract.py"],
+        }),
         encoding="utf-8",
     )
     junit_path = tmp_path / "result.xml"
@@ -1281,18 +1277,16 @@ def test_pytest_run_rejects_missing_or_drifted_plan_tree_binding(monkeypatch, tm
     result_path = tmp_path / "run.json"
     stdout_path = tmp_path / "stdout.log"
     plan_path.write_text(
-        json.dumps(
-            {
-                "base_sha": "a" * 40,
-                "head_sha": "b" * 40,
-                "base_source_tree": "9" * 40,
-                "base_test_inventory_tree": "8" * 40,
-                "source_tree": "c" * 40,
-                "test_inventory_tree": "d" * 40,
-                "impact_class": "SCOPED_IMPLEMENTATION",
-                "pytest_targets": ["tests/test_contract.py"],
-            }
-        ),
+        json.dumps({
+            "base_sha": "a" * 40,
+            "head_sha": "b" * 40,
+            "base_source_tree": "9" * 40,
+            "base_test_inventory_tree": "8" * 40,
+            "source_tree": "c" * 40,
+            "test_inventory_tree": "d" * 40,
+            "impact_class": "SCOPED_IMPLEMENTATION",
+            "pytest_targets": ["tests/test_contract.py"],
+        }),
         encoding="utf-8",
     )
 
@@ -1456,179 +1450,11 @@ def test_pytest_plan_without_exact_core_does_not_add_browser_exclusion(monkeypat
     assert "tests/ops/test_select_tests.py" in cmd
     assert "tests/core/test_other.py" in cmd
     assert "--ignore=tests/core/test_web_dom_mapper.py" not in cmd
-
-
-def _make_main_movement_repo(tmp_path: Path) -> dict[str, Any]:
-    repo = tmp_path / "movement_repo"
-    repo.mkdir()
-
-    def git(*args: str, text: bool = True):
-        return subprocess.check_output(["git", *args], cwd=repo, text=text)
-
-    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
-    (repo / "docs").mkdir()
-    (repo / "docs" / "unrelated.md").write_text("initial\n", encoding="utf-8")
-    (repo / "AGENTS.md").write_text("agents initial\n", encoding="utf-8")
-    subprocess.run(["git", "add", "."], cwd=repo, check=True)
-    subprocess.run(
-        [
-            "git",
-            "-c",
-            "user.name=Nexus Test",
-            "-c",
-            "user.email=nexus@example.invalid",
-            "commit",
-            "-qm",
-            "old_main",
-        ],
-        cwd=repo,
-        check=True,
-    )
-    old_main_sha = git("rev-parse", "HEAD").strip()
-    old_main_tree = git("rev-parse", "HEAD^{tree}").strip()
-
-    (repo / "docs" / "unrelated.md").write_text("updated\n", encoding="utf-8")
-    (repo / "AGENTS.md").write_text("agents updated\n", encoding="utf-8")
-    subprocess.run(["git", "add", "."], cwd=repo, check=True)
-    subprocess.run(
-        [
-            "git",
-            "-c",
-            "user.name=Nexus Test",
-            "-c",
-            "user.email=nexus@example.invalid",
-            "commit",
-            "-qm",
-            "new_main",
-        ],
-        cwd=repo,
-        check=True,
-    )
-    new_main_sha = git("rev-parse", "HEAD").strip()
-    new_main_tree = git("rev-parse", "HEAD^{tree}").strip()
-
-    return {
-        "repo": repo,
-        "old_main_sha": old_main_sha,
-        "old_main_tree_sha": old_main_tree,
-        "new_main_sha": new_main_sha,
-        "new_main_tree_sha": new_main_tree,
-        "changed_paths": ["AGENTS.md", "docs/unrelated.md"],
-    }
-
-
-def test_verify_exact_git_main_movement_paths_exact_match(tmp_path: Path):
-    fixture = _make_main_movement_repo(tmp_path)
-    result = verify_exact_git_main_movement_paths(
-        old_main_sha=fixture["old_main_sha"],
-        old_main_tree_sha=fixture["old_main_tree_sha"],
-        new_main_sha=fixture["new_main_sha"],
-        new_main_tree_sha=fixture["new_main_tree_sha"],
-        changed_main_paths=fixture["changed_paths"],
-        root=fixture["repo"],
-    )
-    assert result["status"] == EXACT_GIT_EVIDENCE_ONLY
-    assert result["valid"] is True
-    assert result["blocking"] is False
-    assert result["reasons"] == ()
-    assert result["proven_paths"] == ("AGENTS.md", "docs/unrelated.md")
-    assert result["merge_authority"] is False
-    assert result["approval_authority"] is False
-    assert result["candidate_commit_allowed"] is False
-    assert result["public_claim_allowed"] is False
-
-
-def test_verify_exact_git_main_movement_paths_omitted_path_fails_closed(tmp_path: Path):
-    fixture = _make_main_movement_repo(tmp_path)
-    # Hostile caller supplies only docs/unrelated.md, omitting AGENTS.md
-    result = verify_exact_git_main_movement_paths(
-        old_main_sha=fixture["old_main_sha"],
-        old_main_tree_sha=fixture["old_main_tree_sha"],
-        new_main_sha=fixture["new_main_sha"],
-        new_main_tree_sha=fixture["new_main_tree_sha"],
-        changed_main_paths=["docs/unrelated.md"],
-        root=fixture["repo"],
-    )
-    assert result["status"] == "IMPACT_UNKNOWN"
-    assert result["valid"] is False
-    assert result["blocking"] is True
-    assert any("omits physical paths" in r and "AGENTS.md" in r for r in result["reasons"])
-
-
-def test_verify_exact_git_main_movement_paths_spurious_path_fails_closed(tmp_path: Path):
-    fixture = _make_main_movement_repo(tmp_path)
-    # Caller supplies an extra path not in physical git diff
-    result = verify_exact_git_main_movement_paths(
-        old_main_sha=fixture["old_main_sha"],
-        old_main_tree_sha=fixture["old_main_tree_sha"],
-        new_main_sha=fixture["new_main_sha"],
-        new_main_tree_sha=fixture["new_main_tree_sha"],
-        changed_main_paths=["AGENTS.md", "docs/unrelated.md", "nexus/extra.py"],
-        root=fixture["repo"],
-    )
-    assert result["status"] == "IMPACT_UNKNOWN"
-    assert result["valid"] is False
-    assert result["blocking"] is True
-    assert any("spurious paths" in r and "nexus/extra.py" in r for r in result["reasons"])
-
-
-def test_verify_exact_git_main_movement_paths_tree_mismatch_fails_closed(tmp_path: Path):
-    fixture = _make_main_movement_repo(tmp_path)
-    result = verify_exact_git_main_movement_paths(
-        old_main_sha=fixture["old_main_sha"],
-        old_main_tree_sha=fixture["old_main_tree_sha"],
-        new_main_sha=fixture["new_main_sha"],
-        new_main_tree_sha="0" * 40,
-        changed_main_paths=fixture["changed_paths"],
-        root=fixture["repo"],
-    )
-    assert result["status"] == "IMPACT_UNKNOWN"
-    assert result["valid"] is False
-    assert result["blocking"] is True
-    assert any("new_main_tree_sha does not match physical Git tree" in r for r in result["reasons"])
-
-
-def test_verify_exact_git_main_movement_paths_unresolvable_endpoint_fails_closed(tmp_path: Path):
-    fixture = _make_main_movement_repo(tmp_path)
-    result = verify_exact_git_main_movement_paths(
-        old_main_sha="f" * 40,
-        old_main_tree_sha=fixture["old_main_tree_sha"],
-        new_main_sha=fixture["new_main_sha"],
-        new_main_tree_sha=fixture["new_main_tree_sha"],
-        changed_main_paths=fixture["changed_paths"],
-        root=fixture["repo"],
-    )
-    assert result["status"] == "IMPACT_UNKNOWN"
-    assert result["valid"] is False
-    assert result["blocking"] is True
-
-
-def test_verify_exact_git_main_movement_paths_malformed_sha():
-    result = verify_exact_git_main_movement_paths(
-        old_main_sha="invalid-sha",
-        old_main_tree_sha="1" * 40,
-        new_main_sha="2" * 40,
-        new_main_tree_sha="3" * 40,
-        changed_main_paths=["docs/unrelated.md"],
-    )
-    assert result["status"] == "IMPACT_UNKNOWN"
-    assert result["valid"] is False
-    assert result["blocking"] is True
-
-
-def test_verify_exact_git_main_movement_paths_untrusted_root():
-    result = verify_exact_git_main_movement_paths(
-        old_main_sha="a" * 40,
-        old_main_tree_sha="1" * 40,
-        new_main_sha="b" * 40,
-        new_main_tree_sha="2" * 40,
-        changed_main_paths=["docs/unrelated.md"],
-        root=Path("/non/existent/path/for/git/root"),
-    )
-    assert result["status"] == "IMPACT_UNKNOWN"
-    assert result["valid"] is False
-    assert result["blocking"] is True
-    assert "trusted Git root is required" in result["reasons"]
+    assert not any(arg.startswith("--ignore=") for arg in cmd)
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    assert payload["status"] == "COMPLETE"
+    assert payload["executed_targets"] == targets
+    assert payload["missing_targets"] == []
 
 
 @pytest.mark.parametrize(
@@ -2094,3 +1920,176 @@ def test_exact_git_result_cannot_enter_current_resolution_or_candidate_commit_pa
             None,
             SimpleNamespace(**evidence),
         )
+
+
+def _make_main_movement_repo(tmp_path: Path) -> dict[str, Any]:
+    repo = tmp_path / "movement_repo"
+    repo.mkdir()
+
+    def git(*args: str, text: bool = True):
+        return subprocess.check_output(["git", *args], cwd=repo, text=text)
+
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    (repo / "docs").mkdir()
+    (repo / "docs" / "unrelated.md").write_text("initial\n", encoding="utf-8")
+    (repo / "AGENTS.md").write_text("agents initial\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Nexus Test",
+            "-c",
+            "user.email=nexus@example.invalid",
+            "commit",
+            "-qm",
+            "old_main",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    old_main_sha = git("rev-parse", "HEAD").strip()
+    old_main_tree = git("rev-parse", "HEAD^{tree}").strip()
+
+    (repo / "docs" / "unrelated.md").write_text("updated\n", encoding="utf-8")
+    (repo / "AGENTS.md").write_text("agents updated\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Nexus Test",
+            "-c",
+            "user.email=nexus@example.invalid",
+            "commit",
+            "-qm",
+            "new_main",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    new_main_sha = git("rev-parse", "HEAD").strip()
+    new_main_tree = git("rev-parse", "HEAD^{tree}").strip()
+
+    return {
+        "repo": repo,
+        "old_main_sha": old_main_sha,
+        "old_main_tree_sha": old_main_tree,
+        "new_main_sha": new_main_sha,
+        "new_main_tree_sha": new_main_tree,
+        "changed_paths": ["AGENTS.md", "docs/unrelated.md"],
+    }
+
+
+def test_verify_exact_git_main_movement_paths_exact_match(tmp_path: Path):
+    fixture = _make_main_movement_repo(tmp_path)
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=fixture["changed_paths"],
+        root=fixture["repo"],
+    )
+    assert result["status"] == EXACT_GIT_EVIDENCE_ONLY
+    assert result["valid"] is True
+    assert result["blocking"] is False
+    assert result["reasons"] == ()
+    assert result["proven_paths"] == ("AGENTS.md", "docs/unrelated.md")
+    assert result["merge_authority"] is False
+    assert result["approval_authority"] is False
+    assert result["candidate_commit_allowed"] is False
+    assert result["public_claim_allowed"] is False
+
+
+def test_verify_exact_git_main_movement_paths_omitted_path_fails_closed(tmp_path: Path):
+    fixture = _make_main_movement_repo(tmp_path)
+    # Hostile caller supplies only docs/unrelated.md, omitting AGENTS.md
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=["docs/unrelated.md"],
+        root=fixture["repo"],
+    )
+    assert result["status"] == "IMPACT_UNKNOWN"
+    assert result["valid"] is False
+    assert result["blocking"] is True
+    assert any("omits physical paths" in r and "AGENTS.md" in r for r in result["reasons"])
+
+
+def test_verify_exact_git_main_movement_paths_spurious_path_fails_closed(tmp_path: Path):
+    fixture = _make_main_movement_repo(tmp_path)
+    # Caller supplies an extra path not in physical git diff
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=["AGENTS.md", "docs/unrelated.md", "nexus/extra.py"],
+        root=fixture["repo"],
+    )
+    assert result["status"] == "IMPACT_UNKNOWN"
+    assert result["valid"] is False
+    assert result["blocking"] is True
+    assert any("spurious paths" in r and "nexus/extra.py" in r for r in result["reasons"])
+
+
+def test_verify_exact_git_main_movement_paths_tree_mismatch_fails_closed(tmp_path: Path):
+    fixture = _make_main_movement_repo(tmp_path)
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha="0" * 40,
+        changed_main_paths=fixture["changed_paths"],
+        root=fixture["repo"],
+    )
+    assert result["status"] == "IMPACT_UNKNOWN"
+    assert result["valid"] is False
+    assert result["blocking"] is True
+    assert any("new_main_tree_sha does not match physical Git tree" in r for r in result["reasons"])
+
+
+def test_verify_exact_git_main_movement_paths_unresolvable_endpoint_fails_closed(tmp_path: Path):
+    fixture = _make_main_movement_repo(tmp_path)
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha="f" * 40,
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=fixture["changed_paths"],
+        root=fixture["repo"],
+    )
+    assert result["status"] == "IMPACT_UNKNOWN"
+    assert result["valid"] is False
+    assert result["blocking"] is True
+
+
+def test_verify_exact_git_main_movement_paths_malformed_sha():
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha="invalid-sha",
+        old_main_tree_sha="1" * 40,
+        new_main_sha="2" * 40,
+        new_main_tree_sha="3" * 40,
+        changed_main_paths=["docs/unrelated.md"],
+    )
+    assert result["status"] == "IMPACT_UNKNOWN"
+    assert result["valid"] is False
+    assert result["blocking"] is True
+
+
+def test_verify_exact_git_main_movement_paths_untrusted_root():
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha="a" * 40,
+        old_main_tree_sha="1" * 40,
+        new_main_sha="b" * 40,
+        new_main_tree_sha="2" * 40,
+        changed_main_paths=["docs/unrelated.md"],
+        root=Path("/non/existent/path/for/git/root"),
+    )
+    assert result["status"] == "IMPACT_UNKNOWN"
+    assert result["valid"] is False
+    assert result["blocking"] is True
+    assert "trusted Git root is required" in result["reasons"]
