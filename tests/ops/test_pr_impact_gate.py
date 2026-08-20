@@ -819,6 +819,110 @@ def test_aware_iso_timestamp_parameter_drift_preserves_logical_node_identity():
     assert result.blocking is False
 
 
+def test_unparameterized_base_expands_to_all_passing_head_parameterizations():
+    base_node = "tests.test_contract::test_matrix"
+    head_nodes = [f"{base_node}[alpha]", f"{base_node}[beta]"]
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[base_node])
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=head_nodes,
+        test_inventory_tree="f" * 40,
+    )
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "PASS"
+    assert result.blocking is False
+
+
+@pytest.mark.parametrize("outcome", ["failed", "errors"])
+def test_unparameterized_base_expansion_failure_is_a_new_regression(outcome):
+    base_node = "tests.test_contract::test_matrix"
+    passing = f"{base_node}[alpha]"
+    failing = f"{base_node}[beta]"
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[base_node])
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[passing],
+        test_inventory_tree="f" * 40,
+        **{outcome: [failing]},
+    )
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "NEW_REGRESSION"
+    assert result.blocking is True
+    assert result.new_failures == [failing]
+
+
+@pytest.mark.parametrize("outcome", ["failed", "errors", "skipped"])
+def test_nonpassing_unparameterized_base_cannot_expand_to_passing_parameters(outcome):
+    base_node = "tests.test_contract::test_matrix"
+    base = _with_node_outcomes(
+        _run(0 if outcome == "skipped" else 1, [], revision="base"),
+        passed=[] if outcome != "skipped" else [],
+        **{outcome: [base_node]},
+    )
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[f"{base_node}[alpha]", f"{base_node}[beta]"],
+        test_inventory_tree="f" * 40,
+    )
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+def test_unparameterized_base_expansion_requires_inventory_tree_delta():
+    base_node = "tests.test_contract::test_matrix"
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[f"{base_node}[alpha]"],
+    )
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[base_node])
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+def test_unparameterized_base_expansion_missing_family_fails_closed():
+    base_node = "tests.test_contract::test_matrix"
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[base_node])
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=["tests.test_contract::test_other[alpha]"],
+        test_inventory_tree="f" * 40,
+    )
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+def test_unparameterized_base_expansion_does_not_hide_unrelated_removal():
+    expanded = "tests.test_contract::test_matrix"
+    retained = "tests.test_contract::test_retained"
+    base = _with_node_outcomes(
+        _run(0, [], revision="base"),
+        passed=[expanded, retained],
+    )
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[f"{expanded}[alpha]"],
+        test_inventory_tree="f" * 40,
+    )
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+def test_unparameterized_base_expansion_with_retained_unparameterized_node_is_ambiguous():
+    base_node = "tests.test_contract::test_matrix"
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[base_node])
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[base_node, f"{base_node}[alpha]"],
+        test_inventory_tree="f" * 40,
+    )
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
 def test_dynamic_failure_identity_preserves_raw_evidence_without_false_regression():
     base_node = "tests.test_contract::test_expiry[2026-08-12T07:32:05Z]"
     head_node = "tests.test_contract::test_expiry[2026-08-12T07:40:05+00:00]"
