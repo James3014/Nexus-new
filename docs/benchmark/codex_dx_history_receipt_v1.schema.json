@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "codex_dx_history_receipt_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "source", "cutoff", "snapshot_hash", "status", "transport_gap", "pagination", "items", "accounting", "coverage"],
+  "properties": {
+    "schema_version": {"const": "codex-dx-history-receipt-v1"},
+    "source": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\r\\n]+$"},
+    "cutoff": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\r\\n]+$"},
+    "snapshot_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "status": {"enum": ["complete", "partial", "timeout", "unavailable"]},
+    "transport_gap": {"type": ["string", "null"], "maxLength": 200, "pattern": "^[^\\r\\n]+$"},
+    "pagination": {"$ref": "#/$defs/pagination"},
+    "items": {"type": "array", "maxItems": 1000, "items": {"$ref": "#/$defs/item"}},
+    "accounting": {"$ref": "#/$defs/accounting"},
+    "coverage": {"$ref": "#/$defs/coverage"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "complete"}}},
+      "then": {
+        "properties": {
+          "transport_gap": {"type": "null"},
+          "pagination": {"properties": {"complete": {"const": true}}},
+          "coverage": {"properties": {"claimable": {"const": true}}}
+        }
+      },
+      "else": {
+        "properties": {
+          "transport_gap": {"type": "string", "minLength": 1},
+          "pagination": {"properties": {"complete": {"const": false}}},
+          "coverage": {"properties": {"claimable": {"const": false}}}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "pagination": {"type": "object", "additionalProperties": false, "required": ["pages", "complete", "cursor_hash"], "properties": {"pages": {"type": "integer", "minimum": 1}, "complete": {"type": "boolean"}, "cursor_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}},
+    "item": {"type": "object", "additionalProperties": false, "required": ["id", "outcome", "category", "recurrence", "human_interventions", "evidence_ref"], "properties": {"id": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\r\\n]+$"}, "outcome": {"enum": ["success", "failure", "timeout", "unavailable"]}, "category": {"type": "string", "minLength": 1, "maxLength": 80, "pattern": "^[^\\r\\n]+$"}, "recurrence": {"type": "integer", "minimum": 1}, "human_interventions": {"type": "integer", "minimum": 0}, "evidence_ref": {"type": "string", "minLength": 1, "maxLength": 200, "pattern": "^[^\\r\\n]+$"}}},
+    "accounting": {"type": "object", "additionalProperties": false, "required": ["returned_items", "classified_items", "successes", "failures", "timeouts", "unavailable", "duplicates"], "properties": {"returned_items": {"type": "integer", "minimum": 0}, "classified_items": {"type": "integer", "minimum": 0}, "successes": {"type": "integer", "minimum": 0}, "failures": {"type": "integer", "minimum": 0}, "timeouts": {"type": "integer", "minimum": 0}, "unavailable": {"type": "integer", "minimum": 0}, "duplicates": {"type": "integer", "minimum": 0}}},
+    "coverage": {"type": "object", "additionalProperties": false, "required": ["claimable", "ceiling"], "properties": {"claimable": {"type": "boolean"}, "ceiling": {"const": "coverage-bounded taxonomy"}}}
+  }
+}

@@ -17,6 +17,7 @@ FAILURE_CLASSES = frozenset(
         "provider_unavailable",
         "provider_failed",
         "verifier_failed",
+        "verifier_evidence_untrusted",
         "learning_failed",
         "capability_skipped",
         "capability_not_executed",
@@ -188,19 +189,99 @@ def _failure_signal(receipt: Mapping[str, Any]) -> tuple[str, str, str, str]:
             return "capability_not_executed", "capability_closure", "selected_not_executed", ""
 
     stages = [stage for stage in receipt.get("stages", []) or [] if isinstance(stage, Mapping)]
+
+    workforce_stage = next(
+        (
+            stage
+            for stage in stages
+            if str(stage.get("name") or "").strip().lower() == "workforce_admission"
+        ),
+        None,
+    )
+    if workforce_stage is not None:
+        workforce_status = str(workforce_stage.get("status") or "").upper()
+        workforce_decision = str(
+            workforce_stage.get("overall_decision") or workforce_stage.get("decision") or ""
+        ).upper()
+        if (
+            workforce_status in {"BLOCKED", "FAILED", "INCOMPLETE"}
+            or workforce_decision in {"BLOCK", "ESCALATE"}
+        ) and not bool(workforce_stage.get("gate_passed")):
+            return "workforce_admission_blocked", "workforce_admission", "workforce_admission", ""
+
+    # Verifier/evidence is a required gate.  It must be evaluated before the
+    # optional Local/Online stages because disabled providers are context, not
+    # the cause, when verification was never observed or its evidence is not
+    # trustworthy.  Do this as a targeted lookup rather than relying on the
+    # serialized stage order.
+    verifier = next(
+        (stage for stage in stages if str(stage.get("name") or "").strip().lower() == "verifier"),
+        None,
+    )
+    provider_stages = [
+        stage
+        for stage in stages
+        if str(stage.get("name") or "").strip().lower() in {"local", "online"}
+    ]
+    for stage in provider_stages:
+        status = str(stage.get("status") or "").upper()
+        reason_text = str(stage.get("reason") or stage.get("skip_reason") or "").lower()
+        if status in {"FAILED", "BLOCKED"} and any(
+            token in reason_text for token in ("authoriz", "authority", "admission", "unauthoriz")
+        ):
+            name = str(stage.get("name") or "provider").strip().lower()
+            return "authorization_blocked", name, "authorization", ""
+    provider_unavailable_explicit = any(
+        "unavailable" in str(stage.get("reason") or stage.get("skip_reason") or "").lower()
+        for stage in provider_stages
+    )
+    if verifier is None and provider_stages and not provider_unavailable_explicit and all(
+        str(stage.get("status") or "").upper() == "NOT_REQUESTED" for stage in provider_stages
+    ):
+        return "verifier_evidence_untrusted", "verifier", "verifier_not_observed", ""
+    if verifier is not None:
+        verifier_status = str(verifier.get("status") or "").upper()
+        verifier_invoked = bool(verifier.get("invoked"))
+        verifier_evidence = bool(verifier.get("evidence_present"))
+        verifier_gate_passed = bool(verifier.get("gate_passed"))
+        verifier_reason = verifier.get("reason") or verifier.get("skip_reason") or ""
+        if (
+            verifier_status in {"NOT_RUN", "NOT_REQUESTED", ""}
+            or not verifier_invoked
+            or not verifier_evidence
+        ) and not (
+            verifier_status in {"SUCCEEDED", "PASS", "PASSED"}
+            and verifier_gate_passed
+            and verifier_invoked
+            and verifier_evidence
+        ):
+            reason_text = str(verifier_reason).strip().lower()
+            if not verifier_invoked or verifier_status in {"NOT_RUN", "NOT_REQUESTED", ""}:
+                reason_code = "verifier_not_observed"
+            elif "evidence" in reason_text or not verifier_evidence:
+                reason_code = "verifier_evidence_untrusted"
+            else:
+                reason_code = _stable_reason_code(verifier_reason, default="verifier_evidence_untrusted")
+                if reason_code in {"provider_unavailable", "provider_failed", "verifier"}:
+                    reason_code = "verifier_evidence_untrusted"
+            return "verifier_evidence_untrusted", "verifier", reason_code, ""
+        if verifier_status not in {"SUCCEEDED", "PASS", "PASSED"} or not verifier_gate_passed:
+            return "verifier_failed", "verifier", _stable_reason_code(verifier_reason, default="verifier"), ""
+
     for stage in stages:
-        name = str(stage.get("name") or "")
+        name = str(stage.get("name") or "").strip().lower()
         status = str(stage.get("status") or "").upper()
         reason = stage.get("reason") or stage.get("skip_reason") or ""
         if status == "SKIPPED" or bool(stage.get("skipped")):
             return "capability_skipped", name or "capability", _stable_reason_code(reason, default="policy_skip"), str(stage.get("provider") or "")
         if status == "SELECTED_NOT_EXECUTED":
             return "capability_not_executed", name or "capability", "selected_not_executed", str(stage.get("provider") or "")
-        if name == "verifier" and (status not in {"SUCCEEDED", "PASS", "PASSED"} or not bool(stage.get("gate_passed"))):
-            return "verifier_failed", name, _stable_reason_code(reason, default="verifier"), ""
         if name == "learning" and (status not in {"SUCCEEDED", "PASS", "PASSED"} or not bool(stage.get("gate_passed"))):
             return "learning_failed", name, _stable_reason_code(reason, default="learning"), ""
         if name in {"online", "local"} and status in {"FAILED", "BLOCKED", "NOT_RUN", "NOT_REQUESTED"}:
+            reason_text = str(reason).lower()
+            if any(token in reason_text for token in ("authoriz", "authority", "admission", "unauthoriz")):
+                return "authorization_blocked", name, "authorization", ""
             reason_code = _stable_reason_code(reason, default="provider_failed" if status in {"FAILED", "BLOCKED"} else "provider_unavailable")
             failure_class = "provider_unavailable" if reason_code == "provider_unavailable" or status in {"NOT_RUN", "NOT_REQUESTED"} else "provider_failed"
             provider = str(stage.get("provider") or "")

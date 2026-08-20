@@ -68,7 +68,16 @@ CI_MACHINERY_TARGETS = (
     "tests/ops/test_pr_impact_gate.py",
     "tests/ops/test_ci_gate_report_trust_audit.py",
 )
+EXACT_CONFIG_TARGETS: dict[str, tuple[str, ...]] = {
+    "configs/codex_dx_failure_prevention.json": ("tests/ops/test_codex_dx_failure_prevention.py",),
+    "configs/codex_task_context_index.json": ("tests/ops/test_codex_task_context_index.py",),
+    "configs/benchmarks/codex_dx_before_v1.json": (
+        "tests/benchmark/test_codex_dx_benchmark.py",
+        "tests/benchmark/test_codex_dx_history.py",
+    ),
+}
 
+OPTIONAL_BROWSER_EXCLUSION = "tests/core/test_web_dom_mapper.py"
 EXACT_GIT_EVIDENCE_ONLY = "EXACT_GIT_EVIDENCE_ONLY"
 _UNKNOWN = "IMPACT_UNKNOWN"
 _FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -541,10 +550,43 @@ def build_impact_plan(
         path for path in normalized if path.endswith(".py") and not path.startswith("tests/")
     ]
     wiki_required = any(path.startswith(("openwiki/", "nexus_wiki_vault/")) for path in normalized)
-    details = select_target_details(normalized, load_impact_rules())
+
+    exact_config_paths = [
+        path for path in normalized if path in EXACT_CONFIG_TARGETS and (root / path).is_file()
+    ]
+    exact_config_targets: list[str] = []
+    exact_config_reasons: list[str] = []
+    for path in exact_config_paths:
+        for target in EXACT_CONFIG_TARGETS[path]:
+            if target not in exact_config_targets:
+                exact_config_targets.append(target)
+        exact_config_reasons.append(f"{path}: matched exact config contract")
+
+    other_paths = [
+        path
+        for path in normalized
+        if path not in exact_config_paths and path not in exact_config_targets
+    ]
+
+    if other_paths:
+        details = select_target_details(other_paths, load_impact_rules())
+        details_targets = list(details.targets)
+        details_reasons = list(details.reasons)
+        details_confidence = details.confidence
+        details_unmatched = list(details.unmatched_paths)
+        details_high_risk = details.high_risk_escalated
+        details_fallback_used = details.fallback_used
+    else:
+        details_targets = []
+        details_reasons = []
+        details_confidence = 0.9
+        details_unmatched = []
+        details_high_risk = False
+        details_fallback_used = False
+
     unknown_unmatched = [
         path
-        for path in details.unmatched_paths
+        for path in details_unmatched
         if not (
             _is_docs_or_governance(path)
             or _is_workflow_or_ci(path)
@@ -556,15 +598,17 @@ def build_impact_plan(
         )
     ]
 
-    targets = list(details.targets)
-    reasons = list(details.reasons)
+    targets = list(exact_config_targets) + [
+        t for t in details_targets if t not in exact_config_targets
+    ]
+    reasons = list(exact_config_reasons) + list(details_reasons)
     impact_class = "SCOPED_IMPLEMENTATION"
     tier = 1
-    confidence = details.confidence
+    confidence = min(0.9, details_confidence) if other_paths else 0.9
 
     if docs_only:
         impact_class = "DOCS_GOVERNANCE"
-        mapped_docs_targets = [] if details.fallback_used else targets
+        mapped_docs_targets = [] if details_fallback_used else targets
         targets = _unique_existing([*mapped_docs_targets, *DOC_GOVERNANCE_TARGETS], root=root)
         confidence = max(confidence, 0.8)
         reasons.append("docs/governance-only diff selects governance verification")
@@ -578,7 +622,7 @@ def build_impact_plan(
             [*targets, *CI_MACHINERY_TARGETS, *MANDATORY_TIER2_TARGETS], root=root
         )
         reasons.append("CI/workflow change requires CI machinery regression set")
-    elif dependency_change or sensitive_change or contract_change or details.high_risk_escalated:
+    elif dependency_change or sensitive_change or contract_change or details_high_risk:
         impact_class = "HIGH_RISK_INTEGRATION"
         tier = 2
         targets = _unique_existing([*targets, *MANDATORY_TIER2_TARGETS], root=root)
@@ -727,6 +771,53 @@ def _logical_node_set(raw_nodes: Iterable[str]) -> set[LogicalNodeKey] | None:
     return None if index is None else set(index)
 
 
+def _parameterized_family(raw_node: str) -> str | None:
+    """Return the unparameterized pytest node name for a parameterized node."""
+    component_start = raw_node.rfind("::") + 2
+    parameter_start = raw_node.find("[", component_start)
+    if parameter_start <= component_start or not raw_node.endswith("]"):
+        return None
+    return raw_node[:parameter_start]
+
+
+def _expanded_node_keys(
+    base: PytestRunResult,
+    head: PytestRunResult,
+    base_index: Mapping[LogicalNodeKey, str],
+    head_index: Mapping[LogicalNodeKey, str],
+) -> tuple[set[LogicalNodeKey], set[LogicalNodeKey], bool]:
+    """Map unparameterized base nodes to their head parameterizations.
+
+    Expansion is accepted only when the test inventory changed.  A retained
+    unparameterized head node alongside parameterizations is ambiguous and is
+    therefore rejected instead of being treated as a successful replacement.
+    """
+    if base.test_inventory_tree == head.test_inventory_tree:
+        return set(), set(), False
+    base_passed = _logical_node_set(base.passed_node_ids)
+    if base_passed is None:
+        return set(), set(), True
+    head_by_family: dict[str, list[LogicalNodeKey]] = {}
+    for key, raw_node in head_index.items():
+        family = _parameterized_family(raw_node)
+        if family is not None:
+            head_by_family.setdefault(family, []).append(key)
+
+    expanded_base: set[LogicalNodeKey] = set()
+    expanded_head: set[LogicalNodeKey] = set()
+    for base_key, raw_node in base_index.items():
+        if base_key not in base_passed or _parameterized_family(raw_node) is not None:
+            continue
+        candidates = head_by_family.get(raw_node, [])
+        if not candidates:
+            continue
+        if base_key in head_index:
+            return set(), set(), True
+        expanded_base.add(base_key)
+        expanded_head.update(candidates)
+    return expanded_base, expanded_head, False
+
+
 def _metadata_mismatch(base: PytestRunResult, head: PytestRunResult) -> bool:
     base_index = _logical_node_index(base.node_ids)
     head_index = _logical_node_index(head.node_ids)
@@ -757,18 +848,27 @@ def _metadata_mismatch(base: PytestRunResult, head: PytestRunResult) -> bool:
     head_nodes = set(head_index)
     if not base_nodes and not head_nodes:
         return False
-    if not base_nodes or not head_nodes or not base_nodes <= head_nodes:
+    expanded_base, expanded_head, expansion_ambiguous = _expanded_node_keys(
+        base, head, base_index, head_index
+    )
+    if expansion_ambiguous:
+        return True
+    if not base_nodes or not head_nodes or not (base_nodes - expanded_base) <= head_nodes:
         return True
 
     head_only = head_nodes - base_nodes
     if head_only and base.test_inventory_tree == head.test_inventory_tree:
         return True
-    if not head_only <= head_passed:
+    ordinary_head_only = head_only - expanded_head
+    if not ordinary_head_only <= head_passed:
+        return True
+    expanded_nonpassing = expanded_head - head_passed
+    if expanded_nonpassing - (head_failed | head_errors):
         return True
     if not head_skipped <= base_skipped:
         return True
 
-    downgraded = base_passed - head_passed
+    downgraded = (base_passed - expanded_base) - head_passed
     classified_failures = head_failed | head_errors
     return bool(downgraded - classified_failures)
 
@@ -977,6 +1077,25 @@ def _git_changed_paths(base_sha: str, head_sha: str, *, root: Path) -> list[str]
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
+def _validate_optional_browser_exclusion(cwd: Path) -> str | None:
+    """Return a diagnostic when the exact optional exclusion is unsafe."""
+    try:
+        resolved_cwd = cwd.resolve(strict=True)
+        exclusion = cwd / OPTIONAL_BROWSER_EXCLUSION
+        resolved_exclusion = exclusion.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return f"missing declared optional exclusion: {OPTIONAL_BROWSER_EXCLUSION}"
+    if exclusion.is_symlink():
+        return f"declared optional exclusion must not be a symlink: {OPTIONAL_BROWSER_EXCLUSION}"
+    try:
+        resolved_exclusion.relative_to(resolved_cwd)
+    except ValueError:
+        return f"declared optional exclusion resolves outside cwd: {OPTIONAL_BROWSER_EXCLUSION}"
+    if not resolved_exclusion.is_file():
+        return f"declared optional exclusion is not a regular file: {OPTIONAL_BROWSER_EXCLUSION}"
+    return None
+
+
 def run_pytest_plan(
     plan_path: Path,
     result_path: Path,
@@ -1118,7 +1237,66 @@ def run_pytest_plan(
         )
         result_path.write_text(json.dumps(asdict(result), indent=2) + "\n", encoding="utf-8")
         return 0
-    command = [sys.executable, "-m", "pytest", *existing_targets, "-q", f"--junitxml={junit_path}"]
+    if "tests/core" in existing_targets:
+        diagnostic = _validate_optional_browser_exclusion(cwd)
+        if diagnostic is not None:
+            diagnostic += "\n"
+            stdout_path.write_text(diagnostic, encoding="utf-8")
+            status = "CI_BOOTSTRAP_DEFECT"
+            result = PytestRunResult(
+                2,
+                status,
+                [],
+                str(junit_path),
+                str(stdout_path),
+                executed_targets=existing_targets,
+                missing_targets=missing_targets,
+                revision=revision,
+                plan_digest=plan_digest,
+                selected_targets=targets,
+                impact_class=impact_class,
+                unexpected_missing_targets=unexpected_missing,
+                verifier_digest=verifier_digest,
+                source_tree=source_tree,
+                test_inventory_tree=test_inventory_tree,
+                bound_source_tree=expected_source_tree,
+                bound_test_inventory_tree=expected_test_inventory_tree,
+                collection_count=0,
+                node_ids=[],
+                passed_node_ids=[],
+                failed_node_ids=[],
+                error_node_ids=[],
+                skipped_node_ids=[],
+                terminal_status=status,
+                provenance_digest=compute_test_provenance_digest(
+                    revision=revision,
+                    source_tree=source_tree,
+                    test_inventory_tree=test_inventory_tree,
+                    plan_digest=plan_digest,
+                    verifier_digest=verifier_digest,
+                    collection_count=0,
+                    node_ids=[],
+                    passed_node_ids=[],
+                    failed_node_ids=[],
+                    error_node_ids=[],
+                    skipped_node_ids=[],
+                    terminal_status=status,
+                    exit_code=2,
+                    status=status,
+                    failures=[],
+                    executed_targets=existing_targets,
+                    missing_targets=missing_targets,
+                    selected_targets=targets,
+                    unexpected_missing_targets=unexpected_missing,
+                    impact_class=impact_class,
+                ),
+            )
+            result_path.write_text(json.dumps(asdict(result), indent=2) + "\n", encoding="utf-8")
+            return 2
+    pytest_args = list(existing_targets)
+    if "tests/core" in existing_targets:
+        pytest_args.append(f"--ignore={OPTIONAL_BROWSER_EXCLUSION}")
+    command = [sys.executable, "-m", "pytest", *pytest_args, "-q", f"--junitxml={junit_path}"]
     completed = subprocess.run(command, cwd=cwd, text=True, capture_output=True, check=False)
     stdout_path.write_text(completed.stdout + completed.stderr, encoding="utf-8")
     status = (

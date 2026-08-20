@@ -2066,7 +2066,9 @@ def test_submit_persists_idempotent_task_state(tmp_path):
             "candidate_commit_created": True,
         }
 
-    service = SelfHostedTaskService(state_dir=tmp_path / "state", runner=fake_runner)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=fake_runner, ephemeral=True
+    )
     request = _request(tmp_path)
 
     first = service.submit_task(request)
@@ -2089,7 +2091,9 @@ def test_submitted_at_matches_initial_submitted_history_entry(tmp_path):
         release.wait(2)
         return {"promotion_status": "PENDING_HUMAN_APPROVAL", "candidate_commit_created": True}
 
-    service = SelfHostedTaskService(state_dir=tmp_path / "state", runner=fake_runner)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=fake_runner, ephemeral=True
+    )
     request = _request(tmp_path, task_id="submitted-at-initial")
 
     submitted = service.submit_task(request)
@@ -2131,7 +2135,9 @@ def test_submitted_at_is_stable_across_idempotent_resubmission(tmp_path):
         calls.append(contract.task_id)
         return {"promotion_status": "PENDING_HUMAN_APPROVAL", "candidate_commit_created": True}
 
-    service = SelfHostedTaskService(state_dir=tmp_path / "state", runner=fake_runner)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=fake_runner, ephemeral=True
+    )
     request = _request(tmp_path, task_id="submitted-at-idempotent")
 
     first = service.submit_task(request)
@@ -2204,7 +2210,7 @@ def test_pid_permission_error_is_treated_as_alive(monkeypatch):
 
 
 def test_submit_rejects_raw_prompt_and_unknown_worker(tmp_path):
-    service = SelfHostedTaskService(state_dir=tmp_path / "state")
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", ephemeral=True)
 
     with pytest.raises(ValueError, match="prompt"):
         service.build_contract(_request(tmp_path, prompt="run arbitrary shell"))
@@ -2225,7 +2231,7 @@ def test_submit_rejects_raw_prompt_and_unknown_worker(tmp_path):
 
 
 def test_approval_is_hash_bound_and_does_not_merge(tmp_path):
-    service = SelfHostedTaskService(state_dir=tmp_path / "state")
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", ephemeral=True)
     request = _request(tmp_path)
 
     service._write_state(
@@ -2290,7 +2296,7 @@ def test_marked_authority_approval_requires_exact_nested_ack_and_persists(tmp_pa
     ],
 )
 def test_marked_authority_approval_service_rejects_tamper_and_expiry(tmp_path, field, value, code):
-    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     task_id = "authority-service-negative"
     packet = {"candidate_commit_sha": "c" * 40, "candidate_tree_sha": "d" * 40, "candidate_state_hash": "e" * 64, "verified_receipt_hash": "f" * 64, "authority_change_required": True, "authority_findings_sha256": "a" * 64}
     service._write_state(task_id, {"task_id": task_id, "attempt_id": "attempt-1", "status": "CANDIDATE_COMMITTED", "promotion_status": "PENDING_HUMAN_APPROVAL", "promotion_packet": packet, "verified_receipt": packet})
@@ -2302,7 +2308,9 @@ def test_marked_authority_approval_service_rejects_tamper_and_expiry(tmp_path, f
 
 
 def test_versioned_allow_action_once_is_consumed_atomically_and_replay_is_idempotent(tmp_path):
-    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
     task_id = "approval-once"
     packet = {
         "candidate_commit_sha": "c" * 40,
@@ -2765,6 +2773,28 @@ def test_safe_hooks_directory_does_not_require_rewrite(tmp_path, monkeypatch):
 def test_noncanonical_state_root_requires_ephemeral_mode(tmp_path):
     with pytest.raises(ValueError, match="canonical state root"):
         SelfHostedTaskService(state_dir="/Users/jameschen/Workspace/nexus-sibling-state", auto_reconcile=False)
+
+
+def test_ci_isolated_state_root_requires_explicit_ephemeral_mode(monkeypatch):
+    isolated_state = Path(
+        "/home/runner/work/_temp/trusted-anchor/source-self-hosted-state"
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service._temporary_state_roots",
+        lambda: (),
+    )
+
+    with pytest.raises(ValueError, match="canonical state root"):
+        SelfHostedTaskService(state_dir=isolated_state, auto_reconcile=False)
+
+    service = SelfHostedTaskService(
+        state_dir=isolated_state,
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+
+    assert service.state_dir == isolated_state.resolve()
+    assert service.ephemeral is True
 
 
 def test_default_state_root_uses_configured_canonical_root(tmp_path, monkeypatch):
