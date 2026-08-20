@@ -252,6 +252,85 @@ def test_run_once_skips_source_lineage_blocked_issue_to_reach_eligible_next(tmp_
     assert gh.comments[0][1] == 2
 
 
+@pytest.mark.parametrize(
+    "disposition",
+    [
+        {"state": "REPAIR_BUDGET_EXHAUSTED", "semantic_dispatched": True},
+        {"state": "UNIT_REPAIR_REQUIRED", "semantic_dispatched": True},
+        {"state": "COMPOSITION_REPAIR_REQUIRED", "semantic_dispatched": True},
+        {"state": "SCOPE_DELTA_REQUIRED", "semantic_dispatched": True},
+        {
+            "state": "RECONCILIATION_REQUIRED",
+            "prior_state": "CLOSURE_DISPATCHING",
+            "semantic_dispatched": True,
+        },
+    ],
+)
+def test_run_once_skips_terminal_or_reconcile_issue_to_reach_eligible_next(tmp_path, disposition):
+    config = _config(tmp_path)
+    calls = []
+
+    class SequencedAutomation:
+        def run_issue(self, repository, issue_number, title, body):
+            calls.append(issue_number)
+            if issue_number == 1:
+                return dict(disposition)
+            return _complete()
+
+    gh = FakeGh({
+        "o/r": [
+            {"number": 2, "title": "eligible", "body": "b"},
+            {"number": 1, "title": "durable-stop", "body": "a"},
+        ]
+    })
+    result = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: SequencedAutomation(),
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert calls == [1, 2]
+    assert result["issue_number"] == 2
+    assert len(gh.comments) == 1
+    assert gh.comments[0][1] == 2
+
+
+def test_run_once_skips_dispatched_blocked_issue_to_reach_eligible_next(tmp_path):
+    config = _config(tmp_path)
+    calls = []
+
+    class SequencedAutomation:
+        def run_issue(self, repository, issue_number, title, body):
+            calls.append(issue_number)
+            if issue_number == 1:
+                return {
+                    "state": "BLOCKED",
+                    "stage": "CLOSURE",
+                    "closure_status": "CLOSURE_NON_TERMINAL_FAILURE",
+                    "semantic_dispatched": True,
+                }
+            return _complete()
+
+    gh = FakeGh({
+        "o/r": [
+            {"number": 2, "title": "eligible", "body": "b"},
+            {"number": 1, "title": "dispatched-blocked", "body": "a"},
+        ]
+    })
+    result = run_once(
+        config,
+        gh=gh,
+        automation_factory=lambda _c, _r: SequencedAutomation(),
+        refresh_fn=lambda _r, _repo: None,
+    )
+    assert calls == [1, 2]
+    assert result["status"] == "COMPLETE"
+    assert result["issue_number"] == 2
+    assert len(gh.comments) == 1
+    assert gh.comments[0][1] == 2
+    assert "External Intelligence automation completed" in gh.comments[0][2]
+
+
 def test_idle_when_no_labeled_issue(tmp_path):
     config = _config(tmp_path)
     gh = FakeGh({"o/r": []})

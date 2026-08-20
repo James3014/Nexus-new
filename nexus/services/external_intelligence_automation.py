@@ -37,6 +37,12 @@ AMBIGUOUS_STATES = {
     "FANOUT_DISPATCHING",
     "CLOSURE_DISPATCHING",
 }
+TERMINAL_DISPOSITIONS = {
+    "REPAIR_BUDGET_EXHAUSTED",
+    "UNIT_REPAIR_REQUIRED",
+    "COMPOSITION_REPAIR_REQUIRED",
+    "SCOPE_DELTA_REQUIRED",
+}
 ALLOWED_KEYS = {
     "schema",
     "task_id",
@@ -542,9 +548,11 @@ class ExternalIntelligenceAutomation:
         previous = self.state_store.load(item)
         previous_state = str((previous or {}).get("state") or "")
         resume_from = previous_state
-        if previous_state == "COMPLETE":
+        if previous_state == "COMPLETE" or previous_state in TERMINAL_DISPOSITIONS:
             return {**previous, "reuse": True, "semantic_dispatched": True}
         if previous_state == "RECONCILIATION_REQUIRED":
+            if (previous or {}).get("reconcile_only"):
+                return {**previous, "reuse": True, "semantic_dispatched": True}
             prior_state = str((previous or {}).get("prior_state") or "")
             if prior_state not in {"INTELLIGENCE_DISPATCHING", "FANOUT_DISPATCHING"}:
                 return {**previous, "semantic_dispatched": True}
@@ -554,6 +562,7 @@ class ExternalIntelligenceAutomation:
                 item,
                 "RECONCILIATION_REQUIRED",
                 prior_state="CLOSURE_DISPATCHING",
+                reconcile_only=True,
                 semantic_dispatched=True,
             )
         recoverable_states = {
@@ -610,6 +619,15 @@ class ExternalIntelligenceAutomation:
                 or not isinstance(closure.get("control_capsule"), Mapping)
                 or not closure["control_capsule"]
             ):
+                closure_status = str(closure.get("status") or "")
+                if closure_status in TERMINAL_DISPOSITIONS:
+                    return self.state_store.save(
+                        item,
+                        closure_status,
+                        closure_status=closure_status,
+                        closure_run_id=closure.get("run_id"),
+                        semantic_dispatched=True,
+                    )
                 return self.state_store.save(
                     item,
                     "BLOCKED",
@@ -639,6 +657,7 @@ class ExternalIntelligenceAutomation:
                     "RECONCILIATION_REQUIRED",
                     prior_state=current.get("state"),
                     error=type(exc).__name__,
+                    reconcile_only=True,
                     semantic_dispatched=dispatched,
                 )
             return self.state_store.save(
@@ -653,6 +672,7 @@ __all__ = [
     "ExternalIntelligenceAutomation",
     "ISSUE_SCHEMA",
     "IssueWorkItem",
+    "TERMINAL_DISPOSITIONS",
     "_normalize_github_repo",
     "compact_publication_payload",
     "parse_issue_contract",

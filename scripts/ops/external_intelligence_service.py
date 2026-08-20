@@ -25,6 +25,7 @@ from nexus.services.external_intelligence import (
     OpenCLIExternalIntelligenceTransport,
 )
 from nexus.services.external_intelligence_automation import (
+    TERMINAL_DISPOSITIONS,
     AutomationStateStore,
     ExternalIntelligenceAutomation,
     _normalize_github_repo,
@@ -577,8 +578,11 @@ def run_once(
                 str(issue.get("title") or ""),
                 str(issue.get("body") or ""),
             )
-            if result.get("reuse") or (
-                result.get("state") == "BLOCKED" and not result.get("semantic_dispatched")
+            if (
+                result.get("reuse")
+                or result.get("state") in TERMINAL_DISPOSITIONS
+                or result.get("state") == "RECONCILIATION_REQUIRED"
+                or result.get("state") == "BLOCKED"
             ):
                 last = {
                     "status": result.get("state"),
