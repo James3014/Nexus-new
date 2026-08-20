@@ -48,25 +48,23 @@ def test_staging_verifier_binds_persisted_executable_identity(tmp_path):
     executable = _python3_executable(tmp_path)
     command = "python3 -c 'print(\"integration-pass\")'"
     state = {
-        "verified_receipt": {
-            "verifier_evidence": [
-                _verifier_evidence(
-                    executable,
-                    command,
-                    ["-c", 'print("integration-pass")'],
-                )
-            ]
-        },
+        "verified_receipt": {"verifier_evidence": [
+            _verifier_evidence(
+                executable,
+                command,
+                ["-c", 'print("integration-pass")'],
+            )
+        ]},
     }
-    admitted = ControlledIntegrationManager._admitted_commands(
-        state, {"verifier_commands": [command]}
-    )
+    admitted = ControlledIntegrationManager._admitted_commands(state, {"verifier_commands": [command]})
     assert admitted == ((str(executable), ("-c", 'print("integration-pass")')),)
 
 
 def test_staging_verifier_rejects_executable_sha_drift_before_run(tmp_path):
     command = "python3 -c 'print(1)'"
-    evidence = _verifier_evidence(_python3_executable(tmp_path), command, ["-c", "print(1)"])
+    evidence = _verifier_evidence(
+        _python3_executable(tmp_path), command, ["-c", "print(1)"]
+    )
     evidence["executable_sha256"] = "0" * 64
     state = {"verified_receipt": {"verifier_evidence": [evidence]}}
     with pytest.raises(RuntimeError, match="SHA drift"):
@@ -76,11 +74,9 @@ def test_staging_verifier_rejects_executable_sha_drift_before_run(tmp_path):
 def test_staging_verifier_preserves_bounded_env_prefix(tmp_path):
     executable = _python3_executable(tmp_path)
     command = "PYTHONDONTWRITEBYTECODE=1 python3 -c 'print(1)'"
-    state = {
-        "verified_receipt": {
-            "verifier_evidence": [_verifier_evidence(executable, command, ["-c", "print(1)"])]
-        }
-    }
+    state = {"verified_receipt": {"verifier_evidence": [
+        _verifier_evidence(executable, command, ["-c", "print(1)"])
+    ]}}
 
     manifest = ControlledIntegrationManager._admitted_manifest(
         state,
@@ -105,7 +101,9 @@ def test_staging_verifier_preserves_bounded_env_prefix(tmp_path):
 )
 def test_staging_verifier_identity_tamper_fails_closed(tmp_path, tamper, message):
     command = "python3 -c 'print(1)'"
-    evidence = _verifier_evidence(_python3_executable(tmp_path), command, ["-c", "print(1)"])
+    evidence = _verifier_evidence(
+        _python3_executable(tmp_path), command, ["-c", "print(1)"]
+    )
     tamper(evidence)
 
     with pytest.raises(RuntimeError, match=message):
@@ -130,25 +128,15 @@ def test_staging_verifier_rejects_reordered_or_injected_commands(tmp_path):
         )
     with pytest.raises(RuntimeError, match="not admitted"):
         ControlledIntegrationManager._admitted_manifest(
-            {
-                "verified_receipt": {
-                    "verifier_evidence": [
-                        _verifier_evidence(executable, "python3 -m pytest; touch pwned", [])
-                    ]
-                }
-            },
+            {"verified_receipt": {"verifier_evidence": [
+                _verifier_evidence(executable, "python3 -m pytest; touch pwned", [])
+            ]}},
             {"verifier_commands": ["python3 -m pytest; touch pwned"]},
         )
 
 
 def _git(repo: Path, *args: str) -> str:
-    result = subprocess.run(
-        ["git", "-c", "core.hooksPath=/dev/null", *args],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    result = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", *args], cwd=repo, capture_output=True, text=True, check=True)
     return result.stdout.strip()
 
 
@@ -177,7 +165,7 @@ def _authorized_verifier_state(tmp_path: Path):
     executable.symlink_to(Path(sys.executable))
     command = (
         "PYTHONDONTWRITEBYTECODE=1 python3 -c "
-        '\'from pathlib import Path; Path("verifier-ran").write_text("ok")\''
+        "'from pathlib import Path; Path(\"verifier-ran\").write_text(\"ok\")'"
     )
     evidence = _verifier_evidence(
         executable,
@@ -377,15 +365,13 @@ def _candidate_state(repo: Path, base: str, candidate: str, tree: str):
             "candidate_state_hash": "a" * 64,
             "verified_receipt_hash": "b" * 64,
         },
-        "verified_receipt": {
-            "verifier_evidence": [
-                _verifier_evidence(
-                    executable,
-                    command,
-                    ["-c", 'print("integration-pass")'],
-                )
-            ]
-        },
+        "verified_receipt": {"verifier_evidence": [
+            _verifier_evidence(
+                executable,
+                command,
+                ["-c", 'print("integration-pass")'],
+            )
+        ]},
     }
     state["integration_verifier_manifest"] = list(
         ControlledIntegrationManager._admitted_manifest(state, state["contract"])
@@ -413,9 +399,9 @@ def test_controlled_integration_merges_only_to_nexus_integration(tmp_path):
     candidate = _git(target, "rev-parse", "HEAD")
     tree = _git(target, "rev-parse", "HEAD^{tree}")
 
-    receipt = ControlledIntegrationManager(
-        integration_root=tmp_path / "integrations"
-    ).integrate_task_state(_candidate_state(repo, base, candidate, tree))
+    receipt = ControlledIntegrationManager(integration_root=tmp_path / "integrations").integrate_task_state(
+        _candidate_state(repo, base, candidate, tree)
+    )
 
     assert receipt.integration_branch == "nexus/integration"
     assert receipt.merge_performed is True
@@ -456,9 +442,9 @@ def test_controlled_integration_uses_durable_ref_for_detached_retry(tmp_path):
     state["lease"]["target_detached"] = True
     state["candidate_ref"] = candidate_ref
 
-    receipt = ControlledIntegrationManager(
-        integration_root=tmp_path / "integrations"
-    ).integrate_task_state(state, integration_branch="nexus/integration/test")
+    receipt = ControlledIntegrationManager(integration_root=tmp_path / "integrations").integrate_task_state(
+        state, integration_branch="nexus/integration/test"
+    )
 
     assert receipt.source_branch == candidate_ref
     assert _git(repo, "rev-parse", "nexus/integration/test") == receipt.integration_commit_sha
@@ -503,9 +489,9 @@ def test_controlled_integration_rolls_back_failed_verifier(tmp_path):
     )
 
     with pytest.raises(RuntimeError, match="staging verifier failed"):
-        ControlledIntegrationManager(
-            integration_root=tmp_path / "integrations"
-        ).integrate_task_state(state, integration_branch="nexus/integration/test")
+        ControlledIntegrationManager(integration_root=tmp_path / "integrations").integrate_task_state(
+            state, integration_branch="nexus/integration/test"
+        )
 
     assert _git(repo, "rev-parse", "nexus/integration/test") == base
     assert not (tmp_path / "integrations" / "integration-task").exists()
