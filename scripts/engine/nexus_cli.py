@@ -3113,6 +3113,7 @@ def learn_benchmark_cmd(manifest_file, topic, source, source_file, output_json, 
 @click.option("--output-json", is_flag=True)
 def oracle_apply(shadow_tid, report_file, output_json):
     """🚀 [Oracle] Promote a successful shadow patch to main workspace."""
+    from nexus.core.exit_codes import NexusExitCode
     from nexus.oracle.promote import promote_shadow_patch
     ok = promote_shadow_patch(repo_root, shadow_tid)
     payload = {"status": "SUCCESS" if ok else "FAILED", "shadow_tid": shadow_tid}
@@ -3127,6 +3128,8 @@ def oracle_apply(shadow_tid, report_file, output_json):
     else:
         click.secho("❌ Promotion failed.", fg="red")
         click.echo(f"Report: {out_path}")
+    if not ok:
+        raise click.exceptions.Exit(NexusExitCode.FAILED)
 
 @nexus_group.group(name="multi-agent")
 def multi_agent_group():
