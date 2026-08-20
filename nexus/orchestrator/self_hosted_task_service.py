@@ -89,7 +89,12 @@ from nexus.orchestrator.task_contract import (
     MutationMode,
 )
 from nexus.orchestrator.worker_escalation import WorkerEscalationPolicy
-from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager
+from nexus.orchestrator.worktree_manager import (
+    TargetWorktreeLease,
+    WorktreeManager,
+    _source_identity,
+    mutation_domains_conflict,
+)
 from nexus.services.model_workforce_policy import WorkforcePolicyLoader
 from nexus.services.runtime_workforce_admission import evaluate_runtime_workforce_admission
 
@@ -4963,7 +4968,13 @@ class SelfHostedTaskService:
             1 for state in states.values()
             if state.get("task_id") != task_id
             if not idempotency_key or str(state.get("idempotency_key") or "") != idempotency_key
-            if state.get("status") not in TERMINAL_STATUSES
+            if (
+                state.get("status") not in TERMINAL_STATUSES
+                or (
+                    state.get("status") in {"FINAL_BLOCK", "RETAINED_FOR_REVIEW"}
+                    and state.get("cleanup_decision") not in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
+                )
+            )
             and state.get("status") not in {"PENDING_HUMAN_APPROVAL", "APPROVED"}
         )
         lane = resolve_execution_lane(request, active_mutation_tasks=active_mutations)
@@ -5057,16 +5068,35 @@ class SelfHostedTaskService:
                     },
                 }
             if current.get("status") in TERMINAL_STATUSES:
-                continue
+                if current.get("status") not in {"FINAL_BLOCK", "RETAINED_FOR_REVIEW"}:
+                    continue
+                if current.get("cleanup_decision") in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}:
+                    continue
             current_controller = (current.get("contract") or {}).get("controller_repo_root")
             if current_controller and Path(current_controller).resolve() != Path(contract.controller_repo_root).resolve():
                 raise RuntimeError("active Controller lease belongs to a different controller worktree")
             if (
                 current.get("task_id") != contract.task_id
-                and current.get("status") in {"TARGET_LEASED", "WORKER_RUNNING", "WORKER_COMPLETED", "CANDIDATE_CAPTURED", "VERIFIED"}
-                and not request.get("competition_id")
+                and (
+                    current.get("status") in {
+                        "TARGET_LEASED", "WORKER_RUNNING", "WORKER_COMPLETED", "CANDIDATE_CAPTURED", "VERIFIED",
+                        "FINAL_BLOCK", "RETAINED_FOR_REVIEW",
+                    }
+                )
             ):
-                raise RuntimeError("serial Target budget exceeded: another task owns the active Target")
+                try:
+                    conflict = mutation_domains_conflict(current, contract)
+                except ValueError as exc:
+                    raise RuntimeError(
+                        "serial Target budget exceeded: active Target identity or scope is ambiguous"
+                    ) from exc
+                if conflict:
+                    raise RuntimeError("serial Target budget exceeded: another task owns the overlapping Target")
+        controller_path = Path(contract.controller_repo_root).resolve()
+        if controller_path.exists() and (controller_path / ".git").exists():
+            manager = WorktreeManager(root_dir=contract.target_worktree_root, create_root=False)
+            if manager.target_conflict(contract, task_states=self._submission_task_states()):
+                raise RuntimeError("serial Target budget exceeded: another task owns the overlapping Target")
         attempt_id = attempt_id_hint if action else uuid4().hex
         now = _utc_now()
         state: dict[str, Any] = {
@@ -5166,6 +5196,27 @@ class SelfHostedTaskService:
                 "EPHEMERAL_TEST_RUNNER"
                 if self._custom_runner is not None
                 else "WORKER_REGISTRY"
+            ),
+            "source_identity": _source_identity(
+                str(Path(contract.controller_repo_root).resolve()),
+                contract.controller_revision,
+                contract.contract_hash,
+                execution_authority=(
+                    "EPHEMERAL_TEST_RUNNER"
+                    if self._custom_runner is not None
+                    else "WORKER_REGISTRY"
+                ),
+                worker_id=(
+                    dispatch_binding["worker_id"]
+                    if dispatch_binding
+                    else None if tracked_dispatch_required else request.get("worker_id")
+                ),
+                provider=(
+                    dispatch_binding["provider"]
+                    if dispatch_binding
+                    else None if tracked_dispatch_required else contract.preferred_provider
+                ),
+                lifecycle_revision=identity.get("lifecycle_revision"),
             ),
             "provider_receipt_authoritative": self._custom_runner is None,
             "workforce_admission_authoritative": self._custom_runner is None,
