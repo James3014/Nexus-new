@@ -5,10 +5,10 @@ campaign_id: github-issue-98-merge-block-controller-throughput-20260818
 source_issue: "#98"
 owner: James Chen
 status: ACTIVE
-baseline_revision: f9899121c6b691fd7a66a391a2055a2c78bd387b
-rebound_from_current_main: f9899121c6b691fd7a66a391a2055a2c78bd387b
-rebind_head_before_edits: cd4056039915a2517d20815e4003920f021aaf07
-historical_baseline_revision: 71ae533ec9f795477131645f96cea1c93b4f4d40
+baseline_revision: c90cb159476c5824d4c1fc4e341652f60036ddf5
+rebound_from_current_main: c90cb159476c5824d4c1fc4e341652f60036ddf5
+rebind_head_before_edits: b197b904050aa8c0f66009bbe6e651eecfc59bf0
+historical_baseline_revision: f9899121c6b691fd7a66a391a2055a2c78bd387b
 claim_ceiling: SOURCE_CANDIDATE_ONLY
 commit_required: true
 candidate_required: true
@@ -36,9 +36,10 @@ block before provider invocation.
 
 ## Authority and dependencies
 
-- GitHub main baseline is the exact current main `f9899121c6b691fd7a66a391a2055a2c78bd387b`.
-  The historical baselines (`71ae533e`, `8c2584d6`, `1ee1c693`, and partial rebind
-  head `cd405603`) are provenance only and grant no stale source authority.
+- GitHub main baseline is the exact current main `c90cb159476c5824d4c1fc4e341652f60036ddf5`.
+  The historical baselines (`f9899121`, `71ae533e`, `8c2584d6`, `1ee1c693`,
+  pre-rebind source repair head `b197b904`, and partial rebind head `cd405603`)
+  are provenance only and grant no stale source authority.
 - Issue #163 is physically closed at current main; standing-grant changes are a
   settled predecessor and remain outside this Candidate's scope.
 - Issue #96 completed `POST_30_LOCAL_DELTA_FULLY_ACCOUNTED` in comment
