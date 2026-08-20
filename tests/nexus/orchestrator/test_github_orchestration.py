@@ -3,6 +3,7 @@ import os
 import subprocess
 from datetime import timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -101,8 +102,77 @@ def _plan(**overrides):
     return type("Plan", (), values)()
 
 
+def _make_requalify_git_repo(
+    tmp_path: Path, *, include_agents_change: bool = False
+) -> dict[str, Any]:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args: str, text: bool = True):
+        return subprocess.check_output(["git", *args], cwd=repo, text=text)
+
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    (repo / "tests").mkdir()
+    (repo / "tests" / "test_smoke.py").write_text("def test_smoke(): pass\n", encoding="utf-8")
+    (repo / "docs").mkdir()
+    (repo / "docs" / "unrelated.md").write_text("initial docs\n", encoding="utf-8")
+    (repo / "AGENTS.md").write_text("initial agents\n", encoding="utf-8")
+    (repo / "nexus").mkdir()
+    (repo / "nexus" / "a.py").write_text("def a(): pass\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Nexus Test",
+            "-c",
+            "user.email=nexus@example.invalid",
+            "commit",
+            "-qm",
+            "old_main",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    old_main_sha = git("rev-parse", "HEAD").strip()
+    old_main_tree = git("rev-parse", "HEAD^{tree}").strip()
+
+    (repo / "docs" / "unrelated.md").write_text("updated docs\n", encoding="utf-8")
+    if include_agents_change:
+        (repo / "AGENTS.md").write_text("updated agents\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Nexus Test",
+            "-c",
+            "user.email=nexus@example.invalid",
+            "commit",
+            "-qm",
+            "new_main",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    new_main_sha = git("rev-parse", "HEAD").strip()
+    new_main_tree = git("rev-parse", "HEAD^{tree}").strip()
+
+    return {
+        "repo": repo,
+        "old_main_sha": old_main_sha,
+        "old_main_tree_sha": old_main_tree,
+        "new_main_sha": new_main_sha,
+        "new_main_tree_sha": new_main_tree,
+    }
+
+
 def test_main_movement_reuses_unaffected_dimensions(monkeypatch):
     snap = evidence()
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
     monkeypatch.setattr("scripts.ops.pr_impact_gate.build_impact_plan", lambda *a, **k: _plan())
     result = requalify_main_movement(snap, movement_for(snap))
     assert result.blocked is False
@@ -111,6 +181,10 @@ def test_main_movement_reuses_unaffected_dimensions(monkeypatch):
 
 def test_main_movement_rechecks_overlap_and_authority(monkeypatch):
     snap = evidence()
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
     monkeypatch.setattr("scripts.ops.pr_impact_gate.build_impact_plan", lambda *a, **k: _plan())
     result = requalify_main_movement(
         snap,
@@ -124,11 +198,169 @@ def test_main_movement_rechecks_overlap_and_authority(monkeypatch):
 
 def test_main_movement_tamper_fails_closed(monkeypatch):
     snap = evidence()
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
     monkeypatch.setattr("scripts.ops.pr_impact_gate.build_impact_plan", lambda *a, **k: _plan())
     result = requalify_main_movement(snap, movement_for(snap, candidate_head_sha="a" * 40))
     assert result.blocked is True
     source = next(item for item in result.dimensions if item.dimension == "SOURCE_IDENTITY")
     assert source.action == "IMPACT_UNKNOWN"
+
+
+def test_h1_omitted_authority_path_fails_closed(tmp_path: Path):
+    fixture = _make_requalify_git_repo(tmp_path, include_agents_change=True)
+    snap = evidence(base_sha=fixture["old_main_sha"], current_main_sha=fixture["old_main_sha"])
+    mov = movement_for(
+        snap,
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=("docs/unrelated.md",),
+    )
+    result = requalify_main_movement(snap, mov, root=fixture["repo"])
+    assert result.blocked is True
+    by_name = {item.dimension: item for item in result.dimensions}
+    assert by_name["AUTHORITY_DRIFT"].action == "IMPACT_UNKNOWN"
+    assert by_name["AUTHORITY_DRIFT"].action != "REUSE_UNAFFECTED"
+    assert by_name["SOURCE_IDENTITY"].action == "IMPACT_UNKNOWN"
+
+
+def test_h2_spurious_caller_path_fails_closed(tmp_path: Path):
+    fixture = _make_requalify_git_repo(tmp_path, include_agents_change=False)
+    snap = evidence(base_sha=fixture["old_main_sha"], current_main_sha=fixture["old_main_sha"])
+    mov = movement_for(
+        snap,
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=("docs/unrelated.md", "nexus/extra.py"),
+    )
+    result = requalify_main_movement(snap, mov, root=fixture["repo"])
+    assert result.blocked is True
+    assert all(item.action == "IMPACT_UNKNOWN" for item in result.dimensions)
+
+
+def test_h3_exact_path_set_allows_unaffected_classification(tmp_path: Path):
+    fixture = _make_requalify_git_repo(tmp_path, include_agents_change=False)
+    snap = evidence(base_sha=fixture["old_main_sha"], current_main_sha=fixture["old_main_sha"])
+    mov = movement_for(
+        snap,
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=("docs/unrelated.md",),
+    )
+    result = requalify_main_movement(snap, mov, root=fixture["repo"])
+    assert result.blocked is False
+    assert {item.action for item in result.dimensions} == {"REUSE_UNAFFECTED"}
+
+
+def test_h4_tree_mismatch_fails_closed(tmp_path: Path):
+    fixture = _make_requalify_git_repo(tmp_path, include_agents_change=False)
+    snap = evidence(base_sha=fixture["old_main_sha"], current_main_sha=fixture["old_main_sha"])
+    mov = movement_for(
+        snap,
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha="0" * 40,
+        changed_main_paths=("docs/unrelated.md",),
+    )
+    result = requalify_main_movement(snap, mov, root=fixture["repo"])
+    assert result.blocked is True
+    assert all(item.action == "IMPACT_UNKNOWN" for item in result.dimensions)
+
+
+def test_h5_unresolvable_endpoint_fails_closed(tmp_path: Path):
+    fixture = _make_requalify_git_repo(tmp_path, include_agents_change=False)
+    snap = evidence(base_sha="f" * 40, current_main_sha="f" * 40)
+    mov = movement_for(
+        snap,
+        old_main_sha="f" * 40,
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=("docs/unrelated.md",),
+    )
+    result = requalify_main_movement(snap, mov, root=fixture["repo"])
+    assert result.blocked is True
+    assert all(item.action == "IMPACT_UNKNOWN" for item in result.dimensions)
+
+
+def test_h6_rename_delete_ambiguity_fails_closed(tmp_path: Path, monkeypatch):
+    fixture = _make_requalify_git_repo(tmp_path, include_agents_change=False)
+    snap = evidence(base_sha=fixture["old_main_sha"], current_main_sha=fixture["old_main_sha"])
+    mov = movement_for(
+        snap,
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=("docs/unrelated.md",),
+    )
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {
+            "valid": False,
+            "reasons": ["raw diff contains unsupported status or rename ambiguity: R100"],
+            "proven_paths": (),
+        },
+    )
+    result = requalify_main_movement(snap, mov, root=fixture["repo"])
+    assert result.blocked is True
+    assert all(item.action == "IMPACT_UNKNOWN" for item in result.dimensions)
+
+
+@pytest.mark.parametrize(
+    "tamper_field",
+    [
+        "candidate_head_sha",
+        "candidate_tree_sha",
+        "candidate_diff_hash",
+        "candidate_changed_paths",
+        "prior_impact_hash",
+        "prior_verifier_hash",
+    ],
+)
+def test_h7_existing_tamper_controls_remain_green(tamper_field, monkeypatch):
+    snap = evidence()
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr("scripts.ops.pr_impact_gate.build_impact_plan", lambda *a, **k: _plan())
+    tamper_val = (
+        ("nexus/tamper.py",)
+        if "paths" in tamper_field
+        else "0" * (40 if "sha" in tamper_field else 64)
+    )
+    mov = movement_for(snap, **{tamper_field: tamper_val})
+    result = requalify_main_movement(snap, mov)
+    assert result.blocked is True
+    by_name = {item.dimension: item for item in result.dimensions}
+    assert by_name["SOURCE_IDENTITY"].action == "IMPACT_UNKNOWN"
+
+
+def test_h8_no_authority_escalation(tmp_path: Path):
+    fixture = _make_requalify_git_repo(tmp_path, include_agents_change=False)
+    snap = evidence(base_sha=fixture["old_main_sha"], current_main_sha=fixture["old_main_sha"])
+    mov = movement_for(
+        snap,
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=("docs/unrelated.md",),
+    )
+    result = requalify_main_movement(snap, mov, root=fixture["repo"])
+    assert result.claim_ceiling == "COMPLETION_PATH_COMPRESSION_TARGET_B_CANDIDATE_ONLY"
+    assert not hasattr(result, "mutation_authorized")
+    assert not hasattr(result, "grant_outcome")
 
 
 def test_durable_receipt_loads_and_authorizes_without_caller_context(tmp_path):
@@ -541,9 +773,9 @@ def test_recomputed_hash_cannot_change_intent_semantics():
     intent = prepare_merge_intent(ctx, req, snap, now=NOW)
     tampered = intent.model_dump(mode="json")
     tampered["claim_ceiling"] = "NO_MUTATION_AUTHORITY"
-    tampered["intent_hash"] = canonical_hash({
-        key: value for key, value in tampered.items() if key != "intent_hash"
-    })
+    tampered["intent_hash"] = canonical_hash(
+        {key: value for key, value in tampered.items() if key != "intent_hash"}
+    )
 
     with pytest.raises(ValueError, match="INTENT_SEMANTIC_MISMATCH"):
         resolve_merge_authorization(tampered, ctx, req, snap, now=NOW)
@@ -559,9 +791,9 @@ def test_durable_resolver_rejects_recomputed_semantic_tamper(tmp_path):
     intent = prepare_merge_intent(ctx, req, snap, now=NOW)
     tampered = intent.model_dump(mode="json")
     tampered["grant_outcome"] = "GRANT_INVALID"
-    tampered["intent_hash"] = canonical_hash({
-        key: value for key, value in tampered.items() if key != "intent_hash"
-    })
+    tampered["intent_hash"] = canonical_hash(
+        {key: value for key, value in tampered.items() if key != "intent_hash"}
+    )
 
     with pytest.raises(ValueError, match="INTENT_SEMANTIC_MISMATCH"):
         _resolve_durable_merge_authorization_at(tampered, req, snap, receipt_path=path, now=NOW)
@@ -584,9 +816,9 @@ def test_recomputed_hash_semantic_tamper_matrix(durable, field, value, expected,
     intent = prepare_merge_intent(ctx, req, snap, now=NOW)
     tampered = intent.model_dump(mode="json")
     tampered[field] = value
-    tampered["intent_hash"] = canonical_hash({
-        key: item for key, item in tampered.items() if key != "intent_hash"
-    })
+    tampered["intent_hash"] = canonical_hash(
+        {key: item for key, item in tampered.items() if key != "intent_hash"}
+    )
 
     if durable:
         receipt = StandingGrantReceipt.issue(grant_id="grant-matrix", context=ctx)
@@ -608,9 +840,9 @@ def test_recomputed_hash_nested_evidence_tamper_is_rejected(durable, tmp_path):
     intent = prepare_merge_intent(ctx, req, original, now=NOW)
     tampered = intent.model_dump(mode="json")
     tampered["evidence"] = changed.model_dump(mode="json")
-    tampered["intent_hash"] = canonical_hash({
-        key: item for key, item in tampered.items() if key != "intent_hash"
-    })
+    tampered["intent_hash"] = canonical_hash(
+        {key: item for key, item in tampered.items() if key != "intent_hash"}
+    )
 
     if durable:
         receipt = StandingGrantReceipt.issue(grant_id="grant-nested-matrix", context=ctx)

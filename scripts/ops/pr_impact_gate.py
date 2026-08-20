@@ -221,14 +221,16 @@ def parse_raw_diff_z(stream: bytes) -> list[dict[str, str]]:
         if path in seen:
             raise ValueError("raw diff contains a duplicate path")
         seen.add(path)
-        parsed.append({
-            "old_mode": old_mode,
-            "new_mode": new_mode,
-            "old_sha": old_sha,
-            "new_sha": new_sha,
-            "status": status,
-            "path": path,
-        })
+        parsed.append(
+            {
+                "old_mode": old_mode,
+                "new_mode": new_mode,
+                "old_sha": old_sha,
+                "new_sha": new_sha,
+                "status": status,
+                "path": path,
+            }
+        )
     if not parsed:
         raise ValueError("raw diff stream is empty")
     return parsed
@@ -383,6 +385,224 @@ def verify_exact_git_deletion_evidence(
     }
 
 
+def verify_exact_git_main_movement_paths(
+    *,
+    old_main_sha: str,
+    old_main_tree_sha: str,
+    new_main_sha: str,
+    new_main_tree_sha: str,
+    changed_main_paths: Iterable[str],
+    root: Path | None = None,
+) -> dict[str, Any]:
+    """Recompute and physically prove the exact Git changed-path set between main movements."""
+    reasons: list[str] = []
+    try:
+        for value, label in (
+            (old_main_sha, "old_main_sha"),
+            (old_main_tree_sha, "old_main_tree_sha"),
+            (new_main_sha, "new_main_sha"),
+            (new_main_tree_sha, "new_main_tree_sha"),
+        ):
+            _exact_sha(value, label)
+    except ValueError as exc:
+        return {
+            "status": _UNKNOWN,
+            "claim": _UNKNOWN,
+            "valid": False,
+            "blocking": True,
+            "reasons": [str(exc)],
+            "proven_paths": (),
+            "old_main_sha": old_main_sha,
+            "new_main_sha": new_main_sha,
+            "old_main_tree_sha": old_main_tree_sha,
+            "new_main_tree_sha": new_main_tree_sha,
+            "raw_stream_sha256": "",
+            "candidate_commit_allowed": False,
+            "public_claim_allowed": False,
+            "merge_authority": False,
+            "approval_authority": False,
+        }
+
+    if old_main_sha == new_main_sha or old_main_tree_sha == new_main_tree_sha:
+        reasons.append("old and new main are not distinct immutable endpoints")
+
+    trusted_root = ROOT if root is None else Path(root)
+    if not _TRUSTED_GIT_EXECUTABLE or not trusted_root.is_dir():
+        reasons.append("trusted Git root is required")
+        return {
+            "status": _UNKNOWN,
+            "claim": _UNKNOWN,
+            "valid": False,
+            "blocking": True,
+            "reasons": reasons,
+            "proven_paths": (),
+            "old_main_sha": old_main_sha,
+            "new_main_sha": new_main_sha,
+            "old_main_tree_sha": old_main_tree_sha,
+            "new_main_tree_sha": new_main_tree_sha,
+            "raw_stream_sha256": "",
+            "candidate_commit_allowed": False,
+            "public_claim_allowed": False,
+            "merge_authority": False,
+            "approval_authority": False,
+        }
+
+    old_commit = _run_trusted_git(
+        trusted_root, ["rev-parse", f"{old_main_sha}^{{commit}}"], text=True
+    )
+    old_tree = _run_trusted_git(trusted_root, ["rev-parse", f"{old_main_sha}^{{tree}}"], text=True)
+    if old_commit.returncode != 0 or old_commit.stdout.strip() != old_main_sha:
+        reasons.append("old_main_sha cannot be resolved as immutable Git commit")
+    if old_tree.returncode != 0:
+        reasons.append("old_main_tree cannot be resolved")
+    elif old_tree.stdout.strip() != old_main_tree_sha:
+        reasons.append("old_main_tree_sha does not match physical Git tree")
+
+    new_commit = _run_trusted_git(
+        trusted_root, ["rev-parse", f"{new_main_sha}^{{commit}}"], text=True
+    )
+    new_tree = _run_trusted_git(trusted_root, ["rev-parse", f"{new_main_sha}^{{tree}}"], text=True)
+    if new_commit.returncode != 0 or new_commit.stdout.strip() != new_main_sha:
+        reasons.append("new_main_sha cannot be resolved as immutable Git commit")
+    if new_tree.returncode != 0:
+        reasons.append("new_main_tree cannot be resolved")
+    elif new_tree.stdout.strip() != new_main_tree_sha:
+        reasons.append("new_main_tree_sha does not match physical Git tree")
+
+    computed_streams = [
+        _run_trusted_git(
+            trusted_root,
+            ["diff", "--raw", "-z", "--no-renames", old_main_sha, new_main_sha],
+            text=False,
+        )
+        for _ in range(2)
+    ]
+    stream_bytes = b""
+    if any(item.returncode != 0 for item in computed_streams):
+        reasons.append("complete exact Git raw diff could not be produced")
+    else:
+        stream_a, stream_b = computed_streams[0].stdout, computed_streams[1].stdout
+        if stream_a != stream_b:
+            reasons.append("independently recomputed Git diffs diverge")
+        stream_bytes = stream_a
+
+    physical_paths: set[str] = set()
+    if stream_bytes:
+        if not stream_bytes.endswith(b"\0"):
+            reasons.append("raw diff stream is missing its NUL terminator")
+        else:
+            records = stream_bytes[:-1].split(b"\0")
+            if len(records) % 2 != 0:
+                reasons.append("raw diff stream has a truncated metadata/path pair")
+            else:
+                for index in range(0, len(records), 2):
+                    metadata, raw_path = records[index : index + 2]
+                    try:
+                        metadata_text = metadata.decode("ascii")
+                        path = raw_path.decode("utf-8")
+                    except UnicodeDecodeError:
+                        reasons.append("raw diff contains non-text metadata/path")
+                        break
+                    fields = metadata_text.split()
+                    if len(fields) != 5 or not fields[0].startswith(":"):
+                        reasons.append("raw diff metadata is malformed")
+                        break
+                    old_mode, new_mode, old_obj, new_obj, status = fields
+                    old_mode = old_mode[1:]
+                    if (
+                        len(old_mode) != 6
+                        or len(new_mode) != 6
+                        or not re.fullmatch(r"[0-7]{12}", old_mode + new_mode)
+                    ):
+                        reasons.append("raw diff mode is malformed")
+                        break
+                    if not all(re.fullmatch(r"[0-9a-f]{7,64}", v) for v in (old_obj, new_obj)):
+                        reasons.append("raw diff object id is malformed")
+                        break
+                    if status not in {"A", "D", "M", "T"}:
+                        reasons.append(
+                            f"raw diff contains unsupported status or rename ambiguity: {status}"
+                        )
+                        break
+                    if (
+                        not path
+                        or path.startswith("/")
+                        or "\x00" in path
+                        or ".." in path.split("/")
+                    ):
+                        reasons.append(f"raw diff path is invalid or unsafe: {path}")
+                        break
+                    if path in physical_paths:
+                        reasons.append(f"raw diff contains duplicate path: {path}")
+                        break
+                    physical_paths.add(path)
+    elif not reasons:
+        reasons.append("physical Git diff produced no paths despite distinct tree hashes")
+
+    name_stream = _run_trusted_git(
+        trusted_root,
+        ["diff", "--name-only", "-z", "--no-renames", old_main_sha, new_main_sha],
+        text=False,
+    )
+    if name_stream.returncode != 0:
+        reasons.append("complete exact Git name-only diff could not be produced")
+    elif stream_bytes and not any("raw diff" in r for r in reasons):
+        name_paths = {p.decode("utf-8") for p in name_stream.stdout.rstrip(b"\0").split(b"\0") if p}
+        if name_paths != physical_paths:
+            reasons.append("name-only diff and raw diff paths diverge")
+
+    supplied_paths = set(changed_main_paths)
+    if not supplied_paths:
+        reasons.append("supplied changed_main_paths is empty")
+    if physical_paths != supplied_paths:
+        missing = physical_paths - supplied_paths
+        spurious = supplied_paths - physical_paths
+        if missing:
+            reasons.append(f"supplied changed_main_paths omits physical paths: {sorted(missing)}")
+        if spurious:
+            reasons.append(
+                f"supplied changed_main_paths contains spurious paths: {sorted(spurious)}"
+            )
+
+    raw_stream_sha256 = hashlib.sha256(stream_bytes).hexdigest() if stream_bytes else ""
+    if reasons:
+        return {
+            "status": _UNKNOWN,
+            "claim": _UNKNOWN,
+            "valid": False,
+            "blocking": True,
+            "reasons": tuple(reasons),
+            "proven_paths": (),
+            "old_main_sha": old_main_sha,
+            "new_main_sha": new_main_sha,
+            "old_main_tree_sha": old_main_tree_sha,
+            "new_main_tree_sha": new_main_tree_sha,
+            "raw_stream_sha256": raw_stream_sha256,
+            "candidate_commit_allowed": False,
+            "public_claim_allowed": False,
+            "merge_authority": False,
+            "approval_authority": False,
+        }
+
+    return {
+        "status": EXACT_GIT_EVIDENCE_ONLY,
+        "claim": EXACT_GIT_EVIDENCE_ONLY,
+        "valid": True,
+        "blocking": False,
+        "reasons": (),
+        "proven_paths": tuple(sorted(physical_paths)),
+        "old_main_sha": old_main_sha,
+        "new_main_sha": new_main_sha,
+        "old_main_tree_sha": old_main_tree_sha,
+        "new_main_tree_sha": new_main_tree_sha,
+        "raw_stream_sha256": raw_stream_sha256,
+        "candidate_commit_allowed": False,
+        "public_claim_allowed": False,
+        "merge_authority": False,
+        "approval_authority": False,
+    }
+
+
 def _unique_existing(targets: Iterable[str], *, root: Path = ROOT) -> list[str]:
     selected: list[str] = []
     for target in targets:
@@ -509,9 +729,9 @@ def build_impact_plan(
             source_tree, test_inventory_tree = _git_revision_trees(root, head_sha)
         except ValueError as exc:
             provenance_error = str(exc)
-    normalized = sorted({
-        path.strip().replace("\\", "/").strip("/") for path in changed_paths if path.strip()
-    })
+    normalized = sorted(
+        {path.strip().replace("\\", "/").strip("/") for path in changed_paths if path.strip()}
+    )
     if not normalized:
         return ImpactPlan(
             base_sha=base_sha,

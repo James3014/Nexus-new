@@ -243,13 +243,13 @@ class GitHubOrchestrationEvidence(_Frozen):
             raise ValueError("ACCEPTANCE_HASH_LINEAGE_MISMATCH")
         if not self.independent_acceptance:
             raise ValueError("INDEPENDENT_ACCEPTANCE_MISSING")
-        if self.reviews_hash != canonical_hash({
-            "reviews": [r.model_dump(mode="json") for r in self.reviews]
-        }):
+        if self.reviews_hash != canonical_hash(
+            {"reviews": [r.model_dump(mode="json") for r in self.reviews]}
+        ):
             raise ValueError("REVIEWS_HASH_MISMATCH")
-        if self.required_checks and self.checks_hash != canonical_hash({
-            "checks": [c.model_dump(mode="json") for c in self.required_checks]
-        }):
+        if self.required_checks and self.checks_hash != canonical_hash(
+            {"checks": [c.model_dump(mode="json") for c in self.required_checks]}
+        ):
             raise ValueError("CHECKS_HASH_MISMATCH")
         if self.impact_hash != canonical_hash(self.impact.model_dump(mode="json")):
             raise ValueError("IMPACT_HASH_MISMATCH")

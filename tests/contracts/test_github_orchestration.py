@@ -178,11 +178,13 @@ def test_merge_intent_hash_tamper_and_mutation_authorization_fail():
     with pytest.raises(ValidationError, match="INTENT_HASH_INVALID"):
         MergeIntent.model_validate({**payload, "intent_hash": "0" * 64})
     with pytest.raises(ValidationError):
-        MergeIntent.model_validate({
-            **payload,
-            "mutation_authorized": True,
-            "intent_hash": canonical_hash(payload),
-        })
+        MergeIntent.model_validate(
+            {
+                **payload,
+                "mutation_authorized": True,
+                "intent_hash": canonical_hash(payload),
+            }
+        )
 
 
 def movement(**overrides):

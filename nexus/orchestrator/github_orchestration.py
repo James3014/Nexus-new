@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from pathlib import Path
 
 from nexus.contracts.autonomy_goal import StandingGrantContext
 from nexus.contracts.github_orchestration import (
@@ -28,6 +29,8 @@ from nexus.orchestrator.standing_grant_store import (
 def requalify_main_movement(
     evidence: GitHubOrchestrationEvidence,
     movement: MainMovementEvidence,
+    *,
+    root: Path | None = None,
 ) -> MainMovementRequalification:
     """Classify main movement against one verified Candidate evidence packet.
 
@@ -50,15 +53,37 @@ def requalify_main_movement(
     ):
         unknown_reasons.append("candidate_evidence_identity_or_digest_tamper")
 
+    try:
+        from scripts.ops.pr_impact_gate import verify_exact_git_main_movement_paths
+
+        git_proof = verify_exact_git_main_movement_paths(
+            old_main_sha=movement.old_main_sha,
+            old_main_tree_sha=movement.old_main_tree_sha,
+            new_main_sha=movement.new_main_sha,
+            new_main_tree_sha=movement.new_main_tree_sha,
+            changed_main_paths=movement.changed_main_paths,
+            root=root,
+        )
+        if not git_proof.get("valid"):
+            unknown_reasons.extend(git_proof.get("reasons", ["physical_git_path_proof_failed"]))
+            proven_main_paths = set(movement.changed_main_paths)
+        else:
+            proven_main_paths = set(git_proof.get("proven_paths", ()))
+    except Exception as exc:  # pragma: no cover - defensive fail-closed boundary
+        unknown_reasons.append(f"physical_git_verifier_unavailable:{type(exc).__name__}")
+        proven_main_paths = set(movement.changed_main_paths)
+
     # Reuse the canonical exact-base classifier.  A malformed/unreadable
     # impact universe is intentionally converted to IMPACT_UNKNOWN here.
     try:
         from scripts.ops.pr_impact_gate import build_impact_plan
 
+        plan_kwargs = {"root": root} if root is not None else {}
         plan = build_impact_plan(
-            list(movement.changed_main_paths),
+            list(proven_main_paths),
             base_sha=movement.old_main_sha,
             head_sha=movement.new_main_sha,
+            **plan_kwargs,
         )
         impact_unknown = plan.impact_class == "IMPACT_UNKNOWN" or bool(plan.unmatched_paths)
     except Exception as exc:  # pragma: no cover - defensive fail-closed boundary
@@ -67,7 +92,7 @@ def requalify_main_movement(
         unknown_reasons.append(f"impact_classifier_unavailable:{type(exc).__name__}")
 
     candidate_paths = set(movement.candidate_changed_paths)
-    main_paths = set(movement.changed_main_paths)
+    main_paths = proven_main_paths
     direct_overlap = bool(candidate_paths & main_paths)
     semantic_overlap = direct_overlap or bool(
         plan is not None
@@ -101,7 +126,7 @@ def requalify_main_movement(
     )
 
     def result(dimension: str, classification: str, affected: bool, reasons=()):
-        if unknown_reasons and dimension in {"SOURCE_IDENTITY", "AUTHORITY_DRIFT"}:
+        if unknown_reasons:
             return MainMovementDimensionResult(
                 dimension=dimension,
                 classification="IMPACT_UNKNOWN",
@@ -137,18 +162,7 @@ def requalify_main_movement(
         result("TRANSPORT_DRIFT", "TRANSPORT_DRIFT", bool(transport_paths), tuple(transport_paths)),
         result("IRRELEVANT_MAIN_MOVEMENT", "IRRELEVANT_MAIN_MOVEMENT", False),
     )
-    if impact_unknown:
-        dimensions = tuple(
-            item
-            if item.dimension in {"SOURCE_IDENTITY", "AUTHORITY_DRIFT", "SEMANTIC_OVERLAP"}
-            else MainMovementDimensionResult(
-                dimension=item.dimension,
-                classification=item.classification,
-                action=item.action,
-                reasons=item.reasons,
-            )
-            for item in dimensions
-        )
+    if impact_unknown and not unknown_reasons:
         dimensions = tuple(
             MainMovementDimensionResult(
                 dimension=item.dimension,
