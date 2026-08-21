@@ -302,15 +302,16 @@ def test_result_quarantine_blocks_formal_scoring_until_qualified() -> None:
 
 
 def test_qualification_receipt_requires_all_six_physical_witnesses() -> None:
-    witnesses = {name: True for name in QUALIFICATION_WITNESSES}
+    witnesses = {name: f"evidence:{name}" for name in QUALIFICATION_WITNESSES}
 
     receipt = build_qualification_receipt(witnesses)
     assert receipt["gate_passed"] is True
     assert receipt["state"] == WAVE2_QUALIFIED
     assert receipt["missing_witnesses"] == []
+    assert receipt["evidence_refs"] == witnesses
     assert receipt["formal_scoring_authorized"] is True
 
-    witnesses["frozen_verifier_readback"] = False
+    witnesses["frozen_verifier_readback"] = ""
     receipt = build_qualification_receipt(witnesses)
     assert receipt["gate_passed"] is False
     assert receipt["state"] == WAVE2_REVISE
@@ -319,8 +320,8 @@ def test_qualification_receipt_requires_all_six_physical_witnesses() -> None:
 
 
 def test_qualification_receipt_rejects_unfrozen_witness_names() -> None:
-    witnesses = {name: True for name in QUALIFICATION_WITNESSES}
-    witnesses["invented_shortcut"] = True
+    witnesses = {name: f"evidence:{name}" for name in QUALIFICATION_WITNESSES}
+    witnesses["invented_shortcut"] = "evidence:shortcut"
 
     with pytest.raises(Wave2QualificationError, match="UNKNOWN_QUALIFICATION_WITNESS"):
         build_qualification_receipt(witnesses)
