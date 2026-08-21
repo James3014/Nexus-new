@@ -1077,9 +1077,7 @@ def _replaced_parameterized_node_keys(
         base_key = missing_base[0]
         if base_key not in base_passed:
             continue
-        candidates = [
-            key for key in head_by_family.get(family, []) if key not in base_index
-        ]
+        candidates = [key for key in head_by_family.get(family, []) if key not in base_index]
         if not candidates:
             continue
         replaced_base.add(base_key)
@@ -1120,8 +1118,8 @@ def _metadata_mismatch(base: PytestRunResult, head: PytestRunResult) -> bool:
     expanded_base, expanded_head, expansion_ambiguous = _expanded_node_keys(
         base, head, base_index, head_index
     )
-    replaced_base, replacement_head, replacement_ambiguous = (
-        _replaced_parameterized_node_keys(base, head, base_index, head_index)
+    replaced_base, replacement_head, replacement_ambiguous = _replaced_parameterized_node_keys(
+        base, head, base_index, head_index
     )
     if expansion_ambiguous or replacement_ambiguous:
         return True
