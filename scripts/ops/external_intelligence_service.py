@@ -225,11 +225,66 @@ def _expected_process_argv(config_path: Path) -> list[str]:
     ]
 
 
+def _accepted_python_executables() -> set[str]:
+    current_exe = Path(sys.executable).resolve()
+    accepted = {str(current_exe)}
+
+    # Framework layout: <framework_root>/bin/python* -> <framework_root>/Resources/Python.app/Contents/MacOS/Python
+    framework_root = current_exe.parent.parent
+    app_exe = framework_root / "Resources" / "Python.app" / "Contents" / "MacOS" / "Python"
+    if app_exe.is_file():
+        accepted.add(str(app_exe.resolve()))
+    elif "Python.framework" in current_exe.parts:
+        accepted.add(str(app_exe))
+
+    # App layout: <framework_root>/Resources/Python.app/Contents/MacOS/Python -> <framework_root>/bin/python*
+    if len(current_exe.parts) >= 5 and current_exe.parts[-5:] == (
+        "Resources",
+        "Python.app",
+        "Contents",
+        "MacOS",
+        "Python",
+    ):
+        app_framework_root = current_exe.parents[4]
+        bin_dir = app_framework_root / "bin"
+        candidates = [
+            bin_dir / f"python{sys.version_info.major}.{sys.version_info.minor}",
+            bin_dir / f"python{sys.version_info.major}",
+            bin_dir / "python",
+        ]
+        for cand in candidates:
+            if cand.is_file():
+                accepted.add(str(cand.resolve()))
+            elif "Python.framework" in current_exe.parts:
+                accepted.add(str(cand))
+
+    return accepted
+
+
+def _is_matching_python_executable(candidate: str) -> bool:
+    try:
+        resolved_candidate = str(Path(candidate).resolve())
+    except Exception:
+        resolved_candidate = candidate
+    accepted = _accepted_python_executables()
+    return candidate in accepted or resolved_candidate in accepted
+
+
 def _process_matches(command: str, config_path: Path) -> bool:
     try:
-        return shlex.split(command) == _expected_process_argv(config_path)
+        argv = shlex.split(command)
     except ValueError:
         return False
+    expected_tail = [
+        "-m",
+        "scripts.ops.external_intelligence_service",
+        "daemon",
+        "--config",
+        str(config_path.resolve()),
+    ]
+    if len(argv) != len(expected_tail) + 1 or argv[1:] != expected_tail:
+        return False
+    return _is_matching_python_executable(argv[0])
 
 
 def _parse_launchctl(result: Any) -> dict[str, Any]:
