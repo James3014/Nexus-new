@@ -112,9 +112,7 @@ def test_wave2_physical_f01_materialization_and_frozen_verifier() -> None:
 
 
 def test_qualification_receipt_rejects_boolean_witness_shortcut() -> None:
-    witnesses: dict[str, object] = {
-        name: f"evidence:{name}" for name in QUALIFICATION_WITNESSES
-    }
+    witnesses: dict[str, object] = {name: f"evidence:{name}" for name in QUALIFICATION_WITNESSES}
     witnesses["exact_base_materialization"] = True
 
     receipt = build_qualification_receipt(witnesses)
