@@ -51,6 +51,8 @@ class AttemptTransitionEvent:
     reason: str = ""
     continuity_event_type: str = "OBSERVATION_RECORDED"
     strategy_delta: str = ""
+    action: str = ""
+    observation: str = ""
     do_not_repeat: tuple[str, ...] = ()
     unresolved_risks: tuple[str, ...] = ()
     unknowns: tuple[str, ...] = ()
@@ -80,7 +82,7 @@ class AttemptTransitionEvent:
             raise ValueError("continuity_event_type is required")
         if self.state in REJECTED_STATES and self.continuity_event_type != "ATTEMPT_REJECTED":
             raise ValueError("rejected state requires ATTEMPT_REJECTED continuity type")
-        for name in ("strategy_delta", "next_action", "claim_ceiling"):
+        for name in ("strategy_delta", "next_action", "claim_ceiling", "action", "observation"):
             if not isinstance(getattr(self, name), str):
                 raise ValueError(f"{name} must be a string")
         if not isinstance(self.source_revision, str) or not isinstance(self.contract_revision, str):
@@ -108,7 +110,8 @@ class AttemptTransitionEvent:
 
 def build_attempt_transition_event(
     *, task_id: str, attempt_id: str, sequence: int, state: str,
-    reason: str = "", candidate_refs: tuple[str, ...] | list[str] = (),
+    reason: str = "", action: str = "", observation: str = "",
+    candidate_refs: tuple[str, ...] | list[str] = (),
     evidence_refs: tuple[str, ...] | list[str] = (), continuity_event_type: str = "OBSERVATION_RECORDED",
     strategy_delta: str = "", do_not_repeat: tuple[str, ...] | list[str] = (),
     unresolved_risks: tuple[str, ...] | list[str] = (), unknowns: tuple[str, ...] | list[str] = (),
@@ -118,7 +121,7 @@ def build_attempt_transition_event(
     return AttemptTransitionEvent(
         task_id=task_id, attempt_id=attempt_id, sequence=sequence, state=state,
         reason=reason, continuity_event_type=continuity_event_type,
-        strategy_delta=strategy_delta,
+        strategy_delta=strategy_delta, action=action, observation=observation,
         do_not_repeat=_continuity_sequence("do_not_repeat", do_not_repeat),
         unresolved_risks=_continuity_sequence("unresolved_risks", unresolved_risks),
         unknowns=_continuity_sequence("unknowns", unknowns),

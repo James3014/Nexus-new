@@ -3,7 +3,13 @@ import json
 
 import pytest
 
-from nexus.core.task_continuity import ContinuityEvent, events_from_attempt_records, project, resume
+from nexus.core.task_continuity import (
+    ContinuityEvent,
+    build_rehydration_projection,
+    events_from_attempt_records,
+    project,
+    resume,
+)
 from nexus.events.contracts import MAX_CONTINUITY_COLLECTION_ITEMS
 
 
@@ -527,3 +533,307 @@ def test_continuity_event_rejects_over_limit_collection_and_accepts_boundary():
         event(1, "PLAN_FORMED", do_not_repeat=("x",) * (MAX_CONTINUITY_COLLECTION_ITEMS + 1))
     bounded = event(1, "PLAN_FORMED", do_not_repeat=("x",) * MAX_CONTINUITY_COLLECTION_ITEMS)
     assert len(bounded.do_not_repeat) == MAX_CONTINUITY_COLLECTION_ITEMS
+
+
+def test_build_rehydration_projection_basic_join():
+    ev1 = event(1, "PLAN_FORMED", next_action="step-1", claim_ceiling="evidence only")
+    ev2 = event(
+        2,
+        "ATTEMPT_REJECTED",
+        ev1.event_hash,
+        summary="A failed",
+        do_not_repeat=("strategy-a",),
+        evidence_refs=("ev-1",),
+        unresolved_risks=("risk-1",),
+        unknowns=("unknown-1",),
+        next_action="step-2",
+        claim_ceiling="evidence only",
+    )
+    snapshot = project([ev1, ev2])
+    task_state = {
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "source_revision": "src-a",
+        "contract_revision": "contract-a",
+        "lifecycle_revision": "life-1",
+        "candidate_commit_sha": "sha-c1",
+        "claim_ceiling": "evidence only",
+        "work_claim": {
+            "claim_id": "claim-1",
+            "generation": 1,
+            "fencing_token": "claim-1:1",
+            "status": "CLAIMED",
+            "claimed_at": "2026-08-18T00:00:00Z",
+            "identity": {
+                "task_id": "task-1",
+                "attempt_id": "attempt-1",
+                "source_hash": "src-a",
+            },
+        },
+    }
+    task_action = {
+        "action_state": "FINAL_BLOCK",
+        "next_action": "step-2",
+    }
+    proj = build_rehydration_projection(
+        task_state=task_state,
+        continuity_snapshot=snapshot,
+        task_action_envelope=task_action,
+    )
+    data = proj.to_dict()
+    assert data["schema"] == "nexus.task_rehydration_projection.v1"
+    assert data["task_identity"] == {"task_id": "task-1", "attempt_id": "attempt-1"}
+    assert data["revision_binding"] == {"source_revision": "src-a", "contract_revision": "contract-a"}
+    assert data["continuation"]["rejected_strategies"] == ["strategy-a"]
+    assert data["continuation"]["do_not_repeat"] == ["strategy-a"]
+    assert data["continuation"]["next_action"] == "step-2"
+    assert data["continuation"]["evidence_refs"] == ["ev-1"]
+    assert data["candidate_binding"]["candidate_commit_sha"] == "sha-c1"
+    assert data["work_claim_binding"]["claim_id"] == "claim-1"
+    assert "completed_actions" in data["missing_durable_bindings"]
+    assert "verified_observations" in data["missing_durable_bindings"]
+    assert "phase_receipts" in data["missing_durable_bindings"]
+
+
+def test_build_rehydration_projection_missing_facts_stay_missing():
+    ev = event(1, "PLAN_FORMED")
+    snapshot = project([ev])
+    task_state = {
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "source_revision": "src-a",
+        "contract_revision": "contract-a",
+    }
+    proj = build_rehydration_projection(task_state=task_state, continuity_snapshot=snapshot)
+    data = proj.to_dict()
+    assert "completed_actions" in data["missing_durable_bindings"]
+    assert "verified_observations" in data["missing_durable_bindings"]
+    assert "authority_revision" in data["missing_durable_bindings"]
+    assert "phase_receipts" in data["missing_durable_bindings"]
+    assert data["candidate_binding"] is None
+    assert data["work_claim_binding"] is None
+
+
+def test_build_rehydration_projection_task_mismatch_fails_closed():
+    ev = event(1, "PLAN_FORMED")
+    snapshot = project([ev])
+    task_state = {
+        "task_id": "task-other",
+        "attempt_id": "attempt-1",
+        "source_revision": "src-a",
+        "contract_revision": "contract-a",
+    }
+    with pytest.raises(ValueError, match="REHYDRATION_TASK_MISMATCH"):
+        build_rehydration_projection(task_state=task_state, continuity_snapshot=snapshot)
+
+
+def test_build_rehydration_projection_attempt_mismatch_fails_closed():
+    ev = event(1, "PLAN_FORMED")
+    snapshot = project([ev])
+    task_state = {
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "source_revision": "src-a",
+        "contract_revision": "contract-a",
+    }
+    with pytest.raises(ValueError, match="REHYDRATION_ATTEMPT_MISMATCH"):
+        build_rehydration_projection(
+            task_state=task_state,
+            continuity_snapshot=snapshot,
+            requested_attempt_id="attempt-other",
+        )
+
+
+def test_build_rehydration_projection_source_revision_mismatch_fails_closed():
+    ev = event(1, "PLAN_FORMED", source_revision="src-1")
+    snapshot = project([ev])
+    task_state = {
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "source_revision": "src-2",
+        "contract_revision": "contract-a",
+    }
+    with pytest.raises(ValueError, match="REHYDRATION_SOURCE_REVISION_MISMATCH"):
+        build_rehydration_projection(task_state=task_state, continuity_snapshot=snapshot)
+
+
+def test_build_rehydration_projection_contract_revision_mismatch_fails_closed():
+    ev = event(1, "PLAN_FORMED", contract_revision="contract-1")
+    snapshot = project([ev])
+    task_state = {
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "source_revision": "src-a",
+        "contract_revision": "contract-2",
+    }
+    with pytest.raises(ValueError, match="REHYDRATION_CONTRACT_REVISION_MISMATCH"):
+        build_rehydration_projection(task_state=task_state, continuity_snapshot=snapshot)
+
+
+def test_build_rehydration_projection_work_claim_mismatch_fails_closed():
+    ev = event(1, "PLAN_FORMED", source_revision="src-a")
+    snapshot = project([ev])
+    task_state = {
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "source_revision": "src-a",
+        "contract_revision": "contract-a",
+        "work_claim": {
+            "claim_id": "claim-1",
+            "generation": 1,
+            "fencing_token": "claim-1:1",
+            "identity": {
+                "task_id": "task-1",
+                "attempt_id": "attempt-foreign",
+                "source_hash": "src-a",
+            },
+        },
+    }
+    with pytest.raises(ValueError, match="REHYDRATION_WORK_CLAIM_MISMATCH"):
+        build_rehydration_projection(task_state=task_state, continuity_snapshot=snapshot)
+
+
+def test_build_rehydration_projection_authority_revision_never_inferred_from_lifecycle_revision():
+    ev = event(1, "PLAN_FORMED")
+    snapshot = project([ev])
+    task_state = {
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "source_revision": "src-a",
+        "contract_revision": "contract-a",
+        "lifecycle_revision": "lifecycle-rev-1",
+    }
+    proj = build_rehydration_projection(task_state=task_state, continuity_snapshot=snapshot)
+    data = proj.to_dict()
+    assert data["authority_binding"]["lifecycle_revision"] == "lifecycle-rev-1"
+    assert "authority_revision" in data["missing_durable_bindings"]
+
+
+@pytest.mark.parametrize(
+    ("key", "val", "expected_match"),
+    [
+        ("candidate", "malformed", "REHYDRATION_MALFORMED_STATE"),
+        ("promotion_packet", "malformed", "REHYDRATION_MALFORMED_STATE"),
+        ("verified_receipt", "malformed", "REHYDRATION_MALFORMED_STATE"),
+        ("contract", "malformed", "REHYDRATION_MALFORMED_STATE"),
+        ("work_claim", "malformed", "REHYDRATION_WORK_CLAIM_MISMATCH"),
+    ],
+)
+def test_build_rehydration_projection_malformed_durable_objects_fail_closed(key, val, expected_match):
+    ev = event(1, "PLAN_FORMED")
+    snapshot = project([ev])
+    task_state = {
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "source_revision": "src-a",
+        "contract_revision": "contract-a",
+        key: val,
+    }
+    with pytest.raises(ValueError, match=expected_match):
+        build_rehydration_projection(task_state=task_state, continuity_snapshot=snapshot)
+
+
+def test_build_rehydration_projection_malformed_work_claim_identity_fails_closed():
+    ev = event(1, "PLAN_FORMED")
+    snapshot = project([ev])
+    task_state = {
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "source_revision": "src-a",
+        "contract_revision": "contract-a",
+        "work_claim": {
+            "claim_id": "claim-1",
+            "generation": 1,
+            "fencing_token": "claim-1:1",
+            "identity": "malformed_not_a_dict",
+        },
+    }
+    with pytest.raises(ValueError, match="REHYDRATION_WORK_CLAIM_MISMATCH"):
+        build_rehydration_projection(task_state=task_state, continuity_snapshot=snapshot)
+
+
+def test_build_rehydration_projection_unrelated_evidence_refs_do_not_falsely_fail_receipt():
+    unrelated_hash = "b" * 64
+    ev = event(1, "PLAN_FORMED", evidence_refs=(unrelated_hash,))
+    snapshot = project([ev])
+    task_state = {
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "source_revision": "src-a",
+        "contract_revision": "contract-a",
+        "verified_receipt_hash": "a" * 64,
+    }
+    proj = build_rehydration_projection(task_state=task_state, continuity_snapshot=snapshot)
+    data = proj.to_dict()
+    assert data["candidate_binding"]["verified_receipt_hash"] == "a" * 64
+
+
+def test_rehydration_no_completed_actions_does_not_invent_them():
+    ev = event(1, "PLAN_FORMED")
+    snapshot = project([ev])
+    task_state = {
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "source_revision": "src-a",
+        "contract_revision": "contract-a",
+        "completed_actions": ["free_standing_action_not_in_continuity"],
+    }
+    proj = build_rehydration_projection(task_state=task_state, continuity_snapshot=snapshot)
+    data = proj.to_dict()
+    assert "completed_actions" not in data["continuation"]
+    assert "completed_actions" in data["missing_durable_bindings"]
+
+
+def test_rehydration_no_verified_observations_does_not_invent_them():
+    ev = event(1, "PLAN_FORMED")
+    snapshot = project([ev])
+    task_state = {
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "source_revision": "src-a",
+        "contract_revision": "contract-a",
+        "verified_observations": ["free_standing_obs_not_in_continuity"],
+    }
+    proj = build_rehydration_projection(task_state=task_state, continuity_snapshot=snapshot)
+    data = proj.to_dict()
+    assert "verified_observations" not in data["continuation"]
+    assert "verified_observations" in data["missing_durable_bindings"]
+
+
+def test_rehydration_freestanding_task_state_actions_and_observations_rejected_without_continuity():
+    ev = event(1, "PLAN_FORMED")
+    snapshot = project([ev])
+    task_state = {
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "source_revision": "src-a",
+        "contract_revision": "contract-a",
+        "completed_actions": ["unauthorized_action_1", "unauthorized_action_2"],
+        "verified_observations": ["unauthorized_obs_1"],
+    }
+    proj = build_rehydration_projection(task_state=task_state, continuity_snapshot=snapshot)
+    data = proj.to_dict()
+    assert "completed_actions" not in data["continuation"]
+    assert "verified_observations" not in data["continuation"]
+    assert "completed_actions" in data["missing_durable_bindings"]
+    assert "verified_observations" in data["missing_durable_bindings"]
+
+
+def test_rehydration_projects_authority_revision_and_phase_receipts_when_present():
+    ev = event(1, "PLAN_FORMED")
+    snapshot = project([ev])
+    phase_receipt = {"phase": "A", "status": "SUCCESS", "authority_revision": "auth-1"}
+    task_state = {
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "source_revision": "src-a",
+        "contract_revision": "contract-a",
+        "authority_revision": "auth-1",
+        "phase_receipts": [phase_receipt],
+    }
+    proj = build_rehydration_projection(task_state=task_state, continuity_snapshot=snapshot)
+    data = proj.to_dict()
+    assert data["authority_binding"]["authority_revision"] == "auth-1"
+    assert data["authority_binding"]["phase_receipts"] == [phase_receipt]
+    assert "authority_revision" not in data["missing_durable_bindings"]
+    assert "phase_receipts" not in data["missing_durable_bindings"]
