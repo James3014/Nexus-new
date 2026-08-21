@@ -196,6 +196,63 @@ def test_main_movement_rechecks_overlap_and_authority(monkeypatch):
     assert result.blocked is True
 
 
+def test_main_movement_rechecks_test_inventory_without_blanket_invalidation(monkeypatch):
+    snap = evidence()
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr("scripts.ops.pr_impact_gate.build_impact_plan", lambda *a, **k: _plan())
+    result = requalify_main_movement(
+        snap,
+        movement_for(snap, changed_main_paths=("tests/unit/test_unrelated.py",)),
+    )
+    by_name = {item.dimension: item for item in result.dimensions}
+    assert by_name["TEST_IMPACT"].classification == "TEST_IMPACT"
+    assert by_name["TEST_IMPACT"].action == "RECHECK_AFFECTED"
+    assert by_name["SEMANTIC_OVERLAP"].action == "REUSE_UNAFFECTED"
+    assert by_name["TRANSPORT_DRIFT"].action == "REUSE_UNAFFECTED"
+    assert result.blocked is False
+
+
+def test_main_movement_rechecks_transport_without_blanket_invalidation(monkeypatch):
+    snap = evidence()
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr("scripts.ops.pr_impact_gate.build_impact_plan", lambda *a, **k: _plan())
+    result = requalify_main_movement(
+        snap,
+        movement_for(snap, changed_main_paths=("nexus/providers/example_transport.py",)),
+    )
+    by_name = {item.dimension: item for item in result.dimensions}
+    assert by_name["TRANSPORT_DRIFT"].classification == "TRANSPORT_DRIFT"
+    assert by_name["TRANSPORT_DRIFT"].action == "RECHECK_AFFECTED"
+    assert by_name["TEST_IMPACT"].action == "REUSE_UNAFFECTED"
+    assert by_name["SEMANTIC_OVERLAP"].action == "REUSE_UNAFFECTED"
+    assert result.blocked is False
+
+
+def test_main_movement_unknown_impact_universe_fails_closed_semantic_dimension(monkeypatch):
+    snap = evidence()
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.verify_exact_git_main_movement_paths",
+        lambda **k: {"valid": True, "proven_paths": tuple(k["changed_main_paths"])},
+    )
+    monkeypatch.setattr(
+        "scripts.ops.pr_impact_gate.build_impact_plan",
+        lambda *a, **k: _plan(impact_class="IMPACT_UNKNOWN"),
+    )
+    result = requalify_main_movement(snap, movement_for(snap))
+    by_name = {item.dimension: item for item in result.dimensions}
+    assert by_name["SEMANTIC_OVERLAP"].classification == "IMPACT_UNKNOWN"
+    assert by_name["SEMANTIC_OVERLAP"].action == "IMPACT_UNKNOWN"
+    assert by_name["TEST_IMPACT"].action == "REUSE_UNAFFECTED"
+    assert by_name["TRANSPORT_DRIFT"].action == "REUSE_UNAFFECTED"
+    assert result.blocked is True
+
+
 def test_main_movement_tamper_fails_closed(monkeypatch):
     snap = evidence()
     monkeypatch.setattr(
