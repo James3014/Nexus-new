@@ -107,6 +107,51 @@ TERMINAL_STATUSES = frozenset({
 PENDING_CANDIDATE_STATUSES = frozenset({
     "PENDING_HUMAN_APPROVAL", "APPROVED", "APPROVAL_INVALIDATED", "INTEGRATING",
 })
+RESUMABLE_STATUSES = frozenset({
+    "WORKER_COMPLETED",
+    "WORKER_ESCALATING",
+    "CANDIDATE_CAPTURED",
+    "VERIFIED",
+})
+ACTIVE_EXECUTION_STATUSES = frozenset({
+    "SUBMITTED",
+    "TARGET_LEASED",
+    "WORKER_RUNNING",
+    "CANDIDATE_COMMITTED",
+    "CANDIDATE_REF_PROTECTED",
+    "TARGET_CLEANED",
+})
+INTEGRATION_INTERMEDIATE_STATUSES = frozenset({
+    "INTEGRATION_FAILED_PRE_APPLY",
+    "INTEGRATION_VERIFY_FAILED_AFTER_APPLY",
+    "INTEGRATED_TARGET_RETAINED",
+})
+DIRECT_EXECUTION_STATUSES = frozenset({
+    "DIRECT_INTENT_RECORDED",
+    "DIRECT_STARTED",
+    "DIRECT_APPLIED",
+    "DIRECT_VERIFIED",
+    "DIRECT_COMMITTED",
+})
+INVALID_STATE_STATUSES = frozenset({
+    "BLOCKED_INVALID_STATE",
+})
+DURABLE_SELF_HOSTED_STATUSES = frozenset(
+    TERMINAL_STATUSES
+    | PENDING_CANDIDATE_STATUSES
+    | RESUMABLE_STATUSES
+    | ACTIVE_EXECUTION_STATUSES
+    | INTEGRATION_INTERMEDIATE_STATUSES
+    | DIRECT_EXECUTION_STATUSES
+)
+KNOWN_SELF_HOSTED_STATUSES = frozenset(
+    DURABLE_SELF_HOSTED_STATUSES
+    | INVALID_STATE_STATUSES
+)
+RETRYABLE_TASK_STATUSES = frozenset({
+    "FINAL_BLOCK",
+    "CANCELLED",
+})
 
 
 def _temporary_state_roots() -> tuple[Path, ...]:
@@ -184,12 +229,6 @@ def resolve_contract_identity(
         "task_card_hash": task_card_hash,
         "owner_inline_contract": owner_inline_contract,
     }
-RESUMABLE_STATUSES = frozenset({
-    "WORKER_COMPLETED",
-    "WORKER_ESCALATING",
-    "CANDIDATE_CAPTURED",
-    "VERIFIED",
-})
 
 
 def _jsonable(value: Any) -> Any:
@@ -591,25 +630,7 @@ def _validate_retry_predecessor(
 
     status = str(predecessor.get("status") or "")
     cleanup_decision = str(predecessor.get("cleanup_decision") or "")
-    retained_retry = (
-        status == "RETAINED_FOR_REVIEW"
-        and predecessor.get("promotion_status") == "NOT_CREATED"
-        and cleanup_decision in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
-        and not (
-            predecessor.get("promotion_packet")
-            or predecessor.get("candidate_commit_sha")
-            or predecessor.get("candidate_ref")
-        )
-    )
-    retryable_terminal = status in {
-        "FINAL_BLOCK",
-        "REJECTED",
-        "SUPERSEDED",
-        "CANCELLED",
-        "INTEGRATION_FAILED",
-        "INTEGRATED",
-    } or retained_retry
-    if not retryable_terminal:
+    if status not in RETRYABLE_TASK_STATUSES:
         raise ValueError("RETRY_REQUIRES_TERMINAL_TASK")
     if cleanup_decision not in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}:
         raise ValueError("RETRY_TARGET_DISPOSITION_REQUIRED")
@@ -1118,7 +1139,7 @@ class SelfHostedTaskService:
         promotion_status = str(state.get("promotion_status") or "")
         candidate_commit = cls._candidate_commit(state)
 
-        if status == "BLOCKED_INVALID_STATE":
+        if status in INVALID_STATE_STATUSES or status not in DURABLE_SELF_HOSTED_STATUSES:
             action_state = "FINAL_BLOCK"
             attention_required = True
             next_action = "inspect_lifecycle_state"
@@ -1182,7 +1203,7 @@ class SelfHostedTaskService:
             elif status == "RETAINED_FOR_REVIEW" and state.get("cleanup_decision") == "BLOCKED_BY_UNSAVED_CHANGES":
                 next_action = "salvage_or_dispose_retained_target"
                 recommended_tool = "nexus_self_hosted_cleanup"
-            elif status in {"FINAL_BLOCK", "RETAINED_FOR_REVIEW"} and not candidate_commit and promotion_status == "NOT_CREATED" and cleanup_removed:
+            elif status == "FINAL_BLOCK" and not candidate_commit and promotion_status == "NOT_CREATED" and cleanup_removed:
                 next_action = "retry_same_task"
                 recommended_tool = "nexus_self_hosted_retry"
             else:
@@ -1208,11 +1229,16 @@ class SelfHostedTaskService:
             attention_required = False
             next_action = "none"
             recommended_tool = None
-        else:
+        elif status in (ACTIVE_EXECUTION_STATUSES | RESUMABLE_STATUSES):
             action_state = "IN_PROGRESS"
             attention_required = False
             next_action = "wait_for_task"
             recommended_tool = "nexus_self_hosted_wait_task"
+        else:
+            action_state = "FINAL_BLOCK"
+            attention_required = True
+            next_action = "inspect_lifecycle_state"
+            recommended_tool = None
 
         packet = state.get("promotion_packet") or {}
         return {
@@ -1512,11 +1538,11 @@ class SelfHostedTaskService:
                 detail="state task_id is missing or does not match its filename",
                 source_path=path,
             )
-        if not isinstance(status, str) or not status.strip():
+        if not isinstance(status, str) or not status.strip() or status not in DURABLE_SELF_HOSTED_STATUSES:
             return cls._invalid_state_status(
                 task_id,
                 code="STATE_FIELD_INVALID",
-                detail="state status must be a non-empty string",
+                detail=f"state status is invalid or unknown: {status!r}" if isinstance(status, str) and status.strip() else "state status must be a non-empty string",
                 source_path=path,
             )
         for field in ("attempts", "executions"):
@@ -5281,16 +5307,8 @@ class SelfHostedTaskService:
         existing, created = self._create_state(contract.task_id, state)
         if not created:
             _validate_existing_autonomy_binding(existing, autonomy_grant)
-            retained_retry = (
-                existing.get("status") == "RETAINED_FOR_REVIEW"
-                and existing.get("promotion_status") == "NOT_CREATED"
-                and existing.get("cleanup_decision") in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
-                and not (existing.get("promotion_packet") or existing.get("candidate_commit_sha") or existing.get("candidate_ref"))
-            )
-            terminal_retry = existing.get("status") in {
-                "FINAL_BLOCK", "REJECTED", "SUPERSEDED", "CANCELLED",
-                "INTEGRATION_FAILED", "INTEGRATED",
-            } or retained_retry
+            existing_status = str(existing.get("status") or "")
+            terminal_retry = existing_status in RETRYABLE_TASK_STATUSES
             contract_refreshed = existing.get("contract_hash") != contract.contract_hash
             if contract_refreshed and not (
                 terminal_retry
@@ -5488,19 +5506,25 @@ class SelfHostedTaskService:
                 return {**state, "retry": retry_meta}
         except Exception:
             pass
-        retained_retry = (
-            status == "RETAINED_FOR_REVIEW"
-            and state.get("promotion_status") == "NOT_CREATED"
-            and cleanup_decision in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}
-            and not (state.get("promotion_packet") or state.get("candidate_commit_sha") or state.get("candidate_ref"))
-        )
-        if status == "RETAINED_FOR_REVIEW" and not retained_retry:
+        if status == "RETAINED_FOR_REVIEW":
             retry_meta.update(
                 decision="BLOCKED_RETAINED_REVIEW",
                 blocker="human disposition or retained-candidate recovery is required before retry; clean no-Candidate retention may retry only after formal cleanup",
             )
             return {**state, "retry": retry_meta}
-        if status not in TERMINAL_STATUSES:
+        if status in INTEGRATION_INTERMEDIATE_STATUSES | {"INTEGRATION_FAILED"}:
+            retry_meta.update(
+                decision="BLOCKED_INTEGRATION_FAILURE",
+                blocker="integration failure requires dedicated integration retry; generic task retry is forbidden",
+            )
+            return {**state, "retry": retry_meta}
+        if status in (TERMINAL_STATUSES - RETRYABLE_TASK_STATUSES - {"RETAINED_FOR_REVIEW", "INTEGRATION_FAILED"}):
+            retry_meta.update(
+                decision="BLOCKED_ABSORBING_STATUS",
+                blocker=f"task is in absorbing terminal status {status}; same-semantic task retry is forbidden",
+            )
+            return {**state, "retry": retry_meta}
+        if status not in RETRYABLE_TASK_STATUSES:
             retry_meta.update(
                 decision="NO_DUPLICATE_ACTIVE_TASK",
                 blocker=f"task is {status}; wait for its existing attempt instead of resubmitting",
