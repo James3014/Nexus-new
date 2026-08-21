@@ -433,13 +433,16 @@ def assert_scoring_allowed(*, qualification_state: str, scoring_mode: str) -> No
         raise Wave2QualificationError("FORMAL_SCORING_BEFORE_WAVE2_QUALIFICATION")
 
 
-def build_qualification_receipt(witnesses: Mapping[str, str]) -> dict[str, Any]:
+def build_qualification_receipt(witnesses: Mapping[str, object]) -> dict[str, Any]:
     unexpected = sorted(set(witnesses) - set(QUALIFICATION_WITNESSES))
     if unexpected:
         raise Wave2QualificationError(f"UNKNOWN_QUALIFICATION_WITNESS:{','.join(unexpected)}")
-    evidence_refs = {
-        name: str(witnesses.get(name) or "").strip() for name in QUALIFICATION_WITNESSES
-    }
+
+    evidence_refs: dict[str, str] = {}
+    for name in QUALIFICATION_WITNESSES:
+        raw_ref = witnesses.get(name)
+        evidence_refs[name] = raw_ref.strip() if isinstance(raw_ref, str) else ""
+
     missing = [name for name, evidence_ref in evidence_refs.items() if not evidence_ref]
     state = WAVE2_QUALIFIED if not missing else WAVE2_REVISE
     return {
