@@ -1290,3 +1290,162 @@ def test_deterministic_publication_id_and_marker_stability():
     pub2 = dict(pub, candidate_commit="0" * 40)
     id3 = compute_publication_id("o/r", 1, "h" * 64, pub2)
     assert id3 != id1
+
+
+def test_homogeneous_bound_worker_contract_validation():
+    valid_worker = {
+        "worker_id": "google/gemini-3.7-flash-medium",
+        "provider": "google",
+        "model": "google/gemini-3.7-flash-medium",
+        "role_ceiling": "bounded L3 implementation worker",
+        "admission_evidence_ref": "tasks/test-task/00_admission.md",
+        "admission_evidence_hash": "c" * 64,
+        "selection_evidence_ref": "tasks/test-task/00_decision.md",
+        "selection_evidence_hash": "d" * 64,
+    }
+    other_worker = {
+        **valid_worker,
+        "worker_id": "anthropic/claude-3-5-sonnet",
+        "provider": "anthropic",
+        "model": "anthropic/claude-3-5-sonnet",
+    }
+
+    # Top-level worker and inherited units -> valid
+    c_inherited = _contract("tasks/t/00.md", "a" * 64, selected_worker=valid_worker)
+    parsed = parse_issue_contract(_body(c_inherited))
+    assert parsed["selected_worker"] == valid_worker
+
+    # Top-level worker and explicit identical unit worker -> valid
+    c_explicit = _contract(
+        "tasks/t/00.md",
+        "a" * 64,
+        selected_worker=valid_worker,
+        execution_units=[
+            {"unit_id": "u1", "mutation_paths": ["nexus/a.py"], "selected_worker": valid_worker}
+        ],
+        unit_verifiers={
+            "u1": [{"id": "u1", "argv": ["python3", "-m", "pytest", "-q", "tests/test_a.py"]}]
+        },
+    )
+    parsed_explicit = parse_issue_contract(_body(c_explicit))
+    assert parsed_explicit["execution_units"][0]["selected_worker"] == valid_worker
+
+    # Unit-only worker without top-level binding -> fails closed
+    c_unit_only = _contract(
+        "tasks/t/00.md",
+        "a" * 64,
+        execution_units=[
+            {"unit_id": "u1", "mutation_paths": ["nexus/a.py"], "selected_worker": valid_worker}
+        ],
+        unit_verifiers={
+            "u1": [{"id": "u1", "argv": ["python3", "-m", "pytest", "-q", "tests/test_a.py"]}]
+        },
+    )
+    with pytest.raises(
+        AutomationError, match="ISSUE_CONTRACT_UNIT_WORKER_WITHOUT_TOP_LEVEL_BINDING"
+    ):
+        parse_issue_contract(_body(c_unit_only))
+
+    # Divergent unit worker -> fails closed
+    c_divergent = _contract(
+        "tasks/t/00.md",
+        "a" * 64,
+        selected_worker=valid_worker,
+        execution_units=[
+            {"unit_id": "u1", "mutation_paths": ["nexus/a.py"], "selected_worker": other_worker}
+        ],
+        unit_verifiers={
+            "u1": [{"id": "u1", "argv": ["python3", "-m", "pytest", "-q", "tests/test_a.py"]}]
+        },
+    )
+    with pytest.raises(AutomationError, match="ISSUE_CONTRACT_UNIT_WORKER_MISMATCH"):
+        parse_issue_contract(_body(c_divergent))
+
+
+def test_exact_source_grounding_reads_git_blob_from_main_sha_not_filesystem(tmp_path):
+    repo, card, contract, body, store = _setup(
+        tmp_path, remote_url="https://github.com/James3014/Nexus-new.git"
+    )
+
+    # 1. Create committed files at revision main_sha
+    src_file = repo / "nexus" / "a.py"
+    src_file.parent.mkdir(parents=True, exist_ok=True)
+    src_file.write_text(
+        "def fn_main_sha():\n    return 'committed_at_main_sha'\n", encoding="utf-8"
+    )
+
+    test_file = repo / "tests" / "test_a.py"
+    test_file.parent.mkdir(parents=True, exist_ok=True)
+    test_file.write_text("def test_fn():\n    assert True\n", encoding="utf-8")
+
+    subprocess.run(["git", "add", "."], cwd=repo, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "add source and test"], cwd=repo, capture_output=True, check=True
+    )
+    main_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    # 2. Add an uncommitted / dirty change to worktree (simulating worktree drift)
+    src_file.write_text("def fn_dirty():\n    return 'uncommitted_drift'\n", encoding="utf-8")
+
+    # 3. Reference an existing mutation path, an existing verifier path, and a non-existent file
+    contract["main_sha"] = main_sha
+    contract["execution_units"] = [
+        {"unit_id": "u1", "mutation_paths": ["nexus/a.py", "nexus/missing_module.py"]}
+    ]
+    contract["unit_verifiers"] = {
+        "u1": [
+            {
+                "id": "u1",
+                "argv": [
+                    "python3",
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "tests/test_a.py",
+                    "tests/test_missing.py",
+                ],
+            }
+        ]
+    }
+
+    sidecar = FakeSidecar(store)
+    c = FakeC()
+    d = FakeD()
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
+
+    item = IssueWorkItem("James3014/Nexus-new", 119, "title", body, contract)
+    sources = automation._sources(item, card.read_text(encoding="utf-8"))
+    refs = {s["ref"]: s for s in sources}
+
+    # Verify task card is present
+    assert contract["task_card_ref"] in refs
+    assert refs[contract["task_card_ref"]]["kind"] == "task_card"
+
+    # Verify nexus/a.py read strictly from git blob at main_sha, NOT from dirty worktree
+    assert "nexus/a.py" in refs
+    assert refs["nexus/a.py"]["kind"] == "source_file"
+    assert "committed_at_main_sha" in refs["nexus/a.py"]["content"]
+    assert "uncommitted_drift" not in refs["nexus/a.py"]["content"]
+    assert refs["nexus/a.py"]["revision"] == main_sha
+
+    # Verify tests/test_a.py extracted from verifier argv and read from git blob
+    assert "tests/test_a.py" in refs
+    assert refs["tests/test_a.py"]["kind"] == "verifier_source"
+    assert "def test_fn()" in refs["tests/test_a.py"]["content"]
+
+    # Verify missing files represented as source_absence context entries
+    assert "nexus/missing_module.py" in refs
+    assert refs["nexus/missing_module.py"]["kind"] == "source_absence"
+    assert (
+        refs["nexus/missing_module.py"]["content"]
+        == f"FILE_NOT_FOUND_AT_REVISION:{main_sha}:nexus/missing_module.py"
+    )
+
+    assert "tests/test_missing.py" in refs
+    assert refs["tests/test_missing.py"]["kind"] == "source_absence"
+    assert (
+        refs["tests/test_missing.py"]["content"]
+        == f"FILE_NOT_FOUND_AT_REVISION:{main_sha}:tests/test_missing.py"
+    )
