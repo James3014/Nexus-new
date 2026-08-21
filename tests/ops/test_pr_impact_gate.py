@@ -925,6 +925,132 @@ def test_unparameterized_base_expansion_with_retained_unparameterized_node_is_am
     assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
 
 
+def test_passing_parameterized_case_replacement_with_passing_guards_is_trusted():
+    family = (
+        "tests.ops.test_codex_dx_failure_prevention::"
+        "test_evidence_reference_negative_controls_fail_closed"
+    )
+    old_case = f"{family}[tests/ops/test_repo_doctor.py#missing]"
+    replacement = (
+        f"{family}[pyproject.toml#"
+        "NEXUS_INTENTIONALLY_ABSENT_EVIDENCE_ANCHOR_ISSUE_459_V1]"
+    )
+    guards = [
+        "tests.ops.test_codex_dx_failure_prevention::"
+        "test_absent_evidence_anchor_is_not_in_pyproject_toml",
+        "tests.ops.test_codex_dx_failure_prevention::"
+        "test_missing_anchor_fails_with_intended_reason",
+    ]
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[old_case])
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[replacement, *guards],
+        test_inventory_tree="f" * 40,
+    )
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "PASS"
+    assert result.blocking is False
+
+
+@pytest.mark.parametrize("outcome", ["failed", "errors"])
+def test_parameterized_case_replacement_failure_is_a_new_regression(outcome):
+    family = "tests.test_contract::test_matrix"
+    old_case = f"{family}[old]"
+    replacement = f"{family}[new]"
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[old_case])
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[],
+        test_inventory_tree="f" * 40,
+        **{outcome: [replacement]},
+    )
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "NEW_REGRESSION"
+    assert result.blocking is True
+    assert result.new_failures == [replacement]
+
+
+def test_parameterized_case_replacement_requires_inventory_tree_delta():
+    family = "tests.test_contract::test_matrix"
+    old_case = f"{family}[old]"
+    replacement = f"{family}[new]"
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[old_case])
+    head = _with_node_outcomes(_run(0, [], revision="head"), passed=[replacement])
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+def test_parameterized_case_replacement_does_not_hide_unrelated_removal():
+    family = "tests.test_contract::test_matrix"
+    old_case = f"{family}[old]"
+    replacement = f"{family}[new]"
+    unrelated = "tests.test_contract::test_unrelated"
+    base = _with_node_outcomes(
+        _run(0, [], revision="base"),
+        passed=[old_case, unrelated],
+    )
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[replacement],
+        test_inventory_tree="f" * 40,
+    )
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+def test_parameterized_case_replacement_requires_same_family():
+    old_case = "tests.test_contract::test_matrix[old]"
+    replacement = "tests.test_contract::test_other[new]"
+    base = _with_node_outcomes(_run(0, [], revision="base"), passed=[old_case])
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[replacement],
+        test_inventory_tree="f" * 40,
+    )
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+@pytest.mark.parametrize("outcome", ["failed", "errors", "skipped"])
+def test_nonpassing_parameterized_base_cannot_be_laundered_into_passing_replacement(
+    outcome,
+):
+    family = "tests.test_contract::test_matrix"
+    old_case = f"{family}[old]"
+    replacement = f"{family}[new]"
+    base = _with_node_outcomes(
+        _run(0 if outcome == "skipped" else 1, [], revision="base"),
+        passed=[],
+        **{outcome: [old_case]},
+    )
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[replacement],
+        test_inventory_tree="f" * 40,
+    )
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+def test_multiple_missing_parameterized_base_cases_are_ambiguous():
+    family = "tests.test_contract::test_matrix"
+    base = _with_node_outcomes(
+        _run(0, [], revision="base"),
+        passed=[f"{family}[old-a]", f"{family}[old-b]"],
+    )
+    head = _with_node_outcomes(
+        _run(0, [], revision="head"),
+        passed=[f"{family}[new]"],
+        test_inventory_tree="f" * 40,
+    )
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
 def test_dynamic_failure_identity_preserves_raw_evidence_without_false_regression():
     base_node = "tests.test_contract::test_expiry[2026-08-12T07:32:05Z]"
     head_node = "tests.test_contract::test_expiry[2026-08-12T07:40:05+00:00]"

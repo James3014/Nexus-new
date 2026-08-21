@@ -1036,6 +1036,57 @@ def _expanded_node_keys(
     return expanded_base, expanded_head, False
 
 
+def _replaced_parameterized_node_keys(
+    base: PytestRunResult,
+    head: PytestRunResult,
+    base_index: Mapping[LogicalNodeKey, str],
+    head_index: Mapping[LogicalNodeKey, str],
+) -> tuple[set[LogicalNodeKey], set[LogicalNodeKey], bool]:
+    """Map one missing passing parameterized base case per family to new head cases.
+
+    This is intentionally narrower than arbitrary test replacement.  The exact
+    test inventory must change, the removed case must have passed on the base,
+    and only one base case may disappear from a given parameterized family.
+    Multiple missing base cases are ambiguous and fail closed.
+    """
+    if base.test_inventory_tree == head.test_inventory_tree:
+        return set(), set(), False
+    base_passed = _logical_node_set(base.passed_node_ids)
+    if base_passed is None:
+        return set(), set(), True
+
+    base_by_family: dict[str, list[LogicalNodeKey]] = {}
+    head_by_family: dict[str, list[LogicalNodeKey]] = {}
+    for key, raw_node in base_index.items():
+        family = _parameterized_family(raw_node)
+        if family is not None:
+            base_by_family.setdefault(family, []).append(key)
+    for key, raw_node in head_index.items():
+        family = _parameterized_family(raw_node)
+        if family is not None:
+            head_by_family.setdefault(family, []).append(key)
+
+    replaced_base: set[LogicalNodeKey] = set()
+    replacement_head: set[LogicalNodeKey] = set()
+    for family, base_keys in base_by_family.items():
+        missing_base = [key for key in base_keys if key not in head_index]
+        if not missing_base:
+            continue
+        if len(missing_base) != 1:
+            return set(), set(), True
+        base_key = missing_base[0]
+        if base_key not in base_passed:
+            continue
+        candidates = [
+            key for key in head_by_family.get(family, []) if key not in base_index
+        ]
+        if not candidates:
+            continue
+        replaced_base.add(base_key)
+        replacement_head.update(candidates)
+    return replaced_base, replacement_head, False
+
+
 def _metadata_mismatch(base: PytestRunResult, head: PytestRunResult) -> bool:
     base_index = _logical_node_index(base.node_ids)
     head_index = _logical_node_index(head.node_ids)
@@ -1069,24 +1120,29 @@ def _metadata_mismatch(base: PytestRunResult, head: PytestRunResult) -> bool:
     expanded_base, expanded_head, expansion_ambiguous = _expanded_node_keys(
         base, head, base_index, head_index
     )
-    if expansion_ambiguous:
+    replaced_base, replacement_head, replacement_ambiguous = (
+        _replaced_parameterized_node_keys(base, head, base_index, head_index)
+    )
+    if expansion_ambiguous or replacement_ambiguous:
         return True
-    if not base_nodes or not head_nodes or not (base_nodes - expanded_base) <= head_nodes:
+    evolved_base = expanded_base | replaced_base
+    evolved_head = expanded_head | replacement_head
+    if not base_nodes or not head_nodes or not (base_nodes - evolved_base) <= head_nodes:
         return True
 
     head_only = head_nodes - base_nodes
     if head_only and base.test_inventory_tree == head.test_inventory_tree:
         return True
-    ordinary_head_only = head_only - expanded_head
+    ordinary_head_only = head_only - evolved_head
     if not ordinary_head_only <= head_passed:
         return True
-    expanded_nonpassing = expanded_head - head_passed
-    if expanded_nonpassing - (head_failed | head_errors):
+    evolved_nonpassing = evolved_head - head_passed
+    if evolved_nonpassing - (head_failed | head_errors):
         return True
     if not head_skipped <= base_skipped:
         return True
 
-    downgraded = (base_passed - expanded_base) - head_passed
+    downgraded = (base_passed - evolved_base) - head_passed
     classified_failures = head_failed | head_errors
     return bool(downgraded - classified_failures)
 
