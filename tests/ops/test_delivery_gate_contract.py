@@ -35,17 +35,6 @@ def _build_delivery_fixture(tmp_path: Path) -> str:
 
     readme = tmp_path / "README.md"
     readme.write_text("# Nexus Test Repo\n", encoding="utf-8")
-    subprocess.run(["git", "add", "README.md"], cwd=tmp_path, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-m", "initial commit"], cwd=tmp_path, check=True, capture_output=True
-    )
-
-    head_sha = (
-        subprocess
-        .check_output(["git", "rev-parse", "--short", "HEAD"], cwd=tmp_path)
-        .decode()
-        .strip()
-    )
 
     scripts_ops = tmp_path / "scripts" / "ops"
     scripts_ops.mkdir(parents=True, exist_ok=True)
@@ -84,7 +73,8 @@ def _build_delivery_fixture(tmp_path: Path) -> str:
     baseline_dir = reports_dir / "baseline"
     baseline_dir.mkdir(parents=True, exist_ok=True)
     (baseline_dir / "baseline_manifest.json").write_text(
-        json.dumps({"manifest": "ok"}), encoding="utf-8"
+        json.dumps({"version": "fixture-v1", "generated_by_sha": "fixture-setup"}),
+        encoding="utf-8",
     )
 
     config_dir = tmp_path / ".nexus" / "config"
@@ -93,15 +83,8 @@ def _build_delivery_fixture(tmp_path: Path) -> str:
         json.dumps({"ignore_dirty_paths": []}), encoding="utf-8"
     )
 
-    return head_sha
-
-
-def _run_delivery_gate(tmp_path: Path) -> subprocess.CompletedProcess:
-    env = dict(os.environ)
-    env["PYTHONPATH"] = f"{ROOT}:{env.get('PYTHONPATH', '')}"
-    env["UV_PYTHON"] = sys.executable
-
-    # Ensure step 5 orchestrator test passes deterministically by providing python with pytest
+    # Ensure step 5 orchestrator test passes deterministically by providing python with pytest.
+    # Keep this shim tracked so it cannot accidentally become the worktree-delta failure source.
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
     uv_stub = bin_dir / "uv"
@@ -110,7 +93,48 @@ def _run_delivery_gate(tmp_path: Path) -> subprocess.CompletedProcess:
         encoding="utf-8",
     )
     uv_stub.chmod(0o755)
-    env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
+
+    # Track all fixture support files, then create an empty HEAD commit. This leaves
+    # the worktree clean and makes the commit-integrity expectation deterministic.
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "fixture setup"], cwd=tmp_path, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-m", "fixture head"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+
+    return (
+        subprocess
+        .check_output(["git", "rev-parse", "--short", "HEAD"], cwd=tmp_path)
+        .decode()
+        .strip()
+    )
+
+
+def _valid_agent_report(head_sha: str) -> dict:
+    return {
+        "head_sha": head_sha,
+        "files_changed_in_this_commit": [],
+        "base_branch": "main",
+        "branch_delta_vs_base": [],
+        "tests_run": [
+            {"command": "pytest -q", "exit_code": 0},
+            {"command": "scripts/engine/nexus_cli.py nexus run", "exit_code": 0},
+        ],
+        "worktree_changed_files": [],
+    }
+
+
+def _run_delivery_gate(tmp_path: Path) -> subprocess.CompletedProcess:
+    env = dict(os.environ)
+    env["PYTHONPATH"] = f"{ROOT}:{env.get('PYTHONPATH', '')}"
+    env["UV_PYTHON"] = sys.executable
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PATH"] = f"{tmp_path / 'bin'}:{env.get('PATH', '')}"
 
     shell_bin = shutil.which("zsh") or shutil.which("bash") or "/bin/sh"
     return subprocess.run(
@@ -122,98 +146,84 @@ def _run_delivery_gate(tmp_path: Path) -> subprocess.CompletedProcess:
     )
 
 
-def test_delivery_gate_physical_execution_missing_test_evidence_fails(tmp_path):
-    """H2, H3, H4, H5: Real delivery gate shell process executes real verify_report_claims.py and fails (exit 17) on missing test evidence."""
+def test_delivery_gate_physical_valid_report_passes_step_7(tmp_path):
+    """Control: a valid report must clear Step 7 so negative cases cannot pass on fixture noise."""
+    head_sha = _build_delivery_fixture(tmp_path)
+    report_path = tmp_path / ".nexus" / "reports" / "agent_report.json"
+    report_path.write_text(json.dumps(_valid_agent_report(head_sha)), encoding="utf-8")
+
+    res = _run_delivery_gate(tmp_path)
+    output = res.stderr + res.stdout
+    assert res.returncode == 16
+    assert "== Step 8: Acceptance (Quality Gate) ==" in output
+    assert "Report integrity check failed" not in output
+
+
+def test_delivery_gate_physical_test_evidence_decision_bearing(tmp_path):
+    """H2-H5: A nonzero test witness alone must make real Step 7 fail with exit 17."""
     head_sha = _build_delivery_fixture(tmp_path)
 
-    # Missing tests_run in agent_report.json
-    agent_report = {
-        "head_sha": head_sha,
-        "files_changed_in_this_commit": ["README.md"],
-        "base_branch": "main",
-        "branch_delta_vs_base": [],
-        "tests_run": [],
-        "worktree_changed_files": [],
-    }
+    agent_report = _valid_agent_report(head_sha)
+    agent_report["tests_run"][0]["exit_code"] = 1
     report_path = tmp_path / ".nexus" / "reports" / "agent_report.json"
     report_path.write_text(json.dumps(agent_report), encoding="utf-8")
 
     res = _run_delivery_gate(tmp_path)
+    output = res.stderr + res.stdout
     assert res.returncode == 17
-    assert "Report integrity check failed" in (res.stderr + res.stdout)
+    assert '"error": "tests_with_nonzero_exit"' in output
+    assert "Report integrity check failed" in output
 
 
 def test_delivery_gate_physical_nexus_command_evidence_decision_bearing(tmp_path):
-    """H6: Report with valid test evidence but missing 'nexus_cli.py nexus' command physically fails at Step 7."""
+    """H6: Valid test evidence without a Nexus CLI command must fail real Step 7."""
     head_sha = _build_delivery_fixture(tmp_path)
 
-    agent_report = {
-        "head_sha": head_sha,
-        "files_changed_in_this_commit": ["README.md"],
-        "base_branch": "main",
-        "branch_delta_vs_base": [],
-        "tests_run": [{"command": "pytest -q", "exit_code": 0}],
-        "worktree_changed_files": [],
-    }
+    agent_report = _valid_agent_report(head_sha)
+    agent_report["tests_run"] = [{"command": "pytest -q", "exit_code": 0}]
     report_path = tmp_path / ".nexus" / "reports" / "agent_report.json"
     report_path.write_text(json.dumps(agent_report), encoding="utf-8")
 
     res = _run_delivery_gate(tmp_path)
+    output = res.stderr + res.stdout
     assert res.returncode == 17
-    assert "Report integrity check failed" in (res.stderr + res.stdout)
+    assert '"error": "missing_nexus_command_evidence"' in output
+    assert "Report integrity check failed" in output
 
 
 def test_delivery_gate_physical_worktree_delta_decision_bearing(tmp_path):
-    """H7: Uncommitted worktree changes not declared in report worktree_changed_files physically fail at Step 7."""
+    """H7: One undeclared worktree path alone must fail real Step 7."""
     head_sha = _build_delivery_fixture(tmp_path)
 
-    # Create an uncommitted file in repo
     extra_file = tmp_path / "untracked.txt"
     extra_file.write_text("dirty\n", encoding="utf-8")
 
-    agent_report = {
-        "head_sha": head_sha,
-        "files_changed_in_this_commit": ["README.md"],
-        "base_branch": "main",
-        "branch_delta_vs_base": [],
-        "tests_run": [
-            {"command": "pytest -q", "exit_code": 0},
-            {"command": "scripts/engine/nexus_cli.py nexus run", "exit_code": 0},
-        ],
-        "worktree_changed_files": [],  # does not declare untracked.txt
-    }
+    agent_report = _valid_agent_report(head_sha)
     report_path = tmp_path / ".nexus" / "reports" / "agent_report.json"
     report_path.write_text(json.dumps(agent_report), encoding="utf-8")
 
     res = _run_delivery_gate(tmp_path)
+    output = res.stderr + res.stdout
     assert res.returncode == 17
-    assert "Report integrity check failed" in (res.stderr + res.stdout)
+    assert '"error": "worktree_delta_mismatch"' in output
+    assert "Report integrity check failed" in output
 
 
 def test_delivery_gate_physical_freshness_decision_bearing(tmp_path):
-    """H8: Report older than hallucination_evidence.json physically fails at Step 7."""
+    """H8: A stale report alone must fail real Step 7."""
     head_sha = _build_delivery_fixture(tmp_path)
 
-    agent_report = {
-        "head_sha": head_sha,
-        "files_changed_in_this_commit": ["README.md"],
-        "base_branch": "main",
-        "branch_delta_vs_base": [],
-        "tests_run": [
-            {"command": "pytest -q", "exit_code": 0},
-            {"command": "scripts/engine/nexus_cli.py nexus run", "exit_code": 0},
-        ],
-        "worktree_changed_files": [],
-    }
+    agent_report = _valid_agent_report(head_sha)
     report_path = tmp_path / ".nexus" / "reports" / "agent_report.json"
     report_path.write_text(json.dumps(agent_report), encoding="utf-8")
 
-    # Force report mtime to be in the past
     evidence_path = tmp_path / ".nexus" / "reports" / "hallucination_evidence.json"
     old_time = time.time() - 3600
     os.utime(report_path, (old_time, old_time))
     os.utime(evidence_path, (time.time(), time.time()))
 
     res = _run_delivery_gate(tmp_path)
+    output = res.stderr + res.stdout
     assert res.returncode == 17
-    assert "Report integrity check failed" in (res.stderr + res.stdout)
+    assert '"error": "report_older_than_reference"' in output
+    assert "Report integrity check failed" in output
