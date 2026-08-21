@@ -8,7 +8,7 @@ PROTOCOL_SCHEMA: Final[str] = "nexus.eia_roi_wave2_protocol.v1"
 OBSERVATION_SCHEMA: Final[str] = "nexus.eia_roi_observation.v1"
 QUALIFICATION_SCHEMA: Final[str] = "nexus.eia_roi_wave2_qualification.v1"
 FIXED_WORKER_MODEL: Final[str] = "opencode-go/deepseek-v4-flash"
-FIXED_WORKER_PROVIDER: Final[str] = "opencode-go"
+FIXED_WORKER_PROVIDER: Final[str] = "opencode"
 NON_SCORING: Final[str] = "NON_SCORING"
 FORMAL_SCORING: Final[str] = "FORMAL"
 WAVE2_QUALIFIED: Final[str] = "WAVE2_HARNESS_QUALIFIED"
@@ -166,9 +166,7 @@ _FIXTURES: Final[dict[str, dict[str, Any]]] = {
     },
 }
 
-_STAGE1_A1_FIRST: Final[frozenset[str]] = frozenset(
-    {"F01", "F02", "F03", "F07", "F08", "F09"}
-)
+_STAGE1_A1_FIRST: Final[frozenset[str]] = frozenset({"F01", "F02", "F03", "F07", "F08", "F09"})
 
 PAIR_IDENTITY_FIELDS: Final[tuple[str, ...]] = (
     "planner_ref",
@@ -191,76 +189,72 @@ QUALIFICATION_WITNESSES: Final[tuple[str, ...]] = (
 TOKEN_COMPONENTS: Final[tuple[str, ...]] = ("compiler", "worker", "coordinator")
 TOKEN_STATUSES: Final[frozenset[str]] = frozenset({"MEASURED", "NOT_OBSERVED"})
 
-REQUIRED_OBSERVATION_FIELDS: Final[frozenset[str]] = frozenset(
-    {
-        "schema",
-        "protocol_comment_id",
-        "scoring_mode",
-        "fixture_id",
-        "family",
-        "base_sha",
-        "base_tree",
-        "arm",
-        "order_index",
-        "attempt_id",
-        "planner_ref",
-        "admission_ref",
-        "worker_id",
-        "profile",
-        "provider",
-        "model",
-        "execution_realm",
-        "transport",
-        "compiler_artifact",
-        "started_at",
-        "ended_at",
-        "first_pass_verifier_pass",
-        "repair_count",
-        "final_disposition",
-        "candidate_head",
-        "candidate_tree",
-        "candidate_diff_sha256",
-        "scope_violation_count",
-        "unauthorized_path_attempt_count",
-        "identity_substitution_violation",
-        "false_green_or_evidence_insufficiency",
-        "diagnosis_status",
-        "diagnosis_probe",
-        "evidence_refs",
-        "coordinator_high_reasoning_invocation_count",
-        "coordinator_high_reasoning_turn_count",
-        "compiler_tokens",
-        "compiler_token_status",
-        "worker_tokens",
-        "worker_token_status",
-        "coordinator_tokens",
-        "coordinator_token_status",
-        "observable_total_tokens",
-        "input_bytes",
-        "output_bytes",
-        "context_bytes",
-        "verifier_command",
-        "verifier_artifact_ref",
-        "diff_check_pass",
-        "allowed_path_audit_pass",
-        "deletion_audit_pass",
-    }
-)
+REQUIRED_OBSERVATION_FIELDS: Final[frozenset[str]] = frozenset({
+    "schema",
+    "protocol_comment_id",
+    "scoring_mode",
+    "fixture_id",
+    "family",
+    "base_sha",
+    "base_tree",
+    "arm",
+    "order_index",
+    "attempt_id",
+    "planner_ref",
+    "admission_ref",
+    "worker_id",
+    "profile",
+    "provider",
+    "model",
+    "execution_realm",
+    "transport",
+    "compiler_artifact",
+    "started_at",
+    "ended_at",
+    "first_pass_verifier_pass",
+    "repair_count",
+    "final_disposition",
+    "candidate_head",
+    "candidate_tree",
+    "candidate_diff_sha256",
+    "scope_violation_count",
+    "unauthorized_path_attempt_count",
+    "identity_substitution_violation",
+    "false_green_or_evidence_insufficiency",
+    "diagnosis_status",
+    "diagnosis_probe",
+    "evidence_refs",
+    "coordinator_high_reasoning_invocation_count",
+    "coordinator_high_reasoning_turn_count",
+    "compiler_tokens",
+    "compiler_token_status",
+    "worker_tokens",
+    "worker_token_status",
+    "coordinator_tokens",
+    "coordinator_token_status",
+    "observable_total_tokens",
+    "input_bytes",
+    "output_bytes",
+    "context_bytes",
+    "verifier_command",
+    "verifier_artifact_ref",
+    "diff_check_pass",
+    "allowed_path_audit_pass",
+    "deletion_audit_pass",
+})
 
 
 def execution_fixture_manifest() -> dict[str, Any]:
     fixtures = []
     for fixture_id in sorted(_FIXTURES):
         spec = _FIXTURES[fixture_id]
-        fixtures.append(
-            {
-                "fixture_id": fixture_id,
-                "family": spec["family"],
-                "base_sha": spec["base_sha"],
-                "allowed_paths": list(spec["allowed_paths"]),
-                "verifier_command": spec["verifier_command"],
-            }
-        )
+        fixtures.append({
+            "fixture_id": fixture_id,
+            "family": spec["family"],
+            "base_sha": spec["base_sha"],
+            "allowed_paths": list(spec["allowed_paths"]),
+            "verifier_command": spec["verifier_command"],
+        })
     return {
         "schema": PROTOCOL_SCHEMA,
         "protocol_comment_id": PROTOCOL_COMMENT_ID,
@@ -274,26 +268,22 @@ def mandatory_schedule() -> list[dict[str, Any]]:
     for fixture_id in sorted(_FIXTURES):
         stage1_arms = ("A1", "A3") if fixture_id in _STAGE1_A1_FIRST else ("A3", "A1")
         for order_index, arm in enumerate(stage1_arms, start=1):
-            schedule.append(
-                {
-                    "stage": 1,
-                    "fixture_id": fixture_id,
-                    "arm": arm,
-                    "order_index": order_index,
-                }
-            )
+            schedule.append({
+                "stage": 1,
+                "fixture_id": fixture_id,
+                "arm": arm,
+                "order_index": order_index,
+            })
 
         fixture_number = int(fixture_id[1:])
         stage2_arms = ("B1", "B2") if fixture_number % 2 else ("B2", "B1")
         for order_index, arm in enumerate(stage2_arms, start=1):
-            schedule.append(
-                {
-                    "stage": 2,
-                    "fixture_id": fixture_id,
-                    "arm": arm,
-                    "order_index": order_index,
-                }
-            )
+            schedule.append({
+                "stage": 2,
+                "fixture_id": fixture_id,
+                "arm": arm,
+                "order_index": order_index,
+            })
     return schedule
 
 
@@ -443,11 +433,14 @@ def assert_scoring_allowed(*, qualification_state: str, scoring_mode: str) -> No
         raise Wave2QualificationError("FORMAL_SCORING_BEFORE_WAVE2_QUALIFICATION")
 
 
-def build_qualification_receipt(witnesses: Mapping[str, bool]) -> dict[str, Any]:
+def build_qualification_receipt(witnesses: Mapping[str, str]) -> dict[str, Any]:
     unexpected = sorted(set(witnesses) - set(QUALIFICATION_WITNESSES))
     if unexpected:
         raise Wave2QualificationError(f"UNKNOWN_QUALIFICATION_WITNESS:{','.join(unexpected)}")
-    missing = [name for name in QUALIFICATION_WITNESSES if witnesses.get(name) is not True]
+    evidence_refs = {
+        name: str(witnesses.get(name) or "").strip() for name in QUALIFICATION_WITNESSES
+    }
+    missing = [name for name, evidence_ref in evidence_refs.items() if not evidence_ref]
     state = WAVE2_QUALIFIED if not missing else WAVE2_REVISE
     return {
         "schema": QUALIFICATION_SCHEMA,
@@ -455,5 +448,6 @@ def build_qualification_receipt(witnesses: Mapping[str, bool]) -> dict[str, Any]
         "gate_passed": not missing,
         "state": state,
         "missing_witnesses": missing,
+        "evidence_refs": evidence_refs,
         "formal_scoring_authorized": not missing,
     }
