@@ -1237,3 +1237,252 @@ def test_normal_ask_path_with_marker_unchanged(monkeypatch):
     assert result.raw == stable
     assert result.conversation_id == "conv-1"
     assert [call[2] for call in calls] == ["ask", "detail"]
+
+
+def sample_selected_worker():
+    return {
+        "worker_id": "gemini-3.7-flash-medium",
+        "provider": "agy",
+        "model": "gemini-3.7-flash-medium",
+        "role_ceiling": "bounded L3 implementation worker",
+        "admission_evidence_ref": "tasks/test-task/00_admission.md",
+        "admission_evidence_hash": "c" * 64,
+        "selection_evidence_ref": "tasks/test-task/00_decision.md",
+        "selection_evidence_hash": "d" * 64,
+    }
+
+
+def envelope_v2_for(request, **overrides):
+    identity = request["identity"]
+    value = {
+        "schema": "external_execution_envelope.v2",
+        "binding": {
+            "repository": identity["repository"],
+            "item_type": identity["item_type"],
+            "item_id": identity["item_id"],
+            "revision": identity["revision"],
+            "main_sha": identity["main_sha"],
+            "task_card_ref": identity["task_card_ref"],
+            "task_card_hash": identity["task_card_hash"],
+            "context_pack_sha256": request["context_pack_sha256"],
+        },
+        "selected_worker": dict(request["selected_worker"]),
+        "objective": "Implement #350 Task Compiler v2 milestone.",
+        "definition_of_done": ["Add V2 schemas and compiler.", "Pass all tests."],
+        "evidence_refs": ["file:nexus/services/external_intelligence.py#L20-L50"],
+        "diagnosis": {
+            "status": "LIKELY",
+            "hypothesis": "Root cause isolated in compiler brief generation.",
+            "next_probe": "Check prompt builder mapping.",
+        },
+        "scope_signal": {
+            "production_edit_paths": ["nexus/a.py"],
+            "required_test_edit_paths": ["tests/test_a.py"],
+            "conditional_migration_paths": [],
+            "read_only_authorities": ["docs/spec.md"],
+            "verification_only_paths": ["tests/unit/**"],
+            "forbidden_paths": ["nexus/protected/**"],
+            "max_files": 10,
+            "scope_confidence": "HIGH",
+            "scope_block_conditions": ["contract_changed"],
+        },
+        "inspect_first": ["nexus/services/external_intelligence.py"],
+        "required_semantics": ["Keep existing V1 compatibility."],
+        "implementation_direction": ["Implement V2 prompt compiler."],
+        "verification_focus": ["Run test suite."],
+        "failure_guards": ["Do not default to deepseek."],
+        "stop_and_escalate": ["contract_changed", "unexpected_deletion"],
+    }
+    value.update(overrides)
+    return value
+
+
+def test_validate_selected_worker_valid_and_fail_closed():
+    from nexus.services.external_intelligence import validate_selected_worker
+
+    valid = sample_selected_worker()
+    assert validate_selected_worker(valid) == valid
+
+    # Extra keys forbidden
+    with pytest.raises(ExternalIntelligenceError, match="INVALID_SELECTED_WORKER"):
+        validate_selected_worker({**valid, "extra_key": "forbidden"})
+    with pytest.raises(ExternalIntelligenceError, match="INVALID_SELECTED_WORKER"):
+        validate_selected_worker({**valid, "fallback_allowed": False})
+
+    # Missing keys forbidden
+    for k in valid:
+        missing = dict(valid)
+        del missing[k]
+        with pytest.raises(ExternalIntelligenceError, match="INVALID_SELECTED_WORKER"):
+            validate_selected_worker(missing)
+
+    # Empty string values forbidden
+    for k in valid:
+        empty = dict(valid)
+        empty[k] = ""
+        with pytest.raises(ExternalIntelligenceError, match="INVALID_SELECTED_WORKER"):
+            validate_selected_worker(empty)
+
+    # Non-mapping value forbidden
+    with pytest.raises(ExternalIntelligenceError, match="INVALID_SELECTED_WORKER"):
+        validate_selected_worker("not-a-mapping")
+
+    # Invalid hash formats
+    with pytest.raises(ExternalIntelligenceError, match="INVALID_SELECTED_WORKER"):
+        validate_selected_worker({**valid, "admission_evidence_hash": "not-64-hex"})
+    with pytest.raises(ExternalIntelligenceError, match="INVALID_SELECTED_WORKER"):
+        validate_selected_worker({**valid, "selection_evidence_hash": "short"})
+
+    # Provider / model-prefix cross-consistency
+    worker_matching_prefix = {
+        **valid,
+        "provider": "google",
+        "model": "google/gemini-3.7-flash-medium",
+    }
+    assert validate_selected_worker(worker_matching_prefix) == worker_matching_prefix
+
+    with pytest.raises(
+        ExternalIntelligenceError, match="INVALID_SELECTED_WORKER_PROVIDER_MODEL_MISMATCH"
+    ):
+        validate_selected_worker({
+            **valid,
+            "provider": "anthropic",
+            "model": "google/gemini-3.7-flash-medium",
+        })
+
+
+def test_build_request_v2_and_prompt_v2_without_deepseek_standing_policy():
+    from nexus.services.external_intelligence import (
+        REQUEST_SCHEMA_V2,
+        build_prompt,
+        build_prompt_v2,
+        build_request,
+        build_request_v2,
+    )
+
+    worker = sample_selected_worker()
+    intake = normalize_intake(record())
+    context_pack = build_context_pack(sources())
+    req_v2 = build_request_v2(intake, context_pack, selected_worker=worker)
+    assert req_v2["schema"] == REQUEST_SCHEMA_V2
+    assert req_v2["selected_worker"] == worker
+
+    # Dispatch via build_request also works
+    req_dispatched = build_request(intake, context_pack, selected_worker=worker)
+    assert req_dispatched == req_v2
+
+    prompt = build_prompt(req_v2, context_pack)
+    prompt_v2 = build_prompt_v2(req_v2, context_pack)
+    assert prompt == prompt_v2
+    assert "NEXUS_REQUEST_SHA256=" in prompt
+    assert "external_execution_envelope.v2" in prompt
+    assert "gemini-3.7-flash-medium" in prompt
+    assert "DeepSeek" not in prompt  # DeepSeek is not standing EIA policy for arbitrary workers
+
+
+def test_parse_external_execution_envelope_v2_proven_diagnosis_requires_evidence():
+    from nexus.services.external_intelligence import (
+        parse_external_execution_envelope,
+        parse_external_execution_envelope_v2,
+    )
+
+    intake = normalize_intake(record())
+    context_pack = build_context_pack(sources())
+    req = build_request(intake, context_pack, selected_worker=sample_selected_worker())
+    env_v2 = envelope_v2_for(req)
+
+    # Valid parse
+    parsed = parse_external_execution_envelope_v2(json.dumps(env_v2))
+    assert parsed["schema"] == "external_execution_envelope.v2"
+    assert parsed == parse_external_execution_envelope(json.dumps(env_v2))
+
+    # Proven without evidence must fail closed
+    env_proven_no_evidence = envelope_v2_for(req)
+    env_proven_no_evidence["diagnosis"]["status"] = "PROVEN"
+    env_proven_no_evidence["evidence_refs"] = []
+    with pytest.raises(ExternalIntelligenceError, match="UNSUPPORTED_PROVEN_DIAGNOSIS"):
+        parse_external_execution_envelope_v2(json.dumps(env_proven_no_evidence))
+
+    # Proven with evidence succeeds
+    env_proven_with_evidence = envelope_v2_for(req)
+    env_proven_with_evidence["diagnosis"]["status"] = "PROVEN"
+    env_proven_with_evidence["evidence_refs"] = ["file:nexus/a.py#L1-L10"]
+    assert (
+        parse_external_execution_envelope_v2(json.dumps(env_proven_with_evidence))["diagnosis"][
+            "status"
+        ]
+        == "PROVEN"
+    )
+
+    # UNKNOWN diagnosis succeeds
+    env_unknown = envelope_v2_for(req)
+    env_unknown["diagnosis"]["status"] = "UNKNOWN"
+    env_unknown["diagnosis"]["hypothesis"] = "Needs exploration."
+    env_unknown["diagnosis"]["next_probe"] = "Run probe tests."
+    assert (
+        parse_external_execution_envelope_v2(json.dumps(env_unknown))["diagnosis"]["status"]
+        == "UNKNOWN"
+    )
+
+    # Stale/unsupported status fails closed
+    env_stale_status = envelope_v2_for(req)
+    env_stale_status["diagnosis"]["status"] = "PLAUSIBLE"
+    with pytest.raises(ExternalIntelligenceError, match="INTELLIGENCE_PARSE_FAILED"):
+        parse_external_execution_envelope_v2(json.dumps(env_stale_status))
+
+
+def test_sidecar_v2_roundtrip_and_telemetry(tmp_path):
+    worker = sample_selected_worker()
+    intake = normalize_intake(record())
+    context_pack = build_context_pack(sources())
+    req = build_request(intake, context_pack, selected_worker=worker)
+    env = envelope_v2_for(req)
+    raw_env = json.dumps(env)
+
+    store = ExternalIntelligenceStore(tmp_path)
+
+    class FakeTransport:
+        def __init__(self):
+            self.calls = []
+
+        def invoke(self, prompt: str):
+            self.calls.append(prompt)
+            return TransportResult(
+                "INTELLIGENCE_COMPLETED",
+                raw=raw_env,
+                conversation_id="conv-v2-1",
+                safe_argv=("opencli", "chatgpt", "ask", "<prompt>"),
+            )
+
+    transport = FakeTransport()
+    sidecar = ExternalIntelligenceSidecar(transport=transport, store=store)
+    receipt = sidecar.analyze(record(), sources(), selected_worker=worker)
+
+    assert receipt["schema"] == "external_intelligence_receipt.v2"
+    assert receipt["status"] == "COMPLETED"
+    assert receipt["selected_worker"] == worker
+    assert receipt["telemetry"]["compiler_input_tokens"] == "NOT_OBSERVED"
+    assert receipt["telemetry"]["compiler_output_tokens"] == "NOT_OBSERVED"
+    assert receipt["telemetry"]["compiler_input_bytes"] > 0
+    assert receipt["telemetry"]["compiler_output_bytes"] > 0
+    assert receipt["control_capsule"]["schema"] == "control_capsule.v2"
+    assert receipt["control_capsule"]["selected_worker"] == worker
+
+
+def test_project_refresh_detects_selected_worker_change():
+    worker1 = sample_selected_worker()
+    worker2 = {**worker1, "worker_id": "gemini-1.5-pro", "model": "gemini-1.5-pro"}
+    intake = normalize_intake(record())
+    context_pack = build_context_pack(sources())
+    req1 = build_request(intake, context_pack, selected_worker=worker1)
+    req2 = build_request(intake, context_pack, selected_worker=worker2)
+
+    receipt1 = {
+        "schema": "external_intelligence_receipt.v2",
+        "request": req1,
+        "context_pack_sha256": req1["context_pack_sha256"],
+        "semantic_contract_sha256": req1["semantic_contract_sha256"],
+    }
+    proj = project_refresh(receipt1, req2)
+    assert proj["status"] == "STALE"
+    assert "selected_worker" in proj["changed_fields"]
