@@ -20,7 +20,7 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Iterator, Mapping, Optional, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Optional, Sequence
 from uuid import uuid4
 
 from nexus.contracts.autonomy_goal import AutonomyGoalGrant
@@ -41,7 +41,11 @@ from nexus.contracts.target_integration_lifecycle import (
     IntegrationAuthorizationEnvelope,
 )
 from nexus.contracts.unified_runtime_receipt import build_runtime_development_mapping
-from nexus.core.task_continuity import events_from_attempt_records
+from nexus.core.task_continuity import (
+    build_rehydration_projection,
+    events_from_attempt_records,
+    project,
+)
 from nexus.engine.canonical_task_seam import build_canonical_dispatch_envelope
 from nexus.events.contracts import build_attempt_transition_event
 from nexus.events.transport import NexusEventBus
@@ -1043,7 +1047,7 @@ class SelfHostedTaskService:
 
     @staticmethod
     def _candidate_commit(state: Mapping[str, Any]) -> Optional[str]:
-        packet = state.get("promotion_packet") or {}
+        packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
         return state.get("candidate_commit_sha") or packet.get("candidate_commit_sha")
 
     def _require_integrated_replacement(self, task_id: str, superseded_by: str) -> None:
@@ -1240,7 +1244,7 @@ class SelfHostedTaskService:
             next_action = "inspect_lifecycle_state"
             recommended_tool = None
 
-        packet = state.get("promotion_packet") or {}
+        packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
         return {
             "schema": "nexus.self_hosted_task_action.v1",
             "task_id": state.get("task_id"),
@@ -2118,10 +2122,13 @@ class SelfHostedTaskService:
                 raise ValueError(f"{name} must contain non-empty strings")
             return tuple(value)
 
+        action = str(result.get("action") or request.get("action") or "")
+        observation = str(result.get("observation") or request.get("observation") or "")
         NexusEventBus.emit_attempt_transition(build_attempt_transition_event(
             task_id=str(result.get("task_id") or task_id),
             attempt_id=str(result.get("attempt_id")), sequence=sequence,
             state=status, reason=str(result.get("error") or result.get("reason") or ""),
+            action=action, observation=observation,
             continuity_event_type=continuity_event_type,
             strategy_delta=str(result.get("strategy_delta") or request.get("strategy_delta") or ""),
             do_not_repeat=continuity_list("do_not_repeat", "rejected_strategies"),
@@ -2162,6 +2169,67 @@ class SelfHostedTaskService:
             task_id=task_id,
             attempt_id=attempt_id,
         )
+
+    def rehydrate_task_continuation(
+        self,
+        task_id: str,
+        attempt_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Deterministic, model-independent, read-only rehydration projection.
+
+        Rebuilds task continuation projection purely from physical durable state
+        and canonical attempt continuity records. Never mutates task state.
+        """
+        state = self._read_state_snapshot(task_id)
+        if state is None:
+            raise KeyError(f"unknown task: {task_id}")
+        if not isinstance(state, Mapping):
+            raise ValueError("REHYDRATION_MALFORMED_STATE: task state must be a mapping")
+        if state.get("state_valid") is False or str(state.get("status") or "").startswith("BLOCKED_INVALID_"):
+            blocker = state.get("blocker") if isinstance(state.get("blocker"), Mapping) else {}
+            detail = blocker.get("detail") or "state is invalid"
+            raise ValueError(f"REHYDRATION_MALFORMED_STATE: {detail}")
+        for key in ("candidate", "promotion_packet", "verified_receipt", "contract"):
+            val = state.get(key)
+            if val is not None and not isinstance(val, Mapping):
+                raise ValueError(f"REHYDRATION_MALFORMED_STATE: {key} must be a mapping")
+        work_claim = state.get("work_claim")
+        if work_claim is not None:
+            if not isinstance(work_claim, Mapping):
+                raise ValueError("REHYDRATION_WORK_CLAIM_MISMATCH: work_claim must be a mapping")
+            if not isinstance(work_claim.get("identity"), Mapping):
+                raise ValueError("REHYDRATION_WORK_CLAIM_MISMATCH: work_claim identity must be a mapping")
+
+        target_attempt_id = attempt_id or state.get("attempt_id")
+        if not target_attempt_id:
+            raise ValueError("REHYDRATION_ATTEMPT_ID_REQUIRED")
+        events = self.read_canonical_attempt_continuity(task_id, str(target_attempt_id))
+        snapshot = project(events)
+        task_action = self._task_action_envelope(state)
+        projection = build_rehydration_projection(
+            task_state=state,
+            continuity_snapshot=snapshot,
+            task_action_envelope=task_action,
+            requested_attempt_id=attempt_id,
+        )
+        return projection.to_dict()
+
+    @classmethod
+    def rehydrate_task_continuation_snapshot(
+        cls,
+        task_state: Mapping[str, Any],
+        attempt_continuity_events: Iterable[Any],
+        *,
+        attempt_id: Optional[str] = None,
+    ) -> dict[str, Any]:
+        snapshot = project(attempt_continuity_events)
+        task_action = cls._task_action_envelope(task_state)
+        return build_rehydration_projection(
+            task_state=task_state,
+            continuity_snapshot=snapshot,
+            task_action_envelope=task_action,
+            requested_attempt_id=attempt_id,
+        ).to_dict()
 
     @staticmethod
     def _request_hash(request: Mapping[str, Any]) -> str:
