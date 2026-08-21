@@ -6,6 +6,7 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -21,6 +22,7 @@ from scripts.ops.pr_impact_gate import (
     parse_raw_diff_z,
     run_pytest_plan,
     verify_exact_git_deletion_evidence,
+    verify_exact_git_main_movement_paths,
 )
 
 
@@ -1918,3 +1920,176 @@ def test_exact_git_result_cannot_enter_current_resolution_or_candidate_commit_pa
             None,
             SimpleNamespace(**evidence),
         )
+
+
+def _make_main_movement_repo(tmp_path: Path) -> dict[str, Any]:
+    repo = tmp_path / "movement_repo"
+    repo.mkdir()
+
+    def git(*args: str, text: bool = True):
+        return subprocess.check_output(["git", *args], cwd=repo, text=text)
+
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    (repo / "docs").mkdir()
+    (repo / "docs" / "unrelated.md").write_text("initial\n", encoding="utf-8")
+    (repo / "AGENTS.md").write_text("agents initial\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Nexus Test",
+            "-c",
+            "user.email=nexus@example.invalid",
+            "commit",
+            "-qm",
+            "old_main",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    old_main_sha = git("rev-parse", "HEAD").strip()
+    old_main_tree = git("rev-parse", "HEAD^{tree}").strip()
+
+    (repo / "docs" / "unrelated.md").write_text("updated\n", encoding="utf-8")
+    (repo / "AGENTS.md").write_text("agents updated\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, check=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Nexus Test",
+            "-c",
+            "user.email=nexus@example.invalid",
+            "commit",
+            "-qm",
+            "new_main",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    new_main_sha = git("rev-parse", "HEAD").strip()
+    new_main_tree = git("rev-parse", "HEAD^{tree}").strip()
+
+    return {
+        "repo": repo,
+        "old_main_sha": old_main_sha,
+        "old_main_tree_sha": old_main_tree,
+        "new_main_sha": new_main_sha,
+        "new_main_tree_sha": new_main_tree,
+        "changed_paths": ["AGENTS.md", "docs/unrelated.md"],
+    }
+
+
+def test_verify_exact_git_main_movement_paths_exact_match(tmp_path: Path):
+    fixture = _make_main_movement_repo(tmp_path)
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=fixture["changed_paths"],
+        root=fixture["repo"],
+    )
+    assert result["status"] == EXACT_GIT_EVIDENCE_ONLY
+    assert result["valid"] is True
+    assert result["blocking"] is False
+    assert result["reasons"] == ()
+    assert result["proven_paths"] == ("AGENTS.md", "docs/unrelated.md")
+    assert result["merge_authority"] is False
+    assert result["approval_authority"] is False
+    assert result["candidate_commit_allowed"] is False
+    assert result["public_claim_allowed"] is False
+
+
+def test_verify_exact_git_main_movement_paths_omitted_path_fails_closed(tmp_path: Path):
+    fixture = _make_main_movement_repo(tmp_path)
+    # Hostile caller supplies only docs/unrelated.md, omitting AGENTS.md
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=["docs/unrelated.md"],
+        root=fixture["repo"],
+    )
+    assert result["status"] == "IMPACT_UNKNOWN"
+    assert result["valid"] is False
+    assert result["blocking"] is True
+    assert any("omits physical paths" in r and "AGENTS.md" in r for r in result["reasons"])
+
+
+def test_verify_exact_git_main_movement_paths_spurious_path_fails_closed(tmp_path: Path):
+    fixture = _make_main_movement_repo(tmp_path)
+    # Caller supplies an extra path not in physical git diff
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=["AGENTS.md", "docs/unrelated.md", "nexus/extra.py"],
+        root=fixture["repo"],
+    )
+    assert result["status"] == "IMPACT_UNKNOWN"
+    assert result["valid"] is False
+    assert result["blocking"] is True
+    assert any("spurious paths" in r and "nexus/extra.py" in r for r in result["reasons"])
+
+
+def test_verify_exact_git_main_movement_paths_tree_mismatch_fails_closed(tmp_path: Path):
+    fixture = _make_main_movement_repo(tmp_path)
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha=fixture["old_main_sha"],
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha="0" * 40,
+        changed_main_paths=fixture["changed_paths"],
+        root=fixture["repo"],
+    )
+    assert result["status"] == "IMPACT_UNKNOWN"
+    assert result["valid"] is False
+    assert result["blocking"] is True
+    assert any("new_main_tree_sha does not match physical Git tree" in r for r in result["reasons"])
+
+
+def test_verify_exact_git_main_movement_paths_unresolvable_endpoint_fails_closed(tmp_path: Path):
+    fixture = _make_main_movement_repo(tmp_path)
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha="f" * 40,
+        old_main_tree_sha=fixture["old_main_tree_sha"],
+        new_main_sha=fixture["new_main_sha"],
+        new_main_tree_sha=fixture["new_main_tree_sha"],
+        changed_main_paths=fixture["changed_paths"],
+        root=fixture["repo"],
+    )
+    assert result["status"] == "IMPACT_UNKNOWN"
+    assert result["valid"] is False
+    assert result["blocking"] is True
+
+
+def test_verify_exact_git_main_movement_paths_malformed_sha():
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha="invalid-sha",
+        old_main_tree_sha="1" * 40,
+        new_main_sha="2" * 40,
+        new_main_tree_sha="3" * 40,
+        changed_main_paths=["docs/unrelated.md"],
+    )
+    assert result["status"] == "IMPACT_UNKNOWN"
+    assert result["valid"] is False
+    assert result["blocking"] is True
+
+
+def test_verify_exact_git_main_movement_paths_untrusted_root():
+    result = verify_exact_git_main_movement_paths(
+        old_main_sha="a" * 40,
+        old_main_tree_sha="1" * 40,
+        new_main_sha="b" * 40,
+        new_main_tree_sha="2" * 40,
+        changed_main_paths=["docs/unrelated.md"],
+        root=Path("/non/existent/path/for/git/root"),
+    )
+    assert result["status"] == "IMPACT_UNKNOWN"
+    assert result["valid"] is False
+    assert result["blocking"] is True
+    assert "trusted Git root is required" in result["reasons"]
