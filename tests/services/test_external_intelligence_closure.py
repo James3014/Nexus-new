@@ -892,3 +892,152 @@ def test_task_card_verification_command_parser_rejects_prose():
         assert "Note:" not in cmd
         assert "explanation" not in cmd
         assert "First" not in cmd
+
+
+def test_validate_worker_receipt_strictly_validates_selected_worker(tmp_path):
+    repo, base = make_repo(tmp_path)
+    ws = _worktree(repo, tmp_path / "ws", "u1", base)
+    valid_worker = {
+        "worker_id": "google/gemini-3.7-flash-medium",
+        "provider": "google",
+        "model": "google/gemini-3.7-flash-medium",
+        "role_ceiling": "bounded L3 implementation worker",
+        "admission_evidence_ref": "tasks/test-task/00_admission.md",
+        "admission_evidence_hash": "c" * 64,
+        "selection_evidence_ref": "tasks/test-task/00_decision.md",
+        "selection_evidence_hash": "d" * 64,
+    }
+    r = _advance_receipt(
+        repo=repo, base=base, workspace=ws, unit_id="u1", target="a.py", content="A = 1\n"
+    )
+    r["provider"] = "google"
+    r["model"] = "google/gemini-3.7-flash-medium"
+    r["provider_id"] = "google"
+    r["model_id"] = "gemini-3.7-flash-medium"
+    r["selected_worker"] = valid_worker
+    r["receipt_id"] = _receipt_identity(r)
+
+    bound = validate_worker_receipt(r)
+    assert bound["selected_worker"] == valid_worker
+    assert bound["provider"] == "google"
+    assert bound["model"] == "google/gemini-3.7-flash-medium"
+    assert bound["provider_id"] == "google"
+    assert bound["model_id"] == "gemini-3.7-flash-medium"
+
+    # Attestation mismatch (provider_id or model_id does not match resolved transport identity)
+    r_bad_attest = dict(r)
+    r_bad_attest["provider_id"] = "opencode-go"
+    r_bad_attest["model_id"] = "deepseek-v4-flash"
+    r_bad_attest["receipt_id"] = _receipt_identity(r_bad_attest)
+    with pytest.raises(ClosureError, match="WORKER_ATTESTATION_MISMATCH"):
+        validate_worker_receipt(r_bad_attest)
+
+    # Provider / model-prefix mismatch in selected_worker
+    r_bad_prefix = dict(r)
+    r_bad_prefix["selected_worker"] = {
+        **valid_worker,
+        "provider": "anthropic",
+        "model": "google/gemini-3.7-flash-medium",
+    }
+    r_bad_prefix["receipt_id"] = _receipt_identity(r_bad_prefix)
+    with pytest.raises(ClosureError, match="INVALID_SELECTED_WORKER"):
+        validate_worker_receipt(r_bad_prefix)
+
+    # Extra key in selected_worker
+    r_bad_extra = dict(r)
+    r_bad_extra["selected_worker"] = {**valid_worker, "extra": "forbidden"}
+    r_bad_extra["receipt_id"] = _receipt_identity(r_bad_extra)
+    with pytest.raises(ClosureError, match="INVALID_SELECTED_WORKER"):
+        validate_worker_receipt(r_bad_extra)
+
+    # Missing key in selected_worker
+    r_bad_missing = dict(r)
+    bad_worker = dict(valid_worker)
+    del bad_worker["admission_evidence_hash"]
+    r_bad_missing["selected_worker"] = bad_worker
+    r_bad_missing["receipt_id"] = _receipt_identity(r_bad_missing)
+    with pytest.raises(ClosureError, match="INVALID_SELECTED_WORKER"):
+        validate_worker_receipt(r_bad_missing)
+
+    # Invalid hash in selected_worker
+    r_bad_hash = dict(r)
+    r_bad_hash["selected_worker"] = {**valid_worker, "selection_evidence_hash": "not-64-hex"}
+    r_bad_hash["receipt_id"] = _receipt_identity(r_bad_hash)
+    with pytest.raises(ClosureError, match="INVALID_SELECTED_WORKER"):
+        validate_worker_receipt(r_bad_hash)
+
+
+def test_validate_repair_result_enforces_exact_parent_worker_identity(tmp_path):
+    from nexus.services.external_intelligence_closure import _validate_repair_result
+
+    repo, base = make_repo(tmp_path)
+    ws = _worktree(repo, tmp_path / "ws", "u1", base)
+    worker1 = {
+        "worker_id": "google/gemini-3.7-flash-medium",
+        "provider": "google",
+        "model": "google/gemini-3.7-flash-medium",
+        "role_ceiling": "bounded L3 implementation worker",
+        "admission_evidence_ref": "tasks/test-task/00_admission.md",
+        "admission_evidence_hash": "c" * 64,
+        "selection_evidence_ref": "tasks/test-task/00_decision.md",
+        "selection_evidence_hash": "d" * 64,
+    }
+    worker2 = {
+        **worker1,
+        "worker_id": "anthropic/claude-3-5-sonnet",
+        "provider": "anthropic",
+        "model": "anthropic/claude-3-5-sonnet",
+    }
+
+    # Initial parent receipt
+    parent_receipt = _advance_receipt(
+        repo=repo, base=base, workspace=ws, unit_id="u1", target="a.py", content="A = 1\n"
+    )
+    parent_receipt["provider"] = "google"
+    parent_receipt["model"] = "google/gemini-3.7-flash-medium"
+    parent_receipt["provider_id"] = "google"
+    parent_receipt["model_id"] = "gemini-3.7-flash-medium"
+    parent_receipt["selected_worker"] = worker1
+    parent_receipt["receipt_id"] = _receipt_identity(parent_receipt)
+
+    parent_bound = validate_worker_receipt(parent_receipt)
+
+    # Child repaired receipt with matching worker
+    child_receipt = _advance_receipt(
+        repo=repo,
+        base=base,
+        workspace=ws,
+        unit_id="u1",
+        target="a.py",
+        content="A = 2\n",
+        parent=parent_receipt,
+    )
+    child_receipt["provider"] = "google"
+    child_receipt["model"] = "google/gemini-3.7-flash-medium"
+    child_receipt["provider_id"] = "google"
+    child_receipt["model_id"] = "gemini-3.7-flash-medium"
+    child_receipt["selected_worker"] = worker1
+    child_receipt["parent_receipt_id"] = parent_receipt["receipt_id"]
+    child_receipt["receipt_id"] = _receipt_identity(child_receipt)
+
+    # Matching repair succeeds
+    _validate_repair_result(parent_bound, child_receipt)
+
+    # Divergent worker in repair fails closed
+    child_bad_worker = dict(child_receipt)
+    child_bad_worker["selected_worker"] = worker2
+    child_bad_worker["provider"] = "anthropic"
+    child_bad_worker["model"] = "anthropic/claude-3-5-sonnet"
+    child_bad_worker["provider_id"] = "anthropic"
+    child_bad_worker["model_id"] = "claude-3-5-sonnet"
+    child_bad_worker["receipt_id"] = _receipt_identity(child_bad_worker)
+    with pytest.raises(ClosureError, match="REPAIR_MODEL_BINDING_MISMATCH"):
+        _validate_repair_result(parent_bound, child_bad_worker)
+
+    # Changed worker but same provider/model label fails closed
+    worker1_mod = {**worker1, "selection_evidence_hash": "e" * 64}
+    child_worker_mismatch = dict(child_receipt)
+    child_worker_mismatch["selected_worker"] = worker1_mod
+    child_worker_mismatch["receipt_id"] = _receipt_identity(child_worker_mismatch)
+    with pytest.raises(ClosureError, match="REPAIR_WORKER_BINDING_MISMATCH"):
+        _validate_repair_result(parent_bound, child_worker_mismatch)

@@ -11,8 +11,10 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping
 
 from nexus.services.external_intelligence import (
+    ExternalIntelligenceError,
     ExternalIntelligenceSidecar,
     ExternalIntelligenceStore,
+    validate_selected_worker,
 )
 from nexus.services.external_intelligence_closure import (
     CLAIM_CEILING as CLOSURE_CLAIM_CEILING,
@@ -24,7 +26,10 @@ from nexus.services.external_intelligence_closure import (
     _path_matches,
     parse_task_card_authority,
 )
-from nexus.services.external_intelligence_fanout import AdaptiveDeepSeekFanoutRuntime, CapacityLease
+from nexus.services.external_intelligence_fanout import (
+    AdaptiveWorkerFanoutRuntime,
+    CapacityLease,
+)
 
 ISSUE_SCHEMA = "nexus.external_intelligence_issue.v1"
 STATE_SCHEMA = "nexus.external_intelligence_automation_state.v1"
@@ -60,6 +65,7 @@ ALLOWED_KEYS = {
     "active_elsewhere",
     "needs_reconciliation",
     "pipeline_mode",
+    "selected_worker",
 }
 
 
@@ -108,9 +114,10 @@ def _normalize_github_repo(url_or_repo: str) -> str:
     return text.lower()
 
 
-def _validate_c_slug(value: Any, field: str) -> None:
+def _validate_c_slug(value: Any, field: str) -> str:
     if not isinstance(value, str) or not C_SLUG_RE.fullmatch(value):
         raise AutomationError(f"ISSUE_CONTRACT_{field}_INVALID")
+    return value
 
 
 def _validate_relative_path(value: Any) -> str:
@@ -191,6 +198,12 @@ def parse_issue_contract(body: str) -> dict[str, Any]:
         raise AutomationError("ISSUE_CONTRACT_MAIN_SHA_INVALID")
     if not SHA256_RE.fullmatch(value["task_card_hash"]):
         raise AutomationError("ISSUE_CONTRACT_TASK_CARD_HASH_INVALID")
+    top_worker: dict[str, str] | None = None
+    if "selected_worker" in value:
+        try:
+            top_worker = validate_selected_worker(value["selected_worker"])
+        except ExternalIntelligenceError as exc:
+            raise AutomationError("ISSUE_CONTRACT_SELECTED_WORKER_INVALID") from exc
     units = value.get("execution_units")
     if not isinstance(units, list) or not units:
         raise AutomationError("ISSUE_CONTRACT_EXECUTION_UNITS_INVALID")
@@ -204,12 +217,12 @@ def parse_issue_contract(body: str) -> dict[str, Any]:
             "dependencies_ready",
             "priority",
             "allow_deletions",
+            "selected_worker",
         }
         if set(unit) - allowed_unit:
             raise AutomationError("ISSUE_CONTRACT_UNIT_KEYS_INVALID")
-        unit_id = unit.get("unit_id")
+        unit_id = _validate_c_slug(unit.get("unit_id"), "UNIT_ID")
         paths = unit.get("mutation_paths")
-        _validate_c_slug(unit_id, "UNIT_ID")
         if unit_id in seen:
             raise AutomationError("ISSUE_CONTRACT_UNIT_ID_INVALID")
         seen.add(unit_id)
@@ -228,6 +241,15 @@ def parse_issue_contract(body: str) -> dict[str, Any]:
             not isinstance(unit["priority"], int) or isinstance(unit["priority"], bool)
         ):
             raise AutomationError("ISSUE_CONTRACT_UNIT_PRIORITY_INVALID")
+        if "selected_worker" in unit:
+            try:
+                unit_w = validate_selected_worker(unit["selected_worker"])
+            except ExternalIntelligenceError as exc:
+                raise AutomationError("ISSUE_CONTRACT_UNIT_SELECTED_WORKER_INVALID") from exc
+            if top_worker is None:
+                raise AutomationError("ISSUE_CONTRACT_UNIT_WORKER_WITHOUT_TOP_LEVEL_BINDING")
+            if unit_w != top_worker:
+                raise AutomationError("ISSUE_CONTRACT_UNIT_WORKER_MISMATCH")
     unit_verifiers = value.get("unit_verifiers")
     if not isinstance(unit_verifiers, dict) or set(unit_verifiers) != seen:
         raise AutomationError("ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID")
@@ -368,7 +390,7 @@ class ExternalIntelligenceAutomation:
         state_store: AutomationStateStore,
         intelligence_store: ExternalIntelligenceStore,
         sidecar: ExternalIntelligenceSidecar,
-        c_runtime: AdaptiveDeepSeekFanoutRuntime | Any,
+        c_runtime: AdaptiveWorkerFanoutRuntime | Any,
         d_runtime: ExternalIntelligenceClosureRuntime | Any,
         capacity_factory: Callable[[Mapping[str, Any]], CapacityLease] | None = None,
     ):
@@ -549,8 +571,10 @@ class ExternalIntelligenceAutomation:
         if _sha256_json(json.loads(envelope_path.read_text(encoding="utf-8"))) != envelope_sha:
             raise AutomationError("INTELLIGENCE_ENVELOPE_ARTIFACT_MISMATCH")
         units: list[dict[str, Any]] = []
+        contract_worker = item.contract.get("selected_worker")
         for unit in item.contract["execution_units"]:
-            units.append({
+            unit_worker = unit.get("selected_worker") or contract_worker
+            unit_data = {
                 "task_id": item.contract["task_id"],
                 "unit_id": unit["unit_id"],
                 "envelope_ref": str(envelope_path),
@@ -560,7 +584,10 @@ class ExternalIntelligenceAutomation:
                 "dependencies_ready": unit.get("dependencies_ready", True),
                 "priority": unit.get("priority", 0),
                 "allow_deletions": unit.get("allow_deletions", False),
-            })
+            }
+            if unit_worker:
+                unit_data["selected_worker"] = dict(unit_worker)
+            units.append(unit_data)
         return units
 
     @staticmethod
@@ -589,19 +616,23 @@ class ExternalIntelligenceAutomation:
             return {"state": "BLOCKED", "error": str(exc), "semantic_dispatched": False}
         item = IssueWorkItem(repository, int(issue_number), title, body, contract)
         previous = self.state_store.load(item)
-        previous_state = str((previous or {}).get("state") or "")
-        resume_from = previous_state
-        if previous_state == "COMPLETE" or previous_state in TERMINAL_DISPOSITIONS:
-            return {**previous, "reuse": True, "semantic_dispatched": True}
-        if previous_state == "BLOCKED" and bool((previous or {}).get("semantic_dispatched")):
-            return {**previous, "reuse": True, "semantic_dispatched": True}
-        if previous_state == "RECONCILIATION_REQUIRED":
-            if (previous or {}).get("reconcile_only"):
+        if previous is not None:
+            previous_state = str(previous.get("state") or "")
+            if previous_state == "COMPLETE" or previous_state in TERMINAL_DISPOSITIONS:
                 return {**previous, "reuse": True, "semantic_dispatched": True}
-            prior_state = str((previous or {}).get("prior_state") or "")
-            if prior_state not in {"INTELLIGENCE_DISPATCHING", "FANOUT_DISPATCHING"}:
-                return {**previous, "semantic_dispatched": True}
-            resume_from = prior_state
+            if previous_state == "BLOCKED" and bool(previous.get("semantic_dispatched")):
+                return {**previous, "reuse": True, "semantic_dispatched": True}
+            if previous_state == "RECONCILIATION_REQUIRED":
+                if previous.get("reconcile_only"):
+                    return {**previous, "reuse": True, "semantic_dispatched": True}
+                prior_state = str(previous.get("prior_state") or "")
+                if prior_state not in {"INTELLIGENCE_DISPATCHING", "FANOUT_DISPATCHING"}:
+                    return {**previous, "semantic_dispatched": True}
+                resume_from = prior_state
+            else:
+                resume_from = previous_state
+        else:
+            resume_from = ""
         if resume_from == "CLOSURE_DISPATCHING":
             return self.state_store.save(
                 item,
@@ -627,7 +658,14 @@ class ExternalIntelligenceAutomation:
             self._validate_task_card_authority(contract, task_card_text)
             record = self._record(item)
             self.state_store.save(item, "INTELLIGENCE_DISPATCHING")
-            intelligence = self.sidecar.analyze(record, self._sources(item, task_card_text))
+            sidecar_kwargs = {}
+            if contract.get("selected_worker") is not None:
+                sidecar_kwargs["selected_worker"] = contract["selected_worker"]
+            intelligence = self.sidecar.analyze(
+                record,
+                self._sources(item, task_card_text),
+                **sidecar_kwargs,
+            )
             if intelligence.get("status") != "COMPLETED":
                 return self.state_store.save(
                     item,
