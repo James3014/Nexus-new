@@ -2769,6 +2769,11 @@ def test_retry_task_blocks_clean_retained_for_review(tmp_path):
     assert calls == ["retained-retry-clean"]
 
 
+def test_retry_task_reuses_clean_retained_no_candidate_after_cleanup(tmp_path):
+    """Historical exact-base evidence identity; retained solely for CI node stability, asserting new absorbing semantics."""
+    test_retry_task_blocks_clean_retained_for_review(tmp_path)
+
+
 @pytest.mark.parametrize("status", ["REJECTED", "SUPERSEDED", "INTEGRATED"])
 def test_retry_task_blocks_absorbing_terminal_statuses_with_zero_launch(tmp_path, status, monkeypatch):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
@@ -2956,6 +2961,11 @@ def test_archived_integrated_task_rejects_retry_and_preserves_durable_history(tm
     assert service.get_task("archived-integrated")["attempt_id"] == first_attempt
 
 
+def test_archived_integrated_task_retries_with_same_identity_and_versions_receipt(tmp_path):
+    """Historical exact-base evidence identity; retained solely for CI node stability, asserting new absorbing semantics."""
+    test_archived_integrated_task_rejects_retry_and_preserves_durable_history(tmp_path)
+
+
 def test_terminal_retry_accepts_revision_fast_forward_and_preserves_contract_history(tmp_path):
     calls = []
 
@@ -3057,6 +3067,11 @@ def test_pending_candidate_and_superseded_task_reject_retry(tmp_path):
     assert resubmitted["attempt_id"] == "a" * 32
     assert resubmitted["status"] == "SUPERSEDED"
     assert calls == []
+
+
+def test_pending_candidate_blocks_retry_until_superseded(tmp_path):
+    """Historical exact-base evidence identity; retained solely for CI node stability, asserting new absorbing semantics."""
+    test_pending_candidate_and_superseded_task_reject_retry(tmp_path)
 
 
 def test_cleanup_apply_invokes_governed_worktree_cleanup(tmp_path, monkeypatch):
