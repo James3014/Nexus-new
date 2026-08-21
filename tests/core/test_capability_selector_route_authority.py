@@ -129,3 +129,25 @@ def test_skip_behavior_preserved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 def test_legacy_route_authority_seam_removed() -> None:
     """The legacy dynamic-learning-policy route authority seam is gone from the module."""
     assert not hasattr(capability_selector_module, "_load_dynamic_learning_policy_safe")
+
+
+def test_d1_force_override_cannot_bypass_safety_in_capability_selector(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D1: NEXUS_LIGHT_ROUTE_FORCE=1 on a HIGH risk task must NOT reduce phases to S/P/R/C."""
+    monkeypatch.setenv("NEXUS_LIGHT_ROUTE_FORCE", "1")
+    signal = CapabilitySignalSet(
+        task_id="d1_probe",
+        task_desc="High risk task",
+        risk_level="HIGH",
+        impact_complexity=1.0,
+        belief_confidence=0.95,
+        skills_triggered=[],
+        tenant_id="tenant_d1",
+    )
+    plan = _make_selector(tmp_path).select_capabilities(signal, _make_constraints(tmp_path))
+    assert isinstance(plan, CapabilityExecutionPlan)
+    assert "X" in plan.phases
+    assert "D" in plan.phases
+    assert "A" in plan.phases
+    assert plan.phases == ["S", "P", "X", "D", "R", "A", "C"]
