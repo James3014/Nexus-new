@@ -56,32 +56,68 @@ class ExecutorControls:
                     slots = plan.skill_slots.get(cap_name) or []
                     skill_receipts: List[SkillReceipt] = []
 
+                    # A planned SkillSlot proves selection only. Do not fabricate physical use.
                     for slot in slots:
                         logger.debug(
-                            "⚙️ [ExecutorControls]   -> Injecting HEEP Role Slot: %s [%s]",
+                            "⚙️ [ExecutorControls]   -> Selecting HEEP Role Slot: %s [%s]",
                             slot.skill_id,
                             slot.role,
                         )
-                        mock_evidence_id = f"ev_slot_{slot.skill_id}_{os.urandom(4).hex()}"
-                        outcome = {
-                            "role_injected": slot.role,
-                            "execution_state": "SUCCESS",
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                        }
+                        selected_evidence_id = f"ev_slot_selected_{slot.skill_id}_{os.urandom(4).hex()}"
                         receipt = SkillReceipt(
                             skill_id=slot.skill_id,
                             selected=True,
-                            used=True,
-                            evidence_id=mock_evidence_id,
-                            outcome=outcome,
+                            used=False,
+                            evidence_id=selected_evidence_id,
+                            outcome={
+                                "role_selected": slot.role,
+                                "execution_state": "NOT_EXECUTED",
+                                "reason": "skill_use_not_evidenced",
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
+                            },
                             timestamp=datetime.now(timezone.utc).isoformat(),
                         )
                         skill_receipts.append(receipt)
 
-                    # Gate capabilities use the original fallback path for test compatibility
+                    def non_execution_receipt(reason: str, detail: str = "") -> CapabilityReceipt:
+                        elapsed_ms = max(0, int((time.monotonic() - cap_start) * 1000))
+                        outcome = {
+                            "phase_executed": phase,
+                            "execution_state": "NOT_EXECUTED",
+                            "error": reason,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        }
+                        if detail:
+                            outcome["detail"] = detail[:300]
+                        return CapabilityReceipt(
+                            capability_name=cap_name,
+                            selected=True,
+                            invoked=False,
+                            evidence_id=f"ev_cap_{cap_name}_not_invoked_{os.urandom(4).hex()}",
+                            gate_passed=False,
+                            outcome=outcome,
+                            skill_receipts=skill_receipts,
+                            telemetries={
+                                "wall_time_ms": None,
+                                "overhead_ms": None,
+                                "token_usage": None,
+                                "provider_costs": None,
+                                "model_calls": 0,
+                                "telemetry_source": "unavailable",
+                                "claimable": False,
+                                "missing_evidence_reason": reason,
+                                "controller_wall_time_ms": elapsed_ms,
+                            },
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                        )
+
+                    # Gate capabilities retain the structural compatibility evaluation below.
                     _GATE_CAPS = frozenset({"artifact_gate", "claim_gate"})
-                    executor_fn = None if cap_name in _GATE_CAPS else get_executor(cap_name)
-                    if executor_fn is not None:
+                    if cap_name not in _GATE_CAPS:
+                        executor_fn = get_executor(cap_name)
+                        if executor_fn is None:
+                            return non_execution_receipt("executor_missing")
+
                         try:
                             _constraints = dict(plan.constraints)
                             _constraints["project_root"] = self.project_root
@@ -92,70 +128,80 @@ class ExecutorControls:
                                 timestamp=plan.timestamp,
                             )
                             cap_receipt = executor_fn(_plan_with_ctx, task_desc)
-                            if cap_receipt.invoked:
-                                # Real wall from stopwatch only — never invent floor=1 measured
-                                elapsed_ms = max(0, int((time.monotonic() - cap_start) * 1000))
-                                existing = dict(cap_receipt.telemetries or {})
-                                existing["wall_time_ms"] = elapsed_ms
-                                existing["overhead_ms"] = elapsed_ms
-                                existing["telemetry_source"] = "measured"
-                                existing["claimable"] = False
-                                return CapabilityReceipt(
-                                    capability_name=cap_receipt.capability_name,
-                                    selected=True,
-                                    invoked=True,
-                                    evidence_id=cap_receipt.evidence_id,
-                                    gate_passed=cap_receipt.gate_passed,
-                                    outcome=dict(cap_receipt.outcome or {}),
-                                    skill_receipts=skill_receipts + list(cap_receipt.skill_receipts or []),
-                                    telemetries=existing,
-                                    timestamp=datetime.now(timezone.utc).isoformat(),
-                                )
                         except Exception as exc:
                             logger.warning("ExecutorControls: real executor for %s failed: %s", cap_name, exc)
-                        # Fall through to mock path below
+                            return non_execution_receipt("executor_exception", str(exc))
 
-                    # Fallback: mock receipt (original behavior)
+                        # Preserve the real executor's invocation truth even when it is False.
+                        elapsed_ms = max(0, int((time.monotonic() - cap_start) * 1000))
+                        existing = dict(cap_receipt.telemetries or {})
+                        if cap_receipt.invoked:
+                            existing["wall_time_ms"] = elapsed_ms
+                            existing["overhead_ms"] = elapsed_ms
+                            existing["telemetry_source"] = "measured"
+                        else:
+                            # A controller call happened, but the capability did not physically execute.
+                            existing["wall_time_ms"] = None
+                            existing["overhead_ms"] = None
+                            existing["telemetry_source"] = "unavailable"
+                            existing["missing_evidence_reason"] = (
+                                existing.get("missing_evidence_reason") or "capability_not_invoked"
+                            )
+                            existing["controller_wall_time_ms"] = elapsed_ms
+                        existing["claimable"] = False
+
+                        return CapabilityReceipt(
+                            capability_name=cap_receipt.capability_name,
+                            selected=True,
+                            invoked=bool(cap_receipt.invoked),
+                            evidence_id=cap_receipt.evidence_id,
+                            gate_passed=(
+                                bool(cap_receipt.gate_passed) if cap_receipt.invoked else False
+                            ),
+                            outcome=dict(cap_receipt.outcome or {}),
+                            skill_receipts=skill_receipts + list(cap_receipt.skill_receipts or []),
+                            telemetries=existing,
+                            timestamp=datetime.now(timezone.utc).isoformat(),
+                        )
+
+                    # Structural compatibility path for artifact_gate / claim_gate only.
                     gate_passed = True
                     if self.gate_evaluator is not None:
                         blockers = []
-                        if cap_name in ("artifact_gate", "claim_gate"):
-                            from pathlib import Path
-                            wiki_audit = Path(self.project_root) / "wiki_audit.json"
-                            reports_dir = Path(self.project_root) / ".nexus" / "reports"
-                            has_evidence = wiki_audit.exists() or (
-                                reports_dir.exists() and any(reports_dir.iterdir())
-                            )
-                            if not has_evidence:
-                                blockers.append("MISSING_EVIDENCE_REPORTS")
+                        from pathlib import Path
+                        wiki_audit = Path(self.project_root) / "wiki_audit.json"
+                        reports_dir = Path(self.project_root) / ".nexus" / "reports"
+                        has_evidence = wiki_audit.exists() or (
+                            reports_dir.exists() and any(reports_dir.iterdir())
+                        )
+                        if not has_evidence:
+                            blockers.append("MISSING_EVIDENCE_REPORTS")
                         from nexus.core.gate_rules_builtin import BlockerCleanRule
                         chain_res = self.gate_evaluator.evaluate_rule_chain(
                             [BlockerCleanRule()], {"blockers": blockers}
                         )
                         gate_passed = (chain_res.verdict == "GREEN")
                     else:
-                        if cap_name in ("artifact_gate", "claim_gate"):
-                            from pathlib import Path
-                            wiki_audit = Path(self.project_root) / "wiki_audit.json"
-                            reports_dir = Path(self.project_root) / ".nexus" / "reports"
-                            has_evidence = wiki_audit.exists() or (
-                                reports_dir.exists() and any(reports_dir.iterdir())
-                            )
-                            if not has_evidence:
-                                gate_passed = False
+                        from pathlib import Path
+                        wiki_audit = Path(self.project_root) / "wiki_audit.json"
+                        reports_dir = Path(self.project_root) / ".nexus" / "reports"
+                        has_evidence = wiki_audit.exists() or (
+                            reports_dir.exists() and any(reports_dir.iterdir())
+                        )
+                        if not has_evidence:
+                            gate_passed = False
 
-                    # Mock path still measures real wall for the mock body only.
                     elapsed_ms = max(0, int((time.monotonic() - cap_start) * 1000))
-                    mock_cap_evidence_id = f"ev_cap_{cap_name}_{os.urandom(4).hex()}"
                     return CapabilityReceipt(
                         capability_name=cap_name,
                         selected=True,
                         invoked=True,
-                        evidence_id=mock_cap_evidence_id,
+                        evidence_id=f"ev_cap_{cap_name}_{os.urandom(4).hex()}",
                         gate_passed=gate_passed,
                         outcome={
                             "phase_executed": phase,
                             "slot_count": len(slots),
+                            "compatibility_gate_evaluated": True,
                             "timestamp": datetime.now(timezone.utc).isoformat(),
                         },
                         skill_receipts=skill_receipts,
