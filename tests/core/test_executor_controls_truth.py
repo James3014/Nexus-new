@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from nexus.core import capability_executor_registry as executor_registry
 from nexus.core import executor_controls as controls_module
 from nexus.core.belief_contracts import (
@@ -114,9 +116,10 @@ def test_executor_exception_fails_closed(monkeypatch, tmp_path):
     assert receipt.telemetries["telemetry_source"] == "unavailable"
 
 
-def test_artifact_gate_compatibility_remains_fail_closed_without_evidence(tmp_path):
+@pytest.mark.parametrize("gate_capability", ["artifact_gate", "claim_gate"])
+def test_gate_compatibility_remains_fail_closed_without_evidence(tmp_path, gate_capability):
     receipt = ExecutorControls(str(tmp_path), registry=_Registry()).execute_plan(
-        _plan("artifact_gate")
+        _plan(gate_capability)
     )[0]
 
     assert receipt.invoked is True
@@ -124,11 +127,12 @@ def test_artifact_gate_compatibility_remains_fail_closed_without_evidence(tmp_pa
     assert receipt.outcome["compatibility_gate_evaluated"] is True
 
 
-def test_artifact_gate_compatibility_can_pass_with_structural_evidence(tmp_path):
+@pytest.mark.parametrize("gate_capability", ["artifact_gate", "claim_gate"])
+def test_gate_compatibility_can_pass_with_structural_evidence(tmp_path, gate_capability):
     (tmp_path / "wiki_audit.json").write_text("{}", encoding="utf-8")
 
     receipt = ExecutorControls(str(tmp_path), registry=_Registry()).execute_plan(
-        _plan("artifact_gate")
+        _plan(gate_capability)
     )[0]
 
     assert receipt.invoked is True
