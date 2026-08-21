@@ -112,8 +112,9 @@ def _run_delivery_gate(tmp_path: Path) -> subprocess.CompletedProcess:
     uv_stub.chmod(0o755)
     env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
 
+    shell_bin = shutil.which("zsh") or shutil.which("bash") or "/bin/sh"
     return subprocess.run(
-        ["/bin/zsh", "scripts/ops/nexus_delivery_gate.sh"],
+        [shell_bin, "scripts/ops/nexus_delivery_gate.sh"],
         cwd=tmp_path,
         env=env,
         capture_output=True,
