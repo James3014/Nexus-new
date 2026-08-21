@@ -13,9 +13,15 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
+from nexus.services.external_intelligence import (
+    ExternalIntelligenceError,
+    validate_selected_worker,
+)
 from nexus.services.external_intelligence_fanout import (
     MODEL,
+    MODEL_ID,
     PROVIDER,
+    PROVIDER_ID,
     WORKER_RECEIPT_SCHEMA,
 )
 
@@ -148,8 +154,6 @@ def _deleted_paths(root: Path, base: str, head: str) -> list[str]:
 
 
 def _diff_sha(root: Path, base: str, head: str) -> str:
-    # C worker receipts hash the normalized/stripped git-diff text. Preserve
-    # that identity contract for receipt verification.
     return _sha256(_run_git(root, "diff", "--binary", base, head))
 
 
@@ -472,8 +476,38 @@ def validate_worker_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
         raise ClosureError("UNIT_CANDIDATE_REQUIRED")
     task_id = _safe_slug(receipt.get("task_id"), "task_id")
     unit_id = _safe_slug(receipt.get("unit_id"), "unit_id")
-    if receipt.get("provider") != PROVIDER or receipt.get("model") != MODEL:
-        raise ClosureError("WORKER_MODEL_BINDING_MISMATCH")
+    if receipt.get("selected_worker"):
+        try:
+            selected_worker = validate_selected_worker(receipt["selected_worker"])
+        except ExternalIntelligenceError as exc:
+            raise ClosureError("INVALID_SELECTED_WORKER") from exc
+        provider = str(selected_worker.get("provider") or PROVIDER)
+        model = str(selected_worker.get("model") or MODEL)
+        if receipt.get("provider") != provider or receipt.get("model") != model:
+            raise ClosureError("WORKER_MODEL_BINDING_MISMATCH")
+        if "/" in model:
+            exp_p_id, exp_m_id = model.split("/", 1)
+            expected_provider_id = exp_p_id.strip()
+            expected_model_id = exp_m_id.strip()
+        elif provider in ("opencode", "opencode-go"):
+            expected_provider_id = "opencode-go"
+            expected_model_id = model
+        elif provider == "deepseek":
+            expected_provider_id = "deepseek"
+            expected_model_id = model
+        else:
+            expected_provider_id = provider
+            expected_model_id = model
+    else:
+        selected_worker = None
+        if receipt.get("provider") != PROVIDER or receipt.get("model") != MODEL:
+            raise ClosureError("WORKER_MODEL_BINDING_MISMATCH")
+        expected_provider_id = PROVIDER_ID
+        expected_model_id = MODEL_ID
+    receipt_provider_id = str(receipt.get("provider_id") or "").strip()
+    receipt_model_id = str(receipt.get("model_id") or "").strip()
+    if receipt_provider_id != expected_provider_id or receipt_model_id != expected_model_id:
+        raise ClosureError("WORKER_ATTESTATION_MISMATCH")
     session_id = str(receipt.get("session_id") or "")
     if not session_id.startswith(_SESSION_PREFIX) or len(session_id) < 12:
         raise ClosureError("INVALID_SESSION_ID")
@@ -536,6 +570,13 @@ def validate_worker_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
         "allow_deletions": bool(receipt.get("allow_deletions", False)),
         "cumulative_changed_paths": cumulative_changed,
         "cumulative_deleted_paths": cumulative_deleted,
+        "provider": str(receipt.get("provider") or PROVIDER),
+        "model": str(receipt.get("model") or MODEL),
+        "provider_id": receipt_provider_id,
+        "model_id": receipt_model_id,
+        "selected_worker": dict(receipt["selected_worker"])
+        if receipt.get("selected_worker")
+        else None,
     }
 
 
@@ -687,8 +728,8 @@ def build_unit_repair_delta(
         "session_id": bound["session_id"],
         "workspace_id": bound["workspace_id"],
         "workspace_path": bound["workspace_path"],
-        "provider": PROVIDER,
-        "model": MODEL,
+        "provider": bound["provider"],
+        "model": bound["model"],
         "allowed_mutation_paths": list(bound["mutation_paths"]),
         "findings": findings,
         "stop_conditions": [
@@ -700,6 +741,8 @@ def build_unit_repair_delta(
         ],
         "claim_ceiling": "BOUNDED_REPAIR_ONLY",
     }
+    if bound.get("selected_worker"):
+        delta["selected_worker"] = dict(bound["selected_worker"])
     delta["delta_id"] = _sha256(_canonical_json(delta))
     return delta
 
@@ -741,8 +784,8 @@ def build_composition_repair_delta(
         "session_id": bound["session_id"],
         "workspace_id": bound["workspace_id"],
         "workspace_path": bound["workspace_path"],
-        "provider": PROVIDER,
-        "model": MODEL,
+        "provider": bound["provider"],
+        "model": bound["model"],
         "allowed_mutation_paths": list(bound["mutation_paths"]),
         "findings": findings,
         "stop_conditions": [
@@ -754,17 +797,31 @@ def build_composition_repair_delta(
         ],
         "claim_ceiling": "BOUNDED_COMPOSITION_REPAIR_ONLY",
     }
+    if bound.get("selected_worker"):
+        delta["selected_worker"] = dict(bound["selected_worker"])
     delta["delta_id"] = _sha256(_canonical_json(delta))
     return delta
 
 
 def _validate_repair_result(parent_bound: Mapping[str, Any], repaired: Mapping[str, Any]) -> None:
     repaired_bound = validate_worker_receipt(repaired)
-    for field in ("task_id", "unit_id", "session_id", "workspace_id", "workspace_path", "base_sha"):
+    for field in (
+        "task_id",
+        "unit_id",
+        "session_id",
+        "workspace_id",
+        "workspace_path",
+        "base_sha",
+    ):
         if repaired_bound[field] != parent_bound[field]:
             raise ClosureError(f"REPAIR_{field.upper()}_MISMATCH")
-    if repaired.get("provider") != PROVIDER or repaired.get("model") != MODEL:
+    if repaired_bound.get("provider") != parent_bound.get("provider") or repaired_bound.get(
+        "model"
+    ) != parent_bound.get("model"):
         raise ClosureError("REPAIR_MODEL_BINDING_MISMATCH")
+    if parent_bound.get("selected_worker") or repaired_bound.get("selected_worker"):
+        if parent_bound.get("selected_worker") != repaired_bound.get("selected_worker"):
+            raise ClosureError("REPAIR_WORKER_BINDING_MISMATCH")
     if repaired.get("parent_receipt_id") != parent_bound["receipt_id"]:
         raise ClosureError("REPAIR_PARENT_RECEIPT_MISMATCH")
 
