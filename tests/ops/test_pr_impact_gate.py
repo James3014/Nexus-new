@@ -931,7 +931,9 @@ def test_passing_parameterized_case_replacement_with_passing_guards_is_trusted()
         "test_evidence_reference_negative_controls_fail_closed"
     )
     old_case = f"{family}[tests/ops/test_repo_doctor.py#missing]"
-    replacement = f"{family}[pyproject.toml#NEXUS_INTENTIONALLY_ABSENT_EVIDENCE_ANCHOR_ISSUE_459_V1]"
+    replacement = (
+        f"{family}[pyproject.toml#NEXUS_INTENTIONALLY_ABSENT_EVIDENCE_ANCHOR_ISSUE_459_V1]"
+    )
     guards = [
         "tests.ops.test_codex_dx_failure_prevention::"
         "test_absent_evidence_anchor_is_not_in_pyproject_toml",
