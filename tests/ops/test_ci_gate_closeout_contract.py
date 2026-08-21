@@ -1,5 +1,8 @@
 import argparse
+import json
 import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import patch
 
 from scripts.ops import ci_gate
@@ -247,6 +250,90 @@ def test_ci_gate_dry_run_blocks_when_route_context_freeze_fails(monkeypatch):
         optimization_read_model="",
         optimization_retention_manifest="",
         route_context_freeze=".nexus/reports/route_context_freeze.json",
+    )
+
+    with patch("argparse.ArgumentParser.parse_args", return_value=args):
+        with patch("sys.exit", side_effect=SystemExit) as mock_exit:
+            try:
+                ci_gate.main()
+            except SystemExit:
+                pass
+            mock_exit.assert_called_with(1)
+
+
+def test_run_closeout_contract_check_physical_invalid_contract_fails(tmp_path, monkeypatch):
+    """H10: Real ci_gate.run_closeout_contract_check executes real closeout_guard.py without mocking subprocess.run, returning False on invalid contract."""
+    monkeypatch.setattr(ci_gate, "VENV_PYTHON", Path(sys.executable))
+
+    # Case 1: Missing contract file
+    missing_path = tmp_path / "missing_done_contract.json"
+    assert ci_gate.run_closeout_contract_check(dry_run=False, contract_path=str(missing_path)) is False
+
+    # Case 2: Invalid contract JSON with missing required fields
+    invalid_path = tmp_path / "invalid_done_contract.json"
+    invalid_path.write_text(json.dumps({"linter_exit_code": 1}), encoding="utf-8")
+    assert ci_gate.run_closeout_contract_check(dry_run=False, contract_path=str(invalid_path)) is False
+
+
+def test_run_closeout_contract_check_physical_valid_contract_passes(tmp_path, monkeypatch):
+    """H10-pass: Real ci_gate.run_closeout_contract_check executes real closeout_guard.py and passes on valid contract."""
+    monkeypatch.setattr(ci_gate, "VENV_PYTHON", Path(sys.executable))
+
+    # Initialize a git repo in tmp_path to get a valid commit SHA
+    subprocess.run(["git", "init", "-b", "main"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.name", "NexusTester"], cwd=tmp_path, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "config", "user.email", "tester@nexus.local"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "--allow-empty", "-m", "init commit"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    head_sha = (
+        subprocess
+        .check_output(["git", "rev-parse", "--short", "HEAD"], cwd=tmp_path)
+        .decode()
+        .strip()
+    )
+
+    valid_path = tmp_path / "done_contract.json"
+    valid_data = {
+        "linter_exit_code": 0,
+        "ci_gate_exit_code": 0,
+        "required_tests_passed": True,
+        "commit_sha": head_sha,
+        "changed_files": ["README.md"],
+        "delivery_profile": "mock_only",
+    }
+    valid_path.write_text(json.dumps(valid_data), encoding="utf-8")
+
+    assert ci_gate.run_closeout_contract_check(dry_run=False, contract_path=str(valid_path)) is True
+
+
+def test_ci_gate_main_physical_closeout_failure_propagates_exit_1(tmp_path, monkeypatch):
+    """H10-cli: Real closeout_guard subprocess failure propagates through ci_gate.main to exit 1."""
+    monkeypatch.setattr(ci_gate, "VENV_PYTHON", Path(sys.executable))
+    monkeypatch.setattr(ci_gate, "run_dry_run", lambda: 0)
+
+    missing_contract = tmp_path / "non_existent_contract.json"
+    args = argparse.Namespace(
+        dry_run=True,
+        strict=False,
+        wiki_drift_enforce_level="warn",
+        wiki_capability_enforce_level="warn",
+        wiki_eval_enforce_level="warn",
+        require_closeout_contract=True,
+        closeout_contract_path=str(missing_contract),
+        optimization_read_model="",
+        optimization_retention_manifest="",
+        route_context_freeze="",
     )
 
     with patch("argparse.ArgumentParser.parse_args", return_value=args):
