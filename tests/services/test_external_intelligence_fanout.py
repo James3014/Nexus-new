@@ -1040,3 +1040,259 @@ def test_repair_session_cannot_be_rebound_to_another_unit(tmp_path):
     }
     with pytest.raises(FanoutError, match="SESSION_BINDING_CONFLICT"):
         store.prepare_repair(fake, repair_id="r1", repair_ref="x", repair_sha256="b" * 64)
+
+
+def sample_worker(**overrides):
+    val = {
+        "worker_id": "google/gemini-3.7-flash-medium",
+        "provider": "google",
+        "model": "google/gemini-3.7-flash-medium",
+        "role_ceiling": "bounded L3 implementation worker",
+        "admission_evidence_ref": "tasks/test-task/00_admission.md",
+        "admission_evidence_hash": "c" * 64,
+        "selection_evidence_ref": "tasks/test-task/00_decision.md",
+        "selection_evidence_hash": "d" * 64,
+    }
+    val.update(overrides)
+    return val
+
+
+def make_v2_envelope(path: Path, base: str, worker: dict, allowed: list[str] = None) -> str:
+    payload = {
+        "schema": "external_execution_envelope.v2",
+        "binding": {
+            "repository": "test/repo",
+            "item_type": "issue",
+            "item_id": "1",
+            "revision": "1",
+            "main_sha": base,
+            "task_card_ref": "tasks/test-task/00_decision.md",
+            "task_card_hash": "a" * 64,
+            "context_pack_sha256": "b" * 64,
+        },
+        "selected_worker": dict(worker),
+        "objective": "Implement task.",
+        "definition_of_done": ["Pass tests."],
+        "evidence_refs": ["file:nexus/a.py#L1-L10"],
+        "diagnosis": {
+            "status": "LIKELY",
+            "hypothesis": "Root cause isolated.",
+            "next_probe": "Check prompt builder.",
+        },
+        "scope_signal": {
+            "production_edit_paths": allowed or ["a.py"],
+            "required_test_edit_paths": ["tests/test_a.py"],
+            "conditional_migration_paths": [],
+            "read_only_authorities": [],
+            "verification_only_paths": [],
+            "forbidden_paths": ["nexus/protected/**"],
+            "max_files": 10,
+            "scope_confidence": "HIGH",
+            "scope_block_conditions": [],
+        },
+        "inspect_first": ["nexus/a.py"],
+        "required_semantics": ["Keep compatibility."],
+        "implementation_direction": ["Implement feature."],
+        "verification_focus": ["Run pytest."],
+        "failure_guards": ["No scope widening."],
+        "stop_and_escalate": ["contract_changed"],
+    }
+    text = json.dumps(payload, sort_keys=True, indent=2)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    import hashlib
+
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def test_execution_unit_validates_selected_worker_strictly(tmp_path):
+    valid_worker = sample_worker()
+    valid_unit_mapping = {
+        "task_id": "task-1",
+        "unit_id": "u1",
+        "envelope_ref": "/tmp/env.json",
+        "envelope_sha256": "a" * 64,
+        "expected_base_sha": "b" * 40,
+        "mutation_paths": ["a.py"],
+        "selected_worker": valid_worker,
+    }
+    unit_obj = ExecutionUnit.from_mapping(valid_unit_mapping)
+    assert unit_obj.selected_worker == valid_worker
+    assert unit_obj.provider == "google"
+    assert unit_obj.model == "google/gemini-3.7-flash-medium"
+
+    # Extra key in worker
+    with pytest.raises(FanoutError, match="INVALID_SELECTED_WORKER"):
+        ExecutionUnit.from_mapping({
+            **valid_unit_mapping,
+            "selected_worker": {**valid_worker, "extra": "forbidden"},
+        })
+
+    # Missing key in worker
+    bad_worker = dict(valid_worker)
+    del bad_worker["admission_evidence_hash"]
+    with pytest.raises(FanoutError, match="INVALID_SELECTED_WORKER"):
+        ExecutionUnit.from_mapping({**valid_unit_mapping, "selected_worker": bad_worker})
+
+    # Bad hash format
+    with pytest.raises(FanoutError, match="INVALID_SELECTED_WORKER"):
+        ExecutionUnit.from_mapping({
+            **valid_unit_mapping,
+            "selected_worker": {**valid_worker, "admission_evidence_hash": "not-64-hex"},
+        })
+
+    # Provider / model-prefix cross-consistency
+    with pytest.raises(FanoutError, match="INVALID_SELECTED_WORKER"):
+        ExecutionUnit.from_mapping({
+            **valid_unit_mapping,
+            "selected_worker": {
+                **valid_worker,
+                "provider": "anthropic",
+                "model": "google/gemini-3.7-flash-medium",
+            },
+        })
+
+
+def test_verify_envelope_scope_v2_bilateral_fail_closed(tmp_path):
+    from nexus.services.external_intelligence_fanout import _verify_envelope_scope
+
+    _, base = make_repo(tmp_path)
+    worker1 = sample_worker()
+    worker2 = sample_worker(
+        worker_id="anthropic/claude-3-5-sonnet",
+        provider="anthropic",
+        model="anthropic/claude-3-5-sonnet",
+    )
+
+    env_path = tmp_path / "env_v2.json"
+    env_sha = make_v2_envelope(env_path, base, worker1, allowed=["a.py"])
+
+    # Matching selected_worker succeeds
+    unit_matching = ExecutionUnit.from_mapping({
+        "task_id": "task-1",
+        "unit_id": "u1",
+        "envelope_ref": str(env_path),
+        "envelope_sha256": env_sha,
+        "expected_base_sha": base,
+        "mutation_paths": ["a.py"],
+        "selected_worker": worker1,
+    })
+    assert _verify_envelope_scope(unit_matching) == env_path.resolve()
+
+    # Unit missing selected_worker on V2 envelope fails closed
+    unit_missing_worker = ExecutionUnit.from_mapping({
+        "task_id": "task-1",
+        "unit_id": "u1",
+        "envelope_ref": str(env_path),
+        "envelope_sha256": env_sha,
+        "expected_base_sha": base,
+        "mutation_paths": ["a.py"],
+    })
+    with pytest.raises(FanoutError, match="ENVELOPE_WORKER_BINDING_MISSING"):
+        _verify_envelope_scope(unit_missing_worker)
+
+    # Unit with divergent selected_worker fails closed
+    unit_mismatched_worker = ExecutionUnit.from_mapping({
+        "task_id": "task-1",
+        "unit_id": "u1",
+        "envelope_ref": str(env_path),
+        "envelope_sha256": env_sha,
+        "expected_base_sha": base,
+        "mutation_paths": ["a.py"],
+        "selected_worker": worker2,
+    })
+    with pytest.raises(FanoutError, match="ENVELOPE_WORKER_BINDING_MISMATCH"):
+        _verify_envelope_scope(unit_mismatched_worker)
+
+
+def test_v2_transport_dispatch_exact_identity_and_unsupported_fails_closed(tmp_path):
+    from nexus.services.external_intelligence_fanout import (
+        AdaptiveWorkerFanoutRuntime,
+        OpenCodeWorkerTransport,
+    )
+
+    repo, base = make_repo(tmp_path)
+    worker = sample_worker()
+    env_path = tmp_path / "env_v2.json"
+    env_sha = make_v2_envelope(env_path, base, worker, allowed=["a.py"])
+
+    class BoundV2Transport:
+        def __init__(self):
+            self.provider_id = "google"
+            self.model_id = "gemini-3.7-flash-medium"
+            self.model = "google/gemini-3.7-flash-medium"
+            self.calls = []
+
+        def run_new(self, *, prompt, artifact_path, workspace_path):
+            self.calls.append((prompt, artifact_path, workspace_path))
+            (Path(workspace_path) / "a.py").write_text("VALUE = 'v2'\n", encoding="utf-8")
+            return OpenCodeRunResult(
+                status="COMPLETED",
+                session_id="ses_test_v2_00000000",
+                response_text=json.dumps({
+                    "schema": "external_intelligence_worker_result.v1",
+                    "task_id": "task-1",
+                    "unit_id": "u1",
+                    "status": "IMPLEMENTATION_COMPLETED",
+                    "summary": "v2 complete",
+                }),
+                provider_id=self.provider_id,
+                model_id=self.model_id,
+                directory=str(Path(workspace_path).resolve()),
+                version="1.18.18",
+                stdout_sha256="1" * 64,
+                stderr_sha256="2" * 64,
+                export_sha256="3" * 64,
+                argv_sha256="4" * 64,
+                process_started=True,
+                retry_safe=False,
+            )
+
+    transport = BoundV2Transport()
+    runtime = AdaptiveWorkerFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
+        store=FanoutStore(tmp_path / "state"),
+        transport=transport,
+    )
+    res = runtime.run(
+        [unit(base, env_path, env_sha, "u1", ["a.py"], selected_worker=worker)],
+        CapacityLease(1, 1, 1, 1),
+    )
+    assert res["errors"] == {}
+    receipt = res["receipts"]["u1"]
+    assert receipt["provider"] == "google"
+    assert receipt["model"] == "google/gemini-3.7-flash-medium"
+    assert receipt["provider_id"] == "google"
+    assert receipt["model_id"] == "gemini-3.7-flash-medium"
+    assert receipt["selected_worker"] == worker
+
+    # Unsupported worker identity (provider without / and not opencode) fails before process
+    unsupported_worker = sample_worker(
+        worker_id="agy-gemini", provider="agy", model="gemini-3.7-flash-medium"
+    )
+    env_unsupported = tmp_path / "env_unsupported.json"
+    env_unsupported_sha = make_v2_envelope(
+        env_unsupported, base, unsupported_worker, allowed=["a.py"]
+    )
+
+    unsupported_runtime = AdaptiveWorkerFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces-unsupported"),
+        store=FanoutStore(tmp_path / "state-unsupported"),
+        transport=OpenCodeWorkerTransport(),
+    )
+    unsupported_res = unsupported_runtime.run(
+        [
+            unit(
+                base,
+                env_unsupported,
+                env_unsupported_sha,
+                "u2",
+                ["a.py"],
+                selected_worker=unsupported_worker,
+            )
+        ],
+        CapacityLease(1, 1, 1, 1),
+    )
+    assert "u2" in unsupported_res["errors"]
+    assert unsupported_res["errors"]["u2"] == "UNSUPPORTED_WORKER_TRANSPORT"

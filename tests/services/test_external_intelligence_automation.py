@@ -1290,3 +1290,73 @@ def test_deterministic_publication_id_and_marker_stability():
     pub2 = dict(pub, candidate_commit="0" * 40)
     id3 = compute_publication_id("o/r", 1, "h" * 64, pub2)
     assert id3 != id1
+
+
+def test_homogeneous_bound_worker_contract_validation():
+    valid_worker = {
+        "worker_id": "google/gemini-3.7-flash-medium",
+        "provider": "google",
+        "model": "google/gemini-3.7-flash-medium",
+        "role_ceiling": "bounded L3 implementation worker",
+        "admission_evidence_ref": "tasks/test-task/00_admission.md",
+        "admission_evidence_hash": "c" * 64,
+        "selection_evidence_ref": "tasks/test-task/00_decision.md",
+        "selection_evidence_hash": "d" * 64,
+    }
+    other_worker = {
+        **valid_worker,
+        "worker_id": "anthropic/claude-3-5-sonnet",
+        "provider": "anthropic",
+        "model": "anthropic/claude-3-5-sonnet",
+    }
+
+    # Top-level worker and inherited units -> valid
+    c_inherited = _contract("tasks/t/00.md", "a" * 64, selected_worker=valid_worker)
+    parsed = parse_issue_contract(_body(c_inherited))
+    assert parsed["selected_worker"] == valid_worker
+
+    # Top-level worker and explicit identical unit worker -> valid
+    c_explicit = _contract(
+        "tasks/t/00.md",
+        "a" * 64,
+        selected_worker=valid_worker,
+        execution_units=[
+            {"unit_id": "u1", "mutation_paths": ["nexus/a.py"], "selected_worker": valid_worker}
+        ],
+        unit_verifiers={
+            "u1": [{"id": "u1", "argv": ["python3", "-m", "pytest", "-q", "tests/test_a.py"]}]
+        },
+    )
+    parsed_explicit = parse_issue_contract(_body(c_explicit))
+    assert parsed_explicit["execution_units"][0]["selected_worker"] == valid_worker
+
+    # Unit-only worker without top-level binding -> fails closed
+    c_unit_only = _contract(
+        "tasks/t/00.md",
+        "a" * 64,
+        execution_units=[
+            {"unit_id": "u1", "mutation_paths": ["nexus/a.py"], "selected_worker": valid_worker}
+        ],
+        unit_verifiers={
+            "u1": [{"id": "u1", "argv": ["python3", "-m", "pytest", "-q", "tests/test_a.py"]}]
+        },
+    )
+    with pytest.raises(
+        AutomationError, match="ISSUE_CONTRACT_UNIT_WORKER_WITHOUT_TOP_LEVEL_BINDING"
+    ):
+        parse_issue_contract(_body(c_unit_only))
+
+    # Divergent unit worker -> fails closed
+    c_divergent = _contract(
+        "tasks/t/00.md",
+        "a" * 64,
+        selected_worker=valid_worker,
+        execution_units=[
+            {"unit_id": "u1", "mutation_paths": ["nexus/a.py"], "selected_worker": other_worker}
+        ],
+        unit_verifiers={
+            "u1": [{"id": "u1", "argv": ["python3", "-m", "pytest", "-q", "tests/test_a.py"]}]
+        },
+    )
+    with pytest.raises(AutomationError, match="ISSUE_CONTRACT_UNIT_WORKER_MISMATCH"):
+        parse_issue_contract(_body(c_divergent))
