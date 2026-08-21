@@ -16,18 +16,16 @@ from nexus.events.contracts import MAX_CONTINUITY_COLLECTION_ITEMS
 
 SCHEMA = "nexus.task_continuity.v1"
 REHYDRATION_PROJECTION_SCHEMA = "nexus.task_rehydration_projection.v1"
-EVENT_TYPES = frozenset(
-    {
-        "PLAN_FORMED",
-        "OBSERVATION_RECORDED",
-        "HYPOTHESIS_REVISED",
-        "STRATEGY_CHANGED",
-        "VERIFICATION_RESULT",
-        "ATTEMPT_REJECTED",
-        "ESCALATED",
-        "COMPLETED",
-    }
-)
+EVENT_TYPES = frozenset({
+    "PLAN_FORMED",
+    "OBSERVATION_RECORDED",
+    "HYPOTHESIS_REVISED",
+    "STRATEGY_CHANGED",
+    "VERIFICATION_RESULT",
+    "ATTEMPT_REJECTED",
+    "ESCALATED",
+    "COMPLETED",
+})
 REJECTED_STATES = frozenset({"ATTEMPT_REJECTED", "REJECTED"})
 PROTECTED = (
     "task_id",
@@ -211,9 +209,9 @@ def _validate_chain(
             raise ValueError("continuity sequence gap")
         if event.previous_hash != previous:
             raise ValueError("continuity hash-chain mismatch")
-        if event.event_hash != _digest(
-            {k: v for k, v in event.to_dict().items() if k != "event_hash"}
-        ):
+        if event.event_hash != _digest({
+            k: v for k, v in event.to_dict().items() if k != "event_hash"
+        }):
             raise ValueError("continuity event tampered")
         previous, expected = event.event_hash, expected + 1
 
