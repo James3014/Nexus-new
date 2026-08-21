@@ -583,7 +583,10 @@ def test_build_rehydration_projection_basic_join():
     data = proj.to_dict()
     assert data["schema"] == "nexus.task_rehydration_projection.v1"
     assert data["task_identity"] == {"task_id": "task-1", "attempt_id": "attempt-1"}
-    assert data["revision_binding"] == {"source_revision": "src-a", "contract_revision": "contract-a"}
+    assert data["revision_binding"] == {
+        "source_revision": "src-a",
+        "contract_revision": "contract-a",
+    }
     assert data["continuation"]["rejected_strategies"] == ["strategy-a"]
     assert data["continuation"]["do_not_repeat"] == ["strategy-a"]
     assert data["continuation"]["next_action"] == "step-2"
@@ -719,7 +722,9 @@ def test_build_rehydration_projection_authority_revision_never_inferred_from_lif
         ("work_claim", "malformed", "REHYDRATION_WORK_CLAIM_MISMATCH"),
     ],
 )
-def test_build_rehydration_projection_malformed_durable_objects_fail_closed(key, val, expected_match):
+def test_build_rehydration_projection_malformed_durable_objects_fail_closed(
+    key, val, expected_match
+):
     ev = event(1, "PLAN_FORMED")
     snapshot = project([ev])
     task_state = {
