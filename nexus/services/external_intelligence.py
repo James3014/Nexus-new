@@ -14,11 +14,21 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 REQUEST_SCHEMA = "external_intelligence_request.v1"
+REQUEST_SCHEMA_V1 = "external_intelligence_request.v1"
+REQUEST_SCHEMA_V2 = "external_intelligence_request.v2"
 ATTEMPT_SCHEMA = "external_intelligence_attempt.v1"
+ATTEMPT_SCHEMA_V1 = "external_intelligence_attempt.v1"
+ATTEMPT_SCHEMA_V2 = "external_intelligence_attempt.v2"
 ENVELOPE_SCHEMA = "external_execution_envelope.v1"
+ENVELOPE_SCHEMA_V1 = "external_execution_envelope.v1"
+ENVELOPE_SCHEMA_V2 = "external_execution_envelope.v2"
 RECEIPT_SCHEMA = "external_intelligence_receipt.v1"
+RECEIPT_SCHEMA_V1 = "external_intelligence_receipt.v1"
+RECEIPT_SCHEMA_V2 = "external_intelligence_receipt.v2"
 CONTEXT_SCHEMA = "external_intelligence_context_pack.v1"
 CONTROL_CAPSULE_SCHEMA = "control_capsule.v1"
+CONTROL_CAPSULE_SCHEMA_V1 = "control_capsule.v1"
+CONTROL_CAPSULE_SCHEMA_V2 = "control_capsule.v2"
 INTAKE_SCHEMA = "external_intelligence_intake.v1"
 CLAIM_CEILING = "PRE_IMPLEMENTATION_INTELLIGENCE_ONLY"
 DEFAULT_CONTEXT_BUDGET = 200_000
@@ -33,6 +43,35 @@ MODEL_ADAPTATION_KEYS = (
     "forbidden_inferences",
     "repair_policy",
 )
+SELECTED_WORKER_KEYS = (
+    "worker_id",
+    "provider",
+    "model",
+    "role_ceiling",
+    "admission_evidence_ref",
+    "admission_evidence_hash",
+    "selection_evidence_ref",
+    "selection_evidence_hash",
+)
+DIAGNOSIS_STATUSES = ("PROVEN", "LIKELY", "UNKNOWN")
+SOURCE_EVIDENCE_KINDS = frozenset({"source", "source_file", "verifier_source", "source_absence"})
+V2_ENVELOPE_TOP_KEYS = {
+    "schema",
+    "binding",
+    "selected_worker",
+    "objective",
+    "definition_of_done",
+    "evidence_refs",
+    "diagnosis",
+    "scope_signal",
+    "inspect_first",
+    "required_semantics",
+    "implementation_direction",
+    "verification_focus",
+    "failure_guards",
+    "stop_and_escalate",
+}
+_HEX64 = frozenset("0123456789abcdef")
 
 
 class ExternalIntelligenceError(RuntimeError):
@@ -58,6 +97,77 @@ def _canonical_json(value: Any) -> str:
 def _sha256(value: bytes | str) -> str:
     raw = value.encode("utf-8") if isinstance(value, str) else value
     return hashlib.sha256(raw).hexdigest()
+
+
+def compute_evidence_ref(entry: Mapping[str, Any]) -> str:
+    kind = str(entry.get("kind") or "")
+    ref = str(entry.get("ref") or "")
+    revision = str(entry.get("revision") or "")
+    provenance = str(entry.get("provenance") or "")
+    source_sha256 = str(entry.get("source_sha256") or "")
+    included_sha256 = str(entry.get("included_sha256") or "")
+    token = _sha256(f"{kind}|{ref}|{revision}|{provenance}|{source_sha256}|{included_sha256}")[:16]
+    return f"{kind}:{ref}@{token}"
+
+
+def validate_context_pack(context_pack: Any) -> dict[str, Any]:
+    if not isinstance(context_pack, Mapping):
+        raise ExternalIntelligenceError("INVALID_CONTEXT_PACK")
+    if context_pack.get("schema") != CONTEXT_SCHEMA:
+        raise ExternalIntelligenceError("INVALID_CONTEXT_PACK")
+    max_bytes = context_pack.get("max_bytes")
+    per_source_bytes = context_pack.get("per_source_bytes")
+    if (
+        not isinstance(max_bytes, int)
+        or not isinstance(per_source_bytes, int)
+        or max_bytes <= 0
+        or per_source_bytes <= 0
+        or per_source_bytes > max_bytes
+    ):
+        raise ExternalIntelligenceError("INVALID_CONTEXT_PACK")
+    entries = context_pack.get("entries")
+    if not isinstance(entries, list):
+        raise ExternalIntelligenceError("INVALID_CONTEXT_PACK")
+
+    for entry in entries:
+        if not isinstance(entry, Mapping):
+            raise ExternalIntelligenceError("INVALID_CONTEXT_PACK")
+        required_entry_keys = {
+            "kind",
+            "ref",
+            "revision",
+            "provenance",
+            "content",
+            "source_sha256",
+            "included_sha256",
+            "source_bytes",
+            "included_bytes",
+            "truncated",
+            "evidence_ref",
+        }
+        if not required_entry_keys.issubset(set(entry)):
+            raise ExternalIntelligenceError("INVALID_CONTEXT_PACK")
+        content_str = str(entry["content"])
+        raw_bytes = content_str.encode("utf-8")
+        if _sha256(raw_bytes) != entry["included_sha256"]:
+            raise ExternalIntelligenceError("INVALID_CONTEXT_PACK")
+        if len(raw_bytes) != entry["included_bytes"]:
+            raise ExternalIntelligenceError("INVALID_CONTEXT_PACK")
+        if compute_evidence_ref(entry) != entry["evidence_ref"]:
+            raise ExternalIntelligenceError("INVALID_CONTEXT_PACK")
+
+    material = {
+        "schema": context_pack["schema"],
+        "max_bytes": max_bytes,
+        "per_source_bytes": per_source_bytes,
+        "entries": entries,
+    }
+    recomputed_hash = _sha256(_canonical_json(material))
+    declared_hash = context_pack.get("context_pack_sha256")
+    if declared_hash != recomputed_hash:
+        raise ExternalIntelligenceError("INVALID_CONTEXT_PACK")
+
+    return dict(context_pack)
 
 
 def _bounded_text(value: Any, field: str, *, allow_empty: bool = False) -> str:
@@ -222,6 +332,7 @@ def build_context_pack(
             "included_bytes": len(clipped_bytes),
             "truncated": len(clipped_bytes) < len(raw),
         }
+        entry["evidence_ref"] = compute_evidence_ref(entry)
         entries.append(entry)
         remaining -= len(clipped_bytes)
         if remaining <= 0:
@@ -237,7 +348,32 @@ def build_context_pack(
     return material
 
 
-def external_execution_envelope_contract() -> dict[str, Any]:
+def validate_selected_worker(value: Any) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        raise ExternalIntelligenceError("INVALID_SELECTED_WORKER")
+    if set(value) != set(SELECTED_WORKER_KEYS):
+        raise ExternalIntelligenceError("INVALID_SELECTED_WORKER_KEYS")
+    result: dict[str, str] = {}
+    for key in SELECTED_WORKER_KEYS:
+        val = value.get(key)
+        if not isinstance(val, str) or not val.strip() or len(val) > MAX_TEXT:
+            raise ExternalIntelligenceError(f"INVALID_SELECTED_WORKER_{key.upper()}")
+        text = val.strip()
+        if key in ("admission_evidence_hash", "selection_evidence_hash"):
+            if len(text) != 64 or any(c not in _HEX64 for c in text.lower()):
+                raise ExternalIntelligenceError(f"INVALID_SELECTED_WORKER_{key.upper()}")
+            text = text.lower()
+        result[key] = text
+    model = result["model"]
+    provider = result["provider"]
+    if "/" in model:
+        prefix, _, _ = model.partition("/")
+        if prefix != provider:
+            raise ExternalIntelligenceError("INVALID_SELECTED_WORKER_PROVIDER_MODEL_MISMATCH")
+    return result
+
+
+def external_execution_envelope_v1_contract() -> dict[str, Any]:
     string_array = {
         "type": "array",
         "maxItems": MAX_LIST,
@@ -259,7 +395,7 @@ def external_execution_envelope_contract() -> dict[str, Any]:
             "model_adaptation",
         ],
         "properties": {
-            "schema": {"const": ENVELOPE_SCHEMA},
+            "schema": {"const": ENVELOPE_SCHEMA_V1},
             "binding": {
                 "type": "object",
                 "additionalProperties": False,
@@ -380,6 +516,121 @@ def external_execution_envelope_contract() -> dict[str, Any]:
     }
 
 
+def external_execution_envelope_contract() -> dict[str, Any]:
+    return external_execution_envelope_v1_contract()
+
+
+def external_execution_envelope_v2_contract() -> dict[str, Any]:
+    string_array = {
+        "type": "array",
+        "maxItems": MAX_LIST,
+        "items": {"type": "string", "maxLength": MAX_TEXT},
+    }
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "schema",
+            "binding",
+            "selected_worker",
+            "objective",
+            "definition_of_done",
+            "evidence_refs",
+            "diagnosis",
+            "scope_signal",
+            "inspect_first",
+            "required_semantics",
+            "implementation_direction",
+            "verification_focus",
+            "failure_guards",
+            "stop_and_escalate",
+        ],
+        "properties": {
+            "schema": {"const": ENVELOPE_SCHEMA_V2},
+            "binding": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "repository",
+                    "item_type",
+                    "item_id",
+                    "revision",
+                    "main_sha",
+                    "task_card_ref",
+                    "task_card_hash",
+                    "context_pack_sha256",
+                ],
+                "properties": {
+                    key: {"type": "string", "maxLength": MAX_TEXT}
+                    for key in (
+                        "repository",
+                        "item_type",
+                        "item_id",
+                        "revision",
+                        "main_sha",
+                        "task_card_ref",
+                        "task_card_hash",
+                        "context_pack_sha256",
+                    )
+                },
+            },
+            "selected_worker": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": list(SELECTED_WORKER_KEYS),
+                "properties": {
+                    key: {"type": "string", "maxLength": MAX_TEXT} for key in SELECTED_WORKER_KEYS
+                },
+            },
+            "objective": {"type": "string", "maxLength": MAX_TEXT},
+            "definition_of_done": string_array,
+            "evidence_refs": string_array,
+            "diagnosis": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["status", "hypothesis", "next_probe"],
+                "properties": {
+                    "status": {"enum": list(DIAGNOSIS_STATUSES)},
+                    "hypothesis": {"type": "string", "maxLength": MAX_TEXT},
+                    "next_probe": {"type": "string", "maxLength": MAX_TEXT},
+                },
+            },
+            "scope_signal": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": [
+                    "production_edit_paths",
+                    "required_test_edit_paths",
+                    "conditional_migration_paths",
+                    "read_only_authorities",
+                    "verification_only_paths",
+                    "forbidden_paths",
+                    "max_files",
+                    "scope_confidence",
+                    "scope_block_conditions",
+                ],
+                "properties": {
+                    "production_edit_paths": string_array,
+                    "required_test_edit_paths": string_array,
+                    "conditional_migration_paths": string_array,
+                    "read_only_authorities": string_array,
+                    "verification_only_paths": string_array,
+                    "forbidden_paths": string_array,
+                    "max_files": {"type": "integer", "minimum": 0, "maximum": 256},
+                    "scope_confidence": {"enum": ["LOW", "MEDIUM", "HIGH"]},
+                    "scope_block_conditions": string_array,
+                },
+            },
+            "inspect_first": string_array,
+            "required_semantics": string_array,
+            "implementation_direction": string_array,
+            "verification_focus": string_array,
+            "failure_guards": string_array,
+            "stop_and_escalate": string_array,
+        },
+    }
+
+
 def _validate_string_list(value: Any, field: str) -> None:
     if not isinstance(value, list) or len(value) > MAX_LIST:
         raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
@@ -387,12 +638,161 @@ def _validate_string_list(value: Any, field: str) -> None:
         raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
 
 
-def parse_external_execution_envelope(text: str) -> dict[str, Any]:
-    """Fail-closed parser for ChatGPT-produced external intelligence."""
+def parse_external_execution_envelope_v2(
+    text: str,
+    *,
+    context_pack: Mapping[str, Any] | None = None,
+    valid_evidence_refs: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    """Fail-closed parser for Task Compiler v2 external execution envelope."""
     try:
         value = json.loads(text)
     except (TypeError, ValueError, json.JSONDecodeError) as exc:
         raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED") from exc
+    if (
+        not isinstance(value, dict)
+        or set(value) != V2_ENVELOPE_TOP_KEYS
+        or value.get("schema") != ENVELOPE_SCHEMA_V2
+    ):
+        raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
+
+    binding = value.get("binding")
+    binding_keys = {
+        "repository",
+        "item_type",
+        "item_id",
+        "revision",
+        "main_sha",
+        "task_card_ref",
+        "task_card_hash",
+        "context_pack_sha256",
+    }
+    if not isinstance(binding, dict) or set(binding) != binding_keys:
+        raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
+    if any(
+        not isinstance(binding[key], str) or len(binding[key]) > MAX_TEXT for key in binding_keys
+    ):
+        raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
+
+    known_valid_refs: set[str] | None = None
+    entries_by_ref: dict[str, Mapping[str, Any]] = {}
+    has_source_entries: bool = False
+    if context_pack is not None:
+        validated_pack = validate_context_pack(context_pack)
+        expected_pack_sha = validated_pack.get("context_pack_sha256")
+        if binding.get("context_pack_sha256") != expected_pack_sha:
+            raise ExternalIntelligenceError("CONTEXT_PACK_HASH_MISMATCH")
+        entries = validated_pack.get("entries") or []
+        known_valid_refs = set()
+        for entry in entries:
+            if isinstance(entry, Mapping) and isinstance(entry.get("evidence_ref"), str):
+                ref_val = entry["evidence_ref"]
+                known_valid_refs.add(ref_val)
+                entries_by_ref[ref_val] = entry
+                if entry.get("kind") in SOURCE_EVIDENCE_KINDS:
+                    has_source_entries = True
+    elif valid_evidence_refs is not None:
+        known_valid_refs = {str(r) for r in valid_evidence_refs}
+
+    try:
+        value["selected_worker"] = validate_selected_worker(value.get("selected_worker"))
+    except ExternalIntelligenceError as exc:
+        raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED") from exc
+
+    if not isinstance(value.get("objective"), str) or len(value["objective"]) > MAX_TEXT:
+        raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
+    if not value["objective"].strip():
+        raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
+
+    _validate_string_list(value.get("definition_of_done"), "definition_of_done")
+    _validate_string_list(value.get("evidence_refs"), "evidence_refs")
+
+    if known_valid_refs is not None:
+        for ref in value["evidence_refs"]:
+            if ref not in known_valid_refs:
+                raise ExternalIntelligenceError("UNKNOWN_EVIDENCE_REF")
+
+    diagnosis = value.get("diagnosis")
+    if not isinstance(diagnosis, dict) or set(diagnosis) != {"status", "hypothesis", "next_probe"}:
+        raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
+    status = diagnosis.get("status")
+    if status not in DIAGNOSIS_STATUSES:
+        raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
+    hypothesis = diagnosis.get("hypothesis")
+    next_probe = diagnosis.get("next_probe")
+    if (
+        not isinstance(hypothesis, str)
+        or len(hypothesis) > MAX_TEXT
+        or not isinstance(next_probe, str)
+        or len(next_probe) > MAX_TEXT
+    ):
+        raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
+    if status == "PROVEN":
+        if not value.get("evidence_refs"):
+            raise ExternalIntelligenceError("UNSUPPORTED_PROVEN_DIAGNOSIS")
+        if context_pack is not None and has_source_entries:
+            cites_source = any(
+                entries_by_ref.get(ref, {}).get("kind") in SOURCE_EVIDENCE_KINDS
+                for ref in value["evidence_refs"]
+            )
+            if not cites_source:
+                raise ExternalIntelligenceError("UNSUPPORTED_PROVEN_DIAGNOSIS")
+
+    scope = value.get("scope_signal")
+    scope_keys = {
+        "production_edit_paths",
+        "required_test_edit_paths",
+        "conditional_migration_paths",
+        "read_only_authorities",
+        "verification_only_paths",
+        "forbidden_paths",
+        "max_files",
+        "scope_confidence",
+        "scope_block_conditions",
+    }
+    if not isinstance(scope, dict) or set(scope) != scope_keys:
+        raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
+    for field in scope_keys - {"max_files", "scope_confidence"}:
+        _validate_string_list(scope[field], field)
+    if not isinstance(scope["max_files"], int) or not 0 <= scope["max_files"] <= 256:
+        raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
+    if scope["scope_confidence"] not in {"LOW", "MEDIUM", "HIGH"}:
+        raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
+
+    for list_field in (
+        "inspect_first",
+        "required_semantics",
+        "implementation_direction",
+        "verification_focus",
+        "failure_guards",
+        "stop_and_escalate",
+    ):
+        _validate_string_list(value.get(list_field), list_field)
+
+    return value
+
+
+def parse_external_execution_envelope(
+    text: str,
+    *,
+    context_pack: Mapping[str, Any] | None = None,
+    valid_evidence_refs: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    """Fail-closed parser for external execution envelopes supporting V1 and V2."""
+    try:
+        raw_val = json.loads(text)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED") from exc
+    if not isinstance(raw_val, dict):
+        raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
+    schema = raw_val.get("schema")
+    if schema == ENVELOPE_SCHEMA_V2:
+        return parse_external_execution_envelope_v2(
+            text, context_pack=context_pack, valid_evidence_refs=valid_evidence_refs
+        )
+    if schema != ENVELOPE_SCHEMA_V1:
+        raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
+
     top = {
         "schema",
         "binding",
@@ -405,8 +805,9 @@ def parse_external_execution_envelope(text: str) -> dict[str, Any]:
         "stop_conditions",
         "model_adaptation",
     }
-    if not isinstance(value, dict) or set(value) != top or value.get("schema") != ENVELOPE_SCHEMA:
+    if set(raw_val) != top:
         raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
+    value = raw_val
     if not isinstance(value.get("goal"), str) or not isinstance(value.get("root_cause"), str):
         raise ExternalIntelligenceError("INTELLIGENCE_PARSE_FAILED")
     if len(value["goal"]) > MAX_TEXT or len(value["root_cause"]) > MAX_TEXT:
@@ -509,7 +910,9 @@ def build_request(
     intake: Mapping[str, Any],
     context_pack: Mapping[str, Any],
     *,
+    selected_worker: Mapping[str, Any] | None = None,
     semantic_contract_sha256: str | None = None,
+    version: str | None = None,
 ) -> dict[str, Any]:
     if (
         intake.get("schema") != INTAKE_SCHEMA
@@ -519,26 +922,65 @@ def build_request(
     if context_pack.get("schema") != CONTEXT_SCHEMA:
         raise ExternalIntelligenceError("INVALID_CONTEXT_PACK")
     identity = dict(intake["identity"])
-    contract_hash = semantic_contract_sha256 or _sha256(
-        _canonical_json(external_execution_envelope_contract())
-    )
-    request = {
-        "schema": REQUEST_SCHEMA,
-        "identity": identity,
-        "identity_sha256": intake["identity_sha256"],
-        "context_pack_sha256": context_pack["context_pack_sha256"],
-        "semantic_contract_sha256": contract_hash,
-        "claim_ceiling": CLAIM_CEILING,
-    }
+
+    if selected_worker is not None or version == "v2":
+        if selected_worker is None:
+            raise ExternalIntelligenceError("SELECTED_WORKER_REQUIRED")
+        worker_binding = validate_selected_worker(selected_worker)
+        contract_hash = semantic_contract_sha256 or _sha256(
+            _canonical_json(external_execution_envelope_v2_contract())
+        )
+        request = {
+            "schema": REQUEST_SCHEMA_V2,
+            "identity": identity,
+            "identity_sha256": intake["identity_sha256"],
+            "context_pack_sha256": context_pack["context_pack_sha256"],
+            "semantic_contract_sha256": contract_hash,
+            "selected_worker": worker_binding,
+            "claim_ceiling": CLAIM_CEILING,
+        }
+    else:
+        contract_hash = semantic_contract_sha256 or _sha256(
+            _canonical_json(external_execution_envelope_v1_contract())
+        )
+        request = {
+            "schema": REQUEST_SCHEMA_V1,
+            "identity": identity,
+            "identity_sha256": intake["identity_sha256"],
+            "context_pack_sha256": context_pack["context_pack_sha256"],
+            "semantic_contract_sha256": contract_hash,
+            "claim_ceiling": CLAIM_CEILING,
+        }
     request["request_sha256"] = _sha256(_canonical_json(request))
     return request
+
+
+def build_request_v2(
+    intake: Mapping[str, Any],
+    context_pack: Mapping[str, Any],
+    *,
+    selected_worker: Mapping[str, Any],
+    semantic_contract_sha256: str | None = None,
+) -> dict[str, Any]:
+    return build_request(
+        intake,
+        context_pack,
+        selected_worker=selected_worker,
+        semantic_contract_sha256=semantic_contract_sha256,
+        version="v2",
+    )
 
 
 def project_refresh(
     previous: Mapping[str, Any], current_request: Mapping[str, Any]
 ) -> dict[str, Any]:
     """Decide reuse vs stale without silently refreshing material identity."""
-    if previous.get("schema") != RECEIPT_SCHEMA or current_request.get("schema") != REQUEST_SCHEMA:
+    prev_schema = previous.get("schema")
+    curr_schema = current_request.get("schema")
+    if prev_schema not in (RECEIPT_SCHEMA_V1, RECEIPT_SCHEMA_V2) or curr_schema not in (
+        REQUEST_SCHEMA_V1,
+        REQUEST_SCHEMA_V2,
+    ):
         raise ExternalIntelligenceError("INVALID_REFRESH_INPUT")
     previous_request = previous.get("request")
     if not isinstance(previous_request, Mapping):
@@ -549,6 +991,9 @@ def project_refresh(
         "semantic_contract_sha256",
         "request_sha256",
     ]
+    if curr_schema == REQUEST_SCHEMA_V2 or previous_request.get("schema") == REQUEST_SCHEMA_V2:
+        if previous_request.get("selected_worker") != current_request.get("selected_worker"):
+            fields.append("selected_worker")
     changed = [
         field for field in fields if previous_request.get(field) != current_request.get(field)
     ]
@@ -561,18 +1006,45 @@ def project_refresh(
 
 
 def build_control_capsule(receipt: Mapping[str, Any]) -> dict[str, Any]:
-    if receipt.get("schema") != RECEIPT_SCHEMA:
+    schema = receipt.get("schema")
+    if schema not in (RECEIPT_SCHEMA_V1, RECEIPT_SCHEMA_V2):
         raise ExternalIntelligenceError("INVALID_RECEIPT")
     request = receipt.get("request") or {}
     envelope = receipt.get("envelope") or {}
     identity = request.get("identity") or {}
     if not isinstance(identity, Mapping) or not isinstance(envelope, Mapping):
         raise ExternalIntelligenceError("INVALID_RECEIPT")
+
+    if schema == RECEIPT_SCHEMA_V2:
+        stop_conditions = envelope.get("stop_and_escalate") or []
+        if not isinstance(stop_conditions, list):
+            raise ExternalIntelligenceError("INVALID_RECEIPT")
+        capsule = {
+            "schema": CONTROL_CAPSULE_SCHEMA_V2,
+            "repository": identity.get("repository"),
+            "item_type": identity.get("item_type"),
+            "item_id": identity.get("item_id"),
+            "main_sha": identity.get("main_sha"),
+            "task_card_ref": identity.get("task_card_ref"),
+            "task_card_hash": identity.get("task_card_hash"),
+            "intelligence_receipt_id": receipt.get("receipt_id"),
+            "intelligence_request_sha256": request.get("request_sha256"),
+            "intelligence_envelope_sha256": receipt.get("envelope_sha256"),
+            "refresh_status": (receipt.get("refresh_projection") or {}).get("status", "NEW"),
+            "current_gate": "PRE_IMPLEMENTATION_INTELLIGENCE_READY",
+            "last_proven": "external_execution_envelope_v2_validated",
+            "selected_worker": dict(envelope.get("selected_worker") or {}),
+            "next_action": "dispatch_to_bound_worker_after_separate_worker_transport_gate",
+            "stop_if": list(stop_conditions),
+            "claim_ceiling": CLAIM_CEILING,
+        }
+        return capsule
+
     stop_conditions = envelope.get("stop_conditions") or []
     if not isinstance(stop_conditions, list):
         raise ExternalIntelligenceError("INVALID_RECEIPT")
     return {
-        "schema": CONTROL_CAPSULE_SCHEMA,
+        "schema": CONTROL_CAPSULE_SCHEMA_V1,
         "repository": identity.get("repository"),
         "item_type": identity.get("item_type"),
         "item_id": identity.get("item_id"),
@@ -592,7 +1064,6 @@ def build_control_capsule(receipt: Mapping[str, Any]) -> dict[str, Any]:
 
 
 _REQUEST_MARKER_PREFIX = "NEXUS_REQUEST_SHA256="
-_HEX64 = frozenset("0123456789abcdef")
 
 
 def _request_marker(request_sha256: Any) -> str:
@@ -621,8 +1092,51 @@ def _extract_request_marker(prompt: Any) -> str | None:
     return None
 
 
+def build_prompt_v2(request: Mapping[str, Any], context_pack: Mapping[str, Any]) -> str:
+    schema = external_execution_envelope_v2_contract()
+    identity = request.get("identity") or {}
+    binding = {
+        "repository": identity.get("repository", ""),
+        "item_type": identity.get("item_type", ""),
+        "item_id": identity.get("item_id", ""),
+        "revision": identity.get("revision", ""),
+        "main_sha": identity.get("main_sha", ""),
+        "task_card_ref": identity.get("task_card_ref", ""),
+        "task_card_hash": identity.get("task_card_hash", ""),
+        "context_pack_sha256": request.get("context_pack_sha256", ""),
+    }
+    selected_worker = validate_selected_worker(request.get("selected_worker"))
+    marker = _request_marker(request.get("request_sha256"))
+    return (
+        "You are the Nexus External Intelligence Sidecar (Task Compiler v2). Produce pre-implementation intelligence only; do not claim execution, Candidate, approval, integration, or production authority. "
+        f"{marker}\n"
+        "Return exactly one JSON object and no markdown fences or prose. The response must be directly parseable by standard json.loads. "
+        "Every JSON string must be serialized without literal U+0000-U+001F control characters; encode newlines/tabs with JSON escapes. "
+        "Inside free-text string values, do not include unescaped double-quote characters; prefer single quotes, backticks, or paraphrase identifiers instead. "
+        "Before responding, mentally validate that the entire response is accepted by standard json.loads without repair. "
+        "Do not use JSON5, comments, trailing commas, or extra keys. The binding object MUST exactly equal the supplied binding. "
+        "SELECTED_WORKER_BINDING: The selected_worker object MUST exactly equal the supplied selected_worker binding. "
+        f"Target worker identity: worker_id={selected_worker['worker_id']}, provider={selected_worker['provider']}, model={selected_worker['model']}, role_ceiling={selected_worker['role_ceiling']}. "
+        "DIAGNOSIS_RULES: Unsupported diagnosis cannot become PROVEN. If evidence is insufficient or contradictory, diagnosis status MUST be UNKNOWN with bounded hypothesis and next_probe. Non-obvious technical claims must be tied to supplied evidence_refs; do not present inference as source fact. "
+        "EVIDENCE_REFS_BINDING: You must return exact `evidence_ref` string values supplied in BEGIN_UNTRUSTED_CONTEXT entries. Do NOT invent plain paths, aliases, or line anchors. PROVEN diagnosis requires citing at least one canonical source/verifier evidence_ref from the context pack. "
+        "OUTPUT_COMPLETENESS: The response MUST contain every property declared in every `required` array of the SCHEMA; no required property may be omitted. "
+        "For a required array field with no substantive content, emit [] rather than omitting the key. "
+        "Compile a lean source-grounded worker-adaptive brief for this selected worker: objective, definition_of_done, evidence_refs, diagnosis {status, hypothesis, next_probe}, inspect_first, required_semantics, implementation_direction, verification_focus, failure_guards, stop_and_escalate. "
+        "Keep semantic output lean and execution-changing; do not re-embed broad governance prose. "
+        f"BINDING={_canonical_json(binding)}\n"
+        f"SELECTED_WORKER={_canonical_json(selected_worker)}\n"
+        f"INTAKE_PROJECTION={_canonical_json(identity)}\n"
+        f"SCHEMA={_canonical_json(schema)}\n"
+        "BEGIN_UNTRUSTED_CONTEXT\n"
+        f"{_canonical_json(context_pack)}\n"
+        "END_UNTRUSTED_CONTEXT"
+    )
+
+
 def build_prompt(request: Mapping[str, Any], context_pack: Mapping[str, Any]) -> str:
-    schema = external_execution_envelope_contract()
+    if request.get("schema") == REQUEST_SCHEMA_V2:
+        return build_prompt_v2(request, context_pack)
+    schema = external_execution_envelope_v1_contract()
     identity = request.get("identity") or {}
     binding = {
         "repository": identity.get("repository", ""),
@@ -810,10 +1324,6 @@ class OpenCLIExternalIntelligenceTransport:
                 "OPENCLI_NOT_FOUND", started_at=started, finished_at=_now(), safe_argv=safe
             )
         if timed_out or code:
-            # Once the ask process starts, timeout or nonzero exit is outcome-ambiguous:
-            # ChatGPT may already have accepted the prompt even if OpenCLI lost the
-            # response/bridge state. Reconcile read-only by exact request marker;
-            # never blind-resend the semantic ask.
             return self._reconcile_timeout(prompt, env, started, safe)
         try:
             rows = json.loads(stdout)
@@ -882,16 +1392,21 @@ class OpenCLIExternalIntelligenceTransport:
     def _extract_stable(self, detail_stdout: str, conversation_id: str) -> tuple[str | None, str]:
         try:
             detail_rows = json.loads(detail_stdout)
-            stable = [
-                row
-                for row in detail_rows
-                if isinstance(row, dict)
-                and row.get("Role") == "Assistant"
-                and isinstance(row.get("Text"), str)
-                and row.get("Generating") is False
-                and isinstance(row.get("StableSeconds"), (int, float))
-                and row.get("StableSeconds") >= self.stable_seconds
-            ]
+            if not isinstance(detail_rows, list):
+                return None, conversation_id
+            stable: list[dict[str, Any]] = []
+            for row in detail_rows:
+                if not isinstance(row, dict):
+                    continue
+                if row.get("Role") != "Assistant":
+                    continue
+                if not isinstance(row.get("Text"), str):
+                    continue
+                if row.get("Generating") is not False:
+                    continue
+                sec = row.get("StableSeconds")
+                if isinstance(sec, (int, float)) and sec >= self.stable_seconds:
+                    stable.append(row)
             if not stable:
                 raise ValueError
             return stable[-1]["Text"], conversation_id
@@ -899,12 +1414,7 @@ class OpenCLIExternalIntelligenceTransport:
             return None, conversation_id
 
     def reconcile(self, prompt: str) -> TransportResult:
-        """READ-ONLY recovery for a previously started ambiguous ask.
-
-        This method never issues a semantic ask. It searches recent ChatGPT
-        history for exactly one conversation containing the request marker and
-        stable-reads that conversation.
-        """
+        """READ-ONLY recovery for a previously started ambiguous ask."""
         started = _now()
         env = os.environ.copy()
         if self.profile:
@@ -966,13 +1476,12 @@ class OpenCLIExternalIntelligenceTransport:
                     raise ValueError
             except (TypeError, ValueError, json.JSONDecodeError):
                 continue
-            user_prompts = [
-                row.get("Text")
-                for row in detail_rows
-                if isinstance(row, dict)
-                and row.get("Role") == "User"
-                and isinstance(row.get("Text"), str)
-            ]
+            user_prompts: list[str] = []
+            for item in detail_rows:
+                if isinstance(item, dict) and item.get("Role") == "User":
+                    text = item.get("Text")
+                    if isinstance(text, str):
+                        user_prompts.append(text)
             if any(self._prompt_matches(text, prompt) for text in user_prompts):
                 matching.append(conversation_id)
         if len(matching) != 1:
@@ -1056,7 +1565,8 @@ class ExternalIntelligenceStore:
 
     def persist_request(self, request: Mapping[str, Any]) -> Path:
         request_sha = str(request.get("request_sha256") or "")
-        if request.get("schema") != REQUEST_SCHEMA or len(request_sha) != 64:
+        schema = request.get("schema")
+        if schema not in (REQUEST_SCHEMA_V1, REQUEST_SCHEMA_V2) or len(request_sha) != 64:
             raise ExternalIntelligenceError("INVALID_REQUEST_IDENTITY")
         path = self._request_path(request_sha)
         if path.exists():
@@ -1072,9 +1582,11 @@ class ExternalIntelligenceStore:
 
     def write_envelope(self, request: Mapping[str, Any], envelope: Mapping[str, Any]) -> Path:
         request_sha = str(request.get("request_sha256") or "")
+        req_schema = request.get("schema")
+        env_schema = envelope.get("schema")
         if (
-            request.get("schema") != REQUEST_SCHEMA
-            or envelope.get("schema") != ENVELOPE_SCHEMA
+            req_schema not in (REQUEST_SCHEMA_V1, REQUEST_SCHEMA_V2)
+            or env_schema not in (ENVELOPE_SCHEMA_V1, ENVELOPE_SCHEMA_V2)
             or len(request_sha) != 64
         ):
             raise ExternalIntelligenceError("INVALID_ENVELOPE_ARTIFACT")
@@ -1101,7 +1613,7 @@ class ExternalIntelligenceStore:
                 value = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError, UnicodeError) as exc:
                 raise ExternalIntelligenceError("INTELLIGENCE_RECEIPT_CORRUPT") from exc
-            if value.get("schema") != RECEIPT_SCHEMA:
+            if value.get("schema") not in (RECEIPT_SCHEMA_V1, RECEIPT_SCHEMA_V2):
                 raise ExternalIntelligenceError("INTELLIGENCE_RECEIPT_CORRUPT")
             previous_identity = value.get("request", {}).get("identity", {})
             previous_key = (
@@ -1129,9 +1641,9 @@ class ExternalIntelligenceStore:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError, UnicodeError) as exc:
             raise ExternalIntelligenceError("INTELLIGENCE_RECEIPT_CORRUPT") from exc
-        if value.get("schema") != RECEIPT_SCHEMA or value.get("request", {}).get(
-            "request_sha256"
-        ) != request.get("request_sha256"):
+        if value.get("schema") not in (RECEIPT_SCHEMA_V1, RECEIPT_SCHEMA_V2) or value.get(
+            "request", {}
+        ).get("request_sha256") != request.get("request_sha256"):
             raise ExternalIntelligenceError("INTELLIGENCE_RECEIPT_IDENTITY_MISMATCH")
         return value
 
@@ -1146,7 +1658,10 @@ class ExternalIntelligenceStore:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError, UnicodeError) as exc:
             raise ExternalIntelligenceError("INTELLIGENCE_ATTEMPT_CORRUPT") from exc
-        if value.get("schema") != ATTEMPT_SCHEMA or value.get("request_sha256") != request_sha:
+        if (
+            value.get("schema") not in (ATTEMPT_SCHEMA_V1, ATTEMPT_SCHEMA_V2)
+            or value.get("request_sha256") != request_sha
+        ):
             raise ExternalIntelligenceError("INTELLIGENCE_ATTEMPT_IDENTITY_MISMATCH")
         return value
 
@@ -1167,8 +1682,11 @@ class ExternalIntelligenceStore:
             if state in {"COMPLETED", "FAILED"}:
                 raise ExternalIntelligenceError("INTELLIGENCE_REPLAY_FORBIDDEN")
             raise ExternalIntelligenceError("INTELLIGENCE_ATTEMPT_STATE_INVALID")
+        attempt_schema = (
+            ATTEMPT_SCHEMA_V2 if request.get("schema") == REQUEST_SCHEMA_V2 else ATTEMPT_SCHEMA_V1
+        )
         value = {
-            "schema": ATTEMPT_SCHEMA,
+            "schema": attempt_schema,
             "attempt_id": str(uuid.uuid4()),
             "request_sha256": request_sha,
             "state": "PREPARED",
@@ -1212,18 +1730,22 @@ class ExternalIntelligenceSidecar:
         self.store = store
 
     def analyze(
-        self, record: Mapping[str, Any], sources: Iterable[Mapping[str, Any]]
+        self,
+        record: Mapping[str, Any],
+        sources: Iterable[Mapping[str, Any]],
+        *,
+        selected_worker: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         intake = normalize_intake(record)
         if intake["disposition"] != IntakeDisposition.EXECUTABLE.value:
             return {
-                "schema": RECEIPT_SCHEMA,
+                "schema": RECEIPT_SCHEMA_V2 if selected_worker is not None else RECEIPT_SCHEMA_V1,
                 "status": "NOT_DISPATCHED",
                 "intake": intake,
                 "claim_ceiling": CLAIM_CEILING,
             }
         context_pack = build_context_pack(sources)
-        request = build_request(intake, context_pack)
+        request = build_request(intake, context_pack, selected_worker=selected_worker)
         existing = self.store.existing_receipt(request)
         if existing is not None:
             return {**existing, "reuse": True}
@@ -1248,17 +1770,16 @@ class ExternalIntelligenceSidecar:
             attempt = self.store.mark_dispatching(attempt)
             result: TransportResult = self.transport.invoke(prompt)
         elif attempt.get("state") == "PREPARED":
-            # The prior controller stopped before dispatch was journaled. No
-            # semantic ask can have started, so resume the original attempt.
             attempt = self.store.mark_dispatching(attempt)
             result = self.transport.invoke(prompt)
         elif attempt.get("state") in {"DISPATCHING", "OUTCOME_UNKNOWN"}:
-            # A prior ask may have reached ChatGPT. Reconcile read-only using
-            # the exact request marker; never resend the semantic request.
-            reconcile = getattr(self.transport, "reconcile", None)
-            if not callable(reconcile):
+            reconcile_fn = getattr(self.transport, "reconcile", None)
+            if not callable(reconcile_fn):
                 raise ExternalIntelligenceError("INTELLIGENCE_RECONCILIATION_REQUIRED")
-            result = reconcile(prompt)
+            reconcile_res = reconcile_fn(prompt)
+            if not isinstance(reconcile_res, TransportResult):
+                raise ExternalIntelligenceError("INTELLIGENCE_RECONCILIATION_REQUIRED")
+            result = reconcile_res
         elif attempt.get("state") == "COMPLETED":
             raise ExternalIntelligenceError("INTELLIGENCE_RECEIPT_MISSING")
         else:
@@ -1270,7 +1791,7 @@ class ExternalIntelligenceSidecar:
                 raise ExternalIntelligenceError("INTELLIGENCE_RECONCILIATION_REQUIRED")
             raise ExternalIntelligenceError(result.status)
         try:
-            envelope = parse_external_execution_envelope(result.raw)
+            envelope = parse_external_execution_envelope(result.raw, context_pack=context_pack)
         except ExternalIntelligenceError:
             self.store.finish_attempt(
                 attempt, state="FAILED", transport_status="INTELLIGENCE_PARSE_FAILED"
@@ -1292,16 +1813,29 @@ class ExternalIntelligenceSidecar:
                 attempt, state="FAILED", transport_status="INTELLIGENCE_BINDING_MISMATCH"
             )
             raise ExternalIntelligenceError("INTELLIGENCE_BINDING_MISMATCH")
-        if envelope["worker_binding"] != {
-            "assigned_thread": "UNASSIGNED",
-            "persistent_thread": True,
-            "create_subagent": False,
-            "fallback_allowed": False,
-        }:
-            self.store.finish_attempt(
-                attempt, state="FAILED", transport_status="INTELLIGENCE_WORKER_BOUNDARY_VIOLATION"
-            )
-            raise ExternalIntelligenceError("INTELLIGENCE_WORKER_BOUNDARY_VIOLATION")
+
+        if request.get("schema") == REQUEST_SCHEMA_V2:
+            if envelope.get("selected_worker") != request.get("selected_worker"):
+                self.store.finish_attempt(
+                    attempt,
+                    state="FAILED",
+                    transport_status="INTELLIGENCE_WORKER_BOUNDARY_VIOLATION",
+                )
+                raise ExternalIntelligenceError("INTELLIGENCE_WORKER_BOUNDARY_VIOLATION")
+        else:
+            if envelope.get("worker_binding") != {
+                "assigned_thread": "UNASSIGNED",
+                "persistent_thread": True,
+                "create_subagent": False,
+                "fallback_allowed": False,
+            }:
+                self.store.finish_attempt(
+                    attempt,
+                    state="FAILED",
+                    transport_status="INTELLIGENCE_WORKER_BOUNDARY_VIOLATION",
+                )
+                raise ExternalIntelligenceError("INTELLIGENCE_WORKER_BOUNDARY_VIOLATION")
+
         envelope_sha256 = _sha256(_canonical_json(envelope))
         self.store.write_envelope(request, envelope)
         receipt_material = {
@@ -1311,8 +1845,20 @@ class ExternalIntelligenceSidecar:
             "envelope_sha256": envelope_sha256,
             "envelope": envelope,
         }
+        receipt_schema = (
+            RECEIPT_SCHEMA_V2 if request.get("schema") == REQUEST_SCHEMA_V2 else RECEIPT_SCHEMA_V1
+        )
+        telemetry = {
+            "compiler_input_bytes": len(prompt.encode("utf-8")),
+            "compiler_output_bytes": len(result.raw.encode("utf-8")),
+            "compiler_input_tokens": "NOT_OBSERVED",
+            "compiler_output_tokens": "NOT_OBSERVED",
+            "selected_worker": dict(request["selected_worker"])
+            if request.get("selected_worker")
+            else None,
+        }
         receipt = {
-            "schema": RECEIPT_SCHEMA,
+            "schema": receipt_schema,
             "receipt_id": _sha256(_canonical_json(receipt_material)),
             "status": "COMPLETED",
             "request": request,
@@ -1329,7 +1875,10 @@ class ExternalIntelligenceSidecar:
             "claim_ceiling": CLAIM_CEILING,
             "created_at": _now(),
             "reuse": False,
+            "telemetry": telemetry,
         }
+        if request.get("selected_worker"):
+            receipt["selected_worker"] = dict(request["selected_worker"])
         receipt["control_capsule"] = build_control_capsule(receipt)
         self.store.write_receipt(receipt)
         self.store.finish_attempt(attempt, state="COMPLETED", transport_status=result.status)
@@ -1338,26 +1887,48 @@ class ExternalIntelligenceSidecar:
 
 __all__ = [
     "ATTEMPT_SCHEMA",
+    "ATTEMPT_SCHEMA_V1",
+    "ATTEMPT_SCHEMA_V2",
     "CLAIM_CEILING",
     "CONTEXT_SCHEMA",
     "CONTROL_CAPSULE_SCHEMA",
+    "CONTROL_CAPSULE_SCHEMA_V1",
+    "CONTROL_CAPSULE_SCHEMA_V2",
+    "DIAGNOSIS_STATUSES",
     "ENVELOPE_SCHEMA",
-    "INTAKE_SCHEMA",
-    "RECEIPT_SCHEMA",
-    "REQUEST_SCHEMA",
+    "ENVELOPE_SCHEMA_V1",
+    "ENVELOPE_SCHEMA_V2",
     "ExternalIntelligenceError",
     "ExternalIntelligenceSidecar",
     "ExternalIntelligenceStore",
+    "INTAKE_SCHEMA",
     "IntakeDisposition",
     "MODEL_ADAPTATION_KEYS",
     "OpenCLIExternalIntelligenceTransport",
+    "RECEIPT_SCHEMA",
+    "RECEIPT_SCHEMA_V1",
+    "RECEIPT_SCHEMA_V2",
+    "REQUEST_SCHEMA",
+    "REQUEST_SCHEMA_V1",
+    "REQUEST_SCHEMA_V2",
+    "SELECTED_WORKER_KEYS",
+    "SOURCE_EVIDENCE_KINDS",
     "TransportResult",
+    "V2_ENVELOPE_TOP_KEYS",
     "build_context_pack",
     "build_control_capsule",
     "build_prompt",
+    "build_prompt_v2",
     "build_request",
+    "build_request_v2",
+    "compute_evidence_ref",
     "external_execution_envelope_contract",
+    "external_execution_envelope_v1_contract",
+    "external_execution_envelope_v2_contract",
     "normalize_intake",
     "parse_external_execution_envelope",
+    "parse_external_execution_envelope_v2",
     "project_refresh",
+    "validate_context_pack",
+    "validate_selected_worker",
 ]

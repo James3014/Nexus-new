@@ -38,10 +38,10 @@ from nexus.services.external_intelligence_closure import (
     ExternalIntelligenceClosureRuntime,
 )
 from nexus.services.external_intelligence_fanout import (
-    AdaptiveDeepSeekFanoutRuntime,
+    AdaptiveWorkerFanoutRuntime,
     FanoutStore,
     GitWorktreeAllocator,
-    OpenCodeDeepSeekTransport,
+    OpenCodeWorkerTransport,
 )
 
 SERVICE_LABEL = "com.nexus.external-intelligence"
@@ -350,7 +350,14 @@ def service_status(
         return result
     result.update({
         key: receipt.get(key)
-        for key in ("run_id", "pid", "heartbeat_at", "last_error", "started_at", "successful_polls")
+        for key in (
+            "run_id",
+            "pid",
+            "heartbeat_at",
+            "last_error",
+            "started_at",
+            "successful_polls",
+        )
     })
     if (
         receipt.get("source_path") not in (None, source_path)
@@ -543,12 +550,12 @@ def build_automation(config: ServiceConfig, repository: str) -> ExternalIntellig
         ),
         store=intel_store,
     )
-    c_runtime = AdaptiveDeepSeekFanoutRuntime(
+    c_runtime = AdaptiveWorkerFanoutRuntime(
         allocator=GitWorktreeAllocator(
             repo_root, config.workspace_root / "fanout" / _safe_repo(repository)
         ),
         store=FanoutStore(repo_state / "fanout"),
-        transport=OpenCodeDeepSeekTransport(executable=config.opencode_executable),
+        transport=OpenCodeWorkerTransport(executable=config.opencode_executable),
     )
     d_runtime = ExternalIntelligenceClosureRuntime(
         repository_root=repo_root,

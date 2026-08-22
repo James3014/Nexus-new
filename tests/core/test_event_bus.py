@@ -647,3 +647,34 @@ def test_attempt_transition_event_enforces_bounded_collection_ceiling():
             source_revision="src",
             contract_revision="contract",
         )
+
+
+def test_attempt_transition_event_additive_action_and_observation():
+    event = AttemptTransitionEvent(
+        task_id="t-add-1",
+        attempt_id="att-1",
+        sequence=1,
+        state="COMPLETED",
+        continuity_event_type="COMPLETED",
+        action="patch_apply_01",
+        observation="patch applied cleanly to 3 files",
+        source_revision="src-rev",
+        contract_revision="cnt-rev",
+    )
+    assert event.action == "patch_apply_01"
+    assert event.observation == "patch applied cleanly to 3 files"
+    d = event.to_dict()
+    assert d["action"] == "patch_apply_01"
+    assert d["observation"] == "patch applied cleanly to 3 files"
+
+    # Negative control: non-string action/observation must fail
+    with pytest.raises(ValueError, match="action must be a string"):
+        AttemptTransitionEvent(
+            task_id="t-add-1",
+            attempt_id="att-1",
+            sequence=1,
+            state="COMPLETED",
+            action=123,  # type: ignore
+            source_revision="src",
+            contract_revision="cnt",
+        )

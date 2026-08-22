@@ -10,11 +10,12 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import asdict, dataclass, field
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping, Optional
 
 from nexus.events.contracts import MAX_CONTINUITY_COLLECTION_ITEMS
 
 SCHEMA = "nexus.task_continuity.v1"
+REHYDRATION_PROJECTION_SCHEMA = "nexus.task_rehydration_projection.v1"
 EVENT_TYPES = frozenset({
     "PLAN_FORMED",
     "OBSERVATION_RECORDED",
@@ -417,6 +418,7 @@ def events_from_attempt_records(
             observation=payload.get("observation", ""),
             failure_reason=payload.get("reason", ""),
             strategy_delta=payload.get("strategy_delta", ""),
+            action=payload.get("action", ""),
             do_not_repeat=tuple_field(payload, "do_not_repeat", "rejected_strategies"),
             evidence_refs=tuple_field(payload, "evidence_refs"),
             unresolved_risks=tuple_field(payload, "unresolved_risks"),
@@ -491,4 +493,305 @@ def _project_tail(snapshot: ContinuitySnapshot, tail: list[ContinuityEvent]) -> 
         next_action=next_action,
         claim_ceiling=claim,
         failure_reason=failure_reason,
+    )
+
+
+@dataclass(frozen=True)
+class TaskRehydrationProjection:
+    schema: str
+    task_identity: dict[str, Any]
+    revision_binding: dict[str, Any]
+    authority_binding: dict[str, Any]
+    continuation: dict[str, Any]
+    current_task_action: Optional[dict[str, Any]]
+    candidate_binding: Optional[dict[str, Any]]
+    work_claim_binding: Optional[dict[str, Any]]
+    missing_durable_bindings: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema": self.schema,
+            "task_identity": dict(self.task_identity),
+            "revision_binding": dict(self.revision_binding),
+            "authority_binding": dict(self.authority_binding),
+            "continuation": dict(self.continuation),
+            "current_task_action": dict(self.current_task_action)
+            if self.current_task_action is not None
+            else None,
+            "candidate_binding": dict(self.candidate_binding)
+            if self.candidate_binding is not None
+            else None,
+            "work_claim_binding": dict(self.work_claim_binding)
+            if self.work_claim_binding is not None
+            else None,
+            "missing_durable_bindings": list(self.missing_durable_bindings),
+        }
+
+
+def build_rehydration_projection(
+    task_state: Mapping[str, Any],
+    continuity_snapshot: ContinuitySnapshot,
+    *,
+    task_action_envelope: Optional[Mapping[str, Any]] = None,
+    requested_attempt_id: Optional[str] = None,
+) -> TaskRehydrationProjection:
+    """Deterministically join durable task state and continuity snapshot into a read-only projection."""
+    continuity_snapshot.validate_integrity()
+
+    if not isinstance(task_state, Mapping):
+        raise ValueError("REHYDRATION_MALFORMED_STATE: task_state must be a mapping")
+
+    for key in ("candidate", "promotion_packet", "verified_receipt", "contract"):
+        val = task_state.get(key)
+        if val is not None and not isinstance(val, Mapping):
+            raise ValueError(f"REHYDRATION_MALFORMED_STATE: {key} must be a mapping")
+
+    work_claim = task_state.get("work_claim")
+    if work_claim is not None:
+        if not isinstance(work_claim, Mapping):
+            raise ValueError("REHYDRATION_WORK_CLAIM_MISMATCH: work_claim must be a mapping")
+        if not isinstance(work_claim.get("identity"), Mapping):
+            raise ValueError(
+                "REHYDRATION_WORK_CLAIM_MISMATCH: work_claim identity must be a mapping"
+            )
+
+    state_task_id = str(task_state.get("task_id") or "").strip()
+    snap_task_id = str(continuity_snapshot.task_id or "").strip()
+    if not state_task_id:
+        raise ValueError("REHYDRATION_TASK_MISMATCH: task_id missing in task state")
+    if snap_task_id and state_task_id != snap_task_id:
+        raise ValueError(
+            f"REHYDRATION_TASK_MISMATCH: state has {state_task_id}, continuity has {snap_task_id}"
+        )
+    task_id = state_task_id
+
+    state_attempt_id = str(task_state.get("attempt_id") or "").strip() or None
+    snap_attempt_id = str(continuity_snapshot.attempt_id or "").strip() or None
+    req_attempt_id = str(requested_attempt_id or "").strip() or None
+
+    target_attempt_id = req_attempt_id or state_attempt_id or snap_attempt_id
+    if not target_attempt_id:
+        raise ValueError("REHYDRATION_ATTEMPT_MISMATCH: attempt_id could not be resolved")
+
+    if req_attempt_id and state_attempt_id and req_attempt_id != state_attempt_id:
+        raise ValueError(
+            f"REHYDRATION_ATTEMPT_MISMATCH: requested {req_attempt_id}, state has {state_attempt_id}"
+        )
+    if snap_attempt_id and target_attempt_id != snap_attempt_id:
+        raise ValueError(
+            f"REHYDRATION_ATTEMPT_MISMATCH: target {target_attempt_id}, continuity has {snap_attempt_id}"
+        )
+
+    contract_val = task_state.get("contract")
+    contract: Mapping[str, Any] = contract_val if isinstance(contract_val, Mapping) else {}
+    state_source = str(
+        task_state.get("source_revision")
+        or task_state.get("controller_revision")
+        or contract.get("controller_revision")
+        or contract.get("source_revision")
+        or ""
+    ).strip()
+    snap_source = str(continuity_snapshot.source_revision or "").strip()
+    if (
+        state_source
+        and snap_source
+        and state_source != "unknown"
+        and snap_source != "unknown"
+        and state_source != snap_source
+    ):
+        raise ValueError(
+            f"REHYDRATION_SOURCE_REVISION_MISMATCH: state has {state_source}, continuity has {snap_source}"
+        )
+    effective_source = state_source or (snap_source if snap_source != "unknown" else "") or None
+
+    state_contract = str(
+        task_state.get("contract_revision")
+        or task_state.get("contract_hash")
+        or contract.get("contract_hash")
+        or contract.get("contract_revision")
+        or ""
+    ).strip()
+    snap_contract = str(continuity_snapshot.contract_revision or "").strip()
+    if (
+        state_contract
+        and snap_contract
+        and state_contract != "unknown"
+        and snap_contract != "unknown"
+        and state_contract != snap_contract
+    ):
+        raise ValueError(
+            f"REHYDRATION_CONTRACT_REVISION_MISMATCH: state has {state_contract}, continuity has {snap_contract}"
+        )
+    effective_contract = (
+        state_contract or (snap_contract if snap_contract != "unknown" else "") or None
+    )
+
+    work_claim_binding: Optional[dict[str, Any]] = None
+    if work_claim is not None:
+        claim_ident = work_claim["identity"]
+        if claim_ident.get("task_id") and str(claim_ident["task_id"]).strip() != task_id:
+            raise ValueError("REHYDRATION_WORK_CLAIM_MISMATCH: work_claim task_id mismatch")
+        if (
+            claim_ident.get("attempt_id")
+            and str(claim_ident["attempt_id"]).strip() != target_attempt_id
+        ):
+            raise ValueError("REHYDRATION_WORK_CLAIM_MISMATCH: work_claim attempt_id mismatch")
+        if (
+            claim_ident.get("source_hash")
+            and snap_source
+            and snap_source != "unknown"
+            and str(claim_ident["source_hash"]).strip() != snap_source
+        ):
+            raise ValueError("REHYDRATION_WORK_CLAIM_MISMATCH: work_claim source_hash mismatch")
+        work_claim_binding = {
+            "claim_id": work_claim.get("claim_id"),
+            "generation": work_claim.get("generation"),
+            "fencing_token": work_claim.get("fencing_token"),
+            "status": work_claim.get("status"),
+            "claimed_at": work_claim.get("claimed_at"),
+            "identity": dict(claim_ident),
+        }
+
+    candidate_binding: Optional[dict[str, Any]] = None
+    if isinstance(task_action_envelope, Mapping) and "candidate" in task_action_envelope:
+        cand_envelope = task_action_envelope.get("candidate")
+        if isinstance(cand_envelope, Mapping):
+            cand_commit = cand_envelope.get("candidate_commit_sha")
+            cand_tree = cand_envelope.get("candidate_tree_sha")
+            cand_state = cand_envelope.get("candidate_state_hash")
+            rec_hash = cand_envelope.get("verified_receipt_hash")
+            if cand_commit or cand_tree or cand_state or rec_hash:
+                candidate_binding = {
+                    "candidate_commit_sha": cand_commit,
+                    "candidate_tree_sha": cand_tree,
+                    "candidate_state_hash": cand_state,
+                    "verified_receipt_hash": rec_hash,
+                }
+    else:
+        cand_val = task_state.get("candidate")
+        cand_dict: Mapping[str, Any] = cand_val if isinstance(cand_val, Mapping) else {}
+        packet_val = task_state.get("promotion_packet")
+        packet: Mapping[str, Any] = packet_val if isinstance(packet_val, Mapping) else {}
+        receipt_val = task_state.get("verified_receipt")
+        verified_receipt: Mapping[str, Any] = (
+            receipt_val if isinstance(receipt_val, Mapping) else {}
+        )
+        cand_commit = (
+            task_state.get("candidate_commit_sha")
+            or cand_dict.get("candidate_commit_sha")
+            or packet.get("candidate_commit_sha")
+        )
+        cand_tree = (
+            task_state.get("candidate_tree_sha")
+            or cand_dict.get("candidate_tree_sha")
+            or packet.get("candidate_tree_sha")
+        )
+        cand_state = (
+            task_state.get("candidate_state_hash")
+            or cand_dict.get("candidate_state_hash")
+            or packet.get("candidate_state_hash")
+        )
+        rec_hash = (
+            task_state.get("verified_receipt_hash")
+            or cand_dict.get("verified_receipt_hash")
+            or packet.get("verified_receipt_hash")
+            or verified_receipt.get("receipt_hash")
+        )
+        if cand_commit or cand_tree or cand_state or rec_hash:
+            candidate_binding = {
+                "candidate_commit_sha": cand_commit,
+                "candidate_tree_sha": cand_tree,
+                "candidate_state_hash": cand_state,
+                "verified_receipt_hash": rec_hash,
+            }
+
+    authority_binding: dict[str, Any] = {}
+    for key in (
+        "authority_revision",
+        "lifecycle_revision",
+        "authority_epoch",
+        "standing_grant_id",
+        "approval_id",
+        "task_card_path",
+        "task_card_hash",
+        "execution_lane",
+    ):
+        val = task_state.get(key)
+        if val is None and key in ("task_card_path", "task_card_hash"):
+            val = contract.get(key)
+        if val is not None:
+            authority_binding[key] = val
+
+    packet_obj_val = task_state.get("promotion_packet")
+    packet_obj: Mapping[str, Any] = packet_obj_val if isinstance(packet_obj_val, Mapping) else {}
+    phase_receipts = task_state.get("phase_receipts") or packet_obj.get("phase_receipts")
+    if phase_receipts is not None:
+        authority_binding["phase_receipts"] = (
+            list(phase_receipts) if isinstance(phase_receipts, (list, tuple)) else phase_receipts
+        )
+
+    missing_bindings: list[str] = []
+    effective_completed_actions = (
+        list(continuity_snapshot.applied_changes) if continuity_snapshot.applied_changes else None
+    )
+    if not effective_completed_actions:
+        missing_bindings.append("completed_actions")
+
+    effective_verified_observations = (
+        list(continuity_snapshot.verified_facts) if continuity_snapshot.verified_facts else None
+    )
+    if not effective_verified_observations:
+        missing_bindings.append("verified_observations")
+
+    if not task_state.get("authority_revision"):
+        missing_bindings.append("authority_revision")
+
+    if not phase_receipts:
+        missing_bindings.append("phase_receipts")
+
+    continuation_action = (
+        continuity_snapshot.next_action
+        or (
+            task_action_envelope.get("next_action")
+            if isinstance(task_action_envelope, Mapping)
+            else ""
+        )
+        or ""
+    )
+    continuation = {
+        "failure_reason": continuity_snapshot.failure_reason
+        or str(task_state.get("error") or task_state.get("reason") or ""),
+        "failed_attempts": list(continuity_snapshot.failed_attempts),
+        "rejected_strategies": list(continuity_snapshot.rejected_strategies),
+        "do_not_repeat": list(continuity_snapshot.rejected_strategies),
+        "unresolved_risks": list(continuity_snapshot.unresolved_risks),
+        "unknowns": list(continuity_snapshot.unknowns),
+        "evidence_refs": list(continuity_snapshot.evidence_refs),
+        "next_action": continuation_action,
+        "claim_ceiling": continuity_snapshot.claim_ceiling
+        or str(task_state.get("claim_ceiling") or ""),
+    }
+    if effective_completed_actions is not None:
+        continuation["completed_actions"] = effective_completed_actions
+    if effective_verified_observations is not None:
+        continuation["verified_observations"] = effective_verified_observations
+
+    return TaskRehydrationProjection(
+        schema=REHYDRATION_PROJECTION_SCHEMA,
+        task_identity={
+            "task_id": task_id,
+            "attempt_id": target_attempt_id,
+        },
+        revision_binding={
+            "source_revision": effective_source,
+            "contract_revision": effective_contract,
+        },
+        authority_binding=authority_binding,
+        continuation=continuation,
+        current_task_action=dict(task_action_envelope)
+        if task_action_envelope is not None
+        else None,
+        candidate_binding=candidate_binding,
+        work_claim_binding=work_claim_binding,
+        missing_durable_bindings=tuple(missing_bindings),
     )
