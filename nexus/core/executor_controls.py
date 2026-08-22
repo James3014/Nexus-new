@@ -79,7 +79,7 @@ class ExecutorControls:
                         )
                         skill_receipts.append(receipt)
 
-                    def non_execution_receipt(reason: str, detail: str = "") -> CapabilityReceipt:
+                    def non_execution_receipt(reason: str) -> CapabilityReceipt:
                         elapsed_ms = max(0, int((time.monotonic() - cap_start) * 1000))
                         outcome = {
                             "phase_executed": phase,
@@ -87,8 +87,6 @@ class ExecutorControls:
                             "error": reason,
                             "timestamp": datetime.now(timezone.utc).isoformat(),
                         }
-                        if detail:
-                            outcome["detail"] = detail[:300]
                         return CapabilityReceipt(
                             capability_name=cap_name,
                             selected=True,
@@ -129,8 +127,12 @@ class ExecutorControls:
                             )
                             cap_receipt = executor_fn(_plan_with_ctx, task_desc)
                         except Exception as exc:
-                            logger.warning("ExecutorControls: real executor for %s failed: %s", cap_name, exc)
-                            return non_execution_receipt("executor_exception", str(exc))
+                            logger.warning(
+                                "ExecutorControls: real executor for %s failed (%s)",
+                                cap_name,
+                                type(exc).__name__,
+                            )
+                            return non_execution_receipt("executor_exception")
 
                         # Preserve the real executor's invocation truth even when it is False.
                         elapsed_ms = max(0, int((time.monotonic() - cap_start) * 1000))
@@ -150,6 +152,17 @@ class ExecutorControls:
                             existing["controller_wall_time_ms"] = elapsed_ms
                         existing["claimable"] = False
 
+                        # Executor-produced receipts are authoritative for a matching skill_id.
+                        # Keep selected-only placeholders only when the executor did not report
+                        # that skill, preventing contradictory used=False/used=True states here.
+                        executor_skill_receipts = list(cap_receipt.skill_receipts or [])
+                        executor_skill_ids = {receipt.skill_id for receipt in executor_skill_receipts}
+                        merged_skill_receipts = [
+                            receipt
+                            for receipt in skill_receipts
+                            if receipt.skill_id not in executor_skill_ids
+                        ] + executor_skill_receipts
+
                         return CapabilityReceipt(
                             capability_name=cap_receipt.capability_name,
                             selected=True,
@@ -159,7 +172,7 @@ class ExecutorControls:
                                 bool(cap_receipt.gate_passed) if cap_receipt.invoked else False
                             ),
                             outcome=dict(cap_receipt.outcome or {}),
-                            skill_receipts=skill_receipts + list(cap_receipt.skill_receipts or []),
+                            skill_receipts=merged_skill_receipts,
                             telemetries=existing,
                             timestamp=datetime.now(timezone.utc).isoformat(),
                         )
