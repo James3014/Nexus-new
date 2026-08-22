@@ -130,6 +130,15 @@ missing card once, then read back its hash. A delegated worker, reviewer, or
 launcher must not create, widen, or recursively bootstrap the card that would
 authorize its own work.
 
+For a fresh coordinator/chat/agent session, load and validate the canonical
+standing-grant receipt before evaluating an already-authorized GitHub action.
+The receipt context `thread_id` is the Owner-issued durable coordination-scope
+identifier; a replaceable chat, provider, or agent session identifier is
+transport provenance and must not replace that authority identity. Rehydrate
+the durable coordination scope from the validated receipt, then re-check Owner,
+coordinator, repository, Goal, action, expiry/revocation, and receipt integrity.
+A session change alone is not a new Owner authorization boundary.
+
 ## GitHub collaboration and local lifecycle domains
 
 - A GitHub PR Candidate is an Issue-branch commit governed by the Ready Issue,
