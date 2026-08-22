@@ -126,6 +126,36 @@ def test_d2_skills_router_route_candidates_safety_blocked_force_preserves_full_p
     assert len(captured_plans) == 1
     plan = captured_plans[0]
     assert plan.phases == ["S", "P", "X", "D", "R", "A", "C"]
+    assert plan.constraints["selection_authority"] == "CapabilityPlanner"
     assert "X" in plan.phases
     assert "D" in plan.phases
     assert "A" in plan.phases
+
+
+def test_route_candidates_rejects_non_planner_projection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from nexus.core.belief_contracts import CapabilityExecutionPlan
+
+    forged = CapabilityExecutionPlan(
+        plan_id="forged",
+        task_id="forged",
+        phases=["S", "P", "R", "C"],
+        required_capabilities=[],
+        constraints={"selection_authority": "LegacySelector"},
+    )
+    monkeypatch.setattr(
+        "nexus.core.capability_selector.CapabilitySelector.select_capabilities",
+        lambda *_args, **_kwargs: forged,
+    )
+    executed = []
+    monkeypatch.setattr(
+        "nexus.core.executor_controls.ExecutorControls.execute_plan",
+        lambda *_args, **_kwargs: executed.append(True) or [],
+    )
+
+    router = SkillsRouter(
+        project_root=str(tmp_path), run_dir=str(tmp_path / ".nexus" / "runs" / "forged")
+    )
+    assert router.route_candidates("R", {"task_id": "forged", "task_desc": "probe"}) == []
+    assert executed == []

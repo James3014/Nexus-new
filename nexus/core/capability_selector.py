@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -15,7 +14,14 @@ logger = logging.getLogger(__name__)
 
 
 class CapabilitySelector:
-    """🧠 The single source of truth decision engine that dynamically generates execution plans."""
+    """Legacy compatibility projection of CapabilityPlanner-owned decisions.
+
+    This class intentionally retains the historical ``CapabilityExecutionPlan``
+    shape for callers that have not migrated yet.  It is not a route or
+    capability-selection authority: the selected set and execution depth come
+    from ``CapabilityPlanner`` and this facade only projects capabilities that
+    have an explicit canonical/legacy identity relationship.
+    """
 
     def __init__(
         self, registry: Optional[CapabilityRegistry] = None, project_root: Optional[str] = None
@@ -60,108 +66,52 @@ class CapabilitySelector:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
-        from nexus.core.lite_route_oracle import should_use_lite_route
+        from nexus.engine.capability_planner import CapabilityPlanner
+        from nexus.services.mainchain_route_freeze import resolve_alias
 
-        lane_name = signal_set.metadata.get("lane") or signal_set.metadata.get("lane_name")
-        lite_decision = should_use_lite_route(
-            risk_level=signal_set.risk_level,
-            impact_complexity=signal_set.impact_complexity,
-            belief_confidence=signal_set.belief_confidence,
-            lane_name=lane_name,
+        risk_score = {
+            "LOW": 10,
+            "NORMAL": 30,
+            "HIGH": 70,
+            "CRITICAL": 95,
+        }.get(signal_set.risk_level, 30)
+        route_features = {
+            "risk_score": risk_score,
+            "impact_complexity": signal_set.impact_complexity,
+            "adjusted_root_cause_confidence": signal_set.belief_confidence,
+            "candidate_count": int(signal_set.metadata.get("candidate_count") or 1),
+            "is_cross_module_task": bool(signal_set.metadata.get("is_cross_module_task", False)),
+            "has_hard_signal": bool(signal_set.metadata.get("has_hard_signal", False)),
+        }
+        planner_route = {
+            "recommended_flow": str(signal_set.metadata.get("recommended_flow") or ""),
+            "route_features": route_features,
+            "prompt_compression": bool(signal_set.metadata.get("prompt_compression", False)),
+            "local_enabled": bool(signal_set.metadata.get("local_enabled", False)),
+        }
+        planner_plan = CapabilityPlanner().plan(
+            task_desc=signal_set.task_desc,
+            task_type=str(signal_set.metadata.get("task_type") or "legacy_compat"),
+            route=planner_route,
+            codeintel=dict(signal_set.codeintel_evidence or {}),
+            skills=[{"skill_id": skill_id} for skill_id in signal_set.skills_triggered],
         )
+        if planner_plan.signal_snapshot.get("route_truth_source") != "CapabilityPlanner":
+            raise ValueError("legacy_projection_requires_capability_planner_truth")
 
-        required_caps: List[str] = []
+        canonical_selected = set(planner_plan.selected_capabilities)
+        required_caps = []
+        for info in self.registry.list_all_capabilities():
+            legacy_name = str(info.name)
+            if resolve_alias(legacy_name) in canonical_selected:
+                required_caps.append(legacy_name)
+
+        phases = (
+            ["S", "P", "R", "C"]
+            if planner_plan.execution_depth == "LIGHT"
+            else ["S", "P", "X", "D", "R", "A", "C"]
+        )
         forbidden_rules = verdict.get("forbidden_skills_rules", [])
-
-        # 2. 智慧能力動態選擇演算法 (Autonomic Adaptive Selection)
-        if lite_decision.is_lite:
-            # 🚀 輕量路由模式下，只保留最核心的 S-P-R-C 骨幹能力，跳過重度沙盒與多重自癒模組
-            required_caps = [
-                "mempalace",
-                "autonomic_router",
-                "belief",
-                "repair_loop",
-                "learning_closure",
-            ]
-            phases = [
-                p
-                for p in ["S", "P", "X", "D", "R", "A", "C"]
-                if p not in lite_decision.skipped_phases
-            ]
-        else:
-            phases = ["S", "P", "X", "D", "R", "A", "C"]
-            query_lower = signal_set.task_desc.lower()
-
-            # S (Scope)
-            required_caps.append("mempalace")
-            required_caps.append("zero_trust_v2_behavior")
-            required_caps.append("nightshift_runner_service")
-            if signal_set.risk_level in ("HIGH", "CRITICAL"):
-                required_caps.append("policy_capability_gate")
-                required_caps.append("entropy_guard_v2")
-
-            # P (Plan)
-            required_caps.append("autonomic_router")
-            if signal_set.impact_complexity > 3.0:
-                required_caps.append("predictive_auditor")
-            if signal_set.risk_level in ("HIGH", "CRITICAL"):
-                required_caps.append("spec_guarded")
-            if "formula" in query_lower or "rule" in query_lower:
-                required_caps.append("decision_formula_engine")
-
-            # X (Recon)
-            required_caps.append("codeintel")
-            required_caps.append("lancedb")
-            if "research" in query_lower or "source" in query_lower or "citation" in query_lower:
-                required_caps.append("research")
-                required_caps.append("research_and_source_discipline")
-            if signal_set.belief_confidence < 0.5:
-                required_caps.append("aos_oracle")
-            if "refresh" in query_lower or "schedule" in query_lower:
-                required_caps.append("learn_refresh_service")
-                required_caps.append("learn_scheduler_service")
-            if signal_set.belief_confidence > 0.8 and "optimize" in query_lower:
-                required_caps.append("reflex_loop")
-
-            # D (Decide)
-            required_caps.append("belief")
-            if signal_set.belief_confidence < 0.65 or signal_set.risk_level == "CRITICAL":
-                required_caps.append("autoreason")
-
-            # R (Repair)
-            if signal_set.impact_complexity > 3.5 or signal_set.risk_level == "CRITICAL":
-                required_caps.append("hyper_sprint")
-                required_caps.append("swarm_multi_agent")
-            else:
-                required_caps.append("repair_loop")
-
-            if "background" in query_lower or "jobs" in query_lower:
-                required_caps.append("drone")
-            if "long" in query_lower or "overnight" in query_lower:
-                required_caps.append("nightshift")
-            if (
-                "battle" in query_lower
-                or "campaign" in query_lower
-                or signal_set.impact_complexity > 4.5
-            ):
-                required_caps.append("battle_swarm")
-            if signal_set.risk_level == "CRITICAL":
-                required_caps.append("sandbox_runner")
-            required_caps.append("dual_loop")
-
-            # A (Audit)
-            required_caps.append("artifact_gate")
-            required_caps.append("claim_gate")
-            if signal_set.risk_level == "CRITICAL" or signal_set.impact_complexity > 4.0:
-                required_caps.append("ultra_review")
-
-            # C (Closure)
-            required_caps.append("learning_closure")
-            required_caps.append("metabolism_resume")
-            required_caps.append("mfp_gate")
-            required_caps.append("promotion_engine")
-            required_caps.append("subagent_outcome_service")
-            required_caps.append("attempt_settlement_service")
 
         # 2.7: M4 — CodeIntel/JIT 獨立查詢 (X/Recon 階段)
         if getattr(signal_set, "codeintel_query_available", False):
@@ -171,28 +121,10 @@ class CapabilitySelector:
             except Exception as e:
                 logger.debug("[CapabilitySelector] codeintel query failed: %s", e)
 
-        # 3. 過濾與過濾黑名單規則 (Filter Out Blocked capabilities)
-        # + NEXUS_SKIP_* env flag 支援 (N16-N22 M2 驗證用)
-        final_caps: List[str] = []
-        for cap_name in required_caps:
-            info = self.registry.get_capability(cap_name)
-            if not info:
-                continue
-            # NEXUS_SKIP_{CAP_NAME}=1 跳過 (M2 關閉測試)
-            skip_env = f"NEXUS_SKIP_{cap_name.upper()}"
-            if os.environ.get(skip_env) == "1":
-                logger.debug("[Selector] Cap %s skipped via %s=1", cap_name, skip_env)
-                continue
-            # 檢查是否違反宮殿黑名單規則
-            is_forbidden = False
-            for rule in forbidden_rules:
-                if cap_name in str(rule).lower():
-                    is_forbidden = True
-                    break
-            if is_forbidden:
-                logger.warning("🛡️ [Selector] Cap %s skipped due to forbid rule", cap_name)
-                continue
-            final_caps.append(cap_name)
+        # 3. Compatibility projection only.  Legacy skip/forbid controls may
+        # block the whole request through CapabilityConstraints above, but they
+        # may not mutate CapabilityPlanner's selected set after planning.
+        final_caps: List[str] = list(dict.fromkeys(required_caps))
 
         # 4. 動態裝配 SkillSlots (P7 實作)
         skill_slots = {}
@@ -208,7 +140,7 @@ class CapabilitySelector:
                     signal_set.risk_level in ("HIGH", "CRITICAL")
                     or signal_set.impact_complexity > 3.5
                 )
-                and not lite_decision.is_lite
+                and planner_plan.execution_depth != "LIGHT"
             ):
                 slots.append(
                     SkillSlot(
@@ -243,6 +175,9 @@ class CapabilitySelector:
                 "belief_confidence": signal_set.belief_confidence,
                 "impact_complexity": signal_set.impact_complexity,
                 "forbidden_rules": forbidden_rules,
+                "selection_authority": "CapabilityPlanner",
+                "canonical_selected_capabilities": list(planner_plan.selected_capabilities),
+                "execution_depth": planner_plan.execution_depth,
             },
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
