@@ -10,6 +10,8 @@ non_authority: Personal learning state only; never repository, product, routing,
 
 This ledger tracks James's engineering judgment development. It is intentionally separate from Nexus's system `Learning Closure Matrix` and `docs/agents/LEARNING_WRITEBACK_OVERLAY.md`.
 
+Use `OWNER_ENGINEERING_CASEBOOK.md` as the reusable real-case teaching library. The Casebook stores cases; this Ledger stores James's demonstrated judgment and learning progression.
+
 ## Mastery scale
 
 - **L0 — 未接觸**: no meaningful exposure yet.
@@ -18,7 +20,7 @@ This ledger tracks James's engineering judgment development. It is intentionally
 - **L3 — 能在案例中判斷**: can apply it to a new real case and choose the right engineering conclusion.
 - **L4 — 能主動提出反證**: can identify what evidence would disprove the current conclusion or expose a hidden failure.
 
-Do not promote mastery from explanation alone. Prefer evidence from real predictions, decisions, corrections, or falsification proposals.
+Do not promote mastery from explanation alone. Prefer evidence from real predictions, decisions, corrections, teach-back, or falsification proposals.
 
 ## Current learning priorities
 
@@ -48,6 +50,70 @@ This is a conservative starting baseline derived from recent Nexus discussions. 
 | Timeout / lost acknowledgement / reconciliation | L0 | Relevant to current Agent workflows but not yet practiced here | Examine one real OpenCode/Agy timeout and decide safe retry conditions |
 | SSOT / duplicate authority | L1 | Central Nexus theme and recent Skill boundary discussion | Given two apparent decision sources, identify which one may actually decide and which is projection |
 
+## Prediction & Misconception Register
+
+Purpose: preserve the judgment *before* the answer is known. This prevents hindsight from making a lesson look easier than it was and lets later sessions measure transfer.
+
+Record only meaningful predictions that test engineering judgment. Do not quiz James on routine syntax, trivia, or facts that can be looked up mechanically.
+
+| ID | Date | Real case | Concept tested | James prediction before evidence | Evidence/result | Misconception or correct heuristic | Transfer status | Re-test trigger |
+|---|---|---|---|---|---|---|---|---|
+| P-001 | 2026-08-22 | Learning program initialization | failure clustering | Not yet captured | Historical Nexus example: 73 failures clustered into 4 failure domains | Baseline only; no demonstrated prediction yet | UNTESTED | Next natural multi-failure incident |
+| P-002 | 2026-08-22 | Learning program initialization | capability vs authority | Not yet captured | Historical MiMo example: strong semantic frontier plus tool/scope hard failure kept mutation ceiling low | Baseline only; no demonstrated prediction yet | UNTESTED | Next model-promotion or dispatch-authority decision |
+| P-003 | 2026-08-22 | Learning program initialization | revision-bound evidence | Not yet captured | Historical passing suite remained bound to its tested HEAD | Baseline only; no demonstrated prediction yet | UNTESTED | Next Candidate -> merge -> post-merge verification flow |
+
+### Prediction capture rules
+
+When a real task presents a useful learning moment:
+
+1. Ask at most one short prediction question before revealing decisive evidence.
+2. Make the choices reflect real engineering alternatives; avoid obvious answer cues.
+3. Record the answer only when it teaches something reusable.
+4. After evidence is inspected, classify the result as:
+   - `CORRECT_TRANSFER` — correct reasoning on a materially new case;
+   - `CORRECT_BUT_CUED` — answer was correct but heavily scaffolded;
+   - `MISCONCEPTION_FOUND` — wrong model or missing distinction was exposed;
+   - `EVIDENCE_INSUFFICIENT` — evidence did not actually resolve the question;
+   - `UNTESTED` — baseline only, no prediction captured.
+5. Preserve wrong predictions verbatim or faithfully paraphrased. Never rewrite them after seeing the answer.
+6. A single correct prediction does not automatically promote to L3; prefer transfer across at least one new case.
+
+## Spaced Recall Queue
+
+Purpose: revisit concepts through *new real work*, not through repetitive classroom questions.
+
+| Concept | Current mastery | Last meaningful exposure | Next recall mode | Trigger condition | Status |
+|---|---|---|---|---|---|
+| Failure clustering | L1 | 2026-08-22 baseline | Prediction | A task has many failures or symptoms | WAIT_FOR_NATURAL_CASE |
+| Capability != reliability != authority | L1 | 2026-08-22 baseline | Prediction + short teach-back | Selecting/promoting a model after mixed evidence | WAIT_FOR_NATURAL_CASE |
+| Revision-bound evidence | L1 | 2026-08-22 baseline | Identify exact Candidate/merged HEAD | PR or Candidate moves revisions | WAIT_FOR_NATURAL_CASE |
+| Fail-closed | L1 | 2026-08-22 baseline | Propose falsification | Permission/admission/claim gate is changed or reviewed | WAIT_FOR_NATURAL_CASE |
+| Test oracle quality | L0 | none | Guided question | A suite passes and acceptance depends on what it truly proves | WAIT_FOR_NATURAL_CASE |
+| Timeout/reconciliation | L0 | none | Scenario prediction | Real worker timeout, disconnect, uncertain acknowledgement, or retry | WAIT_FOR_NATURAL_CASE |
+| Idempotency | L0 | none | Scenario prediction | Duplicate dispatch, webhook, retry, or external side effect appears | WAIT_FOR_NATURAL_CASE |
+
+### Spaced recall rules
+
+- Prefer natural triggers from active Nexus work over calendar-based quizzes.
+- Do not re-teach a concept merely because time passed.
+- If James demonstrates `CORRECT_TRANSFER` twice on materially different cases, reduce prompting and move toward silent application.
+- If James reaches L4, only revisit when a substantially harder variant appears or evidence shows regression.
+- If a concept has not appeared naturally for a long period and remains strategically important, a short monthly challenge may be used.
+
+## Teach-back evidence
+
+Use teach-back sparingly. A teach-back is useful when James can explain a distinction in plain language after seeing evidence.
+
+Record:
+
+- concept;
+- case;
+- James's explanation in concise paraphrase;
+- whether the explanation captured the decisive boundary;
+- whether it transferred to a new case later.
+
+Teach-back alone can support L2, but not L3 or L4 without application or falsification evidence.
+
 ## Learning-event template
 
 Append only when there is a meaningful change in demonstrated judgment.
@@ -59,8 +125,21 @@ Append only when there is a meaningful change in demonstrated judgment.
 - **Evidence inspected:** exact evidence that resolved the question.
 - **Result:** what was actually true.
 - **Reusable rule:** one concise engineering principle.
+- **Teach-back:** optional plain-language explanation from James.
+- **Prediction classification:** `CORRECT_TRANSFER` / `CORRECT_BUT_CUED` / `MISCONCEPTION_FOUND` / `EVIDENCE_INSUFFICIENT` / not applicable.
 - **Demonstrated level:** L0-L4, with a reason.
 - **Next challenge:** the smallest harder variant worth practicing.
+
+## Promotion rules
+
+Use conservative evidence to change mastery:
+
+- **L0 -> L1:** encountered the concept in a real case.
+- **L1 -> L2:** can explain the decisive distinction without merely repeating terminology.
+- **L2 -> L3:** applies the distinction correctly to a materially new real case.
+- **L3 -> L4:** proactively proposes a credible falsification, hidden failure, or evidence gap before being told.
+
+Demotion is allowed if repeated new cases show the mental model is not stable. Record the reason; do not treat mastery as permanent merely because a prior row was green.
 
 ## Update rules
 
@@ -70,4 +149,6 @@ Append only when there is a meaningful change in demonstrated judgment.
 - Preserve wrong predictions when useful; do not rewrite history after seeing the answer.
 - If new evidence contradicts an earlier learning conclusion, update the entry and state why.
 - Prefer concrete Issue/PR/revision references over generic prose.
+- Prefer new cases over repeating the same demonstration fixture.
+- Do not turn every engineering interaction into a quiz; execution remains primary.
 - This ledger never authorizes implementation, approval, integration, merge, or production claims.
