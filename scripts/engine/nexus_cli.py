@@ -1543,7 +1543,9 @@ def learn_ingest(source, source_file, topic, task_desc, difficulty, report_file,
             )
             is_light = planner_plan.execution_depth == "LIGHT"
         except Exception:
-            is_light = difficulty.lower() == "easy"
+            # Fail closed to the full/heavy path when canonical Planner truth
+            # is unavailable. Difficulty is an input signal, not route authority.
+            is_light = False
 
     if is_light:
         click.echo("⚡ [Learn:Ingest] Autonomic Router triggered LIGHT_ROUTE. Skipping heavy ingestion.")
@@ -1727,7 +1729,9 @@ def learn_converge(
             )
             is_light = planner_plan.execution_depth == "LIGHT"
         except Exception:
-            is_light = difficulty.lower() == "easy"
+            # Fail closed to the full/heavy path when canonical Planner truth
+            # is unavailable. Difficulty is an input signal, not route authority.
+            is_light = False
 
     if is_light:
         click.echo("⚡ [Learn:Converge] Autonomic Router triggered LIGHT_ROUTE. Skipping heavy convergence.")

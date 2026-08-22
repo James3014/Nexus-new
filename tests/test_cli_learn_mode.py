@@ -257,6 +257,84 @@ def test_learn_converge_route_depth_comes_from_capability_planner(tmp_path, monk
     assert '"semantic_status": "SKIPPED_LIGHT_ROUTE"' in result.output
 
 
+def test_learn_ingest_planner_failure_does_not_fallback_to_easy_light_route(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
+    monkeypatch.setattr("nexus.core.router.SkillsRouter.route_candidates", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        "nexus.engine.capability_planner.CapabilityPlanner.plan",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("planner unavailable")),
+    )
+
+    class _Result:
+        payload = {
+            "status": "SUCCESS",
+            "semantic_status": "VERIFIED",
+            "claims_count": 1,
+            "error": "",
+        }
+
+    monkeypatch.setattr(nexus_cli, "run_learn_ingest", lambda *args, **kwargs: _Result())
+    monkeypatch.setattr(nexus_cli, "enforce_learn_ingest_semantic_contract", lambda _result: None)
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "learn:ingest",
+            "--source",
+            "planner-failure-probe",
+            "--task-desc",
+            "simple learning task",
+            "--difficulty",
+            "easy",
+            "--output-json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "SKIPPED_LIGHT_ROUTE" not in result.output
+    assert '"semantic_status": "VERIFIED"' in result.output
+
+
+def test_learn_converge_planner_failure_does_not_fallback_to_easy_light_route(tmp_path, monkeypatch):
+    runner = CliRunner()
+    monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
+    monkeypatch.setenv("NEXUS_LIGHT_ROUTE", "0")
+    monkeypatch.setattr("nexus.core.router.SkillsRouter.route_candidates", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        "nexus.engine.capability_planner.CapabilityPlanner.plan",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("planner unavailable")),
+    )
+
+    class _Result:
+        payload = {
+            "status": "SUCCESS",
+            "semantic_status": "VERIFIED",
+            "claims_count": 1,
+            "error": "",
+        }
+
+    monkeypatch.setattr(nexus_cli, "run_learn_converge", lambda *args, **kwargs: _Result())
+
+    result = runner.invoke(
+        nexus,
+        [
+            "nexus",
+            "learn:converge",
+            "--topic",
+            "planner-failure-probe",
+            "--task-desc",
+            "simple convergence task",
+            "--difficulty",
+            "easy",
+            "--output-json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "SKIPPED_LIGHT_ROUTE" not in result.output
+    assert '"semantic_status": "VERIFIED"' in result.output
+
+
 def test_learn_ingest_fails_closed_when_semantic_contract_unverified(tmp_path, monkeypatch):
     runner = CliRunner()
     monkeypatch.setattr(nexus_cli, "repo_root", tmp_path)
