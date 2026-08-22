@@ -377,11 +377,13 @@ def _read_all_fd(fd: int, size: int) -> bytes:
     return b"".join(chunks)
 
 
-def _load_receipt_at(path: Path, *, now: datetime | None = None) -> StandingGrantReceipt:
-    """Validate one receipt from an explicit path using fd-based O_NOFOLLOW reads.
+def _load_receipt_structural_at(path: Path) -> StandingGrantReceipt:
+    """Validate receipt structure/integrity without granting current authority.
 
-    This is a test/internal helper; production callers must use
-    :func:`load_standing_grant_receipt` against the canonical path only.
+    This helper intentionally does not evaluate issuance, expiry, or revocation.
+    It exists so read-only operator inspection can distinguish a structurally
+    valid but inactive receipt from malformed/tampered state without creating a
+    second authorization evaluator.
     """
     fd = _open_receipt_fd(path)
     try:
@@ -431,9 +433,18 @@ def _load_receipt_at(path: Path, *, now: datetime | None = None) -> StandingGran
     if canonical_autonomy_hash(body) != stored_hash:
         raise StandingGrantReceiptError("TAMPERED")
     try:
-        receipt = StandingGrantReceipt.model_validate(parsed)
+        return StandingGrantReceipt.model_validate(parsed)
     except Exception as exc:
         raise StandingGrantReceiptError("MALFORMED") from exc
+
+
+def _load_receipt_at(path: Path, *, now: datetime | None = None) -> StandingGrantReceipt:
+    """Validate one receipt from an explicit path using fd-based O_NOFOLLOW reads.
+
+    This is a test/internal helper; production callers must use
+    :func:`load_standing_grant_receipt` against the canonical path only.
+    """
+    receipt = _load_receipt_structural_at(path)
     try:
         now = now if now is not None else datetime.now(timezone.utc)
         if not isinstance(now, datetime) or now.tzinfo is None:
@@ -460,6 +471,67 @@ def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def inspect_standing_grant_receipt(*, now: datetime | None = None) -> dict[str, Any]:
+    """Return a non-authorizing status projection for the canonical receipt.
+
+    The projection never substitutes for :func:`load_standing_grant_receipt` or
+    the semantic evaluator.  It exposes only bounded grant metadata needed by a
+    fresh coordinator/operator to understand whether durable authority can be
+    rehydrated.
+    """
+    effective_now = now if now is not None else datetime.now(timezone.utc)
+    if not isinstance(effective_now, datetime) or effective_now.tzinfo is None:
+        raise StandingGrantReceiptError("EXACT_TIMEZONE_REQUIRED")
+    try:
+        st = DEFAULT_RECEIPT_PATH.lstat()
+    except FileNotFoundError:
+        return {"schema": "nexus.standing_grant_inspection.v1", "status": "MISSING"}
+    except OSError:
+        return {
+            "schema": "nexus.standing_grant_inspection.v1",
+            "status": "INVALID",
+            "reason": "RECEIPT_READ_FAILED",
+        }
+    try:
+        if stat.S_ISLNK(st.st_mode):
+            raise StandingGrantReceiptError("NOT_REGULAR_FILE")
+        _assert_dir_chain_safe(DEFAULT_RECEIPT_PATH.parent, create=False)
+        receipt = _load_receipt_structural_at(DEFAULT_RECEIPT_PATH)
+    except StandingGrantReceiptError as exc:
+        return {
+            "schema": "nexus.standing_grant_inspection.v1",
+            "status": "INVALID",
+            "reason": str(exc),
+        }
+
+    context = receipt.context
+    if context.revoked_at is not None:
+        status = "REVOKED"
+    elif effective_now < context.issued_at:
+        status = "NOT_YET_VALID"
+    elif effective_now >= context.expires_at:
+        status = "EXPIRED"
+    else:
+        status = "VALID"
+    return {
+        "schema": "nexus.standing_grant_inspection.v1",
+        "status": status,
+        "grant_id": receipt.grant_id,
+        "receipt_hash": receipt.receipt_hash,
+        "owner_id": context.owner_id,
+        "coordinator_id": context.coordinator_id,
+        "repository_id": context.repository.repository_id,
+        "canonical_remote": context.repository.canonical_remote,
+        "coordination_scope_id": context.thread_id,
+        "goal_id": context.goal_id,
+        "allowed_actions": [action.value for action in context.allowed_actions],
+        "issued_at": context.issued_at.isoformat(),
+        "expires_at": context.expires_at.isoformat(),
+        "revoked_at": context.revoked_at.isoformat() if context.revoked_at else None,
+        "revocation_reason": context.revocation_reason,
+    }
+
+
 def load_standing_grant_receipt(*, now: datetime | None = None) -> StandingGrantReceipt | None:
     """Load and validate the single canonical receipt, or fail closed.
 
@@ -479,6 +551,72 @@ def load_standing_grant_receipt(*, now: datetime | None = None) -> StandingGrant
         raise StandingGrantReceiptError("NOT_REGULAR_FILE")
     _assert_dir_chain_safe(DEFAULT_RECEIPT_PATH.parent, create=False)
     return _load_receipt_at(DEFAULT_RECEIPT_PATH, now=now)
+
+
+def rehydrate_durable_standing_grant_request(
+    *,
+    requested_owner_id: str,
+    requested_coordinator_id: str,
+    repository: RepositoryIdentity,
+    goal_id: str,
+    action: AutonomyActionClass,
+    requested_at: datetime,
+) -> tuple[StandingGrantReceipt, StandingGrantRequest]:
+    """Bind a fresh coordinator session to the receipt's durable scope.
+
+    ``StandingGrantContext.thread_id`` is treated here as the durable
+    coordination-scope identifier issued by the Owner.  Replaceable chat,
+    provider, or agent session identifiers are transport provenance and must not
+    be substituted for that authority identifier.  All other identity, action,
+    validity, and hash checks remain enforced by the canonical loader/evaluator.
+    """
+    receipt = load_standing_grant_receipt(now=requested_at)
+    if receipt is None:
+        raise StandingGrantReceiptError("RECEIPT_MISSING")
+    context = receipt.context
+    try:
+        request = StandingGrantRequest(
+            owner_id=requested_owner_id,
+            coordinator_id=requested_coordinator_id,
+            repository=repository,
+            thread_id=context.thread_id,
+            goal_id=goal_id,
+            action=action,
+            requested_at=requested_at,
+            context_hash=context.context_hash,
+        )
+    except Exception as exc:
+        raise StandingGrantReceiptError("REQUEST_INVALID") from exc
+    return receipt, request
+
+
+def evaluate_rehydrated_durable_standing_grant(
+    *,
+    requested_owner_id: str,
+    requested_coordinator_id: str,
+    repository: RepositoryIdentity,
+    goal_id: str,
+    action: AutonomyActionClass,
+    requested_at: datetime,
+    platform_approval_required: bool = False,
+) -> StandingGrantDecision:
+    """Evaluate a durable grant after rehydrating its coordination scope."""
+    try:
+        receipt, request = rehydrate_durable_standing_grant_request(
+            requested_owner_id=requested_owner_id,
+            requested_coordinator_id=requested_coordinator_id,
+            repository=repository,
+            goal_id=goal_id,
+            action=action,
+            requested_at=requested_at,
+        )
+    except StandingGrantReceiptError:
+        return evaluate_standing_grant_decision({}, {})
+    return evaluate_standing_grant_decision(
+        receipt.context,
+        request,
+        platform_approval_required=platform_approval_required,
+    )
 
 
 def evaluate_durable_standing_grant(
