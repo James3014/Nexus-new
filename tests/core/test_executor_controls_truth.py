@@ -209,7 +209,9 @@ def test_router_learning_records_failed_for_non_invocation(monkeypatch, tmp_path
             pass
 
         def select_capabilities(self, *_args, **_kwargs):
-            return _plan()
+            plan = _plan()
+            plan.constraints["selection_authority"] = "CapabilityPlanner"
+            return plan
 
     monkeypatch.setattr(signal_module, "CapabilitySignalSet", _SignalSet)
     monkeypatch.setattr(constraints_module, "CapabilityConstraints", _Constraints)
