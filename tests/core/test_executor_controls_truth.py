@@ -10,6 +10,7 @@ from nexus.core import executor_controls as controls_module
 from nexus.core.belief_contracts import (
     CapabilityExecutionPlan,
     CapabilityReceipt,
+    SkillReceipt,
     SkillSlot,
 )
 from nexus.core.executor_controls import ExecutorControls
@@ -101,9 +102,11 @@ def test_missing_executor_fails_closed_and_selected_skill_is_not_used(monkeypatc
     assert skill_receipt.outcome["reason"] == "skill_use_not_evidenced"
 
 
-def test_executor_exception_fails_closed(monkeypatch, tmp_path):
+def test_executor_exception_fails_closed_without_persisting_exception_text(monkeypatch, tmp_path):
+    secret_marker = "provider-token=do-not-persist"
+
     def exploding_executor(_plan, _task_desc):
-        raise RuntimeError("boom")
+        raise RuntimeError(secret_marker)
 
     monkeypatch.setattr(controls_module, "get_executor", lambda _name: exploding_executor)
 
@@ -112,8 +115,54 @@ def test_executor_exception_fails_closed(monkeypatch, tmp_path):
     assert receipt.invoked is False
     assert receipt.gate_passed is False
     assert receipt.outcome["error"] == "executor_exception"
-    assert "boom" in receipt.outcome["detail"]
+    assert "detail" not in receipt.outcome
+    assert secret_marker not in json.dumps(receipt.outcome, sort_keys=True)
+    assert receipt.telemetries["missing_evidence_reason"] == "executor_exception"
     assert receipt.telemetries["telemetry_source"] == "unavailable"
+
+
+def test_executor_skill_receipt_replaces_matching_selected_only_placeholder(monkeypatch, tmp_path):
+    slot = SkillSlot(role="SCOUT", skill_id="issue-488-scout")
+
+    def invoked_executor(plan: CapabilityExecutionPlan, _task_desc: str) -> CapabilityReceipt:
+        return CapabilityReceipt(
+            capability_name=plan.required_capabilities[0],
+            selected=True,
+            invoked=True,
+            evidence_id="ev_cap_physical",
+            gate_passed=True,
+            outcome={"execution_state": "SUCCESS"},
+            skill_receipts=[
+                SkillReceipt(
+                    skill_id="issue-488-scout",
+                    selected=True,
+                    used=True,
+                    evidence_id="ev_skill_physical",
+                    outcome={"execution_state": "SUCCESS"},
+                )
+            ],
+            telemetries={
+                "wall_time_ms": 1,
+                "overhead_ms": 1,
+                "token_usage": 0,
+                "provider_costs": 0.0,
+                "model_calls": 0,
+                "telemetry_source": "measured",
+                "claimable": False,
+            },
+        )
+
+    monkeypatch.setattr(controls_module, "get_executor", lambda _name: invoked_executor)
+
+    receipt = ExecutorControls(str(tmp_path), registry=_Registry()).execute_plan(
+        _plan(slots=[slot])
+    )[0]
+
+    matching = [r for r in receipt.skill_receipts if r.skill_id == "issue-488-scout"]
+    assert len(matching) == 1
+    assert matching[0].used is True
+    assert matching[0].evidence_id == "ev_skill_physical"
+    assert matching[0].outcome["execution_state"] == "SUCCESS"
 
 
 @pytest.mark.parametrize("gate_capability", ["artifact_gate", "claim_gate"])
