@@ -119,11 +119,15 @@ def test_tampered_policy_cannot_alter_plan(tmp_path: Path) -> None:
     assert _normal_plan(tmp_path).required_capabilities == list(_baseline_signature(tmp_path)[0])
 
 
-def test_skip_behavior_preserved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """NEXUS_SKIP_* controls still apply after legacy policy authority removal."""
+def test_legacy_skip_cannot_remove_planner_required_capability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """NEXUS_SKIP_* is not a post-Planner capability-selection authority."""
     monkeypatch.setenv("NEXUS_SKIP_MEMPALACE", "1")
     plan = _normal_plan(tmp_path)
-    assert "mempalace" not in plan.required_capabilities
+    assert plan.constraints["selection_authority"] == "CapabilityPlanner"
+    assert "mempalace_gate" in plan.constraints["canonical_selected_capabilities"]
+    assert "mempalace" in plan.required_capabilities
 
 
 def test_legacy_route_authority_seam_removed() -> None:

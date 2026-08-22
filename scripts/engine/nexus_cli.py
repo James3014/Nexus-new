@@ -1514,10 +1514,8 @@ def learn_ingest(source, source_file, topic, task_desc, difficulty, report_file,
     if task_desc:
         try:
             from nexus.core.router import SkillsRouter
-            from nexus.core.capability_signal_set import CapabilitySignalSet
-            from nexus.core.capability_constraints import CapabilityConstraints
-            from nexus.core.capability_selector import CapabilitySelector
-            
+            from nexus.engine.capability_planner import CapabilityPlanner
+
             router = SkillsRouter(project_root=str(repo_root))
             risk_level = "LOW" if difficulty.lower() == "easy" else "NORMAL"
             complexity = 1.0 if difficulty.lower() == "easy" else (2.5 if difficulty.lower() == "medium" else 4.5)
@@ -1528,18 +1526,22 @@ def learn_ingest(source, source_file, topic, task_desc, difficulty, report_file,
                 "impact_complexity": complexity,
                 "tenant_id": "default",
             }
-            # 驅動 router 進行動態評估
+            # Keep skill-routing compatibility effects, but route/depth truth is
+            # consumed directly from the canonical CapabilityPlanner.
             router.route_candidates("R", router_context)
-            
-            signal_set = CapabilitySignalSet.from_context(router_context, str(repo_root), belief_engine=router.p_loop)
-            constraints = CapabilityConstraints(str(repo_root), mem_palace=router.mem_palace, firewall=router.firewall)
-            selector = CapabilitySelector()
-            plan = selector.select_capabilities(signal_set, constraints)
-            
-            if hasattr(plan, "phases"):
-                is_light = "X" not in plan.phases and "D" not in plan.phases
-            elif isinstance(plan, dict) and "phases" in plan:
-                is_light = "X" not in plan["phases"] and "D" not in plan["phases"]
+            planner_plan = CapabilityPlanner().plan(
+                task_desc=task_desc,
+                task_type="learn_ingest",
+                route={
+                    "route_features": {
+                        "risk_score": 10 if risk_level == "LOW" else 30,
+                        "impact_complexity": complexity,
+                        "adjusted_root_cause_confidence": 0.7,
+                        "candidate_count": 1,
+                    }
+                },
+            )
+            is_light = planner_plan.execution_depth == "LIGHT"
         except Exception:
             is_light = difficulty.lower() == "easy"
 
@@ -1698,10 +1700,8 @@ def learn_converge(
     if not is_light and task_desc:
         try:
             from nexus.core.router import SkillsRouter
-            from nexus.core.capability_signal_set import CapabilitySignalSet
-            from nexus.core.capability_constraints import CapabilityConstraints
-            from nexus.core.capability_selector import CapabilitySelector
-            
+            from nexus.engine.capability_planner import CapabilityPlanner
+
             router = SkillsRouter(project_root=str(repo_root))
             risk_level = "LOW" if difficulty.lower() == "easy" else "NORMAL"
             complexity = 1.0 if difficulty.lower() == "easy" else (2.5 if difficulty.lower() == "medium" else 4.5)
@@ -1713,16 +1713,19 @@ def learn_converge(
                 "tenant_id": "default",
             }
             router.route_candidates("R", router_context)
-            
-            signal_set = CapabilitySignalSet.from_context(router_context, str(repo_root), belief_engine=router.p_loop)
-            constraints = CapabilityConstraints(str(repo_root), mem_palace=router.mem_palace, firewall=router.firewall)
-            selector = CapabilitySelector()
-            plan = selector.select_capabilities(signal_set, constraints)
-            
-            if hasattr(plan, "phases"):
-                is_light = "X" not in plan.phases and "D" not in plan.phases
-            elif isinstance(plan, dict) and "phases" in plan:
-                is_light = "X" not in plan["phases"] and "D" not in plan["phases"]
+            planner_plan = CapabilityPlanner().plan(
+                task_desc=task_desc,
+                task_type="learn_converge",
+                route={
+                    "route_features": {
+                        "risk_score": 10 if risk_level == "LOW" else 30,
+                        "impact_complexity": complexity,
+                        "adjusted_root_cause_confidence": 0.7,
+                        "candidate_count": 1,
+                    }
+                },
+            )
+            is_light = planner_plan.execution_depth == "LIGHT"
         except Exception:
             is_light = difficulty.lower() == "easy"
 
