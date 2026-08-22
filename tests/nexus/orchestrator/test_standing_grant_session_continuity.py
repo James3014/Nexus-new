@@ -8,7 +8,11 @@ from pathlib import Path
 import pytest
 
 import nexus.orchestrator.standing_grant_store as standing_grant_store
-from nexus.contracts.autonomy_goal import AutonomyActionClass, RepositoryIdentity, StandingGrantContext
+from nexus.contracts.autonomy_goal import (
+    AutonomyActionClass,
+    RepositoryIdentity,
+    StandingGrantContext,
+)
 from nexus.orchestrator.autonomy_policy import StandingGrantOutcome
 from nexus.orchestrator.standing_grant_store import (
     StandingGrantReceipt,
@@ -131,7 +135,10 @@ def test_rehydration_does_not_widen_other_identity_dimensions(monkeypatch, tmp_p
     }
     kwargs[field] = value
 
-    assert evaluate_rehydrated_durable_standing_grant(**kwargs).outcome is StandingGrantOutcome.OUT_OF_SCOPE
+    assert (
+        evaluate_rehydrated_durable_standing_grant(**kwargs).outcome
+        is StandingGrantOutcome.OUT_OF_SCOPE
+    )
 
 
 def test_rehydration_rejects_wrong_repository_and_ungranted_action(monkeypatch, tmp_path):
@@ -213,8 +220,8 @@ def test_cli_issue_renew_revoke_preserves_scope_and_actions(monkeypatch, tmp_pat
     path = tmp_path / "operator" / "standing-grant.json"
     monkeypatch.setattr(standing_grant_store, "DEFAULT_RECEIPT_PATH", path)
 
-    assert standing_grant_cli.main(
-        [
+    assert (
+        standing_grant_cli.main([
             "issue",
             "--grant-id",
             "grant-issue",
@@ -238,8 +245,9 @@ def test_cli_issue_renew_revoke_preserves_scope_and_actions(monkeypatch, tmp_pat
             (NOW - timedelta(minutes=5)).isoformat(),
             "--expires-at",
             (NOW + timedelta(hours=1)).isoformat(),
-        ]
-    ) == 0
+        ])
+        == 0
+    )
     capsys.readouterr()
     issued = load_standing_grant_receipt(now=NOW)
     assert issued is not None
@@ -249,8 +257,8 @@ def test_cli_issue_renew_revoke_preserves_scope_and_actions(monkeypatch, tmp_pat
     )
     issued_hash = issued.receipt_hash
 
-    assert standing_grant_cli.main(
-        [
+    assert (
+        standing_grant_cli.main([
             "renew",
             "--grant-id",
             "grant-renew",
@@ -260,8 +268,9 @@ def test_cli_issue_renew_revoke_preserves_scope_and_actions(monkeypatch, tmp_pat
             NOW.isoformat(),
             "--expires-at",
             (NOW + timedelta(hours=2)).isoformat(),
-        ]
-    ) == 0
+        ])
+        == 0
+    )
     capsys.readouterr()
     renewed = load_standing_grant_receipt(now=NOW + timedelta(minutes=1))
     assert renewed is not None
@@ -274,8 +283,8 @@ def test_cli_issue_renew_revoke_preserves_scope_and_actions(monkeypatch, tmp_pat
     assert renewed.context.allowed_actions == issued.context.allowed_actions
     renewed_hash = renewed.receipt_hash
 
-    assert standing_grant_cli.main(
-        [
+    assert (
+        standing_grant_cli.main([
             "revoke",
             "--grant-id",
             "grant-revoke",
@@ -285,8 +294,9 @@ def test_cli_issue_renew_revoke_preserves_scope_and_actions(monkeypatch, tmp_pat
             (NOW + timedelta(minutes=1)).isoformat(),
             "--reason",
             "owner-request",
-        ]
-    ) == 0
+        ])
+        == 0
+    )
     capsys.readouterr()
     inspection = inspect_standing_grant_receipt(now=NOW + timedelta(minutes=2))
     assert inspection["status"] == "REVOKED"

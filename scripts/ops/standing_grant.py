@@ -18,12 +18,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from nexus.contracts.autonomy_goal import (
+from nexus.contracts.autonomy_goal import (  # noqa: E402
     AutonomyActionClass,
     RepositoryIdentity,
     StandingGrantContext,
 )
-from nexus.orchestrator.standing_grant_store import (
+from nexus.orchestrator.standing_grant_store import (  # noqa: E402
     StandingGrantReceipt,
     StandingGrantReceiptError,
     inspect_standing_grant_receipt,
@@ -47,7 +47,9 @@ def _action(value: str) -> AutonomyActionClass:
         return AutonomyActionClass(value)
     except ValueError as exc:
         allowed = ", ".join(item.value for item in AutonomyActionClass)
-        raise argparse.ArgumentTypeError(f"unknown action {value!r}; choose one of: {allowed}") from exc
+        raise argparse.ArgumentTypeError(
+            f"unknown action {value!r}; choose one of: {allowed}"
+        ) from exc
 
 
 def _print(payload: object) -> None:
@@ -99,14 +101,12 @@ def _renew(args: argparse.Namespace) -> int:
         supersedes_grant_hash=current.receipt_hash,
     )
     write_standing_grant_receipt(receipt, expected_receipt_hash=current.receipt_hash)
-    _print(
-        {
-            "status": "RENEWED",
-            "grant_id": receipt.grant_id,
-            "receipt_hash": receipt.receipt_hash,
-            "supersedes_grant_hash": current.receipt_hash,
-        }
-    )
+    _print({
+        "status": "RENEWED",
+        "grant_id": receipt.grant_id,
+        "receipt_hash": receipt.receipt_hash,
+        "supersedes_grant_hash": current.receipt_hash,
+    })
     return 0
 
 
@@ -133,14 +133,12 @@ def _revoke(args: argparse.Namespace) -> int:
         supersedes_grant_hash=current.receipt_hash,
     )
     write_standing_grant_receipt(receipt, expected_receipt_hash=current.receipt_hash)
-    _print(
-        {
-            "status": "REVOKED",
-            "grant_id": receipt.grant_id,
-            "receipt_hash": receipt.receipt_hash,
-            "supersedes_grant_hash": current.receipt_hash,
-        }
-    )
+    _print({
+        "status": "REVOKED",
+        "grant_id": receipt.grant_id,
+        "receipt_hash": receipt.receipt_hash,
+        "supersedes_grant_hash": current.receipt_hash,
+    })
     return 0
 
 

@@ -486,7 +486,7 @@ def inspect_standing_grant_receipt(*, now: datetime | None = None) -> dict[str, 
         st = DEFAULT_RECEIPT_PATH.lstat()
     except FileNotFoundError:
         return {"schema": "nexus.standing_grant_inspection.v1", "status": "MISSING"}
-    except OSError as exc:
+    except OSError:
         return {
             "schema": "nexus.standing_grant_inspection.v1",
             "status": "INVALID",
