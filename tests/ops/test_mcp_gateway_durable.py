@@ -951,7 +951,8 @@ def test_same_fence_different_request_is_ledger_conflict_and_fields_are_physical
         )
 
 
-def test_legacy_status_receipt_is_not_a_bundle_child_and_reads_nothing():
+# Preserve the base pytest node ID while asserting the newer bundle-only rule.
+def test_positive_gateway_status_reads_only_fixed_gateway_service():
     request = _gateway_request("status")
     calls = []
     with pytest.raises(g.GatewayContractError):
@@ -1387,7 +1388,8 @@ def test_cli_rejects_caller_selected_gateway_store(monkeypatch, tmp_path):
         g.main()
 
 
-def test_legacy_preflight_receipt_is_not_a_bundle_child():
+# Preserve the base pytest node ID while asserting the newer bundle-only rule.
+def test_cli_dispatch_real_preflight_binds_matching_action_and_effect():
     request = _gateway_request("preflight")
     with pytest.raises(g.GatewayContractError):
         g.dispatch_gateway_cli(
