@@ -5,6 +5,7 @@ It describes the only identities that the durable adapter may act on and keeps
 the state machine/hash rules deterministic.  The adapter in
 ``scripts/ops/mcp_gateway_durable.py`` is the sole effect owner.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -29,7 +30,9 @@ STDOUT = "/Users/jameschen/Library/Logs/Nexus/gateway.log"
 STDERR = "/Users/jameschen/Library/Logs/Nexus/gateway.err.log"
 ENDPOINT = "http://127.0.0.1:8766"
 INTERPRETER = "/Users/jameschen/Workspace/Nexus-new/.venv/bin/python"
-INTERPRETER_TARGET = "/Users/jameschen/.local/share/uv/python/cpython-3.14.0-macos-aarch64-none/bin/python3.14"
+INTERPRETER_TARGET = (
+    "/Users/jameschen/.local/share/uv/python/cpython-3.14.0-macos-aarch64-none/bin/python3.14"
+)
 INTERPRETER_SHA256 = "c89af0b037c601180919ca5fd8a936bd2568cbb4976f91a208c10f54c17a1b78"
 ENTRYPOINT = "scripts/ops/nexus_mcp_gateway_http.py"
 SCHEMA = "nexus.gateway.deployment.v1"
@@ -90,7 +93,8 @@ class StrictRecord:
         names = {item.name for item in fields(cls)}
         unknown = set(value) - names
         required = {
-            item.name for item in fields(cls)
+            item.name
+            for item in fields(cls)
             if item.default is MISSING and item.default_factory is MISSING
         }
         if unknown or not required.issubset(value):
@@ -136,12 +140,24 @@ def _strict_types(value: Any) -> None:
         return
     for item in fields(value):
         raw = getattr(value, item.name)
-        numeric_fields = {"uid", "gid", "pid", "sequence"} | ({"mode"} if type(value).__name__ == "StableArtifactIdentity" else set())
-        if item.name in numeric_fields and raw is not None and (not isinstance(raw, int) or isinstance(raw, bool)):
+        numeric_fields = {"uid", "gid", "pid", "sequence"} | (
+            {"mode"} if type(value).__name__ == "StableArtifactIdentity" else set()
+        )
+        if (
+            item.name in numeric_fields
+            and raw is not None
+            and (not isinstance(raw, int) or isinstance(raw, bool))
+        ):
             raise ContractError(f"{type(value).__name__}.{item.name} type mismatch")
-        if item.name in {"clean", "loaded", "client_bound", "token_bound"} and not isinstance(raw, bool):
+        if item.name in {"clean", "loaded", "client_bound", "token_bound"} and not isinstance(
+            raw, bool
+        ):
             raise ContractError(f"{type(value).__name__}.{item.name} type mismatch")
-        if item.name in {"required_actions", "observed_actions", "pending_actions"} and not isinstance(raw, tuple):
+        if item.name in {
+            "required_actions",
+            "observed_actions",
+            "pending_actions",
+        } and not isinstance(raw, tuple):
             raise ContractError(f"{type(value).__name__}.{item.name} type mismatch")
 
 
@@ -367,7 +383,9 @@ class GatewayDeploymentRequest(StrictRecord):
         "quiescence": QuiescenceEvidence.model_validate,
         "effect_class": EffectClass,
         "postflight": PostflightIdentity.model_validate,
-        "stable_artifact": lambda value: None if value is None else StableArtifactIdentity.model_validate(value),
+        "stable_artifact": lambda value: (
+            None if value is None else StableArtifactIdentity.model_validate(value)
+        ),
     }
 
 
@@ -376,14 +394,20 @@ def validate_repository(profile: RepositoryProfile) -> RepositoryProfile:
         raise ContractError("repository profile must be typed")
     if profile.repository != REPOSITORY or profile.remote != REMOTE or profile.label != LABEL:
         raise ContractError("repository/service identity mismatch")
-    for value, name in ((profile.plist, "plist"), (profile.stdout, "stdout"), (profile.stderr, "stderr")):
+    for value, name in (
+        (profile.plist, "plist"),
+        (profile.stdout, "stdout"),
+        (profile.stderr, "stderr"),
+    ):
         _absolute(value, name)
     if profile.endpoint != ENDPOINT:
         raise ContractError("endpoint mismatch")
     return profile
 
 
-def validate_profile(profile: DeploymentProfile, *, expected: DeploymentProfile | None = None) -> DeploymentProfile:
+def validate_profile(
+    profile: DeploymentProfile, *, expected: DeploymentProfile | None = None
+) -> DeploymentProfile:
     if not isinstance(profile, DeploymentProfile):
         raise ContractError("profile must be typed")
     validate_repository(profile.repository)
@@ -400,11 +424,23 @@ def validate_profile(profile: DeploymentProfile, *, expected: DeploymentProfile 
         raise ContractError("entrypoint mismatch")
     _hash(profile.entrypoint_sha256, "entrypoint hash")
     _hash(profile.interpreter.sha256, "interpreter hash")
-    if profile.interpreter.path != INTERPRETER or profile.interpreter.resolved_path != INTERPRETER_TARGET:
+    if (
+        profile.interpreter.path != INTERPRETER
+        or profile.interpreter.resolved_path != INTERPRETER_TARGET
+    ):
         raise ContractError("interpreter mismatch")
-    if not isinstance(profile.interpreter.uid, int) or isinstance(profile.interpreter.uid, bool) or not isinstance(profile.interpreter.gid, int) or isinstance(profile.interpreter.gid, bool):
+    if (
+        not isinstance(profile.interpreter.uid, int)
+        or isinstance(profile.interpreter.uid, bool)
+        or not isinstance(profile.interpreter.gid, int)
+        or isinstance(profile.interpreter.gid, bool)
+    ):
         raise ContractError("interpreter ownership mismatch")
-    if profile.interpreter.mode != "lrwxr-xr-x" or profile.interpreter.uid != 501 or profile.interpreter.gid != 20:
+    if (
+        profile.interpreter.mode != "lrwxr-xr-x"
+        or profile.interpreter.uid != 501
+        or profile.interpreter.gid != 20
+    ):
         raise ContractError("interpreter mode/ownership mismatch")
     if profile.trust_class == "" or not isinstance(profile.trust_class, str):
         raise ContractError("trust class missing")
@@ -426,7 +462,9 @@ def compare_profiles(current: DeploymentProfile, desired: DeploymentProfile) -> 
     return current == desired
 
 
-def validate_desired_profile(current: DeploymentProfile, desired: DeploymentProfile) -> DeploymentProfile:
+def validate_desired_profile(
+    current: DeploymentProfile, desired: DeploymentProfile
+) -> DeploymentProfile:
     validate_profile(current)
     validate_profile(desired)
     if current.git.head == desired.git.head and current.git.tree == desired.git.tree:
@@ -437,12 +475,30 @@ def validate_desired_profile(current: DeploymentProfile, desired: DeploymentProf
 _EDGES: dict[DeploymentState, set[DeploymentState]] = {
     DeploymentState.REQUESTED: {DeploymentState.PREFLIGHTED, DeploymentState.BLOCKED},
     DeploymentState.PREFLIGHTED: {DeploymentState.STARTED, DeploymentState.BLOCKED},
-    DeploymentState.STARTED: {DeploymentState.SERVICE_OBSERVED, DeploymentState.UNCERTAIN_EFFECT, DeploymentState.BLOCKED},
-    DeploymentState.SERVICE_OBSERVED: {DeploymentState.IDENTITY_VERIFIED, DeploymentState.UNCERTAIN_EFFECT},
-    DeploymentState.IDENTITY_VERIFIED: {DeploymentState.CLIENT_BOUND, DeploymentState.UNCERTAIN_EFFECT},
+    DeploymentState.STARTED: {
+        DeploymentState.SERVICE_OBSERVED,
+        DeploymentState.UNCERTAIN_EFFECT,
+        DeploymentState.BLOCKED,
+    },
+    DeploymentState.SERVICE_OBSERVED: {
+        DeploymentState.IDENTITY_VERIFIED,
+        DeploymentState.UNCERTAIN_EFFECT,
+    },
+    DeploymentState.IDENTITY_VERIFIED: {
+        DeploymentState.CLIENT_BOUND,
+        DeploymentState.UNCERTAIN_EFFECT,
+    },
     DeploymentState.CLIENT_BOUND: {DeploymentState.VERIFIED, DeploymentState.UNCERTAIN_EFFECT},
-    DeploymentState.UNCERTAIN_EFFECT: {DeploymentState.ROLLBACK_STARTED, DeploymentState.PREFLIGHTED, DeploymentState.BLOCKED},
-    DeploymentState.ROLLBACK_STARTED: {DeploymentState.ROLLED_BACK, DeploymentState.UNCERTAIN_EFFECT, DeploymentState.BLOCKED},
+    DeploymentState.UNCERTAIN_EFFECT: {
+        DeploymentState.ROLLBACK_STARTED,
+        DeploymentState.PREFLIGHTED,
+        DeploymentState.BLOCKED,
+    },
+    DeploymentState.ROLLBACK_STARTED: {
+        DeploymentState.ROLLED_BACK,
+        DeploymentState.UNCERTAIN_EFFECT,
+        DeploymentState.BLOCKED,
+    },
 }
 
 
@@ -457,9 +513,18 @@ def transition(previous: DeploymentState | str, current: DeploymentState | str) 
 
 
 def _validate_rollback(capture: RollbackCapture) -> None:
-    for value, name in ((capture.plist_sha256, "rollback plist"), (capture.plist_bytes_sha256, "rollback bytes"), (capture.artifact_sha256, "rollback artifact"), (capture.source_sha256, "rollback source")):
+    for value, name in (
+        (capture.plist_sha256, "rollback plist"),
+        (capture.plist_bytes_sha256, "rollback bytes"),
+        (capture.artifact_sha256, "rollback artifact"),
+        (capture.source_sha256, "rollback source"),
+    ):
         _hash(value, name)
-    if not isinstance(capture.plist_bytes_hex, str) or not capture.plist_bytes_hex or len(capture.plist_bytes_hex) % 2:
+    if (
+        not isinstance(capture.plist_bytes_hex, str)
+        or not capture.plist_bytes_hex
+        or len(capture.plist_bytes_hex) % 2
+    ):
         raise ContractError("rollback bytes missing")
     try:
         payload = bytes.fromhex(capture.plist_bytes_hex)
@@ -472,9 +537,15 @@ def _validate_rollback(capture: RollbackCapture) -> None:
         raise ContractError("rollback fixed identity mismatch")
     if capture.root != CURRENT_PROFILE.git.root or capture.source_root != CURRENT_PROFILE.git.root:
         raise ContractError("rollback source root mismatch")
-    if capture.source_head != CURRENT_PROFILE.git.head or capture.source_tree != CURRENT_PROFILE.git.tree:
+    if (
+        capture.source_head != CURRENT_PROFILE.git.head
+        or capture.source_tree != CURRENT_PROFILE.git.tree
+    ):
         raise ContractError("rollback source revision mismatch")
-    for value, name in ((capture.program_arguments_hash, "rollback program arguments"), (capture.environment_hash, "rollback environment")):
+    for value, name in (
+        (capture.program_arguments_hash, "rollback program arguments"),
+        (capture.environment_hash, "rollback environment"),
+    ):
         _hash(value, name)
     try:
         parsed = plistlib.loads(payload)
@@ -483,7 +554,12 @@ def _validate_rollback(capture: RollbackCapture) -> None:
     if not isinstance(parsed, Mapping) or parsed.get("Label") != LABEL:
         raise ContractError("rollback plist label mismatch")
     args = parsed.get("ProgramArguments")
-    if not isinstance(args, list) or len(args) != 2 or args[0] != INTERPRETER or not str(args[1]).endswith("/" + ENTRYPOINT):
+    if (
+        not isinstance(args, list)
+        or len(args) != 2
+        or args[0] != INTERPRETER
+        or not str(args[1]).endswith("/" + ENTRYPOINT)
+    ):
         raise ContractError("rollback program arguments mismatch")
     if parsed.get("WorkingDirectory") != CURRENT_PROFILE.git.root:
         raise ContractError("rollback working directory mismatch")
@@ -492,18 +568,27 @@ def _validate_rollback(capture: RollbackCapture) -> None:
     env = parsed.get("EnvironmentVariables")
     if env != {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}:
         raise ContractError("rollback environment mismatch")
-    if canonical_hash(args) != capture.program_arguments_hash or canonical_hash(env) != capture.environment_hash:
+    if (
+        canonical_hash(args) != capture.program_arguments_hash
+        or canonical_hash(env) != capture.environment_hash
+    ):
         raise ContractError("rollback identity hash mismatch")
 
 
-def validate_request(request: GatewayDeploymentRequest | Mapping[str, Any]) -> GatewayDeploymentRequest:
+def validate_request(
+    request: GatewayDeploymentRequest | Mapping[str, Any],
+) -> GatewayDeploymentRequest:
     if isinstance(request, Mapping):
         request = GatewayDeploymentRequest.model_validate(request)
     if not isinstance(request, GatewayDeploymentRequest):
         raise ContractError("request must be typed")
     if request.schema != SCHEMA:
         raise ContractError("schema mismatch")
-    for value, name in ((request.request_id, "request id"), (request.idempotency_fence, "idempotency fence"), (request.operation, "operation")):
+    for value, name in (
+        (request.request_id, "request id"),
+        (request.idempotency_fence, "idempotency fence"),
+        (request.operation, "operation"),
+    ):
         _id(value, name)
     operations = {
         "preflight": EffectClass.PREFLIGHT,
@@ -517,20 +602,37 @@ def validate_request(request: GatewayDeploymentRequest | Mapping[str, Any]) -> G
         "rollback": EffectClass.GATEWAY_ROLLBACK,
         "gateway-rollback": EffectClass.GATEWAY_ROLLBACK,
     }
-    if request.operation not in operations or request.effect_class is not operations[request.operation]:
+    if (
+        request.operation not in operations
+        or request.effect_class is not operations[request.operation]
+    ):
         raise ContractError("operation/effect substitution")
     validate_profile(request.current, expected=CURRENT_PROFILE)
     validate_profile(request.desired, expected=DESIRED_PROFILE)
     validate_desired_profile(request.current, request.desired)
     validate_current_identity(request.current_identity, request.current)
-    if not isinstance(request.authority, AuthorityReceipt) or not request.authority.issuer or not request.authority.receipt_id:
+    if (
+        not isinstance(request.authority, AuthorityReceipt)
+        or not request.authority.issuer
+        or not request.authority.receipt_id
+    ):
         raise ContractError("authority identity missing")
-    if request.authority.repository != REPOSITORY or request.authority.request_id != request.request_id:
+    if (
+        request.authority.repository != REPOSITORY
+        or request.authority.request_id != request.request_id
+    ):
         raise ContractError("authority mismatch")
-    if request.authority.action != "gateway-rebind" or request.authority.scope != "NEXUS_GATEWAY_REBIND_MANAGER_CONTRACT_SOURCE_CANDIDATE_ONLY":
+    if (
+        request.authority.action != "gateway-rebind"
+        or request.authority.scope != "NEXUS_GATEWAY_REBIND_MANAGER_CONTRACT_SOURCE_CANDIDATE_ONLY"
+    ):
         raise ContractError("authority scope mismatch")
     _validate_rollback(request.rollback)
-    if request.quiescence.disposition not in {"drained", "held", "reconciled"} or not request.quiescence.lifecycle_state or not request.quiescence.assist_state:
+    if (
+        request.quiescence.disposition not in {"drained", "held", "reconciled"}
+        or not request.quiescence.lifecycle_state
+        or not request.quiescence.assist_state
+    ):
         raise ContractError("quiescence required")
     if not request.quiescence.evidence_sha256 or not request.quiescence.reacquisition_receipt:
         raise ContractError("quiescence evidence missing")
@@ -542,23 +644,51 @@ def validate_request(request: GatewayDeploymentRequest | Mapping[str, Any]) -> G
         artifact = request.stable_artifact
         if not isinstance(artifact, StableArtifactIdentity):
             raise ContractError("artifact identity must be typed")
-        for value, name in ((artifact.source_root, "artifact source root"), (artifact.source_path, "artifact source path")):
+        for value, name in (
+            (artifact.source_root, "artifact source root"),
+            (artifact.source_path, "artifact source path"),
+        ):
             _absolute(value, name)
-        for value, name in ((artifact.source_head, "artifact head"), (artifact.source_tree, "artifact tree"), (artifact.source_blob_sha256, "artifact blob"), (artifact.artifact_sha256, "artifact hash")):
+        for value, name in (
+            (artifact.source_head, "artifact head"),
+            (artifact.source_tree, "artifact tree"),
+            (artifact.source_blob_sha256, "artifact blob"),
+            (artifact.artifact_sha256, "artifact hash"),
+        ):
             _hash(value, name, 40 if name.endswith(("head", "tree")) else 64)
-        if not isinstance(artifact.uid, int) or isinstance(artifact.uid, bool) or artifact.uid < 0 or not isinstance(artifact.mode, int) or isinstance(artifact.mode, bool) or artifact.mode & ~0o777:
+        if (
+            not isinstance(artifact.uid, int)
+            or isinstance(artifact.uid, bool)
+            or artifact.uid < 0
+            or not isinstance(artifact.mode, int)
+            or isinstance(artifact.mode, bool)
+            or artifact.mode & ~0o777
+        ):
             raise ContractError("artifact ownership/mode invalid")
         try:
             Path(artifact.source_path).relative_to(Path(artifact.source_root))
         except ValueError as exc:
             raise ContractError("artifact source path outside source root") from exc
-        if artifact.request_id != request.request_id or artifact.card_id != "TASK-526-A" or not artifact.authority_receipt_id or not artifact.install_fence or not artifact.predecessor_sha256 or not artifact.rollback_receipt:
+        if (
+            artifact.request_id != request.request_id
+            or artifact.card_id != "TASK-526-A"
+            or not artifact.authority_receipt_id
+            or not artifact.install_fence
+            or not artifact.predecessor_sha256
+            or not artifact.rollback_receipt
+        ):
             raise ContractError("artifact request substitution")
-    payload = {key: _plain(value) for key, value in _plain(request).items() if key not in {"request_hash", "schema"}}
+    payload = {
+        key: _plain(value)
+        for key, value in _plain(request).items()
+        if key not in {"request_hash", "schema"}
+    }
     expected = canonical_hash(payload)
     if request.request_hash != expected:
         raise ContractError("request hash mismatch")
-    expected_receipt = canonical_hash({key: value for key, value in _plain(request.authority).items() if key != "receipt_hash"})
+    expected_receipt = canonical_hash(
+        {key: value for key, value in _plain(request.authority).items() if key != "receipt_hash"}
+    )
     if request.authority.receipt_hash != expected_receipt:
         raise ContractError("authority receipt hash mismatch")
     return request
@@ -568,8 +698,15 @@ def validate_authority_freshness(receipt: AuthorityReceipt, *, now: str) -> Auth
     """Validate an authority receipt against a caller-supplied timestamp."""
     if not isinstance(receipt, AuthorityReceipt) or not receipt.issued_at or not receipt.expires_at:
         raise ContractError("authority freshness evidence missing")
+
     def parse(value: str) -> datetime:
-        if not isinstance(value, str) or not value or value.endswith("Z") is False and "+" not in value and "-" not in value[10:]:
+        if (
+            not isinstance(value, str)
+            or not value
+            or value.endswith("Z") is False
+            and "+" not in value
+            and "-" not in value[10:]
+        ):
             raise ContractError("authority timestamp malformed")
         try:
             parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -578,13 +715,16 @@ def validate_authority_freshness(receipt: AuthorityReceipt, *, now: str) -> Auth
         if parsed.tzinfo is None:
             raise ContractError("authority timestamp must be timezone-aware")
         return parsed.astimezone(timezone.utc)
+
     issued, expires, observed = parse(receipt.issued_at), parse(receipt.expires_at), parse(now)
     if expires <= issued or issued > observed or expires <= observed:
         raise ContractError("authority receipt stale")
     return receipt
 
 
-def validate_current_identity(identity: IdentityEvidence, profile: DeploymentProfile) -> IdentityEvidence:
+def validate_current_identity(
+    identity: IdentityEvidence, profile: DeploymentProfile
+) -> IdentityEvidence:
     """Reject supplied identity fields that disagree with the bound profile."""
     validate_profile(profile)
     if not isinstance(identity, IdentityEvidence):
@@ -623,25 +763,49 @@ def validate_current_identity(identity: IdentityEvidence, profile: DeploymentPro
     return identity
 
 
-def validate_postflight_identity(identity: PostflightIdentity, profile: DeploymentProfile) -> PostflightIdentity:
+def validate_postflight_identity(
+    identity: PostflightIdentity, profile: DeploymentProfile
+) -> PostflightIdentity:
     if not isinstance(identity, PostflightIdentity):
         raise ContractError("postflight identity must be typed")
     validate_profile(profile)
-    if not identity.server_instance or not identity.root or not identity.action or not identity.task_id or not identity.lifecycle:
+    if (
+        not identity.server_instance
+        or not identity.root
+        or not identity.action
+        or not identity.task_id
+        or not identity.lifecycle
+    ):
         raise ContractError("postflight identity incomplete")
-    if identity.root != profile.git.root or identity.head != profile.git.head or identity.tree != profile.git.tree:
+    if (
+        identity.root != profile.git.root
+        or identity.head != profile.git.head
+        or identity.tree != profile.git.tree
+    ):
         raise ContractError("postflight deployment identity mismatch")
     for value, name in ((identity.head, "postflight HEAD"), (identity.tree, "postflight tree")):
         _hash(value, name, 40)
-    for value, name in ((identity.tool_manifest_sha256, "postflight manifest"), (identity.schema_sha256, "postflight schema"), (identity.permission_sha256, "postflight permission")):
+    for value, name in (
+        (identity.tool_manifest_sha256, "postflight manifest"),
+        (identity.schema_sha256, "postflight schema"),
+        (identity.permission_sha256, "postflight permission"),
+    ):
         _hash(value, name)
-    if identity.action != "gateway-rebind" or identity.task_id != "TASK-526-A" or identity.lifecycle not in {"QUIESCENT", "READY", "ACTIVE"}:
+    if (
+        identity.action != "gateway-rebind"
+        or identity.task_id != "TASK-526-A"
+        or identity.lifecycle not in {"QUIESCENT", "READY", "ACTIVE"}
+    ):
         raise ContractError("postflight action/task/lifecycle mismatch")
     if not identity.client_bound or not identity.token_bound:
         raise ContractError("authenticated client binding missing")
     required = tuple(identity.required_actions)
     observed = tuple(identity.observed_actions)
-    if not required or not observed or any(not isinstance(item, str) or not item for item in required + observed):
+    if (
+        not required
+        or not observed
+        or any(not isinstance(item, str) or not item for item in required + observed)
+    ):
         raise ContractError("postflight action manifest missing")
     if not set(required).issubset(set(observed)):
         raise ContractError("postflight required action missing")
@@ -656,12 +820,22 @@ def validate_rollback_capture(capture: RollbackCapture) -> RollbackCapture:
 
 
 CURRENT_PROFILE = DeploymentProfile(
-    GitIdentity("/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe", "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe", "67521fe91e990f4e140642984c743dd50a408e84", "f6d6c2bf0912ff4a63d3c10a089910f95eab3c12"),
+    GitIdentity(
+        "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe",
+        "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe",
+        "67521fe91e990f4e140642984c743dd50a408e84",
+        "f6d6c2bf0912ff4a63d3c10a089910f95eab3c12",
+    ),
     entrypoint_sha256="8f5fddd5c7761574da8566b5511e9107651a04687a6f656c05d5b435e9a530b1",
     trust_class="ROLLBACK_ONLY_OBSERVED_CURRENT",
 )
 DESIRED_PROFILE = DeploymentProfile(
-    GitIdentity("/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-935a9dd3", "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-935a9dd3", "7ad264e1c12a2b4d3896b4cdeec68688acf034f7", "b9057f8ef736fb6d3cd30da983f33f5f61fb86e9"),
+    GitIdentity(
+        "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-935a9dd3",
+        "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-935a9dd3",
+        "7ad264e1c12a2b4d3896b4cdeec68688acf034f7",
+        "b9057f8ef736fb6d3cd30da983f33f5f61fb86e9",
+    ),
     entrypoint_sha256="8f5fddd5c7761574da8566b5511e9107651a04687a6f656c05d5b435e9a530b1",
     trust_class="EXPLICIT_DESIRED_CANARY",
 )
