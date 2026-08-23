@@ -70,14 +70,12 @@ def _request():
         expires_at="2026-08-24T00:00:00Z",
         request_id="r-526",
     )
-    receipt = AuthorityReceipt(
-        **{
-            **receipt.__dict__,
-            "receipt_hash": canonical_hash(
-                {k: v for k, v in receipt.__dict__.items() if k != "receipt_hash"}
-            ),
-        }
-    )
+    receipt = AuthorityReceipt(**{
+        **receipt.__dict__,
+        "receipt_hash": canonical_hash({
+            k: v for k, v in receipt.__dict__.items() if k != "receipt_hash"
+        }),
+    })
     ident = IdentityEvidence(
         plist_sha256=plist_hash,
         plist_bytes_sha256=plist_hash,
@@ -149,9 +147,9 @@ def test_rollback_plist_hashes_both_bind_to_bytes():
     request = _request()
     bad = request.rollback.__class__(**{**request.rollback.__dict__, "plist_sha256": "0" * 64})
     values = {**request.__dict__, "rollback": bad}
-    values["request_hash"] = canonical_hash(
-        {k: v for k, v in values.items() if k not in {"request_hash", "schema"}}
-    )
+    values["request_hash"] = canonical_hash({
+        k: v for k, v in values.items() if k not in {"request_hash", "schema"}
+    })
     with pytest.raises(ContractError):
         validate_request(request.__class__(**values))
 
@@ -192,14 +190,12 @@ def test_wrong_profile_identity_rejected():
 
 
 def test_model_validate_is_strict_and_defaults_are_typed():
-    profile = DeploymentProfile.model_validate(
-        {
-            "git": CURRENT_PROFILE.git.model_dump(),
-            "entrypoint": CURRENT_PROFILE.entrypoint,
-            "entrypoint_sha256": CURRENT_PROFILE.entrypoint_sha256,
-            "trust_class": CURRENT_PROFILE.trust_class,
-        }
-    )
+    profile = DeploymentProfile.model_validate({
+        "git": CURRENT_PROFILE.git.model_dump(),
+        "entrypoint": CURRENT_PROFILE.entrypoint,
+        "entrypoint_sha256": CURRENT_PROFILE.entrypoint_sha256,
+        "trust_class": CURRENT_PROFILE.trust_class,
+    })
     assert profile == CURRENT_PROFILE
     with pytest.raises(ContractError):
         DeploymentProfile.model_validate({**profile.model_dump(), "unexpected": True})
@@ -236,9 +232,10 @@ def test_postflight_schema_is_extra_forbid_and_complete():
     with pytest.raises(ContractError):
         PostflightIdentity.model_validate({"server_instance": "x"})
     with pytest.raises(ContractError):
-        PostflightIdentity.model_validate(
-            {**_request().postflight.model_dump(), "unexpected": True}
-        )
+        PostflightIdentity.model_validate({
+            **_request().postflight.model_dump(),
+            "unexpected": True,
+        })
 
 
 def test_profile_full_identity_substitution_is_rejected():

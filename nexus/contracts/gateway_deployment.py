@@ -686,9 +686,9 @@ def validate_request(
     expected = canonical_hash(payload)
     if request.request_hash != expected:
         raise ContractError("request hash mismatch")
-    expected_receipt = canonical_hash(
-        {key: value for key, value in _plain(request.authority).items() if key != "receipt_hash"}
-    )
+    expected_receipt = canonical_hash({
+        key: value for key, value in _plain(request.authority).items() if key != "receipt_hash"
+    })
     if request.authority.receipt_hash != expected_receipt:
         raise ContractError("authority receipt hash mismatch")
     return request
