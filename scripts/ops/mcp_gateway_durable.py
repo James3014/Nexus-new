@@ -245,7 +245,7 @@ def main() -> int:
             operation = a.action.removeprefix("gateway-")
             if operation == "install-artifact": operation = "install-artifact"
             now = _current_observation_time()
-            observed = collect_gateway_observation(request, observation_time=now)
+            observed = collect_gateway_observation(request, operation=operation, observation_time=now)
             if a.gateway_evidence is not None:
                 _fixed_cli_store_path(a.gateway_evidence, GATEWAY_EVIDENCE_STORE)
             print(json.dumps(dispatch_gateway_cli(operation, request=request, observed=observed,
@@ -749,6 +749,12 @@ def observe_artifact_source(source_root: Path, source_path: Path,
     }
 
 
+def _fixed_git_command_runner(*args: Any) -> Any:
+    """Run only the command tuples constructed by the manager's fixed observer."""
+    command = tuple(args) if args and isinstance(args[0], str) else tuple(args[0])
+    return subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+
+
 def install_stable_artifact(request: GatewayDeploymentRequest, *, source_root: Path,
                             source_path: Path, artifact_path: Path | None = None,
                             command_runner: Callable[..., Any] | None = None,
@@ -1167,15 +1173,29 @@ def observe_gateway_quiescence() -> dict[str, Any]:
 
 
 def collect_gateway_observation(request: GatewayDeploymentRequest, *, observation_time: str | None = None,
+                                operation: str | None = None,
                                 runner: Callable[..., Any] | None = None,
-                                token_loader: Callable[[], str] | None = None) -> dict[str, Any]:
+                                token_loader: Callable[[], str] | None = None,
+                                plist_observer: Callable[[Path], tuple[bytes, Mapping[str, Any]]] | None = None,
+                                git_observer: Callable[[Path], Mapping[str, Any]] | None = None,
+                                source_observer: Callable[[Path], str] | None = None,
+                                interpreter_observer: Callable[[Path], tuple[Path, str, int, int, str]] | None = None,
+                                artifact_observer: Callable[[Path], str] | None = None,
+                                health_observer: Callable[[str], Mapping[str, Any]] | None = None,
+                                quiescence_observer: Callable[[], Mapping[str, Any]] | None = None) -> dict[str, Any]:
     """Collect all preflight evidence from fixed manager-owned observations."""
     validate_request(request)
     profile = request.current
     plist_path = Path(profile.repository.plist)
+    def read_plist(path: Path) -> tuple[bytes, Mapping[str, Any]]:
+        data = path.read_bytes()
+        value = plistlib.loads(data)
+        if not isinstance(value, Mapping):
+            raise _gateway_error("Gateway plist observation malformed")
+        return data, value
+
     try:
-        plist_bytes = plist_path.read_bytes()
-        parsed = plistlib.loads(plist_bytes)
+        plist_bytes, parsed = (plist_observer or read_plist)(plist_path)
     except (OSError, ValueError, plistlib.InvalidFileException) as exc:
         raise _gateway_error("Gateway plist observation failed", exc) from exc
     if not isinstance(parsed, Mapping):
@@ -1190,60 +1210,81 @@ def collect_gateway_observation(request: GatewayDeploymentRequest, *, observatio
             or parsed.get("EnvironmentVariables") != {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}):
         raise _gateway_error("Gateway plist physical identity mismatch")
     plist_digest = hashlib.sha256(plist_bytes).hexdigest()
-    git = {
-        "root": profile.git.root, "toplevel": _git(Path(profile.git.root), "rev-parse", "--show-toplevel"),
-        "remote": _git(Path(profile.git.root), "remote", "get-url", "origin"),
-        "head": _git(Path(profile.git.root), "rev-parse", "HEAD"),
-        "tree": _git(Path(profile.git.root), "rev-parse", "HEAD^{tree}"),
-        "clean": not bool(_git(Path(profile.git.root), "status", "--porcelain")),
-    }
-    entrypoint = Path(profile.git.root) / GATEWAY_ENTRYPOINT
-    source_hash = hashlib.sha256(entrypoint.read_bytes()).hexdigest()
-    interpreter = Path(profile.interpreter.path)
-    target = interpreter.resolve(strict=True)
-    interpreter_hash = hashlib.sha256(target.read_bytes()).hexdigest()
+    if git_observer is None:
+        git = {
+            "root": profile.git.root, "toplevel": _git(Path(profile.git.root), "rev-parse", "--show-toplevel"),
+            "remote": _git(Path(profile.git.root), "remote", "get-url", "origin"),
+            "head": _git(Path(profile.git.root), "rev-parse", "HEAD"),
+            "tree": _git(Path(profile.git.root), "rev-parse", "HEAD^{tree}"),
+            "clean": not bool(_git(Path(profile.git.root), "status", "--porcelain")),
+        }
+    else:
+        git = dict(git_observer(Path(profile.git.root)))
+        git.setdefault("root", profile.git.root)
+    source_path = Path(profile.git.root) / GATEWAY_ENTRYPOINT
+    source_hash = (source_observer or (lambda path: hashlib.sha256(path.read_bytes()).hexdigest()))(source_path)
+    if interpreter_observer is None:
+        interpreter = Path(profile.interpreter.path)
+        target = interpreter.resolve(strict=True)
+        interpreter_values = (target, hashlib.sha256(target.read_bytes()).hexdigest(), target.stat().st_uid,
+                              target.stat().st_gid, stat.filemode(target.stat().st_mode))
+    else:
+        interpreter_values = interpreter_observer(Path(profile.interpreter.path))
+    target, interpreter_hash, interpreter_uid, interpreter_gid, interpreter_mode = interpreter_values
     service = _launchctl_observation(runner=runner)
-    loader = token_loader or (lambda: read_secret_env().get("NEXUS_MCP_GATEWAY_TOKEN", ""))
-    token = loader()
-    if not token:
-        raise _gateway_error("Gateway observation token missing")
-    health = _http_json(GATEWAY_ENDPOINT + "/health", token=token)
-    health = health.get("result", health)
-    if not isinstance(health, Mapping):
-        raise _gateway_error("Gateway health observation malformed")
-    try:
-        artifact_digest = hashlib.sha256(Path(GATEWAY_ARTIFACT).read_bytes()).hexdigest()
-    except OSError:
-        artifact_digest = ""
-    quiescence = observe_gateway_quiescence()
+    requested_operation = operation or request.operation
+    rollback_unloaded = requested_operation in {"rollback", "gateway-rollback"} and not service.get("loaded", False)
+    health: Mapping[str, Any] = {}
+    if not rollback_unloaded:
+        loader = token_loader or (lambda: read_secret_env().get("NEXUS_MCP_GATEWAY_TOKEN", ""))
+        token = loader()
+        if not token:
+            raise _gateway_error("Gateway observation token missing")
+        health = (health_observer or (lambda value: _http_json(GATEWAY_ENDPOINT + "/health", token=value)))(token)
+        health = health.get("result", health)
+        if not isinstance(health, Mapping):
+            raise _gateway_error("Gateway health observation malformed")
+    if artifact_observer is None:
+        try:
+            artifact_digest = hashlib.sha256(Path(GATEWAY_ARTIFACT).read_bytes()).hexdigest()
+        except OSError:
+            artifact_digest = ""
+    else:
+        artifact_digest = artifact_observer(Path(GATEWAY_ARTIFACT))
+    quiescence = (quiescence_observer or observe_gateway_quiescence)()
+    source_root = str(health.get("repo_root") or git.get("root") or "")
+    source_head = str(health.get("git_head") or git.get("head") or "")
+    source_tree = str(health.get("git_tree") or git.get("tree") or "")
+    physical_source_hash = str(health.get("source_sha256") or source_hash)
+    server_instance = str(health.get("server_instance") or health.get("instance_id") or "")
     predecessor = {
         "plist_sha256": plist_digest, "plist_bytes_sha256": plist_digest,
-        "artifact_sha256": artifact_digest, "source_sha256": str(health.get("source_sha256") or ""),
-        "source_root": str(health.get("repo_root") or ""),
-        "source_head": str(health.get("git_head") or ""), "source_tree": str(health.get("git_tree") or ""),
+        "artifact_sha256": artifact_digest, "source_sha256": physical_source_hash,
+        "source_root": source_root, "source_head": source_head, "source_tree": source_tree,
         "loaded": service.get("loaded", False), "pid": service.get("pid"),
-        "server_instance": str(health.get("server_instance") or health.get("instance_id") or ""),
-        "listener": GATEWAY_ENDPOINT, "service_loaded": service.get("service_loaded", False),
+        "server_instance": server_instance if not rollback_unloaded else "",
+        "listener": GATEWAY_ENDPOINT if not rollback_unloaded else "",
+        "service_loaded": service.get("service_loaded", False),
     }
     observed = {
         **git, "entrypoint": GATEWAY_ENTRYPOINT, "entrypoint_sha256": source_hash,
         "interpreter_path": profile.interpreter.path, "interpreter_resolved_path": str(target),
-        "interpreter_sha256": interpreter_hash, "interpreter_uid": target.stat().st_uid,
-        "interpreter_gid": target.stat().st_gid, "interpreter_mode": stat.filemode(target.stat().st_mode),
+        "interpreter_sha256": interpreter_hash, "interpreter_uid": interpreter_uid,
+        "interpreter_gid": interpreter_gid, "interpreter_mode": interpreter_mode,
         "trust_class": profile.trust_class, "repository": profile.repository.repository,
         "stdout": profile.repository.stdout, "stderr": profile.repository.stderr,
         "label": GATEWAY_LABEL, "plist": str(plist_path), "endpoint": GATEWAY_ENDPOINT,
         "plist_sha256": plist_digest, "plist_bytes_sha256": plist_digest,
         "plist_bytes_hex": plist_bytes.hex(), **service,
-        "server_instance": str(health.get("server_instance") or health.get("instance_id") or ""),
-        "source_sha256": str(health.get("source_sha256") or ""),
+        "server_instance": server_instance,
+        "source_sha256": physical_source_hash,
         "tool_manifest_sha256": str(health.get("tool_manifest_sha256") or ""),
         "schema_sha256": str(health.get("schema_sha256") or ""),
         "permission_sha256": str(health.get("permission_policy_hash") or ""),
         "action": str(health.get("action") or ""), "task_id": str(health.get("task_id") or ""),
         "lifecycle": str(health.get("lifecycle") or health.get("lifecycle_identity") or ""),
         "stable_artifact": {"artifact_sha256": artifact_digest},
-        "rollback_predecessor": predecessor, "listener": GATEWAY_ENDPOINT,
+        "rollback_predecessor": predecessor, "listener": GATEWAY_ENDPOINT if not rollback_unloaded else "",
         "services": [GATEWAY_LABEL], "quiescence": quiescence,
     }
     return observed
@@ -1255,18 +1296,33 @@ def observe_gateway_physical(request: GatewayDeploymentRequest, **kwargs: Any) -
 
 
 def dispatch_gateway_cli(action: str, *, request: GatewayDeploymentRequest,
-                         observed: Mapping[str, Any], observation_time: str) -> dict[str, Any]:
+                         observed: Mapping[str, Any], observation_time: str,
+                         command_runner: Callable[..., Any] | None = None,
+                         runner: Callable[..., Any] | None = None,
+                         opener: Any | None = None,
+                         token_loader: Callable[[], str] | None = None) -> dict[str, Any]:
     """Route only the fixed Gateway operations with manager-owned arguments."""
     if action not in {"preflight", "reload", "install-artifact", "rollback"}:
         raise _gateway_error("unsupported Gateway CLI action")
     kwargs: dict[str, Any] = {"observation_time": observation_time}
     if action == "reload":
-        kwargs.update(opener=urllib.request.urlopen,
-                      token_loader=lambda: read_secret_env()["NEXUS_MCP_GATEWAY_TOKEN"])
+        if runner is not None:
+            kwargs["runner"] = runner
+        kwargs.update(opener=opener or urllib.request.urlopen,
+                      token_loader=token_loader or (lambda: read_secret_env()["NEXUS_MCP_GATEWAY_TOKEN"]))
+    elif action == "install-artifact":
+        artifact = request.stable_artifact
+        if artifact is None:
+            raise _gateway_error("artifact installation requires explicit stable artifact identity")
+        kwargs.update(source_root=Path(artifact.source_root), source_path=Path(artifact.source_path),
+                      artifact_path=Path(GATEWAY_ARTIFACT),
+                      command_runner=command_runner or _fixed_git_command_runner)
     elif action == "rollback":
+        if runner is not None:
+            kwargs["runner"] = runner
         kwargs.update(predecessor_observer=observed.get("rollback_predecessor"),
-                      opener=urllib.request.urlopen,
-                      token_loader=lambda: read_secret_env()["NEXUS_MCP_GATEWAY_TOKEN"])
+                      opener=opener or urllib.request.urlopen,
+                      token_loader=token_loader or (lambda: read_secret_env()["NEXUS_MCP_GATEWAY_TOKEN"]))
     return manage_gateway(action, request=request, observed=observed, **kwargs)
 
 

@@ -352,7 +352,8 @@ def _gateway_request(operation="reload", *, stable_artifact=None):
         program_arguments_hash=__import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(["/Users/jameschen/Workspace/Nexus-new/.venv/bin/python", CURRENT_PROFILE.git.root + "/scripts/ops/nexus_mcp_gateway_http.py"]),
         environment_hash=__import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash({"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}),
     )
-    effect = {"reload": EffectClass.GATEWAY_RELOAD, "install-artifact": EffectClass.INSTALL_ARTIFACT, "rollback": EffectClass.GATEWAY_ROLLBACK}[operation]
+    effect = {"preflight": EffectClass.PREFLIGHT, "reload": EffectClass.GATEWAY_RELOAD,
+              "install-artifact": EffectClass.INSTALL_ARTIFACT, "rollback": EffectClass.GATEWAY_ROLLBACK}[operation]
     values = {
         "request_id": "r-526", "idempotency_fence": "f-526", "operation": operation,
         "authority": AuthorityReceipt("owner", "receipt", issued_at="2026-08-22T00:00:00Z", expires_at="2026-08-24T00:00:00Z", request_id="r-526"),
@@ -678,20 +679,93 @@ def test_cli_rejects_caller_selected_gateway_store(monkeypatch, tmp_path):
         g.main()
 
 
-@pytest.mark.parametrize("action", ["gateway-preflight", "gateway-reload", "gateway-install-artifact", "gateway-rollback"])
-def test_cli_dispatches_fixed_actions_with_manager_owned_observation(monkeypatch, tmp_path, action):
-    request = _gateway_request("rollback" if action.endswith("rollback") else ("install-artifact" if "install-artifact" in action else "reload"))
-    request_store = tmp_path / "request.json"
-    request_store.write_text(json.dumps(request.model_dump()))
-    request_store.chmod(0o600)
-    evidence_store = tmp_path / "evidence.json"
-    monkeypatch.setattr(g, "GATEWAY_REQUEST_STORE", request_store)
-    monkeypatch.setattr(g, "GATEWAY_EVIDENCE_STORE", evidence_store)
-    observed = _gateway_observed()
-    monkeypatch.setattr(g, "collect_gateway_observation", lambda req, **kwargs: observed)
-    seen = {}
-    monkeypatch.setattr(g, "dispatch_gateway_cli", lambda op, **kwargs: seen.update(action=op, **kwargs) or {"state": "PREFLIGHTED"})
-    monkeypatch.setattr(sys, "argv", ["mcp_gateway_durable.py", action, "--gateway-request", str(request_store), "--gateway-evidence", str(evidence_store)])
-    assert g.main() == 0
-    assert seen["action"] == action.removeprefix("gateway-")
-    assert seen["observation_time"].endswith("Z")
+def test_cli_dispatch_real_preflight_binds_matching_action_and_effect():
+    request = _gateway_request("preflight")
+    result = g.dispatch_gateway_cli("preflight", request=request, observed=_gateway_observed(),
+                                    observation_time="2026-08-23T00:00:00Z")
+    assert result["state"] == "PREFLIGHTED"
+    assert result["request_hash"] == request.request_hash
+
+
+def test_cli_dispatch_real_install_uses_bound_artifact_and_fixed_git_runner(monkeypatch, tmp_path):
+    from nexus.contracts.gateway_deployment import StableArtifactIdentity
+
+    repo = _real_git_repo(tmp_path)
+    source = repo / "manager.py"
+    source.write_bytes(b"stable-manager")
+    source.chmod(0o700)
+    subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", "https://github.com/James3014/Nexus-new.git"], check=True)
+    source_head = _commit(repo, "manager")
+    source_tree = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD^{tree}"], text=True).strip()
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    destination = tmp_path / "installed-manager.py"
+    predecessor = hashlib.sha256(b"old-manager").hexdigest()
+    destination.write_bytes(b"old-manager")
+    destination.chmod(0o700)
+    artifact = StableArtifactIdentity(
+        source_root=str(repo), source_head=source_head, source_tree=source_tree,
+        source_path=str(source), source_blob_sha256=digest, artifact_sha256=digest,
+        uid=os.getuid(), mode=0o700, predecessor_sha256=predecessor,
+        request_id="r-526", authority_receipt_id="receipt", install_fence="fence", rollback_receipt="rollback",
+    )
+    monkeypatch.setattr(g, "GATEWAY_ARTIFACT", destination)
+    request = _gateway_request("install-artifact", stable_artifact=artifact)
+    result = g.dispatch_gateway_cli("install-artifact", request=request, observed={},
+                                    observation_time="2026-08-23T00:00:00Z")
+    assert result["state"] == "VERIFIED"
+    assert destination.read_bytes() == source.read_bytes()
+
+
+def test_cli_dispatch_rejects_mismatched_action_and_request():
+    request = _gateway_request("reload")
+    with pytest.raises(g.GatewayContractError, match="operation substitution"):
+        g.dispatch_gateway_cli("preflight", request=request, observed=_gateway_observed(),
+                               observation_time="2026-08-23T00:00:00Z")
+
+
+def test_collect_dispatch_unloaded_rollback_skips_health_and_launch_effects(monkeypatch, tmp_path):
+    request = _gateway_request("rollback")
+    capture = request.rollback
+    payload = bytes.fromhex(capture.plist_bytes_hex)
+    parsed = plistlib.loads(payload)
+    fixed_root = capture.root
+    calls = []
+
+    class Absent:
+        returncode = 113
+        stdout = ""
+        stderr = f'Bad request.\nCould not find service "{g.GATEWAY_LABEL}" in domain for user gui: {os.getuid()}\n'
+
+    def launchctl(*args):
+        calls.append(args)
+        assert args[1] == "print"
+        return Absent()
+
+    monkeypatch.setattr(g, "GATEWAY_PLIST", tmp_path / "gateway.plist")
+    monkeypatch.setattr(g, "GATEWAY_LOCK", tmp_path / "gateway.lock")
+    observed = g.collect_gateway_observation(
+        request, operation="rollback", runner=launchctl,
+        plist_observer=lambda _path: (payload, parsed),
+        git_observer=lambda _root: {"root": fixed_root, "toplevel": fixed_root,
+                                    "remote": "https://github.com/James3014/Nexus-new.git",
+                                    "head": capture.source_head, "tree": capture.source_tree, "clean": True},
+        source_observer=lambda _path: capture.source_sha256,
+        interpreter_observer=lambda _path: (Path("/tmp/fixed-python"), "d" * 64, 501, 20, "lrwxr-xr-x"),
+        artifact_observer=lambda _path: capture.artifact_sha256,
+        quiescence_observer=lambda: {"disposition": "reconciled", "lifecycle_state": "QUIESCENT",
+                                     "assist_state": "QUIESCENT", "evidence_sha256": "1" * 64,
+                                     "reacquisition_receipt": "reacq"},
+        token_loader=lambda: pytest.fail("unloaded rollback must not load a token"),
+        health_observer=lambda _token: pytest.fail("unloaded rollback must not call health"),
+    )
+    assert observed["loaded"] is False
+    assert observed["server_instance"] == ""
+    assert observed["listener"] == ""
+    assert observed["rollback_predecessor"]["source_root"] == fixed_root
+    result = g.dispatch_gateway_cli(
+        "rollback", request=request, observed=observed,
+        observation_time="2026-08-23T00:00:00Z", runner=launchctl,
+        token_loader=lambda: pytest.fail("unloaded rollback must not load a token"),
+    )
+    assert result["state"] == "ROLLED_BACK"
+    assert [call[1] for call in calls] == ["print"]
