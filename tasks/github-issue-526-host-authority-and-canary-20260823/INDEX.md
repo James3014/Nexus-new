@@ -3,21 +3,23 @@
 ```yaml
 campaign_id: github-issue-526-host-authority-and-canary-20260823
 repository: James3014/Nexus-new
-base_main: ac4a9ab1e0180170ca062cdc81f2142bca8bd80f
-base_tree: db329f4931b55b74f1e1f9fe61f7edf4ca8422bc
+base_main: a5f6de006637c61e8073cbdc4dd6d43e96307787
+base_tree: 57184a06f0bae4d86fca101f236e485e4c8b121d
 auto_chain: false
 ```
 
 | Order | Task | Status | SHA-256 | Dependency |
 |---|---|---|---|---|
-| 1 | `TASK-526-B-AUTHORITY` | ACTIVE | `477317e723493ad1f1a12035199c2aa55c39973564f71c918fb818c5fa9da366` | merged Slice A `ac4a9ab1` |
-| 2 | `TASK-526-HOST-1` | BLOCKED | `fcd22da4ef92b7cde004523fe900c06bc1b9e67715049c95383c581e640f631f` | exact accepted/merged authority contract + acceptance receipt + Git-tracked/CAS-merged host receipt |
+| 1 | `TASK-526-B-AUTHORITY` | MERGED | `477317e723493ad1f1a12035199c2aa55c39973564f71c918fb818c5fa9da366` | main `a5f6de00` |
+| 2 | `TASK-526-C-RECEIPT-BUNDLE` | ACTIVE | `42a9df063963c3b9e7b8ad99128fc0bc13ae40b5511a4cdd66ce73a1bf40c9e3` | merged B `a5f6de00` |
+| 3 | `TASK-526-HOST-1` | BLOCKED | `f4c581f0062c6b3d65c9ca8f7029a96caa76b2e35d95cc6bccae874c0945f514` | exact accepted/merged bundle contract + acceptance receipt + Git-tracked/CAS-merged bundle |
 
 ## Execution frontier
 
-Only `TASK-526-B-AUTHORITY` is dispatchable. It may produce one four-file
+Only `TASK-526-C-RECEIPT-BUNDLE` is dispatchable. It may produce one four-file
 source/test Candidate and must stop. The host Card cannot mutate repository or
-host state until the authority Candidate is independently accepted and merged.
+host state until the bundle Candidate is independently accepted/merged and the
+separate exact bundle issuance PR is merged/read back.
 
 The Gateway-only local canary performs zero DevSpace effects. The future
 DevSpace/ChatGPT-facing action integration remains `SERIALIZE_AFTER:#398`.

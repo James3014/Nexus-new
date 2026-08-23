@@ -373,9 +373,18 @@ def _gateway_request(operation="reload", *, stable_artifact=None):
     from nexus.contracts.gateway_deployment import (
         CURRENT_PROFILE,
         DESIRED_PROFILE,
+        HOST_AUTHORITY_BUNDLE_SCHEMA,
+        HOST_AUTHORITY_BUNDLE_SCOPE,
+        HOST_CARD_ID,
+        HOST_CARD_PATH,
+        HOST_CARD_SHA256,
+        REPOSITORY,
+        SOURCE_BASE_MERGE,
+        SOURCE_BASE_TREE,
         AuthorityReceipt,
         EffectClass,
         GatewayDeploymentRequest,
+        HostEffectAuthorityBundle,
         HostEffectAuthorityReceipt,
         IdentityEvidence,
         PostflightIdentity,
@@ -419,10 +428,79 @@ def _gateway_request(operation="reload", *, stable_artifact=None):
     values["authority"] = AuthorityReceipt(**{**receipt.__dict__, "receipt_hash": __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash({k: v for k, v in receipt.__dict__.items() if k != "receipt_hash"})})
     if stable_artifact is not None:
         values["stable_artifact"] = stable_artifact.__class__(**{**stable_artifact.__dict__, "authority_receipt_id": host.receipt_id})
-    values["request_hash"] = __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(values)
+    canonical_children = []
+    for child_operation, child_effect, child_suffix in (
+        ("install-artifact", EffectClass.INSTALL_ARTIFACT, "install"),
+        ("reload", EffectClass.GATEWAY_RELOAD, "reload"),
+        ("rollback", EffectClass.GATEWAY_ROLLBACK, "rollback"),
+    ):
+        child_values = {
+            **host.__dict__,
+            "operation": child_operation,
+            "effect_class": child_effect,
+            "receipt_id": f"host-{child_suffix}",
+            "request_id": "r-526" if child_operation == "reload" else f"r-526-{child_suffix}",
+            "idempotency_fence": "f-526" if child_operation == "reload" else f"f-526-{child_suffix}",
+        }
+        child = HostEffectAuthorityReceipt(**child_values)
+        child = HostEffectAuthorityReceipt(**{
+            **child.__dict__,
+            "receipt_hash": __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(
+                {k: v for k, v in child.__dict__.items() if k != "receipt_hash"}
+            ),
+        })
+        canonical_children.append(child)
+    selected = next((child for child in canonical_children if child.operation == operation), None)
+    if selected is None:
+        selected = HostEffectAuthorityReceipt(**{**host.__dict__, "receipt_id": f"legacy-{operation}"})
+        selected = HostEffectAuthorityReceipt(**{
+            **selected.__dict__,
+            "receipt_hash": __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(
+                {k: v for k, v in selected.__dict__.items() if k != "receipt_hash"}
+            ),
+        })
+    values["request_id"] = selected.request_id
+    values["idempotency_fence"] = selected.idempotency_fence
+    values["authority"] = AuthorityReceipt(**{
+        **values["authority"].__dict__,
+        "request_id": selected.request_id,
+        "receipt_hash": __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash({
+            **{k: v for k, v in values["authority"].__dict__.items() if k not in {"request_id", "receipt_hash"}},
+            "request_id": selected.request_id,
+        }),
+    })
+    values["host_authority"] = selected
+    if stable_artifact is not None:
+        values["stable_artifact"] = stable_artifact.__class__(**{
+            **stable_artifact.__dict__, "request_id": selected.request_id,
+            "authority_receipt_id": selected.receipt_id,
+        })
+    bundle = HostEffectAuthorityBundle(
+        schema=HOST_AUTHORITY_BUNDLE_SCHEMA, bundle_version=1,
+        bundle_id="bundle-526", bundle_hash="0" * 64,
+        scope=HOST_AUTHORITY_BUNDLE_SCOPE, repository=REPOSITORY,
+        host_card_path=HOST_CARD_PATH, host_card_id=HOST_CARD_ID,
+        host_card_sha256=HOST_CARD_SHA256,
+        source_base_merge=SOURCE_BASE_MERGE, source_base_tree=SOURCE_BASE_TREE,
+        correction_merge_sha="1" * 40, correction_tree_sha="2" * 40,
+        independent_acceptance_receipt_hash="3" * 64,
+        final_manager_sha256="4" * 64, current_main_sha="5" * 40,
+        issued_at="2026-08-22T00:00:00Z", expires_at="2026-08-24T00:00:00Z",
+        revocation_state="NOT_REVOKED", revoked_at=None, revocation_reason=None,
+        receipts=tuple(canonical_children),
+    )
+    bundle = HostEffectAuthorityBundle(**{
+        **bundle.__dict__,
+        "bundle_hash": __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(
+            {k: v for k, v in bundle.__dict__.items() if k != "bundle_hash"}
+        ),
+    })
+    values["request_hash"] = __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash({
+        k: v for k, v in values.items() if k not in {"request_hash", "schema"}
+    })
     store = Path(g.GATEWAY_HOST_AUTHORITY_STORE)
     store.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    raw = json.dumps(host.model_dump(), sort_keys=True, separators=(",", ":")).encode()
+    raw = json.dumps(bundle.model_dump(), sort_keys=True, separators=(",", ":")).encode()
     store.write_bytes(raw)
     store.chmod(0o600)
     source_root = g.HOST_AUTHORITY_SOURCE_ROOT
@@ -517,9 +595,19 @@ def _request_with_host_changes(request, *, sync_store=True, recompute_receipt_ha
     )
     updated = request.__class__(**values)
     if sync_store:
-        raw = json.dumps(
-            updated.host_authority.model_dump(), sort_keys=True, separators=(",", ":")
-        ).encode()
+        bundle = g._read_host_authority_store()[1]
+        children = tuple(
+            host if child.receipt_id == request.host_authority.receipt_id else child
+            for child in bundle.receipts
+        )
+        bundle = bundle.__class__(**{**bundle.__dict__, "receipts": children})
+        bundle = bundle.__class__(**{
+            **bundle.__dict__,
+            "bundle_hash": __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(
+                {key: value for key, value in bundle.__dict__.items() if key != "bundle_hash"}
+            ),
+        })
+        raw = json.dumps(bundle.model_dump(), sort_keys=True, separators=(",", ":")).encode()
         store = Path(g.GATEWAY_HOST_AUTHORITY_STORE)
         store.write_bytes(raw)
         store.chmod(0o600)
@@ -546,7 +634,7 @@ def _request_with_host_changes(request, *, sync_store=True, recompute_receipt_ha
     ],
 )
 def test_host_authority_identity_failures_precede_gateway_observer(field, value):
-    request = _request_with_host_changes(_gateway_request("status"), **{field: value})
+    request = _request_with_host_changes(_gateway_request("reload"), **{field: value})
     calls = []
     authority_calls = []
 
@@ -572,7 +660,7 @@ def test_host_authority_identity_failures_precede_gateway_observer(field, value)
     ],
 )
 def test_host_authority_freshness_and_revocation_fail_before_observer(mutate):
-    request = _request_with_host_changes(_gateway_request("status"), **mutate(None))
+    request = _request_with_host_changes(_gateway_request("reload"), **mutate(None))
     calls = []
     authority_calls = []
 
@@ -588,6 +676,44 @@ def test_host_authority_freshness_and_revocation_fail_before_observer(mutate):
         )
     assert calls == []
     assert authority_calls == []
+
+
+def test_revoked_bundle_is_evidence_only_and_skips_remote_authority_and_observer():
+    request = _gateway_request("reload")
+    bundle = g._read_host_authority_store()[1]
+    revoked_child = bundle.receipts[1].__class__(**{
+        **bundle.receipts[1].__dict__, "revocation_state": "REVOKED",
+        "revoked_at": "2026-08-23T00:00:00Z", "revocation_reason": "owner",
+    })
+    revoked_child = revoked_child.__class__(**{
+        **revoked_child.__dict__,
+        "receipt_hash": __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(
+            {key: value for key, value in revoked_child.__dict__.items() if key != "receipt_hash"}
+        ),
+    })
+    revoked_bundle = bundle.__class__(**{
+        **bundle.__dict__, "revocation_state": "REVOKED",
+        "revoked_at": "2026-08-23T00:00:00Z", "revocation_reason": "owner",
+        "receipts": (bundle.receipts[0], revoked_child, bundle.receipts[2]),
+    })
+    revoked_bundle = revoked_bundle.__class__(**{
+        **revoked_bundle.__dict__,
+        "bundle_hash": __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(
+            {key: value for key, value in revoked_bundle.__dict__.items() if key != "bundle_hash"}
+        ),
+    })
+    Path(g.GATEWAY_HOST_AUTHORITY_STORE).write_bytes(
+        json.dumps(revoked_bundle.model_dump(), sort_keys=True, separators=(",", ":")).encode()
+    )
+    Path(g.GATEWAY_HOST_AUTHORITY_STORE).chmod(0o600)
+    remote_calls, observer_calls = [], []
+    with pytest.raises(g.GatewayContractError, match="host authority rejected"):
+        g.gateway_reload(
+            request, observed={}, runner=lambda *args: observer_calls.append(args),
+            authority_command_runner=lambda *args: remote_calls.append(args),
+            observation_time="2026-08-23T00:00:00Z",
+        )
+    assert remote_calls == [] and observer_calls == []
 
 
 @pytest.mark.parametrize(
@@ -632,7 +758,7 @@ def test_matching_store_substitutions_hit_intended_validator_before_any_physical
     monkeypatch, field, value, recompute_receipt_hash
 ):
     request = _request_with_host_changes(
-        _gateway_request("status"),
+        _gateway_request("reload"),
         recompute_receipt_hash=recompute_receipt_hash,
         **{field: value},
     )
@@ -660,12 +786,26 @@ def test_matching_store_substitutions_hit_intended_validator_before_any_physical
 
 
 def test_same_uid_fabricated_local_receipt_lacks_remote_main_binding():
-    request = _gateway_request("status")
+    request = _gateway_request("reload")
     fabricated = _request_with_host_changes(
         request, sync_store=False, receipt_id="locally-fabricated"
     )
     store = Path(g.GATEWAY_HOST_AUTHORITY_STORE)
-    store.write_bytes(json.dumps(fabricated.host_authority.model_dump(), sort_keys=True, separators=(",", ":")).encode())
+    bundle = g._read_host_authority_store()[1]
+    bundle = bundle.__class__(**{
+        **bundle.__dict__,
+        "receipts": tuple(
+            fabricated.host_authority if child.receipt_id == fabricated.host_authority.receipt_id else child
+            for child in bundle.receipts
+        ),
+    })
+    bundle = bundle.__class__(**{
+        **bundle.__dict__,
+        "bundle_hash": __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(
+            {key: value for key, value in bundle.__dict__.items() if key != "bundle_hash"}
+        ),
+    })
+    store.write_bytes(json.dumps(bundle.model_dump(), sort_keys=True, separators=(",", ":")).encode())
     store.chmod(0o600)
     calls = []
     with pytest.raises(g.GatewayContractError, match="host authority rejected"):
@@ -811,21 +951,17 @@ def test_same_fence_different_request_is_ledger_conflict_and_fields_are_physical
         )
 
 
+# Preserve the base pytest node ID while asserting the newer bundle-only rule.
 def test_positive_gateway_status_reads_only_fixed_gateway_service():
     request = _gateway_request("status")
     calls = []
-    class Result:
-        returncode = 0
-        stdout = "pid = 42\n"
-        stderr = ""
-    result = g.gateway_status(
-        request, runner=lambda *args: (calls.append(args) or Result()),
-        observation_time="2026-08-23T00:00:00Z",
-        authority_command_runner=g._fixed_authority_command_runner,
-    )
-    assert result["service"] == g.GATEWAY_LABEL
-    assert calls == [("launchctl", "print", f"{g.UID_TARGET}/{g.GATEWAY_LABEL}")]
-    assert not any("devspace" in str(call).lower() or "com.nexus.mcp.gateway" in str(call) and "direct" not in str(call) for call in calls)
+    with pytest.raises(g.GatewayContractError):
+        g.gateway_status(
+            request, runner=lambda *args: (calls.append(args) or pytest.fail("observer called")),
+            observation_time="2026-08-23T00:00:00Z",
+            authority_command_runner=g._fixed_authority_command_runner,
+        )
+    assert calls == []
 
 
 def test_gateway_ledger_chain_tamper_and_cas_fail_closed(tmp_path):
@@ -1252,12 +1388,14 @@ def test_cli_rejects_caller_selected_gateway_store(monkeypatch, tmp_path):
         g.main()
 
 
+# Preserve the base pytest node ID while asserting the newer bundle-only rule.
 def test_cli_dispatch_real_preflight_binds_matching_action_and_effect():
     request = _gateway_request("preflight")
-    result = g.dispatch_gateway_cli("preflight", request=request, observed=_gateway_observed(),
-                                    observation_time="2026-08-23T00:00:00Z")
-    assert result["state"] == "PREFLIGHTED"
-    assert result["request_hash"] == request.request_hash
+    with pytest.raises(g.GatewayContractError):
+        g.dispatch_gateway_cli(
+            "preflight", request=request, observed=_gateway_observed(),
+            observation_time="2026-08-23T00:00:00Z",
+        )
 
 
 def test_cli_dispatch_real_install_uses_bound_artifact_and_fixed_git_runner(monkeypatch, tmp_path):

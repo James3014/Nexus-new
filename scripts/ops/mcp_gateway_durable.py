@@ -32,11 +32,14 @@ from nexus.contracts.gateway_deployment import (
     DeploymentState,
     EffectClass,
     GatewayDeploymentRequest,
+    HostEffectAuthorityBundle,
     HostEffectAuthorityReceipt,
     PostflightIdentity,
     canonical_hash,
+    select_host_effect_authority_receipt,
     validate_authority_freshness,
     validate_host_effect_authority,
+    validate_host_effect_authority_bundle,
     validate_postflight_identity,
     validate_profile,
     validate_receipt_freshness,
@@ -388,8 +391,8 @@ def _safe_store_path(
     return path
 
 
-def _read_host_authority_store() -> tuple[bytes, HostEffectAuthorityReceipt]:
-    """Read the fixed canonical store and preserve its exact bytes."""
+def _read_host_authority_store() -> tuple[bytes, HostEffectAuthorityBundle]:
+    """Read the fixed canonical bundle store and preserve its exact bytes."""
     path = _safe_store_path(GATEWAY_HOST_AUTHORITY_STORE)
     if path.is_symlink() or not path.is_file():
         raise _gateway_error("canonical host authority store missing")
@@ -404,15 +407,15 @@ def _read_host_authority_store() -> tuple[bytes, HostEffectAuthorityReceipt]:
         if not raw or len(raw) > MAX_GATEWAY_STORE_BYTES:
             raise _gateway_error("canonical host authority store size invalid")
         payload = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_pairs)
-        receipt = HostEffectAuthorityReceipt.model_validate(payload)
-        validate_host_effect_authority(receipt)
+        bundle = HostEffectAuthorityBundle.model_validate(payload)
+        validate_host_effect_authority_bundle(bundle, allow_revoked=True)
     except (OSError, UnicodeError, ValueError, ContractError) as exc:
-        raise _gateway_error("canonical host authority receipt invalid", exc) from exc
-    return raw, receipt
+        raise _gateway_error("canonical host authority bundle invalid", exc) from exc
+    return raw, bundle
 
 
-def _load_host_authority_store() -> HostEffectAuthorityReceipt:
-    """Load only the fixed canonical host receipt, with no caller path seam."""
+def _load_host_authority_store() -> HostEffectAuthorityBundle:
+    """Load only the fixed canonical host bundle, with no caller path seam."""
     return _read_host_authority_store()[1]
 
 
@@ -473,11 +476,11 @@ def _authority_command_output(
 
 def _verify_git_main_host_authority(
     local_bytes: bytes,
-    local_receipt: HostEffectAuthorityReceipt,
+    local_bundle: HostEffectAuthorityBundle,
     *,
     command_runner: Callable[..., Any] | None = None,
-) -> HostEffectAuthorityReceipt:
-    """Bind the local store to the exact receipt blob on clean remote ``main``."""
+) -> HostEffectAuthorityBundle:
+    """Bind the local store to the exact bundle blob on clean remote ``main``."""
     root = HOST_AUTHORITY_SOURCE_ROOT
     if root.is_symlink() or not root.is_dir():
         raise _gateway_error("trusted authority source root invalid")
@@ -507,13 +510,13 @@ def _verify_git_main_host_authority(
         raise _gateway_error("local host authority is not byte-identical to remote main blob")
     try:
         payload = json.loads(blob.decode("utf-8"), object_pairs_hook=_unique_pairs)
-        remote_receipt = HostEffectAuthorityReceipt.model_validate(payload)
-        validate_host_effect_authority(remote_receipt)
+        remote_bundle = HostEffectAuthorityBundle.model_validate(payload)
+        validate_host_effect_authority_bundle(remote_bundle, allow_revoked=True)
     except (UnicodeError, ValueError, ContractError) as exc:
-        raise _gateway_error("remote host authority receipt invalid", exc) from exc
-    if remote_receipt != local_receipt:
-        raise _gateway_error("remote host authority differs from local receipt")
-    return remote_receipt
+        raise _gateway_error("remote host authority bundle invalid", exc) from exc
+    if remote_bundle != local_bundle:
+        raise _gateway_error("remote host authority differs from local bundle")
+    return remote_bundle
 
 
 def _require_host_authority(
@@ -530,12 +533,22 @@ def _require_host_authority(
         raise _gateway_error("host-effect authority receipt required")
     try:
         validate_receipt_freshness(receipt, now=_freshness_time(observation_time))
-        local_bytes, stored = _read_host_authority_store()
-        if stored != receipt:
-            raise ContractError("stored host authority differs from request")
-        validate_host_effect_authority(stored, request=typed)
-        _verify_git_main_host_authority(
-            local_bytes, stored, command_runner=authority_command_runner
+        local_bytes, bundle = _read_host_authority_store()
+        # Select locally before touching the remote authority seam.  A
+        # consistently revoked bundle/child is evidence-only and must stop
+        # every operation without a Git authority read or host observation.
+        select_host_effect_authority_receipt(
+            bundle,
+            typed,
+            now=_freshness_time(observation_time),
+        )
+        remote_bundle = _verify_git_main_host_authority(
+            local_bytes, bundle, command_runner=authority_command_runner
+        )
+        select_host_effect_authority_receipt(
+            remote_bundle,
+            typed,
+            now=_freshness_time(observation_time),
         )
     except (ContractError, GatewayContractError) as exc:
         raise _gateway_error("host authority rejected", exc) from exc

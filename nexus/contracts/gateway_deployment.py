@@ -38,6 +38,8 @@ ENTRYPOINT = "scripts/ops/nexus_mcp_gateway_http.py"
 SCHEMA = "nexus.gateway.deployment.v1"
 HOST_AUTHORITY_SCHEMA = "nexus.gateway.host_effect_authority.v1"
 HOST_AUTHORITY_SCOPE = "NEXUS_GATEWAY_REBIND_HOST_EFFECT_ONLY"
+HOST_AUTHORITY_BUNDLE_SCHEMA = "nexus.gateway.host_effect_authority_bundle.v1"
+HOST_AUTHORITY_BUNDLE_SCOPE = "NEXUS_GATEWAY_REBIND_HOST_EFFECT_BUNDLE_ONLY"
 HOST_CARD_ID = "TASK-526-HOST-1"
 HOST_CARD_PATH = (
     "tasks/github-issue-526-host-authority-and-canary-20260823/01-gateway-host-local-canary.md"
@@ -171,6 +173,7 @@ def _strict_types(value: Any) -> None:
             "required_actions",
             "observed_actions",
             "pending_actions",
+            "receipts",
         } and not isinstance(raw, tuple):
             raise ContractError(f"{type(value).__name__}.{item.name} type mismatch")
 
@@ -309,6 +312,45 @@ class HostEffectAuthorityReceipt(StrictRecord):
     revocation_reason: str | None
 
     _converters: ClassVar[Mapping[str, Any]] = {"effect_class": EffectClass}
+
+
+@dataclass(frozen=True)
+class HostEffectAuthorityBundle(StrictRecord):
+    """Immutable pre-authority for the complete host effect sequence.
+
+    The tuple order is part of the bundle hash.  A bundle is evidence until
+    :func:`select_host_effect_authority_receipt` proves that exactly one child
+    is an active, byte-equal authority for the request.
+    """
+
+    schema: str
+    bundle_version: int
+    bundle_id: str
+    bundle_hash: str
+    scope: str
+    repository: str
+    host_card_path: str
+    host_card_id: str
+    host_card_sha256: str
+    source_base_merge: str
+    source_base_tree: str
+    correction_merge_sha: str
+    correction_tree_sha: str
+    independent_acceptance_receipt_hash: str
+    final_manager_sha256: str
+    current_main_sha: str
+    issued_at: str
+    expires_at: str
+    revocation_state: str
+    revoked_at: str | None
+    revocation_reason: str | None
+    receipts: tuple[HostEffectAuthorityReceipt, ...]
+
+    _converters: ClassVar[Mapping[str, Any]] = {
+        "receipts": lambda value: tuple(
+            HostEffectAuthorityReceipt.model_validate(item) for item in value
+        ),
+    }
 
 
 @dataclass(frozen=True)
@@ -673,8 +715,13 @@ def validate_host_effect_authority(
     *,
     request: "GatewayDeploymentRequest | None" = None,
     now: str | None = None,
+    allow_revoked: bool = False,
 ) -> HostEffectAuthorityReceipt:
-    """Validate the complete host-effect receipt without reading the host store."""
+    """Validate one host-effect receipt without reading the host store.
+
+    ``allow_revoked`` is intentionally limited to evidence parsing by the
+    bundle validator.  The effect selector never enables it.
+    """
     if not isinstance(receipt, HostEffectAuthorityReceipt):
         raise ContractError("host authority receipt must be typed")
     if (
@@ -705,7 +752,6 @@ def validate_host_effect_authority(
         "service_label": LABEL,
         "plist_path": PLIST,
         "endpoint": ENDPOINT,
-        "revocation_state": "NOT_REVOKED",
     }
     for name, expected in exact.items():
         if getattr(receipt, name) != expected:
@@ -738,8 +784,14 @@ def validate_host_effect_authority(
         (receipt.desired_profile_hash, "desired profile", 64),
     ):
         _hash(value, name, length)
-    if receipt.revoked_at is not None or receipt.revocation_reason is not None:
-        raise ContractError("host authority revocation fields must be null")
+    _validate_revocation_fields(
+        receipt.revocation_state,
+        receipt.revoked_at,
+        receipt.revocation_reason,
+        label="host authority",
+    )
+    if receipt.revocation_state == "REVOKED" and not allow_revoked:
+        raise ContractError("host authority is revoked")
     if request is not None:
         if (
             receipt.request_id != request.request_id
@@ -763,6 +815,196 @@ def validate_host_effect_authority(
     if receipt.receipt_hash != expected_hash:
         raise ContractError("host authority receipt hash mismatch")
     return receipt
+
+
+def _validate_revocation_fields(
+    state: str,
+    revoked_at: str | None,
+    reason: str | None,
+    *,
+    label: str,
+) -> None:
+    if state == "NOT_REVOKED":
+        if revoked_at is not None or reason is not None:
+            raise ContractError(f"{label} revocation fields must be null")
+        return
+    if state != "REVOKED":
+        raise ContractError(f"{label} revocation state invalid")
+    if not isinstance(revoked_at, str) or not revoked_at:
+        raise ContractError(f"{label} revoked_at missing")
+    if not isinstance(reason, str) or not reason:
+        raise ContractError(f"{label} revocation reason missing")
+
+
+_BUNDLE_CHILDREN: tuple[tuple[str, EffectClass], ...] = (
+    ("install-artifact", EffectClass.INSTALL_ARTIFACT),
+    ("reload", EffectClass.GATEWAY_RELOAD),
+    ("rollback", EffectClass.GATEWAY_ROLLBACK),
+)
+
+
+def validate_host_effect_authority_bundle(
+    bundle: HostEffectAuthorityBundle | Mapping[str, Any],
+    *,
+    now: str | None = None,
+    allow_revoked: bool = True,
+) -> HostEffectAuthorityBundle:
+    """Parse and validate the immutable three-child bundle as evidence.
+
+    Parsing deliberately preserves a consistently revoked bundle/child so a
+    reviewer can inspect the evidence.  It does not make that evidence
+    selectable; callers must use the selector below before any effect.
+    """
+    if isinstance(bundle, Mapping):
+        bundle = HostEffectAuthorityBundle.model_validate(bundle)
+    if not isinstance(bundle, HostEffectAuthorityBundle):
+        raise ContractError("host authority bundle must be typed")
+    if (
+        bundle.schema != HOST_AUTHORITY_BUNDLE_SCHEMA
+        or type(bundle.bundle_version) is not int
+        or bundle.bundle_version != 1
+    ):
+        raise ContractError("host authority bundle schema/version mismatch")
+    if bundle.scope != HOST_AUTHORITY_BUNDLE_SCOPE:
+        raise ContractError("host authority bundle scope mismatch")
+    _id(bundle.bundle_id, "host authority bundle id")
+    _hash(bundle.bundle_hash, "host authority bundle hash")
+    exact = {
+        "repository": REPOSITORY,
+        "host_card_path": HOST_CARD_PATH,
+        "host_card_id": HOST_CARD_ID,
+        "host_card_sha256": HOST_CARD_SHA256,
+        "source_base_merge": SOURCE_BASE_MERGE,
+        "source_base_tree": SOURCE_BASE_TREE,
+    }
+    for name, expected in exact.items():
+        if getattr(bundle, name) != expected:
+            raise ContractError(f"host authority bundle {name} mismatch")
+    for value, name, length in (
+        (bundle.correction_merge_sha, "bundle correction merge", 40),
+        (bundle.correction_tree_sha, "bundle correction tree", 40),
+        (bundle.current_main_sha, "bundle current main", 40),
+        (bundle.independent_acceptance_receipt_hash, "bundle acceptance receipt", 64),
+        (bundle.final_manager_sha256, "bundle final manager", 64),
+    ):
+        _hash(value, name, length)
+    _validate_revocation_fields(
+        bundle.revocation_state,
+        bundle.revoked_at,
+        bundle.revocation_reason,
+        label="host authority bundle",
+    )
+    if not isinstance(bundle.receipts, tuple) or len(bundle.receipts) != len(_BUNDLE_CHILDREN):
+        raise ContractError("host authority bundle must contain exactly three receipts")
+    seen_receipt_ids: set[str] = set()
+    seen_request_ids: set[str] = set()
+    seen_fences: set[str] = set()
+    revoked_children = 0
+    for index, (receipt, (operation, effect)) in enumerate(
+        zip(bundle.receipts, _BUNDLE_CHILDREN, strict=True)
+    ):
+        if not isinstance(receipt, HostEffectAuthorityReceipt):
+            raise ContractError("host authority bundle child must be typed")
+        # Validate the full child without binding it to a caller request.  A
+        # bundle is canonical only in this exact order and with no aliases.
+        validate_host_effect_authority(receipt, allow_revoked=allow_revoked)
+        if receipt.operation != operation or receipt.effect_class is not effect:
+            raise ContractError(f"host authority bundle child {index} operation mismatch")
+        if receipt.receipt_id in seen_receipt_ids:
+            raise ContractError("host authority bundle duplicate receipt id")
+        if receipt.request_id in seen_request_ids:
+            raise ContractError("host authority bundle duplicate request id")
+        if receipt.idempotency_fence in seen_fences:
+            raise ContractError("host authority bundle duplicate idempotency fence")
+        seen_receipt_ids.add(receipt.receipt_id)
+        seen_request_ids.add(receipt.request_id)
+        seen_fences.add(receipt.idempotency_fence)
+        if receipt.revocation_state == "REVOKED":
+            if (
+                receipt.revoked_at != bundle.revoked_at
+                or receipt.revocation_reason != bundle.revocation_reason
+            ):
+                raise ContractError("host authority bundle revoked child fields mismatch")
+            revoked_children += 1
+        elif receipt.revoked_at is not None or receipt.revocation_reason is not None:
+            raise ContractError("host authority bundle child revocation fields mismatch")
+    if bundle.revocation_state == "NOT_REVOKED" and revoked_children:
+        raise ContractError("active host authority bundle contains revoked child")
+    if bundle.revocation_state == "REVOKED" and not revoked_children:
+        raise ContractError("revoked host authority bundle has no revoked child")
+    expected_hash = canonical_hash({
+        key: value for key, value in _plain(bundle).items() if key != "bundle_hash"
+    })
+    if bundle.bundle_hash != expected_hash:
+        raise ContractError("host authority bundle hash mismatch")
+    if now is not None:
+        _validate_bundle_freshness(bundle, now=now)
+    return bundle
+
+
+def _validate_bundle_freshness(bundle: HostEffectAuthorityBundle, *, now: str) -> None:
+    def parse(value: str) -> datetime:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ContractError("host authority bundle timestamp malformed") from exc
+        if parsed.tzinfo is None:
+            raise ContractError("host authority bundle timestamp must be timezone-aware")
+        return parsed.astimezone(timezone.utc)
+
+    issued, expires, observed = parse(bundle.issued_at), parse(bundle.expires_at), parse(now)
+    if expires <= issued or issued > observed or expires <= observed:
+        raise ContractError("host authority bundle stale")
+    for receipt in bundle.receipts:
+        validate_receipt_freshness(receipt, now=now)
+
+
+def select_host_effect_authority_receipt(
+    bundle: HostEffectAuthorityBundle | Mapping[str, Any],
+    request: "GatewayDeploymentRequest | Mapping[str, Any]",
+    *,
+    now: str | None = None,
+) -> HostEffectAuthorityReceipt:
+    """Select exactly one active child equal to the request's receipt."""
+    parsed = validate_host_effect_authority_bundle(bundle, now=None, allow_revoked=True)
+    if (
+        parsed.revocation_state != "NOT_REVOKED"
+        or parsed.revoked_at is not None
+        or parsed.revocation_reason is not None
+    ):
+        raise ContractError("host authority bundle is revoked")
+    if isinstance(request, Mapping):
+        request = GatewayDeploymentRequest.model_validate(request)
+    if not isinstance(request, GatewayDeploymentRequest) or request.host_authority is None:
+        raise ContractError("host authority request child required")
+    if now is not None:
+        _validate_bundle_freshness(parsed, now=now)
+    selected = [
+        child
+        for child in parsed.receipts
+        if child.receipt_id == request.host_authority.receipt_id
+        and child.operation == request.host_authority.operation
+        and child.effect_class is request.host_authority.effect_class
+        and child.request_id == request.host_authority.request_id
+        and child.idempotency_fence == request.host_authority.idempotency_fence
+        and child == request.host_authority
+    ]
+    if len(selected) != 1:
+        raise ContractError("host authority bundle child selection mismatch")
+    selected_child = selected[0]
+    if (
+        selected_child.revocation_state != "NOT_REVOKED"
+        or selected_child.revoked_at is not None
+        or selected_child.revocation_reason is not None
+    ):
+        raise ContractError("selected host authority child is revoked")
+    return selected_child
+
+
+# Short names are kept for adapter/review tooling that uses the contract's
+# parse/select vocabulary.
+parse_host_effect_authority_bundle = validate_host_effect_authority_bundle
+select_host_authority_receipt = select_host_effect_authority_receipt
 
 
 def validate_receipt_freshness(

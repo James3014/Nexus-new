@@ -7,6 +7,14 @@ import pytest
 from nexus.contracts.gateway_deployment import (
     CURRENT_PROFILE,
     DESIRED_PROFILE,
+    HOST_AUTHORITY_BUNDLE_SCHEMA,
+    HOST_AUTHORITY_BUNDLE_SCOPE,
+    HOST_CARD_ID,
+    HOST_CARD_PATH,
+    HOST_CARD_SHA256,
+    REPOSITORY,
+    SOURCE_BASE_MERGE,
+    SOURCE_BASE_TREE,
     AuthorityReceipt,
     ContractError,
     DeploymentProfile,
@@ -14,15 +22,18 @@ from nexus.contracts.gateway_deployment import (
     EffectClass,
     GatewayDeploymentRequest,
     GitIdentity,
+    HostEffectAuthorityBundle,
     HostEffectAuthorityReceipt,
     IdentityEvidence,
     PostflightIdentity,
     QuiescenceEvidence,
     RollbackCapture,
     canonical_hash,
+    select_host_effect_authority_receipt,
     transition,
     validate_authority_freshness,
     validate_current_identity,
+    validate_host_effect_authority_bundle,
     validate_profile,
     validate_request,
 )
@@ -176,6 +187,194 @@ def _request():
     values["host_authority"] = host
     values["request_hash"] = canonical_hash(values)
     return GatewayDeploymentRequest(**values)
+
+
+def _bundle_fixture(*, revoked=False, child_revoked=False):
+    base = _request().host_authority
+    children = []
+    for operation, effect, suffix in (
+        ("install-artifact", EffectClass.INSTALL_ARTIFACT, "install"),
+        ("reload", EffectClass.GATEWAY_RELOAD, "reload"),
+        ("rollback", EffectClass.GATEWAY_ROLLBACK, "rollback"),
+    ):
+        child = HostEffectAuthorityReceipt(**{
+            **base.__dict__,
+            "operation": operation,
+            "effect_class": effect,
+            "receipt_id": f"bundle-{suffix}",
+            "request_id": f"bundle-request-{suffix}",
+            "idempotency_fence": f"bundle-fence-{suffix}",
+            "revocation_state": "REVOKED"
+            if (child_revoked and suffix == "reload")
+            else "NOT_REVOKED",
+            "revoked_at": "2026-08-23T00:00:00Z"
+            if (child_revoked and suffix == "reload")
+            else None,
+            "revocation_reason": "owner" if (child_revoked and suffix == "reload") else None,
+        })
+        child = HostEffectAuthorityReceipt(**{
+            **child.__dict__,
+            "receipt_hash": canonical_hash({
+                k: v for k, v in child.__dict__.items() if k != "receipt_hash"
+            }),
+        })
+        children.append(child)
+    bundle = HostEffectAuthorityBundle(
+        schema=HOST_AUTHORITY_BUNDLE_SCHEMA,
+        bundle_version=1,
+        bundle_id="bundle-fixture",
+        bundle_hash="0" * 64,
+        scope=HOST_AUTHORITY_BUNDLE_SCOPE,
+        repository=REPOSITORY,
+        host_card_path=HOST_CARD_PATH,
+        host_card_id=HOST_CARD_ID,
+        host_card_sha256=HOST_CARD_SHA256,
+        source_base_merge=SOURCE_BASE_MERGE,
+        source_base_tree=SOURCE_BASE_TREE,
+        correction_merge_sha="1" * 40,
+        correction_tree_sha="2" * 40,
+        independent_acceptance_receipt_hash="3" * 64,
+        final_manager_sha256="4" * 64,
+        current_main_sha="5" * 40,
+        issued_at="2026-08-22T00:00:00Z",
+        expires_at="2026-08-24T00:00:00Z",
+        revocation_state="REVOKED" if revoked else "NOT_REVOKED",
+        revoked_at="2026-08-23T00:00:00Z" if revoked else None,
+        revocation_reason="owner" if revoked else None,
+        receipts=tuple(children),
+    )
+    return HostEffectAuthorityBundle(**{
+        **bundle.__dict__,
+        "bundle_hash": canonical_hash({
+            k: v for k, v in bundle.__dict__.items() if k != "bundle_hash"
+        }),
+    })
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("revoked_at", "2026-08-23T00:00:01Z"),
+        ("revocation_reason", "reviewer"),
+    ],
+)
+def test_revoked_child_fields_must_equal_bundle(field, replacement):
+    bundle = _bundle_fixture(revoked=True, child_revoked=True)
+    index = next(i for i, receipt in enumerate(bundle.receipts) if receipt.operation == "reload")
+    child = HostEffectAuthorityReceipt(**{
+        **bundle.receipts[index].__dict__,
+        field: replacement,
+    })
+    child = HostEffectAuthorityReceipt(**{
+        **child.__dict__,
+        "receipt_hash": canonical_hash({
+            k: v for k, v in child.__dict__.items() if k != "receipt_hash"
+        }),
+    })
+    receipts = tuple(child if i == index else receipt for i, receipt in enumerate(bundle.receipts))
+    altered = HostEffectAuthorityBundle(**{**bundle.__dict__, "receipts": receipts})
+    altered = HostEffectAuthorityBundle(**{
+        **altered.__dict__,
+        "bundle_hash": canonical_hash({
+            k: v for k, v in altered.__dict__.items() if k != "bundle_hash"
+        }),
+    })
+
+    with pytest.raises(ContractError, match="revoked child fields mismatch"):
+        validate_host_effect_authority_bundle(altered)
+
+
+def test_bundle_is_exactly_ordered_three_child_hash_sealed():
+    bundle = _bundle_fixture()
+    assert tuple(child.operation for child in bundle.receipts) == (
+        "install-artifact",
+        "reload",
+        "rollback",
+    )
+    assert validate_host_effect_authority_bundle(bundle) == bundle
+    reordered = HostEffectAuthorityBundle(**{
+        **bundle.__dict__,
+        "receipts": tuple(reversed(bundle.receipts)),
+    })
+    with pytest.raises(ContractError):
+        validate_host_effect_authority_bundle(reordered)
+    with pytest.raises(ContractError):
+        HostEffectAuthorityBundle.model_validate({**bundle.model_dump(), "extra": True})
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda b: b.receipts[:2],
+        lambda b: b.receipts + (b.receipts[0],),
+        lambda b: tuple(
+            HostEffectAuthorityReceipt(**{**b.receipts[0].__dict__, "operation": "install"})
+            if i == 0
+            else r
+            for i, r in enumerate(b.receipts)
+        ),
+    ],
+)
+def test_bundle_missing_extra_alias_children_fail_closed(mutation):
+    bundle = _bundle_fixture()
+    altered = HostEffectAuthorityBundle(**{**bundle.__dict__, "receipts": mutation(bundle)})
+    with pytest.raises(ContractError):
+        validate_host_effect_authority_bundle(altered)
+
+
+def test_bundle_duplicate_ids_requests_and_fences_are_rejected():
+    bundle = _bundle_fixture()
+    duplicate = HostEffectAuthorityReceipt(**{
+        **bundle.receipts[1].__dict__,
+        "receipt_id": bundle.receipts[0].receipt_id,
+        "receipt_hash": "0" * 64,
+    })
+    duplicate = HostEffectAuthorityReceipt(**{
+        **duplicate.__dict__,
+        "receipt_hash": canonical_hash({
+            k: v for k, v in duplicate.__dict__.items() if k != "receipt_hash"
+        }),
+    })
+    altered = HostEffectAuthorityBundle(**{
+        **bundle.__dict__,
+        "receipts": (bundle.receipts[0], duplicate, bundle.receipts[2]),
+    })
+    with pytest.raises(ContractError, match="duplicate receipt"):
+        validate_host_effect_authority_bundle(altered)
+
+
+def test_revoked_bundle_parses_as_evidence_but_never_selects():
+    bundle = _bundle_fixture(revoked=True, child_revoked=True)
+    assert validate_host_effect_authority_bundle(bundle).revocation_state == "REVOKED"
+    request = _request()
+    with pytest.raises(ContractError, match="revoked"):
+        select_host_effect_authority_receipt(bundle, request, now="2026-08-23T00:00:00Z")
+
+
+@pytest.mark.parametrize(
+    "now",
+    [
+        pytest.param("2026-08-21T00:00:00Z", id="stale"),
+        pytest.param("2026-08-25T00:00:00Z", id="future"),
+    ],
+)
+def test_bundle_selection_rejects_future_or_stale_validity(now):
+    bundle = _bundle_fixture()
+    request = _request()
+    child = bundle.receipts[1]
+    values = {
+        **request.__dict__,
+        "request_id": child.request_id,
+        "idempotency_fence": child.idempotency_fence,
+        "host_authority": child,
+        "operation": "reload",
+        "effect_class": EffectClass.GATEWAY_RELOAD,
+    }
+    values["request_hash"] = canonical_hash({
+        k: v for k, v in values.items() if k not in {"request_hash", "schema"}
+    })
+    with pytest.raises(ContractError):
+        select_host_effect_authority_receipt(bundle, GatewayDeploymentRequest(**values), now=now)
 
 
 def test_frozen_profiles_are_explicit_and_valid():
