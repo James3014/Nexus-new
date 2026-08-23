@@ -488,6 +488,147 @@ def test_rollback_rejects_altered_plist_and_restores_unloaded_predecessor(monkey
         g.rollback_gateway(request.__class__(**tampered_values), plist_path=g.GATEWAY_PLIST, predecessor_observer=observer, observation_time="2026-08-23T00:00:00Z")
 
 
+def test_loaded_rollback_boots_only_fixed_gateway_and_rebinds_old_client(monkeypatch, tmp_path):
+    """A loaded predecessor must be restored only after fresh physical proof."""
+    from nexus.contracts.gateway_deployment import canonical_hash
+
+    monkeypatch.setattr(g, "GATEWAY_LOCK", tmp_path / "rollback.lock")
+    monkeypatch.setattr(g, "GATEWAY_PLIST", tmp_path / "gateway.plist")
+    base = _gateway_request("rollback")
+    capture = base.rollback.__class__(**{**base.rollback.__dict__, "loaded": True})
+    values = {**base.__dict__, "rollback": capture}
+    values["request_hash"] = canonical_hash({k: v for k, v in values.items()
+                                               if k not in {"request_hash", "schema"}})
+    request = base.__class__(**values)
+    payload = bytes.fromhex(capture.plist_bytes_hex)
+    observer = {
+        "plist_sha256": capture.plist_sha256,
+        "plist_bytes_sha256": capture.plist_bytes_sha256,
+        "artifact_sha256": capture.artifact_sha256,
+        "source_sha256": capture.source_sha256,
+        "source_root": capture.source_root,
+        "source_head": capture.source_head,
+        "source_tree": capture.source_tree,
+        "loaded": True,
+        "pid": 123,
+        "server_instance": capture.server_instance,
+        "listener": g.GATEWAY_ENDPOINT,
+        "service_loaded": True,
+    }
+    calls = []
+    class Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def runner(*args):
+        calls.append(args)
+        assert args[0:2] == ("launchctl", "bootout") or args[0:2] == ("launchctl", "bootstrap")
+        assert args[-1] == f"{g.UID_TARGET}/{g.GATEWAY_LABEL}" or args[-1] == str(g.GATEWAY_PLIST)
+        return Result()
+
+    tools = [{"name": "gateway-rebind", "description": "bounded"}]
+    manifest = hashlib.sha256(json.dumps(("gateway-rebind",), separators=(",", ":"), ensure_ascii=True).encode()).hexdigest()
+    schema = hashlib.sha256(json.dumps(tools, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+    identity = {
+        "server_instance": capture.server_instance,
+        "repo_root": capture.source_root,
+        "git_head": capture.source_head,
+        "git_tree": capture.source_tree,
+        "permission_policy_hash": "e" * 64,
+        "action": "gateway-rebind",
+        "task_id": "TASK-526-A",
+        "lifecycle": "QUIESCENT",
+        "tool_manifest_revision": manifest,
+        "full_tool_schema_hash": schema,
+        "client_bound": True,
+        "token_bound": True,
+    }
+    requests = []
+    class Response:
+        def __init__(self, value): self.value = value
+        def __enter__(self): return self
+        def __exit__(self, *_): return False
+        def read(self): return json.dumps(self.value).encode()
+
+    def opener(req, timeout):
+        requests.append(req)
+        assert req.headers.get("Authorization") == "Bearer SECRET"
+        if req.full_url.endswith("/health"):
+            return Response(identity)
+        body = json.loads(req.data.decode())
+        assert body["method"] in {"initialize", "tools/list"}
+        if body["method"] == "initialize":
+            return Response({"result": {"serverInfo": identity}})
+        return Response({"result": {"tools": tools}})
+
+    result = g.rollback_gateway(
+        request, plist_path=g.GATEWAY_PLIST, predecessor_observer=observer,
+        runner=runner, opener=opener, token_loader=lambda: "SECRET",
+        sleeper=lambda _: None, observation_time="2026-08-23T00:00:00Z",
+    )
+    assert result["state"] == "ROLLED_BACK"
+    assert [call[1] for call in calls] == ["bootout", "bootstrap"]
+    assert all(call[-1] == f"{g.UID_TARGET}/{g.GATEWAY_LABEL}" for call in calls[:1])
+    assert calls[1][-1] == str(g.GATEWAY_PLIST)
+    assert [req.full_url.rsplit("/", 1)[-1] for req in requests] == ["health", "mcp", "mcp"]
+    assert [json.loads(req.data.decode())["method"] for req in requests[1:]] == ["initialize", "tools/list"]
+    assert not any("devspace" in str(call).lower() for call in calls)
+    assert g.GATEWAY_PLIST.read_bytes() == payload
+
+
+def test_loaded_rollback_postflight_failure_is_uncertain_and_not_recorded_success(monkeypatch, tmp_path):
+    """Bootstrap acknowledgement failure cannot become a false ROLLED_BACK."""
+    from nexus.contracts.gateway_deployment import canonical_hash
+
+    monkeypatch.setattr(g, "GATEWAY_LOCK", tmp_path / "rollback.lock")
+    monkeypatch.setattr(g, "GATEWAY_PLIST", tmp_path / "gateway.plist")
+    base = _gateway_request("rollback")
+    capture = base.rollback.__class__(**{**base.rollback.__dict__, "loaded": True})
+    values = {**base.__dict__, "rollback": capture}
+    values["request_hash"] = canonical_hash({k: v for k, v in values.items()
+                                               if k not in {"request_hash", "schema"}})
+    request = base.__class__(**values)
+    observer = {
+        "plist_sha256": capture.plist_sha256,
+        "plist_bytes_sha256": capture.plist_bytes_sha256,
+        "artifact_sha256": capture.artifact_sha256,
+        "source_sha256": capture.source_sha256,
+        "source_root": capture.source_root,
+        "source_head": capture.source_head,
+        "source_tree": capture.source_tree,
+        "loaded": True,
+        "pid": 123,
+        "server_instance": capture.server_instance,
+        "listener": g.GATEWAY_ENDPOINT,
+        "service_loaded": True,
+    }
+    calls = []
+    class Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def runner(*args):
+        calls.append(args)
+        return Result()
+
+    def failing_opener(req, timeout):
+        assert req.headers.get("Authorization") == "Bearer SECRET"
+        raise OSError("postflight unavailable")
+
+    with pytest.raises(g.GatewayContractError, match="postflight") as exc_info:
+        g.rollback_gateway(
+            request, plist_path=g.GATEWAY_PLIST, predecessor_observer=observer,
+            runner=runner, opener=failing_opener, token_loader=lambda: "SECRET",
+            sleeper=lambda _: None, observation_time="2026-08-23T00:00:00Z",
+        )
+    assert [call[1] for call in calls] == ["bootout", "bootstrap"]
+    assert not any("devspace" in str(call).lower() for call in calls)
+    assert "ROLLED_BACK" not in str(exc_info.value)
+    assert not (tmp_path / "ledger.jsonl").exists()
+
+
 def test_rollback_missing_observer_and_stale_authority_have_zero_effects(monkeypatch, tmp_path):
     request = _gateway_request("rollback")
     calls = []
