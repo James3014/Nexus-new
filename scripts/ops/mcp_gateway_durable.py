@@ -26,6 +26,8 @@ from typing import Any, Callable, Mapping
 from nexus.contracts.gateway_deployment import (
     CURRENT_WRAPPER_COMMAND,
     DESIRED_PROFILE,
+    GATEWAY_ACTION,
+    GATEWAY_TASK_ID,
     HOST_CARD_SHA256,
     SOURCE_BASE_MERGE,
     SOURCE_BASE_TREE,
@@ -36,8 +38,8 @@ from nexus.contracts.gateway_deployment import (
     HostEffectAuthorityBundle,
     HostEffectAuthorityReceipt,
     PostflightIdentity,
+    _gateway_wrapper_command,
     canonical_hash,
-    gateway_wrapper_command,
     select_host_effect_authority_receipt,
     validate_authority_freshness,
     validate_host_effect_authority,
@@ -977,13 +979,13 @@ def gateway_preflight(*args: Any, **kwargs: Any) -> dict[str, Any]:
     return preflight_gateway(*args, **kwargs)
 
 
-def _gateway_plist(profile: Any, *, token_env: str = "NEXUS_MCP_GATEWAY_TOKEN") -> bytes:
+def _gateway_plist(profile: Any) -> bytes:
     validate_profile(profile)
     root = profile.git.root
     entrypoint = profile.entrypoint if profile.entrypoint.startswith("/") else str(Path(root) / profile.entrypoint)
     payload = {
         "Label": GATEWAY_LABEL,
-        "ProgramArguments": ["/bin/zsh", "-c", gateway_wrapper_command(root, entrypoint)],
+        "ProgramArguments": ["/bin/zsh", "-c", _gateway_wrapper_command(root, entrypoint)],
         "WorkingDirectory": root,
         "RunAtLoad": True,
         "KeepAlive": True,
@@ -1181,6 +1183,52 @@ def _canonical_alias(mapping: Mapping[str, Any], canonical: str, aliases: tuple[
     return values[0]
 
 
+_GATEWAY_PROTOCOL_ALIASES = {
+    "server_instance": ("serverInstanceId", "server_instance_id", "instance_id"),
+    "tool_manifest_sha256": ("toolManifestRevision", "tool_manifest_revision"),
+    "schema_sha256": ("fullToolSchemaHash", "full_tool_schema_hash"),
+    "permission_sha256": ("permissionPolicyHash", "permission_policy_hash"),
+    "lifecycle": ("lifecycleRevision", "lifecycle_revision"),
+}
+
+
+def _normalize_gateway_identity_surfaces(
+    health: Mapping[str, Any],
+    *,
+    profile: Any,
+    git: Mapping[str, Any],
+    server_info: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    """Normalize physical health/initialize fields against fixed local Git."""
+    normalized: dict[str, str] = {}
+    for key, aliases in _GATEWAY_PROTOCOL_ALIASES.items():
+        health_value = _canonical_alias(health, key, aliases)
+        if server_info is not None:
+            initialize_value = _canonical_alias(server_info, key, aliases)
+            if health_value != initialize_value:
+                raise _gateway_error(f"health/initialize identity disagreement: {key}")
+        normalized[key] = health_value
+
+    root = _canonical_alias(health, "root", ("repo_root",))
+    head = _canonical_alias(health, "head", ("git_head",))
+    local_root = git.get("root")
+    local_head = git.get("head")
+    local_tree = git.get("tree")
+    if (
+        root != profile.git.root
+        or head != profile.git.head
+        or local_root != profile.git.root
+        or local_head != profile.git.head
+        or local_tree != profile.git.tree
+    ):
+        raise _gateway_error("health/local Git identity disagreement")
+    if "tree" in health or "git_tree" in health:
+        if _canonical_alias(health, "tree", ("git_tree",)) != local_tree:
+            raise _gateway_error("health/local Git tree disagreement")
+    normalized.update(root=root, head=head, tree=str(local_tree))
+    return normalized
+
+
 def postflight_gateway(expected: Mapping[str, Any], *, token: str, endpoint: str = GATEWAY_ENDPOINT,
                        opener: Any = urllib.request.urlopen, retries: int = 3,
                        timeout: float = 2.0, sleeper: Callable[[float], None] = time.sleep) -> PostflightIdentity:
@@ -1190,11 +1238,14 @@ def postflight_gateway(expected: Mapping[str, Any], *, token: str, endpoint: str
     last: BaseException | None = None
     for attempt in range(retries):
         try:
+            authenticated_methods: set[str] = set()
             health = _http_json(endpoint + "/health", token=token, timeout=timeout, opener=opener)
             init = _http_json(endpoint + "/mcp", token=token, timeout=timeout, opener=opener,
                               payload={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+            authenticated_methods.add("initialize")
             listing = _http_json(endpoint + "/mcp", token=token, timeout=timeout, opener=opener,
                                  payload={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+            authenticated_methods.add("tools/list")
             result = init.get("result", init); health_result = health.get("result", health)
             tools_result = listing.get("result", listing)
             if not isinstance(health_result, Mapping) or not isinstance(result, Mapping) or not isinstance(tools_result, Mapping):
@@ -1208,29 +1259,17 @@ def postflight_gateway(expected: Mapping[str, Any], *, token: str, endpoint: str
             server_info = result.get("serverInfo")
             if not isinstance(server_info, Mapping):
                 raise _gateway_error("initialize identity missing")
-            merged = dict(health_result)
-            # Health and initialize are independent physical surfaces.  They
-            # may use snake_case/camelCase, but overlapping canonical values
-            # must agree and missing/empty aliases are rejected.
-            for key, aliases in {
-                "server_instance": ("serverInstanceId", "server_instance_id", "instance_id"),
-                "tool_manifest_sha256": ("toolManifestRevision", "tool_manifest_revision"),
-                "schema_sha256": ("fullToolSchemaHash", "full_tool_schema_hash"),
-                "permission_sha256": ("permissionPolicyHash", "permission_policy_hash"),
-                "lifecycle": ("lifecycleRevision", "lifecycle_revision"),
-                "root": ("repo_root",), "head": ("git_head",), "tree": ("git_tree",),
-            }.items():
-                h = _canonical_alias(merged, key, aliases)
-                # Physical initialize only carries protocol/server identity;
-                # repository revision is supplied by health plus fixed local
-                # Git observation.  Compare only fields present on both
-                # surfaces, while still rejecting conflicting aliases.
-                i_values = [server_info[name] for name in (key, *aliases) if name in server_info]
-                if i_values:
-                    i = _canonical_alias(server_info, key, aliases)
-                    if h != i:
-                        raise _gateway_error(f"health/initialize identity disagreement: {key}")
-                merged[key] = h
+            profile = _profile_for_expected(expected)
+            merged = _normalize_gateway_identity_surfaces(
+                health_result,
+                profile=profile,
+                git={
+                    "root": profile.git.root,
+                    "head": profile.git.head,
+                    "tree": profile.git.tree,
+                },
+                server_info=server_info,
+            )
             declared_manifest = merged["tool_manifest_sha256"]
             declared_schema = merged["schema_sha256"]
             if declared_manifest != manifest or declared_schema != schema:
@@ -1247,15 +1286,15 @@ def postflight_gateway(expected: Mapping[str, Any], *, token: str, endpoint: str
                 tool_manifest_sha256=str(declared_manifest or ""),
                 schema_sha256=str(declared_schema or ""),
                 permission_sha256=str(merged["permission_sha256"]),
-                action=str(merged.get("action") or ""),
-                task_id=str(merged.get("task_id") or ""),
+                action=GATEWAY_ACTION,
+                task_id=GATEWAY_TASK_ID,
                 lifecycle=str(merged["lifecycle"]),
-                client_bound=merged.get("client_bound") is True,
+                client_bound="initialize" in authenticated_methods,
                 required_actions=required,
                 observed_actions=names,
-                token_bound=merged.get("token_bound") is True,
+                token_bound=bool(token) and authenticated_methods == {"initialize", "tools/list"},
             )
-            validate_postflight_identity(identity, _profile_for_expected(expected))
+            validate_postflight_identity(identity, profile)
             for key, expected_value in expected.items():
                 if key == "previous_server_instance":
                     continue
@@ -1318,7 +1357,7 @@ def rollback_gateway(request: GatewayDeploymentRequest, *, plist_path: Path | No
         if wrapper:
             if args[2] != CURRENT_WRAPPER_COMMAND or payload_hash != "082c7786f9b7254949a6fdb38d905414a78c1b1979aabf7f434dd7019c09e100":
                 raise _gateway_error("rollback wrapper command drift")
-        elif not (len(args) == 2 and args[0] == "/Users/jameschen/Workspace/Nexus-new/.venv/bin/python" and str(args[1]).endswith(GATEWAY_ENTRYPOINT)):
+        elif args != ["/Users/jameschen/Workspace/Nexus-new/.venv/bin/python", "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe/scripts/ops/nexus_mcp_gateway_http.py"]:
             raise _gateway_error("rollback program arguments drift")
         if parsed.get("WorkingDirectory") != capture.root or parsed.get("StandardOutPath") != "/Users/jameschen/Library/Logs/Nexus/gateway.log" or parsed.get("StandardErrorPath") != "/Users/jameschen/Library/Logs/Nexus/gateway.err.log":
             raise _gateway_error("rollback root/log identity drift")
@@ -1634,7 +1673,7 @@ def collect_gateway_observation(request: GatewayDeploymentRequest, *, observatio
     if not isinstance(parsed, Mapping):
         raise _gateway_error("Gateway plist observation malformed")
     args = parsed.get("ProgramArguments")
-    wrapper_ok = isinstance(args, list) and len(args) == 3 and args[:2] == ["/bin/zsh", "-c"] and args[2] == gateway_wrapper_command(profile.git.root, profile.entrypoint)
+    wrapper_ok = isinstance(args, list) and len(args) == 3 and args[:2] == ["/bin/zsh", "-c"] and args[2] == _gateway_wrapper_command(profile.git.root, str(Path(profile.git.root) / GATEWAY_ENTRYPOINT))
     direct_ok = isinstance(args, list) and len(args) == 2 and args[0] == profile.interpreter.path and str(args[1]) in {GATEWAY_ENTRYPOINT, str(Path(profile.git.root) / GATEWAY_ENTRYPOINT)} and parsed.get("EnvironmentVariables") == {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}
     if (parsed.get("Label") != GATEWAY_LABEL or parsed.get("WorkingDirectory") != profile.git.root
             or parsed.get("StandardOutPath") != profile.repository.stdout
@@ -1685,11 +1724,20 @@ def collect_gateway_observation(request: GatewayDeploymentRequest, *, observatio
     else:
         artifact_digest = artifact_observer(Path(GATEWAY_ARTIFACT))
     quiescence = (quiescence_observer or observe_gateway_quiescence)()
-    source_root = str(health.get("repo_root") or git.get("root") or "")
-    source_head = str(health.get("git_head") or git.get("head") or "")
-    source_tree = str(health.get("git_tree") or git.get("tree") or "")
+    normalized_health = (
+        {}
+        if rollback_unloaded
+        else _normalize_gateway_identity_surfaces(
+            health,
+            profile=profile,
+            git=git,
+        )
+    )
+    source_root = str(normalized_health.get("root") or git.get("root") or "")
+    source_head = str(normalized_health.get("head") or git.get("head") or "")
+    source_tree = str(normalized_health.get("tree") or git.get("tree") or "")
     physical_source_hash = str(health.get("source_sha256") or source_hash)
-    server_instance = str(health.get("server_instance") or health.get("instance_id") or "")
+    server_instance = str(normalized_health.get("server_instance") or "")
     predecessor = {
         "plist_sha256": plist_digest, "plist_bytes_sha256": plist_digest,
         "artifact_sha256": artifact_digest, "source_sha256": physical_source_hash,
@@ -1711,11 +1759,12 @@ def collect_gateway_observation(request: GatewayDeploymentRequest, *, observatio
         "plist_bytes_hex": plist_bytes.hex(), **service,
         "server_instance": server_instance,
         "source_sha256": physical_source_hash,
-        "tool_manifest_sha256": str(health.get("tool_manifest_sha256") or ""),
-        "schema_sha256": str(health.get("schema_sha256") or ""),
-        "permission_sha256": str(health.get("permission_policy_hash") or ""),
-        "action": str(health.get("action") or ""), "task_id": str(health.get("task_id") or ""),
-        "lifecycle": str(health.get("lifecycle") or health.get("lifecycle_identity") or ""),
+        "tool_manifest_sha256": str(normalized_health.get("tool_manifest_sha256") or ""),
+        "schema_sha256": str(normalized_health.get("schema_sha256") or ""),
+        "permission_sha256": str(normalized_health.get("permission_sha256") or ""),
+        "action": GATEWAY_ACTION,
+        "task_id": GATEWAY_TASK_ID,
+        "lifecycle": str(normalized_health.get("lifecycle") or ""),
         "stable_artifact": {"artifact_sha256": artifact_digest},
         "rollback_predecessor": predecessor, "listener": GATEWAY_ENDPOINT if not rollback_unloaded else "",
         "services": [GATEWAY_LABEL], "quiescence": quiescence,

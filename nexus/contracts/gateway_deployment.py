@@ -52,15 +52,25 @@ INTERPRETER_TARGET = (
 )
 INTERPRETER_SHA256 = "c89af0b037c601180919ca5fd8a936bd2568cbb4976f91a208c10f54c17a1b78"
 ENTRYPOINT = "scripts/ops/nexus_mcp_gateway_http.py"
+GATEWAY_ACTION = "gateway-rebind"
+GATEWAY_TASK_ID = "TASK-526-A"
+GATEWAY_LIFECYCLE_REVISION = "nexus.lifecycle.gateway.v2"
 
 
-def gateway_wrapper_command(root: str, entrypoint: str = ENTRYPOINT) -> str:
+def _gateway_wrapper_command(root: str, entrypoint: str) -> str:
     """Build the sole permitted fixed-literal Gateway shell wrapper."""
-    if not isinstance(root, str) or not root or not Path(root).is_absolute():
+    frozen = {
+        CURRENT_ROOT: str(Path(CURRENT_ROOT) / ENTRYPOINT),
+        DESIRED_ROOT: str(Path(DESIRED_ROOT) / ENTRYPOINT),
+    }
+    if root not in frozen or entrypoint != frozen[root]:
         raise ContractError("wrapper profile root invalid")
-    executable = entrypoint if entrypoint.startswith("/") else str(Path(root) / entrypoint)
-    if not isinstance(executable, str) or not executable or not Path(executable).is_absolute():
-        raise ContractError("wrapper entrypoint invalid")
+    if any(
+        token in root or token in entrypoint
+        for token in (";", "&&", "|", "$", "`", "\n", "\r", "\x00")
+    ):
+        raise ContractError("wrapper path contains shell metacharacter")
+    executable = entrypoint
     return (
         f'cd {root} ; source "{ENV_FILE}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
         f"export NEXUS_CANONICAL_SOURCE_ROOT={root} ; "
@@ -69,7 +79,9 @@ def gateway_wrapper_command(root: str, entrypoint: str = ENTRYPOINT) -> str:
     )
 
 
-CURRENT_WRAPPER_COMMAND = gateway_wrapper_command(CURRENT_ROOT)
+CURRENT_WRAPPER_COMMAND = _gateway_wrapper_command(
+    CURRENT_ROOT, str(Path(CURRENT_ROOT) / ENTRYPOINT)
+)
 SCHEMA = "nexus.gateway.deployment.v1"
 HOST_AUTHORITY_SCHEMA = "nexus.gateway.host_effect_authority.v1"
 HOST_AUTHORITY_SCOPE = "NEXUS_GATEWAY_REBIND_HOST_EFFECT_ONLY"
@@ -733,7 +745,7 @@ def _validate_rollback(capture: RollbackCapture) -> None:
         expected_payload_hash = CURRENT_WRAPPER_PLIST_SHA256
     else:
         # Direct interpreter form retained for compatibility only.
-        if len(args) != 2 or args[0] != INTERPRETER or not str(args[1]).endswith("/" + ENTRYPOINT):
+        if args != [INTERPRETER, str(Path(CURRENT_ROOT) / ENTRYPOINT)]:
             raise ContractError("rollback program arguments mismatch")
         if env != {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}:
             raise ContractError("rollback environment mismatch")
@@ -992,9 +1004,6 @@ def validate_host_effect_authority_bundle(
     ):
         if not isinstance(receipt, HostEffectAuthorityReceipt):
             raise ContractError("host authority bundle child must be typed")
-        # Validate the full child without binding it to a caller request.  A
-        # bundle is canonical only in this exact order and with no aliases.
-        validate_host_effect_authority(receipt, allow_revoked=allow_revoked)
         shared_provenance = {
             "repository": "repository",
             "host_card_path": "host_card_path",
@@ -1011,6 +1020,9 @@ def validate_host_effect_authority_bundle(
         for bundle_field, receipt_field in shared_provenance.items():
             if getattr(receipt, receipt_field) != getattr(bundle, bundle_field):
                 raise ContractError(f"host authority bundle child {index} provenance mismatch")
+        # Validate the full child after cross-binding every shared field, so a
+        # rehashed child substitution is rejected at the bundle equality gate.
+        validate_host_effect_authority(receipt, allow_revoked=allow_revoked)
         if receipt.operation != operation or receipt.effect_class is not effect:
             raise ContractError(f"host authority bundle child {index} operation mismatch")
         if receipt.receipt_id in seen_receipt_ids:
@@ -1293,9 +1305,9 @@ def validate_current_identity(
         "tool_manifest_sha256": None,
         "schema_sha256": None,
         "permission_sha256": None,
-        "action": "gateway-rebind",
-        "task_id": "TASK-526-A",
-        "lifecycle": None,
+        "action": GATEWAY_ACTION,
+        "task_id": GATEWAY_TASK_ID,
+        "lifecycle": GATEWAY_LIFECYCLE_REVISION,
         "endpoint": ENDPOINT,
     }
     for key, value in expected.items():
@@ -1344,9 +1356,9 @@ def validate_postflight_identity(
     ):
         _hash(value, name)
     if (
-        identity.action != "gateway-rebind"
-        or identity.task_id != "TASK-526-A"
-        or identity.lifecycle not in {"QUIESCENT", "READY", "ACTIVE"}
+        identity.action != GATEWAY_ACTION
+        or identity.task_id != GATEWAY_TASK_ID
+        or identity.lifecycle != GATEWAY_LIFECYCLE_REVISION
     ):
         raise ContractError("postflight action/task/lifecycle mismatch")
     if not identity.client_bound or not identity.token_bound:
