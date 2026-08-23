@@ -24,7 +24,11 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from nexus.contracts.gateway_deployment import (
+    CURRENT_PROFILE,
+    CURRENT_WRAPPER_COMMAND,
     DESIRED_PROFILE,
+    GATEWAY_ACTION,
+    GATEWAY_TASK_ID,
     HOST_CARD_SHA256,
     SOURCE_BASE_MERGE,
     SOURCE_BASE_TREE,
@@ -35,6 +39,7 @@ from nexus.contracts.gateway_deployment import (
     HostEffectAuthorityBundle,
     HostEffectAuthorityReceipt,
     PostflightIdentity,
+    _gateway_wrapper_command,
     canonical_hash,
     select_host_effect_authority_receipt,
     validate_authority_freshness,
@@ -278,13 +283,16 @@ GATEWAY_EVIDENCE_STORE = GATEWAY_STATE_ROOT / "evidence.json"
 GATEWAY_HOST_AUTHORITY_STORE = Path(
     "/Users/jameschen/Library/Application Support/Nexus/gateway-direct/host-authority.json"
 )
-# This is deliberately not caller-selectable.  The local checkout is only a
-# trusted source mirror; authority comes from the fixed receipt blob on the
-# public remote's ``main`` ref, and the mirror must be clean and at that exact
-# remote-main commit before a host observation/effect can proceed.
-HOST_AUTHORITY_SOURCE_ROOT = Path("/Users/jameschen/Workspace/Nexus-new")
+# This is deliberately not caller-selectable.  The authority mirror is a
+# detached, non-DevSpace Git worktree created only by the coordinator from
+# verified remote ``main``.  The worker never creates or updates it; it only
+# verifies exact path, safe non-symlink ancestry, expected UID/mode, fixed
+# origin, clean status, local HEAD equal to remote main, and byte-identical
+# bundle path before any host observation/effect.
+HOST_AUTHORITY_SOURCE_ROOT = Path("/Users/jameschen/Workspace/Nexus-new-authority-main")
 HOST_AUTHORITY_REMOTE = "https://github.com/James3014/Nexus-new.git"
 HOST_AUTHORITY_REF = "refs/heads/main"
+HOST_AUTHORITY_UID = 501
 HOST_AUTHORITY_SOURCE_PATH = (
     "tasks/github-issue-526-host-authority-and-canary-20260823/02-host-effect-authority-receipt.json"
 )
@@ -430,6 +438,12 @@ def _fixed_authority_command_runner(*args: Any) -> Any:
         ("git", "-C", root, "rev-parse", "HEAD"),
         ("git", "-C", root, "ls-remote", HOST_AUTHORITY_REMOTE, HOST_AUTHORITY_REF),
     }
+    # The ancestry check is manager-owned and the SHA arguments come only from
+    # the validated bundle and fixed remote-main observation.
+    if len(command) == 7 and command[:5] == ("git", "-C", root, "merge-base", "--is-ancestor"):
+        if not all(isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}", value) for value in command[5:]):
+            raise _gateway_error("caller-selected authority ancestry rejected")
+        return subprocess.run(command, text=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
     if command not in allowed and not (
         len(command) == 5
         and command[:4] == ("git", "-C", root, "show")
@@ -474,6 +488,23 @@ def _authority_command_output(
         raise _gateway_error("fixed authority command output is not UTF-8", exc) from exc
 
 
+def _validate_authority_source_directory(info: Any, *, leaf: bool) -> None:
+    """Validate the mirror leaf or one generic ancestor without weakening it."""
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise _gateway_error("trusted authority source ancestry unsafe")
+    mode = stat.S_IMODE(info.st_mode)
+    if leaf:
+        if info.st_uid != HOST_AUTHORITY_UID:
+            raise _gateway_error("trusted authority source owner mismatch")
+        if mode not in {0o700, 0o755}:
+            raise _gateway_error("trusted authority source ancestry unsafe")
+        return
+    if info.st_uid not in {HOST_AUTHORITY_UID, 0}:
+        raise _gateway_error("trusted authority source ancestry unsafe")
+    if mode & 0o022 and not (info.st_uid == 0 and info.st_mode & stat.S_ISVTX):
+        raise _gateway_error("trusted authority source ancestry unsafe")
+
+
 def _verify_git_main_host_authority(
     local_bytes: bytes,
     local_bundle: HostEffectAuthorityBundle,
@@ -484,6 +515,20 @@ def _verify_git_main_host_authority(
     root = HOST_AUTHORITY_SOURCE_ROOT
     if root.is_symlink() or not root.is_dir():
         raise _gateway_error("trusted authority source root invalid")
+    # The mirror is a coordinator-created cache, never an implicit authority
+    # path.  Reject symlinked/loosely-owned ancestry before any Git read.
+    cursor = root
+    while True:
+        try:
+            info = os.lstat(cursor)
+        except OSError as exc:
+            raise _gateway_error("trusted authority source ancestry unavailable", exc) from exc
+        _validate_authority_source_directory(info, leaf=cursor == root)
+        if cursor.parent == cursor:
+            break
+        if cursor == Path("/"):
+            break
+        cursor = cursor.parent
     run = command_runner or _fixed_authority_command_runner
     root_text = str(root)
     top = _authority_command_output(run, ("git", "-C", root_text, "rev-parse", "--show-toplevel"))
@@ -501,6 +546,13 @@ def _verify_git_main_host_authority(
     remote_sha = parts[0]
     if head != remote_sha:
         raise _gateway_error("trusted authority source HEAD differs from remote main")
+    ancestor = local_bundle.current_main_sha
+    if not re.fullmatch(r"[0-9a-f]{40}", ancestor):
+        raise _gateway_error("bundle current main SHA malformed")
+    _authority_command_output(
+        run,
+        ("git", "-C", root_text, "merge-base", "--is-ancestor", ancestor, remote_sha),
+    )
     blob = _authority_command_output(
         run,
         ("git", "-C", root_text, "show", f"{remote_sha}:{HOST_AUTHORITY_SOURCE_PATH}"),
@@ -841,7 +893,7 @@ def gateway_profile_matches(observed: Mapping[str, Any], expected: Any) -> bool:
     required = {
         "root": profile.git.root, "toplevel": profile.git.toplevel,
         "remote": profile.git.remote, "head": profile.git.head, "tree": profile.git.tree,
-        "clean": True, "entrypoint": profile.entrypoint,
+        "clean": profile.git.clean, "entrypoint": profile.entrypoint,
         "entrypoint_sha256": profile.entrypoint_sha256,
         "interpreter_path": profile.interpreter.path,
         "interpreter_resolved_path": profile.interpreter.resolved_path,
@@ -942,19 +994,18 @@ def gateway_preflight(*args: Any, **kwargs: Any) -> dict[str, Any]:
     return preflight_gateway(*args, **kwargs)
 
 
-def _gateway_plist(profile: Any, *, token_env: str = "NEXUS_MCP_GATEWAY_TOKEN") -> bytes:
+def _gateway_plist(profile: Any) -> bytes:
     validate_profile(profile)
     root = profile.git.root
     entrypoint = profile.entrypoint if profile.entrypoint.startswith("/") else str(Path(root) / profile.entrypoint)
     payload = {
         "Label": GATEWAY_LABEL,
-        "ProgramArguments": [profile.interpreter.path, entrypoint],
+        "ProgramArguments": ["/bin/zsh", "-c", _gateway_wrapper_command(root, entrypoint)],
         "WorkingDirectory": root,
         "RunAtLoad": True,
         "KeepAlive": True,
         "StandardOutPath": "/Users/jameschen/Library/Logs/Nexus/gateway.log",
         "StandardErrorPath": "/Users/jameschen/Library/Logs/Nexus/gateway.err.log",
-        "EnvironmentVariables": {"NEXUS_MCP_GATEWAY_TOKEN": f"${{{token_env}}}"},
     }
     return plistlib.dumps(payload, fmt=plistlib.FMT_XML)
 
@@ -1128,10 +1179,7 @@ def _http_json(url: str, *, token: str, payload: Mapping[str, Any] | None = None
 
 def _profile_for_expected(expected: Mapping[str, Any]) -> Any:
     """Resolve only one of the two frozen profiles; callers cannot choose another."""
-    candidates = (DESIRED_PROFILE,)
-    from nexus.contracts.gateway_deployment import CURRENT_PROFILE
-    candidates += (CURRENT_PROFILE,)
-    for profile in candidates:
+    for profile in (DESIRED_PROFILE, CURRENT_PROFILE):
         if (expected.get("root") in (None, "", profile.git.root)
                 and expected.get("head") in (None, "", profile.git.head)
                 and expected.get("tree") in (None, "", profile.git.tree)):
@@ -1139,20 +1187,164 @@ def _profile_for_expected(expected: Mapping[str, Any]) -> Any:
     raise _gateway_error("postflight expected profile substitution")
 
 
+def _canonical_alias(mapping: Mapping[str, Any], canonical: str, aliases: tuple[str, ...]) -> Any:
+    """Resolve camel/snake aliases, rejecting conflicting physical values."""
+    values = [mapping[key] for key in (canonical, *aliases) if key in mapping]
+    if not values or any(not isinstance(value, str) or not value for value in values) or any(value != values[0] for value in values[1:]):
+        raise _gateway_error(f"postflight alias conflict: {canonical}")
+    return values[0]
+
+
+def _postflight_root_is_safe(root: Path) -> bool:
+    """Require the fixed profile root to be a real, owner-controlled directory."""
+    try:
+        if not root.is_absolute() or root.is_symlink() or not root.is_dir():
+            return False
+        if root.resolve(strict=True) != root:
+            return False
+        info = os.lstat(root)
+    except OSError:
+        return False
+    return (
+        stat.S_ISDIR(info.st_mode)
+        and info.st_uid == HOST_UID
+        and stat.S_IMODE(info.st_mode) & 0o022 == 0
+    )
+
+
+def _fixed_postflight_git_command_runner(*args: Any) -> Any:
+    """Execute only the manager-owned postflight Git identity commands."""
+    command = tuple(args) if args and isinstance(args[0], str) else tuple(args[0])
+    roots = {CURRENT_PROFILE.git.root, DESIRED_PROFILE.git.root}
+    suffixes = {
+        ("rev-parse", "--show-toplevel"),
+        ("remote", "get-url", "origin"),
+        ("status", "--porcelain"),
+        ("rev-parse", "HEAD"),
+        ("rev-parse", "HEAD^{tree}"),
+    }
+    if (
+        len(command) < 5
+        or command[:2] != ("git", "-C")
+        or command[2] not in roots
+        or command[3:] not in suffixes
+    ):
+        raise _gateway_error("caller-selected postflight Git command rejected")
+    return subprocess.run(
+        command,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+
+def _observe_postflight_git(
+    profile: Any,
+    *,
+    command_runner: Callable[..., Any] | None = None,
+) -> dict[str, Any]:
+    """Reread exact local Git truth for one already-resolved frozen profile."""
+    validate_profile(profile)
+    root = Path(profile.git.root)
+    if not _postflight_root_is_safe(root):
+        raise _gateway_error("postflight Git root unsafe or unavailable")
+    commands = (
+        ("git", "-C", str(root), "rev-parse", "--show-toplevel"),
+        ("git", "-C", str(root), "remote", "get-url", "origin"),
+        ("git", "-C", str(root), "status", "--porcelain"),
+        ("git", "-C", str(root), "rev-parse", "HEAD"),
+        ("git", "-C", str(root), "rev-parse", "HEAD^{tree}"),
+    )
+    run = command_runner or _fixed_postflight_git_command_runner
+    top, remote, status_output, head, tree = (
+        _command_output(run, command) for command in commands
+    )
+    observed = {
+        "root": str(root),
+        "toplevel": top,
+        "remote": remote,
+        "clean": status_output == "",
+        "head": head,
+        "tree": tree,
+    }
+    expected = {
+        "root": profile.git.root,
+        "toplevel": profile.git.toplevel,
+        "remote": profile.git.remote,
+        "clean": profile.git.clean,
+        "head": profile.git.head,
+        "tree": profile.git.tree,
+    }
+    if observed != expected:
+        raise _gateway_error("postflight local Git identity mismatch")
+    return observed
+
+
+_GATEWAY_PROTOCOL_ALIASES = {
+    "server_instance": ("serverInstanceId", "server_instance_id", "instance_id"),
+    "tool_manifest_sha256": ("toolManifestRevision", "tool_manifest_revision"),
+    "schema_sha256": ("fullToolSchemaHash", "full_tool_schema_hash"),
+    "permission_sha256": ("permissionPolicyHash", "permission_policy_hash"),
+    "lifecycle": ("lifecycleRevision", "lifecycle_revision"),
+}
+
+
+def _normalize_gateway_identity_surfaces(
+    health: Mapping[str, Any],
+    *,
+    profile: Any,
+    git: Mapping[str, Any],
+    server_info: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    """Normalize physical health/initialize fields against fixed local Git."""
+    normalized: dict[str, str] = {}
+    for key, aliases in _GATEWAY_PROTOCOL_ALIASES.items():
+        health_value = _canonical_alias(health, key, aliases)
+        if server_info is not None:
+            initialize_value = _canonical_alias(server_info, key, aliases)
+            if health_value != initialize_value:
+                raise _gateway_error(f"health/initialize identity disagreement: {key}")
+        normalized[key] = health_value
+
+    root = _canonical_alias(health, "root", ("repo_root",))
+    head = _canonical_alias(health, "head", ("git_head",))
+    local_root = git.get("root")
+    local_head = git.get("head")
+    local_tree = git.get("tree")
+    if (
+        root != profile.git.root
+        or head != profile.git.head
+        or local_root != profile.git.root
+        or local_head != profile.git.head
+        or local_tree != profile.git.tree
+    ):
+        raise _gateway_error("health/local Git identity disagreement")
+    if "tree" in health or "git_tree" in health:
+        if _canonical_alias(health, "tree", ("git_tree",)) != local_tree:
+            raise _gateway_error("health/local Git tree disagreement")
+    normalized.update(root=root, head=head, tree=str(local_tree))
+    return normalized
+
+
 def postflight_gateway(expected: Mapping[str, Any], *, token: str, endpoint: str = GATEWAY_ENDPOINT,
                        opener: Any = urllib.request.urlopen, retries: int = 3,
-                       timeout: float = 2.0, sleeper: Callable[[float], None] = time.sleep) -> PostflightIdentity:
+                       timeout: float = 2.0, sleeper: Callable[[float], None] = time.sleep,
+                       git_command_runner: Callable[..., Any] | None = None) -> PostflightIdentity:
     """Bounded authenticated health/initialize/tools-list identity proof."""
     if not token or retries < 1 or retries > 5:
         raise _gateway_error("postflight retry/token contract invalid")
     last: BaseException | None = None
     for attempt in range(retries):
         try:
+            authenticated_methods: set[str] = set()
             health = _http_json(endpoint + "/health", token=token, timeout=timeout, opener=opener)
             init = _http_json(endpoint + "/mcp", token=token, timeout=timeout, opener=opener,
                               payload={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+            authenticated_methods.add("initialize")
             listing = _http_json(endpoint + "/mcp", token=token, timeout=timeout, opener=opener,
                                  payload={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
+            authenticated_methods.add("tools/list")
             result = init.get("result", init); health_result = health.get("result", health)
             tools_result = listing.get("result", listing)
             if not isinstance(health_result, Mapping) or not isinstance(result, Mapping) or not isinstance(tools_result, Mapping):
@@ -1166,11 +1358,19 @@ def postflight_gateway(expected: Mapping[str, Any], *, token: str, endpoint: str
             server_info = result.get("serverInfo")
             if not isinstance(server_info, Mapping):
                 raise _gateway_error("initialize identity missing")
-            if dict(health_result) != dict(server_info):
-                raise _gateway_error("health/initialize identity disagreement")
-            merged = dict(health_result)
-            declared_manifest = merged.get("tool_manifest_sha256") or merged.get("tool_manifest_revision")
-            declared_schema = merged.get("schema_sha256") or merged.get("full_tool_schema_hash")
+            profile = _profile_for_expected(expected)
+            git_identity = _observe_postflight_git(
+                profile,
+                command_runner=git_command_runner,
+            )
+            merged = _normalize_gateway_identity_surfaces(
+                health_result,
+                profile=profile,
+                git=git_identity,
+                server_info=server_info,
+            )
+            declared_manifest = merged["tool_manifest_sha256"]
+            declared_schema = merged["schema_sha256"]
             if declared_manifest != manifest or declared_schema != schema:
                 raise _gateway_error("postflight manifest/schema recomputation mismatch")
             required = tuple(expected.get("required_actions", ()))
@@ -1178,22 +1378,22 @@ def postflight_gateway(expected: Mapping[str, Any], *, token: str, endpoint: str
             if previous and merged.get("server_instance") == previous:
                 raise _gateway_error("postflight server instance did not change")
             identity = PostflightIdentity(
-                server_instance=str(merged.get("server_instance") or merged.get("instance_id") or ""),
-                root=str(merged.get("repo_root") or merged.get("root") or ""),
-                head=str(merged.get("git_head") or merged.get("head") or ""),
-                tree=str(merged.get("git_tree") or merged.get("tree") or ""),
+                server_instance=str(merged["server_instance"]),
+                root=str(merged["root"]),
+                head=str(merged["head"]),
+                tree=str(merged["tree"]),
                 tool_manifest_sha256=str(declared_manifest or ""),
                 schema_sha256=str(declared_schema or ""),
-                permission_sha256=str(merged.get("permission_policy_hash") or ""),
-                action=str(merged.get("action") or ""),
-                task_id=str(merged.get("task_id") or ""),
-                lifecycle=str(merged.get("lifecycle") or merged.get("lifecycle_identity") or ""),
-                client_bound=merged.get("client_bound") is True,
+                permission_sha256=str(merged["permission_sha256"]),
+                action=GATEWAY_ACTION,
+                task_id=GATEWAY_TASK_ID,
+                lifecycle=str(merged["lifecycle"]),
+                client_bound="initialize" in authenticated_methods,
                 required_actions=required,
                 observed_actions=names,
-                token_bound=merged.get("token_bound") is True,
+                token_bound=bool(token) and authenticated_methods == {"initialize", "tools/list"},
             )
-            validate_postflight_identity(identity, _profile_for_expected(expected))
+            validate_postflight_identity(identity, profile)
             for key, expected_value in expected.items():
                 if key == "previous_server_instance":
                     continue
@@ -1250,12 +1450,20 @@ def rollback_gateway(request: GatewayDeploymentRequest, *, plist_path: Path | No
         if parsed.get("Label") != GATEWAY_LABEL:
             raise _gateway_error("rollback plist label drift")
         args = parsed.get("ProgramArguments")
-        if not isinstance(args, list) or len(args) != 2 or args[0] != "/Users/jameschen/Workspace/Nexus-new/.venv/bin/python" or not str(args[1]).endswith(GATEWAY_ENTRYPOINT):
+        if not isinstance(args, list):
+            raise _gateway_error("rollback program arguments drift")
+        wrapper = len(args) == 3 and args[:2] == ["/bin/zsh", "-c"]
+        if wrapper:
+            if args[2] != CURRENT_WRAPPER_COMMAND or payload_hash != "082c7786f9b7254949a6fdb38d905414a78c1b1979aabf7f434dd7019c09e100":
+                raise _gateway_error("rollback wrapper command drift")
+        elif args != ["/Users/jameschen/Workspace/Nexus-new/.venv/bin/python", "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe/scripts/ops/nexus_mcp_gateway_http.py"]:
             raise _gateway_error("rollback program arguments drift")
         if parsed.get("WorkingDirectory") != capture.root or parsed.get("StandardOutPath") != "/Users/jameschen/Library/Logs/Nexus/gateway.log" or parsed.get("StandardErrorPath") != "/Users/jameschen/Library/Logs/Nexus/gateway.err.log":
             raise _gateway_error("rollback root/log identity drift")
         env = parsed.get("EnvironmentVariables")
-        if env is not None and env != {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}:
+        if wrapper and env not in (None, {}):
+            raise _gateway_error("rollback wrapper environment drift")
+        if not wrapper and env != {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}:
             raise _gateway_error("rollback environment drift")
         if capture.root != "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe":
             raise _gateway_error("rollback source root drift")
@@ -1564,13 +1772,13 @@ def collect_gateway_observation(request: GatewayDeploymentRequest, *, observatio
     if not isinstance(parsed, Mapping):
         raise _gateway_error("Gateway plist observation malformed")
     args = parsed.get("ProgramArguments")
+    wrapper_ok = isinstance(args, list) and len(args) == 3 and args[:2] == ["/bin/zsh", "-c"] and args[2] == _gateway_wrapper_command(profile.git.root, str(Path(profile.git.root) / GATEWAY_ENTRYPOINT))
+    direct_ok = isinstance(args, list) and len(args) == 2 and args[0] == profile.interpreter.path and str(args[1]) in {GATEWAY_ENTRYPOINT, str(Path(profile.git.root) / GATEWAY_ENTRYPOINT)} and parsed.get("EnvironmentVariables") == {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}
     if (parsed.get("Label") != GATEWAY_LABEL or parsed.get("WorkingDirectory") != profile.git.root
             or parsed.get("StandardOutPath") != profile.repository.stdout
             or parsed.get("StandardErrorPath") != profile.repository.stderr
-            or not isinstance(args, list) or len(args) != 2
-            or args[0] != profile.interpreter.path
-            or str(args[1]) not in {GATEWAY_ENTRYPOINT, str(Path(profile.git.root) / GATEWAY_ENTRYPOINT)}
-            or parsed.get("EnvironmentVariables") != {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}):
+            or not (wrapper_ok or direct_ok)
+            or parsed.get("RunAtLoad") is not True or parsed.get("KeepAlive") is not True):
         raise _gateway_error("Gateway plist physical identity mismatch")
     plist_digest = hashlib.sha256(plist_bytes).hexdigest()
     if git_observer is None:
@@ -1615,11 +1823,20 @@ def collect_gateway_observation(request: GatewayDeploymentRequest, *, observatio
     else:
         artifact_digest = artifact_observer(Path(GATEWAY_ARTIFACT))
     quiescence = (quiescence_observer or observe_gateway_quiescence)()
-    source_root = str(health.get("repo_root") or git.get("root") or "")
-    source_head = str(health.get("git_head") or git.get("head") or "")
-    source_tree = str(health.get("git_tree") or git.get("tree") or "")
+    normalized_health = (
+        {}
+        if rollback_unloaded
+        else _normalize_gateway_identity_surfaces(
+            health,
+            profile=profile,
+            git=git,
+        )
+    )
+    source_root = str(normalized_health.get("root") or git.get("root") or "")
+    source_head = str(normalized_health.get("head") or git.get("head") or "")
+    source_tree = str(normalized_health.get("tree") or git.get("tree") or "")
     physical_source_hash = str(health.get("source_sha256") or source_hash)
-    server_instance = str(health.get("server_instance") or health.get("instance_id") or "")
+    server_instance = str(normalized_health.get("server_instance") or "")
     predecessor = {
         "plist_sha256": plist_digest, "plist_bytes_sha256": plist_digest,
         "artifact_sha256": artifact_digest, "source_sha256": physical_source_hash,
@@ -1641,11 +1858,12 @@ def collect_gateway_observation(request: GatewayDeploymentRequest, *, observatio
         "plist_bytes_hex": plist_bytes.hex(), **service,
         "server_instance": server_instance,
         "source_sha256": physical_source_hash,
-        "tool_manifest_sha256": str(health.get("tool_manifest_sha256") or ""),
-        "schema_sha256": str(health.get("schema_sha256") or ""),
-        "permission_sha256": str(health.get("permission_policy_hash") or ""),
-        "action": str(health.get("action") or ""), "task_id": str(health.get("task_id") or ""),
-        "lifecycle": str(health.get("lifecycle") or health.get("lifecycle_identity") or ""),
+        "tool_manifest_sha256": str(normalized_health.get("tool_manifest_sha256") or ""),
+        "schema_sha256": str(normalized_health.get("schema_sha256") or ""),
+        "permission_sha256": str(normalized_health.get("permission_sha256") or ""),
+        "action": GATEWAY_ACTION,
+        "task_id": GATEWAY_TASK_ID,
+        "lifecycle": str(normalized_health.get("lifecycle") or ""),
         "stable_artifact": {"artifact_sha256": artifact_digest},
         "rollback_predecessor": predecessor, "listener": GATEWAY_ENDPOINT if not rollback_unloaded else "",
         "services": [GATEWAY_LABEL], "quiescence": quiescence,

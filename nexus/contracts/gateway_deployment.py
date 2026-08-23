@@ -29,12 +29,59 @@ PLIST = "/Users/jameschen/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plis
 STDOUT = "/Users/jameschen/Library/Logs/Nexus/gateway.log"
 STDERR = "/Users/jameschen/Library/Logs/Nexus/gateway.err.log"
 ENDPOINT = "http://127.0.0.1:8766"
+CURRENT_ROOT = "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe"
+DESIRED_ROOT = "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-935a9dd3"
+ENV_FILE = "/Users/jameschen/Library/Application Support/Nexus/mcp-gateway.env"
+STATE_DIR = "/Users/jameschen/Workspace/Nexus-new-self-hosted-state"
+CURRENT_WRAPPER_PLIST_SHA256 = "082c7786f9b7254949a6fdb38d905414a78c1b1979aabf7f434dd7019c09e100"
+# The exact loaded `.direct` plist uses a fixed `/bin/zsh -c` wrapper.  The
+# command literals are immutable; the desired form changes only the root and
+# entrypoint which are derived from the frozen desired profile.
+CURRENT_WRAPPER_COMMAND = (
+    "cd /Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe "
+    '; source "/Users/jameschen/Library/Application Support/Nexus/mcp-gateway.env" '
+    "; export PYTHONDONTWRITEBYTECODE=1 "
+    "; export NEXUS_CANONICAL_SOURCE_ROOT=/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe "
+    "; export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR=/Users/jameschen/Workspace/Nexus-new-self-hosted-state "
+    "; exec /Users/jameschen/Workspace/Nexus-new/.venv/bin/python "
+    "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe/scripts/ops/nexus_mcp_gateway_http.py"
+)
 INTERPRETER = "/Users/jameschen/Workspace/Nexus-new/.venv/bin/python"
 INTERPRETER_TARGET = (
     "/Users/jameschen/.local/share/uv/python/cpython-3.14.0-macos-aarch64-none/bin/python3.14"
 )
 INTERPRETER_SHA256 = "c89af0b037c601180919ca5fd8a936bd2568cbb4976f91a208c10f54c17a1b78"
 ENTRYPOINT = "scripts/ops/nexus_mcp_gateway_http.py"
+GATEWAY_ACTION = "gateway-rebind"
+GATEWAY_TASK_ID = "TASK-526-A"
+GATEWAY_LIFECYCLE_REVISION = "nexus.lifecycle.gateway.v2"
+
+
+def _gateway_wrapper_command(root: str, entrypoint: str) -> str:
+    """Build the sole permitted fixed-literal Gateway shell wrapper."""
+    frozen = {
+        CURRENT_ROOT: str(Path(CURRENT_ROOT) / ENTRYPOINT),
+        DESIRED_ROOT: str(Path(DESIRED_ROOT) / ENTRYPOINT),
+    }
+    if root not in frozen or entrypoint != frozen[root]:
+        raise ContractError("wrapper profile root invalid")
+    if any(
+        token in root or token in entrypoint
+        for token in (";", "&&", "|", "$", "`", "\n", "\r", "\x00")
+    ):
+        raise ContractError("wrapper path contains shell metacharacter")
+    executable = entrypoint
+    return (
+        f'cd {root} ; source "{ENV_FILE}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
+        f"export NEXUS_CANONICAL_SOURCE_ROOT={root} ; "
+        f"export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR={STATE_DIR} ; "
+        f"exec {INTERPRETER} {executable}"
+    )
+
+
+CURRENT_WRAPPER_COMMAND = _gateway_wrapper_command(
+    CURRENT_ROOT, str(Path(CURRENT_ROOT) / ENTRYPOINT)
+)
 SCHEMA = "nexus.gateway.deployment.v1"
 HOST_AUTHORITY_SCHEMA = "nexus.gateway.host_effect_authority.v1"
 HOST_AUTHORITY_SCOPE = "NEXUS_GATEWAY_REBIND_HOST_EFFECT_ONLY"
@@ -527,7 +574,15 @@ def validate_profile(
         raise ContractError("profile nested identity must be typed")
     for value, name in ((g.root, "root"), (g.toplevel, "toplevel")):
         _absolute(value, name)
-    if g.root != g.toplevel or g.remote != REMOTE or g.clean is not True:
+    if g.root != g.toplevel or g.remote != REMOTE:
+        raise ContractError("profile trust mismatch")
+    # A dirty profile is only ever the observed rollback-only current profile.
+    # Any other dirty profile, including a dirty desired target, is rejected.
+    if g.clean is False:
+        frozen_current = globals().get("CURRENT_PROFILE")
+        if frozen_current is None or _plain(profile) != _plain(frozen_current):
+            raise ContractError("only the frozen rollback-only current profile may be dirty")
+    elif g.clean is not True:
         raise ContractError("profile trust mismatch")
     _hash(g.head, "HEAD", 40)
     _hash(g.tree, "tree", 40)
@@ -568,9 +623,11 @@ def compare_profiles(current: DeploymentProfile, desired: DeploymentProfile) -> 
     """Return true only when the current server is exactly the desired canary."""
     validate_profile(current)
     validate_profile(desired)
-    if desired.git.root == current.git.root and desired.git.head != current.git.head:
+    if current.git.clean is not desired.git.clean:
         return False
-    return current == desired
+    if current.git.root != desired.git.root:
+        return False
+    return current.git.head == desired.git.head and current.git.tree == desired.git.tree
 
 
 def validate_desired_profile(
@@ -665,20 +722,62 @@ def _validate_rollback(capture: RollbackCapture) -> None:
     if not isinstance(parsed, Mapping) or parsed.get("Label") != LABEL:
         raise ContractError("rollback plist label mismatch")
     args = parsed.get("ProgramArguments")
+    env = parsed.get("EnvironmentVariables")
+    if not isinstance(args, list) or not isinstance(env, (dict, type(None))):
+        raise ContractError("rollback plist arguments malformed")
+    if len(args) == 3 and args[0] == "/bin/zsh" and args[1] == "-c":
+        # Exact legacy wrapper allowlist: the observed current `.direct`
+        # plist.  This is the only accepted shell/wrapper form and it never
+        # grants generic shell authority.
+        if args[2] != CURRENT_WRAPPER_COMMAND:
+            raise ContractError("rollback wrapper command mismatch")
+        if env not in (None, {}):
+            raise ContractError("rollback wrapper environment mismatch")
+        allowed_keys = {
+            "Label",
+            "ProgramArguments",
+            "RunAtLoad",
+            "KeepAlive",
+            "WorkingDirectory",
+            "StandardOutPath",
+            "StandardErrorPath",
+        }
+        expected_payload_hash = CURRENT_WRAPPER_PLIST_SHA256
+    else:
+        # Direct interpreter form retained for compatibility only.
+        if args != [INTERPRETER, str(Path(CURRENT_ROOT) / ENTRYPOINT)]:
+            raise ContractError("rollback program arguments mismatch")
+        if env != {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}:
+            raise ContractError("rollback environment mismatch")
+        allowed_keys = {
+            "Label",
+            "EnvironmentVariables",
+            "ProgramArguments",
+            "RunAtLoad",
+            "KeepAlive",
+            "WorkingDirectory",
+            "StandardOutPath",
+            "StandardErrorPath",
+        }
+        expected_payload_hash = payload_hash
+    if set(parsed) != allowed_keys:
+        raise ContractError("rollback plist fields mismatch")
     if (
-        not isinstance(args, list)
-        or len(args) != 2
-        or args[0] != INTERPRETER
-        or not str(args[1]).endswith("/" + ENTRYPOINT)
+        parsed.get("RunAtLoad") is not True
+        or parsed.get("KeepAlive") is not True
+        or parsed.get("WorkingDirectory") != CURRENT_PROFILE.git.root
+        or parsed.get("StandardOutPath") != STDOUT
+        or parsed.get("StandardErrorPath") != STDERR
     ):
-        raise ContractError("rollback program arguments mismatch")
+        raise ContractError("rollback fixed plist identity mismatch")
+    if payload_hash != expected_payload_hash:
+        raise ContractError("legacy rollback wrapper hash mismatch")
     if parsed.get("WorkingDirectory") != CURRENT_PROFILE.git.root:
         raise ContractError("rollback working directory mismatch")
     if parsed.get("StandardOutPath") != STDOUT or parsed.get("StandardErrorPath") != STDERR:
         raise ContractError("rollback log identity mismatch")
-    env = parsed.get("EnvironmentVariables")
-    if env != {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}:
-        raise ContractError("rollback environment mismatch")
+    if parsed.get("RunAtLoad") is not True or parsed.get("KeepAlive") is not True:
+        raise ContractError("rollback launch flags mismatch")
     if (
         canonical_hash(args) != capture.program_arguments_hash
         or canonical_hash(env) != capture.environment_hash
@@ -905,8 +1004,24 @@ def validate_host_effect_authority_bundle(
     ):
         if not isinstance(receipt, HostEffectAuthorityReceipt):
             raise ContractError("host authority bundle child must be typed")
-        # Validate the full child without binding it to a caller request.  A
-        # bundle is canonical only in this exact order and with no aliases.
+        shared_provenance = {
+            "repository": "repository",
+            "host_card_path": "host_card_path",
+            "host_card_id": "host_card_id",
+            "host_card_sha256": "host_card_sha256",
+            "source_base_merge": "source_base_merge",
+            "source_base_tree": "source_base_tree",
+            "correction_merge_sha": "correction_merge_sha",
+            "correction_tree_sha": "correction_tree_sha",
+            "independent_acceptance_receipt_hash": "independent_acceptance_receipt_hash",
+            "final_manager_sha256": "final_manager_sha256",
+            "current_main_sha": "current_main_sha",
+        }
+        for bundle_field, receipt_field in shared_provenance.items():
+            if getattr(receipt, receipt_field) != getattr(bundle, bundle_field):
+                raise ContractError(f"host authority bundle child {index} provenance mismatch")
+        # Validate the full child after cross-binding every shared field, so a
+        # rehashed child substitution is rejected at the bundle equality gate.
         validate_host_effect_authority(receipt, allow_revoked=allow_revoked)
         if receipt.operation != operation or receipt.effect_class is not effect:
             raise ContractError(f"host authority bundle child {index} operation mismatch")
@@ -1091,6 +1206,13 @@ def validate_request(
         artifact = request.stable_artifact
         if not isinstance(artifact, StableArtifactIdentity):
             raise ContractError("artifact identity must be typed")
+        if request.host_authority is None:
+            raise ContractError("artifact authority receipt required")
+        if (
+            request.host_authority.final_manager_sha256 != artifact.source_blob_sha256
+            or request.host_authority.final_manager_sha256 != artifact.artifact_sha256
+        ):
+            raise ContractError("manager artifact triple mismatch")
         for value, name in (
             (artifact.source_root, "artifact source root"),
             (artifact.source_path, "artifact source path"),
@@ -1183,9 +1305,9 @@ def validate_current_identity(
         "tool_manifest_sha256": None,
         "schema_sha256": None,
         "permission_sha256": None,
-        "action": "gateway-rebind",
-        "task_id": "TASK-526-A",
-        "lifecycle": None,
+        "action": GATEWAY_ACTION,
+        "task_id": GATEWAY_TASK_ID,
+        "lifecycle": GATEWAY_LIFECYCLE_REVISION,
         "endpoint": ENDPOINT,
     }
     for key, value in expected.items():
@@ -1234,9 +1356,9 @@ def validate_postflight_identity(
     ):
         _hash(value, name)
     if (
-        identity.action != "gateway-rebind"
-        or identity.task_id != "TASK-526-A"
-        or identity.lifecycle not in {"QUIESCENT", "READY", "ACTIVE"}
+        identity.action != GATEWAY_ACTION
+        or identity.task_id != GATEWAY_TASK_ID
+        or identity.lifecycle != GATEWAY_LIFECYCLE_REVISION
     ):
         raise ContractError("postflight action/task/lifecycle mismatch")
     if not identity.client_bound or not identity.token_bound:
@@ -1267,6 +1389,7 @@ CURRENT_PROFILE = DeploymentProfile(
         "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe",
         "67521fe91e990f4e140642984c743dd50a408e84",
         "f6d6c2bf0912ff4a63d3c10a089910f95eab3c12",
+        clean=False,
     ),
     entrypoint_sha256="8f5fddd5c7761574da8566b5511e9107651a04687a6f656c05d5b435e9a530b1",
     trust_class="ROLLBACK_ONLY_OBSERVED_CURRENT",

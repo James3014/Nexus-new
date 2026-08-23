@@ -5,9 +5,11 @@ from pathlib import Path
 
 import pytest
 
+from nexus.contracts import gateway_deployment as contract
 from nexus.contracts.gateway_deployment import (
     CURRENT_PROFILE,
     DESIRED_PROFILE,
+    GATEWAY_LIFECYCLE_REVISION,
     HOST_AUTHORITY_BUNDLE_SCHEMA,
     HOST_AUTHORITY_BUNDLE_SCOPE,
     HOST_CARD_ID,
@@ -44,6 +46,8 @@ def _request():
     payload = plistlib.dumps(
         {
             "Label": "com.nexus.mcp.gateway.direct",
+            "RunAtLoad": True,
+            "KeepAlive": True,
             "ProgramArguments": [
                 "/Users/jameschen/Workspace/Nexus-new/.venv/bin/python",
                 CURRENT_PROFILE.git.root + "/scripts/ops/nexus_mcp_gateway_http.py",
@@ -103,7 +107,7 @@ def _request():
         permission_sha256="e" * 64,
         action="gateway-rebind",
         task_id="TASK-526-A",
-        lifecycle="QUIESCENT",
+        lifecycle=GATEWAY_LIFECYCLE_REVISION,
         loaded=True,
         client_bound=True,
     )
@@ -117,7 +121,7 @@ def _request():
         "b" * 64,
         "gateway-rebind",
         "TASK-526-A",
-        "QUIESCENT",
+        GATEWAY_LIFECYCLE_REVISION,
         True,
         ("gateway-rebind",),
         ("gateway-rebind",),
@@ -305,7 +309,10 @@ def test_stale_host_card_sha256_is_rejected_after_rehashing(scope):
         }),
     })
 
-    with pytest.raises(ContractError, match="host authority.*host_card_sha256 mismatch"):
+    with pytest.raises(
+        ContractError,
+        match="host authority.*(host_card_sha256|provenance) mismatch",
+    ):
         validate_host_effect_authority_bundle(altered)
 
 
@@ -554,6 +561,204 @@ def test_model_validate_is_strict_and_defaults_are_typed():
     assert profile == CURRENT_PROFILE
     with pytest.raises(ContractError):
         DeploymentProfile.model_validate({**profile.model_dump(), "unexpected": True})
+
+
+def test_dirty_current_profile_roundtrip_is_frozen_and_only_rollback_profile():
+    roundtrip = DeploymentProfile.model_validate(CURRENT_PROFILE.model_dump())
+    assert roundtrip == CURRENT_PROFILE
+    assert validate_profile(roundtrip) == CURRENT_PROFILE
+    dirty_desired = DeploymentProfile.model_validate({
+        **DESIRED_PROFILE.model_dump(),
+        "git": {**DESIRED_PROFILE.git.model_dump(), "clean": False},
+    })
+    with pytest.raises(ContractError):
+        validate_profile(dirty_desired)
+    arbitrary_dirty = DeploymentProfile.model_validate({
+        **CURRENT_PROFILE.model_dump(),
+        "git": {
+            **CURRENT_PROFILE.git.model_dump(),
+            "root": "/tmp/foreign",
+            "toplevel": "/tmp/foreign",
+        },
+    })
+    with pytest.raises(ContractError):
+        validate_profile(arbitrary_dirty)
+
+
+def _exact_wrapper_payload():
+    return plistlib.dumps(
+        {
+            "Label": contract.LABEL,
+            "ProgramArguments": ["/bin/zsh", "-c", contract.CURRENT_WRAPPER_COMMAND],
+            "RunAtLoad": True,
+            "KeepAlive": True,
+            "WorkingDirectory": contract.CURRENT_ROOT,
+            "StandardOutPath": contract.STDOUT,
+            "StandardErrorPath": contract.STDERR,
+        },
+        fmt=plistlib.FMT_XML,
+        sort_keys=False,
+    )
+
+
+def _request_with_rollback_payload(payload):
+    request = _request()
+    parsed = plistlib.loads(payload)
+    digest = hashlib.sha256(payload).hexdigest()
+    rollback = RollbackCapture(**{
+        **request.rollback.__dict__,
+        "plist_sha256": digest,
+        "plist_bytes_sha256": digest,
+        "plist_bytes_hex": payload.hex(),
+        "program_arguments_hash": canonical_hash(parsed.get("ProgramArguments")),
+        "environment_hash": canonical_hash(parsed.get("EnvironmentVariables")),
+    })
+    current_identity = IdentityEvidence(**{
+        **request.current_identity.__dict__,
+        "plist_sha256": digest,
+        "plist_bytes_sha256": digest,
+    })
+    values = {**request.__dict__, "rollback": rollback, "current_identity": current_identity}
+    values["request_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key not in {"request_hash", "schema"}
+    })
+    return GatewayDeploymentRequest(**values)
+
+
+def test_exact_current_wrapper_bytes_are_the_only_wrapper_rollback_identity():
+    payload = _exact_wrapper_payload()
+    assert hashlib.sha256(payload).hexdigest() == contract.CURRENT_WRAPPER_PLIST_SHA256
+    assert validate_request(_request_with_rollback_payload(payload)).rollback.plist_bytes_hex
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        pytest.param(
+            lambda value: value["ProgramArguments"].__setitem__(0, "/bin/bash"), id="shell"
+        ),
+        pytest.param(
+            lambda value: value["ProgramArguments"].__setitem__(
+                2, value["ProgramArguments"][2].replace(contract.ENV_FILE, "/tmp/evil.env")
+            ),
+            id="env-file",
+        ),
+        pytest.param(
+            lambda value: value["ProgramArguments"].__setitem__(
+                2,
+                value["ProgramArguments"][2].replace(
+                    "PYTHONDONTWRITEBYTECODE=1", "PYTHONDONTWRITEBYTECODE=0"
+                ),
+            ),
+            id="export",
+        ),
+        pytest.param(
+            lambda value: value["ProgramArguments"].__setitem__(
+                2, value["ProgramArguments"][2].replace(contract.CURRENT_ROOT, "/tmp/foreign", 1)
+            ),
+            id="root",
+        ),
+        pytest.param(
+            lambda value: value["ProgramArguments"].__setitem__(
+                2, value["ProgramArguments"][2].replace(contract.STATE_DIR, "/tmp/state")
+            ),
+            id="state",
+        ),
+        pytest.param(
+            lambda value: value["ProgramArguments"].__setitem__(
+                2, value["ProgramArguments"][2].replace(contract.INTERPRETER, "/tmp/python")
+            ),
+            id="interpreter",
+        ),
+        pytest.param(
+            lambda value: value["ProgramArguments"].__setitem__(
+                2, value["ProgramArguments"][2].replace(contract.ENTRYPOINT, "scripts/ops/other.py")
+            ),
+            id="entrypoint",
+        ),
+        pytest.param(lambda value: value.__setitem__("ThrottleInterval", 1), id="extra-field"),
+        pytest.param(lambda value: value.__setitem__("RunAtLoad", False), id="run-at-load"),
+        pytest.param(lambda value: value.__setitem__("KeepAlive", False), id="keep-alive"),
+    ],
+)
+def test_current_wrapper_semantic_mutation_matrix_rejects_rehashed_payload(mutation):
+    parsed = plistlib.loads(_exact_wrapper_payload())
+    mutation(parsed)
+    payload = plistlib.dumps(parsed, fmt=plistlib.FMT_XML, sort_keys=False)
+    with pytest.raises(ContractError):
+        validate_request(_request_with_rollback_payload(payload))
+
+
+def test_current_wrapper_byte_mutation_rejects_even_when_plist_semantics_match():
+    with pytest.raises(ContractError, match="legacy rollback wrapper hash mismatch"):
+        validate_request(_request_with_rollback_payload(_exact_wrapper_payload() + b"\n"))
+
+
+def test_direct_rollback_rejects_foreign_entrypoint_with_matching_suffix():
+    request = _request()
+    parsed = plistlib.loads(bytes.fromhex(request.rollback.plist_bytes_hex))
+    parsed["ProgramArguments"][1] = "/tmp/foreign/" + contract.ENTRYPOINT
+    payload = plistlib.dumps(parsed, fmt=plistlib.FMT_XML)
+    with pytest.raises(ContractError, match="rollback program arguments mismatch"):
+        validate_request(_request_with_rollback_payload(payload))
+
+
+def test_gateway_lifecycle_revision_cannot_be_substituted_by_quiescence_state():
+    request = _request()
+    postflight = PostflightIdentity(**{
+        **request.postflight.__dict__,
+        "lifecycle": request.quiescence.lifecycle_state,
+    })
+    values = {**request.__dict__, "postflight": postflight}
+    values["request_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key not in {"request_hash", "schema"}
+    })
+    with pytest.raises(ContractError, match="action/task/lifecycle mismatch"):
+        validate_request(GatewayDeploymentRequest(**values))
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("repository", "Other/Repository"),
+        ("host_card_path", "tasks/other.md"),
+        ("host_card_id", "TASK-OTHER"),
+        ("host_card_sha256", "a" * 64),
+        ("source_base_merge", "a" * 40),
+        ("source_base_tree", "b" * 40),
+        ("correction_merge_sha", "c" * 40),
+        ("correction_tree_sha", "d" * 40),
+        ("independent_acceptance_receipt_hash", "e" * 64),
+        ("final_manager_sha256", "f" * 64),
+        ("current_main_sha", "9" * 40),
+    ],
+)
+def test_every_shared_bundle_child_provenance_mutation_rejects_after_full_rehash(
+    field, replacement
+):
+    bundle = _bundle_fixture()
+    child = HostEffectAuthorityReceipt(**{
+        **bundle.receipts[1].__dict__,
+        field: replacement,
+    })
+    child = HostEffectAuthorityReceipt(**{
+        **child.__dict__,
+        "receipt_hash": canonical_hash({
+            key: value for key, value in child.__dict__.items() if key != "receipt_hash"
+        }),
+    })
+    altered = HostEffectAuthorityBundle(**{
+        **bundle.__dict__,
+        "receipts": (bundle.receipts[0], child, bundle.receipts[2]),
+    })
+    altered = HostEffectAuthorityBundle(**{
+        **altered.__dict__,
+        "bundle_hash": canonical_hash({
+            key: value for key, value in altered.__dict__.items() if key != "bundle_hash"
+        }),
+    })
+    with pytest.raises(ContractError, match="child 1 provenance mismatch"):
+        validate_host_effect_authority_bundle(altered)
 
 
 def test_old_profile_does_not_equal_explicit_new_target():
