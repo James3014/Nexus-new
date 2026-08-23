@@ -5,7 +5,7 @@ task_id: TASK-526-HOST-1
 issue: 526
 repository: James3014/Nexus-new
 status: BLOCKED
-blocked_by: TASK-526-B-AUTHORITY
+blocked_by: TASK-526-C-RECEIPT-BUNDLE
 execution_realm: LOCAL_HOST_BOUND_EXTERNAL_BOOTSTRAP
 auto_chain: false
 claim_mode: MANUAL_DISPATCH
@@ -94,19 +94,35 @@ mode `0700`; `host-authority.json`, `request.json`, `evidence.json`,
 `0700`. Each JSON store is capped at 64 KiB, duplicate keys and symlinks are
 rejected, and unsafe/writable ancestry blocks before effects.
 
-## Canonical host authority receipt
+## Canonical host authority bundle
 
-After `TASK-526-B-AUTHORITY` is accepted and merged, coordinator
+After `TASK-526-C-RECEIPT-BUNDLE` is accepted and merged, coordinator
 `coordinator-codex` issues exactly one owner-only
-`nexus.gateway.host_effect_authority.v1` receipt through a separate reviewed
-GitHub PR that creates only:
+`nexus.gateway.host_effect_authority_bundle.v1` bundle through a separate
+reviewed GitHub PR that creates only:
 
 `tasks/github-issue-526-host-authority-and-canary-20260823/02-host-effect-authority-receipt.json`
 
-The PR must pass required checks and expected-head/CAS merge. The merged receipt
+The PR must pass required checks and expected-head/CAS merge. The merged bundle
 on GitHub `main` is the non-self-issued authority source. Only afterward may the
 coordinator materialize a byte-for-byte identical copy at the fixed local
-`host-authority.json` path. Required top-level fields are:
+`host-authority.json` path. Required bundle fields are `schema`, exact
+`bundle_version=1`, `bundle_id`, `bundle_hash`, host Card identity, exact
+authority-contract merge/tree/manager/acceptance/current-main identities, and
+an immutable `receipts` array.
+
+The bundle contains exactly three individually hashed
+`nexus.gateway.host_effect_authority.v1` receipts:
+
+- one `install-artifact / INSTALL_ARTIFACT` receipt;
+- one `reload / GATEWAY_RELOAD` receipt (its internal preflight uses the same
+  request and does not widen authority);
+- one pre-issued `rollback / GATEWAY_ROLLBACK` receipt available before reload.
+
+Every receipt has a distinct receipt ID, request ID, and idempotency fence.
+Cross-operation reuse, missing/extra/duplicate operations, duplicate
+request/fence, or bundle mutation fails before observation/effect. Required
+individual receipt fields are:
 
 - `schema`, `receipt_version`, `receipt_id`, and `receipt_hash`;
 - `issuer_id=owner-james`, `coordinator_id=coordinator-codex`, and
@@ -125,15 +141,22 @@ coordinator materialize a byte-for-byte identical copy at the fixed local
   `revoked_at=null`, and `revocation_reason=null`.
 
 Owner `owner-james` is the sole revocation authority. Revocation is an atomic
-replacement of the Git-tracked receipt through another reviewed/CAS-merged PR
-with `revocation_state=REVOKED`, followed by byte-identical local
+replacement of the Git-tracked bundle through another reviewed/CAS-merged PR
+whose affected receipt has `revocation_state=REVOKED`, followed by byte-identical local
 materialization. The manager rereads GitHub remote `main`, resolves the fixed
 origin, verifies the trusted clean source HEAD equals remote main, reads the
-receipt with `git show <remote-main>:<fixed-path>`, and requires byte equality
+bundle with `git show <remote-main>:<fixed-path>`, and requires byte equality
 with the local store immediately before every first effect. A locally created
 commit, working-tree edit, same-UID file, caller mapping, or unmerged branch is
 not authority. No caller-selected receipt path, remote, ref, or revocation path
 exists.
+
+Revocation has two explicit phases. The strict bundle parser may preserve a
+hash-valid `REVOKED` bundle/child as evidence only when `revoked_at` and
+`revocation_reason` are non-empty and internally consistent. The host effect
+selector accepts only a bundle whose bundle state and every child state are
+`NOT_REVOKED` with null revocation fields. Any revoked bundle or child blocks
+all operation selection before authority/host observation or effect.
 
 ## Pre-effect reconciliation
 
@@ -158,9 +181,9 @@ must never claim the task succeeded or drained.
 1. Reread exact Git, source bytes, target cleanliness, plist bytes/hash,
    interpreter link/target/hash/owner/mode, service/PID/listener, authenticated
    health identity, stable artifact predecessor, and durable quiescence.
-2. Verify the exact authority-correction merge/main/tree and independent
+2. Verify the exact receipt-bundle contract merge/main/tree and independent
    acceptance receipt. Have only `coordinator-codex` create, review, merge, and
-   read back the fixed Git-tracked receipt above; then materialize its exact
+   read back the fixed Git-tracked bundle above; then materialize its exact
    bytes locally. Create request/evidence stores from this Card, hash/read all
    stores back, and keep receipt issuance separate from the host effect
    operator.
@@ -209,9 +232,9 @@ must never claim the task succeeded or drained.
 - independent acceptance distinct from the effect operator.
 
 The dependency unlock is not a status label: it requires the exact merged
-authority-correction main SHA/tree, exact independent acceptance receipt hash,
-the exact receipt-issuance PR/main SHA/tree, and a current valid local receipt
-that matches the Git-tracked remote-main receipt byte-for-byte.
+receipt-bundle contract main SHA/tree, exact independent acceptance receipt
+hash, the exact bundle-issuance PR/main SHA/tree, and a current valid local
+bundle that matches the Git-tracked remote-main bundle byte-for-byte.
 
 `PASS` means only `NEXUS_GATEWAY_REBIND_LOCAL_CANARY_VERIFIED_ONLY`.
 `AUTO_CHAIN=false`; stop before #398-serialized Slice B/ChatGPT-facing work.
