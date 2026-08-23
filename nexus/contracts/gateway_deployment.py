@@ -36,6 +36,20 @@ INTERPRETER_TARGET = (
 INTERPRETER_SHA256 = "c89af0b037c601180919ca5fd8a936bd2568cbb4976f91a208c10f54c17a1b78"
 ENTRYPOINT = "scripts/ops/nexus_mcp_gateway_http.py"
 SCHEMA = "nexus.gateway.deployment.v1"
+HOST_AUTHORITY_SCHEMA = "nexus.gateway.host_effect_authority.v1"
+HOST_AUTHORITY_SCOPE = "NEXUS_GATEWAY_REBIND_HOST_EFFECT_ONLY"
+HOST_CARD_ID = "TASK-526-HOST-1"
+HOST_CARD_PATH = (
+    "tasks/github-issue-526-host-authority-and-canary-20260823/01-gateway-host-local-canary.md"
+)
+HOST_CARD_SHA256 = "fcd22da4ef92b7cde004523fe900c06bc1b9e67715049c95383c581e640f631f"
+OWNER_ACTIVATION_ID = "OWNER_ISSUE526_CONTINUE_20260823"
+OWNER_ACTIVATION_SHA256 = "f0ed77ffe3872b083ef0b6d66526524a7091a8e3125322c84ba632f3c64ba322"
+OWNER_SOURCE_THREAD = "01a02a17-691c-7a20-ad0f-9166456416dc"
+STANDING_GRANT_ID = "OWNER_STANDING_COORDINATOR_20260818_DURABLE_GITHUB_WORKFLOW"
+STANDING_GRANT_RECEIPT_SHA256 = "3b8895f093692257d6225fbb8150b34f520e667d250c7817ad120cefd42751d5"
+SOURCE_BASE_MERGE = "ac4a9ab1e0180170ca062cdc81f2142bca8bd80f"
+SOURCE_BASE_TREE = "db329f4931b55b74f1e1f9fe61f7edf4ca8422bc"
 
 
 class ContractError(ValueError):
@@ -247,6 +261,57 @@ class AuthorityReceipt(StrictRecord):
 
 
 @dataclass(frozen=True)
+class HostEffectAuthorityReceipt(StrictRecord):
+    """The independent, owner-issued authority for one physical Gateway effect.
+
+    This receipt is deliberately a different type and hash domain from
+    :class:`AuthorityReceipt`.  A source Candidate can therefore never be
+    upgraded by copying its scope or issuer into a host request.
+    """
+
+    schema: str
+    receipt_version: int
+    receipt_id: str
+    receipt_hash: str
+    scope: str
+    issuer_id: str
+    coordinator_id: str
+    authorized_actor_id: str
+    owner_activation_id: str
+    owner_activation_sha256: str
+    source_thread: str
+    standing_grant_id: str
+    standing_grant_receipt_sha256: str
+    source_base_merge: str
+    source_base_tree: str
+    correction_merge_sha: str
+    correction_tree_sha: str
+    independent_acceptance_receipt_hash: str
+    final_manager_sha256: str
+    current_main_sha: str
+    host_card_path: str
+    host_card_id: str
+    host_card_sha256: str
+    repository: str
+    operation: str
+    effect_class: EffectClass
+    service_label: str
+    plist_path: str
+    endpoint: str
+    current_profile_hash: str
+    desired_profile_hash: str
+    request_id: str
+    idempotency_fence: str
+    issued_at: str
+    expires_at: str
+    revocation_state: str
+    revoked_at: str | None
+    revocation_reason: str | None
+
+    _converters: ClassVar[Mapping[str, Any]] = {"effect_class": EffectClass}
+
+
+@dataclass(frozen=True)
 class IdentityEvidence(StrictRecord):
     label: str = LABEL
     plist_sha256: str = ""
@@ -373,6 +438,7 @@ class GatewayDeploymentRequest(StrictRecord):
     request_hash: str = ""
     schema: str = SCHEMA
     stable_artifact: StableArtifactIdentity | None = None
+    host_authority: HostEffectAuthorityReceipt | None = None
 
     _converters: ClassVar[Mapping[str, Any]] = {
         "authority": AuthorityReceipt.model_validate,
@@ -385,6 +451,9 @@ class GatewayDeploymentRequest(StrictRecord):
         "postflight": PostflightIdentity.model_validate,
         "stable_artifact": lambda value: (
             None if value is None else StableArtifactIdentity.model_validate(value)
+        ),
+        "host_authority": lambda value: (
+            None if value is None else HostEffectAuthorityReceipt.model_validate(value)
         ),
     }
 
@@ -575,6 +644,153 @@ def _validate_rollback(capture: RollbackCapture) -> None:
         raise ContractError("rollback identity hash mismatch")
 
 
+def validate_source_authority(
+    receipt: AuthorityReceipt, *, request_id: str | None = None
+) -> AuthorityReceipt:
+    """Validate provenance only; this receipt has no host-effect authority."""
+    if not isinstance(receipt, AuthorityReceipt):
+        raise ContractError("source authority receipt must be typed")
+    if not receipt.issuer or not receipt.receipt_id:
+        raise ContractError("source authority identity missing")
+    _id(receipt.receipt_id, "source receipt id")
+    if receipt.repository != REPOSITORY or receipt.action != "gateway-rebind":
+        raise ContractError("source authority identity mismatch")
+    if receipt.scope != "NEXUS_GATEWAY_REBIND_MANAGER_CONTRACT_SOURCE_CANDIDATE_ONLY":
+        raise ContractError("source authority scope mismatch")
+    if request_id is not None and receipt.request_id != request_id:
+        raise ContractError("source authority request mismatch")
+    _hash(receipt.receipt_hash, "source receipt hash")
+    expected = canonical_hash({
+        key: value for key, value in _plain(receipt).items() if key != "receipt_hash"
+    })
+    if receipt.receipt_hash != expected:
+        raise ContractError("source authority receipt hash mismatch")
+    return receipt
+
+
+def validate_host_effect_authority(
+    receipt: HostEffectAuthorityReceipt,
+    *,
+    request: "GatewayDeploymentRequest | None" = None,
+    now: str | None = None,
+) -> HostEffectAuthorityReceipt:
+    """Validate the complete host-effect receipt without reading the host store."""
+    if not isinstance(receipt, HostEffectAuthorityReceipt):
+        raise ContractError("host authority receipt must be typed")
+    if (
+        receipt.schema != HOST_AUTHORITY_SCHEMA
+        or type(receipt.receipt_version) is not int
+        or receipt.receipt_version != 1
+    ):
+        raise ContractError("host authority schema/version mismatch")
+    _id(receipt.receipt_id, "host receipt id")
+    if receipt.scope != HOST_AUTHORITY_SCOPE:
+        raise ContractError("host authority scope mismatch")
+    _hash(receipt.receipt_hash, "host receipt hash")
+    exact = {
+        "issuer_id": "owner-james",
+        "coordinator_id": "coordinator-codex",
+        "authorized_actor_id": "coordinator-codex",
+        "owner_activation_id": OWNER_ACTIVATION_ID,
+        "owner_activation_sha256": OWNER_ACTIVATION_SHA256,
+        "source_thread": OWNER_SOURCE_THREAD,
+        "standing_grant_id": STANDING_GRANT_ID,
+        "standing_grant_receipt_sha256": STANDING_GRANT_RECEIPT_SHA256,
+        "source_base_merge": SOURCE_BASE_MERGE,
+        "source_base_tree": SOURCE_BASE_TREE,
+        "host_card_path": HOST_CARD_PATH,
+        "host_card_id": HOST_CARD_ID,
+        "host_card_sha256": HOST_CARD_SHA256,
+        "repository": REPOSITORY,
+        "service_label": LABEL,
+        "plist_path": PLIST,
+        "endpoint": ENDPOINT,
+        "revocation_state": "NOT_REVOKED",
+    }
+    for name, expected in exact.items():
+        if getattr(receipt, name) != expected:
+            raise ContractError(f"host authority {name} mismatch")
+    operation_effects = {
+        "status": EffectClass.STATUS,
+        "gateway-status": EffectClass.STATUS,
+        "preflight": EffectClass.PREFLIGHT,
+        "gateway-preflight": EffectClass.PREFLIGHT,
+        "install": EffectClass.INSTALL_ARTIFACT,
+        "install-artifact": EffectClass.INSTALL_ARTIFACT,
+        "install_artifact": EffectClass.INSTALL_ARTIFACT,
+        "reload": EffectClass.GATEWAY_RELOAD,
+        "gateway-reload": EffectClass.GATEWAY_RELOAD,
+        "rollback": EffectClass.GATEWAY_ROLLBACK,
+        "gateway-rollback": EffectClass.GATEWAY_ROLLBACK,
+    }
+    if (
+        receipt.operation not in operation_effects
+        or receipt.effect_class is not operation_effects[receipt.operation]
+    ):
+        raise ContractError("host authority operation/effect mismatch")
+    for value, name, length in (
+        (receipt.correction_merge_sha, "correction merge", 40),
+        (receipt.correction_tree_sha, "correction tree", 40),
+        (receipt.current_main_sha, "current main", 40),
+        (receipt.independent_acceptance_receipt_hash, "acceptance receipt", 64),
+        (receipt.final_manager_sha256, "final manager", 64),
+        (receipt.current_profile_hash, "current profile", 64),
+        (receipt.desired_profile_hash, "desired profile", 64),
+    ):
+        _hash(value, name, length)
+    if receipt.revoked_at is not None or receipt.revocation_reason is not None:
+        raise ContractError("host authority revocation fields must be null")
+    if request is not None:
+        if (
+            receipt.request_id != request.request_id
+            or receipt.idempotency_fence != request.idempotency_fence
+        ):
+            raise ContractError("host authority request/fence mismatch")
+        if (
+            receipt.operation != request.operation
+            or receipt.effect_class is not request.effect_class
+        ):
+            raise ContractError("host authority operation/effect mismatch")
+        if receipt.current_profile_hash != canonical_hash(request.current):
+            raise ContractError("host authority current profile mismatch")
+        if receipt.desired_profile_hash != canonical_hash(request.desired):
+            raise ContractError("host authority desired profile mismatch")
+    if now is not None:
+        validate_receipt_freshness(receipt, now=now)
+    expected_hash = canonical_hash({
+        key: value for key, value in _plain(receipt).items() if key != "receipt_hash"
+    })
+    if receipt.receipt_hash != expected_hash:
+        raise ContractError("host authority receipt hash mismatch")
+    return receipt
+
+
+def validate_receipt_freshness(
+    receipt: HostEffectAuthorityReceipt, *, now: str
+) -> HostEffectAuthorityReceipt:
+    if not isinstance(receipt, HostEffectAuthorityReceipt):
+        raise ContractError("host authority freshness receipt must be typed")
+
+    def parse(value: str) -> datetime:
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ContractError("host authority timestamp malformed") from exc
+        if parsed.tzinfo is None:
+            raise ContractError("host authority timestamp must be timezone-aware")
+        return parsed.astimezone(timezone.utc)
+
+    issued, expires, observed = parse(receipt.issued_at), parse(receipt.expires_at), parse(now)
+    if expires <= issued or issued > observed or expires <= observed:
+        raise ContractError("host authority receipt stale")
+    return receipt
+
+
+# Stable public names for adapters and review tooling.
+HostAuthorityReceipt = HostEffectAuthorityReceipt
+validate_host_authority = validate_host_effect_authority
+
+
 def validate_request(
     request: GatewayDeploymentRequest | Mapping[str, Any],
 ) -> GatewayDeploymentRequest:
@@ -597,6 +813,7 @@ def validate_request(
         "gateway-status": EffectClass.STATUS,
         "install-artifact": EffectClass.INSTALL_ARTIFACT,
         "install_artifact": EffectClass.INSTALL_ARTIFACT,
+        "install": EffectClass.INSTALL_ARTIFACT,
         "reload": EffectClass.GATEWAY_RELOAD,
         "gateway-reload": EffectClass.GATEWAY_RELOAD,
         "rollback": EffectClass.GATEWAY_ROLLBACK,
@@ -611,22 +828,10 @@ def validate_request(
     validate_profile(request.desired, expected=DESIRED_PROFILE)
     validate_desired_profile(request.current, request.desired)
     validate_current_identity(request.current_identity, request.current)
-    if (
-        not isinstance(request.authority, AuthorityReceipt)
-        or not request.authority.issuer
-        or not request.authority.receipt_id
-    ):
-        raise ContractError("authority identity missing")
-    if (
-        request.authority.repository != REPOSITORY
-        or request.authority.request_id != request.request_id
-    ):
-        raise ContractError("authority mismatch")
-    if (
-        request.authority.action != "gateway-rebind"
-        or request.authority.scope != "NEXUS_GATEWAY_REBIND_MANAGER_CONTRACT_SOURCE_CANDIDATE_ONLY"
-    ):
-        raise ContractError("authority scope mismatch")
+    validate_source_authority(request.authority, request_id=request.request_id)
+    if request.host_authority is None:
+        raise ContractError("host-effect authority receipt required")
+    validate_host_effect_authority(request.host_authority, request=request)
     _validate_rollback(request.rollback)
     if (
         request.quiescence.disposition not in {"drained", "held", "reconciled"}
@@ -662,9 +867,9 @@ def validate_request(
             or artifact.uid < 0
             or not isinstance(artifact.mode, int)
             or isinstance(artifact.mode, bool)
-            or artifact.mode & ~0o777
+            or artifact.mode != 0o700
         ):
-            raise ContractError("artifact ownership/mode invalid")
+            raise ContractError("installed manager ownership/mode invalid")
         try:
             Path(artifact.source_path).relative_to(Path(artifact.source_root))
         except ValueError as exc:
@@ -672,7 +877,7 @@ def validate_request(
         if (
             artifact.request_id != request.request_id
             or artifact.card_id != "TASK-526-A"
-            or not artifact.authority_receipt_id
+            or artifact.authority_receipt_id != request.host_authority.receipt_id
             or not artifact.install_fence
             or not artifact.predecessor_sha256
             or not artifact.rollback_receipt
@@ -686,11 +891,6 @@ def validate_request(
     expected = canonical_hash(payload)
     if request.request_hash != expected:
         raise ContractError("request hash mismatch")
-    expected_receipt = canonical_hash({
-        key: value for key, value in _plain(request.authority).items() if key != "receipt_hash"
-    })
-    if request.authority.receipt_hash != expected_receipt:
-        raise ContractError("authority receipt hash mismatch")
     return request
 
 
