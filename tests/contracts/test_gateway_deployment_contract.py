@@ -351,7 +351,13 @@ def test_revoked_bundle_parses_as_evidence_but_never_selects():
         select_host_effect_authority_receipt(bundle, request, now="2026-08-23T00:00:00Z")
 
 
-@pytest.mark.parametrize("now", ["2026-08-21T00:00:00Z", "2026-08-25T00:00:00Z"])
+@pytest.mark.parametrize(
+    "now",
+    [
+        pytest.param("2026-08-21T00:00:00Z", id="stale"),
+        pytest.param("2026-08-25T00:00:00Z", id="future"),
+    ],
+)
 def test_bundle_selection_rejects_future_or_stale_validity(now):
     bundle = _bundle_fixture()
     request = _request()
