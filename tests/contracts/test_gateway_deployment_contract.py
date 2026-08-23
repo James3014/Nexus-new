@@ -36,6 +36,7 @@ from nexus.contracts.gateway_deployment import (
     transition,
     validate_authority_freshness,
     validate_current_identity,
+    validate_host_effect_authority,
     validate_host_effect_authority_bundle,
     validate_profile,
     validate_request,
@@ -314,6 +315,39 @@ def test_stale_host_card_sha256_is_rejected_after_rehashing(scope):
         match="host authority.*(host_card_sha256|provenance) mismatch",
     ):
         validate_host_effect_authority_bundle(altered)
+
+
+@pytest.mark.parametrize("field", ["current_profile_hash", "desired_profile_hash"])
+def test_standalone_bundle_binds_frozen_profile_hashes(field):
+    bundle = _bundle_fixture()
+    assert validate_host_effect_authority(bundle.receipts[1])
+    assert validate_host_effect_authority_bundle(bundle) == bundle
+
+    altered_child = HostEffectAuthorityReceipt(**{
+        **bundle.receipts[1].__dict__,
+        field: "a" * 64,
+    })
+    altered_child = HostEffectAuthorityReceipt(**{
+        **altered_child.__dict__,
+        "receipt_hash": canonical_hash({
+            k: v for k, v in altered_child.__dict__.items() if k != "receipt_hash"
+        }),
+    })
+    receipts = tuple(
+        altered_child if i == 1 else receipt for i, receipt in enumerate(bundle.receipts)
+    )
+    altered_bundle = HostEffectAuthorityBundle(**{**bundle.__dict__, "receipts": receipts})
+    altered_bundle = HostEffectAuthorityBundle(**{
+        **altered_bundle.__dict__,
+        "bundle_hash": canonical_hash({
+            k: v for k, v in altered_bundle.__dict__.items() if k != "bundle_hash"
+        }),
+    })
+
+    with pytest.raises(ContractError, match=f"host authority {field} mismatch"):
+        validate_host_effect_authority(altered_child)
+    with pytest.raises(ContractError, match=f"host authority {field} mismatch"):
+        validate_host_effect_authority_bundle(altered_bundle)
 
 
 @pytest.mark.parametrize(
