@@ -409,7 +409,7 @@ def _gateway_request(operation="reload", *, stable_artifact=None):
         source_thread="01a02a17-691c-7a20-ad0f-9166456416dc", standing_grant_id="OWNER_STANDING_COORDINATOR_20260818_DURABLE_GITHUB_WORKFLOW",
         standing_grant_receipt_sha256="3b8895f093692257d6225fbb8150b34f520e667d250c7817ad120cefd42751d5", source_base_merge="ac4a9ab1e0180170ca062cdc81f2142bca8bd80f", source_base_tree="db329f4931b55b74f1e1f9fe61f7edf4ca8422bc",
         correction_merge_sha="1" * 40, correction_tree_sha="2" * 40, independent_acceptance_receipt_hash="3" * 64, final_manager_sha256="4" * 64, current_main_sha="5" * 40,
-        host_card_path="tasks/github-issue-526-host-authority-and-canary-20260823/01-gateway-host-local-canary.md", host_card_id="TASK-526-HOST-1", host_card_sha256="fcd22da4ef92b7cde004523fe900c06bc1b9e67715049c95383c581e640f631f",
+        host_card_path="tasks/github-issue-526-host-authority-and-canary-20260823/01-gateway-host-local-canary.md", host_card_id="TASK-526-HOST-1", host_card_sha256=HOST_CARD_SHA256,
         repository="James3014/Nexus-new", operation=operation, effect_class=effect, service_label=g.GATEWAY_LABEL, plist_path="/Users/jameschen/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist", endpoint=g.GATEWAY_ENDPOINT,
         current_profile_hash=__import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(CURRENT_PROFILE), desired_profile_hash=__import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(DESIRED_PROFILE),
         request_id="r-526", idempotency_fence="f-526", issued_at="2026-08-22T00:00:00Z", expires_at="2026-08-24T00:00:00Z", revocation_state="NOT_REVOKED", revoked_at=None, revocation_reason=None,
