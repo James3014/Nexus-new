@@ -33,9 +33,7 @@ CURRENT_ROOT = "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new
 DESIRED_ROOT = "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-935a9dd3"
 ENV_FILE = "/Users/jameschen/Library/Application Support/Nexus/mcp-gateway.env"
 STATE_DIR = "/Users/jameschen/Workspace/Nexus-new-self-hosted-state"
-CURRENT_WRAPPER_PLIST_SHA256 = (
-    "082c7786f9b7254949a6fdb38d905414a78c1b1979aabf7f434dd7019c09e100"
-)
+CURRENT_WRAPPER_PLIST_SHA256 = "082c7786f9b7254949a6fdb38d905414a78c1b1979aabf7f434dd7019c09e100"
 # The exact loaded `.direct` plist uses a fixed `/bin/zsh -c` wrapper.  The
 # command literals are immutable; the desired form changes only the root and
 # entrypoint which are derived from the frozen desired profile.
@@ -64,7 +62,7 @@ def gateway_wrapper_command(root: str, entrypoint: str = ENTRYPOINT) -> str:
     if not isinstance(executable, str) or not executable or not Path(executable).is_absolute():
         raise ContractError("wrapper entrypoint invalid")
     return (
-        f"cd {root} ; source \"{ENV_FILE}\" ; export PYTHONDONTWRITEBYTECODE=1 ; "
+        f'cd {root} ; source "{ENV_FILE}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
         f"export NEXUS_CANONICAL_SOURCE_ROOT={root} ; "
         f"export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR={STATE_DIR} ; "
         f"exec {INTERPRETER} {executable}"
@@ -569,7 +567,8 @@ def validate_profile(
     # A dirty profile is only ever the observed rollback-only current profile.
     # Any other dirty profile, including a dirty desired target, is rejected.
     if g.clean is False:
-        if profile is not globals().get("CURRENT_PROFILE"):
+        frozen_current = globals().get("CURRENT_PROFILE")
+        if frozen_current is None or _plain(profile) != _plain(frozen_current):
             raise ContractError("only the frozen rollback-only current profile may be dirty")
     elif g.clean is not True:
         raise ContractError("profile trust mismatch")
@@ -723,8 +722,13 @@ def _validate_rollback(capture: RollbackCapture) -> None:
         if env not in (None, {}):
             raise ContractError("rollback wrapper environment mismatch")
         allowed_keys = {
-            "Label", "ProgramArguments", "RunAtLoad", "KeepAlive", "WorkingDirectory",
-            "StandardOutPath", "StandardErrorPath",
+            "Label",
+            "ProgramArguments",
+            "RunAtLoad",
+            "KeepAlive",
+            "WorkingDirectory",
+            "StandardOutPath",
+            "StandardErrorPath",
         }
         expected_payload_hash = CURRENT_WRAPPER_PLIST_SHA256
     else:
@@ -734,16 +738,24 @@ def _validate_rollback(capture: RollbackCapture) -> None:
         if env != {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}:
             raise ContractError("rollback environment mismatch")
         allowed_keys = {
-            "Label", "EnvironmentVariables", "ProgramArguments", "RunAtLoad",
-            "KeepAlive", "WorkingDirectory", "StandardOutPath", "StandardErrorPath",
+            "Label",
+            "EnvironmentVariables",
+            "ProgramArguments",
+            "RunAtLoad",
+            "KeepAlive",
+            "WorkingDirectory",
+            "StandardOutPath",
+            "StandardErrorPath",
         }
         expected_payload_hash = payload_hash
     if set(parsed) != allowed_keys:
         raise ContractError("rollback plist fields mismatch")
     if (
-        parsed.get("RunAtLoad") is not True or parsed.get("KeepAlive") is not True
+        parsed.get("RunAtLoad") is not True
+        or parsed.get("KeepAlive") is not True
         or parsed.get("WorkingDirectory") != CURRENT_PROFILE.git.root
-        or parsed.get("StandardOutPath") != STDOUT or parsed.get("StandardErrorPath") != STDERR
+        or parsed.get("StandardOutPath") != STDOUT
+        or parsed.get("StandardErrorPath") != STDERR
     ):
         raise ContractError("rollback fixed plist identity mismatch")
     if payload_hash != expected_payload_hash:
@@ -1185,8 +1197,7 @@ def validate_request(
         if request.host_authority is None:
             raise ContractError("artifact authority receipt required")
         if (
-            request.host_authority.final_manager_sha256
-            != artifact.source_blob_sha256
+            request.host_authority.final_manager_sha256 != artifact.source_blob_sha256
             or request.host_authority.final_manager_sha256 != artifact.artifact_sha256
         ):
             raise ContractError("manager artifact triple mismatch")

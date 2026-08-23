@@ -558,6 +558,28 @@ def test_model_validate_is_strict_and_defaults_are_typed():
         DeploymentProfile.model_validate({**profile.model_dump(), "unexpected": True})
 
 
+def test_dirty_current_profile_roundtrip_is_frozen_and_only_rollback_profile():
+    roundtrip = DeploymentProfile.model_validate(CURRENT_PROFILE.model_dump())
+    assert roundtrip == CURRENT_PROFILE
+    assert validate_profile(roundtrip) == CURRENT_PROFILE
+    dirty_desired = DeploymentProfile.model_validate({
+        **DESIRED_PROFILE.model_dump(),
+        "git": {**DESIRED_PROFILE.git.model_dump(), "clean": False},
+    })
+    with pytest.raises(ContractError):
+        validate_profile(dirty_desired)
+    arbitrary_dirty = DeploymentProfile.model_validate({
+        **CURRENT_PROFILE.model_dump(),
+        "git": {
+            **CURRENT_PROFILE.git.model_dump(),
+            "root": "/tmp/foreign",
+            "toplevel": "/tmp/foreign",
+        },
+    })
+    with pytest.raises(ContractError):
+        validate_profile(arbitrary_dirty)
+
+
 def test_old_profile_does_not_equal_explicit_new_target():
     from nexus.contracts.gateway_deployment import compare_profiles, validate_desired_profile
 

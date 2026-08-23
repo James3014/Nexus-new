@@ -1227,7 +1227,7 @@ def test_postflight_requires_authenticated_identity_and_recomputes_manifest(monk
     schema = hashlib.sha256(json.dumps(tools, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
     from nexus.contracts.gateway_deployment import DESIRED_PROFILE
     identity = {
-        "server_instance": "new-instance", "repo_root": DESIRED_PROFILE.git.root, "git_head": DESIRED_PROFILE.git.head,
+        "server_instance_id": "new-instance", "repo_root": DESIRED_PROFILE.git.root, "git_head": DESIRED_PROFILE.git.head,
         "git_tree": DESIRED_PROFILE.git.tree, "permission_policy_hash": "a" * 64,
         "action": "gateway-rebind", "task_id": "TASK-526-A", "lifecycle": "QUIESCENT",
         "tool_manifest_revision": manifest, "full_tool_schema_hash": schema, "client_bound": True, "token_bound": True,
@@ -1252,7 +1252,11 @@ def test_postflight_requires_authenticated_identity_and_recomputes_manifest(monk
             return Response(identity)
         payload = json.loads(request.data.decode())
         if payload["method"] == "initialize":
-            return Response({"result": {"serverInfo": identity}})
+            return Response({"result": {"serverInfo": {
+                "serverInstanceId": "new-instance", "toolManifestRevision": manifest,
+                "fullToolSchemaHash": schema, "permissionPolicyHash": "a" * 64,
+                "lifecycleRevision": "QUIESCENT",
+            }}})
         return Response({"result": {"tools": tools}})
 
     expected = {
@@ -1267,6 +1271,15 @@ def test_postflight_requires_authenticated_identity_and_recomputes_manifest(monk
     bad = dict(expected); bad["server_instance"] = "old-instance"
     with pytest.raises(g.GatewayContractError):
         g.postflight_gateway(bad, token="SECRET", endpoint="http://127.0.0.1:8766", opener=opener, sleeper=lambda _: None, retries=1)
+    identity["server_instance_id"] = "different"
+    with pytest.raises(g.GatewayContractError, match="postflight remained uncertain"):
+        g.postflight_gateway(expected, token="SECRET", endpoint="http://127.0.0.1:8766",
+                             opener=lambda request, timeout: opener(request, timeout), sleeper=lambda _: None,
+                             retries=1)
+    identity.pop("server_instance_id")
+    with pytest.raises(g.GatewayContractError, match="postflight remained uncertain"):
+        g.postflight_gateway(expected, token="SECRET", endpoint="http://127.0.0.1:8766",
+                             opener=opener, sleeper=lambda _: None, retries=1)
 
 
 def test_stable_artifact_install_is_separate_and_hash_bound(tmp_path):

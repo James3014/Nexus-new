@@ -1176,7 +1176,7 @@ def _profile_for_expected(expected: Mapping[str, Any]) -> Any:
 def _canonical_alias(mapping: Mapping[str, Any], canonical: str, aliases: tuple[str, ...]) -> Any:
     """Resolve camel/snake aliases, rejecting conflicting physical values."""
     values = [mapping[key] for key in (canonical, *aliases) if key in mapping]
-    if not values or any(value in (None, "") for value in values) or any(value != values[0] for value in values[1:]):
+    if not values or any(not isinstance(value, str) or not value for value in values) or any(value != values[0] for value in values[1:]):
         raise _gateway_error(f"postflight alias conflict: {canonical}")
     return values[0]
 
@@ -1213,7 +1213,7 @@ def postflight_gateway(expected: Mapping[str, Any], *, token: str, endpoint: str
             # may use snake_case/camelCase, but overlapping canonical values
             # must agree and missing/empty aliases are rejected.
             for key, aliases in {
-                "server_instance": ("serverInstanceId", "instance_id"),
+                "server_instance": ("serverInstanceId", "server_instance_id", "instance_id"),
                 "tool_manifest_sha256": ("toolManifestRevision", "tool_manifest_revision"),
                 "schema_sha256": ("fullToolSchemaHash", "full_tool_schema_hash"),
                 "permission_sha256": ("permissionPolicyHash", "permission_policy_hash"),
@@ -1221,9 +1221,15 @@ def postflight_gateway(expected: Mapping[str, Any], *, token: str, endpoint: str
                 "root": ("repo_root",), "head": ("git_head",), "tree": ("git_tree",),
             }.items():
                 h = _canonical_alias(merged, key, aliases)
-                i = _canonical_alias(server_info, key, aliases)
-                if h != i:
-                    raise _gateway_error(f"health/initialize identity disagreement: {key}")
+                # Physical initialize only carries protocol/server identity;
+                # repository revision is supplied by health plus fixed local
+                # Git observation.  Compare only fields present on both
+                # surfaces, while still rejecting conflicting aliases.
+                i_values = [server_info[name] for name in (key, *aliases) if name in server_info]
+                if i_values:
+                    i = _canonical_alias(server_info, key, aliases)
+                    if h != i:
+                        raise _gateway_error(f"health/initialize identity disagreement: {key}")
                 merged[key] = h
             declared_manifest = merged["tool_manifest_sha256"]
             declared_schema = merged["schema_sha256"]
