@@ -40,4 +40,3 @@ seam. It does not rewrite or approve the failed Candidate.
 Maximum four tracked paths. Zero deletions. The contract module is pure and
 creates no second process owner; all host/process effects remain solely in
 `mcp_gateway_durable.py`.
-
