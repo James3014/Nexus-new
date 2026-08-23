@@ -13,6 +13,13 @@ from scripts.ops import mcp_gateway_durable as g
 
 HASH = hashlib.sha256(b"identity").hexdigest()
 
+@pytest.fixture(autouse=True)
+def _isolated_host_authority_store(monkeypatch, tmp_path):
+    path = tmp_path / "gateway-direct" / "host-authority.json"
+    path.parent.mkdir(mode=0o700)
+    monkeypatch.setattr(g, "GATEWAY_HOST_AUTHORITY_STORE", path)
+    yield
+
 def setup(monkeypatch, tmp_path, head="abc123", dirty="", branch="nexus/integration/main"):
     monkeypatch.setattr(g, "CANONICAL_ROOT", tmp_path)
     monkeypatch.setattr(g, "ENV_PATH", tmp_path.parent / f"{tmp_path.name}-state.env")
@@ -338,6 +345,7 @@ def _gateway_request(operation="reload", *, stable_artifact=None):
         AuthorityReceipt,
         EffectClass,
         GatewayDeploymentRequest,
+        HostEffectAuthorityReceipt,
         IdentityEvidence,
         PostflightIdentity,
         QuiescenceEvidence,
@@ -352,11 +360,24 @@ def _gateway_request(operation="reload", *, stable_artifact=None):
         program_arguments_hash=__import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(["/Users/jameschen/Workspace/Nexus-new/.venv/bin/python", CURRENT_PROFILE.git.root + "/scripts/ops/nexus_mcp_gateway_http.py"]),
         environment_hash=__import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash({"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}),
     )
-    effect = {"preflight": EffectClass.PREFLIGHT, "reload": EffectClass.GATEWAY_RELOAD,
+    effect = {"preflight": EffectClass.PREFLIGHT, "status": EffectClass.STATUS, "reload": EffectClass.GATEWAY_RELOAD,
               "install-artifact": EffectClass.INSTALL_ARTIFACT, "rollback": EffectClass.GATEWAY_ROLLBACK}[operation]
+    host = HostEffectAuthorityReceipt(
+        schema="nexus.gateway.host_effect_authority.v1", receipt_version=1, receipt_id="host-receipt", receipt_hash="0" * 64, scope="NEXUS_GATEWAY_REBIND_HOST_EFFECT_ONLY",
+        issuer_id="owner-james", coordinator_id="coordinator-codex", authorized_actor_id="coordinator-codex",
+        owner_activation_id="OWNER_ISSUE526_CONTINUE_20260823", owner_activation_sha256="f0ed77ffe3872b083ef0b6d66526524a7091a8e3125322c84ba632f3c64ba322",
+        source_thread="01a02a17-691c-7a20-ad0f-9166456416dc", standing_grant_id="OWNER_STANDING_COORDINATOR_20260818_DURABLE_GITHUB_WORKFLOW",
+        standing_grant_receipt_sha256="3b8895f093692257d6225fbb8150b34f520e667d250c7817ad120cefd42751d5", source_base_merge="ac4a9ab1e0180170ca062cdc81f2142bca8bd80f", source_base_tree="db329f4931b55b74f1e1f9fe61f7edf4ca8422bc",
+        correction_merge_sha="1" * 40, correction_tree_sha="2" * 40, independent_acceptance_receipt_hash="3" * 64, final_manager_sha256="4" * 64, current_main_sha="5" * 40,
+        host_card_path="tasks/github-issue-526-host-authority-and-canary-20260823/01-gateway-host-local-canary.md", host_card_id="TASK-526-HOST-1", host_card_sha256="b6e0c0015b1098261622b7ea087869eca5e0c80a6a1d3071815aa19e520ca7b1",
+        repository="James3014/Nexus-new", operation=operation, effect_class=effect, service_label=g.GATEWAY_LABEL, plist_path="/Users/jameschen/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist", endpoint=g.GATEWAY_ENDPOINT,
+        current_profile_hash=__import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(CURRENT_PROFILE), desired_profile_hash=__import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(DESIRED_PROFILE),
+        request_id="r-526", idempotency_fence="f-526", issued_at="2026-08-22T00:00:00Z", expires_at="2026-08-24T00:00:00Z", revocation_state="NOT_REVOKED", revoked_at=None, revocation_reason=None,
+    )
+    host = HostEffectAuthorityReceipt(**{**host.__dict__, "receipt_hash": __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash({k: v for k, v in host.__dict__.items() if k != "receipt_hash"})})
     values = {
         "request_id": "r-526", "idempotency_fence": "f-526", "operation": operation,
-        "authority": AuthorityReceipt("owner", "receipt", issued_at="2026-08-22T00:00:00Z", expires_at="2026-08-24T00:00:00Z", request_id="r-526"),
+        "authority": AuthorityReceipt("owner", "receipt", issued_at="2026-08-22T00:00:00Z", expires_at="2026-08-24T00:00:00Z", request_id="r-526"), "host_authority": host,
         "current": CURRENT_PROFILE, "desired": DESIRED_PROFILE,
         "current_identity": IdentityEvidence(plist_sha256=hashlib.sha256(payload).hexdigest(), plist_bytes_sha256=hashlib.sha256(payload).hexdigest(), pid=123, server_instance="old", root=CURRENT_PROFILE.git.root, head=CURRENT_PROFILE.git.head, tree=CURRENT_PROFILE.git.tree, source_sha256="b"*64, tool_manifest_sha256="c"*64, schema_sha256="d"*64, permission_sha256="e"*64, action="gateway-rebind", task_id="TASK-526-A", lifecycle="QUIESCENT", loaded=True, client_bound=True), "rollback": rollback,
         "quiescence": QuiescenceEvidence("reconciled", "QUIESCENT", "QUIESCENT", "1"*64, (), "reacq"), "postflight": PostflightIdentity("new", DESIRED_PROFILE.git.root, DESIRED_PROFILE.git.head, DESIRED_PROFILE.git.tree, "f"*64, "a"*64, "b"*64, "gateway-rebind", "TASK-526-A", "QUIESCENT", True, ("gateway-rebind",), ("gateway-rebind",), True),
@@ -366,9 +387,20 @@ def _gateway_request(operation="reload", *, stable_artifact=None):
     receipt = values["authority"]
     values["authority"] = AuthorityReceipt(**{**receipt.__dict__, "receipt_hash": __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash({k: v for k, v in receipt.__dict__.items() if k != "receipt_hash"})})
     if stable_artifact is not None:
-        values["stable_artifact"] = stable_artifact
+        values["stable_artifact"] = stable_artifact.__class__(**{**stable_artifact.__dict__, "authority_receipt_id": host.receipt_id})
     values["request_hash"] = __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(values)
+    store = Path(g.GATEWAY_HOST_AUTHORITY_STORE)
+    store.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    store.write_text(json.dumps(host.model_dump(), sort_keys=True, separators=(",", ":")))
+    store.chmod(0o600)
     return GatewayDeploymentRequest(**values)
+
+
+def _ledger_receipt(request_id="r", fence="f"):
+    receipt = _gateway_request().host_authority
+    values = {**receipt.__dict__, "request_id": request_id, "idempotency_fence": fence}
+    values["receipt_hash"] = __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash({k: v for k, v in values.items() if k != "receipt_hash"})
+    return receipt.__class__(**values)
 
 
 def _gateway_observed():
@@ -397,11 +429,43 @@ def test_gateway_preflight_requires_exact_current_identity(monkeypatch, tmp_path
         g.preflight_gateway(request, observed=bad, observation_time="2026-08-23T00:00:00Z")
 
 
+@pytest.mark.parametrize("operation", ["status", "preflight", "install-artifact", "reload", "rollback"])
+def test_source_only_host_operations_have_zero_effects(operation):
+    request = _gateway_request(operation)
+    values = {**request.__dict__, "host_authority": None}
+    canonical = __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash
+    values["request_hash"] = canonical({k: v for k, v in values.items() if k not in {"request_hash", "schema"}})
+    source_only = request.__class__(**values)
+    calls = []
+    with pytest.raises(g.GatewayContractError):
+        if operation == "status":
+            g.gateway_status(source_only, runner=lambda *args: calls.append(args), observation_time="2026-08-23T00:00:00Z")
+        elif operation == "preflight":
+            g.preflight_gateway(source_only, observed={}, observation_time="2026-08-23T00:00:00Z")
+        elif operation == "install-artifact":
+            g.install_stable_artifact(source_only, source_root=Path("/tmp"), source_path=Path("/tmp/missing"), observation_time="2026-08-23T00:00:00Z")
+        elif operation == "reload":
+            g.gateway_reload(source_only, observed={}, runner=lambda *args: calls.append(args), observation_time="2026-08-23T00:00:00Z")
+        else:
+            g.rollback_gateway(source_only, predecessor_observer={}, runner=lambda *args: calls.append(args), observation_time="2026-08-23T00:00:00Z")
+    assert calls == []
+
+
+def test_canonical_host_store_tamper_blocks_status_before_runner():
+    request = _gateway_request("status")
+    store = Path(g.GATEWAY_HOST_AUTHORITY_STORE)
+    store.write_text(store.read_text().replace("host-receipt", "tampered-receipt"))
+    calls = []
+    with pytest.raises(g.GatewayContractError):
+        g.gateway_status(request, runner=lambda *args: calls.append(args), observation_time="2026-08-23T00:00:00Z")
+    assert calls == []
+
+
 def test_gateway_ledger_chain_tamper_and_cas_fail_closed(tmp_path):
     ledger = g.GatewayLedger(tmp_path / "ledger.jsonl")
-    first = ledger.append(request_id="r", request_hash="a" * 64, state="REQUESTED")
+    first = ledger.append(request_id="r", request_hash="a" * 64, state="REQUESTED", host_authority=_ledger_receipt(), operation="reload", effect_class="GATEWAY_RELOAD", idempotency_fence="f")
     with pytest.raises(g.GatewayContractError):
-        ledger.append(request_id="r2", request_hash="b" * 64, state="REQUESTED", expected_tail="0" * 64)
+        ledger.append(request_id="r2", request_hash="b" * 64, state="REQUESTED", expected_tail="0" * 64, host_authority=_ledger_receipt("r2", "f2"), operation="reload", effect_class="GATEWAY_RELOAD", idempotency_fence="f2")
     path = tmp_path / "ledger.jsonl"
     path.write_text(path.read_text().replace(first["record_hash"], "0" * 64))
     with pytest.raises(g.LedgerCorruption):
@@ -801,11 +865,12 @@ def test_artifact_source_substitution_has_zero_destination_write(tmp_path):
 
 def test_ledger_rejects_skipped_state_and_replay_conflict(tmp_path):
     ledger = g.GatewayLedger(tmp_path / "ledger.jsonl")
-    ledger.append(request_id="r", request_hash="a" * 64, state="REQUESTED")
+    receipt = _ledger_receipt()
+    ledger.append(request_id="r", request_hash="a" * 64, state="REQUESTED", host_authority=receipt, operation="reload", effect_class="GATEWAY_RELOAD", idempotency_fence="f")
     with pytest.raises(g.GatewayContractError):
-        ledger.append(request_id="r", request_hash="a" * 64, state="STARTED")
+        ledger.append(request_id="r", request_hash="a" * 64, state="STARTED", host_authority=receipt, operation="reload", effect_class="GATEWAY_RELOAD", idempotency_fence="f")
     with pytest.raises(g.GatewayContractError):
-        ledger.append(request_id="r", request_hash="b" * 64, state="PREFLIGHTED")
+        ledger.append(request_id="r", request_hash="b" * 64, state="PREFLIGHTED", host_authority=receipt, operation="reload", effect_class="GATEWAY_RELOAD", idempotency_fence="f")
 
 
 def test_cli_rejects_caller_selected_gateway_command(monkeypatch):

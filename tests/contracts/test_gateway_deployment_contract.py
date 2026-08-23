@@ -14,6 +14,7 @@ from nexus.contracts.gateway_deployment import (
     EffectClass,
     GatewayDeploymentRequest,
     GitIdentity,
+    HostEffectAuthorityReceipt,
     IdentityEvidence,
     PostflightIdentity,
     QuiescenceEvidence,
@@ -126,6 +127,53 @@ def _request():
         effect_class=EffectClass.GATEWAY_RELOAD,
         stable_artifact=None,
     )
+    host = HostEffectAuthorityReceipt(
+        schema="nexus.gateway.host_effect_authority.v1",
+        receipt_version=1,
+        receipt_id="host-receipt",
+        receipt_hash="0" * 64,
+        scope="NEXUS_GATEWAY_REBIND_HOST_EFFECT_ONLY",
+        issuer_id="owner-james",
+        coordinator_id="coordinator-codex",
+        authorized_actor_id="coordinator-codex",
+        owner_activation_id="OWNER_ISSUE526_CONTINUE_20260823",
+        owner_activation_sha256="f0ed77ffe3872b083ef0b6d66526524a7091a8e3125322c84ba632f3c64ba322",
+        source_thread="01a02a17-691c-7a20-ad0f-9166456416dc",
+        standing_grant_id="OWNER_STANDING_COORDINATOR_20260818_DURABLE_GITHUB_WORKFLOW",
+        standing_grant_receipt_sha256="3b8895f093692257d6225fbb8150b34f520e667d250c7817ad120cefd42751d5",
+        source_base_merge="ac4a9ab1e0180170ca062cdc81f2142bca8bd80f",
+        source_base_tree="db329f4931b55b74f1e1f9fe61f7edf4ca8422bc",
+        correction_merge_sha="1" * 40,
+        correction_tree_sha="2" * 40,
+        independent_acceptance_receipt_hash="3" * 64,
+        final_manager_sha256="4" * 64,
+        current_main_sha="5" * 40,
+        host_card_path="tasks/github-issue-526-host-authority-and-canary-20260823/01-gateway-host-local-canary.md",
+        host_card_id="TASK-526-HOST-1",
+        host_card_sha256="b6e0c0015b1098261622b7ea087869eca5e0c80a6a1d3071815aa19e520ca7b1",
+        repository="James3014/Nexus-new",
+        operation="reload",
+        effect_class=EffectClass.GATEWAY_RELOAD,
+        service_label="com.nexus.mcp.gateway.direct",
+        plist_path="/Users/jameschen/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist",
+        endpoint="http://127.0.0.1:8766",
+        current_profile_hash=canonical_hash(CURRENT_PROFILE),
+        desired_profile_hash=canonical_hash(DESIRED_PROFILE),
+        request_id="r-526",
+        idempotency_fence="f-526",
+        issued_at="2026-08-22T00:00:00Z",
+        expires_at="2026-08-24T00:00:00Z",
+        revocation_state="NOT_REVOKED",
+        revoked_at=None,
+        revocation_reason=None,
+    )
+    host = HostEffectAuthorityReceipt(**{
+        **host.__dict__,
+        "receipt_hash": canonical_hash({
+            k: v for k, v in host.__dict__.items() if k != "receipt_hash"
+        }),
+    })
+    values["host_authority"] = host
     values["request_hash"] = canonical_hash(values)
     return GatewayDeploymentRequest(**values)
 
@@ -141,6 +189,36 @@ def test_request_hash_and_rollback_are_bound():
     request = _request()
     with pytest.raises(ContractError):
         validate_request(request.__class__(**{**request.__dict__, "request_hash": "0" * 64}))
+
+
+def test_source_provenance_alone_can_never_validate_as_host_request():
+    request = _request()
+    values = {**request.__dict__, "host_authority": None}
+    values["request_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key not in {"request_hash", "schema"}
+    })
+    with pytest.raises(ContractError, match="host-effect authority"):
+        validate_request(GatewayDeploymentRequest(**values))
+
+
+def test_host_receipt_is_strictly_bound_to_operation_and_fence():
+    request = _request()
+    altered = request.host_authority.__class__(**{
+        **request.host_authority.__dict__,
+        "idempotency_fence": "other-fence",
+    })
+    altered = altered.__class__(**{
+        **altered.__dict__,
+        "receipt_hash": canonical_hash({
+            key: value for key, value in altered.__dict__.items() if key != "receipt_hash"
+        }),
+    })
+    values = {**request.__dict__, "host_authority": altered}
+    values["request_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key not in {"request_hash", "schema"}
+    })
+    with pytest.raises(ContractError, match="request/fence"):
+        validate_request(GatewayDeploymentRequest(**values))
 
 
 def test_rollback_plist_hashes_both_bind_to_bytes():

@@ -27,12 +27,16 @@ from nexus.contracts.gateway_deployment import (
     DESIRED_PROFILE,
     ContractError,
     DeploymentState,
+    EffectClass,
     GatewayDeploymentRequest,
+    HostEffectAuthorityReceipt,
     PostflightIdentity,
     canonical_hash,
     validate_authority_freshness,
+    validate_host_effect_authority,
     validate_postflight_identity,
     validate_profile,
+    validate_receipt_freshness,
     validate_request,
     validate_rollback_capture,
 )
@@ -219,7 +223,7 @@ def serve(kind: str, *, root: Path = CANONICAL_ROOT, launch_floor_head: str | No
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("action", choices=("preflight", "render", "install", "status", "reload", "uninstall", "serve-gateway", "serve-devspace",
-                                       "gateway-preflight", "gateway-reload", "gateway-install-artifact", "gateway-rollback"))
+                                       "gateway-status", "gateway-preflight", "gateway-reload", "gateway-install-artifact", "gateway-rollback"))
     p.add_argument("--launch-floor-head", dest="launch_floor_head")
     p.add_argument("--expected-head", dest="launch_floor_head", help="backward-compat alias for --launch-floor-head")
     p.add_argument("--devspace-hash"); p.add_argument("--env-file")
@@ -238,14 +242,16 @@ def main() -> int:
                 p.error("--gateway-request is required for Gateway-only operations")
             request_path = _fixed_cli_store_path(a.gateway_request, GATEWAY_REQUEST_STORE)
             try:
-                payload = json.loads(request_path.read_text())
+                payload = json.loads(request_path.read_text(), object_pairs_hook=_unique_pairs)
             except (OSError, ValueError) as exc:
                 raise GateError("gateway request file malformed") from exc
             request = GatewayDeploymentRequest.model_validate(payload)
             operation = a.action.removeprefix("gateway-")
             if operation == "install-artifact": operation = "install-artifact"
             now = _current_observation_time()
-            observed = collect_gateway_observation(request, operation=operation, observation_time=now)
+            observed = {} if operation in {"status", "gateway-status"} else collect_gateway_observation(
+                request, operation=operation, observation_time=now
+            )
             if a.gateway_evidence is not None:
                 _fixed_cli_store_path(a.gateway_evidence, GATEWAY_EVIDENCE_STORE)
             print(json.dumps(dispatch_gateway_cli(operation, request=request, observed=observed,
@@ -257,13 +263,19 @@ GATEWAY_LABEL = "com.nexus.mcp.gateway.direct"
 GATEWAY_PLIST = Path("/Users/jameschen/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist")
 GATEWAY_ENDPOINT = "http://127.0.0.1:8766"
 GATEWAY_ENTRYPOINT = "scripts/ops/nexus_mcp_gateway_http.py"
-GATEWAY_LEDGER = Path.home() / "Library/Application Support/Nexus/gateway-direct/ledger.jsonl"
-GATEWAY_LOCK = Path.home() / "Library/Application Support/Nexus/gateway-direct/ledger.lock"
-GATEWAY_ARTIFACT = Path.home() / "Library/Application Support/Nexus/gateway-direct/manager.py"
-GATEWAY_REQUEST_STORE = Path.home() / "Library/Application Support/Nexus/gateway-direct/request.json"
-GATEWAY_EVIDENCE_STORE = Path.home() / "Library/Application Support/Nexus/gateway-direct/evidence.json"
-MAX_LEDGER_BYTES = 4 * 1024 * 1024
+GATEWAY_STATE_ROOT = Path("/Users/jameschen/Library/Application Support/Nexus/gateway-direct")
+GATEWAY_LEDGER = GATEWAY_STATE_ROOT / "ledger.jsonl"
+GATEWAY_LOCK = GATEWAY_STATE_ROOT / "ledger.lock"
+GATEWAY_ARTIFACT = GATEWAY_STATE_ROOT / "manager.py"
+GATEWAY_REQUEST_STORE = GATEWAY_STATE_ROOT / "request.json"
+GATEWAY_EVIDENCE_STORE = GATEWAY_STATE_ROOT / "evidence.json"
+GATEWAY_HOST_AUTHORITY_STORE = Path(
+    "/Users/jameschen/Library/Application Support/Nexus/gateway-direct/host-authority.json"
+)
+MAX_LEDGER_BYTES = 64 * 1024
 MAX_LEDGER_RECORDS = 256
+MAX_GATEWAY_STORE_BYTES = 64 * 1024
+HOST_UID = 501
 
 
 class GatewayContractError(GateError):
@@ -305,7 +317,9 @@ def _gateway_error(message: str, exc: BaseException | None = None) -> GatewayCon
     return error
 
 
-def _safe_store_path(path: Path, *, leaf_mode: int = 0o600, create: bool = False) -> Path:
+def _safe_store_path(
+    path: Path, *, leaf_mode: int = 0o600, create: bool = False, require_owner: bool = True
+) -> Path:
     """Reject symlink/non-directory ancestry and unsafe writable parents."""
     path = Path(path)
     if not path.is_absolute() or ".git" in path.parts or path == Path("/"):
@@ -337,13 +351,73 @@ def _safe_store_path(path: Path, *, leaf_mode: int = 0o600, create: bool = False
         if cursor.parent == cursor:
             break
         cursor = cursor.parent
+    if require_owner:
+        try:
+            parent_info = os.lstat(parent)
+        except OSError as exc:
+            raise _gateway_error("gateway store parent unreadable", exc) from exc
+        if (
+            not stat.S_ISDIR(parent_info.st_mode)
+            or parent_info.st_uid != HOST_UID
+            or stat.S_IMODE(parent_info.st_mode) != 0o700
+        ):
+            raise _gateway_error("gateway store parent ownership/mode invalid")
     if path.exists() or path.is_symlink():
         info = os.lstat(path)
         if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
             raise _gateway_error("gateway store is not a regular file")
         if info.st_mode & 0o077:
             raise _gateway_error("gateway store permissions are too broad")
+        if require_owner and info.st_uid != HOST_UID:
+            raise _gateway_error("gateway store owner mismatch")
+        if info.st_size > MAX_GATEWAY_STORE_BYTES:
+            raise _gateway_error("gateway store exceeds size bound")
     return path
+
+
+def _load_host_authority_store() -> HostEffectAuthorityReceipt:
+    """Load only the fixed canonical host receipt, with no caller path seam."""
+    path = _safe_store_path(GATEWAY_HOST_AUTHORITY_STORE)
+    if path.is_symlink() or not path.is_file():
+        raise _gateway_error("canonical host authority store missing")
+    parent_info = os.stat(path.parent)
+    if parent_info.st_uid != HOST_UID or stat.S_IMODE(parent_info.st_mode) != 0o700:
+        raise _gateway_error("canonical host authority directory ownership/mode invalid")
+    info = os.stat(path)
+    if info.st_uid != HOST_UID or stat.S_IMODE(info.st_mode) != 0o600:
+        raise _gateway_error("canonical host authority file ownership/mode invalid")
+    try:
+        raw = path.read_bytes()
+        if not raw or len(raw) > MAX_GATEWAY_STORE_BYTES:
+            raise _gateway_error("canonical host authority store size invalid")
+        payload = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_pairs)
+        receipt = HostEffectAuthorityReceipt.model_validate(payload)
+        validate_host_effect_authority(receipt)
+    except (OSError, UnicodeError, ValueError, ContractError) as exc:
+        raise _gateway_error("canonical host authority receipt invalid", exc) from exc
+    return receipt
+
+
+def _require_host_authority(
+    request: GatewayDeploymentRequest, *, observation_time: str | None = None
+) -> GatewayDeploymentRequest:
+    """Revalidate pure bindings and exact equality with the canonical store."""
+    try:
+        typed = validate_request(request)
+    except ContractError as exc:
+        raise _gateway_error("host authority rejected", exc) from exc
+    receipt = typed.host_authority
+    if receipt is None:  # defensive: validate_request already rejects this
+        raise _gateway_error("host-effect authority receipt required")
+    try:
+        validate_receipt_freshness(receipt, now=_freshness_time(observation_time))
+        stored = _load_host_authority_store()
+        if stored != receipt:
+            raise ContractError("stored host authority differs from request")
+        validate_host_effect_authority(stored, request=typed)
+    except (ContractError, GatewayContractError) as exc:
+        raise _gateway_error("host authority rejected", exc) from exc
+    return typed
 
 
 def _fsync_dir(path: Path) -> None:
@@ -389,7 +463,7 @@ class InterProcessLock:
             flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
             self._fd = os.open(self.path, flags, 0o600)
             info = os.fstat(self._fd)
-            if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077:
+            if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != HOST_UID:
                 raise _gateway_error("gateway lock permissions invalid")
             deadline = time.monotonic() + self.timeout
             while True:
@@ -436,11 +510,15 @@ class GatewayLedger:
         if not self.path.exists():
             return []
         self.path = _safe_store_path(self.path)
+        info = os.stat(self.path)
+        if info.st_uid != HOST_UID or stat.S_IMODE(info.st_mode) != 0o600:
+            raise LedgerCorruption("ledger ownership/mode invalid")
         raw = self.path.read_bytes()
         if not raw or len(raw) > MAX_LEDGER_BYTES:
             raise LedgerCorruption("ledger missing or exceeds size bound")
         rows: list[dict[str, Any]] = []
         last_state: dict[str, str] = {}
+        fences: dict[str, str] = {}
         for line in raw.splitlines(keepends=True):
             if not line.endswith(b"\n"):
                 raise LedgerCorruption("ledger is not newline terminated")
@@ -448,12 +526,41 @@ class GatewayLedger:
                 row = json.loads(line.decode("utf-8"), object_pairs_hook=_unique_pairs)
             except (ValueError, UnicodeError) as exc:
                 raise LedgerCorruption("ledger JSON malformed") from exc
-            if not isinstance(row, dict) or set(row) != {"schema", "request_id", "request_hash", "state", "sequence", "parent_hash", "record_hash", "pre_effect_identity", "observed_identity"}:
+            expected_keys = {
+                "schema", "request_id", "request_hash", "state", "sequence", "parent_hash",
+                "record_hash", "pre_effect_identity", "observed_identity", "host_receipt_hash",
+                "source_base_merge", "source_base_tree", "host_card_sha256", "effect_class",
+                "operation", "idempotency_fence",
+            }
+            if not isinstance(row, dict) or set(row) != expected_keys:
                 raise LedgerCorruption("ledger schema mismatch")
             if row["schema"] != "nexus.gateway.ledger.v1" or not isinstance(row["request_id"], str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", row["request_id"]):
                 raise LedgerCorruption("ledger request identity malformed")
             if not isinstance(row["request_hash"], str) or not re.fullmatch(r"[0-9a-f]{64}", row["request_hash"]):
                 raise LedgerCorruption("ledger request hash malformed")
+            if any(not isinstance(row[key], str) or not row[key] for key in (
+                "host_receipt_hash", "source_base_merge", "source_base_tree", "host_card_sha256",
+                "effect_class", "operation", "idempotency_fence"
+            )):
+                raise LedgerCorruption("ledger host authority binding missing")
+            for key in ("host_receipt_hash", "host_card_sha256"):
+                if not re.fullmatch(r"[0-9a-f]{64}", row[key]):
+                    raise LedgerCorruption("ledger host authority hash malformed")
+            for key in ("source_base_merge", "source_base_tree"):
+                if not re.fullmatch(r"[0-9a-f]{40}", row[key]):
+                    raise LedgerCorruption("ledger source binding malformed")
+            if row["effect_class"] not in {effect.value for effect in EffectClass}:
+                raise LedgerCorruption("ledger effect class unknown")
+            if row["operation"] not in {
+                "status", "gateway-status", "preflight", "gateway-preflight",
+                "install", "install-artifact", "install_artifact", "reload", "gateway-reload",
+                "rollback", "gateway-rollback",
+            }:
+                raise LedgerCorruption("ledger operation unknown")
+            prior_fence = fences.get(row["idempotency_fence"])
+            if prior_fence is not None and prior_fence != row["request_id"]:
+                raise LedgerCorruption("ledger idempotency fence reused")
+            fences[row["idempotency_fence"]] = row["request_id"]
             if not isinstance(row["sequence"], int) or row["sequence"] != len(rows) + 1:
                 raise LedgerCorruption("ledger sequence gap")
             if row["state"] not in {state.value for state in DeploymentState}:
@@ -487,12 +594,24 @@ class GatewayLedger:
     def append(self, *, request_id: str, request_hash: str, state: DeploymentState | str,
                pre_effect_identity: Mapping[str, Any] | None = None,
                observed_identity: Mapping[str, Any] | None = None,
-               expected_tail: str | None = None) -> dict[str, Any]:
+               expected_tail: str | None = None,
+               host_authority: HostEffectAuthorityReceipt | None = None,
+               operation: str | None = None,
+               effect_class: str | None = None,
+               idempotency_fence: str | None = None) -> dict[str, Any]:
         state = DeploymentState(state)
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", request_id) or not re.fullmatch(r"[0-9a-f]{64}", request_hash):
             raise GatewayContractError("ledger request identity malformed")
+        if host_authority is None or not isinstance(host_authority, HostEffectAuthorityReceipt):
+            raise GatewayContractError("ledger host authority binding required")
+        validate_host_effect_authority(host_authority)
+        if host_authority.request_id != request_id or operation != host_authority.operation or effect_class != host_authority.effect_class.value or idempotency_fence != host_authority.idempotency_fence:
+            raise GatewayContractError("ledger host authority binding mismatch")
         with InterProcessLock(self.lock_path):
             rows = self._scan_unlocked()
+            for prior in rows:
+                if prior["idempotency_fence"] == idempotency_fence and prior["request_id"] != request_id:
+                    raise GatewayContractError("idempotency fence conflict")
             prior_for_request = next((row for row in reversed(rows) if row["request_id"] == request_id), None)
             for prior in rows:
                 if prior["request_id"] == request_id:
@@ -514,12 +633,19 @@ class GatewayLedger:
                 raise GatewayContractError("ledger compare-and-swap conflict")
             return self._append_unlocked(rows, request_id=request_id, request_hash=request_hash,
                                          state=state, pre_effect_identity=pre_effect_identity,
-                                         observed_identity=observed_identity)
+                                         observed_identity=observed_identity,
+                                         host_authority=host_authority, operation=operation,
+                                         effect_class=effect_class, idempotency_fence=idempotency_fence)
 
     def _append_unlocked(self, rows: list[dict[str, Any]], *, request_id: str,
                          request_hash: str, state: DeploymentState | str,
                          pre_effect_identity: Mapping[str, Any] | None = None,
-                         observed_identity: Mapping[str, Any] | None = None) -> dict[str, Any]:
+                         observed_identity: Mapping[str, Any] | None = None,
+                         host_authority: HostEffectAuthorityReceipt | None = None,
+                         operation: str | None = None, effect_class: str | None = None,
+                         idempotency_fence: str | None = None) -> dict[str, Any]:
+            if host_authority is None or operation is None or effect_class is None or idempotency_fence is None:
+                raise GatewayContractError("ledger host authority binding required")
             state = DeploymentState(state)
             tail = rows[-1]["record_hash"] if rows else ""
             row: dict[str, Any] = {
@@ -528,6 +654,13 @@ class GatewayLedger:
                 "sequence": len(rows) + 1, "parent_hash": tail,
                 "record_hash": "", "pre_effect_identity": dict(pre_effect_identity or {}),
                 "observed_identity": dict(observed_identity or {}),
+                "host_receipt_hash": host_authority.receipt_hash,
+                "source_base_merge": host_authority.source_base_merge,
+                "source_base_tree": host_authority.source_base_tree,
+                "host_card_sha256": host_authority.host_card_sha256,
+                "effect_class": effect_class,
+                "operation": operation,
+                "idempotency_fence": idempotency_fence,
             }
             row["record_hash"] = _record_hash(row)
             encoded = (json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n").encode()
@@ -593,7 +726,7 @@ def preflight_gateway(request: GatewayDeploymentRequest, *, observed: Mapping[st
                       observation_time: str | None = None) -> dict[str, Any]:
     """Validate fresh physical evidence without performing a process effect."""
     try:
-        validate_request(request)
+        request = _require_host_authority(request, observation_time=observation_time)
         validate_authority_freshness(request.authority, now=_freshness_time(observation_time))
     except (ContractError, ValueError) as exc:
         raise _gateway_error("gateway request rejected", exc) from exc
@@ -760,12 +893,12 @@ def install_stable_artifact(request: GatewayDeploymentRequest, *, source_root: P
                             command_runner: Callable[..., Any] | None = None,
                             observation_time: str | None = None) -> dict[str, Any]:
     """Publish one exact manager artifact; this is never part of reload."""
-    validate_request(request)
+    request = _require_host_authority(request, observation_time=observation_time)
     try:
         validate_authority_freshness(request.authority, now=_freshness_time(observation_time))
     except ContractError as exc:
-        raise _gateway_error("artifact authority freshness rejected", exc) from exc
-    if request.operation not in {"install-artifact", "install_artifact"} or request.stable_artifact is None:
+        raise _gateway_error("artifact source authority freshness rejected", exc) from exc
+    if request.operation not in {"install", "install-artifact", "install_artifact"} or request.stable_artifact is None:
         raise _gateway_error("artifact installation requires explicit install-artifact request")
     artifact_path = Path(artifact_path or GATEWAY_ARTIFACT)
     if artifact_path != Path(GATEWAY_ARTIFACT):
@@ -937,7 +1070,7 @@ def rollback_gateway(request: GatewayDeploymentRequest, *, plist_path: Path | No
     if plist_path != Path(GATEWAY_PLIST):
         raise _gateway_error("rollback plist destination substitution")
     try:
-        request = validate_request(request)
+        request = _require_host_authority(request, observation_time=observation_time)
         validate_authority_freshness(request.authority, now=_freshness_time(observation_time))
     except ContractError as exc:
         raise _gateway_error("rollback authority freshness rejected", exc) from exc
@@ -1028,11 +1161,11 @@ def gateway_reload(request: GatewayDeploymentRequest, *, observed: Mapping[str, 
                    sleeper: Callable[[float], None] = time.sleep,
                    observation_time: str | None = None) -> dict[str, Any]:
     """Gateway-only reload/adopt operation.  It cannot install a stable artifact."""
-    validate_request(request)
+    request = _require_host_authority(request, observation_time=observation_time)
     try:
         validate_authority_freshness(request.authority, now=_freshness_time(observation_time))
     except ContractError as exc:
-        raise _gateway_error("Gateway authority freshness rejected", exc) from exc
+        raise _gateway_error("Gateway source authority freshness rejected", exc) from exc
     if request.operation not in {"reload", "gateway-reload"}:
         raise _gateway_error("gateway_reload requires reload operation")
     plist_path = Path(plist_path or GATEWAY_PLIST)
@@ -1067,7 +1200,11 @@ def gateway_reload(request: GatewayDeploymentRequest, *, observed: Mapping[str, 
                 transition(prior["state"], state)
             row = store._append_unlocked(current_rows, request_id=request.request_id, request_hash=request.request_hash,
                                           state=state, pre_effect_identity=preflight["observed"],
-                                          observed_identity=observed_identity or {})
+                                          observed_identity=observed_identity or {},
+                                          host_authority=request.host_authority,
+                                          operation=request.operation,
+                                          effect_class=request.effect_class.value,
+                                          idempotency_fence=request.idempotency_fence)
             return row
         append_state(DeploymentState.REQUESTED)
         append_state(DeploymentState.PREFLIGHTED)
@@ -1100,27 +1237,48 @@ def gateway_reload(request: GatewayDeploymentRequest, *, observed: Mapping[str, 
                 prior = next((item for item in reversed(current_rows) if item["request_id"] == request.request_id), None)
                 if prior is not None and prior["state"] not in {DeploymentState.UNCERTAIN_EFFECT.value, DeploymentState.VERIFIED.value}:
                     store._append_unlocked(current_rows, request_id=request.request_id, request_hash=request.request_hash, state=DeploymentState.UNCERTAIN_EFFECT,
-                                           pre_effect_identity=preflight["observed"], observed_identity={"error": type(exc).__name__})
+                                           pre_effect_identity=preflight["observed"], observed_identity={"error": type(exc).__name__},
+                                           host_authority=request.host_authority,
+                                           operation=request.operation,
+                                           effect_class=request.effect_class.value,
+                                           idempotency_fence=request.idempotency_fence)
             raise _gateway_error("Gateway effect uncertain", exc) from exc
+
+
+def gateway_status(
+    request: GatewayDeploymentRequest,
+    *,
+    runner: Callable[..., Any] | None = None,
+    observation_time: str | None = None,
+) -> dict[str, Any]:
+    """Read status for the fixed Gateway service under a STATUS receipt only."""
+    request = _require_host_authority(request, observation_time=observation_time)
+    if request.operation not in {"status", "gateway-status"} or request.effect_class is not EffectClass.STATUS:
+        raise _gateway_error("Gateway status requires STATUS operation")
+    observed = _launchctl_observation(runner=runner)
+    return {"state": "SERVICE_OBSERVED", "operation": "status", "service": GATEWAY_LABEL, **observed}
 
 
 def manage_gateway(action: str, *, request: GatewayDeploymentRequest | Mapping[str, Any],
                    observed: Mapping[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
     """Explicit Gateway-only dispatch; legacy ``manage`` cannot reach this path."""
-    typed = validate_request(request)
+    typed = _require_host_authority(request, observation_time=kwargs.get("observation_time"))
     observation_time = kwargs.get("observation_time")
     try:
         validate_authority_freshness(typed.authority, now=_freshness_time(observation_time))
     except ContractError as exc:
         raise _gateway_error("Gateway authority freshness rejected", exc) from exc
     expected_operation = {
+        "status": {"status", "gateway-status"},
         "preflight": {"preflight", "gateway-preflight"},
         "reload": {"reload", "gateway-reload"},
-        "install-artifact": {"install-artifact", "install_artifact"},
+        "install-artifact": {"install", "install-artifact", "install_artifact"},
         "rollback": {"rollback", "gateway-rollback"},
     }
     if action not in expected_operation or typed.operation not in expected_operation[action]:
         raise _gateway_error("operation substitution rejected")
+    if action == "status":
+        return gateway_status(typed, runner=kwargs.get("runner"), observation_time=observation_time)
     if action == "preflight":
         if observed is None:
             raise _gateway_error("fresh physical Gateway evidence required")
@@ -1140,7 +1298,12 @@ def _fixed_cli_store_path(value: Path, expected: Path) -> Path:
     path = Path(value)
     if path != Path(expected):
         raise _gateway_error("caller-selected Gateway store path rejected")
-    return _safe_store_path(path)
+    path = _safe_store_path(path)
+    if path.exists():
+        info = os.stat(path)
+        if info.st_uid != HOST_UID or stat.S_IMODE(info.st_mode) != 0o600:
+            raise _gateway_error("Gateway store ownership/mode invalid")
+    return path
 
 
 def _launchctl_observation(*, runner: Callable[..., Any] | None = None) -> dict[str, Any]:
@@ -1161,7 +1324,7 @@ def observe_gateway_quiescence() -> dict[str, Any]:
     """Read the manager-owned durable quiescence receipt; never trust request input."""
     path = _safe_store_path(GATEWAY_EVIDENCE_STORE)
     try:
-        value = json.loads(path.read_text())
+        value = json.loads(path.read_text(), object_pairs_hook=_unique_pairs)
     except (OSError, ValueError) as exc:
         raise _gateway_error("Gateway quiescence evidence unavailable", exc) from exc
     if not isinstance(value, Mapping) or value.get("disposition") not in {"drained", "held", "reconciled"}:
@@ -1184,7 +1347,7 @@ def collect_gateway_observation(request: GatewayDeploymentRequest, *, observatio
                                 health_observer: Callable[[str], Mapping[str, Any]] | None = None,
                                 quiescence_observer: Callable[[], Mapping[str, Any]] | None = None) -> dict[str, Any]:
     """Collect all preflight evidence from fixed manager-owned observations."""
-    validate_request(request)
+    request = _require_host_authority(request, observation_time=observation_time)
     profile = request.current
     plist_path = Path(profile.repository.plist)
     def read_plist(path: Path) -> tuple[bytes, Mapping[str, Any]]:
@@ -1302,10 +1465,13 @@ def dispatch_gateway_cli(action: str, *, request: GatewayDeploymentRequest,
                          opener: Any | None = None,
                          token_loader: Callable[[], str] | None = None) -> dict[str, Any]:
     """Route only the fixed Gateway operations with manager-owned arguments."""
-    if action not in {"preflight", "reload", "install-artifact", "rollback"}:
+    if action not in {"status", "preflight", "reload", "install-artifact", "rollback"}:
         raise _gateway_error("unsupported Gateway CLI action")
     kwargs: dict[str, Any] = {"observation_time": observation_time}
-    if action == "reload":
+    if action == "status":
+        if runner is not None:
+            kwargs["runner"] = runner
+    elif action == "reload":
         if runner is not None:
             kwargs["runner"] = runner
         kwargs.update(opener=opener or urllib.request.urlopen,
