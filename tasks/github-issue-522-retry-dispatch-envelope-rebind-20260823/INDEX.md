@@ -42,4 +42,3 @@ preflight, and `AUTO_CHAIN=false`.
 Before acceptance: exact Candidate head/base/diff, all card verifiers,
 fresh-envelope positive control, stale-envelope zero-launch negative control,
 two-path/deletion audit, and independent review.
-
