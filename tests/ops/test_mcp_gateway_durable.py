@@ -25,6 +25,7 @@ HOST_OPERATION_PAIRS = [
     for target_operation in HOST_OPERATIONS
     if source_operation != target_operation
 ]
+REAL_POSTFLIGHT_GIT_RUNNER = g._fixed_postflight_git_command_runner
 
 @pytest.fixture(autouse=True)
 def _isolated_host_authority_store(monkeypatch, tmp_path):
@@ -56,6 +57,25 @@ def _isolated_host_authority_store(monkeypatch, tmp_path):
         return subprocess.run(command, text=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
 
     monkeypatch.setattr(g, "_fixed_authority_command_runner", fixed_authority_runner)
+
+    def fixed_postflight_git_runner(*args):
+        command = tuple(args) if args and isinstance(args[0], str) else tuple(args[0])
+        profiles = {CURRENT_PROFILE.git.root: CURRENT_PROFILE, DESIRED_PROFILE.git.root: DESIRED_PROFILE}
+        profile = profiles[command[2]]
+        outputs = {
+            ("rev-parse", "--show-toplevel"): profile.git.toplevel,
+            ("remote", "get-url", "origin"): profile.git.remote,
+            ("status", "--porcelain"): "" if profile.git.clean else " M rollback-only",
+            ("rev-parse", "HEAD"): profile.git.head,
+            ("rev-parse", "HEAD^{tree}"): profile.git.tree,
+        }
+        return subprocess.CompletedProcess(command, 0, outputs[command[3:]], "")
+
+    monkeypatch.setattr(g, "_postflight_root_is_safe", lambda root: str(root) in {
+        CURRENT_PROFILE.git.root,
+        DESIRED_PROFILE.git.root,
+    })
+    monkeypatch.setattr(g, "_fixed_postflight_git_command_runner", fixed_postflight_git_runner)
     yield
 
 def setup(monkeypatch, tmp_path, head="abc123", dirty="", branch="nexus/integration/main"):
@@ -1822,3 +1842,147 @@ def test_manager_artifact_triple_mismatch_rejects_before_destination_write(monke
             observation_time="2026-08-23T00:00:00Z",
         )
     assert not destination.exists()
+
+
+def _exact_postflight_git_runner(profile, *, mutation=None, calls=None):
+    outputs = {
+        ("rev-parse", "--show-toplevel"): profile.git.root,
+        ("remote", "get-url", "origin"): profile.git.remote,
+        ("status", "--porcelain"): "",
+        ("rev-parse", "HEAD"): profile.git.head,
+        ("rev-parse", "HEAD^{tree}"): profile.git.tree,
+    }
+    if mutation is not None:
+        key, value = mutation
+        outputs[key] = value
+
+    def runner(*args):
+        command = tuple(args) if args and isinstance(args[0], str) else tuple(args[0])
+        if calls is not None:
+            calls.append(command)
+        suffix = command[3:]
+        value = outputs[suffix]
+        if isinstance(value, BaseException):
+            raise value
+        if isinstance(value, tuple):
+            return subprocess.CompletedProcess(command, value[0], value[1], value[2])
+        return subprocess.CompletedProcess(command, 0, value, "")
+
+    return runner
+
+
+def _postflight_expected(profile, manifest, schema):
+    return {
+        "server_instance": "physical-instance",
+        "root": profile.git.root,
+        "head": profile.git.head,
+        "tree": profile.git.tree,
+        "tool_manifest_sha256": manifest,
+        "schema_sha256": schema,
+        "permission_sha256": "a" * 64,
+        "action": g.GATEWAY_ACTION,
+        "task_id": g.GATEWAY_TASK_ID,
+        "lifecycle": GATEWAY_LIFECYCLE_REVISION,
+        "required_actions": ("gateway-rebind",),
+    }
+
+
+def test_postflight_accepts_only_after_exact_manager_owned_local_git_reread(monkeypatch):
+    tools = [{"name": "gateway-rebind", "description": "bounded"}]
+    health, server_info, manifest, schema = _actual_gateway_surfaces(DESIRED_PROFILE, tools)
+    calls = []
+    monkeypatch.setattr(g, "_postflight_root_is_safe", lambda root: root == Path(DESIRED_PROFILE.git.root))
+    result = g.postflight_gateway(
+        _postflight_expected(DESIRED_PROFILE, manifest, schema),
+        token="SECRET",
+        opener=_surface_opener(health, server_info, tools),
+        sleeper=lambda _: None,
+        retries=1,
+        git_command_runner=_exact_postflight_git_runner(DESIRED_PROFILE, calls=calls),
+    )
+    root = DESIRED_PROFILE.git.root
+    assert calls == [
+        ("git", "-C", root, "rev-parse", "--show-toplevel"),
+        ("git", "-C", root, "remote", "get-url", "origin"),
+        ("git", "-C", root, "status", "--porcelain"),
+        ("git", "-C", root, "rev-parse", "HEAD"),
+        ("git", "-C", root, "rev-parse", "HEAD^{tree}"),
+    ]
+    assert result.head == DESIRED_PROFILE.git.head
+    assert result.tree == DESIRED_PROFILE.git.tree
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        (("rev-parse", "HEAD"), "0" * 40),
+        (("rev-parse", "HEAD^{tree}"), "1" * 40),
+        (("status", "--porcelain"), " M tracked.py"),
+        (("rev-parse", "--show-toplevel"), "/tmp/wrong-root"),
+        (("remote", "get-url", "origin"), "https://example.invalid/wrong.git"),
+        (("rev-parse", "HEAD"), (1, "", "observer failed")),
+    ],
+    ids=["head-drift", "tree-drift", "dirty", "wrong-top", "wrong-origin", "command-failure"],
+)
+def test_postflight_git_drift_or_command_failure_rejects_after_http_success(
+    monkeypatch, mutation
+):
+    tools = [{"name": "gateway-rebind", "description": "bounded"}]
+    health, server_info, manifest, schema = _actual_gateway_surfaces(DESIRED_PROFILE, tools)
+    http_calls = []
+    opener = _surface_opener(health, server_info, tools)
+
+    def observed_opener(request, timeout):
+        http_calls.append(request)
+        return opener(request, timeout)
+
+    monkeypatch.setattr(g, "_postflight_root_is_safe", lambda root: root == Path(DESIRED_PROFILE.git.root))
+    with pytest.raises(g.GatewayContractError, match="postflight remained uncertain"):
+        g.postflight_gateway(
+            _postflight_expected(DESIRED_PROFILE, manifest, schema),
+            token="SECRET",
+            opener=observed_opener,
+            sleeper=lambda _: None,
+            retries=1,
+            git_command_runner=_exact_postflight_git_runner(
+                DESIRED_PROFILE,
+                mutation=mutation,
+            ),
+        )
+    assert len(http_calls) == 3
+
+
+def test_postflight_unsafe_or_missing_root_observer_rejects_after_http_success(monkeypatch):
+    tools = [{"name": "gateway-rebind", "description": "bounded"}]
+    health, server_info, manifest, schema = _actual_gateway_surfaces(DESIRED_PROFILE, tools)
+    http_calls = []
+    opener = _surface_opener(health, server_info, tools)
+
+    def observed_opener(request, timeout):
+        http_calls.append(request)
+        return opener(request, timeout)
+
+    monkeypatch.setattr(g, "_postflight_root_is_safe", lambda _root: False)
+    with pytest.raises(g.GatewayContractError, match="postflight remained uncertain"):
+        g.postflight_gateway(
+            _postflight_expected(DESIRED_PROFILE, manifest, schema),
+            token="SECRET",
+            opener=observed_opener,
+            sleeper=lambda _: None,
+            retries=1,
+            git_command_runner=lambda *_: pytest.fail("unsafe root must stop Git command"),
+        )
+    assert len(http_calls) == 3
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ("git", "-C", "/tmp/caller-root", "rev-parse", "HEAD"),
+        ("git", "-C", DESIRED_PROFILE.git.root, "status", "--porcelain", "--ignored"),
+    ],
+    ids=["caller-root", "caller-argv"],
+)
+def test_default_postflight_git_runner_rejects_caller_selected_root_or_argv(command):
+    with pytest.raises(g.GatewayContractError, match="caller-selected"):
+        REAL_POSTFLIGHT_GIT_RUNNER(*command)

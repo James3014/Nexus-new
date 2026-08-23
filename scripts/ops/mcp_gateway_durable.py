@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from nexus.contracts.gateway_deployment import (
+    CURRENT_PROFILE,
     CURRENT_WRAPPER_COMMAND,
     DESIRED_PROFILE,
     GATEWAY_ACTION,
@@ -1164,10 +1165,7 @@ def _http_json(url: str, *, token: str, payload: Mapping[str, Any] | None = None
 
 def _profile_for_expected(expected: Mapping[str, Any]) -> Any:
     """Resolve only one of the two frozen profiles; callers cannot choose another."""
-    candidates = (DESIRED_PROFILE,)
-    from nexus.contracts.gateway_deployment import CURRENT_PROFILE
-    candidates += (CURRENT_PROFILE,)
-    for profile in candidates:
+    for profile in (DESIRED_PROFILE, CURRENT_PROFILE):
         if (expected.get("root") in (None, "", profile.git.root)
                 and expected.get("head") in (None, "", profile.git.head)
                 and expected.get("tree") in (None, "", profile.git.tree)):
@@ -1181,6 +1179,92 @@ def _canonical_alias(mapping: Mapping[str, Any], canonical: str, aliases: tuple[
     if not values or any(not isinstance(value, str) or not value for value in values) or any(value != values[0] for value in values[1:]):
         raise _gateway_error(f"postflight alias conflict: {canonical}")
     return values[0]
+
+
+def _postflight_root_is_safe(root: Path) -> bool:
+    """Require the fixed profile root to be a real, owner-controlled directory."""
+    try:
+        if not root.is_absolute() or root.is_symlink() or not root.is_dir():
+            return False
+        if root.resolve(strict=True) != root:
+            return False
+        info = os.lstat(root)
+    except OSError:
+        return False
+    return (
+        stat.S_ISDIR(info.st_mode)
+        and info.st_uid == HOST_UID
+        and stat.S_IMODE(info.st_mode) & 0o022 == 0
+    )
+
+
+def _fixed_postflight_git_command_runner(*args: Any) -> Any:
+    """Execute only the manager-owned postflight Git identity commands."""
+    command = tuple(args) if args and isinstance(args[0], str) else tuple(args[0])
+    roots = {CURRENT_PROFILE.git.root, DESIRED_PROFILE.git.root}
+    suffixes = {
+        ("rev-parse", "--show-toplevel"),
+        ("remote", "get-url", "origin"),
+        ("status", "--porcelain"),
+        ("rev-parse", "HEAD"),
+        ("rev-parse", "HEAD^{tree}"),
+    }
+    if (
+        len(command) < 5
+        or command[:2] != ("git", "-C")
+        or command[2] not in roots
+        or command[3:] not in suffixes
+    ):
+        raise _gateway_error("caller-selected postflight Git command rejected")
+    return subprocess.run(
+        command,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+
+
+def _observe_postflight_git(
+    profile: Any,
+    *,
+    command_runner: Callable[..., Any] | None = None,
+) -> dict[str, Any]:
+    """Reread exact local Git truth for one already-resolved frozen profile."""
+    validate_profile(profile)
+    root = Path(profile.git.root)
+    if not _postflight_root_is_safe(root):
+        raise _gateway_error("postflight Git root unsafe or unavailable")
+    commands = (
+        ("git", "-C", str(root), "rev-parse", "--show-toplevel"),
+        ("git", "-C", str(root), "remote", "get-url", "origin"),
+        ("git", "-C", str(root), "status", "--porcelain"),
+        ("git", "-C", str(root), "rev-parse", "HEAD"),
+        ("git", "-C", str(root), "rev-parse", "HEAD^{tree}"),
+    )
+    run = command_runner or _fixed_postflight_git_command_runner
+    top, remote, status_output, head, tree = (
+        _command_output(run, command) for command in commands
+    )
+    observed = {
+        "root": str(root),
+        "toplevel": top,
+        "remote": remote,
+        "clean": status_output == "",
+        "head": head,
+        "tree": tree,
+    }
+    expected = {
+        "root": profile.git.root,
+        "toplevel": profile.git.toplevel,
+        "remote": profile.git.remote,
+        "clean": profile.git.clean,
+        "head": profile.git.head,
+        "tree": profile.git.tree,
+    }
+    if observed != expected:
+        raise _gateway_error("postflight local Git identity mismatch")
+    return observed
 
 
 _GATEWAY_PROTOCOL_ALIASES = {
@@ -1231,7 +1315,8 @@ def _normalize_gateway_identity_surfaces(
 
 def postflight_gateway(expected: Mapping[str, Any], *, token: str, endpoint: str = GATEWAY_ENDPOINT,
                        opener: Any = urllib.request.urlopen, retries: int = 3,
-                       timeout: float = 2.0, sleeper: Callable[[float], None] = time.sleep) -> PostflightIdentity:
+                       timeout: float = 2.0, sleeper: Callable[[float], None] = time.sleep,
+                       git_command_runner: Callable[..., Any] | None = None) -> PostflightIdentity:
     """Bounded authenticated health/initialize/tools-list identity proof."""
     if not token or retries < 1 or retries > 5:
         raise _gateway_error("postflight retry/token contract invalid")
@@ -1260,14 +1345,14 @@ def postflight_gateway(expected: Mapping[str, Any], *, token: str, endpoint: str
             if not isinstance(server_info, Mapping):
                 raise _gateway_error("initialize identity missing")
             profile = _profile_for_expected(expected)
+            git_identity = _observe_postflight_git(
+                profile,
+                command_runner=git_command_runner,
+            )
             merged = _normalize_gateway_identity_surfaces(
                 health_result,
                 profile=profile,
-                git={
-                    "root": profile.git.root,
-                    "head": profile.git.head,
-                    "tree": profile.git.tree,
-                },
+                git=git_identity,
                 server_info=server_info,
             )
             declared_manifest = merged["tool_manifest_sha256"]
