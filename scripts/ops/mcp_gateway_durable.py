@@ -1414,19 +1414,14 @@ def gateway_status(
     return {"state": "SERVICE_OBSERVED", "operation": "status", "service": GATEWAY_LABEL, **observed}
 
 
-def manage_gateway(action: str, *, request: GatewayDeploymentRequest | Mapping[str, Any],
-                   observed: Mapping[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
-    """Explicit Gateway-only dispatch; legacy ``manage`` cannot reach this path."""
-    typed = _require_host_authority(
-        request,
-        observation_time=kwargs.get("observation_time"),
-        authority_command_runner=kwargs.get("authority_command_runner"),
-    )
-    observation_time = kwargs.get("observation_time")
+def _validate_gateway_action_pair(
+    action: str, request: GatewayDeploymentRequest | Mapping[str, Any]
+) -> GatewayDeploymentRequest:
+    """Parse and validate the typed request before any physical authority read."""
     try:
-        validate_authority_freshness(typed.authority, now=_freshness_time(observation_time))
+        typed = validate_request(request)
     except ContractError as exc:
-        raise _gateway_error("Gateway authority freshness rejected", exc) from exc
+        raise _gateway_error("Gateway request rejected", exc) from exc
     expected_operation = {
         "status": {"status", "gateway-status"},
         "preflight": {"preflight", "gateway-preflight"},
@@ -1435,8 +1430,30 @@ def manage_gateway(action: str, *, request: GatewayDeploymentRequest | Mapping[s
         "install-artifact": {"install", "install-artifact", "install_artifact"},
         "rollback": {"rollback", "gateway-rollback"},
     }
-    if action not in expected_operation or typed.operation not in expected_operation[action]:
+    if action not in expected_operation:
+        raise _gateway_error("unsupported Gateway-only action")
+    if typed.operation not in expected_operation[action]:
         raise _gateway_error("operation substitution rejected")
+    return typed
+
+
+def manage_gateway(action: str, *, request: GatewayDeploymentRequest | Mapping[str, Any],
+                   observed: Mapping[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
+    """Explicit Gateway-only dispatch; legacy ``manage`` cannot reach this path."""
+    # Pairing is deliberately checked while the request is still pure.  A
+    # cross-operation request must not cause a canonical store, remote-main,
+    # source, or local-Git read merely to discover the mismatch.
+    parsed = _validate_gateway_action_pair(action, request)
+    typed = _require_host_authority(
+        parsed,
+        observation_time=kwargs.get("observation_time"),
+        authority_command_runner=kwargs.get("authority_command_runner"),
+    )
+    observation_time = kwargs.get("observation_time")
+    try:
+        validate_authority_freshness(typed.authority, now=_freshness_time(observation_time))
+    except ContractError as exc:
+        raise _gateway_error("Gateway authority freshness rejected", exc) from exc
     if action == "status":
         return gateway_status(
             typed, runner=kwargs.get("runner"), observation_time=observation_time,
@@ -1636,8 +1653,7 @@ def dispatch_gateway_cli(action: str, *, request: GatewayDeploymentRequest,
                          opener: Any | None = None,
                          token_loader: Callable[[], str] | None = None) -> dict[str, Any]:
     """Route only the fixed Gateway operations with manager-owned arguments."""
-    if action not in {"status", "preflight", "reload", "install-artifact", "rollback"}:
-        raise _gateway_error("unsupported Gateway CLI action")
+    parsed = _validate_gateway_action_pair(action, request)
     kwargs: dict[str, Any] = {
         "observation_time": observation_time,
         "authority_command_runner": authority_command_runner or _fixed_authority_command_runner,
@@ -1651,7 +1667,7 @@ def dispatch_gateway_cli(action: str, *, request: GatewayDeploymentRequest,
         kwargs.update(opener=opener or urllib.request.urlopen,
                       token_loader=token_loader or (lambda: read_secret_env()["NEXUS_MCP_GATEWAY_TOKEN"]))
     elif action == "install-artifact":
-        artifact = request.stable_artifact
+        artifact = parsed.stable_artifact
         if artifact is None:
             raise _gateway_error("artifact installation requires explicit stable artifact identity")
         kwargs.update(source_root=Path(artifact.source_root), source_path=Path(artifact.source_path),
@@ -1663,7 +1679,7 @@ def dispatch_gateway_cli(action: str, *, request: GatewayDeploymentRequest,
         kwargs.update(predecessor_observer=observed.get("rollback_predecessor"),
                       opener=opener or urllib.request.urlopen,
                       token_loader=token_loader or (lambda: read_secret_env()["NEXUS_MCP_GATEWAY_TOKEN"]))
-    return manage_gateway(action, request=request, observed=observed, **kwargs)
+    return manage_gateway(action, request=parsed, observed=observed, **kwargs)
 
 
 if __name__ == "__main__": raise SystemExit(main())

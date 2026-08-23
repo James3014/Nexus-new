@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from nexus.contracts.gateway_deployment import EffectClass
 from scripts.ops import mcp_gateway_durable as g
 
 HASH = hashlib.sha256(b"identity").hexdigest()
@@ -34,6 +35,9 @@ def _isolated_host_authority_store(monkeypatch, tmp_path):
                 ["git", "-C", str(source_root), "rev-parse", "HEAD"], text=True
             ).strip()
             return subprocess.CompletedProcess(command, 0, f"{head}\t{g.HOST_AUTHORITY_REF}\n", "")
+        if len(command) == 5 and command[0:4] == ("git", "-C", str(source_root), "show"):
+            blob = (source_root / g.HOST_AUTHORITY_SOURCE_PATH).read_bytes()
+            return subprocess.CompletedProcess(command, 0, blob, b"")
         return subprocess.run(command, text=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
 
     monkeypatch.setattr(g, "_fixed_authority_command_runner", fixed_authority_runner)
@@ -487,7 +491,7 @@ def test_canonical_host_store_tamper_blocks_status_before_runner():
     assert calls == []
 
 
-def _request_with_host_changes(request, **changes):
+def _request_with_host_changes(request, *, sync_store=True, **changes):
     host_values = {**request.host_authority.__dict__, **changes}
     host = request.host_authority.__class__(**host_values)
     host = host.__class__(
@@ -502,7 +506,24 @@ def _request_with_host_changes(request, **changes):
     values["request_hash"] = __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(
         {key: value for key, value in values.items() if key not in {"request_hash", "schema"}}
     )
-    return request.__class__(**values)
+    updated = request.__class__(**values)
+    if sync_store:
+        raw = json.dumps(
+            updated.host_authority.model_dump(), sort_keys=True, separators=(",", ":")
+        ).encode()
+        store = Path(g.GATEWAY_HOST_AUTHORITY_STORE)
+        store.write_bytes(raw)
+        store.chmod(0o600)
+        source_root = g.HOST_AUTHORITY_SOURCE_ROOT
+        source_path = source_root / g.HOST_AUTHORITY_SOURCE_PATH
+        source_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        source_path.write_bytes(raw)
+        subprocess.run(["git", "-C", str(source_root), "add", "-A"], check=True)
+        subprocess.run(
+            ["git", "-C", str(source_root), "commit", "-q", "-m", "matching receipt"],
+            check=True,
+        )
+    return updated
 
 
 @pytest.mark.parametrize(
@@ -518,13 +539,20 @@ def _request_with_host_changes(request, **changes):
 def test_host_authority_identity_failures_precede_gateway_observer(field, value):
     request = _request_with_host_changes(_gateway_request("status"), **{field: value})
     calls = []
+    authority_calls = []
+
+    def authority_runner(*args):
+        authority_calls.append(args)
+        return g._fixed_authority_command_runner(*args)
+
     with pytest.raises(g.GatewayContractError):
         g.gateway_status(
             request, runner=lambda *args: calls.append(args),
             observation_time="2026-08-23T00:00:00Z",
-            authority_command_runner=g._fixed_authority_command_runner,
+            authority_command_runner=authority_runner,
         )
     assert calls == []
+    assert authority_calls == []
 
 
 @pytest.mark.parametrize(
@@ -537,18 +565,82 @@ def test_host_authority_identity_failures_precede_gateway_observer(field, value)
 def test_host_authority_freshness_and_revocation_fail_before_observer(mutate):
     request = _request_with_host_changes(_gateway_request("status"), **mutate(None))
     calls = []
+    authority_calls = []
+
+    def authority_runner(*args):
+        authority_calls.append(args)
+        return g._fixed_authority_command_runner(*args)
+
     with pytest.raises(g.GatewayContractError):
         g.gateway_status(
             request, runner=lambda *args: calls.append(args),
             observation_time="2026-08-23T00:00:00Z",
-            authority_command_runner=g._fixed_authority_command_runner,
+            authority_command_runner=authority_runner,
         )
     assert calls == []
+    assert authority_calls == []
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("source_base_merge", "0" * 40),
+        ("source_base_tree", "1" * 40),
+        ("host_card_path", "tasks/other-card.md"),
+        ("host_card_id", "TASK-526-OTHER"),
+        ("host_card_sha256", "0" * 64),
+        ("repository", "Other/repository"),
+        ("service_label", "com.other.service"),
+        ("plist_path", "/tmp/other-gateway.plist"),
+        ("endpoint", "http://127.0.0.1:9999"),
+        ("current_profile_hash", "0" * 64),
+        ("desired_profile_hash", "1" * 64),
+        ("request_id", "request-other"),
+        ("idempotency_fence", "fence-other"),
+        ("issuer_id", "owner-forged"),
+        ("coordinator_id", "coordinator-forged"),
+        ("authorized_actor_id", "actor-forged"),
+        ("standing_grant_id", "grant-forged"),
+        ("standing_grant_receipt_sha256", "0" * 64),
+        ("issued_at", "2026-08-24T00:00:00Z"),
+        ("expires_at", "2026-08-22T00:00:00Z"),
+        ("revocation_state", "REVOKED"),
+        ("operation", "preflight"),
+        ("effect_class", EffectClass.PREFLIGHT),
+    ],
+)
+def test_matching_store_substitutions_hit_intended_validator_before_any_physical_read(
+    monkeypatch, field, value
+):
+    request = _request_with_host_changes(_gateway_request("status"), **{field: value})
+    host_calls = []
+    authority_calls = []
+
+    def authority_runner(*args):
+        authority_calls.append(args)
+        return g._fixed_authority_command_runner(*args)
+
+    monkeypatch.setattr(
+        g,
+        "_read_host_authority_store",
+        lambda: pytest.fail("matching-store validator must reject before canonical read"),
+    )
+    with pytest.raises(g.GatewayContractError):
+        g.gateway_status(
+            request,
+            runner=lambda *args: host_calls.append(args),
+            observation_time="2026-08-23T00:00:00Z",
+            authority_command_runner=authority_runner,
+        )
+    assert host_calls == []
+    assert authority_calls == []
 
 
 def test_same_uid_fabricated_local_receipt_lacks_remote_main_binding():
     request = _gateway_request("status")
-    fabricated = _request_with_host_changes(request, receipt_id="locally-fabricated")
+    fabricated = _request_with_host_changes(
+        request, sync_store=False, receipt_id="locally-fabricated"
+    )
     store = Path(g.GATEWAY_HOST_AUTHORITY_STORE)
     store.write_bytes(json.dumps(fabricated.host_authority.model_dump(), sort_keys=True, separators=(",", ":")).encode())
     store.chmod(0o600)
@@ -640,14 +732,40 @@ def test_every_distinct_host_operation_pair_rejects_before_effect(source_operati
         pytest.skip("same operation is not a cross-operation pair")
     request = _gateway_request(source_operation)
     calls = []
+    authority_calls = []
+
+    def authority_runner(*args):
+        authority_calls.append(args)
+        return g._fixed_authority_command_runner(*args)
+
     with pytest.raises(g.GatewayContractError):
         g.manage_gateway(
             target_operation, request=request, observed={},
             runner=lambda *args: calls.append(args),
-            authority_command_runner=g._fixed_authority_command_runner,
+            authority_command_runner=authority_runner,
             observation_time="2026-08-23T00:00:00Z",
         )
     assert calls == []
+    assert authority_calls == []
+
+    dispatch_calls = []
+    dispatch_authority_calls = []
+
+    def dispatch_authority_runner(*args):
+        dispatch_authority_calls.append(args)
+        return g._fixed_authority_command_runner(*args)
+
+    with pytest.raises(g.GatewayContractError):
+        g.dispatch_gateway_cli(
+            target_operation,
+            request=request,
+            observed={},
+            observation_time="2026-08-23T00:00:00Z",
+            runner=lambda *args: dispatch_calls.append(args),
+            authority_command_runner=dispatch_authority_runner,
+        )
+    assert dispatch_calls == []
+    assert dispatch_authority_calls == []
 
 
 def test_same_fence_different_request_is_ledger_conflict_and_fields_are_physical(tmp_path):
