@@ -18,6 +18,25 @@ def _isolated_host_authority_store(monkeypatch, tmp_path):
     path = tmp_path / "gateway-direct" / "host-authority.json"
     path.parent.mkdir(mode=0o700)
     monkeypatch.setattr(g, "GATEWAY_HOST_AUTHORITY_STORE", path)
+
+    source_root = tmp_path / "trusted-main"
+    source_root.mkdir()
+    subprocess.run(["git", "-C", str(source_root), "init", "-q", "-b", "main"], check=True)
+    subprocess.run(["git", "-C", str(source_root), "config", "user.email", "tests@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(source_root), "config", "user.name", "tests"], check=True)
+    subprocess.run(["git", "-C", str(source_root), "remote", "add", "origin", g.HOST_AUTHORITY_REMOTE], check=True)
+    monkeypatch.setattr(g, "HOST_AUTHORITY_SOURCE_ROOT", source_root)
+
+    def fixed_authority_runner(*args):
+        command = tuple(args) if args and isinstance(args[0], str) else tuple(args[0])
+        if command[0:4] == ("git", "-C", str(source_root), "ls-remote"):
+            head = subprocess.check_output(
+                ["git", "-C", str(source_root), "rev-parse", "HEAD"], text=True
+            ).strip()
+            return subprocess.CompletedProcess(command, 0, f"{head}\t{g.HOST_AUTHORITY_REF}\n", "")
+        return subprocess.run(command, text=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+
+    monkeypatch.setattr(g, "_fixed_authority_command_runner", fixed_authority_runner)
     yield
 
 def setup(monkeypatch, tmp_path, head="abc123", dirty="", branch="nexus/integration/main"):
@@ -369,7 +388,7 @@ def _gateway_request(operation="reload", *, stable_artifact=None):
         source_thread="01a02a17-691c-7a20-ad0f-9166456416dc", standing_grant_id="OWNER_STANDING_COORDINATOR_20260818_DURABLE_GITHUB_WORKFLOW",
         standing_grant_receipt_sha256="3b8895f093692257d6225fbb8150b34f520e667d250c7817ad120cefd42751d5", source_base_merge="ac4a9ab1e0180170ca062cdc81f2142bca8bd80f", source_base_tree="db329f4931b55b74f1e1f9fe61f7edf4ca8422bc",
         correction_merge_sha="1" * 40, correction_tree_sha="2" * 40, independent_acceptance_receipt_hash="3" * 64, final_manager_sha256="4" * 64, current_main_sha="5" * 40,
-        host_card_path="tasks/github-issue-526-host-authority-and-canary-20260823/01-gateway-host-local-canary.md", host_card_id="TASK-526-HOST-1", host_card_sha256="b6e0c0015b1098261622b7ea087869eca5e0c80a6a1d3071815aa19e520ca7b1",
+        host_card_path="tasks/github-issue-526-host-authority-and-canary-20260823/01-gateway-host-local-canary.md", host_card_id="TASK-526-HOST-1", host_card_sha256="fcd22da4ef92b7cde004523fe900c06bc1b9e67715049c95383c581e640f631f",
         repository="James3014/Nexus-new", operation=operation, effect_class=effect, service_label=g.GATEWAY_LABEL, plist_path="/Users/jameschen/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist", endpoint=g.GATEWAY_ENDPOINT,
         current_profile_hash=__import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(CURRENT_PROFILE), desired_profile_hash=__import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(DESIRED_PROFILE),
         request_id="r-526", idempotency_fence="f-526", issued_at="2026-08-22T00:00:00Z", expires_at="2026-08-24T00:00:00Z", revocation_state="NOT_REVOKED", revoked_at=None, revocation_reason=None,
@@ -391,8 +410,15 @@ def _gateway_request(operation="reload", *, stable_artifact=None):
     values["request_hash"] = __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(values)
     store = Path(g.GATEWAY_HOST_AUTHORITY_STORE)
     store.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    store.write_text(json.dumps(host.model_dump(), sort_keys=True, separators=(",", ":")))
+    raw = json.dumps(host.model_dump(), sort_keys=True, separators=(",", ":")).encode()
+    store.write_bytes(raw)
     store.chmod(0o600)
+    source_root = g.HOST_AUTHORITY_SOURCE_ROOT
+    source_path = source_root / g.HOST_AUTHORITY_SOURCE_PATH
+    source_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    source_path.write_bytes(raw)
+    subprocess.run(["git", "-C", str(source_root), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(source_root), "commit", "-q", "--allow-empty", "-m", "receipt"], check=True)
     return GatewayDeploymentRequest(**values)
 
 
@@ -459,6 +485,209 @@ def test_canonical_host_store_tamper_blocks_status_before_runner():
     with pytest.raises(g.GatewayContractError):
         g.gateway_status(request, runner=lambda *args: calls.append(args), observation_time="2026-08-23T00:00:00Z")
     assert calls == []
+
+
+def _request_with_host_changes(request, **changes):
+    host_values = {**request.host_authority.__dict__, **changes}
+    host = request.host_authority.__class__(**host_values)
+    host = host.__class__(
+        **{
+            **host.__dict__,
+            "receipt_hash": __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(
+                {key: value for key, value in host.__dict__.items() if key != "receipt_hash"}
+            ),
+        }
+    )
+    values = {**request.__dict__, "host_authority": host}
+    values["request_hash"] = __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(
+        {key: value for key, value in values.items() if key not in {"request_hash", "schema"}}
+    )
+    return request.__class__(**values)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("issuer_id", "owner-forged"),
+        ("coordinator_id", "coordinator-forged"),
+        ("authorized_actor_id", "actor-forged"),
+        ("standing_grant_id", "grant-forged"),
+        ("standing_grant_receipt_sha256", "0" * 64),
+    ],
+)
+def test_host_authority_identity_failures_precede_gateway_observer(field, value):
+    request = _request_with_host_changes(_gateway_request("status"), **{field: value})
+    calls = []
+    with pytest.raises(g.GatewayContractError):
+        g.gateway_status(
+            request, runner=lambda *args: calls.append(args),
+            observation_time="2026-08-23T00:00:00Z",
+            authority_command_runner=g._fixed_authority_command_runner,
+        )
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda receipt: {"issued_at": "2026-08-24T00:00:00Z"},
+        lambda receipt: {"revocation_state": "REVOKED", "revoked_at": "2026-08-22T00:00:00Z", "revocation_reason": "owner"},
+    ],
+)
+def test_host_authority_freshness_and_revocation_fail_before_observer(mutate):
+    request = _request_with_host_changes(_gateway_request("status"), **mutate(None))
+    calls = []
+    with pytest.raises(g.GatewayContractError):
+        g.gateway_status(
+            request, runner=lambda *args: calls.append(args),
+            observation_time="2026-08-23T00:00:00Z",
+            authority_command_runner=g._fixed_authority_command_runner,
+        )
+    assert calls == []
+
+
+def test_same_uid_fabricated_local_receipt_lacks_remote_main_binding():
+    request = _gateway_request("status")
+    fabricated = _request_with_host_changes(request, receipt_id="locally-fabricated")
+    store = Path(g.GATEWAY_HOST_AUTHORITY_STORE)
+    store.write_bytes(json.dumps(fabricated.host_authority.model_dump(), sort_keys=True, separators=(",", ":")).encode())
+    store.chmod(0o600)
+    calls = []
+    with pytest.raises(g.GatewayContractError, match="host authority rejected"):
+        g.gateway_status(
+            fabricated, runner=lambda *args: calls.append(args),
+            observation_time="2026-08-23T00:00:00Z",
+            authority_command_runner=g._fixed_authority_command_runner,
+        )
+    assert calls == []
+
+
+@pytest.mark.parametrize("failure", ["remote", "dirty", "head", "blob"])
+def test_fixed_git_main_source_failures_precede_gateway_observer(failure):
+    request = _gateway_request("status")
+    base_runner = g._fixed_authority_command_runner
+
+    def failing_runner(*args):
+        command = tuple(args) if args and isinstance(args[0], str) else tuple(args[0])
+        if failure == "remote" and command[-2:] == (g.HOST_AUTHORITY_REMOTE, g.HOST_AUTHORITY_REF):
+            return subprocess.CompletedProcess(command, 0, f"{'0' * 40}\t{g.HOST_AUTHORITY_REF}\n", b"")
+        if failure == "dirty" and command[-2:] == ("status", "--porcelain"):
+            return subprocess.CompletedProcess(command, 0, b" M source\n", b"")
+        if failure == "head" and command[-2:] == ("rev-parse", "HEAD"):
+            return subprocess.CompletedProcess(command, 0, b"0" * 40, b"")
+        if failure == "blob" and command[3] == "show":
+            return subprocess.CompletedProcess(command, 1, b"", b"missing blob")
+        return base_runner(*command)
+
+    calls = []
+    with pytest.raises(g.GatewayContractError):
+        g.gateway_status(
+            request, runner=lambda *args: calls.append(args),
+            observation_time="2026-08-23T00:00:00Z",
+            authority_command_runner=failing_runner,
+        )
+    assert calls == []
+
+
+def test_missing_symlink_mode_oversized_and_duplicate_host_store_fail_closed(monkeypatch):
+    request = _gateway_request("status")
+    store = Path(g.GATEWAY_HOST_AUTHORITY_STORE)
+    target = store.with_name("target.json")
+    target.write_bytes(store.read_bytes())
+    target.chmod(0o600)
+    store.unlink()
+    with pytest.raises(g.GatewayContractError):
+        g.gateway_status(request, runner=lambda *_: pytest.fail("observer called"), observation_time="2026-08-23T00:00:00Z", authority_command_runner=g._fixed_authority_command_runner)
+    store.symlink_to(target)
+    with pytest.raises(g.GatewayContractError):
+        g.gateway_status(request, runner=lambda *_: pytest.fail("observer called"), observation_time="2026-08-23T00:00:00Z", authority_command_runner=g._fixed_authority_command_runner)
+
+    store.unlink()
+    store.write_bytes(target.read_bytes())
+    store.chmod(0o640)
+    with pytest.raises(g.GatewayContractError):
+        g.gateway_status(request, runner=lambda *_: pytest.fail("observer called"), observation_time="2026-08-23T00:00:00Z", authority_command_runner=g._fixed_authority_command_runner)
+
+    store.chmod(0o600)
+    store.write_bytes(b"{" + b"x" * (g.MAX_GATEWAY_STORE_BYTES + 1) + b"}")
+    with pytest.raises(g.GatewayContractError):
+        g.gateway_status(request, runner=lambda *_: pytest.fail("observer called"), observation_time="2026-08-23T00:00:00Z", authority_command_runner=g._fixed_authority_command_runner)
+
+    store.write_bytes(b'{"receipt_id":"a","receipt_id":"b"}')
+    store.chmod(0o600)
+    with pytest.raises(g.GatewayContractError):
+        g.gateway_status(request, runner=lambda *_: pytest.fail("observer called"), observation_time="2026-08-23T00:00:00Z", authority_command_runner=g._fixed_authority_command_runner)
+
+    original_lstat = g.os.lstat
+    def wrong_uid(path):
+        info = original_lstat(path)
+        if Path(path) == store:
+            values = list(info)
+            values[4] = 999
+            return os.stat_result(values)
+        return info
+    store.write_bytes(target.read_bytes())
+    store.chmod(0o600)
+    monkeypatch.setattr(g.os, "lstat", wrong_uid)
+    with pytest.raises(g.GatewayContractError):
+        g.gateway_status(request, runner=lambda *_: pytest.fail("observer called"), observation_time="2026-08-23T00:00:00Z", authority_command_runner=g._fixed_authority_command_runner)
+
+
+@pytest.mark.parametrize("source_operation", ["status", "preflight", "install-artifact", "reload", "rollback"])
+@pytest.mark.parametrize("target_operation", ["status", "preflight", "install-artifact", "reload", "rollback"])
+def test_every_distinct_host_operation_pair_rejects_before_effect(source_operation, target_operation):
+    if source_operation == target_operation:
+        pytest.skip("same operation is not a cross-operation pair")
+    request = _gateway_request(source_operation)
+    calls = []
+    with pytest.raises(g.GatewayContractError):
+        g.manage_gateway(
+            target_operation, request=request, observed={},
+            runner=lambda *args: calls.append(args),
+            authority_command_runner=g._fixed_authority_command_runner,
+            observation_time="2026-08-23T00:00:00Z",
+        )
+    assert calls == []
+
+
+def test_same_fence_different_request_is_ledger_conflict_and_fields_are_physical(tmp_path):
+    ledger = g.GatewayLedger(tmp_path / "ledger.jsonl")
+    first_receipt = _ledger_receipt("r-1", "same-fence")
+    row = ledger.append(
+        request_id="r-1", request_hash="a" * 64, state="REQUESTED",
+        host_authority=first_receipt, operation="reload", effect_class="GATEWAY_RELOAD",
+        idempotency_fence="same-fence",
+    )
+    assert row["host_receipt_hash"] == first_receipt.receipt_hash
+    assert row["source_base_merge"] == first_receipt.source_base_merge
+    assert row["source_base_tree"] == first_receipt.source_base_tree
+    assert row["host_card_sha256"] == first_receipt.host_card_sha256
+    assert row["effect_class"] == first_receipt.effect_class.value
+    assert row["operation"] == first_receipt.operation
+    assert row["idempotency_fence"] == first_receipt.idempotency_fence
+    with pytest.raises(g.GatewayContractError, match="idempotency fence"):
+        ledger.append(
+            request_id="r-2", request_hash="b" * 64, state="REQUESTED",
+            host_authority=_ledger_receipt("r-2", "same-fence"), operation="reload",
+            effect_class="GATEWAY_RELOAD", idempotency_fence="same-fence",
+        )
+
+
+def test_positive_gateway_status_reads_only_fixed_gateway_service():
+    request = _gateway_request("status")
+    calls = []
+    class Result:
+        returncode = 0
+        stdout = "pid = 42\n"
+        stderr = ""
+    result = g.gateway_status(
+        request, runner=lambda *args: (calls.append(args) or Result()),
+        observation_time="2026-08-23T00:00:00Z",
+        authority_command_runner=g._fixed_authority_command_runner,
+    )
+    assert result["service"] == g.GATEWAY_LABEL
+    assert calls == [("launchctl", "print", f"{g.UID_TARGET}/{g.GATEWAY_LABEL}")]
+    assert not any("devspace" in str(call).lower() or "com.nexus.mcp.gateway" in str(call) and "direct" not in str(call) for call in calls)
 
 
 def test_gateway_ledger_chain_tamper_and_cas_fail_closed(tmp_path):
@@ -778,7 +1007,7 @@ def test_stable_artifact_install_is_separate_and_hash_bound(tmp_path):
     g.GATEWAY_ARTIFACT = tmp_path / "installed.py"
     request = _gateway_request("install-artifact", stable_artifact=artifact)
     try:
-        (tmp_path / "installed.py").write_bytes(b"old"); (tmp_path / "installed.py").chmod(0o600)
+        (tmp_path / "installed.py").write_bytes(b"old"); (tmp_path / "installed.py").chmod(0o700)
         def command_runner(*args):
             command = args if args and isinstance(args[0], str) else args[0]
             if command[0:2] == ("git", "-C") and command[-1] == "--show-toplevel": return str(tmp_path)

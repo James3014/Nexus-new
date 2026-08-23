@@ -42,7 +42,7 @@ HOST_CARD_ID = "TASK-526-HOST-1"
 HOST_CARD_PATH = (
     "tasks/github-issue-526-host-authority-and-canary-20260823/01-gateway-host-local-canary.md"
 )
-HOST_CARD_SHA256 = "b6e0c0015b1098261622b7ea087869eca5e0c80a6a1d3071815aa19e520ca7b1"
+HOST_CARD_SHA256 = "fcd22da4ef92b7cde004523fe900c06bc1b9e67715049c95383c581e640f631f"
 OWNER_ACTIVATION_ID = "OWNER_ISSUE526_CONTINUE_20260823"
 OWNER_ACTIVATION_SHA256 = "f0ed77ffe3872b083ef0b6d66526524a7091a8e3125322c84ba632f3c64ba322"
 OWNER_SOURCE_THREAD = "01a02a17-691c-7a20-ad0f-9166456416dc"
@@ -680,7 +680,7 @@ def validate_host_effect_authority(
     if (
         receipt.schema != HOST_AUTHORITY_SCHEMA
         or type(receipt.receipt_version) is not int
-        or receipt.receipt_version < 1
+        or receipt.receipt_version != 1
     ):
         raise ContractError("host authority schema/version mismatch")
     _id(receipt.receipt_id, "host receipt id")
@@ -867,9 +867,9 @@ def validate_request(
             or artifact.uid < 0
             or not isinstance(artifact.mode, int)
             or isinstance(artifact.mode, bool)
-            or artifact.mode & ~0o777
+            or artifact.mode != 0o700
         ):
-            raise ContractError("artifact ownership/mode invalid")
+            raise ContractError("installed manager ownership/mode invalid")
         try:
             Path(artifact.source_path).relative_to(Path(artifact.source_root))
         except ValueError as exc:

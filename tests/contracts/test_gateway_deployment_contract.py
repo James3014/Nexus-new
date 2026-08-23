@@ -150,7 +150,7 @@ def _request():
         current_main_sha="5" * 40,
         host_card_path="tasks/github-issue-526-host-authority-and-canary-20260823/01-gateway-host-local-canary.md",
         host_card_id="TASK-526-HOST-1",
-        host_card_sha256="b6e0c0015b1098261622b7ea087869eca5e0c80a6a1d3071815aa19e520ca7b1",
+        host_card_sha256="fcd22da4ef92b7cde004523fe900c06bc1b9e67715049c95383c581e640f631f",
         repository="James3014/Nexus-new",
         operation="reload",
         effect_class=EffectClass.GATEWAY_RELOAD,
@@ -219,6 +219,26 @@ def test_host_receipt_is_strictly_bound_to_operation_and_fence():
     })
     with pytest.raises(ContractError, match="request/fence"):
         validate_request(GatewayDeploymentRequest(**values))
+
+
+def test_host_receipt_version_is_exactly_one():
+    request = _request()
+    altered = request.host_authority.__class__(**{
+        **request.host_authority.__dict__,
+        "receipt_version": 2,
+    })
+    altered = altered.__class__(**{
+        **altered.__dict__,
+        "receipt_hash": canonical_hash({
+            key: value for key, value in altered.__dict__.items() if key != "receipt_hash"
+        }),
+    })
+    values = {**request.__dict__, "host_authority": altered}
+    values["request_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key not in {"request_hash", "schema"}
+    })
+    with pytest.raises(ContractError, match="schema/version"):
+        validate_request(request.__class__(**values))
 
 
 def test_rollback_plist_hashes_both_bind_to_bytes():

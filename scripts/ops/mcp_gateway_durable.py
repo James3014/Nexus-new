@@ -25,6 +25,9 @@ from typing import Any, Callable, Mapping
 
 from nexus.contracts.gateway_deployment import (
     DESIRED_PROFILE,
+    HOST_CARD_SHA256,
+    SOURCE_BASE_MERGE,
+    SOURCE_BASE_TREE,
     ContractError,
     DeploymentState,
     EffectClass,
@@ -272,6 +275,16 @@ GATEWAY_EVIDENCE_STORE = GATEWAY_STATE_ROOT / "evidence.json"
 GATEWAY_HOST_AUTHORITY_STORE = Path(
     "/Users/jameschen/Library/Application Support/Nexus/gateway-direct/host-authority.json"
 )
+# This is deliberately not caller-selectable.  The local checkout is only a
+# trusted source mirror; authority comes from the fixed receipt blob on the
+# public remote's ``main`` ref, and the mirror must be clean and at that exact
+# remote-main commit before a host observation/effect can proceed.
+HOST_AUTHORITY_SOURCE_ROOT = Path("/Users/jameschen/Workspace/Nexus-new")
+HOST_AUTHORITY_REMOTE = "https://github.com/James3014/Nexus-new.git"
+HOST_AUTHORITY_REF = "refs/heads/main"
+HOST_AUTHORITY_SOURCE_PATH = (
+    "tasks/github-issue-526-host-authority-and-canary-20260823/02-host-effect-authority-receipt.json"
+)
 MAX_LEDGER_BYTES = 64 * 1024
 MAX_LEDGER_RECORDS = 256
 MAX_GATEWAY_STORE_BYTES = 64 * 1024
@@ -366,8 +379,8 @@ def _safe_store_path(
         info = os.lstat(path)
         if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
             raise _gateway_error("gateway store is not a regular file")
-        if info.st_mode & 0o077:
-            raise _gateway_error("gateway store permissions are too broad")
+        if stat.S_IMODE(info.st_mode) != leaf_mode:
+            raise _gateway_error("gateway store mode mismatch")
         if require_owner and info.st_uid != HOST_UID:
             raise _gateway_error("gateway store owner mismatch")
         if info.st_size > MAX_GATEWAY_STORE_BYTES:
@@ -375,8 +388,8 @@ def _safe_store_path(
     return path
 
 
-def _load_host_authority_store() -> HostEffectAuthorityReceipt:
-    """Load only the fixed canonical host receipt, with no caller path seam."""
+def _read_host_authority_store() -> tuple[bytes, HostEffectAuthorityReceipt]:
+    """Read the fixed canonical store and preserve its exact bytes."""
     path = _safe_store_path(GATEWAY_HOST_AUTHORITY_STORE)
     if path.is_symlink() or not path.is_file():
         raise _gateway_error("canonical host authority store missing")
@@ -395,11 +408,117 @@ def _load_host_authority_store() -> HostEffectAuthorityReceipt:
         validate_host_effect_authority(receipt)
     except (OSError, UnicodeError, ValueError, ContractError) as exc:
         raise _gateway_error("canonical host authority receipt invalid", exc) from exc
-    return receipt
+    return raw, receipt
+
+
+def _load_host_authority_store() -> HostEffectAuthorityReceipt:
+    """Load only the fixed canonical host receipt, with no caller path seam."""
+    return _read_host_authority_store()[1]
+
+
+def _fixed_authority_command_runner(*args: Any) -> Any:
+    """Execute only manager-constructed Git authority commands."""
+    command = tuple(args) if args and isinstance(args[0], str) else tuple(args[0])
+    root = str(HOST_AUTHORITY_SOURCE_ROOT)
+    allowed = {
+        ("git", "-C", root, "rev-parse", "--show-toplevel"),
+        ("git", "-C", root, "remote", "get-url", "origin"),
+        ("git", "-C", root, "status", "--porcelain"),
+        ("git", "-C", root, "rev-parse", "HEAD"),
+        ("git", "-C", root, "ls-remote", HOST_AUTHORITY_REMOTE, HOST_AUTHORITY_REF),
+    }
+    if command not in allowed and not (
+        len(command) == 5
+        and command[:4] == ("git", "-C", root, "show")
+        and re.fullmatch(r"[0-9a-f]{40}:" + re.escape(HOST_AUTHORITY_SOURCE_PATH), command[4])
+    ):
+        raise _gateway_error("caller-selected authority command rejected")
+    return subprocess.run(command, text=False, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+
+
+def _authority_command_output(
+    runner: Callable[..., Any], command: tuple[str, ...], *, preserve_bytes: bool = False
+) -> bytes | str:
+    """Read one output from a fixed command; the caller never supplies command data."""
+    try:
+        result = runner(*command)
+    except TypeError:
+        try:
+            result = runner(command)
+        except OSError as exc:
+            raise _gateway_error("fixed authority command unavailable", exc) from exc
+    except OSError as exc:
+        raise _gateway_error("fixed authority command unavailable", exc) from exc
+    if isinstance(result, tuple):
+        code = result[0] if result else 0
+        output = result[1] if len(result) > 1 else b""
+    else:
+        code = getattr(result, "returncode", 0)
+        output = result if isinstance(result, (str, bytes)) else getattr(result, "stdout", b"")
+    if code not in (0, None):
+        raise _gateway_error(f"fixed authority command failed: {command[0]}")
+    if output is None:
+        output = b""
+    if isinstance(output, str):
+        output = output.encode("utf-8")
+    if not isinstance(output, bytes):
+        raise _gateway_error("fixed authority command output malformed")
+    if preserve_bytes:
+        return output
+    try:
+        return output.decode("utf-8").strip()
+    except UnicodeDecodeError as exc:
+        raise _gateway_error("fixed authority command output is not UTF-8", exc) from exc
+
+
+def _verify_git_main_host_authority(
+    local_bytes: bytes,
+    local_receipt: HostEffectAuthorityReceipt,
+    *,
+    command_runner: Callable[..., Any] | None = None,
+) -> HostEffectAuthorityReceipt:
+    """Bind the local store to the exact receipt blob on clean remote ``main``."""
+    root = HOST_AUTHORITY_SOURCE_ROOT
+    if root.is_symlink() or not root.is_dir():
+        raise _gateway_error("trusted authority source root invalid")
+    run = command_runner or _fixed_authority_command_runner
+    root_text = str(root)
+    top = _authority_command_output(run, ("git", "-C", root_text, "rev-parse", "--show-toplevel"))
+    remote = _authority_command_output(run, ("git", "-C", root_text, "remote", "get-url", "origin"))
+    dirty = _authority_command_output(run, ("git", "-C", root_text, "status", "--porcelain"))
+    head = _authority_command_output(run, ("git", "-C", root_text, "rev-parse", "HEAD"))
+    remote_line = _authority_command_output(
+        run, ("git", "-C", root_text, "ls-remote", HOST_AUTHORITY_REMOTE, HOST_AUTHORITY_REF)
+    )
+    if top != str(root.resolve()) or remote != HOST_AUTHORITY_REMOTE or dirty != "":
+        raise _gateway_error("trusted authority source is not clean/fixed")
+    parts = str(remote_line).split()
+    if len(parts) != 2 or parts[1] != HOST_AUTHORITY_REF or not re.fullmatch(r"[0-9a-f]{40}", parts[0]):
+        raise _gateway_error("remote main SHA malformed")
+    remote_sha = parts[0]
+    if head != remote_sha:
+        raise _gateway_error("trusted authority source HEAD differs from remote main")
+    blob = _authority_command_output(
+        run,
+        ("git", "-C", root_text, "show", f"{remote_sha}:{HOST_AUTHORITY_SOURCE_PATH}"),
+        preserve_bytes=True,
+    )
+    if not isinstance(blob, bytes) or blob != local_bytes:
+        raise _gateway_error("local host authority is not byte-identical to remote main blob")
+    try:
+        payload = json.loads(blob.decode("utf-8"), object_pairs_hook=_unique_pairs)
+        remote_receipt = HostEffectAuthorityReceipt.model_validate(payload)
+        validate_host_effect_authority(remote_receipt)
+    except (UnicodeError, ValueError, ContractError) as exc:
+        raise _gateway_error("remote host authority receipt invalid", exc) from exc
+    if remote_receipt != local_receipt:
+        raise _gateway_error("remote host authority differs from local receipt")
+    return remote_receipt
 
 
 def _require_host_authority(
-    request: GatewayDeploymentRequest, *, observation_time: str | None = None
+    request: GatewayDeploymentRequest, *, observation_time: str | None = None,
+    authority_command_runner: Callable[..., Any] | None = None,
 ) -> GatewayDeploymentRequest:
     """Revalidate pure bindings and exact equality with the canonical store."""
     try:
@@ -411,10 +530,13 @@ def _require_host_authority(
         raise _gateway_error("host-effect authority receipt required")
     try:
         validate_receipt_freshness(receipt, now=_freshness_time(observation_time))
-        stored = _load_host_authority_store()
+        local_bytes, stored = _read_host_authority_store()
         if stored != receipt:
             raise ContractError("stored host authority differs from request")
         validate_host_effect_authority(stored, request=typed)
+        _verify_git_main_host_authority(
+            local_bytes, stored, command_runner=authority_command_runner
+        )
     except (ContractError, GatewayContractError) as exc:
         raise _gateway_error("host authority rejected", exc) from exc
     return typed
@@ -549,14 +671,24 @@ class GatewayLedger:
             for key in ("source_base_merge", "source_base_tree"):
                 if not re.fullmatch(r"[0-9a-f]{40}", row[key]):
                     raise LedgerCorruption("ledger source binding malformed")
+            if row["source_base_merge"] != SOURCE_BASE_MERGE or row["source_base_tree"] != SOURCE_BASE_TREE:
+                raise LedgerCorruption("ledger source binding drift")
+            if row["host_card_sha256"] != HOST_CARD_SHA256:
+                raise LedgerCorruption("ledger host Card binding drift")
             if row["effect_class"] not in {effect.value for effect in EffectClass}:
                 raise LedgerCorruption("ledger effect class unknown")
-            if row["operation"] not in {
-                "status", "gateway-status", "preflight", "gateway-preflight",
-                "install", "install-artifact", "install_artifact", "reload", "gateway-reload",
-                "rollback", "gateway-rollback",
-            }:
+            operation_effects = {
+                "status": EffectClass.STATUS.value, "gateway-status": EffectClass.STATUS.value,
+                "preflight": EffectClass.PREFLIGHT.value, "gateway-preflight": EffectClass.PREFLIGHT.value,
+                "install": EffectClass.INSTALL_ARTIFACT.value, "install-artifact": EffectClass.INSTALL_ARTIFACT.value,
+                "install_artifact": EffectClass.INSTALL_ARTIFACT.value,
+                "reload": EffectClass.GATEWAY_RELOAD.value, "gateway-reload": EffectClass.GATEWAY_RELOAD.value,
+                "rollback": EffectClass.GATEWAY_ROLLBACK.value, "gateway-rollback": EffectClass.GATEWAY_ROLLBACK.value,
+            }
+            if row["operation"] not in operation_effects:
                 raise LedgerCorruption("ledger operation unknown")
+            if row["effect_class"] != operation_effects[row["operation"]]:
+                raise LedgerCorruption("ledger operation/effect mismatch")
             prior_fence = fences.get(row["idempotency_fence"])
             if prior_fence is not None and prior_fence != row["request_id"]:
                 raise LedgerCorruption("ledger idempotency fence reused")
@@ -723,10 +855,14 @@ def gateway_profile_matches(observed: Mapping[str, Any], expected: Any) -> bool:
 
 def preflight_gateway(request: GatewayDeploymentRequest, *, observed: Mapping[str, Any],
                       quiescence: Mapping[str, Any] | None = None,
-                      observation_time: str | None = None) -> dict[str, Any]:
+                      observation_time: str | None = None,
+                      authority_command_runner: Callable[..., Any] | None = None) -> dict[str, Any]:
     """Validate fresh physical evidence without performing a process effect."""
     try:
-        request = _require_host_authority(request, observation_time=observation_time)
+        request = _require_host_authority(
+            request, observation_time=observation_time,
+            authority_command_runner=authority_command_runner,
+        )
         validate_authority_freshness(request.authority, now=_freshness_time(observation_time))
     except (ContractError, ValueError) as exc:
         raise _gateway_error("gateway request rejected", exc) from exc
@@ -891,9 +1027,13 @@ def _fixed_git_command_runner(*args: Any) -> Any:
 def install_stable_artifact(request: GatewayDeploymentRequest, *, source_root: Path,
                             source_path: Path, artifact_path: Path | None = None,
                             command_runner: Callable[..., Any] | None = None,
-                            observation_time: str | None = None) -> dict[str, Any]:
+                            observation_time: str | None = None,
+                            authority_command_runner: Callable[..., Any] | None = None) -> dict[str, Any]:
     """Publish one exact manager artifact; this is never part of reload."""
-    request = _require_host_authority(request, observation_time=observation_time)
+    request = _require_host_authority(
+        request, observation_time=observation_time,
+        authority_command_runner=authority_command_runner,
+    )
     try:
         validate_authority_freshness(request.authority, now=_freshness_time(observation_time))
     except ContractError as exc:
@@ -936,7 +1076,7 @@ def install_stable_artifact(request: GatewayDeploymentRequest, *, source_root: P
         predecessor = hashlib.sha256(Path(artifact_path or GATEWAY_ARTIFACT).read_bytes()).hexdigest()
         if predecessor != artifact.predecessor_sha256:
             raise _gateway_error("stable artifact predecessor mismatch")
-    destination = _safe_store_path(Path(artifact_path), create=True)
+    destination = _safe_store_path(Path(artifact_path), leaf_mode=artifact.mode, create=True)
     if destination.exists():
         if hashlib.sha256(destination.read_bytes()).hexdigest() != artifact.predecessor_sha256:
             raise _gateway_error("stable artifact predecessor conflict")
@@ -1064,13 +1204,17 @@ def rollback_gateway(request: GatewayDeploymentRequest, *, plist_path: Path | No
                      opener: Any = urllib.request.urlopen,
                      token_loader: Callable[[], str] | None = None,
                      sleeper: Callable[[float], None] = time.sleep,
-                     observation_time: str | None = None) -> dict[str, Any]:
+                     observation_time: str | None = None,
+                     authority_command_runner: Callable[..., Any] | None = None) -> dict[str, Any]:
     """Restore one request-bound predecessor after mandatory physical proof."""
     plist_path = Path(plist_path or GATEWAY_PLIST)
     if plist_path != Path(GATEWAY_PLIST):
         raise _gateway_error("rollback plist destination substitution")
     try:
-        request = _require_host_authority(request, observation_time=observation_time)
+        request = _require_host_authority(
+            request, observation_time=observation_time,
+            authority_command_runner=authority_command_runner,
+        )
         validate_authority_freshness(request.authority, now=_freshness_time(observation_time))
     except ContractError as exc:
         raise _gateway_error("rollback authority freshness rejected", exc) from exc
@@ -1159,9 +1303,13 @@ def gateway_reload(request: GatewayDeploymentRequest, *, observed: Mapping[str, 
                    opener: Any = urllib.request.urlopen,
                    token_loader: Callable[[], str] | None = None,
                    sleeper: Callable[[float], None] = time.sleep,
-                   observation_time: str | None = None) -> dict[str, Any]:
+                   observation_time: str | None = None,
+                   authority_command_runner: Callable[..., Any] | None = None) -> dict[str, Any]:
     """Gateway-only reload/adopt operation.  It cannot install a stable artifact."""
-    request = _require_host_authority(request, observation_time=observation_time)
+    request = _require_host_authority(
+        request, observation_time=observation_time,
+        authority_command_runner=authority_command_runner,
+    )
     try:
         validate_authority_freshness(request.authority, now=_freshness_time(observation_time))
     except ContractError as exc:
@@ -1171,7 +1319,10 @@ def gateway_reload(request: GatewayDeploymentRequest, *, observed: Mapping[str, 
     plist_path = Path(plist_path or GATEWAY_PLIST)
     if plist_path != Path(GATEWAY_PLIST):
         raise _gateway_error("Gateway plist destination substitution")
-    preflight = preflight_gateway(request, observed=observed, observation_time=observation_time)
+    preflight = preflight_gateway(
+        request, observed=observed, observation_time=observation_time,
+        authority_command_runner=authority_command_runner,
+    )
     store = ledger or GatewayLedger()
     run = runner or (lambda *args: subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE))
     loader = token_loader or (lambda: read_secret_env().get("NEXUS_MCP_GATEWAY_TOKEN", ""))
@@ -1250,9 +1401,13 @@ def gateway_status(
     *,
     runner: Callable[..., Any] | None = None,
     observation_time: str | None = None,
+    authority_command_runner: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
     """Read status for the fixed Gateway service under a STATUS receipt only."""
-    request = _require_host_authority(request, observation_time=observation_time)
+    request = _require_host_authority(
+        request, observation_time=observation_time,
+        authority_command_runner=authority_command_runner,
+    )
     if request.operation not in {"status", "gateway-status"} or request.effect_class is not EffectClass.STATUS:
         raise _gateway_error("Gateway status requires STATUS operation")
     observed = _launchctl_observation(runner=runner)
@@ -1262,7 +1417,11 @@ def gateway_status(
 def manage_gateway(action: str, *, request: GatewayDeploymentRequest | Mapping[str, Any],
                    observed: Mapping[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
     """Explicit Gateway-only dispatch; legacy ``manage`` cannot reach this path."""
-    typed = _require_host_authority(request, observation_time=kwargs.get("observation_time"))
+    typed = _require_host_authority(
+        request,
+        observation_time=kwargs.get("observation_time"),
+        authority_command_runner=kwargs.get("authority_command_runner"),
+    )
     observation_time = kwargs.get("observation_time")
     try:
         validate_authority_freshness(typed.authority, now=_freshness_time(observation_time))
@@ -1272,22 +1431,29 @@ def manage_gateway(action: str, *, request: GatewayDeploymentRequest | Mapping[s
         "status": {"status", "gateway-status"},
         "preflight": {"preflight", "gateway-preflight"},
         "reload": {"reload", "gateway-reload"},
+        "install": {"install", "install-artifact", "install_artifact"},
         "install-artifact": {"install", "install-artifact", "install_artifact"},
         "rollback": {"rollback", "gateway-rollback"},
     }
     if action not in expected_operation or typed.operation not in expected_operation[action]:
         raise _gateway_error("operation substitution rejected")
     if action == "status":
-        return gateway_status(typed, runner=kwargs.get("runner"), observation_time=observation_time)
+        return gateway_status(
+            typed, runner=kwargs.get("runner"), observation_time=observation_time,
+            authority_command_runner=kwargs.get("authority_command_runner"),
+        )
     if action == "preflight":
         if observed is None:
             raise _gateway_error("fresh physical Gateway evidence required")
-        return preflight_gateway(typed, observed=observed, observation_time=observation_time)
+        return preflight_gateway(
+            typed, observed=observed, observation_time=observation_time,
+            authority_command_runner=kwargs.get("authority_command_runner"),
+        )
     if action == "reload":
         if observed is None:
             raise _gateway_error("fresh physical Gateway evidence required")
         return gateway_reload(typed, observed=observed, **kwargs)
-    if action == "install-artifact":
+    if action in {"install", "install-artifact"}:
         return install_stable_artifact(typed, **kwargs)
     if action == "rollback":
         return rollback_gateway(typed, **kwargs)
@@ -1345,9 +1511,13 @@ def collect_gateway_observation(request: GatewayDeploymentRequest, *, observatio
                                 interpreter_observer: Callable[[Path], tuple[Path, str, int, int, str]] | None = None,
                                 artifact_observer: Callable[[Path], str] | None = None,
                                 health_observer: Callable[[str], Mapping[str, Any]] | None = None,
-                                quiescence_observer: Callable[[], Mapping[str, Any]] | None = None) -> dict[str, Any]:
+                                quiescence_observer: Callable[[], Mapping[str, Any]] | None = None,
+                                authority_command_runner: Callable[..., Any] | None = None) -> dict[str, Any]:
     """Collect all preflight evidence from fixed manager-owned observations."""
-    request = _require_host_authority(request, observation_time=observation_time)
+    request = _require_host_authority(
+        request, observation_time=observation_time,
+        authority_command_runner=authority_command_runner,
+    )
     profile = request.current
     plist_path = Path(profile.repository.plist)
     def read_plist(path: Path) -> tuple[bytes, Mapping[str, Any]]:
@@ -1461,13 +1631,17 @@ def observe_gateway_physical(request: GatewayDeploymentRequest, **kwargs: Any) -
 def dispatch_gateway_cli(action: str, *, request: GatewayDeploymentRequest,
                          observed: Mapping[str, Any], observation_time: str,
                          command_runner: Callable[..., Any] | None = None,
+                         authority_command_runner: Callable[..., Any] | None = None,
                          runner: Callable[..., Any] | None = None,
                          opener: Any | None = None,
                          token_loader: Callable[[], str] | None = None) -> dict[str, Any]:
     """Route only the fixed Gateway operations with manager-owned arguments."""
     if action not in {"status", "preflight", "reload", "install-artifact", "rollback"}:
         raise _gateway_error("unsupported Gateway CLI action")
-    kwargs: dict[str, Any] = {"observation_time": observation_time}
+    kwargs: dict[str, Any] = {
+        "observation_time": observation_time,
+        "authority_command_runner": authority_command_runner or _fixed_authority_command_runner,
+    }
     if action == "status":
         if runner is not None:
             kwargs["runner"] = runner
