@@ -3,9 +3,11 @@ import hashlib
 import json
 import os
 import plistlib
+import stat
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -1987,3 +1989,27 @@ def test_postflight_unsafe_or_missing_root_observer_rejects_after_http_success(m
 def test_default_postflight_git_runner_rejects_caller_selected_root_or_argv(command):
     with pytest.raises(g.GatewayContractError, match="caller-selected"):
         REAL_POSTFLIGHT_GIT_RUNNER(*command)
+
+
+def test_authority_source_root_owned_sticky_ancestor_is_allowed():
+    info = SimpleNamespace(st_mode=stat.S_IFDIR | 0o1777, st_uid=0)
+    g._validate_authority_source_directory(info, leaf=False)
+
+
+def test_authority_source_nonsticky_group_or_world_writable_ancestor_is_rejected():
+    info = SimpleNamespace(st_mode=stat.S_IFDIR | 0o0777, st_uid=0)
+    with pytest.raises(g.GatewayContractError, match="ancestry unsafe"):
+        g._validate_authority_source_directory(info, leaf=False)
+
+
+@pytest.mark.parametrize(
+    "info",
+    [
+        SimpleNamespace(st_mode=stat.S_IFDIR | 0o0755, st_uid=12345),
+        SimpleNamespace(st_mode=stat.S_IFLNK | 0o0777, st_uid=os.getuid()),
+    ],
+    ids=["wrong-owner", "symlink"],
+)
+def test_authority_source_wrong_owner_or_symlink_ancestor_is_rejected(info):
+    with pytest.raises(g.GatewayContractError, match="ancestry unsafe"):
+        g._validate_authority_source_directory(info, leaf=False)

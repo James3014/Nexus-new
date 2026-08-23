@@ -488,6 +488,23 @@ def _authority_command_output(
         raise _gateway_error("fixed authority command output is not UTF-8", exc) from exc
 
 
+def _validate_authority_source_directory(info: Any, *, leaf: bool) -> None:
+    """Validate the mirror leaf or one generic ancestor without weakening it."""
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise _gateway_error("trusted authority source ancestry unsafe")
+    mode = stat.S_IMODE(info.st_mode)
+    if leaf:
+        if info.st_uid != HOST_AUTHORITY_UID:
+            raise _gateway_error("trusted authority source owner mismatch")
+        if mode not in {0o700, 0o755}:
+            raise _gateway_error("trusted authority source ancestry unsafe")
+        return
+    if info.st_uid not in {HOST_AUTHORITY_UID, 0}:
+        raise _gateway_error("trusted authority source ancestry unsafe")
+    if mode & 0o022 and not (info.st_uid == 0 and info.st_mode & stat.S_ISVTX):
+        raise _gateway_error("trusted authority source ancestry unsafe")
+
+
 def _verify_git_main_host_authority(
     local_bytes: bytes,
     local_bundle: HostEffectAuthorityBundle,
@@ -506,10 +523,7 @@ def _verify_git_main_host_authority(
             info = os.lstat(cursor)
         except OSError as exc:
             raise _gateway_error("trusted authority source ancestry unavailable", exc) from exc
-        if stat.S_ISLNK(info.st_mode) or stat.S_IMODE(info.st_mode) not in {0o700, 0o755}:
-            raise _gateway_error("trusted authority source ancestry unsafe")
-        if cursor == root and info.st_uid != HOST_AUTHORITY_UID:
-            raise _gateway_error("trusted authority source owner mismatch")
+        _validate_authority_source_directory(info, leaf=cursor == root)
         if cursor.parent == cursor:
             break
         if cursor == Path("/"):
