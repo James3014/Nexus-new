@@ -16,6 +16,7 @@ HASH = hashlib.sha256(b"identity").hexdigest()
 
 @pytest.fixture(autouse=True)
 def _isolated_host_authority_store(monkeypatch, tmp_path):
+    monkeypatch.setattr(g, "HOST_UID", os.getuid())
     path = tmp_path / "gateway-direct" / "host-authority.json"
     path.parent.mkdir(mode=0o700)
     monkeypatch.setattr(g, "GATEWAY_HOST_AUTHORITY_STORE", path)
