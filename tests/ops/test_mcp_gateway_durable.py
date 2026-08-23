@@ -13,6 +13,13 @@ from nexus.contracts.gateway_deployment import EffectClass
 from scripts.ops import mcp_gateway_durable as g
 
 HASH = hashlib.sha256(b"identity").hexdigest()
+HOST_OPERATIONS = ("status", "preflight", "install-artifact", "reload", "rollback")
+HOST_OPERATION_PAIRS = [
+    (source_operation, target_operation)
+    for source_operation in HOST_OPERATIONS
+    for target_operation in HOST_OPERATIONS
+    if source_operation != target_operation
+]
 
 @pytest.fixture(autouse=True)
 def _isolated_host_authority_store(monkeypatch, tmp_path):
@@ -741,11 +748,8 @@ def test_missing_symlink_mode_oversized_and_duplicate_host_store_fail_closed(mon
         g.gateway_status(request, runner=lambda *_: pytest.fail("observer called"), observation_time="2026-08-23T00:00:00Z", authority_command_runner=g._fixed_authority_command_runner)
 
 
-@pytest.mark.parametrize("source_operation", ["status", "preflight", "install-artifact", "reload", "rollback"])
-@pytest.mark.parametrize("target_operation", ["status", "preflight", "install-artifact", "reload", "rollback"])
+@pytest.mark.parametrize("source_operation,target_operation", HOST_OPERATION_PAIRS)
 def test_every_distinct_host_operation_pair_rejects_before_effect(source_operation, target_operation):
-    if source_operation == target_operation:
-        pytest.skip("same operation is not a cross-operation pair")
     request = _gateway_request(source_operation)
     calls = []
     authority_calls = []
