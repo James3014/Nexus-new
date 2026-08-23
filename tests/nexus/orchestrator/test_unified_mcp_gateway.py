@@ -1,6 +1,7 @@
 import hashlib
 import io
 import json
+import subprocess
 import sys
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -1801,6 +1802,7 @@ def test_task_card_create_is_owner_confirmed_non_overwriting_and_hashed(monkeypa
     payload = response["result"]["structuredContent"]
     assert payload["status"] == "CREATED_PENDING_COMMIT"
     assert len(payload["card_hash"]) == 64
+    assert len(payload["index_hash"]) == 64
     assert payload["git_blob_sha"] == "f" * 40
     assert (tmp_path / "tasks/chatgpt-bootstrap/INDEX.md").exists()
     assert (tmp_path / "tasks/chatgpt-bootstrap/00-first-card.md").exists()
@@ -1819,6 +1821,81 @@ def test_task_card_create_hash_failure_leaves_no_campaign(monkeypatch, tmp_path)
     assert response["result"]["isError"] is True
     assert not (tmp_path / "tasks/atomic-failure").exists()
     assert not list((tmp_path / "tasks").glob(".atomic-failure.create-*"))
+
+
+def _init_detached_git_repo(root: Path) -> str:
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.name", "Nexus Test"], cwd=root, check=True)
+    subprocess.run(["git", "config", "user.email", "nexus-test@example.invalid"], cwd=root, check=True)
+    (root / "README.md").write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=root, check=True)
+    subprocess.run(["git", "commit", "-qm", "base"], cwd=root, check=True)
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True, check=True).stdout.strip()
+    subprocess.run(["git", "checkout", "-q", "--detach", head], cwd=root, check=True)
+    return head
+
+
+def test_task_card_commit_closes_pending_card_bootstrap_and_leaves_controller_clean(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    head = _init_detached_git_repo(tmp_path)
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
+    gateway = UnifiedMCPGateway(service=FakeService())
+    create = gateway.handle({"jsonrpc": "2.0", "id": 7052, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {"owner_confirmation": True, "campaign_id": "bootstrap-close", "task_id": "first-card", "objective": "Close the task-card bootstrap loop.", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
+    created = create["result"]["structuredContent"]
+    assert created["status"] == "CREATED_PENDING_COMMIT"
+
+    commit = gateway.handle({"jsonrpc": "2.0", "id": 7053, "method": "tools/call", "params": {"name": "nexus_task_card_commit", "arguments": {"owner_confirmation": True, "campaign_id": "bootstrap-close", "task_id": "first-card", "expected_head": head, "card_hash": created["card_hash"], "index_hash": created["index_hash"]}}})
+    payload = commit["result"]["structuredContent"]
+
+    assert payload["status"] == "COMMITTED"
+    assert payload["previous_head"] == head
+    assert payload["commit_sha"] != head
+    assert payload["controller_clean"] is True
+    assert payload["committed_paths"] == [
+        "tasks/bootstrap-close/00-first-card.md",
+        "tasks/bootstrap-close/INDEX.md",
+    ]
+    assert subprocess.run(["git", "status", "--porcelain=v1"], cwd=tmp_path, capture_output=True, text=True, check=True).stdout == ""
+    changed = subprocess.run(["git", "diff-tree", "--no-commit-id", "--name-only", "-r", payload["commit_sha"]], cwd=tmp_path, capture_output=True, text=True, check=True).stdout.splitlines()
+    assert set(changed) == set(payload["committed_paths"])
+
+
+def test_task_card_commit_fails_closed_on_unrelated_dirty_state(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    head = _init_detached_git_repo(tmp_path)
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
+    gateway = UnifiedMCPGateway(service=FakeService())
+    create = gateway.handle({"jsonrpc": "2.0", "id": 7054, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {"owner_confirmation": True, "campaign_id": "bootstrap-dirty", "task_id": "first-card", "objective": "Close the task-card bootstrap loop.", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
+    created = create["result"]["structuredContent"]
+    (tmp_path / "unrelated.txt").write_text("do not absorb\n", encoding="utf-8")
+
+    commit = gateway.handle({"jsonrpc": "2.0", "id": 7055, "method": "tools/call", "params": {"name": "nexus_task_card_commit", "arguments": {"owner_confirmation": True, "campaign_id": "bootstrap-dirty", "task_id": "first-card", "expected_head": head, "card_hash": created["card_hash"], "index_hash": created["index_hash"]}}})
+
+    assert commit["result"]["isError"] is True
+    assert "TASK_CARD_COMMIT_CONTROLLER_NOT_EXACTLY_PENDING_CARD" in commit["result"]["structuredContent"]["error"]
+    assert subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True, check=True).stdout.strip() == head
+    assert subprocess.run(["git", "diff", "--cached", "--name-only"], cwd=tmp_path, capture_output=True, text=True, check=True).stdout == ""
+
+
+def test_task_card_commit_rejects_index_content_drift(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    head = _init_detached_git_repo(tmp_path)
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
+    gateway = UnifiedMCPGateway(service=FakeService())
+    create = gateway.handle({"jsonrpc": "2.0", "id": 7056, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {"owner_confirmation": True, "campaign_id": "bootstrap-index-drift", "task_id": "first-card", "objective": "Close the task-card bootstrap loop.", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
+    created = create["result"]["structuredContent"]
+    index_path = tmp_path / "tasks/bootstrap-index-drift/INDEX.md"
+    index_path.write_text(index_path.read_text(encoding="utf-8") + "\nunauthorized drift\n", encoding="utf-8")
+
+    commit = gateway.handle({"jsonrpc": "2.0", "id": 7057, "method": "tools/call", "params": {"name": "nexus_task_card_commit", "arguments": {"owner_confirmation": True, "campaign_id": "bootstrap-index-drift", "task_id": "first-card", "expected_head": head, "card_hash": created["card_hash"], "index_hash": created["index_hash"]}}})
+
+    assert commit["result"]["isError"] is True
+    assert "TASK_CARD_COMMIT_INDEX_HASH_MISMATCH" in commit["result"]["structuredContent"]["error"]
+    assert subprocess.run(["git", "rev-parse", "HEAD"], cwd=tmp_path, capture_output=True, text=True, check=True).stdout.strip() == head
+    assert subprocess.run(["git", "diff", "--cached", "--name-only"], cwd=tmp_path, capture_output=True, text=True, check=True).stdout == ""
 
 
 def test_model_probe_isolated_receipt_validates_schema_and_cleans_workspace(monkeypatch, tmp_path):
