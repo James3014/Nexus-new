@@ -34,6 +34,7 @@ from nexus.contracts.lifecycle_action import (
     MutationDomain,
     PermissionProfile,
     build_action_envelope,
+    canonical_request_hash,
 )
 from nexus.contracts.target_integration_lifecycle import ExternalAcceptanceReceipt
 from nexus.engine.canonical_task_seam import (
