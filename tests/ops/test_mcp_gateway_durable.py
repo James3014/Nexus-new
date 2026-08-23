@@ -30,6 +30,7 @@ REAL_POSTFLIGHT_GIT_RUNNER = g._fixed_postflight_git_command_runner
 @pytest.fixture(autouse=True)
 def _isolated_host_authority_store(monkeypatch, tmp_path):
     monkeypatch.setattr(g, "HOST_UID", os.getuid())
+    monkeypatch.setattr(g, "HOST_AUTHORITY_UID", os.getuid())
     path = tmp_path / "gateway-direct" / "host-authority.json"
     path.parent.mkdir(mode=0o700)
     monkeypatch.setattr(g, "GATEWAY_HOST_AUTHORITY_STORE", path)
