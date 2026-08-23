@@ -10,8 +10,8 @@ auto_chain: false
 
 | Order | Task | Status | SHA-256 | Dependency |
 |---|---|---|---|---|
-| 1 | `TASK-526-B-AUTHORITY` | ACTIVE | `fc72e4f1daf50413513a4cf5cc60812cf4ec992b41490916c0cbea372b9196cf` | merged Slice A `ac4a9ab1` |
-| 2 | `TASK-526-HOST-1` | BLOCKED | `b6e0c0015b1098261622b7ea087869eca5e0c80a6a1d3071815aa19e520ca7b1` | exact accepted/merged authority contract + acceptance receipt + valid host receipt |
+| 1 | `TASK-526-B-AUTHORITY` | ACTIVE | `477317e723493ad1f1a12035199c2aa55c39973564f71c918fb818c5fa9da366` | merged Slice A `ac4a9ab1` |
+| 2 | `TASK-526-HOST-1` | BLOCKED | `fcd22da4ef92b7cde004523fe900c06bc1b9e67715049c95383c581e640f631f` | exact accepted/merged authority contract + acceptance receipt + Git-tracked/CAS-merged host receipt |
 
 ## Execution frontier
 

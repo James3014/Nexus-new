@@ -98,7 +98,14 @@ rejected, and unsafe/writable ancestry blocks before effects.
 
 After `TASK-526-B-AUTHORITY` is accepted and merged, coordinator
 `coordinator-codex` issues exactly one owner-only
-`nexus.gateway.host_effect_authority.v1` receipt at the fixed
+`nexus.gateway.host_effect_authority.v1` receipt through a separate reviewed
+GitHub PR that creates only:
+
+`tasks/github-issue-526-host-authority-and-canary-20260823/02-host-effect-authority-receipt.json`
+
+The PR must pass required checks and expected-head/CAS merge. The merged receipt
+on GitHub `main` is the non-self-issued authority source. Only afterward may the
+coordinator materialize a byte-for-byte identical copy at the fixed local
 `host-authority.json` path. Required top-level fields are:
 
 - `schema`, `receipt_version`, `receipt_id`, and `receipt_hash`;
@@ -118,9 +125,15 @@ After `TASK-526-B-AUTHORITY` is accepted and merged, coordinator
   `revoked_at=null`, and `revocation_reason=null`.
 
 Owner `owner-james` is the sole revocation authority. Revocation is an atomic
-replacement of this same fixed canonical store with
-`revocation_state=REVOKED`; the manager rereads the latest store immediately
-before every first effect. No separate caller-selected revocation path exists.
+replacement of the Git-tracked receipt through another reviewed/CAS-merged PR
+with `revocation_state=REVOKED`, followed by byte-identical local
+materialization. The manager rereads GitHub remote `main`, resolves the fixed
+origin, verifies the trusted clean source HEAD equals remote main, reads the
+receipt with `git show <remote-main>:<fixed-path>`, and requires byte equality
+with the local store immediately before every first effect. A locally created
+commit, working-tree edit, same-UID file, caller mapping, or unmerged branch is
+not authority. No caller-selected receipt path, remote, ref, or revocation path
+exists.
 
 ## Pre-effect reconciliation
 
@@ -146,10 +159,11 @@ must never claim the task succeeded or drained.
    interpreter link/target/hash/owner/mode, service/PID/listener, authenticated
    health identity, stable artifact predecessor, and durable quiescence.
 2. Verify the exact authority-correction merge/main/tree and independent
-   acceptance receipt, then have only `coordinator-codex` issue the canonical
-   host-authority receipt above. Create request/evidence stores from this Card,
-   hash/read all stores back, and keep receipt issuance separate from the host
-   effect operator.
+   acceptance receipt. Have only `coordinator-codex` create, review, merge, and
+   read back the fixed Git-tracked receipt above; then materialize its exact
+   bytes locally. Create request/evidence stores from this Card, hash/read all
+   stores back, and keep receipt issuance separate from the host effect
+   operator.
 3. Run Gateway preflight. Source-only, stale, revoked, substituted, unbound, or
    self-issued authority must fail before any filesystem/process effect.
 4. Acquire the inter-process ledger lock and install the stable manager as a
@@ -196,7 +210,8 @@ must never claim the task succeeded or drained.
 
 The dependency unlock is not a status label: it requires the exact merged
 authority-correction main SHA/tree, exact independent acceptance receipt hash,
-and a current valid canonical host-authority receipt binding those values.
+the exact receipt-issuance PR/main SHA/tree, and a current valid local receipt
+that matches the Git-tracked remote-main receipt byte-for-byte.
 
 `PASS` means only `NEXUS_GATEWAY_REBIND_LOCAL_CANARY_VERIFIED_ONLY`.
 `AUTO_CHAIN=false`; stop before #398-serialized Slice B/ChatGPT-facing work.

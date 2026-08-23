@@ -10,7 +10,7 @@ claim_mode: MANUAL_DISPATCH
 base_main: ac4a9ab1e0180170ca062cdc81f2142bca8bd80f
 base_tree: db329f4931b55b74f1e1f9fe61f7edf4ca8422bc
 work_branch: codex/issue-526-host-rebind-canary
-host_card_sha256: b6e0c0015b1098261622b7ea087869eca5e0c80a6a1d3071815aa19e520ca7b1
+host_card_sha256: fcd22da4ef92b7cde004523fe900c06bc1b9e67715049c95383c581e640f631f
 claim_ceiling: NEXUS_GATEWAY_HOST_AUTHORITY_CONTRACT_SOURCE_CANDIDATE_ONLY
 ```
 
@@ -65,10 +65,11 @@ paths.
      is accepted and merged;
    - host Card path/ID/SHA-256
      `TASK-526-HOST-1` /
-     `b6e0c0015b1098261622b7ea087869eca5e0c80a6a1d3071815aa19e520ca7b1`;
+     `fcd22da4ef92b7cde004523fe900c06bc1b9e67715049c95383c581e640f631f`;
    - exact operation and `EffectClass`;
    - fixed service label, plist, endpoint, desired/current profile hash;
    - request ID and idempotency fence;
+   - exact `receipt_version=1`; unknown versions fail closed;
    - issued/expires timestamps, `revocation_state=NOT_REVOKED`,
      `revoked_at=null`, and `revocation_reason=null`.
 3. A deployment request carries source provenance plus an optional typed host
@@ -94,6 +95,13 @@ paths.
    rejection, and the exact strict top-level schema above. Caller input cannot
    select another path. Request/evidence/ledger/lock stores also require UID
    `501`/mode `0600`; installed manager mode is `0700`.
+   The non-self-issued source is the fixed Git-tracked path
+   `tasks/github-issue-526-host-authority-and-canary-20260823/02-host-effect-authority-receipt.json`
+   on public remote `https://github.com/James3014/Nexus-new.git` `main`. Before
+   effects the manager must use fixed Git commands to read remote main, require
+   a clean trusted source HEAD equal to remote main, read that exact blob with
+   `git show`, and require byte equality with the local canonical store. No
+   caller may select the remote/ref/path or substitute a local commit/branch.
 2. Before any physical observation for a host request and before every first
    artifact/plist/process/network effect, load the canonical host receipt and
    require exact equality with the request receipt plus the pure contract.
@@ -114,12 +122,17 @@ paths.
    issue the canonical host receipt. Owner `owner-james` is the sole revocation
    authority through atomic replacement of the same fixed store. The source
    worker cannot issue, activate, or revoke a receipt.
+8. `_safe_store_path` and every direct canonical store/lock seam enforce the
+   exact Card modes, not merely absence of group/other write bits.
 
 ## Acceptance and negative controls
 
 - source-only status/preflight/install/reload/rollback: reject with zero observer,
   token, HTTP, filesystem, ledger, plist, runner, or launchctl calls;
 - missing/unknown/self-issued/unstored host receipt: reject;
+- same-UID locally fabricated receipt, unmerged branch receipt, wrong remote
+  main, dirty/source-divergent receipt, or local/Git-tracked byte mismatch:
+  reject before observation/effect;
 - wrong repository/Owner/coordinator/standing grant/source merge/tree/Card
   ID/hash/service/plist/endpoint/profile/request/fence/operation/effect: reject;
 - stale, future-issued, revoked, malformed, hash-invalid receipt: reject;
@@ -133,6 +146,10 @@ paths.
   receipt and canonical-store fixture, not the source receipt helper;
 - legacy source-only false-green helpers are retained only for explicit
   rejection tests.
+- execute stale, future, revoked, actor/issuer/coordinator/grant, missing store,
+  symlink, wrong UID/mode, oversized, duplicate-key, all distinct
+  cross-operation pairs, same-fence/different-request, ledger-field binding,
+  and positive fixed-Gateway STATUS tests. Do not mock above the seam.
 
 ## Verification
 
@@ -153,8 +170,9 @@ test seams, and preserve the source-only claim ceiling.
 - `TASK-526-HOST-1` remains BLOCKED until this Candidate is independently
   accepted and merged. Unlock requires exact merged main SHA/tree, exact
   independent acceptance receipt hash, final manager SHA-256, current-main
-  ancestry, and a current valid canonical host receipt binding all of them;
-  branch/Card status alone never unlocks it.
+  ancestry, separately reviewed/CAS-merged receipt-issuance PR/main SHA/tree,
+  and a current valid local receipt byte-identical to the fixed Git-tracked
+  remote-main receipt; branch/Card status alone never unlocks it.
 - Gateway-only local host canary is not serialized behind #398 because it
   performs zero DevSpace effects. The future DevSpace/ChatGPT-facing action
   canary remains `SERIALIZE_AFTER:#398`.
