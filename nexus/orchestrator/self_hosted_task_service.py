@@ -5612,6 +5612,38 @@ class SelfHostedTaskService:
                 blocker="durable request is missing; cannot safely reconstruct the task",
             )
             return {**state, "retry": retry_meta}
+
+        # Validate the persisted predecessor envelope against its old
+        # attempt/card identity before minting fresh retry transport IDs.
+        predecessor_dispatch: Optional[dict[str, Any]] = None
+        demands, admission = _workforce_dispatch_inputs(request)
+        if demands is not None or admission is not None:
+            predecessor_request = dict(request)
+            predecessor_request.update(
+                task_id=str(state.get("task_id") or ""),
+                attempt_id=str(state.get("attempt_id") or ""),
+                task_card_path=str(state.get("task_card_path") or request.get("task_card_path") or ""),
+                task_card_hash=str(state.get("task_card_hash") or request.get("task_card_hash") or ""),
+                canonical_dispatch_envelope=state.get("canonical_dispatch_envelope"),
+            )
+            try:
+                predecessor_dispatch = validate_workforce_dispatch_binding(
+                    predecessor_request, require_binding=True
+                )
+            except RuntimeError as exc:
+                return {
+                    **state,
+                    "retry": {**retry_meta, "decision": "BLOCK", "blocker": str(exc)},
+                }
+            if not isinstance(predecessor_dispatch.get("canonical_dispatch_envelope"), Mapping):
+                return {
+                    **state,
+                    "retry": {
+                        **retry_meta,
+                        "decision": "BLOCK",
+                        "blocker": "WORKFORCE_DISPATCH_ENVELOPE_MISSING",
+                    },
+                }
         # A REPAIRABLE acceptance must rebind through the canonical Planner /
         # Workforce admission envelope; caller-supplied worker identity is
         # never accepted as a selector.
@@ -5638,15 +5670,16 @@ class SelfHostedTaskService:
         retry_source = dict(state)
         retry_source["request"] = request
         retry_request = _retry_request(retry_source)
-        if repair_dispatch is not None:
+        rebind_dispatch = repair_dispatch or predecessor_dispatch
+        if rebind_dispatch is not None:
             retry_request = dict(retry_request)
             retry_request["planner_output"] = request.get("planner_output")
             try:
                 retry_request["canonical_dispatch_envelope"] = build_canonical_dispatch_envelope(
                     request["planner_output"],
                     {
-                        **repair_dispatch,
-                        "demand_id": repair_dispatch.get("demand_id"),
+                        **rebind_dispatch,
+                        "demand_id": rebind_dispatch.get("demand_id"),
                     },
                     task_id=str(retry_request.get("task_id") or ""),
                     attempt_id=str(retry_request.get("attempt_id") or ""),

@@ -7290,7 +7290,9 @@ def test_m3c_retry_preserves_execution_history_and_aggregate_budget_blocks_invok
     assert invoked["n"] == 0
 
 
-def _m3c_repairable_workforce_state(tmp_path, monkeypatch, *, task_id):
+def _m3c_repairable_workforce_state(
+    tmp_path, monkeypatch, *, task_id, acceptance_decision="REPAIRABLE"
+):
     card_path = f"tasks/issue-7/{task_id}.md"
     card = tmp_path / card_path
     card.parent.mkdir(parents=True)
@@ -7359,7 +7361,7 @@ def _m3c_repairable_workforce_state(tmp_path, monkeypatch, *, task_id):
         "final_disposition": "FINAL_BLOCK",
         "cleanup_decision": "REMOVED",
         "promotion_status": "NOT_CREATED",
-        "acceptance_decision": "REPAIRABLE",
+        "acceptance_decision": acceptance_decision,
         "request": request,
         "contract": contract.model_dump(mode="json"),
         "contract_hash": contract.contract_hash,
@@ -7492,6 +7494,100 @@ def test_m3c_repair_retry_rebinds_fresh_attempt_and_preserves_old_evidence(
         "promotion_packet",
     ):
         assert durable[field] is None
+
+
+def test_m3c_nonrepair_retry_rebinds_workforce_envelope_without_launching_provider(
+    tmp_path, monkeypatch
+):
+    task_id = "m3c-nonrepair-fresh-envelope"
+    service, _, old_envelope, old_receipt, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=task_id,
+        acceptance_decision="NOT_REPAIRABLE",
+    )
+    predecessor = service._read_state(task_id)
+    old_action_id = predecessor.get("action_id")
+    old_idempotency_key = predecessor.get("idempotency_key")
+    authority_snapshot = {
+        field: copy.deepcopy(predecessor.get(field))
+        for field in (
+            "task_card_path", "task_card_hash", "selected_worker_id",
+            "selected_provider", "selected_model", "workforce_policy_hash",
+            "workforce_binding_hash", "workforce_aggregate_binding_hash",
+            "workforce_dispatch", "request",
+        )
+    }
+    calls = {"launch": 0, "invoke": 0}
+    monkeypatch.setattr(
+        service,
+        "_launch_worker",
+        lambda owned_task_id, _attempt_id: (
+            calls.__setitem__("launch", calls["launch"] + 1)
+            or service._read_state(owned_task_id)
+        ),
+    )
+    monkeypatch.setattr(
+        service.worker_registry,
+        "invoke",
+        lambda *_args, **_kwargs: calls.__setitem__("invoke", calls["invoke"] + 1),
+    )
+
+    result = service.retry_task(task_id)
+    durable = service._read_state(task_id)
+    fresh_envelope = durable["canonical_dispatch_envelope"]
+
+    assert result["retry"]["decision"] == "REUSED_TASK_ID"
+    assert durable["attempt_id"] != old_envelope["attempt_id"]
+    assert durable["action_id"] and durable["action_id"] != old_action_id
+    assert durable["idempotency_key"] and durable["idempotency_key"] != old_idempotency_key
+    assert result["retry"]["new_attempt_id"] == durable["attempt_id"]
+    assert result["retry"]["new_action_id"] == durable["action_id"]
+    assert result["retry"]["new_idempotency_key"] == durable["idempotency_key"]
+    assert fresh_envelope["attempt_id"] == durable["attempt_id"]
+    assert fresh_envelope != old_envelope
+    assert fresh_envelope["worker_id"] == old_envelope["worker_id"]
+    assert fresh_envelope["provider"] == old_envelope["provider"]
+    assert fresh_envelope["model"] == old_envelope["model"]
+    for field, value in authority_snapshot.items():
+        if field in {"request", "workforce_dispatch"}:
+            continue
+        assert durable[field] == value
+    for field in (
+        "demands", "admission", "demand_id", "worker_id", "provider", "model",
+        "policy_hash", "binding_hash", "aggregate_binding_hash",
+    ):
+        assert durable["workforce_dispatch"][field] == authority_snapshot["workforce_dispatch"][field]
+    assert durable["request"]["planner_output"] == authority_snapshot["request"]["planner_output"]
+    assert durable["request"]["workforce_admission"] == authority_snapshot["request"]["workforce_admission"]
+    assert durable["request"]["workforce_demands"] == authority_snapshot["request"]["workforce_demands"]
+    assert json.dumps(durable["executions"][0], sort_keys=True) == json.dumps(old_receipt, sort_keys=True)
+    assert calls == {"launch": 1, "invoke": 0}
+
+
+def test_m3c_nonrepair_retry_rejects_restored_stale_predecessor_envelope(
+    tmp_path, monkeypatch
+):
+    task_id = "m3c-nonrepair-stale-envelope"
+    service, _, old_envelope, _, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=task_id,
+        acceptance_decision="NOT_REPAIRABLE",
+    )
+    state = service._read_state(task_id)
+    stale = copy.deepcopy(old_envelope)
+    stale["attempt_id"] = "attempt-stale-restored"
+    state["canonical_dispatch_envelope"] = stale
+    state["request"]["canonical_dispatch_envelope"] = stale
+    service._write_state(task_id, state)
+    monkeypatch.setattr(service, "_launch_worker", lambda *_: pytest.fail("launch must not run"))
+
+    result = service.retry_task(task_id)
+
+    assert result["retry"]["decision"] == "BLOCK"
+    assert result["retry"]["blocker"] == "WORKFORCE_DISPATCH_ENVELOPE_MISMATCH"
+    assert service._read_state(task_id)["attempts"] == state["attempts"]
 
 
 def test_m3d_event_append_failure_persists_reconciliation_debt(tmp_path, monkeypatch):
