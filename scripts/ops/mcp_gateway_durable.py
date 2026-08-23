@@ -19,6 +19,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
@@ -224,22 +225,31 @@ def main() -> int:
     p.add_argument("--devspace-hash"); p.add_argument("--env-file")
     p.add_argument("--devspace-root", type=Path, default=DEVSPACE_ROOT); p.add_argument("--node-path", type=Path, default=NODE_PATH)
     p.add_argument("--gateway-request", type=Path)
+    p.add_argument("--gateway-evidence", type=Path)
     a = p.parse_args()
     try:
+        if a.action.startswith("gateway-") and (a.env_file or a.devspace_hash or a.launch_floor_head or a.devspace_root != DEVSPACE_ROOT or a.node_path != NODE_PATH):
+            p.error("Gateway-only CLI accepts only fixed request/evidence stores")
         if a.env_file: globals()["ENV_PATH"] = Path(a.env_file)
         if a.action == "serve-gateway": serve("gateway", launch_floor_head=a.launch_floor_head)
         elif a.action == "serve-devspace": serve("devspace", launch_floor_head=a.launch_floor_head, devspace_hash=a.devspace_hash, devspace_root=a.devspace_root, node_path=a.node_path)
         elif a.action.startswith("gateway-"):
             if a.gateway_request is None:
                 p.error("--gateway-request is required for Gateway-only operations")
-            request_path = _safe_store_path(a.gateway_request)
+            request_path = _fixed_cli_store_path(a.gateway_request, GATEWAY_REQUEST_STORE)
             try:
                 payload = json.loads(request_path.read_text())
             except (OSError, ValueError) as exc:
                 raise GateError("gateway request file malformed") from exc
+            request = GatewayDeploymentRequest.model_validate(payload)
             operation = a.action.removeprefix("gateway-")
             if operation == "install-artifact": operation = "install-artifact"
-            print(json.dumps(manage_gateway(operation, request=payload), sort_keys=True, default=str))
+            now = _current_observation_time()
+            observed = collect_gateway_observation(request, observation_time=now)
+            if a.gateway_evidence is not None:
+                _fixed_cli_store_path(a.gateway_evidence, GATEWAY_EVIDENCE_STORE)
+            print(json.dumps(dispatch_gateway_cli(operation, request=request, observed=observed,
+                                                  observation_time=now), sort_keys=True, default=str))
         else: print(json.dumps(manage(a.action, launch_floor_head=a.launch_floor_head, devspace_hash=a.devspace_hash, devspace_root=a.devspace_root, node_path=a.node_path), sort_keys=True))
     except (GateError, subprocess.CalledProcessError) as exc: p.error(str(exc))
     return 0
@@ -250,6 +260,8 @@ GATEWAY_ENTRYPOINT = "scripts/ops/nexus_mcp_gateway_http.py"
 GATEWAY_LEDGER = Path.home() / "Library/Application Support/Nexus/gateway-direct/ledger.jsonl"
 GATEWAY_LOCK = Path.home() / "Library/Application Support/Nexus/gateway-direct/ledger.lock"
 GATEWAY_ARTIFACT = Path.home() / "Library/Application Support/Nexus/gateway-direct/manager.py"
+GATEWAY_REQUEST_STORE = Path.home() / "Library/Application Support/Nexus/gateway-direct/request.json"
+GATEWAY_EVIDENCE_STORE = Path.home() / "Library/Application Support/Nexus/gateway-direct/evidence.json"
 MAX_LEDGER_BYTES = 4 * 1024 * 1024
 MAX_LEDGER_RECORDS = 256
 
@@ -260,6 +272,15 @@ class GatewayContractError(GateError):
 
 class LedgerCorruption(GatewayContractError):
     pass
+
+
+def _current_observation_time() -> str:
+    """Manager-owned UTC clock; pure contract validation remains clock-free."""
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _freshness_time(value: str | None) -> str:
+    return value if value is not None else _current_observation_time()
 
 
 def _legacy_absent_service(result: Any, args: tuple[Any, ...] | list[Any]) -> bool:
@@ -573,7 +594,7 @@ def preflight_gateway(request: GatewayDeploymentRequest, *, observed: Mapping[st
     """Validate fresh physical evidence without performing a process effect."""
     try:
         validate_request(request)
-        validate_authority_freshness(request.authority, now=observation_time or "")
+        validate_authority_freshness(request.authority, now=_freshness_time(observation_time))
     except (ContractError, ValueError) as exc:
         raise _gateway_error("gateway request rejected", exc) from exc
     required_physical = {
@@ -592,7 +613,8 @@ def preflight_gateway(request: GatewayDeploymentRequest, *, observed: Mapping[st
         plist_bytes = bytes.fromhex(str(observed["plist_bytes_hex"]))
     except (TypeError, ValueError) as exc:
         raise _gateway_error("Gateway plist bytes malformed", exc) from exc
-    if hashlib.sha256(plist_bytes).hexdigest() not in {observed["plist_sha256"], observed["plist_bytes_sha256"]}:
+    plist_digest = hashlib.sha256(plist_bytes).hexdigest()
+    if plist_digest != observed["plist_sha256"] or plist_digest != observed["plist_bytes_sha256"]:
         raise _gateway_error("Gateway plist bytes hash mismatch")
     if not isinstance(observed.get("stable_artifact"), Mapping) or not isinstance(observed.get("rollback_predecessor"), Mapping):
         raise _gateway_error("stable artifact/rollback predecessor evidence missing")
@@ -600,6 +622,7 @@ def preflight_gateway(request: GatewayDeploymentRequest, *, observed: Mapping[st
         raise _gateway_error("current Gateway identity does not match request")
     identity_bindings = {
         "plist_sha256": request.current_identity.plist_sha256,
+        "plist_bytes_sha256": request.current_identity.plist_bytes_sha256,
         "pid": request.current_identity.pid,
         "server_instance": request.current_identity.server_instance,
         "root": request.current_identity.root, "head": request.current_identity.head, "tree": request.current_identity.tree,
@@ -654,14 +677,86 @@ def _gateway_plist(profile: Any, *, token_env: str = "NEXUS_MCP_GATEWAY_TOKEN") 
     return plistlib.dumps(payload, fmt=plistlib.FMT_XML)
 
 
+def build_artifact_observation_commands(source_root: Path, source_path: Path) -> tuple[tuple[str, ...], ...]:
+    """Return the fixed, manager-owned Git/file observation command set."""
+    root = str(source_root)
+    relative = os.path.relpath(source_path, source_root)
+    if relative.startswith("../") or relative == ".." or os.path.isabs(relative):
+        raise _gateway_error("artifact source outside clean root")
+    return (
+        ("git", "-C", root, "rev-parse", "--show-toplevel"),
+        ("git", "-C", root, "remote", "get-url", "origin"),
+        ("git", "-C", root, "rev-parse", "HEAD"),
+        ("git", "-C", root, "rev-parse", "HEAD^{tree}"),
+        ("git", "-C", root, "status", "--porcelain"),
+        ("git", "-C", root, "ls-files", "--full-name", "--error-unmatch", "--", relative),
+        ("git", "-C", root, "hash-object", "--", relative),
+        ("shasum", "-a", "256", str(source_path)),
+    )
+
+
+def _command_output(runner: Callable[..., Any], command: tuple[str, ...]) -> str:
+    """Run one fixed observation command and return stdout only."""
+    try:
+        result = runner(*command)
+    except TypeError:
+        result = runner(command)
+    if isinstance(result, str):
+        return result.strip()
+    code = getattr(result, "returncode", 0)
+    if code not in (0, None):
+        raise _gateway_error(f"fixed observation command failed: {command[0]}")
+    return str(getattr(result, "stdout", "") or "").strip()
+
+
+def observe_artifact_source(source_root: Path, source_path: Path,
+                            *, command_runner: Callable[..., Any] | None = None) -> dict[str, Any]:
+    """Collect Git/file truth; callers can inject only command results."""
+    raw_root, raw_path = Path(source_root), Path(source_path)
+    if raw_root.is_symlink() or raw_path.is_symlink():
+        raise _gateway_error("artifact source/root symlink rejected")
+    source_root = raw_root.resolve(strict=False)
+    source_path = raw_path.resolve(strict=False)
+    try:
+        relative = source_path.relative_to(source_root)
+    except ValueError as exc:
+        raise _gateway_error("artifact source outside clean root", exc) from exc
+    if not source_path.is_file() or source_path.is_symlink():
+        raise _gateway_error("artifact source is not a regular file")
+    run = command_runner or (lambda *args: subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE))
+    commands = build_artifact_observation_commands(source_root, source_path)
+    values = [_command_output(run, command) for command in commands]
+    top, remote, head, tree, status, tracked, git_blob, sha_line = values
+    try:
+        digest = sha_line.split()[0]
+        info = source_path.stat()
+    except (IndexError, OSError) as exc:
+        raise _gateway_error("fixed file observation failed", exc) from exc
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise _gateway_error("fixed bytes hash observation malformed")
+    if not re.fullmatch(r"[0-9a-f]{40}", git_blob):
+        raise _gateway_error("fixed Git blob observation malformed")
+    if tracked != str(relative) or not top or not remote or not head or not tree:
+        raise _gateway_error("fixed Git source identity observation incomplete")
+    if hashlib.sha256(source_path.read_bytes()).hexdigest() != digest:
+        raise _gateway_error("fixed bytes hash observation disagrees")
+    return {
+        "root": str(source_root), "toplevel": top, "remote": remote,
+        "head": head, "tree": tree, "clean": status == "", "path": str(source_path),
+        "relative_path": str(relative), "tracked_path": tracked,
+        "git_blob_sha1": git_blob, "blob_sha256": digest, "bytes_sha256": digest,
+        "uid": info.st_uid, "mode": stat.S_IMODE(info.st_mode),
+    }
+
+
 def install_stable_artifact(request: GatewayDeploymentRequest, *, source_root: Path,
                             source_path: Path, artifact_path: Path | None = None,
-                            source_observer: Mapping[str, Any] | Callable[[Path], Mapping[str, Any]] | None = None,
+                            command_runner: Callable[..., Any] | None = None,
                             observation_time: str | None = None) -> dict[str, Any]:
     """Publish one exact manager artifact; this is never part of reload."""
     validate_request(request)
     try:
-        validate_authority_freshness(request.authority, now=observation_time or "")
+        validate_authority_freshness(request.authority, now=_freshness_time(observation_time))
     except ContractError as exc:
         raise _gateway_error("artifact authority freshness rejected", exc) from exc
     if request.operation not in {"install-artifact", "install_artifact"} or request.stable_artifact is None:
@@ -670,8 +765,11 @@ def install_stable_artifact(request: GatewayDeploymentRequest, *, source_root: P
     if artifact_path != Path(GATEWAY_ARTIFACT):
         raise _gateway_error("stable artifact destination substitution")
     artifact = request.stable_artifact
-    source_root = Path(source_root).resolve(strict=False)
-    source_path = Path(source_path).resolve(strict=False)
+    raw_root, raw_path = Path(source_root), Path(source_path)
+    if raw_root.is_symlink() or raw_path.is_symlink():
+        raise _gateway_error("artifact source/root symlink rejected")
+    source_root = raw_root.resolve(strict=False)
+    source_path = raw_path.resolve(strict=False)
     if source_root != Path(artifact.source_root) or source_path != Path(artifact.source_path):
         raise _gateway_error("artifact source substitution")
     try:
@@ -684,9 +782,7 @@ def install_stable_artifact(request: GatewayDeploymentRequest, *, source_root: P
     digest = hashlib.sha256(data).hexdigest()
     if digest != artifact.source_blob_sha256 or digest != artifact.artifact_sha256:
         raise _gateway_error("artifact bytes hash mismatch")
-    physical = source_observer(source_root) if callable(source_observer) else dict(source_observer or {})
-    if not physical:
-        raise _gateway_error("physical source Git evidence required")
+    physical = observe_artifact_source(source_root, source_path, command_runner=command_runner)
     expected_physical = {
         "root": str(source_root), "toplevel": str(source_root), "remote": "https://github.com/James3014/Nexus-new.git",
         "head": artifact.source_head, "tree": artifact.source_tree, "clean": True,
@@ -739,10 +835,16 @@ def _http_json(url: str, *, token: str, payload: Mapping[str, Any] | None = None
 
 
 def _profile_for_expected(expected: Mapping[str, Any]) -> Any:
-    """Resolve only the frozen desired profile; callers cannot choose a profile."""
-    if expected.get("root") not in (None, "", DESIRED_PROFILE.git.root) or expected.get("head") not in (None, "", DESIRED_PROFILE.git.head) or expected.get("tree") not in (None, "", DESIRED_PROFILE.git.tree):
-        raise _gateway_error("postflight expected profile substitution")
-    return DESIRED_PROFILE
+    """Resolve only one of the two frozen profiles; callers cannot choose another."""
+    candidates = (DESIRED_PROFILE,)
+    from nexus.contracts.gateway_deployment import CURRENT_PROFILE
+    candidates += (CURRENT_PROFILE,)
+    for profile in candidates:
+        if (expected.get("root") in (None, "", profile.git.root)
+                and expected.get("head") in (None, "", profile.git.head)
+                and expected.get("tree") in (None, "", profile.git.tree)):
+            return profile
+    raise _gateway_error("postflight expected profile substitution")
 
 
 def postflight_gateway(expected: Mapping[str, Any], *, token: str, endpoint: str = GATEWAY_ENDPOINT,
@@ -803,6 +905,8 @@ def postflight_gateway(expected: Mapping[str, Any], *, token: str, endpoint: str
             for key, expected_value in expected.items():
                 if key == "previous_server_instance":
                     continue
+                if key in {"required_actions", "observed_actions"}:
+                    expected_value = tuple(expected_value)
                 actual = getattr(identity, key, merged.get(key))
                 if expected_value not in (None, "") and actual != expected_value:
                     raise _gateway_error(f"postflight identity mismatch: {key}")
@@ -815,17 +919,33 @@ def postflight_gateway(expected: Mapping[str, Any], *, token: str, endpoint: str
     raise _gateway_error("postflight remained uncertain", last)
 
 
-def rollback_gateway(capture: Any, *, plist_path: Path | None = None,
-                     runner: Callable[..., Any] | None = None, postflight: Callable[[], Any] | None = None,
-                     predecessor_observer: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """Restore only the captured fixed predecessor; never select a new target."""
+def rollback_gateway(request: GatewayDeploymentRequest, *, plist_path: Path | None = None,
+                     runner: Callable[..., Any] | None = None,
+                     predecessor_observer: Mapping[str, Any] | None = None,
+                     opener: Any = urllib.request.urlopen,
+                     token_loader: Callable[[], str] | None = None,
+                     sleeper: Callable[[float], None] = time.sleep,
+                     observation_time: str | None = None) -> dict[str, Any]:
+    """Restore one request-bound predecessor after mandatory physical proof."""
     plist_path = Path(plist_path or GATEWAY_PLIST)
     if plist_path != Path(GATEWAY_PLIST):
         raise _gateway_error("rollback plist destination substitution")
     try:
+        request = validate_request(request)
+        validate_authority_freshness(request.authority, now=_freshness_time(observation_time))
+    except ContractError as exc:
+        raise _gateway_error("rollback authority freshness rejected", exc) from exc
+    try:
+        if request.operation not in {"rollback", "gateway-rollback"}:
+            raise _gateway_error("rollback requires rollback operation")
+        capture = request.rollback
+        if predecessor_observer is None:
+            raise _gateway_error("fresh rollback predecessor observer required")
         validate_rollback_capture(capture)
         if capture.label != GATEWAY_LABEL:
             raise _gateway_error("rollback fixed identity mismatch")
+        if capture.loaded and not capture.server_instance:
+            raise _gateway_error("loaded rollback predecessor server identity missing")
         payload = bytes.fromhex(capture.plist_bytes_hex)
         payload_hash = hashlib.sha256(payload).hexdigest()
         if payload_hash != capture.plist_bytes_sha256 or (capture.plist_sha256 and capture.plist_sha256 != payload_hash):
@@ -843,13 +963,34 @@ def rollback_gateway(capture: Any, *, plist_path: Path | None = None,
             raise _gateway_error("rollback environment drift")
         if capture.root != "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe":
             raise _gateway_error("rollback source root drift")
-        if predecessor_observer is not None:
-            for key in ("artifact_sha256", "source_sha256", "source_root", "source_head", "source_tree", "loaded"):
-                if predecessor_observer.get(key) != getattr(capture, key, None):
-                    raise _gateway_error("rollback predecessor physical identity mismatch")
+        required_observer = ("plist_sha256", "plist_bytes_sha256", "artifact_sha256", "source_sha256",
+                             "source_root", "source_head", "source_tree", "loaded")
+        if any(key not in predecessor_observer for key in required_observer):
+            raise _gateway_error("rollback predecessor observer incomplete")
+        for key in required_observer:
+            expected = getattr(capture, key, None)
+            if predecessor_observer.get(key) != expected:
+                raise _gateway_error("rollback predecessor physical identity mismatch")
+        if capture.loaded:
+            if predecessor_observer.get("server_instance") != capture.server_instance or not isinstance(predecessor_observer.get("pid"), int) or predecessor_observer["pid"] <= 0:
+                raise _gateway_error("loaded rollback predecessor service identity mismatch")
+        if not capture.loaded:
+            if predecessor_observer.get("pid") not in (None, 0) or predecessor_observer.get("server_instance") not in (None, ""):
+                raise _gateway_error("unloaded rollback predecessor is not absent")
+            if predecessor_observer.get("listener") not in (None, "") or predecessor_observer.get("service_loaded") not in (None, False):
+                raise _gateway_error("unloaded rollback predecessor has physical service")
     except (ValueError, KeyError, TypeError, ContractError) as exc:
         raise _gateway_error("rollback predecessor malformed", exc) from exc
     run = runner or (lambda *args: subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE))
+    rollback_token: str | None = None
+    if capture.loaded:
+        loader = token_loader or (lambda: read_secret_env().get("NEXUS_MCP_GATEWAY_TOKEN", ""))
+        try:
+            rollback_token = loader()
+        except Exception as exc:
+            raise _gateway_error("rollback authenticated postflight unavailable", exc) from exc
+        if not rollback_token:
+            raise _gateway_error("rollback authenticated postflight token missing")
     with InterProcessLock(GATEWAY_LOCK):
         if capture.loaded:
             result = run("launchctl", "bootout", f"{UID_TARGET}/{GATEWAY_LABEL}")
@@ -860,14 +1001,14 @@ def rollback_gateway(capture: Any, *, plist_path: Path | None = None,
             result = run("launchctl", "bootstrap", UID_TARGET, str(plist_path))
             if getattr(result, "returncode", 0) not in (0, None):
                 raise _gateway_error("rollback bootstrap failed")
-        if postflight is not None:
-            observed = postflight()
-            if isinstance(observed, Mapping):
-                observed = PostflightIdentity.model_validate(observed)
-            if not isinstance(observed, PostflightIdentity):
-                raise _gateway_error("rollback postflight identity must be typed")
-            from nexus.contracts.gateway_deployment import CURRENT_PROFILE
-            validate_postflight_identity(observed, CURRENT_PROFILE)
+        if capture.loaded:
+            expected = {
+                "root": capture.root, "head": capture.source_head, "tree": capture.source_tree,
+                "server_instance": capture.server_instance,
+                "required_actions": tuple(request.postflight.required_actions),
+            }
+            observed = postflight_gateway(expected, token=rollback_token or "", endpoint=GATEWAY_ENDPOINT,
+                                          opener=opener, sleeper=sleeper)
             if capture.server_instance and observed.server_instance != capture.server_instance:
                 raise _gateway_error("rollback server identity mismatch")
     return {"state": DeploymentState.ROLLED_BACK.value, "loaded": bool(capture.loaded), "plist_sha256": hashlib.sha256(payload).hexdigest()}
@@ -875,12 +1016,15 @@ def rollback_gateway(capture: Any, *, plist_path: Path | None = None,
 
 def gateway_reload(request: GatewayDeploymentRequest, *, observed: Mapping[str, Any],
                    runner: Callable[..., Any] | None = None, plist_path: Path | None = None,
-                   ledger: GatewayLedger | None = None, postflight: Callable[[], Any] | None = None,
+                   ledger: GatewayLedger | None = None,
+                   opener: Any = urllib.request.urlopen,
+                   token_loader: Callable[[], str] | None = None,
+                   sleeper: Callable[[float], None] = time.sleep,
                    observation_time: str | None = None) -> dict[str, Any]:
     """Gateway-only reload/adopt operation.  It cannot install a stable artifact."""
     validate_request(request)
     try:
-        validate_authority_freshness(request.authority, now=observation_time or "")
+        validate_authority_freshness(request.authority, now=_freshness_time(observation_time))
     except ContractError as exc:
         raise _gateway_error("Gateway authority freshness rejected", exc) from exc
     if request.operation not in {"reload", "gateway-reload"}:
@@ -891,6 +1035,13 @@ def gateway_reload(request: GatewayDeploymentRequest, *, observed: Mapping[str, 
     preflight = preflight_gateway(request, observed=observed, observation_time=observation_time)
     store = ledger or GatewayLedger()
     run = runner or (lambda *args: subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE))
+    loader = token_loader or (lambda: read_secret_env().get("NEXUS_MCP_GATEWAY_TOKEN", ""))
+    try:
+        token = loader()
+    except Exception as exc:
+        raise _gateway_error("Gateway postflight token unavailable", exc) from exc
+    if not token:
+        raise _gateway_error("Gateway postflight token missing")
     with InterProcessLock(store.lock_path):
         rows = store._scan_unlocked()
         existing = next((row for row in reversed(rows) if row["request_id"] == request.request_id), None)
@@ -924,16 +1075,10 @@ def gateway_reload(request: GatewayDeploymentRequest, *, observed: Mapping[str, 
             result = run("launchctl", "bootstrap", UID_TARGET, str(plist_path))
             if getattr(result, "returncode", 0) not in (0, None):
                 raise _gateway_error("Gateway bootstrap failed")
-            if postflight is None:
-                raise _gateway_error("postflight callback required before VERIFIED")
-            postflight_result = postflight()
-            if isinstance(postflight_result, Mapping):
-                try:
-                    postflight_result = PostflightIdentity.model_validate(postflight_result)
-                except ContractError as exc:
-                    raise _gateway_error("postflight identity schema mismatch", exc) from exc
-            if not isinstance(postflight_result, PostflightIdentity):
-                raise _gateway_error("postflight callback must return typed identity")
+            expected = request.postflight.model_dump()
+            expected["previous_server_instance"] = request.current_identity.server_instance
+            postflight_result = postflight_gateway(expected, token=token, endpoint=GATEWAY_ENDPOINT,
+                                                   opener=opener, sleeper=sleeper)
             validate_postflight_identity(postflight_result, request.desired)
             previous = request.current_identity.server_instance
             if previous and postflight_result.server_instance == previous:
@@ -957,6 +1102,11 @@ def manage_gateway(action: str, *, request: GatewayDeploymentRequest | Mapping[s
                    observed: Mapping[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
     """Explicit Gateway-only dispatch; legacy ``manage`` cannot reach this path."""
     typed = validate_request(request)
+    observation_time = kwargs.get("observation_time")
+    try:
+        validate_authority_freshness(typed.authority, now=_freshness_time(observation_time))
+    except ContractError as exc:
+        raise _gateway_error("Gateway authority freshness rejected", exc) from exc
     expected_operation = {
         "preflight": {"preflight", "gateway-preflight"},
         "reload": {"reload", "gateway-reload"},
@@ -968,7 +1118,7 @@ def manage_gateway(action: str, *, request: GatewayDeploymentRequest | Mapping[s
     if action == "preflight":
         if observed is None:
             raise _gateway_error("fresh physical Gateway evidence required")
-        return preflight_gateway(typed, observed=observed)
+        return preflight_gateway(typed, observed=observed, observation_time=observation_time)
     if action == "reload":
         if observed is None:
             raise _gateway_error("fresh physical Gateway evidence required")
@@ -976,8 +1126,148 @@ def manage_gateway(action: str, *, request: GatewayDeploymentRequest | Mapping[s
     if action == "install-artifact":
         return install_stable_artifact(typed, **kwargs)
     if action == "rollback":
-        return rollback_gateway(**kwargs)
+        return rollback_gateway(typed, **kwargs)
     raise _gateway_error("unsupported Gateway-only action")
+
+
+def _fixed_cli_store_path(value: Path, expected: Path) -> Path:
+    path = Path(value)
+    if path != Path(expected):
+        raise _gateway_error("caller-selected Gateway store path rejected")
+    return _safe_store_path(path)
+
+
+def _launchctl_observation(*, runner: Callable[..., Any] | None = None) -> dict[str, Any]:
+    run = runner or (lambda *args: subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE))
+    command = ("launchctl", "print", f"{UID_TARGET}/{GATEWAY_LABEL}")
+    result = run(*command)
+    code = getattr(result, "returncode", 0)
+    output = str(getattr(result, "stdout", "") or "")
+    if code not in (0, None):
+        if _legacy_absent_service(result, command):
+            return {"loaded": False, "pid": None, "service_loaded": False}
+        raise _gateway_error("Gateway service observation failed")
+    match = re.search(r"\bpid\s*=\s*(\d+)", output)
+    return {"loaded": True, "service_loaded": True, "pid": int(match.group(1)) if match else None}
+
+
+def observe_gateway_quiescence() -> dict[str, Any]:
+    """Read the manager-owned durable quiescence receipt; never trust request input."""
+    path = _safe_store_path(GATEWAY_EVIDENCE_STORE)
+    try:
+        value = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        raise _gateway_error("Gateway quiescence evidence unavailable", exc) from exc
+    if not isinstance(value, Mapping) or value.get("disposition") not in {"drained", "held", "reconciled"}:
+        raise _gateway_error("Gateway quiescence evidence malformed")
+    required = ("lifecycle_state", "assist_state", "evidence_sha256", "reacquisition_receipt")
+    if any(not value.get(key) for key in required):
+        raise _gateway_error("Gateway quiescence evidence incomplete")
+    return dict(value)
+
+
+def collect_gateway_observation(request: GatewayDeploymentRequest, *, observation_time: str | None = None,
+                                runner: Callable[..., Any] | None = None,
+                                token_loader: Callable[[], str] | None = None) -> dict[str, Any]:
+    """Collect all preflight evidence from fixed manager-owned observations."""
+    validate_request(request)
+    profile = request.current
+    plist_path = Path(profile.repository.plist)
+    try:
+        plist_bytes = plist_path.read_bytes()
+        parsed = plistlib.loads(plist_bytes)
+    except (OSError, ValueError, plistlib.InvalidFileException) as exc:
+        raise _gateway_error("Gateway plist observation failed", exc) from exc
+    if not isinstance(parsed, Mapping):
+        raise _gateway_error("Gateway plist observation malformed")
+    args = parsed.get("ProgramArguments")
+    if (parsed.get("Label") != GATEWAY_LABEL or parsed.get("WorkingDirectory") != profile.git.root
+            or parsed.get("StandardOutPath") != profile.repository.stdout
+            or parsed.get("StandardErrorPath") != profile.repository.stderr
+            or not isinstance(args, list) or len(args) != 2
+            or args[0] != profile.interpreter.path
+            or str(args[1]) not in {GATEWAY_ENTRYPOINT, str(Path(profile.git.root) / GATEWAY_ENTRYPOINT)}
+            or parsed.get("EnvironmentVariables") != {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}):
+        raise _gateway_error("Gateway plist physical identity mismatch")
+    plist_digest = hashlib.sha256(plist_bytes).hexdigest()
+    git = {
+        "root": profile.git.root, "toplevel": _git(Path(profile.git.root), "rev-parse", "--show-toplevel"),
+        "remote": _git(Path(profile.git.root), "remote", "get-url", "origin"),
+        "head": _git(Path(profile.git.root), "rev-parse", "HEAD"),
+        "tree": _git(Path(profile.git.root), "rev-parse", "HEAD^{tree}"),
+        "clean": not bool(_git(Path(profile.git.root), "status", "--porcelain")),
+    }
+    entrypoint = Path(profile.git.root) / GATEWAY_ENTRYPOINT
+    source_hash = hashlib.sha256(entrypoint.read_bytes()).hexdigest()
+    interpreter = Path(profile.interpreter.path)
+    target = interpreter.resolve(strict=True)
+    interpreter_hash = hashlib.sha256(target.read_bytes()).hexdigest()
+    service = _launchctl_observation(runner=runner)
+    loader = token_loader or (lambda: read_secret_env().get("NEXUS_MCP_GATEWAY_TOKEN", ""))
+    token = loader()
+    if not token:
+        raise _gateway_error("Gateway observation token missing")
+    health = _http_json(GATEWAY_ENDPOINT + "/health", token=token)
+    health = health.get("result", health)
+    if not isinstance(health, Mapping):
+        raise _gateway_error("Gateway health observation malformed")
+    try:
+        artifact_digest = hashlib.sha256(Path(GATEWAY_ARTIFACT).read_bytes()).hexdigest()
+    except OSError:
+        artifact_digest = ""
+    quiescence = observe_gateway_quiescence()
+    predecessor = {
+        "plist_sha256": plist_digest, "plist_bytes_sha256": plist_digest,
+        "artifact_sha256": artifact_digest, "source_sha256": str(health.get("source_sha256") or ""),
+        "source_root": str(health.get("repo_root") or ""),
+        "source_head": str(health.get("git_head") or ""), "source_tree": str(health.get("git_tree") or ""),
+        "loaded": service.get("loaded", False), "pid": service.get("pid"),
+        "server_instance": str(health.get("server_instance") or health.get("instance_id") or ""),
+        "listener": GATEWAY_ENDPOINT, "service_loaded": service.get("service_loaded", False),
+    }
+    observed = {
+        **git, "entrypoint": GATEWAY_ENTRYPOINT, "entrypoint_sha256": source_hash,
+        "interpreter_path": profile.interpreter.path, "interpreter_resolved_path": str(target),
+        "interpreter_sha256": interpreter_hash, "interpreter_uid": target.stat().st_uid,
+        "interpreter_gid": target.stat().st_gid, "interpreter_mode": stat.filemode(target.stat().st_mode),
+        "trust_class": profile.trust_class, "repository": profile.repository.repository,
+        "stdout": profile.repository.stdout, "stderr": profile.repository.stderr,
+        "label": GATEWAY_LABEL, "plist": str(plist_path), "endpoint": GATEWAY_ENDPOINT,
+        "plist_sha256": plist_digest, "plist_bytes_sha256": plist_digest,
+        "plist_bytes_hex": plist_bytes.hex(), **service,
+        "server_instance": str(health.get("server_instance") or health.get("instance_id") or ""),
+        "source_sha256": str(health.get("source_sha256") or ""),
+        "tool_manifest_sha256": str(health.get("tool_manifest_sha256") or ""),
+        "schema_sha256": str(health.get("schema_sha256") or ""),
+        "permission_sha256": str(health.get("permission_policy_hash") or ""),
+        "action": str(health.get("action") or ""), "task_id": str(health.get("task_id") or ""),
+        "lifecycle": str(health.get("lifecycle") or health.get("lifecycle_identity") or ""),
+        "stable_artifact": {"artifact_sha256": artifact_digest},
+        "rollback_predecessor": predecessor, "listener": GATEWAY_ENDPOINT,
+        "services": [GATEWAY_LABEL], "quiescence": quiescence,
+    }
+    return observed
+
+
+def observe_gateway_physical(request: GatewayDeploymentRequest, **kwargs: Any) -> dict[str, Any]:
+    """Named physical-observation seam used by the fixed CLI adapter."""
+    return collect_gateway_observation(request, **kwargs)
+
+
+def dispatch_gateway_cli(action: str, *, request: GatewayDeploymentRequest,
+                         observed: Mapping[str, Any], observation_time: str) -> dict[str, Any]:
+    """Route only the fixed Gateway operations with manager-owned arguments."""
+    if action not in {"preflight", "reload", "install-artifact", "rollback"}:
+        raise _gateway_error("unsupported Gateway CLI action")
+    kwargs: dict[str, Any] = {"observation_time": observation_time}
+    if action == "reload":
+        kwargs.update(opener=urllib.request.urlopen,
+                      token_loader=lambda: read_secret_env()["NEXUS_MCP_GATEWAY_TOKEN"])
+    elif action == "rollback":
+        kwargs.update(predecessor_observer=observed.get("rollback_predecessor"),
+                      opener=urllib.request.urlopen,
+                      token_loader=lambda: read_secret_env()["NEXUS_MCP_GATEWAY_TOKEN"])
+    return manage_gateway(action, request=request, observed=observed, **kwargs)
 
 
 if __name__ == "__main__": raise SystemExit(main())

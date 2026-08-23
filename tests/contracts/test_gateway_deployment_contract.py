@@ -35,7 +35,7 @@ def _request():
     rollback = RollbackCapture(plist_hash, plist_hash, payload.hex(), "b"*64, "c"*64, True, server_instance="old", source_root=CURRENT_PROFILE.git.root, source_head=CURRENT_PROFILE.git.head, source_tree=CURRENT_PROFILE.git.tree, root=CURRENT_PROFILE.git.root, program_arguments_hash=canonical_hash(args), environment_hash=canonical_hash(env))
     receipt = AuthorityReceipt("owner", "receipt", issued_at="2026-08-22T00:00:00Z", expires_at="2026-08-24T00:00:00Z", request_id="r-526")
     receipt = AuthorityReceipt(**{**receipt.__dict__, "receipt_hash": canonical_hash({k: v for k, v in receipt.__dict__.items() if k != "receipt_hash"})})
-    ident = IdentityEvidence(plist_sha256="a"*64, pid=123, server_instance="old", root=CURRENT_PROFILE.git.root, head=CURRENT_PROFILE.git.head, tree=CURRENT_PROFILE.git.tree, source_sha256="b"*64, tool_manifest_sha256="c"*64, schema_sha256="d"*64, permission_sha256="e"*64, action="gateway-rebind", task_id="TASK-526-A", lifecycle="QUIESCENT", loaded=True, client_bound=True)
+    ident = IdentityEvidence(plist_sha256=plist_hash, plist_bytes_sha256=plist_hash, pid=123, server_instance="old", root=CURRENT_PROFILE.git.root, head=CURRENT_PROFILE.git.head, tree=CURRENT_PROFILE.git.tree, source_sha256="b"*64, tool_manifest_sha256="c"*64, schema_sha256="d"*64, permission_sha256="e"*64, action="gateway-rebind", task_id="TASK-526-A", lifecycle="QUIESCENT", loaded=True, client_bound=True)
     post = PostflightIdentity("new", DESIRED_PROFILE.git.root, DESIRED_PROFILE.git.head, DESIRED_PROFILE.git.tree, "f"*64, "a"*64, "b"*64, "gateway-rebind", "TASK-526-A", "QUIESCENT", True, ("gateway-rebind",), ("gateway-rebind",), True)
     values = dict(request_id="r-526", idempotency_fence="f-526", operation="reload",
         authority=receipt, current=CURRENT_PROFILE,
@@ -54,6 +54,14 @@ def test_request_hash_and_rollback_are_bound():
     assert validate_request(_request()).operation == "reload"
     request = _request()
     with pytest.raises(ContractError): validate_request(request.__class__(**{**request.__dict__, "request_hash":"0"*64}))
+
+def test_rollback_plist_hashes_both_bind_to_bytes():
+    request = _request()
+    bad = request.rollback.__class__(**{**request.rollback.__dict__, "plist_sha256": "0" * 64})
+    values = {**request.__dict__, "rollback": bad}
+    values["request_hash"] = canonical_hash({k: v for k, v in values.items() if k not in {"request_hash", "schema"}})
+    with pytest.raises(ContractError):
+        validate_request(request.__class__(**values))
 
 @pytest.mark.parametrize("previous,current", [("REQUESTED","STARTED"),("PREFLIGHTED","VERIFIED"),("VERIFIED","STARTED"),("CLIENT_BOUND","VERIFIED")])
 def test_invalid_state_transitions_fail_closed(previous,current):

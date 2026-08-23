@@ -136,7 +136,8 @@ def _strict_types(value: Any) -> None:
         return
     for item in fields(value):
         raw = getattr(value, item.name)
-        if item.name in {"uid", "gid", "mode", "pid", "sequence"} and raw is not None and (not isinstance(raw, int) or isinstance(raw, bool)):
+        numeric_fields = {"uid", "gid", "pid", "sequence"} | ({"mode"} if type(value).__name__ == "StableArtifactIdentity" else set())
+        if item.name in numeric_fields and raw is not None and (not isinstance(raw, int) or isinstance(raw, bool)):
             raise ContractError(f"{type(value).__name__}.{item.name} type mismatch")
         if item.name in {"clean", "loaded", "client_bound", "token_bound"} and not isinstance(raw, bool):
             raise ContractError(f"{type(value).__name__}.{item.name} type mismatch")
@@ -248,6 +249,7 @@ class IdentityEvidence(StrictRecord):
     loaded: bool = False
     endpoint: str = ENDPOINT
     client_bound: bool = False
+    plist_bytes_sha256: str = ""
 
 
 @dataclass(frozen=True)
@@ -258,6 +260,8 @@ class QuiescenceEvidence(StrictRecord):
     evidence_sha256: str = ""
     pending_actions: tuple[str, ...] = ()
     reacquisition_receipt: str = ""
+
+    _converters: ClassVar[Mapping[str, Any]] = {"pending_actions": lambda value: tuple(value)}
 
 
 @dataclass(frozen=True)
@@ -588,6 +592,7 @@ def validate_current_identity(identity: IdentityEvidence, profile: DeploymentPro
     expected = {
         "label": LABEL,
         "plist_sha256": None,
+        "plist_bytes_sha256": None,
         "server_instance": None,
         "root": profile.git.root,
         "head": profile.git.head,
@@ -613,6 +618,8 @@ def validate_current_identity(identity: IdentityEvidence, profile: DeploymentPro
         raise ContractError("invalid current PID")
     if not identity.loaded or not identity.client_bound:
         raise ContractError("current service/client identity not verified")
+    if identity.plist_sha256 != identity.plist_bytes_sha256:
+        raise ContractError("current plist hashes disagree")
     return identity
 
 
