@@ -43,6 +43,8 @@ def _isolated_host_authority_store(monkeypatch, tmp_path):
                 ["git", "-C", str(source_root), "rev-parse", "HEAD"], text=True
             ).strip()
             return subprocess.CompletedProcess(command, 0, f"{head}\t{g.HOST_AUTHORITY_REF}\n", "")
+        if len(command) == 7 and command[0:5] == ("git", "-C", str(source_root), "merge-base", "--is-ancestor"):
+            return subprocess.CompletedProcess(command, 0, b"", b"")
         if len(command) == 5 and command[0:4] == ("git", "-C", str(source_root), "show"):
             blob = (source_root / g.HOST_AUTHORITY_SOURCE_PATH).read_bytes()
             return subprocess.CompletedProcess(command, 0, blob, b"")
@@ -392,7 +394,7 @@ def _gateway_request(operation="reload", *, stable_artifact=None):
         RollbackCapture,
     )
 
-    payload = plistlib.dumps({"Label": g.GATEWAY_LABEL, "ProgramArguments": ["/Users/jameschen/Workspace/Nexus-new/.venv/bin/python", CURRENT_PROFILE.git.root + "/scripts/ops/nexus_mcp_gateway_http.py"], "WorkingDirectory": CURRENT_PROFILE.git.root, "StandardOutPath": "/Users/jameschen/Library/Logs/Nexus/gateway.log", "StandardErrorPath": "/Users/jameschen/Library/Logs/Nexus/gateway.err.log", "EnvironmentVariables": {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}}, fmt=plistlib.FMT_XML)
+    payload = plistlib.dumps({"Label": g.GATEWAY_LABEL, "ProgramArguments": ["/Users/jameschen/Workspace/Nexus-new/.venv/bin/python", CURRENT_PROFILE.git.root + "/scripts/ops/nexus_mcp_gateway_http.py"], "WorkingDirectory": CURRENT_PROFILE.git.root, "RunAtLoad": True, "KeepAlive": True, "StandardOutPath": "/Users/jameschen/Library/Logs/Nexus/gateway.log", "StandardErrorPath": "/Users/jameschen/Library/Logs/Nexus/gateway.err.log", "EnvironmentVariables": {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}}, fmt=plistlib.FMT_XML)
     rollback = RollbackCapture(
         hashlib.sha256(payload).hexdigest(), hashlib.sha256(payload).hexdigest(), payload.hex(),
         "b" * 64, "c" * 64, False, server_instance="old", source_root=CURRENT_PROFILE.git.root,
@@ -428,6 +430,9 @@ def _gateway_request(operation="reload", *, stable_artifact=None):
     values["authority"] = AuthorityReceipt(**{**receipt.__dict__, "receipt_hash": __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash({k: v for k, v in receipt.__dict__.items() if k != "receipt_hash"})})
     if stable_artifact is not None:
         values["stable_artifact"] = stable_artifact.__class__(**{**stable_artifact.__dict__, "authority_receipt_id": host.receipt_id})
+        host = HostEffectAuthorityReceipt(**{**host.__dict__, "final_manager_sha256": stable_artifact.artifact_sha256})
+        host = HostEffectAuthorityReceipt(**{**host.__dict__, "receipt_hash": __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash({k: v for k, v in host.__dict__.items() if k != "receipt_hash"})})
+        values["host_authority"] = host
     canonical_children = []
     for child_operation, child_effect, child_suffix in (
         ("install-artifact", EffectClass.INSTALL_ARTIFACT, "install"),
@@ -484,7 +489,7 @@ def _gateway_request(operation="reload", *, stable_artifact=None):
         source_base_merge=SOURCE_BASE_MERGE, source_base_tree=SOURCE_BASE_TREE,
         correction_merge_sha="1" * 40, correction_tree_sha="2" * 40,
         independent_acceptance_receipt_hash="3" * 64,
-        final_manager_sha256="4" * 64, current_main_sha="5" * 40,
+        final_manager_sha256=host.final_manager_sha256, current_main_sha="5" * 40,
         issued_at="2026-08-22T00:00:00Z", expires_at="2026-08-24T00:00:00Z",
         revocation_state="NOT_REVOKED", revoked_at=None, revocation_reason=None,
         receipts=tuple(canonical_children),
@@ -520,7 +525,7 @@ def _ledger_receipt(request_id="r", fence="f"):
 
 
 def _gateway_observed():
-    predecessor_payload = plistlib.dumps({"Label": g.GATEWAY_LABEL, "ProgramArguments": ["/Users/jameschen/Workspace/Nexus-new/.venv/bin/python", "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe/scripts/ops/nexus_mcp_gateway_http.py"], "WorkingDirectory": "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe", "StandardOutPath": "/Users/jameschen/Library/Logs/Nexus/gateway.log", "StandardErrorPath": "/Users/jameschen/Library/Logs/Nexus/gateway.err.log", "EnvironmentVariables": {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}}, fmt=plistlib.FMT_XML)
+    predecessor_payload = plistlib.dumps({"Label": g.GATEWAY_LABEL, "ProgramArguments": ["/Users/jameschen/Workspace/Nexus-new/.venv/bin/python", "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe/scripts/ops/nexus_mcp_gateway_http.py"], "WorkingDirectory": "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe", "RunAtLoad": True, "KeepAlive": True, "StandardOutPath": "/Users/jameschen/Library/Logs/Nexus/gateway.log", "StandardErrorPath": "/Users/jameschen/Library/Logs/Nexus/gateway.err.log", "EnvironmentVariables": {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}}, fmt=plistlib.FMT_XML)
     predecessor_hash = hashlib.sha256(predecessor_payload).hexdigest()
     return {
         "root": "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe",
@@ -530,7 +535,7 @@ def _gateway_observed():
         "tree": "f6d6c2bf0912ff4a63d3c10a089910f95eab3c12",
         "entrypoint": "scripts/ops/nexus_mcp_gateway_http.py",
         "entrypoint_sha256": "8f5fddd5c7761574da8566b5511e9107651a04687a6f656c05d5b435e9a530b1",
-        "clean": True, "interpreter_path": "/Users/jameschen/Workspace/Nexus-new/.venv/bin/python", "interpreter_resolved_path": "/Users/jameschen/.local/share/uv/python/cpython-3.14.0-macos-aarch64-none/bin/python3.14", "interpreter_sha256": "c89af0b037c601180919ca5fd8a936bd2568cbb4976f91a208c10f54c17a1b78", "interpreter_uid": 501, "interpreter_gid": 20, "interpreter_mode": "lrwxr-xr-x", "trust_class": "ROLLBACK_ONLY_OBSERVED_CURRENT", "repository": "James3014/Nexus-new", "stdout": "/Users/jameschen/Library/Logs/Nexus/gateway.log", "stderr": "/Users/jameschen/Library/Logs/Nexus/gateway.err.log", "label": g.GATEWAY_LABEL, "plist": "/Users/jameschen/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist", "endpoint": g.GATEWAY_ENDPOINT,
+        "clean": False, "interpreter_path": "/Users/jameschen/Workspace/Nexus-new/.venv/bin/python", "interpreter_resolved_path": "/Users/jameschen/.local/share/uv/python/cpython-3.14.0-macos-aarch64-none/bin/python3.14", "interpreter_sha256": "c89af0b037c601180919ca5fd8a936bd2568cbb4976f91a208c10f54c17a1b78", "interpreter_uid": 501, "interpreter_gid": 20, "interpreter_mode": "lrwxr-xr-x", "trust_class": "ROLLBACK_ONLY_OBSERVED_CURRENT", "repository": "James3014/Nexus-new", "stdout": "/Users/jameschen/Library/Logs/Nexus/gateway.log", "stderr": "/Users/jameschen/Library/Logs/Nexus/gateway.err.log", "label": g.GATEWAY_LABEL, "plist": "/Users/jameschen/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist", "endpoint": g.GATEWAY_ENDPOINT,
         "plist_sha256": predecessor_hash, "plist_bytes_sha256": predecessor_hash, "plist_bytes_hex": predecessor_payload.hex(), "loaded": True, "pid": 123, "server_instance": "old", "source_sha256": "b"*64, "tool_manifest_sha256": "c"*64, "schema_sha256": "d"*64, "permission_sha256": "e"*64, "action": "gateway-rebind", "task_id": "TASK-526-A", "lifecycle": "QUIESCENT", "stable_artifact": {"artifact_sha256": "f"*64}, "rollback_predecessor": {"plist_sha256": predecessor_hash, "artifact_sha256": "b"*64, "source_sha256": "c"*64}, "listener": g.GATEWAY_ENDPOINT, "services": [g.GATEWAY_LABEL],
         "quiescence": {"disposition": "reconciled", "lifecycle_state": "QUIESCENT", "assist_state": "QUIESCENT", "evidence_sha256": "1"*64, "reacquisition_receipt": "reacq"},
     }
@@ -1027,6 +1032,7 @@ def test_rollback_rejects_altered_plist_and_restores_unloaded_predecessor(monkey
         "Label": g.GATEWAY_LABEL,
         "ProgramArguments": ["/Users/jameschen/Workspace/Nexus-new/.venv/bin/python", "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe/scripts/ops/nexus_mcp_gateway_http.py"],
         "WorkingDirectory": "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe",
+        "RunAtLoad": True, "KeepAlive": True,
         "StandardOutPath": "/Users/jameschen/Library/Logs/Nexus/gateway.log", "StandardErrorPath": "/Users/jameschen/Library/Logs/Nexus/gateway.err.log",
         "EnvironmentVariables": {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"},
     }, fmt=plistlib.FMT_XML)

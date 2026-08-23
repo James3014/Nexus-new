@@ -44,6 +44,8 @@ def _request():
     payload = plistlib.dumps(
         {
             "Label": "com.nexus.mcp.gateway.direct",
+            "RunAtLoad": True,
+            "KeepAlive": True,
             "ProgramArguments": [
                 "/Users/jameschen/Workspace/Nexus-new/.venv/bin/python",
                 CURRENT_PROFILE.git.root + "/scripts/ops/nexus_mcp_gateway_http.py",
