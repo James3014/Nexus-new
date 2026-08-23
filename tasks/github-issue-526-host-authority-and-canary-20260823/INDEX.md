@@ -14,14 +14,15 @@ auto_chain: false
 | 2 | `TASK-526-C-RECEIPT-BUNDLE` | MERGED | `42a9df063963c3b9e7b8ad99128fc0bc13ae40b5511a4cdd66ce73a1bf40c9e3` | main `7c2e7970` |
 | 3 | `TASK-526-D-HOST-CARD-SHA-REBIND r1` | SUPERSEDED | `f1c8df0cd66349a3c185e3fe12f074ee5d5e31e56c413a57453da5afed9cf350` | historical attempt Card SHA `a5f0fc12`; superseded by r2 after operations-fixture evidence |
 | 4 | `TASK-526-D-HOST-CARD-SHA-REBIND r2` | MERGED | `c386446703e0b626b0c32a1cd58670c7561e5a209f1ccb25fc0c2251fddf5073` | main `ae8fddc1` |
-| 5 | `TASK-526-E-PREISSUANCE-CONTRACT-RECONCILIATION` | ACTIVE | `e131e0b251e1d053ea9daddda218becc52b0e2b9e73f67ab0e82c661e810c047` | exhaustive source/physical pre-issuance audit |
-| 6 | `TASK-526-HOST-1` | BLOCKED | `f4c581f0062c6b3d65c9ca8f7029a96caa76b2e35d95cc6bccae874c0945f514` | exact accepted/merged E correction + acceptance receipt + Git-tracked/CAS-merged bundle |
+| 5 | `TASK-526-E-PREISSUANCE-CONTRACT-RECONCILIATION` | MERGED | `e131e0b251e1d053ea9daddda218becc52b0e2b9e73f67ab0e82c661e810c047` | main `6e261f22` |
+| 6 | `TASK-526-F-BUNDLE-PROFILE-HASH-BINDING` | ACTIVE | `608d22db9d3235c12a9f034561e179776be9aa8275b5c48f6dc2ff04f1fcf242` | adversarial issuance review found standalone profile-hash gap |
+| 7 | `TASK-526-HOST-1` | BLOCKED | `f4c581f0062c6b3d65c9ca8f7029a96caa76b2e35d95cc6bccae874c0945f514` | exact accepted/merged F correction + acceptance receipt + Git-tracked/CAS-merged bundle |
 
 ## Execution frontier
 
-Only `TASK-526-E-PREISSUANCE-CONTRACT-RECONCILIATION` is dispatchable. It may
-produce one four-file source/test Candidate and must stop. The host Card cannot
-mutate repository or host state until E is independently accepted/merged and the
+Only `TASK-526-F-BUNDLE-PROFILE-HASH-BINDING` is dispatchable. It may produce
+one two-file source/test Candidate and must stop. The host Card cannot mutate
+repository or host state until F is independently accepted/merged and the
 separate exact bundle issuance PR is merged/read back.
 
 The Gateway-only local canary performs zero DevSpace effects. The future
