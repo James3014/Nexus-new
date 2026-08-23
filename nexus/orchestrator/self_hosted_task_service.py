@@ -5617,7 +5617,25 @@ class SelfHostedTaskService:
         # attempt/card identity before minting fresh retry transport IDs.
         predecessor_dispatch: Optional[dict[str, Any]] = None
         demands, admission = _workforce_dispatch_inputs(request)
-        if demands is not None or admission is not None:
+        envelope_present = (
+            request.get("canonical_dispatch_envelope") is not None
+            or state.get("canonical_dispatch_envelope") is not None
+        )
+        if envelope_present:
+            for envelope_source in (request, state):
+                if (
+                    "canonical_dispatch_envelope" in envelope_source
+                    and not isinstance(envelope_source.get("canonical_dispatch_envelope"), Mapping)
+                ):
+                    return {
+                        **state,
+                        "retry": {
+                            **retry_meta,
+                            "decision": "BLOCK",
+                            "blocker": "WORKFORCE_DISPATCH_ENVELOPE_INVALID",
+                        },
+                    }
+        if envelope_present or demands is not None or admission is not None:
             predecessor_request = dict(request)
             predecessor_request.update(
                 task_id=str(state.get("task_id") or ""),

@@ -7549,6 +7549,16 @@ def test_m3c_nonrepair_retry_rebinds_workforce_envelope_without_launching_provid
     assert fresh_envelope["worker_id"] == old_envelope["worker_id"]
     assert fresh_envelope["provider"] == old_envelope["provider"]
     assert fresh_envelope["model"] == old_envelope["model"]
+    fresh_binding = validate_workforce_dispatch_binding(durable["request"])
+    expected_envelope = build_canonical_dispatch_envelope(
+        durable["request"]["planner_output"],
+        {**fresh_binding, "demand_id": fresh_binding["demand_id"]},
+        task_id=durable["task_id"],
+        attempt_id=durable["attempt_id"],
+        task_card_path=durable["task_card_path"],
+        task_card_hash=durable["task_card_hash"],
+    ).to_dict()
+    assert fresh_envelope == expected_envelope
     for field, value in authority_snapshot.items():
         if field in {"request", "workforce_dispatch"}:
             continue
@@ -7587,6 +7597,53 @@ def test_m3c_nonrepair_retry_rejects_restored_stale_predecessor_envelope(
 
     assert result["retry"]["decision"] == "BLOCK"
     assert result["retry"]["blocker"] == "WORKFORCE_DISPATCH_ENVELOPE_MISMATCH"
+    assert service._read_state(task_id)["attempts"] == state["attempts"]
+
+
+@pytest.mark.parametrize(
+    "fault",
+    ["non_mapping", "cross_task", "card_drift", "missing_bindings"],
+)
+def test_m3c_nonrepair_retry_workforce_envelope_faults_block_before_launch(
+    tmp_path, monkeypatch, fault
+):
+    task_id = f"m3c-nonrepair-envelope-{fault}"
+    service, _, old_envelope, _, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=task_id,
+        acceptance_decision="NOT_REPAIRABLE",
+    )
+    state = service._read_state(task_id)
+    if fault == "non_mapping":
+        state["request"]["canonical_dispatch_envelope"] = ["malformed"]
+    elif fault == "cross_task":
+        state["canonical_dispatch_envelope"] = {**old_envelope, "task_id": "other-task"}
+        state["request"]["canonical_dispatch_envelope"] = copy.deepcopy(
+            state["canonical_dispatch_envelope"]
+        )
+    elif fault == "card_drift":
+        state["canonical_dispatch_envelope"] = {**old_envelope, "task_card_hash": "f" * 64}
+        state["request"]["canonical_dispatch_envelope"] = copy.deepcopy(
+            state["canonical_dispatch_envelope"]
+        )
+    else:
+        state["request"].pop("workforce_demands", None)
+        state["request"].pop("workforce_admission", None)
+    service._write_state(task_id, state)
+    monkeypatch.setattr(service, "_launch_worker", lambda *_: pytest.fail("launch must not run"))
+
+    result = service.retry_task(task_id)
+
+    assert result["retry"]["decision"] == "BLOCK"
+    expected = (
+        "WORKFORCE_DISPATCH_ENVELOPE_INVALID"
+        if fault == "non_mapping"
+        else "WORKFORCE_ADMISSION_BINDING_MISSING"
+        if fault == "missing_bindings"
+        else "WORKFORCE_DISPATCH_ENVELOPE_MISMATCH"
+    )
+    assert result["retry"]["blocker"] == expected
     assert service._read_state(task_id)["attempts"] == state["attempts"]
 
 
