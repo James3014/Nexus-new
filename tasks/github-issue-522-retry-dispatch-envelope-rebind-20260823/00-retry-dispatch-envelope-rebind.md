@@ -32,6 +32,29 @@ exact `ALLOW` for the selected worker/provider/model/role/context/scope and
 the provider transport is independently runnable. Implementer output is never
 its own acceptance evidence. `AUTO_CHAIN=false`.
 
+### Workforce reconciliation
+
+- Issue guidance role: `primary_implementer`
+- Issue guidance class: `ROLE_ONLY`
+- Issue-time admission state: `NOT_OBSERVED`
+- Dispatch-time bounded role: `fast_bounded_implementation`
+- Dispatch candidate: `agy_flash / agy / gemini-3.6-flash-high / L2`
+- Preliminary role-fit receipt: `ALLOW` at predecessor Card HEAD
+  `f5a984d3`, policy hash
+  `a1917b29d890c553fcf9fad1ea1eb3d0fdf7a88e917dad3d478fe2e1bb5e35c2`
+- Preliminary receipt artifact:
+  `/private/tmp/issue522_admission_f5a984d3.json`
+- Fresh post-correction admission required: `true`; the preliminary receipt
+  is evidence for role fit only and cannot authorize dispatch after Card drift
+- Provider preflight: model advertised by Agy CLI 1.1.19; private-source export
+  permission remains a separate required gate
+
+The narrower dispatch role is permitted only because the physical task is
+frozen to one production file, one test file, deterministic acceptance, and
+independent verification. If scouting or implementation requires wider
+authority, scope, lifecycle semantics, or architecture, stop with
+`WORKER_ESCALATION_REQUIRED`; do not widen this card.
+
 ## Root cause
 
 `_retry_request()` mints fresh `attempt_id`, `action_id`, and
@@ -88,7 +111,9 @@ Create none. Delete none. Do not edit Task Cards during implementation.
 uv run pytest -q tests/nexus/orchestrator/test_self_hosted_task_service.py -k retry
 uv run pytest -q tests/nexus/orchestrator/test_self_hosted_task_service.py
 git diff --check
-git diff --name-status
+git diff --cached --check
+git diff --cached --name-status
+git diff --name-status 7ad264e1c12a2b4d3896b4cdeec68688acf034f7...HEAD
 ```
 
 Before commit, inspect tracked/staged deletions, diff stats, and full staged

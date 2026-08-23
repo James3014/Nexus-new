@@ -39,6 +39,12 @@ Before dispatch: exact card hash readback, clean isolated branch, fresh
 Workforce Admission for the exact worker/model/role/scope, executable provider
 preflight, and `AUTO_CHAIN=false`.
 
+Issue-time guidance remains `primary_implementer / ROLE_ONLY`. Dispatch-time
+reconciliation may use the narrower admitted
+`fast_bounded_implementation` role only when the exact two-path scope remains
+unchanged and a fresh machine receipt returns `ALLOW`; this is worker
+eligibility, not a change to Issue semantics or lifecycle authority.
+
 Before acceptance: exact Candidate head/base/diff, all card verifiers,
 fresh-envelope positive control, stale-envelope zero-launch negative control,
 two-path/deletion audit, and independent review.
