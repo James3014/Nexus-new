@@ -883,6 +883,10 @@ def validate_host_effect_authority(
         (receipt.desired_profile_hash, "desired profile", 64),
     ):
         _hash(value, name, length)
+    if receipt.current_profile_hash != canonical_hash(CURRENT_PROFILE):
+        raise ContractError("host authority current_profile_hash mismatch")
+    if receipt.desired_profile_hash != canonical_hash(DESIRED_PROFILE):
+        raise ContractError("host authority desired_profile_hash mismatch")
     _validate_revocation_fields(
         receipt.revocation_state,
         receipt.revoked_at,
