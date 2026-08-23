@@ -24,7 +24,17 @@ This Card consumes:
 - `ISSUE526_G0_SUPERVISOR_REACHABILITY_SERIALIZE_AFTER_398`;
 - `ISSUE526_GATEWAY_REBIND_CONTROL_PLANE_G0_FROZEN`;
 - `ISSUE526_SLICE_A_HARD_BLOCK_CARD_REDESIGN_REQUIRED`;
-- current Owner approval for this superseding four-file scope.
+- Goal v7 objective SHA-256
+  `5d60d07646fc8b07635e9a769f228d79bbfe3d1d481904ea87d8d89949b2b19e`,
+  whose Goal-preserving replan rule explicitly permits this bounded scope
+  supersession without another semantic decision;
+- current Owner message `都同意，繼續` in source thread
+  `01a02a17-691c-7a20-ad0f-9166456416dc` on 2026-08-23;
+- canonical standing-grant inspection status `VALID`, grant
+  `OWNER_STANDING_COORDINATOR_20260818_DURABLE_GITHUB_WORKFLOW`, receipt
+  SHA-256
+  `3b8895f093692257d6225fbb8150b34f520e667d250c7817ad120cefd42751d5`,
+  valid through `2026-09-17T09:25:00+00:00`.
 
 It authorizes one source/test Candidate only. It does not authorize stable
 artifact installation, LaunchAgent adoption/reload/rollback, DevSpace mutation,
@@ -40,6 +50,68 @@ manager artifact identity, Gateway-only preflight/effect/postflight/rollback,
 inter-process crash-safe fencing, physical lifecycle quiescence, authenticated
 MCP client binding, and desired-versus-loaded reconciliation without creating
 a generic process manager or second authority.
+
+## Frozen physical deployment profiles
+
+Shared immutable service profile:
+
+- repository: `James3014/Nexus-new`
+- remote: `https://github.com/James3014/Nexus-new.git`
+- label: `com.nexus.mcp.gateway.direct`
+- plist:
+  `/Users/jameschen/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist`
+- current plist SHA-256:
+  `082c7786f9b7254949a6fdb38d905414a78c1b1979aabf7f434dd7019c09e100`
+- stdout: `/Users/jameschen/Library/Logs/Nexus/gateway.log`
+- stderr: `/Users/jameschen/Library/Logs/Nexus/gateway.err.log`
+- endpoint: `http://127.0.0.1:8766`
+- interpreter link:
+  `/Users/jameschen/Workspace/Nexus-new/.venv/bin/python`
+- interpreter resolved path:
+  `/Users/jameschen/.local/share/uv/python/cpython-3.14.0-macos-aarch64-none/bin/python3.14`
+- interpreter content SHA-256:
+  `c89af0b037c601180919ca5fd8a936bd2568cbb4976f91a208c10f54c17a1b78`
+- interpreter owner/mode observation: uid `501`, gid `20`, symlink mode
+  `lrwxr-xr-x`; target file executable identity must be re-read before effect.
+
+Current/rollback profile:
+
+- root and Git toplevel:
+  `/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe`
+- HEAD: `67521fe91e990f4e140642984c743dd50a408e84`
+- tree: `f6d6c2bf0912ff4a63d3c10a089910f95eab3c12`
+- entrypoint:
+  `/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe/scripts/ops/nexus_mcp_gateway_http.py`
+- entrypoint SHA-256:
+  `8f5fddd5c7761574da8566b5511e9107651a04687a6f656c05d5b435e9a530b1`
+- current process: PID `24474`, server instance
+  `1433310d5f0f4831a1c48785cde2b3bc`
+- current tool manifest:
+  `ad47960675b2b96680c3988be7ed3e9af0eaf34260ece54cc7d10bbb4daddcc7`
+- current full schema:
+  `5cda65f887c3b5160915edd9ed2f0acb37f1e990d6c760439427532344a79d85`
+- current permission policy:
+  `45910e1e37069abf3d5b01f15196548da094e2fc6b71cf8a6136e8cdf9fd71cf`
+- trust class: `ROLLBACK_ONLY_OBSERVED_CURRENT`; the worktree contains four
+  untracked copied Task directories and is not a clean desired target.
+
+Desired canary profile:
+
+- root and Git toplevel:
+  `/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-935a9dd3`
+- HEAD: `7ad264e1c12a2b4d3896b4cdeec68688acf034f7`
+- tree: `b9057f8ef736fb6d3cd30da983f33f5f61fb86e9`
+- entrypoint:
+  `/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-935a9dd3/scripts/ops/nexus_mcp_gateway_http.py`
+- entrypoint SHA-256:
+  `8f5fddd5c7761574da8566b5511e9107651a04687a6f656c05d5b435e9a530b1`
+- cleanliness observation: clean
+- trust class: `EXPLICIT_DESIRED_CANARY`.
+
+All profile facts are dispatch-preparation evidence only. Re-read exact root,
+Git identity, interpreter, plist, process, server, source, action, and
+permission identity immediately before any host effect. Profile drift fails
+closed; it never silently selects a newer main.
 
 ## Exact mutation scope
 
