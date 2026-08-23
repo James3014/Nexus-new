@@ -920,6 +920,11 @@ def validate_host_effect_authority_bundle(
         seen_request_ids.add(receipt.request_id)
         seen_fences.add(receipt.idempotency_fence)
         if receipt.revocation_state == "REVOKED":
+            if (
+                receipt.revoked_at != bundle.revoked_at
+                or receipt.revocation_reason != bundle.revocation_reason
+            ):
+                raise ContractError("host authority bundle revoked child fields mismatch")
             revoked_children += 1
         elif receipt.revoked_at is not None or receipt.revocation_reason is not None:
             raise ContractError("host authority bundle child revocation fields mismatch")

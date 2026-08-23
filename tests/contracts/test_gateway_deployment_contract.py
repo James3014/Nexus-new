@@ -251,6 +251,39 @@ def _bundle_fixture(*, revoked=False, child_revoked=False):
     })
 
 
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("revoked_at", "2026-08-23T00:00:01Z"),
+        ("revocation_reason", "reviewer"),
+    ],
+)
+def test_revoked_child_fields_must_equal_bundle(field, replacement):
+    bundle = _bundle_fixture(revoked=True, child_revoked=True)
+    index = next(i for i, receipt in enumerate(bundle.receipts) if receipt.operation == "reload")
+    child = HostEffectAuthorityReceipt(**{
+        **bundle.receipts[index].__dict__,
+        field: replacement,
+    })
+    child = HostEffectAuthorityReceipt(**{
+        **child.__dict__,
+        "receipt_hash": canonical_hash({
+            k: v for k, v in child.__dict__.items() if k != "receipt_hash"
+        }),
+    })
+    receipts = tuple(child if i == index else receipt for i, receipt in enumerate(bundle.receipts))
+    altered = HostEffectAuthorityBundle(**{**bundle.__dict__, "receipts": receipts})
+    altered = HostEffectAuthorityBundle(**{
+        **altered.__dict__,
+        "bundle_hash": canonical_hash({
+            k: v for k, v in altered.__dict__.items() if k != "bundle_hash"
+        }),
+    })
+
+    with pytest.raises(ContractError, match="revoked child fields mismatch"):
+        validate_host_effect_authority_bundle(altered)
+
+
 def test_bundle_is_exactly_ordered_three_child_hash_sealed():
     bundle = _bundle_fixture()
     assert tuple(child.operation for child in bundle.receipts) == (
