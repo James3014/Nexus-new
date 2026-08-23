@@ -339,24 +339,31 @@ def _gateway_request(operation="reload", *, stable_artifact=None):
         EffectClass,
         GatewayDeploymentRequest,
         IdentityEvidence,
+        PostflightIdentity,
         QuiescenceEvidence,
         RollbackCapture,
     )
 
-    payload = b"<plist><dict><key>Label</key><string>com.nexus.mcp.gateway.direct</string></dict></plist>"
+    payload = plistlib.dumps({"Label": g.GATEWAY_LABEL, "ProgramArguments": ["/Users/jameschen/Workspace/Nexus-new/.venv/bin/python", CURRENT_PROFILE.git.root + "/scripts/ops/nexus_mcp_gateway_http.py"], "WorkingDirectory": CURRENT_PROFILE.git.root, "StandardOutPath": "/Users/jameschen/Library/Logs/Nexus/gateway.log", "StandardErrorPath": "/Users/jameschen/Library/Logs/Nexus/gateway.err.log", "EnvironmentVariables": {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}}, fmt=plistlib.FMT_XML)
     rollback = RollbackCapture(
         hashlib.sha256(payload).hexdigest(), hashlib.sha256(payload).hexdigest(), payload.hex(),
-        "b" * 64, "c" * 64, False,
+        "b" * 64, "c" * 64, False, server_instance="old", source_root=CURRENT_PROFILE.git.root,
+        source_head=CURRENT_PROFILE.git.head, source_tree=CURRENT_PROFILE.git.tree, root=CURRENT_PROFILE.git.root,
+        program_arguments_hash=__import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(["/Users/jameschen/Workspace/Nexus-new/.venv/bin/python", CURRENT_PROFILE.git.root + "/scripts/ops/nexus_mcp_gateway_http.py"]),
+        environment_hash=__import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash({"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}),
     )
     effect = {"reload": EffectClass.GATEWAY_RELOAD, "install-artifact": EffectClass.INSTALL_ARTIFACT}[operation]
     values = {
         "request_id": "r-526", "idempotency_fence": "f-526", "operation": operation,
-        "authority": AuthorityReceipt("owner", "receipt", request_id="r-526"),
+        "authority": AuthorityReceipt("owner", "receipt", issued_at="2026-08-22T00:00:00Z", expires_at="2026-08-24T00:00:00Z", request_id="r-526"),
         "current": CURRENT_PROFILE, "desired": DESIRED_PROFILE,
-        "current_identity": IdentityEvidence(), "rollback": rollback,
-        "quiescence": QuiescenceEvidence("reconciled"), "postflight": {"server_instance": "new"},
+        "current_identity": IdentityEvidence(plist_sha256="a"*64, pid=123, server_instance="old", root=CURRENT_PROFILE.git.root, head=CURRENT_PROFILE.git.head, tree=CURRENT_PROFILE.git.tree, source_sha256="b"*64, tool_manifest_sha256="c"*64, schema_sha256="d"*64, permission_sha256="e"*64, action="gateway-rebind", task_id="TASK-526-A", lifecycle="QUIESCENT", loaded=True, client_bound=True), "rollback": rollback,
+        "quiescence": QuiescenceEvidence("reconciled", "QUIESCENT", "QUIESCENT", "1"*64, (), "reacq"), "postflight": PostflightIdentity("new", DESIRED_PROFILE.git.root, DESIRED_PROFILE.git.head, DESIRED_PROFILE.git.tree, "f"*64, "a"*64, "b"*64, "gateway-rebind", "TASK-526-A", "QUIESCENT", True, ("gateway-rebind",), ("gateway-rebind",), True),
         "effect_class": effect,
+        "stable_artifact": stable_artifact,
     }
+    receipt = values["authority"]
+    values["authority"] = AuthorityReceipt(**{**receipt.__dict__, "receipt_hash": __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash({k: v for k, v in receipt.__dict__.items() if k != "receipt_hash"})})
     if stable_artifact is not None:
         values["stable_artifact"] = stable_artifact
     values["request_hash"] = __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(values)
@@ -364,6 +371,8 @@ def _gateway_request(operation="reload", *, stable_artifact=None):
 
 
 def _gateway_observed():
+    predecessor_payload = plistlib.dumps({"Label": g.GATEWAY_LABEL, "ProgramArguments": ["/Users/jameschen/Workspace/Nexus-new/.venv/bin/python", "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe/scripts/ops/nexus_mcp_gateway_http.py"], "WorkingDirectory": "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe", "StandardOutPath": "/Users/jameschen/Library/Logs/Nexus/gateway.log", "StandardErrorPath": "/Users/jameschen/Library/Logs/Nexus/gateway.err.log", "EnvironmentVariables": {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}}, fmt=plistlib.FMT_XML)
+    predecessor_hash = hashlib.sha256(predecessor_payload).hexdigest()
     return {
         "root": "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe",
         "toplevel": "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe",
@@ -372,25 +381,26 @@ def _gateway_observed():
         "tree": "f6d6c2bf0912ff4a63d3c10a089910f95eab3c12",
         "entrypoint": "scripts/ops/nexus_mcp_gateway_http.py",
         "entrypoint_sha256": "8f5fddd5c7761574da8566b5511e9107651a04687a6f656c05d5b435e9a530b1",
-        "label": g.GATEWAY_LABEL, "plist": str(g.GATEWAY_PLIST), "endpoint": g.GATEWAY_ENDPOINT,
-        "quiescence": {"disposition": "reconciled"},
+        "clean": True, "interpreter_path": "/Users/jameschen/Workspace/Nexus-new/.venv/bin/python", "interpreter_resolved_path": "/Users/jameschen/.local/share/uv/python/cpython-3.14.0-macos-aarch64-none/bin/python3.14", "interpreter_sha256": "c89af0b037c601180919ca5fd8a936bd2568cbb4976f91a208c10f54c17a1b78", "interpreter_uid": 501, "interpreter_gid": 20, "interpreter_mode": "lrwxr-xr-x", "trust_class": "ROLLBACK_ONLY_OBSERVED_CURRENT", "repository": "James3014/Nexus-new", "stdout": "/Users/jameschen/Library/Logs/Nexus/gateway.log", "stderr": "/Users/jameschen/Library/Logs/Nexus/gateway.err.log", "label": g.GATEWAY_LABEL, "plist": "/Users/jameschen/Library/LaunchAgents/com.nexus.mcp.gateway.direct.plist", "endpoint": g.GATEWAY_ENDPOINT,
+        "plist_sha256": "a"*64, "plist_bytes_sha256": predecessor_hash, "plist_bytes_hex": predecessor_payload.hex(), "loaded": True, "pid": 123, "server_instance": "old", "source_sha256": "b"*64, "tool_manifest_sha256": "c"*64, "schema_sha256": "d"*64, "permission_sha256": "e"*64, "action": "gateway-rebind", "task_id": "TASK-526-A", "lifecycle": "QUIESCENT", "stable_artifact": {"artifact_sha256": "f"*64}, "rollback_predecessor": {"plist_sha256": predecessor_hash, "artifact_sha256": "b"*64, "source_sha256": "c"*64}, "listener": g.GATEWAY_ENDPOINT, "services": [g.GATEWAY_LABEL],
+        "quiescence": {"disposition": "reconciled", "lifecycle_state": "QUIESCENT", "assist_state": "QUIESCENT", "evidence_sha256": "1"*64, "reacquisition_receipt": "reacq"},
     }
 
 
 def test_gateway_preflight_requires_exact_current_identity(monkeypatch, tmp_path):
     monkeypatch.setattr(g, "GATEWAY_PLIST", tmp_path / "gateway.plist")
     request = _gateway_request()
-    assert g.preflight_gateway(request, observed=_gateway_observed())["state"] == "PREFLIGHTED"
+    assert g.preflight_gateway(request, observed=_gateway_observed(), observation_time="2026-08-23T00:00:00Z")["state"] == "PREFLIGHTED"
     bad = _gateway_observed(); bad["head"] = "0" * 40
     with pytest.raises(g.GatewayContractError):
-        g.preflight_gateway(request, observed=bad)
+        g.preflight_gateway(request, observed=bad, observation_time="2026-08-23T00:00:00Z")
 
 
 def test_gateway_ledger_chain_tamper_and_cas_fail_closed(tmp_path):
     ledger = g.GatewayLedger(tmp_path / "ledger.jsonl")
-    first = ledger.append(request_id="r", request_hash="a" * 64, state="STARTED")
+    first = ledger.append(request_id="r", request_hash="a" * 64, state="REQUESTED")
     with pytest.raises(g.GatewayContractError):
-        ledger.append(request_id="r2", request_hash="b" * 64, state="SERVICE_OBSERVED", expected_tail="0" * 64)
+        ledger.append(request_id="r2", request_hash="b" * 64, state="REQUESTED", expected_tail="0" * 64)
     path = tmp_path / "ledger.jsonl"
     path.write_text(path.read_text().replace(first["record_hash"], "0" * 64))
     with pytest.raises(g.LedgerCorruption):
@@ -415,7 +425,8 @@ def test_gateway_reload_writes_only_fixed_service_and_requires_postflight(monkey
     result = g.gateway_reload(
         request, observed=_gateway_observed(), runner=runner,
         plist_path=g.GATEWAY_PLIST, ledger=g.GatewayLedger(tmp_path / "ledger.jsonl"),
-        postflight=lambda: {"server_instance": "new"},
+        postflight=lambda: request.postflight,
+        observation_time="2026-08-23T00:00:00Z",
     )
     assert result["state"] == "VERIFIED"
     assert all(g.GATEWAY_LABEL in " ".join(map(str, call)) or "gateway.plist" in " ".join(map(str, call)) for call in calls)
@@ -428,8 +439,13 @@ def test_rollback_rejects_altered_plist_and_restores_unloaded_predecessor(monkey
     payload = plistlib.dumps({
         "Label": g.GATEWAY_LABEL,
         "ProgramArguments": ["/Users/jameschen/Workspace/Nexus-new/.venv/bin/python", "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe/scripts/ops/nexus_mcp_gateway_http.py"],
+        "WorkingDirectory": "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe",
+        "StandardOutPath": "/Users/jameschen/Library/Logs/Nexus/gateway.log", "StandardErrorPath": "/Users/jameschen/Library/Logs/Nexus/gateway.err.log",
+        "EnvironmentVariables": {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"},
     }, fmt=plistlib.FMT_XML)
-    capture = RollbackCapture(hashlib.sha256(payload).hexdigest(), hashlib.sha256(payload).hexdigest(), payload.hex(), "b" * 64, "c" * 64, False)
+    args = ["/Users/jameschen/Workspace/Nexus-new/.venv/bin/python", "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe/scripts/ops/nexus_mcp_gateway_http.py"]
+    env = {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}
+    capture = RollbackCapture(hashlib.sha256(payload).hexdigest(), hashlib.sha256(payload).hexdigest(), payload.hex(), "b" * 64, "c" * 64, False, server_instance="old", source_root="/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe", source_head="67521fe91e990f4e140642984c743dd50a408e84", source_tree="f6d6c2bf0912ff4a63d3c10a089910f95eab3c12", root="/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe", program_arguments_hash=__import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(args), environment_hash=__import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash(env))
     monkeypatch.setattr(g, "GATEWAY_LOCK", tmp_path / "rollback.lock")
     monkeypatch.setattr(g, "GATEWAY_PLIST", tmp_path / "gateway.plist")
     out = g.rollback_gateway(capture, plist_path=g.GATEWAY_PLIST, runner=lambda *args: pytest.fail("unloaded rollback must not bootstrap"))
@@ -443,11 +459,12 @@ def test_postflight_requires_authenticated_identity_and_recomputes_manifest(monk
     tools = [{"name": "ping", "description": "bounded"}]
     manifest = hashlib.sha256(json.dumps(("ping",), separators=(",", ":"), ensure_ascii=True).encode()).hexdigest()
     schema = hashlib.sha256(json.dumps(tools, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+    from nexus.contracts.gateway_deployment import DESIRED_PROFILE
     identity = {
-        "server_instance": "new-instance", "repo_root": "desired-root", "git_head": "h" * 40,
-        "git_tree": "t" * 40, "permission_policy_hash": "p" * 64,
+        "server_instance": "new-instance", "repo_root": DESIRED_PROFILE.git.root, "git_head": DESIRED_PROFILE.git.head,
+        "git_tree": DESIRED_PROFILE.git.tree, "permission_policy_hash": "a" * 64,
         "action": "gateway-rebind", "task_id": "TASK-526-A", "lifecycle": "QUIESCENT",
-        "tool_manifest_revision": manifest, "full_tool_schema_hash": schema,
+        "tool_manifest_revision": manifest, "full_tool_schema_hash": schema, "client_bound": True, "token_bound": True,
     }
 
     class Response:
@@ -473,9 +490,9 @@ def test_postflight_requires_authenticated_identity_and_recomputes_manifest(monk
         return Response({"result": {"tools": tools}})
 
     expected = {
-        "server_instance": "new-instance", "root": "desired-root", "head": "h" * 40,
-        "tree": "t" * 40, "tool_manifest_sha256": manifest, "schema_sha256": schema,
-        "permission_sha256": "p" * 64, "action": "gateway-rebind", "task_id": "TASK-526-A",
+        "server_instance": "new-instance", "root": DESIRED_PROFILE.git.root, "head": DESIRED_PROFILE.git.head,
+        "tree": DESIRED_PROFILE.git.tree, "tool_manifest_sha256": manifest, "schema_sha256": schema,
+        "permission_sha256": "a" * 64, "action": "gateway-rebind", "task_id": "TASK-526-A",
         "lifecycle": "QUIESCENT", "required_actions": ("ping",),
     }
     result = g.postflight_gateway(expected, token="SECRET", endpoint="http://127.0.0.1:8766", opener=opener, sleeper=lambda _: None)
@@ -491,11 +508,12 @@ def test_stable_artifact_install_is_separate_and_hash_bound(tmp_path):
 
     source = tmp_path / "manager.py"
     source.write_bytes(b"stable-manager")
+    source.chmod(0o700)
     digest = hashlib.sha256(source.read_bytes()).hexdigest()
     artifact = StableArtifactIdentity(
         source_root=str(tmp_path), source_head="a" * 40, source_tree="b" * 40,
         source_path=str(source), source_blob_sha256=digest, artifact_sha256=digest,
-        uid=os.getuid(), mode=0o700, request_id="r-526",
+        uid=os.getuid(), mode=0o700, predecessor_sha256=hashlib.sha256(b"old").hexdigest(), request_id="r-526", authority_receipt_id="receipt", install_fence="fence", rollback_receipt="rollback",
     )
     # The destination is a fixed manager constant; tests isolate it by
     # replacing that constant rather than passing a caller-selected path.
@@ -503,10 +521,82 @@ def test_stable_artifact_install_is_separate_and_hash_bound(tmp_path):
     g.GATEWAY_ARTIFACT = tmp_path / "installed.py"
     request = _gateway_request("install-artifact", stable_artifact=artifact)
     try:
-        out = g.install_stable_artifact(request, source_root=tmp_path, source_path=source, artifact_path=g.GATEWAY_ARTIFACT)
+        (tmp_path / "installed.py").write_bytes(b"old"); (tmp_path / "installed.py").chmod(0o600)
+        out = g.install_stable_artifact(request, source_root=tmp_path, source_path=source, artifact_path=g.GATEWAY_ARTIFACT,
+                                        source_observer={"root": str(tmp_path), "toplevel": str(tmp_path), "remote": "https://github.com/James3014/Nexus-new.git", "head": "a"*40, "tree": "b"*40, "clean": True, "path": str(source), "blob_sha256": digest}, observation_time="2026-08-23T00:00:00Z")
     finally:
         g.GATEWAY_ARTIFACT = original_destination
     assert out["state"] == "VERIFIED" and (tmp_path / "installed.py").read_bytes() == source.read_bytes()
     source.write_bytes(b"tampered")
     with pytest.raises(g.GatewayContractError):
         g.install_stable_artifact(request, source_root=tmp_path, source_path=source, artifact_path=tmp_path / "installed-2.py")
+
+
+def test_gateway_reload_partial_postflight_is_uncertain_not_verified(monkeypatch, tmp_path):
+    monkeypatch.setattr(g, "GATEWAY_LOCK", tmp_path / "gateway.lock")
+    monkeypatch.setattr(g, "GATEWAY_PLIST", tmp_path / "gateway.plist")
+    request = _gateway_request()
+    class Result:
+        returncode = 0; stdout = ""; stderr = ""
+    with pytest.raises(g.GatewayContractError, match="uncertain"):
+        g.gateway_reload(request, observed=_gateway_observed(), runner=lambda *args: Result(),
+                          ledger=g.GatewayLedger(tmp_path / "ledger.jsonl"),
+                          postflight=lambda: {"server_instance": "new"}, observation_time="2026-08-23T00:00:00Z")
+    rows = g.GatewayLedger(tmp_path / "ledger.jsonl").read()
+    assert rows[-1]["state"] == "UNCERTAIN_EFFECT"
+    assert not any(row["state"] == "VERIFIED" for row in rows)
+
+
+def test_gateway_reload_wrong_typed_identity_is_uncertain(monkeypatch, tmp_path):
+    monkeypatch.setattr(g, "GATEWAY_LOCK", tmp_path / "gateway.lock")
+    monkeypatch.setattr(g, "GATEWAY_PLIST", tmp_path / "gateway.plist")
+    request = _gateway_request()
+    wrong = request.postflight.__class__("new", "/wrong", request.postflight.head, request.postflight.tree,
+        request.postflight.tool_manifest_sha256, request.postflight.schema_sha256, request.postflight.permission_sha256,
+        "gateway-rebind", "TASK-526-A", "QUIESCENT", True, ("gateway-rebind",), ("gateway-rebind",), True)
+    class Result:
+        returncode = 0; stdout = ""; stderr = ""
+    with pytest.raises(g.GatewayContractError):
+        g.gateway_reload(request, observed=_gateway_observed(), runner=lambda *args: Result(),
+                          ledger=g.GatewayLedger(tmp_path / "ledger.jsonl"), postflight=lambda: wrong,
+                          observation_time="2026-08-23T00:00:00Z")
+    assert g.GatewayLedger(tmp_path / "ledger.jsonl").read()[-1]["state"] == "UNCERTAIN_EFFECT"
+
+
+def test_preflight_missing_physical_evidence_fails_before_effect(monkeypatch):
+    request = _gateway_request()
+    observed = _gateway_observed(); observed.pop("plist_bytes_sha256")
+    with pytest.raises(g.GatewayContractError, match="complete fresh"):
+        g.preflight_gateway(request, observed=observed, observation_time="2026-08-23T00:00:00Z")
+
+
+def test_artifact_source_substitution_has_zero_destination_write(tmp_path):
+    from nexus.contracts.gateway_deployment import StableArtifactIdentity
+    source = tmp_path / "manager.py"; source.write_bytes(b"stable-manager"); source.chmod(0o700)
+    digest = hashlib.sha256(source.read_bytes()).hexdigest()
+    artifact = StableArtifactIdentity(str(tmp_path), "a"*40, "b"*40, str(source), digest, digest, os.getuid(), 0o700,
+        hashlib.sha256(b"old").hexdigest(), "r-526", "TASK-526-A", "receipt", "fence", "rollback")
+    old_destination = g.GATEWAY_ARTIFACT; g.GATEWAY_ARTIFACT = tmp_path / "installed.py"
+    try:
+        request = _gateway_request("install-artifact", stable_artifact=artifact)
+        with pytest.raises(g.GatewayContractError):
+            g.install_stable_artifact(request, source_root=tmp_path, source_path=source,
+                artifact_path=g.GATEWAY_ARTIFACT, source_observer={"root": "/wrong"}, observation_time="2026-08-23T00:00:00Z")
+        assert not g.GATEWAY_ARTIFACT.exists()
+    finally:
+        g.GATEWAY_ARTIFACT = old_destination
+
+
+def test_ledger_rejects_skipped_state_and_replay_conflict(tmp_path):
+    ledger = g.GatewayLedger(tmp_path / "ledger.jsonl")
+    ledger.append(request_id="r", request_hash="a" * 64, state="REQUESTED")
+    with pytest.raises(g.GatewayContractError):
+        ledger.append(request_id="r", request_hash="a" * 64, state="STARTED")
+    with pytest.raises(g.GatewayContractError):
+        ledger.append(request_id="r", request_hash="b" * 64, state="PREFLIGHTED")
+
+
+def test_cli_rejects_caller_selected_gateway_command(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["mcp_gateway_durable.py", "gateway-reload", "--operation", "launchctl"])
+    with pytest.raises(SystemExit):
+        g.main()

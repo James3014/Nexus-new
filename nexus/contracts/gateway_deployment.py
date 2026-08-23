@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import plistlib
 import re
 from dataclasses import MISSING, dataclass, field, fields, is_dataclass
+from datetime import datetime, timezone
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, ClassVar, Mapping, TypeVar
@@ -105,7 +107,9 @@ class StrictRecord:
                 except (TypeError, ValueError, KeyError) as exc:
                     raise ContractError(f"{cls.__name__}.{name} invalid") from exc
             converted[name] = raw
-        return cls(**converted)  # type: ignore[arg-type]
+        result = cls(**converted)  # type: ignore[arg-type]
+        _strict_types(result)
+        return result
 
     def model_dump(self, *, mode: str = "python") -> dict[str, Any]:
         return _plain(self)
@@ -124,6 +128,20 @@ def _plain(value: Any) -> Any:
     if isinstance(value, (tuple, list)):
         return [_plain(item) for item in value]
     return value
+
+
+def _strict_types(value: Any) -> None:
+    """Reject the common bool-as-int and collection coercions of loose schemas."""
+    if not is_dataclass(value):
+        return
+    for item in fields(value):
+        raw = getattr(value, item.name)
+        if item.name in {"uid", "gid", "mode", "pid", "sequence"} and raw is not None and (not isinstance(raw, int) or isinstance(raw, bool)):
+            raise ContractError(f"{type(value).__name__}.{item.name} type mismatch")
+        if item.name in {"clean", "loaded", "client_bound", "token_bound"} and not isinstance(raw, bool):
+            raise ContractError(f"{type(value).__name__}.{item.name} type mismatch")
+        if item.name in {"required_actions", "observed_actions", "pending_actions"} and not isinstance(raw, tuple):
+            raise ContractError(f"{type(value).__name__}.{item.name} type mismatch")
 
 
 def canonical_hash(value: Any) -> str:
@@ -294,9 +312,14 @@ class PostflightIdentity(StrictRecord):
     task_id: str
     lifecycle: str
     client_bound: bool
-    required_actions: tuple[str, ...] = ()
-    observed_actions: tuple[str, ...] = ()
-    token_bound: bool = False
+    required_actions: tuple[str, ...]
+    observed_actions: tuple[str, ...]
+    token_bound: bool
+
+    _converters: ClassVar[Mapping[str, Any]] = {
+        "required_actions": lambda value: tuple(value),
+        "observed_actions": lambda value: tuple(value),
+    }
 
 
 @dataclass(frozen=True)
@@ -325,7 +348,7 @@ class GatewayDeploymentRequest(StrictRecord):
     current_identity: IdentityEvidence
     rollback: RollbackCapture
     quiescence: QuiescenceEvidence
-    postflight: Mapping[str, str]
+    postflight: PostflightIdentity
     effect_class: EffectClass
     request_hash: str = ""
     schema: str = SCHEMA
@@ -339,6 +362,7 @@ class GatewayDeploymentRequest(StrictRecord):
         "rollback": RollbackCapture.model_validate,
         "quiescence": QuiescenceEvidence.model_validate,
         "effect_class": EffectClass,
+        "postflight": PostflightIdentity.model_validate,
         "stable_artifact": lambda value: None if value is None else StableArtifactIdentity.model_validate(value),
     }
 
@@ -360,6 +384,8 @@ def validate_profile(profile: DeploymentProfile, *, expected: DeploymentProfile 
         raise ContractError("profile must be typed")
     validate_repository(profile.repository)
     g = profile.git
+    if not isinstance(g, GitIdentity) or not isinstance(profile.interpreter, InterpreterIdentity):
+        raise ContractError("profile nested identity must be typed")
     for value, name in ((g.root, "root"), (g.toplevel, "toplevel")):
         _absolute(value, name)
     if g.root != g.toplevel or g.remote != REMOTE or g.clean is not True:
@@ -372,15 +398,16 @@ def validate_profile(profile: DeploymentProfile, *, expected: DeploymentProfile 
     _hash(profile.interpreter.sha256, "interpreter hash")
     if profile.interpreter.path != INTERPRETER or profile.interpreter.resolved_path != INTERPRETER_TARGET:
         raise ContractError("interpreter mismatch")
-    if not isinstance(profile.interpreter.uid, int) or not isinstance(profile.interpreter.gid, int):
+    if not isinstance(profile.interpreter.uid, int) or isinstance(profile.interpreter.uid, bool) or not isinstance(profile.interpreter.gid, int) or isinstance(profile.interpreter.gid, bool):
         raise ContractError("interpreter ownership mismatch")
+    if profile.interpreter.mode != "lrwxr-xr-x" or profile.interpreter.uid != 501 or profile.interpreter.gid != 20:
+        raise ContractError("interpreter mode/ownership mismatch")
     if profile.trust_class == "" or not isinstance(profile.trust_class, str):
         raise ContractError("trust class missing")
     known_profiles = globals().get("CURRENT_PROFILE"), globals().get("DESIRED_PROFILE")
     if all(item is not None for item in known_profiles):
-        identity = (g.root, g.head, g.tree)
-        if identity not in {(item.git.root, item.git.head, item.git.tree) for item in known_profiles if item is not None}:
-            raise ContractError("profile is not one of the frozen deployment identities")
+        if profile not in {item for item in known_profiles if item is not None}:
+            raise ContractError("profile differs from complete frozen deployment identity")
     if expected is not None and profile != expected:
         raise ContractError("profile differs from explicit expected identity")
     return profile
@@ -428,6 +455,8 @@ def transition(previous: DeploymentState | str, current: DeploymentState | str) 
 def _validate_rollback(capture: RollbackCapture) -> None:
     for value, name in ((capture.plist_sha256, "rollback plist"), (capture.plist_bytes_sha256, "rollback bytes"), (capture.artifact_sha256, "rollback artifact"), (capture.source_sha256, "rollback source")):
         _hash(value, name)
+    if not isinstance(capture.plist_bytes_hex, str) or not capture.plist_bytes_hex or len(capture.plist_bytes_hex) % 2:
+        raise ContractError("rollback bytes missing")
     try:
         payload = bytes.fromhex(capture.plist_bytes_hex)
     except (TypeError, ValueError) as exc:
@@ -437,8 +466,30 @@ def _validate_rollback(capture: RollbackCapture) -> None:
         raise ContractError("rollback bytes hash mismatch")
     if capture.label != LABEL or capture.interpreter_sha256 != INTERPRETER_SHA256:
         raise ContractError("rollback fixed identity mismatch")
-    if capture.root:
-        _absolute(capture.root, "rollback root")
+    if capture.root != CURRENT_PROFILE.git.root or capture.source_root != CURRENT_PROFILE.git.root:
+        raise ContractError("rollback source root mismatch")
+    if capture.source_head != CURRENT_PROFILE.git.head or capture.source_tree != CURRENT_PROFILE.git.tree:
+        raise ContractError("rollback source revision mismatch")
+    for value, name in ((capture.program_arguments_hash, "rollback program arguments"), (capture.environment_hash, "rollback environment")):
+        _hash(value, name)
+    try:
+        parsed = plistlib.loads(payload)
+    except Exception as exc:
+        raise ContractError("rollback plist malformed") from exc
+    if not isinstance(parsed, Mapping) or parsed.get("Label") != LABEL:
+        raise ContractError("rollback plist label mismatch")
+    args = parsed.get("ProgramArguments")
+    if not isinstance(args, list) or len(args) != 2 or args[0] != INTERPRETER or not str(args[1]).endswith("/" + ENTRYPOINT):
+        raise ContractError("rollback program arguments mismatch")
+    if parsed.get("WorkingDirectory") != CURRENT_PROFILE.git.root:
+        raise ContractError("rollback working directory mismatch")
+    if parsed.get("StandardOutPath") != STDOUT or parsed.get("StandardErrorPath") != STDERR:
+        raise ContractError("rollback log identity mismatch")
+    env = parsed.get("EnvironmentVariables")
+    if env != {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}:
+        raise ContractError("rollback environment mismatch")
+    if canonical_hash(args) != capture.program_arguments_hash or canonical_hash(env) != capture.environment_hash:
+        raise ContractError("rollback identity hash mismatch")
 
 
 def validate_request(request: GatewayDeploymentRequest | Mapping[str, Any]) -> GatewayDeploymentRequest:
@@ -464,45 +515,48 @@ def validate_request(request: GatewayDeploymentRequest | Mapping[str, Any]) -> G
     }
     if request.operation not in operations or request.effect_class is not operations[request.operation]:
         raise ContractError("operation/effect substitution")
-    validate_profile(request.current)
-    validate_profile(request.desired)
+    validate_profile(request.current, expected=CURRENT_PROFILE)
+    validate_profile(request.desired, expected=DESIRED_PROFILE)
     validate_desired_profile(request.current, request.desired)
     validate_current_identity(request.current_identity, request.current)
-    if request.authority.repository != REPOSITORY or request.authority.request_id not in ("", request.request_id):
+    if not isinstance(request.authority, AuthorityReceipt) or not request.authority.issuer or not request.authority.receipt_id:
+        raise ContractError("authority identity missing")
+    if request.authority.repository != REPOSITORY or request.authority.request_id != request.request_id:
         raise ContractError("authority mismatch")
-    if request.authority.action != "gateway-rebind" or not request.authority.scope.endswith("SOURCE_CANDIDATE_ONLY"):
+    if request.authority.action != "gateway-rebind" or request.authority.scope != "NEXUS_GATEWAY_REBIND_MANAGER_CONTRACT_SOURCE_CANDIDATE_ONLY":
         raise ContractError("authority scope mismatch")
     _validate_rollback(request.rollback)
-    if request.quiescence.disposition not in {"drained", "held", "reconciled"}:
+    if request.quiescence.disposition not in {"drained", "held", "reconciled"} or not request.quiescence.lifecycle_state or not request.quiescence.assist_state:
         raise ContractError("quiescence required")
+    if not request.quiescence.evidence_sha256 or not request.quiescence.reacquisition_receipt:
+        raise ContractError("quiescence evidence missing")
+    _hash(request.quiescence.evidence_sha256, "quiescence evidence")
     if request.quiescence.pending_actions and request.quiescence.disposition != "reconciled":
         raise ContractError("pending actions require reconciliation")
-    allowed_postflight = {
-        "server_instance", "root", "head", "tree", "tool_manifest_sha256",
-        "schema_sha256", "permission_sha256", "action", "task_id", "lifecycle",
-        "required_actions", "client_bound", "token_bound",
-    }
-    if not isinstance(request.postflight, Mapping) or not request.postflight or set(request.postflight) - allowed_postflight or any(not isinstance(k, str) or not isinstance(v, str) or not v for k, v in request.postflight.items()):
-        raise ContractError("postflight identities missing")
+    validate_postflight_identity(request.postflight, request.desired)
     if request.stable_artifact is not None:
         artifact = request.stable_artifact
+        if not isinstance(artifact, StableArtifactIdentity):
+            raise ContractError("artifact identity must be typed")
         for value, name in ((artifact.source_root, "artifact source root"), (artifact.source_path, "artifact source path")):
             _absolute(value, name)
         for value, name in ((artifact.source_head, "artifact head"), (artifact.source_tree, "artifact tree"), (artifact.source_blob_sha256, "artifact blob"), (artifact.artifact_sha256, "artifact hash")):
             _hash(value, name, 40 if name.endswith(("head", "tree")) else 64)
-        if artifact.uid < 0 or artifact.mode & ~0o777:
+        if not isinstance(artifact.uid, int) or isinstance(artifact.uid, bool) or artifact.uid < 0 or not isinstance(artifact.mode, int) or isinstance(artifact.mode, bool) or artifact.mode & ~0o777:
             raise ContractError("artifact ownership/mode invalid")
-        if artifact.request_id not in ("", request.request_id):
+        try:
+            Path(artifact.source_path).relative_to(Path(artifact.source_root))
+        except ValueError as exc:
+            raise ContractError("artifact source path outside source root") from exc
+        if artifact.request_id != request.request_id or artifact.card_id != "TASK-526-A" or not artifact.authority_receipt_id or not artifact.install_fence or not artifact.predecessor_sha256 or not artifact.rollback_receipt:
             raise ContractError("artifact request substitution")
     payload = {key: _plain(value) for key, value in _plain(request).items() if key not in {"request_hash", "schema"}}
     expected = canonical_hash(payload)
-    # The first admitted worker predates the optional stable-artifact field and
-    # calculated its fence from the six required request fields.  Accept that
-    # exact legacy encoding only when the optional field is absent (never when
-    # a real artifact is supplied).
-    legacy_expected = canonical_hash({key: value for key, value in payload.items() if key != "stable_artifact"})
-    if request.request_hash not in {expected, legacy_expected}:
+    if request.request_hash != expected:
         raise ContractError("request hash mismatch")
+    expected_receipt = canonical_hash({key: value for key, value in _plain(request.authority).items() if key != "receipt_hash"})
+    if request.authority.receipt_hash != expected_receipt:
+        raise ContractError("authority receipt hash mismatch")
     return request
 
 
@@ -510,7 +564,18 @@ def validate_authority_freshness(receipt: AuthorityReceipt, *, now: str) -> Auth
     """Validate an authority receipt against a caller-supplied timestamp."""
     if not isinstance(receipt, AuthorityReceipt) or not receipt.issued_at or not receipt.expires_at:
         raise ContractError("authority freshness evidence missing")
-    if receipt.issued_at > now or receipt.expires_at <= now:
+    def parse(value: str) -> datetime:
+        if not isinstance(value, str) or not value or value.endswith("Z") is False and "+" not in value and "-" not in value[10:]:
+            raise ContractError("authority timestamp malformed")
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ContractError("authority timestamp malformed") from exc
+        if parsed.tzinfo is None:
+            raise ContractError("authority timestamp must be timezone-aware")
+        return parsed.astimezone(timezone.utc)
+    issued, expires, observed = parse(receipt.issued_at), parse(receipt.expires_at), parse(now)
+    if expires <= issued or issued > observed or expires <= observed:
         raise ContractError("authority receipt stale")
     return receipt
 
@@ -518,19 +583,61 @@ def validate_authority_freshness(receipt: AuthorityReceipt, *, now: str) -> Auth
 def validate_current_identity(identity: IdentityEvidence, profile: DeploymentProfile) -> IdentityEvidence:
     """Reject supplied identity fields that disagree with the bound profile."""
     validate_profile(profile)
+    if not isinstance(identity, IdentityEvidence):
+        raise ContractError("current identity must be typed")
     expected = {
         "label": LABEL,
+        "plist_sha256": None,
+        "server_instance": None,
         "root": profile.git.root,
         "head": profile.git.head,
         "tree": profile.git.tree,
+        "source_sha256": None,
+        "tool_manifest_sha256": None,
+        "schema_sha256": None,
+        "permission_sha256": None,
+        "action": "gateway-rebind",
+        "task_id": "TASK-526-A",
+        "lifecycle": None,
         "endpoint": ENDPOINT,
     }
     for key, value in expected.items():
         observed = getattr(identity, key)
-        if observed not in ("", None) and observed != value:
+        if value is None and (not isinstance(observed, str) or not observed):
+            raise ContractError(f"current identity missing: {key}")
+        if key.endswith("_sha256") and observed:
+            _hash(observed, key)
+        if value is not None and observed != value:
             raise ContractError(f"current identity mismatch: {key}")
-    if identity.pid is not None and identity.pid <= 0:
+    if not isinstance(identity.pid, int) or isinstance(identity.pid, bool) or identity.pid <= 0:
         raise ContractError("invalid current PID")
+    if not identity.loaded or not identity.client_bound:
+        raise ContractError("current service/client identity not verified")
+    return identity
+
+
+def validate_postflight_identity(identity: PostflightIdentity, profile: DeploymentProfile) -> PostflightIdentity:
+    if not isinstance(identity, PostflightIdentity):
+        raise ContractError("postflight identity must be typed")
+    validate_profile(profile)
+    if not identity.server_instance or not identity.root or not identity.action or not identity.task_id or not identity.lifecycle:
+        raise ContractError("postflight identity incomplete")
+    if identity.root != profile.git.root or identity.head != profile.git.head or identity.tree != profile.git.tree:
+        raise ContractError("postflight deployment identity mismatch")
+    for value, name in ((identity.head, "postflight HEAD"), (identity.tree, "postflight tree")):
+        _hash(value, name, 40)
+    for value, name in ((identity.tool_manifest_sha256, "postflight manifest"), (identity.schema_sha256, "postflight schema"), (identity.permission_sha256, "postflight permission")):
+        _hash(value, name)
+    if identity.action != "gateway-rebind" or identity.task_id != "TASK-526-A" or identity.lifecycle not in {"QUIESCENT", "READY", "ACTIVE"}:
+        raise ContractError("postflight action/task/lifecycle mismatch")
+    if not identity.client_bound or not identity.token_bound:
+        raise ContractError("authenticated client binding missing")
+    required = tuple(identity.required_actions)
+    observed = tuple(identity.observed_actions)
+    if not required or not observed or any(not isinstance(item, str) or not item for item in required + observed):
+        raise ContractError("postflight action manifest missing")
+    if not set(required).issubset(set(observed)):
+        raise ContractError("postflight required action missing")
     return identity
 
 

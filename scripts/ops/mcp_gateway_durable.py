@@ -23,11 +23,14 @@ from pathlib import Path
 from typing import Any, Callable, Mapping
 
 from nexus.contracts.gateway_deployment import (
+    DESIRED_PROFILE,
     ContractError,
     DeploymentState,
     GatewayDeploymentRequest,
     PostflightIdentity,
     canonical_hash,
+    validate_authority_freshness,
+    validate_postflight_identity,
     validate_profile,
     validate_request,
     validate_rollback_capture,
@@ -213,12 +216,30 @@ def serve(kind: str, *, root: Path = CANONICAL_ROOT, launch_floor_head: str | No
     execve(argv[0], argv, env)
 
 def main() -> int:
-    p = argparse.ArgumentParser(); p.add_argument("action", choices=("preflight","render","install","status","reload","uninstall","serve-gateway","serve-devspace")); p.add_argument("--launch-floor-head", dest="launch_floor_head"); p.add_argument("--expected-head", dest="launch_floor_head", help="backward-compat alias for --launch-floor-head"); p.add_argument("--devspace-hash"); p.add_argument("--env-file"); p.add_argument("--devspace-root", type=Path, default=DEVSPACE_ROOT); p.add_argument("--node-path", type=Path, default=NODE_PATH)
+    p = argparse.ArgumentParser()
+    p.add_argument("action", choices=("preflight", "render", "install", "status", "reload", "uninstall", "serve-gateway", "serve-devspace",
+                                       "gateway-preflight", "gateway-reload", "gateway-install-artifact", "gateway-rollback"))
+    p.add_argument("--launch-floor-head", dest="launch_floor_head")
+    p.add_argument("--expected-head", dest="launch_floor_head", help="backward-compat alias for --launch-floor-head")
+    p.add_argument("--devspace-hash"); p.add_argument("--env-file")
+    p.add_argument("--devspace-root", type=Path, default=DEVSPACE_ROOT); p.add_argument("--node-path", type=Path, default=NODE_PATH)
+    p.add_argument("--gateway-request", type=Path)
     a = p.parse_args()
     try:
         if a.env_file: globals()["ENV_PATH"] = Path(a.env_file)
         if a.action == "serve-gateway": serve("gateway", launch_floor_head=a.launch_floor_head)
         elif a.action == "serve-devspace": serve("devspace", launch_floor_head=a.launch_floor_head, devspace_hash=a.devspace_hash, devspace_root=a.devspace_root, node_path=a.node_path)
+        elif a.action.startswith("gateway-"):
+            if a.gateway_request is None:
+                p.error("--gateway-request is required for Gateway-only operations")
+            request_path = _safe_store_path(a.gateway_request)
+            try:
+                payload = json.loads(request_path.read_text())
+            except (OSError, ValueError) as exc:
+                raise GateError("gateway request file malformed") from exc
+            operation = a.action.removeprefix("gateway-")
+            if operation == "install-artifact": operation = "install-artifact"
+            print(json.dumps(manage_gateway(operation, request=payload), sort_keys=True, default=str))
         else: print(json.dumps(manage(a.action, launch_floor_head=a.launch_floor_head, devspace_hash=a.devspace_hash, devspace_root=a.devspace_root, node_path=a.node_path), sort_keys=True))
     except (GateError, subprocess.CalledProcessError) as exc: p.error(str(exc))
     return 0
@@ -398,6 +419,7 @@ class GatewayLedger:
         if not raw or len(raw) > MAX_LEDGER_BYTES:
             raise LedgerCorruption("ledger missing or exceeds size bound")
         rows: list[dict[str, Any]] = []
+        last_state: dict[str, str] = {}
         for line in raw.splitlines(keepends=True):
             if not line.endswith(b"\n"):
                 raise LedgerCorruption("ledger is not newline terminated")
@@ -415,11 +437,24 @@ class GatewayLedger:
                 raise LedgerCorruption("ledger sequence gap")
             if row["state"] not in {state.value for state in DeploymentState}:
                 raise LedgerCorruption("ledger state unknown")
+            previous_state = last_state.get(row["request_id"])
+            try:
+                if previous_state is None:
+                    if row["state"] != DeploymentState.REQUESTED.value:
+                        raise LedgerCorruption("ledger request does not begin in REQUESTED")
+                else:
+                    from nexus.contracts.gateway_deployment import transition
+                    transition(previous_state, row["state"])
+            except LedgerCorruption:
+                raise
+            except Exception as exc:
+                raise LedgerCorruption("ledger state transition invalid") from exc
             if row["parent_hash"] != (rows[-1]["record_hash"] if rows else ""):
                 raise LedgerCorruption("ledger parent mismatch")
             if row["record_hash"] != _record_hash(row):
                 raise LedgerCorruption("ledger record hash mismatch")
             rows.append(row)
+            last_state[row["request_id"]] = row["state"]
             if len(rows) > MAX_LEDGER_RECORDS:
                 raise LedgerCorruption("ledger record limit exceeded")
         return rows
@@ -437,12 +472,22 @@ class GatewayLedger:
             raise GatewayContractError("ledger request identity malformed")
         with InterProcessLock(self.lock_path):
             rows = self._scan_unlocked()
+            prior_for_request = next((row for row in reversed(rows) if row["request_id"] == request_id), None)
             for prior in rows:
                 if prior["request_id"] == request_id:
                     if prior["request_hash"] != request_hash:
                         raise GatewayContractError("duplicate request fence conflict")
                     if prior["state"] == state.value:
                         return prior
+            if prior_for_request is None:
+                if state is not DeploymentState.REQUESTED:
+                    raise GatewayContractError("request must begin in REQUESTED")
+            else:
+                try:
+                    transition = __import__("nexus.contracts.gateway_deployment", fromlist=["transition"]).transition
+                    transition(prior_for_request["state"], state)
+                except Exception as exc:
+                    raise GatewayContractError("invalid ledger state transition") from exc
             tail = rows[-1]["record_hash"] if rows else ""
             if expected_tail is not None and expected_tail != tail:
                 raise GatewayContractError("ledger compare-and-swap conflict")
@@ -494,33 +539,93 @@ def gateway_profile_matches(observed: Mapping[str, Any], expected: Any) -> bool:
         profile = validate_profile(expected)
     except ContractError:
         return False
-    required = {"root": profile.git.root, "toplevel": profile.git.toplevel,
-                "remote": profile.git.remote, "head": profile.git.head,
-                "tree": profile.git.tree, "entrypoint": profile.entrypoint,
-                "entrypoint_sha256": profile.entrypoint_sha256}
-    return all(observed.get(key) == value or (key == "entrypoint" and observed.get(key) == str(Path(profile.git.root) / GATEWAY_ENTRYPOINT)) for key, value in required.items())
+    required = {
+        "root": profile.git.root, "toplevel": profile.git.toplevel,
+        "remote": profile.git.remote, "head": profile.git.head, "tree": profile.git.tree,
+        "clean": True, "entrypoint": profile.entrypoint,
+        "entrypoint_sha256": profile.entrypoint_sha256,
+        "interpreter_path": profile.interpreter.path,
+        "interpreter_resolved_path": profile.interpreter.resolved_path,
+        "interpreter_sha256": profile.interpreter.sha256,
+        "interpreter_uid": profile.interpreter.uid, "interpreter_gid": profile.interpreter.gid,
+        "interpreter_mode": profile.interpreter.mode, "trust_class": profile.trust_class,
+        "repository": profile.repository.repository, "plist": profile.repository.plist,
+        "stdout": profile.repository.stdout, "stderr": profile.repository.stderr,
+        "endpoint": profile.repository.endpoint, "label": profile.repository.label,
+    }
+    # Physical adapters may expose nested interpreter/repository objects; flatten only
+    # those typed fields and reject any omitted safety-critical identity.
+    flat = dict(observed)
+    for prefix in ("interpreter", "repository", "git"):
+        nested = observed.get(prefix)
+        if isinstance(nested, Mapping):
+            flat.update({f"{prefix}_{key}": value for key, value in nested.items()})
+    if "interpreter_path" not in flat and isinstance(observed.get("interpreter"), Mapping):
+        flat["interpreter_path"] = observed["interpreter"].get("path")
+    if flat.get("entrypoint") == str(Path(profile.git.root) / GATEWAY_ENTRYPOINT):
+        flat["entrypoint"] = profile.entrypoint
+    return all(flat.get(key) == value for key, value in required.items())
 
 
 def preflight_gateway(request: GatewayDeploymentRequest, *, observed: Mapping[str, Any],
-                      quiescence: Mapping[str, Any] | None = None) -> dict[str, Any]:
+                      quiescence: Mapping[str, Any] | None = None,
+                      observation_time: str | None = None) -> dict[str, Any]:
     """Validate fresh physical evidence without performing a process effect."""
     try:
         validate_request(request)
+        validate_authority_freshness(request.authority, now=observation_time or "")
     except (ContractError, ValueError) as exc:
         raise _gateway_error("gateway request rejected", exc) from exc
+    required_physical = {
+        "plist_sha256", "plist_bytes_sha256", "plist_bytes_hex", "loaded", "pid", "server_instance",
+        "source_sha256", "tool_manifest_sha256", "schema_sha256", "permission_sha256",
+        "action", "task_id", "lifecycle", "stable_artifact", "rollback_predecessor", "listener", "services",
+    }
+    if not required_physical.issubset(observed):
+        raise _gateway_error("complete fresh physical Gateway evidence required")
+    if not isinstance(observed.get("loaded"), bool) or not isinstance(observed.get("pid"), int) or observed["pid"] <= 0:
+        raise _gateway_error("Gateway loaded/PID identity invalid")
+    for key in ("plist_sha256", "plist_bytes_sha256", "source_sha256", "tool_manifest_sha256", "schema_sha256", "permission_sha256"):
+        if not isinstance(observed.get(key), str) or not re.fullmatch(r"[0-9a-f]{64}", observed[key]):
+            raise _gateway_error(f"Gateway physical hash missing: {key}")
+    try:
+        plist_bytes = bytes.fromhex(str(observed["plist_bytes_hex"]))
+    except (TypeError, ValueError) as exc:
+        raise _gateway_error("Gateway plist bytes malformed", exc) from exc
+    if hashlib.sha256(plist_bytes).hexdigest() not in {observed["plist_sha256"], observed["plist_bytes_sha256"]}:
+        raise _gateway_error("Gateway plist bytes hash mismatch")
+    if not isinstance(observed.get("stable_artifact"), Mapping) or not isinstance(observed.get("rollback_predecessor"), Mapping):
+        raise _gateway_error("stable artifact/rollback predecessor evidence missing")
     if not gateway_profile_matches(observed, request.current):
         raise _gateway_error("current Gateway identity does not match request")
-    fixed = {"label": GATEWAY_LABEL, "plist": str(GATEWAY_PLIST), "endpoint": GATEWAY_ENDPOINT}
-    if any(observed.get(key) != value for key, value in fixed.items()):
+    identity_bindings = {
+        "plist_sha256": request.current_identity.plist_sha256,
+        "pid": request.current_identity.pid,
+        "server_instance": request.current_identity.server_instance,
+        "root": request.current_identity.root, "head": request.current_identity.head, "tree": request.current_identity.tree,
+        "source_sha256": request.current_identity.source_sha256,
+        "tool_manifest_sha256": request.current_identity.tool_manifest_sha256,
+        "schema_sha256": request.current_identity.schema_sha256,
+        "permission_sha256": request.current_identity.permission_sha256,
+        "action": request.current_identity.action, "task_id": request.current_identity.task_id,
+        "lifecycle": request.current_identity.lifecycle, "loaded": request.current_identity.loaded,
+    }
+    if any(observed.get(key) != value for key, value in identity_bindings.items()):
+        raise _gateway_error("current Gateway identity evidence substituted")
+    predecessor = observed["rollback_predecessor"]
+    for key in ("plist_sha256", "artifact_sha256", "source_sha256"):
+        expected_value = getattr(request.rollback, key, None)
+        if expected_value and predecessor.get(key) != expected_value:
+            raise _gateway_error("rollback predecessor identity mismatch")
+    fixed = {"label": GATEWAY_LABEL, "endpoint": GATEWAY_ENDPOINT}
+    if any(observed.get(key) != value for key, value in fixed.items()) or observed.get("plist") not in {str(GATEWAY_PLIST), request.current.repository.plist}:
         raise _gateway_error("fixed Gateway service identity mismatch")
-    if "listener" in observed and observed["listener"] not in {GATEWAY_ENDPOINT, "127.0.0.1:8766"}:
+    if observed["listener"] not in {GATEWAY_ENDPOINT, "127.0.0.1:8766"}:
         raise _gateway_error("Gateway listener mismatch")
-    if "pid" in observed and (not isinstance(observed["pid"], int) or observed["pid"] <= 0):
-        raise _gateway_error("Gateway PID identity invalid")
-    if "services" in observed and observed["services"] != [GATEWAY_LABEL]:
+    if observed["services"] != [GATEWAY_LABEL]:
         raise _gateway_error("ambiguous Gateway service ownership")
     q = quiescence or observed.get("quiescence", {})
-    if q.get("disposition") not in {"drained", "held", "reconciled"}:
+    if q.get("disposition") not in {"drained", "held", "reconciled"} or not q.get("lifecycle_state") or not q.get("assist_state") or not q.get("evidence_sha256") or not q.get("reacquisition_receipt"):
         raise _gateway_error("lifecycle/assist quiescence missing")
     if q.get("pending_actions") and q.get("disposition") != "reconciled":
         raise _gateway_error("pending actions require durable reconciliation")
@@ -550,9 +655,15 @@ def _gateway_plist(profile: Any, *, token_env: str = "NEXUS_MCP_GATEWAY_TOKEN") 
 
 
 def install_stable_artifact(request: GatewayDeploymentRequest, *, source_root: Path,
-                            source_path: Path, artifact_path: Path | None = None) -> dict[str, Any]:
+                            source_path: Path, artifact_path: Path | None = None,
+                            source_observer: Mapping[str, Any] | Callable[[Path], Mapping[str, Any]] | None = None,
+                            observation_time: str | None = None) -> dict[str, Any]:
     """Publish one exact manager artifact; this is never part of reload."""
     validate_request(request)
+    try:
+        validate_authority_freshness(request.authority, now=observation_time or "")
+    except ContractError as exc:
+        raise _gateway_error("artifact authority freshness rejected", exc) from exc
     if request.operation not in {"install-artifact", "install_artifact"} or request.stable_artifact is None:
         raise _gateway_error("artifact installation requires explicit install-artifact request")
     artifact_path = Path(artifact_path or GATEWAY_ARTIFACT)
@@ -563,15 +674,38 @@ def install_stable_artifact(request: GatewayDeploymentRequest, *, source_root: P
     source_path = Path(source_path).resolve(strict=False)
     if source_root != Path(artifact.source_root) or source_path != Path(artifact.source_path):
         raise _gateway_error("artifact source substitution")
+    try:
+        source_path.relative_to(source_root)
+    except ValueError as exc:
+        raise _gateway_error("artifact source outside clean root", exc) from exc
     if not source_path.is_file() or source_path.is_symlink():
         raise _gateway_error("artifact source is not a regular file")
     data = source_path.read_bytes()
-    if hashlib.sha256(data).hexdigest() != artifact.source_blob_sha256 or hashlib.sha256(data).hexdigest() != artifact.artifact_sha256:
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != artifact.source_blob_sha256 or digest != artifact.artifact_sha256:
         raise _gateway_error("artifact bytes hash mismatch")
+    physical = source_observer(source_root) if callable(source_observer) else dict(source_observer or {})
+    if not physical:
+        raise _gateway_error("physical source Git evidence required")
+    expected_physical = {
+        "root": str(source_root), "toplevel": str(source_root), "remote": "https://github.com/James3014/Nexus-new.git",
+        "head": artifact.source_head, "tree": artifact.source_tree, "clean": True,
+        "path": str(source_path), "blob_sha256": artifact.source_blob_sha256,
+    }
+    if any(physical.get(key) != value for key, value in expected_physical.items()):
+        raise _gateway_error("stable artifact source identity mismatch")
+    info = source_path.stat()
+    if info.st_uid != artifact.uid or stat.S_IMODE(info.st_mode) != artifact.mode:
+        raise _gateway_error("stable artifact source ownership/mode mismatch")
+    if artifact.predecessor_sha256 and Path(artifact_path or GATEWAY_ARTIFACT).exists():
+        predecessor = hashlib.sha256(Path(artifact_path or GATEWAY_ARTIFACT).read_bytes()).hexdigest()
+        if predecessor != artifact.predecessor_sha256:
+            raise _gateway_error("stable artifact predecessor mismatch")
     destination = _safe_store_path(Path(artifact_path), create=True)
     if destination.exists():
-        if destination.read_bytes() != data:
+        if hashlib.sha256(destination.read_bytes()).hexdigest() != artifact.predecessor_sha256:
             raise _gateway_error("stable artifact predecessor conflict")
+        _atomic_gateway_write(destination, data, mode=artifact.mode)
     else:
         fd, tmp_name = tempfile.mkstemp(dir=destination.parent, prefix=f".{destination.name}.")
         try:
@@ -604,6 +738,13 @@ def _http_json(url: str, *, token: str, payload: Mapping[str, Any] | None = None
     return value
 
 
+def _profile_for_expected(expected: Mapping[str, Any]) -> Any:
+    """Resolve only the frozen desired profile; callers cannot choose a profile."""
+    if expected.get("root") not in (None, "", DESIRED_PROFILE.git.root) or expected.get("head") not in (None, "", DESIRED_PROFILE.git.head) or expected.get("tree") not in (None, "", DESIRED_PROFILE.git.tree):
+        raise _gateway_error("postflight expected profile substitution")
+    return DESIRED_PROFILE
+
+
 def postflight_gateway(expected: Mapping[str, Any], *, token: str, endpoint: str = GATEWAY_ENDPOINT,
                        opener: Any = urllib.request.urlopen, retries: int = 3,
                        timeout: float = 2.0, sleeper: Callable[[float], None] = time.sleep) -> PostflightIdentity:
@@ -620,36 +761,53 @@ def postflight_gateway(expected: Mapping[str, Any], *, token: str, endpoint: str
                                  payload={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}})
             result = init.get("result", init); health_result = health.get("result", health)
             tools_result = listing.get("result", listing)
-            tools = tools_result.get("tools", []) if isinstance(tools_result, Mapping) else []
-            names = tuple(sorted(str(item.get("name")) for item in tools if isinstance(item, Mapping) and item.get("name")))
+            if not isinstance(health_result, Mapping) or not isinstance(result, Mapping) or not isinstance(tools_result, Mapping):
+                raise _gateway_error("postflight response missing typed result")
+            tools = tools_result.get("tools")
+            if not isinstance(tools, list) or not tools or any(not isinstance(item, Mapping) or not isinstance(item.get("name"), str) or not item.get("name") for item in tools):
+                raise _gateway_error("postflight tool manifest missing")
+            names = tuple(sorted(item["name"] for item in tools))
             manifest = hashlib.sha256(json.dumps(names, separators=(",", ":"), ensure_ascii=True).encode()).hexdigest()
             schema = hashlib.sha256(json.dumps(tools, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
-            merged = dict(health_result) if isinstance(health_result, Mapping) else {}
-            if isinstance(result, Mapping):
-                merged.update(result.get("serverInfo", result))
+            server_info = result.get("serverInfo")
+            if not isinstance(server_info, Mapping):
+                raise _gateway_error("initialize identity missing")
+            if dict(health_result) != dict(server_info):
+                raise _gateway_error("health/initialize identity disagreement")
+            merged = dict(health_result)
+            declared_manifest = merged.get("tool_manifest_sha256") or merged.get("tool_manifest_revision")
+            declared_schema = merged.get("schema_sha256") or merged.get("full_tool_schema_hash")
+            if declared_manifest != manifest or declared_schema != schema:
+                raise _gateway_error("postflight manifest/schema recomputation mismatch")
+            required = tuple(expected.get("required_actions", ()))
+            previous = expected.get("previous_server_instance")
+            if previous and merged.get("server_instance") == previous:
+                raise _gateway_error("postflight server instance did not change")
             identity = PostflightIdentity(
                 server_instance=str(merged.get("server_instance") or merged.get("instance_id") or ""),
                 root=str(merged.get("repo_root") or merged.get("root") or ""),
                 head=str(merged.get("git_head") or merged.get("head") or ""),
                 tree=str(merged.get("git_tree") or merged.get("tree") or ""),
-                tool_manifest_sha256=str(merged.get("tool_manifest_revision") or manifest),
-                schema_sha256=str(merged.get("full_tool_schema_hash") or schema),
-                permission_sha256=str(merged.get("permission_policy_hash") or expected.get("permission_sha256", "")),
-                action=str(merged.get("action") or expected.get("action", "")),
-                task_id=str(merged.get("task_id") or expected.get("task_id", "")),
-                lifecycle=str(merged.get("lifecycle") or merged.get("lifecycle_identity") or expected.get("lifecycle", "")),
-                client_bound=True,
-                required_actions=tuple(expected.get("required_actions", names)), observed_actions=names,
-                token_bound=True,
+                tool_manifest_sha256=str(declared_manifest or ""),
+                schema_sha256=str(declared_schema or ""),
+                permission_sha256=str(merged.get("permission_policy_hash") or ""),
+                action=str(merged.get("action") or ""),
+                task_id=str(merged.get("task_id") or ""),
+                lifecycle=str(merged.get("lifecycle") or merged.get("lifecycle_identity") or ""),
+                client_bound=merged.get("client_bound") is True,
+                required_actions=required,
+                observed_actions=names,
+                token_bound=merged.get("token_bound") is True,
             )
+            validate_postflight_identity(identity, _profile_for_expected(expected))
             for key, expected_value in expected.items():
+                if key == "previous_server_instance":
+                    continue
                 actual = getattr(identity, key, merged.get(key))
                 if expected_value not in (None, "") and actual != expected_value:
                     raise _gateway_error(f"postflight identity mismatch: {key}")
-            if identity.required_actions and not set(identity.required_actions).issubset(set(identity.observed_actions)):
-                raise _gateway_error("postflight required action missing")
             return identity
-        except GatewayContractError as exc:
+        except (GatewayContractError, ContractError) as exc:
             last = exc
             if attempt + 1 < retries:
                 sleeper(min(0.25, 0.05 * (2 ** attempt)))
@@ -658,7 +816,8 @@ def postflight_gateway(expected: Mapping[str, Any], *, token: str, endpoint: str
 
 
 def rollback_gateway(capture: Any, *, plist_path: Path | None = None,
-                     runner: Callable[..., Any] | None = None, postflight: Callable[[], Any] | None = None) -> dict[str, Any]:
+                     runner: Callable[..., Any] | None = None, postflight: Callable[[], Any] | None = None,
+                     predecessor_observer: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Restore only the captured fixed predecessor; never select a new target."""
     plist_path = Path(plist_path or GATEWAY_PLIST)
     if plist_path != Path(GATEWAY_PLIST):
@@ -675,8 +834,19 @@ def rollback_gateway(capture: Any, *, plist_path: Path | None = None,
         if parsed.get("Label") != GATEWAY_LABEL:
             raise _gateway_error("rollback plist label drift")
         args = parsed.get("ProgramArguments")
-        if not isinstance(args, list) or len(args) != 2 or not str(args[0]).endswith("/python") or not str(args[1]).endswith(GATEWAY_ENTRYPOINT):
+        if not isinstance(args, list) or len(args) != 2 or args[0] != "/Users/jameschen/Workspace/Nexus-new/.venv/bin/python" or not str(args[1]).endswith(GATEWAY_ENTRYPOINT):
             raise _gateway_error("rollback program arguments drift")
+        if parsed.get("WorkingDirectory") != capture.root or parsed.get("StandardOutPath") != "/Users/jameschen/Library/Logs/Nexus/gateway.log" or parsed.get("StandardErrorPath") != "/Users/jameschen/Library/Logs/Nexus/gateway.err.log":
+            raise _gateway_error("rollback root/log identity drift")
+        env = parsed.get("EnvironmentVariables")
+        if env is not None and env != {"NEXUS_MCP_GATEWAY_TOKEN": "${NEXUS_MCP_GATEWAY_TOKEN}"}:
+            raise _gateway_error("rollback environment drift")
+        if capture.root != "/Users/jameschen/Workspace/.devspace-chatgpt/worktrees/Nexus-new-482a79fe":
+            raise _gateway_error("rollback source root drift")
+        if predecessor_observer is not None:
+            for key in ("artifact_sha256", "source_sha256", "source_root", "source_head", "source_tree", "loaded"):
+                if predecessor_observer.get(key) != getattr(capture, key, None):
+                    raise _gateway_error("rollback predecessor physical identity mismatch")
     except (ValueError, KeyError, TypeError, ContractError) as exc:
         raise _gateway_error("rollback predecessor malformed", exc) from exc
     run = runner or (lambda *args: subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE))
@@ -691,21 +861,34 @@ def rollback_gateway(capture: Any, *, plist_path: Path | None = None,
             if getattr(result, "returncode", 0) not in (0, None):
                 raise _gateway_error("rollback bootstrap failed")
         if postflight is not None:
-            postflight()
+            observed = postflight()
+            if isinstance(observed, Mapping):
+                observed = PostflightIdentity.model_validate(observed)
+            if not isinstance(observed, PostflightIdentity):
+                raise _gateway_error("rollback postflight identity must be typed")
+            from nexus.contracts.gateway_deployment import CURRENT_PROFILE
+            validate_postflight_identity(observed, CURRENT_PROFILE)
+            if capture.server_instance and observed.server_instance != capture.server_instance:
+                raise _gateway_error("rollback server identity mismatch")
     return {"state": DeploymentState.ROLLED_BACK.value, "loaded": bool(capture.loaded), "plist_sha256": hashlib.sha256(payload).hexdigest()}
 
 
 def gateway_reload(request: GatewayDeploymentRequest, *, observed: Mapping[str, Any],
                    runner: Callable[..., Any] | None = None, plist_path: Path | None = None,
-                   ledger: GatewayLedger | None = None, postflight: Callable[[], Any] | None = None) -> dict[str, Any]:
+                   ledger: GatewayLedger | None = None, postflight: Callable[[], Any] | None = None,
+                   observation_time: str | None = None) -> dict[str, Any]:
     """Gateway-only reload/adopt operation.  It cannot install a stable artifact."""
     validate_request(request)
+    try:
+        validate_authority_freshness(request.authority, now=observation_time or "")
+    except ContractError as exc:
+        raise _gateway_error("Gateway authority freshness rejected", exc) from exc
     if request.operation not in {"reload", "gateway-reload"}:
         raise _gateway_error("gateway_reload requires reload operation")
     plist_path = Path(plist_path or GATEWAY_PLIST)
     if plist_path != Path(GATEWAY_PLIST):
         raise _gateway_error("Gateway plist destination substitution")
-    preflight = preflight_gateway(request, observed=observed)
+    preflight = preflight_gateway(request, observed=observed, observation_time=observation_time)
     store = ledger or GatewayLedger()
     run = runner or (lambda *args: subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE))
     with InterProcessLock(store.lock_path):
@@ -718,19 +901,20 @@ def gateway_reload(request: GatewayDeploymentRequest, *, observed: Mapping[str, 
                 raise _gateway_error("duplicate or uncertain request requires physical reconciliation")
             if existing["state"] == DeploymentState.VERIFIED.value:
                 return {"state": existing["state"], "replayed": True, "request_id": request.request_id}
-        # The lock is held across the STARTED record and first effect.  The
-        # ledger method takes the same lock, so append directly while held.
-        row = {"schema": "nexus.gateway.ledger.v1", "request_id": request.request_id, "request_hash": request.request_hash,
-               "state": DeploymentState.STARTED.value, "sequence": len(rows) + 1,
-               "parent_hash": rows[-1]["record_hash"] if rows else "", "record_hash": "",
-               "pre_effect_identity": preflight["observed"], "observed_identity": {}}
-        row["record_hash"] = _record_hash(row)
-        encoded = (json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n").encode()
-        if store.path.exists():
-            with store.path.open("ab") as handle:
-                handle.write(encoded); handle.flush(); os.fsync(handle.fileno())
-        else:
-            _atomic_gateway_write(store.path, encoded)
+        # Persist the legal lifecycle chain while this same lock remains held.
+        def append_state(state: DeploymentState, observed_identity: Mapping[str, Any] | None = None) -> dict[str, Any]:
+            current_rows = store._scan_unlocked()
+            prior = next((item for item in reversed(current_rows) if item["request_id"] == request.request_id), None)
+            if prior is not None:
+                from nexus.contracts.gateway_deployment import transition
+                transition(prior["state"], state)
+            row = store._append_unlocked(current_rows, request_id=request.request_id, request_hash=request.request_hash,
+                                          state=state, pre_effect_identity=preflight["observed"],
+                                          observed_identity=observed_identity or {})
+            return row
+        append_state(DeploymentState.REQUESTED)
+        append_state(DeploymentState.PREFLIGHTED)
+        append_state(DeploymentState.STARTED)
         try:
             plist_data = _gateway_plist(request.desired)
             _atomic_gateway_write(Path(plist_path), plist_data)
@@ -743,13 +927,29 @@ def gateway_reload(request: GatewayDeploymentRequest, *, observed: Mapping[str, 
             if postflight is None:
                 raise _gateway_error("postflight callback required before VERIFIED")
             postflight_result = postflight()
-            store._append_unlocked(store._scan_unlocked(), request_id=request.request_id, request_hash=request.request_hash, state=DeploymentState.VERIFIED,
-                                   pre_effect_identity=preflight["observed"], observed_identity=dict(postflight_result) if isinstance(postflight_result, Mapping) else {})
+            if isinstance(postflight_result, Mapping):
+                try:
+                    postflight_result = PostflightIdentity.model_validate(postflight_result)
+                except ContractError as exc:
+                    raise _gateway_error("postflight identity schema mismatch", exc) from exc
+            if not isinstance(postflight_result, PostflightIdentity):
+                raise _gateway_error("postflight callback must return typed identity")
+            validate_postflight_identity(postflight_result, request.desired)
+            previous = request.current_identity.server_instance
+            if previous and postflight_result.server_instance == previous:
+                raise _gateway_error("postflight server instance was not replaced")
+            append_state(DeploymentState.SERVICE_OBSERVED, postflight_result.model_dump())
+            append_state(DeploymentState.IDENTITY_VERIFIED, postflight_result.model_dump())
+            append_state(DeploymentState.CLIENT_BOUND, postflight_result.model_dump())
+            append_state(DeploymentState.VERIFIED, postflight_result.model_dump())
             return {"state": DeploymentState.VERIFIED.value, "request_id": request.request_id, "postflight": postflight_result}
         except Exception as exc:
             with contextlib.suppress(Exception):
-                store._append_unlocked(store._scan_unlocked(), request_id=request.request_id, request_hash=request.request_hash, state=DeploymentState.UNCERTAIN_EFFECT,
-                                       pre_effect_identity=preflight["observed"], observed_identity={"error": type(exc).__name__})
+                current_rows = store._scan_unlocked()
+                prior = next((item for item in reversed(current_rows) if item["request_id"] == request.request_id), None)
+                if prior is not None and prior["state"] not in {DeploymentState.UNCERTAIN_EFFECT.value, DeploymentState.VERIFIED.value}:
+                    store._append_unlocked(current_rows, request_id=request.request_id, request_hash=request.request_hash, state=DeploymentState.UNCERTAIN_EFFECT,
+                                           pre_effect_identity=preflight["observed"], observed_identity={"error": type(exc).__name__})
             raise _gateway_error("Gateway effect uncertain", exc) from exc
 
 
