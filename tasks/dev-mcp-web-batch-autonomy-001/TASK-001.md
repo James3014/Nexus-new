@@ -1,7 +1,7 @@
 # TASK-001 — Define the Nexus batch-autonomy authority contract
 
 - **Campaign:** `CAMPAIGN-DEV-MCP-WEB-BATCH-AUTONOMY-001`
-- **Status:** `PLANNED`
+- **Status:** `ACTIVE`
 - **Source spec:** `SPEC-DEV-MCP-WEB-BATCH-AUTONOMY-001`
 - **Source spec SHA-256:** `fc57f20b2133ed98c8f0c5eabcd6bbe5567aa8a3f97aef70b2eca1ba42bf9d22`
 - **Source groups:** TG-1 Authority and grant contracts
@@ -48,16 +48,16 @@ Current Nexus authority explicitly preserves DIRECT_DELEGATED while defining a s
 
 ## Owner decisions
 
-Source Spec owner decisions are already settled; no new Owner decision in this card.
+Source Spec owner decisions are already settled; no new Owner decision in this card. The Owner explicitly authorized completion of the next gate on 2026-08-23 after PR #523 merged, which activates this card as the sole campaign frontier without authorizing any sibling card or auto-chain.
 
 ## Source and start state
 
 - **Workspace/root:** /Users/jameschen/Workspace/Nexus-new
 - **Branch:** main@GitHub
-- **Starting HEAD:** 67521fe91e990f4e140642984c743dd50a408e84
-- **Dirty baseline:** Canonical GitHub main is clean; ordinary local checkout is dirty/behind and must not be used as mutation baseline.
-- **Required initial verification:** Re-read root, branch/identity, HEAD, dirty state, and applicable instruction files before the task starts.
-- **Freshness rule:** Re-read after any predecessor completion, repository movement, reconnect, tool/profile change, or material delay before mutation/proof.
+- **Starting HEAD:** 9ff8bccff38384b83400f9cbea2747f5ce9bd8f0
+- **Dirty baseline:** Canonical GitHub main is clean at the activation base; ordinary local checkout is dirty/behind and must not be used as mutation baseline.
+- **Required initial verification:** Re-read root, branch/identity, current GitHub main HEAD, dirty state, and applicable instruction files before the implementation attempt starts. The execution baseline must be rebound after this activation change lands; do not treat the activation-base SHA as standing mutation authority if main moves.
+- **Freshness rule:** Re-read after any predecessor completion, repository movement, reconnect, tool/profile change, activation merge, or material delay before mutation/proof.
 
 ## MCP execution profile
 
@@ -66,7 +66,7 @@ Source Spec owner decisions are already settled; no new Owner decision in this c
 - **Confirmation-required actions:** nexus_task_run;nexus_task_finish
 - **Idempotency and attempt rule:** Bind task_id, attempt identity, expected HEAD, source Task Card hash, and request hash; never replay uncertain mutation before reconcile.
 - **Reconnect reconciliation:** Re-read gateway identity and task status, then nexus_task_reconcile before retry/resume.
-- **Transport blocker:** none
+- **Transport blocker:** none at card activation; execution still requires fresh live transport/schema binding.
 
 ## Authority map
 
@@ -87,7 +87,7 @@ Source Spec owner decisions are already settled; no new Owner decision in this c
 
 ## Unknown scan
 
-- **Known facts:** GitHub main was rebound at 67521fe9. Local checkout baseline test currently shows AGENTS.md 12111 bytes > 12000 budget; re-run at exact execution baseline before attributing.
+- **Known facts:** GitHub main activation base is 9ff8bccff38384b83400f9cbea2747f5ce9bd8f0. The ordinary local checkout remains stale/dirty and is excluded from the mutation baseline. A historical local focused run showed AGENTS.md over the 12 KB budget; that observation must be re-run against the exact execution baseline before causality is assigned.
 - **Assumptions requiring verification:** The new lane can be expressed additively in existing authority contracts without changing CapabilityPlanner.
 - **Architecture risks:** Authority prose can silently broaden existing lanes; root AGENTS.md has a tight context budget.
 - **Evidence risks:** Reports/status alone cannot prove the linked acceptance criteria; preserve exact revision and negative-control evidence.
@@ -103,7 +103,7 @@ Re-read the listed allowed Read paths, root AGENTS.md, relevant caller/consumer 
 
 ## RED or existing-guard proof
 
-At current local checkout, focused authority tests show a pre-existing context-budget failure; exact GitHub-main execution baseline must be re-run before assigning causality. The card must preserve DIRECT_DELEGATED negative controls and the 12 KB root-context guard.
+A historical stale local checkout showed a focused context-budget failure; exact GitHub-main execution baseline must be re-run before assigning causality. The card must preserve DIRECT_DELEGATED negative controls and the 12 KB root-context guard.
 
 ## Implementation constraints
 
