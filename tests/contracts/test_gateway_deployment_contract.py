@@ -1,6 +1,7 @@
 # ruff: noqa: E701
 import hashlib
 import plistlib
+from pathlib import Path
 
 import pytest
 
@@ -161,7 +162,7 @@ def _request():
         current_main_sha="5" * 40,
         host_card_path="tasks/github-issue-526-host-authority-and-canary-20260823/01-gateway-host-local-canary.md",
         host_card_id="TASK-526-HOST-1",
-        host_card_sha256="fcd22da4ef92b7cde004523fe900c06bc1b9e67715049c95383c581e640f631f",
+        host_card_sha256="f4c581f0062c6b3d65c9ca8f7029a96caa76b2e35d95cc6bccae874c0945f514",
         repository="James3014/Nexus-new",
         operation="reload",
         effect_class=EffectClass.GATEWAY_RELOAD,
@@ -249,6 +250,63 @@ def _bundle_fixture(*, revoked=False, child_revoked=False):
             k: v for k, v in bundle.__dict__.items() if k != "bundle_hash"
         }),
     })
+
+
+def test_host_card_sha256_matches_tracked_authority_card():
+    card_path = Path(__file__).resolve().parents[2] / HOST_CARD_PATH
+    assert hashlib.sha256(card_path.read_bytes()).hexdigest() == (
+        "f4c581f0062c6b3d65c9ca8f7029a96caa76b2e35d95cc6bccae874c0945f514"
+    )
+    assert HOST_CARD_SHA256 == ("f4c581f0062c6b3d65c9ca8f7029a96caa76b2e35d95cc6bccae874c0945f514")
+
+
+@pytest.mark.parametrize("scope", ["child", "bundle"])
+def test_stale_host_card_sha256_is_rejected_after_rehashing(scope):
+    stale_sha256 = "fcd22da4ef92b7cde004523fe900c06bc1b9e67715049c95383c581e640f631f"
+    valid_bundle = _bundle_fixture()
+
+    def rehash_receipt(receipt):
+        return HostEffectAuthorityReceipt(**{
+            **receipt.__dict__,
+            "receipt_hash": canonical_hash({
+                k: v for k, v in receipt.__dict__.items() if k != "receipt_hash"
+            }),
+        })
+
+    if scope == "child":
+        stale_child = rehash_receipt(
+            HostEffectAuthorityReceipt(**{
+                **valid_bundle.receipts[1].__dict__,
+                "host_card_sha256": stale_sha256,
+            })
+        )
+        receipts = (valid_bundle.receipts[0], stale_child, valid_bundle.receipts[2])
+        altered = HostEffectAuthorityBundle(**{**valid_bundle.__dict__, "receipts": receipts})
+    else:
+        receipts = tuple(
+            rehash_receipt(
+                HostEffectAuthorityReceipt(**{
+                    **receipt.__dict__,
+                    "host_card_sha256": stale_sha256,
+                })
+            )
+            for receipt in valid_bundle.receipts
+        )
+        altered = HostEffectAuthorityBundle(**{
+            **valid_bundle.__dict__,
+            "host_card_sha256": stale_sha256,
+            "receipts": receipts,
+        })
+
+    altered = HostEffectAuthorityBundle(**{
+        **altered.__dict__,
+        "bundle_hash": canonical_hash({
+            k: v for k, v in altered.__dict__.items() if k != "bundle_hash"
+        }),
+    })
+
+    with pytest.raises(ContractError, match="host authority.*host_card_sha256 mismatch"):
+        validate_host_effect_authority_bundle(altered)
 
 
 @pytest.mark.parametrize(
