@@ -90,3 +90,11 @@ false-green outer-hash failure.
 - `PASS` means only
   `NEXUS_GATEWAY_HOST_CARD_SHA_BINDING_SOURCE_CANDIDATE_ONLY`.
 - `AUTO_CHAIN=false`; worker stops after one source/test Candidate.
+
+## Supersession
+
+This Card is superseded by
+`04-host-card-sha-binding-correction-superseding.md` after the first bounded
+attempt proved that the operations-test request fixture also hardcodes the
+stale Host Card SHA. Historical Card SHA-256:
+`a5f0fc128e18e12a0524f49aa463b2fe4b5e3f0766f3ff1d3be41564373e07cc`.
