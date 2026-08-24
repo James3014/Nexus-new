@@ -25,6 +25,83 @@ allowed_files:
   - tests/ops/test_mcp_gateway_durable.py
 ```
 
+## R1-B amendment: verified Git store and complete detached deployments
+
+This amendment supersedes single-file/content-bundle staging while preserving
+the stable task ID, source-only realm, `AUTO_CHAIN=false`, and four
+implementation/test paths. Candidate `3a97e2f493152e48b66eb2efe18125cbeb1d6f26`
+is `REVISE` evidence. Card hash
+`e403989a59de80477bb23875f1343da77300d23ddf28da4cd3281e76425ad0e7` is
+superseded; the INDEX binds the amended hash after applying exact bytes. The
+Card does not self-embed its own content hash.
+
+The staging unit is a complete detached Git worktree for each target and
+predecessor. A verified Git bundle containing exact remote-main, desired, and
+predecessor refs is imported into one persistent manager-owned bare repository
+with no alternates:
+
+    fixed authority mirror -> verified Git bundle ->
+    /Users/jameschen/Library/Application Support/Nexus/gateway-direct/repository.git ->
+    deployments/<deployment-id> (two full detached checkouts)
+
+The fixed authority mirror is
+`/Users/jameschen/Workspace/Nexus-new-authority-main`; origin, clean state,
+numeric owner/mode, and `HEAD == fresh remote-main` are verified before bundle
+creation. Recovery performs no network fetch and never follows main; the fixed
+authority preflight may use `git ls-remote` only to prove the mirror HEAD equals
+current remote main. The
+canonical dirty checkout and R1 branch are never recovery byte sources.
+
+Deployments are atomically materialized under
+`/Users/jameschen/Library/Application Support/Nexus/gateway-direct/deployments/<deployment-id>`.
+Each is a Git-aware detached worktree whose gitdir/object store resolves only
+through the fixed manager-owned `repository.git`; it has no external alternates,
+authority-mirror, or disposable-source dependency. Source bundles
+use the fixed path
+`/Users/jameschen/Library/Application Support/Nexus/gateway-direct/source-bundles/<recovery-receipt-hash>.bundle`.
+The manager derives deployment ID from repository, commit, tree, fixed
+entrypoint path/blob/hash, tracked mode, interpreter identity, and bundle hash;
+callers cannot provide IDs or paths.
+
+The fixed tracked receipt is
+`tasks/github-issue-526-host-authority-and-canary-20260823/10-durable-recovery-authority-receipt.json`;
+the only local receipt is
+`/Users/jameschen/Library/Application Support/Nexus/gateway-direct/recovery-authority.json`.
+A new strict `GatewayRecoveryRequest` contains only receipt ID/hash reference,
+request ID, fence, desired/predecessor manifest references, and fixed recovery
+operation data. It excludes legacy authority/current-profile/rollback and all
+caller root, command, PID, plist, port, environment, or follow-main fields;
+the caller never supplies the receipt body.
+
+The manager validates local receipt bytes, strict schema, R1 Card/source/
+manager/acceptance/manifest bindings, and `git show <fresh-remote-main>:<fixed-receipt-path>` bytes from the verified
+authority mirror against the fixed tracked receipt. A caller-rehashed receipt is not authority;
+the legacy host-effect bundle is never parsed for recovery.
+
+Ledger v2 recovery rows share the v1 parent-hash chain. Under the lock, exact
+request-hash CAS and unique fence, persist
+`REQUESTED -> PREFLIGHTED -> TARGET_READY -> ROLLBACK_READY -> EFFECT_STARTED`
+with both full checkouts and pre-effect evidence. Lost acknowledgement becomes
+`UNCERTAIN_EFFECT`; reconcile the fixed service/PID-start/listener/plist and
+authenticated health, initialize, and tools/list for the same request/fence.
+Desired complete postflight yields `VERIFIED`, predecessor yields `ROLLED_BACK`,
+and an unprovable state remains `UNCERTAIN_EFFECT`/`BLOCKED`; never launch a
+second Gateway. Same request/hash/fence is idempotent; conflicts fail closed.
+
+Schemas, manager logic, and tests remain within the same four allowed files.
+Host receipt issuance, mirror refresh, real bundle/bare-repo/worktree
+materialization, plist/launchd effect, rollback, and canary are deferred to a
+separately authorized host phase.
+
+The required negative canary hides/removes the disposable authority mirror and
+original DevSpace roots after both checkouts are staged, then proves
+`repository.git` and both deployments still pass Git root/origin/HEAD/tree/
+clean/entrypoint tracked-mode/blob/hash checks and Gateway import/health
+postflight. One-file staging, Gitlink, symlink escape, alternates, missing
+objects, source drift, caller path, network/follow-main, missing predecessor,
+stale/rehashed receipt, fence conflict, lost-ack replay, wrong service
+identity, or failed authenticated postflight fails closed with zero effect.
+
 ## Objective and authority boundary
 
 Implement the smallest typed contract and single-manager behavior for a
