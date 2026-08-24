@@ -1,0 +1,69 @@
+name: Fast Start v2 Shadow
+
+on:
+  pull_request:
+    paths:
+      - scripts/ops/fast_start_v2.py
+      - tests/ops/test_fast_start_v2.py
+      - .github/workflows/fast-start-v2-shadow.yml
+      - .github/workflows/fast-start-v2-invalidator.yml
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  deterministic-simulator:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install focused test dependency
+        run: python -m pip install --disable-pip-version-check pytest==9.0.3
+      - name: Run focused Fast Start v2 tests without repository-global conftest
+        run: python -m pytest -q --confcutdir=tests/ops tests/ops/test_fast_start_v2.py
+
+  live-shadow-canary:
+    needs: deterministic-simulator
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run read-only live shadow
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          report="$RUNNER_TEMP/fast-start-v2-shadow.json"
+          python scripts/ops/fast_start_v2.py shadow-live > "$report"
+          cat "$report"
+          python - "$report" <<'PY'
+          import json
+          import sys
+
+          report = json.load(open(sys.argv[1], encoding="utf-8"))
+          expected = {
+              "129": ("CACHE_HIT", "BLOCKED"),
+              "92": ("CACHE_HIT", "BLOCKED"),
+              "419": ("CACHE_HIT", "BLOCKED"),
+              "526": ("CACHE_HIT", "HOST_REBIND_REQUIRED"),
+              "398": ("CACHE_HIT", "HOST_REBIND_REQUIRED"),
+          }
+          assert report["authority"] == "SHADOW_READ_ONLY"
+          assert report["implementation_source_or_test_body_reads"] == 0
+          for issue, (action, frontier) in expected.items():
+              decision = report["decisions"][issue]
+              assert decision["reconcile_action"] == action, (issue, decision)
+              assert decision["frontier_state"] == frontier, (issue, decision)
+              assert decision["source_body_reads_allowed"] is False
+              assert decision["test_body_reads_allowed"] is False
+          PY
