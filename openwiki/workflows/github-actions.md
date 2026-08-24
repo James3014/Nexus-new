@@ -1,21 +1,21 @@
 ---
 type: Concept
 title: GitHub Actions Workflows & Operational Lanes
-description: Current inventory and trigger classification of all 10 GitHub Actions workflows, including exact-base Pytest impact selection and trusted deletion-evidence bootstrap.
+description: Current inventory and trigger classification of all 12 GitHub Actions workflows, including exact-base Pytest impact selection, trusted deletion-evidence bootstrap, and Fast Start v2 shadow/invalidation lanes.
 tags: [workflows, github-actions, ci-cd, operational-lanes]
 openwiki:
   roles: [architecture, operations, testing]
   change_kinds: [public-api, workflow]
-  source_paths: [.github/workflows/openwiki-update.yml, .github/workflows/benchmark-ci.yml, .github/workflows/pytest.yml]
-  symbols: [workflow_dispatch, schedule, push, pull_request]
-  test_paths: [tests/ops/test_openwiki_source_contract.py, tests/ops/test_trusted_deletion_anchor.py, tests/ops/test_pr_impact_gate.py]
-  invariants: [Workflow display names and trigger modes come from current YAML. workflow_dispatch alone is manual-only. GitHub Actions run on the CI surface and do not independently grant merge or release authority.]
-  validation_commands: [pytest tests/ops/test_openwiki_source_contract.py tests/ops/test_trusted_deletion_anchor.py tests/ops/test_pr_impact_gate.py -q]
+  source_paths: [.github/workflows/openwiki-update.yml, .github/workflows/benchmark-ci.yml, .github/workflows/pytest.yml, .github/workflows/fast-start-v2-shadow.yml, .github/workflows/fast-start-v2-invalidator.yml]
+  symbols: [workflow_dispatch, schedule, push, pull_request, pull_request_target, issues, issue_comment]
+  test_paths: [tests/ops/test_openwiki_source_contract.py, tests/ops/test_trusted_deletion_anchor.py, tests/ops/test_pr_impact_gate.py, tests/ops/test_fast_start_v2.py]
+  invariants: [Workflow display names and trigger modes come from current YAML. workflow_dispatch alone is manual-only. GitHub Actions run on the CI surface and do not independently grant merge or release authority. Fast Start v2 event hints are WAKEUP_HINT_ONLY and do not write the canonical registry body.]
+  validation_commands: [pytest tests/ops/test_openwiki_source_contract.py tests/ops/test_trusted_deletion_anchor.py tests/ops/test_pr_impact_gate.py tests/ops/test_fast_start_v2.py -q]
 ---
 
 # GitHub Actions Workflows & Operational Lanes
 
-The repository currently contains **all 10 GitHub Actions workflows** under `.github/workflows/`. Display names and trigger modes below are derived from the physical YAML at the synchronized GitHub revision; they are not inferred from filenames or historical workflow intent.
+The repository currently contains **all 12 GitHub Actions workflows** under `.github/workflows/`. Display names and trigger modes below are derived from the physical YAML at the synchronized GitHub revision; they are not inferred from filenames or historical workflow intent.
 
 ---
 
@@ -24,6 +24,8 @@ The repository currently contains **all 10 GitHub Actions workflows** under `.gi
 | Workflow File | Display Name | Trigger Keys (`on:`) | Operational Mode | Current Role |
 | :--- | :--- | :--- | :--- | :--- |
 | `benchmark-ci.yml` | 📊 Nexus Benchmark CI | `schedule` (`0 18 * * *`), `workflow_dispatch` | Scheduled & Manual | Scheduled/manual benchmark evaluation |
+| `fast-start-v2-invalidator.yml` | Fast Start v2 Invalidator | `push` (`main`), `pull_request_target`, `issues`, `issue_comment` | Event-driven | Default-branch-trusted Fast Start invalidation that emits only non-authoritative wakeup hints; it does not write the canonical registry body |
+| `fast-start-v2-shadow.yml` | Fast Start v2 Shadow | `pull_request` (Fast Start paths), `workflow_dispatch` | Event-driven & Manual | Read-only deterministic simulator and live-shadow canary for Fast Start v2 |
 | `lint.yml` | Nexus Exact-Base Ruff CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Exact-base Ruff/static lint lane |
 | `nexus-smoke.yml` | Nexus Smoke Benchmark | `push` (`main`, `master`), `schedule` (`0 2 * * *`), `workflow_dispatch` | Scheduled, Event-driven & Manual | Protected-branch/nightly smoke benchmark |
 | `openwiki-update.yml` | OpenWiki Manual Update | `workflow_dispatch` | Manual-Only | Pinned OpenWiki generation with containment checks and artifact upload |
@@ -47,6 +49,14 @@ The repository currently contains **all 10 GitHub Actions workflows** under `.gi
 5. carries that evidence into downstream Pytest verification.
 
 This makes the CI claim revision-bound. A green run on another base/head pair is not evidence for the current Candidate.
+
+---
+
+## ⚡ Fast Start v2 Lanes
+
+`fast-start-v2-shadow.yml` is the read-only verification lane. It runs the deterministic invalidation/reconcile simulator and a live shadow against current GitHub/cache metadata without reading implementation source/test bodies for blocked or host-bound entries.
+
+`fast-start-v2-invalidator.yml` is the event wakeup lane. It runs trusted default-branch code, derives bounded PR/push path impact through GitHub metadata, hashes untrusted changed-path text before persistence, suppresses registry self-events, and may publish only `WAKEUP_HINT_ONLY` receipts. It does not write the canonical `#549` registry body and grants no Issue readiness, dispatch, claim, approval, merge, runtime, release, or production authority.
 
 ---
 
@@ -99,6 +109,37 @@ claim_ceiling: Revision-bound CI verification surface with an exact-base impact 
 ```
 
 ```yaml
+component: FastStartV2ShadowWorkflow
+implementation_status: CURRENT
+wiring_status: WIRED
+runtime_surfaces:
+  - CI
+authority_roles:
+  - NONE
+evidence_basis:
+  - .github/workflows/fast-start-v2-shadow.yml:on.pull_request
+  - .github/workflows/fast-start-v2-shadow.yml:jobs.deterministic-simulator
+  - .github/workflows/fast-start-v2-shadow.yml:jobs.live-shadow-canary
+claim_ceiling: Read-only Fast Start v2 simulator and shadow evidence lane; it cannot mutate the registry or grant execution authority.
+```
+
+```yaml
+component: FastStartV2InvalidatorWorkflow
+implementation_status: CURRENT
+wiring_status: WIRED
+runtime_surfaces:
+  - CI
+authority_roles:
+  - DERIVED_ONLY
+evidence_basis:
+  - .github/workflows/fast-start-v2-invalidator.yml:on.push
+  - .github/workflows/fast-start-v2-invalidator.yml:on.pull_request_target
+  - .github/workflows/fast-start-v2-invalidator.yml:on.issues
+  - .github/workflows/fast-start-v2-invalidator.yml:on.issue_comment
+claim_ceiling: Event-driven Fast Start invalidation hint producer only; persisted hints are WAKEUP_HINT_ONLY and cannot write the canonical registry body or grant route, dispatch, claim, approval, merge, runtime, release, or production authority.
+```
+
+```yaml
 component: TrustedDeletionAnchorWorkflow
 implementation_status: CURRENT
 wiring_status: WIRED
@@ -132,13 +173,14 @@ claim_ceiling: Scheduled/manual benchmark CI surface; benchmark results are not 
 ## 🧭 Change Navigation & Validation
 
 ### When to Consult
-Consult this page when changing workflow triggers, exact-base selection, trusted PR evidence handling, OpenWiki generation, benchmark scheduling, or CI gate behavior.
+Consult this page when changing workflow triggers, exact-base selection, trusted PR evidence handling, Fast Start invalidation/shadow behavior, OpenWiki generation, benchmark scheduling, or CI gate behavior.
 
 ### Workflow Invariants
 - Copy top-level workflow `name:` values verbatim from YAML.
 - `workflow_dispatch` alone means manual-only.
 - Describe a workflow as scheduled only when `schedule:` exists physically.
 - Treat GitHub Actions execution as `CI`; add `BENCHMARK` only when the workflow is actually a benchmark surface.
+- Fast Start event hints are non-authoritative wakeups; they do not write the canonical registry body or grant execution authority.
 - A CI success result does not independently grant merge, integration, release, or public-claim authority.
 
 ### Exact Source Files
@@ -146,13 +188,16 @@ Consult this page when changing workflow triggers, exact-base selection, trusted
 - `.github/workflows/pytest.yml`
 - `.github/workflows/trusted-deletion-anchor.yml`
 - `.github/workflows/benchmark-ci.yml`
+- `.github/workflows/fast-start-v2-shadow.yml`
+- `.github/workflows/fast-start-v2-invalidator.yml`
 
 ### Focused Tests
 - `tests/ops/test_openwiki_source_contract.py`
 - `tests/ops/test_trusted_deletion_anchor.py`
 - `tests/ops/test_pr_impact_gate.py`
+- `tests/ops/test_fast_start_v2.py`
 
 ### Minimal Validation Command
 ```bash
-pytest tests/ops/test_openwiki_source_contract.py tests/ops/test_trusted_deletion_anchor.py tests/ops/test_pr_impact_gate.py -q
+pytest tests/ops/test_openwiki_source_contract.py tests/ops/test_trusted_deletion_anchor.py tests/ops/test_pr_impact_gate.py tests/ops/test_fast_start_v2.py -q
 ```
