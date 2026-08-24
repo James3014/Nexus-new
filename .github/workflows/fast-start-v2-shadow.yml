@@ -23,8 +23,8 @@ jobs:
           python-version: "3.12"
       - name: Install focused test dependency
         run: python -m pip install --disable-pip-version-check pytest==9.0.3
-      - name: Run focused Fast Start v2 tests
-        run: python -m pytest -q tests/ops/test_fast_start_v2.py
+      - name: Run focused Fast Start v2 tests without repository-global conftest
+        run: python -m pytest -q --confcutdir=tests/ops tests/ops/test_fast_start_v2.py
 
   live-shadow-canary:
     needs: deterministic-simulator
