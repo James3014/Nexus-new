@@ -1,6 +1,8 @@
 # ruff: noqa: E701, E702, E731
+import fcntl
 import hashlib
 import json
+import multiprocessing
 import os
 import plistlib
 import shutil
@@ -2605,3 +2607,1433 @@ def test_authority_source_nonsticky_group_or_world_writable_ancestor_is_rejected
 def test_authority_source_wrong_owner_or_symlink_ancestor_is_rejected(info):
     with pytest.raises(g.GatewayContractError, match="ancestry unsafe"):
         g._validate_authority_source_directory(info, leaf=False)
+
+
+def _r1b2_record(fixture, staged, state, sequence, parent_hash):
+    from nexus.contracts.gateway_deployment import RecoveryLedgerRecord, canonical_hash
+
+    request = fixture["request"]
+    receipt = fixture["receipt"]
+    values = {
+        "schema": "nexus.gateway.ledger.v2",
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "state": state,
+        "sequence": sequence,
+        "parent_hash": parent_hash,
+        "authority_schema": receipt.schema,
+        "receipt_id": receipt.receipt_id,
+        "receipt_hash": receipt.receipt_hash,
+        "card_sha256": receipt.card_sha256,
+        "accepted_source_merge": receipt.accepted_source_merge,
+        "accepted_source_tree": receipt.accepted_source_tree,
+        "final_manager_sha256": receipt.final_manager_sha256,
+        "independent_acceptance_receipt_hash": (
+            receipt.independent_acceptance_receipt_hash
+        ),
+        "source_set_sha256": receipt.source_set.source_set_sha256,
+        "desired_manifest_id": receipt.desired_manifest_id,
+        "desired_manifest_hash": receipt.desired_manifest_sha256,
+        "predecessor_manifest_id": receipt.predecessor_manifest_id,
+        "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
+        "source_bundle_evidence_hash": (
+            None if state == "REQUESTED" else staged.bundle_evidence.evidence_hash
+        ),
+        "operation": request.operation,
+        "effect_class": request.effect_class,
+        "idempotency_fence": request.idempotency_fence,
+        "pre_effect_identity": {},
+        "observed_identity": {},
+    }
+    values["record_hash"] = canonical_hash(values)
+    return RecoveryLedgerRecord.model_validate(values)
+
+
+def _r1b2_prepared_fixture(tmp_path, monkeypatch):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    staged = g.stage_verified_git_store(fixture["request"], fixture["receipt"])
+    fixture["staged"] = staged
+    fixture["ledger_path"] = fixture["state"] / "ledger.jsonl"
+    fixture["lock_path"] = fixture["state"] / "ledger.lock"
+    return fixture
+
+
+def test_r1b2_ledger_v2_exact_jsonl_fsync_mixed_chain_and_v1_bytes(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_prepared_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    v1 = ledger.append(
+        request_id="legacy-request",
+        request_hash="a" * 64,
+        state="REQUESTED",
+        host_authority=_ledger_receipt("legacy-request", "legacy-fence"),
+        operation="reload",
+        effect_class="GATEWAY_RELOAD",
+        idempotency_fence="legacy-fence",
+    )
+    v1_bytes = fixture["ledger_path"].read_bytes()
+    fsync_calls = []
+    real_fsync = g.os.fsync
+    monkeypatch.setattr(
+        g.os, "fsync",
+        lambda fd: (fsync_calls.append(fd), real_fsync(fd))[1],
+    )
+    record = _r1b2_record(
+        fixture, fixture["staged"], "REQUESTED", 2, v1["record_hash"]
+    )
+    appended = ledger.append_recovery(
+        record,
+        expected_tail=v1["record_hash"],
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=None,
+    )
+    expected_v2 = (
+        json.dumps(
+            appended.model_dump(),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode()
+        + b"\n"
+    )
+    raw = fixture["ledger_path"].read_bytes()
+    assert raw == v1_bytes + expected_v2
+    assert raw.startswith(v1_bytes)
+    assert fsync_calls
+    rows = ledger.read()
+    assert [row["sequence"] for row in rows] == [1, 2]
+    assert rows[1]["parent_hash"] == rows[0]["record_hash"]
+    assert rows[0]["schema"] == "nexus.gateway.ledger.v1"
+    assert rows[1]["schema"] == "nexus.gateway.ledger.v2"
+    assert set(rows[0]).isdisjoint({
+        "authority_schema", "receipt_id", "source_set_sha256",
+        "source_bundle_evidence_hash",
+    })
+    assert set(rows[1]).isdisjoint({
+        "host_receipt_hash", "source_base_merge", "source_base_tree",
+        "host_card_sha256",
+    })
+    recovery = ledger.recovery_rows(
+        fixture["request"].request_id,
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=fixture["staged"].bundle_evidence,
+    )
+    assert [row.state for row in recovery] == ["REQUESTED"]
+    assert ledger.current_recovery_state(
+        fixture["request"].request_id,
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=fixture["staged"].bundle_evidence,
+    ) == "REQUESTED"
+
+
+def test_r1b2_ledger_v2_tamper_truncate_reorder_and_self_rehash_rejected(
+    tmp_path, monkeypatch
+):
+    from nexus.contracts.gateway_deployment import canonical_hash
+
+    fixture = _r1b2_prepared_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    first = _r1b2_record(fixture, fixture["staged"], "REQUESTED", 1, "")
+    first = ledger.append_recovery(
+        first,
+        expected_tail="",
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=None,
+    )
+    second = _r1b2_record(
+        fixture, fixture["staged"], "PREFLIGHTED", 2, first.record_hash
+    )
+    ledger.append_recovery(
+        second,
+        expected_tail=first.record_hash,
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=fixture["staged"].bundle_evidence,
+    )
+    valid = fixture["ledger_path"].read_bytes()
+    lines = valid.splitlines(keepends=True)
+    corruptions = {
+        "truncate": valid[:-1],
+        "reorder": lines[1] + lines[0],
+        "tamper": valid.replace(b'"state":"PREFLIGHTED"', b'"state":"VERIFIED"'),
+    }
+    for name, raw in corruptions.items():
+        path = fixture["state"] / f"{name}.jsonl"
+        path.write_bytes(raw)
+        path.chmod(0o600)
+        with pytest.raises(g.LedgerCorruption):
+            g.GatewayLedger(path).read()
+    substituted = json.loads(lines[1])
+    substituted["receipt_hash"] = "f" * 64
+    substituted["record_hash"] = canonical_hash({
+        key: value for key, value in substituted.items() if key != "record_hash"
+    })
+    substitution_path = fixture["state"] / "substitution.jsonl"
+    substitution_path.write_bytes(
+        lines[0]
+        + json.dumps(
+            substituted, sort_keys=True, separators=(",", ":")
+        ).encode()
+        + b"\n"
+    )
+    substitution_path.chmod(0o600)
+    substituted_ledger = g.GatewayLedger(substitution_path)
+    with pytest.raises((g.LedgerCorruption, g.GatewayContractError)):
+        substituted_ledger.recovery_rows(
+            fixture["request"].request_id,
+            request=fixture["request"],
+            receipt=fixture["receipt"],
+            source_bundle_evidence=fixture["staged"].bundle_evidence,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("request_hash", "0" * 64),
+        ("idempotency_fence", "substituted-fence"),
+        ("authority_schema", "nexus.gateway.other_authority.v1"),
+        ("receipt_id", "substituted-receipt"),
+        ("receipt_hash", "1" * 64),
+        ("card_sha256", "2" * 64),
+        ("accepted_source_merge", "3" * 40),
+        ("accepted_source_tree", "4" * 40),
+        ("final_manager_sha256", "5" * 64),
+        ("independent_acceptance_receipt_hash", "6" * 64),
+        ("source_set_sha256", "7" * 64),
+        ("desired_manifest_id", "r1-substituted-desired"),
+        ("desired_manifest_hash", "8" * 64),
+        ("predecessor_manifest_id", "r1-substituted-predecessor"),
+        ("predecessor_manifest_hash", "9" * 64),
+        ("source_bundle_evidence_hash", "a" * 64),
+    ],
+)
+def test_r1b2_ledger_v2_self_rehashed_suffix_substitution_rejected_by_trusted_context(
+    tmp_path, monkeypatch, field, replacement
+):
+    from nexus.contracts.gateway_deployment import canonical_hash
+
+    assert hasattr(g.GatewayLedger, "append_recovery")
+    fixture = _r1b2_prepared_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    requested = _r1b2_record(
+        fixture, fixture["staged"], "REQUESTED", 1, ""
+    )
+    requested = ledger.append_recovery(
+        requested,
+        expected_tail="",
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=None,
+    )
+    preflighted = _r1b2_record(
+        fixture, fixture["staged"], "PREFLIGHTED", 2, requested.record_hash
+    )
+    preflighted = ledger.append_recovery(
+        preflighted,
+        expected_tail=requested.record_hash,
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=fixture["staged"].bundle_evidence,
+    )
+    target = _r1b2_record(
+        fixture, fixture["staged"], "TARGET_READY", 3, preflighted.record_hash
+    )
+    ledger.append_recovery(
+        target,
+        expected_tail=preflighted.record_hash,
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=fixture["staged"].bundle_evidence,
+    )
+    rows = ledger.read()
+    rows[1][field] = replacement
+    rows[1]["record_hash"] = canonical_hash({
+        key: value for key, value in rows[1].items() if key != "record_hash"
+    })
+    rows[2]["parent_hash"] = rows[1]["record_hash"]
+    rows[2]["record_hash"] = canonical_hash({
+        key: value for key, value in rows[2].items() if key != "record_hash"
+    })
+    fixture["ledger_path"].write_bytes(
+        b"".join(
+            json.dumps(row, sort_keys=True, separators=(",", ":")).encode()
+            + b"\n"
+            for row in rows
+        )
+    )
+    with pytest.raises((g.GatewayContractError, g.LedgerCorruption)):
+        ledger.recovery_rows(
+            fixture["request"].request_id,
+            request=fixture["request"],
+            receipt=fixture["receipt"],
+            source_bundle_evidence=fixture["staged"].bundle_evidence,
+        )
+
+
+def test_r1b2_recovery_cas_tail_request_and_fence_conflicts_fail_closed(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_prepared_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    first = _r1b2_record(fixture, fixture["staged"], "REQUESTED", 1, "")
+    first = ledger.append_recovery(
+        first,
+        expected_tail="",
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=None,
+    )
+    second = _r1b2_record(
+        fixture, fixture["staged"], "PREFLIGHTED", 2, first.record_hash
+    )
+    for mutation, expected_tail in (
+        ({"request_hash": "f" * 64}, first.record_hash),
+        ({"idempotency_fence": "other-fence"}, first.record_hash),
+        ({"request_id": "other-request"}, first.record_hash),
+        ({}, "e" * 64),
+    ):
+        values = {**second.__dict__, **mutation}
+        values["record_hash"] = __import__(
+            "nexus.contracts.gateway_deployment",
+            fromlist=["canonical_hash"],
+        ).canonical_hash({
+            key: value for key, value in values.items() if key != "record_hash"
+        })
+        with pytest.raises((g.GatewayContractError, g.LedgerCorruption)):
+            ledger.append_recovery(
+                second.__class__(**values),
+                expected_tail=expected_tail,
+                request=fixture["request"],
+                receipt=fixture["receipt"],
+                source_bundle_evidence=fixture["staged"].bundle_evidence,
+            )
+    assert len(ledger.read()) == 1
+
+
+class _R1B2Crash(BaseException):
+    pass
+
+
+def _r1b2_runtime_fixture(tmp_path, monkeypatch):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    fixture["ledger_path"] = fixture["state"] / "ledger.jsonl"
+    fixture["lock_path"] = fixture["state"] / "ledger.lock"
+    return fixture
+
+
+def _r1b2_physical_identity(fixture, role="desired", **changes):
+    from nexus.contracts.gateway_deployment import (
+        RecoveryPhysicalIdentity,
+        canonical_hash,
+    )
+
+    receipt = fixture["receipt"]
+    if role == "desired":
+        manifest = receipt.desired_manifest
+    elif role == "predecessor":
+        manifest = receipt.predecessor_manifest
+    elif role == "unknown":
+        manifest = receipt.desired_manifest.__class__(**{
+            **receipt.desired_manifest.__dict__,
+            "deployment_id": "r1-unknown",
+            "commit": "e" * 40,
+            "tree": "f" * 40,
+        })
+    else:
+        raise AssertionError(role)
+    root = str(g.GATEWAY_DEPLOYMENTS_ROOT / manifest.deployment_id)
+    values = {
+        "loaded": True,
+        "service_label": g.GATEWAY_LABEL,
+        "pid": 4321,
+        "start_identity": "pid-4321-start-1",
+        "listener": g.GATEWAY_ENDPOINT,
+        "plist_sha256": "1" * 64,
+        "deployment_id": manifest.deployment_id,
+        "root": root,
+        "head": manifest.commit,
+        "tree": manifest.tree,
+        "server_instance": f"server-{role}",
+        "observed_at": "2026-08-25T00:00:00Z",
+        **changes,
+    }
+    return RecoveryPhysicalIdentity(
+        **values, evidence_hash=canonical_hash(values)
+    )
+
+
+def _r1b2_postflight(fixture, physical, **changes):
+    receipt = fixture["receipt"]
+    values = {
+        "authenticated": True,
+        "health": {
+            "deployment_id": physical.deployment_id,
+            "root": physical.root,
+            "head": physical.head,
+            "tree": physical.tree,
+            "server_instance": physical.server_instance,
+            "permission_policy_hash": "2" * 64,
+        },
+        "initialize": {
+            "session_id": "recovery-session-1",
+            "server_instance": physical.server_instance,
+            "permission_policy_hash": "2" * 64,
+        },
+        "tools_list": {
+            "session_id": "recovery-session-1",
+            "actions": ["gateway-rebind"],
+            "schema_hash": "3" * 64,
+        },
+        "expected_action": "gateway-rebind",
+        "expected_manifest_id": receipt.desired_manifest_id,
+        **changes,
+    }
+    return values
+
+
+def _r1b2_durable_count(path, increment=0):
+    path = Path(path)
+    if not path.exists():
+        path.write_text("0")
+    with path.open("r+") as stream:
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+        current = int(stream.read() or "0")
+        if increment:
+            current += increment
+            stream.seek(0)
+            stream.truncate()
+            stream.write(str(current))
+            stream.flush()
+            os.fsync(stream.fileno())
+        fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+    return current
+
+
+def _r1b2_adapters(
+    fixture,
+    ledger,
+    *,
+    observe_role="desired",
+    physical_changes=None,
+    postflight_changes=None,
+    already_desired=False,
+    lost_ack=False,
+    crash_point=None,
+    effect_calls=None,
+    external_calls=None,
+    effect_count_path=None,
+    external_count_path=None,
+):
+    from nexus.contracts.gateway_deployment import (
+        RecoveryEffectAck,
+        canonical_hash,
+    )
+
+    effect_calls = effect_calls if effect_calls is not None else []
+    external_calls = external_calls if external_calls is not None else []
+    physical = _r1b2_physical_identity(
+        fixture, observe_role, **(physical_changes or {})
+    )
+
+    def observe(plan):
+        assert plan.request_id == fixture["request"].request_id
+        return physical
+
+    def effect(plan):
+        rows = g.GatewayLedger(
+            ledger.path, lock_path=ledger.lock_path
+        ).recovery_rows(
+            fixture["request"].request_id,
+            request=fixture["request"],
+            receipt=fixture["receipt"],
+            source_bundle_evidence=None,
+        )
+        assert rows[-1].state == "EFFECT_STARTED"
+        effect_calls.append(plan.plan_hash)
+        if effect_count_path is not None:
+            _r1b2_durable_count(effect_count_path, 1)
+        if not already_desired:
+            external_calls.append("fixed-effect")
+            if external_count_path is not None:
+                _r1b2_durable_count(external_count_path, 1)
+        if lost_ack:
+            raise TimeoutError("effect applied but acknowledgement was lost")
+        ack_values = {
+            "plan_hash": plan.plan_hash,
+            "acknowledged": True,
+            "applied": not already_desired,
+            "already_desired": already_desired,
+            "effect_kind": "GATEWAY_DURABLE_RECOVERY",
+        }
+        return RecoveryEffectAck(
+            **ack_values, evidence_hash=canonical_hash(ack_values)
+        )
+
+    def postflight(plan, identity):
+        assert plan.request_id == fixture["request"].request_id
+        assert identity == physical
+        return _r1b2_postflight(
+            fixture, physical, **(postflight_changes or {})
+        )
+
+    def crash_hook(point):
+        if point == crash_point:
+            raise _R1B2Crash(point)
+
+    return g._RecoveryAdapters(
+        observe=observe,
+        effect=effect,
+        postflight=postflight,
+        clock=lambda: "2026-08-25T00:00:00Z",
+        crash_hook=crash_hook,
+    )
+
+
+@pytest.mark.parametrize(
+    ("crash_point", "expected_state"),
+    [
+        ("after_bundle_evidence", "PREFLIGHTED"),
+        ("after_target_ready", "TARGET_READY"),
+        ("after_rollback_ready", "ROLLBACK_READY"),
+        ("after_effect_started_before_call", "EFFECT_STARTED"),
+        ("after_effect_call_before_ack", "EFFECT_STARTED"),
+        ("after_effect_success_before_observation", "EFFECT_STARTED"),
+        ("after_service_observed", "SERVICE_OBSERVED"),
+        ("after_identity_verified", "IDENTITY_VERIFIED"),
+        ("after_client_bound", "CLIENT_BOUND"),
+    ],
+)
+def test_r1b2_crash_points_leave_only_complete_durable_rows(
+    tmp_path, monkeypatch, crash_point, expected_state
+):
+    assert hasattr(g, "_RecoveryAdapters")
+    assert hasattr(g, "_gateway_recover_with_adapters")
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    effect_count = tmp_path / "durable-effect-count"
+    external_count = tmp_path / "durable-external-count"
+    adapters = _r1b2_adapters(
+        fixture,
+        ledger,
+        crash_point=crash_point,
+        effect_count_path=effect_count,
+        external_count_path=external_count,
+    )
+    with pytest.raises(_R1B2Crash):
+        g._gateway_recover_with_adapters(
+            fixture["request"], adapters=adapters, ledger=ledger
+        )
+    raw = fixture["ledger_path"].read_bytes()
+    assert raw.endswith(b"\n")
+    rows = ledger.recovery_rows(
+        fixture["request"].request_id,
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=None,
+    )
+    assert rows[-1].state == expected_state
+    readiness_points = {
+        "after_bundle_evidence",
+        "after_target_ready",
+        "after_rollback_ready",
+    }
+    pre_call_points = {
+        *readiness_points,
+        "after_effect_started_before_call",
+    }
+    initial_calls = 0 if crash_point in pre_call_points else 1
+    assert _r1b2_durable_count(effect_count) == initial_calls
+    assert _r1b2_durable_count(external_count) == initial_calls
+    if crash_point == "after_bundle_evidence":
+        assert rows[-1].source_bundle_evidence_hash
+        assert not g.GATEWAY_DEPLOYMENTS_ROOT.exists()
+    prefix = fixture["ledger_path"].read_bytes()
+    row_count = len(rows)
+    replay = _r1b2_adapters(
+        fixture,
+        ledger,
+        already_desired=True,
+        effect_count_path=effect_count,
+        external_count_path=external_count,
+    )
+    if crash_point not in readiness_points:
+        replay = replay.__class__(
+            observe=replay.observe,
+            effect=lambda _plan: pytest.fail(
+                "EFFECT_STARTED-or-later replay cannot invoke an effect seam"
+            ),
+            postflight=replay.postflight,
+            clock=replay.clock,
+            crash_hook=replay.crash_hook,
+        )
+    outcome = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=replay, ledger=ledger
+    )
+    assert outcome.result == "VERIFIED"
+    assert fixture["ledger_path"].read_bytes().startswith(prefix)
+    replay_rows = ledger.recovery_rows(
+        fixture["request"].request_id,
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=None,
+    )
+    assert replay_rows[:row_count] == rows
+    assert replay_rows[-1].state == "VERIFIED"
+    terminal_path = [
+        "PREFLIGHTED",
+        "TARGET_READY",
+        "ROLLBACK_READY",
+        "EFFECT_STARTED",
+        "SERVICE_OBSERVED",
+        "IDENTITY_VERIFIED",
+        "CLIENT_BOUND",
+        "VERIFIED",
+    ]
+    expected_suffix = terminal_path[
+        terminal_path.index(expected_state) + 1:
+    ]
+    assert [row.state for row in replay_rows[row_count:]] == expected_suffix
+    assert sum(row.state == "EFFECT_STARTED" for row in replay_rows) == 1
+    if crash_point in readiness_points:
+        assert _r1b2_durable_count(effect_count) == 1
+        assert _r1b2_durable_count(external_count) == 0
+    elif crash_point == "after_effect_started_before_call":
+        assert _r1b2_durable_count(effect_count) == 0
+        assert _r1b2_durable_count(external_count) == 0
+    else:
+        assert _r1b2_durable_count(effect_count) == 1
+        assert _r1b2_durable_count(external_count) == 1
+    expected_evidence_hash = next(
+        row.source_bundle_evidence_hash
+        for row in replay_rows
+        if row.source_bundle_evidence_hash is not None
+    )
+    revalidated = g._revalidate_recovery_artifacts(
+        fixture["request"],
+        fixture["receipt"],
+        expected_bundle_evidence_hash=expected_evidence_hash,
+    )
+    assert revalidated.bundle_evidence.evidence_hash == expected_evidence_hash
+    for path, manifest in (
+        (
+            g.GATEWAY_DEPLOYMENTS_ROOT / fixture["receipt"].desired_manifest_id,
+            fixture["receipt"].desired_manifest,
+        ),
+        (
+            g.GATEWAY_DEPLOYMENTS_ROOT / fixture["receipt"].predecessor_manifest_id,
+            fixture["receipt"].predecessor_manifest,
+        ),
+    ):
+        assert g._r1_verify_worktree(path, manifest) == path
+
+
+def test_r1b2_crash_partial_append_is_corruption_not_a_replayable_state(
+    tmp_path, monkeypatch
+):
+    assert hasattr(g.GatewayLedger, "append_recovery")
+    fixture = _r1b2_prepared_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    first = _r1b2_record(fixture, fixture["staged"], "REQUESTED", 1, "")
+    ledger.append_recovery(
+        first,
+        expected_tail="",
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=None,
+    )
+    with fixture["ledger_path"].open("ab") as stream:
+        stream.write(b'{"schema":"nexus.gateway.ledger.v2"')
+        stream.flush()
+        os.fsync(stream.fileno())
+    with pytest.raises(g.LedgerCorruption):
+        ledger.read()
+
+
+def test_r1b2_recovery_cas_persists_bundle_evidence_before_promotion_and_missing_predecessor(
+    tmp_path, monkeypatch
+):
+    assert hasattr(g, "_gateway_recover_with_adapters")
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    materialize = g._r1_materialize_worktree
+    effects = []
+
+    def missing_predecessor(manifest):
+        rows = ledger.recovery_rows(
+            fixture["request"].request_id,
+            request=fixture["request"],
+            receipt=fixture["receipt"],
+            source_bundle_evidence=None,
+        )
+        assert rows[-1].source_bundle_evidence_hash
+        if manifest.role == "predecessor":
+            raise g.GatewayContractError("predecessor bytes missing")
+        return materialize(manifest)
+
+    monkeypatch.setattr(g, "_r1_materialize_worktree", missing_predecessor)
+    adapters = _r1b2_adapters(
+        fixture, ledger, effect_calls=effects
+    )
+    result = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=adapters, ledger=ledger
+    )
+    assert result.result == "BLOCKED"
+    assert result.effect_started is False
+    assert effects == []
+    states = [
+        row.state
+        for row in ledger.recovery_rows(
+            fixture["request"].request_id,
+            request=fixture["request"],
+            receipt=fixture["receipt"],
+            source_bundle_evidence=None,
+        )
+    ]
+    assert states[-3:] == [
+        "TARGET_READY", "ROLLBACK_UNAVAILABLE", "BLOCKED"
+    ]
+
+
+def test_r1b2_lost_ack_reopens_durable_effect_started_and_never_reapplies(
+    tmp_path, monkeypatch
+):
+    assert hasattr(g, "_gateway_recover_with_adapters")
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    effect_calls = []
+    external_calls = []
+    lost = _r1b2_adapters(
+        fixture,
+        ledger,
+        lost_ack=True,
+        effect_calls=effect_calls,
+        external_calls=external_calls,
+    )
+    first = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=lost, ledger=ledger
+    )
+    assert first.result == "UNCERTAIN_EFFECT"
+    assert len(effect_calls) == 1
+    assert external_calls == ["fixed-effect"]
+    assert ledger.current_recovery_state(
+        fixture["request"].request_id,
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=None,
+    ) == "UNCERTAIN_EFFECT"
+
+    def no_second_effect(_plan):
+        pytest.fail("UNCERTAIN_EFFECT replay must never invoke a second effect")
+
+    recovered = _r1b2_adapters(fixture, ledger)
+    recovered = recovered.__class__(
+        observe=recovered.observe,
+        effect=no_second_effect,
+        postflight=recovered.postflight,
+        clock=recovered.clock,
+        crash_hook=recovered.crash_hook,
+    )
+    second = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=recovered, ledger=ledger
+    )
+    assert second.result == "VERIFIED"
+    states = [
+        row.state
+        for row in ledger.recovery_rows(
+            fixture["request"].request_id,
+            request=fixture["request"],
+            receipt=fixture["receipt"],
+            source_bundle_evidence=None,
+        )
+    ]
+    assert states.count("EFFECT_STARTED") == 1
+    assert len(effect_calls) == 1
+    assert external_calls == ["fixed-effect"]
+
+
+@pytest.mark.parametrize(
+    ("role", "changes", "postflight_changes", "expected"),
+    [
+        ("desired", {}, {}, "VERIFIED"),
+        ("predecessor", {}, {}, "ROLLED_BACK"),
+        ("unknown", {}, {}, "BLOCKED"),
+        ("desired", {"loaded": False}, {}, "BLOCKED"),
+        ("desired", {"service_label": "com.example.wrong"}, {}, "BLOCKED"),
+        ("desired", {"pid": None}, {}, "BLOCKED"),
+        ("desired", {"start_identity": ""}, {}, "BLOCKED"),
+        ("desired", {"listener": "http://127.0.0.1:9999"}, {}, "BLOCKED"),
+        (
+            "desired",
+            {"listener": {"endpoint": g.GATEWAY_ENDPOINT, "owner_pid": 9999}},
+            {},
+            "BLOCKED",
+        ),
+        (
+            "desired",
+            {"listener": [g.GATEWAY_ENDPOINT, "http://127.0.0.1:9999"]},
+            {},
+            "BLOCKED",
+        ),
+        ("desired", {"plist_sha256": "f" * 64}, {}, "BLOCKED"),
+        ("desired", {"root": "/tmp/wrong-root"}, {}, "BLOCKED"),
+        ("desired", {"head": "e" * 40}, {}, "BLOCKED"),
+        ("desired", {"tree": "f" * 40}, {}, "BLOCKED"),
+        ("desired", {"deployment_id": "r1-wrong-manifest"}, {}, "BLOCKED"),
+        (
+            "desired",
+            {"server_instance": "wrong-server"},
+            {"initialize": {"session_id": "recovery-session-1", "server_instance": "different-server"}},
+            "BLOCKED",
+        ),
+        (
+            "desired",
+            {},
+            {
+                "tools_list": {
+                    "session_id": "recovery-session-1",
+                    "actions": ["gateway-rebind"],
+                    "schema_hash": "f" * 64,
+                }
+            },
+            "BLOCKED",
+        ),
+    ],
+)
+def test_r1b2_uncertain_reconcile_physical_matrix_never_reenters_effect(
+    tmp_path, monkeypatch, role, changes, postflight_changes, expected
+):
+    assert hasattr(g, "_gateway_recover_with_adapters")
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    effect_calls = []
+    first = _r1b2_adapters(
+        fixture, ledger, lost_ack=True, effect_calls=effect_calls
+    )
+    assert g._gateway_recover_with_adapters(
+        fixture["request"], adapters=first, ledger=ledger
+    ).result == "UNCERTAIN_EFFECT"
+
+    retry = _r1b2_adapters(
+        fixture,
+        ledger,
+        observe_role=role,
+        physical_changes=changes,
+        postflight_changes=postflight_changes,
+    )
+    retry = retry.__class__(
+        observe=retry.observe,
+        effect=lambda _plan: pytest.fail("reconcile cannot invoke effect"),
+        postflight=retry.postflight,
+        clock=retry.clock,
+        crash_hook=retry.crash_hook,
+    )
+    outcome = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=retry, ledger=ledger
+    )
+    assert outcome.result == expected
+    states = [
+        row.state
+        for row in ledger.recovery_rows(
+            fixture["request"].request_id,
+            request=fixture["request"],
+            receipt=fixture["receipt"],
+            source_bundle_evidence=None,
+        )
+    ]
+    assert states.count("EFFECT_STARTED") == 1
+    assert len(effect_calls) == 1
+    if expected != "VERIFIED":
+        assert "VERIFIED" not in states
+        assert states[-1] != "CLIENT_BOUND"
+
+
+def test_r1b2_uncertain_ambiguous_identity_stays_blocked_without_effect(
+    tmp_path, monkeypatch
+):
+    assert hasattr(g, "_gateway_reconcile_physical")
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    desired = _r1b2_physical_identity(fixture, "desired")
+    predecessor = _r1b2_physical_identity(fixture, "predecessor")
+    with pytest.raises(g.GatewayContractError, match="ambiguous"):
+        g._gateway_reconcile_physical(
+            fixture["request"],
+            fixture["receipt"],
+            (desired, predecessor),
+        )
+
+
+def test_r1b2_already_desired_enters_durable_seam_with_zero_external_calls(
+    tmp_path, monkeypatch
+):
+    assert hasattr(g, "_gateway_recover_with_adapters")
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    seam_calls = []
+    external_calls = []
+    adapters = _r1b2_adapters(
+        fixture,
+        ledger,
+        already_desired=True,
+        effect_calls=seam_calls,
+        external_calls=external_calls,
+    )
+    result = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=adapters, ledger=ledger
+    )
+    assert result.result == "VERIFIED"
+    assert result.effect_started is True
+    assert len(seam_calls) == 1
+    assert external_calls == []
+    rows = ledger.recovery_rows(
+        fixture["request"].request_id,
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=None,
+    )
+    assert [row.state for row in rows][-5:] == [
+        "EFFECT_STARTED",
+        "SERVICE_OBSERVED",
+        "IDENTITY_VERIFIED",
+        "CLIENT_BOUND",
+        "VERIFIED",
+    ]
+    assert rows[-1].observed_identity["ack"] == {
+        "acknowledged": True,
+        "applied": False,
+        "already_desired": True,
+    }
+    first_raw = fixture["ledger_path"].read_bytes()
+    first_rows = tuple(rows)
+    first_seam_count = len(seam_calls)
+    repeat_adapters = _r1b2_adapters(
+        fixture,
+        ledger,
+        already_desired=True,
+        effect_calls=seam_calls,
+        external_calls=external_calls,
+    )
+    repeat_adapters = repeat_adapters.__class__(
+        observe=repeat_adapters.observe,
+        effect=lambda _plan: pytest.fail(
+            "terminal already-desired replay cannot enter the seam"
+        ),
+        postflight=repeat_adapters.postflight,
+        clock=repeat_adapters.clock,
+        crash_hook=repeat_adapters.crash_hook,
+    )
+    repeated = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=repeat_adapters, ledger=ledger
+    )
+    assert repeated == result
+    assert repeated.evidence_hash == result.evidence_hash
+    assert fixture["ledger_path"].read_bytes() == first_raw
+    assert tuple(
+        ledger.recovery_rows(
+            fixture["request"].request_id,
+            request=fixture["request"],
+            receipt=fixture["receipt"],
+            source_bundle_evidence=None,
+        )
+    ) == first_rows
+    assert len(seam_calls) == first_seam_count == 1
+    assert external_calls == []
+
+
+@pytest.mark.parametrize(
+    "postflight_changes",
+    [
+        {"authenticated": False},
+        {"health": {"deployment_id": "wrong"}},
+        {"initialize": {"session_id": "other-session"}},
+        {"tools_list": {"session_id": "other-session", "actions": ["gateway-rebind"]}},
+        {"tools_list": {"session_id": "recovery-session-1", "actions": []}},
+        {"tools_list": {"session_id": "recovery-session-1", "actions": ["gateway-rebind"], "schema_hash": "f" * 64}},
+        {"initialize": {"session_id": "recovery-session-1", "permission_policy_hash": "f" * 64}},
+    ],
+    ids=[
+        "unauthenticated",
+        "health-identity",
+        "initialize-session",
+        "tools-session",
+        "action-set",
+        "schema",
+        "permission",
+    ],
+)
+def test_r1b2_authenticated_recovery_requires_health_initialize_tools_list_identity(
+    tmp_path, monkeypatch, postflight_changes
+):
+    assert hasattr(g, "_gateway_recover_with_adapters")
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    effect_count = tmp_path / "effect-count"
+    external_count = tmp_path / "external-count"
+    forbidden_calls = []
+    for name in (
+        "_provider_recovery_effect",
+        "_devspace_recovery_effect",
+        "_fallback_recovery_effect",
+    ):
+        monkeypatch.setattr(
+            g,
+            name,
+            lambda *args, _name=name, **kwargs: forbidden_calls.append(_name),
+            raising=False,
+        )
+    adapters = _r1b2_adapters(
+        fixture,
+        ledger,
+        postflight_changes=postflight_changes,
+        effect_count_path=effect_count,
+        external_count_path=external_count,
+    )
+    outcome = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=adapters, ledger=ledger
+    )
+    assert outcome.result == "UNCERTAIN_EFFECT"
+    assert _r1b2_durable_count(effect_count) <= 1
+    assert _r1b2_durable_count(external_count) <= 1
+    before_effect = _r1b2_durable_count(effect_count)
+    before_external = _r1b2_durable_count(external_count)
+    retry = _r1b2_adapters(
+        fixture,
+        ledger,
+        postflight_changes=postflight_changes,
+        effect_count_path=effect_count,
+        external_count_path=external_count,
+    )
+    retry = retry.__class__(
+        observe=retry.observe,
+        effect=lambda _plan: pytest.fail(
+            "authenticated reconciliation cannot invoke another effect"
+        ),
+        postflight=retry.postflight,
+        clock=retry.clock,
+        crash_hook=retry.crash_hook,
+    )
+    repeated = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=retry, ledger=ledger
+    )
+    assert repeated.result == "UNCERTAIN_EFFECT"
+    assert _r1b2_durable_count(effect_count) == before_effect
+    assert _r1b2_durable_count(external_count) == before_external
+    assert forbidden_calls == []
+    states = [
+        row.state
+        for row in ledger.recovery_rows(
+            fixture["request"].request_id,
+            request=fixture["request"],
+            receipt=fixture["receipt"],
+            source_bundle_evidence=None,
+        )
+    ]
+    assert "VERIFIED" not in states
+    assert "CLIENT_BOUND" not in states
+    assert states.count("EFFECT_STARTED") <= 1
+
+
+def test_r1b2_authenticated_recovery_positive_binds_all_three_calls(
+    tmp_path, monkeypatch
+):
+    assert hasattr(g, "_gateway_recover_with_adapters")
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    adapters = _r1b2_adapters(fixture, ledger)
+    outcome = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=adapters, ledger=ledger
+    )
+    assert outcome.result == "VERIFIED"
+    assert ledger.current_recovery_state(
+        fixture["request"].request_id,
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=None,
+    ) == "VERIFIED"
+
+
+@pytest.mark.parametrize("target", ["bundle", "worktree", "evidence"])
+def test_r1b2_uncertain_replay_tampered_artifacts_block_without_second_effect(
+    tmp_path, monkeypatch, target
+):
+    assert hasattr(g, "_gateway_recover_with_adapters")
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    effect_calls = []
+    first = _r1b2_adapters(
+        fixture, ledger, lost_ack=True, effect_calls=effect_calls
+    )
+    assert g._gateway_recover_with_adapters(
+        fixture["request"], adapters=first, ledger=ledger
+    ).result == "UNCERTAIN_EFFECT"
+    if target == "bundle":
+        bundle = next(g.GATEWAY_SOURCE_BUNDLES_ROOT.glob("*.bundle"))
+        bundle.write_bytes(bundle.read_bytes() + b"tamper")
+    elif target == "worktree":
+        desired = g.GATEWAY_DEPLOYMENTS_ROOT / fixture["receipt"].desired_manifest_id
+        (desired / g.GATEWAY_ENTRYPOINT).write_text("tamper\n")
+    else:
+        rows = ledger.read()
+        for row in reversed(rows):
+            if row["schema"] == "nexus.gateway.ledger.v2":
+                row["source_bundle_evidence_hash"] = "f" * 64
+                row["record_hash"] = g._record_hash(row)
+                break
+        fixture["ledger_path"].write_bytes(
+            b"".join(
+                json.dumps(row, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+                for row in rows
+            )
+        )
+    retry = _r1b2_adapters(fixture, ledger)
+    retry = retry.__class__(
+        observe=retry.observe,
+        effect=lambda _plan: pytest.fail("tampered replay cannot invoke effect"),
+        postflight=retry.postflight,
+        clock=retry.clock,
+        crash_hook=retry.crash_hook,
+    )
+    with pytest.raises((g.GatewayContractError, g.LedgerCorruption)):
+        g._gateway_recover_with_adapters(
+            fixture["request"], adapters=retry, ledger=ledger
+        )
+    assert len(effect_calls) == 1
+
+
+def test_r1b2_public_gateway_recover_remains_noninjectable_and_live_effect_unreachable(
+    tmp_path, monkeypatch
+):
+    import inspect
+
+    assert tuple(inspect.signature(g.gateway_recover).parameters) == ("request",)
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    forbidden_calls = []
+    launchctl_calls = []
+    plist = Path(g.GATEWAY_PLIST)
+    plist_existed = plist.exists()
+    plist_snapshot = plist.read_bytes() if plist_existed else None
+    real_run = g.subprocess.run
+
+    def guarded_subprocess(command, *args, **kwargs):
+        executable = str(command[0]) if command else ""
+        if Path(executable).name == "launchctl":
+            launchctl_calls.append(tuple(command))
+            raise AssertionError("public recovery cannot call launchctl")
+        return real_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(g.subprocess, "run", guarded_subprocess)
+    monkeypatch.setattr(
+        g.os,
+        "execve",
+        lambda *args, **kwargs: pytest.fail("public recovery cannot exec"),
+    )
+    monkeypatch.setattr(
+        g,
+        "_default_recovery_effect",
+        lambda *_args, **_kwargs: forbidden_calls.append("default-effect"),
+        raising=False,
+    )
+    for name in (
+        "_provider_recovery_effect",
+        "_devspace_recovery_effect",
+        "_fallback_recovery_effect",
+    ):
+        monkeypatch.setattr(
+            g,
+            name,
+            lambda *args, _name=name, **kwargs: forbidden_calls.append(_name),
+            raising=False,
+        )
+    outcome = g.gateway_recover(fixture["request"])
+    assert outcome.result == "BLOCKED"
+    assert outcome.effect_started is False
+    assert forbidden_calls == []
+    assert launchctl_calls == []
+    assert plist.exists() is plist_existed
+    if plist_existed:
+        assert plist.read_bytes() == plist_snapshot
+
+
+def _r1b2_mp_recovery_worker(
+    request,
+    receipt,
+    ledger_path,
+    lock_path,
+    barrier,
+    effect_count_path,
+    physical,
+    postflight,
+    result_queue,
+):
+    from nexus.contracts.gateway_deployment import RecoveryEffectAck, canonical_hash
+
+    ledger = g.GatewayLedger(Path(ledger_path), lock_path=Path(lock_path))
+
+    def observe(_plan):
+        return physical
+
+    def effect(plan):
+        reopened = g.GatewayLedger(Path(ledger_path), lock_path=Path(lock_path))
+        rows = reopened.recovery_rows(
+            request.request_id,
+            request=request,
+            receipt=receipt,
+            source_bundle_evidence=None,
+        )
+        assert rows[-1].state == "EFFECT_STARTED"
+        with Path(effect_count_path).open("r+") as stream:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+            current = int(stream.read() or "0")
+            stream.seek(0)
+            stream.truncate()
+            stream.write(str(current + 1))
+            stream.flush()
+            os.fsync(stream.fileno())
+            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+        values = {
+            "plan_hash": plan.plan_hash,
+            "acknowledged": True,
+            "applied": True,
+            "already_desired": False,
+            "effect_kind": "GATEWAY_DURABLE_RECOVERY",
+        }
+        return RecoveryEffectAck(
+            **values, evidence_hash=canonical_hash(values)
+        )
+
+    adapters = g._RecoveryAdapters(
+        observe=observe,
+        effect=effect,
+        postflight=lambda _plan, _identity: postflight,
+        clock=lambda: "2026-08-25T00:00:00Z",
+        crash_hook=lambda _point: None,
+    )
+    barrier.wait(timeout=10)
+    try:
+        outcome = g._gateway_recover_with_adapters(
+            request, adapters=adapters, ledger=ledger
+        )
+        result_queue.put(("ok", outcome.result, outcome.evidence_hash))
+    except BaseException as exc:
+        result_queue.put(("error", type(exc).__name__, str(exc)))
+
+
+def _r1b2_mp_append_worker(
+    record,
+    request,
+    receipt,
+    evidence,
+    ledger_path,
+    lock_path,
+    barrier,
+    result_queue,
+):
+    ledger = g.GatewayLedger(Path(ledger_path), lock_path=Path(lock_path))
+    barrier.wait(timeout=10)
+    try:
+        ledger.append_recovery(
+            record,
+            expected_tail="",
+            request=request,
+            receipt=receipt,
+            source_bundle_evidence=evidence,
+        )
+        result_queue.put("winner")
+    except (g.GatewayContractError, g.LedgerCorruption):
+        result_queue.put("blocked")
+
+
+def test_r1b2_recovery_concurrent_real_multiprocessing_exactly_one_effect_repeat_three(
+    tmp_path, monkeypatch
+):
+    assert hasattr(g, "_RecoveryAdapters")
+    assert hasattr(g, "_gateway_recover_with_adapters")
+    context = multiprocessing.get_context("fork")
+    for repeat in range(3):
+        repeat_root = tmp_path / f"repeat-{repeat}"
+        repeat_root.mkdir()
+        fixture = _r1b2_runtime_fixture(repeat_root, monkeypatch)
+        physical = _r1b2_physical_identity(fixture, "desired")
+        postflight = _r1b2_postflight(fixture, physical)
+        effect_count = repeat_root / "effect-count"
+        effect_count.write_text("0")
+        barrier = context.Barrier(2)
+        result_queue = context.Queue()
+        processes = [
+            context.Process(
+                target=_r1b2_mp_recovery_worker,
+                args=(
+                    fixture["request"],
+                    fixture["receipt"],
+                    str(fixture["ledger_path"]),
+                    str(fixture["lock_path"]),
+                    barrier,
+                    str(effect_count),
+                    physical,
+                    postflight,
+                    result_queue,
+                ),
+            )
+            for _ in range(2)
+        ]
+        for process in processes:
+            process.start()
+        for process in processes:
+            process.join(timeout=20)
+            assert process.exitcode == 0
+        results = [result_queue.get(timeout=2) for _ in processes]
+        assert {item[0] for item in results} == {"ok"}
+        assert {item[1] for item in results} == {"VERIFIED"}
+        assert len({item[2] for item in results}) == 1
+        assert effect_count.read_text() == "1"
+        ledger = g.GatewayLedger(
+            fixture["ledger_path"], lock_path=fixture["lock_path"]
+        )
+        states = [
+            row.state
+            for row in ledger.recovery_rows(
+                fixture["request"].request_id,
+                request=fixture["request"],
+                receipt=fixture["receipt"],
+                source_bundle_evidence=None,
+            )
+        ]
+        assert states.count("EFFECT_STARTED") == 1
+        assert states[-1] == "VERIFIED"
+
+
+def _r1b2_conflicting_context(fixture):
+    from nexus.contracts.gateway_deployment import canonical_hash
+
+    receipt = fixture["receipt"]
+    receipt_values = {
+        **receipt.__dict__,
+        "receipt_id": "receipt-conflict",
+        "request_id": "request-conflict",
+    }
+    receipt_values["receipt_hash"] = canonical_hash({
+        key: value for key, value in receipt_values.items() if key != "receipt_hash"
+    })
+    conflicting_receipt = receipt.__class__(**receipt_values)
+    request = fixture["request"]
+    request_values = {
+        **request.__dict__,
+        "request_id": conflicting_receipt.request_id,
+        "recovery_authority_id": conflicting_receipt.receipt_id,
+        "recovery_authority_hash": conflicting_receipt.receipt_hash,
+    }
+    request_values["request_hash"] = canonical_hash({
+        key: value for key, value in request_values.items()
+        if key not in {"request_hash", "schema"}
+    })
+    conflicting_request = request.__class__(**request_values)
+    evidence = fixture["staged"].bundle_evidence
+    evidence_values = {
+        **evidence.__dict__,
+        "request_id": conflicting_request.request_id,
+        "request_hash": conflicting_request.request_hash,
+        "receipt_id": conflicting_receipt.receipt_id,
+        "receipt_hash": conflicting_receipt.receipt_hash,
+    }
+    evidence_values["evidence_hash"] = canonical_hash({
+        key: value for key, value in evidence_values.items() if key != "evidence_hash"
+    })
+    conflicting_evidence = evidence.__class__(**evidence_values)
+    return conflicting_request, conflicting_receipt, conflicting_evidence
+
+
+def test_r1b2_recovery_concurrent_conflicting_fence_has_one_winner(
+    tmp_path, monkeypatch
+):
+    assert hasattr(g.GatewayLedger, "append_recovery")
+    fixture = _r1b2_prepared_fixture(tmp_path, monkeypatch)
+    other_request, other_receipt, other_evidence = _r1b2_conflicting_context(fixture)
+    first = _r1b2_record(
+        fixture, fixture["staged"], "REQUESTED", 1, ""
+    )
+    other_fixture = {
+        **fixture,
+        "request": other_request,
+        "receipt": other_receipt,
+    }
+    other_staged = SimpleNamespace(bundle_evidence=other_evidence)
+    second = _r1b2_record(
+        other_fixture, other_staged, "REQUESTED", 1, ""
+    )
+    context = multiprocessing.get_context("fork")
+    barrier = context.Barrier(2)
+    result_queue = context.Queue()
+    inputs = (
+        (
+            first, fixture["request"], fixture["receipt"], None,
+        ),
+        (second, other_request, other_receipt, None),
+    )
+    processes = [
+        context.Process(
+            target=_r1b2_mp_append_worker,
+            args=(
+                record,
+                request,
+                receipt,
+                evidence,
+                str(fixture["ledger_path"]),
+                str(fixture["lock_path"]),
+                barrier,
+                result_queue,
+            ),
+        )
+        for record, request, receipt, evidence in inputs
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=20)
+        assert process.exitcode == 0
+    assert sorted(result_queue.get(timeout=2) for _ in processes) == [
+        "blocked", "winner"
+    ]
+    rows = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    ).read()
+    assert len(rows) == 1
+    assert rows[0]["schema"] == "nexus.gateway.ledger.v2"
+    assert rows[0]["state"] == "REQUESTED"
+    assert rows[0]["sequence"] == 1
+    assert rows[0]["parent_hash"] == ""
+    assert rows[0]["source_bundle_evidence_hash"] is None
+    assert rows[0]["request_id"] in {
+        fixture["request"].request_id, other_request.request_id,
+    }
+    assert rows[0]["idempotency_fence"] == fixture["request"].idempotency_fence

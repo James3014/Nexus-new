@@ -1327,3 +1327,307 @@ def test_profile_full_identity_substitution_is_rejected():
     )
     with pytest.raises(ContractError):
         validate_profile(altered)
+
+
+_R1B2_LEDGER_V2_KEYS = {
+    "schema",
+    "request_id",
+    "request_hash",
+    "state",
+    "sequence",
+    "parent_hash",
+    "record_hash",
+    "authority_schema",
+    "receipt_id",
+    "receipt_hash",
+    "card_sha256",
+    "accepted_source_merge",
+    "accepted_source_tree",
+    "final_manager_sha256",
+    "independent_acceptance_receipt_hash",
+    "source_set_sha256",
+    "desired_manifest_id",
+    "desired_manifest_hash",
+    "predecessor_manifest_id",
+    "predecessor_manifest_hash",
+    "source_bundle_evidence_hash",
+    "operation",
+    "effect_class",
+    "idempotency_fence",
+    "pre_effect_identity",
+    "observed_identity",
+}
+
+
+def _r1b2_ledger_values(state="PREFLIGHTED", *, sequence=2, parent_hash="1" * 64):
+    fixture = _r1_bundle_evidence_fixture()
+    request = fixture["request"]
+    receipt = fixture["receipt"]
+    values = {
+        "schema": "nexus.gateway.ledger.v2",
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "state": state,
+        "sequence": sequence,
+        "parent_hash": parent_hash,
+        "authority_schema": receipt.schema,
+        "receipt_id": receipt.receipt_id,
+        "receipt_hash": receipt.receipt_hash,
+        "card_sha256": receipt.card_sha256,
+        "accepted_source_merge": receipt.accepted_source_merge,
+        "accepted_source_tree": receipt.accepted_source_tree,
+        "final_manager_sha256": receipt.final_manager_sha256,
+        "independent_acceptance_receipt_hash": (
+            receipt.independent_acceptance_receipt_hash
+        ),
+        "source_set_sha256": receipt.source_set.source_set_sha256,
+        "desired_manifest_id": receipt.desired_manifest_id,
+        "desired_manifest_hash": receipt.desired_manifest_sha256,
+        "predecessor_manifest_id": receipt.predecessor_manifest_id,
+        "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
+        "source_bundle_evidence_hash": fixture["evidence"].evidence_hash,
+        "operation": request.operation,
+        "effect_class": request.effect_class,
+        "idempotency_fence": request.idempotency_fence,
+        "pre_effect_identity": {"deployment_id": receipt.predecessor_manifest_id},
+        "observed_identity": {},
+    }
+    if state == "REQUESTED":
+        values["source_bundle_evidence_hash"] = None
+    values["record_hash"] = canonical_hash(values)
+    return fixture, values
+
+
+def test_r1b2_ledger_v2_strict_schema_keys_hash_and_nullable_evidence():
+    from nexus.contracts.gateway_deployment import (
+        RecoveryLedgerRecord,
+        validate_recovery_ledger_record,
+    )
+
+    fixture, values = _r1b2_ledger_values()
+    record = RecoveryLedgerRecord.model_validate(values)
+    assert set(record.model_dump()) == _R1B2_LEDGER_V2_KEYS
+    assert record.schema == "nexus.gateway.ledger.v2"
+    assert validate_recovery_ledger_record(
+        record,
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=fixture["evidence"],
+        expected_sequence=2,
+        expected_parent_hash="1" * 64,
+    ) == record
+    requested_fixture, requested_values = _r1b2_ledger_values(
+        "REQUESTED", sequence=1, parent_hash=""
+    )
+    requested = RecoveryLedgerRecord.model_validate(requested_values)
+    assert validate_recovery_ledger_record(
+        requested,
+        request=requested_fixture["request"],
+        receipt=requested_fixture["receipt"],
+        source_bundle_evidence=None,
+        expected_sequence=1,
+        expected_parent_hash="",
+    ) == requested
+    for mutation in (
+        {**values, "schema": "nexus.gateway.ledger.v1"},
+        {**values, "unexpected": True},
+        {key: value for key, value in values.items() if key != "receipt_hash"},
+        {**values, "source_bundle_evidence_hash": None},
+    ):
+        with pytest.raises((ContractError, TypeError, ValueError)):
+            validate_recovery_ledger_record(
+                RecoveryLedgerRecord.model_validate(mutation),
+                request=fixture["request"],
+                receipt=fixture["receipt"],
+                source_bundle_evidence=fixture["evidence"],
+                expected_sequence=2,
+                expected_parent_hash="1" * 64,
+            )
+
+
+def test_r1b2_recovery_binding_hash_covers_every_immutable_input():
+    from nexus.contracts.gateway_deployment import derive_recovery_ledger_binding
+
+    fixture = _r1_bundle_evidence_fixture()
+    request = fixture["request"]
+    receipt = fixture["receipt"]
+    evidence = fixture["evidence"]
+    expected = canonical_hash({
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "authority_schema": receipt.schema,
+        "receipt_id": receipt.receipt_id,
+        "receipt_hash": receipt.receipt_hash,
+        "card_sha256": receipt.card_sha256,
+        "accepted_source_merge": receipt.accepted_source_merge,
+        "accepted_source_tree": receipt.accepted_source_tree,
+        "final_manager_sha256": receipt.final_manager_sha256,
+        "independent_acceptance_receipt_hash": (
+            receipt.independent_acceptance_receipt_hash
+        ),
+        "source_set_sha256": receipt.source_set.source_set_sha256,
+        "desired_manifest_id": receipt.desired_manifest_id,
+        "desired_manifest_hash": receipt.desired_manifest_sha256,
+        "predecessor_manifest_id": receipt.predecessor_manifest_id,
+        "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
+        "source_bundle_evidence_hash": evidence.evidence_hash,
+        "operation": request.operation,
+        "effect_class": request.effect_class,
+        "idempotency_fence": request.idempotency_fence,
+    })
+    assert derive_recovery_ledger_binding(
+        request=request,
+        receipt=receipt,
+        source_bundle_evidence=evidence,
+    ) == expected
+
+
+def test_r1b2_ledger_v2_rejects_v1_field_injection_and_v1_omission():
+    from nexus.contracts.gateway_deployment import RecoveryLedgerRecord
+
+    _, values = _r1b2_ledger_values()
+    for v1_field in (
+        "host_receipt_hash",
+        "source_base_merge",
+        "source_base_tree",
+        "host_card_sha256",
+    ):
+        with pytest.raises((ContractError, TypeError, ValueError)):
+            RecoveryLedgerRecord.model_validate({**values, v1_field: "f" * 64})
+    assert not (
+        {"authority_schema", "receipt_id", "source_set_sha256"}
+        & {
+            "schema", "request_id", "request_hash", "state", "sequence",
+            "parent_hash", "record_hash", "pre_effect_identity",
+            "observed_identity", "host_receipt_hash", "source_base_merge",
+            "source_base_tree", "host_card_sha256", "effect_class",
+            "operation", "idempotency_fence",
+        }
+    )
+
+
+def test_r1b2_recovery_transition_exact_edges_and_no_uncertain_reentry():
+    allowed = (
+        ("REQUESTED", "PREFLIGHTED"),
+        ("PREFLIGHTED", "TARGET_READY"),
+        ("TARGET_READY", "ROLLBACK_READY"),
+        ("TARGET_READY", "ROLLBACK_UNAVAILABLE"),
+        ("ROLLBACK_UNAVAILABLE", "BLOCKED"),
+        ("ROLLBACK_READY", "EFFECT_STARTED"),
+        ("EFFECT_STARTED", "SERVICE_OBSERVED"),
+        ("EFFECT_STARTED", "UNCERTAIN_EFFECT"),
+        ("UNCERTAIN_EFFECT", "SERVICE_OBSERVED"),
+        ("UNCERTAIN_EFFECT", "ROLLED_BACK"),
+        ("UNCERTAIN_EFFECT", "BLOCKED"),
+        ("SERVICE_OBSERVED", "IDENTITY_VERIFIED"),
+        ("IDENTITY_VERIFIED", "CLIENT_BOUND"),
+        ("CLIENT_BOUND", "VERIFIED"),
+    )
+    for previous, current in allowed:
+        assert transition(previous, current).value == current
+    forbidden = (
+        ("TARGET_READY", "EFFECT_STARTED"),
+        ("ROLLBACK_UNAVAILABLE", "EFFECT_STARTED"),
+        ("UNCERTAIN_EFFECT", "EFFECT_STARTED"),
+        ("UNCERTAIN_EFFECT", "PREFLIGHTED"),
+        ("VERIFIED", "EFFECT_STARTED"),
+        ("ROLLED_BACK", "EFFECT_STARTED"),
+    )
+    for previous, current in forbidden:
+        with pytest.raises(ContractError):
+            transition(previous, current)
+
+
+def test_r1b2_already_desired_plan_ack_and_physical_identity_are_strict():
+    from nexus.contracts.gateway_deployment import (
+        RecoveryEffectAck,
+        RecoveryEffectPlan,
+        RecoveryPhysicalIdentity,
+        validate_recovery_effect_ack,
+        validate_recovery_effect_plan,
+        validate_recovery_physical_identity,
+    )
+
+    fixture = _r1_bundle_evidence_fixture()
+    request = fixture["request"]
+    receipt = fixture["receipt"]
+    desired_root = (
+        "/Users/jameschen/Library/Application Support/Nexus/gateway-direct/"
+        f"deployments/{receipt.desired_manifest_id}"
+    )
+    predecessor_root = (
+        "/Users/jameschen/Library/Application Support/Nexus/gateway-direct/"
+        f"deployments/{receipt.predecessor_manifest_id}"
+    )
+    plan_values = {
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "idempotency_fence": request.idempotency_fence,
+        "receipt_id": receipt.receipt_id,
+        "receipt_hash": receipt.receipt_hash,
+        "source_set_sha256": receipt.source_set.source_set_sha256,
+        "desired_manifest_id": receipt.desired_manifest_id,
+        "desired_manifest_hash": receipt.desired_manifest_sha256,
+        "predecessor_manifest_id": receipt.predecessor_manifest_id,
+        "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
+        "desired_root": desired_root,
+        "predecessor_root": predecessor_root,
+        "service_label": contract.LABEL,
+        "plist_path": contract.PLIST,
+        "endpoint": contract.ENDPOINT,
+        "pre_effect_identity_hash": "1" * 64,
+    }
+    plan = RecoveryEffectPlan(
+        **plan_values, plan_hash=canonical_hash(plan_values)
+    )
+    assert validate_recovery_effect_plan(
+        plan, request=request, receipt=receipt
+    ) == plan
+    ack_values = {
+        "plan_hash": plan.plan_hash,
+        "acknowledged": True,
+        "applied": False,
+        "already_desired": True,
+        "effect_kind": "GATEWAY_DURABLE_RECOVERY",
+    }
+    ack = RecoveryEffectAck(
+        **ack_values, evidence_hash=canonical_hash(ack_values)
+    )
+    assert validate_recovery_effect_ack(ack, plan=plan) == ack
+    assert set(ack.model_dump()) == {
+        "plan_hash", "acknowledged", "applied", "already_desired",
+        "effect_kind", "evidence_hash",
+    }
+    invalid_ack_values = {
+        **ack_values, "applied": True, "already_desired": True,
+    }
+    with pytest.raises(ContractError):
+        validate_recovery_effect_ack(
+            RecoveryEffectAck(
+                **invalid_ack_values,
+                evidence_hash=canonical_hash(invalid_ack_values),
+            ),
+            plan=plan,
+        )
+    physical_values = {
+        "loaded": True,
+        "service_label": contract.LABEL,
+        "pid": 123,
+        "start_identity": "pid-123-start-1",
+        "listener": contract.ENDPOINT,
+        "plist_sha256": "2" * 64,
+        "deployment_id": receipt.desired_manifest_id,
+        "root": desired_root,
+        "head": receipt.desired_commit,
+        "tree": receipt.desired_tree,
+        "server_instance": "server-1",
+        "observed_at": "2026-08-25T00:00:00Z",
+    }
+    physical = RecoveryPhysicalIdentity(
+        **physical_values, evidence_hash=canonical_hash(physical_values)
+    )
+    assert validate_recovery_physical_identity(
+        physical,
+        expected_manifest=receipt.desired_manifest,
+        expected_root=desired_root,
+    ) == physical
