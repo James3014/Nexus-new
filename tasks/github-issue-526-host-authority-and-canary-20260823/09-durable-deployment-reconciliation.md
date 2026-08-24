@@ -262,14 +262,14 @@ ephemeral profiles and three-effect host bundle are not redesigned authority.
 |---|---|---|---|
 | `REQUESTED` | strict request/hash/fence parsed | `PREFLIGHTED`, `BLOCKED` | none |
 | `PREFLIGHTED` | static authority/lock/CAS gates pass | `TARGET_READY`, `BLOCKED` | none |
-| `TARGET_READY` | desired bytes and manifest verified | `ROLLBACK_READY`, `BLOCKED` | none |
+| `TARGET_READY` | desired bytes and manifest verified | `ROLLBACK_READY`, `ROLLBACK_UNAVAILABLE`, `BLOCKED` | none |
 | `ROLLBACK_READY` | predecessor bytes/plist/manifest verified | `EFFECT_STARTED`, `BLOCKED` | none |
 | `ROLLBACK_UNAVAILABLE` | predecessor not reconstructable | `BLOCKED` | forbidden |
 | `EFFECT_STARTED` | ledger persisted immediately before effect | `SERVICE_OBSERVED`, `UNCERTAIN_EFFECT` | one fixed effect |
 | `SERVICE_OBSERVED` | fixed physical service identity observed | `IDENTITY_VERIFIED`, `UNCERTAIN_EFFECT` | none |
 | `IDENTITY_VERIFIED` | manifest/runtime identity exact | `CLIENT_BOUND`, `UNCERTAIN_EFFECT` | none |
 | `CLIENT_BOUND` | authenticated client binding succeeds | `VERIFIED`, `UNCERTAIN_EFFECT` | none |
-| `UNCERTAIN_EFFECT` | lost ack/timeout/crash/postflight mismatch | internal reconcile to `VERIFIED`, `ROLLED_BACK`, `BLOCKED`, or remain uncertain | no blind retry |
+| `UNCERTAIN_EFFECT` | lost ack/timeout/crash/postflight mismatch | `SERVICE_OBSERVED`, `ROLLED_BACK`, `BLOCKED`, or remain uncertain | no blind retry and no second `EFFECT_STARTED` |
 | `ROLLED_BACK` | exact predecessor serving and verified | terminal | none |
 | `VERIFIED` | desired and complete postflight verified | terminal | none |
 | `BLOCKED` | any failed gate/unprovable identity | terminal | none |
@@ -277,6 +277,15 @@ ephemeral profiles and three-effect host bundle are not redesigned authority.
 No transition from `ROLLBACK_UNAVAILABLE` reaches an effect. Internal
 reconcile never changes the receipt/effect class and never creates a second
 authority record.
+
+For an already-desired service, `EFFECT_STARTED` means the fixed adoption seam
+was durably entered, not that an external mutation occurred. The fixed adapter
+must perform a final observation, return an acknowledgement with
+`applied=false` and `already_desired=true`, make zero plist/launchctl writes,
+and continue through `SERVICE_OBSERVED -> IDENTITY_VERIFIED -> CLIENT_BOUND ->
+VERIFIED`. Replays from `EFFECT_STARTED` or `UNCERTAIN_EFFECT` reconcile
+physical identity only and can never append or invoke a second
+`EFFECT_STARTED` effect.
 
 ## TDD RED-first and required tests
 
