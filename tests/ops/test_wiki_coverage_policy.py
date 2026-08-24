@@ -12,14 +12,14 @@ def test_crosswalk_alignment_regenerates_current_inputs() -> None:
 
     assert result["schema"] == "nexus.openwiki_wiki_crosswalk.v1"
     assert result["authority"] == "derived_non_authoritative"
-    assert result["record_count"] == 22
+    assert result["record_count"] == 24
     assert result["status_counts"] == {
         "EXACT_PREFIX_MATCH": 10,
-        "UNMAPPED": 12,
+        "UNMAPPED": 14,
     }
     assert result["alignment_status"] == "PASS"
     assert result["mapped_count"] == 10
-    assert result["unmapped_count"] == 12
+    assert result["unmapped_count"] == 14
     assert result["ambiguous_count"] == 0
 
 
@@ -29,14 +29,14 @@ def test_formal_mapping_report_exposes_crosswalk_alignment() -> None:
     )
 
     assert result["crosswalk_alignment"]["alignment_status"] == "PASS"
-    assert result["crosswalk_alignment"]["status_counts"]["UNMAPPED"] == 12
+    assert result["crosswalk_alignment"]["status_counts"]["UNMAPPED"] == 14
 
 
 def test_crosswalk_alignment_keeps_unmapped_out_of_scope() -> None:
     result = audit.build_crosswalk_alignment(formal_scope={"nexus/services/unified_runtime.py"})
 
     assert result["alignment_status"] == "PASS"
-    assert result["unmapped_count"] == 12
+    assert result["unmapped_count"] == 14
     assert result["scoped_unmapped_count"] == 0
     assert all(record["authority_page"] is None for record in result["unmapped_records"])
 
@@ -184,7 +184,7 @@ def test_crosswalk_alignment_fails_closed_for_scoped_ambiguous(monkeypatch) -> N
     record["mapping_status"] = "AMBIGUOUS"
     record["authority_page"] = None
     record["authority_classification"] = None
-    tampered["status_counts"] = {"AMBIGUOUS": 1, "EXACT_PREFIX_MATCH": 9, "UNMAPPED": 12}
+    tampered["status_counts"] = {"AMBIGUOUS": 1, "EXACT_PREFIX_MATCH": 9, "UNMAPPED": 14}
     monkeypatch.setattr(audit, "compile_crosswalk", lambda *_args: tampered)
 
     result = audit.build_crosswalk_alignment(formal_scope={record["implementation_key"]})
