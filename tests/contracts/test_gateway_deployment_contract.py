@@ -26,10 +26,10 @@ from nexus.contracts.gateway_deployment import (
     EffectClass,
     GatewayDeploymentRequest,
     GitIdentity,
-    InterpreterIdentity,
     HostEffectAuthorityBundle,
     HostEffectAuthorityReceipt,
     IdentityEvidence,
+    InterpreterIdentity,
     PostflightIdentity,
     QuiescenceEvidence,
     RollbackCapture,
@@ -580,29 +580,37 @@ def test_r1_manifest_readiness_and_reconcile_contract_is_typed_and_hash_bound():
         DeploymentReadiness,
         EffectClass,
         GatewayReconcileOutcome,
+        RecoveryEntrypointIdentity,
+        RecoverySourceSet,
         ResultClass,
+        derive_deployment_manifest,
+        validate_deployment_manifest,
     )
 
-    manifest = DeploymentManifest(
-        deployment_id="desired-1",
-        repository=REPOSITORY,
-        commit="a" * 40,
-        tree="b" * 40,
-        entrypoint=ENTRYPOINT,
-        entrypoint_sha256="c" * 64,
-        interpreter=InterpreterIdentity(),
-        content_sha256="d" * 64,
-        manifest_sha256="0" * 64,
-        owner_uid=501,
-        owner_gid=20,
-        mode=0o700,
+    values = {
+        "repository": REPOSITORY,
+        "accepted_commit": "a" * 40,
+        "accepted_tree": "b" * 40,
+        "accepted_entrypoint": RecoveryEntrypointIdentity(
+            path=ENTRYPOINT, blob_oid="0" * 40, sha256="1" * 64
+        ),
+        "desired_commit": "c" * 40,
+        "desired_tree": "d" * 40,
+        "desired_entrypoint": RecoveryEntrypointIdentity(
+            path=ENTRYPOINT, blob_oid="e" * 40, sha256="f" * 64
+        ),
+        "predecessor_commit": "1" * 40,
+        "predecessor_tree": "2" * 40,
+        "predecessor_entrypoint": RecoveryEntrypointIdentity(
+            path=ENTRYPOINT, blob_oid="3" * 40, sha256="4" * 64
+        ),
+        "interpreter": InterpreterIdentity(),
+    }
+    source_set = RecoverySourceSet(
+        **values, source_set_sha256=canonical_hash(values)
     )
-    manifest = DeploymentManifest(**{
-        **manifest.__dict__,
-        "manifest_sha256": canonical_hash({
-            key: value for key, value in manifest.model_dump().items() if key != "manifest_sha256"
-        }),
-    })
+    manifest = derive_deployment_manifest(source_set, role="desired")
+    assert validate_deployment_manifest(manifest) == manifest
     assert manifest.model_validate(manifest.model_dump()) == manifest
     assert DeploymentReadiness.TARGET_READY.value == "TARGET_READY"
     assert EffectClass.GATEWAY_DURABLE_RECOVERY.value == "GATEWAY_DURABLE_RECOVERY"
@@ -615,6 +623,26 @@ def test_r1_manifest_readiness_and_reconcile_contract_is_typed_and_hash_bound():
     assert outcome.model_validate(outcome.model_dump()) == outcome
     with pytest.raises(ContractError):
         DeploymentManifest.model_validate({**manifest.model_dump(), "root": "/tmp/caller"})
+    with pytest.raises(ContractError, match="manager-derived"):
+        validate_deployment_manifest(
+            manifest.__class__(**{**manifest.__dict__, "deployment_id": "caller-choice"})
+        )
+    with pytest.raises(ContractError, match="ownership/mode"):
+        validate_deployment_manifest(
+            manifest.__class__(**{
+                **manifest.__dict__,
+                "owner_uid": 999999,
+                "owner_gid": 999999,
+                "mode": 0o755,
+                "manifest_sha256": canonical_hash({
+                    **{key: value for key, value in manifest.model_dump().items()
+                       if key != "manifest_sha256"},
+                    "owner_uid": 999999,
+                    "owner_gid": 999999,
+                    "mode": 0o755,
+                }),
+            })
+        )
 
 
 def test_legacy_host_authority_cannot_authorize_durable_recovery():
@@ -632,6 +660,379 @@ def test_r1_recovery_authority_is_a_distinct_hash_domain():
     from nexus.contracts.gateway_deployment import RecoveryAuthorityReceipt
 
     assert RecoveryAuthorityReceipt.SCHEMA == "nexus.gateway.durable_recovery_authority.v1"
+    # B1 binds the eventual host receipt to the accepted source bytes.  This
+    # is only schema coverage: no receipt is issued by a source test.
+    required = set(RecoveryAuthorityReceipt.__dataclass_fields__)
+    assert {
+        "current_main_sha", "accepted_source_merge", "accepted_source_tree",
+        "final_manager_sha256", "independent_acceptance_receipt_hash",
+        "desired_commit", "desired_tree", "desired_manifest_sha256",
+        "predecessor_commit", "predecessor_tree", "predecessor_manifest_sha256",
+    } <= required
+
+
+def _r1_authority_fixture():
+    from nexus.contracts.gateway_deployment import (
+        RECOVERY_CARD_PATH,
+        RECOVERY_CARD_SHA256,
+        SOURCE_BASE_MERGE,
+        SOURCE_BASE_TREE,
+        EffectClass,
+        RecoveryAuthorityReceipt,
+        RecoveryEntrypointIdentity,
+        RecoverySourceSet,
+        derive_deployment_manifest,
+    )
+
+    source_values = {
+        "repository": REPOSITORY,
+        "accepted_commit": "1" * 40,
+        "accepted_tree": "2" * 40,
+        "accepted_entrypoint": RecoveryEntrypointIdentity(
+            path=ENTRYPOINT, blob_oid="0" * 40, sha256="1" * 64
+        ),
+        "desired_commit": "3" * 40,
+        "desired_tree": "4" * 40,
+        "desired_entrypoint": RecoveryEntrypointIdentity(
+            path=ENTRYPOINT, blob_oid="5" * 40, sha256="6" * 64
+        ),
+        "predecessor_commit": "7" * 40,
+        "predecessor_tree": "8" * 40,
+        "predecessor_entrypoint": RecoveryEntrypointIdentity(
+            path=ENTRYPOINT, blob_oid="9" * 40, sha256="a" * 64
+        ),
+        "interpreter": InterpreterIdentity(),
+    }
+    source_set = RecoverySourceSet(
+        **source_values, source_set_sha256=canonical_hash(source_values)
+    )
+    desired = derive_deployment_manifest(source_set, role="desired")
+    predecessor = derive_deployment_manifest(source_set, role="predecessor")
+    values = {
+        "schema": RecoveryAuthorityReceipt.SCHEMA,
+        "receipt_version": 1,
+        "receipt_id": "receipt-r1",
+        "card_sha256": RECOVERY_CARD_SHA256,
+        "source_base_merge": SOURCE_BASE_MERGE,
+        "source_base_tree": SOURCE_BASE_TREE,
+        "current_main_sha": source_set.accepted_commit,
+        "operation": "gateway-recover",
+        "effect_class": EffectClass.GATEWAY_DURABLE_RECOVERY,
+        "service_label": contract.LABEL,
+        "plist_path": contract.PLIST,
+        "endpoint": contract.ENDPOINT,
+        "desired_manifest_id": desired.deployment_id,
+        "desired_manifest_sha256": desired.manifest_sha256,
+        "predecessor_manifest_id": predecessor.deployment_id,
+        "predecessor_manifest_sha256": predecessor.manifest_sha256,
+        "request_id": "request-r1",
+        "idempotency_fence": "fence-r1",
+        "issued_at": "2026-08-24T00:00:00Z",
+        "expires_at": "2026-08-27T00:00:00Z",
+        "revocation_state": "NOT_REVOKED",
+        "revoked_at": None,
+        "revocation_reason": None,
+        "issuer_id": "owner-james",
+        "coordinator_id": "coordinator-codex",
+        "authorized_actor_id": "coordinator-codex",
+        "owner_activation_id": contract.OWNER_ACTIVATION_ID,
+        "owner_activation_sha256": contract.OWNER_ACTIVATION_SHA256,
+        "source_thread": contract.OWNER_SOURCE_THREAD,
+        "standing_grant_id": contract.STANDING_GRANT_ID,
+        "standing_grant_receipt_sha256": contract.STANDING_GRANT_RECEIPT_SHA256,
+        "repository": REPOSITORY,
+        "host_card_path": RECOVERY_CARD_PATH,
+        "accepted_source_merge": source_set.accepted_commit,
+        "accepted_source_tree": source_set.accepted_tree,
+        "final_manager_sha256": "b" * 64,
+        "independent_acceptance_receipt_hash": "c" * 64,
+        "authority_floor_commit": source_set.accepted_commit,
+        "authority_floor_tree": source_set.accepted_tree,
+        "desired_commit": source_set.desired_commit,
+        "desired_tree": source_set.desired_tree,
+        "predecessor_commit": source_set.predecessor_commit,
+        "predecessor_tree": source_set.predecessor_tree,
+        "source_set": source_set,
+        "desired_manifest": desired,
+        "predecessor_manifest": predecessor,
+    }
+    receipt = RecoveryAuthorityReceipt(
+        **values, receipt_hash=canonical_hash(values)
+    )
+    return receipt
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("issuer_id", "other-owner"),
+        ("coordinator_id", "other-coordinator"),
+        ("authorized_actor_id", "other-actor"),
+        ("owner_activation_id", "other-activation"),
+        ("owner_activation_sha256", "d" * 64),
+        ("source_thread", "other-thread"),
+        ("standing_grant_id", "other-grant"),
+        ("standing_grant_receipt_sha256", "e" * 64),
+        ("host_card_path", "tasks/other.md"),
+    ],
+)
+def test_r1_authority_wrong_lineage_rejects_after_full_rehash(field, replacement):
+    from nexus.contracts.gateway_deployment import (
+        RecoveryAuthorityReceipt,
+        validate_recovery_authority,
+    )
+
+    receipt = _r1_authority_fixture()
+    values = {**receipt.__dict__, field: replacement}
+    values["receipt_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key != "receipt_hash"
+    })
+    with pytest.raises(ContractError, match="authority"):
+        validate_recovery_authority(RecoveryAuthorityReceipt(**values))
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"revocation_state": "NOT_REVOKED", "revoked_at": "2026-08-25T00:00:00Z"},
+        {"revocation_state": "REVOKED", "revoked_at": None, "revocation_reason": None},
+        {
+            "revocation_state": "REVOKED",
+            "revoked_at": "2026-08-25T00:00:00Z",
+            "revocation_reason": "withdrawn",
+        },
+    ],
+)
+def test_r1_authority_revocation_states_fail_closed(changes):
+    from nexus.contracts.gateway_deployment import (
+        RecoveryAuthorityReceipt,
+        validate_recovery_authority,
+    )
+
+    receipt = _r1_authority_fixture()
+    values = {**receipt.__dict__, **changes}
+    values["receipt_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key != "receipt_hash"
+    })
+    with pytest.raises(ContractError, match="revocation|revoked"):
+        validate_recovery_authority(RecoveryAuthorityReceipt(**values))
+
+
+def _r1_request_fixture(receipt):
+    from nexus.contracts.gateway_deployment import GatewayRecoveryRequest
+
+    values = {
+        "request_id": receipt.request_id,
+        "idempotency_fence": receipt.idempotency_fence,
+        "operation": receipt.operation,
+        "effect_class": receipt.effect_class,
+        "recovery_authority_id": receipt.receipt_id,
+        "recovery_authority_hash": receipt.receipt_hash,
+        "desired_manifest_id": receipt.desired_manifest_id,
+        "desired_manifest_hash": receipt.desired_manifest_sha256,
+        "predecessor_manifest_id": receipt.predecessor_manifest_id,
+        "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
+    }
+    return GatewayRecoveryRequest(**values, request_hash=canonical_hash(values))
+
+
+def _r1_bundle_evidence_fixture():
+    from nexus.contracts.gateway_deployment import (
+        BareStoreEvidence,
+        BundleRoleHead,
+        SourceBundleEvidence,
+    )
+
+    receipt = _r1_authority_fixture()
+    request = _r1_request_fixture(receipt)
+    fresh = "d" * 40
+    fresh_tree = "e" * 40
+    bare = BareStoreEvidence(
+        path="/fixed/repository.git",
+        repository=REPOSITORY,
+        origin=contract.REMOTE,
+        is_bare=True,
+        alternates_absent=True,
+        owner_uid=501,
+        owner_gid=20,
+        mode=0o700,
+        object_set_sha256="1" * 64,
+    )
+    heads = (
+        BundleRoleHead("fresh-main", "refs/nexus-r1/fresh-main", fresh),
+        BundleRoleHead("desired", "refs/nexus-r1/desired", receipt.desired_commit),
+        BundleRoleHead(
+            "predecessor", "refs/nexus-r1/predecessor", receipt.predecessor_commit
+        ),
+    )
+    values = {
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "idempotency_fence": request.idempotency_fence,
+        "receipt_id": receipt.receipt_id,
+        "receipt_hash": receipt.receipt_hash,
+        "source_set_sha256": receipt.source_set.source_set_sha256,
+        "observed_fresh_main_commit": fresh,
+        "observed_fresh_main_tree": fresh_tree,
+        "role_heads": heads,
+        "bundle_sha256": "5" * 64,
+        "bundle_size": 100,
+        "bundle_verified": True,
+        "bare_store": bare,
+        "observed_at": "2026-08-25T00:00:00Z",
+    }
+    evidence = SourceBundleEvidence(**values, evidence_hash=canonical_hash(values))
+    return {
+        "receipt": receipt,
+        "request": request,
+        "source_set": receipt.source_set,
+        "fresh": fresh,
+        "fresh_tree": fresh_tree,
+        "bare": bare,
+        "evidence": evidence,
+    }
+
+
+def _validate_r1_bundle_fixture(fixture, evidence=None):
+    from nexus.contracts.gateway_deployment import validate_source_bundle_evidence
+
+    return validate_source_bundle_evidence(
+        evidence or fixture["evidence"],
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_set=fixture["source_set"],
+        expected_fresh_main_commit=fixture["fresh"],
+        expected_fresh_main_tree=fixture["fresh_tree"],
+        expected_bare_store=fixture["bare"],
+    )
+
+
+def test_r1_semantic_change_changes_ids_but_bundle_observation_does_not():
+    from nexus.contracts.gateway_deployment import (
+        RecoveryEntrypointIdentity,
+        RecoverySourceSet,
+        derive_deployment_manifest,
+    )
+
+    receipt = _r1_authority_fixture()
+    original = derive_deployment_manifest(receipt.source_set, role="desired")
+    values = {
+        **receipt.source_set.__dict__,
+        "desired_entrypoint": RecoveryEntrypointIdentity(**{
+            **receipt.source_set.desired_entrypoint.__dict__,
+            "sha256": "f" * 64,
+        }),
+    }
+    values["source_set_sha256"] = canonical_hash({
+        key: value for key, value in values.items() if key != "source_set_sha256"
+    })
+    changed = derive_deployment_manifest(
+        RecoverySourceSet(**values), role="desired"
+    )
+    assert changed.deployment_id != original.deployment_id
+    accepted_values = {
+        **receipt.source_set.__dict__,
+        "accepted_entrypoint": RecoveryEntrypointIdentity(**{
+            **receipt.source_set.accepted_entrypoint.__dict__,
+            "sha256": "e" * 64,
+        }),
+    }
+    accepted_values["source_set_sha256"] = canonical_hash({
+        key: value for key, value in accepted_values.items()
+        if key != "source_set_sha256"
+    })
+    accepted_changed = derive_deployment_manifest(
+        RecoverySourceSet(**accepted_values), role="desired"
+    )
+    assert accepted_changed.deployment_id != original.deployment_id
+    assert "bundle" not in set(receipt.source_set.__dataclass_fields__)
+    first_fixture = _r1_bundle_evidence_fixture()
+    first = _validate_r1_bundle_fixture(first_fixture)
+    second_values = {
+        **first.__dict__,
+        "bundle_sha256": "6" * 64,
+    }
+    second_values["evidence_hash"] = canonical_hash({
+        key: value for key, value in second_values.items() if key != "evidence_hash"
+    })
+    second = _validate_r1_bundle_fixture(
+        first_fixture, first.__class__(**second_values)
+    )
+    assert first.evidence_hash != second.evidence_hash
+    assert derive_deployment_manifest(
+        receipt.source_set, role="desired"
+    ).deployment_id == original.deployment_id
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("request_id", "other-request"),
+        ("request_hash", "a" * 64),
+        ("idempotency_fence", "other-fence"),
+        ("receipt_id", "other-receipt"),
+        ("receipt_hash", "b" * 64),
+        ("source_set_sha256", "c" * 64),
+        ("observed_fresh_main_tree", "d" * 40),
+    ],
+)
+def test_r1_bundle_evidence_rejects_self_rehashed_context_substitution(
+    field, replacement
+):
+    fixture = _r1_bundle_evidence_fixture()
+    evidence = fixture["evidence"]
+    values = {**evidence.__dict__, field: replacement}
+    values["evidence_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key != "evidence_hash"
+    })
+    with pytest.raises(ContractError, match="trusted"):
+        _validate_r1_bundle_fixture(fixture, evidence.__class__(**values))
+
+
+def test_r1_bundle_evidence_rejects_role_swap_arbitrary_commits_and_wrong_origin():
+    from nexus.contracts.gateway_deployment import BareStoreEvidence, BundleRoleHead
+
+    fixture = _r1_bundle_evidence_fixture()
+    evidence = fixture["evidence"]
+    mutations = [
+        {
+            "role_heads": (
+                evidence.role_heads[0],
+                BundleRoleHead(
+                    "desired", "refs/nexus-r1/desired",
+                    fixture["source_set"].predecessor_commit,
+                ),
+                BundleRoleHead(
+                    "predecessor", "refs/nexus-r1/predecessor",
+                    fixture["source_set"].desired_commit,
+                ),
+            ),
+        },
+        {
+            "role_heads": (
+                evidence.role_heads[0],
+                BundleRoleHead("desired", "refs/nexus-r1/desired", "f" * 40),
+                evidence.role_heads[2],
+            ),
+        },
+        {
+            "bare_store": BareStoreEvidence(**{
+                **fixture["bare"].__dict__, "origin": "https://example.invalid/wrong.git"
+            }),
+        },
+        {
+            "bare_store": BareStoreEvidence(**{
+                **fixture["bare"].__dict__, "path": "/wrong/repository.git"
+            }),
+        },
+    ]
+    for mutation in mutations:
+        values = {**evidence.__dict__, **mutation}
+        values["evidence_hash"] = canonical_hash({
+            key: value for key, value in values.items() if key != "evidence_hash"
+        })
+        with pytest.raises(ContractError, match="trusted"):
+            _validate_r1_bundle_fixture(fixture, evidence.__class__(**values))
 
 
 def test_r1b_recovery_request_is_separate_and_has_no_legacy_authority_body():

@@ -92,6 +92,15 @@ HOST_CARD_PATH = (
     "tasks/github-issue-526-host-authority-and-canary-20260823/01-gateway-host-local-canary.md"
 )
 HOST_CARD_SHA256 = "f4c581f0062c6b3d65c9ca8f7029a96caa76b2e35d95cc6bccae874c0945f514"
+RECOVERY_CARD_PATH = (
+    "tasks/github-issue-526-host-authority-and-canary-20260823/"
+    "09-durable-deployment-reconciliation.md"
+)
+RECOVERY_CARD_SHA256 = "c8882d47df5375091808a0d6e5340d6a80e9af6976ea4a8a4eed1d1983809487"
+RECOVERY_RECEIPT_PATH = (
+    "tasks/github-issue-526-host-authority-and-canary-20260823/"
+    "10-durable-recovery-authority-receipt.json"
+)
 OWNER_ACTIVATION_ID = "OWNER_ISSUE526_CONTINUE_20260823"
 OWNER_ACTIVATION_SHA256 = "f0ed77ffe3872b083ef0b6d66526524a7091a8e3125322c84ba632f3c64ba322"
 OWNER_SOURCE_THREAD = "01a02a17-691c-7a20-ad0f-9166456416dc"
@@ -214,8 +223,15 @@ def _strict_types(value: Any) -> None:
         return
     for item in fields(value):
         raw = getattr(value, item.name)
-        numeric_fields = {"uid", "gid", "pid", "sequence"} | (
-            {"mode"} if type(value).__name__ == "StableArtifactIdentity" else set()
+        numeric_fields = {
+            "uid", "gid", "pid", "sequence", "owner_uid", "owner_gid",
+            "bundle_size",
+        } | (
+            {"mode"}
+            if type(value).__name__ in {
+                "StableArtifactIdentity", "DeploymentManifest", "BareStoreEvidence"
+            }
+            else set()
         )
         if (
             item.name in numeric_fields
@@ -223,7 +239,10 @@ def _strict_types(value: Any) -> None:
             and (not isinstance(raw, int) or isinstance(raw, bool))
         ):
             raise ContractError(f"{type(value).__name__}.{item.name} type mismatch")
-        if item.name in {"clean", "loaded", "client_bound", "token_bound"} and not isinstance(
+        if item.name in {
+            "clean", "loaded", "client_bound", "token_bound", "is_bare",
+            "alternates_absent", "bundle_verified", "effect_started",
+        } and not isinstance(
             raw, bool
         ):
             raise ContractError(f"{type(value).__name__}.{item.name} type mismatch")
@@ -290,24 +309,109 @@ class InterpreterIdentity(StrictRecord):
 
 
 @dataclass(frozen=True)
+class RecoveryEntrypointIdentity(StrictRecord):
+    """One role's complete, tracked Git entrypoint identity."""
+
+    path: str
+    blob_oid: str
+    sha256: str
+    tracked_mode: str = "100644"
+
+
+@dataclass(frozen=True)
+class RecoverySourceSet(StrictRecord):
+    """Pure semantic identity; physical bundle and receipt observations are excluded."""
+
+    repository: str
+    accepted_commit: str
+    accepted_tree: str
+    accepted_entrypoint: RecoveryEntrypointIdentity
+    desired_commit: str
+    desired_tree: str
+    desired_entrypoint: RecoveryEntrypointIdentity
+    predecessor_commit: str
+    predecessor_tree: str
+    predecessor_entrypoint: RecoveryEntrypointIdentity
+    interpreter: InterpreterIdentity
+    source_set_sha256: str
+
+    _converters: ClassVar[Mapping[str, Any]] = {
+        "accepted_entrypoint": RecoveryEntrypointIdentity.model_validate,
+        "desired_entrypoint": RecoveryEntrypointIdentity.model_validate,
+        "predecessor_entrypoint": RecoveryEntrypointIdentity.model_validate,
+        "interpreter": InterpreterIdentity.model_validate,
+    }
+
+
+@dataclass(frozen=True)
 class DeploymentManifest(StrictRecord):
-    """Manager-issued, content-addressed deployment identity."""
+    """Manager-derived deployment identity for one semantic source-set role."""
 
     deployment_id: str
+    role: str
     repository: str
+    source_set_sha256: str
     commit: str
     tree: str
     entrypoint: str
+    entrypoint_blob_oid: str
     entrypoint_sha256: str
+    tracked_mode: str
     interpreter: InterpreterIdentity
     content_sha256: str
     manifest_sha256: str
     owner_uid: int
     owner_gid: int
-    mode: int = 0o700
+    mode: int = 0o644
 
     _converters: ClassVar[Mapping[str, Any]] = {
         "interpreter": InterpreterIdentity.model_validate,
+    }
+
+
+@dataclass(frozen=True)
+class BundleRoleHead(StrictRecord):
+    role: str
+    ref: str
+    commit: str
+
+
+@dataclass(frozen=True)
+class BareStoreEvidence(StrictRecord):
+    path: str
+    repository: str
+    origin: str
+    is_bare: bool
+    alternates_absent: bool
+    owner_uid: int
+    owner_gid: int
+    mode: int
+    object_set_sha256: str
+
+
+@dataclass(frozen=True)
+class SourceBundleEvidence(StrictRecord):
+    """Post-receipt physical evidence.  It is never an authority record."""
+
+    request_id: str
+    request_hash: str
+    idempotency_fence: str
+    receipt_id: str
+    receipt_hash: str
+    source_set_sha256: str
+    observed_fresh_main_commit: str
+    observed_fresh_main_tree: str
+    role_heads: tuple[BundleRoleHead, ...]
+    bundle_sha256: str
+    bundle_size: int
+    bundle_verified: bool
+    bare_store: BareStoreEvidence
+    observed_at: str
+    evidence_hash: str
+
+    _converters: ClassVar[Mapping[str, Any]] = {
+        "role_heads": lambda value: tuple(BundleRoleHead.model_validate(item) for item in value),
+        "bare_store": BareStoreEvidence.model_validate,
     }
 
 
@@ -454,8 +558,22 @@ class RecoveryAuthorityReceipt(StrictRecord):
     accepted_source_tree: str
     final_manager_sha256: str
     independent_acceptance_receipt_hash: str
+    authority_floor_commit: str
+    authority_floor_tree: str
+    desired_commit: str
+    desired_tree: str
+    predecessor_commit: str
+    predecessor_tree: str
+    source_set: RecoverySourceSet
+    desired_manifest: DeploymentManifest
+    predecessor_manifest: DeploymentManifest
 
-    _converters: ClassVar[Mapping[str, Any]] = {"effect_class": EffectClass}
+    _converters: ClassVar[Mapping[str, Any]] = {
+        "effect_class": EffectClass,
+        "source_set": RecoverySourceSet.model_validate,
+        "desired_manifest": DeploymentManifest.model_validate,
+        "predecessor_manifest": DeploymentManifest.model_validate,
+    }
 
 
 @dataclass(frozen=True)
@@ -684,25 +802,261 @@ def validate_deployment_manifest(manifest: DeploymentManifest) -> DeploymentMani
     if not isinstance(manifest, DeploymentManifest):
         raise ContractError("deployment manifest must be typed")
     _id(manifest.deployment_id, "deployment id")
+    if manifest.role not in {"desired", "predecessor"}:
+        raise ContractError("deployment role mismatch")
     if manifest.repository != REPOSITORY:
         raise ContractError("deployment repository mismatch")
+    _hash(manifest.source_set_sha256, "deployment source-set hash")
     _hash(manifest.commit, "deployment commit", 40)
     _hash(manifest.tree, "deployment tree", 40)
     if manifest.entrypoint != ENTRYPOINT:
         raise ContractError("deployment entrypoint mismatch")
+    _hash(manifest.entrypoint_blob_oid, "deployment entrypoint blob", 40)
     _hash(manifest.entrypoint_sha256, "deployment entrypoint hash")
+    if manifest.tracked_mode != "100644":
+        raise ContractError("deployment tracked mode mismatch")
     _hash(manifest.content_sha256, "deployment content hash")
+    if manifest.content_sha256 != manifest.entrypoint_sha256:
+        raise ContractError("deployment content identity mismatch")
     _hash(manifest.manifest_sha256, "deployment manifest hash")
+    expected_deployment_id = "r1-" + canonical_hash({
+        "schema": "nexus.gateway.deployment_manifest.v2",
+        "role": manifest.role,
+        "repository": manifest.repository,
+        "source_set_sha256": manifest.source_set_sha256,
+    })[:40]
+    if manifest.deployment_id != expected_deployment_id:
+        raise ContractError("deployment id is not manager-derived")
     expected_manifest_hash = canonical_hash({
         key: value for key, value in manifest.model_dump().items() if key != "manifest_sha256"
     })
     if manifest.manifest_sha256 != expected_manifest_hash:
         raise ContractError("deployment manifest hash mismatch")
-    if manifest.owner_uid < 0 or manifest.owner_gid < 0 or manifest.mode != 0o700:
+    fixed_interpreter = InterpreterIdentity()
+    if (
+        manifest.owner_uid != fixed_interpreter.uid
+        or manifest.owner_gid != fixed_interpreter.gid
+        or manifest.mode != 0o644
+    ):
         raise ContractError("deployment ownership/mode mismatch")
-    if manifest.interpreter != InterpreterIdentity():
+    if manifest.interpreter != fixed_interpreter:
         raise ContractError("deployment interpreter mismatch")
     return manifest
+
+
+def validate_recovery_source_set(source_set: RecoverySourceSet) -> RecoverySourceSet:
+    if not isinstance(source_set, RecoverySourceSet):
+        raise ContractError("recovery source set must be typed")
+    if source_set.repository != REPOSITORY:
+        raise ContractError("recovery source-set repository mismatch")
+    for value, name in (
+        (source_set.accepted_commit, "accepted commit"),
+        (source_set.accepted_tree, "accepted tree"),
+        (source_set.desired_commit, "desired commit"),
+        (source_set.desired_tree, "desired tree"),
+        (source_set.predecessor_commit, "predecessor commit"),
+        (source_set.predecessor_tree, "predecessor tree"),
+    ):
+        _hash(value, name, 40)
+    for role, entrypoint in (
+        ("accepted", source_set.accepted_entrypoint),
+        ("desired", source_set.desired_entrypoint),
+        ("predecessor", source_set.predecessor_entrypoint),
+    ):
+        if entrypoint.path != ENTRYPOINT or entrypoint.tracked_mode != "100644":
+            raise ContractError(f"{role} source-set entrypoint mismatch")
+        _hash(entrypoint.blob_oid, f"{role} entrypoint blob", 40)
+        _hash(entrypoint.sha256, f"{role} entrypoint hash")
+    if source_set.interpreter != InterpreterIdentity():
+        raise ContractError("recovery source-set interpreter mismatch")
+    _hash(source_set.source_set_sha256, "recovery source-set hash")
+    expected = canonical_hash({
+        key: value
+        for key, value in source_set.model_dump().items()
+        if key != "source_set_sha256"
+    })
+    if source_set.source_set_sha256 != expected:
+        raise ContractError("recovery source-set hash mismatch")
+    return source_set
+
+
+def derive_deployment_manifest(
+    source_set: RecoverySourceSet,
+    *,
+    role: str,
+) -> DeploymentManifest:
+    """Derive the only valid manifest/ID from a validated semantic source set."""
+    validate_recovery_source_set(source_set)
+    if role == "desired":
+        commit, tree, entrypoint = (
+            source_set.desired_commit,
+            source_set.desired_tree,
+            source_set.desired_entrypoint,
+        )
+    elif role == "predecessor":
+        commit, tree, entrypoint = (
+            source_set.predecessor_commit,
+            source_set.predecessor_tree,
+            source_set.predecessor_entrypoint,
+        )
+    else:
+        raise ContractError("deployment role mismatch")
+    deployment_id = "r1-" + canonical_hash({
+        "schema": "nexus.gateway.deployment_manifest.v2",
+        "role": role,
+        "repository": source_set.repository,
+        "source_set_sha256": source_set.source_set_sha256,
+    })[:40]
+    values = {
+        "deployment_id": deployment_id,
+        "role": role,
+        "repository": source_set.repository,
+        "source_set_sha256": source_set.source_set_sha256,
+        "commit": commit,
+        "tree": tree,
+        "entrypoint": entrypoint.path,
+        "entrypoint_blob_oid": entrypoint.blob_oid,
+        "entrypoint_sha256": entrypoint.sha256,
+        "tracked_mode": entrypoint.tracked_mode,
+        "interpreter": source_set.interpreter,
+        "content_sha256": entrypoint.sha256,
+        "owner_uid": source_set.interpreter.uid,
+        "owner_gid": source_set.interpreter.gid,
+        "mode": 0o644,
+    }
+    manifest = DeploymentManifest(
+        **values,
+        manifest_sha256=canonical_hash(values),
+    )
+    return validate_deployment_manifest(manifest)
+
+
+def validate_source_bundle_evidence(
+    evidence: SourceBundleEvidence,
+    *,
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    source_set: RecoverySourceSet,
+    expected_fresh_main_commit: str,
+    expected_fresh_main_tree: str,
+    expected_bare_store: BareStoreEvidence,
+) -> SourceBundleEvidence:
+    if not isinstance(evidence, SourceBundleEvidence):
+        raise ContractError("source bundle evidence must be typed")
+    validate_recovery_request(request)
+    validate_recovery_authority(receipt, request=request)
+    validate_recovery_source_set(source_set)
+    if receipt.source_set != source_set:
+        raise ContractError("source bundle trusted source-set mismatch")
+    _hash(expected_fresh_main_commit, "trusted fresh main commit", 40)
+    _hash(expected_fresh_main_tree, "trusted fresh main tree", 40)
+    if (
+        not isinstance(expected_bare_store, BareStoreEvidence)
+        or not Path(expected_bare_store.path).is_absolute()
+        or expected_bare_store.repository != REPOSITORY
+        or not expected_bare_store.origin
+        or expected_bare_store.is_bare is not True
+        or expected_bare_store.alternates_absent is not True
+        or expected_bare_store.owner_uid != InterpreterIdentity().uid
+        or expected_bare_store.owner_gid != InterpreterIdentity().gid
+        or expected_bare_store.mode != 0o700
+    ):
+        raise ContractError("trusted bare store identity mismatch")
+    _id(evidence.request_id, "bundle request id")
+    _id(evidence.idempotency_fence, "bundle fence")
+    _id(evidence.receipt_id, "bundle receipt id")
+    for value, name, length in (
+        (evidence.request_hash, "bundle request hash", 64),
+        (evidence.receipt_hash, "bundle receipt hash", 64),
+        (evidence.source_set_sha256, "bundle source-set hash", 64),
+        (evidence.observed_fresh_main_commit, "fresh main commit", 40),
+        (evidence.observed_fresh_main_tree, "fresh main tree", 40),
+        (evidence.bundle_sha256, "raw bundle hash", 64),
+        (evidence.bare_store.object_set_sha256, "bare object-set hash", 64),
+        (evidence.evidence_hash, "bundle evidence hash", 64),
+    ):
+        _hash(value, name, length)
+    expected_roles = (
+        ("fresh-main", "refs/nexus-r1/fresh-main"),
+        ("desired", "refs/nexus-r1/desired"),
+        ("predecessor", "refs/nexus-r1/predecessor"),
+    )
+    if not isinstance(evidence.role_heads, tuple) or len(evidence.role_heads) != 3:
+        raise ContractError("source bundle must contain exactly three named roles")
+    for head, (role, ref) in zip(evidence.role_heads, expected_roles, strict=True):
+        if head.role != role or head.ref != ref:
+            raise ContractError("source bundle named role mismatch")
+        _hash(head.commit, f"{role} bundle head", 40)
+    if tuple(head.commit for head in evidence.role_heads) != (
+        expected_fresh_main_commit,
+        source_set.desired_commit,
+        source_set.predecessor_commit,
+    ):
+        raise ContractError("source bundle trusted role head mismatch")
+    if (
+        evidence.request_id != request.request_id
+        or evidence.request_hash != request.request_hash
+        or evidence.idempotency_fence != request.idempotency_fence
+        or evidence.receipt_id != receipt.receipt_id
+        or evidence.receipt_hash != receipt.receipt_hash
+        or evidence.source_set_sha256 != source_set.source_set_sha256
+    ):
+        raise ContractError("source bundle trusted request/receipt/source-set mismatch")
+    if (
+        evidence.observed_fresh_main_commit != expected_fresh_main_commit
+        or evidence.observed_fresh_main_tree != expected_fresh_main_tree
+    ):
+        raise ContractError("source bundle trusted fresh-main mismatch")
+    if evidence.bundle_size <= 0 or evidence.bundle_verified is not True:
+        raise ContractError("source bundle physical verification missing")
+    if (
+        not Path(evidence.bare_store.path).is_absolute()
+        or evidence.bare_store.repository != REPOSITORY
+        or not evidence.bare_store.origin
+        or evidence.bare_store.is_bare is not True
+        or evidence.bare_store.alternates_absent is not True
+        or evidence.bare_store.owner_uid != InterpreterIdentity().uid
+        or evidence.bare_store.owner_gid != InterpreterIdentity().gid
+        or evidence.bare_store.mode != 0o700
+    ):
+        raise ContractError("bare store evidence mismatch")
+    if evidence.bare_store != expected_bare_store:
+        raise ContractError("source bundle trusted bare store mismatch")
+    if not isinstance(evidence.observed_at, str) or not evidence.observed_at:
+        raise ContractError("bundle observation time missing")
+    expected_hash = canonical_hash({
+        key: value
+        for key, value in evidence.model_dump().items()
+        if key != "evidence_hash"
+    })
+    if evidence.evidence_hash != expected_hash:
+        raise ContractError("source bundle evidence hash mismatch")
+    return evidence
+
+
+def validate_reconcile_outcome(
+    outcome: GatewayReconcileOutcome,
+) -> GatewayReconcileOutcome:
+    if not isinstance(outcome, GatewayReconcileOutcome):
+        raise ContractError("reconcile outcome must be typed")
+    _id(outcome.request_id, "reconcile request id")
+    _id(outcome.idempotency_fence, "reconcile fence")
+    _id(outcome.desired_manifest_id, "reconcile desired manifest")
+    _id(outcome.predecessor_manifest_id, "reconcile predecessor manifest")
+    _hash(outcome.request_hash, "reconcile request hash")
+    _hash(outcome.evidence_hash, "reconcile evidence hash")
+    if not isinstance(outcome.physical_observation, Mapping):
+        raise ContractError("reconcile physical observation missing")
+    if type(outcome.effect_started) is not bool or not isinstance(outcome.result, ResultClass):
+        raise ContractError("reconcile result type mismatch")
+    expected = canonical_hash({
+        key: value
+        for key, value in outcome.model_dump().items()
+        if key != "evidence_hash"
+    })
+    if outcome.evidence_hash != expected:
+        raise ContractError("reconcile evidence hash mismatch")
+    return outcome
 
 
 def validate_recovery_request(request: GatewayRecoveryRequest) -> GatewayRecoveryRequest:
@@ -1306,21 +1660,46 @@ def validate_recovery_authority(
 ) -> RecoveryAuthorityReceipt:
     if not isinstance(receipt, RecoveryAuthorityReceipt) or receipt.schema != RecoveryAuthorityReceipt.SCHEMA:
         raise ContractError("R1 recovery authority schema mismatch")
-    if receipt.receipt_version != 1 or receipt.operation != "gateway-recover":
+    if type(receipt.receipt_version) is not int or receipt.receipt_version != 1 or receipt.operation != "gateway-recover":
         raise ContractError("R1 recovery operation mismatch")
     if receipt.effect_class is not EffectClass.GATEWAY_DURABLE_RECOVERY:
         raise ContractError("R1 recovery effect mismatch")
-    if receipt.card_sha256 != "e403989a59de80477bb23875f1343da77300d23ddf28da4cd3281e76425ad0e7":
+    if receipt.card_sha256 != RECOVERY_CARD_SHA256:
         raise ContractError("R1 recovery Card mismatch")
     if receipt.source_base_merge != SOURCE_BASE_MERGE or receipt.source_base_tree != SOURCE_BASE_TREE:
         raise ContractError("R1 recovery source binding mismatch")
     if receipt.service_label != LABEL or receipt.plist_path != PLIST or receipt.endpoint != ENDPOINT:
         raise ContractError("R1 recovery fixed service mismatch")
+    exact = {
+        "issuer_id": "owner-james",
+        "coordinator_id": "coordinator-codex",
+        "authorized_actor_id": "coordinator-codex",
+        "owner_activation_id": OWNER_ACTIVATION_ID,
+        "owner_activation_sha256": OWNER_ACTIVATION_SHA256,
+        "source_thread": OWNER_SOURCE_THREAD,
+        "standing_grant_id": STANDING_GRANT_ID,
+        "standing_grant_receipt_sha256": STANDING_GRANT_RECEIPT_SHA256,
+        "repository": REPOSITORY,
+        "host_card_path": RECOVERY_CARD_PATH,
+    }
+    for name, expected in exact.items():
+        if getattr(receipt, name) != expected:
+            raise ContractError(f"R1 recovery authority {name} mismatch")
     for value, name, length in (
         (receipt.receipt_hash, "recovery receipt", 64),
-        (receipt.current_main_sha, "recovery current main", 40),
+        (receipt.current_main_sha, "recovery issuance parent", 40),
+        (receipt.accepted_source_merge, "accepted source merge", 40),
+        (receipt.accepted_source_tree, "accepted source tree", 40),
+        (receipt.authority_floor_commit, "authority floor commit", 40),
+        (receipt.authority_floor_tree, "authority floor tree", 40),
+        (receipt.desired_commit, "desired commit", 40),
+        (receipt.desired_tree, "desired tree", 40),
+        (receipt.predecessor_commit, "predecessor commit", 40),
+        (receipt.predecessor_tree, "predecessor tree", 40),
         (receipt.desired_manifest_sha256, "desired manifest", 64),
         (receipt.predecessor_manifest_sha256, "predecessor manifest", 64),
+        (receipt.final_manager_sha256, "final manager", 64),
+        (receipt.independent_acceptance_receipt_hash, "acceptance receipt", 64),
     ):
         _hash(value, name, length)
     _id(receipt.receipt_id, "recovery receipt id")
@@ -1331,10 +1710,42 @@ def validate_recovery_authority(
     })
     if receipt.receipt_hash != expected_hash:
         raise ContractError("R1 recovery receipt hash mismatch")
-    if receipt.revocation_state != "NOT_REVOKED" or receipt.revoked_at is not None:
+    _validate_revocation_fields(
+        receipt.revocation_state,
+        receipt.revoked_at,
+        receipt.revocation_reason,
+        label="R1 recovery authority",
+    )
+    if receipt.revocation_state != "NOT_REVOKED":
         raise ContractError("R1 recovery authority revoked")
+    source_set = validate_recovery_source_set(receipt.source_set)
+    if (
+        receipt.current_main_sha != receipt.authority_floor_commit
+        or receipt.authority_floor_commit != receipt.accepted_source_merge
+        or receipt.authority_floor_tree != receipt.accepted_source_tree
+        or source_set.accepted_commit != receipt.accepted_source_merge
+        or source_set.accepted_tree != receipt.accepted_source_tree
+        or source_set.desired_commit != receipt.desired_commit
+        or source_set.desired_tree != receipt.desired_tree
+        or source_set.predecessor_commit != receipt.predecessor_commit
+        or source_set.predecessor_tree != receipt.predecessor_tree
+    ):
+        raise ContractError("R1 recovery semantic source binding mismatch")
+    desired = derive_deployment_manifest(source_set, role="desired")
+    predecessor = derive_deployment_manifest(source_set, role="predecessor")
+    if (
+        receipt.desired_manifest != desired
+        or receipt.predecessor_manifest != predecessor
+        or receipt.desired_manifest_id != desired.deployment_id
+        or receipt.desired_manifest_sha256 != desired.manifest_sha256
+        or receipt.predecessor_manifest_id != predecessor.deployment_id
+        or receipt.predecessor_manifest_sha256 != predecessor.manifest_sha256
+    ):
+        raise ContractError("R1 recovery manager-derived manifest mismatch")
     if request is not None and (
-        request.operation != receipt.operation
+        request.recovery_authority_id != receipt.receipt_id
+        or request.recovery_authority_hash != receipt.receipt_hash
+        or request.operation != receipt.operation
         or request.request_id != receipt.request_id
         or request.idempotency_fence != receipt.idempotency_fence
         or request.desired_manifest_id != receipt.desired_manifest_id

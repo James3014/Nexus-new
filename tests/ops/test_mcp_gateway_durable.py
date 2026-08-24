@@ -3,8 +3,8 @@ import hashlib
 import json
 import os
 import plistlib
-import stat
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -221,81 +221,552 @@ def test_status_is_json_serializable_and_does_not_expose_process_output(monkeypa
 
 
 def test_r1_stage_is_content_addressed_and_missing_rollback_has_zero_effect(monkeypatch, tmp_path):
-    from nexus.contracts.gateway_deployment import DeploymentManifest, InterpreterIdentity
-
-    source = tmp_path / "desired.py"
-    source.write_bytes(b"desired gateway bytes")
-    source.chmod(0o700)
-    manifest = DeploymentManifest(
-        deployment_id="desired-1", repository="James3014/Nexus-new", commit="a" * 40,
-        tree="b" * 40, entrypoint="scripts/ops/nexus_mcp_gateway_http.py",
-        entrypoint_sha256=hashlib.sha256(source.read_bytes()).hexdigest(), interpreter=InterpreterIdentity(),
-        content_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
-        manifest_sha256="0" * 64, owner_uid=source.stat().st_uid, owner_gid=source.stat().st_gid, mode=stat.S_IMODE(source.stat().st_mode),
-    )
-    manifest = DeploymentManifest(**{
-        **manifest.__dict__,
-        "manifest_sha256": __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash({
-            key: value for key, value in manifest.model_dump().items() if key != "manifest_sha256"
-        }),
-    })
-    monkeypatch.setattr(g, "GATEWAY_STATE_ROOT", tmp_path / "state")
-    monkeypatch.setattr(g, "GATEWAY_DEPLOYMENTS_ROOT", tmp_path / "state" / "deployments")
-    monkeypatch.setattr(g, "_resolve_manifest_source", lambda _manifest: source)
-    staged = g.stage_deployment(manifest)
-    assert staged.name == manifest.content_sha256
-    assert (staged / "nexus_mcp_gateway_http.py").read_bytes() == source.read_bytes()
+    # R1-B removes the public one-file staging surface entirely.
+    assert not hasattr(g, "stage_deployment")
     with pytest.raises(g.GatewayContractError, match="R1 recovery request rejected"):
-        g.gateway_recover(
-            request=None,
-        )
+        g.gateway_recover(request=None)
 
 
 def test_r1_recovery_rejects_caller_selected_effect_surface():
     import inspect
     parameters = inspect.signature(g.gateway_recover).parameters
-    stage_parameters = inspect.signature(g.stage_deployment).parameters
+    stage_parameters = inspect.signature(g.stage_verified_git_store).parameters
     assert "state_root" not in parameters
     assert "desired_source" not in parameters
     assert "predecessor_source" not in parameters
-    assert "source_path" not in stage_parameters
-    assert "state_root" not in stage_parameters
+    assert tuple(stage_parameters) == ("request", "receipt")
     assert g.GATEWAY_DEPLOYMENTS_ROOT == g.GATEWAY_STATE_ROOT / "deployments"
 
 
-def test_r1b1_real_git_bundle_bare_store_and_two_detached_worktrees(tmp_path, monkeypatch):
-    """B1 RED: staging must survive removal of the authority mirror."""
+def test_r1b1_staging_does_not_accept_caller_selected_git_refs():
+    import inspect
+    parameters = inspect.signature(g.stage_verified_git_store).parameters
+    assert tuple(parameters) == ("request", "receipt")
+
+
+def _r1b1_fixture(tmp_path, monkeypatch):
+    from nexus.contracts.gateway_deployment import (
+        RECOVERY_CARD_PATH,
+        RECOVERY_CARD_SHA256,
+        SOURCE_BASE_MERGE,
+        SOURCE_BASE_TREE,
+        EffectClass,
+        GatewayRecoveryRequest,
+        InterpreterIdentity,
+        RecoveryAuthorityReceipt,
+        RecoveryEntrypointIdentity,
+        RecoverySourceSet,
+        canonical_hash,
+        derive_deployment_manifest,
+    )
+
     mirror = tmp_path / "authority"
     subprocess.run(["git", "init", "-q", "-b", "main", str(mirror)], check=True)
     subprocess.run(["git", "-C", str(mirror), "config", "user.email", "b1@example.invalid"], check=True)
     subprocess.run(["git", "-C", str(mirror), "config", "user.name", "b1"], check=True)
-    subprocess.run(["git", "-C", str(mirror), "remote", "add", "origin", g.HOST_AUTHORITY_REMOTE], check=True)
+    subprocess.run(["git", "-C", str(mirror), "remote", "add", "origin", str(mirror)], check=True)
     entrypoint = mirror / "scripts/ops/nexus_mcp_gateway_http.py"
     entrypoint.parent.mkdir(parents=True)
-    entrypoint.write_text("def main(): return 0\n")
-    entrypoint.chmod(0o755)
+    entrypoint.write_text("ROLE = 'predecessor'\n")
+    entrypoint.chmod(0o644)
     subprocess.run(["git", "-C", str(mirror), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(mirror), "commit", "-q", "-m", "b1"], check=True)
     predecessor = subprocess.check_output(["git", "-C", str(mirror), "rev-parse", "HEAD"], text=True).strip()
-    entrypoint.write_text("def main(): return 1\n")
+    entrypoint.write_text("ROLE = 'desired'\n")
     subprocess.run(["git", "-C", str(mirror), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(mirror), "commit", "-q", "-m", "b1-desired"], check=True)
     desired = subprocess.check_output(["git", "-C", str(mirror), "rev-parse", "HEAD"], text=True).strip()
-    entrypoint.write_text("def main(): return 2\n")
+    entrypoint.write_text("ROLE = 'accepted'\n")
     subprocess.run(["git", "-C", str(mirror), "add", "-A"], check=True)
-    subprocess.run(["git", "-C", str(mirror), "commit", "-q", "-m", "b1-main"], check=True)
-    head = subprocess.check_output(["git", "-C", str(mirror), "rev-parse", "HEAD"], text=True).strip()
+    subprocess.run(["git", "-C", str(mirror), "commit", "-q", "-m", "b1-accepted"], check=True)
+    accepted = subprocess.check_output(
+        ["git", "-C", str(mirror), "rev-parse", "HEAD"], text=True
+    ).strip()
+
     monkeypatch.setattr(g, "HOST_AUTHORITY_SOURCE_ROOT", mirror)
-    monkeypatch.setattr(g, "GATEWAY_SOURCE_BUNDLES_ROOT", tmp_path / "source-bundles")
-    monkeypatch.setattr(g, "GATEWAY_REPOSITORY", tmp_path / "repository.git")
-    monkeypatch.setattr(g, "GATEWAY_DEPLOYMENTS_ROOT", tmp_path / "deployments")
-    desired_path, predecessor_path = g.stage_verified_git_store(head, desired, predecessor)
+    monkeypatch.setattr(g, "HOST_AUTHORITY_REMOTE", str(mirror))
+    monkeypatch.setattr(g, "HOST_AUTHORITY_UID", os.getuid())
+    monkeypatch.setattr(g, "HOST_UID", os.getuid())
+    monkeypatch.setattr(g, "HOST_GID", os.getgid())
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    state.chmod(0o700)
+    monkeypatch.setattr(g, "GATEWAY_STATE_ROOT", state)
+    monkeypatch.setattr(g, "GATEWAY_SOURCE_BUNDLES_ROOT", state / "source-bundles")
+    monkeypatch.setattr(g, "GATEWAY_REPOSITORY", state / "repository.git")
+    monkeypatch.setattr(g, "GATEWAY_DEPLOYMENTS_ROOT", state / "deployments")
+    monkeypatch.setattr(g, "GATEWAY_RECOVERY_AUTHORITY_STORE", state / "recovery-authority.json")
+    monkeypatch.setattr(g, "GATEWAY_LOCK", state / "ledger.lock")
+
+    def tree(commit):
+        return subprocess.check_output(
+            ["git", "-C", str(mirror), "rev-parse", f"{commit}^{{tree}}"], text=True
+        ).strip()
+
+    def entry_identity(commit):
+        row = subprocess.check_output(
+            ["git", "-C", str(mirror), "ls-tree", commit, "--", g.GATEWAY_ENTRYPOINT],
+            text=True,
+        ).strip()
+        metadata, path = row.split("\t", 1)
+        mode, kind, blob = metadata.split()
+        assert (mode, kind, path) == ("100644", "blob", g.GATEWAY_ENTRYPOINT)
+        payload = subprocess.check_output(
+            ["git", "-C", str(mirror), "cat-file", "blob", blob]
+        )
+        return RecoveryEntrypointIdentity(
+            path=path,
+            blob_oid=blob,
+            sha256=hashlib.sha256(payload).hexdigest(),
+            tracked_mode=mode,
+        )
+
+    source_values = {
+        "repository": "James3014/Nexus-new",
+        "accepted_commit": accepted,
+        "accepted_tree": tree(accepted),
+        "accepted_entrypoint": entry_identity(accepted),
+        "desired_commit": desired,
+        "desired_tree": tree(desired),
+        "desired_entrypoint": entry_identity(desired),
+        "predecessor_commit": predecessor,
+        "predecessor_tree": tree(predecessor),
+        "predecessor_entrypoint": entry_identity(predecessor),
+        "interpreter": InterpreterIdentity(),
+    }
+    source_set = RecoverySourceSet(
+        **source_values, source_set_sha256=canonical_hash(source_values)
+    )
+    desired_manifest = derive_deployment_manifest(source_set, role="desired")
+    predecessor_manifest = derive_deployment_manifest(source_set, role="predecessor")
+    receipt_values = {
+        "schema": RecoveryAuthorityReceipt.SCHEMA,
+        "receipt_version": 1,
+        "receipt_id": "receipt-1",
+        "card_sha256": RECOVERY_CARD_SHA256,
+        "source_base_merge": SOURCE_BASE_MERGE,
+        "source_base_tree": SOURCE_BASE_TREE,
+        "current_main_sha": accepted,
+        "operation": "gateway-recover",
+        "effect_class": EffectClass.GATEWAY_DURABLE_RECOVERY,
+        "service_label": g.GATEWAY_LABEL,
+        "plist_path": str(g.GATEWAY_PLIST),
+        "endpoint": g.GATEWAY_ENDPOINT,
+        "desired_manifest_id": desired_manifest.deployment_id,
+        "desired_manifest_sha256": desired_manifest.manifest_sha256,
+        "predecessor_manifest_id": predecessor_manifest.deployment_id,
+        "predecessor_manifest_sha256": predecessor_manifest.manifest_sha256,
+        "request_id": "request-1",
+        "idempotency_fence": "fence-1",
+        "issued_at": "2020-01-01T00:00:00Z",
+        "expires_at": "2099-01-01T00:00:00Z",
+        "revocation_state": "NOT_REVOKED",
+        "revoked_at": None,
+        "revocation_reason": None,
+        "issuer_id": "owner-james",
+        "coordinator_id": "coordinator-codex",
+        "authorized_actor_id": "coordinator-codex",
+        "owner_activation_id": "OWNER_ISSUE526_CONTINUE_20260823",
+        "owner_activation_sha256": "f0ed77ffe3872b083ef0b6d66526524a7091a8e3125322c84ba632f3c64ba322",
+        "source_thread": "01a02a17-691c-7a20-ad0f-9166456416dc",
+        "standing_grant_id": "OWNER_STANDING_COORDINATOR_20260818_DURABLE_GITHUB_WORKFLOW",
+        "standing_grant_receipt_sha256": "3b8895f093692257d6225fbb8150b34f520e667d250c7817ad120cefd42751d5",
+        "repository": "James3014/Nexus-new",
+        "host_card_path": RECOVERY_CARD_PATH,
+        "accepted_source_merge": accepted,
+        "accepted_source_tree": tree(accepted),
+        "final_manager_sha256": hashlib.sha256(Path(g.__file__).read_bytes()).hexdigest(),
+        "independent_acceptance_receipt_hash": "a" * 64,
+        "authority_floor_commit": accepted,
+        "authority_floor_tree": tree(accepted),
+        "desired_commit": desired,
+        "desired_tree": tree(desired),
+        "predecessor_commit": predecessor,
+        "predecessor_tree": tree(predecessor),
+        "source_set": source_set,
+        "desired_manifest": desired_manifest,
+        "predecessor_manifest": predecessor_manifest,
+    }
+    receipt = RecoveryAuthorityReceipt(
+        **receipt_values, receipt_hash=canonical_hash(receipt_values)
+    )
+    request_values = {
+        "request_id": receipt.request_id,
+        "idempotency_fence": receipt.idempotency_fence,
+        "operation": receipt.operation,
+        "effect_class": receipt.effect_class,
+        "recovery_authority_id": receipt.receipt_id,
+        "recovery_authority_hash": receipt.receipt_hash,
+        "desired_manifest_id": desired_manifest.deployment_id,
+        "desired_manifest_hash": desired_manifest.manifest_sha256,
+        "predecessor_manifest_id": predecessor_manifest.deployment_id,
+        "predecessor_manifest_hash": predecessor_manifest.manifest_sha256,
+    }
+    request = GatewayRecoveryRequest(
+        **request_values, request_hash=canonical_hash(request_values)
+    )
+    raw = json.dumps(receipt.model_dump(), sort_keys=True, separators=(",", ":")).encode()
+    tracked = mirror / g.RECOVERY_AUTHORITY_SOURCE_PATH
+    tracked.parent.mkdir(parents=True)
+    tracked.write_bytes(raw)
+    subprocess.run(["git", "-C", str(mirror), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(mirror), "commit", "-q", "-m", "receipt"], check=True)
+    g.GATEWAY_RECOVERY_AUTHORITY_STORE.write_bytes(raw)
+    g.GATEWAY_RECOVERY_AUTHORITY_STORE.chmod(0o600)
+    return {
+        "mirror": mirror,
+        "state": state,
+        "receipt": receipt,
+        "request": request,
+        "desired": desired,
+        "predecessor": predecessor,
+        "desired_manifest": desired_manifest,
+        "predecessor_manifest": predecessor_manifest,
+    }
+
+
+def test_r1b1_real_git_bundle_bare_store_and_two_detached_worktrees(tmp_path, monkeypatch):
+    """The public B1 checkpoint stages two full paths and starts no host effect."""
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    calls = []
+    monkeypatch.setattr(
+        g, "_launchctl_observation", lambda *args, **kwargs: calls.append((args, kwargs))
+    )
+    outcome = g.gateway_recover(fixture["request"])
+    assert outcome.result == "BLOCKED"
+    assert outcome.effect_started is False
+    assert outcome.physical_observation["readiness"] == ["TARGET_READY", "ROLLBACK_READY"]
+    assert calls == []
+    desired_path = Path(outcome.physical_observation["desired_path"])
+    predecessor_path = Path(outcome.physical_observation["predecessor_path"])
     assert desired_path.is_dir() and predecessor_path.is_dir()
-    assert (tmp_path / "repository.git").is_dir()
-    shutil.rmtree(mirror)
-    for worktree, commit in ((desired_path, desired), (predecessor_path, predecessor)):
+    assert g.GATEWAY_REPOSITORY.is_dir()
+    shutil.rmtree(fixture["mirror"])
+    for worktree, commit, manifest in (
+        (desired_path, fixture["desired"], fixture["desired_manifest"]),
+        (predecessor_path, fixture["predecessor"], fixture["predecessor_manifest"]),
+    ):
         assert subprocess.check_output(["git", "-C", str(worktree), "rev-parse", "HEAD"], text=True).strip() == commit
         assert not (worktree / ".git").is_symlink()
+        assert g._r1_verify_worktree(worktree, manifest) == worktree
+
+
+def test_r1b1_local_typed_receipt_mismatch_fails_before_bundle(tmp_path, monkeypatch):
+    from nexus.contracts.gateway_deployment import canonical_hash
+
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    receipt = fixture["receipt"]
+    values = {**receipt.__dict__, "independent_acceptance_receipt_hash": "d" * 64}
+    values["receipt_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key != "receipt_hash"
+    })
+    altered = receipt.__class__(**values)
+    request = fixture["request"]
+    request_values = {**request.__dict__, "recovery_authority_hash": altered.receipt_hash}
+    request_values["request_hash"] = canonical_hash({
+        key: value for key, value in request_values.items()
+        if key not in {"request_hash", "schema"}
+    })
+    altered_request = request.__class__(**request_values)
+    with pytest.raises(g.GatewayContractError, match="differs from fixed local"):
+        g.stage_verified_git_store(altered_request, altered)
+    assert not g.GATEWAY_SOURCE_BUNDLES_ROOT.exists()
+
+
+def test_r1b1_safe_ancestry_and_existing_bare_identity_fail_closed(tmp_path, monkeypatch):
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    state.chmod(0o700)
+    monkeypatch.setattr(g, "GATEWAY_STATE_ROOT", state)
+    monkeypatch.setattr(g, "HOST_UID", os.getuid())
+    monkeypatch.setattr(g, "HOST_GID", os.getgid())
+    unsafe = state / "unsafe"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    unsafe.symlink_to(outside, target_is_directory=True)
+    with pytest.raises(g.GatewayContractError, match="ownership/mode"):
+        g._r1_safe_directory(unsafe)
+    unsafe.unlink()
+    state.chmod(0o755)
+    with pytest.raises(g.GatewayContractError, match="ownership/mode"):
+        g._r1_safe_directory(state / "child")
+    state.chmod(0o700)
+
+    repository = state / "repository.git"
+    repository.mkdir(mode=0o700)
+    repository.chmod(0o700)
+    monkeypatch.setattr(g, "GATEWAY_REPOSITORY", repository)
+    with pytest.raises(g.GatewayContractError, match="not bare"):
+        g._r1_verify_bare_repository()
+    shutil.rmtree(repository)
+    subprocess.run(["git", "init", "-q", "--bare", str(repository)], check=True)
+    repository.chmod(0o755)
+    with pytest.raises(g.GatewayContractError, match="ownership/mode"):
+        g._r1_verify_bare_repository()
+    repository.chmod(0o700)
+    subprocess.run(
+        ["git", "--git-dir", str(repository), "remote", "add", "origin", "wrong"],
+        check=True,
+    )
+    with pytest.raises(g.GatewayContractError, match="origin"):
+        g._r1_verify_bare_repository()
+
+
+def test_r1b1_wrong_owner_and_accepted_tree_mismatch_fail_closed(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from nexus.contracts.gateway_deployment import (
+        RecoverySourceSet,
+        canonical_hash,
+        derive_deployment_manifest,
+    )
+
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    state.chmod(0o700)
+    monkeypatch.setattr(g, "GATEWAY_STATE_ROOT", state)
+    monkeypatch.setattr(g, "HOST_UID", os.getuid())
+    monkeypatch.setattr(g, "HOST_GID", os.getgid())
+    actual_lstat = g.os.lstat
+    def wrong_owner(path):
+        info = actual_lstat(path)
+        if Path(path) == state:
+            values = {
+                name: getattr(info, name)
+                for name in dir(info)
+                if name.startswith("st_")
+            }
+            values["st_uid"] = os.getuid() + 1
+            return SimpleNamespace(**values)
+        return info
+    monkeypatch.setattr(g.os, "lstat", wrong_owner)
+    with pytest.raises(g.GatewayContractError, match="ownership/mode"):
+        g._r1_safe_directory(state)
+    monkeypatch.setattr(g.os, "lstat", actual_lstat)
+
+    physical = tmp_path / "physical"
+    physical.mkdir()
+    fixture = _r1b1_fixture(physical, monkeypatch)
+    receipt = fixture["receipt"]
+    source_values = {
+        **receipt.source_set.__dict__,
+        "accepted_tree": "f" * 40,
+    }
+    source_values["source_set_sha256"] = canonical_hash({
+        key: value for key, value in source_values.items()
+        if key != "source_set_sha256"
+    })
+    source_set = RecoverySourceSet(**source_values)
+    altered_values = {
+        **receipt.__dict__,
+        "accepted_source_tree": "f" * 40,
+        "authority_floor_tree": "f" * 40,
+        "source_set": source_set,
+        "desired_manifest": derive_deployment_manifest(source_set, role="desired"),
+        "predecessor_manifest": derive_deployment_manifest(
+            source_set, role="predecessor"
+        ),
+    }
+    altered = receipt.__class__(**altered_values)
+    with pytest.raises(g.GatewayContractError, match="commit/tree"):
+        g._r1_derive_source_set(altered)
+
+
+def test_r1b1_reuse_tamper_common_dir_and_bundle_tamper_block(tmp_path, monkeypatch):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    staged = g.stage_verified_git_store(fixture["request"], fixture["receipt"])
+    desired = staged.desired_path
+    entrypoint = desired / g.GATEWAY_ENTRYPOINT
+    entrypoint.chmod(0o755)
+    with pytest.raises(g.GatewayContractError, match="commit/tree/clean|physical identity"):
+        g._r1_verify_worktree(desired, fixture["desired_manifest"])
+    entrypoint.chmod(0o644)
+    git_file = desired / ".git"
+    original_git_file = git_file.read_bytes()
+    git_file.write_text(f"gitdir: {fixture['mirror'] / '.git'}\n")
+    with pytest.raises(g.GatewayContractError, match="common-dir"):
+        g._r1_verify_worktree(desired, fixture["desired_manifest"])
+    git_file.write_bytes(original_git_file)
+    entrypoint.write_text("tampered\n")
+    with pytest.raises(g.GatewayContractError, match="commit/tree/clean"):
+        g._r1_verify_worktree(desired, fixture["desired_manifest"])
+    subprocess.run(["git", "-C", str(desired), "checkout", "-q", "--", "."], check=True)
+    bundle = (
+        g.GATEWAY_SOURCE_BUNDLES_ROOT / f"{fixture['receipt'].receipt_hash}.bundle"
+    )
+    original_bundle = bundle.read_bytes()
+    bundle.write_bytes(original_bundle + b"\ntampered")
+    bundle.chmod(0o600)
+    with pytest.raises(g.GatewayContractError):
+        g.stage_verified_git_store(fixture["request"], fixture["receipt"])
+    bundle.write_bytes(original_bundle)
+    bundle.chmod(0o600)
+    bundle.chmod(0o644)
+    with pytest.raises(g.GatewayContractError, match="bundle identity"):
+        g.stage_verified_git_store(fixture["request"], fixture["receipt"])
+    bundle.chmod(0o600)
+    outside_bundle = tmp_path / "outside.bundle"
+    outside_bundle.write_bytes(original_bundle)
+    outside_bundle.chmod(0o600)
+    bundle.unlink()
+    bundle.symlink_to(outside_bundle)
+    with pytest.raises(g.GatewayContractError, match="bundle identity"):
+        g.stage_verified_git_store(fixture["request"], fixture["receipt"])
+    bundle.unlink()
+    bundle.write_bytes(original_bundle)
+    bundle.chmod(0o600)
+    assert g._r1_verify_worktree(desired, fixture["desired_manifest"]) == desired
+
+
+def test_r1b1_strict_evidence_seam_precedes_worktree_promotion(tmp_path, monkeypatch):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    events = []
+    import_bundle = g._r1_import_bundle
+    bundle_evidence = g._r1_bundle_evidence
+    materialize = g._r1_materialize_worktree
+
+    def observed_import(*args, **kwargs):
+        result = import_bundle(*args, **kwargs)
+        events.append("bare-verified")
+        return result
+
+    def observed_evidence(*args, **kwargs):
+        assert events == ["bare-verified"]
+        result = bundle_evidence(*args, **kwargs)
+        events.append("evidence-validated")
+        return result
+
+    def observed_materialize(*args, **kwargs):
+        assert events[:2] == ["bare-verified", "evidence-validated"]
+        events.append("worktree")
+        return materialize(*args, **kwargs)
+
+    monkeypatch.setattr(g, "_r1_import_bundle", observed_import)
+    monkeypatch.setattr(g, "_r1_bundle_evidence", observed_evidence)
+    monkeypatch.setattr(g, "_r1_materialize_worktree", observed_materialize)
+    staged = g.stage_verified_git_store(fixture["request"], fixture["receipt"])
+    assert staged.bundle_evidence.evidence_hash
+    assert events == [
+        "bare-verified", "evidence-validated", "worktree", "worktree"
+    ]
+
+
+def test_r1b1_named_role_swap_extra_refs_and_valid_bundle_encodings(tmp_path, monkeypatch):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    source = tmp_path / "bundle-source.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(source)], check=True)
+    fresh = subprocess.check_output(
+        ["git", "-C", str(fixture["mirror"]), "rev-parse", "HEAD"], text=True
+    ).strip()
+    mappings = (
+        ("refs/nexus-r1/fresh-main", fresh),
+        ("refs/nexus-r1/desired", fixture["predecessor"]),
+        ("refs/nexus-r1/predecessor", fixture["desired"]),
+        ("refs/nexus-r1/extra", fixture["receipt"].accepted_source_merge),
+    )
+    for ref, commit in mappings:
+        subprocess.run(
+            [
+                "git", "--git-dir", str(source), "fetch", "-q", "--no-tags",
+                str(fixture["mirror"]), f"+{commit}:{ref}",
+            ],
+            check=True,
+        )
+    extra_bundle = tmp_path / "extra.bundle"
+    subprocess.run(
+        [
+            "git", "--git-dir", str(source), "bundle", "create", str(extra_bundle),
+            *(ref for ref, _ in mappings),
+        ],
+        check=True,
+    )
+    with pytest.raises(g.GatewayContractError, match="refs"):
+        g._r1_bundle_heads(extra_bundle)
+    swapped_bundle = tmp_path / "swapped.bundle"
+    subprocess.run(
+        [
+            "git", "--git-dir", str(source), "bundle", "create", str(swapped_bundle),
+            *(ref for ref, _ in mappings[:3]),
+        ],
+        check=True,
+    )
+    g.GATEWAY_SOURCE_BUNDLES_ROOT.mkdir(mode=0o700)
+    g.GATEWAY_SOURCE_BUNDLES_ROOT.chmod(0o700)
+    persisted = (
+        g.GATEWAY_SOURCE_BUNDLES_ROOT / f"{fixture['receipt'].receipt_hash}.bundle"
+    )
+    persisted.write_bytes(swapped_bundle.read_bytes())
+    persisted.chmod(0o600)
+    with pytest.raises(g.GatewayContractError, match="bundle bytes|role/commit"):
+        g.stage_verified_git_store(fixture["request"], fixture["receipt"])
+
+    correct_source = tmp_path / "correct-source.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(correct_source)], check=True)
+    correct = (
+        ("refs/nexus-r1/fresh-main", fresh),
+        ("refs/nexus-r1/desired", fixture["desired"]),
+        ("refs/nexus-r1/predecessor", fixture["predecessor"]),
+    )
+    for ref, commit in correct:
+        subprocess.run(
+            [
+                "git", "--git-dir", str(correct_source), "fetch", "-q", "--no-tags",
+                str(fixture["mirror"]), f"+{commit}:{ref}",
+            ],
+            check=True,
+        )
+    encoded = []
+    for version in ("2", "3"):
+        path = tmp_path / f"bundle-v{version}"
+        subprocess.run(
+            [
+                "git", "--git-dir", str(correct_source), "bundle", "create",
+                f"--version={version}", str(path), *(ref for ref, _ in correct),
+            ],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(fixture["mirror"]), "bundle", "verify", str(path)],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        encoded.append(hashlib.sha256(path.read_bytes()).hexdigest())
+    assert encoded[0] != encoded[1]
+    assert fixture["desired_manifest"].deployment_id == fixture["receipt"].desired_manifest_id
+
+
+def test_r1b1_bounded_subprocess_import_failure_is_rejected(tmp_path):
+    root = tmp_path / "checkout"
+    entrypoint = root / g.GATEWAY_ENTRYPOINT
+    entrypoint.parent.mkdir(parents=True)
+    entrypoint.write_text("import module_that_does_not_exist_r1b1\n")
+    with pytest.raises(g.GatewayContractError, match="bounded repository import"):
+        g._r1_import_witness(root)
+
+
+def test_r1b1_fresh_main_gitlink_is_rejected(tmp_path, monkeypatch):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    subprocess.run(
+        [
+            "git", "-C", str(fixture["mirror"]), "update-index", "--add",
+            "--cacheinfo", f"160000,{fixture['desired']},nested-repository",
+        ],
+        check=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(fixture["mirror"]), "commit", "-q", "-m", "gitlink"],
+        check=True,
+    )
+    head = subprocess.check_output(
+        ["git", "-C", str(fixture["mirror"]), "rev-parse", "HEAD"], text=True
+    ).strip()
+    with pytest.raises(g.GatewayContractError, match="Gitlink"):
+        g._r1_reject_gitlinks(head)
+    with pytest.raises(g.GatewayContractError, match="dirty|Gitlink"):
+        g.stage_verified_git_store(fixture["request"], fixture["receipt"])
+    assert not g.GATEWAY_SOURCE_BUNDLES_ROOT.exists()
+
 
 def test_status_classifies_real_absent_launchctl_service(monkeypatch, tmp_path):
     setup(monkeypatch, tmp_path)

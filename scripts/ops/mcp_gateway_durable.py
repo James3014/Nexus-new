@@ -20,6 +20,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -31,22 +32,31 @@ from nexus.contracts.gateway_deployment import (
     GATEWAY_ACTION,
     GATEWAY_TASK_ID,
     HOST_CARD_SHA256,
+    INTERPRETER,
+    RECOVERY_RECEIPT_PATH,
+    REPOSITORY,
     SOURCE_BASE_MERGE,
     SOURCE_BASE_TREE,
+    BareStoreEvidence,
+    BundleRoleHead,
     ContractError,
     DeploymentManifest,
     DeploymentState,
     EffectClass,
     GatewayDeploymentRequest,
-    GatewayRecoveryRequest,
-    RecoveryAuthorityReceipt,
     GatewayReconcileOutcome,
+    GatewayRecoveryRequest,
     HostEffectAuthorityBundle,
     HostEffectAuthorityReceipt,
     PostflightIdentity,
-    REPOSITORY,
+    RecoveryAuthorityReceipt,
+    RecoveryEntrypointIdentity,
+    RecoverySourceSet,
+    ResultClass,
+    SourceBundleEvidence,
     _gateway_wrapper_command,
     canonical_hash,
+    derive_deployment_manifest,
     select_host_effect_authority_receipt,
     validate_authority_freshness,
     validate_deployment_manifest,
@@ -54,11 +64,14 @@ from nexus.contracts.gateway_deployment import (
     validate_host_effect_authority_bundle,
     validate_postflight_identity,
     validate_profile,
-    validate_recovery_request,
-    validate_recovery_authority,
     validate_receipt_freshness,
+    validate_reconcile_outcome,
+    validate_recovery_authority,
+    validate_recovery_request,
+    validate_recovery_source_set,
     validate_request,
     validate_rollback_capture,
+    validate_source_bundle_evidence,
 )
 
 CANONICAL_ROOT = Path("/Users/jameschen/Workspace/nexus")
@@ -265,9 +278,13 @@ def main() -> int:
                 payload = json.loads(request_path.read_text(), object_pairs_hook=_unique_pairs)
             except (OSError, ValueError) as exc:
                 raise GateError("gateway request file malformed") from exc
-            request = GatewayDeploymentRequest.model_validate(payload)
             operation = "gateway-recover" if a.action == "gateway-recover" else a.action.removeprefix("gateway-")
             if operation == "install-artifact": operation = "install-artifact"
+            request = (
+                GatewayRecoveryRequest.model_validate(payload)
+                if operation == "gateway-recover"
+                else GatewayDeploymentRequest.model_validate(payload)
+            )
             now = _current_observation_time()
             observed = {} if operation in {"status", "gateway-status", "install-artifact", "gateway-recover"} else collect_gateway_observation(
                 request, operation=operation, observation_time=now
@@ -288,7 +305,7 @@ GATEWAY_DEPLOYMENTS_ROOT = GATEWAY_STATE_ROOT / "deployments"
 GATEWAY_SOURCE_BUNDLES_ROOT = GATEWAY_STATE_ROOT / "source-bundles"
 GATEWAY_REPOSITORY = GATEWAY_STATE_ROOT / "repository.git"
 GATEWAY_RECOVERY_AUTHORITY_STORE = GATEWAY_STATE_ROOT / "recovery-authority.json"
-RECOVERY_AUTHORITY_SOURCE_PATH = "tasks/github-issue-526-host-authority-and-canary-20260823/10-durable-recovery-authority-receipt.json"
+RECOVERY_AUTHORITY_SOURCE_PATH = RECOVERY_RECEIPT_PATH
 GATEWAY_LEDGER = GATEWAY_STATE_ROOT / "ledger.jsonl"
 GATEWAY_LOCK = GATEWAY_STATE_ROOT / "ledger.lock"
 GATEWAY_ARTIFACT = GATEWAY_STATE_ROOT / "manager.py"
@@ -314,6 +331,7 @@ MAX_LEDGER_BYTES = 64 * 1024
 MAX_LEDGER_RECORDS = 256
 MAX_GATEWAY_STORE_BYTES = 64 * 1024
 HOST_UID = 501
+HOST_GID = 20
 
 
 class GatewayContractError(GateError):
@@ -651,201 +669,680 @@ def _atomic_gateway_write(path: Path, data: bytes, *, mode: int = 0o600) -> None
         raise
 
 
-def stage_deployment(
-    manifest: DeploymentManifest,
-) -> Path:
-    """Materialize one manager-owned deployment under its content hash."""
+@dataclass(frozen=True)
+class _R1StageResult:
+    desired_path: Path
+    predecessor_path: Path
+    desired_manifest: DeploymentManifest
+    predecessor_manifest: DeploymentManifest
+    bundle_evidence: SourceBundleEvidence
+
+
+def _r1_run(*command: str, bytes_output: bool = False) -> str | bytes:
     try:
-        validate_deployment_manifest(manifest)
-    except ContractError as exc:
-        raise _gateway_error("deployment manifest rejected", exc) from exc
-    source = _resolve_manifest_source(manifest)
-    if not source.is_absolute() or source.is_symlink() or not source.is_file():
-        raise _gateway_error("deployment source must be a regular file")
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=not bytes_output,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise _gateway_error("R1 fixed subprocess failed", exc) from exc
+    if result.returncode != 0:
+        raise _gateway_error("R1 fixed subprocess rejected")
+    return result.stdout if bytes_output else str(result.stdout).strip()
+
+
+def _r1_safe_directory(path: Path) -> Path:
+    """Create/validate only manager-owned 0700 directories below the fixed root."""
+    path = Path(path)
+    root = Path(GATEWAY_STATE_ROOT)
+    if not path.is_absolute() or not root.is_absolute():
+        raise _gateway_error("R1 manager directory must be absolute")
     try:
-        payload = source.read_bytes()
-    except OSError as exc:
-        raise _gateway_error("deployment source unavailable", exc) from exc
-    source_info = source.stat()
-    if (source_info.st_uid, source_info.st_gid, stat.S_IMODE(source_info.st_mode)) != (
-        manifest.owner_uid, manifest.owner_gid, manifest.mode
+        relative = path.relative_to(root)
+    except ValueError as exc:
+        raise _gateway_error("R1 manager directory escaped fixed root", exc) from exc
+    current = root
+    components = (root, *(root / Path(*relative.parts[:index]) for index in range(1, len(relative.parts) + 1)))
+    for current in components:
+        if current.exists() or current.is_symlink():
+            info = os.lstat(current)
+            if (
+                stat.S_ISLNK(info.st_mode)
+                or not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != HOST_UID
+                or info.st_gid != HOST_GID
+                or stat.S_IMODE(info.st_mode) != 0o700
+            ):
+                raise _gateway_error("R1 manager directory ownership/mode invalid")
+            continue
+        current.mkdir(mode=0o700, parents=current == root)
+        os.chmod(current, 0o700)
+        info = os.lstat(current)
+        if (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) != (HOST_UID, HOST_GID, 0o700):
+            raise _gateway_error("R1 manager directory creation identity mismatch")
+    return path
+
+
+def _r1_mirror_fresh_main() -> tuple[str, str]:
+    root = Path(HOST_AUTHORITY_SOURCE_ROOT)
+    if root.is_symlink() or not root.is_dir() or (root / ".git").is_symlink():
+        raise _gateway_error("R1 authority mirror unavailable")
+    info = os.lstat(root)
+    if info.st_uid != HOST_AUTHORITY_UID or stat.S_IMODE(info.st_mode) not in {0o700, 0o755}:
+        raise _gateway_error("R1 authority mirror ownership/mode invalid")
+    root_text = str(root)
+    if _r1_run("git", "-C", root_text, "rev-parse", "--show-toplevel") != str(root.resolve()):
+        raise _gateway_error("R1 authority mirror root mismatch")
+    if _r1_run("git", "-C", root_text, "remote", "get-url", "origin") != HOST_AUTHORITY_REMOTE:
+        raise _gateway_error("R1 authority mirror origin mismatch")
+    if _r1_run("git", "-C", root_text, "status", "--porcelain"):
+        raise _gateway_error("R1 authority mirror dirty")
+    observed = str(
+        _r1_run("git", "-C", root_text, "ls-remote", HOST_AUTHORITY_REMOTE, HOST_AUTHORITY_REF)
+    ).split()
+    if len(observed) != 2 or observed[1] != HOST_AUTHORITY_REF or not re.fullmatch(r"[0-9a-f]{40}", observed[0]):
+        raise _gateway_error("R1 fresh-main observation malformed")
+    fresh_main = observed[0]
+    if _r1_run("git", "-C", root_text, "rev-parse", "HEAD") != fresh_main:
+        raise _gateway_error("R1 authority mirror stale")
+    fresh_tree = str(_r1_run("git", "-C", root_text, "rev-parse", f"{fresh_main}^{{tree}}"))
+    return fresh_main, fresh_tree
+
+
+def _r1_entrypoint_identity(commit: str) -> RecoveryEntrypointIdentity:
+    root = str(HOST_AUTHORITY_SOURCE_ROOT)
+    entry = str(_r1_run("git", "-C", root, "ls-tree", commit, "--", GATEWAY_ENTRYPOINT))
+    metadata, separator, tracked = entry.partition("\t")
+    fields = metadata.split()
+    if (
+        not separator
+        or len(fields) != 3
+        or fields[0] != "100644"
+        or fields[1] != "blob"
+        or not re.fullmatch(r"[0-9a-f]{40}", fields[2])
+        or tracked != GATEWAY_ENTRYPOINT
     ):
-        raise _gateway_error("deployment source ownership/mode mismatch")
-    if hashlib.sha256(payload).hexdigest() != manifest.content_sha256 or hashlib.sha256(payload).hexdigest() != manifest.entrypoint_sha256:
-        raise _gateway_error("deployment content hash mismatch")
-    deployments = GATEWAY_DEPLOYMENTS_ROOT
-    for ancestor in (GATEWAY_STATE_ROOT, deployments):
-        if ancestor.exists() and ancestor.is_symlink():
-            raise _gateway_error("deployment ancestry unsafe")
-    deployments.mkdir(mode=0o700, parents=True, exist_ok=True)
-    os.chmod(deployments, 0o700)
-    destination = deployments / manifest.content_sha256
-    target_name = Path(manifest.entrypoint).name
-    if destination.exists():
-        if destination.is_symlink() or not destination.is_dir():
-            raise _gateway_error("deployment ancestry unsafe")
-        target = destination / target_name
-        if target.is_symlink() or not target.is_file() or target.read_bytes() != payload:
-            raise _gateway_error("staged deployment tampered")
-        return destination
-    temporary = Path(tempfile.mkdtemp(prefix=f".{manifest.content_sha256}.", dir=deployments))
+        raise _gateway_error("R1 tracked entrypoint identity invalid")
+    payload = _r1_run(
+        "git", "-C", root, "cat-file", "blob", fields[2], bytes_output=True
+    )
+    return RecoveryEntrypointIdentity(
+        path=GATEWAY_ENTRYPOINT,
+        blob_oid=fields[2],
+        sha256=hashlib.sha256(bytes(payload)).hexdigest(),
+        tracked_mode=fields[0],
+    )
+
+
+def _r1_reject_gitlinks(commit: str) -> None:
+    tree = str(
+        _r1_run(
+            "git", "-C", str(HOST_AUTHORITY_SOURCE_ROOT),
+            "ls-tree", "-r", commit,
+        )
+    )
+    for row in tree.splitlines():
+        if row.split(maxsplit=1)[:1] == ["160000"]:
+            raise _gateway_error("R1 Gitlink is forbidden")
+
+
+def _r1_interpreter_identity() -> Any:
+    path = Path(INTERPRETER)
     try:
-        os.chmod(temporary, 0o700)
-        target = temporary / target_name
-        target.write_bytes(payload)
-        os.chmod(target, manifest.mode)
-        fd = os.open(target, os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
-        os.replace(temporary, destination)
-        _fsync_dir(deployments)
-    except Exception:
-        shutil.rmtree(temporary, ignore_errors=True)
-        raise
-    destination_info = destination.stat()
-    target_info = (destination / target_name).stat()
-    if (destination_info.st_uid, destination_info.st_gid, stat.S_IMODE(destination_info.st_mode)) != (manifest.owner_uid, manifest.owner_gid, manifest.mode):
-        raise _gateway_error("staged deployment ownership/mode mismatch")
-    if (target_info.st_uid, target_info.st_gid, stat.S_IMODE(target_info.st_mode)) != (manifest.owner_uid, manifest.owner_gid, manifest.mode):
-        raise _gateway_error("staged entrypoint ownership/mode mismatch")
-    return destination
+        info = os.lstat(path)
+        resolved = path.resolve(strict=True)
+        payload = resolved.read_bytes()
+    except OSError as exc:
+        raise _gateway_error("R1 fixed interpreter unavailable", exc) from exc
+    from nexus.contracts.gateway_deployment import InterpreterIdentity
+    return InterpreterIdentity(
+        path=str(path),
+        resolved_path=str(resolved),
+        sha256=hashlib.sha256(payload).hexdigest(),
+        uid=info.st_uid,
+        gid=info.st_gid,
+        mode=stat.filemode(info.st_mode),
+    )
 
 
-def stage_verified_git_store(fresh_main: str, desired_commit: str, predecessor_commit: str) -> tuple[Path, Path]:
-    """Transfer exact commits through a manager-owned bundle and bare store.
-
-    This is deliberately a source-only checkpoint: the fixed mirror is read,
-    the bundle is verified, and all subsequent bytes come from the bare store.
-    """
-    root = HOST_AUTHORITY_SOURCE_ROOT
-    if root.is_symlink() or not root.is_dir():
-        raise _gateway_error("authority mirror unavailable")
-    run = lambda *args: subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
-    if _command_output(run, ("git", "-C", str(root), "rev-parse", "--show-toplevel")) != str(root.resolve()):
-        raise _gateway_error("authority mirror root mismatch")
-    if _command_output(run, ("git", "-C", str(root), "remote", "get-url", "origin")) != HOST_AUTHORITY_REMOTE:
-        raise _gateway_error("authority mirror origin mismatch")
-    head = _command_output(run, ("git", "-C", str(root), "rev-parse", "HEAD"))
-    if head != fresh_main or _command_output(run, ("git", "-C", str(root), "status", "--porcelain")):
-        raise _gateway_error("authority mirror dirty or stale")
-    commits = (fresh_main, desired_commit, predecessor_commit)
+def _r1_derive_source_set(receipt: RecoveryAuthorityReceipt) -> RecoverySourceSet:
+    root = str(HOST_AUTHORITY_SOURCE_ROOT)
+    commits = (
+        receipt.accepted_source_merge,
+        receipt.desired_commit,
+        receipt.predecessor_commit,
+    )
     for commit in commits:
         if not re.fullmatch(r"[0-9a-f]{40}", commit):
-            raise _gateway_error("commit identity malformed")
-        if _command_output(run, ("git", "-C", str(root), "cat-file", "-e", f"{commit}^{{commit}}")) != "":
-            raise _gateway_error("authority commit unavailable")
-    for commit in (desired_commit, predecessor_commit):
-        result = run("git", "-C", str(root), "merge-base", "--is-ancestor", commit, fresh_main)
-        if result.returncode != 0:
-            raise _gateway_error("deployment commit is outside fresh main")
-    GATEWAY_SOURCE_BUNDLES_ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
-    bundle = GATEWAY_SOURCE_BUNDLES_ROOT / f"{fresh_main}.bundle"
-    result = run("git", "-C", str(root), "bundle", "create", str(bundle), HOST_AUTHORITY_REF)
+            raise _gateway_error("R1 semantic commit malformed")
+        _r1_run("git", "-C", root, "cat-file", "-e", f"{commit}^{{commit}}")
+        _r1_reject_gitlinks(commit)
+    trees = tuple(
+        str(_r1_run("git", "-C", root, "rev-parse", f"{commit}^{{tree}}"))
+        for commit in commits
+    )
+    if trees != (
+        receipt.accepted_source_tree,
+        receipt.desired_tree,
+        receipt.predecessor_tree,
+    ):
+        raise _gateway_error("R1 semantic commit/tree mismatch")
+    values = {
+        "repository": REPOSITORY,
+        "accepted_commit": commits[0],
+        "accepted_tree": trees[0],
+        "accepted_entrypoint": _r1_entrypoint_identity(commits[0]),
+        "desired_commit": commits[1],
+        "desired_tree": trees[1],
+        "desired_entrypoint": _r1_entrypoint_identity(commits[1]),
+        "predecessor_commit": commits[2],
+        "predecessor_tree": trees[2],
+        "predecessor_entrypoint": _r1_entrypoint_identity(commits[2]),
+        "interpreter": _r1_interpreter_identity(),
+    }
+    source_set = RecoverySourceSet(
+        **values,
+        source_set_sha256=canonical_hash(values),
+    )
+    return validate_recovery_source_set(source_set)
+
+
+def _r1_local_receipt(receipt: RecoveryAuthorityReceipt) -> tuple[bytes, str, str]:
+    path = _safe_store_path(GATEWAY_RECOVERY_AUTHORITY_STORE)
+    if not path.exists() or path.stat().st_uid != HOST_UID or path.stat().st_gid != HOST_GID:
+        raise _gateway_error("R1 recovery authority store invalid")
+    raw = path.read_bytes()
+    try:
+        payload = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_pairs)
+        local_receipt = RecoveryAuthorityReceipt.model_validate(payload)
+        validate_recovery_authority(local_receipt)
+    except (UnicodeError, ValueError, ContractError) as exc:
+        raise _gateway_error("R1 local recovery receipt malformed", exc) from exc
+    if local_receipt != receipt or receipt.receipt_hash != canonical_hash({
+        key: value for key, value in receipt.model_dump().items() if key != "receipt_hash"
+    }):
+        raise _gateway_error("R1 supplied receipt differs from fixed local receipt")
+    fresh_main, fresh_tree = _r1_mirror_fresh_main()
+    root = str(HOST_AUTHORITY_SOURCE_ROOT)
+    if _r1_run(
+        "git", "-C", root, "merge-base", "--is-ancestor",
+        receipt.authority_floor_commit, fresh_main,
+    ) != "":
+        raise _gateway_error("R1 authority floor is outside fresh main")
+    if _r1_run(
+        "git", "-C", root, "rev-parse", f"{receipt.authority_floor_commit}^{{tree}}"
+    ) != receipt.authority_floor_tree:
+        raise _gateway_error("R1 authority floor tree mismatch")
+    tracked = _r1_run(
+        "git", "-C", root, "show",
+        f"{fresh_main}:{RECOVERY_AUTHORITY_SOURCE_PATH}",
+        bytes_output=True,
+    )
+    if bytes(tracked) != raw:
+        raise _gateway_error("R1 recovery receipt remote/local byte mismatch")
+    return raw, fresh_main, fresh_tree
+
+
+_R1_ROLE_REFS = (
+    ("fresh-main", "refs/nexus-r1/fresh-main"),
+    ("desired", "refs/nexus-r1/desired"),
+    ("predecessor", "refs/nexus-r1/predecessor"),
+)
+
+
+def _r1_bundle_heads(bundle: Path) -> tuple[BundleRoleHead, ...]:
+    observed: dict[str, str] = {}
+    for line in str(_r1_run("git", "bundle", "list-heads", str(bundle))).splitlines():
+        commit, ref = line.split(maxsplit=1)
+        if ref in observed:
+            raise _gateway_error("R1 duplicate bundle head")
+        observed[ref] = commit
+    expected_refs = tuple(ref for _, ref in _R1_ROLE_REFS)
+    if set(observed) != set(expected_refs):
+        raise _gateway_error("R1 named bundle refs mismatch")
+    return tuple(
+        BundleRoleHead(role=role, ref=ref, commit=observed[ref])
+        for role, ref in _R1_ROLE_REFS
+    )
+
+
+def _r1_create_or_verify_bundle(
+    receipt: RecoveryAuthorityReceipt,
+    fresh_main: str,
+) -> tuple[Path, tuple[BundleRoleHead, ...]]:
+    bundles = _r1_safe_directory(GATEWAY_SOURCE_BUNDLES_ROOT)
+    bundle = bundles / f"{receipt.receipt_hash}.bundle"
+    expected = (fresh_main, receipt.desired_commit, receipt.predecessor_commit)
+    try:
+        existing_info = os.lstat(bundle)
+    except FileNotFoundError:
+        bundle_exists = False
+    except OSError as exc:
+        raise _gateway_error("R1 persisted bundle identity unreadable", exc) from exc
+    else:
+        bundle_exists = True
+        if (
+            stat.S_ISLNK(existing_info.st_mode)
+            or not stat.S_ISREG(existing_info.st_mode)
+            or existing_info.st_uid != HOST_UID
+            or existing_info.st_gid != HOST_GID
+            or stat.S_IMODE(existing_info.st_mode) != 0o600
+        ):
+            raise _gateway_error("R1 persisted bundle identity invalid")
+    scratch = Path(tempfile.mkdtemp(prefix=".bundle-source.", dir=bundles))
+    try:
+        os.chmod(scratch, 0o700)
+        source = scratch / "source.git"
+        candidate = scratch / "candidate.bundle"
+        _r1_run("git", "init", "--bare", str(source))
+        for (_, ref), commit in zip(_R1_ROLE_REFS, expected, strict=True):
+            _r1_run(
+                "git", "--git-dir", str(source), "fetch", "--no-tags",
+                str(HOST_AUTHORITY_SOURCE_ROOT), f"+{commit}:{ref}",
+            )
+        _r1_run(
+            "git", "--git-dir", str(source), "bundle", "create",
+            str(candidate), *(ref for _, ref in _R1_ROLE_REFS),
+        )
+        os.chmod(candidate, 0o600)
+        candidate_bytes = candidate.read_bytes()
+        if not bundle_exists:
+            os.replace(candidate, bundle)
+        elif bundle.read_bytes() != candidate_bytes:
+            raise _gateway_error("R1 persisted bundle bytes changed")
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    if bundle.exists() or bundle.is_symlink():
+        info = os.lstat(bundle)
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISREG(info.st_mode)
+            or info.st_uid != HOST_UID
+            or info.st_gid != HOST_GID
+            or stat.S_IMODE(info.st_mode) != 0o600
+        ):
+            raise _gateway_error("R1 persisted bundle identity invalid")
+    _r1_run(
+        "git", "-C", str(HOST_AUTHORITY_SOURCE_ROOT),
+        "bundle", "verify", str(bundle),
+    )
+    heads = _r1_bundle_heads(bundle)
+    if tuple(head.commit for head in heads) != expected:
+        raise _gateway_error("R1 named bundle role/commit mismatch")
+    return bundle, heads
+
+
+def _r1_verify_bare_repository() -> None:
+    repository = Path(GATEWAY_REPOSITORY)
+    if repository.is_symlink() or not repository.is_dir():
+        raise _gateway_error("R1 bare repository unavailable")
+    info = os.lstat(repository)
+    if (
+        info.st_uid != HOST_UID
+        or info.st_gid != HOST_GID
+        or stat.S_IMODE(info.st_mode) != 0o700
+    ):
+        raise _gateway_error("R1 bare repository ownership/mode invalid")
+    try:
+        is_bare = _r1_run(
+            "git", "--git-dir", str(repository), "rev-parse", "--is-bare-repository"
+        )
+    except GatewayContractError as exc:
+        raise _gateway_error("R1 repository is not bare", exc) from exc
+    if is_bare != "true":
+        raise _gateway_error("R1 repository is not bare")
+    try:
+        origin = _r1_run(
+            "git", "--git-dir", str(repository), "remote", "get-url", "origin"
+        )
+    except GatewayContractError as exc:
+        raise _gateway_error("R1 bare repository origin mismatch", exc) from exc
+    if origin != HOST_AUTHORITY_REMOTE:
+        raise _gateway_error("R1 bare repository origin mismatch")
+    if (repository / "objects/info/alternates").exists():
+        raise _gateway_error("R1 repository alternates forbidden")
+
+
+def _r1_import_bundle(
+    bundle: Path,
+    heads: tuple[BundleRoleHead, ...],
+) -> BareStoreEvidence:
+    _r1_safe_directory(GATEWAY_STATE_ROOT)
+    repository = Path(GATEWAY_REPOSITORY)
+    if not repository.exists():
+        _r1_run("git", "init", "--bare", str(repository))
+        os.chmod(repository, 0o700)
+        _r1_run(
+            "git", "--git-dir", str(repository), "remote", "add",
+            "origin", HOST_AUTHORITY_REMOTE,
+        )
+    _r1_verify_bare_repository()
+    for head in heads:
+        _r1_run(
+            "git", "--git-dir", str(repository), "fetch", "--no-tags",
+            str(bundle), f"+{head.ref}:{head.ref}",
+        )
+    _r1_run("git", "--git-dir", str(repository), "fsck", "--full", "--strict")
+    for head in heads:
+        if _r1_run("git", "--git-dir", str(repository), "rev-parse", head.ref) != head.commit:
+            raise _gateway_error("R1 bare repository role head mismatch")
+        _r1_run("git", "--git-dir", str(repository), "cat-file", "-e", f"{head.commit}^{{commit}}")
+    object_rows = str(
+        _r1_run(
+            "git", "--git-dir", str(repository), "rev-list", "--objects",
+            *(head.ref for head in heads),
+        )
+    ).splitlines()
+    return BareStoreEvidence(
+        path=str(Path(GATEWAY_REPOSITORY)),
+        repository=REPOSITORY,
+        origin=HOST_AUTHORITY_REMOTE,
+        is_bare=True,
+        alternates_absent=True,
+        owner_uid=HOST_UID,
+        owner_gid=HOST_GID,
+        mode=0o700,
+        object_set_sha256=canonical_hash(sorted(object_rows)),
+    )
+
+
+def _r1_import_witness(path: Path) -> None:
+    code = (
+        "import importlib.util,pathlib,sys; "
+        "sys.path.insert(0, sys.argv[1]); "
+        "p=pathlib.Path(sys.argv[1])/'scripts/ops/nexus_mcp_gateway_http.py'; "
+        "s=importlib.util.spec_from_file_location('nexus_r1_gateway_entrypoint', p); "
+        "m=importlib.util.module_from_spec(s); "
+        "s.loader.exec_module(m)"
+    )
+    result = subprocess.run(
+        (INTERPRETER, "-I", "-B", "-c", code, str(path)),
+        cwd=path,
+        env={"PATH": os.defpath, "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1"},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=10,
+        check=False,
+    )
     if result.returncode != 0:
-        raise _gateway_error(f"Git bundle creation failed: {result.stderr.strip()}")
-    result = run("git", "bundle", "verify", str(bundle))
-    if result.returncode != 0:
-        raise _gateway_error("Git bundle verification failed")
-    heads = _command_output(run, ("git", "bundle", "list-heads", str(bundle))).splitlines()
-    if not any(line.split()[:1] == [fresh_main] for line in heads if line.split()):
-        raise _gateway_error("Git bundle refs mismatch")
-    if not GATEWAY_REPOSITORY.exists():
-        GATEWAY_REPOSITORY.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        result = run("git", "init", "--bare", str(GATEWAY_REPOSITORY))
-        if result.returncode != 0:
-            raise _gateway_error("bare repository import failed")
-    if GATEWAY_REPOSITORY.is_symlink() or not GATEWAY_REPOSITORY.is_dir():
-        raise _gateway_error("bare repository unsafe")
-    if (GATEWAY_REPOSITORY / "objects/info/alternates").exists():
-        raise _gateway_error("repository alternates forbidden")
-    if _command_output(run, ("git", "--git-dir", str(GATEWAY_REPOSITORY), "rev-parse", "--is-bare-repository")) != "true":
-        raise _gateway_error("bare repository invalid")
-    result = run("git", "--git-dir", str(GATEWAY_REPOSITORY), "fetch", str(bundle), *commits)
-    if result.returncode != 0:
-        raise _gateway_error("bare repository import failed")
-    for commit in commits:
-        if _command_output(run, ("git", "--git-dir", str(GATEWAY_REPOSITORY), "cat-file", "-e", f"{commit}^{{commit}}")) != "":
-            raise _gateway_error("bare repository missing commit")
-    GATEWAY_DEPLOYMENTS_ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
-    paths = []
-    for commit in (desired_commit, predecessor_commit):
-        tree = _command_output(run, ("git", "--git-dir", str(GATEWAY_REPOSITORY), "rev-parse", f"{commit}^{{tree}}"))
-        entry = _command_output(run, ("git", "--git-dir", str(GATEWAY_REPOSITORY), "ls-tree", commit, "--", GATEWAY_ENTRYPOINT))
-        fields, entrypoint = (entry.split("\t", 1)[0].split(), entry.split("\t", 1)[1]) if "\t" in entry else ([], "")
-        if len(fields) != 3 or fields[0] != "100755" or fields[1] != "blob" or len(fields[2]) != 40 or entrypoint != GATEWAY_ENTRYPOINT:
-            raise _gateway_error("tracked entrypoint identity invalid")
-        deployment_id = canonical_hash({
-            "repository": REPOSITORY, "commit": commit, "tree": tree,
-            "entrypoint": GATEWAY_ENTRYPOINT, "blob": fields[2], "mode": fields[0],
-            "interpreter": "manager-fixed", "bundle": hashlib.sha256(bundle.read_bytes()).hexdigest(),
-        })[:32]
-        target = GATEWAY_DEPLOYMENTS_ROOT / deployment_id
-        if target.exists():
-            if target.is_symlink() or not target.is_dir() or _command_output(run, ("git", "-C", str(target), "status", "--porcelain")):
-                raise _gateway_error("detached deployment tampered")
-            if _command_output(run, ("git", "-C", str(target), "rev-parse", "HEAD")) != commit:
-                raise _gateway_error("detached deployment identity mismatch")
-        else:
-            temporary = GATEWAY_DEPLOYMENTS_ROOT / f".{deployment_id}.tmp"
-            result = run("git", "--git-dir", str(GATEWAY_REPOSITORY), "worktree", "add", "--detach", str(temporary), commit)
-            if result.returncode != 0:
-                raise _gateway_error("detached worktree creation failed")
-            os.replace(temporary, target)
-        paths.append(target)
-    return paths[0], paths[1]
+        raise _gateway_error("R1 bounded repository import failed")
+
+
+def _r1_verify_worktree(path: Path, manifest: DeploymentManifest) -> Path:
+    validate_deployment_manifest(manifest)
+    if path.is_symlink() or not path.is_dir() or (path / ".git").is_symlink():
+        raise _gateway_error("R1 worktree identity invalid")
+    root_info = os.lstat(path)
+    if (
+        root_info.st_uid != HOST_UID
+        or root_info.st_gid != HOST_GID
+        or stat.S_IMODE(root_info.st_mode) != 0o700
+    ):
+        raise _gateway_error("R1 worktree ownership/mode invalid")
+    top = _r1_run("git", "-C", str(path), "rev-parse", "--show-toplevel")
+    common = Path(str(_r1_run("git", "-C", str(path), "rev-parse", "--git-common-dir")))
+    if not common.is_absolute():
+        common = (path / common).resolve()
+    if top != str(path.resolve()) or common.resolve() != Path(GATEWAY_REPOSITORY).resolve():
+        raise _gateway_error("R1 worktree common-dir escaped")
+    if _r1_run("git", "-C", str(path), "remote", "get-url", "origin") != HOST_AUTHORITY_REMOTE:
+        raise _gateway_error("R1 worktree origin mismatch")
+    if (
+        _r1_run("git", "-C", str(path), "status", "--porcelain")
+        or _r1_run("git", "-C", str(path), "rev-parse", "HEAD") != manifest.commit
+        or _r1_run("git", "-C", str(path), "rev-parse", "HEAD^{tree}") != manifest.tree
+    ):
+        raise _gateway_error("R1 worktree commit/tree/clean mismatch")
+    entry = _r1_entrypoint_from_store(manifest.commit)
+    if entry != (
+        manifest.entrypoint_blob_oid,
+        manifest.entrypoint_sha256,
+        manifest.tracked_mode,
+    ):
+        raise _gateway_error("R1 worktree tracked entrypoint mismatch")
+    source = path / manifest.entrypoint
+    if source.is_symlink() or not source.is_file():
+        raise _gateway_error("R1 worktree entrypoint unavailable")
+    info = os.lstat(source)
+    payload = source.read_bytes()
+    if (
+        info.st_uid != manifest.owner_uid
+        or info.st_gid != manifest.owner_gid
+        or stat.S_IMODE(info.st_mode) != manifest.mode
+        or hashlib.sha256(payload).hexdigest() != manifest.entrypoint_sha256
+    ):
+        raise _gateway_error("R1 worktree entrypoint physical identity mismatch")
+    _r1_import_witness(path)
+    return path
+
+
+def _r1_entrypoint_from_store(commit: str) -> tuple[str, str, str]:
+    repository = str(GATEWAY_REPOSITORY)
+    entry = str(_r1_run(
+        "git", "--git-dir", repository, "ls-tree", commit, "--", GATEWAY_ENTRYPOINT
+    ))
+    metadata, separator, tracked = entry.partition("\t")
+    fields = metadata.split()
+    if (
+        not separator or len(fields) != 3 or fields[0] != "100644"
+        or fields[1] != "blob" or tracked != GATEWAY_ENTRYPOINT
+    ):
+        raise _gateway_error("R1 bare entrypoint identity invalid")
+    payload = _r1_run(
+        "git", "--git-dir", repository, "cat-file", "blob", fields[2],
+        bytes_output=True,
+    )
+    return fields[2], hashlib.sha256(bytes(payload)).hexdigest(), fields[0]
+
+
+def _r1_materialize_worktree(manifest: DeploymentManifest) -> Path:
+    deployments = _r1_safe_directory(GATEWAY_DEPLOYMENTS_ROOT)
+    target = deployments / manifest.deployment_id
+    if target.exists() or target.is_symlink():
+        return _r1_verify_worktree(target, manifest)
+    temporary = Path(tempfile.mkdtemp(prefix=f".{manifest.deployment_id}.", dir=deployments))
+    os.rmdir(temporary)
+    try:
+        _r1_run(
+            "git", "--git-dir", str(GATEWAY_REPOSITORY), "worktree", "add",
+            "--detach", str(temporary), manifest.commit,
+        )
+        os.chmod(temporary, 0o700)
+        _r1_run(
+            "git", "--git-dir", str(GATEWAY_REPOSITORY), "worktree", "move",
+            str(temporary), str(target),
+        )
+        os.chmod(target, 0o700)
+    except Exception:
+        with contextlib.suppress(Exception):
+            _r1_run(
+                "git", "--git-dir", str(GATEWAY_REPOSITORY), "worktree",
+                "remove", "--force", str(temporary),
+            )
+        raise
+    return _r1_verify_worktree(target, manifest)
+
+
+def _r1_bundle_evidence(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    fresh_main: str,
+    fresh_tree: str,
+    bundle: Path,
+    heads: tuple[BundleRoleHead, ...],
+    bare_store: BareStoreEvidence,
+) -> SourceBundleEvidence:
+    values = {
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "idempotency_fence": request.idempotency_fence,
+        "receipt_id": receipt.receipt_id,
+        "receipt_hash": receipt.receipt_hash,
+        "source_set_sha256": receipt.source_set.source_set_sha256,
+        "observed_fresh_main_commit": fresh_main,
+        "observed_fresh_main_tree": fresh_tree,
+        "role_heads": heads,
+        "bundle_sha256": hashlib.sha256(bundle.read_bytes()).hexdigest(),
+        "bundle_size": bundle.stat().st_size,
+        "bundle_verified": True,
+        "bare_store": bare_store,
+        "observed_at": _current_observation_time(),
+    }
+    evidence = SourceBundleEvidence(**values, evidence_hash=canonical_hash(values))
+    return validate_source_bundle_evidence(
+        evidence,
+        request=request,
+        receipt=receipt,
+        source_set=receipt.source_set,
+        expected_fresh_main_commit=fresh_main,
+        expected_fresh_main_tree=fresh_tree,
+        expected_bare_store=bare_store,
+    )
+
+
+def stage_verified_git_store(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+) -> _R1StageResult:
+    """Build the receipt-bound B1 store and two complete detached worktrees."""
+    try:
+        validate_recovery_request(request)
+        validate_recovery_authority(receipt, request=request)
+    except ContractError as exc:
+        raise _gateway_error("R1 source authority rejected", exc) from exc
+    _, fresh_main, fresh_tree = _r1_local_receipt(receipt)
+    _r1_reject_gitlinks(fresh_main)
+    root = str(HOST_AUTHORITY_SOURCE_ROOT)
+    for commit in (
+        receipt.accepted_source_merge,
+        receipt.desired_commit,
+        receipt.predecessor_commit,
+    ):
+        if _r1_run(
+            "git", "-C", root, "merge-base", "--is-ancestor", commit, fresh_main
+        ) != "":
+            raise _gateway_error("R1 semantic commit outside fresh main")
+    source_set = _r1_derive_source_set(receipt)
+    desired_manifest = derive_deployment_manifest(source_set, role="desired")
+    predecessor_manifest = derive_deployment_manifest(source_set, role="predecessor")
+    if (
+        source_set != receipt.source_set
+        or desired_manifest != receipt.desired_manifest
+        or predecessor_manifest != receipt.predecessor_manifest
+        or request.desired_manifest_id != desired_manifest.deployment_id
+        or request.desired_manifest_hash != desired_manifest.manifest_sha256
+        or request.predecessor_manifest_id != predecessor_manifest.deployment_id
+        or request.predecessor_manifest_hash != predecessor_manifest.manifest_sha256
+    ):
+        raise _gateway_error("R1 manager-derived identity mismatch")
+    bundle, heads = _r1_create_or_verify_bundle(receipt, fresh_main)
+    bare_store = _r1_import_bundle(bundle, heads)
+    evidence = _r1_bundle_evidence(
+        request, receipt, fresh_main, fresh_tree, bundle, heads, bare_store
+    )
+    desired_path = _r1_materialize_worktree(desired_manifest)
+    predecessor_path = _r1_materialize_worktree(predecessor_manifest)
+    return _R1StageResult(
+        desired_path=desired_path,
+        predecessor_path=predecessor_path,
+        desired_manifest=desired_manifest,
+        predecessor_manifest=predecessor_manifest,
+        bundle_evidence=evidence,
+    )
 
 
 def _resolve_manifest_source(manifest: DeploymentManifest) -> Path:
-    """Private manager resolver; callers cannot select source bytes."""
-    raise _gateway_error("manager source resolver unavailable")
+    """Resolve only a manager-derived ID below the fixed deployments root."""
+    try:
+        validate_deployment_manifest(manifest)
+    except ContractError as exc:
+        raise _gateway_error("manager manifest rejected", exc) from exc
+    target = Path(GATEWAY_DEPLOYMENTS_ROOT) / manifest.deployment_id
+    _r1_verify_worktree(target, manifest)
+    return target / manifest.entrypoint
 
 
 def _require_recovery_authority(request: GatewayRecoveryRequest) -> RecoveryAuthorityReceipt:
     path = _safe_store_path(GATEWAY_RECOVERY_AUTHORITY_STORE)
-    if path.is_symlink() or not path.exists() or path.stat().st_uid != HOST_UID or stat.S_IMODE(path.stat().st_mode) != 0o600:
+    if not path.exists() or path.stat().st_uid != HOST_UID or path.stat().st_gid != HOST_GID:
         raise _gateway_error("R1 recovery authority store invalid")
-    if path.stat().st_size > MAX_GATEWAY_STORE_BYTES:
-        raise _gateway_error("R1 recovery authority store oversized")
     try:
-        payload = json.loads(path.read_text(), object_pairs_hook=_unique_pairs)
+        raw = path.read_bytes()
+        payload = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_pairs)
         receipt = RecoveryAuthorityReceipt.model_validate(payload)
-        validate_recovery_authority(receipt, request=request)
-    except (OSError, ValueError, ContractError) as exc:
+        validate_recovery_authority(
+            receipt, request=request, now=_current_observation_time()
+        )
+    except (OSError, UnicodeError, ValueError, ContractError) as exc:
         raise _gateway_error("R1 recovery authority rejected", exc) from exc
-    if receipt.receipt_id != request.recovery_authority_id or receipt.receipt_hash != request.recovery_authority_hash:
-        raise _gateway_error("R1 recovery authority reference mismatch")
+    if hashlib.sha256(Path(__file__).read_bytes()).hexdigest() != receipt.final_manager_sha256:
+        raise _gateway_error("R1 recovery manager hash mismatch")
+    _r1_local_receipt(receipt)
     return receipt
 
 
-def _resolve_manifest_reference(request: GatewayRecoveryRequest, *, desired: bool) -> DeploymentManifest:
-    raise _gateway_error("R1 manifest resolver unavailable")
+def _resolve_manifest_reference(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    *,
+    desired: bool,
+) -> DeploymentManifest:
+    manifest = derive_deployment_manifest(
+        receipt.source_set,
+        role="desired" if desired else "predecessor",
+    )
+    expected = (
+        (request.desired_manifest_id, request.desired_manifest_hash)
+        if desired
+        else (request.predecessor_manifest_id, request.predecessor_manifest_hash)
+    )
+    if (manifest.deployment_id, manifest.manifest_sha256) != expected:
+        raise _gateway_error("R1 request manifest reference mismatch")
+    _resolve_manifest_source(manifest)
+    return manifest
 
 
 def gateway_recover(
-    request: GatewayDeploymentRequest | Mapping[str, Any],
+    request: GatewayRecoveryRequest | Mapping[str, Any],
 ) -> GatewayReconcileOutcome:
-    """Validate and stage a recovery request; host effect remains coordinator-gated."""
+    """Reach the positive, effect-free B1 source checkpoint."""
     try:
         typed = GatewayRecoveryRequest.model_validate(request)
         validate_recovery_request(typed)
     except ContractError as exc:
         raise _gateway_error("R1 recovery request rejected", exc) from exc
-    _require_recovery_authority(typed)
-    desired_manifest = _resolve_manifest_reference(typed, desired=True)
-    predecessor_manifest = _resolve_manifest_reference(typed, desired=False)
+    receipt = _require_recovery_authority(typed)
     with InterProcessLock(GATEWAY_LOCK):
-        desired_path = stage_deployment(desired_manifest)
-        predecessor_path = stage_deployment(predecessor_manifest)
-    # The physical effect is intentionally not callable from this source
-    # Candidate.  A later coordinator-bound host receipt consumes these paths.
-    return GatewayReconcileOutcome(
-        request_id=typed.request_id, request_hash=typed.request_hash, idempotency_fence=typed.idempotency_fence,
-        desired_manifest_id=desired_manifest.deployment_id,
-        predecessor_manifest_id=predecessor_manifest.deployment_id,
-        physical_observation={"desired_path": str(desired_path), "predecessor_path": str(predecessor_path)},
-        effect_started=False, result="BLOCKED", evidence_hash=canonical_hash({"state": "staged"}),
+        staged = stage_verified_git_store(typed, receipt)
+        desired_manifest = _resolve_manifest_reference(typed, receipt, desired=True)
+        predecessor_manifest = _resolve_manifest_reference(typed, receipt, desired=False)
+    observation = {
+        "desired_path": str(staged.desired_path),
+        "predecessor_path": str(staged.predecessor_path),
+        "source_set_sha256": receipt.source_set.source_set_sha256,
+        "bundle_evidence_hash": staged.bundle_evidence.evidence_hash,
+        "readiness": ["TARGET_READY", "ROLLBACK_READY"],
+    }
+    outcome_values = {
+        "request_id": typed.request_id,
+        "request_hash": typed.request_hash,
+        "idempotency_fence": typed.idempotency_fence,
+        "desired_manifest_id": desired_manifest.deployment_id,
+        "predecessor_manifest_id": predecessor_manifest.deployment_id,
+        "physical_observation": observation,
+        "effect_started": False,
+        "result": ResultClass.BLOCKED,
+    }
+    return validate_reconcile_outcome(
+        GatewayReconcileOutcome(
+            **outcome_values,
+            evidence_hash=canonical_hash(outcome_values),
+        )
     )
 
 
@@ -1875,7 +2372,7 @@ def _validate_gateway_action_pair(
     return typed
 
 
-def manage_gateway(action: str, *, request: GatewayDeploymentRequest | Mapping[str, Any],
+def manage_gateway(action: str, *, request: GatewayDeploymentRequest | GatewayRecoveryRequest | Mapping[str, Any],
                    observed: Mapping[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
     """Explicit Gateway-only dispatch; legacy ``manage`` cannot reach this path."""
     # Pairing is deliberately checked while the request is still pure.  A
