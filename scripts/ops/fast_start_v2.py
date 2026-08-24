@@ -69,6 +69,16 @@ VALID_FRONTIERS = {
     "EVIDENCE_BLOCKED",
 }
 EARLY_STOP_FRONTIERS = VALID_FRONTIERS - {"READY_CANDIDATE"}
+SUPPORTED_EVENT_TYPES = {
+    "issue_comment",
+    "issues",
+    "pull_request",
+    "pull_request_target",
+    "push",
+    "workflow_dispatch",
+    "schedule",
+    "anti_entropy",
+}
 
 
 @dataclass(frozen=True)
@@ -139,6 +149,8 @@ def affected_entries_for_event(
 
     action = str(payload.get("action") or "unknown")
     event_type = event_type.strip()
+    if event_type not in SUPPORTED_EVENT_TYPES:
+        raise ValueError(f"unsupported event type: {event_type}")
     affected: set[int] = set()
     reasons: set[str] = set()
     seed_keys: set[str] = set()
