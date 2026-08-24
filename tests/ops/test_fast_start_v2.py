@@ -49,9 +49,7 @@ def test_pr_402_only_impacts_419() -> None:
 
 
 def test_issue_29_only_impacts_92() -> None:
-    hint = affected_entries_for_event(
-        "issues", {"action": "closed", "issue": {"number": 29}}
-    )
+    hint = affected_entries_for_event("issues", {"action": "closed", "issue": {"number": 29}})
     assert hint.affected_entries == (92,)
 
 
@@ -94,9 +92,7 @@ def test_authority_bundle_path_impacts_only_526() -> None:
 
 
 def test_push_without_changed_paths_fails_closed_for_path_discovery() -> None:
-    hint = affected_entries_for_event(
-        "push", {"ref": "refs/heads/main", "after": "1" * 40}
-    )
+    hint = affected_entries_for_event("push", {"ref": "refs/heads/main", "after": "1" * 40})
     assert hint.affected_entries == ()
     assert "PATH_IMPACT_DISCOVERY_REQUIRED" in hint.reason_codes
 
@@ -116,9 +112,7 @@ def test_contract_change_while_blocked_still_has_zero_implementation_reads() -> 
 
 
 def test_dirty_implementation_context_is_deferred_while_blocked() -> None:
-    decision = decide_reconcile(
-        frontier_state="BLOCKED", implementation_dirty=True
-    )
+    decision = decide_reconcile(frontier_state="BLOCKED", implementation_dirty=True)
     assert decision.implementation_context == "DIRTY_DEFERRED"
     assert decision.source_body_reads_allowed is False
 
@@ -131,17 +125,13 @@ def test_host_frontier_is_orthogonal_to_cache_hit() -> None:
 
 
 def test_missing_evidence_can_never_be_ready() -> None:
-    decision = decide_reconcile(
-        frontier_state="READY_CANDIDATE", evidence_complete=False
-    )
+    decision = decide_reconcile(frontier_state="READY_CANDIDATE", evidence_complete=False)
     assert decision.frontier_state == "EVIDENCE_BLOCKED"
     assert decision.source_body_reads_allowed is False
 
 
 def test_ready_candidate_is_only_frontier_that_allows_implementation_reads() -> None:
-    decision = decide_reconcile(
-        frontier_state="READY_CANDIDATE", implementation_dirty=True
-    )
+    decision = decide_reconcile(frontier_state="READY_CANDIDATE", implementation_dirty=True)
     assert decision.source_body_reads_allowed is True
     assert decision.test_body_reads_allowed is True
     assert decision.implementation_context == "DIRTY_REBIND_REQUIRED"
