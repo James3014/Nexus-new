@@ -1479,6 +1479,47 @@ def test_cli_dispatch_real_install_uses_bound_artifact_and_fixed_git_runner(monk
     assert destination.read_bytes() == source.read_bytes()
 
 
+def test_main_install_artifact_skips_current_gateway_observation(monkeypatch, tmp_path):
+    request = _gateway_request("install-artifact")
+    request_path = tmp_path / "request.json"
+    request_path.write_text(json.dumps(request.model_dump(), default=str))
+    request_path.chmod(0o600)
+    monkeypatch.setattr(g, "GATEWAY_REQUEST_STORE", request_path)
+    seen = {}
+    monkeypatch.setattr(g, "collect_gateway_observation", lambda *args, **kwargs: pytest.fail(
+        "install-artifact must not observe the current Gateway"
+    ))
+    monkeypatch.setattr(g, "dispatch_gateway_cli", lambda action, **kwargs: seen.update(
+        action=action, observed=kwargs["observed"]
+    ) or {"state": "VERIFIED"})
+    monkeypatch.setattr(sys, "argv", [
+        "mcp_gateway_durable.py", "gateway-install-artifact", "--gateway-request", str(request_path)
+    ])
+
+    assert g.main() == 0
+    assert seen == {"action": "install-artifact", "observed": {}}
+
+
+def test_main_reload_still_collects_current_gateway_observation(monkeypatch, tmp_path):
+    request = _gateway_request("reload")
+    request_path = tmp_path / "request.json"
+    request_path.write_text(json.dumps(request.model_dump(), default=str))
+    request_path.chmod(0o600)
+    monkeypatch.setattr(g, "GATEWAY_REQUEST_STORE", request_path)
+    seen = {}
+    physical = {"loaded": True}
+    monkeypatch.setattr(g, "collect_gateway_observation", lambda *args, **kwargs: physical)
+    monkeypatch.setattr(g, "dispatch_gateway_cli", lambda action, **kwargs: seen.update(
+        action=action, observed=kwargs["observed"]
+    ) or {"state": "VERIFIED"})
+    monkeypatch.setattr(sys, "argv", [
+        "mcp_gateway_durable.py", "gateway-reload", "--gateway-request", str(request_path)
+    ])
+
+    assert g.main() == 0
+    assert seen == {"action": "reload", "observed": physical}
+
+
 def test_cli_dispatch_rejects_mismatched_action_and_request():
     request = _gateway_request("reload")
     with pytest.raises(g.GatewayContractError, match="operation substitution"):
