@@ -244,7 +244,8 @@ def _add_path_impacts(
     reasons: set[str],
 ) -> None:
     for path in sorted(set(changed_paths)):
-        seed_keys.add(f"path:{path}")
+        path_digest = hashlib.sha256(path.encode("utf-8")).hexdigest()
+        seed_keys.add(f"path_sha256:{path_digest}")
         for entry in ENTRY_RULES:
             if _entry_matches_path(entry, path):
                 affected.add(entry)
