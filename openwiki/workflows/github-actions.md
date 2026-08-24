@@ -6,7 +6,7 @@ tags: [workflows, github-actions, ci-cd, operational-lanes]
 openwiki:
   roles: [architecture, operations, testing]
   change_kinds: [public-api, workflow]
-  source_paths: [.github/workflows/openwiki-update.yml, .github/workflows/benchmark-ci.yml, .github/workflows/pytest.yml, .github/workflows/fast-start-v2-shadow.yml, .github/workflows/fast-start-v2-invalidator.yml]
+  source_paths: [.github/workflows/openwiki-update.yml, .github/workflows/benchmark-ci.yml, .github/workflows/pytest.yml]
   symbols: [workflow_dispatch, schedule, push, pull_request, pull_request_target, issues, issue_comment]
   test_paths: [tests/ops/test_openwiki_source_contract.py, tests/ops/test_trusted_deletion_anchor.py, tests/ops/test_pr_impact_gate.py, tests/ops/test_fast_start_v2.py]
   invariants: [Workflow display names and trigger modes come from current YAML. workflow_dispatch alone is manual-only. GitHub Actions run on the CI surface and do not independently grant merge or release authority. Fast Start v2 invalidation hints are non-authoritative and do not replace the canonical cache writer.]
