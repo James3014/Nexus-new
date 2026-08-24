@@ -1508,6 +1508,7 @@ def test_collect_dispatch_unloaded_rollback_skips_health_and_launch_effects(monk
     monkeypatch.setattr(g, "GATEWAY_LOCK", tmp_path / "gateway.lock")
     observed = g.collect_gateway_observation(
         request, operation="rollback", runner=launchctl,
+        observation_time="2026-08-23T00:00:00Z",
         plist_observer=lambda _path: (payload, parsed),
         git_observer=lambda _root: {"root": fixed_root, "toplevel": fixed_root,
                                     "remote": "https://github.com/James3014/Nexus-new.git",
