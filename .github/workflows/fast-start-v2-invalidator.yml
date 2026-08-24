@@ -1,0 +1,134 @@
+name: Fast Start v2 Invalidator
+
+on:
+  push:
+    branches: [main]
+  pull_request_target:
+    types: [opened, synchronize, reopened, closed, ready_for_review]
+  issues:
+    types: [opened, edited, closed, reopened]
+  issue_comment:
+    types: [created, edited, deleted]
+
+permissions: {}
+
+concurrency:
+  group: fast-start-v2-invalidator
+  cancel-in-progress: false
+
+jobs:
+  invalidator:
+    if: >-
+      github.repository == 'James3014/Nexus-new' &&
+      !(github.event_name == 'issue_comment' && github.event.issue.number == 549) &&
+      !(github.event_name == 'issues' && github.event.issue.number == 549)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: write
+    steps:
+      - name: Checkout trusted default-branch implementation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Derive bounded changed-path evidence
+        id: paths
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.event.after }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/fast-start-v2-paths.txt"
+          : > "$out"
+          case "$EVENT_NAME" in
+            pull_request_target)
+              test "$PR_NUMBER" = "$(printf '%s' "$PR_NUMBER" | grep -E '^[0-9]+$')"
+              gh api --paginate "/repos/$REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename' \
+                | sort -u > "$out"
+              ;;
+            push)
+              test "$BEFORE_SHA" = "$(printf '%s' "$BEFORE_SHA" | grep -E '^[0-9a-f]{40}$')"
+              test "$AFTER_SHA" = "$(printf '%s' "$AFTER_SHA" | grep -E '^[0-9a-f]{40}$')"
+              gh api "/repos/$REPOSITORY/compare/$BEFORE_SHA...$AFTER_SHA" --jq '.files[].filename' \
+                | sort -u > "$out"
+              ;;
+            issues|issue_comment)
+              ;;
+            *)
+              echo "::error::unsupported event $EVENT_NAME"
+              exit 2
+              ;;
+          esac
+          echo "path_file=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Produce non-authoritative invalidation hint
+        id: hint
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PATH: ${{ github.event_path }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          hint="$RUNNER_TEMP/fast-start-v2-hint.json"
+          args=()
+          while IFS= read -r path; do
+            test -n "$path" || continue
+            args+=(--changed-path "$path")
+          done < "${{ steps.paths.outputs.path_file }}"
+          python scripts/ops/fast_start_v2.py hint \
+            --event-name "$EVENT_NAME" \
+            --event-json "$EVENT_PATH" \
+            "${args[@]}" > "$hint"
+          cat "$hint"
+          echo "hint_file=$hint" >> "$GITHUB_OUTPUT"
+          affected="$(python - "$hint" <<'PY'
+          import json
+          import sys
+          value = json.load(open(sys.argv[1], encoding="utf-8"))
+          print(len(value["affected_entries"]))
+          PY
+          )"
+          needs_attention="$(python - "$hint" <<'PY'
+          import json
+          import sys
+          value = json.load(open(sys.argv[1], encoding="utf-8"))
+          reasons = set(value["reason_codes"])
+          print("true" if "PATH_IMPACT_DISCOVERY_REQUIRED" in reasons else "false")
+          PY
+          )"
+          echo "affected=$affected" >> "$GITHUB_OUTPUT"
+          echo "needs_attention=$needs_attention" >> "$GITHUB_OUTPUT"
+
+      - name: Publish wakeup receipt only when relevant
+        if: steps.hint.outputs.affected != '0' || steps.hint.outputs.needs_attention == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          HINT_FILE: ${{ steps.hint.outputs.hint_file }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$RUNNER_TEMP/fast-start-v2-comment.md"
+          {
+            printf '%s\n\n' 'FAST_START_V2_HINT — non-authoritative wakeup receipt'
+            printf '%s\n' 'Authority: `WAKEUP_HINT_ONLY`'
+            printf '%s\n\n' 'This comment may wake the single canonical reconciler. It is not Issue readiness, dispatch, claim, approval, merge, runtime, release, or production authority.'
+            printf '%s\n' '```json'
+            cat "$HINT_FILE"
+            printf '%s\n' '```'
+          } > "$body"
+          gh api "/repos/$REPOSITORY/issues/549/comments" \
+            --method POST \
+            --raw-field "body=$(cat "$body")" > /dev/null
