@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from scripts.ops.fast_start_v2 import (
     affected_entries_for_event,
     decide_reconcile,
@@ -95,6 +97,11 @@ def test_push_without_changed_paths_fails_closed_for_path_discovery() -> None:
     hint = affected_entries_for_event("push", {"ref": "refs/heads/main", "after": "1" * 40})
     assert hint.affected_entries == ()
     assert "PATH_IMPACT_DISCOVERY_REQUIRED" in hint.reason_codes
+
+
+def test_unknown_event_fails_closed() -> None:
+    with pytest.raises(ValueError, match="unsupported event type"):
+        affected_entries_for_event("mystery_event", {"action": "created"})
 
 
 def test_hostile_changed_path_is_not_reflected_into_hint_text() -> None:
