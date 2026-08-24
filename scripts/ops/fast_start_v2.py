@@ -147,11 +147,7 @@ def affected_entries_for_event(
     head_sha: str | None = None
 
     issue = payload.get("issue") if isinstance(payload.get("issue"), Mapping) else None
-    pr = (
-        payload.get("pull_request")
-        if isinstance(payload.get("pull_request"), Mapping)
-        else None
-    )
+    pr = payload.get("pull_request") if isinstance(payload.get("pull_request"), Mapping) else None
 
     if event_type == "issue_comment" and issue:
         subject_type = "issue"
@@ -423,9 +419,7 @@ def live_shadow_report(client: GitHubReadClient) -> dict[str, Any]:
         if isinstance(item, Mapping)
     )
     decisions["398"] = asdict(
-        decide_reconcile(
-            frontier_state="HOST_REBIND_REQUIRED" if host398 else "EVIDENCE_BLOCKED"
-        )
+        decide_reconcile(frontier_state="HOST_REBIND_REQUIRED" if host398 else "EVIDENCE_BLOCKED")
     )
 
     forbidden_reads = [
@@ -450,10 +444,9 @@ def live_shadow_report(client: GitHubReadClient) -> dict[str, Any]:
 
 def _pr_changed(entry: Mapping[str, Any], pr: Mapping[str, Any]) -> bool:
     blocker = entry.get("blocker") if isinstance(entry.get("blocker"), Mapping) else {}
-    return (
-        blocker.get("state") != pr.get("state")
-        or blocker.get("head_sha") != pr.get("head", {}).get("sha")
-    )
+    return blocker.get("state") != pr.get("state") or blocker.get("head_sha") != pr.get(
+        "head", {}
+    ).get("sha")
 
 
 def _extract_header_hash(body: str) -> str:
