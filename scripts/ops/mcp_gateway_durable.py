@@ -260,7 +260,7 @@ def main() -> int:
             operation = a.action.removeprefix("gateway-")
             if operation == "install-artifact": operation = "install-artifact"
             now = _current_observation_time()
-            observed = {} if operation in {"status", "gateway-status"} else collect_gateway_observation(
+            observed = {} if operation in {"status", "gateway-status", "install-artifact"} else collect_gateway_observation(
                 request, operation=operation, observation_time=now
             )
             if a.gateway_evidence is not None:
