@@ -44,6 +44,7 @@ from nexus.contracts.gateway_deployment import (
     HostEffectAuthorityBundle,
     HostEffectAuthorityReceipt,
     PostflightIdentity,
+    REPOSITORY,
     _gateway_wrapper_command,
     canonical_hash,
     select_host_effect_authority_receipt,
@@ -710,6 +711,90 @@ def stage_deployment(
     if (target_info.st_uid, target_info.st_gid, stat.S_IMODE(target_info.st_mode)) != (manifest.owner_uid, manifest.owner_gid, manifest.mode):
         raise _gateway_error("staged entrypoint ownership/mode mismatch")
     return destination
+
+
+def stage_verified_git_store(fresh_main: str, desired_commit: str, predecessor_commit: str) -> tuple[Path, Path]:
+    """Transfer exact commits through a manager-owned bundle and bare store.
+
+    This is deliberately a source-only checkpoint: the fixed mirror is read,
+    the bundle is verified, and all subsequent bytes come from the bare store.
+    """
+    root = HOST_AUTHORITY_SOURCE_ROOT
+    if root.is_symlink() or not root.is_dir():
+        raise _gateway_error("authority mirror unavailable")
+    run = lambda *args: subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    if _command_output(run, ("git", "-C", str(root), "rev-parse", "--show-toplevel")) != str(root.resolve()):
+        raise _gateway_error("authority mirror root mismatch")
+    if _command_output(run, ("git", "-C", str(root), "remote", "get-url", "origin")) != HOST_AUTHORITY_REMOTE:
+        raise _gateway_error("authority mirror origin mismatch")
+    head = _command_output(run, ("git", "-C", str(root), "rev-parse", "HEAD"))
+    if head != fresh_main or _command_output(run, ("git", "-C", str(root), "status", "--porcelain")):
+        raise _gateway_error("authority mirror dirty or stale")
+    commits = (fresh_main, desired_commit, predecessor_commit)
+    for commit in commits:
+        if not re.fullmatch(r"[0-9a-f]{40}", commit):
+            raise _gateway_error("commit identity malformed")
+        if _command_output(run, ("git", "-C", str(root), "cat-file", "-e", f"{commit}^{{commit}}")) != "":
+            raise _gateway_error("authority commit unavailable")
+    for commit in (desired_commit, predecessor_commit):
+        result = run("git", "-C", str(root), "merge-base", "--is-ancestor", commit, fresh_main)
+        if result.returncode != 0:
+            raise _gateway_error("deployment commit is outside fresh main")
+    GATEWAY_SOURCE_BUNDLES_ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
+    bundle = GATEWAY_SOURCE_BUNDLES_ROOT / f"{fresh_main}.bundle"
+    result = run("git", "-C", str(root), "bundle", "create", str(bundle), HOST_AUTHORITY_REF)
+    if result.returncode != 0:
+        raise _gateway_error(f"Git bundle creation failed: {result.stderr.strip()}")
+    result = run("git", "bundle", "verify", str(bundle))
+    if result.returncode != 0:
+        raise _gateway_error("Git bundle verification failed")
+    heads = _command_output(run, ("git", "bundle", "list-heads", str(bundle))).splitlines()
+    if not any(line.split()[:1] == [fresh_main] for line in heads if line.split()):
+        raise _gateway_error("Git bundle refs mismatch")
+    if not GATEWAY_REPOSITORY.exists():
+        GATEWAY_REPOSITORY.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        result = run("git", "init", "--bare", str(GATEWAY_REPOSITORY))
+        if result.returncode != 0:
+            raise _gateway_error("bare repository import failed")
+    if GATEWAY_REPOSITORY.is_symlink() or not GATEWAY_REPOSITORY.is_dir():
+        raise _gateway_error("bare repository unsafe")
+    if (GATEWAY_REPOSITORY / "objects/info/alternates").exists():
+        raise _gateway_error("repository alternates forbidden")
+    if _command_output(run, ("git", "--git-dir", str(GATEWAY_REPOSITORY), "rev-parse", "--is-bare-repository")) != "true":
+        raise _gateway_error("bare repository invalid")
+    result = run("git", "--git-dir", str(GATEWAY_REPOSITORY), "fetch", str(bundle), *commits)
+    if result.returncode != 0:
+        raise _gateway_error("bare repository import failed")
+    for commit in commits:
+        if _command_output(run, ("git", "--git-dir", str(GATEWAY_REPOSITORY), "cat-file", "-e", f"{commit}^{{commit}}")) != "":
+            raise _gateway_error("bare repository missing commit")
+    GATEWAY_DEPLOYMENTS_ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
+    paths = []
+    for commit in (desired_commit, predecessor_commit):
+        tree = _command_output(run, ("git", "--git-dir", str(GATEWAY_REPOSITORY), "rev-parse", f"{commit}^{{tree}}"))
+        entry = _command_output(run, ("git", "--git-dir", str(GATEWAY_REPOSITORY), "ls-tree", commit, "--", GATEWAY_ENTRYPOINT))
+        fields, entrypoint = (entry.split("\t", 1)[0].split(), entry.split("\t", 1)[1]) if "\t" in entry else ([], "")
+        if len(fields) != 3 or fields[0] != "100755" or fields[1] != "blob" or len(fields[2]) != 40 or entrypoint != GATEWAY_ENTRYPOINT:
+            raise _gateway_error("tracked entrypoint identity invalid")
+        deployment_id = canonical_hash({
+            "repository": REPOSITORY, "commit": commit, "tree": tree,
+            "entrypoint": GATEWAY_ENTRYPOINT, "blob": fields[2], "mode": fields[0],
+            "interpreter": "manager-fixed", "bundle": hashlib.sha256(bundle.read_bytes()).hexdigest(),
+        })[:32]
+        target = GATEWAY_DEPLOYMENTS_ROOT / deployment_id
+        if target.exists():
+            if target.is_symlink() or not target.is_dir() or _command_output(run, ("git", "-C", str(target), "status", "--porcelain")):
+                raise _gateway_error("detached deployment tampered")
+            if _command_output(run, ("git", "-C", str(target), "rev-parse", "HEAD")) != commit:
+                raise _gateway_error("detached deployment identity mismatch")
+        else:
+            temporary = GATEWAY_DEPLOYMENTS_ROOT / f".{deployment_id}.tmp"
+            result = run("git", "--git-dir", str(GATEWAY_REPOSITORY), "worktree", "add", "--detach", str(temporary), commit)
+            if result.returncode != 0:
+                raise _gateway_error("detached worktree creation failed")
+            os.replace(temporary, target)
+        paths.append(target)
+    return paths[0], paths[1]
 
 
 def _resolve_manifest_source(manifest: DeploymentManifest) -> Path:

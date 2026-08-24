@@ -4,6 +4,7 @@ import json
 import os
 import plistlib
 import stat
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -260,6 +261,41 @@ def test_r1_recovery_rejects_caller_selected_effect_surface():
     assert "source_path" not in stage_parameters
     assert "state_root" not in stage_parameters
     assert g.GATEWAY_DEPLOYMENTS_ROOT == g.GATEWAY_STATE_ROOT / "deployments"
+
+
+def test_r1b1_real_git_bundle_bare_store_and_two_detached_worktrees(tmp_path, monkeypatch):
+    """B1 RED: staging must survive removal of the authority mirror."""
+    mirror = tmp_path / "authority"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(mirror)], check=True)
+    subprocess.run(["git", "-C", str(mirror), "config", "user.email", "b1@example.invalid"], check=True)
+    subprocess.run(["git", "-C", str(mirror), "config", "user.name", "b1"], check=True)
+    subprocess.run(["git", "-C", str(mirror), "remote", "add", "origin", g.HOST_AUTHORITY_REMOTE], check=True)
+    entrypoint = mirror / "scripts/ops/nexus_mcp_gateway_http.py"
+    entrypoint.parent.mkdir(parents=True)
+    entrypoint.write_text("def main(): return 0\n")
+    entrypoint.chmod(0o755)
+    subprocess.run(["git", "-C", str(mirror), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(mirror), "commit", "-q", "-m", "b1"], check=True)
+    predecessor = subprocess.check_output(["git", "-C", str(mirror), "rev-parse", "HEAD"], text=True).strip()
+    entrypoint.write_text("def main(): return 1\n")
+    subprocess.run(["git", "-C", str(mirror), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(mirror), "commit", "-q", "-m", "b1-desired"], check=True)
+    desired = subprocess.check_output(["git", "-C", str(mirror), "rev-parse", "HEAD"], text=True).strip()
+    entrypoint.write_text("def main(): return 2\n")
+    subprocess.run(["git", "-C", str(mirror), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(mirror), "commit", "-q", "-m", "b1-main"], check=True)
+    head = subprocess.check_output(["git", "-C", str(mirror), "rev-parse", "HEAD"], text=True).strip()
+    monkeypatch.setattr(g, "HOST_AUTHORITY_SOURCE_ROOT", mirror)
+    monkeypatch.setattr(g, "GATEWAY_SOURCE_BUNDLES_ROOT", tmp_path / "source-bundles")
+    monkeypatch.setattr(g, "GATEWAY_REPOSITORY", tmp_path / "repository.git")
+    monkeypatch.setattr(g, "GATEWAY_DEPLOYMENTS_ROOT", tmp_path / "deployments")
+    desired_path, predecessor_path = g.stage_verified_git_store(head, desired, predecessor)
+    assert desired_path.is_dir() and predecessor_path.is_dir()
+    assert (tmp_path / "repository.git").is_dir()
+    shutil.rmtree(mirror)
+    for worktree, commit in ((desired_path, desired), (predecessor_path, predecessor)):
+        assert subprocess.check_output(["git", "-C", str(worktree), "rev-parse", "HEAD"], text=True).strip() == commit
+        assert not (worktree / ".git").is_symlink()
 
 def test_status_classifies_real_absent_launchctl_service(monkeypatch, tmp_path):
     setup(monkeypatch, tmp_path)
