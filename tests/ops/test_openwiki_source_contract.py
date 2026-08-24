@@ -62,11 +62,11 @@ def test_openwiki_issue10_claims_match_current_inventory() -> None:
         )
     }
 
-    assert len(workflow_files) == 10
+    assert len(workflow_files) == 12
     assert sorted(listed_files) == sorted(path.name for path in workflow_files)
     assert listed_workflow_names == expected_workflow_names
-    assert "all 10 GitHub Actions workflows" in workflows
-    assert "all 12 GitHub Actions workflows" not in workflows
+    assert "all 12 GitHub Actions workflows" in workflows
+    assert "all 10 GitHub Actions workflows" not in workflows
 
     assert "seven core concept domains" in quickstart
     assert quickstart.count("**[") == 7
