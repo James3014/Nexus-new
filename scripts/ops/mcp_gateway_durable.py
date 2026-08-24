@@ -13,6 +13,7 @@ import os
 import plistlib
 import re
 import shlex
+import shutil
 import stat
 import subprocess
 import tempfile
@@ -33,9 +34,11 @@ from nexus.contracts.gateway_deployment import (
     SOURCE_BASE_MERGE,
     SOURCE_BASE_TREE,
     ContractError,
+    DeploymentManifest,
     DeploymentState,
     EffectClass,
     GatewayDeploymentRequest,
+    GatewayReconcileOutcome,
     HostEffectAuthorityBundle,
     HostEffectAuthorityReceipt,
     PostflightIdentity,
@@ -43,6 +46,7 @@ from nexus.contracts.gateway_deployment import (
     canonical_hash,
     select_host_effect_authority_receipt,
     validate_authority_freshness,
+    validate_deployment_manifest,
     validate_host_effect_authority,
     validate_host_effect_authority_bundle,
     validate_postflight_identity,
@@ -275,6 +279,7 @@ GATEWAY_PLIST = Path("/Users/jameschen/Library/LaunchAgents/com.nexus.mcp.gatewa
 GATEWAY_ENDPOINT = "http://127.0.0.1:8766"
 GATEWAY_ENTRYPOINT = "scripts/ops/nexus_mcp_gateway_http.py"
 GATEWAY_STATE_ROOT = Path("/Users/jameschen/Library/Application Support/Nexus/gateway-direct")
+GATEWAY_DEPLOYMENTS_ROOT = GATEWAY_STATE_ROOT / "deployments"
 GATEWAY_LEDGER = GATEWAY_STATE_ROOT / "ledger.jsonl"
 GATEWAY_LOCK = GATEWAY_STATE_ROOT / "ledger.lock"
 GATEWAY_ARTIFACT = GATEWAY_STATE_ROOT / "manager.py"
@@ -635,6 +640,102 @@ def _atomic_gateway_write(path: Path, data: bytes, *, mode: int = 0o600) -> None
         with contextlib.suppress(OSError):
             tmp.unlink()
         raise
+
+
+def stage_deployment(
+    manifest: DeploymentManifest,
+    *,
+    source_path: Path,
+    state_root: Path | None = None,
+) -> Path:
+    """Materialize one manager-owned deployment under its content hash."""
+    try:
+        validate_deployment_manifest(manifest)
+    except ContractError as exc:
+        raise _gateway_error("deployment manifest rejected", exc) from exc
+    source = Path(source_path)
+    if not source.is_absolute() or source.is_symlink() or not source.is_file():
+        raise _gateway_error("deployment source must be a regular file")
+    try:
+        payload = source.read_bytes()
+    except OSError as exc:
+        raise _gateway_error("deployment source unavailable", exc) from exc
+    if hashlib.sha256(payload).hexdigest() != manifest.content_sha256:
+        raise _gateway_error("deployment content hash mismatch")
+    root = Path(state_root) if state_root is not None else GATEWAY_STATE_ROOT
+    deployments = root / "deployments"
+    for ancestor in (root, deployments):
+        if ancestor.exists() and ancestor.is_symlink():
+            raise _gateway_error("deployment ancestry unsafe")
+    deployments.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(deployments, 0o700)
+    destination = deployments / manifest.content_sha256
+    target_name = Path(manifest.entrypoint).name
+    if destination.exists():
+        if destination.is_symlink() or not destination.is_dir():
+            raise _gateway_error("deployment ancestry unsafe")
+        target = destination / target_name
+        if target.is_symlink() or not target.is_file() or target.read_bytes() != payload:
+            raise _gateway_error("staged deployment tampered")
+        return destination
+    temporary = Path(tempfile.mkdtemp(prefix=f".{manifest.content_sha256}.", dir=deployments))
+    try:
+        os.chmod(temporary, 0o700)
+        target = temporary / target_name
+        target.write_bytes(payload)
+        os.chmod(target, 0o700)
+        fd = os.open(target, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(temporary, destination)
+        _fsync_dir(deployments)
+    except Exception:
+        shutil.rmtree(temporary, ignore_errors=True)
+        raise
+    return destination
+
+
+def gateway_recover(
+    *,
+    request: GatewayDeploymentRequest | Mapping[str, Any],
+    desired_manifest: DeploymentManifest | None,
+    predecessor_manifest: DeploymentManifest | None,
+    state_root: Path | None = None,
+    desired_source: Path | None = None,
+    predecessor_source: Path | None = None,
+    runner: Callable[..., Any] | None = None,
+) -> GatewayReconcileOutcome:
+    """Validate and stage a recovery request; host effect remains coordinator-gated."""
+    if isinstance(request, Mapping):
+        forbidden = {"root", "label", "pid", "plist", "command", "port", "environment", "devspace"}
+        if forbidden.intersection(request):
+            raise _gateway_error("caller-selected Gateway field rejected")
+        request_id = request.get("request_id", "")
+        fence = request.get("idempotency_fence", "")
+        request_hash = request.get("request_hash") or canonical_hash(dict(request))
+    else:
+        request_id, fence, request_hash = request.request_id, request.idempotency_fence, request.request_hash
+    if not request_id or not fence:
+        raise _gateway_error("durable recovery request identity missing")
+    if desired_manifest is None or predecessor_manifest is None or predecessor_source is None:
+        raise _gateway_error("ROLLBACK_UNAVAILABLE: predecessor deployment bytes unavailable")
+    desired_path = stage_deployment(
+        desired_manifest, source_path=desired_source or Path(desired_manifest.entrypoint), state_root=state_root
+    )
+    predecessor_path = stage_deployment(
+        predecessor_manifest, source_path=predecessor_source, state_root=state_root
+    )
+    # The physical effect is intentionally not callable from this source
+    # Candidate.  A later coordinator-bound host receipt consumes these paths.
+    return GatewayReconcileOutcome(
+        request_id=request_id, request_hash=request_hash, idempotency_fence=fence,
+        desired_manifest_id=desired_manifest.deployment_id,
+        predecessor_manifest_id=predecessor_manifest.deployment_id,
+        physical_observation={"desired_path": str(desired_path), "predecessor_path": str(predecessor_path)},
+        effect_started=False, result="BLOCKED", evidence_hash=canonical_hash({"state": "staged"}),
+    )
 
 
 class InterProcessLock:

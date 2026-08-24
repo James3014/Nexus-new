@@ -9,6 +9,7 @@ from nexus.contracts import gateway_deployment as contract
 from nexus.contracts.gateway_deployment import (
     CURRENT_PROFILE,
     DESIRED_PROFILE,
+    ENTRYPOINT,
     GATEWAY_LIFECYCLE_REVISION,
     HOST_AUTHORITY_BUNDLE_SCHEMA,
     HOST_AUTHORITY_BUNDLE_SCOPE,
@@ -25,6 +26,7 @@ from nexus.contracts.gateway_deployment import (
     EffectClass,
     GatewayDeploymentRequest,
     GitIdentity,
+    InterpreterIdentity,
     HostEffectAuthorityBundle,
     HostEffectAuthorityReceipt,
     IdentityEvidence,
@@ -570,6 +572,49 @@ def test_invalid_state_transitions_fail_closed(previous, current):
 def test_unknown_fields_cannot_become_typed_request():
     with pytest.raises(ContractError):
         validate_request({"request_id": "r"})
+
+
+def test_r1_manifest_readiness_and_reconcile_contract_is_typed_and_hash_bound():
+    from nexus.contracts.gateway_deployment import (
+        DeploymentManifest,
+        DeploymentReadiness,
+        EffectClass,
+        GatewayReconcileOutcome,
+        ResultClass,
+    )
+
+    manifest = DeploymentManifest(
+        deployment_id="desired-1",
+        repository=REPOSITORY,
+        commit="a" * 40,
+        tree="b" * 40,
+        entrypoint=ENTRYPOINT,
+        entrypoint_sha256="c" * 64,
+        interpreter=InterpreterIdentity(),
+        content_sha256="d" * 64,
+        manifest_sha256="0" * 64,
+        owner_uid=501,
+        owner_gid=20,
+        mode=0o700,
+    )
+    manifest = DeploymentManifest(**{
+        **manifest.__dict__,
+        "manifest_sha256": canonical_hash({
+            key: value for key, value in manifest.model_dump().items() if key != "manifest_sha256"
+        }),
+    })
+    assert manifest.model_validate(manifest.model_dump()) == manifest
+    assert DeploymentReadiness.TARGET_READY.value == "TARGET_READY"
+    assert EffectClass.GATEWAY_DURABLE_RECOVERY.value == "GATEWAY_DURABLE_RECOVERY"
+    outcome = GatewayReconcileOutcome(
+        request_id="r-1", request_hash="f" * 64, idempotency_fence="f-1",
+        desired_manifest_id=manifest.deployment_id,
+        predecessor_manifest_id="previous-1", physical_observation={"label": "com.nexus.mcp.gateway.direct"},
+        effect_started=False, result=ResultClass.BLOCKED, evidence_hash="0" * 64,
+    )
+    assert outcome.model_validate(outcome.model_dump()) == outcome
+    with pytest.raises(ContractError):
+        DeploymentManifest.model_validate({**manifest.model_dump(), "root": "/tmp/caller"})
 
 
 def test_wrong_profile_identity_rejected():

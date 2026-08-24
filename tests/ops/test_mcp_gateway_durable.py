@@ -218,6 +218,44 @@ def test_status_is_json_serializable_and_does_not_expose_process_output(monkeypa
     assert "stdout" not in encoded and "stderr" not in encoded and "SECRET" not in encoded
     assert set(payload) == {"gateway", "devspace"}
 
+
+def test_r1_stage_is_content_addressed_and_missing_rollback_has_zero_effect(tmp_path):
+    from nexus.contracts.gateway_deployment import DeploymentManifest, InterpreterIdentity
+
+    source = tmp_path / "desired.py"
+    source.write_bytes(b"desired gateway bytes")
+    manifest = DeploymentManifest(
+        deployment_id="desired-1", repository="James3014/Nexus-new", commit="a" * 40,
+        tree="b" * 40, entrypoint="scripts/ops/nexus_mcp_gateway_http.py",
+        entrypoint_sha256="c" * 64, interpreter=InterpreterIdentity(),
+        content_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+        manifest_sha256="0" * 64, owner_uid=os.getuid(), owner_gid=os.getgid(), mode=0o700,
+    )
+    manifest = DeploymentManifest(**{
+        **manifest.__dict__,
+        "manifest_sha256": __import__("nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]).canonical_hash({
+            key: value for key, value in manifest.model_dump().items() if key != "manifest_sha256"
+        }),
+    })
+    staged = g.stage_deployment(manifest, source_path=source, state_root=tmp_path / "state")
+    assert staged.name == manifest.content_sha256
+    assert (staged / "nexus_mcp_gateway_http.py").read_bytes() == source.read_bytes()
+    with pytest.raises(g.GatewayContractError, match="ROLLBACK_UNAVAILABLE"):
+        g.gateway_recover(
+            request={"request_id": "r-1", "idempotency_fence": "f-1"},
+            desired_manifest=manifest, predecessor_manifest=None,
+            state_root=tmp_path / "state", runner=lambda *args: pytest.fail("effect called"),
+        )
+
+
+def test_r1_recovery_rejects_caller_selected_effect_surface(tmp_path):
+    with pytest.raises(g.GatewayContractError, match="caller-selected"):
+        g.gateway_recover(
+            request={"request_id": "r-1", "idempotency_fence": "f-1", "root": "/tmp/caller",
+                     "label": "com.attacker.gateway"},
+            desired_manifest=None, predecessor_manifest=None, state_root=tmp_path,
+        )
+
 def test_status_classifies_real_absent_launchctl_service(monkeypatch, tmp_path):
     setup(monkeypatch, tmp_path)
     def runner(*args):

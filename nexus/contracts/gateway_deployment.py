@@ -108,7 +108,11 @@ class ContractError(ValueError):
 class DeploymentState(StrEnum):
     REQUESTED = "REQUESTED"
     PREFLIGHTED = "PREFLIGHTED"
+    TARGET_READY = "TARGET_READY"
+    ROLLBACK_READY = "ROLLBACK_READY"
+    ROLLBACK_UNAVAILABLE = "ROLLBACK_UNAVAILABLE"
     STARTED = "STARTED"
+    EFFECT_STARTED = "EFFECT_STARTED"
     SERVICE_OBSERVED = "SERVICE_OBSERVED"
     IDENTITY_VERIFIED = "IDENTITY_VERIFIED"
     CLIENT_BOUND = "CLIENT_BOUND"
@@ -125,6 +129,7 @@ class EffectClass(StrEnum):
     GATEWAY_RELOAD = "GATEWAY_RELOAD"
     GATEWAY_ROLLBACK = "GATEWAY_ROLLBACK"
     STATUS = "STATUS"
+    GATEWAY_DURABLE_RECOVERY = "GATEWAY_DURABLE_RECOVERY"
 
 
 class ResultClass(StrEnum):
@@ -132,6 +137,12 @@ class ResultClass(StrEnum):
     BLOCKED = "BLOCKED"
     UNCERTAIN_EFFECT = "UNCERTAIN_EFFECT"
     ROLLED_BACK = "ROLLED_BACK"
+
+
+class DeploymentReadiness(StrEnum):
+    TARGET_READY = "TARGET_READY"
+    ROLLBACK_READY = "ROLLBACK_READY"
+    ROLLBACK_UNAVAILABLE = "ROLLBACK_UNAVAILABLE"
 
 
 T = TypeVar("T")
@@ -276,6 +287,45 @@ class InterpreterIdentity(StrictRecord):
     uid: int = 501
     gid: int = 20
     mode: str = "lrwxr-xr-x"
+
+
+@dataclass(frozen=True)
+class DeploymentManifest(StrictRecord):
+    """Manager-issued, content-addressed deployment identity."""
+
+    deployment_id: str
+    repository: str
+    commit: str
+    tree: str
+    entrypoint: str
+    entrypoint_sha256: str
+    interpreter: InterpreterIdentity
+    content_sha256: str
+    manifest_sha256: str
+    owner_uid: int
+    owner_gid: int
+    mode: int = 0o700
+
+    _converters: ClassVar[Mapping[str, Any]] = {
+        "interpreter": InterpreterIdentity.model_validate,
+    }
+
+
+@dataclass(frozen=True)
+class GatewayReconcileOutcome(StrictRecord):
+    """Read-only continuation result for the original recovery request."""
+
+    request_id: str
+    request_hash: str
+    idempotency_fence: str
+    desired_manifest_id: str
+    predecessor_manifest_id: str
+    physical_observation: Mapping[str, Any]
+    effect_started: bool
+    result: ResultClass
+    evidence_hash: str
+
+    _converters: ClassVar[Mapping[str, Any]] = {"result": ResultClass}
 
 
 @dataclass(frozen=True)
@@ -528,6 +578,9 @@ class GatewayDeploymentRequest(StrictRecord):
     schema: str = SCHEMA
     stable_artifact: StableArtifactIdentity | None = None
     host_authority: HostEffectAuthorityReceipt | None = None
+    desired_manifest: DeploymentManifest | None = None
+    predecessor_manifest: DeploymentManifest | None = None
+    readiness: tuple[DeploymentReadiness, ...] = ()
 
     _converters: ClassVar[Mapping[str, Any]] = {
         "authority": AuthorityReceipt.model_validate,
@@ -544,6 +597,13 @@ class GatewayDeploymentRequest(StrictRecord):
         "host_authority": lambda value: (
             None if value is None else HostEffectAuthorityReceipt.model_validate(value)
         ),
+        "desired_manifest": lambda value: (
+            None if value is None else DeploymentManifest.model_validate(value)
+        ),
+        "predecessor_manifest": lambda value: (
+            None if value is None else DeploymentManifest.model_validate(value)
+        ),
+        "readiness": lambda value: tuple(DeploymentReadiness(item) for item in value),
     }
 
 
@@ -561,6 +621,31 @@ def validate_repository(profile: RepositoryProfile) -> RepositoryProfile:
     if profile.endpoint != ENDPOINT:
         raise ContractError("endpoint mismatch")
     return profile
+
+
+def validate_deployment_manifest(manifest: DeploymentManifest) -> DeploymentManifest:
+    if not isinstance(manifest, DeploymentManifest):
+        raise ContractError("deployment manifest must be typed")
+    _id(manifest.deployment_id, "deployment id")
+    if manifest.repository != REPOSITORY:
+        raise ContractError("deployment repository mismatch")
+    _hash(manifest.commit, "deployment commit", 40)
+    _hash(manifest.tree, "deployment tree", 40)
+    if manifest.entrypoint != ENTRYPOINT:
+        raise ContractError("deployment entrypoint mismatch")
+    _hash(manifest.entrypoint_sha256, "deployment entrypoint hash")
+    _hash(manifest.content_sha256, "deployment content hash")
+    _hash(manifest.manifest_sha256, "deployment manifest hash")
+    expected_manifest_hash = canonical_hash({
+        key: value for key, value in manifest.model_dump().items() if key != "manifest_sha256"
+    })
+    if manifest.manifest_sha256 != expected_manifest_hash:
+        raise ContractError("deployment manifest hash mismatch")
+    if manifest.owner_uid < 0 or manifest.owner_gid < 0 or manifest.mode != 0o700:
+        raise ContractError("deployment ownership/mode mismatch")
+    if manifest.interpreter != InterpreterIdentity():
+        raise ContractError("deployment interpreter mismatch")
+    return manifest
 
 
 def validate_profile(
@@ -642,8 +727,18 @@ def validate_desired_profile(
 
 _EDGES: dict[DeploymentState, set[DeploymentState]] = {
     DeploymentState.REQUESTED: {DeploymentState.PREFLIGHTED, DeploymentState.BLOCKED},
-    DeploymentState.PREFLIGHTED: {DeploymentState.STARTED, DeploymentState.BLOCKED},
+    DeploymentState.PREFLIGHTED: {
+        DeploymentState.TARGET_READY, DeploymentState.STARTED, DeploymentState.BLOCKED,
+    },
+    DeploymentState.TARGET_READY: {DeploymentState.ROLLBACK_READY, DeploymentState.BLOCKED},
+    DeploymentState.ROLLBACK_READY: {DeploymentState.EFFECT_STARTED, DeploymentState.BLOCKED},
+    DeploymentState.ROLLBACK_UNAVAILABLE: {DeploymentState.BLOCKED},
     DeploymentState.STARTED: {
+        DeploymentState.SERVICE_OBSERVED,
+        DeploymentState.UNCERTAIN_EFFECT,
+        DeploymentState.BLOCKED,
+    },
+    DeploymentState.EFFECT_STARTED: {
         DeploymentState.SERVICE_OBSERVED,
         DeploymentState.UNCERTAIN_EFFECT,
         DeploymentState.BLOCKED,
@@ -867,6 +962,8 @@ def validate_host_effect_authority(
         "gateway-reload": EffectClass.GATEWAY_RELOAD,
         "rollback": EffectClass.GATEWAY_ROLLBACK,
         "gateway-rollback": EffectClass.GATEWAY_ROLLBACK,
+        "gateway-recover": EffectClass.GATEWAY_DURABLE_RECOVERY,
+        "recover": EffectClass.GATEWAY_DURABLE_RECOVERY,
     }
     if (
         receipt.operation not in operation_effects
@@ -1179,6 +1276,8 @@ def validate_request(
         "gateway-reload": EffectClass.GATEWAY_RELOAD,
         "rollback": EffectClass.GATEWAY_ROLLBACK,
         "gateway-rollback": EffectClass.GATEWAY_ROLLBACK,
+        "gateway-recover": EffectClass.GATEWAY_DURABLE_RECOVERY,
+        "recover": EffectClass.GATEWAY_DURABLE_RECOVERY,
     }
     if (
         request.operation not in operations
@@ -1188,6 +1287,17 @@ def validate_request(
     validate_profile(request.current, expected=CURRENT_PROFILE)
     validate_profile(request.desired, expected=DESIRED_PROFILE)
     validate_desired_profile(request.current, request.desired)
+    if request.operation in {"gateway-recover", "recover"}:
+        if request.effect_class is not EffectClass.GATEWAY_DURABLE_RECOVERY:
+            raise ContractError("durable recovery effect mismatch")
+        if request.desired_manifest is None or request.predecessor_manifest is None:
+            raise ContractError("durable recovery manifests required")
+        validate_deployment_manifest(request.desired_manifest)
+        validate_deployment_manifest(request.predecessor_manifest)
+        if tuple(request.readiness) != (
+            DeploymentReadiness.TARGET_READY, DeploymentReadiness.ROLLBACK_READY
+        ):
+            raise ContractError("durable recovery readiness gates required")
     validate_current_identity(request.current_identity, request.current)
     validate_source_authority(request.authority, request_id=request.request_id)
     if request.host_authority is None:
@@ -1256,8 +1366,21 @@ def validate_request(
         for key, value in _plain(request).items()
         if key not in {"request_hash", "schema"}
     }
+    # Preserve the historical request hash domain for pre-R1 operations; the
+    # new manifest/readiness fields participate only when explicitly present.
+    if request.desired_manifest is None:
+        payload.pop("desired_manifest", None)
+    if request.predecessor_manifest is None:
+        payload.pop("predecessor_manifest", None)
+    if not request.readiness:
+        payload.pop("readiness", None)
     expected = canonical_hash(payload)
-    if request.request_hash != expected:
+    legacy_payload = {
+        key: _plain(value)
+        for key, value in _plain(request).items()
+        if key not in {"request_hash", "schema"}
+    }
+    if request.request_hash not in {expected, canonical_hash(legacy_payload)}:
         raise ContractError("request hash mismatch")
     return request
 
