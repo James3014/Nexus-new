@@ -13,6 +13,7 @@ import pytest
 from scripts.ops.pr_impact_gate import (
     EXACT_CONFIG_TARGETS,
     EXACT_GIT_EVIDENCE_ONLY,
+    MANDATORY_TIER2_TARGETS,
     PytestRunResult,
     _git_changed_paths,
     build_impact_plan,
@@ -336,6 +337,40 @@ def test_unknown_impact_fails_closed_to_broader_verification():
     assert plan.pytest_required is True
     assert plan.unmatched_paths == ["mystery/runtime.surface"]
     assert "tests/ops/test_pr_impact_gate.py" in plan.pytest_targets
+
+
+def test_issue526_exact_authority_bundle_json_selects_high_risk_tier2_contracts():
+    exact_path = (
+        "tasks/github-issue-526-host-authority-and-canary-20260823/"
+        "02-host-effect-authority-receipt.json"
+    )
+
+    plan = build_impact_plan([exact_path])
+
+    assert plan.tier == 2
+    assert plan.impact_class == "HIGH_RISK_INTEGRATION"
+    assert plan.confidence == 0.85
+    assert plan.unmatched_paths == []
+    assert "tests/contracts/test_gateway_deployment_contract.py" in plan.pytest_targets
+    assert "tests/ops/test_mcp_gateway_durable.py" in plan.pytest_targets
+    assert set(MANDATORY_TIER2_TARGETS).issubset(plan.pytest_targets)
+
+
+def test_issue526_adjacent_authority_json_remains_unknown_broader_fallback():
+    adjacent_path = (
+        "tasks/github-issue-526-host-authority-and-canary-20260823/"
+        "03-host-effect-authority-receipt.json"
+    )
+
+    plan = build_impact_plan([adjacent_path])
+
+    assert plan.tier == 2
+    assert plan.impact_class == "IMPACT_UNKNOWN"
+    assert plan.confidence == 0.4
+    assert plan.unmatched_paths == [adjacent_path]
+    assert set(MANDATORY_TIER2_TARGETS).issubset(plan.pytest_targets)
+    assert "tests/contracts/test_gateway_deployment_contract.py" not in plan.pytest_targets
+    assert "tests/ops/test_mcp_gateway_durable.py" not in plan.pytest_targets
 
 
 def test_codex_dx_failure_prevention_config_selects_exact_test(tmp_path: Path):
