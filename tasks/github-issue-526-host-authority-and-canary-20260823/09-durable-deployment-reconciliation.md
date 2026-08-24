@@ -59,9 +59,53 @@ through the fixed manager-owned `repository.git`; it has no external alternates,
 authority-mirror, or disposable-source dependency. Source bundles
 use the fixed path
 `/Users/jameschen/Library/Application Support/Nexus/gateway-direct/source-bundles/<recovery-receipt-hash>.bundle`.
-The manager derives deployment ID from repository, commit, tree, fixed
-entrypoint path/blob/hash, tracked mode, interpreter identity, and bundle hash;
-callers cannot provide IDs or paths.
+The manager derives deployment identity from a canonical semantic recovery
+source set: repository, accepted/desired/predecessor commits and trees, fixed
+entrypoint paths/blobs/hashes/tracked modes, and interpreter identity. Callers
+cannot provide IDs, refs, roots, or paths. Raw Git bundle SHA-256 is physical
+transport evidence and never an input to source-set, deployment-ID, manifest,
+or receipt authority identity.
+
+### R1-B semantic identity clarification
+
+This clarification breaks the otherwise circular issuance dependency in which
+the tracked receipt changes fresh main, fresh main changes the raw bundle, and
+the raw bundle hash changes receipt-bound deployment identity. It preserves the
+single recovery authority and all exact Git verification requirements.
+
+`RecoverySourceSet` is a strict pure record containing repository;
+accepted-source commit/tree; desired and predecessor commit/tree; each role's
+fixed entrypoint path, blob OID, SHA-256, and tracked mode; and fixed interpreter
+path/resolved path/SHA-256/owner/mode. Its `source_set_sha256` is the canonical
+hash of those semantic fields only. It excludes receipt bytes/hash, receipt
+merge or observed fresh-main identity, raw bundle hash, timestamps, host paths,
+caller refs, and deployment paths.
+
+Each manager-derived `DeploymentManifest` binds its role, repository,
+`source_set_sha256`, commit/tree, entrypoint Git identity, interpreter identity,
+and a canonical manager-derived deployment ID and manifest hash. Raw bundle
+SHA-256 is excluded. The sole `RecoveryAuthorityReceipt` binds the semantic
+source set and both expected manager-derived deployment/manifests plus the
+accepted R1 source, final manager, independent acceptance, fixed service,
+request/fence, authority lineage, validity, and revocation. Its ancestry field
+is an authority floor or issuance parent that precedes the receipt merge; it is
+not a self-containing future-main claim.
+
+After local receipt bytes equal the tracked blob on fresh remote main, the
+manager builds and verifies the exact three-role Git bundle, computes its raw
+SHA-256, and records a strict `SourceBundleEvidence` row in the same ledger-v2
+hash chain before import/promotion. That evidence binds request/hash/fence,
+receipt ID/hash, source-set hash, observed fresh-main commit/tree, exact
+role-to-commit head map, raw bundle hash/size, bundle verification, bare-store
+identity evidence, observation time, and evidence hash. It is not authority and
+cannot authorize staging or effect.
+
+Issuance is acyclic: accepted/desired/predecessor Git identity -> semantic
+source set and manifests -> receipt -> receipt-bearing fresh main -> raw bundle
+and physical evidence -> durable store/worktrees. If fresh main later advances
+without changing tracked receipt bytes, semantic deployment identity remains
+stable. Once a ledger row records a raw bundle hash for the request, replay must
+reverify that exact artifact/head map and may not silently regenerate it.
 
 The fixed tracked receipt is
 `tasks/github-issue-526-host-authority-and-canary-20260823/10-durable-recovery-authority-receipt.json`;
@@ -74,11 +118,13 @@ caller root, command, PID, plist, port, environment, or follow-main fields;
 the caller never supplies the receipt body.
 
 The manager validates local receipt bytes, strict schema, R1 Card/source/
-manager/acceptance/manifest bindings, and `git show <fresh-remote-main>:<fixed-receipt-path>` bytes from the verified
+manager/acceptance/source-set/manifest bindings, and `git show <fresh-remote-main>:<fixed-receipt-path>` bytes from the verified
 authority mirror against the fixed tracked receipt. A caller-rehashed receipt is not authority;
 the legacy host-effect bundle is never parsed for recovery.
 
-Ledger v2 recovery rows share the v1 parent-hash chain. Under the lock, exact
+Ledger v2 recovery rows share the v1 parent-hash chain. They include the
+post-receipt `SourceBundleEvidence` physical record; raw bundle SHA-256 is
+ledger-bound evidence, not a deployment or receipt identity input. Under the lock, exact
 request-hash CAS and unique fence, persist
 `REQUESTED -> PREFLIGHTED -> TARGET_READY -> ROLLBACK_READY -> EFFECT_STARTED`
 with both full checkouts and pre-effect evidence. Lost acknowledgement becomes
@@ -134,22 +180,29 @@ In `nexus/contracts/gateway_deployment.py`, preserve the pure/no-I/O contract
 module and add strict hashable records/enums:
 
 1. `DeploymentManifest`: manager-issued deployment ID, repository, commit,
-   tree, fixed entrypoint and hash, interpreter identity/hash, canonical
-   manifest/content hash, owner and mode. It contains no caller-selected root,
-   label, PID, plist, command, port, symlink or follow-main selector.
-2. Readiness classifications exactly covering `TARGET_READY`,
+   tree, role, `source_set_sha256`, fixed tracked entrypoint path/blob/hash/mode,
+   interpreter identity/hash, and canonical manifest/deployment hash. It
+   contains no raw bundle hash or caller-selected root, label, PID, plist,
+   command, port, symlink or follow-main selector.
+2. `RecoverySourceSet`: the canonical semantic accepted/desired/predecessor,
+   entrypoint, and interpreter identity described above. The manager recomputes
+   it; callers cannot supply or select any constituent ref or path.
+3. `SourceBundleEvidence`: strict post-receipt physical evidence for the exact
+   three named heads, raw bundle bytes, verified bare store, and request/fence.
+   It is ledger evidence only and is never accepted as authority.
+4. Readiness classifications exactly covering `TARGET_READY`,
    `ROLLBACK_READY`, and `ROLLBACK_UNAVAILABLE`; readiness requires verified
    materialized bytes plus manifest, ancestry, ownership/mode and fixed
    identities, never metadata alone.
-3. A typed reconcile outcome that records request/hash/fence, desired and
+5. A typed reconcile outcome that records request/hash/fence, desired and
    predecessor manifest IDs, physical observation, effect-started flag, result
    (`VERIFIED`, `ROLLED_BACK`, `BLOCKED`, or `UNCERTAIN_EFFECT`) and evidence
    hash. It must model reconcile as continuation of the same request.
-4. Add `EFFECT_STARTED` to the state vocabulary and
+6. Add `EFFECT_STARTED` to the state vocabulary and
    `GATEWAY_DURABLE_RECOVERY` to the effect vocabulary. Do not add
    `RECONCILE` as an effect class. Existing `STARTED` ledger records remain
    parseable as historical records.
-5. Extend the typed request so desired/predecessor manifests and readiness,
+7. Extend the typed request so desired/predecessor manifests and readiness,
    operation `gateway-recover`, and the same host receipt/fence are included
    in canonical request hashing and CAS checks.
 
@@ -174,20 +227,24 @@ Required order:
 
 1. Parse and validate the exact request, authority binding, lock, ledger tail,
    CAS and static source/interpreter/plist constraints.
-2. Stage desired bytes and append `TARGET_READY`.
-3. Stage exact predecessor bytes and append `ROLLBACK_READY`. Missing bytes or
+2. Recompute the semantic source set and both manager-derived manifests; they
+   must equal the receipt/request expectations. Then build/verify the exact
+   three-role bundle, compute raw bundle SHA-256, and persist
+   `SourceBundleEvidence` before import or promotion.
+3. Stage desired bytes and append `TARGET_READY`.
+4. Stage exact predecessor bytes and append `ROLLBACK_READY`. Missing bytes or
    metadata-only predecessor yields `ROLLBACK_UNAVAILABLE` and `BLOCKED` with
    zero process effect.
-4. Persist request, both manifests and static evidence; append
+5. Persist request, both manifests and static evidence; append
    `EFFECT_STARTED` while holding the lock immediately before the one fixed
    recovery effect.
-5. Execute only the manager-selected fixed service effect. No generic shell,
+6. Execute only the manager-selected fixed service effect. No generic shell,
    launchctl, PID, label, plist, command, environment, port, root or DevSpace
    argument is accepted.
-6. Re-observe fixed label/PID/start identity/listener/plist/manifest, then run
+7. Re-observe fixed label/PID/start identity/listener/plist/manifest, then run
    authenticated `/health`, `initialize` and `tools/list`. Only exact desired
    identity reaches `VERIFIED`.
-7. On timeout, disconnect, crash or lost acknowledgement, append
+8. On timeout, disconnect, crash or lost acknowledgement, append
    `UNCERTAIN_EFFECT` and internally reconcile the same request/fence before
    retry. Desired serving plus complete postflight completes the original
    request; predecessor serving records `ROLLED_BACK`; neither provable remains
@@ -252,6 +309,11 @@ calls before `EFFECT_STARTED`.
   timeout, initialize/tools-list failure or listener mismatch never verifies.
 - Deployment ancestry/content hash/manifest tamper fails closed; DevSpace and
   unrelated services remain untouched; no second manager is introduced.
+- No semantic identity builder accepts raw bundle hash, receipt hash, or
+  observed fresh-main SHA. Byte-different valid bundle encodings of the same
+  exact semantic source set produce the same deployment IDs but distinct
+  physical evidence. Wrong source-set field, named-ref role, object set,
+  persisted bundle hash, or head map fails closed.
 
 ## Verification and exit
 
