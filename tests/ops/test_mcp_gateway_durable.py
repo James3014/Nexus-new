@@ -253,9 +253,13 @@ def test_r1_stage_is_content_addressed_and_missing_rollback_has_zero_effect(monk
 def test_r1_recovery_rejects_caller_selected_effect_surface():
     import inspect
     parameters = inspect.signature(g.gateway_recover).parameters
+    stage_parameters = inspect.signature(g.stage_deployment).parameters
     assert "state_root" not in parameters
     assert "desired_source" not in parameters
     assert "predecessor_source" not in parameters
+    assert "source_path" not in stage_parameters
+    assert "state_root" not in stage_parameters
+    assert g.GATEWAY_DEPLOYMENTS_ROOT == g.GATEWAY_STATE_ROOT / "deployments"
 
 def test_status_classifies_real_absent_launchctl_service(monkeypatch, tmp_path):
     setup(monkeypatch, tmp_path)

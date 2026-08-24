@@ -440,6 +440,20 @@ class RecoveryAuthorityReceipt(StrictRecord):
     revocation_state: str
     revoked_at: str | None
     revocation_reason: str | None
+    issuer_id: str
+    coordinator_id: str
+    authorized_actor_id: str
+    owner_activation_id: str
+    owner_activation_sha256: str
+    source_thread: str
+    standing_grant_id: str
+    standing_grant_receipt_sha256: str
+    repository: str
+    host_card_path: str
+    accepted_source_merge: str
+    accepted_source_tree: str
+    final_manager_sha256: str
+    independent_acceptance_receipt_hash: str
 
     _converters: ClassVar[Mapping[str, Any]] = {"effect_class": EffectClass}
 
@@ -611,10 +625,6 @@ class GatewayDeploymentRequest(StrictRecord):
     schema: str = SCHEMA
     stable_artifact: StableArtifactIdentity | None = None
     host_authority: HostEffectAuthorityReceipt | None = None
-    desired_manifest: DeploymentManifest | None = None
-    predecessor_manifest: DeploymentManifest | None = None
-    readiness: tuple[DeploymentReadiness, ...] = ()
-    recovery_authority: RecoveryAuthorityReceipt | None = None
 
     _converters: ClassVar[Mapping[str, Any]] = {
         "authority": AuthorityReceipt.model_validate,
@@ -631,17 +641,27 @@ class GatewayDeploymentRequest(StrictRecord):
         "host_authority": lambda value: (
             None if value is None else HostEffectAuthorityReceipt.model_validate(value)
         ),
-        "desired_manifest": lambda value: (
-            None if value is None else DeploymentManifest.model_validate(value)
-        ),
-        "predecessor_manifest": lambda value: (
-            None if value is None else DeploymentManifest.model_validate(value)
-        ),
-        "readiness": lambda value: tuple(DeploymentReadiness(item) for item in value),
-        "recovery_authority": lambda value: (
-            None if value is None else RecoveryAuthorityReceipt.model_validate(value)
-        ),
     }
+
+
+@dataclass(frozen=True)
+class GatewayRecoveryRequest(StrictRecord):
+    """R1-B request: references authority and manifests, never their bodies."""
+
+    request_id: str
+    idempotency_fence: str
+    operation: str
+    effect_class: EffectClass
+    recovery_authority_id: str
+    recovery_authority_hash: str
+    desired_manifest_id: str
+    desired_manifest_hash: str
+    predecessor_manifest_id: str
+    predecessor_manifest_hash: str
+    request_hash: str = ""
+    schema: str = "nexus.gateway.durable_recovery_request.v1"
+
+    _converters: ClassVar[Mapping[str, Any]] = {"effect_class": EffectClass}
 
 
 def validate_repository(profile: RepositoryProfile) -> RepositoryProfile:
@@ -683,6 +703,26 @@ def validate_deployment_manifest(manifest: DeploymentManifest) -> DeploymentMani
     if manifest.interpreter != InterpreterIdentity():
         raise ContractError("deployment interpreter mismatch")
     return manifest
+
+
+def validate_recovery_request(request: GatewayRecoveryRequest) -> GatewayRecoveryRequest:
+    if not isinstance(request, GatewayRecoveryRequest) or request.schema != GatewayRecoveryRequest.__dataclass_fields__["schema"].default:
+        raise ContractError("R1 recovery request schema mismatch")
+    if request.operation != "gateway-recover" or request.effect_class is not EffectClass.GATEWAY_DURABLE_RECOVERY:
+        raise ContractError("R1 recovery operation/effect mismatch")
+    for value, name, length in (
+        (request.request_id, "request id", 128), (request.idempotency_fence, "fence", 128),
+        (request.recovery_authority_id, "authority id", 128), (request.desired_manifest_id, "desired id", 128),
+        (request.predecessor_manifest_id, "predecessor id", 128),
+        (request.recovery_authority_hash, "authority hash", 64),
+        (request.desired_manifest_hash, "desired manifest hash", 64),
+        (request.predecessor_manifest_hash, "predecessor manifest hash", 64),
+    ):
+        (_hash(value, name) if length == 64 else _id(value, name))
+    expected = canonical_hash({key: value for key, value in request.model_dump().items() if key not in {"request_hash", "schema"}})
+    if request.request_hash != expected:
+        raise ContractError("R1 recovery request hash mismatch")
+    return request
 
 
 def validate_profile(
@@ -1261,7 +1301,7 @@ select_host_authority_receipt = select_host_effect_authority_receipt
 def validate_recovery_authority(
     receipt: RecoveryAuthorityReceipt,
     *,
-    request: GatewayDeploymentRequest | None = None,
+    request: GatewayRecoveryRequest | None = None,
     now: str | None = None,
 ) -> RecoveryAuthorityReceipt:
     if not isinstance(receipt, RecoveryAuthorityReceipt) or receipt.schema != RecoveryAuthorityReceipt.SCHEMA:
@@ -1297,12 +1337,10 @@ def validate_recovery_authority(
         request.operation != receipt.operation
         or request.request_id != receipt.request_id
         or request.idempotency_fence != receipt.idempotency_fence
-        or request.desired_manifest is None
-        or request.predecessor_manifest is None
-        or request.desired_manifest.deployment_id != receipt.desired_manifest_id
-        or request.predecessor_manifest.deployment_id != receipt.predecessor_manifest_id
-        or request.desired_manifest.manifest_sha256 != receipt.desired_manifest_sha256
-        or request.predecessor_manifest.manifest_sha256 != receipt.predecessor_manifest_sha256
+        or request.desired_manifest_id != receipt.desired_manifest_id
+        or request.predecessor_manifest_id != receipt.predecessor_manifest_id
+        or request.desired_manifest_hash != receipt.desired_manifest_sha256
+        or request.predecessor_manifest_hash != receipt.predecessor_manifest_sha256
     ):
         raise ContractError("R1 recovery request binding mismatch")
     if now is not None:
@@ -1363,7 +1401,6 @@ def validate_request(
         "gateway-reload": EffectClass.GATEWAY_RELOAD,
         "rollback": EffectClass.GATEWAY_ROLLBACK,
         "gateway-rollback": EffectClass.GATEWAY_ROLLBACK,
-        "gateway-recover": EffectClass.GATEWAY_DURABLE_RECOVERY,
     }
     if (
         request.operation not in operations
@@ -1374,19 +1411,7 @@ def validate_request(
     validate_profile(request.desired, expected=DESIRED_PROFILE)
     validate_desired_profile(request.current, request.desired)
     if request.operation == "gateway-recover":
-        if request.effect_class is not EffectClass.GATEWAY_DURABLE_RECOVERY:
-            raise ContractError("durable recovery effect mismatch")
-        if request.desired_manifest is None or request.predecessor_manifest is None:
-            raise ContractError("durable recovery manifests required")
-        validate_deployment_manifest(request.desired_manifest)
-        validate_deployment_manifest(request.predecessor_manifest)
-        if tuple(request.readiness) != (
-            DeploymentReadiness.TARGET_READY, DeploymentReadiness.ROLLBACK_READY
-        ):
-            raise ContractError("durable recovery readiness gates required")
-        if request.recovery_authority is None:
-            raise ContractError("R1 recovery authority required")
-        validate_recovery_authority(request.recovery_authority, request=request)
+        raise ContractError("R1 recovery requires GatewayRecoveryRequest")
     validate_current_identity(request.current_identity, request.current)
     validate_source_authority(request.authority, request_id=request.request_id)
     if request.host_authority is None:
@@ -1457,14 +1482,6 @@ def validate_request(
     }
     # Preserve the historical request hash domain for pre-R1 operations; the
     # new manifest/readiness fields participate only when explicitly present.
-    if request.desired_manifest is None:
-        payload.pop("desired_manifest", None)
-    if request.predecessor_manifest is None:
-        payload.pop("predecessor_manifest", None)
-    if not request.readiness:
-        payload.pop("readiness", None)
-    if request.recovery_authority is None:
-        payload.pop("recovery_authority", None)
     expected = canonical_hash(payload)
     legacy_payload = {
         key: _plain(value)

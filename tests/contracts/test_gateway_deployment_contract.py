@@ -634,6 +634,30 @@ def test_r1_recovery_authority_is_a_distinct_hash_domain():
     assert RecoveryAuthorityReceipt.SCHEMA == "nexus.gateway.durable_recovery_authority.v1"
 
 
+def test_r1b_recovery_request_is_separate_and_has_no_legacy_authority_body():
+    from nexus.contracts.gateway_deployment import GatewayRecoveryRequest, validate_recovery_request
+
+    values = {
+        "request_id": "r1b-1", "idempotency_fence": "f1b-1",
+        "operation": "gateway-recover", "effect_class": EffectClass.GATEWAY_DURABLE_RECOVERY,
+        "recovery_authority_id": "receipt-1", "recovery_authority_hash": "a" * 64,
+        "desired_manifest_id": "desired-1", "desired_manifest_hash": "b" * 64,
+        "predecessor_manifest_id": "previous-1", "predecessor_manifest_hash": "c" * 64,
+    }
+    request = GatewayRecoveryRequest(**values)
+    request = GatewayRecoveryRequest(**{
+        **request.__dict__,
+        "request_hash": canonical_hash(values),
+    })
+    assert validate_recovery_request(request) == request
+    with pytest.raises(ContractError):
+        GatewayRecoveryRequest.model_validate({**request.model_dump(), "authority": {}})
+    with pytest.raises(ContractError):
+        validate_recovery_request(
+            GatewayRecoveryRequest.model_validate({**request.model_dump(), "operation": "recover"})
+        )
+
+
 def test_wrong_profile_identity_rejected():
     bad = DeploymentProfile(
         GitIdentity(

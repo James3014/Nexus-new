@@ -38,6 +38,8 @@ from nexus.contracts.gateway_deployment import (
     DeploymentState,
     EffectClass,
     GatewayDeploymentRequest,
+    GatewayRecoveryRequest,
+    RecoveryAuthorityReceipt,
     GatewayReconcileOutcome,
     HostEffectAuthorityBundle,
     HostEffectAuthorityReceipt,
@@ -51,6 +53,7 @@ from nexus.contracts.gateway_deployment import (
     validate_host_effect_authority_bundle,
     validate_postflight_identity,
     validate_profile,
+    validate_recovery_request,
     validate_recovery_authority,
     validate_receipt_freshness,
     validate_request,
@@ -281,6 +284,10 @@ GATEWAY_ENDPOINT = "http://127.0.0.1:8766"
 GATEWAY_ENTRYPOINT = "scripts/ops/nexus_mcp_gateway_http.py"
 GATEWAY_STATE_ROOT = Path("/Users/jameschen/Library/Application Support/Nexus/gateway-direct")
 GATEWAY_DEPLOYMENTS_ROOT = GATEWAY_STATE_ROOT / "deployments"
+GATEWAY_SOURCE_BUNDLES_ROOT = GATEWAY_STATE_ROOT / "source-bundles"
+GATEWAY_REPOSITORY = GATEWAY_STATE_ROOT / "repository.git"
+GATEWAY_RECOVERY_AUTHORITY_STORE = GATEWAY_STATE_ROOT / "recovery-authority.json"
+RECOVERY_AUTHORITY_SOURCE_PATH = "tasks/github-issue-526-host-authority-and-canary-20260823/10-durable-recovery-authority-receipt.json"
 GATEWAY_LEDGER = GATEWAY_STATE_ROOT / "ledger.jsonl"
 GATEWAY_LOCK = GATEWAY_STATE_ROOT / "ledger.lock"
 GATEWAY_ARTIFACT = GATEWAY_STATE_ROOT / "manager.py"
@@ -710,19 +717,39 @@ def _resolve_manifest_source(manifest: DeploymentManifest) -> Path:
     raise _gateway_error("manager source resolver unavailable")
 
 
+def _require_recovery_authority(request: GatewayRecoveryRequest) -> RecoveryAuthorityReceipt:
+    path = _safe_store_path(GATEWAY_RECOVERY_AUTHORITY_STORE)
+    if path.is_symlink() or not path.exists() or path.stat().st_uid != HOST_UID or stat.S_IMODE(path.stat().st_mode) != 0o600:
+        raise _gateway_error("R1 recovery authority store invalid")
+    if path.stat().st_size > MAX_GATEWAY_STORE_BYTES:
+        raise _gateway_error("R1 recovery authority store oversized")
+    try:
+        payload = json.loads(path.read_text(), object_pairs_hook=_unique_pairs)
+        receipt = RecoveryAuthorityReceipt.model_validate(payload)
+        validate_recovery_authority(receipt, request=request)
+    except (OSError, ValueError, ContractError) as exc:
+        raise _gateway_error("R1 recovery authority rejected", exc) from exc
+    if receipt.receipt_id != request.recovery_authority_id or receipt.receipt_hash != request.recovery_authority_hash:
+        raise _gateway_error("R1 recovery authority reference mismatch")
+    return receipt
+
+
+def _resolve_manifest_reference(request: GatewayRecoveryRequest, *, desired: bool) -> DeploymentManifest:
+    raise _gateway_error("R1 manifest resolver unavailable")
+
+
 def gateway_recover(
     request: GatewayDeploymentRequest | Mapping[str, Any],
 ) -> GatewayReconcileOutcome:
     """Validate and stage a recovery request; host effect remains coordinator-gated."""
     try:
-        typed = validate_request(request)
+        typed = GatewayRecoveryRequest.model_validate(request)
+        validate_recovery_request(typed)
     except ContractError as exc:
         raise _gateway_error("R1 recovery request rejected", exc) from exc
-    authority = typed.recovery_authority
-    if authority is None:
-        raise _gateway_error("R1 recovery authority required")
-    validate_recovery_authority(authority, request=typed)
-    desired_manifest, predecessor_manifest = typed.desired_manifest, typed.predecessor_manifest
+    _require_recovery_authority(typed)
+    desired_manifest = _resolve_manifest_reference(typed, desired=True)
+    predecessor_manifest = _resolve_manifest_reference(typed, desired=False)
     with InterProcessLock(GATEWAY_LOCK):
         desired_path = stage_deployment(desired_manifest)
         predecessor_path = stage_deployment(predecessor_manifest)
@@ -1736,11 +1763,15 @@ def gateway_status(
 
 
 def _validate_gateway_action_pair(
-    action: str, request: GatewayDeploymentRequest | Mapping[str, Any]
-) -> GatewayDeploymentRequest:
+    action: str, request: GatewayDeploymentRequest | GatewayRecoveryRequest | Mapping[str, Any]
+) -> GatewayDeploymentRequest | GatewayRecoveryRequest:
     """Parse and validate the typed request before any physical authority read."""
     try:
-        typed = validate_request(request)
+        if action == "gateway-recover":
+            typed = GatewayRecoveryRequest.model_validate(request)
+            validate_recovery_request(typed)
+        else:
+            typed = validate_request(request)
     except ContractError as exc:
         raise _gateway_error("Gateway request rejected", exc) from exc
     expected_operation = {
