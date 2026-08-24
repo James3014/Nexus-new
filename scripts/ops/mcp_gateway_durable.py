@@ -51,6 +51,7 @@ from nexus.contracts.gateway_deployment import (
     validate_host_effect_authority_bundle,
     validate_postflight_identity,
     validate_profile,
+    validate_recovery_authority,
     validate_receipt_freshness,
     validate_request,
     validate_rollback_capture,
@@ -238,7 +239,7 @@ def serve(kind: str, *, root: Path = CANONICAL_ROOT, launch_floor_head: str | No
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("action", choices=("preflight", "render", "install", "status", "reload", "uninstall", "serve-gateway", "serve-devspace",
-                                       "gateway-status", "gateway-preflight", "gateway-reload", "gateway-install-artifact", "gateway-rollback"))
+                                       "gateway-status", "gateway-preflight", "gateway-reload", "gateway-install-artifact", "gateway-rollback", "gateway-recover"))
     p.add_argument("--launch-floor-head", dest="launch_floor_head")
     p.add_argument("--expected-head", dest="launch_floor_head", help="backward-compat alias for --launch-floor-head")
     p.add_argument("--devspace-hash"); p.add_argument("--env-file")
@@ -261,10 +262,10 @@ def main() -> int:
             except (OSError, ValueError) as exc:
                 raise GateError("gateway request file malformed") from exc
             request = GatewayDeploymentRequest.model_validate(payload)
-            operation = a.action.removeprefix("gateway-")
+            operation = "gateway-recover" if a.action == "gateway-recover" else a.action.removeprefix("gateway-")
             if operation == "install-artifact": operation = "install-artifact"
             now = _current_observation_time()
-            observed = {} if operation in {"status", "gateway-status", "install-artifact"} else collect_gateway_observation(
+            observed = {} if operation in {"status", "gateway-status", "install-artifact", "gateway-recover"} else collect_gateway_observation(
                 request, operation=operation, observation_time=now
             )
             if a.gateway_evidence is not None:
@@ -644,27 +645,28 @@ def _atomic_gateway_write(path: Path, data: bytes, *, mode: int = 0o600) -> None
 
 def stage_deployment(
     manifest: DeploymentManifest,
-    *,
-    source_path: Path,
-    state_root: Path | None = None,
 ) -> Path:
     """Materialize one manager-owned deployment under its content hash."""
     try:
         validate_deployment_manifest(manifest)
     except ContractError as exc:
         raise _gateway_error("deployment manifest rejected", exc) from exc
-    source = Path(source_path)
+    source = _resolve_manifest_source(manifest)
     if not source.is_absolute() or source.is_symlink() or not source.is_file():
         raise _gateway_error("deployment source must be a regular file")
     try:
         payload = source.read_bytes()
     except OSError as exc:
         raise _gateway_error("deployment source unavailable", exc) from exc
-    if hashlib.sha256(payload).hexdigest() != manifest.content_sha256:
+    source_info = source.stat()
+    if (source_info.st_uid, source_info.st_gid, stat.S_IMODE(source_info.st_mode)) != (
+        manifest.owner_uid, manifest.owner_gid, manifest.mode
+    ):
+        raise _gateway_error("deployment source ownership/mode mismatch")
+    if hashlib.sha256(payload).hexdigest() != manifest.content_sha256 or hashlib.sha256(payload).hexdigest() != manifest.entrypoint_sha256:
         raise _gateway_error("deployment content hash mismatch")
-    root = Path(state_root) if state_root is not None else GATEWAY_STATE_ROOT
-    deployments = root / "deployments"
-    for ancestor in (root, deployments):
+    deployments = GATEWAY_DEPLOYMENTS_ROOT
+    for ancestor in (GATEWAY_STATE_ROOT, deployments):
         if ancestor.exists() and ancestor.is_symlink():
             raise _gateway_error("deployment ancestry unsafe")
     deployments.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -683,7 +685,7 @@ def stage_deployment(
         os.chmod(temporary, 0o700)
         target = temporary / target_name
         target.write_bytes(payload)
-        os.chmod(target, 0o700)
+        os.chmod(target, manifest.mode)
         fd = os.open(target, os.O_RDONLY)
         try:
             os.fsync(fd)
@@ -694,43 +696,40 @@ def stage_deployment(
     except Exception:
         shutil.rmtree(temporary, ignore_errors=True)
         raise
+    destination_info = destination.stat()
+    target_info = (destination / target_name).stat()
+    if (destination_info.st_uid, destination_info.st_gid, stat.S_IMODE(destination_info.st_mode)) != (manifest.owner_uid, manifest.owner_gid, manifest.mode):
+        raise _gateway_error("staged deployment ownership/mode mismatch")
+    if (target_info.st_uid, target_info.st_gid, stat.S_IMODE(target_info.st_mode)) != (manifest.owner_uid, manifest.owner_gid, manifest.mode):
+        raise _gateway_error("staged entrypoint ownership/mode mismatch")
     return destination
 
 
+def _resolve_manifest_source(manifest: DeploymentManifest) -> Path:
+    """Private manager resolver; callers cannot select source bytes."""
+    raise _gateway_error("manager source resolver unavailable")
+
+
 def gateway_recover(
-    *,
     request: GatewayDeploymentRequest | Mapping[str, Any],
-    desired_manifest: DeploymentManifest | None,
-    predecessor_manifest: DeploymentManifest | None,
-    state_root: Path | None = None,
-    desired_source: Path | None = None,
-    predecessor_source: Path | None = None,
-    runner: Callable[..., Any] | None = None,
 ) -> GatewayReconcileOutcome:
     """Validate and stage a recovery request; host effect remains coordinator-gated."""
-    if isinstance(request, Mapping):
-        forbidden = {"root", "label", "pid", "plist", "command", "port", "environment", "devspace"}
-        if forbidden.intersection(request):
-            raise _gateway_error("caller-selected Gateway field rejected")
-        request_id = request.get("request_id", "")
-        fence = request.get("idempotency_fence", "")
-        request_hash = request.get("request_hash") or canonical_hash(dict(request))
-    else:
-        request_id, fence, request_hash = request.request_id, request.idempotency_fence, request.request_hash
-    if not request_id or not fence:
-        raise _gateway_error("durable recovery request identity missing")
-    if desired_manifest is None or predecessor_manifest is None or predecessor_source is None:
-        raise _gateway_error("ROLLBACK_UNAVAILABLE: predecessor deployment bytes unavailable")
-    desired_path = stage_deployment(
-        desired_manifest, source_path=desired_source or Path(desired_manifest.entrypoint), state_root=state_root
-    )
-    predecessor_path = stage_deployment(
-        predecessor_manifest, source_path=predecessor_source, state_root=state_root
-    )
+    try:
+        typed = validate_request(request)
+    except ContractError as exc:
+        raise _gateway_error("R1 recovery request rejected", exc) from exc
+    authority = typed.recovery_authority
+    if authority is None:
+        raise _gateway_error("R1 recovery authority required")
+    validate_recovery_authority(authority, request=typed)
+    desired_manifest, predecessor_manifest = typed.desired_manifest, typed.predecessor_manifest
+    with InterProcessLock(GATEWAY_LOCK):
+        desired_path = stage_deployment(desired_manifest)
+        predecessor_path = stage_deployment(predecessor_manifest)
     # The physical effect is intentionally not callable from this source
     # Candidate.  A later coordinator-bound host receipt consumes these paths.
     return GatewayReconcileOutcome(
-        request_id=request_id, request_hash=request_hash, idempotency_fence=fence,
+        request_id=typed.request_id, request_hash=typed.request_hash, idempotency_fence=typed.idempotency_fence,
         desired_manifest_id=desired_manifest.deployment_id,
         predecessor_manifest_id=predecessor_manifest.deployment_id,
         physical_observation={"desired_path": str(desired_path), "predecessor_path": str(predecessor_path)},
@@ -1751,6 +1750,7 @@ def _validate_gateway_action_pair(
         "install": {"install", "install-artifact", "install_artifact"},
         "install-artifact": {"install", "install-artifact", "install_artifact"},
         "rollback": {"rollback", "gateway-rollback"},
+        "gateway-recover": {"gateway-recover"},
     }
     if action not in expected_operation:
         raise _gateway_error("unsupported Gateway-only action")
@@ -1766,6 +1766,8 @@ def manage_gateway(action: str, *, request: GatewayDeploymentRequest | Mapping[s
     # cross-operation request must not cause a canonical store, remote-main,
     # source, or local-Git read merely to discover the mismatch.
     parsed = _validate_gateway_action_pair(action, request)
+    if action == "gateway-recover":
+        return gateway_recover(parsed)
     typed = _require_host_authority(
         parsed,
         observation_time=kwargs.get("observation_time"),

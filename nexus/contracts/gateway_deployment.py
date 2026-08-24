@@ -412,6 +412,39 @@ class HostEffectAuthorityReceipt(StrictRecord):
 
 
 @dataclass(frozen=True)
+class RecoveryAuthorityReceipt(StrictRecord):
+    """Separate R1 source authority; never parsed as the legacy host bundle."""
+
+    SCHEMA: ClassVar[str] = "nexus.gateway.durable_recovery_authority.v1"
+    schema: str
+    receipt_version: int
+    receipt_id: str
+    receipt_hash: str
+    card_sha256: str
+    source_base_merge: str
+    source_base_tree: str
+    current_main_sha: str
+    operation: str
+    effect_class: EffectClass
+    service_label: str
+    plist_path: str
+    endpoint: str
+    desired_manifest_id: str
+    desired_manifest_sha256: str
+    predecessor_manifest_id: str
+    predecessor_manifest_sha256: str
+    request_id: str
+    idempotency_fence: str
+    issued_at: str
+    expires_at: str
+    revocation_state: str
+    revoked_at: str | None
+    revocation_reason: str | None
+
+    _converters: ClassVar[Mapping[str, Any]] = {"effect_class": EffectClass}
+
+
+@dataclass(frozen=True)
 class HostEffectAuthorityBundle(StrictRecord):
     """Immutable pre-authority for the complete host effect sequence.
 
@@ -581,6 +614,7 @@ class GatewayDeploymentRequest(StrictRecord):
     desired_manifest: DeploymentManifest | None = None
     predecessor_manifest: DeploymentManifest | None = None
     readiness: tuple[DeploymentReadiness, ...] = ()
+    recovery_authority: RecoveryAuthorityReceipt | None = None
 
     _converters: ClassVar[Mapping[str, Any]] = {
         "authority": AuthorityReceipt.model_validate,
@@ -604,6 +638,9 @@ class GatewayDeploymentRequest(StrictRecord):
             None if value is None else DeploymentManifest.model_validate(value)
         ),
         "readiness": lambda value: tuple(DeploymentReadiness(item) for item in value),
+        "recovery_authority": lambda value: (
+            None if value is None else RecoveryAuthorityReceipt.model_validate(value)
+        ),
     }
 
 
@@ -962,8 +999,6 @@ def validate_host_effect_authority(
         "gateway-reload": EffectClass.GATEWAY_RELOAD,
         "rollback": EffectClass.GATEWAY_ROLLBACK,
         "gateway-rollback": EffectClass.GATEWAY_ROLLBACK,
-        "gateway-recover": EffectClass.GATEWAY_DURABLE_RECOVERY,
-        "recover": EffectClass.GATEWAY_DURABLE_RECOVERY,
     }
     if (
         receipt.operation not in operation_effects
@@ -1223,11 +1258,63 @@ parse_host_effect_authority_bundle = validate_host_effect_authority_bundle
 select_host_authority_receipt = select_host_effect_authority_receipt
 
 
+def validate_recovery_authority(
+    receipt: RecoveryAuthorityReceipt,
+    *,
+    request: GatewayDeploymentRequest | None = None,
+    now: str | None = None,
+) -> RecoveryAuthorityReceipt:
+    if not isinstance(receipt, RecoveryAuthorityReceipt) or receipt.schema != RecoveryAuthorityReceipt.SCHEMA:
+        raise ContractError("R1 recovery authority schema mismatch")
+    if receipt.receipt_version != 1 or receipt.operation != "gateway-recover":
+        raise ContractError("R1 recovery operation mismatch")
+    if receipt.effect_class is not EffectClass.GATEWAY_DURABLE_RECOVERY:
+        raise ContractError("R1 recovery effect mismatch")
+    if receipt.card_sha256 != "e403989a59de80477bb23875f1343da77300d23ddf28da4cd3281e76425ad0e7":
+        raise ContractError("R1 recovery Card mismatch")
+    if receipt.source_base_merge != SOURCE_BASE_MERGE or receipt.source_base_tree != SOURCE_BASE_TREE:
+        raise ContractError("R1 recovery source binding mismatch")
+    if receipt.service_label != LABEL or receipt.plist_path != PLIST or receipt.endpoint != ENDPOINT:
+        raise ContractError("R1 recovery fixed service mismatch")
+    for value, name, length in (
+        (receipt.receipt_hash, "recovery receipt", 64),
+        (receipt.current_main_sha, "recovery current main", 40),
+        (receipt.desired_manifest_sha256, "desired manifest", 64),
+        (receipt.predecessor_manifest_sha256, "predecessor manifest", 64),
+    ):
+        _hash(value, name, length)
+    _id(receipt.receipt_id, "recovery receipt id")
+    _id(receipt.request_id, "recovery request id")
+    _id(receipt.idempotency_fence, "recovery fence")
+    expected_hash = canonical_hash({
+        key: value for key, value in receipt.model_dump().items() if key != "receipt_hash"
+    })
+    if receipt.receipt_hash != expected_hash:
+        raise ContractError("R1 recovery receipt hash mismatch")
+    if receipt.revocation_state != "NOT_REVOKED" or receipt.revoked_at is not None:
+        raise ContractError("R1 recovery authority revoked")
+    if request is not None and (
+        request.operation != receipt.operation
+        or request.request_id != receipt.request_id
+        or request.idempotency_fence != receipt.idempotency_fence
+        or request.desired_manifest is None
+        or request.predecessor_manifest is None
+        or request.desired_manifest.deployment_id != receipt.desired_manifest_id
+        or request.predecessor_manifest.deployment_id != receipt.predecessor_manifest_id
+        or request.desired_manifest.manifest_sha256 != receipt.desired_manifest_sha256
+        or request.predecessor_manifest.manifest_sha256 != receipt.predecessor_manifest_sha256
+    ):
+        raise ContractError("R1 recovery request binding mismatch")
+    if now is not None:
+        validate_receipt_freshness(receipt, now=now)
+    return receipt
+
+
 def validate_receipt_freshness(
-    receipt: HostEffectAuthorityReceipt, *, now: str
-) -> HostEffectAuthorityReceipt:
-    if not isinstance(receipt, HostEffectAuthorityReceipt):
-        raise ContractError("host authority freshness receipt must be typed")
+    receipt: HostEffectAuthorityReceipt | RecoveryAuthorityReceipt, *, now: str
+) -> HostEffectAuthorityReceipt | RecoveryAuthorityReceipt:
+    if not isinstance(receipt, (HostEffectAuthorityReceipt, RecoveryAuthorityReceipt)):
+        raise ContractError("authority freshness receipt must be typed")
 
     def parse(value: str) -> datetime:
         try:
@@ -1277,7 +1364,6 @@ def validate_request(
         "rollback": EffectClass.GATEWAY_ROLLBACK,
         "gateway-rollback": EffectClass.GATEWAY_ROLLBACK,
         "gateway-recover": EffectClass.GATEWAY_DURABLE_RECOVERY,
-        "recover": EffectClass.GATEWAY_DURABLE_RECOVERY,
     }
     if (
         request.operation not in operations
@@ -1287,7 +1373,7 @@ def validate_request(
     validate_profile(request.current, expected=CURRENT_PROFILE)
     validate_profile(request.desired, expected=DESIRED_PROFILE)
     validate_desired_profile(request.current, request.desired)
-    if request.operation in {"gateway-recover", "recover"}:
+    if request.operation == "gateway-recover":
         if request.effect_class is not EffectClass.GATEWAY_DURABLE_RECOVERY:
             raise ContractError("durable recovery effect mismatch")
         if request.desired_manifest is None or request.predecessor_manifest is None:
@@ -1298,6 +1384,9 @@ def validate_request(
             DeploymentReadiness.TARGET_READY, DeploymentReadiness.ROLLBACK_READY
         ):
             raise ContractError("durable recovery readiness gates required")
+        if request.recovery_authority is None:
+            raise ContractError("R1 recovery authority required")
+        validate_recovery_authority(request.recovery_authority, request=request)
     validate_current_identity(request.current_identity, request.current)
     validate_source_authority(request.authority, request_id=request.request_id)
     if request.host_authority is None:
@@ -1374,6 +1463,8 @@ def validate_request(
         payload.pop("predecessor_manifest", None)
     if not request.readiness:
         payload.pop("readiness", None)
+    if request.recovery_authority is None:
+        payload.pop("recovery_authority", None)
     expected = canonical_hash(payload)
     legacy_payload = {
         key: _plain(value)

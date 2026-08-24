@@ -617,6 +617,23 @@ def test_r1_manifest_readiness_and_reconcile_contract_is_typed_and_hash_bound():
         DeploymentManifest.model_validate({**manifest.model_dump(), "root": "/tmp/caller"})
 
 
+def test_legacy_host_authority_cannot_authorize_durable_recovery():
+    request = _request()
+    altered = HostEffectAuthorityReceipt(**{
+        **request.host_authority.__dict__,
+        "operation": "gateway-recover",
+        "effect_class": EffectClass.GATEWAY_DURABLE_RECOVERY,
+    })
+    with pytest.raises(ContractError):
+        validate_host_effect_authority(altered)
+
+
+def test_r1_recovery_authority_is_a_distinct_hash_domain():
+    from nexus.contracts.gateway_deployment import RecoveryAuthorityReceipt
+
+    assert RecoveryAuthorityReceipt.SCHEMA == "nexus.gateway.durable_recovery_authority.v1"
+
+
 def test_wrong_profile_identity_rejected():
     bad = DeploymentProfile(
         GitIdentity(

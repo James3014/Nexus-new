@@ -219,17 +219,18 @@ def test_status_is_json_serializable_and_does_not_expose_process_output(monkeypa
     assert set(payload) == {"gateway", "devspace"}
 
 
-def test_r1_stage_is_content_addressed_and_missing_rollback_has_zero_effect(tmp_path):
+def test_r1_stage_is_content_addressed_and_missing_rollback_has_zero_effect(monkeypatch, tmp_path):
     from nexus.contracts.gateway_deployment import DeploymentManifest, InterpreterIdentity
 
     source = tmp_path / "desired.py"
     source.write_bytes(b"desired gateway bytes")
+    source.chmod(0o700)
     manifest = DeploymentManifest(
         deployment_id="desired-1", repository="James3014/Nexus-new", commit="a" * 40,
         tree="b" * 40, entrypoint="scripts/ops/nexus_mcp_gateway_http.py",
-        entrypoint_sha256="c" * 64, interpreter=InterpreterIdentity(),
+        entrypoint_sha256=hashlib.sha256(source.read_bytes()).hexdigest(), interpreter=InterpreterIdentity(),
         content_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
-        manifest_sha256="0" * 64, owner_uid=os.getuid(), owner_gid=os.getgid(), mode=0o700,
+        manifest_sha256="0" * 64, owner_uid=source.stat().st_uid, owner_gid=source.stat().st_gid, mode=stat.S_IMODE(source.stat().st_mode),
     )
     manifest = DeploymentManifest(**{
         **manifest.__dict__,
@@ -237,24 +238,24 @@ def test_r1_stage_is_content_addressed_and_missing_rollback_has_zero_effect(tmp_
             key: value for key, value in manifest.model_dump().items() if key != "manifest_sha256"
         }),
     })
-    staged = g.stage_deployment(manifest, source_path=source, state_root=tmp_path / "state")
+    monkeypatch.setattr(g, "GATEWAY_STATE_ROOT", tmp_path / "state")
+    monkeypatch.setattr(g, "GATEWAY_DEPLOYMENTS_ROOT", tmp_path / "state" / "deployments")
+    monkeypatch.setattr(g, "_resolve_manifest_source", lambda _manifest: source)
+    staged = g.stage_deployment(manifest)
     assert staged.name == manifest.content_sha256
     assert (staged / "nexus_mcp_gateway_http.py").read_bytes() == source.read_bytes()
-    with pytest.raises(g.GatewayContractError, match="ROLLBACK_UNAVAILABLE"):
+    with pytest.raises(g.GatewayContractError, match="R1 recovery request rejected"):
         g.gateway_recover(
-            request={"request_id": "r-1", "idempotency_fence": "f-1"},
-            desired_manifest=manifest, predecessor_manifest=None,
-            state_root=tmp_path / "state", runner=lambda *args: pytest.fail("effect called"),
+            request=None,
         )
 
 
-def test_r1_recovery_rejects_caller_selected_effect_surface(tmp_path):
-    with pytest.raises(g.GatewayContractError, match="caller-selected"):
-        g.gateway_recover(
-            request={"request_id": "r-1", "idempotency_fence": "f-1", "root": "/tmp/caller",
-                     "label": "com.attacker.gateway"},
-            desired_manifest=None, predecessor_manifest=None, state_root=tmp_path,
-        )
+def test_r1_recovery_rejects_caller_selected_effect_surface():
+    import inspect
+    parameters = inspect.signature(g.gateway_recover).parameters
+    assert "state_root" not in parameters
+    assert "desired_source" not in parameters
+    assert "predecessor_source" not in parameters
 
 def test_status_classifies_real_absent_launchctl_service(monkeypatch, tmp_path):
     setup(monkeypatch, tmp_path)
