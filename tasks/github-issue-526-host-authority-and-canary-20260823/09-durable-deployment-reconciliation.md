@@ -93,8 +93,10 @@ not a self-containing future-main claim.
 
 After local receipt bytes equal the tracked blob on fresh remote main, the
 manager builds and verifies the exact three-role Git bundle, computes its raw
-SHA-256, and records a strict `SourceBundleEvidence` row in the same ledger-v2
-hash chain before import/promotion. That evidence binds request/hash/fence,
+SHA-256, imports it into the strict fixed bare repository, and verifies the
+imported bare-store identity. The manager then constructs and records a strict
+`SourceBundleEvidence` row in the same ledger-v2 hash chain before any worktree
+promotion. That evidence binds request/hash/fence,
 receipt ID/hash, source-set hash, observed fresh-main commit/tree, exact
 role-to-commit head map, raw bundle hash/size, bundle verification, bare-store
 identity evidence, observation time, and evidence hash. It is not authority and
@@ -229,8 +231,9 @@ Required order:
    CAS and static source/interpreter/plist constraints.
 2. Recompute the semantic source set and both manager-derived manifests; they
    must equal the receipt/request expectations. Then build/verify the exact
-   three-role bundle, compute raw bundle SHA-256, and persist
-   `SourceBundleEvidence` before import or promotion.
+   three-role bundle, compute raw bundle SHA-256, import it into and verify the
+   strict fixed bare repository, and persist `SourceBundleEvidence` before any
+   worktree promotion.
 3. Stage desired bytes and append `TARGET_READY`.
 4. Stage exact predecessor bytes and append `ROLLBACK_READY`. Missing bytes or
    metadata-only predecessor yields `ROLLBACK_UNAVAILABLE` and `BLOCKED` with
