@@ -359,6 +359,44 @@ def test_model_capability_lineage_uses_exact_calibration_targets_without_fallbac
     assert details.sources == ["impact_map"]
 
 
+def test_issue526_authority_bundle_json_maps_exact_targets_without_shadowing_siblings(
+    tmp_path,
+):
+    exact_path = (
+        "tasks/github-issue-526-host-authority-and-canary-20260823/"
+        "02-host-effect-authority-receipt.json"
+    )
+    adjacent_path = (
+        "tasks/github-issue-526-host-authority-and-canary-20260823/"
+        "03-host-effect-authority-receipt.json"
+    )
+    rules = load_impact_rules()
+    kwargs = {
+        "index_path": tmp_path / "missing-index.json",
+        "stats_path": tmp_path / "missing-stats.json",
+        "history_path": tmp_path / "missing-history.jsonl",
+    }
+
+    exact = select_target_details([exact_path], rules, **kwargs)
+    adjacent = select_target_details([adjacent_path], rules, **kwargs)
+
+    assert exact.targets == [
+        "tests/contracts/test_gateway_deployment_contract.py",
+        "tests/ops/test_mcp_gateway_durable.py",
+        "tests/services/test_policy_gate.py",
+    ]
+    assert exact.risk == "high"
+    assert exact.risk_reasons == ["gateway_host_authority_bundle_contract"]
+    assert exact.sources == ["impact_map", "high_risk"]
+    assert exact.fallback_used is False
+    assert exact.unmatched_paths == []
+
+    assert adjacent.fallback_used is True
+    assert adjacent.unmatched_paths == [adjacent_path]
+    assert adjacent.sources == ["fallback"]
+    assert "tests/core" in adjacent.targets
+
+
 def test_select_targets_uses_fallback_when_no_paths_match():
     targets, reasons = select_targets(
         ["nexus/app/flow.py"],
