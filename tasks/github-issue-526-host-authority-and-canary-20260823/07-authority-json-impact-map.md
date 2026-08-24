@@ -90,4 +90,3 @@ the claim ceiling before push or PR.
 - do not push, open/approve/merge a PR, or alter protected refs;
 - do not self-approve or advance TASK-526-HOST-1;
 - `AUTO_CHAIN=false`; stop after the committed Candidate report.
-
