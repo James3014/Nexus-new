@@ -17,10 +17,14 @@ Current Owner request in this conversation authorizes this bounded governed mile
 - `tests/ops/test_fast_start_v2.py`
 - `.github/workflows/fast-start-v2-shadow.yml`
 - `.github/workflows/fast-start-v2-invalidator.yml`
+- `openwiki/workflows/github-actions.md`
+- `tests/ops/test_openwiki_source_contract.py`
 - `tasks/github-fast-start-v2-g9-g11-20260824/00-fast-start-v2-g9-g11.md`
 - `tasks/github-fast-start-v2-g9-g11-20260824/INDEX.md`
 
-Maximum repository changed files: 6.
+Maximum repository changed files: 8.
+
+The OpenWiki page and its source-contract test are included only because the repository's exact-base CI requires the physical workflow inventory and derived OpenWiki workflow inventory to remain synchronized. They are derived/governance evidence, not a new Fast Start authority.
 
 ## Forbidden scope
 - No product source changes.
