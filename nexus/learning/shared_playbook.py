@@ -125,9 +125,7 @@ def _validate_authority(payload: dict[str, Any]) -> None:
 
 
 def _validate_permissions(payload: dict[str, Any]) -> None:
-    permissions = _mapping(
-        payload.get("permissions"), reason="shared_playbook_permissions_missing"
-    )
+    permissions = _mapping(payload.get("permissions"), reason="shared_playbook_permissions_missing")
     if not set(_INHERIT_ONLY_PERMISSION_KEYS).issubset(permissions):
         raise SharedPlaybookError("shared_playbook_permissions_missing")
     if any(str(value or "") != "INHERIT_ONLY" for value in permissions.values()):
@@ -401,9 +399,7 @@ def bind_shared_playbook_runtime_receipts(
             if receipt.get("playbook_violation"):
                 continue
             evidence_refs = [
-                str(ref)
-                for ref in (receipt.get("evidence_refs", []) or [])
-                if str(ref).strip()
+                str(ref) for ref in (receipt.get("evidence_refs", []) or []) if str(ref).strip()
             ]
             evidence_refs.append(
                 "shared_playbook:"

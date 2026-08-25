@@ -168,9 +168,9 @@ def test_runtime_receipt_fails_closed_when_playbook_is_not_planner_selected(
 ) -> None:
     identity = _identity()
     plan = _plan(identity)
-    plan["signal_snapshot"]["planned_skill_mount_contracts"][0][
-        "planner_selected_capability"
-    ] = False
+    plan["signal_snapshot"]["planned_skill_mount_contracts"][0]["planner_selected_capability"] = (
+        False
+    )
     _stub_receipts(monkeypatch, [_receipt(public_claim_safe=True)])
 
     receipt = build_capability_receipt_payloads(plan, {"capabilities": {}})[0]
