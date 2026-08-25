@@ -90,14 +90,12 @@ def _request():
         expires_at="2026-08-24T00:00:00Z",
         request_id="r-526",
     )
-    receipt = AuthorityReceipt(
-        **{
-            **receipt.__dict__,
-            "receipt_hash": canonical_hash(
-                {k: v for k, v in receipt.__dict__.items() if k != "receipt_hash"}
-            ),
-        }
-    )
+    receipt = AuthorityReceipt(**{
+        **receipt.__dict__,
+        "receipt_hash": canonical_hash({
+            k: v for k, v in receipt.__dict__.items() if k != "receipt_hash"
+        }),
+    })
     ident = IdentityEvidence(
         plist_sha256=plist_hash,
         plist_bytes_sha256=plist_hash,
@@ -188,14 +186,12 @@ def _request():
         revoked_at=None,
         revocation_reason=None,
     )
-    host = HostEffectAuthorityReceipt(
-        **{
-            **host.__dict__,
-            "receipt_hash": canonical_hash(
-                {k: v for k, v in host.__dict__.items() if k != "receipt_hash"}
-            ),
-        }
-    )
+    host = HostEffectAuthorityReceipt(**{
+        **host.__dict__,
+        "receipt_hash": canonical_hash({
+            k: v for k, v in host.__dict__.items() if k != "receipt_hash"
+        }),
+    })
     values["host_authority"] = host
     values["request_hash"] = canonical_hash(values)
     return GatewayDeploymentRequest(**values)
@@ -209,31 +205,27 @@ def _bundle_fixture(*, revoked=False, child_revoked=False):
         ("reload", EffectClass.GATEWAY_RELOAD, "reload"),
         ("rollback", EffectClass.GATEWAY_ROLLBACK, "rollback"),
     ):
-        child = HostEffectAuthorityReceipt(
-            **{
-                **base.__dict__,
-                "operation": operation,
-                "effect_class": effect,
-                "receipt_id": f"bundle-{suffix}",
-                "request_id": f"bundle-request-{suffix}",
-                "idempotency_fence": f"bundle-fence-{suffix}",
-                "revocation_state": "REVOKED"
-                if (child_revoked and suffix == "reload")
-                else "NOT_REVOKED",
-                "revoked_at": "2026-08-23T00:00:00Z"
-                if (child_revoked and suffix == "reload")
-                else None,
-                "revocation_reason": "owner" if (child_revoked and suffix == "reload") else None,
-            }
-        )
-        child = HostEffectAuthorityReceipt(
-            **{
-                **child.__dict__,
-                "receipt_hash": canonical_hash(
-                    {k: v for k, v in child.__dict__.items() if k != "receipt_hash"}
-                ),
-            }
-        )
+        child = HostEffectAuthorityReceipt(**{
+            **base.__dict__,
+            "operation": operation,
+            "effect_class": effect,
+            "receipt_id": f"bundle-{suffix}",
+            "request_id": f"bundle-request-{suffix}",
+            "idempotency_fence": f"bundle-fence-{suffix}",
+            "revocation_state": "REVOKED"
+            if (child_revoked and suffix == "reload")
+            else "NOT_REVOKED",
+            "revoked_at": "2026-08-23T00:00:00Z"
+            if (child_revoked and suffix == "reload")
+            else None,
+            "revocation_reason": "owner" if (child_revoked and suffix == "reload") else None,
+        })
+        child = HostEffectAuthorityReceipt(**{
+            **child.__dict__,
+            "receipt_hash": canonical_hash({
+                k: v for k, v in child.__dict__.items() if k != "receipt_hash"
+            }),
+        })
         children.append(child)
     bundle = HostEffectAuthorityBundle(
         schema=HOST_AUTHORITY_BUNDLE_SCHEMA,
@@ -259,14 +251,12 @@ def _bundle_fixture(*, revoked=False, child_revoked=False):
         revocation_reason="owner" if revoked else None,
         receipts=tuple(children),
     )
-    return HostEffectAuthorityBundle(
-        **{
-            **bundle.__dict__,
-            "bundle_hash": canonical_hash(
-                {k: v for k, v in bundle.__dict__.items() if k != "bundle_hash"}
-            ),
-        }
-    )
+    return HostEffectAuthorityBundle(**{
+        **bundle.__dict__,
+        "bundle_hash": canonical_hash({
+            k: v for k, v in bundle.__dict__.items() if k != "bundle_hash"
+        }),
+    })
 
 
 def test_host_card_sha256_matches_tracked_authority_card():
@@ -283,54 +273,44 @@ def test_stale_host_card_sha256_is_rejected_after_rehashing(scope):
     valid_bundle = _bundle_fixture()
 
     def rehash_receipt(receipt):
-        return HostEffectAuthorityReceipt(
-            **{
-                **receipt.__dict__,
-                "receipt_hash": canonical_hash(
-                    {k: v for k, v in receipt.__dict__.items() if k != "receipt_hash"}
-                ),
-            }
-        )
+        return HostEffectAuthorityReceipt(**{
+            **receipt.__dict__,
+            "receipt_hash": canonical_hash({
+                k: v for k, v in receipt.__dict__.items() if k != "receipt_hash"
+            }),
+        })
 
     if scope == "child":
         stale_child = rehash_receipt(
-            HostEffectAuthorityReceipt(
-                **{
-                    **valid_bundle.receipts[1].__dict__,
-                    "host_card_sha256": stale_sha256,
-                }
-            )
+            HostEffectAuthorityReceipt(**{
+                **valid_bundle.receipts[1].__dict__,
+                "host_card_sha256": stale_sha256,
+            })
         )
         receipts = (valid_bundle.receipts[0], stale_child, valid_bundle.receipts[2])
         altered = HostEffectAuthorityBundle(**{**valid_bundle.__dict__, "receipts": receipts})
     else:
         receipts = tuple(
             rehash_receipt(
-                HostEffectAuthorityReceipt(
-                    **{
-                        **receipt.__dict__,
-                        "host_card_sha256": stale_sha256,
-                    }
-                )
+                HostEffectAuthorityReceipt(**{
+                    **receipt.__dict__,
+                    "host_card_sha256": stale_sha256,
+                })
             )
             for receipt in valid_bundle.receipts
         )
-        altered = HostEffectAuthorityBundle(
-            **{
-                **valid_bundle.__dict__,
-                "host_card_sha256": stale_sha256,
-                "receipts": receipts,
-            }
-        )
+        altered = HostEffectAuthorityBundle(**{
+            **valid_bundle.__dict__,
+            "host_card_sha256": stale_sha256,
+            "receipts": receipts,
+        })
 
-    altered = HostEffectAuthorityBundle(
-        **{
-            **altered.__dict__,
-            "bundle_hash": canonical_hash(
-                {k: v for k, v in altered.__dict__.items() if k != "bundle_hash"}
-            ),
-        }
-    )
+    altered = HostEffectAuthorityBundle(**{
+        **altered.__dict__,
+        "bundle_hash": canonical_hash({
+            k: v for k, v in altered.__dict__.items() if k != "bundle_hash"
+        }),
+    })
 
     with pytest.raises(
         ContractError,
@@ -345,32 +325,26 @@ def test_standalone_bundle_binds_frozen_profile_hashes(field):
     assert validate_host_effect_authority(bundle.receipts[1])
     assert validate_host_effect_authority_bundle(bundle) == bundle
 
-    altered_child = HostEffectAuthorityReceipt(
-        **{
-            **bundle.receipts[1].__dict__,
-            field: "a" * 64,
-        }
-    )
-    altered_child = HostEffectAuthorityReceipt(
-        **{
-            **altered_child.__dict__,
-            "receipt_hash": canonical_hash(
-                {k: v for k, v in altered_child.__dict__.items() if k != "receipt_hash"}
-            ),
-        }
-    )
+    altered_child = HostEffectAuthorityReceipt(**{
+        **bundle.receipts[1].__dict__,
+        field: "a" * 64,
+    })
+    altered_child = HostEffectAuthorityReceipt(**{
+        **altered_child.__dict__,
+        "receipt_hash": canonical_hash({
+            k: v for k, v in altered_child.__dict__.items() if k != "receipt_hash"
+        }),
+    })
     receipts = tuple(
         altered_child if i == 1 else receipt for i, receipt in enumerate(bundle.receipts)
     )
     altered_bundle = HostEffectAuthorityBundle(**{**bundle.__dict__, "receipts": receipts})
-    altered_bundle = HostEffectAuthorityBundle(
-        **{
-            **altered_bundle.__dict__,
-            "bundle_hash": canonical_hash(
-                {k: v for k, v in altered_bundle.__dict__.items() if k != "bundle_hash"}
-            ),
-        }
-    )
+    altered_bundle = HostEffectAuthorityBundle(**{
+        **altered_bundle.__dict__,
+        "bundle_hash": canonical_hash({
+            k: v for k, v in altered_bundle.__dict__.items() if k != "bundle_hash"
+        }),
+    })
 
     with pytest.raises(ContractError, match=f"host authority {field} mismatch"):
         validate_host_effect_authority(altered_child)
@@ -388,30 +362,24 @@ def test_standalone_bundle_binds_frozen_profile_hashes(field):
 def test_revoked_child_fields_must_equal_bundle(field, replacement):
     bundle = _bundle_fixture(revoked=True, child_revoked=True)
     index = next(i for i, receipt in enumerate(bundle.receipts) if receipt.operation == "reload")
-    child = HostEffectAuthorityReceipt(
-        **{
-            **bundle.receipts[index].__dict__,
-            field: replacement,
-        }
-    )
-    child = HostEffectAuthorityReceipt(
-        **{
-            **child.__dict__,
-            "receipt_hash": canonical_hash(
-                {k: v for k, v in child.__dict__.items() if k != "receipt_hash"}
-            ),
-        }
-    )
+    child = HostEffectAuthorityReceipt(**{
+        **bundle.receipts[index].__dict__,
+        field: replacement,
+    })
+    child = HostEffectAuthorityReceipt(**{
+        **child.__dict__,
+        "receipt_hash": canonical_hash({
+            k: v for k, v in child.__dict__.items() if k != "receipt_hash"
+        }),
+    })
     receipts = tuple(child if i == index else receipt for i, receipt in enumerate(bundle.receipts))
     altered = HostEffectAuthorityBundle(**{**bundle.__dict__, "receipts": receipts})
-    altered = HostEffectAuthorityBundle(
-        **{
-            **altered.__dict__,
-            "bundle_hash": canonical_hash(
-                {k: v for k, v in altered.__dict__.items() if k != "bundle_hash"}
-            ),
-        }
-    )
+    altered = HostEffectAuthorityBundle(**{
+        **altered.__dict__,
+        "bundle_hash": canonical_hash({
+            k: v for k, v in altered.__dict__.items() if k != "bundle_hash"
+        }),
+    })
 
     with pytest.raises(ContractError, match="revoked child fields mismatch"):
         validate_host_effect_authority_bundle(altered)
@@ -425,12 +393,10 @@ def test_bundle_is_exactly_ordered_three_child_hash_sealed():
         "rollback",
     )
     assert validate_host_effect_authority_bundle(bundle) == bundle
-    reordered = HostEffectAuthorityBundle(
-        **{
-            **bundle.__dict__,
-            "receipts": tuple(reversed(bundle.receipts)),
-        }
-    )
+    reordered = HostEffectAuthorityBundle(**{
+        **bundle.__dict__,
+        "receipts": tuple(reversed(bundle.receipts)),
+    })
     with pytest.raises(ContractError):
         validate_host_effect_authority_bundle(reordered)
     with pytest.raises(ContractError):
@@ -459,27 +425,21 @@ def test_bundle_missing_extra_alias_children_fail_closed(mutation):
 
 def test_bundle_duplicate_ids_requests_and_fences_are_rejected():
     bundle = _bundle_fixture()
-    duplicate = HostEffectAuthorityReceipt(
-        **{
-            **bundle.receipts[1].__dict__,
-            "receipt_id": bundle.receipts[0].receipt_id,
-            "receipt_hash": "0" * 64,
-        }
-    )
-    duplicate = HostEffectAuthorityReceipt(
-        **{
-            **duplicate.__dict__,
-            "receipt_hash": canonical_hash(
-                {k: v for k, v in duplicate.__dict__.items() if k != "receipt_hash"}
-            ),
-        }
-    )
-    altered = HostEffectAuthorityBundle(
-        **{
-            **bundle.__dict__,
-            "receipts": (bundle.receipts[0], duplicate, bundle.receipts[2]),
-        }
-    )
+    duplicate = HostEffectAuthorityReceipt(**{
+        **bundle.receipts[1].__dict__,
+        "receipt_id": bundle.receipts[0].receipt_id,
+        "receipt_hash": "0" * 64,
+    })
+    duplicate = HostEffectAuthorityReceipt(**{
+        **duplicate.__dict__,
+        "receipt_hash": canonical_hash({
+            k: v for k, v in duplicate.__dict__.items() if k != "receipt_hash"
+        }),
+    })
+    altered = HostEffectAuthorityBundle(**{
+        **bundle.__dict__,
+        "receipts": (bundle.receipts[0], duplicate, bundle.receipts[2]),
+    })
     with pytest.raises(ContractError, match="duplicate receipt"):
         validate_host_effect_authority_bundle(altered)
 
@@ -511,9 +471,9 @@ def test_bundle_selection_rejects_future_or_stale_validity(now):
         "operation": "reload",
         "effect_class": EffectClass.GATEWAY_RELOAD,
     }
-    values["request_hash"] = canonical_hash(
-        {k: v for k, v in values.items() if k not in {"request_hash", "schema"}}
-    )
+    values["request_hash"] = canonical_hash({
+        k: v for k, v in values.items() if k not in {"request_hash", "schema"}
+    })
     with pytest.raises(ContractError):
         select_host_effect_authority_receipt(bundle, GatewayDeploymentRequest(**values), now=now)
 
@@ -534,57 +494,49 @@ def test_request_hash_and_rollback_are_bound():
 def test_source_provenance_alone_can_never_validate_as_host_request():
     request = _request()
     values = {**request.__dict__, "host_authority": None}
-    values["request_hash"] = canonical_hash(
-        {key: value for key, value in values.items() if key not in {"request_hash", "schema"}}
-    )
+    values["request_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key not in {"request_hash", "schema"}
+    })
     with pytest.raises(ContractError, match="host-effect authority"):
         validate_request(GatewayDeploymentRequest(**values))
 
 
 def test_host_receipt_is_strictly_bound_to_operation_and_fence():
     request = _request()
-    altered = request.host_authority.__class__(
-        **{
-            **request.host_authority.__dict__,
-            "idempotency_fence": "other-fence",
-        }
-    )
-    altered = altered.__class__(
-        **{
-            **altered.__dict__,
-            "receipt_hash": canonical_hash(
-                {key: value for key, value in altered.__dict__.items() if key != "receipt_hash"}
-            ),
-        }
-    )
+    altered = request.host_authority.__class__(**{
+        **request.host_authority.__dict__,
+        "idempotency_fence": "other-fence",
+    })
+    altered = altered.__class__(**{
+        **altered.__dict__,
+        "receipt_hash": canonical_hash({
+            key: value for key, value in altered.__dict__.items() if key != "receipt_hash"
+        }),
+    })
     values = {**request.__dict__, "host_authority": altered}
-    values["request_hash"] = canonical_hash(
-        {key: value for key, value in values.items() if key not in {"request_hash", "schema"}}
-    )
+    values["request_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key not in {"request_hash", "schema"}
+    })
     with pytest.raises(ContractError, match="request/fence"):
         validate_request(GatewayDeploymentRequest(**values))
 
 
 def test_host_receipt_version_is_exactly_one():
     request = _request()
-    altered = request.host_authority.__class__(
-        **{
-            **request.host_authority.__dict__,
-            "receipt_version": 2,
-        }
-    )
-    altered = altered.__class__(
-        **{
-            **altered.__dict__,
-            "receipt_hash": canonical_hash(
-                {key: value for key, value in altered.__dict__.items() if key != "receipt_hash"}
-            ),
-        }
-    )
+    altered = request.host_authority.__class__(**{
+        **request.host_authority.__dict__,
+        "receipt_version": 2,
+    })
+    altered = altered.__class__(**{
+        **altered.__dict__,
+        "receipt_hash": canonical_hash({
+            key: value for key, value in altered.__dict__.items() if key != "receipt_hash"
+        }),
+    })
     values = {**request.__dict__, "host_authority": altered}
-    values["request_hash"] = canonical_hash(
-        {key: value for key, value in values.items() if key not in {"request_hash", "schema"}}
-    )
+    values["request_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key not in {"request_hash", "schema"}
+    })
     with pytest.raises(ContractError, match="schema/version"):
         validate_request(request.__class__(**values))
 
@@ -593,9 +545,9 @@ def test_rollback_plist_hashes_both_bind_to_bytes():
     request = _request()
     bad = request.rollback.__class__(**{**request.rollback.__dict__, "plist_sha256": "0" * 64})
     values = {**request.__dict__, "rollback": bad}
-    values["request_hash"] = canonical_hash(
-        {k: v for k, v in values.items() if k not in {"request_hash", "schema"}}
-    )
+    values["request_hash"] = canonical_hash({
+        k: v for k, v in values.items() if k not in {"request_hash", "schema"}
+    })
     with pytest.raises(ContractError):
         validate_request(request.__class__(**values))
 
@@ -680,38 +632,32 @@ def test_r1_manifest_readiness_and_reconcile_contract_is_typed_and_hash_bound():
         )
     with pytest.raises(ContractError, match="ownership/mode"):
         validate_deployment_manifest(
-            manifest.__class__(
-                **{
-                    **manifest.__dict__,
+            manifest.__class__(**{
+                **manifest.__dict__,
+                "owner_uid": 999999,
+                "owner_gid": 999999,
+                "mode": 0o755,
+                "manifest_sha256": canonical_hash({
+                    **{
+                        key: value
+                        for key, value in manifest.model_dump().items()
+                        if key != "manifest_sha256"
+                    },
                     "owner_uid": 999999,
                     "owner_gid": 999999,
                     "mode": 0o755,
-                    "manifest_sha256": canonical_hash(
-                        {
-                            **{
-                                key: value
-                                for key, value in manifest.model_dump().items()
-                                if key != "manifest_sha256"
-                            },
-                            "owner_uid": 999999,
-                            "owner_gid": 999999,
-                            "mode": 0o755,
-                        }
-                    ),
-                }
-            )
+                }),
+            })
         )
 
 
 def test_legacy_host_authority_cannot_authorize_durable_recovery():
     request = _request()
-    altered = HostEffectAuthorityReceipt(
-        **{
-            **request.host_authority.__dict__,
-            "operation": "gateway-recover",
-            "effect_class": EffectClass.GATEWAY_DURABLE_RECOVERY,
-        }
-    )
+    altered = HostEffectAuthorityReceipt(**{
+        **request.host_authority.__dict__,
+        "operation": "gateway-recover",
+        "effect_class": EffectClass.GATEWAY_DURABLE_RECOVERY,
+    })
     with pytest.raises(ContractError):
         validate_host_effect_authority(altered)
 
@@ -847,9 +793,9 @@ def test_r1_authority_wrong_lineage_rejects_after_full_rehash(field, replacement
 
     receipt = _r1_authority_fixture()
     values = {**receipt.__dict__, field: replacement}
-    values["receipt_hash"] = canonical_hash(
-        {key: value for key, value in values.items() if key != "receipt_hash"}
-    )
+    values["receipt_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key != "receipt_hash"
+    })
     with pytest.raises(ContractError, match="authority"):
         validate_recovery_authority(RecoveryAuthorityReceipt(**values))
 
@@ -874,9 +820,9 @@ def test_r1_authority_revocation_states_fail_closed(changes):
 
     receipt = _r1_authority_fixture()
     values = {**receipt.__dict__, **changes}
-    values["receipt_hash"] = canonical_hash(
-        {key: value for key, value in values.items() if key != "receipt_hash"}
-    )
+    values["receipt_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key != "receipt_hash"
+    })
     with pytest.raises(ContractError, match="revocation|revoked"):
         validate_recovery_authority(RecoveryAuthorityReceipt(**values))
 
@@ -979,30 +925,26 @@ def test_r1_semantic_change_changes_ids_but_bundle_observation_does_not():
     original = derive_deployment_manifest(receipt.source_set, role="desired")
     values = {
         **receipt.source_set.__dict__,
-        "desired_entrypoint": RecoveryEntrypointIdentity(
-            **{
-                **receipt.source_set.desired_entrypoint.__dict__,
-                "sha256": "f" * 64,
-            }
-        ),
+        "desired_entrypoint": RecoveryEntrypointIdentity(**{
+            **receipt.source_set.desired_entrypoint.__dict__,
+            "sha256": "f" * 64,
+        }),
     }
-    values["source_set_sha256"] = canonical_hash(
-        {key: value for key, value in values.items() if key != "source_set_sha256"}
-    )
+    values["source_set_sha256"] = canonical_hash({
+        key: value for key, value in values.items() if key != "source_set_sha256"
+    })
     changed = derive_deployment_manifest(RecoverySourceSet(**values), role="desired")
     assert changed.deployment_id != original.deployment_id
     accepted_values = {
         **receipt.source_set.__dict__,
-        "accepted_entrypoint": RecoveryEntrypointIdentity(
-            **{
-                **receipt.source_set.accepted_entrypoint.__dict__,
-                "sha256": "e" * 64,
-            }
-        ),
+        "accepted_entrypoint": RecoveryEntrypointIdentity(**{
+            **receipt.source_set.accepted_entrypoint.__dict__,
+            "sha256": "e" * 64,
+        }),
     }
-    accepted_values["source_set_sha256"] = canonical_hash(
-        {key: value for key, value in accepted_values.items() if key != "source_set_sha256"}
-    )
+    accepted_values["source_set_sha256"] = canonical_hash({
+        key: value for key, value in accepted_values.items() if key != "source_set_sha256"
+    })
     accepted_changed = derive_deployment_manifest(
         RecoverySourceSet(**accepted_values), role="desired"
     )
@@ -1014,9 +956,9 @@ def test_r1_semantic_change_changes_ids_but_bundle_observation_does_not():
         **first.__dict__,
         "bundle_sha256": "6" * 64,
     }
-    second_values["evidence_hash"] = canonical_hash(
-        {key: value for key, value in second_values.items() if key != "evidence_hash"}
-    )
+    second_values["evidence_hash"] = canonical_hash({
+        key: value for key, value in second_values.items() if key != "evidence_hash"
+    })
     second = _validate_r1_bundle_fixture(first_fixture, first.__class__(**second_values))
     assert first.evidence_hash != second.evidence_hash
     assert (
@@ -1041,9 +983,9 @@ def test_r1_bundle_evidence_rejects_self_rehashed_context_substitution(field, re
     fixture = _r1_bundle_evidence_fixture()
     evidence = fixture["evidence"]
     values = {**evidence.__dict__, field: replacement}
-    values["evidence_hash"] = canonical_hash(
-        {key: value for key, value in values.items() if key != "evidence_hash"}
-    )
+    values["evidence_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key != "evidence_hash"
+    })
     with pytest.raises(ContractError, match="trusted"):
         _validate_r1_bundle_fixture(fixture, evidence.__class__(**values))
 
@@ -1077,21 +1019,23 @@ def test_r1_bundle_evidence_rejects_role_swap_arbitrary_commits_and_wrong_origin
             ),
         },
         {
-            "bare_store": BareStoreEvidence(
-                **{**fixture["bare"].__dict__, "origin": "https://example.invalid/wrong.git"}
-            ),
+            "bare_store": BareStoreEvidence(**{
+                **fixture["bare"].__dict__,
+                "origin": "https://example.invalid/wrong.git",
+            }),
         },
         {
-            "bare_store": BareStoreEvidence(
-                **{**fixture["bare"].__dict__, "path": "/wrong/repository.git"}
-            ),
+            "bare_store": BareStoreEvidence(**{
+                **fixture["bare"].__dict__,
+                "path": "/wrong/repository.git",
+            }),
         },
     ]
     for mutation in mutations:
         values = {**evidence.__dict__, **mutation}
-        values["evidence_hash"] = canonical_hash(
-            {key: value for key, value in values.items() if key != "evidence_hash"}
-        )
+        values["evidence_hash"] = canonical_hash({
+            key: value for key, value in values.items() if key != "evidence_hash"
+        })
         with pytest.raises(ContractError, match="trusted"):
             _validate_r1_bundle_fixture(fixture, evidence.__class__(**values))
 
@@ -1112,12 +1056,10 @@ def test_r1b_recovery_request_is_separate_and_has_no_legacy_authority_body():
         "predecessor_manifest_hash": "c" * 64,
     }
     request = GatewayRecoveryRequest(**values)
-    request = GatewayRecoveryRequest(
-        **{
-            **request.__dict__,
-            "request_hash": canonical_hash(values),
-        }
-    )
+    request = GatewayRecoveryRequest(**{
+        **request.__dict__,
+        "request_hash": canonical_hash(values),
+    })
     assert validate_recovery_request(request) == request
     with pytest.raises(ContractError):
         GatewayRecoveryRequest.model_validate({**request.model_dump(), "authority": {}})
@@ -1141,14 +1083,12 @@ def test_wrong_profile_identity_rejected():
 
 
 def test_model_validate_is_strict_and_defaults_are_typed():
-    profile = DeploymentProfile.model_validate(
-        {
-            "git": CURRENT_PROFILE.git.model_dump(),
-            "entrypoint": CURRENT_PROFILE.entrypoint,
-            "entrypoint_sha256": CURRENT_PROFILE.entrypoint_sha256,
-            "trust_class": CURRENT_PROFILE.trust_class,
-        }
-    )
+    profile = DeploymentProfile.model_validate({
+        "git": CURRENT_PROFILE.git.model_dump(),
+        "entrypoint": CURRENT_PROFILE.entrypoint,
+        "entrypoint_sha256": CURRENT_PROFILE.entrypoint_sha256,
+        "trust_class": CURRENT_PROFILE.trust_class,
+    })
     assert profile == CURRENT_PROFILE
     with pytest.raises(ContractError):
         DeploymentProfile.model_validate({**profile.model_dump(), "unexpected": True})
@@ -1158,24 +1098,20 @@ def test_dirty_current_profile_roundtrip_is_frozen_and_only_rollback_profile():
     roundtrip = DeploymentProfile.model_validate(CURRENT_PROFILE.model_dump())
     assert roundtrip == CURRENT_PROFILE
     assert validate_profile(roundtrip) == CURRENT_PROFILE
-    dirty_desired = DeploymentProfile.model_validate(
-        {
-            **DESIRED_PROFILE.model_dump(),
-            "git": {**DESIRED_PROFILE.git.model_dump(), "clean": False},
-        }
-    )
+    dirty_desired = DeploymentProfile.model_validate({
+        **DESIRED_PROFILE.model_dump(),
+        "git": {**DESIRED_PROFILE.git.model_dump(), "clean": False},
+    })
     with pytest.raises(ContractError):
         validate_profile(dirty_desired)
-    arbitrary_dirty = DeploymentProfile.model_validate(
-        {
-            **CURRENT_PROFILE.model_dump(),
-            "git": {
-                **CURRENT_PROFILE.git.model_dump(),
-                "root": "/tmp/foreign",
-                "toplevel": "/tmp/foreign",
-            },
-        }
-    )
+    arbitrary_dirty = DeploymentProfile.model_validate({
+        **CURRENT_PROFILE.model_dump(),
+        "git": {
+            **CURRENT_PROFILE.git.model_dump(),
+            "root": "/tmp/foreign",
+            "toplevel": "/tmp/foreign",
+        },
+    })
     with pytest.raises(ContractError):
         validate_profile(arbitrary_dirty)
 
@@ -1200,27 +1136,23 @@ def _request_with_rollback_payload(payload):
     request = _request()
     parsed = plistlib.loads(payload)
     digest = hashlib.sha256(payload).hexdigest()
-    rollback = RollbackCapture(
-        **{
-            **request.rollback.__dict__,
-            "plist_sha256": digest,
-            "plist_bytes_sha256": digest,
-            "plist_bytes_hex": payload.hex(),
-            "program_arguments_hash": canonical_hash(parsed.get("ProgramArguments")),
-            "environment_hash": canonical_hash(parsed.get("EnvironmentVariables")),
-        }
-    )
-    current_identity = IdentityEvidence(
-        **{
-            **request.current_identity.__dict__,
-            "plist_sha256": digest,
-            "plist_bytes_sha256": digest,
-        }
-    )
+    rollback = RollbackCapture(**{
+        **request.rollback.__dict__,
+        "plist_sha256": digest,
+        "plist_bytes_sha256": digest,
+        "plist_bytes_hex": payload.hex(),
+        "program_arguments_hash": canonical_hash(parsed.get("ProgramArguments")),
+        "environment_hash": canonical_hash(parsed.get("EnvironmentVariables")),
+    })
+    current_identity = IdentityEvidence(**{
+        **request.current_identity.__dict__,
+        "plist_sha256": digest,
+        "plist_bytes_sha256": digest,
+    })
     values = {**request.__dict__, "rollback": rollback, "current_identity": current_identity}
-    values["request_hash"] = canonical_hash(
-        {key: value for key, value in values.items() if key not in {"request_hash", "schema"}}
-    )
+    values["request_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key not in {"request_hash", "schema"}
+    })
     return GatewayDeploymentRequest(**values)
 
 
@@ -1304,16 +1236,14 @@ def test_direct_rollback_rejects_foreign_entrypoint_with_matching_suffix():
 
 def test_gateway_lifecycle_revision_cannot_be_substituted_by_quiescence_state():
     request = _request()
-    postflight = PostflightIdentity(
-        **{
-            **request.postflight.__dict__,
-            "lifecycle": request.quiescence.lifecycle_state,
-        }
-    )
+    postflight = PostflightIdentity(**{
+        **request.postflight.__dict__,
+        "lifecycle": request.quiescence.lifecycle_state,
+    })
     values = {**request.__dict__, "postflight": postflight}
-    values["request_hash"] = canonical_hash(
-        {key: value for key, value in values.items() if key not in {"request_hash", "schema"}}
-    )
+    values["request_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key not in {"request_hash", "schema"}
+    })
     with pytest.raises(ContractError, match="action/task/lifecycle mismatch"):
         validate_request(GatewayDeploymentRequest(**values))
 
@@ -1338,34 +1268,26 @@ def test_every_shared_bundle_child_provenance_mutation_rejects_after_full_rehash
     field, replacement
 ):
     bundle = _bundle_fixture()
-    child = HostEffectAuthorityReceipt(
-        **{
-            **bundle.receipts[1].__dict__,
-            field: replacement,
-        }
-    )
-    child = HostEffectAuthorityReceipt(
-        **{
-            **child.__dict__,
-            "receipt_hash": canonical_hash(
-                {key: value for key, value in child.__dict__.items() if key != "receipt_hash"}
-            ),
-        }
-    )
-    altered = HostEffectAuthorityBundle(
-        **{
-            **bundle.__dict__,
-            "receipts": (bundle.receipts[0], child, bundle.receipts[2]),
-        }
-    )
-    altered = HostEffectAuthorityBundle(
-        **{
-            **altered.__dict__,
-            "bundle_hash": canonical_hash(
-                {key: value for key, value in altered.__dict__.items() if key != "bundle_hash"}
-            ),
-        }
-    )
+    child = HostEffectAuthorityReceipt(**{
+        **bundle.receipts[1].__dict__,
+        field: replacement,
+    })
+    child = HostEffectAuthorityReceipt(**{
+        **child.__dict__,
+        "receipt_hash": canonical_hash({
+            key: value for key, value in child.__dict__.items() if key != "receipt_hash"
+        }),
+    })
+    altered = HostEffectAuthorityBundle(**{
+        **bundle.__dict__,
+        "receipts": (bundle.receipts[0], child, bundle.receipts[2]),
+    })
+    altered = HostEffectAuthorityBundle(**{
+        **altered.__dict__,
+        "bundle_hash": canonical_hash({
+            key: value for key, value in altered.__dict__.items() if key != "bundle_hash"
+        }),
+    })
     with pytest.raises(ContractError, match="child 1 provenance mismatch"):
         validate_host_effect_authority_bundle(altered)
 
@@ -1401,12 +1323,10 @@ def test_postflight_schema_is_extra_forbid_and_complete():
     with pytest.raises(ContractError):
         PostflightIdentity.model_validate({"server_instance": "x"})
     with pytest.raises(ContractError):
-        PostflightIdentity.model_validate(
-            {
-                **_request().postflight.model_dump(),
-                "unexpected": True,
-            }
-        )
+        PostflightIdentity.model_validate({
+            **_request().postflight.model_dump(),
+            "unexpected": True,
+        })
 
 
 def test_profile_full_identity_substitution_is_rejected():
@@ -1546,29 +1466,27 @@ def test_r1b2_recovery_binding_hash_covers_every_immutable_input():
     request = fixture["request"]
     receipt = fixture["receipt"]
     evidence = fixture["evidence"]
-    expected = canonical_hash(
-        {
-            "request_id": request.request_id,
-            "request_hash": request.request_hash,
-            "authority_schema": receipt.schema,
-            "receipt_id": receipt.receipt_id,
-            "receipt_hash": receipt.receipt_hash,
-            "card_sha256": receipt.card_sha256,
-            "accepted_source_merge": receipt.accepted_source_merge,
-            "accepted_source_tree": receipt.accepted_source_tree,
-            "final_manager_sha256": receipt.final_manager_sha256,
-            "independent_acceptance_receipt_hash": (receipt.independent_acceptance_receipt_hash),
-            "source_set_sha256": receipt.source_set.source_set_sha256,
-            "desired_manifest_id": receipt.desired_manifest_id,
-            "desired_manifest_hash": receipt.desired_manifest_sha256,
-            "predecessor_manifest_id": receipt.predecessor_manifest_id,
-            "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
-            "source_bundle_evidence_hash": evidence.evidence_hash,
-            "operation": request.operation,
-            "effect_class": request.effect_class,
-            "idempotency_fence": request.idempotency_fence,
-        }
-    )
+    expected = canonical_hash({
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "authority_schema": receipt.schema,
+        "receipt_id": receipt.receipt_id,
+        "receipt_hash": receipt.receipt_hash,
+        "card_sha256": receipt.card_sha256,
+        "accepted_source_merge": receipt.accepted_source_merge,
+        "accepted_source_tree": receipt.accepted_source_tree,
+        "final_manager_sha256": receipt.final_manager_sha256,
+        "independent_acceptance_receipt_hash": (receipt.independent_acceptance_receipt_hash),
+        "source_set_sha256": receipt.source_set.source_set_sha256,
+        "desired_manifest_id": receipt.desired_manifest_id,
+        "desired_manifest_hash": receipt.desired_manifest_sha256,
+        "predecessor_manifest_id": receipt.predecessor_manifest_id,
+        "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
+        "source_bundle_evidence_hash": evidence.evidence_hash,
+        "operation": request.operation,
+        "effect_class": request.effect_class,
+        "idempotency_fence": request.idempotency_fence,
+    })
     assert (
         derive_recovery_ledger_binding(
             request=request,
