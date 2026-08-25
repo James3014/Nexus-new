@@ -127,3 +127,23 @@ def test_planner_mount_rejects_second_primary_playbook(tmp_path: Path, monkeypat
     assert [item["reason"] for item in result["skill_mount_violations"]] == [
         "shared_playbook_second_primary"
     ]
+
+
+def test_planner_mount_preserves_optional_skill_without_shared_playbook(
+    tmp_path: Path, monkeypatch
+) -> None:
+    report = _status_report(tmp_path, ["plain-skill"])
+    monkeypatch.setattr(shared_playbook, "DEFAULT_REPO_ROOT", tmp_path)
+
+    result = build_skill_mount_evidence(
+        skills=[{"skill_id": "plain-skill", "capability_id": "xray"}],
+        budget={"skill_status_report": str(report)},
+        selected_capabilities=["xray"],
+    )
+
+    assert result["skill_mount_violations"] == []
+    assert len(result["skill_mount_contracts"]) == 1
+    contract = result["skill_mount_contracts"][0]
+    assert contract["skill_id"] == "plain-skill"
+    assert contract["planner_selected_capability"] is True
+    assert "shared_playbook" not in contract
