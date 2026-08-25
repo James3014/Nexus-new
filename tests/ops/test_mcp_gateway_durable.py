@@ -33,6 +33,21 @@ HOST_OPERATION_PAIRS = [
     if source_operation != target_operation
 ]
 REAL_POSTFLIGHT_GIT_RUNNER = g._fixed_postflight_git_command_runner
+REAL_R1_IMPORT_BUNDLE = g._r1_import_bundle
+
+
+def _r1b2_portable_import_bundle(bundle, heads):
+    from nexus.contracts.gateway_deployment import BareStoreEvidence, InterpreterIdentity
+
+    observed = REAL_R1_IMPORT_BUNDLE(bundle, heads)
+    fixed = InterpreterIdentity()
+    return BareStoreEvidence(
+        **{
+            **observed.__dict__,
+            "owner_uid": fixed.uid,
+            "owner_gid": fixed.gid,
+        }
+    )
 
 @pytest.fixture(autouse=True)
 def _isolated_host_authority_store(monkeypatch, tmp_path):
@@ -248,7 +263,7 @@ def test_r1b1_staging_does_not_accept_caller_selected_git_refs():
     assert tuple(parameters) == ("request", "receipt")
 
 
-def _r1b1_fixture(tmp_path, monkeypatch):
+def _r1b1_fixture(tmp_path, monkeypatch, *, identity_seed=None):
     from nexus.contracts.gateway_deployment import (
         RECOVERY_CARD_PATH,
         RECOVERY_CARD_SHA256,
@@ -264,12 +279,17 @@ def _r1b1_fixture(tmp_path, monkeypatch):
         derive_deployment_manifest,
     )
 
-    seed = hashlib.sha256(str(tmp_path).encode()).hexdigest()[:12]
+    seed = identity_seed or hashlib.sha256(str(tmp_path).encode()).hexdigest()[:12]
     monkeypatch.setattr(g, "INTERPRETER", sys.executable)
     monkeypatch.setattr(
         g,
         "_r1_interpreter_identity",
         lambda: InterpreterIdentity(),
+    )
+    monkeypatch.setattr(
+        g,
+        "_r1_import_bundle",
+        _r1b2_portable_import_bundle,
     )
 
     mirror = tmp_path / "authority"
@@ -3025,8 +3045,8 @@ def test_r1b2_expected_recovery_identities_are_derived_not_fixture_literals(
     second_root = tmp_path / "second"
     first_root.mkdir()
     second_root.mkdir()
-    first = _r1b1_fixture(first_root, monkeypatch)
-    second = _r1b1_fixture(second_root, monkeypatch)
+    first = _r1b1_fixture(first_root, monkeypatch, identity_seed="first")
+    second = _r1b1_fixture(second_root, monkeypatch, identity_seed="second")
     first_expected = g._recovery_expected_postflight(first["receipt"])
     second_expected = g._recovery_expected_postflight(second["receipt"])
     assert first_expected != second_expected
@@ -4037,6 +4057,7 @@ def _r1b2_apply_runtime_payload(payload):
     for name, value in payload.items():
         setattr(g, name, Path(value) if name in path_names else value)
     g._r1_interpreter_identity = lambda: InterpreterIdentity()
+    g._r1_import_bundle = _r1b2_portable_import_bundle
 
 
 def _r1b2_mp_recovery_worker(
