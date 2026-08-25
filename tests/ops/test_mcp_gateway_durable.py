@@ -4162,11 +4162,13 @@ def _r1b2_mp_append_worker(
     request,
     receipt,
     evidence,
+    runtime_payload,
     ledger_path,
     lock_path,
     barrier,
     result_queue,
 ):
+    _r1b2_apply_runtime_payload(runtime_payload)
     ledger = g.GatewayLedger(Path(ledger_path), lock_path=Path(lock_path))
     barrier.wait(timeout=10)
     try:
@@ -4403,6 +4405,7 @@ def test_r1b2_recovery_concurrent_conflicting_fence_has_one_winner(
                 request,
                 receipt,
                 evidence,
+                _r1b2_runtime_payload(fixture),
                 str(fixture["ledger_path"]),
                 str(fixture["lock_path"]),
                 barrier,
