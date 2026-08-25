@@ -13,43 +13,36 @@ import os
 import tempfile
 
 
-ORIG_SRC   = 'def greet(name)\n    return f"Hello, {name}!"\n'   # intentional syntax error in original
-SEARCH_BAD = 'def greet(name)\n    return f"Hello, {name}!"'      # matches original file
+ORIG_SRC = 'def greet(name):\n    return "unfixed"\n'
 
-# executor restores file to ORIG after isolation, so STANDARD retry sees original content
-SEARCH_GOOD = SEARCH_BAD  # same SEARCH — file is restored to original before retry
+DIFF_BAD = (
+    "--- a/f.py\n"
+    "+++ b/f.py\n"
+    "@@ -1,2 +1,2 @@\n"
+    " def greet(name):\n"
+    '-    return "unfixed"\n'
+    '+    return "WRONG"\n'
+)
 
-
-def _make_ssrp(search: str, replace: str) -> str:
-    return f"FILE: f.py\n<<<<<<< SEARCH\n{search}\n=======\n{replace}\n>>>>>>> REPLACE"
+DIFF_GOOD = (
+    "--- a/f.py\n"
+    "+++ b/f.py\n"
+    "@@ -1,2 +1,2 @@\n"
+    " def greet(name):\n"
+    '-    return "unfixed"\n'
+    '+    return f"Hello, {name}!"\n'
+)
 
 
 def _build_provider():
-    """
-    Provider sequence:
-      Planner / spec-gen prompts  → return JSON / description
-      Patch call #1 (LITE)       → bad patch: syntactically valid, wrong return value
-      Patch call #2 (STANDARD)   → good patch: correct return value
-
-    LITE runs with candidate_cap=1 (max_tries=1), so exactly one patch call per profile.
-    """
     from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
     ctr = {"patch_count": 0}
 
     def gen(req):
-        prompt = req.prompt
-        if "JSON" in prompt or "software architect" in prompt:
-            return '{"search_symbols": ["greet"], "repair_strategy": "Fix return value", "violated_constraints": []}'
-        if "logical specification" in prompt or "senior engineer" in prompt:
-            return "Return the correct greeting string."
-        # Patch synthesis
         ctr["patch_count"] += 1
         if ctr["patch_count"] == 1:
-            # LITE attempt: syntactically valid, verifier-failing patch
-            return _make_ssrp(SEARCH_BAD, 'def greet(name):\n    return "WRONG"')
-        else:
-            # STANDARD retry: SEARCH matches the modified file content
-            return _make_ssrp(SEARCH_GOOD, 'def greet(name):\n    return f"Hello, {name}!"')
+            return DIFF_BAD
+        return DIFF_GOOD
 
     return InjectedLocalModelProvider(generate_fn=gen), ctr
 
@@ -67,6 +60,8 @@ def test_lite_to_standard_verifier_driven_escalation():
       - STANDARD retry: second candidate hash distinct, verifier PASS
       - solved = True
     """
+    from unittest.mock import patch, MagicMock
+    from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
     from nexus.services.local_heal.local_model_executor import (
         LocalModelExecutor,
         LocalModelExecutorRequest,
@@ -102,7 +97,7 @@ def test_lite_to_standard_verifier_driven_escalation():
             },
             "verifier_command": list(verifier_cmd),
             "target_file":      target,
-            "locked_search":    SEARCH_BAD,
+            "locked_search":    'def greet(name):\n    return "unfixed"',
             "python_executable": "python3",
             "llm_call_history": [],
         }
@@ -120,7 +115,55 @@ def test_lite_to_standard_verifier_driven_escalation():
             dry_run=False,
         )
 
-        resp = LocalModelExecutor.run(req, provider=provider)
+        main_pipeline_result = CapabilityExecutionResult(
+            name="repair_loop",
+            selected=True,
+            invoked=True,
+            gate_passed=True,
+            outcome_contributed=True,
+            evidence_present=True,
+            failure_reason="",
+            telemetries={
+                "pipeline_final_patch": DIFF_BAD,
+                "pipeline_solve_eligible": True,
+                "pipeline_failure_reason": "",
+                "patch_synthesis_output_len": len(DIFF_BAD),
+                "patch_synthesis_model_name": "test-model",
+                "patch_synthesis_model_called": True,
+                "provider_invoked": True,
+                "model_called": True,
+                "localheal_pipeline_run_called": True,
+                "localheal_pipeline_run_success": True,
+                "localheal_pipeline_invoked": True,
+                "localheal_pipeline_actual_execution": True,
+                "orchestrator_run_reachable": True,
+                "path_a_actual_execution": True,
+            },
+        )
+
+        retry_result = MagicMock()
+        retry_result.final_patch = DIFF_GOOD
+        retry_result.pre_verification_final_patch = ""
+        retry_result.failure_reason = ""
+        retry_result.model_decisions = [
+            {
+                "phase": "patch",
+                "output_class": "VALID_SEARCH_REPLACE",
+                "parser_error_kind": "none",
+                "status": "SUCCESS",
+                "output_excerpt": DIFF_GOOD,
+            }
+        ]
+        retry_result._orchestrator_verifier_evidence_passed = True
+        retry_result._orchestrator_verifier_evidence_fields = "verifier_failure_evidence_available"
+        retry_result._orchestrator_retry_prompt_evidence_hash = ""
+        retry_result._semantic_retry_telemetry = {}
+
+        with patch("nexus.services.local_heal.local_model_capability_executors.LocalHealPipelineCapabilityExecutor.execute", return_value=main_pipeline_result), \
+             patch("nexus.services.local_heal.pipeline.HealPipeline.__init__", return_value=None), \
+             patch("nexus.services.local_heal.pipeline.HealPipeline.run", return_value=retry_result):
+            resp = LocalModelExecutor.run(req, provider=provider)
+
         raw  = resp.raw_model_metadata
         assert raw is not None, "raw_model_metadata must be present"
 
