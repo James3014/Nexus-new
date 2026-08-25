@@ -220,16 +220,13 @@ def test_invalid_registry_falls_back_without_granting_authority() -> None:
     assert report["implementation_source_or_test_body_reads"] == 0
 
 
-def test_primary_coordinator_contract_makes_fast_start_preflight_mandatory() -> None:
-    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+def test_primary_coordinator_l1_contract_makes_preflight_step_zero() -> None:
     contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(encoding="utf-8")
     command = "python -B scripts/ops/fast_start_consumer.py --issue <number>"
 
-    assert command in agents
-    assert "before\n  implementation source/test reads" in agents
-    assert "sole advisory registry Issue #549 first" in agents
-    assert "Fast Start is `ADVISORY_CACHE_ONLY`" in agents
     assert command in contract
+    assert "0. For GitHub Issue work" in contract
     assert "before implementation source/test body reads" in contract
+    assert "#549 is `ADVISORY_CACHE_ONLY`" in contract
     assert "miss/invalid/stale" in contract
     assert "fresh authoritative discovery/rebind" in contract
