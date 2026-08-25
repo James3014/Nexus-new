@@ -9,7 +9,6 @@ import yaml
 
 from nexus.learning.shared_playbook import SharedPlaybookError, load_selected_shared_playbook
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -36,17 +35,21 @@ def test_diagnose_shared_playbook_binds_exact_manifest_and_instructions_hashes()
     assert identity.status == "CANDIDATE"
     assert identity.primary is True
     assert identity.trace_authority == "DERIVED_ONLY"
-    assert identity.manifest_sha256 == hashlib.sha256(
-        (REPO_ROOT / identity.manifest_path).read_bytes()
-    ).hexdigest()
-    assert identity.instructions_sha256 == hashlib.sha256(
-        (REPO_ROOT / identity.instructions_path).read_bytes()
-    ).hexdigest()
+    assert (
+        identity.manifest_sha256
+        == hashlib.sha256((REPO_ROOT / identity.manifest_path).read_bytes()).hexdigest()
+    )
+    assert (
+        identity.instructions_sha256
+        == hashlib.sha256((REPO_ROOT / identity.instructions_path).read_bytes()).hexdigest()
+    )
 
 
 def test_shared_playbook_rejects_permission_expansion(tmp_path: Path) -> None:
     skill_dir = _copy_diagnose_skill(tmp_path)
-    _mutate_manifest(skill_dir, lambda payload: payload["permissions"].__setitem__("network", "ALLOW"))
+    _mutate_manifest(
+        skill_dir, lambda payload: payload["permissions"].__setitem__("network", "ALLOW")
+    )
 
     with pytest.raises(SharedPlaybookError, match="shared_playbook_permission_expansion"):
         load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
@@ -54,7 +57,9 @@ def test_shared_playbook_rejects_permission_expansion(tmp_path: Path) -> None:
 
 def test_shared_playbook_rejects_authority_escalation(tmp_path: Path) -> None:
     skill_dir = _copy_diagnose_skill(tmp_path)
-    _mutate_manifest(skill_dir, lambda payload: payload["authority"].__setitem__("route_selection", True))
+    _mutate_manifest(
+        skill_dir, lambda payload: payload["authority"].__setitem__("route_selection", True)
+    )
 
     with pytest.raises(SharedPlaybookError, match="shared_playbook_authority_escalation"):
         load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
@@ -80,5 +85,17 @@ def test_shared_playbook_rejects_local_transition_across_stage_boundary(tmp_path
         payload["transitions"][-1]["kind"] = "LOCAL_TRANSITION"
 
     _mutate_manifest(skill_dir, mutate)
-    with pytest.raises(SharedPlaybookError, match="shared_playbook_cross_boundary_requires_handoff"):
+    with pytest.raises(
+        SharedPlaybookError, match="shared_playbook_cross_boundary_requires_handoff"
+    ):
+        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
+
+
+def test_shared_playbook_rejects_unknown_permission_expansion(tmp_path: Path) -> None:
+    skill_dir = _copy_diagnose_skill(tmp_path)
+    _mutate_manifest(
+        skill_dir, lambda payload: payload["permissions"].__setitem__("shell", "ALLOW")
+    )
+
+    with pytest.raises(SharedPlaybookError, match="shared_playbook_permission_expansion"):
         load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)

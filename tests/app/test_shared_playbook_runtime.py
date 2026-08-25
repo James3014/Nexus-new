@@ -8,7 +8,6 @@ from nexus.app import research_receipt_runtime
 from nexus.app.research_receipt_runtime import build_capability_receipt_payloads
 from nexus.learning.shared_playbook import load_selected_shared_playbook
 
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -84,7 +83,9 @@ def test_runtime_receipt_reverifies_and_binds_exact_shared_playbook_identity(mon
     assert receipt["playbook_trace"]["selected_by"] == "CapabilityPlanner"
 
 
-def test_runtime_receipt_fails_closed_on_hash_mismatch_even_if_public_claim_was_safe(monkeypatch) -> None:
+def test_runtime_receipt_fails_closed_on_hash_mismatch_even_if_public_claim_was_safe(
+    monkeypatch,
+) -> None:
     identity = _identity()
     identity["manifest_sha256"] = "0" * 64
     _stub_receipts(monkeypatch, [_receipt(public_claim_safe=True)])
@@ -100,7 +101,10 @@ def test_runtime_receipt_fails_closed_on_hash_mismatch_even_if_public_claim_was_
 
 
 def test_runtime_receipt_strips_unselected_playbook_injection(monkeypatch) -> None:
-    plan = {"selected_capabilities": ["xray"], "signal_snapshot": {"planned_skill_mount_contracts": []}}
+    plan = {
+        "selected_capabilities": ["xray"],
+        "signal_snapshot": {"planned_skill_mount_contracts": []},
+    }
     _stub_receipts(
         monkeypatch,
         [
@@ -140,4 +144,39 @@ def test_runtime_receipt_rejects_second_primary_playbook(monkeypatch) -> None:
 
     assert {receipt["name"] for receipt in receipts} == {"xray", "drone"}
     assert all(receipt["playbook_gate_passed"] is False for receipt in receipts)
-    assert all(receipt["playbook_violation"] == "shared_playbook_second_primary" for receipt in receipts)
+    assert all(
+        receipt["playbook_violation"] == "shared_playbook_second_primary" for receipt in receipts
+    )
+
+
+def test_runtime_receipt_fails_closed_when_required_playbook_contract_is_missing(
+    monkeypatch,
+) -> None:
+    _stub_receipts(monkeypatch, [_receipt(public_claim_safe=True)])
+
+    receipt = build_capability_receipt_payloads(_plan(), {"capabilities": {}})[0]
+
+    assert receipt["playbook_gate_passed"] is False
+    assert receipt["playbook_violation"] == "shared_playbook_runtime_contract_missing"
+    assert receipt["public_claim_safe"] is False
+    assert receipt["gate_passed"] is False
+    assert receipt["outcome_contributed"] is False
+
+
+def test_runtime_receipt_fails_closed_when_playbook_is_not_planner_selected(
+    monkeypatch,
+) -> None:
+    identity = _identity()
+    plan = _plan(identity)
+    plan["signal_snapshot"]["planned_skill_mount_contracts"][0][
+        "planner_selected_capability"
+    ] = False
+    _stub_receipts(monkeypatch, [_receipt(public_claim_safe=True)])
+
+    receipt = build_capability_receipt_payloads(plan, {"capabilities": {}})[0]
+
+    assert receipt["playbook_gate_passed"] is False
+    assert receipt["playbook_violation"] == "shared_playbook_not_planner_selected"
+    assert receipt["public_claim_safe"] is False
+    assert receipt["gate_passed"] is False
+    assert receipt["outcome_contributed"] is False
