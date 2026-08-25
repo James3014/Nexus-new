@@ -28,6 +28,12 @@ source behavior, tests, and required verifiers remain authoritative.
   mutation. An eligible governed worker implements on an issue-specific branch
   such as `codex/issue-<number>-<slug>`, pushes only that branch, and opens a PR
   to `main`. Provider/model names are not normative ownership identities.
+- For any GitHub Issue discovery, the primary coordinator must run
+  `python -B scripts/ops/fast_start_consumer.py --issue <number>` after loading
+  root authority and before any implementation source/test body read. Issue #549
+  is `ADVISORY_CACHE_ONLY`: `EARLY_STOP_*` may return the current blocker and stop;
+  `CACHE_MISS`, `CACHE_UNAVAILABLE_OR_INVALID`, or stale results fall back to
+  fresh authoritative discovery/rebind and can never grant readiness or mutation.
 - Issue claim metadata is explicit and fail-closed: `claim_intent`,
   `claim_enforcement_state`, and `claim_mode`; `PROJECTION_ONLY` or `UNKNOWN`
   enforcement resolves to `MANUAL_DISPATCH`. assignees, labels, comments, Project fields, branch names, and worker prose are projections and cannot
