@@ -157,6 +157,8 @@ def build_skill_mount_evidence(
                     "skill_name": skill_id,
                     "path": entry.path,
                     "reason": exc.reason,
+                    "capability_mount": capability_mount,
+                    "capability": capability_mount,
                 }
             )
             continue
@@ -166,6 +168,8 @@ def build_skill_mount_evidence(
                     "skill_name": skill_id,
                     "path": shared_playbook.manifest_path,
                     "reason": "shared_playbook_not_planner_selected",
+                    "capability_mount": capability_mount,
+                    "capability": capability_mount,
                 }
             )
             continue
@@ -175,6 +179,8 @@ def build_skill_mount_evidence(
                     "skill_name": skill_id,
                     "path": shared_playbook.manifest_path,
                     "reason": "shared_playbook_second_primary",
+                    "capability_mount": capability_mount,
+                    "capability": capability_mount,
                 }
             )
             continue
