@@ -70,15 +70,13 @@ def test_blocked_entry_returns_live_blocker_before_implementation_reads() -> Non
         blocker={"pr": 479, "state": "open", "head_sha": "a" * 40},
         unlock_condition="PR #479 terminal then rebind",
     )
-    client = FakeClient(
-        {
-            "/repos/James3014/Nexus-new/issues/549": _registry(blocked),
-            "/repos/James3014/Nexus-new/pulls/479": {
-                "state": "open",
-                "head": {"sha": "a" * 40},
-            },
-        }
-    )
+    client = FakeClient({
+        "/repos/James3014/Nexus-new/issues/549": _registry(blocked),
+        "/repos/James3014/Nexus-new/pulls/479": {
+            "state": "open",
+            "head": {"sha": "a" * 40},
+        },
+    })
 
     report = consumer_preflight(client, 129)
 
@@ -92,13 +90,9 @@ def test_blocked_entry_returns_live_blocker_before_implementation_reads() -> Non
 
 
 def test_host_bound_entry_stops_after_registry_read() -> None:
-    client = FakeClient(
-        {
-            "/repos/James3014/Nexus-new/issues/549": _registry(
-                _entry(526, "HOST_REBIND_REQUIRED")
-            )
-        }
-    )
+    client = FakeClient({
+        "/repos/James3014/Nexus-new/issues/549": _registry(_entry(526, "HOST_REBIND_REQUIRED"))
+    })
 
     report = consumer_preflight(client, 526)
 
@@ -124,15 +118,13 @@ def test_stale_blocker_never_unlocks_from_cache() -> None:
         "BLOCKED_OVERLAP",
         blocker={"pr": 479, "state": "open", "head_sha": "a" * 40},
     )
-    client = FakeClient(
-        {
-            "/repos/James3014/Nexus-new/issues/549": _registry(blocked),
-            "/repos/James3014/Nexus-new/pulls/479": {
-                "state": "closed",
-                "head": {"sha": "b" * 40},
-            },
-        }
-    )
+    client = FakeClient({
+        "/repos/James3014/Nexus-new/issues/549": _registry(blocked),
+        "/repos/James3014/Nexus-new/pulls/479": {
+            "state": "closed",
+            "head": {"sha": "b" * 40},
+        },
+    })
 
     report = consumer_preflight(client, 129)
 
@@ -142,13 +134,11 @@ def test_stale_blocker_never_unlocks_from_cache() -> None:
 
 
 def test_invalid_registry_falls_back_without_granting_authority() -> None:
-    client = FakeClient(
-        {
-            "/repos/James3014/Nexus-new/issues/549": _registry(
-                _entry(129, "BLOCKED_OVERLAP"), corrupt_hash=True
-            )
-        }
-    )
+    client = FakeClient({
+        "/repos/James3014/Nexus-new/issues/549": _registry(
+            _entry(129, "BLOCKED_OVERLAP"), corrupt_hash=True
+        )
+    })
 
     report = safe_consumer_preflight(client, 129)
 
