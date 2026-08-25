@@ -684,6 +684,18 @@ def test_r1_recovery_authority_is_a_distinct_hash_domain():
     } <= required
 
 
+def test_r1_recovery_card_hash_matches_tracked_card_bytes():
+    from nexus.contracts.gateway_deployment import (
+        RECOVERY_CARD_PATH,
+        RECOVERY_CARD_SHA256,
+    )
+
+    repository_root = Path(__file__).resolve().parents[2]
+    tracked_card = repository_root / RECOVERY_CARD_PATH
+    assert tracked_card.is_file()
+    assert hashlib.sha256(tracked_card.read_bytes()).hexdigest() == RECOVERY_CARD_SHA256
+
+
 def _r1_authority_fixture():
     from nexus.contracts.gateway_deployment import (
         RECOVERY_CARD_PATH,
@@ -769,6 +781,25 @@ def _r1_authority_fixture():
     }
     receipt = RecoveryAuthorityReceipt(**values, receipt_hash=canonical_hash(values))
     return receipt
+
+
+def test_r1_recovery_authority_accepts_current_card_and_rejects_rehashed_stale_card():
+    from nexus.contracts.gateway_deployment import (
+        RecoveryAuthorityReceipt,
+        validate_recovery_authority,
+    )
+
+    receipt = _r1_authority_fixture()
+    assert validate_recovery_authority(receipt) == receipt
+    values = {
+        **receipt.__dict__,
+        "card_sha256": "c8882d47df5375091808a0d6e5340d6a80e9af6976ea4a8a4eed1d1983809487",
+    }
+    values["receipt_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key != "receipt_hash"
+    })
+    with pytest.raises(ContractError, match="Card mismatch"):
+        validate_recovery_authority(RecoveryAuthorityReceipt(**values))
 
 
 @pytest.mark.parametrize(
