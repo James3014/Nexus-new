@@ -8,41 +8,36 @@ from typing import Any
 
 import yaml
 
-
 SHARED_PLAYBOOK_SCHEMA = "nexus.shared_playbook.v1"
 PLAYBOOK_TRACE_SCHEMA = "nexus.playbook_trace.v1"
 DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[2]
 REQUIRED_SHARED_PLAYBOOK_IDS = frozenset({"diagnose"})
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
 _ALLOWED_STATUSES = frozenset({"CANDIDATE", "ACTIVE"})
-_REQUIRED_AUTHORITY_FLAGS = frozenset(
-    {
-        "route_selection",
-        "model_selection",
-        "worker_selection",
-        "approval",
-        "integration",
-        "merge",
-        "promotion",
-        "task_receipt",
-        "claim_authority",
-        "self_modify",
-        "permission_expand",
-    }
-)
+_REQUIRED_AUTHORITY_FLAGS = frozenset({
+    "route_selection",
+    "model_selection",
+    "worker_selection",
+    "approval",
+    "integration",
+    "merge",
+    "promotion",
+    "task_receipt",
+    "claim_authority",
+    "self_modify",
+    "permission_expand",
+})
 _INHERIT_ONLY_PERMISSION_KEYS = ("filesystem", "network", "tools")
-_PLAYBOOK_RECEIPT_KEYS = frozenset(
-    {
-        "playbook_id",
-        "playbook_version",
-        "playbook_manifest_sha256",
-        "playbook_instructions_sha256",
-        "playbook_gate_passed",
-        "playbook_violation",
-        "playbook_trace",
-        "shared_playbook",
-    }
-)
+_PLAYBOOK_RECEIPT_KEYS = frozenset({
+    "playbook_id",
+    "playbook_version",
+    "playbook_manifest_sha256",
+    "playbook_instructions_sha256",
+    "playbook_gate_passed",
+    "playbook_violation",
+    "playbook_trace",
+    "shared_playbook",
+})
 
 
 class SharedPlaybookError(ValueError):
@@ -116,7 +111,9 @@ def _string_list(value: Any, *, reason: str) -> list[str]:
 
 
 def _validate_authority(payload: dict[str, Any]) -> None:
-    authority = _mapping(payload.get("authority"), reason="shared_playbook_authority_contract_missing")
+    authority = _mapping(
+        payload.get("authority"), reason="shared_playbook_authority_contract_missing"
+    )
     if not _REQUIRED_AUTHORITY_FLAGS.issubset(authority):
         raise SharedPlaybookError("shared_playbook_authority_contract_incomplete")
     if any(bool(value) for value in authority.values()):
@@ -128,15 +125,23 @@ def _validate_authority(payload: dict[str, Any]) -> None:
 
 
 def _validate_permissions(payload: dict[str, Any]) -> None:
-    permissions = _mapping(payload.get("permissions"), reason="shared_playbook_permissions_missing")
-    for key in _INHERIT_ONLY_PERMISSION_KEYS:
-        if str(permissions.get(key) or "") != "INHERIT_ONLY":
-            raise SharedPlaybookError("shared_playbook_permission_expansion")
+    permissions = _mapping(
+        payload.get("permissions"), reason="shared_playbook_permissions_missing"
+    )
+    if not set(_INHERIT_ONLY_PERMISSION_KEYS).issubset(permissions):
+        raise SharedPlaybookError("shared_playbook_permissions_missing")
+    if any(str(value or "") != "INHERIT_ONLY" for value in permissions.values()):
+        raise SharedPlaybookError("shared_playbook_permission_expansion")
 
 
 def _validate_learning_writeback(payload: dict[str, Any]) -> None:
-    writeback = _mapping(payload.get("learning_writeback"), reason="shared_playbook_learning_writeback_missing")
-    if str(writeback.get("mode") or "") != "CANDIDATE_ONLY" or writeback.get("self_modify") is not False:
+    writeback = _mapping(
+        payload.get("learning_writeback"), reason="shared_playbook_learning_writeback_missing"
+    )
+    if (
+        str(writeback.get("mode") or "") != "CANDIDATE_ONLY"
+        or writeback.get("self_modify") is not False
+    ):
         raise SharedPlaybookError("shared_playbook_self_modify_forbidden")
 
 
@@ -148,7 +153,9 @@ def _validate_transitions(payload: dict[str, Any]) -> None:
     for stage in stages:
         item = _mapping(stage, reason="shared_playbook_stage_invalid")
         stage_id = str(item.get("id") or "").strip()
-        exit_evidence = _string_list(item.get("exit_evidence"), reason="shared_playbook_stage_exit_evidence_invalid")
+        exit_evidence = _string_list(
+            item.get("exit_evidence"), reason="shared_playbook_stage_exit_evidence_invalid"
+        )
         if not stage_id or not exit_evidence:
             raise SharedPlaybookError("shared_playbook_stage_invalid")
         stage_ids.append(stage_id)
@@ -159,7 +166,13 @@ def _validate_transitions(payload: dict[str, Any]) -> None:
         payload.get("local_transition_contract"),
         reason="shared_playbook_local_transition_contract_missing",
     )
-    required_local_guards = ("same_task", "same_scope", "same_capability", "same_permissions", "same_authority")
+    required_local_guards = (
+        "same_task",
+        "same_scope",
+        "same_capability",
+        "same_permissions",
+        "same_authority",
+    )
     if any(local_contract.get(key) is not True for key in required_local_guards):
         raise SharedPlaybookError("shared_playbook_local_transition_boundary_invalid")
 
@@ -186,7 +199,10 @@ def _validate_transitions(payload: dict[str, Any]) -> None:
 def _validate_payload(payload: dict[str, Any], *, skill_id: str, capability_mount: str) -> None:
     if str(payload.get("schema") or "") != SHARED_PLAYBOOK_SCHEMA:
         raise SharedPlaybookError("shared_playbook_schema_invalid")
-    if str(payload.get("playbook_id") or "") != skill_id or str(payload.get("skill_id") or "") != skill_id:
+    if (
+        str(payload.get("playbook_id") or "") != skill_id
+        or str(payload.get("skill_id") or "") != skill_id
+    ):
         raise SharedPlaybookError("shared_playbook_identity_mismatch")
     version = str(payload.get("version") or "").strip()
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
@@ -196,11 +212,15 @@ def _validate_payload(payload: dict[str, Any], *, skill_id: str, capability_moun
     if not isinstance(payload.get("primary"), bool):
         raise SharedPlaybookError("shared_playbook_primary_invalid")
     capabilities = set(
-        _string_list(payload.get("capability_mounts"), reason="shared_playbook_capability_mounts_invalid")
+        _string_list(
+            payload.get("capability_mounts"), reason="shared_playbook_capability_mounts_invalid"
+        )
     )
     if capability_mount not in capabilities:
         raise SharedPlaybookError("shared_playbook_capability_mismatch")
-    stop_conditions = _string_list(payload.get("stop_conditions"), reason="shared_playbook_stop_conditions_invalid")
+    stop_conditions = _string_list(
+        payload.get("stop_conditions"), reason="shared_playbook_stop_conditions_invalid"
+    )
     if not stop_conditions:
         raise SharedPlaybookError("shared_playbook_stop_conditions_invalid")
     _validate_authority(payload)
@@ -303,20 +323,50 @@ def bind_shared_playbook_runtime_receipts(
     receipts: list[dict[str, Any]],
     root: str | Path | None = None,
 ) -> list[dict[str, Any]]:
-    bound_receipts = [_sanitize_receipt(receipt) for receipt in receipts if isinstance(receipt, dict)]
+    bound_receipts = [
+        _sanitize_receipt(receipt) for receipt in receipts if isinstance(receipt, dict)
+    ]
     snapshot = (
         capability_plan_payload.get("signal_snapshot", {})
         if isinstance(capability_plan_payload.get("signal_snapshot"), dict)
         else {}
     )
-    planned_mounts = [
+    all_mounts = [
         item
         for item in (snapshot.get("planned_skill_mount_contracts", []) or [])
         if isinstance(item, dict)
-        and isinstance(item.get("shared_playbook"), dict)
-        and bool(item.get("planner_selected_capability"))
     ]
-    primary_mounts = [item for item in planned_mounts if bool(item["shared_playbook"].get("primary"))]
+    planned_mounts: list[dict[str, Any]] = []
+    for planned in all_mounts:
+        skill_id = str(planned.get("skill_id") or "").strip()
+        capability_mount = str(
+            planned.get("capability_mount") or planned.get("capability") or ""
+        ).strip()
+        targets = _target_receipts(
+            bound_receipts,
+            capability_mount=capability_mount,
+            capability=str(planned.get("capability") or "").strip(),
+        )
+        shared_value = planned.get("shared_playbook")
+        has_playbook_marker = "shared_playbook" in planned
+        playbook_required = skill_id in REQUIRED_SHARED_PLAYBOOK_IDS
+        if (has_playbook_marker or playbook_required) and not bool(
+            planned.get("planner_selected_capability")
+        ):
+            _invalidate_receipts(targets, "shared_playbook_not_planner_selected")
+            continue
+        if playbook_required and not isinstance(shared_value, dict):
+            _invalidate_receipts(targets, "shared_playbook_runtime_contract_missing")
+            continue
+        if has_playbook_marker and not isinstance(shared_value, dict):
+            _invalidate_receipts(targets, "shared_playbook_runtime_contract_invalid")
+            continue
+        if isinstance(shared_value, dict):
+            planned_mounts.append(planned)
+
+    primary_mounts = [
+        item for item in planned_mounts if bool(item["shared_playbook"].get("primary"))
+    ]
     if len(primary_mounts) > 1:
         for planned in primary_mounts:
             targets = _target_receipts(
@@ -329,7 +379,9 @@ def bind_shared_playbook_runtime_receipts(
 
     for planned in planned_mounts:
         skill_id = str(planned.get("skill_id") or "").strip()
-        capability_mount = str(planned.get("capability_mount") or planned.get("capability") or "").strip()
+        capability_mount = str(
+            planned.get("capability_mount") or planned.get("capability") or ""
+        ).strip()
         targets = _target_receipts(
             bound_receipts,
             capability_mount=capability_mount,
@@ -346,27 +398,31 @@ def bind_shared_playbook_runtime_receipts(
             _invalidate_receipts(targets, exc.reason)
             continue
         for receipt in targets:
-            evidence_refs = [str(ref) for ref in (receipt.get("evidence_refs", []) or []) if str(ref).strip()]
+            if receipt.get("playbook_violation"):
+                continue
+            evidence_refs = [
+                str(ref)
+                for ref in (receipt.get("evidence_refs", []) or [])
+                if str(ref).strip()
+            ]
             evidence_refs.append(
                 "shared_playbook:"
                 f"{identity.playbook_id}@{identity.version}:"
                 f"manifest={identity.manifest_sha256}:instructions={identity.instructions_sha256}"
             )
-            receipt.update(
-                {
+            receipt.update({
+                "playbook_id": identity.playbook_id,
+                "playbook_version": identity.version,
+                "playbook_manifest_sha256": identity.manifest_sha256,
+                "playbook_instructions_sha256": identity.instructions_sha256,
+                "playbook_gate_passed": True,
+                "playbook_trace": {
+                    "schema": PLAYBOOK_TRACE_SCHEMA,
+                    "authority": "DERIVED_ONLY",
+                    "selected_by": "CapabilityPlanner",
                     "playbook_id": identity.playbook_id,
-                    "playbook_version": identity.version,
-                    "playbook_manifest_sha256": identity.manifest_sha256,
-                    "playbook_instructions_sha256": identity.instructions_sha256,
-                    "playbook_gate_passed": True,
-                    "playbook_trace": {
-                        "schema": PLAYBOOK_TRACE_SCHEMA,
-                        "authority": "DERIVED_ONLY",
-                        "selected_by": "CapabilityPlanner",
-                        "playbook_id": identity.playbook_id,
-                        "version": identity.version,
-                    },
-                    "evidence_refs": list(dict.fromkeys(evidence_refs)),
-                }
-            )
+                    "version": identity.version,
+                },
+                "evidence_refs": list(dict.fromkeys(evidence_refs)),
+            })
     return bound_receipts
