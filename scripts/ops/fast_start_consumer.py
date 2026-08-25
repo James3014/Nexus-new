@@ -121,7 +121,9 @@ def _issue_contract_fresh(client: Any, entry: Mapping[str, Any]) -> bool:
         for item in comments
         if isinstance(item, Mapping) and int(item.get("id") or 0) > cached_comment
     ]
-    return bool(newer) and all(_is_non_authority_comment(str(item.get("body") or "")) for item in newer)
+    return bool(newer) and all(
+        _is_non_authority_comment(str(item.get("body") or "")) for item in newer
+    )
 
 
 def consumer_preflight(client: Any, issue_number: int) -> dict[str, Any]:
