@@ -67,6 +67,40 @@ def runtime_receipt_plan_payload(
     return plan
 
 
+def _apply_planner_playbook_violations(
+    capability_plan_payload: dict[str, Any],
+    receipts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    snapshot = capability_plan_payload.get("signal_snapshot", {})
+    if not isinstance(snapshot, dict):
+        return receipts
+    violations = snapshot.get("skill_mount_violations", [])
+    if not isinstance(violations, list):
+        return receipts
+
+    for violation in violations:
+        if not isinstance(violation, dict):
+            continue
+        reason = str(violation.get("reason") or "").strip()
+        if not reason.startswith("shared_playbook_"):
+            continue
+        capability_mount = str(
+            violation.get("capability_mount") or violation.get("capability") or ""
+        ).strip()
+        if not capability_mount:
+            continue
+        for receipt in receipts:
+            if str(receipt.get("name") or "").strip() != capability_mount:
+                continue
+            receipt["public_claim_safe"] = False
+            receipt["gate_passed"] = False
+            receipt["outcome_contributed"] = False
+            receipt["playbook_gate_passed"] = False
+            if not receipt.get("playbook_violation"):
+                receipt["playbook_violation"] = reason
+    return receipts
+
+
 def build_capability_receipt_payloads(
     capability_plan_payload: dict[str, Any],
     nexus_usage_trace: dict[str, Any],
@@ -84,7 +118,8 @@ def build_capability_receipt_payloads(
             codeintel=nexus_usage_trace.get("codeintel", {}) if isinstance(nexus_usage_trace.get("codeintel"), dict) else {},
         )
     ]
-    return bind_shared_playbook_runtime_receipts(
+    bound_receipts = bind_shared_playbook_runtime_receipts(
         capability_plan_payload=runtime_plan,
         receipts=receipts,
     )
+    return _apply_planner_playbook_violations(runtime_plan, bound_receipts)
