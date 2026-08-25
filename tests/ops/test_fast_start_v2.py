@@ -203,6 +203,12 @@ def test_production_reconciler_inline_python_compiles() -> None:
 
 def test_production_reconciler_explicitly_rejects_implementation_content_reads() -> None:
     workflow = _production_workflow_text()
-    for marker in ("/contents/", "/git/blobs/", '"/files"', '.endswith(".diff")', '.endswith(".patch")'):
+    for marker in (
+        "/contents/",
+        "/git/blobs/",
+        '"/files"',
+        '.endswith(".diff")',
+        '.endswith(".patch")',
+    ):
         assert marker in workflow
     assert "implementation-content read attempted" in workflow
