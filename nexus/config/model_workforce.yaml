@@ -658,6 +658,7 @@ routing:
     bounded_reasoning_shadow: local_qwen3_8b
   online:
     fast_bounded_implementation: agy_flash
+    main_engineering: codex_luna
     independent_review: grok_review
     complex_milestone: codex_luna_when_available
     free_remote_candidate_pool: [opencode_mimo_free, opencode_ling_free]
