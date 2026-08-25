@@ -8119,6 +8119,13 @@ class SelfHostedTaskService:
             raise RuntimeError("INTEGRATION_AUTHORIZATION_BRANCH_DRIFT")
         if "INTEGRATION_STAGING" not in authorization_obj.action_set or "APPLY_VERIFIED_INTEGRATION" not in authorization_obj.action_set:
             raise RuntimeError("INTEGRATION_AUTHORIZATION_ACTION_SET_INCOMPLETE")
+        persisted_auth_hash = str(
+            (isinstance(raw_authorization, Mapping) and raw_authorization.get("authorization_hash"))
+            or (isinstance(state.get("integration_closure_binding"), Mapping) and state["integration_closure_binding"].get("authorization_hash"))
+            or ""
+        )
+        if persisted_auth_hash and authorization_obj.authorization_hash != persisted_auth_hash:
+            raise RuntimeError("INTEGRATION_AUTHORIZATION_TAMPERED: authorization hash mismatch")
         grant = (state.get("integration_approval_grant") if isinstance(state.get("integration_approval_grant"), Mapping) else None) or (approved.get("approval_grant") if isinstance(approved.get("approval_grant"), Mapping) else None)
         if not grant or not grant.get("consumed_at"):
             raise RuntimeError("APPROVAL_REVALIDATION_REQUIRED: one-shot approval grant is not consumed")
@@ -8143,6 +8150,37 @@ class SelfHostedTaskService:
             "target_base_revision": c_dict.get("target_base_revision", "a" * 40),
         }
         contract = self.build_contract(request_dict)
+        current_universe = {
+            "task_id": task_id,
+            "campaign_id": str(state.get("campaign_id") or (state.get("contract") or {}).get("campaign_id") or authorization_obj.campaign_id),
+            "task_card_hash": str(state.get("task_card_hash") or (state.get("contract") or {}).get("task_card_hash") or boundary_identity.get("task_card_hash") or authorization_obj.task_card_hash),
+            "candidate_commit": str((state.get("promotion_packet") or {}).get("candidate_commit_sha") or authorization_obj.candidate_commit),
+            "candidate_receipt_hash": str((state.get("promotion_packet") or {}).get("candidate_receipt_hash") or authorization_obj.candidate_receipt_hash),
+            "acceptance_receipt_hash": acceptance_obj.receipt_hash,
+            "canonical_root": str(authorization_obj.canonical_root),
+            "canonical_branch": integration_branch,
+            "expected_canonical_head": authorization_obj.expected_canonical_head,
+            "canonical_dirty_baseline": str(authorization_obj.canonical_dirty_baseline),
+            "integration_plan_hash": str(authorization_obj.integration_plan_hash),
+            "cleanup_target_id": str((state.get("lease") or {}).get("target_id") or authorization_obj.cleanup_target_id),
+            "cleanup_target_path": str((state.get("lease") or {}).get("target_path") or authorization_obj.cleanup_target_path),
+            "durable_ref": str(state.get("candidate_ref") or authorization_obj.durable_ref),
+            "attempt_id": str(state.get("attempt_id") or authorization_obj.attempt_id),
+            "candidate_tree_sha": str((state.get("promotion_packet") or {}).get("candidate_tree_sha") or authorization_obj.candidate_tree_sha),
+            "candidate_state_hash": str((state.get("promotion_packet") or {}).get("candidate_state_hash") or authorization_obj.candidate_state_hash),
+            "reviewer_id": acceptance_obj.reviewer_id,
+            "verifier_artifact_hash": str(authorization_obj.verifier_artifact_hash),
+            "require_clean": authorization_obj.require_clean,
+            "strategy": authorization_obj.strategy,
+            "verification_commands_hash": authorization_obj.verification_commands_hash,
+            "post_apply_commands_hash": authorization_obj.post_apply_commands_hash,
+            "cleanup_requested": authorization_obj.cleanup_requested,
+            "approval_scope": authorization_obj.approval_scope,
+        }
+        try:
+            authorization_obj.validate_current(current_universe)
+        except ValueError as exc:
+            raise RuntimeError(f"INTEGRATION_AUTHORIZATION_EXPIRED: {exc}" if "expired" in str(exc) else f"INTEGRATION_AUTHORIZATION_DRIFT: {exc}") from exc
         protected_binding_fields = (
             "task_id",
             "attempt_id",
