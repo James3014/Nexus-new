@@ -9,17 +9,22 @@ on:
     types: [opened, edited, closed, reopened]
   issue_comment:
     types: [created, edited, deleted]
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
 
 permissions: {}
 
 concurrency:
-  group: fast-start-v2-invalidator
+  group: fast-start-v2-registry-control
   cancel-in-progress: false
 
 jobs:
   invalidator:
     if: >-
       github.repository == 'James3014/Nexus-new' &&
+      github.event_name != 'schedule' &&
+      github.event_name != 'workflow_dispatch' &&
       !(github.event_name == 'issue_comment' && github.event.issue.number == 549) &&
       !(github.event_name == 'issues' && github.event.issue.number == 549)
     runs-on: ubuntu-24.04
@@ -132,3 +137,343 @@ jobs:
           gh api "/repos/$REPOSITORY/issues/549/comments" \
             --method POST \
             --raw-field "body=$(cat "$body")" > /dev/null
+
+  reconciler:
+    if: >-
+      github.repository == 'James3014/Nexus-new' &&
+      !(github.event_name == 'issue_comment' && github.event.issue.number == 549) &&
+      !(github.event_name == 'issues' && github.event.issue.number == 549)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: write
+    steps:
+      - name: Checkout trusted default-branch implementation
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Reconcile canonical advisory registry with metadata-only reads
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from __future__ import annotations
+
+          import copy
+          import datetime as dt
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.request
+          from typing import Any, Mapping
+
+          from scripts.ops.fast_start_v2 import parse_registry_body, registry_payload_hash
+
+          REPOSITORY = "James3014/Nexus-new"
+          REGISTRY_ISSUE = 549
+          TOKEN = os.environ["GITHUB_TOKEN"]
+          requested_paths: list[str] = []
+
+
+          def request(path: str, *, method: str = "GET", payload: Mapping[str, Any] | None = None) -> Any:
+              if not path.startswith("/"):
+                  raise ValueError("GitHub path must start with /")
+              requested_paths.append(path)
+              data = None if payload is None else json.dumps(payload, ensure_ascii=False).encode("utf-8")
+              req = urllib.request.Request(
+                  f"https://api.github.com{path}",
+                  data=data,
+                  method=method,
+                  headers={
+                      "Accept": "application/vnd.github+json",
+                      "Authorization": f"Bearer {TOKEN}",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "User-Agent": "nexus-fast-start-v2-reconciler",
+                      "Content-Type": "application/json",
+                  },
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as response:
+                      raw = response.read()
+              except urllib.error.HTTPError as exc:
+                  raise RuntimeError(f"GitHub {method} failed: HTTP {exc.code} {path}") from exc
+              if not raw:
+                  return None
+              return json.loads(raw.decode("utf-8"))
+
+
+          def get(path: str) -> Any:
+              return request(path)
+
+
+          def get_comments(issue: int) -> list[dict[str, Any]]:
+              comments: list[dict[str, Any]] = []
+              for page in range(1, 11):
+                  batch = get(
+                      f"/repos/{REPOSITORY}/issues/{issue}/comments?per_page=100&page={page}"
+                  )
+                  if not isinstance(batch, list):
+                      raise RuntimeError(f"issue {issue} comments response is not a list")
+                  comments.extend(item for item in batch if isinstance(item, dict))
+                  if len(batch) < 100:
+                      return comments
+              raise RuntimeError(f"issue {issue} comments exceed bounded pagination")
+
+
+          def extract_header_hash(body: str) -> str:
+              match = re.search(r"\*\*Canonical payload SHA-256:\*\* `([0-9a-f]{64})`", body)
+              if not match:
+                  raise ValueError("registry hash header missing or malformed")
+              return match.group(1)
+
+
+          def extract_header_revision(body: str) -> int:
+              match = re.search(r"\*\*Registry revision:\*\* `(\d+)`", body)
+              if not match:
+                  raise ValueError("registry revision header missing or malformed")
+              return int(match.group(1))
+
+
+          def rewrite_body(body: str, payload: dict[str, Any], payload_hash: str) -> str:
+              body = re.sub(
+                  r"(\*\*Registry revision:\*\* `)\d+(`)",
+                  rf"\g<1>{int(payload['registry_revision'])}\g<2>",
+                  body,
+                  count=1,
+              )
+              body = re.sub(
+                  r"(\*\*Canonical payload SHA-256:\*\* `)[0-9a-f]{64}(`)",
+                  rf"\g<1>{payload_hash}\g<2>",
+                  body,
+                  count=1,
+              )
+              start = body.find("```json")
+              if start < 0:
+                  raise ValueError("registry JSON block missing")
+              content_start = body.find("\n", start)
+              if content_start < 0:
+                  raise ValueError("registry JSON block malformed")
+              content_start += 1
+              end = body.find("```", content_start)
+              if end < 0:
+                  raise ValueError("registry JSON block unterminated")
+              rendered = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2)
+              return body[:content_start] + rendered + "\n" + body[end:]
+
+
+          def is_explicit_non_authority_comment(body: str) -> bool:
+              upper = body.upper()
+              return "WAKEUP_HINT_ONLY" in upper and "NO_AUTHORITY" in upper
+
+
+          def apply_contract_fence(entry: dict[str, Any], issue: Mapping[str, Any]) -> bool:
+              cached_updated = str(entry.get("issue_updated_at") or "")
+              current_updated = str(issue.get("updated_at") or "")
+              cached_comment = int(entry.get("latest_material_comment_id") or 0)
+              state = str(issue.get("state") or "")
+              if state != "open":
+                  changed = entry.get("dispatch_state") != "EVIDENCE_BLOCKED"
+                  entry["dispatch_state"] = "EVIDENCE_BLOCKED"
+                  if current_updated and current_updated != cached_updated:
+                      entry["issue_updated_at"] = current_updated
+                      changed = True
+                  return changed
+              if not current_updated or current_updated == cached_updated:
+                  return False
+
+              comments = get_comments(int(entry["issue"]))
+              newer = [item for item in comments if int(item.get("id") or 0) > cached_comment]
+              material = [
+                  item
+                  for item in newer
+                  if not is_explicit_non_authority_comment(str(item.get("body") or ""))
+              ]
+              if newer and not material:
+                  # The only new evidence is explicitly non-authoritative. Do not
+                  # rewrite the canonical cache merely to acknowledge a canary/hint.
+                  return False
+
+              changed = False
+              if material:
+                  latest_material = max(int(item.get("id") or 0) for item in material)
+                  if latest_material != cached_comment:
+                      entry["latest_material_comment_id"] = latest_material
+                      changed = True
+              # updated_at drift without an explainable NO_AUTHORITY comment is an
+              # issue-contract ambiguity. Fail closed instead of reading code.
+              if current_updated != cached_updated:
+                  entry["issue_updated_at"] = current_updated
+                  changed = True
+              if entry.get("dispatch_state") != "EVIDENCE_BLOCKED":
+                  entry["dispatch_state"] = "EVIDENCE_BLOCKED"
+                  changed = True
+              return changed
+
+
+          def sync_pr_blocker(entry: dict[str, Any], pr: Mapping[str, Any], blocked_state: str) -> bool:
+              blocker = entry.get("blocker")
+              if not isinstance(blocker, dict):
+                  raise ValueError(f"issue {entry.get('issue')} blocker missing")
+              state = str(pr.get("state") or "")
+              head = pr.get("head") if isinstance(pr.get("head"), Mapping) else {}
+              head_sha = str(head.get("sha") or "")
+              if state not in {"open", "closed"} or not re.fullmatch(r"[0-9a-f]{40}", head_sha):
+                  raise ValueError(f"invalid PR metadata for issue {entry.get('issue')}")
+              changed = False
+              if blocker.get("state") != state:
+                  blocker["state"] = state
+                  changed = True
+              if blocker.get("head_sha") != head_sha:
+                  blocker["head_sha"] = head_sha
+                  changed = True
+              desired_dispatch = blocked_state if state == "open" else "EVIDENCE_BLOCKED"
+              if entry.get("dispatch_state") != "EVIDENCE_BLOCKED" and entry.get("dispatch_state") != desired_dispatch:
+                  entry["dispatch_state"] = desired_dispatch
+                  changed = True
+              if state == "closed" and entry.get("dispatch_state") != "EVIDENCE_BLOCKED":
+                  entry["dispatch_state"] = "EVIDENCE_BLOCKED"
+                  changed = True
+              return changed
+
+
+          registry_issue = get(f"/repos/{REPOSITORY}/issues/{REGISTRY_ISSUE}")
+          if not isinstance(registry_issue, Mapping):
+              raise RuntimeError("registry issue response malformed")
+          initial_body = str(registry_issue.get("body") or "")
+          initial_payload = parse_registry_body(initial_body)
+          initial_hash = extract_header_hash(initial_body)
+          initial_revision = extract_header_revision(initial_body)
+          if initial_payload.get("authority") != "ADVISORY_CACHE_ONLY":
+              raise ValueError("registry authority mismatch")
+          if int(initial_payload.get("registry_revision") or -1) != initial_revision:
+              raise ValueError("registry revision header/payload mismatch")
+          if registry_payload_hash(initial_payload) != initial_hash:
+              raise ValueError("REGISTRY_HASH_MISMATCH")
+
+          branch = get(f"/repos/{REPOSITORY}/branches/main")
+          current_main = str(branch["commit"]["sha"])
+          current_tree = str(branch["commit"]["commit"]["tree"]["sha"])
+          if not re.fullmatch(r"[0-9a-f]{40}", current_main):
+              raise ValueError("current main SHA malformed")
+          if not re.fullmatch(r"[0-9a-f]{40}", current_tree):
+              raise ValueError("current main tree malformed")
+
+          desired = copy.deepcopy(initial_payload)
+          entries = {int(entry["issue"]): entry for entry in desired.get("entries", [])}
+          if set(entries) != {129, 92, 419, 526, 398}:
+              raise ValueError("unexpected registry entry set")
+          before_entries = {issue: copy.deepcopy(entry) for issue, entry in entries.items()}
+
+          issue129 = get(f"/repos/{REPOSITORY}/issues/129")
+          issue92 = get(f"/repos/{REPOSITORY}/issues/92")
+          issue419 = get(f"/repos/{REPOSITORY}/issues/419")
+          pr479 = get(f"/repos/{REPOSITORY}/pulls/479")
+          pr403 = get(f"/repos/{REPOSITORY}/pulls/403")
+          pr402 = get(f"/repos/{REPOSITORY}/pulls/402")
+          issue29 = get(f"/repos/{REPOSITORY}/issues/29")
+
+          contract_blocked = {
+              129: apply_contract_fence(entries[129], issue129),
+              92: apply_contract_fence(entries[92], issue92),
+              419: apply_contract_fence(entries[419], issue419),
+          }
+          sync_pr_blocker(entries[129], pr479, "BLOCKED_OVERLAP")
+          sync_pr_blocker(entries[92], pr403, "BLOCKED_UPSTREAM")
+          sync_pr_blocker(entries[419], pr402, "BLOCKED_PR")
+
+          if not contract_blocked[92]:
+              issue29_state = str(issue29.get("state") or "")
+              pr403_state = str(pr403.get("state") or "")
+              desired_92 = (
+                  "BLOCKED_UPSTREAM"
+                  if pr403_state == "open" or issue29_state == "open"
+                  else "EVIDENCE_BLOCKED"
+              )
+              if entries[92].get("dispatch_state") != "EVIDENCE_BLOCKED":
+                  entries[92]["dispatch_state"] = desired_92
+
+          changed_entries = sorted(
+              issue for issue, entry in entries.items() if entry != before_entries[issue]
+          )
+
+          forbidden = [
+              path
+              for path in requested_paths
+              if "/contents/" in path
+              or "/git/blobs/" in path
+              or "/files" in path
+              or path.endswith(".diff")
+              or path.endswith(".patch")
+          ]
+          if forbidden:
+              raise RuntimeError(f"implementation-content read attempted: {forbidden}")
+
+          report: dict[str, Any] = {
+              "schema": "nexus.fast_start_registry_reconcile_report.v2",
+              "authority": "ADVISORY_CACHE_ONLY",
+              "event_name": os.environ.get("GITHUB_EVENT_NAME"),
+              "registry_revision_before": initial_revision,
+              "current_main": current_main,
+              "current_tree": current_tree,
+              "changed_entries": changed_entries,
+              "implementation_source_or_test_body_reads": 0,
+              "requested_url_count": len(requested_paths),
+          }
+
+          if not changed_entries:
+              report["action"] = "NOOP"
+              report["registry_revision_after"] = initial_revision
+              print(json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2))
+              raise SystemExit(0)
+
+          desired["registry_revision"] = initial_revision + 1
+          desired["generated_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
+          snapshot = desired.setdefault("snapshot", {})
+          snapshot["main_sha"] = current_main
+          snapshot["main_tree"] = current_tree
+          desired_hash = registry_payload_hash(desired)
+          desired_body = rewrite_body(initial_body, desired, desired_hash)
+
+          # Pre-write fence: comments may move issue.updated_at, but canonical body,
+          # revision and payload hash must still match the exact source snapshot.
+          fence_issue = get(f"/repos/{REPOSITORY}/issues/{REGISTRY_ISSUE}")
+          fence_body = str(fence_issue.get("body") or "")
+          if fence_body != initial_body:
+              raise RuntimeError("REGISTRY_PREWRITE_FENCE_CONFLICT")
+          if extract_header_revision(fence_body) != initial_revision:
+              raise RuntimeError("REGISTRY_PREWRITE_REVISION_CONFLICT")
+          if extract_header_hash(fence_body) != initial_hash:
+              raise RuntimeError("REGISTRY_PREWRITE_HASH_CONFLICT")
+
+          request(
+              f"/repos/{REPOSITORY}/issues/{REGISTRY_ISSUE}",
+              method="PATCH",
+              payload={"body": desired_body},
+          )
+          readback = get(f"/repos/{REPOSITORY}/issues/{REGISTRY_ISSUE}")
+          readback_body = str(readback.get("body") or "")
+          if readback_body != desired_body:
+              raise RuntimeError("REGISTRY_POSTWRITE_BODY_MISMATCH")
+          readback_payload = parse_registry_body(readback_body)
+          if int(readback_payload.get("registry_revision") or -1) != initial_revision + 1:
+              raise RuntimeError("REGISTRY_POSTWRITE_REVISION_MISMATCH")
+          if registry_payload_hash(readback_payload) != desired_hash:
+              raise RuntimeError("REGISTRY_POSTWRITE_HASH_MISMATCH")
+          if extract_header_hash(readback_body) != desired_hash:
+              raise RuntimeError("REGISTRY_POSTWRITE_HEADER_HASH_MISMATCH")
+
+          report["action"] = "UPDATED"
+          report["registry_revision_after"] = initial_revision + 1
+          report["registry_hash_after"] = desired_hash
+          print(json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2))
+          PY
