@@ -397,6 +397,61 @@ def test_issue526_authority_bundle_json_maps_exact_targets_without_shadowing_sib
     assert "tests/core" in adjacent.targets
 
 
+def test_issue526_r1_evidence_rows_map_exact_targets_without_shadowing_adjacent(
+    tmp_path,
+):
+    recovery_authority_path = (
+        "tasks/github-issue-526-host-authority-and-canary-20260823/"
+        "10-durable-recovery-authority-receipt.json"
+    )
+    source_acceptance_path = (
+        "tasks/github-issue-526-host-authority-and-canary-20260823/"
+        "10-r1-source-acceptance-evidence.json"
+    )
+    adjacent_path = (
+        "tasks/github-issue-526-host-authority-and-canary-20260823/"
+        "10-r1-source-acceptance-evidence-adjacent.json"
+    )
+    kwargs = {
+        "index_path": tmp_path / "missing-index.json",
+        "stats_path": tmp_path / "missing-stats.json",
+        "history_path": tmp_path / "missing-history.jsonl",
+    }
+
+    exact = select_target_details(
+        [recovery_authority_path, source_acceptance_path],
+        load_impact_rules(),
+        **kwargs,
+    )
+    adjacent = select_target_details([adjacent_path], load_impact_rules(), **kwargs)
+
+    assert exact.targets == [
+        "tests/contracts/test_gateway_deployment_contract.py",
+        "tests/ops/test_mcp_gateway_durable.py",
+        "tests/services/test_policy_gate.py",
+    ]
+    assert exact.reasons == [
+        f"{recovery_authority_path}: matched {recovery_authority_path}",
+        f"{source_acceptance_path}: matched {source_acceptance_path}",
+        "high-risk escalation",
+    ]
+    assert exact.risk == "high"
+    assert exact.high_risk_escalated is True
+    assert exact.risk_reasons == [
+        "issue526_r1_recovery_authority_receipt_contract",
+        "issue526_r1_source_acceptance_evidence_contract",
+    ]
+    assert exact.sources == ["impact_map", "high_risk"]
+    assert exact.fallback_used is False
+    assert exact.unmatched_paths == []
+
+    assert adjacent.fallback_used is True
+    assert adjacent.unmatched_paths == [adjacent_path]
+    assert adjacent.sources == ["fallback"]
+    assert "tests/contracts/test_gateway_deployment_contract.py" not in adjacent.targets
+    assert "tests/ops/test_mcp_gateway_durable.py" not in adjacent.targets
+
+
 def test_select_targets_uses_fallback_when_no_paths_match():
     targets, reasons = select_targets(
         ["nexus/app/flow.py"],
