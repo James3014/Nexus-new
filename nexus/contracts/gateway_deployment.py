@@ -96,7 +96,7 @@ RECOVERY_CARD_PATH = (
     "tasks/github-issue-526-host-authority-and-canary-20260823/"
     "09-durable-deployment-reconciliation.md"
 )
-RECOVERY_CARD_SHA256 = "c8882d47df5375091808a0d6e5340d6a80e9af6976ea4a8a4eed1d1983809487"
+RECOVERY_CARD_SHA256 = "b316a07965b070d1b76fa11fa20105d40bd2be1de325576e719a127bdc1d8609"
 RECOVERY_RECEIPT_PATH = (
     "tasks/github-issue-526-host-authority-and-canary-20260823/"
     "10-durable-recovery-authority-receipt.json"
