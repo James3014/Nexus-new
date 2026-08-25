@@ -264,6 +264,14 @@ def _r1b1_fixture(tmp_path, monkeypatch):
         derive_deployment_manifest,
     )
 
+    seed = hashlib.sha256(str(tmp_path).encode()).hexdigest()[:12]
+    monkeypatch.setattr(g, "INTERPRETER", sys.executable)
+    monkeypatch.setattr(
+        g,
+        "_r1_interpreter_identity",
+        lambda: InterpreterIdentity(),
+    )
+
     mirror = tmp_path / "authority"
     subprocess.run(["git", "init", "-q", "-b", "main", str(mirror)], check=True)
     subprocess.run(["git", "-C", str(mirror), "config", "user.email", "b1@example.invalid"], check=True)
@@ -271,16 +279,16 @@ def _r1b1_fixture(tmp_path, monkeypatch):
     subprocess.run(["git", "-C", str(mirror), "remote", "add", "origin", str(mirror)], check=True)
     entrypoint = mirror / "scripts/ops/nexus_mcp_gateway_http.py"
     entrypoint.parent.mkdir(parents=True)
-    entrypoint.write_text("ROLE = 'predecessor'\n")
+    entrypoint.write_text(f"ROLE = 'predecessor'\nSEED = '{seed}'\n")
     entrypoint.chmod(0o644)
     subprocess.run(["git", "-C", str(mirror), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(mirror), "commit", "-q", "-m", "b1"], check=True)
     predecessor = subprocess.check_output(["git", "-C", str(mirror), "rev-parse", "HEAD"], text=True).strip()
-    entrypoint.write_text("ROLE = 'desired'\n")
+    entrypoint.write_text(f"ROLE = 'desired'\nSEED = '{seed}'\n")
     subprocess.run(["git", "-C", str(mirror), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(mirror), "commit", "-q", "-m", "b1-desired"], check=True)
     desired = subprocess.check_output(["git", "-C", str(mirror), "rev-parse", "HEAD"], text=True).strip()
-    entrypoint.write_text("ROLE = 'accepted'\n")
+    entrypoint.write_text(f"ROLE = 'accepted'\nSEED = '{seed}'\n")
     subprocess.run(["git", "-C", str(mirror), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(mirror), "commit", "-q", "-m", "b1-accepted"], check=True)
     accepted = subprocess.check_output(
@@ -3995,6 +4003,7 @@ def test_r1b2_blocked_terminal_does_not_reenter_physical_or_effect(
 
 def _r1b2_runtime_payload(fixture):
     return {
+        "INTERPRETER": sys.executable,
         "HOST_AUTHORITY_SOURCE_ROOT": str(fixture["mirror"]),
         "HOST_AUTHORITY_REMOTE": str(fixture["mirror"]),
         "HOST_AUTHORITY_UID": os.getuid(),
@@ -4014,6 +4023,8 @@ def _r1b2_runtime_payload(fixture):
 
 
 def _r1b2_apply_runtime_payload(payload):
+    from nexus.contracts.gateway_deployment import InterpreterIdentity
+
     path_names = {
         "HOST_AUTHORITY_SOURCE_ROOT",
         "GATEWAY_STATE_ROOT",
@@ -4025,6 +4036,7 @@ def _r1b2_apply_runtime_payload(payload):
     }
     for name, value in payload.items():
         setattr(g, name, Path(value) if name in path_names else value)
+    g._r1_interpreter_identity = lambda: InterpreterIdentity()
 
 
 def _r1b2_mp_recovery_worker(
