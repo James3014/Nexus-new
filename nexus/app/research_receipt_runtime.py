@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from nexus.engine.capability_receipts import build_trace_receipts
+from nexus.learning.shared_playbook import bind_shared_playbook_runtime_receipts
 
 
 def runtime_receipt_plan_payload(
@@ -72,7 +73,7 @@ def build_capability_receipt_payloads(
 ) -> list[dict[str, Any]]:
     runtime_plan = runtime_receipt_plan_payload(capability_plan_payload, nexus_usage_trace)
     capabilities = nexus_usage_trace.get("capabilities", {}) if isinstance(nexus_usage_trace.get("capabilities"), dict) else {}
-    return [
+    receipts = [
         item.to_dict()
         for item in build_trace_receipts(
             plan=runtime_plan,
@@ -83,3 +84,7 @@ def build_capability_receipt_payloads(
             codeintel=nexus_usage_trace.get("codeintel", {}) if isinstance(nexus_usage_trace.get("codeintel"), dict) else {},
         )
     ]
+    return bind_shared_playbook_runtime_receipts(
+        capability_plan_payload=runtime_plan,
+        receipts=receipts,
+    )
