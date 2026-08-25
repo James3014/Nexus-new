@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from nexus.learning.shared_playbook import SharedPlaybookError, load_selected_shared_playbook
 from nexus.learning.skill_catalog import SkillCatalog
 
 
@@ -131,6 +132,8 @@ def build_skill_mount_evidence(
     selected_set = set(selected_capabilities)
     allow_ablation_skill_mounts = bool(budget.get("allow_ablation_skill_mounts"))
     contracts: list[dict[str, Any]] = []
+    playbook_violations: list[dict[str, str]] = []
+    primary_playbook_bound = False
     for skill_id in skill_ids:
         entry = catalog.get(skill_id)
         if entry is None:
@@ -145,6 +148,39 @@ def build_skill_mount_evidence(
         capability_mount = capability_overrides.get(skill_id) or entry.capability_mount or "unmapped_skill_capability"
         if capability_mount.startswith("reference:"):
             capability_mount = capability_mount.removeprefix("reference:")
+        planner_selected_capability = capability_mount in selected_set or overlay_request
+        try:
+            shared_playbook = load_selected_shared_playbook(skill_id, capability_mount)
+        except SharedPlaybookError as exc:
+            playbook_violations.append(
+                {
+                    "skill_name": skill_id,
+                    "path": entry.path,
+                    "reason": exc.reason,
+                }
+            )
+            continue
+        if shared_playbook is not None and not planner_selected_capability:
+            playbook_violations.append(
+                {
+                    "skill_name": skill_id,
+                    "path": shared_playbook.manifest_path,
+                    "reason": "shared_playbook_not_planner_selected",
+                }
+            )
+            continue
+        if shared_playbook is not None and shared_playbook.primary and primary_playbook_bound:
+            playbook_violations.append(
+                {
+                    "skill_name": skill_id,
+                    "path": shared_playbook.manifest_path,
+                    "reason": "shared_playbook_second_primary",
+                }
+            )
+            continue
+        if shared_playbook is not None and shared_playbook.primary:
+            primary_playbook_bound = True
+
         load_reason_codes = [
             "capability_planner_skill_signal",
             f"catalog_status:{entry.skill_status}",
@@ -153,20 +189,29 @@ def build_skill_mount_evidence(
             load_reason_codes.append("benchmark_ablation_only_mount")
         if overlay_request:
             load_reason_codes.append("sf_runtime_policy_overlay")
-        contracts.append(
-            {
-                "skill_id": entry.name,
-                "skill_status": entry.skill_status,
-                "capability_mount": capability_mount,
-                "capability": capability_mount,
-                "load_reason_codes": load_reason_codes,
-                "evidence_refs": [
-                    f"skill_catalog:{entry.name}",
-                    f"skill_path:{entry.path}",
-                ],
-                "planner_selected_capability": capability_mount in selected_set or overlay_request,
-            }
-        )
+        if shared_playbook is not None:
+            load_reason_codes.append("shared_playbook_exact_identity_bound")
+        contract: dict[str, Any] = {
+            "skill_id": entry.name,
+            "skill_status": entry.skill_status,
+            "capability_mount": capability_mount,
+            "capability": capability_mount,
+            "load_reason_codes": load_reason_codes,
+            "evidence_refs": [
+                f"skill_catalog:{entry.name}",
+                f"skill_path:{entry.path}",
+            ],
+            "planner_selected_capability": planner_selected_capability,
+        }
+        if shared_playbook is not None:
+            contract["shared_playbook"] = shared_playbook.to_dict()
+            contract["evidence_refs"].extend(
+                [
+                    f"playbook_manifest:{shared_playbook.manifest_path}",
+                    f"playbook_instructions:{shared_playbook.instructions_path}",
+                ]
+            )
+        contracts.append(contract)
     validation_skill_ids = [skill_id for skill_id in skill_ids if skill_id not in overlay_skill_ids]
     violations = [
         violation.to_dict()
@@ -175,4 +220,5 @@ def build_skill_mount_evidence(
             allow_ablation=allow_ablation_skill_mounts,
         )
     ]
+    violations.extend(playbook_violations)
     return {"skill_mount_contracts": contracts, "skill_mount_violations": violations}
