@@ -274,6 +274,27 @@ def test_authorized_integration_rejects_persisted_manifest_drift_before_staging(
     assert _git(repo, "rev-parse", branch) == base
 
 
+def test_authorized_integration_rejects_expired_authorization_before_staging(
+    tmp_path: Path,
+):
+    repo, base, _, branch, _, state = _authorized_verifier_state(tmp_path)
+    state["integration_authorization"]["expires_at"] = "2000-01-01T00:00:00+00:00"
+
+    with pytest.raises(RuntimeError, match="authorization expired"):
+        ControlledIntegrationManager(
+            integration_root=tmp_path / "integrations"
+        ).integrate_authorized_task_state(
+            state,
+            integration_branch=branch,
+            staging_root=tmp_path / "staging",
+            apply=True,
+        )
+
+    # Mutation Sentinel: prove neither staging worktree nor git branch mutation was reached
+    assert not (tmp_path / "staging" / "integration-identity").exists()
+    assert _git(repo, "rev-parse", branch) == base
+
+
 def test_staging_verifier_failure_exposes_digests_not_raw_output(
     tmp_path: Path,
     monkeypatch,

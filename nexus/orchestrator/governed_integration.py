@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from nexus.contracts.target_integration_lifecycle import IntegrationAuthorizationEnvelope
 from nexus.executors.cli_worker import (
     CliWorkerRequest,
     CliWorkerStatus,
@@ -458,6 +459,65 @@ class ControlledIntegrationManager:
             raise RuntimeError("integration branch HEAD drift")
         if self._git(["status", "--porcelain=v1", "--untracked-files=all"], controller_root):
             raise RuntimeError("canonical/integration worktree must be clean before apply")
+
+        auth_obj = (
+            authorization
+            if isinstance(authorization, IntegrationAuthorizationEnvelope)
+            else IntegrationAuthorizationEnvelope(
+                **{
+                    "schema": "nexus.integration_authorization.v1",
+                    "task_id": task_id,
+                    "campaign_id": "campaign-default",
+                    "task_card_hash": "0" * 64,
+                    "candidate_commit": candidate_sha,
+                    "candidate_receipt_hash": "0" * 64,
+                    "acceptance_receipt_hash": "0" * 64,
+                    "canonical_root": str(controller_root),
+                    "canonical_branch": integration_branch,
+                    "expected_canonical_head": expected_head,
+                    "canonical_dirty_baseline": "clean",
+                    "integration_plan_hash": "0" * 64,
+                    "action_set": tuple(authorization.get("action_set") or ()),
+                    "cleanup_target_id": "target-default",
+                    "cleanup_target_path": str(controller_root),
+                    "durable_ref": f"refs/heads/nexus/task/{task_id}",
+                    "rollback": "none",
+                    "issued_at": "2026-08-01T00:00:00+00:00",
+                    **{k: v for k, v in dict(authorization).items() if k != "authorization_hash"},
+                }
+            )
+        )
+        current_universe = {
+            "task_id": task_id,
+            "campaign_id": str(state.get("campaign_id") or contract.get("campaign_id") or auth_obj.campaign_id),
+            "task_card_hash": str(state.get("task_card_hash") or contract.get("task_card_hash") or auth_obj.task_card_hash),
+            "candidate_commit": candidate_sha,
+            "candidate_receipt_hash": str(packet.get("candidate_receipt_hash") or auth_obj.candidate_receipt_hash),
+            "acceptance_receipt_hash": str(acceptance.get("receipt_hash") or auth_obj.acceptance_receipt_hash),
+            "canonical_root": str(controller_root),
+            "canonical_branch": integration_branch,
+            "expected_canonical_head": expected_head,
+            "canonical_dirty_baseline": str(state.get("canonical_dirty_baseline") or auth_obj.canonical_dirty_baseline),
+            "integration_plan_hash": str(state.get("integration_plan_hash") or auth_obj.integration_plan_hash),
+            "cleanup_target_id": str((state.get("lease") or {}).get("target_id") or auth_obj.cleanup_target_id),
+            "cleanup_target_path": str((state.get("lease") or {}).get("target_path") or auth_obj.cleanup_target_path),
+            "durable_ref": str(state.get("candidate_ref") or auth_obj.durable_ref),
+            "attempt_id": str(state.get("attempt_id") or auth_obj.attempt_id),
+            "candidate_tree_sha": str(packet.get("candidate_tree_sha") or auth_obj.candidate_tree_sha),
+            "candidate_state_hash": str(packet.get("candidate_state_hash") or auth_obj.candidate_state_hash),
+            "reviewer_id": str(acceptance.get("reviewer_id") or auth_obj.reviewer_id),
+            "verifier_artifact_hash": str(auth_obj.verifier_artifact_hash),
+            "require_clean": auth_obj.require_clean,
+            "strategy": auth_obj.strategy,
+            "verification_commands_hash": auth_obj.verification_commands_hash,
+            "post_apply_commands_hash": auth_obj.post_apply_commands_hash,
+            "cleanup_requested": auth_obj.cleanup_requested,
+            "approval_scope": auth_obj.approval_scope,
+        }
+        try:
+            auth_obj.validate_current(current_universe)
+        except ValueError as exc:
+            raise RuntimeError(f"authorization validation failed: {exc}") from exc
 
         admitted_verifiers = self._bound_manifest(state, contract)
 
