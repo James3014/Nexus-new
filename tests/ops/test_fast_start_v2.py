@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import re
+import textwrap
+from pathlib import Path
+
 import pytest
 
 from scripts.ops.fast_start_v2 import (
@@ -7,6 +11,8 @@ from scripts.ops.fast_start_v2 import (
     decide_reconcile,
     sha256_json,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_pr_479_only_impacts_129() -> None:
@@ -164,3 +170,39 @@ def test_hint_hash_is_deterministic() -> None:
     payload_a = {"b": [2, 1], "a": {"x": "y"}}
     payload_b = {"a": {"x": "y"}, "b": [2, 1]}
     assert sha256_json(payload_a) == sha256_json(payload_b)
+
+
+def _production_workflow_text() -> str:
+    return (REPO_ROOT / ".github" / "workflows" / "fast-start-v2-invalidator.yml").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_production_reconciler_is_default_branch_hourly_writer() -> None:
+    workflow = _production_workflow_text()
+    assert 'cron: "17 * * * *"' in workflow
+    assert "workflow_dispatch:" in workflow
+    assert "  reconciler:" in workflow
+    assert "ref: main" in workflow
+    assert "issues: write" in workflow
+    assert "fast-start-v2-registry-control" in workflow
+    assert "REGISTRY_PREWRITE_FENCE_CONFLICT" in workflow
+    assert "REGISTRY_POSTWRITE_HASH_MISMATCH" in workflow
+    assert '"action"] = "NOOP"' in workflow
+    assert '"dispatch_state"] = "EVIDENCE_BLOCKED"' in workflow
+    assert "implementation_source_or_test_body_reads" in workflow
+
+
+def test_production_reconciler_inline_python_compiles() -> None:
+    workflow = _production_workflow_text()
+    blocks = re.findall(r"python -[^\n]*<<'PY'\n(.*?)\n\s*PY", workflow, flags=re.DOTALL)
+    assert len(blocks) >= 3
+    for index, block in enumerate(blocks, start=1):
+        compile(textwrap.dedent(block), f"fast-start-inline-{index}", "exec")
+
+
+def test_production_reconciler_explicitly_rejects_implementation_content_reads() -> None:
+    workflow = _production_workflow_text()
+    for marker in ("/contents/", "/git/blobs/", '"/files"', '.endswith(".diff")', '.endswith(".patch")'):
+        assert marker in workflow
+    assert "implementation-content read attempted" in workflow
