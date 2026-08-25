@@ -108,12 +108,25 @@ runtime-pool compatibility; reopen, launch-gap, stale-callback, retry/backoff,
 post-kill baseline, truthful pending-versus-blocked status, and atomic legacy
 generic updates under `IMMEDIATE` plus exact row compare-and-swap.
 
-The two Goal paths must remain exact `147359` content:
+The two Goal paths port the accepted `147359` coherent-screen behavior to the
+destructive-delta `ProcessSnapshot` contract physically present at `e3b`:
 
-| Path | Mode | Blob OID | SHA-256 |
-|---|---|---|---|
-| `src/codex-goal-sessions.test.ts` | `100644` | `b7adad626fdd5f9bcf4fb315417ac5e49ed69b6d` | `8f261ae6004f8f06e61b996b4ed4f83c5f094704d7e8566307b82ac0c570f982` |
-| `src/codex-goal-sessions.ts` | `100644` | `7a028663b20de87c2cac3d9728de72364841bee4` | `33d20560627f22c15037e2a69ca0e672e89f4651ab5b3f3db3d4eb5e1cb5503f` |
+- each non-truncated snapshot is ordered novel output bytes, not a cumulative
+  prefix and not a replay deduplication key;
+- an incomplete ANSI-stripped line tail is retained across snapshots;
+- model, directory, and input-ready prompt must form one current coherent
+  screen in order;
+- loading/error/unavailable/unknown/none/empty, trust prompts, later identity
+  regressions, and explicit requested-model/workspace mismatches fail closed;
+- truncation or sequence uncertainty permanently blocks readiness;
+- empty polls do not replay history, while identical text received twice as
+  two real output chunks must be consumed twice;
+- no prefix heuristic, global process-manager change, or server monkeypatch is
+  permitted.
+
+The accepted `147359` commit/tree and tests remain behavioral oracle evidence,
+not a byte requirement for this transport port. The new Goal bytes require
+fresh SHA/tree-bound acceptance.
 
 Every other tree entry must remain byte-identical to `e3b446a`. In particular:
 
@@ -132,6 +145,12 @@ closure also requires source modules not present at `e3b446a`. Copying all
 import. Do not add `better-result`, change package metadata, add dependency
 files, use network materialization, or alter tool/product surfaces.
 
+The first semantic-port oracle is also preserved: exact `147359` Goal blobs
+require cumulative process snapshots, while `e3b` emits destructive deltas.
+Do not add `src/process-sessions.ts` or its test. The later process blob also
+introduces replay, status, timeout, retention, TTL, and cleanup behavior beyond
+this Goal adapter and is not authorized by this Card.
+
 If the accepted G3 invariants cannot be implemented inside these eight paths
 against `e3b446a`, stop with `ALLOWED_SCOPE_INSUFFICIENT / CONTRACT_GAP`.
 Compatibility edits inside the eight paths are a new composite Candidate and
@@ -145,8 +164,9 @@ Before commit:
 1. Re-read deployed HEAD/tree/dirty paths and all three dirty hashes above.
 2. Verify the isolated parent is exactly `e3b446a` and the worktree was clean
    before transplant.
-3. Verify the two Goal modes/blob OIDs/SHA-256 values against the table and
-   verify the package/package-lock blob identities remain exact `e3b446a`.
+3. Verify package/package-lock blob identities remain exact `e3b446a` and
+   verify `src/process-sessions.ts` remains blob
+   `4424d24b4342e661b8f2253083cfd0062e66e79a`.
 4. Run a dependency-denial check proving every relative production import
    resolves and no changed production file adds a bare-package import.
 5. Verify `git diff --name-only e3b446a` is exactly the ten allowed paths,
@@ -172,6 +192,12 @@ git diff --check e3b446a7507491b653d932284a09dc0923652c3d
 The expected historical counts (G3 execution 71, sessions 13, continuation 8,
 server 24, Goal 44) are evidence references, not reasons to weaken current
 assertions or to claim a command passed without execution.
+
+The Goal suite must retain all prior `147359` positive and negative controls
+and add destructive-snapshot cases for multi-snapshot readiness, arbitrary
+label fragmentation, empty polls, identical real chunks, historical ready rows
+followed by loading/error, trust after readiness, truncation fail-closed, no
+`/goal` bytes on every negative, and zero active-session leak.
 
 ## Candidate and review gate
 

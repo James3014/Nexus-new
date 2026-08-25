@@ -11,7 +11,7 @@ auto_chain: false
 
 | Order | Task | Status | SHA-256 | Dependency |
 |---|---|---|---|---|
-| 1 | `TASK-398-DEVSPACE-COMPOSITE-SOURCE-REBIND` | ACTIVE | `cdbadc74c5cf012570a145fc3bbfc47b5db609ff73a0919f697256de649bef7c` | exact-blob attempt stopped on incompatible dependency closure; bounded e3b semantic-port revision active |
+| 1 | `TASK-398-DEVSPACE-COMPOSITE-SOURCE-REBIND` | ACTIVE | `eb49eb8192828c60dc49c470c3192dfdf9b5c7a2533e815da003b64d04176f18` | exact-blob and cumulative-snapshot attempts preserved as RED; bounded e3b delta-snapshot semantic port active |
 
 ## Frontier
 
