@@ -17,6 +17,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -50,7 +51,11 @@ from nexus.contracts.gateway_deployment import (
     HostEffectAuthorityReceipt,
     PostflightIdentity,
     RecoveryAuthorityReceipt,
+    RecoveryEffectAck,
+    RecoveryEffectPlan,
     RecoveryEntrypointIdentity,
+    RecoveryLedgerRecord,
+    RecoveryPhysicalIdentity,
     RecoverySourceSet,
     ResultClass,
     SourceBundleEvidence,
@@ -67,6 +72,10 @@ from nexus.contracts.gateway_deployment import (
     validate_receipt_freshness,
     validate_reconcile_outcome,
     validate_recovery_authority,
+    validate_recovery_effect_ack,
+    validate_recovery_effect_plan,
+    validate_recovery_ledger_record,
+    validate_recovery_physical_identity,
     validate_recovery_request,
     validate_recovery_source_set,
     validate_request,
@@ -678,6 +687,24 @@ class _R1StageResult:
     bundle_evidence: SourceBundleEvidence
 
 
+@dataclass(frozen=True)
+class _R1PreparedSource:
+    desired_manifest: DeploymentManifest
+    predecessor_manifest: DeploymentManifest
+    bundle_evidence: SourceBundleEvidence
+
+
+@dataclass(frozen=True)
+class _RecoveryAdapters:
+    observe: Callable[[RecoveryEffectPlan], RecoveryPhysicalIdentity]
+    effect: Callable[[RecoveryEffectPlan], RecoveryEffectAck]
+    postflight: Callable[
+        [RecoveryEffectPlan, RecoveryPhysicalIdentity], Mapping[str, Any]
+    ]
+    clock: Callable[[], str]
+    crash_hook: Callable[[str], None]
+
+
 def _r1_run(*command: str, bytes_output: bool = False) -> str | bytes:
     try:
         result = subprocess.run(
@@ -1205,11 +1232,54 @@ def _r1_bundle_evidence(
     )
 
 
-def stage_verified_git_store(
+def _recovery_evidence_path(request: GatewayRecoveryRequest) -> Path:
+    return Path(GATEWAY_STATE_ROOT) / f"source-bundle-evidence-{request.request_id}.json"
+
+
+def _persist_or_load_recovery_evidence(
     request: GatewayRecoveryRequest,
     receipt: RecoveryAuthorityReceipt,
-) -> _R1StageResult:
-    """Build the receipt-bound B1 store and two complete detached worktrees."""
+    current: SourceBundleEvidence,
+) -> SourceBundleEvidence:
+    path = _recovery_evidence_path(request)
+    if path.exists() or path.is_symlink():
+        path = _safe_store_path(path)
+        try:
+            persisted = SourceBundleEvidence.model_validate(
+                json.loads(path.read_text(), object_pairs_hook=_unique_pairs)
+            )
+            validate_source_bundle_evidence(
+                persisted,
+                request=request,
+                receipt=receipt,
+                source_set=receipt.source_set,
+                expected_fresh_main_commit=current.observed_fresh_main_commit,
+                expected_fresh_main_tree=current.observed_fresh_main_tree,
+                expected_bare_store=current.bare_store,
+            )
+        except (OSError, ValueError, ContractError) as exc:
+            raise _gateway_error("persisted recovery bundle evidence invalid", exc) from exc
+        physical_fields = {
+            "role_heads", "bundle_sha256", "bundle_size", "bundle_verified",
+            "bare_store", "source_set_sha256", "receipt_hash", "request_hash",
+        }
+        if any(
+            getattr(persisted, field) != getattr(current, field)
+            for field in physical_fields
+        ):
+            raise _gateway_error("persisted recovery bundle evidence changed")
+        return persisted
+    encoded = json.dumps(
+        current.model_dump(), sort_keys=True, separators=(",", ":")
+    ).encode()
+    _atomic_gateway_write(path, encoded)
+    return current
+
+
+def _prepare_recovery_source(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+) -> _R1PreparedSource:
     try:
         validate_recovery_request(request)
         validate_recovery_authority(receipt, request=request)
@@ -1245,6 +1315,17 @@ def stage_verified_git_store(
     evidence = _r1_bundle_evidence(
         request, receipt, fresh_main, fresh_tree, bundle, heads, bare_store
     )
+    evidence = _persist_or_load_recovery_evidence(request, receipt, evidence)
+    return _R1PreparedSource(
+        desired_manifest=desired_manifest,
+        predecessor_manifest=predecessor_manifest,
+        bundle_evidence=evidence,
+    )
+
+
+def _promote_recovery_source(prepared: _R1PreparedSource) -> _R1StageResult:
+    desired_manifest = prepared.desired_manifest
+    predecessor_manifest = prepared.predecessor_manifest
     desired_path = _r1_materialize_worktree(desired_manifest)
     predecessor_path = _r1_materialize_worktree(predecessor_manifest)
     return _R1StageResult(
@@ -1252,8 +1333,16 @@ def stage_verified_git_store(
         predecessor_path=predecessor_path,
         desired_manifest=desired_manifest,
         predecessor_manifest=predecessor_manifest,
-        bundle_evidence=evidence,
+        bundle_evidence=prepared.bundle_evidence,
     )
+
+
+def stage_verified_git_store(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+) -> _R1StageResult:
+    """Build the receipt-bound B1 store and two complete detached worktrees."""
+    return _promote_recovery_source(_prepare_recovery_source(request, receipt))
 
 
 def _resolve_manifest_source(manifest: DeploymentManifest) -> Path:
@@ -1349,12 +1438,22 @@ def gateway_recover(
 class InterProcessLock:
     """Timed, no-follow advisory lock used for every mutable gateway store."""
 
+    _process_holds: dict[tuple[int, int, str], tuple[int, int]] = {}
+
     def __init__(self, path: Path, *, timeout: float = 2.0):
         self.path = _safe_store_path(path, create=True)
         self.timeout = timeout
         self._fd: int | None = None
+        self._key = (os.getpid(), threading.get_ident(), str(self.path.resolve()))
+        self._reentrant = False
 
     def __enter__(self) -> "InterProcessLock":
+        self._key = (os.getpid(), threading.get_ident(), str(self.path.resolve()))
+        held = self._process_holds.get(self._key)
+        if held is not None:
+            self._process_holds[self._key] = (held[0], held[1] + 1)
+            self._reentrant = True
+            return self
         try:
             flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
             self._fd = os.open(self.path, flags, 0o600)
@@ -1372,13 +1471,21 @@ class InterProcessLock:
                     if time.monotonic() >= deadline:
                         raise _gateway_error("gateway lock contention") from exc
                     time.sleep(0.01)
+            self._process_holds[self._key] = (self._fd, 1)
             return self
         except Exception:
             self._close()
             raise
 
     def _close(self) -> None:
+        held = self._process_holds.get(self._key)
+        if self._reentrant:
+            if held is not None:
+                self._process_holds[self._key] = (held[0], held[1] - 1)
+            self._reentrant = False
+            return
         if self._fd is not None:
+            self._process_holds.pop(self._key, None)
             with contextlib.suppress(OSError):
                 fcntl.flock(self._fd, fcntl.LOCK_UN)
             with contextlib.suppress(OSError):
@@ -1387,6 +1494,17 @@ class InterProcessLock:
 
     def __exit__(self, *_: object) -> None:
         self._close()
+
+    @classmethod
+    def _reset_after_fork(cls) -> None:
+        for fd, _depth in set(cls._process_holds.values()):
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        cls._process_holds.clear()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=InterProcessLock._reset_after_fork)
 
 
 def _record_hash(record: Mapping[str, Any]) -> str:
@@ -1414,7 +1532,9 @@ class GatewayLedger:
             raise LedgerCorruption("ledger missing or exceeds size bound")
         rows: list[dict[str, Any]] = []
         last_state: dict[str, str] = {}
+        last_schema: dict[str, str] = {}
         fences: dict[str, str] = {}
+        requests: dict[str, tuple[str, str]] = {}
         for line in raw.splitlines(keepends=True):
             if not line.endswith(b"\n"):
                 raise LedgerCorruption("ledger is not newline terminated")
@@ -1422,33 +1542,80 @@ class GatewayLedger:
                 row = json.loads(line.decode("utf-8"), object_pairs_hook=_unique_pairs)
             except (ValueError, UnicodeError) as exc:
                 raise LedgerCorruption("ledger JSON malformed") from exc
-            expected_keys = {
+            v1_keys = {
                 "schema", "request_id", "request_hash", "state", "sequence", "parent_hash",
                 "record_hash", "pre_effect_identity", "observed_identity", "host_receipt_hash",
                 "source_base_merge", "source_base_tree", "host_card_sha256", "effect_class",
                 "operation", "idempotency_fence",
             }
-            if not isinstance(row, dict) or set(row) != expected_keys:
+            v2_keys = {
+                "schema", "request_id", "request_hash", "state", "sequence",
+                "parent_hash", "record_hash", "authority_schema", "receipt_id",
+                "receipt_hash", "card_sha256", "accepted_source_merge",
+                "accepted_source_tree", "final_manager_sha256",
+                "independent_acceptance_receipt_hash", "source_set_sha256",
+                "desired_manifest_id", "desired_manifest_hash",
+                "predecessor_manifest_id", "predecessor_manifest_hash",
+                "source_bundle_evidence_hash", "operation", "effect_class",
+                "idempotency_fence", "pre_effect_identity", "observed_identity",
+            }
+            if not isinstance(row, dict) or (
+                row.get("schema") == "nexus.gateway.ledger.v1"
+                and set(row) != v1_keys
+            ) or (
+                row.get("schema") == "nexus.gateway.ledger.v2"
+                and set(row) != v2_keys
+            ) or row.get("schema") not in {
+                "nexus.gateway.ledger.v1", "nexus.gateway.ledger.v2"
+            }:
                 raise LedgerCorruption("ledger schema mismatch")
-            if row["schema"] != "nexus.gateway.ledger.v1" or not isinstance(row["request_id"], str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", row["request_id"]):
+            canonical_line = (
+                json.dumps(row, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+            )
+            if line != canonical_line:
+                raise LedgerCorruption("ledger JSON is not canonical")
+            if not isinstance(row["request_id"], str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", row["request_id"]):
                 raise LedgerCorruption("ledger request identity malformed")
             if not isinstance(row["request_hash"], str) or not re.fullmatch(r"[0-9a-f]{64}", row["request_hash"]):
                 raise LedgerCorruption("ledger request hash malformed")
-            if any(not isinstance(row[key], str) or not row[key] for key in (
-                "host_receipt_hash", "source_base_merge", "source_base_tree", "host_card_sha256",
-                "effect_class", "operation", "idempotency_fence"
-            )):
-                raise LedgerCorruption("ledger host authority binding missing")
-            for key in ("host_receipt_hash", "host_card_sha256"):
-                if not re.fullmatch(r"[0-9a-f]{64}", row[key]):
-                    raise LedgerCorruption("ledger host authority hash malformed")
-            for key in ("source_base_merge", "source_base_tree"):
-                if not re.fullmatch(r"[0-9a-f]{40}", row[key]):
-                    raise LedgerCorruption("ledger source binding malformed")
-            if row["source_base_merge"] != SOURCE_BASE_MERGE or row["source_base_tree"] != SOURCE_BASE_TREE:
-                raise LedgerCorruption("ledger source binding drift")
-            if row["host_card_sha256"] != HOST_CARD_SHA256:
-                raise LedgerCorruption("ledger host Card binding drift")
+            if row["schema"] == "nexus.gateway.ledger.v1":
+                if any(not isinstance(row[key], str) or not row[key] for key in (
+                    "host_receipt_hash", "source_base_merge", "source_base_tree", "host_card_sha256",
+                    "effect_class", "operation", "idempotency_fence"
+                )):
+                    raise LedgerCorruption("ledger host authority binding missing")
+                for key in ("host_receipt_hash", "host_card_sha256"):
+                    if not re.fullmatch(r"[0-9a-f]{64}", row[key]):
+                        raise LedgerCorruption("ledger host authority hash malformed")
+                for key in ("source_base_merge", "source_base_tree"):
+                    if not re.fullmatch(r"[0-9a-f]{40}", row[key]):
+                        raise LedgerCorruption("ledger source binding malformed")
+                if row["source_base_merge"] != SOURCE_BASE_MERGE or row["source_base_tree"] != SOURCE_BASE_TREE:
+                    raise LedgerCorruption("ledger source binding drift")
+                if row["host_card_sha256"] != HOST_CARD_SHA256:
+                    raise LedgerCorruption("ledger host Card binding drift")
+            else:
+                for key in (
+                    "receipt_hash", "card_sha256", "final_manager_sha256",
+                    "independent_acceptance_receipt_hash", "source_set_sha256",
+                    "desired_manifest_hash", "predecessor_manifest_hash",
+                ):
+                    if not isinstance(row[key], str) or not re.fullmatch(
+                        r"[0-9a-f]{64}", row[key]
+                    ):
+                        raise LedgerCorruption("recovery ledger hash malformed")
+                for key in ("accepted_source_merge", "accepted_source_tree"):
+                    if not isinstance(row[key], str) or not re.fullmatch(
+                        r"[0-9a-f]{40}", row[key]
+                    ):
+                        raise LedgerCorruption("recovery ledger source malformed")
+                if row["state"] == DeploymentState.REQUESTED.value:
+                    if row["source_bundle_evidence_hash"] is not None:
+                        raise LedgerCorruption("REQUESTED evidence must be null")
+                elif not isinstance(row["source_bundle_evidence_hash"], str) or not re.fullmatch(
+                    r"[0-9a-f]{64}", row["source_bundle_evidence_hash"]
+                ):
+                    raise LedgerCorruption("recovery ledger evidence missing")
             if row["effect_class"] not in {effect.value for effect in EffectClass}:
                 raise LedgerCorruption("ledger effect class unknown")
             operation_effects = {
@@ -1458,6 +1625,7 @@ class GatewayLedger:
                 "install_artifact": EffectClass.INSTALL_ARTIFACT.value,
                 "reload": EffectClass.GATEWAY_RELOAD.value, "gateway-reload": EffectClass.GATEWAY_RELOAD.value,
                 "rollback": EffectClass.GATEWAY_ROLLBACK.value, "gateway-rollback": EffectClass.GATEWAY_ROLLBACK.value,
+                "gateway-recover": EffectClass.GATEWAY_DURABLE_RECOVERY.value,
             }
             if row["operation"] not in operation_effects:
                 raise LedgerCorruption("ledger operation unknown")
@@ -1467,6 +1635,11 @@ class GatewayLedger:
             if prior_fence is not None and prior_fence != row["request_id"]:
                 raise LedgerCorruption("ledger idempotency fence reused")
             fences[row["idempotency_fence"]] = row["request_id"]
+            prior_request = requests.get(row["request_id"])
+            request_binding = (row["request_hash"], row["idempotency_fence"])
+            if prior_request is not None and prior_request != request_binding:
+                raise LedgerCorruption("ledger request binding changed")
+            requests[row["request_id"]] = request_binding
             if not isinstance(row["sequence"], int) or row["sequence"] != len(rows) + 1:
                 raise LedgerCorruption("ledger sequence gap")
             if row["state"] not in {state.value for state in DeploymentState}:
@@ -1477,8 +1650,18 @@ class GatewayLedger:
                     if row["state"] != DeploymentState.REQUESTED.value:
                         raise LedgerCorruption("ledger request does not begin in REQUESTED")
                 else:
-                    from nexus.contracts.gateway_deployment import transition
-                    transition(previous_state, row["state"])
+                    legacy_uncertain = (
+                        last_schema.get(row["request_id"]) == "nexus.gateway.ledger.v1"
+                        and row["schema"] == "nexus.gateway.ledger.v1"
+                        and previous_state == DeploymentState.UNCERTAIN_EFFECT.value
+                        and row["state"] in {
+                            DeploymentState.PREFLIGHTED.value,
+                            DeploymentState.ROLLBACK_STARTED.value,
+                        }
+                    )
+                    if not legacy_uncertain:
+                        from nexus.contracts.gateway_deployment import transition
+                        transition(previous_state, row["state"])
             except LedgerCorruption:
                 raise
             except Exception as exc:
@@ -1489,6 +1672,7 @@ class GatewayLedger:
                 raise LedgerCorruption("ledger record hash mismatch")
             rows.append(row)
             last_state[row["request_id"]] = row["state"]
+            last_schema[row["request_id"]] = row["schema"]
             if len(rows) > MAX_LEDGER_RECORDS:
                 raise LedgerCorruption("ledger record limit exceeded")
         return rows
@@ -1543,6 +1727,161 @@ class GatewayLedger:
                                          host_authority=host_authority, operation=operation,
                                          effect_class=effect_class, idempotency_fence=idempotency_fence)
 
+    def append_recovery(
+        self,
+        record: RecoveryLedgerRecord,
+        *,
+        expected_tail: str,
+        request: GatewayRecoveryRequest,
+        receipt: RecoveryAuthorityReceipt,
+        source_bundle_evidence: SourceBundleEvidence | None,
+    ) -> RecoveryLedgerRecord:
+        with InterProcessLock(self.lock_path):
+            rows = self._scan_unlocked()
+            tail = rows[-1]["record_hash"] if rows else ""
+            if expected_tail != tail:
+                raise GatewayContractError("recovery ledger compare-and-swap conflict")
+            for prior in rows:
+                if (
+                    prior["idempotency_fence"] == record.idempotency_fence
+                    and prior["request_id"] != record.request_id
+                ):
+                    raise GatewayContractError("recovery idempotency fence conflict")
+                if prior["request_id"] == record.request_id and (
+                    prior["request_hash"] != record.request_hash
+                    or prior["idempotency_fence"] != record.idempotency_fence
+                ):
+                    raise GatewayContractError("recovery request binding conflict")
+                if (
+                    prior["schema"] == "nexus.gateway.ledger.v2"
+                    and prior["request_id"] == record.request_id
+                    and prior["state"] == record.state.value
+                ):
+                    return RecoveryLedgerRecord.model_validate(prior)
+            try:
+                validate_recovery_ledger_record(
+                    record,
+                    request=request,
+                    receipt=receipt,
+                    source_bundle_evidence=source_bundle_evidence,
+                    expected_sequence=len(rows) + 1,
+                    expected_parent_hash=tail,
+                )
+            except ContractError as exc:
+                raise GatewayContractError("recovery ledger record rejected") from exc
+            return self._append_recovery_unlocked(rows, record)
+
+    def _append_recovery_unlocked(
+        self,
+        rows: list[dict[str, Any]],
+        record: RecoveryLedgerRecord,
+    ) -> RecoveryLedgerRecord:
+        encoded = (
+            json.dumps(
+                record.model_dump(),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            ).encode()
+            + b"\n"
+        )
+        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if self.path.exists():
+            with self.path.open("ab") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            _fsync_dir(self.path.parent)
+        else:
+            _atomic_gateway_write(self.path, encoded)
+        return record
+
+    @staticmethod
+    def _validate_recovery_context_without_evidence(
+        record: RecoveryLedgerRecord,
+        request: GatewayRecoveryRequest,
+        receipt: RecoveryAuthorityReceipt,
+    ) -> None:
+        exact = {
+            "request_id": request.request_id,
+            "request_hash": request.request_hash,
+            "authority_schema": receipt.schema,
+            "receipt_id": receipt.receipt_id,
+            "receipt_hash": receipt.receipt_hash,
+            "card_sha256": receipt.card_sha256,
+            "accepted_source_merge": receipt.accepted_source_merge,
+            "accepted_source_tree": receipt.accepted_source_tree,
+            "final_manager_sha256": receipt.final_manager_sha256,
+            "independent_acceptance_receipt_hash": (
+                receipt.independent_acceptance_receipt_hash
+            ),
+            "source_set_sha256": receipt.source_set.source_set_sha256,
+            "desired_manifest_id": receipt.desired_manifest_id,
+            "desired_manifest_hash": receipt.desired_manifest_sha256,
+            "predecessor_manifest_id": receipt.predecessor_manifest_id,
+            "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
+            "operation": request.operation,
+            "effect_class": request.effect_class,
+            "idempotency_fence": request.idempotency_fence,
+        }
+        if any(getattr(record, key) != value for key, value in exact.items()):
+            raise GatewayContractError("recovery ledger trusted context mismatch")
+
+    def recovery_rows(
+        self,
+        request_id: str,
+        *,
+        request: GatewayRecoveryRequest,
+        receipt: RecoveryAuthorityReceipt,
+        source_bundle_evidence: SourceBundleEvidence | None,
+    ) -> list[RecoveryLedgerRecord]:
+        with InterProcessLock(self.lock_path):
+            rows = self._scan_unlocked()
+        selected = [
+            RecoveryLedgerRecord.model_validate(row)
+            for row in rows
+            if row["schema"] == "nexus.gateway.ledger.v2"
+            and row["request_id"] == request_id
+        ]
+        for record in selected:
+            if record.state is DeploymentState.REQUESTED:
+                evidence = None
+            else:
+                evidence = source_bundle_evidence
+            if evidence is None and record.state is not DeploymentState.REQUESTED:
+                self._validate_recovery_context_without_evidence(record, request, receipt)
+            else:
+                try:
+                    validate_recovery_ledger_record(
+                        record,
+                        request=request,
+                        receipt=receipt,
+                        source_bundle_evidence=evidence,
+                        expected_sequence=record.sequence,
+                        expected_parent_hash=record.parent_hash,
+                    )
+                except ContractError as exc:
+                    raise GatewayContractError(
+                        "recovery ledger trusted context mismatch"
+                    ) from exc
+        return selected
+
+    def current_recovery_state(
+        self,
+        request_id: str,
+        *,
+        request: GatewayRecoveryRequest,
+        receipt: RecoveryAuthorityReceipt,
+        source_bundle_evidence: SourceBundleEvidence | None,
+    ) -> str | None:
+        rows = self.recovery_rows(
+            request_id,
+            request=request,
+            receipt=receipt,
+            source_bundle_evidence=source_bundle_evidence,
+        )
+        return rows[-1].state.value if rows else None
+
     def _append_unlocked(self, rows: list[dict[str, Any]], *, request_id: str,
                          request_hash: str, state: DeploymentState | str,
                          pre_effect_identity: Mapping[str, Any] | None = None,
@@ -1578,6 +1917,844 @@ class GatewayLedger:
             else:
                 _atomic_gateway_write(self.path, encoded)
             return row
+
+
+def _recovery_record(
+    rows: list[dict[str, Any]],
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    evidence: SourceBundleEvidence | None,
+    state: DeploymentState,
+    *,
+    pre_effect_identity: Mapping[str, Any] | None = None,
+    observed_identity: Mapping[str, Any] | None = None,
+) -> RecoveryLedgerRecord:
+    values = {
+        "schema": "nexus.gateway.ledger.v2",
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "state": state,
+        "sequence": len(rows) + 1,
+        "parent_hash": rows[-1]["record_hash"] if rows else "",
+        "authority_schema": receipt.schema,
+        "receipt_id": receipt.receipt_id,
+        "receipt_hash": receipt.receipt_hash,
+        "card_sha256": receipt.card_sha256,
+        "accepted_source_merge": receipt.accepted_source_merge,
+        "accepted_source_tree": receipt.accepted_source_tree,
+        "final_manager_sha256": receipt.final_manager_sha256,
+        "independent_acceptance_receipt_hash": (
+            receipt.independent_acceptance_receipt_hash
+        ),
+        "source_set_sha256": receipt.source_set.source_set_sha256,
+        "desired_manifest_id": receipt.desired_manifest_id,
+        "desired_manifest_hash": receipt.desired_manifest_sha256,
+        "predecessor_manifest_id": receipt.predecessor_manifest_id,
+        "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
+        "source_bundle_evidence_hash": (
+            None if state is DeploymentState.REQUESTED else evidence.evidence_hash
+        ),
+        "operation": request.operation,
+        "effect_class": request.effect_class,
+        "idempotency_fence": request.idempotency_fence,
+        "pre_effect_identity": dict(pre_effect_identity or {}),
+        "observed_identity": dict(observed_identity or {}),
+    }
+    return RecoveryLedgerRecord(
+        **values,
+        record_hash=canonical_hash(values),
+    )
+
+
+RECOVERY_OWNER_COMPLETION_SECONDS = 6.0
+RECOVERY_OWNER_POLL_SECONDS = 0.02
+RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS = 15.0
+_RECOVERY_PROCESS_PID = os.getpid()
+_RECOVERY_PROCESS_START = canonical_hash({
+    "pid": _RECOVERY_PROCESS_PID,
+    "started_ns": time.time_ns(),
+})
+
+
+def _current_recovery_process_start() -> str:
+    global _RECOVERY_PROCESS_PID, _RECOVERY_PROCESS_START
+    pid = os.getpid()
+    if pid != _RECOVERY_PROCESS_PID:
+        _RECOVERY_PROCESS_PID = pid
+        _RECOVERY_PROCESS_START = canonical_hash({
+            "pid": pid,
+            "started_ns": time.time_ns(),
+        })
+    return _RECOVERY_PROCESS_START
+
+
+def _recovery_owner_marker(pid: int) -> Path:
+    return Path(GATEWAY_STATE_ROOT) / f"effect-owner-{pid}.json"
+
+
+def _record_recovery_owner(pid: int, start_identity: str) -> None:
+    encoded = json.dumps(
+        {"pid": pid, "start_identity": start_identity},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    _atomic_gateway_write(_recovery_owner_marker(pid), encoded)
+
+
+def _recovery_owner_is_live(pid: int, start_identity: str) -> bool:
+    try:
+        payload = json.loads(
+            _safe_store_path(_recovery_owner_marker(pid)).read_text(),
+            object_pairs_hook=_unique_pairs,
+        )
+        os.kill(pid, 0)
+    except (OSError, ValueError, GatewayContractError):
+        return False
+    return payload == {"pid": pid, "start_identity": start_identity}
+
+
+def _append_recovery_state_unlocked(
+    ledger: GatewayLedger,
+    rows: list[dict[str, Any]],
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    evidence: SourceBundleEvidence | None,
+    state: DeploymentState,
+    *,
+    pre_effect_identity: Mapping[str, Any] | None = None,
+    observed_identity: Mapping[str, Any] | None = None,
+) -> RecoveryLedgerRecord:
+    record = _recovery_record(
+        rows,
+        request,
+        receipt,
+        evidence,
+        state,
+        pre_effect_identity=pre_effect_identity,
+        observed_identity=observed_identity,
+    )
+    validate_recovery_ledger_record(
+        record,
+        request=request,
+        receipt=receipt,
+        source_bundle_evidence=evidence,
+        expected_sequence=len(rows) + 1,
+        expected_parent_hash=rows[-1]["record_hash"] if rows else "",
+    )
+    ledger._append_recovery_unlocked(rows, record)
+    rows.append(record.model_dump())
+    return record
+
+
+def _recovery_typed_rows(
+    rows: list[dict[str, Any]], request_id: str
+) -> list[RecoveryLedgerRecord]:
+    return [
+        RecoveryLedgerRecord.model_validate(row)
+        for row in rows
+        if row["schema"] == "nexus.gateway.ledger.v2"
+        and row["request_id"] == request_id
+    ]
+
+
+def _recovery_plan(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+) -> RecoveryEffectPlan:
+    values = {
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "idempotency_fence": request.idempotency_fence,
+        "receipt_id": receipt.receipt_id,
+        "receipt_hash": receipt.receipt_hash,
+        "source_set_sha256": receipt.source_set.source_set_sha256,
+        "desired_manifest_id": receipt.desired_manifest_id,
+        "desired_manifest_hash": receipt.desired_manifest_sha256,
+        "predecessor_manifest_id": receipt.predecessor_manifest_id,
+        "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
+        "desired_root": str(
+            Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.desired_manifest_id
+        ),
+        "predecessor_root": str(
+            Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.predecessor_manifest_id
+        ),
+        "service_label": GATEWAY_LABEL,
+        "plist_path": str(GATEWAY_PLIST),
+        "endpoint": GATEWAY_ENDPOINT,
+        "pre_effect_identity_hash": canonical_hash({}),
+    }
+    plan = RecoveryEffectPlan(**values, plan_hash=canonical_hash(values))
+    return validate_recovery_effect_plan(
+        plan,
+        request=request,
+        receipt=receipt,
+        deployment_root=str(GATEWAY_DEPLOYMENTS_ROOT),
+    )
+
+
+def _recovery_expected_plist_bytes(root: str) -> bytes:
+    return plistlib.dumps(
+        {
+            "Label": GATEWAY_LABEL,
+            "ProgramArguments": [
+                INTERPRETER,
+                str(Path(root) / GATEWAY_ENTRYPOINT),
+            ],
+            "WorkingDirectory": root,
+            "RunAtLoad": True,
+            "KeepAlive": True,
+            "StandardOutPath": "/Users/jameschen/Library/Logs/Nexus/gateway.log",
+            "StandardErrorPath": "/Users/jameschen/Library/Logs/Nexus/gateway.err.log",
+            "EnvironmentVariables": {
+                "NEXUS_MCP_GATEWAY_TOKEN": "FIXED_SECRET_STORE_REFERENCE"
+            },
+        },
+        fmt=plistlib.FMT_XML,
+        sort_keys=False,
+    )
+
+
+def _recovery_expected_plist_sha256(root: str) -> str:
+    return hashlib.sha256(_recovery_expected_plist_bytes(root)).hexdigest()
+
+
+def _recovery_expected_postflight(
+    receipt: RecoveryAuthorityReceipt,
+) -> dict[str, Any]:
+    actions = [GATEWAY_ACTION]
+    return {
+        "permission_policy_hash": canonical_hash({
+            "kind": "recovery-permission-policy",
+            "source_set_sha256": receipt.source_set.source_set_sha256,
+            "final_manager_sha256": receipt.final_manager_sha256,
+        }),
+        "schema_hash": canonical_hash({
+            "kind": "recovery-tools-schema",
+            "desired_manifest_hash": receipt.desired_manifest_sha256,
+            "actions": actions,
+        }),
+        "tool_manifest_hash": canonical_hash({
+            "kind": "recovery-tool-manifest",
+            "actions": actions,
+        }),
+        "actions": actions,
+    }
+
+
+def _recovery_outcome(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    *,
+    result: ResultClass,
+    effect_started: bool,
+    observation: Mapping[str, Any],
+) -> GatewayReconcileOutcome:
+    values = {
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "idempotency_fence": request.idempotency_fence,
+        "desired_manifest_id": receipt.desired_manifest_id,
+        "predecessor_manifest_id": receipt.predecessor_manifest_id,
+        "physical_observation": dict(observation),
+        "effect_started": effect_started,
+        "result": result,
+    }
+    return validate_reconcile_outcome(
+        GatewayReconcileOutcome(
+            **values,
+            evidence_hash=canonical_hash(values),
+        )
+    )
+
+
+def _terminal_recovery_outcome(
+    records: list[RecoveryLedgerRecord],
+) -> GatewayReconcileOutcome | None:
+    if not records:
+        return None
+    terminal = records[-1]
+    payload = terminal.observed_identity.get("outcome")
+    if terminal.state in {
+        DeploymentState.VERIFIED,
+        DeploymentState.ROLLED_BACK,
+        DeploymentState.BLOCKED,
+    } and isinstance(payload, Mapping):
+        return GatewayReconcileOutcome.model_validate(payload)
+    return None
+
+
+def _validate_recovery_postflight(
+    postflight: Mapping[str, Any],
+    identity: RecoveryPhysicalIdentity,
+    receipt: RecoveryAuthorityReceipt,
+) -> None:
+    if not isinstance(postflight, Mapping) or postflight.get("authenticated") is not True:
+        raise GatewayContractError("recovery postflight is not authenticated")
+    health = postflight.get("health")
+    initialize = postflight.get("initialize")
+    tools = postflight.get("tools_list")
+    if not all(isinstance(item, Mapping) for item in (health, initialize, tools)):
+        raise GatewayContractError("recovery postflight response missing")
+    expected = _recovery_expected_postflight(receipt)
+    if (
+        health.get("deployment_id") != identity.deployment_id
+        or health.get("root") != identity.root
+        or health.get("head") != identity.head
+        or health.get("tree") != identity.tree
+        or health.get("server_instance") != identity.server_instance
+        or health.get("permission_policy_hash") != expected["permission_policy_hash"]
+    ):
+        raise GatewayContractError("recovery health identity mismatch")
+    if (
+        not isinstance(initialize.get("session_id"), str)
+        or not initialize.get("session_id")
+        or initialize.get("server_instance") != identity.server_instance
+        or initialize.get("permission_policy_hash") != health.get(
+            "permission_policy_hash"
+        )
+    ):
+        raise GatewayContractError("recovery initialize identity mismatch")
+    if (
+        tools.get("session_id") != initialize.get("session_id")
+        or tools.get("actions") != expected["actions"]
+        or tools.get("schema_hash") != expected["schema_hash"]
+        or tools.get("tool_manifest_hash") != expected["tool_manifest_hash"]
+        or postflight.get("expected_action") != GATEWAY_ACTION
+        or postflight.get("expected_manifest_id") != identity.deployment_id
+    ):
+        raise GatewayContractError("recovery tools identity mismatch")
+
+
+def _classify_recovery_physical(
+    identity: RecoveryPhysicalIdentity,
+    receipt: RecoveryAuthorityReceipt,
+) -> str:
+    desired_root = str(
+        Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.desired_manifest_id
+    )
+    predecessor_root = str(
+        Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.predecessor_manifest_id
+    )
+    try:
+        validate_recovery_physical_identity(
+            identity,
+            expected_manifest=receipt.desired_manifest,
+            expected_root=desired_root,
+            expected_plist_sha256=_recovery_expected_plist_sha256(desired_root),
+        )
+        return "desired"
+    except ContractError:
+        pass
+    try:
+        validate_recovery_physical_identity(
+            identity,
+            expected_manifest=receipt.predecessor_manifest,
+            expected_root=predecessor_root,
+            expected_plist_sha256=_recovery_expected_plist_sha256(predecessor_root),
+        )
+        return "predecessor"
+    except ContractError:
+        return "unknown"
+
+
+def _gateway_reconcile_physical(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    identities: RecoveryPhysicalIdentity | tuple[RecoveryPhysicalIdentity, ...],
+) -> str:
+    candidates = identities if isinstance(identities, tuple) else (identities,)
+    classifications = {
+        _classify_recovery_physical(identity, receipt) for identity in candidates
+    }
+    classifications.discard("unknown")
+    if len(classifications) > 1 or len(candidates) > 1 and classifications:
+        raise GatewayContractError("recovery physical identity ambiguous")
+    return next(iter(classifications), "unknown")
+
+
+def _revalidate_recovery_artifacts(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    *,
+    expected_bundle_evidence_hash: str,
+) -> _R1StageResult:
+    prepared = _prepare_recovery_source(request, receipt)
+    if prepared.bundle_evidence.evidence_hash != expected_bundle_evidence_hash:
+        raise GatewayContractError("recovery bundle evidence replay mismatch")
+    desired = Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.desired_manifest_id
+    predecessor = Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.predecessor_manifest_id
+    _r1_verify_worktree(desired, receipt.desired_manifest)
+    _r1_verify_worktree(predecessor, receipt.predecessor_manifest)
+    return _R1StageResult(
+        desired_path=desired,
+        predecessor_path=predecessor,
+        desired_manifest=receipt.desired_manifest,
+        predecessor_manifest=receipt.predecessor_manifest,
+        bundle_evidence=prepared.bundle_evidence,
+    )
+
+
+def _validate_terminal_recovery_replay(
+    terminal: GatewayReconcileOutcome,
+    records: list[RecoveryLedgerRecord],
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    adapters: _RecoveryAdapters,
+) -> GatewayReconcileOutcome:
+    if terminal.result is ResultClass.BLOCKED:
+        return terminal
+    evidence_hashes = {
+        record.source_bundle_evidence_hash
+        for record in records
+        if record.source_bundle_evidence_hash is not None
+    }
+    if len(evidence_hashes) != 1:
+        raise GatewayContractError("terminal recovery evidence binding invalid")
+    _revalidate_recovery_artifacts(
+        request,
+        receipt,
+        expected_bundle_evidence_hash=next(iter(evidence_hashes)),
+    )
+    plan = _recovery_plan(request, receipt)
+    identity = adapters.observe(plan)
+    classification = _gateway_reconcile_physical(request, receipt, identity)
+    if terminal.result is ResultClass.VERIFIED:
+        if classification != "desired":
+            raise GatewayContractError("VERIFIED recovery physical identity drift")
+        postflight = adapters.postflight(plan, identity)
+        _validate_recovery_postflight(postflight, identity, receipt)
+    elif terminal.result is ResultClass.ROLLED_BACK:
+        if classification != "predecessor":
+            raise GatewayContractError("ROLLED_BACK recovery physical identity drift")
+    else:
+        raise GatewayContractError("unsupported terminal recovery replay")
+    return terminal
+
+
+def _gateway_recover_with_adapters(
+    request: GatewayRecoveryRequest | Mapping[str, Any],
+    *,
+    adapters: _RecoveryAdapters,
+    ledger: GatewayLedger,
+) -> GatewayReconcileOutcome:
+    try:
+        typed = GatewayRecoveryRequest.model_validate(request)
+        validate_recovery_request(typed)
+    except ContractError as exc:
+        raise _gateway_error("R1 B2 recovery request rejected", exc) from exc
+    receipt = _require_recovery_authority(typed)
+    prepared: _R1PreparedSource | None = None
+    evidence: SourceBundleEvidence | None = None
+    plan = _recovery_plan(typed, receipt)
+    invoke_effect = False
+    wait_for_owner: tuple[int, str] | None = None
+    with InterProcessLock(
+        ledger.lock_path, timeout=RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS
+    ):
+        rows = ledger._scan_unlocked()
+        for prior in rows:
+            if (
+                prior["idempotency_fence"] == typed.idempotency_fence
+                and prior["request_id"] != typed.request_id
+            ):
+                raise GatewayContractError("recovery idempotency fence conflict")
+        records = _recovery_typed_rows(rows, typed.request_id)
+        terminal = _terminal_recovery_outcome(records)
+        if terminal is not None:
+            return _validate_terminal_recovery_replay(
+                terminal, records, typed, receipt, adapters
+            )
+        if not records:
+            _append_recovery_state_unlocked(
+                ledger, rows, typed, receipt, None, DeploymentState.REQUESTED
+            )
+            records = _recovery_typed_rows(rows, typed.request_id)
+        state = records[-1].state
+        if state in {
+            DeploymentState.REQUESTED,
+            DeploymentState.PREFLIGHTED,
+            DeploymentState.TARGET_READY,
+            DeploymentState.ROLLBACK_READY,
+        }:
+            prepared = _prepare_recovery_source(typed, receipt)
+            evidence = prepared.bundle_evidence
+        else:
+            evidence_hashes = {
+                record.source_bundle_evidence_hash
+                for record in records
+                if record.source_bundle_evidence_hash is not None
+            }
+            if len(evidence_hashes) != 1:
+                raise GatewayContractError("recovery evidence binding missing")
+            evidence_hash = next(iter(evidence_hashes))
+            prepared = _prepare_recovery_source(typed, receipt)
+            evidence = prepared.bundle_evidence
+            if evidence.evidence_hash != evidence_hash:
+                raise GatewayContractError("recovery evidence changed")
+            _r1_verify_worktree(
+                Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.desired_manifest_id,
+                receipt.desired_manifest,
+            )
+            _r1_verify_worktree(
+                Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.predecessor_manifest_id,
+                receipt.predecessor_manifest,
+            )
+            owner_pid = records[-1].pre_effect_identity.get("effect_owner_pid")
+            owner_start = records[-1].pre_effect_identity.get("effect_owner_start")
+            if (
+                records[-1].state is DeploymentState.EFFECT_STARTED
+                and type(owner_pid) is int
+                and isinstance(owner_start, str)
+                and owner_pid != os.getpid()
+            ):
+                wait_for_owner = (owner_pid, owner_start)
+        if state is DeploymentState.REQUESTED:
+            _append_recovery_state_unlocked(
+                ledger,
+                rows,
+                typed,
+                receipt,
+                evidence,
+                DeploymentState.PREFLIGHTED,
+            )
+            state = DeploymentState.PREFLIGHTED
+            adapters.crash_hook("after_bundle_evidence")
+        if state is DeploymentState.PREFLIGHTED:
+            _r1_materialize_worktree(prepared.desired_manifest)
+            _append_recovery_state_unlocked(
+                ledger, rows, typed, receipt, evidence, DeploymentState.TARGET_READY
+            )
+            state = DeploymentState.TARGET_READY
+            adapters.crash_hook("after_target_ready")
+        if state is DeploymentState.TARGET_READY:
+            try:
+                _r1_materialize_worktree(prepared.predecessor_manifest)
+            except Exception as exc:
+                _append_recovery_state_unlocked(
+                    ledger,
+                    rows,
+                    typed,
+                    receipt,
+                    evidence,
+                    DeploymentState.ROLLBACK_UNAVAILABLE,
+                    observed_identity={"error": type(exc).__name__},
+                )
+                outcome = _recovery_outcome(
+                    typed,
+                    receipt,
+                    result=ResultClass.BLOCKED,
+                    effect_started=False,
+                    observation={"state": "ROLLBACK_UNAVAILABLE"},
+                )
+                _append_recovery_state_unlocked(
+                    ledger,
+                    rows,
+                    typed,
+                    receipt,
+                    evidence,
+                    DeploymentState.BLOCKED,
+                    observed_identity={"outcome": outcome.model_dump()},
+                )
+                return outcome
+            _append_recovery_state_unlocked(
+                ledger,
+                rows,
+                typed,
+                receipt,
+                evidence,
+                DeploymentState.ROLLBACK_READY,
+            )
+            state = DeploymentState.ROLLBACK_READY
+            adapters.crash_hook("after_rollback_ready")
+        if state is DeploymentState.ROLLBACK_READY:
+            owner_start = _current_recovery_process_start()
+            _record_recovery_owner(os.getpid(), owner_start)
+            _append_recovery_state_unlocked(
+                ledger,
+                rows,
+                typed,
+                receipt,
+                evidence,
+                DeploymentState.EFFECT_STARTED,
+                pre_effect_identity={
+                    "plan_hash": plan.plan_hash,
+                    "effect_owner_pid": os.getpid(),
+                    "effect_owner_start": owner_start,
+                },
+            )
+            state = DeploymentState.EFFECT_STARTED
+            invoke_effect = True
+            adapters.crash_hook("after_effect_started_before_call")
+    if wait_for_owner is not None:
+        owner_pid, owner_start = wait_for_owner
+        deadline = time.monotonic() + RECOVERY_OWNER_COMPLETION_SECONDS
+        owner_live = True
+        while True:
+            with InterProcessLock(
+                ledger.lock_path, timeout=RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS
+            ):
+                current_rows = ledger._scan_unlocked()
+                current_records = _recovery_typed_rows(
+                    current_rows, typed.request_id
+                )
+                terminal = _terminal_recovery_outcome(current_records)
+                if terminal is not None:
+                    return _validate_terminal_recovery_replay(
+                        terminal, current_records, typed, receipt, adapters
+                    )
+            owner_live = _recovery_owner_is_live(owner_pid, owner_start)
+            now = time.monotonic()
+            if not owner_live or now >= deadline:
+                break
+            time.sleep(min(RECOVERY_OWNER_POLL_SECONDS, deadline - now))
+        # Close the owner-exit/terminal-write race with one final durable read.
+        with InterProcessLock(
+            ledger.lock_path, timeout=RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS
+        ):
+            current_rows = ledger._scan_unlocked()
+            current_records = _recovery_typed_rows(current_rows, typed.request_id)
+            terminal = _terminal_recovery_outcome(current_records)
+            if terminal is not None:
+                return _validate_terminal_recovery_replay(
+                    terminal, current_records, typed, receipt, adapters
+                )
+        if owner_live and _recovery_owner_is_live(owner_pid, owner_start):
+            return _recovery_outcome(
+                typed,
+                receipt,
+                result=ResultClass.UNCERTAIN_EFFECT,
+                effect_started=True,
+                observation={"state": "EFFECT_STARTED", "owner_live": True},
+            )
+    ack: RecoveryEffectAck | None = None
+    if invoke_effect:
+        try:
+            ack = adapters.effect(plan)
+            adapters.crash_hook("after_effect_call_before_ack")
+            validate_recovery_effect_ack(ack, plan=plan)
+            adapters.crash_hook("after_effect_success_before_observation")
+        except Exception as exc:
+            with InterProcessLock(
+                ledger.lock_path, timeout=RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS
+            ):
+                rows = ledger._scan_unlocked()
+                records = _recovery_typed_rows(rows, typed.request_id)
+                if records[-1].state is DeploymentState.EFFECT_STARTED:
+                    _append_recovery_state_unlocked(
+                        ledger,
+                        rows,
+                        typed,
+                        receipt,
+                        evidence,
+                        DeploymentState.UNCERTAIN_EFFECT,
+                        observed_identity={"error": type(exc).__name__},
+                    )
+            return _recovery_outcome(
+                typed,
+                receipt,
+                result=ResultClass.UNCERTAIN_EFFECT,
+                effect_started=True,
+                observation={"state": "UNCERTAIN_EFFECT"},
+            )
+    identity = adapters.observe(plan)
+    classification = _gateway_reconcile_physical(typed, receipt, identity)
+    with InterProcessLock(
+        ledger.lock_path, timeout=RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS
+    ):
+        rows = ledger._scan_unlocked()
+        records = _recovery_typed_rows(rows, typed.request_id)
+        terminal = _terminal_recovery_outcome(records)
+        if terminal is not None:
+            return _validate_terminal_recovery_replay(
+                terminal, records, typed, receipt, adapters
+            )
+        state = records[-1].state
+        if classification == "predecessor":
+            if state is DeploymentState.EFFECT_STARTED:
+                _append_recovery_state_unlocked(
+                    ledger, rows, typed, receipt, evidence,
+                    DeploymentState.UNCERTAIN_EFFECT,
+                )
+            outcome = _recovery_outcome(
+                typed,
+                receipt,
+                result=ResultClass.ROLLED_BACK,
+                effect_started=True,
+                observation={"state": "ROLLED_BACK"},
+            )
+            _append_recovery_state_unlocked(
+                ledger,
+                rows,
+                typed,
+                receipt,
+                evidence,
+                DeploymentState.ROLLED_BACK,
+                observed_identity={"outcome": outcome.model_dump()},
+            )
+            return outcome
+        if classification != "desired":
+            if state is not DeploymentState.UNCERTAIN_EFFECT:
+                _append_recovery_state_unlocked(
+                    ledger, rows, typed, receipt, evidence,
+                    DeploymentState.UNCERTAIN_EFFECT,
+                )
+            outcome = _recovery_outcome(
+                typed,
+                receipt,
+                result=ResultClass.BLOCKED,
+                effect_started=True,
+                observation={"state": "BLOCKED"},
+            )
+            _append_recovery_state_unlocked(
+                ledger,
+                rows,
+                typed,
+                receipt,
+                evidence,
+                DeploymentState.BLOCKED,
+                observed_identity={"outcome": outcome.model_dump()},
+            )
+            return outcome
+        ack_view = (
+            {
+                "acknowledged": ack.acknowledged,
+                "applied": ack.applied,
+                "already_desired": ack.already_desired,
+            }
+            if ack is not None
+            else {}
+        )
+        if state in {
+            DeploymentState.EFFECT_STARTED,
+            DeploymentState.UNCERTAIN_EFFECT,
+        }:
+            _append_recovery_state_unlocked(
+                ledger,
+                rows,
+                typed,
+                receipt,
+                evidence,
+                DeploymentState.SERVICE_OBSERVED,
+                observed_identity={"physical": identity.model_dump(), "ack": ack_view},
+            )
+            state = DeploymentState.SERVICE_OBSERVED
+            adapters.crash_hook("after_service_observed")
+        if state is DeploymentState.SERVICE_OBSERVED:
+            _append_recovery_state_unlocked(
+                ledger,
+                rows,
+                typed,
+                receipt,
+                evidence,
+                DeploymentState.IDENTITY_VERIFIED,
+                observed_identity={"physical": identity.model_dump(), "ack": ack_view},
+            )
+            state = DeploymentState.IDENTITY_VERIFIED
+            adapters.crash_hook("after_identity_verified")
+    try:
+        postflight = adapters.postflight(plan, identity)
+        _validate_recovery_postflight(postflight, identity, receipt)
+    except Exception as exc:
+        with InterProcessLock(
+            ledger.lock_path, timeout=RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS
+        ):
+            rows = ledger._scan_unlocked()
+            records = _recovery_typed_rows(rows, typed.request_id)
+            lost_ack_reconcile = (
+                not invoke_effect
+                and any(
+                    record.state is DeploymentState.UNCERTAIN_EFFECT
+                    and record.observed_identity.get("error") == "TimeoutError"
+                    for record in records
+                )
+            )
+            if lost_ack_reconcile:
+                if records[-1].state is not DeploymentState.UNCERTAIN_EFFECT:
+                    _append_recovery_state_unlocked(
+                        ledger,
+                        rows,
+                        typed,
+                        receipt,
+                        evidence,
+                        DeploymentState.UNCERTAIN_EFFECT,
+                        observed_identity={"error": type(exc).__name__},
+                    )
+                outcome = _recovery_outcome(
+                    typed,
+                    receipt,
+                    result=ResultClass.BLOCKED,
+                    effect_started=True,
+                    observation={"state": "BLOCKED"},
+                )
+                _append_recovery_state_unlocked(
+                    ledger,
+                    rows,
+                    typed,
+                    receipt,
+                    evidence,
+                    DeploymentState.BLOCKED,
+                    observed_identity={
+                        "error": type(exc).__name__,
+                        "outcome": outcome.model_dump(),
+                    },
+                )
+                return outcome
+            if records[-1].state is not DeploymentState.UNCERTAIN_EFFECT:
+                _append_recovery_state_unlocked(
+                    ledger,
+                    rows,
+                    typed,
+                    receipt,
+                    evidence,
+                    DeploymentState.UNCERTAIN_EFFECT,
+                    observed_identity={"error": type(exc).__name__},
+                )
+        return _recovery_outcome(
+            typed,
+            receipt,
+            result=ResultClass.UNCERTAIN_EFFECT,
+            effect_started=True,
+            observation={"state": "UNCERTAIN_EFFECT"},
+        )
+    with InterProcessLock(
+        ledger.lock_path, timeout=RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS
+    ):
+        rows = ledger._scan_unlocked()
+        records = _recovery_typed_rows(rows, typed.request_id)
+        terminal = _terminal_recovery_outcome(records)
+        if terminal is not None:
+            return _validate_terminal_recovery_replay(
+                terminal, records, typed, receipt, adapters
+            )
+        state = records[-1].state
+        if state is DeploymentState.IDENTITY_VERIFIED:
+            _append_recovery_state_unlocked(
+                ledger,
+                rows,
+                typed,
+                receipt,
+                evidence,
+                DeploymentState.CLIENT_BOUND,
+                observed_identity={"postflight": dict(postflight), "ack": ack_view},
+            )
+            adapters.crash_hook("after_client_bound")
+        outcome = _recovery_outcome(
+            typed,
+            receipt,
+            result=ResultClass.VERIFIED,
+            effect_started=True,
+            observation={"state": "VERIFIED", "deployment_id": identity.deployment_id},
+        )
+        _append_recovery_state_unlocked(
+            ledger,
+            rows,
+            typed,
+            receipt,
+            evidence,
+            DeploymentState.VERIFIED,
+            observed_identity={"ack": ack_view, "outcome": outcome.model_dump()},
+        )
+        return outcome
 
 
 def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

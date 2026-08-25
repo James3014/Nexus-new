@@ -9,6 +9,8 @@ import shutil
 import stat
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -2962,7 +2964,7 @@ def _r1b2_physical_identity(fixture, role="desired", **changes):
         "pid": 4321,
         "start_identity": "pid-4321-start-1",
         "listener": g.GATEWAY_ENDPOINT,
-        "plist_sha256": "1" * 64,
+        "plist_sha256": g._recovery_expected_plist_sha256(root),
         "deployment_id": manifest.deployment_id,
         "root": root,
         "head": manifest.commit,
@@ -2978,6 +2980,8 @@ def _r1b2_physical_identity(fixture, role="desired", **changes):
 
 def _r1b2_postflight(fixture, physical, **changes):
     receipt = fixture["receipt"]
+    expected = g._recovery_expected_postflight(receipt)
+    session_id = f"session-{receipt.receipt_hash[:20]}"
     values = {
         "authenticated": True,
         "health": {
@@ -2986,23 +2990,55 @@ def _r1b2_postflight(fixture, physical, **changes):
             "head": physical.head,
             "tree": physical.tree,
             "server_instance": physical.server_instance,
-            "permission_policy_hash": "2" * 64,
+            "permission_policy_hash": expected["permission_policy_hash"],
         },
         "initialize": {
-            "session_id": "recovery-session-1",
+            "session_id": session_id,
             "server_instance": physical.server_instance,
-            "permission_policy_hash": "2" * 64,
+            "permission_policy_hash": expected["permission_policy_hash"],
         },
         "tools_list": {
-            "session_id": "recovery-session-1",
-            "actions": ["gateway-rebind"],
-            "schema_hash": "3" * 64,
+            "session_id": session_id,
+            "actions": expected["actions"],
+            "schema_hash": expected["schema_hash"],
+            "tool_manifest_hash": expected["tool_manifest_hash"],
         },
-        "expected_action": "gateway-rebind",
+        "expected_action": g.GATEWAY_ACTION,
         "expected_manifest_id": receipt.desired_manifest_id,
         **changes,
     }
     return values
+
+
+def test_r1b2_expected_recovery_identities_are_derived_not_fixture_literals(
+    tmp_path, monkeypatch
+):
+    first_root = tmp_path / "first"
+    second_root = tmp_path / "second"
+    first_root.mkdir()
+    second_root.mkdir()
+    first = _r1b1_fixture(first_root, monkeypatch)
+    second = _r1b1_fixture(second_root, monkeypatch)
+    first_expected = g._recovery_expected_postflight(first["receipt"])
+    second_expected = g._recovery_expected_postflight(second["receipt"])
+    assert first_expected != second_expected
+    assert first_expected["permission_policy_hash"] != "2" * 64
+    assert first_expected["schema_hash"] != "3" * 64
+    assert first_expected["actions"] == [g.GATEWAY_ACTION]
+    first_session = f"session-{first['receipt'].receipt_hash[:20]}"
+    second_session = f"session-{second['receipt'].receipt_hash[:20]}"
+    assert first_session != second_session
+    first_root_path = str(
+        Path(first["state"]) / "deployments" / first["receipt"].desired_manifest_id
+    )
+    second_root_path = str(
+        Path(second["state"]) / "deployments" / second["receipt"].desired_manifest_id
+    )
+    assert g._recovery_expected_plist_sha256(first_root_path) != "1" * 64
+    assert (
+        g._recovery_expected_plist_sha256(first_root_path)
+        != g._recovery_expected_plist_sha256(second_root_path)
+    )
 
 
 def _r1b2_durable_count(path, increment=0):
@@ -3785,19 +3821,228 @@ def test_r1b2_public_gateway_recover_remains_noninjectable_and_live_effect_unrea
         assert plist.read_bytes() == plist_snapshot
 
 
+def test_r1b2_strict_ack_spoof_cannot_bypass_physical_and_postflight(
+    tmp_path, monkeypatch
+):
+    from nexus.contracts.gateway_deployment import RecoveryEffectAck, canonical_hash
+
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    adapters = _r1b2_adapters(fixture, ledger, observe_role="unknown")
+
+    def spoofed_ack(plan):
+        values = {
+            "plan_hash": plan.plan_hash,
+            "acknowledged": True,
+            "applied": True,
+            "already_desired": False,
+            "effect_kind": "GATEWAY_DURABLE_RECOVERY",
+        }
+        return RecoveryEffectAck(
+            **values, evidence_hash=canonical_hash(values)
+        )
+
+    adapters = adapters.__class__(
+        observe=adapters.observe,
+        effect=spoofed_ack,
+        postflight=lambda *_args: pytest.fail("unknown identity cannot postflight"),
+        clock=adapters.clock,
+        crash_hook=adapters.crash_hook,
+    )
+    outcome = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=adapters, ledger=ledger
+    )
+    assert outcome.result == "BLOCKED"
+    assert "VERIFIED" not in [
+        row.state
+        for row in ledger.recovery_rows(
+            fixture["request"].request_id,
+            request=fixture["request"],
+            receipt=fixture["receipt"],
+            source_bundle_evidence=None,
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    "drift",
+    ["bundle", "worktree", "evidence", "physical", "postflight"],
+)
+def test_r1b2_verified_terminal_replay_revalidates_all_artifacts(
+    tmp_path, monkeypatch, drift
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    adapters = _r1b2_adapters(fixture, ledger)
+    terminal = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=adapters, ledger=ledger
+    )
+    assert terminal.result == "VERIFIED"
+    if drift == "bundle":
+        bundle = next(g.GATEWAY_SOURCE_BUNDLES_ROOT.glob("*.bundle"))
+        bundle.write_bytes(bundle.read_bytes() + b"drift")
+    elif drift == "worktree":
+        entrypoint = (
+            g.GATEWAY_DEPLOYMENTS_ROOT
+            / fixture["receipt"].desired_manifest_id
+            / g.GATEWAY_ENTRYPOINT
+        )
+        entrypoint.write_text("drift\n")
+    elif drift == "evidence":
+        rows = ledger.read()
+        rows[-1]["source_bundle_evidence_hash"] = "f" * 64
+        rows[-1]["record_hash"] = g._record_hash(rows[-1])
+        fixture["ledger_path"].write_bytes(
+            b"".join(
+                json.dumps(row, sort_keys=True, separators=(",", ":")).encode()
+                + b"\n"
+                for row in rows
+            )
+        )
+    replay = _r1b2_adapters(
+        fixture,
+        ledger,
+        physical_changes={"root": "/tmp/drift"} if drift == "physical" else None,
+        postflight_changes=(
+            {"authenticated": False} if drift == "postflight" else None
+        ),
+    )
+    replay = replay.__class__(
+        observe=replay.observe,
+        effect=lambda _plan: pytest.fail("terminal replay cannot invoke effect"),
+        postflight=replay.postflight,
+        clock=replay.clock,
+        crash_hook=replay.crash_hook,
+    )
+    with pytest.raises((g.GatewayContractError, g.LedgerCorruption)):
+        g._gateway_recover_with_adapters(
+            fixture["request"], adapters=replay, ledger=ledger
+        )
+
+
+def test_r1b2_rolled_back_terminal_revalidates_predecessor(tmp_path, monkeypatch):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    lost = _r1b2_adapters(fixture, ledger, lost_ack=True)
+    assert g._gateway_recover_with_adapters(
+        fixture["request"], adapters=lost, ledger=ledger
+    ).result == "UNCERTAIN_EFFECT"
+    predecessor = _r1b2_adapters(
+        fixture, ledger, observe_role="predecessor"
+    )
+    predecessor = predecessor.__class__(
+        observe=predecessor.observe,
+        effect=lambda _plan: pytest.fail("rollback reconcile cannot effect"),
+        postflight=predecessor.postflight,
+        clock=predecessor.clock,
+        crash_hook=predecessor.crash_hook,
+    )
+    terminal = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=predecessor, ledger=ledger
+    )
+    assert terminal.result == "ROLLED_BACK"
+    entrypoint = (
+        g.GATEWAY_DEPLOYMENTS_ROOT
+        / fixture["receipt"].predecessor_manifest_id
+        / g.GATEWAY_ENTRYPOINT
+    )
+    entrypoint.write_text("drift\n")
+    with pytest.raises(g.GatewayContractError):
+        g._gateway_recover_with_adapters(
+            fixture["request"], adapters=predecessor, ledger=ledger
+        )
+
+
+def test_r1b2_blocked_terminal_does_not_reenter_physical_or_effect(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    materialize = g._r1_materialize_worktree
+
+    def missing_predecessor(manifest):
+        if manifest.role == "predecessor":
+            raise g.GatewayContractError("missing predecessor")
+        return materialize(manifest)
+
+    monkeypatch.setattr(g, "_r1_materialize_worktree", missing_predecessor)
+    adapters = _r1b2_adapters(fixture, ledger)
+    terminal = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=adapters, ledger=ledger
+    )
+    assert terminal.result == "BLOCKED"
+    bundle = next(g.GATEWAY_SOURCE_BUNDLES_ROOT.glob("*.bundle"))
+    bundle.write_bytes(bundle.read_bytes() + b"drift")
+    blocked_replay = adapters.__class__(
+        observe=lambda _plan: pytest.fail("BLOCKED replay cannot observe"),
+        effect=lambda _plan: pytest.fail("BLOCKED replay cannot effect"),
+        postflight=lambda *_args: pytest.fail("BLOCKED replay cannot postflight"),
+        clock=adapters.clock,
+        crash_hook=adapters.crash_hook,
+    )
+    assert g._gateway_recover_with_adapters(
+        fixture["request"], adapters=blocked_replay, ledger=ledger
+    ) == terminal
+
+
+def _r1b2_runtime_payload(fixture):
+    return {
+        "HOST_AUTHORITY_SOURCE_ROOT": str(fixture["mirror"]),
+        "HOST_AUTHORITY_REMOTE": str(fixture["mirror"]),
+        "HOST_AUTHORITY_UID": os.getuid(),
+        "HOST_UID": os.getuid(),
+        "HOST_GID": os.getgid(),
+        "GATEWAY_STATE_ROOT": str(fixture["state"]),
+        "GATEWAY_SOURCE_BUNDLES_ROOT": str(
+            fixture["state"] / "source-bundles"
+        ),
+        "GATEWAY_REPOSITORY": str(fixture["state"] / "repository.git"),
+        "GATEWAY_DEPLOYMENTS_ROOT": str(fixture["state"] / "deployments"),
+        "GATEWAY_RECOVERY_AUTHORITY_STORE": str(
+            fixture["state"] / "recovery-authority.json"
+        ),
+        "GATEWAY_LOCK": str(fixture["lock_path"]),
+    }
+
+
+def _r1b2_apply_runtime_payload(payload):
+    path_names = {
+        "HOST_AUTHORITY_SOURCE_ROOT",
+        "GATEWAY_STATE_ROOT",
+        "GATEWAY_SOURCE_BUNDLES_ROOT",
+        "GATEWAY_REPOSITORY",
+        "GATEWAY_DEPLOYMENTS_ROOT",
+        "GATEWAY_RECOVERY_AUTHORITY_STORE",
+        "GATEWAY_LOCK",
+    }
+    for name, value in payload.items():
+        setattr(g, name, Path(value) if name in path_names else value)
+
+
 def _r1b2_mp_recovery_worker(
     request,
     receipt,
     ledger_path,
     lock_path,
+    runtime_payload,
     barrier,
     effect_count_path,
+    effect_delay,
     physical,
     postflight,
     result_queue,
 ):
     from nexus.contracts.gateway_deployment import RecoveryEffectAck, canonical_hash
 
+    _r1b2_apply_runtime_payload(runtime_payload)
     ledger = g.GatewayLedger(Path(ledger_path), lock_path=Path(lock_path))
 
     def observe(_plan):
@@ -3821,6 +4066,8 @@ def _r1b2_mp_recovery_worker(
             stream.flush()
             os.fsync(stream.fileno())
             fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+        if effect_delay:
+            time.sleep(effect_delay)
         values = {
             "plan_hash": plan.plan_hash,
             "acknowledged": True,
@@ -3874,18 +4121,103 @@ def _r1b2_mp_append_worker(
         result_queue.put("blocked")
 
 
+def _r1b2_fork_lock_worker(lock_path, result_queue):
+    try:
+        with g.InterProcessLock(Path(lock_path), timeout=0.1):
+            result_queue.put("acquired")
+    except g.GatewayContractError:
+        result_queue.put("blocked")
+
+
+def _r1b2_slow_owner_worker(
+    request,
+    receipt,
+    ledger_path,
+    lock_path,
+    runtime_payload,
+    physical,
+    postflight,
+    entered,
+    effect_count_path,
+    result_queue,
+):
+    from nexus.contracts.gateway_deployment import RecoveryEffectAck, canonical_hash
+
+    _r1b2_apply_runtime_payload(runtime_payload)
+    ledger = g.GatewayLedger(Path(ledger_path), lock_path=Path(lock_path))
+
+    def effect(plan):
+        _r1b2_durable_count(effect_count_path, 1)
+        entered.set()
+        time.sleep(g.RECOVERY_OWNER_COMPLETION_SECONDS + 5)
+        values = {
+            "plan_hash": plan.plan_hash,
+            "acknowledged": True,
+            "applied": True,
+            "already_desired": False,
+            "effect_kind": "GATEWAY_DURABLE_RECOVERY",
+        }
+        return RecoveryEffectAck(
+            **values, evidence_hash=canonical_hash(values)
+        )
+
+    adapters = g._RecoveryAdapters(
+        observe=lambda _plan: physical,
+        effect=effect,
+        postflight=lambda _plan, _identity: postflight,
+        clock=lambda: "2026-08-25T00:00:00Z",
+        crash_hook=lambda _point: None,
+    )
+    outcome = g._gateway_recover_with_adapters(
+        request, adapters=adapters, ledger=ledger
+    )
+    result_queue.put((outcome.result, outcome.evidence_hash))
+
+
+def _r1b2_slow_contender_worker(
+    request,
+    receipt,
+    ledger_path,
+    lock_path,
+    runtime_payload,
+    physical,
+    postflight,
+    contender_effect_count_path,
+    result_queue,
+):
+    _r1b2_apply_runtime_payload(runtime_payload)
+    ledger = g.GatewayLedger(Path(ledger_path), lock_path=Path(lock_path))
+
+    def forbidden_effect(_plan):
+        _r1b2_durable_count(contender_effect_count_path, 1)
+        raise AssertionError("live-owner contender cannot invoke effect")
+
+    adapters = g._RecoveryAdapters(
+        observe=lambda _plan: physical,
+        effect=forbidden_effect,
+        postflight=lambda _plan, _identity: postflight,
+        clock=lambda: "2026-08-25T00:00:00Z",
+        crash_hook=lambda _point: None,
+    )
+    outcome = g._gateway_recover_with_adapters(
+        request, adapters=adapters, ledger=ledger
+    )
+    result_queue.put((outcome.result, outcome.evidence_hash))
+
+
 def test_r1b2_recovery_concurrent_real_multiprocessing_exactly_one_effect_repeat_three(
     tmp_path, monkeypatch
 ):
     assert hasattr(g, "_RecoveryAdapters")
     assert hasattr(g, "_gateway_recover_with_adapters")
-    context = multiprocessing.get_context("fork")
-    for repeat in range(3):
+    context = multiprocessing.get_context("spawn")
+    for repeat in range(5):
         repeat_root = tmp_path / f"repeat-{repeat}"
         repeat_root.mkdir()
         fixture = _r1b2_runtime_fixture(repeat_root, monkeypatch)
         physical = _r1b2_physical_identity(fixture, "desired")
         postflight = _r1b2_postflight(fixture, physical)
+        runtime_payload = _r1b2_runtime_payload(fixture)
         effect_count = repeat_root / "effect-count"
         effect_count.write_text("0")
         barrier = context.Barrier(2)
@@ -3898,8 +4230,10 @@ def test_r1b2_recovery_concurrent_real_multiprocessing_exactly_one_effect_repeat
                     fixture["receipt"],
                     str(fixture["ledger_path"]),
                     str(fixture["lock_path"]),
+                    runtime_payload,
                     barrier,
                     str(effect_count),
+                    0.75,
                     physical,
                     postflight,
                     result_queue,
@@ -3910,7 +4244,7 @@ def test_r1b2_recovery_concurrent_real_multiprocessing_exactly_one_effect_repeat
         for process in processes:
             process.start()
         for process in processes:
-            process.join(timeout=20)
+            process.join(timeout=30)
             assert process.exitcode == 0
         results = [result_queue.get(timeout=2) for _ in processes]
         assert {item[0] for item in results} == {"ok"}
@@ -3991,7 +4325,7 @@ def test_r1b2_recovery_concurrent_conflicting_fence_has_one_winner(
     second = _r1b2_record(
         other_fixture, other_staged, "REQUESTED", 1, ""
     )
-    context = multiprocessing.get_context("fork")
+    context = multiprocessing.get_context("spawn")
     barrier = context.Barrier(2)
     result_queue = context.Queue()
     inputs = (
@@ -4037,3 +4371,147 @@ def test_r1b2_recovery_concurrent_conflicting_fence_has_one_winner(
         fixture["request"].request_id, other_request.request_id,
     }
     assert rows[0]["idempotency_fence"] == fixture["request"].idempotency_fence
+
+
+def test_r1b2_interprocess_lock_reentry_is_context_local_and_threads_block(
+    tmp_path, monkeypatch
+):
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    state.chmod(0o700)
+    monkeypatch.setattr(g, "HOST_UID", os.getuid())
+    lock_path = state / "lock"
+    flock_calls = []
+    real_flock = g.fcntl.flock
+
+    def observed_flock(fd, operation):
+        flock_calls.append(operation)
+        return real_flock(fd, operation)
+
+    monkeypatch.setattr(g.fcntl, "flock", observed_flock)
+    barrier = threading.Barrier(2)
+    result = []
+    with g.InterProcessLock(lock_path):
+        with g.InterProcessLock(lock_path):
+            assert sum(
+                bool(operation & fcntl.LOCK_EX) for operation in flock_calls
+            ) == 1
+
+        def contender():
+            barrier.wait(timeout=2)
+            try:
+                with g.InterProcessLock(lock_path, timeout=0.1):
+                    result.append("acquired")
+            except g.GatewayContractError:
+                result.append("blocked")
+
+        thread = threading.Thread(target=contender)
+        thread.start()
+        barrier.wait(timeout=2)
+        thread.join(timeout=2)
+    assert result == ["blocked"]
+
+
+@pytest.mark.filterwarnings("ignore:lance is not fork-safe")
+@pytest.mark.filterwarnings("ignore:This process .*multi-threaded.*:DeprecationWarning")
+def test_r1b2_interprocess_lock_fork_child_resets_inherited_reentry(
+    tmp_path, monkeypatch
+):
+    state = tmp_path / "state"
+    state.mkdir(mode=0o700)
+    state.chmod(0o700)
+    monkeypatch.setattr(g, "HOST_UID", os.getuid())
+    lock_path = state / "lock"
+    context = multiprocessing.get_context("fork")
+    result_queue = context.Queue()
+    with g.InterProcessLock(lock_path):
+        process = context.Process(
+            target=_r1b2_fork_lock_worker,
+            args=(str(lock_path), result_queue),
+        )
+        process.start()
+        process.join(timeout=5)
+        assert process.exitcode == 0
+        assert result_queue.get(timeout=2) == "blocked"
+
+
+def test_r1b2_live_effect_owner_timeout_returns_uncertain_without_contender_effect(
+    tmp_path, monkeypatch
+):
+    context = multiprocessing.get_context("spawn")
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    payload = _r1b2_runtime_payload(fixture)
+    physical = _r1b2_physical_identity(fixture, "desired")
+    postflight = _r1b2_postflight(fixture, physical)
+    owner_effect_count = tmp_path / "owner-effect-count"
+    contender_effect_count = tmp_path / "contender-effect-count"
+    owner_effect_count.write_text("0")
+    contender_effect_count.write_text("0")
+    entered = context.Event()
+    owner_results = context.Queue()
+    contender_results = context.Queue()
+    owner = context.Process(
+        target=_r1b2_slow_owner_worker,
+        args=(
+            fixture["request"],
+            fixture["receipt"],
+            str(fixture["ledger_path"]),
+            str(fixture["lock_path"]),
+            payload,
+            physical,
+            postflight,
+            entered,
+            str(owner_effect_count),
+            owner_results,
+        ),
+    )
+    owner.start()
+    assert entered.wait(timeout=20)
+    safe_rows = len(g.GatewayLedger(fixture["ledger_path"]).read())
+    contender = context.Process(
+        target=_r1b2_slow_contender_worker,
+        args=(
+            fixture["request"],
+            fixture["receipt"],
+            str(fixture["ledger_path"]),
+            str(fixture["lock_path"]),
+            payload,
+            physical,
+            postflight,
+            str(contender_effect_count),
+            contender_results,
+        ),
+    )
+    contender_started = time.monotonic()
+    contender.start()
+    contender.join(timeout=10)
+    contender_elapsed = time.monotonic() - contender_started
+    assert contender.exitcode == 0
+    assert contender_results.get(timeout=2)[0] == "UNCERTAIN_EFFECT"
+    assert contender_elapsed < g.RECOVERY_OWNER_COMPLETION_SECONDS + 4
+    assert _r1b2_durable_count(contender_effect_count) == 0
+    assert len(g.GatewayLedger(fixture["ledger_path"]).read()) == safe_rows
+    owner.join(timeout=20)
+    assert owner.exitcode == 0
+    assert owner_results.get(timeout=2)[0] == "VERIFIED"
+    assert _r1b2_durable_count(owner_effect_count) == 1
+    terminal_results = context.Queue()
+    terminal_reopen = context.Process(
+        target=_r1b2_slow_contender_worker,
+        args=(
+            fixture["request"],
+            fixture["receipt"],
+            str(fixture["ledger_path"]),
+            str(fixture["lock_path"]),
+            payload,
+            physical,
+            postflight,
+            str(contender_effect_count),
+            terminal_results,
+        ),
+    )
+    terminal_reopen.start()
+    terminal_reopen.join(timeout=20)
+    assert terminal_reopen.exitcode == 0
+    assert terminal_results.get(timeout=2)[0] == "VERIFIED"
+    assert _r1b2_durable_count(contender_effect_count) == 0

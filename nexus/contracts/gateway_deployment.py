@@ -242,6 +242,7 @@ def _strict_types(value: Any) -> None:
         if item.name in {
             "clean", "loaded", "client_bound", "token_bound", "is_bare",
             "alternates_absent", "bundle_verified", "effect_started",
+            "acknowledged", "applied", "already_desired",
         } and not isinstance(
             raw, bool
         ):
@@ -413,6 +414,89 @@ class SourceBundleEvidence(StrictRecord):
         "role_heads": lambda value: tuple(BundleRoleHead.model_validate(item) for item in value),
         "bare_store": BareStoreEvidence.model_validate,
     }
+
+
+@dataclass(frozen=True)
+class RecoveryLedgerRecord(StrictRecord):
+    schema: str
+    request_id: str
+    request_hash: str
+    state: DeploymentState
+    sequence: int
+    parent_hash: str
+    record_hash: str
+    authority_schema: str
+    receipt_id: str
+    receipt_hash: str
+    card_sha256: str
+    accepted_source_merge: str
+    accepted_source_tree: str
+    final_manager_sha256: str
+    independent_acceptance_receipt_hash: str
+    source_set_sha256: str
+    desired_manifest_id: str
+    desired_manifest_hash: str
+    predecessor_manifest_id: str
+    predecessor_manifest_hash: str
+    source_bundle_evidence_hash: str | None
+    operation: str
+    effect_class: EffectClass
+    idempotency_fence: str
+    pre_effect_identity: Mapping[str, Any]
+    observed_identity: Mapping[str, Any]
+
+    _converters: ClassVar[Mapping[str, Any]] = {
+        "state": DeploymentState,
+        "effect_class": EffectClass,
+    }
+
+
+@dataclass(frozen=True)
+class RecoveryEffectPlan(StrictRecord):
+    request_id: str
+    request_hash: str
+    idempotency_fence: str
+    receipt_id: str
+    receipt_hash: str
+    source_set_sha256: str
+    desired_manifest_id: str
+    desired_manifest_hash: str
+    predecessor_manifest_id: str
+    predecessor_manifest_hash: str
+    desired_root: str
+    predecessor_root: str
+    service_label: str
+    plist_path: str
+    endpoint: str
+    pre_effect_identity_hash: str
+    plan_hash: str
+
+
+@dataclass(frozen=True)
+class RecoveryEffectAck(StrictRecord):
+    plan_hash: str
+    acknowledged: bool
+    applied: bool
+    already_desired: bool
+    effect_kind: str
+    evidence_hash: str
+
+
+@dataclass(frozen=True)
+class RecoveryPhysicalIdentity(StrictRecord):
+    loaded: bool
+    service_label: str
+    pid: int | None
+    start_identity: str
+    listener: Any
+    plist_sha256: str
+    deployment_id: str
+    root: str
+    head: str
+    tree: str
+    server_instance: str
+    observed_at: str
+    evidence_hash: str
 
 
 @dataclass(frozen=True)
@@ -1059,6 +1143,216 @@ def validate_reconcile_outcome(
     return outcome
 
 
+def derive_recovery_ledger_binding(
+    *,
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    source_bundle_evidence: SourceBundleEvidence,
+) -> str:
+    validate_recovery_request(request)
+    validate_recovery_authority(receipt, request=request)
+    return canonical_hash({
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "authority_schema": receipt.schema,
+        "receipt_id": receipt.receipt_id,
+        "receipt_hash": receipt.receipt_hash,
+        "card_sha256": receipt.card_sha256,
+        "accepted_source_merge": receipt.accepted_source_merge,
+        "accepted_source_tree": receipt.accepted_source_tree,
+        "final_manager_sha256": receipt.final_manager_sha256,
+        "independent_acceptance_receipt_hash": (
+            receipt.independent_acceptance_receipt_hash
+        ),
+        "source_set_sha256": receipt.source_set.source_set_sha256,
+        "desired_manifest_id": receipt.desired_manifest_id,
+        "desired_manifest_hash": receipt.desired_manifest_sha256,
+        "predecessor_manifest_id": receipt.predecessor_manifest_id,
+        "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
+        "source_bundle_evidence_hash": source_bundle_evidence.evidence_hash,
+        "operation": request.operation,
+        "effect_class": request.effect_class,
+        "idempotency_fence": request.idempotency_fence,
+    })
+
+
+def validate_recovery_ledger_record(
+    record: RecoveryLedgerRecord,
+    *,
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    source_bundle_evidence: SourceBundleEvidence | None,
+    expected_sequence: int,
+    expected_parent_hash: str,
+) -> RecoveryLedgerRecord:
+    if not isinstance(record, RecoveryLedgerRecord):
+        raise ContractError("recovery ledger record must be typed")
+    validate_recovery_request(request)
+    validate_recovery_authority(receipt, request=request)
+    if record.schema != "nexus.gateway.ledger.v2":
+        raise ContractError("recovery ledger schema mismatch")
+    if type(record.sequence) is not int or record.sequence != expected_sequence:
+        raise ContractError("recovery ledger sequence mismatch")
+    if record.parent_hash != expected_parent_hash:
+        raise ContractError("recovery ledger parent mismatch")
+    if record.sequence == 1:
+        if record.parent_hash != "":
+            raise ContractError("first recovery ledger parent must be empty")
+    else:
+        _hash(record.parent_hash, "recovery ledger parent")
+    _hash(record.request_hash, "recovery ledger request")
+    _hash(record.record_hash, "recovery ledger record")
+    expected_hash = canonical_hash({
+        key: value for key, value in record.model_dump().items() if key != "record_hash"
+    })
+    if record.record_hash != expected_hash:
+        raise ContractError("recovery ledger record hash mismatch")
+    evidence_hash = (
+        None if source_bundle_evidence is None else source_bundle_evidence.evidence_hash
+    )
+    if record.state is DeploymentState.REQUESTED:
+        if record.source_bundle_evidence_hash is not None:
+            raise ContractError("REQUESTED recovery row cannot bind bundle evidence")
+    elif evidence_hash is None or record.source_bundle_evidence_hash != evidence_hash:
+        raise ContractError("recovery ledger bundle evidence mismatch")
+    exact = {
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "authority_schema": receipt.schema,
+        "receipt_id": receipt.receipt_id,
+        "receipt_hash": receipt.receipt_hash,
+        "card_sha256": receipt.card_sha256,
+        "accepted_source_merge": receipt.accepted_source_merge,
+        "accepted_source_tree": receipt.accepted_source_tree,
+        "final_manager_sha256": receipt.final_manager_sha256,
+        "independent_acceptance_receipt_hash": (
+            receipt.independent_acceptance_receipt_hash
+        ),
+        "source_set_sha256": receipt.source_set.source_set_sha256,
+        "desired_manifest_id": receipt.desired_manifest_id,
+        "desired_manifest_hash": receipt.desired_manifest_sha256,
+        "predecessor_manifest_id": receipt.predecessor_manifest_id,
+        "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
+        "operation": request.operation,
+        "effect_class": request.effect_class,
+        "idempotency_fence": request.idempotency_fence,
+    }
+    for name, expected in exact.items():
+        if getattr(record, name) != expected:
+            raise ContractError(f"recovery ledger trusted {name} mismatch")
+    if not isinstance(record.pre_effect_identity, Mapping) or not isinstance(
+        record.observed_identity, Mapping
+    ):
+        raise ContractError("recovery ledger identity evidence invalid")
+    return record
+
+
+def validate_recovery_effect_plan(
+    plan: RecoveryEffectPlan,
+    *,
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    deployment_root: str = (
+        "/Users/jameschen/Library/Application Support/Nexus/gateway-direct/deployments"
+    ),
+) -> RecoveryEffectPlan:
+    if not isinstance(plan, RecoveryEffectPlan):
+        raise ContractError("recovery effect plan must be typed")
+    validate_recovery_request(request)
+    validate_recovery_authority(receipt, request=request)
+    fixed = {
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "idempotency_fence": request.idempotency_fence,
+        "receipt_id": receipt.receipt_id,
+        "receipt_hash": receipt.receipt_hash,
+        "source_set_sha256": receipt.source_set.source_set_sha256,
+        "desired_manifest_id": receipt.desired_manifest_id,
+        "desired_manifest_hash": receipt.desired_manifest_sha256,
+        "predecessor_manifest_id": receipt.predecessor_manifest_id,
+        "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
+        "desired_root": str(Path(deployment_root) / receipt.desired_manifest_id),
+        "predecessor_root": str(Path(deployment_root) / receipt.predecessor_manifest_id),
+        "service_label": LABEL,
+        "plist_path": PLIST,
+        "endpoint": ENDPOINT,
+    }
+    for name, expected in fixed.items():
+        if getattr(plan, name) != expected:
+            raise ContractError(f"recovery effect plan {name} mismatch")
+    _hash(plan.pre_effect_identity_hash, "pre-effect identity")
+    _hash(plan.plan_hash, "recovery effect plan")
+    expected_hash = canonical_hash({
+        key: value for key, value in plan.model_dump().items() if key != "plan_hash"
+    })
+    if plan.plan_hash != expected_hash:
+        raise ContractError("recovery effect plan hash mismatch")
+    return plan
+
+
+def validate_recovery_effect_ack(
+    ack: RecoveryEffectAck,
+    *,
+    plan: RecoveryEffectPlan,
+) -> RecoveryEffectAck:
+    if not isinstance(ack, RecoveryEffectAck):
+        raise ContractError("recovery effect acknowledgement must be typed")
+    if ack.plan_hash != plan.plan_hash or ack.effect_kind != "GATEWAY_DURABLE_RECOVERY":
+        raise ContractError("recovery effect acknowledgement binding mismatch")
+    if type(ack.acknowledged) is not bool or type(ack.applied) is not bool or type(
+        ack.already_desired
+    ) is not bool:
+        raise ContractError("recovery effect acknowledgement type mismatch")
+    if not ack.acknowledged or (ack.applied and ack.already_desired):
+        raise ContractError("recovery effect acknowledgement state mismatch")
+    _hash(ack.evidence_hash, "recovery effect acknowledgement")
+    expected = canonical_hash({
+        key: value for key, value in ack.model_dump().items() if key != "evidence_hash"
+    })
+    if ack.evidence_hash != expected:
+        raise ContractError("recovery effect acknowledgement hash mismatch")
+    return ack
+
+
+def validate_recovery_physical_identity(
+    identity: RecoveryPhysicalIdentity,
+    *,
+    expected_manifest: DeploymentManifest,
+    expected_root: str,
+    expected_plist_sha256: str | None = None,
+) -> RecoveryPhysicalIdentity:
+    if not isinstance(identity, RecoveryPhysicalIdentity):
+        raise ContractError("recovery physical identity must be typed")
+    validate_deployment_manifest(expected_manifest)
+    if (
+        identity.loaded is not True
+        or identity.service_label != LABEL
+        or type(identity.pid) is not int
+        or identity.pid <= 0
+        or not identity.start_identity
+        or identity.listener != ENDPOINT
+        or identity.deployment_id != expected_manifest.deployment_id
+        or identity.root != expected_root
+        or identity.head != expected_manifest.commit
+        or identity.tree != expected_manifest.tree
+        or not identity.server_instance
+        or not identity.observed_at
+        or (
+            expected_plist_sha256 is not None
+            and identity.plist_sha256 != expected_plist_sha256
+        )
+    ):
+        raise ContractError("recovery physical identity mismatch")
+    _hash(identity.plist_sha256, "recovery physical plist")
+    _hash(identity.evidence_hash, "recovery physical identity")
+    expected = canonical_hash({
+        key: value for key, value in identity.model_dump().items() if key != "evidence_hash"
+    })
+    if identity.evidence_hash != expected:
+        raise ContractError("recovery physical identity hash mismatch")
+    return identity
+
+
 def validate_recovery_request(request: GatewayRecoveryRequest) -> GatewayRecoveryRequest:
     if not isinstance(request, GatewayRecoveryRequest) or request.schema != GatewayRecoveryRequest.__dataclass_fields__["schema"].default:
         raise ContractError("R1 recovery request schema mismatch")
@@ -1161,7 +1455,11 @@ _EDGES: dict[DeploymentState, set[DeploymentState]] = {
     DeploymentState.PREFLIGHTED: {
         DeploymentState.TARGET_READY, DeploymentState.STARTED, DeploymentState.BLOCKED,
     },
-    DeploymentState.TARGET_READY: {DeploymentState.ROLLBACK_READY, DeploymentState.BLOCKED},
+    DeploymentState.TARGET_READY: {
+        DeploymentState.ROLLBACK_READY,
+        DeploymentState.ROLLBACK_UNAVAILABLE,
+        DeploymentState.BLOCKED,
+    },
     DeploymentState.ROLLBACK_READY: {DeploymentState.EFFECT_STARTED, DeploymentState.BLOCKED},
     DeploymentState.ROLLBACK_UNAVAILABLE: {DeploymentState.BLOCKED},
     DeploymentState.STARTED: {
@@ -1184,8 +1482,8 @@ _EDGES: dict[DeploymentState, set[DeploymentState]] = {
     },
     DeploymentState.CLIENT_BOUND: {DeploymentState.VERIFIED, DeploymentState.UNCERTAIN_EFFECT},
     DeploymentState.UNCERTAIN_EFFECT: {
-        DeploymentState.ROLLBACK_STARTED,
-        DeploymentState.PREFLIGHTED,
+        DeploymentState.SERVICE_OBSERVED,
+        DeploymentState.ROLLED_BACK,
         DeploymentState.BLOCKED,
     },
     DeploymentState.ROLLBACK_STARTED: {
