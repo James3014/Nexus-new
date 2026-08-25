@@ -1674,3 +1674,244 @@ def test_exact_replay_tampered_caller_approval_is_not_duplicate(tmp_path: Path):
     with pytest.raises(RuntimeError):
         service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval={**approval, "approved_by": "attacker"}, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
     assert json.dumps(service._read_state("closure-bind"), sort_keys=True, separators=(",", ":")) == before
+
+
+def test_h1_integrate_approved_rejects_expired_authorization_before_staging_or_apply(tmp_path: Path):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure(
+        "closure-bind",
+        external_acceptance=acceptance,
+        approval=approval,
+        runtime_identity=runtime,
+        expected_canonical_head=base,
+        integration_branch="nexus/integration/canary",
+    )
+    state = service._read_state("closure-bind") or {}
+    auth_envelope = IntegrationAuthorizationEnvelope(
+        **{
+            **{k: v for k, v in state["integration_authorization"].items() if k != "authorization_hash"},
+            "expires_at": "2000-01-01T00:00:00+00:00",
+        }
+    )
+    auth_dict = auth_envelope.to_dict()
+    auth_dict["authorization_hash"] = auth_envelope.authorization_hash
+    state["integration_authorization"] = auth_dict
+    service._write_state("closure-bind", state)
+
+    with pytest.raises(RuntimeError, match="authorization expired"):
+        service.integrate_approved(
+            "closure-bind",
+            integration_branch="nexus/integration/canary",
+            runtime_identity=runtime,
+        )
+
+    # Mutation Sentinel: no staging or Git merge occurred on canonical root
+    assert _git(root, "rev-parse", "HEAD") == base
+    final_state = service._read_state("closure-bind") or {}
+    assert final_state.get("status") in {"APPROVED", "INTEGRATION_FAILED_PRE_APPLY"}
+    assert not final_state.get("merge_performed")
+
+
+def test_h2_retry_integration_rejects_expired_authorization_before_apply(tmp_path: Path):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure(
+        "closure-bind",
+        external_acceptance=acceptance,
+        approval=approval,
+        runtime_identity=runtime,
+        expected_canonical_head=base,
+        integration_branch="nexus/integration/canary",
+    )
+    state = service._read_state("closure-bind") or {}
+    auth_envelope = IntegrationAuthorizationEnvelope(
+        **{
+            **{k: v for k, v in state["integration_authorization"].items() if k != "authorization_hash"},
+            "expires_at": "2000-01-01T00:00:00+00:00",
+        }
+    )
+    auth_dict = auth_envelope.to_dict()
+    auth_dict["authorization_hash"] = auth_envelope.authorization_hash
+    state["integration_authorization"] = auth_dict
+    state["status"] = "INTEGRATION_FAILED_PRE_APPLY"
+    state["promotion_status"] = "INTEGRATION_FAILED_PRE_APPLY"
+    state["merge_performed"] = False
+    service._write_state("closure-bind", state)
+
+    with pytest.raises(RuntimeError, match="authorization expired"):
+        service.retry_integration("closure-bind", integration_branch="nexus/integration/canary")
+
+    # Mutation Sentinel: no Git branch update-ref or merge performed
+    assert _git(root, "rev-parse", "HEAD") == base
+    final_state = service._read_state("closure-bind") or {}
+    assert final_state.get("merge_performed") is False
+
+
+def test_h3_retry_integration_preserves_valid_unexpired_authorization(tmp_path: Path, monkeypatch):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure(
+        "closure-bind",
+        external_acceptance=acceptance,
+        approval=approval,
+        runtime_identity=runtime,
+        expected_canonical_head=base,
+        integration_branch="nexus/integration/canary",
+    )
+    state = service._read_state("closure-bind") or {}
+    state["status"] = "INTEGRATION_FAILED_PRE_APPLY"
+    state["promotion_status"] = "INTEGRATION_FAILED_PRE_APPLY"
+    state["merge_performed"] = False
+    service._write_state("closure-bind", state)
+
+    monkeypatch.setattr(
+        service,
+        "_record_integration",
+        lambda receipt, *, task_id=None: {"status": "INTEGRATED", "promotion_status": "INTEGRATED", "task_id": task_id},
+    )
+    monkeypatch.setattr(
+        RepositoryContractGate,
+        "evaluate_committed_candidate",
+        lambda *args, **kwargs: SimpleNamespace(passed=True, blocking_reasons=()),
+    )
+    class FakeIntegrationManager:
+        def __init__(self, **kwargs):
+            pass
+        def integrate_authorized_task_state(self, *args, **kwargs):
+            return SimpleNamespace()
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.ControlledIntegrationManager",
+        FakeIntegrationManager,
+    )
+
+    result = service.retry_integration("closure-bind", integration_branch="nexus/integration/canary")
+    assert result["status"] == "INTEGRATED"
+
+
+def test_h4_post_apply_retry_still_forbidden(tmp_path: Path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state(
+        "post-apply-retry",
+        {
+            "task_id": "post-apply-retry",
+            "status": "INTEGRATION_VERIFY_FAILED_AFTER_APPLY",
+            "promotion_status": "INTEGRATION_VERIFY_FAILED_AFTER_APPLY",
+            "merge_performed": True,
+            "approved_binding": {"candidate_commit_sha": "a" * 40},
+        },
+    )
+    with pytest.raises(RuntimeError, match="INTEGRATION_ALREADY_APPLIED_RETRY_FORBIDDEN"):
+        service.retry_integration("post-apply-retry")
+
+
+def test_h5_none_expiry_preserved(tmp_path: Path, monkeypatch):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure(
+        "closure-bind",
+        external_acceptance=acceptance,
+        approval=approval,
+        runtime_identity=runtime,
+        expected_canonical_head=base,
+        integration_branch="nexus/integration/canary",
+    )
+    state = service._read_state("closure-bind") or {}
+    auth_envelope = IntegrationAuthorizationEnvelope(
+        **{
+            **{k: v for k, v in state["integration_authorization"].items() if k != "authorization_hash"},
+            "expires_at": None,
+        }
+    )
+    auth_dict = auth_envelope.to_dict()
+    auth_dict["authorization_hash"] = auth_envelope.authorization_hash
+    state["integration_authorization"] = auth_dict
+    service._write_state("closure-bind", state)
+
+    monkeypatch.setattr(
+        service,
+        "_record_integration",
+        lambda receipt, *, task_id=None: {"status": "INTEGRATED", "promotion_status": "INTEGRATED", "task_id": task_id},
+    )
+    monkeypatch.setattr(
+        RepositoryContractGate,
+        "evaluate_committed_candidate",
+        lambda *args, **kwargs: SimpleNamespace(passed=True, blocking_reasons=()),
+    )
+    class FakeIntegrationManager:
+        def __init__(self, **kwargs):
+            pass
+        def integrate_authorized_task_state(self, *args, **kwargs):
+            return SimpleNamespace()
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.ControlledIntegrationManager",
+        FakeIntegrationManager,
+    )
+    result = service.integrate_approved(
+        "closure-bind",
+        integration_branch="nexus/integration/canary",
+        runtime_identity=runtime,
+    )
+    assert result["status"] == "INTEGRATED"
+
+
+def test_h6_expiry_hash_tamper_fails_closed(tmp_path: Path):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure(
+        "closure-bind",
+        external_acceptance=acceptance,
+        approval=approval,
+        runtime_identity=runtime,
+        expected_canonical_head=base,
+        integration_branch="nexus/integration/canary",
+    )
+    state = service._read_state("closure-bind") or {}
+    state["integration_authorization"]["expires_at"] = "2099-12-31T00:00:00+00:00"
+    service._write_state("closure-bind", state)
+
+    with pytest.raises(RuntimeError, match="INTEGRATION_AUTHORIZATION_TAMPERED|INTEGRATION_BINDING_DRIFT_AT_APPLY_BOUNDARY|INTEGRATION_AUTHORIZATION_DRIFT"):
+        service.integrate_approved(
+            "closure-bind",
+            integration_branch="nexus/integration/canary",
+            runtime_identity=runtime,
+        )
+
+
+def test_h7_existing_binding_drift_controls_fail_closed(tmp_path: Path):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure(
+        "closure-bind",
+        external_acceptance=acceptance,
+        approval=approval,
+        runtime_identity=runtime,
+        expected_canonical_head=base,
+        integration_branch="nexus/integration/canary",
+    )
+    (root / "value.txt").write_text("drift\n")
+    _git(root, "commit", "-am", "drift commit")
+    with pytest.raises(RuntimeError):
+        service.integrate_approved(
+            "closure-bind",
+            integration_branch="nexus/integration/canary",
+            runtime_identity=runtime,
+        )
+
+
+def test_h8_transactional_integration_rejects_expired_authorization_before_staging_or_apply(tmp_path: Path):
+    root, base, candidate = _repo(tmp_path)
+    receipt = _acceptance(candidate)
+    auth = replace(
+        _authorization(root, base, candidate, receipt),
+        expires_at="2000-01-01T00:00:00+00:00",
+    )
+    with pytest.raises(RuntimeError, match="authorization expired"):
+        TargetIntegrationLifecycle.transactional_integration(
+            task_id="task-1",
+            canonical_root=str(root.resolve()),
+            candidate_commit=candidate,
+            expected_canonical_head=base,
+            staging_root=str(tmp_path / "stage"),
+            apply=True,
+            external_acceptance=receipt,
+            authorization=auth,
+        )
+
+    # Mutation Sentinel: HEAD is untouched, no staging directory created
+    assert _git(root, "rev-parse", "HEAD") == base
+    assert not (tmp_path / "stage" / "task-1").exists()
