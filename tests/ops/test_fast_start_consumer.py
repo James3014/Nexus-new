@@ -4,7 +4,11 @@ import json
 from pathlib import Path
 from typing import Any
 
-from scripts.ops.fast_start_consumer import REGISTRY_ISSUE, consumer_preflight, safe_consumer_preflight
+from scripts.ops.fast_start_consumer import (
+    REGISTRY_ISSUE,
+    consumer_preflight,
+    safe_consumer_preflight,
+)
 from scripts.ops.fast_start_v2 import registry_payload_hash
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -154,10 +158,10 @@ def test_invalid_registry_falls_back_without_granting_authority() -> None:
     assert report["implementation_source_or_test_body_reads"] == 0
 
 
-def test_root_agent_contract_makes_fast_start_preflight_mandatory() -> None:
-    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
-    assert "scripts/ops/fast_start_consumer.py --issue <number>" in agents
-    assert "before any implementation source/test body read" in agents
-    assert "ADVISORY_CACHE_ONLY" in agents
-    assert "CACHE_MISS" in agents
-    assert "CACHE_UNAVAILABLE_OR_INVALID" in agents
+def test_primary_coordinator_contract_makes_fast_start_preflight_mandatory() -> None:
+    contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(encoding="utf-8")
+    assert "scripts/ops/fast_start_consumer.py --issue <number>" in contract
+    assert "before any implementation source/test body read" in contract
+    assert "ADVISORY_CACHE_ONLY" in contract
+    assert "CACHE_MISS" in contract
+    assert "CACHE_UNAVAILABLE_OR_INVALID" in contract
