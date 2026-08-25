@@ -23,6 +23,15 @@ source behavior, tests, and required verifiers remain authoritative.
 
 - The collaboration repository is `James3014/Nexus-new`; default and
   collaboration branch is `main`.
+- For primary-coordinator GitHub Issue intake, after this root file and before
+  implementation source/test reads, run
+  `python -B scripts/ops/fast_start_consumer.py --issue <number>`. It must read
+  the sole advisory registry Issue #549 first. `EARLY_STOP_BLOCKED` and
+  `EARLY_STOP_HOST_BOUND` stop before implementation exploration; cache miss,
+  invalid/stale cache, or rebind-required results fall back to fresh
+  authoritative discovery. Fast Start is `ADVISORY_CACHE_ONLY`: it may reduce
+  reads or expose a blocker, but never grants Ready, claim, route, mutation,
+  approval, merge, runtime, release, or production authority.
 - A Ready GitHub Issue is a worker-neutral bounded collaboration contract; it
   does not select local lifecycle. Draft, triage, and unready Issues grant no
   mutation. An eligible governed worker implements on an issue-specific branch
