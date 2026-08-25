@@ -11,7 +11,12 @@ import urllib.error
 import urllib.request
 from typing import Any, Mapping
 
-from scripts.ops.fast_start_v2 import parse_registry_body, registry_payload_hash
+try:
+    from scripts.ops.fast_start_v2 import parse_registry_body, registry_payload_hash
+except ModuleNotFoundError as exc:  # pragma: no cover - direct script entrypoint
+    if exc.name != "scripts":
+        raise
+    from fast_start_v2 import parse_registry_body, registry_payload_hash
 
 REPOSITORY = "James3014/Nexus-new"
 REGISTRY_ISSUE = 549
@@ -48,6 +53,8 @@ class GitHubMetadataClient:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:  # pragma: no cover - live boundary
             raise RuntimeError(f"GitHub GET failed: HTTP {exc.code} {path}") from exc
+        except urllib.error.URLError as exc:  # pragma: no cover - live boundary
+            raise RuntimeError(f"GitHub GET unavailable: {path}") from exc
 
 
 def _header_hash(body: str) -> str:
