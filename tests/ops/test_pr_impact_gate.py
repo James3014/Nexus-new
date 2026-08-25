@@ -356,6 +356,29 @@ def test_issue526_exact_authority_bundle_json_selects_high_risk_tier2_contracts(
     assert set(MANDATORY_TIER2_TARGETS).issubset(plan.pytest_targets)
 
 
+def test_issue526_r1_evidence_jsons_select_high_risk_tier2_contracts():
+    exact_paths = [
+        (
+            "tasks/github-issue-526-host-authority-and-canary-20260823/"
+            "10-durable-recovery-authority-receipt.json"
+        ),
+        (
+            "tasks/github-issue-526-host-authority-and-canary-20260823/"
+            "10-r1-source-acceptance-evidence.json"
+        ),
+    ]
+
+    plan = build_impact_plan(exact_paths)
+
+    assert plan.changed_paths == exact_paths
+    assert plan.tier == 2
+    assert plan.impact_class == "HIGH_RISK_INTEGRATION"
+    assert plan.unmatched_paths == []
+    assert "tests/contracts/test_gateway_deployment_contract.py" in plan.pytest_targets
+    assert "tests/ops/test_mcp_gateway_durable.py" in plan.pytest_targets
+    assert set(MANDATORY_TIER2_TARGETS).issubset(plan.pytest_targets)
+
+
 def test_issue526_adjacent_authority_json_remains_unknown_broader_fallback():
     adjacent_path = (
         "tasks/github-issue-526-host-authority-and-canary-20260823/"
