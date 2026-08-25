@@ -8,7 +8,7 @@ frontier_status: READY_FOR_BOUNDED_IMPLEMENTATION_AFTER_FRESH_ADMISSION_AND_OVER
 current_frontier: github-issue-129-atomic-work-claim
 AUTO_CHAIN: false
 owner: James Chen
-owner_authorization: direct Owner authorization for persistent claim subrecord/recovery under existing SelfHostedTaskService .state.lock plus Issue #129 contract delta 5336198602
+owner_authorization: "direct Owner authorization for persistent claim subrecord/recovery under existing SelfHostedTaskService .state.lock plus Issue #129 contract delta 5336198602"
 shared_file_gate: SATISFIED_BY_PR581_MERGE_50A6FBC
 implementation_status: READY_FOR_BOUNDED_IMPLEMENTATION_AFTER_FRESH_ADMISSION_AND_OVERLAP_BIND
 reconciled_main: 50a6fbc766218a17fa9296edf23ce95504fee8c8
