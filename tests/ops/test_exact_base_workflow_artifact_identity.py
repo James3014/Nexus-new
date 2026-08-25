@@ -98,9 +98,7 @@ def test_upload_artifact_rejects_plain_github_sha(name: str) -> None:
 def test_workflow_shares_unified_exact_head_identity_contract(name: str) -> None:
     cfg = WORKFLOWS[name]
     checkout_ref = _step(name, "Checkout exact head").get("with", {}).get("ref")
-    impact_head_sha = (
-        _step(name, "Decide cheap exact-base impact").get("env", {}).get("HEAD_SHA")
-    )
+    impact_head_sha = _step(name, "Decide cheap exact-base impact").get("env", {}).get("HEAD_SHA")
     artifact_name = _step(name, cfg["upload_step"]).get("with", {}).get("name")
 
     assert checkout_ref == EXACT_HEAD_EXPRESSION
