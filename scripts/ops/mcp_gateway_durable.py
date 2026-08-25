@@ -13,12 +13,15 @@ import os
 import plistlib
 import re
 import shlex
+import shutil
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -30,26 +33,54 @@ from nexus.contracts.gateway_deployment import (
     GATEWAY_ACTION,
     GATEWAY_TASK_ID,
     HOST_CARD_SHA256,
+    INTERPRETER,
+    RECOVERY_RECEIPT_PATH,
+    REPOSITORY,
     SOURCE_BASE_MERGE,
     SOURCE_BASE_TREE,
+    BareStoreEvidence,
+    BundleRoleHead,
     ContractError,
+    DeploymentManifest,
     DeploymentState,
     EffectClass,
     GatewayDeploymentRequest,
+    GatewayReconcileOutcome,
+    GatewayRecoveryRequest,
     HostEffectAuthorityBundle,
     HostEffectAuthorityReceipt,
     PostflightIdentity,
+    RecoveryAuthorityReceipt,
+    RecoveryEffectAck,
+    RecoveryEffectPlan,
+    RecoveryEntrypointIdentity,
+    RecoveryLedgerRecord,
+    RecoveryPhysicalIdentity,
+    RecoverySourceSet,
+    ResultClass,
+    SourceBundleEvidence,
     _gateway_wrapper_command,
     canonical_hash,
+    derive_deployment_manifest,
     select_host_effect_authority_receipt,
     validate_authority_freshness,
+    validate_deployment_manifest,
     validate_host_effect_authority,
     validate_host_effect_authority_bundle,
     validate_postflight_identity,
     validate_profile,
     validate_receipt_freshness,
+    validate_reconcile_outcome,
+    validate_recovery_authority,
+    validate_recovery_effect_ack,
+    validate_recovery_effect_plan,
+    validate_recovery_ledger_record,
+    validate_recovery_physical_identity,
+    validate_recovery_request,
+    validate_recovery_source_set,
     validate_request,
     validate_rollback_capture,
+    validate_source_bundle_evidence,
 )
 
 CANONICAL_ROOT = Path("/Users/jameschen/Workspace/nexus")
@@ -234,7 +265,7 @@ def serve(kind: str, *, root: Path = CANONICAL_ROOT, launch_floor_head: str | No
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("action", choices=("preflight", "render", "install", "status", "reload", "uninstall", "serve-gateway", "serve-devspace",
-                                       "gateway-status", "gateway-preflight", "gateway-reload", "gateway-install-artifact", "gateway-rollback"))
+                                       "gateway-status", "gateway-preflight", "gateway-reload", "gateway-install-artifact", "gateway-rollback", "gateway-recover"))
     p.add_argument("--launch-floor-head", dest="launch_floor_head")
     p.add_argument("--expected-head", dest="launch_floor_head", help="backward-compat alias for --launch-floor-head")
     p.add_argument("--devspace-hash"); p.add_argument("--env-file")
@@ -256,11 +287,15 @@ def main() -> int:
                 payload = json.loads(request_path.read_text(), object_pairs_hook=_unique_pairs)
             except (OSError, ValueError) as exc:
                 raise GateError("gateway request file malformed") from exc
-            request = GatewayDeploymentRequest.model_validate(payload)
-            operation = a.action.removeprefix("gateway-")
+            operation = "gateway-recover" if a.action == "gateway-recover" else a.action.removeprefix("gateway-")
             if operation == "install-artifact": operation = "install-artifact"
+            request = (
+                GatewayRecoveryRequest.model_validate(payload)
+                if operation == "gateway-recover"
+                else GatewayDeploymentRequest.model_validate(payload)
+            )
             now = _current_observation_time()
-            observed = {} if operation in {"status", "gateway-status", "install-artifact"} else collect_gateway_observation(
+            observed = {} if operation in {"status", "gateway-status", "install-artifact", "gateway-recover"} else collect_gateway_observation(
                 request, operation=operation, observation_time=now
             )
             if a.gateway_evidence is not None:
@@ -275,6 +310,11 @@ GATEWAY_PLIST = Path("/Users/jameschen/Library/LaunchAgents/com.nexus.mcp.gatewa
 GATEWAY_ENDPOINT = "http://127.0.0.1:8766"
 GATEWAY_ENTRYPOINT = "scripts/ops/nexus_mcp_gateway_http.py"
 GATEWAY_STATE_ROOT = Path("/Users/jameschen/Library/Application Support/Nexus/gateway-direct")
+GATEWAY_DEPLOYMENTS_ROOT = GATEWAY_STATE_ROOT / "deployments"
+GATEWAY_SOURCE_BUNDLES_ROOT = GATEWAY_STATE_ROOT / "source-bundles"
+GATEWAY_REPOSITORY = GATEWAY_STATE_ROOT / "repository.git"
+GATEWAY_RECOVERY_AUTHORITY_STORE = GATEWAY_STATE_ROOT / "recovery-authority.json"
+RECOVERY_AUTHORITY_SOURCE_PATH = RECOVERY_RECEIPT_PATH
 GATEWAY_LEDGER = GATEWAY_STATE_ROOT / "ledger.jsonl"
 GATEWAY_LOCK = GATEWAY_STATE_ROOT / "ledger.lock"
 GATEWAY_ARTIFACT = GATEWAY_STATE_ROOT / "manager.py"
@@ -300,6 +340,7 @@ MAX_LEDGER_BYTES = 64 * 1024
 MAX_LEDGER_RECORDS = 256
 MAX_GATEWAY_STORE_BYTES = 64 * 1024
 HOST_UID = 501
+HOST_GID = 20
 
 
 class GatewayContractError(GateError):
@@ -637,15 +678,782 @@ def _atomic_gateway_write(path: Path, data: bytes, *, mode: int = 0o600) -> None
         raise
 
 
+@dataclass(frozen=True)
+class _R1StageResult:
+    desired_path: Path
+    predecessor_path: Path
+    desired_manifest: DeploymentManifest
+    predecessor_manifest: DeploymentManifest
+    bundle_evidence: SourceBundleEvidence
+
+
+@dataclass(frozen=True)
+class _R1PreparedSource:
+    desired_manifest: DeploymentManifest
+    predecessor_manifest: DeploymentManifest
+    bundle_evidence: SourceBundleEvidence
+
+
+@dataclass(frozen=True)
+class _RecoveryAdapters:
+    observe: Callable[[RecoveryEffectPlan], RecoveryPhysicalIdentity]
+    effect: Callable[[RecoveryEffectPlan], RecoveryEffectAck]
+    postflight: Callable[
+        [RecoveryEffectPlan, RecoveryPhysicalIdentity], Mapping[str, Any]
+    ]
+    clock: Callable[[], str]
+    crash_hook: Callable[[str], None]
+
+
+def _r1_run(*command: str, bytes_output: bool = False) -> str | bytes:
+    try:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=not bytes_output,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise _gateway_error("R1 fixed subprocess failed", exc) from exc
+    if result.returncode != 0:
+        raise _gateway_error("R1 fixed subprocess rejected")
+    return result.stdout if bytes_output else str(result.stdout).strip()
+
+
+def _r1_safe_directory(path: Path) -> Path:
+    """Create/validate only manager-owned 0700 directories below the fixed root."""
+    path = Path(path)
+    root = Path(GATEWAY_STATE_ROOT)
+    if not path.is_absolute() or not root.is_absolute():
+        raise _gateway_error("R1 manager directory must be absolute")
+    try:
+        relative = path.relative_to(root)
+    except ValueError as exc:
+        raise _gateway_error("R1 manager directory escaped fixed root", exc) from exc
+    current = root
+    components = (root, *(root / Path(*relative.parts[:index]) for index in range(1, len(relative.parts) + 1)))
+    for current in components:
+        if current.exists() or current.is_symlink():
+            info = os.lstat(current)
+            if (
+                stat.S_ISLNK(info.st_mode)
+                or not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != HOST_UID
+                or info.st_gid != HOST_GID
+                or stat.S_IMODE(info.st_mode) != 0o700
+            ):
+                raise _gateway_error("R1 manager directory ownership/mode invalid")
+            continue
+        current.mkdir(mode=0o700, parents=current == root)
+        os.chmod(current, 0o700)
+        info = os.lstat(current)
+        if (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) != (HOST_UID, HOST_GID, 0o700):
+            raise _gateway_error("R1 manager directory creation identity mismatch")
+    return path
+
+
+def _r1_mirror_fresh_main() -> tuple[str, str]:
+    root = Path(HOST_AUTHORITY_SOURCE_ROOT)
+    if root.is_symlink() or not root.is_dir() or (root / ".git").is_symlink():
+        raise _gateway_error("R1 authority mirror unavailable")
+    info = os.lstat(root)
+    if info.st_uid != HOST_AUTHORITY_UID or stat.S_IMODE(info.st_mode) not in {0o700, 0o755}:
+        raise _gateway_error("R1 authority mirror ownership/mode invalid")
+    root_text = str(root)
+    if _r1_run("git", "-C", root_text, "rev-parse", "--show-toplevel") != str(root.resolve()):
+        raise _gateway_error("R1 authority mirror root mismatch")
+    if _r1_run("git", "-C", root_text, "remote", "get-url", "origin") != HOST_AUTHORITY_REMOTE:
+        raise _gateway_error("R1 authority mirror origin mismatch")
+    if _r1_run("git", "-C", root_text, "status", "--porcelain"):
+        raise _gateway_error("R1 authority mirror dirty")
+    observed = str(
+        _r1_run("git", "-C", root_text, "ls-remote", HOST_AUTHORITY_REMOTE, HOST_AUTHORITY_REF)
+    ).split()
+    if len(observed) != 2 or observed[1] != HOST_AUTHORITY_REF or not re.fullmatch(r"[0-9a-f]{40}", observed[0]):
+        raise _gateway_error("R1 fresh-main observation malformed")
+    fresh_main = observed[0]
+    if _r1_run("git", "-C", root_text, "rev-parse", "HEAD") != fresh_main:
+        raise _gateway_error("R1 authority mirror stale")
+    fresh_tree = str(_r1_run("git", "-C", root_text, "rev-parse", f"{fresh_main}^{{tree}}"))
+    return fresh_main, fresh_tree
+
+
+def _r1_entrypoint_identity(commit: str) -> RecoveryEntrypointIdentity:
+    root = str(HOST_AUTHORITY_SOURCE_ROOT)
+    entry = str(_r1_run("git", "-C", root, "ls-tree", commit, "--", GATEWAY_ENTRYPOINT))
+    metadata, separator, tracked = entry.partition("\t")
+    fields = metadata.split()
+    if (
+        not separator
+        or len(fields) != 3
+        or fields[0] != "100644"
+        or fields[1] != "blob"
+        or not re.fullmatch(r"[0-9a-f]{40}", fields[2])
+        or tracked != GATEWAY_ENTRYPOINT
+    ):
+        raise _gateway_error("R1 tracked entrypoint identity invalid")
+    payload = _r1_run(
+        "git", "-C", root, "cat-file", "blob", fields[2], bytes_output=True
+    )
+    return RecoveryEntrypointIdentity(
+        path=GATEWAY_ENTRYPOINT,
+        blob_oid=fields[2],
+        sha256=hashlib.sha256(bytes(payload)).hexdigest(),
+        tracked_mode=fields[0],
+    )
+
+
+def _r1_reject_gitlinks(commit: str) -> None:
+    tree = str(
+        _r1_run(
+            "git", "-C", str(HOST_AUTHORITY_SOURCE_ROOT),
+            "ls-tree", "-r", commit,
+        )
+    )
+    for row in tree.splitlines():
+        if row.split(maxsplit=1)[:1] == ["160000"]:
+            raise _gateway_error("R1 Gitlink is forbidden")
+
+
+def _r1_interpreter_identity() -> Any:
+    path = Path(INTERPRETER)
+    try:
+        info = os.lstat(path)
+        resolved = path.resolve(strict=True)
+        payload = resolved.read_bytes()
+    except OSError as exc:
+        raise _gateway_error("R1 fixed interpreter unavailable", exc) from exc
+    from nexus.contracts.gateway_deployment import InterpreterIdentity
+    return InterpreterIdentity(
+        path=str(path),
+        resolved_path=str(resolved),
+        sha256=hashlib.sha256(payload).hexdigest(),
+        uid=info.st_uid,
+        gid=info.st_gid,
+        mode=stat.filemode(info.st_mode),
+    )
+
+
+def _r1_derive_source_set(receipt: RecoveryAuthorityReceipt) -> RecoverySourceSet:
+    root = str(HOST_AUTHORITY_SOURCE_ROOT)
+    commits = (
+        receipt.accepted_source_merge,
+        receipt.desired_commit,
+        receipt.predecessor_commit,
+    )
+    for commit in commits:
+        if not re.fullmatch(r"[0-9a-f]{40}", commit):
+            raise _gateway_error("R1 semantic commit malformed")
+        _r1_run("git", "-C", root, "cat-file", "-e", f"{commit}^{{commit}}")
+        _r1_reject_gitlinks(commit)
+    trees = tuple(
+        str(_r1_run("git", "-C", root, "rev-parse", f"{commit}^{{tree}}"))
+        for commit in commits
+    )
+    if trees != (
+        receipt.accepted_source_tree,
+        receipt.desired_tree,
+        receipt.predecessor_tree,
+    ):
+        raise _gateway_error("R1 semantic commit/tree mismatch")
+    values = {
+        "repository": REPOSITORY,
+        "accepted_commit": commits[0],
+        "accepted_tree": trees[0],
+        "accepted_entrypoint": _r1_entrypoint_identity(commits[0]),
+        "desired_commit": commits[1],
+        "desired_tree": trees[1],
+        "desired_entrypoint": _r1_entrypoint_identity(commits[1]),
+        "predecessor_commit": commits[2],
+        "predecessor_tree": trees[2],
+        "predecessor_entrypoint": _r1_entrypoint_identity(commits[2]),
+        "interpreter": _r1_interpreter_identity(),
+    }
+    source_set = RecoverySourceSet(
+        **values,
+        source_set_sha256=canonical_hash(values),
+    )
+    return validate_recovery_source_set(source_set)
+
+
+def _r1_local_receipt(receipt: RecoveryAuthorityReceipt) -> tuple[bytes, str, str]:
+    path = _safe_store_path(GATEWAY_RECOVERY_AUTHORITY_STORE)
+    if not path.exists() or path.stat().st_uid != HOST_UID or path.stat().st_gid != HOST_GID:
+        raise _gateway_error("R1 recovery authority store invalid")
+    raw = path.read_bytes()
+    try:
+        payload = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_pairs)
+        local_receipt = RecoveryAuthorityReceipt.model_validate(payload)
+        validate_recovery_authority(local_receipt)
+    except (UnicodeError, ValueError, ContractError) as exc:
+        raise _gateway_error("R1 local recovery receipt malformed", exc) from exc
+    if local_receipt != receipt or receipt.receipt_hash != canonical_hash({
+        key: value for key, value in receipt.model_dump().items() if key != "receipt_hash"
+    }):
+        raise _gateway_error("R1 supplied receipt differs from fixed local receipt")
+    fresh_main, fresh_tree = _r1_mirror_fresh_main()
+    root = str(HOST_AUTHORITY_SOURCE_ROOT)
+    if _r1_run(
+        "git", "-C", root, "merge-base", "--is-ancestor",
+        receipt.authority_floor_commit, fresh_main,
+    ) != "":
+        raise _gateway_error("R1 authority floor is outside fresh main")
+    if _r1_run(
+        "git", "-C", root, "rev-parse", f"{receipt.authority_floor_commit}^{{tree}}"
+    ) != receipt.authority_floor_tree:
+        raise _gateway_error("R1 authority floor tree mismatch")
+    tracked = _r1_run(
+        "git", "-C", root, "show",
+        f"{fresh_main}:{RECOVERY_AUTHORITY_SOURCE_PATH}",
+        bytes_output=True,
+    )
+    if bytes(tracked) != raw:
+        raise _gateway_error("R1 recovery receipt remote/local byte mismatch")
+    return raw, fresh_main, fresh_tree
+
+
+_R1_ROLE_REFS = (
+    ("fresh-main", "refs/nexus-r1/fresh-main"),
+    ("desired", "refs/nexus-r1/desired"),
+    ("predecessor", "refs/nexus-r1/predecessor"),
+)
+
+
+def _r1_bundle_heads(bundle: Path) -> tuple[BundleRoleHead, ...]:
+    observed: dict[str, str] = {}
+    for line in str(_r1_run("git", "bundle", "list-heads", str(bundle))).splitlines():
+        commit, ref = line.split(maxsplit=1)
+        if ref in observed:
+            raise _gateway_error("R1 duplicate bundle head")
+        observed[ref] = commit
+    expected_refs = tuple(ref for _, ref in _R1_ROLE_REFS)
+    if set(observed) != set(expected_refs):
+        raise _gateway_error("R1 named bundle refs mismatch")
+    return tuple(
+        BundleRoleHead(role=role, ref=ref, commit=observed[ref])
+        for role, ref in _R1_ROLE_REFS
+    )
+
+
+def _r1_create_or_verify_bundle(
+    receipt: RecoveryAuthorityReceipt,
+    fresh_main: str,
+) -> tuple[Path, tuple[BundleRoleHead, ...]]:
+    bundles = _r1_safe_directory(GATEWAY_SOURCE_BUNDLES_ROOT)
+    bundle = bundles / f"{receipt.receipt_hash}.bundle"
+    expected = (fresh_main, receipt.desired_commit, receipt.predecessor_commit)
+    try:
+        existing_info = os.lstat(bundle)
+    except FileNotFoundError:
+        bundle_exists = False
+    except OSError as exc:
+        raise _gateway_error("R1 persisted bundle identity unreadable", exc) from exc
+    else:
+        bundle_exists = True
+        if (
+            stat.S_ISLNK(existing_info.st_mode)
+            or not stat.S_ISREG(existing_info.st_mode)
+            or existing_info.st_uid != HOST_UID
+            or existing_info.st_gid != HOST_GID
+            or stat.S_IMODE(existing_info.st_mode) != 0o600
+        ):
+            raise _gateway_error("R1 persisted bundle identity invalid")
+    scratch = Path(tempfile.mkdtemp(prefix=".bundle-source.", dir=bundles))
+    try:
+        os.chmod(scratch, 0o700)
+        source = scratch / "source.git"
+        candidate = scratch / "candidate.bundle"
+        _r1_run("git", "init", "--bare", str(source))
+        for (_, ref), commit in zip(_R1_ROLE_REFS, expected, strict=True):
+            _r1_run(
+                "git", "--git-dir", str(source), "fetch", "--no-tags",
+                str(HOST_AUTHORITY_SOURCE_ROOT), f"+{commit}:{ref}",
+            )
+        _r1_run(
+            "git", "--git-dir", str(source), "bundle", "create",
+            str(candidate), *(ref for _, ref in _R1_ROLE_REFS),
+        )
+        os.chmod(candidate, 0o600)
+        candidate_bytes = candidate.read_bytes()
+        if not bundle_exists:
+            os.replace(candidate, bundle)
+        elif bundle.read_bytes() != candidate_bytes:
+            raise _gateway_error("R1 persisted bundle bytes changed")
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+    if bundle.exists() or bundle.is_symlink():
+        info = os.lstat(bundle)
+        if (
+            stat.S_ISLNK(info.st_mode)
+            or not stat.S_ISREG(info.st_mode)
+            or info.st_uid != HOST_UID
+            or info.st_gid != HOST_GID
+            or stat.S_IMODE(info.st_mode) != 0o600
+        ):
+            raise _gateway_error("R1 persisted bundle identity invalid")
+    _r1_run(
+        "git", "-C", str(HOST_AUTHORITY_SOURCE_ROOT),
+        "bundle", "verify", str(bundle),
+    )
+    heads = _r1_bundle_heads(bundle)
+    if tuple(head.commit for head in heads) != expected:
+        raise _gateway_error("R1 named bundle role/commit mismatch")
+    return bundle, heads
+
+
+def _r1_verify_bare_repository() -> None:
+    repository = Path(GATEWAY_REPOSITORY)
+    if repository.is_symlink() or not repository.is_dir():
+        raise _gateway_error("R1 bare repository unavailable")
+    info = os.lstat(repository)
+    if (
+        info.st_uid != HOST_UID
+        or info.st_gid != HOST_GID
+        or stat.S_IMODE(info.st_mode) != 0o700
+    ):
+        raise _gateway_error("R1 bare repository ownership/mode invalid")
+    try:
+        is_bare = _r1_run(
+            "git", "--git-dir", str(repository), "rev-parse", "--is-bare-repository"
+        )
+    except GatewayContractError as exc:
+        raise _gateway_error("R1 repository is not bare", exc) from exc
+    if is_bare != "true":
+        raise _gateway_error("R1 repository is not bare")
+    try:
+        origin = _r1_run(
+            "git", "--git-dir", str(repository), "remote", "get-url", "origin"
+        )
+    except GatewayContractError as exc:
+        raise _gateway_error("R1 bare repository origin mismatch", exc) from exc
+    if origin != HOST_AUTHORITY_REMOTE:
+        raise _gateway_error("R1 bare repository origin mismatch")
+    if (repository / "objects/info/alternates").exists():
+        raise _gateway_error("R1 repository alternates forbidden")
+
+
+def _r1_import_bundle(
+    bundle: Path,
+    heads: tuple[BundleRoleHead, ...],
+) -> BareStoreEvidence:
+    _r1_safe_directory(GATEWAY_STATE_ROOT)
+    repository = Path(GATEWAY_REPOSITORY)
+    if not repository.exists():
+        _r1_run("git", "init", "--bare", str(repository))
+        os.chmod(repository, 0o700)
+        _r1_run(
+            "git", "--git-dir", str(repository), "remote", "add",
+            "origin", HOST_AUTHORITY_REMOTE,
+        )
+    _r1_verify_bare_repository()
+    for head in heads:
+        _r1_run(
+            "git", "--git-dir", str(repository), "fetch", "--no-tags",
+            str(bundle), f"+{head.ref}:{head.ref}",
+        )
+    _r1_run("git", "--git-dir", str(repository), "fsck", "--full", "--strict")
+    for head in heads:
+        if _r1_run("git", "--git-dir", str(repository), "rev-parse", head.ref) != head.commit:
+            raise _gateway_error("R1 bare repository role head mismatch")
+        _r1_run("git", "--git-dir", str(repository), "cat-file", "-e", f"{head.commit}^{{commit}}")
+    object_rows = str(
+        _r1_run(
+            "git", "--git-dir", str(repository), "rev-list", "--objects",
+            *(head.ref for head in heads),
+        )
+    ).splitlines()
+    return BareStoreEvidence(
+        path=str(Path(GATEWAY_REPOSITORY)),
+        repository=REPOSITORY,
+        origin=HOST_AUTHORITY_REMOTE,
+        is_bare=True,
+        alternates_absent=True,
+        owner_uid=HOST_UID,
+        owner_gid=HOST_GID,
+        mode=0o700,
+        object_set_sha256=canonical_hash(sorted(object_rows)),
+    )
+
+
+def _r1_import_witness(path: Path) -> None:
+    code = (
+        "import importlib.util,pathlib,sys; "
+        "sys.path.insert(0, sys.argv[1]); "
+        "p=pathlib.Path(sys.argv[1])/'scripts/ops/nexus_mcp_gateway_http.py'; "
+        "s=importlib.util.spec_from_file_location('nexus_r1_gateway_entrypoint', p); "
+        "m=importlib.util.module_from_spec(s); "
+        "s.loader.exec_module(m)"
+    )
+    result = subprocess.run(
+        (INTERPRETER, "-I", "-B", "-c", code, str(path)),
+        cwd=path,
+        env={"PATH": os.defpath, "PYTHONNOUSERSITE": "1", "PYTHONDONTWRITEBYTECODE": "1"},
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise _gateway_error("R1 bounded repository import failed")
+
+
+def _r1_verify_worktree(path: Path, manifest: DeploymentManifest) -> Path:
+    validate_deployment_manifest(manifest)
+    if path.is_symlink() or not path.is_dir() or (path / ".git").is_symlink():
+        raise _gateway_error("R1 worktree identity invalid")
+    root_info = os.lstat(path)
+    if (
+        root_info.st_uid != HOST_UID
+        or root_info.st_gid != HOST_GID
+        or stat.S_IMODE(root_info.st_mode) != 0o700
+    ):
+        raise _gateway_error("R1 worktree ownership/mode invalid")
+    top = _r1_run("git", "-C", str(path), "rev-parse", "--show-toplevel")
+    common = Path(str(_r1_run("git", "-C", str(path), "rev-parse", "--git-common-dir")))
+    if not common.is_absolute():
+        common = (path / common).resolve()
+    if top != str(path.resolve()) or common.resolve() != Path(GATEWAY_REPOSITORY).resolve():
+        raise _gateway_error("R1 worktree common-dir escaped")
+    if _r1_run("git", "-C", str(path), "remote", "get-url", "origin") != HOST_AUTHORITY_REMOTE:
+        raise _gateway_error("R1 worktree origin mismatch")
+    if (
+        _r1_run("git", "-C", str(path), "status", "--porcelain")
+        or _r1_run("git", "-C", str(path), "rev-parse", "HEAD") != manifest.commit
+        or _r1_run("git", "-C", str(path), "rev-parse", "HEAD^{tree}") != manifest.tree
+    ):
+        raise _gateway_error("R1 worktree commit/tree/clean mismatch")
+    entry = _r1_entrypoint_from_store(manifest.commit)
+    if entry != (
+        manifest.entrypoint_blob_oid,
+        manifest.entrypoint_sha256,
+        manifest.tracked_mode,
+    ):
+        raise _gateway_error("R1 worktree tracked entrypoint mismatch")
+    source = path / manifest.entrypoint
+    if source.is_symlink() or not source.is_file():
+        raise _gateway_error("R1 worktree entrypoint unavailable")
+    info = os.lstat(source)
+    payload = source.read_bytes()
+    if (
+        info.st_uid != manifest.owner_uid
+        or info.st_gid != manifest.owner_gid
+        or stat.S_IMODE(info.st_mode) != manifest.mode
+        or hashlib.sha256(payload).hexdigest() != manifest.entrypoint_sha256
+    ):
+        raise _gateway_error("R1 worktree entrypoint physical identity mismatch")
+    _r1_import_witness(path)
+    return path
+
+
+def _r1_entrypoint_from_store(commit: str) -> tuple[str, str, str]:
+    repository = str(GATEWAY_REPOSITORY)
+    entry = str(_r1_run(
+        "git", "--git-dir", repository, "ls-tree", commit, "--", GATEWAY_ENTRYPOINT
+    ))
+    metadata, separator, tracked = entry.partition("\t")
+    fields = metadata.split()
+    if (
+        not separator or len(fields) != 3 or fields[0] != "100644"
+        or fields[1] != "blob" or tracked != GATEWAY_ENTRYPOINT
+    ):
+        raise _gateway_error("R1 bare entrypoint identity invalid")
+    payload = _r1_run(
+        "git", "--git-dir", repository, "cat-file", "blob", fields[2],
+        bytes_output=True,
+    )
+    return fields[2], hashlib.sha256(bytes(payload)).hexdigest(), fields[0]
+
+
+def _r1_materialize_worktree(manifest: DeploymentManifest) -> Path:
+    deployments = _r1_safe_directory(GATEWAY_DEPLOYMENTS_ROOT)
+    target = deployments / manifest.deployment_id
+    if target.exists() or target.is_symlink():
+        return _r1_verify_worktree(target, manifest)
+    temporary = Path(tempfile.mkdtemp(prefix=f".{manifest.deployment_id}.", dir=deployments))
+    os.rmdir(temporary)
+    try:
+        _r1_run(
+            "git", "--git-dir", str(GATEWAY_REPOSITORY), "worktree", "add",
+            "--detach", str(temporary), manifest.commit,
+        )
+        os.chmod(temporary, 0o700)
+        _r1_run(
+            "git", "--git-dir", str(GATEWAY_REPOSITORY), "worktree", "move",
+            str(temporary), str(target),
+        )
+        os.chmod(target, 0o700)
+    except Exception:
+        with contextlib.suppress(Exception):
+            _r1_run(
+                "git", "--git-dir", str(GATEWAY_REPOSITORY), "worktree",
+                "remove", "--force", str(temporary),
+            )
+        raise
+    return _r1_verify_worktree(target, manifest)
+
+
+def _r1_bundle_evidence(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    fresh_main: str,
+    fresh_tree: str,
+    bundle: Path,
+    heads: tuple[BundleRoleHead, ...],
+    bare_store: BareStoreEvidence,
+) -> SourceBundleEvidence:
+    values = {
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "idempotency_fence": request.idempotency_fence,
+        "receipt_id": receipt.receipt_id,
+        "receipt_hash": receipt.receipt_hash,
+        "source_set_sha256": receipt.source_set.source_set_sha256,
+        "observed_fresh_main_commit": fresh_main,
+        "observed_fresh_main_tree": fresh_tree,
+        "role_heads": heads,
+        "bundle_sha256": hashlib.sha256(bundle.read_bytes()).hexdigest(),
+        "bundle_size": bundle.stat().st_size,
+        "bundle_verified": True,
+        "bare_store": bare_store,
+        "observed_at": _current_observation_time(),
+    }
+    evidence = SourceBundleEvidence(**values, evidence_hash=canonical_hash(values))
+    return validate_source_bundle_evidence(
+        evidence,
+        request=request,
+        receipt=receipt,
+        source_set=receipt.source_set,
+        expected_fresh_main_commit=fresh_main,
+        expected_fresh_main_tree=fresh_tree,
+        expected_bare_store=bare_store,
+    )
+
+
+def _recovery_evidence_path(request: GatewayRecoveryRequest) -> Path:
+    return Path(GATEWAY_STATE_ROOT) / f"source-bundle-evidence-{request.request_id}.json"
+
+
+def _persist_or_load_recovery_evidence(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    current: SourceBundleEvidence,
+) -> SourceBundleEvidence:
+    path = _recovery_evidence_path(request)
+    if path.exists() or path.is_symlink():
+        path = _safe_store_path(path)
+        try:
+            persisted = SourceBundleEvidence.model_validate(
+                json.loads(path.read_text(), object_pairs_hook=_unique_pairs)
+            )
+            validate_source_bundle_evidence(
+                persisted,
+                request=request,
+                receipt=receipt,
+                source_set=receipt.source_set,
+                expected_fresh_main_commit=current.observed_fresh_main_commit,
+                expected_fresh_main_tree=current.observed_fresh_main_tree,
+                expected_bare_store=current.bare_store,
+            )
+        except (OSError, ValueError, ContractError) as exc:
+            raise _gateway_error("persisted recovery bundle evidence invalid", exc) from exc
+        physical_fields = {
+            "role_heads", "bundle_sha256", "bundle_size", "bundle_verified",
+            "bare_store", "source_set_sha256", "receipt_hash", "request_hash",
+        }
+        if any(
+            getattr(persisted, field) != getattr(current, field)
+            for field in physical_fields
+        ):
+            raise _gateway_error("persisted recovery bundle evidence changed")
+        return persisted
+    encoded = json.dumps(
+        current.model_dump(), sort_keys=True, separators=(",", ":")
+    ).encode()
+    _atomic_gateway_write(path, encoded)
+    return current
+
+
+def _prepare_recovery_source(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+) -> _R1PreparedSource:
+    try:
+        validate_recovery_request(request)
+        validate_recovery_authority(receipt, request=request)
+    except ContractError as exc:
+        raise _gateway_error("R1 source authority rejected", exc) from exc
+    _, fresh_main, fresh_tree = _r1_local_receipt(receipt)
+    _r1_reject_gitlinks(fresh_main)
+    root = str(HOST_AUTHORITY_SOURCE_ROOT)
+    for commit in (
+        receipt.accepted_source_merge,
+        receipt.desired_commit,
+        receipt.predecessor_commit,
+    ):
+        if _r1_run(
+            "git", "-C", root, "merge-base", "--is-ancestor", commit, fresh_main
+        ) != "":
+            raise _gateway_error("R1 semantic commit outside fresh main")
+    source_set = _r1_derive_source_set(receipt)
+    desired_manifest = derive_deployment_manifest(source_set, role="desired")
+    predecessor_manifest = derive_deployment_manifest(source_set, role="predecessor")
+    if (
+        source_set != receipt.source_set
+        or desired_manifest != receipt.desired_manifest
+        or predecessor_manifest != receipt.predecessor_manifest
+        or request.desired_manifest_id != desired_manifest.deployment_id
+        or request.desired_manifest_hash != desired_manifest.manifest_sha256
+        or request.predecessor_manifest_id != predecessor_manifest.deployment_id
+        or request.predecessor_manifest_hash != predecessor_manifest.manifest_sha256
+    ):
+        raise _gateway_error("R1 manager-derived identity mismatch")
+    bundle, heads = _r1_create_or_verify_bundle(receipt, fresh_main)
+    bare_store = _r1_import_bundle(bundle, heads)
+    evidence = _r1_bundle_evidence(
+        request, receipt, fresh_main, fresh_tree, bundle, heads, bare_store
+    )
+    evidence = _persist_or_load_recovery_evidence(request, receipt, evidence)
+    return _R1PreparedSource(
+        desired_manifest=desired_manifest,
+        predecessor_manifest=predecessor_manifest,
+        bundle_evidence=evidence,
+    )
+
+
+def _promote_recovery_source(prepared: _R1PreparedSource) -> _R1StageResult:
+    desired_manifest = prepared.desired_manifest
+    predecessor_manifest = prepared.predecessor_manifest
+    desired_path = _r1_materialize_worktree(desired_manifest)
+    predecessor_path = _r1_materialize_worktree(predecessor_manifest)
+    return _R1StageResult(
+        desired_path=desired_path,
+        predecessor_path=predecessor_path,
+        desired_manifest=desired_manifest,
+        predecessor_manifest=predecessor_manifest,
+        bundle_evidence=prepared.bundle_evidence,
+    )
+
+
+def stage_verified_git_store(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+) -> _R1StageResult:
+    """Build the receipt-bound B1 store and two complete detached worktrees."""
+    return _promote_recovery_source(_prepare_recovery_source(request, receipt))
+
+
+def _resolve_manifest_source(manifest: DeploymentManifest) -> Path:
+    """Resolve only a manager-derived ID below the fixed deployments root."""
+    try:
+        validate_deployment_manifest(manifest)
+    except ContractError as exc:
+        raise _gateway_error("manager manifest rejected", exc) from exc
+    target = Path(GATEWAY_DEPLOYMENTS_ROOT) / manifest.deployment_id
+    _r1_verify_worktree(target, manifest)
+    return target / manifest.entrypoint
+
+
+def _require_recovery_authority(request: GatewayRecoveryRequest) -> RecoveryAuthorityReceipt:
+    path = _safe_store_path(GATEWAY_RECOVERY_AUTHORITY_STORE)
+    if not path.exists() or path.stat().st_uid != HOST_UID or path.stat().st_gid != HOST_GID:
+        raise _gateway_error("R1 recovery authority store invalid")
+    try:
+        raw = path.read_bytes()
+        payload = json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_pairs)
+        receipt = RecoveryAuthorityReceipt.model_validate(payload)
+        validate_recovery_authority(
+            receipt, request=request, now=_current_observation_time()
+        )
+    except (OSError, UnicodeError, ValueError, ContractError) as exc:
+        raise _gateway_error("R1 recovery authority rejected", exc) from exc
+    if hashlib.sha256(Path(__file__).read_bytes()).hexdigest() != receipt.final_manager_sha256:
+        raise _gateway_error("R1 recovery manager hash mismatch")
+    _r1_local_receipt(receipt)
+    return receipt
+
+
+def _resolve_manifest_reference(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    *,
+    desired: bool,
+) -> DeploymentManifest:
+    manifest = derive_deployment_manifest(
+        receipt.source_set,
+        role="desired" if desired else "predecessor",
+    )
+    expected = (
+        (request.desired_manifest_id, request.desired_manifest_hash)
+        if desired
+        else (request.predecessor_manifest_id, request.predecessor_manifest_hash)
+    )
+    if (manifest.deployment_id, manifest.manifest_sha256) != expected:
+        raise _gateway_error("R1 request manifest reference mismatch")
+    _resolve_manifest_source(manifest)
+    return manifest
+
+
+def gateway_recover(
+    request: GatewayRecoveryRequest | Mapping[str, Any],
+) -> GatewayReconcileOutcome:
+    """Reach the positive, effect-free B1 source checkpoint."""
+    try:
+        typed = GatewayRecoveryRequest.model_validate(request)
+        validate_recovery_request(typed)
+    except ContractError as exc:
+        raise _gateway_error("R1 recovery request rejected", exc) from exc
+    receipt = _require_recovery_authority(typed)
+    with InterProcessLock(GATEWAY_LOCK):
+        staged = stage_verified_git_store(typed, receipt)
+        desired_manifest = _resolve_manifest_reference(typed, receipt, desired=True)
+        predecessor_manifest = _resolve_manifest_reference(typed, receipt, desired=False)
+    observation = {
+        "desired_path": str(staged.desired_path),
+        "predecessor_path": str(staged.predecessor_path),
+        "source_set_sha256": receipt.source_set.source_set_sha256,
+        "bundle_evidence_hash": staged.bundle_evidence.evidence_hash,
+        "readiness": ["TARGET_READY", "ROLLBACK_READY"],
+    }
+    outcome_values = {
+        "request_id": typed.request_id,
+        "request_hash": typed.request_hash,
+        "idempotency_fence": typed.idempotency_fence,
+        "desired_manifest_id": desired_manifest.deployment_id,
+        "predecessor_manifest_id": predecessor_manifest.deployment_id,
+        "physical_observation": observation,
+        "effect_started": False,
+        "result": ResultClass.BLOCKED,
+    }
+    return validate_reconcile_outcome(
+        GatewayReconcileOutcome(
+            **outcome_values,
+            evidence_hash=canonical_hash(outcome_values),
+        )
+    )
+
+
 class InterProcessLock:
     """Timed, no-follow advisory lock used for every mutable gateway store."""
+
+    _process_holds: dict[tuple[int, int, str], tuple[int, int]] = {}
 
     def __init__(self, path: Path, *, timeout: float = 2.0):
         self.path = _safe_store_path(path, create=True)
         self.timeout = timeout
         self._fd: int | None = None
+        self._key = (os.getpid(), threading.get_ident(), str(self.path.resolve()))
+        self._reentrant = False
 
     def __enter__(self) -> "InterProcessLock":
+        self._key = (os.getpid(), threading.get_ident(), str(self.path.resolve()))
+        held = self._process_holds.get(self._key)
+        if held is not None:
+            self._process_holds[self._key] = (held[0], held[1] + 1)
+            self._reentrant = True
+            return self
         try:
             flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
             self._fd = os.open(self.path, flags, 0o600)
@@ -663,13 +1471,21 @@ class InterProcessLock:
                     if time.monotonic() >= deadline:
                         raise _gateway_error("gateway lock contention") from exc
                     time.sleep(0.01)
+            self._process_holds[self._key] = (self._fd, 1)
             return self
         except Exception:
             self._close()
             raise
 
     def _close(self) -> None:
+        held = self._process_holds.get(self._key)
+        if self._reentrant:
+            if held is not None:
+                self._process_holds[self._key] = (held[0], held[1] - 1)
+            self._reentrant = False
+            return
         if self._fd is not None:
+            self._process_holds.pop(self._key, None)
             with contextlib.suppress(OSError):
                 fcntl.flock(self._fd, fcntl.LOCK_UN)
             with contextlib.suppress(OSError):
@@ -678,6 +1494,17 @@ class InterProcessLock:
 
     def __exit__(self, *_: object) -> None:
         self._close()
+
+    @classmethod
+    def _reset_after_fork(cls) -> None:
+        for fd, _depth in set(cls._process_holds.values()):
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        cls._process_holds.clear()
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=InterProcessLock._reset_after_fork)
 
 
 def _record_hash(record: Mapping[str, Any]) -> str:
@@ -705,7 +1532,9 @@ class GatewayLedger:
             raise LedgerCorruption("ledger missing or exceeds size bound")
         rows: list[dict[str, Any]] = []
         last_state: dict[str, str] = {}
+        last_schema: dict[str, str] = {}
         fences: dict[str, str] = {}
+        requests: dict[str, tuple[str, str]] = {}
         for line in raw.splitlines(keepends=True):
             if not line.endswith(b"\n"):
                 raise LedgerCorruption("ledger is not newline terminated")
@@ -713,33 +1542,80 @@ class GatewayLedger:
                 row = json.loads(line.decode("utf-8"), object_pairs_hook=_unique_pairs)
             except (ValueError, UnicodeError) as exc:
                 raise LedgerCorruption("ledger JSON malformed") from exc
-            expected_keys = {
+            v1_keys = {
                 "schema", "request_id", "request_hash", "state", "sequence", "parent_hash",
                 "record_hash", "pre_effect_identity", "observed_identity", "host_receipt_hash",
                 "source_base_merge", "source_base_tree", "host_card_sha256", "effect_class",
                 "operation", "idempotency_fence",
             }
-            if not isinstance(row, dict) or set(row) != expected_keys:
+            v2_keys = {
+                "schema", "request_id", "request_hash", "state", "sequence",
+                "parent_hash", "record_hash", "authority_schema", "receipt_id",
+                "receipt_hash", "card_sha256", "accepted_source_merge",
+                "accepted_source_tree", "final_manager_sha256",
+                "independent_acceptance_receipt_hash", "source_set_sha256",
+                "desired_manifest_id", "desired_manifest_hash",
+                "predecessor_manifest_id", "predecessor_manifest_hash",
+                "source_bundle_evidence_hash", "operation", "effect_class",
+                "idempotency_fence", "pre_effect_identity", "observed_identity",
+            }
+            if not isinstance(row, dict) or (
+                row.get("schema") == "nexus.gateway.ledger.v1"
+                and set(row) != v1_keys
+            ) or (
+                row.get("schema") == "nexus.gateway.ledger.v2"
+                and set(row) != v2_keys
+            ) or row.get("schema") not in {
+                "nexus.gateway.ledger.v1", "nexus.gateway.ledger.v2"
+            }:
                 raise LedgerCorruption("ledger schema mismatch")
-            if row["schema"] != "nexus.gateway.ledger.v1" or not isinstance(row["request_id"], str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", row["request_id"]):
+            canonical_line = (
+                json.dumps(row, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+            )
+            if line != canonical_line:
+                raise LedgerCorruption("ledger JSON is not canonical")
+            if not isinstance(row["request_id"], str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", row["request_id"]):
                 raise LedgerCorruption("ledger request identity malformed")
             if not isinstance(row["request_hash"], str) or not re.fullmatch(r"[0-9a-f]{64}", row["request_hash"]):
                 raise LedgerCorruption("ledger request hash malformed")
-            if any(not isinstance(row[key], str) or not row[key] for key in (
-                "host_receipt_hash", "source_base_merge", "source_base_tree", "host_card_sha256",
-                "effect_class", "operation", "idempotency_fence"
-            )):
-                raise LedgerCorruption("ledger host authority binding missing")
-            for key in ("host_receipt_hash", "host_card_sha256"):
-                if not re.fullmatch(r"[0-9a-f]{64}", row[key]):
-                    raise LedgerCorruption("ledger host authority hash malformed")
-            for key in ("source_base_merge", "source_base_tree"):
-                if not re.fullmatch(r"[0-9a-f]{40}", row[key]):
-                    raise LedgerCorruption("ledger source binding malformed")
-            if row["source_base_merge"] != SOURCE_BASE_MERGE or row["source_base_tree"] != SOURCE_BASE_TREE:
-                raise LedgerCorruption("ledger source binding drift")
-            if row["host_card_sha256"] != HOST_CARD_SHA256:
-                raise LedgerCorruption("ledger host Card binding drift")
+            if row["schema"] == "nexus.gateway.ledger.v1":
+                if any(not isinstance(row[key], str) or not row[key] for key in (
+                    "host_receipt_hash", "source_base_merge", "source_base_tree", "host_card_sha256",
+                    "effect_class", "operation", "idempotency_fence"
+                )):
+                    raise LedgerCorruption("ledger host authority binding missing")
+                for key in ("host_receipt_hash", "host_card_sha256"):
+                    if not re.fullmatch(r"[0-9a-f]{64}", row[key]):
+                        raise LedgerCorruption("ledger host authority hash malformed")
+                for key in ("source_base_merge", "source_base_tree"):
+                    if not re.fullmatch(r"[0-9a-f]{40}", row[key]):
+                        raise LedgerCorruption("ledger source binding malformed")
+                if row["source_base_merge"] != SOURCE_BASE_MERGE or row["source_base_tree"] != SOURCE_BASE_TREE:
+                    raise LedgerCorruption("ledger source binding drift")
+                if row["host_card_sha256"] != HOST_CARD_SHA256:
+                    raise LedgerCorruption("ledger host Card binding drift")
+            else:
+                for key in (
+                    "receipt_hash", "card_sha256", "final_manager_sha256",
+                    "independent_acceptance_receipt_hash", "source_set_sha256",
+                    "desired_manifest_hash", "predecessor_manifest_hash",
+                ):
+                    if not isinstance(row[key], str) or not re.fullmatch(
+                        r"[0-9a-f]{64}", row[key]
+                    ):
+                        raise LedgerCorruption("recovery ledger hash malformed")
+                for key in ("accepted_source_merge", "accepted_source_tree"):
+                    if not isinstance(row[key], str) or not re.fullmatch(
+                        r"[0-9a-f]{40}", row[key]
+                    ):
+                        raise LedgerCorruption("recovery ledger source malformed")
+                if row["state"] == DeploymentState.REQUESTED.value:
+                    if row["source_bundle_evidence_hash"] is not None:
+                        raise LedgerCorruption("REQUESTED evidence must be null")
+                elif not isinstance(row["source_bundle_evidence_hash"], str) or not re.fullmatch(
+                    r"[0-9a-f]{64}", row["source_bundle_evidence_hash"]
+                ):
+                    raise LedgerCorruption("recovery ledger evidence missing")
             if row["effect_class"] not in {effect.value for effect in EffectClass}:
                 raise LedgerCorruption("ledger effect class unknown")
             operation_effects = {
@@ -749,6 +1625,7 @@ class GatewayLedger:
                 "install_artifact": EffectClass.INSTALL_ARTIFACT.value,
                 "reload": EffectClass.GATEWAY_RELOAD.value, "gateway-reload": EffectClass.GATEWAY_RELOAD.value,
                 "rollback": EffectClass.GATEWAY_ROLLBACK.value, "gateway-rollback": EffectClass.GATEWAY_ROLLBACK.value,
+                "gateway-recover": EffectClass.GATEWAY_DURABLE_RECOVERY.value,
             }
             if row["operation"] not in operation_effects:
                 raise LedgerCorruption("ledger operation unknown")
@@ -758,6 +1635,11 @@ class GatewayLedger:
             if prior_fence is not None and prior_fence != row["request_id"]:
                 raise LedgerCorruption("ledger idempotency fence reused")
             fences[row["idempotency_fence"]] = row["request_id"]
+            prior_request = requests.get(row["request_id"])
+            request_binding = (row["request_hash"], row["idempotency_fence"])
+            if prior_request is not None and prior_request != request_binding:
+                raise LedgerCorruption("ledger request binding changed")
+            requests[row["request_id"]] = request_binding
             if not isinstance(row["sequence"], int) or row["sequence"] != len(rows) + 1:
                 raise LedgerCorruption("ledger sequence gap")
             if row["state"] not in {state.value for state in DeploymentState}:
@@ -768,8 +1650,18 @@ class GatewayLedger:
                     if row["state"] != DeploymentState.REQUESTED.value:
                         raise LedgerCorruption("ledger request does not begin in REQUESTED")
                 else:
-                    from nexus.contracts.gateway_deployment import transition
-                    transition(previous_state, row["state"])
+                    legacy_uncertain = (
+                        last_schema.get(row["request_id"]) == "nexus.gateway.ledger.v1"
+                        and row["schema"] == "nexus.gateway.ledger.v1"
+                        and previous_state == DeploymentState.UNCERTAIN_EFFECT.value
+                        and row["state"] in {
+                            DeploymentState.PREFLIGHTED.value,
+                            DeploymentState.ROLLBACK_STARTED.value,
+                        }
+                    )
+                    if not legacy_uncertain:
+                        from nexus.contracts.gateway_deployment import transition
+                        transition(previous_state, row["state"])
             except LedgerCorruption:
                 raise
             except Exception as exc:
@@ -780,6 +1672,7 @@ class GatewayLedger:
                 raise LedgerCorruption("ledger record hash mismatch")
             rows.append(row)
             last_state[row["request_id"]] = row["state"]
+            last_schema[row["request_id"]] = row["schema"]
             if len(rows) > MAX_LEDGER_RECORDS:
                 raise LedgerCorruption("ledger record limit exceeded")
         return rows
@@ -834,6 +1727,161 @@ class GatewayLedger:
                                          host_authority=host_authority, operation=operation,
                                          effect_class=effect_class, idempotency_fence=idempotency_fence)
 
+    def append_recovery(
+        self,
+        record: RecoveryLedgerRecord,
+        *,
+        expected_tail: str,
+        request: GatewayRecoveryRequest,
+        receipt: RecoveryAuthorityReceipt,
+        source_bundle_evidence: SourceBundleEvidence | None,
+    ) -> RecoveryLedgerRecord:
+        with InterProcessLock(self.lock_path):
+            rows = self._scan_unlocked()
+            tail = rows[-1]["record_hash"] if rows else ""
+            if expected_tail != tail:
+                raise GatewayContractError("recovery ledger compare-and-swap conflict")
+            for prior in rows:
+                if (
+                    prior["idempotency_fence"] == record.idempotency_fence
+                    and prior["request_id"] != record.request_id
+                ):
+                    raise GatewayContractError("recovery idempotency fence conflict")
+                if prior["request_id"] == record.request_id and (
+                    prior["request_hash"] != record.request_hash
+                    or prior["idempotency_fence"] != record.idempotency_fence
+                ):
+                    raise GatewayContractError("recovery request binding conflict")
+                if (
+                    prior["schema"] == "nexus.gateway.ledger.v2"
+                    and prior["request_id"] == record.request_id
+                    and prior["state"] == record.state.value
+                ):
+                    return RecoveryLedgerRecord.model_validate(prior)
+            try:
+                validate_recovery_ledger_record(
+                    record,
+                    request=request,
+                    receipt=receipt,
+                    source_bundle_evidence=source_bundle_evidence,
+                    expected_sequence=len(rows) + 1,
+                    expected_parent_hash=tail,
+                )
+            except ContractError as exc:
+                raise GatewayContractError("recovery ledger record rejected") from exc
+            return self._append_recovery_unlocked(rows, record)
+
+    def _append_recovery_unlocked(
+        self,
+        rows: list[dict[str, Any]],
+        record: RecoveryLedgerRecord,
+    ) -> RecoveryLedgerRecord:
+        encoded = (
+            json.dumps(
+                record.model_dump(),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=True,
+            ).encode()
+            + b"\n"
+        )
+        self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if self.path.exists():
+            with self.path.open("ab") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            _fsync_dir(self.path.parent)
+        else:
+            _atomic_gateway_write(self.path, encoded)
+        return record
+
+    @staticmethod
+    def _validate_recovery_context_without_evidence(
+        record: RecoveryLedgerRecord,
+        request: GatewayRecoveryRequest,
+        receipt: RecoveryAuthorityReceipt,
+    ) -> None:
+        exact = {
+            "request_id": request.request_id,
+            "request_hash": request.request_hash,
+            "authority_schema": receipt.schema,
+            "receipt_id": receipt.receipt_id,
+            "receipt_hash": receipt.receipt_hash,
+            "card_sha256": receipt.card_sha256,
+            "accepted_source_merge": receipt.accepted_source_merge,
+            "accepted_source_tree": receipt.accepted_source_tree,
+            "final_manager_sha256": receipt.final_manager_sha256,
+            "independent_acceptance_receipt_hash": (
+                receipt.independent_acceptance_receipt_hash
+            ),
+            "source_set_sha256": receipt.source_set.source_set_sha256,
+            "desired_manifest_id": receipt.desired_manifest_id,
+            "desired_manifest_hash": receipt.desired_manifest_sha256,
+            "predecessor_manifest_id": receipt.predecessor_manifest_id,
+            "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
+            "operation": request.operation,
+            "effect_class": request.effect_class,
+            "idempotency_fence": request.idempotency_fence,
+        }
+        if any(getattr(record, key) != value for key, value in exact.items()):
+            raise GatewayContractError("recovery ledger trusted context mismatch")
+
+    def recovery_rows(
+        self,
+        request_id: str,
+        *,
+        request: GatewayRecoveryRequest,
+        receipt: RecoveryAuthorityReceipt,
+        source_bundle_evidence: SourceBundleEvidence | None,
+    ) -> list[RecoveryLedgerRecord]:
+        with InterProcessLock(self.lock_path):
+            rows = self._scan_unlocked()
+        selected = [
+            RecoveryLedgerRecord.model_validate(row)
+            for row in rows
+            if row["schema"] == "nexus.gateway.ledger.v2"
+            and row["request_id"] == request_id
+        ]
+        for record in selected:
+            if record.state is DeploymentState.REQUESTED:
+                evidence = None
+            else:
+                evidence = source_bundle_evidence
+            if evidence is None and record.state is not DeploymentState.REQUESTED:
+                self._validate_recovery_context_without_evidence(record, request, receipt)
+            else:
+                try:
+                    validate_recovery_ledger_record(
+                        record,
+                        request=request,
+                        receipt=receipt,
+                        source_bundle_evidence=evidence,
+                        expected_sequence=record.sequence,
+                        expected_parent_hash=record.parent_hash,
+                    )
+                except ContractError as exc:
+                    raise GatewayContractError(
+                        "recovery ledger trusted context mismatch"
+                    ) from exc
+        return selected
+
+    def current_recovery_state(
+        self,
+        request_id: str,
+        *,
+        request: GatewayRecoveryRequest,
+        receipt: RecoveryAuthorityReceipt,
+        source_bundle_evidence: SourceBundleEvidence | None,
+    ) -> str | None:
+        rows = self.recovery_rows(
+            request_id,
+            request=request,
+            receipt=receipt,
+            source_bundle_evidence=source_bundle_evidence,
+        )
+        return rows[-1].state.value if rows else None
+
     def _append_unlocked(self, rows: list[dict[str, Any]], *, request_id: str,
                          request_hash: str, state: DeploymentState | str,
                          pre_effect_identity: Mapping[str, Any] | None = None,
@@ -869,6 +1917,844 @@ class GatewayLedger:
             else:
                 _atomic_gateway_write(self.path, encoded)
             return row
+
+
+def _recovery_record(
+    rows: list[dict[str, Any]],
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    evidence: SourceBundleEvidence | None,
+    state: DeploymentState,
+    *,
+    pre_effect_identity: Mapping[str, Any] | None = None,
+    observed_identity: Mapping[str, Any] | None = None,
+) -> RecoveryLedgerRecord:
+    values = {
+        "schema": "nexus.gateway.ledger.v2",
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "state": state,
+        "sequence": len(rows) + 1,
+        "parent_hash": rows[-1]["record_hash"] if rows else "",
+        "authority_schema": receipt.schema,
+        "receipt_id": receipt.receipt_id,
+        "receipt_hash": receipt.receipt_hash,
+        "card_sha256": receipt.card_sha256,
+        "accepted_source_merge": receipt.accepted_source_merge,
+        "accepted_source_tree": receipt.accepted_source_tree,
+        "final_manager_sha256": receipt.final_manager_sha256,
+        "independent_acceptance_receipt_hash": (
+            receipt.independent_acceptance_receipt_hash
+        ),
+        "source_set_sha256": receipt.source_set.source_set_sha256,
+        "desired_manifest_id": receipt.desired_manifest_id,
+        "desired_manifest_hash": receipt.desired_manifest_sha256,
+        "predecessor_manifest_id": receipt.predecessor_manifest_id,
+        "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
+        "source_bundle_evidence_hash": (
+            None if state is DeploymentState.REQUESTED else evidence.evidence_hash
+        ),
+        "operation": request.operation,
+        "effect_class": request.effect_class,
+        "idempotency_fence": request.idempotency_fence,
+        "pre_effect_identity": dict(pre_effect_identity or {}),
+        "observed_identity": dict(observed_identity or {}),
+    }
+    return RecoveryLedgerRecord(
+        **values,
+        record_hash=canonical_hash(values),
+    )
+
+
+RECOVERY_OWNER_COMPLETION_SECONDS = 6.0
+RECOVERY_OWNER_POLL_SECONDS = 0.02
+RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS = 15.0
+_RECOVERY_PROCESS_PID = os.getpid()
+_RECOVERY_PROCESS_START = canonical_hash({
+    "pid": _RECOVERY_PROCESS_PID,
+    "started_ns": time.time_ns(),
+})
+
+
+def _current_recovery_process_start() -> str:
+    global _RECOVERY_PROCESS_PID, _RECOVERY_PROCESS_START
+    pid = os.getpid()
+    if pid != _RECOVERY_PROCESS_PID:
+        _RECOVERY_PROCESS_PID = pid
+        _RECOVERY_PROCESS_START = canonical_hash({
+            "pid": pid,
+            "started_ns": time.time_ns(),
+        })
+    return _RECOVERY_PROCESS_START
+
+
+def _recovery_owner_marker(pid: int) -> Path:
+    return Path(GATEWAY_STATE_ROOT) / f"effect-owner-{pid}.json"
+
+
+def _record_recovery_owner(pid: int, start_identity: str) -> None:
+    encoded = json.dumps(
+        {"pid": pid, "start_identity": start_identity},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    _atomic_gateway_write(_recovery_owner_marker(pid), encoded)
+
+
+def _recovery_owner_is_live(pid: int, start_identity: str) -> bool:
+    try:
+        payload = json.loads(
+            _safe_store_path(_recovery_owner_marker(pid)).read_text(),
+            object_pairs_hook=_unique_pairs,
+        )
+        os.kill(pid, 0)
+    except (OSError, ValueError, GatewayContractError):
+        return False
+    return payload == {"pid": pid, "start_identity": start_identity}
+
+
+def _append_recovery_state_unlocked(
+    ledger: GatewayLedger,
+    rows: list[dict[str, Any]],
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    evidence: SourceBundleEvidence | None,
+    state: DeploymentState,
+    *,
+    pre_effect_identity: Mapping[str, Any] | None = None,
+    observed_identity: Mapping[str, Any] | None = None,
+) -> RecoveryLedgerRecord:
+    record = _recovery_record(
+        rows,
+        request,
+        receipt,
+        evidence,
+        state,
+        pre_effect_identity=pre_effect_identity,
+        observed_identity=observed_identity,
+    )
+    validate_recovery_ledger_record(
+        record,
+        request=request,
+        receipt=receipt,
+        source_bundle_evidence=evidence,
+        expected_sequence=len(rows) + 1,
+        expected_parent_hash=rows[-1]["record_hash"] if rows else "",
+    )
+    ledger._append_recovery_unlocked(rows, record)
+    rows.append(record.model_dump())
+    return record
+
+
+def _recovery_typed_rows(
+    rows: list[dict[str, Any]], request_id: str
+) -> list[RecoveryLedgerRecord]:
+    return [
+        RecoveryLedgerRecord.model_validate(row)
+        for row in rows
+        if row["schema"] == "nexus.gateway.ledger.v2"
+        and row["request_id"] == request_id
+    ]
+
+
+def _recovery_plan(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+) -> RecoveryEffectPlan:
+    values = {
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "idempotency_fence": request.idempotency_fence,
+        "receipt_id": receipt.receipt_id,
+        "receipt_hash": receipt.receipt_hash,
+        "source_set_sha256": receipt.source_set.source_set_sha256,
+        "desired_manifest_id": receipt.desired_manifest_id,
+        "desired_manifest_hash": receipt.desired_manifest_sha256,
+        "predecessor_manifest_id": receipt.predecessor_manifest_id,
+        "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
+        "desired_root": str(
+            Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.desired_manifest_id
+        ),
+        "predecessor_root": str(
+            Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.predecessor_manifest_id
+        ),
+        "service_label": GATEWAY_LABEL,
+        "plist_path": str(GATEWAY_PLIST),
+        "endpoint": GATEWAY_ENDPOINT,
+        "pre_effect_identity_hash": canonical_hash({}),
+    }
+    plan = RecoveryEffectPlan(**values, plan_hash=canonical_hash(values))
+    return validate_recovery_effect_plan(
+        plan,
+        request=request,
+        receipt=receipt,
+        deployment_root=str(GATEWAY_DEPLOYMENTS_ROOT),
+    )
+
+
+def _recovery_expected_plist_bytes(root: str) -> bytes:
+    return plistlib.dumps(
+        {
+            "Label": GATEWAY_LABEL,
+            "ProgramArguments": [
+                INTERPRETER,
+                str(Path(root) / GATEWAY_ENTRYPOINT),
+            ],
+            "WorkingDirectory": root,
+            "RunAtLoad": True,
+            "KeepAlive": True,
+            "StandardOutPath": "/Users/jameschen/Library/Logs/Nexus/gateway.log",
+            "StandardErrorPath": "/Users/jameschen/Library/Logs/Nexus/gateway.err.log",
+            "EnvironmentVariables": {
+                "NEXUS_MCP_GATEWAY_TOKEN": "FIXED_SECRET_STORE_REFERENCE"
+            },
+        },
+        fmt=plistlib.FMT_XML,
+        sort_keys=False,
+    )
+
+
+def _recovery_expected_plist_sha256(root: str) -> str:
+    return hashlib.sha256(_recovery_expected_plist_bytes(root)).hexdigest()
+
+
+def _recovery_expected_postflight(
+    receipt: RecoveryAuthorityReceipt,
+) -> dict[str, Any]:
+    actions = [GATEWAY_ACTION]
+    return {
+        "permission_policy_hash": canonical_hash({
+            "kind": "recovery-permission-policy",
+            "source_set_sha256": receipt.source_set.source_set_sha256,
+            "final_manager_sha256": receipt.final_manager_sha256,
+        }),
+        "schema_hash": canonical_hash({
+            "kind": "recovery-tools-schema",
+            "desired_manifest_hash": receipt.desired_manifest_sha256,
+            "actions": actions,
+        }),
+        "tool_manifest_hash": canonical_hash({
+            "kind": "recovery-tool-manifest",
+            "actions": actions,
+        }),
+        "actions": actions,
+    }
+
+
+def _recovery_outcome(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    *,
+    result: ResultClass,
+    effect_started: bool,
+    observation: Mapping[str, Any],
+) -> GatewayReconcileOutcome:
+    values = {
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "idempotency_fence": request.idempotency_fence,
+        "desired_manifest_id": receipt.desired_manifest_id,
+        "predecessor_manifest_id": receipt.predecessor_manifest_id,
+        "physical_observation": dict(observation),
+        "effect_started": effect_started,
+        "result": result,
+    }
+    return validate_reconcile_outcome(
+        GatewayReconcileOutcome(
+            **values,
+            evidence_hash=canonical_hash(values),
+        )
+    )
+
+
+def _terminal_recovery_outcome(
+    records: list[RecoveryLedgerRecord],
+) -> GatewayReconcileOutcome | None:
+    if not records:
+        return None
+    terminal = records[-1]
+    payload = terminal.observed_identity.get("outcome")
+    if terminal.state in {
+        DeploymentState.VERIFIED,
+        DeploymentState.ROLLED_BACK,
+        DeploymentState.BLOCKED,
+    } and isinstance(payload, Mapping):
+        return GatewayReconcileOutcome.model_validate(payload)
+    return None
+
+
+def _validate_recovery_postflight(
+    postflight: Mapping[str, Any],
+    identity: RecoveryPhysicalIdentity,
+    receipt: RecoveryAuthorityReceipt,
+) -> None:
+    if not isinstance(postflight, Mapping) or postflight.get("authenticated") is not True:
+        raise GatewayContractError("recovery postflight is not authenticated")
+    health = postflight.get("health")
+    initialize = postflight.get("initialize")
+    tools = postflight.get("tools_list")
+    if not all(isinstance(item, Mapping) for item in (health, initialize, tools)):
+        raise GatewayContractError("recovery postflight response missing")
+    expected = _recovery_expected_postflight(receipt)
+    if (
+        health.get("deployment_id") != identity.deployment_id
+        or health.get("root") != identity.root
+        or health.get("head") != identity.head
+        or health.get("tree") != identity.tree
+        or health.get("server_instance") != identity.server_instance
+        or health.get("permission_policy_hash") != expected["permission_policy_hash"]
+    ):
+        raise GatewayContractError("recovery health identity mismatch")
+    if (
+        not isinstance(initialize.get("session_id"), str)
+        or not initialize.get("session_id")
+        or initialize.get("server_instance") != identity.server_instance
+        or initialize.get("permission_policy_hash") != health.get(
+            "permission_policy_hash"
+        )
+    ):
+        raise GatewayContractError("recovery initialize identity mismatch")
+    if (
+        tools.get("session_id") != initialize.get("session_id")
+        or tools.get("actions") != expected["actions"]
+        or tools.get("schema_hash") != expected["schema_hash"]
+        or tools.get("tool_manifest_hash") != expected["tool_manifest_hash"]
+        or postflight.get("expected_action") != GATEWAY_ACTION
+        or postflight.get("expected_manifest_id") != identity.deployment_id
+    ):
+        raise GatewayContractError("recovery tools identity mismatch")
+
+
+def _classify_recovery_physical(
+    identity: RecoveryPhysicalIdentity,
+    receipt: RecoveryAuthorityReceipt,
+) -> str:
+    desired_root = str(
+        Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.desired_manifest_id
+    )
+    predecessor_root = str(
+        Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.predecessor_manifest_id
+    )
+    try:
+        validate_recovery_physical_identity(
+            identity,
+            expected_manifest=receipt.desired_manifest,
+            expected_root=desired_root,
+            expected_plist_sha256=_recovery_expected_plist_sha256(desired_root),
+        )
+        return "desired"
+    except ContractError:
+        pass
+    try:
+        validate_recovery_physical_identity(
+            identity,
+            expected_manifest=receipt.predecessor_manifest,
+            expected_root=predecessor_root,
+            expected_plist_sha256=_recovery_expected_plist_sha256(predecessor_root),
+        )
+        return "predecessor"
+    except ContractError:
+        return "unknown"
+
+
+def _gateway_reconcile_physical(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    identities: RecoveryPhysicalIdentity | tuple[RecoveryPhysicalIdentity, ...],
+) -> str:
+    candidates = identities if isinstance(identities, tuple) else (identities,)
+    classifications = {
+        _classify_recovery_physical(identity, receipt) for identity in candidates
+    }
+    classifications.discard("unknown")
+    if len(classifications) > 1 or len(candidates) > 1 and classifications:
+        raise GatewayContractError("recovery physical identity ambiguous")
+    return next(iter(classifications), "unknown")
+
+
+def _revalidate_recovery_artifacts(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    *,
+    expected_bundle_evidence_hash: str,
+) -> _R1StageResult:
+    prepared = _prepare_recovery_source(request, receipt)
+    if prepared.bundle_evidence.evidence_hash != expected_bundle_evidence_hash:
+        raise GatewayContractError("recovery bundle evidence replay mismatch")
+    desired = Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.desired_manifest_id
+    predecessor = Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.predecessor_manifest_id
+    _r1_verify_worktree(desired, receipt.desired_manifest)
+    _r1_verify_worktree(predecessor, receipt.predecessor_manifest)
+    return _R1StageResult(
+        desired_path=desired,
+        predecessor_path=predecessor,
+        desired_manifest=receipt.desired_manifest,
+        predecessor_manifest=receipt.predecessor_manifest,
+        bundle_evidence=prepared.bundle_evidence,
+    )
+
+
+def _validate_terminal_recovery_replay(
+    terminal: GatewayReconcileOutcome,
+    records: list[RecoveryLedgerRecord],
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    adapters: _RecoveryAdapters,
+) -> GatewayReconcileOutcome:
+    if terminal.result is ResultClass.BLOCKED:
+        return terminal
+    evidence_hashes = {
+        record.source_bundle_evidence_hash
+        for record in records
+        if record.source_bundle_evidence_hash is not None
+    }
+    if len(evidence_hashes) != 1:
+        raise GatewayContractError("terminal recovery evidence binding invalid")
+    _revalidate_recovery_artifacts(
+        request,
+        receipt,
+        expected_bundle_evidence_hash=next(iter(evidence_hashes)),
+    )
+    plan = _recovery_plan(request, receipt)
+    identity = adapters.observe(plan)
+    classification = _gateway_reconcile_physical(request, receipt, identity)
+    if terminal.result is ResultClass.VERIFIED:
+        if classification != "desired":
+            raise GatewayContractError("VERIFIED recovery physical identity drift")
+        postflight = adapters.postflight(plan, identity)
+        _validate_recovery_postflight(postflight, identity, receipt)
+    elif terminal.result is ResultClass.ROLLED_BACK:
+        if classification != "predecessor":
+            raise GatewayContractError("ROLLED_BACK recovery physical identity drift")
+    else:
+        raise GatewayContractError("unsupported terminal recovery replay")
+    return terminal
+
+
+def _gateway_recover_with_adapters(
+    request: GatewayRecoveryRequest | Mapping[str, Any],
+    *,
+    adapters: _RecoveryAdapters,
+    ledger: GatewayLedger,
+) -> GatewayReconcileOutcome:
+    try:
+        typed = GatewayRecoveryRequest.model_validate(request)
+        validate_recovery_request(typed)
+    except ContractError as exc:
+        raise _gateway_error("R1 B2 recovery request rejected", exc) from exc
+    receipt = _require_recovery_authority(typed)
+    prepared: _R1PreparedSource | None = None
+    evidence: SourceBundleEvidence | None = None
+    plan = _recovery_plan(typed, receipt)
+    invoke_effect = False
+    wait_for_owner: tuple[int, str] | None = None
+    with InterProcessLock(
+        ledger.lock_path, timeout=RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS
+    ):
+        rows = ledger._scan_unlocked()
+        for prior in rows:
+            if (
+                prior["idempotency_fence"] == typed.idempotency_fence
+                and prior["request_id"] != typed.request_id
+            ):
+                raise GatewayContractError("recovery idempotency fence conflict")
+        records = _recovery_typed_rows(rows, typed.request_id)
+        terminal = _terminal_recovery_outcome(records)
+        if terminal is not None:
+            return _validate_terminal_recovery_replay(
+                terminal, records, typed, receipt, adapters
+            )
+        if not records:
+            _append_recovery_state_unlocked(
+                ledger, rows, typed, receipt, None, DeploymentState.REQUESTED
+            )
+            records = _recovery_typed_rows(rows, typed.request_id)
+        state = records[-1].state
+        if state in {
+            DeploymentState.REQUESTED,
+            DeploymentState.PREFLIGHTED,
+            DeploymentState.TARGET_READY,
+            DeploymentState.ROLLBACK_READY,
+        }:
+            prepared = _prepare_recovery_source(typed, receipt)
+            evidence = prepared.bundle_evidence
+        else:
+            evidence_hashes = {
+                record.source_bundle_evidence_hash
+                for record in records
+                if record.source_bundle_evidence_hash is not None
+            }
+            if len(evidence_hashes) != 1:
+                raise GatewayContractError("recovery evidence binding missing")
+            evidence_hash = next(iter(evidence_hashes))
+            prepared = _prepare_recovery_source(typed, receipt)
+            evidence = prepared.bundle_evidence
+            if evidence.evidence_hash != evidence_hash:
+                raise GatewayContractError("recovery evidence changed")
+            _r1_verify_worktree(
+                Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.desired_manifest_id,
+                receipt.desired_manifest,
+            )
+            _r1_verify_worktree(
+                Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.predecessor_manifest_id,
+                receipt.predecessor_manifest,
+            )
+            owner_pid = records[-1].pre_effect_identity.get("effect_owner_pid")
+            owner_start = records[-1].pre_effect_identity.get("effect_owner_start")
+            if (
+                records[-1].state is DeploymentState.EFFECT_STARTED
+                and type(owner_pid) is int
+                and isinstance(owner_start, str)
+                and owner_pid != os.getpid()
+            ):
+                wait_for_owner = (owner_pid, owner_start)
+        if state is DeploymentState.REQUESTED:
+            _append_recovery_state_unlocked(
+                ledger,
+                rows,
+                typed,
+                receipt,
+                evidence,
+                DeploymentState.PREFLIGHTED,
+            )
+            state = DeploymentState.PREFLIGHTED
+            adapters.crash_hook("after_bundle_evidence")
+        if state is DeploymentState.PREFLIGHTED:
+            _r1_materialize_worktree(prepared.desired_manifest)
+            _append_recovery_state_unlocked(
+                ledger, rows, typed, receipt, evidence, DeploymentState.TARGET_READY
+            )
+            state = DeploymentState.TARGET_READY
+            adapters.crash_hook("after_target_ready")
+        if state is DeploymentState.TARGET_READY:
+            try:
+                _r1_materialize_worktree(prepared.predecessor_manifest)
+            except Exception as exc:
+                _append_recovery_state_unlocked(
+                    ledger,
+                    rows,
+                    typed,
+                    receipt,
+                    evidence,
+                    DeploymentState.ROLLBACK_UNAVAILABLE,
+                    observed_identity={"error": type(exc).__name__},
+                )
+                outcome = _recovery_outcome(
+                    typed,
+                    receipt,
+                    result=ResultClass.BLOCKED,
+                    effect_started=False,
+                    observation={"state": "ROLLBACK_UNAVAILABLE"},
+                )
+                _append_recovery_state_unlocked(
+                    ledger,
+                    rows,
+                    typed,
+                    receipt,
+                    evidence,
+                    DeploymentState.BLOCKED,
+                    observed_identity={"outcome": outcome.model_dump()},
+                )
+                return outcome
+            _append_recovery_state_unlocked(
+                ledger,
+                rows,
+                typed,
+                receipt,
+                evidence,
+                DeploymentState.ROLLBACK_READY,
+            )
+            state = DeploymentState.ROLLBACK_READY
+            adapters.crash_hook("after_rollback_ready")
+        if state is DeploymentState.ROLLBACK_READY:
+            owner_start = _current_recovery_process_start()
+            _record_recovery_owner(os.getpid(), owner_start)
+            _append_recovery_state_unlocked(
+                ledger,
+                rows,
+                typed,
+                receipt,
+                evidence,
+                DeploymentState.EFFECT_STARTED,
+                pre_effect_identity={
+                    "plan_hash": plan.plan_hash,
+                    "effect_owner_pid": os.getpid(),
+                    "effect_owner_start": owner_start,
+                },
+            )
+            state = DeploymentState.EFFECT_STARTED
+            invoke_effect = True
+            adapters.crash_hook("after_effect_started_before_call")
+    if wait_for_owner is not None:
+        owner_pid, owner_start = wait_for_owner
+        deadline = time.monotonic() + RECOVERY_OWNER_COMPLETION_SECONDS
+        owner_live = True
+        while True:
+            with InterProcessLock(
+                ledger.lock_path, timeout=RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS
+            ):
+                current_rows = ledger._scan_unlocked()
+                current_records = _recovery_typed_rows(
+                    current_rows, typed.request_id
+                )
+                terminal = _terminal_recovery_outcome(current_records)
+                if terminal is not None:
+                    return _validate_terminal_recovery_replay(
+                        terminal, current_records, typed, receipt, adapters
+                    )
+            owner_live = _recovery_owner_is_live(owner_pid, owner_start)
+            now = time.monotonic()
+            if not owner_live or now >= deadline:
+                break
+            time.sleep(min(RECOVERY_OWNER_POLL_SECONDS, deadline - now))
+        # Close the owner-exit/terminal-write race with one final durable read.
+        with InterProcessLock(
+            ledger.lock_path, timeout=RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS
+        ):
+            current_rows = ledger._scan_unlocked()
+            current_records = _recovery_typed_rows(current_rows, typed.request_id)
+            terminal = _terminal_recovery_outcome(current_records)
+            if terminal is not None:
+                return _validate_terminal_recovery_replay(
+                    terminal, current_records, typed, receipt, adapters
+                )
+        if owner_live and _recovery_owner_is_live(owner_pid, owner_start):
+            return _recovery_outcome(
+                typed,
+                receipt,
+                result=ResultClass.UNCERTAIN_EFFECT,
+                effect_started=True,
+                observation={"state": "EFFECT_STARTED", "owner_live": True},
+            )
+    ack: RecoveryEffectAck | None = None
+    if invoke_effect:
+        try:
+            ack = adapters.effect(plan)
+            adapters.crash_hook("after_effect_call_before_ack")
+            validate_recovery_effect_ack(ack, plan=plan)
+            adapters.crash_hook("after_effect_success_before_observation")
+        except Exception as exc:
+            with InterProcessLock(
+                ledger.lock_path, timeout=RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS
+            ):
+                rows = ledger._scan_unlocked()
+                records = _recovery_typed_rows(rows, typed.request_id)
+                if records[-1].state is DeploymentState.EFFECT_STARTED:
+                    _append_recovery_state_unlocked(
+                        ledger,
+                        rows,
+                        typed,
+                        receipt,
+                        evidence,
+                        DeploymentState.UNCERTAIN_EFFECT,
+                        observed_identity={"error": type(exc).__name__},
+                    )
+            return _recovery_outcome(
+                typed,
+                receipt,
+                result=ResultClass.UNCERTAIN_EFFECT,
+                effect_started=True,
+                observation={"state": "UNCERTAIN_EFFECT"},
+            )
+    identity = adapters.observe(plan)
+    classification = _gateway_reconcile_physical(typed, receipt, identity)
+    with InterProcessLock(
+        ledger.lock_path, timeout=RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS
+    ):
+        rows = ledger._scan_unlocked()
+        records = _recovery_typed_rows(rows, typed.request_id)
+        terminal = _terminal_recovery_outcome(records)
+        if terminal is not None:
+            return _validate_terminal_recovery_replay(
+                terminal, records, typed, receipt, adapters
+            )
+        state = records[-1].state
+        if classification == "predecessor":
+            if state is DeploymentState.EFFECT_STARTED:
+                _append_recovery_state_unlocked(
+                    ledger, rows, typed, receipt, evidence,
+                    DeploymentState.UNCERTAIN_EFFECT,
+                )
+            outcome = _recovery_outcome(
+                typed,
+                receipt,
+                result=ResultClass.ROLLED_BACK,
+                effect_started=True,
+                observation={"state": "ROLLED_BACK"},
+            )
+            _append_recovery_state_unlocked(
+                ledger,
+                rows,
+                typed,
+                receipt,
+                evidence,
+                DeploymentState.ROLLED_BACK,
+                observed_identity={"outcome": outcome.model_dump()},
+            )
+            return outcome
+        if classification != "desired":
+            if state is not DeploymentState.UNCERTAIN_EFFECT:
+                _append_recovery_state_unlocked(
+                    ledger, rows, typed, receipt, evidence,
+                    DeploymentState.UNCERTAIN_EFFECT,
+                )
+            outcome = _recovery_outcome(
+                typed,
+                receipt,
+                result=ResultClass.BLOCKED,
+                effect_started=True,
+                observation={"state": "BLOCKED"},
+            )
+            _append_recovery_state_unlocked(
+                ledger,
+                rows,
+                typed,
+                receipt,
+                evidence,
+                DeploymentState.BLOCKED,
+                observed_identity={"outcome": outcome.model_dump()},
+            )
+            return outcome
+        ack_view = (
+            {
+                "acknowledged": ack.acknowledged,
+                "applied": ack.applied,
+                "already_desired": ack.already_desired,
+            }
+            if ack is not None
+            else {}
+        )
+        if state in {
+            DeploymentState.EFFECT_STARTED,
+            DeploymentState.UNCERTAIN_EFFECT,
+        }:
+            _append_recovery_state_unlocked(
+                ledger,
+                rows,
+                typed,
+                receipt,
+                evidence,
+                DeploymentState.SERVICE_OBSERVED,
+                observed_identity={"physical": identity.model_dump(), "ack": ack_view},
+            )
+            state = DeploymentState.SERVICE_OBSERVED
+            adapters.crash_hook("after_service_observed")
+        if state is DeploymentState.SERVICE_OBSERVED:
+            _append_recovery_state_unlocked(
+                ledger,
+                rows,
+                typed,
+                receipt,
+                evidence,
+                DeploymentState.IDENTITY_VERIFIED,
+                observed_identity={"physical": identity.model_dump(), "ack": ack_view},
+            )
+            state = DeploymentState.IDENTITY_VERIFIED
+            adapters.crash_hook("after_identity_verified")
+    try:
+        postflight = adapters.postflight(plan, identity)
+        _validate_recovery_postflight(postflight, identity, receipt)
+    except Exception as exc:
+        with InterProcessLock(
+            ledger.lock_path, timeout=RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS
+        ):
+            rows = ledger._scan_unlocked()
+            records = _recovery_typed_rows(rows, typed.request_id)
+            lost_ack_reconcile = (
+                not invoke_effect
+                and any(
+                    record.state is DeploymentState.UNCERTAIN_EFFECT
+                    and record.observed_identity.get("error") == "TimeoutError"
+                    for record in records
+                )
+            )
+            if lost_ack_reconcile:
+                if records[-1].state is not DeploymentState.UNCERTAIN_EFFECT:
+                    _append_recovery_state_unlocked(
+                        ledger,
+                        rows,
+                        typed,
+                        receipt,
+                        evidence,
+                        DeploymentState.UNCERTAIN_EFFECT,
+                        observed_identity={"error": type(exc).__name__},
+                    )
+                outcome = _recovery_outcome(
+                    typed,
+                    receipt,
+                    result=ResultClass.BLOCKED,
+                    effect_started=True,
+                    observation={"state": "BLOCKED"},
+                )
+                _append_recovery_state_unlocked(
+                    ledger,
+                    rows,
+                    typed,
+                    receipt,
+                    evidence,
+                    DeploymentState.BLOCKED,
+                    observed_identity={
+                        "error": type(exc).__name__,
+                        "outcome": outcome.model_dump(),
+                    },
+                )
+                return outcome
+            if records[-1].state is not DeploymentState.UNCERTAIN_EFFECT:
+                _append_recovery_state_unlocked(
+                    ledger,
+                    rows,
+                    typed,
+                    receipt,
+                    evidence,
+                    DeploymentState.UNCERTAIN_EFFECT,
+                    observed_identity={"error": type(exc).__name__},
+                )
+        return _recovery_outcome(
+            typed,
+            receipt,
+            result=ResultClass.UNCERTAIN_EFFECT,
+            effect_started=True,
+            observation={"state": "UNCERTAIN_EFFECT"},
+        )
+    with InterProcessLock(
+        ledger.lock_path, timeout=RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS
+    ):
+        rows = ledger._scan_unlocked()
+        records = _recovery_typed_rows(rows, typed.request_id)
+        terminal = _terminal_recovery_outcome(records)
+        if terminal is not None:
+            return _validate_terminal_recovery_replay(
+                terminal, records, typed, receipt, adapters
+            )
+        state = records[-1].state
+        if state is DeploymentState.IDENTITY_VERIFIED:
+            _append_recovery_state_unlocked(
+                ledger,
+                rows,
+                typed,
+                receipt,
+                evidence,
+                DeploymentState.CLIENT_BOUND,
+                observed_identity={"postflight": dict(postflight), "ack": ack_view},
+            )
+            adapters.crash_hook("after_client_bound")
+        outcome = _recovery_outcome(
+            typed,
+            receipt,
+            result=ResultClass.VERIFIED,
+            effect_started=True,
+            observation={"state": "VERIFIED", "deployment_id": identity.deployment_id},
+        )
+        _append_recovery_state_unlocked(
+            ledger,
+            rows,
+            typed,
+            receipt,
+            evidence,
+            DeploymentState.VERIFIED,
+            observed_identity={"ack": ack_view, "outcome": outcome.model_dump()},
+        )
+        return outcome
 
 
 def _unique_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -1636,11 +3522,15 @@ def gateway_status(
 
 
 def _validate_gateway_action_pair(
-    action: str, request: GatewayDeploymentRequest | Mapping[str, Any]
-) -> GatewayDeploymentRequest:
+    action: str, request: GatewayDeploymentRequest | GatewayRecoveryRequest | Mapping[str, Any]
+) -> GatewayDeploymentRequest | GatewayRecoveryRequest:
     """Parse and validate the typed request before any physical authority read."""
     try:
-        typed = validate_request(request)
+        if action == "gateway-recover":
+            typed = GatewayRecoveryRequest.model_validate(request)
+            validate_recovery_request(typed)
+        else:
+            typed = validate_request(request)
     except ContractError as exc:
         raise _gateway_error("Gateway request rejected", exc) from exc
     expected_operation = {
@@ -1650,6 +3540,7 @@ def _validate_gateway_action_pair(
         "install": {"install", "install-artifact", "install_artifact"},
         "install-artifact": {"install", "install-artifact", "install_artifact"},
         "rollback": {"rollback", "gateway-rollback"},
+        "gateway-recover": {"gateway-recover"},
     }
     if action not in expected_operation:
         raise _gateway_error("unsupported Gateway-only action")
@@ -1658,13 +3549,15 @@ def _validate_gateway_action_pair(
     return typed
 
 
-def manage_gateway(action: str, *, request: GatewayDeploymentRequest | Mapping[str, Any],
+def manage_gateway(action: str, *, request: GatewayDeploymentRequest | GatewayRecoveryRequest | Mapping[str, Any],
                    observed: Mapping[str, Any] | None = None, **kwargs: Any) -> dict[str, Any]:
     """Explicit Gateway-only dispatch; legacy ``manage`` cannot reach this path."""
     # Pairing is deliberately checked while the request is still pure.  A
     # cross-operation request must not cause a canonical store, remote-main,
     # source, or local-Git read merely to discover the mismatch.
     parsed = _validate_gateway_action_pair(action, request)
+    if action == "gateway-recover":
+        return gateway_recover(parsed)
     typed = _require_host_authority(
         parsed,
         observation_time=kwargs.get("observation_time"),
