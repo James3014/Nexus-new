@@ -224,13 +224,17 @@ def _strict_types(value: Any) -> None:
     for item in fields(value):
         raw = getattr(value, item.name)
         numeric_fields = {
-            "uid", "gid", "pid", "sequence", "owner_uid", "owner_gid",
+            "uid",
+            "gid",
+            "pid",
+            "sequence",
+            "owner_uid",
+            "owner_gid",
             "bundle_size",
         } | (
             {"mode"}
-            if type(value).__name__ in {
-                "StableArtifactIdentity", "DeploymentManifest", "BareStoreEvidence"
-            }
+            if type(value).__name__
+            in {"StableArtifactIdentity", "DeploymentManifest", "BareStoreEvidence"}
             else set()
         )
         if (
@@ -240,12 +244,18 @@ def _strict_types(value: Any) -> None:
         ):
             raise ContractError(f"{type(value).__name__}.{item.name} type mismatch")
         if item.name in {
-            "clean", "loaded", "client_bound", "token_bound", "is_bare",
-            "alternates_absent", "bundle_verified", "effect_started",
-            "acknowledged", "applied", "already_desired",
-        } and not isinstance(
-            raw, bool
-        ):
+            "clean",
+            "loaded",
+            "client_bound",
+            "token_bound",
+            "is_bare",
+            "alternates_absent",
+            "bundle_verified",
+            "effect_started",
+            "acknowledged",
+            "applied",
+            "already_desired",
+        } and not isinstance(raw, bool):
             raise ContractError(f"{type(value).__name__}.{item.name} type mismatch")
         if item.name in {
             "required_actions",
@@ -903,17 +913,22 @@ def validate_deployment_manifest(manifest: DeploymentManifest) -> DeploymentMani
     if manifest.content_sha256 != manifest.entrypoint_sha256:
         raise ContractError("deployment content identity mismatch")
     _hash(manifest.manifest_sha256, "deployment manifest hash")
-    expected_deployment_id = "r1-" + canonical_hash({
-        "schema": "nexus.gateway.deployment_manifest.v2",
-        "role": manifest.role,
-        "repository": manifest.repository,
-        "source_set_sha256": manifest.source_set_sha256,
-    })[:40]
+    expected_deployment_id = (
+        "r1-"
+        + canonical_hash(
+            {
+                "schema": "nexus.gateway.deployment_manifest.v2",
+                "role": manifest.role,
+                "repository": manifest.repository,
+                "source_set_sha256": manifest.source_set_sha256,
+            }
+        )[:40]
+    )
     if manifest.deployment_id != expected_deployment_id:
         raise ContractError("deployment id is not manager-derived")
-    expected_manifest_hash = canonical_hash({
-        key: value for key, value in manifest.model_dump().items() if key != "manifest_sha256"
-    })
+    expected_manifest_hash = canonical_hash(
+        {key: value for key, value in manifest.model_dump().items() if key != "manifest_sha256"}
+    )
     if manifest.manifest_sha256 != expected_manifest_hash:
         raise ContractError("deployment manifest hash mismatch")
     fixed_interpreter = InterpreterIdentity()
@@ -954,11 +969,9 @@ def validate_recovery_source_set(source_set: RecoverySourceSet) -> RecoverySourc
     if source_set.interpreter != InterpreterIdentity():
         raise ContractError("recovery source-set interpreter mismatch")
     _hash(source_set.source_set_sha256, "recovery source-set hash")
-    expected = canonical_hash({
-        key: value
-        for key, value in source_set.model_dump().items()
-        if key != "source_set_sha256"
-    })
+    expected = canonical_hash(
+        {key: value for key, value in source_set.model_dump().items() if key != "source_set_sha256"}
+    )
     if source_set.source_set_sha256 != expected:
         raise ContractError("recovery source-set hash mismatch")
     return source_set
@@ -985,12 +998,17 @@ def derive_deployment_manifest(
         )
     else:
         raise ContractError("deployment role mismatch")
-    deployment_id = "r1-" + canonical_hash({
-        "schema": "nexus.gateway.deployment_manifest.v2",
-        "role": role,
-        "repository": source_set.repository,
-        "source_set_sha256": source_set.source_set_sha256,
-    })[:40]
+    deployment_id = (
+        "r1-"
+        + canonical_hash(
+            {
+                "schema": "nexus.gateway.deployment_manifest.v2",
+                "role": role,
+                "repository": source_set.repository,
+                "source_set_sha256": source_set.source_set_sha256,
+            }
+        )[:40]
+    )
     values = {
         "deployment_id": deployment_id,
         "role": role,
@@ -1108,11 +1126,9 @@ def validate_source_bundle_evidence(
         raise ContractError("source bundle trusted bare store mismatch")
     if not isinstance(evidence.observed_at, str) or not evidence.observed_at:
         raise ContractError("bundle observation time missing")
-    expected_hash = canonical_hash({
-        key: value
-        for key, value in evidence.model_dump().items()
-        if key != "evidence_hash"
-    })
+    expected_hash = canonical_hash(
+        {key: value for key, value in evidence.model_dump().items() if key != "evidence_hash"}
+    )
     if evidence.evidence_hash != expected_hash:
         raise ContractError("source bundle evidence hash mismatch")
     return evidence
@@ -1133,11 +1149,9 @@ def validate_reconcile_outcome(
         raise ContractError("reconcile physical observation missing")
     if type(outcome.effect_started) is not bool or not isinstance(outcome.result, ResultClass):
         raise ContractError("reconcile result type mismatch")
-    expected = canonical_hash({
-        key: value
-        for key, value in outcome.model_dump().items()
-        if key != "evidence_hash"
-    })
+    expected = canonical_hash(
+        {key: value for key, value in outcome.model_dump().items() if key != "evidence_hash"}
+    )
     if outcome.evidence_hash != expected:
         raise ContractError("reconcile evidence hash mismatch")
     return outcome
@@ -1151,29 +1165,29 @@ def derive_recovery_ledger_binding(
 ) -> str:
     validate_recovery_request(request)
     validate_recovery_authority(receipt, request=request)
-    return canonical_hash({
-        "request_id": request.request_id,
-        "request_hash": request.request_hash,
-        "authority_schema": receipt.schema,
-        "receipt_id": receipt.receipt_id,
-        "receipt_hash": receipt.receipt_hash,
-        "card_sha256": receipt.card_sha256,
-        "accepted_source_merge": receipt.accepted_source_merge,
-        "accepted_source_tree": receipt.accepted_source_tree,
-        "final_manager_sha256": receipt.final_manager_sha256,
-        "independent_acceptance_receipt_hash": (
-            receipt.independent_acceptance_receipt_hash
-        ),
-        "source_set_sha256": receipt.source_set.source_set_sha256,
-        "desired_manifest_id": receipt.desired_manifest_id,
-        "desired_manifest_hash": receipt.desired_manifest_sha256,
-        "predecessor_manifest_id": receipt.predecessor_manifest_id,
-        "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
-        "source_bundle_evidence_hash": source_bundle_evidence.evidence_hash,
-        "operation": request.operation,
-        "effect_class": request.effect_class,
-        "idempotency_fence": request.idempotency_fence,
-    })
+    return canonical_hash(
+        {
+            "request_id": request.request_id,
+            "request_hash": request.request_hash,
+            "authority_schema": receipt.schema,
+            "receipt_id": receipt.receipt_id,
+            "receipt_hash": receipt.receipt_hash,
+            "card_sha256": receipt.card_sha256,
+            "accepted_source_merge": receipt.accepted_source_merge,
+            "accepted_source_tree": receipt.accepted_source_tree,
+            "final_manager_sha256": receipt.final_manager_sha256,
+            "independent_acceptance_receipt_hash": (receipt.independent_acceptance_receipt_hash),
+            "source_set_sha256": receipt.source_set.source_set_sha256,
+            "desired_manifest_id": receipt.desired_manifest_id,
+            "desired_manifest_hash": receipt.desired_manifest_sha256,
+            "predecessor_manifest_id": receipt.predecessor_manifest_id,
+            "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
+            "source_bundle_evidence_hash": source_bundle_evidence.evidence_hash,
+            "operation": request.operation,
+            "effect_class": request.effect_class,
+            "idempotency_fence": request.idempotency_fence,
+        }
+    )
 
 
 def validate_recovery_ledger_record(
@@ -1202,14 +1216,12 @@ def validate_recovery_ledger_record(
         _hash(record.parent_hash, "recovery ledger parent")
     _hash(record.request_hash, "recovery ledger request")
     _hash(record.record_hash, "recovery ledger record")
-    expected_hash = canonical_hash({
-        key: value for key, value in record.model_dump().items() if key != "record_hash"
-    })
+    expected_hash = canonical_hash(
+        {key: value for key, value in record.model_dump().items() if key != "record_hash"}
+    )
     if record.record_hash != expected_hash:
         raise ContractError("recovery ledger record hash mismatch")
-    evidence_hash = (
-        None if source_bundle_evidence is None else source_bundle_evidence.evidence_hash
-    )
+    evidence_hash = None if source_bundle_evidence is None else source_bundle_evidence.evidence_hash
     if record.state is DeploymentState.REQUESTED:
         if record.source_bundle_evidence_hash is not None:
             raise ContractError("REQUESTED recovery row cannot bind bundle evidence")
@@ -1225,9 +1237,7 @@ def validate_recovery_ledger_record(
         "accepted_source_merge": receipt.accepted_source_merge,
         "accepted_source_tree": receipt.accepted_source_tree,
         "final_manager_sha256": receipt.final_manager_sha256,
-        "independent_acceptance_receipt_hash": (
-            receipt.independent_acceptance_receipt_hash
-        ),
+        "independent_acceptance_receipt_hash": (receipt.independent_acceptance_receipt_hash),
         "source_set_sha256": receipt.source_set.source_set_sha256,
         "desired_manifest_id": receipt.desired_manifest_id,
         "desired_manifest_hash": receipt.desired_manifest_sha256,
@@ -1282,9 +1292,9 @@ def validate_recovery_effect_plan(
             raise ContractError(f"recovery effect plan {name} mismatch")
     _hash(plan.pre_effect_identity_hash, "pre-effect identity")
     _hash(plan.plan_hash, "recovery effect plan")
-    expected_hash = canonical_hash({
-        key: value for key, value in plan.model_dump().items() if key != "plan_hash"
-    })
+    expected_hash = canonical_hash(
+        {key: value for key, value in plan.model_dump().items() if key != "plan_hash"}
+    )
     if plan.plan_hash != expected_hash:
         raise ContractError("recovery effect plan hash mismatch")
     return plan
@@ -1299,16 +1309,18 @@ def validate_recovery_effect_ack(
         raise ContractError("recovery effect acknowledgement must be typed")
     if ack.plan_hash != plan.plan_hash or ack.effect_kind != "GATEWAY_DURABLE_RECOVERY":
         raise ContractError("recovery effect acknowledgement binding mismatch")
-    if type(ack.acknowledged) is not bool or type(ack.applied) is not bool or type(
-        ack.already_desired
-    ) is not bool:
+    if (
+        type(ack.acknowledged) is not bool
+        or type(ack.applied) is not bool
+        or type(ack.already_desired) is not bool
+    ):
         raise ContractError("recovery effect acknowledgement type mismatch")
     if not ack.acknowledged or (ack.applied and ack.already_desired):
         raise ContractError("recovery effect acknowledgement state mismatch")
     _hash(ack.evidence_hash, "recovery effect acknowledgement")
-    expected = canonical_hash({
-        key: value for key, value in ack.model_dump().items() if key != "evidence_hash"
-    })
+    expected = canonical_hash(
+        {key: value for key, value in ack.model_dump().items() if key != "evidence_hash"}
+    )
     if ack.evidence_hash != expected:
         raise ContractError("recovery effect acknowledgement hash mismatch")
     return ack
@@ -1337,37 +1349,48 @@ def validate_recovery_physical_identity(
         or identity.tree != expected_manifest.tree
         or not identity.server_instance
         or not identity.observed_at
-        or (
-            expected_plist_sha256 is not None
-            and identity.plist_sha256 != expected_plist_sha256
-        )
+        or (expected_plist_sha256 is not None and identity.plist_sha256 != expected_plist_sha256)
     ):
         raise ContractError("recovery physical identity mismatch")
     _hash(identity.plist_sha256, "recovery physical plist")
     _hash(identity.evidence_hash, "recovery physical identity")
-    expected = canonical_hash({
-        key: value for key, value in identity.model_dump().items() if key != "evidence_hash"
-    })
+    expected = canonical_hash(
+        {key: value for key, value in identity.model_dump().items() if key != "evidence_hash"}
+    )
     if identity.evidence_hash != expected:
         raise ContractError("recovery physical identity hash mismatch")
     return identity
 
 
 def validate_recovery_request(request: GatewayRecoveryRequest) -> GatewayRecoveryRequest:
-    if not isinstance(request, GatewayRecoveryRequest) or request.schema != GatewayRecoveryRequest.__dataclass_fields__["schema"].default:
+    if (
+        not isinstance(request, GatewayRecoveryRequest)
+        or request.schema != GatewayRecoveryRequest.__dataclass_fields__["schema"].default
+    ):
         raise ContractError("R1 recovery request schema mismatch")
-    if request.operation != "gateway-recover" or request.effect_class is not EffectClass.GATEWAY_DURABLE_RECOVERY:
+    if (
+        request.operation != "gateway-recover"
+        or request.effect_class is not EffectClass.GATEWAY_DURABLE_RECOVERY
+    ):
         raise ContractError("R1 recovery operation/effect mismatch")
     for value, name, length in (
-        (request.request_id, "request id", 128), (request.idempotency_fence, "fence", 128),
-        (request.recovery_authority_id, "authority id", 128), (request.desired_manifest_id, "desired id", 128),
+        (request.request_id, "request id", 128),
+        (request.idempotency_fence, "fence", 128),
+        (request.recovery_authority_id, "authority id", 128),
+        (request.desired_manifest_id, "desired id", 128),
         (request.predecessor_manifest_id, "predecessor id", 128),
         (request.recovery_authority_hash, "authority hash", 64),
         (request.desired_manifest_hash, "desired manifest hash", 64),
         (request.predecessor_manifest_hash, "predecessor manifest hash", 64),
     ):
         (_hash(value, name) if length == 64 else _id(value, name))
-    expected = canonical_hash({key: value for key, value in request.model_dump().items() if key not in {"request_hash", "schema"}})
+    expected = canonical_hash(
+        {
+            key: value
+            for key, value in request.model_dump().items()
+            if key not in {"request_hash", "schema"}
+        }
+    )
     if request.request_hash != expected:
         raise ContractError("R1 recovery request hash mismatch")
     return request
@@ -1453,7 +1476,9 @@ def validate_desired_profile(
 _EDGES: dict[DeploymentState, set[DeploymentState]] = {
     DeploymentState.REQUESTED: {DeploymentState.PREFLIGHTED, DeploymentState.BLOCKED},
     DeploymentState.PREFLIGHTED: {
-        DeploymentState.TARGET_READY, DeploymentState.STARTED, DeploymentState.BLOCKED,
+        DeploymentState.TARGET_READY,
+        DeploymentState.STARTED,
+        DeploymentState.BLOCKED,
     },
     DeploymentState.TARGET_READY: {
         DeploymentState.ROLLBACK_READY,
@@ -1625,9 +1650,9 @@ def validate_source_authority(
     if request_id is not None and receipt.request_id != request_id:
         raise ContractError("source authority request mismatch")
     _hash(receipt.receipt_hash, "source receipt hash")
-    expected = canonical_hash({
-        key: value for key, value in _plain(receipt).items() if key != "receipt_hash"
-    })
+    expected = canonical_hash(
+        {key: value for key, value in _plain(receipt).items() if key != "receipt_hash"}
+    )
     if receipt.receipt_hash != expected:
         raise ContractError("source authority receipt hash mismatch")
     return receipt
@@ -1736,9 +1761,9 @@ def validate_host_effect_authority(
             raise ContractError("host authority desired profile mismatch")
     if now is not None:
         validate_receipt_freshness(receipt, now=now)
-    expected_hash = canonical_hash({
-        key: value for key, value in _plain(receipt).items() if key != "receipt_hash"
-    })
+    expected_hash = canonical_hash(
+        {key: value for key, value in _plain(receipt).items() if key != "receipt_hash"}
+    )
     if receipt.receipt_hash != expected_hash:
         raise ContractError("host authority receipt hash mismatch")
     return receipt
@@ -1875,9 +1900,9 @@ def validate_host_effect_authority_bundle(
         raise ContractError("active host authority bundle contains revoked child")
     if bundle.revocation_state == "REVOKED" and not revoked_children:
         raise ContractError("revoked host authority bundle has no revoked child")
-    expected_hash = canonical_hash({
-        key: value for key, value in _plain(bundle).items() if key != "bundle_hash"
-    })
+    expected_hash = canonical_hash(
+        {key: value for key, value in _plain(bundle).items() if key != "bundle_hash"}
+    )
     if bundle.bundle_hash != expected_hash:
         raise ContractError("host authority bundle hash mismatch")
     if now is not None:
@@ -1956,17 +1981,31 @@ def validate_recovery_authority(
     request: GatewayRecoveryRequest | None = None,
     now: str | None = None,
 ) -> RecoveryAuthorityReceipt:
-    if not isinstance(receipt, RecoveryAuthorityReceipt) or receipt.schema != RecoveryAuthorityReceipt.SCHEMA:
+    if (
+        not isinstance(receipt, RecoveryAuthorityReceipt)
+        or receipt.schema != RecoveryAuthorityReceipt.SCHEMA
+    ):
         raise ContractError("R1 recovery authority schema mismatch")
-    if type(receipt.receipt_version) is not int or receipt.receipt_version != 1 or receipt.operation != "gateway-recover":
+    if (
+        type(receipt.receipt_version) is not int
+        or receipt.receipt_version != 1
+        or receipt.operation != "gateway-recover"
+    ):
         raise ContractError("R1 recovery operation mismatch")
     if receipt.effect_class is not EffectClass.GATEWAY_DURABLE_RECOVERY:
         raise ContractError("R1 recovery effect mismatch")
     if receipt.card_sha256 != RECOVERY_CARD_SHA256:
         raise ContractError("R1 recovery Card mismatch")
-    if receipt.source_base_merge != SOURCE_BASE_MERGE or receipt.source_base_tree != SOURCE_BASE_TREE:
+    if (
+        receipt.source_base_merge != SOURCE_BASE_MERGE
+        or receipt.source_base_tree != SOURCE_BASE_TREE
+    ):
         raise ContractError("R1 recovery source binding mismatch")
-    if receipt.service_label != LABEL or receipt.plist_path != PLIST or receipt.endpoint != ENDPOINT:
+    if (
+        receipt.service_label != LABEL
+        or receipt.plist_path != PLIST
+        or receipt.endpoint != ENDPOINT
+    ):
         raise ContractError("R1 recovery fixed service mismatch")
     exact = {
         "issuer_id": "owner-james",
@@ -2003,9 +2042,9 @@ def validate_recovery_authority(
     _id(receipt.receipt_id, "recovery receipt id")
     _id(receipt.request_id, "recovery request id")
     _id(receipt.idempotency_fence, "recovery fence")
-    expected_hash = canonical_hash({
-        key: value for key, value in receipt.model_dump().items() if key != "receipt_hash"
-    })
+    expected_hash = canonical_hash(
+        {key: value for key, value in receipt.model_dump().items() if key != "receipt_hash"}
+    )
     if receipt.receipt_hash != expected_hash:
         raise ContractError("R1 recovery receipt hash mismatch")
     _validate_revocation_fields(
