@@ -79,16 +79,14 @@ def test_blocked_entry_reads_549_first_and_stops_before_implementation() -> None
         blocker={"pr": 479, "state": "open", "head_sha": "a" * 40},
         unlock_condition="PR #479 terminal then rebind",
     )
-    client = FakeClient(
-        {
-            f"/repos/{REPOSITORY}/issues/549": _registry(blocked),
-            f"/repos/{REPOSITORY}/issues/129": _fresh_issue(129),
-            f"/repos/{REPOSITORY}/pulls/479": {
-                "state": "open",
-                "head": {"sha": "a" * 40},
-            },
-        }
-    )
+    client = FakeClient({
+        f"/repos/{REPOSITORY}/issues/549": _registry(blocked),
+        f"/repos/{REPOSITORY}/issues/129": _fresh_issue(129),
+        f"/repos/{REPOSITORY}/pulls/479": {
+            "state": "open",
+            "head": {"sha": "a" * 40},
+        },
+    })
 
     report = consumer_preflight(client, 129)
 
@@ -106,19 +104,17 @@ def test_issue_contract_drift_falls_back_before_blocker_pr_read() -> None:
         "BLOCKED_OVERLAP",
         blocker={"pr": 479, "state": "open", "head_sha": "a" * 40},
     )
-    client = FakeClient(
-        {
-            f"/repos/{REPOSITORY}/issues/549": _registry(blocked),
-            f"/repos/{REPOSITORY}/issues/129": {
-                "number": 129,
-                "state": "open",
-                "updated_at": "2026-08-25T01:00:00Z",
-            },
-            f"/repos/{REPOSITORY}/issues/129/comments?per_page=100": [
-                {"id": 101, "body": "material contract change"}
-            ],
-        }
-    )
+    client = FakeClient({
+        f"/repos/{REPOSITORY}/issues/549": _registry(blocked),
+        f"/repos/{REPOSITORY}/issues/129": {
+            "number": 129,
+            "state": "open",
+            "updated_at": "2026-08-25T01:00:00Z",
+        },
+        f"/repos/{REPOSITORY}/issues/129/comments?per_page=100": [
+            {"id": 101, "body": "material contract change"}
+        ],
+    })
 
     report = consumer_preflight(client, 129)
 
@@ -133,23 +129,21 @@ def test_non_authority_wakeup_comment_preserves_valid_blocker_cache() -> None:
         "BLOCKED_OVERLAP",
         blocker={"pr": 479, "state": "open", "head_sha": "a" * 40},
     )
-    client = FakeClient(
-        {
-            f"/repos/{REPOSITORY}/issues/549": _registry(blocked),
-            f"/repos/{REPOSITORY}/issues/129": {
-                "number": 129,
-                "state": "open",
-                "updated_at": "2026-08-25T01:00:00Z",
-            },
-            f"/repos/{REPOSITORY}/issues/129/comments?per_page=100": [
-                {"id": 101, "body": "WAKEUP_HINT_ONLY NO_AUTHORITY canary"}
-            ],
-            f"/repos/{REPOSITORY}/pulls/479": {
-                "state": "open",
-                "head": {"sha": "a" * 40},
-            },
-        }
-    )
+    client = FakeClient({
+        f"/repos/{REPOSITORY}/issues/549": _registry(blocked),
+        f"/repos/{REPOSITORY}/issues/129": {
+            "number": 129,
+            "state": "open",
+            "updated_at": "2026-08-25T01:00:00Z",
+        },
+        f"/repos/{REPOSITORY}/issues/129/comments?per_page=100": [
+            {"id": 101, "body": "WAKEUP_HINT_ONLY NO_AUTHORITY canary"}
+        ],
+        f"/repos/{REPOSITORY}/pulls/479": {
+            "state": "open",
+            "head": {"sha": "a" * 40},
+        },
+    })
 
     report = consumer_preflight(client, 129)
 
@@ -163,16 +157,14 @@ def test_blocker_head_drift_requires_metadata_rebind_not_unlock() -> None:
         "BLOCKED_OVERLAP",
         blocker={"pr": 479, "state": "open", "head_sha": "a" * 40},
     )
-    client = FakeClient(
-        {
-            f"/repos/{REPOSITORY}/issues/549": _registry(blocked),
-            f"/repos/{REPOSITORY}/issues/129": _fresh_issue(129),
-            f"/repos/{REPOSITORY}/pulls/479": {
-                "state": "open",
-                "head": {"sha": "b" * 40},
-            },
-        }
-    )
+    client = FakeClient({
+        f"/repos/{REPOSITORY}/issues/549": _registry(blocked),
+        f"/repos/{REPOSITORY}/issues/129": _fresh_issue(129),
+        f"/repos/{REPOSITORY}/pulls/479": {
+            "state": "open",
+            "head": {"sha": "b" * 40},
+        },
+    })
 
     report = consumer_preflight(client, 129)
 
@@ -183,12 +175,10 @@ def test_blocker_head_drift_requires_metadata_rebind_not_unlock() -> None:
 
 def test_host_bound_entry_early_stops_when_issue_watermark_is_fresh() -> None:
     host = _entry(526, "HOST_REBIND_REQUIRED")
-    client = FakeClient(
-        {
-            f"/repos/{REPOSITORY}/issues/549": _registry(host),
-            f"/repos/{REPOSITORY}/issues/526": _fresh_issue(526),
-        }
-    )
+    client = FakeClient({
+        f"/repos/{REPOSITORY}/issues/549": _registry(host),
+        f"/repos/{REPOSITORY}/issues/526": _fresh_issue(526),
+    })
 
     report = consumer_preflight(client, 526)
 
@@ -208,9 +198,11 @@ def test_cache_miss_falls_back_to_full_authoritative_discovery() -> None:
 
 
 def test_invalid_registry_falls_back_without_granting_authority() -> None:
-    client = FakeClient(
-        {f"/repos/{REPOSITORY}/issues/549": _registry(_entry(129, "BLOCKED_OVERLAP"), corrupt_hash=True)}
-    )
+    client = FakeClient({
+        f"/repos/{REPOSITORY}/issues/549": _registry(
+            _entry(129, "BLOCKED_OVERLAP"), corrupt_hash=True
+        )
+    })
 
     report = safe_consumer_preflight(client, 129)
 
