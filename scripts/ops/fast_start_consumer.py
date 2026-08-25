@@ -15,6 +15,7 @@ from scripts.ops.fast_start_v2 import parse_registry_body, registry_payload_hash
 
 REPOSITORY = "James3014/Nexus-new"
 REGISTRY_ISSUE = 549
+REGISTRY_SCHEMA = "nexus.fast_start_cache.v1"
 REPORT_SCHEMA = "nexus.fast_start_consumer_preflight.v1"
 
 
@@ -94,13 +95,24 @@ def consumer_preflight(client: Any, issue_number: int) -> dict[str, Any]:
     registry = client.get(f"/repos/{REPOSITORY}/issues/{REGISTRY_ISSUE}")
     if not isinstance(registry, Mapping):
         raise ValueError("registry response malformed")
+    if registry.get("number") not in (None, REGISTRY_ISSUE):
+        raise ValueError("REGISTRY_IDENTITY_MISMATCH")
+    if registry.get("state") not in (None, "open"):
+        raise ValueError("REGISTRY_NOT_OPEN")
+
     body = str(registry.get("body") or "")
     payload = parse_registry_body(body)
     payload_hash = registry_payload_hash(payload)
     if _header_hash(body) != payload_hash:
         raise ValueError("REGISTRY_HASH_MISMATCH")
+    if payload.get("schema") != REGISTRY_SCHEMA:
+        raise ValueError("REGISTRY_SCHEMA_MISMATCH")
     if payload.get("authority") != "ADVISORY_CACHE_ONLY":
         raise ValueError("REGISTRY_AUTHORITY_MISMATCH")
+    if payload.get("repository") != REPOSITORY:
+        raise ValueError("REGISTRY_REPOSITORY_MISMATCH")
+    if not isinstance(payload.get("registry_revision"), int):
+        raise ValueError("REGISTRY_REVISION_INVALID")
 
     entries = {
         int(entry["issue"]): entry
@@ -143,7 +155,7 @@ def consumer_preflight(client: Any, issue_number: int) -> dict[str, Any]:
             head_sha = str(head.get("sha") or "")
             cached_head = str(blocker.get("head_sha") or "")
             if state == "open" and re.fullmatch(r"[0-9a-f]{40}", head_sha):
-                if not cached_head or head_sha == cached_head:
+                if cached_head and head_sha == cached_head:
                     report["outcome"] = "EARLY_STOP_BLOCKED"
                     report["next_action"] = "RETURN_BLOCKER"
                     report["live_blocker"] = {
