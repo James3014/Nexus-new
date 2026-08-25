@@ -1,0 +1,81 @@
+schema: nexus.shared_playbook.v1
+playbook_id: diagnose
+skill_id: diagnose
+version: 1.0.0
+status: CANDIDATE
+primary: true
+capability_mounts:
+  - xray
+  - drone
+  - memory
+  - regression_guard
+trace_authority: DERIVED_ONLY
+permissions:
+  filesystem: INHERIT_ONLY
+  network: INHERIT_ONLY
+  tools: INHERIT_ONLY
+authority:
+  route_selection: false
+  model_selection: false
+  worker_selection: false
+  approval: false
+  integration: false
+  merge: false
+  promotion: false
+  task_receipt: false
+  claim_authority: false
+  self_modify: false
+  permission_expand: false
+auto_chain: false
+local_transition_contract:
+  same_task: true
+  same_scope: true
+  same_capability: true
+  same_permissions: true
+  same_authority: true
+stages:
+  - id: feedback_loop
+    exit_evidence:
+      - reproducer_or_explicit_no_loop
+  - id: reproduce
+    exit_evidence:
+      - captured_failure_witness
+  - id: hypothesise
+    exit_evidence:
+      - ranked_falsifiable_hypotheses
+  - id: instrument
+    exit_evidence:
+      - hypothesis_bound_probe_results
+  - id: fix_and_regression
+    exit_evidence:
+      - regression_witness_and_original_repro_result
+  - id: cleanup_postmortem
+    exit_evidence:
+      - cleanup_and_prevention_finding
+transitions:
+  - from: feedback_loop
+    to: reproduce
+    kind: LOCAL_TRANSITION
+  - from: reproduce
+    to: hypothesise
+    kind: LOCAL_TRANSITION
+  - from: hypothesise
+    to: instrument
+    kind: LOCAL_TRANSITION
+  - from: instrument
+    to: fix_and_regression
+    kind: LOCAL_TRANSITION
+  - from: fix_and_regression
+    to: cleanup_postmortem
+    kind: LOCAL_TRANSITION
+  - from: cleanup_postmortem
+    to: improve-codebase-architecture
+    kind: HANDOFF_REQUEST
+stop_conditions:
+  - no_reproducible_feedback_loop
+  - scope_or_authority_boundary_crossed
+  - permission_expansion_required
+  - independent_verifier_required
+learning_writeback:
+  mode: CANDIDATE_ONLY
+  self_modify: false
