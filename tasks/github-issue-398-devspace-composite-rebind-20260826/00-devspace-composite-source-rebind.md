@@ -12,7 +12,7 @@ execution_realm: SOURCE_ONLY_ISOLATED_WORKTREE
 auto_chain: false
 claim_mode: MANUAL_DISPATCH
 claim_ceiling: DEVSPACE_COMPOSITE_SOURCE_CANDIDATE_ONLY
-allowed_file_count: 10
+allowed_file_count: 15
 host_effect_authority: NOT_GRANTED
 runtime_effect_authority: NOT_GRANTED
 ```
@@ -20,9 +20,10 @@ runtime_effect_authority: NOT_GRANTED
 ## Purpose
 
 Create one clean, immutable DevSpace source Candidate that combines the already
-accepted G3 durable-termination implementation and the already accepted Codex
-Goal coherent-screen readiness implementation without importing unrelated Git
-history or modifying the deployed dirty checkout.
+accepted G3 durable-termination implementation, its production provider
+readiness-to-execution boundary, and the accepted Codex Goal coherent-screen
+readiness implementation without importing unrelated Git history or modifying
+the deployed dirty checkout.
 
 This Card is a source-contract rebind only. It does not accept a new Candidate,
 integrate the deployed branch, rebuild or reload DevSpace, touch ports, call a
@@ -45,8 +46,10 @@ Deployed local source, which must remain untouched during this Card:
 
 - root: `/Users/jameschen/Workspace/devspace-chatgpt-mcp`
 - branch: `james/agy-durable-dispatch-v1`
-- HEAD: `e3b446a7507491b653d932284a09dc0923652c3d`
-- tree: `325f5e2de1d21381b083d0239011a9f869c772f1`
+- HEAD: `13a8eb50c756e69d60c9deb3007ba6d71ee0978e`
+- tree: `3b0aeb02b45dea7bb071b2b295026f2c6255a7b8`
+- remote branch: `refs/heads/james/agy-durable-dispatch-v1` at exact
+  `13a8eb50c756e69d60c9deb3007ba6d71ee0978e`
 - dirty paths: `src/codex-goal-sessions.ts`,
   `src/codex-goal-sessions.test.ts`
 - dirty binary diff SHA-256:
@@ -55,6 +58,11 @@ Deployed local source, which must remain untouched during this Card:
   `868d142e294c0decdf3ff3aa051d3cba5ccedc93c5db69988113ff8db2c9adc7`
 - dirty test SHA-256:
   `9b3f8fc44380dd21cea13b98debb257c4d872144027a4227691606c9b650f72c`
+
+The `e3b446a..13a8eb5` base movement is accepted current source, not Candidate
+scope. It changes only `src/local-agent-adapters.ts` and its test by the linked
+worktree Git-metadata containment fix, 42 insertions and 11 deletions. The
+replacement Candidate must preserve that base behavior.
 
 Current DevSpace collaboration main observed before Card creation:
 
@@ -81,14 +89,20 @@ deletes `skills/subagent-delegation/SKILL.md`, and has binary diff SHA-256
 `b90f359c724d04bddaba7ecbbc8c5ea7b743ffc2bcc4b06ecb02c384c8e66d6b`.
 That range is outside this Card.
 
+The earlier semantic-port Candidates `23d66c9a58ba367fc31cf2509471a5faf66d5667`
+and `6ba60417791c096298cea58a878457d6d0134395` are `REVISE` oracle evidence.
+They are not accepted, not eligible for integration, and must not be
+cherry-picked. The latter also violates the direct-parent contract because its
+direct parent is `23d66c9`, not the current deployment base.
+
 ## Bounded semantic port
 
 Create one clean isolated DevSpace worktree with parent exactly
-`e3b446a7507491b653d932284a09dc0923652c3d`. Port the already accepted G3
-behavior to the APIs physically present at `e3b446a`; do not transplant G3 Git
-history or require byte equality with the eight `d009` blobs.
+`13a8eb50c756e69d60c9deb3007ba6d71ee0978e`. Port the already accepted G3
+behavior to the APIs physically present at `13a8eb5`; do not transplant G3 Git
+history or require byte equality with the `d009` blobs.
 
-The port is limited to these eight G3 paths:
+The durable lifecycle port remains limited to these eight G3 paths:
 
 - `src/local-agent-contract.ts`
 - `src/local-agent-execution-contract.test.ts`
@@ -99,6 +113,14 @@ The port is limited to these eight G3 paths:
 - `src/server.test.ts`
 - `src/server.ts`
 
+The production readiness-to-execution seam adds exactly these five paths:
+
+- `src/local-agent-runtime.ts`
+- `src/local-agent-runtime.test.ts`
+- `src/local-agent-adapters.ts`
+- `src/local-agent-adapters.test.ts`
+- `src/local-agent-omp.ts`
+
 It must preserve the accepted G3 invariants: one detached-worker lifecycle
 owner; an opaque generation and launch state; durable `terminationPending`;
 PID/token identity retained until verified physical absence and end evidence;
@@ -108,8 +130,31 @@ runtime-pool compatibility; reopen, launch-gap, stale-callback, retry/backoff,
 post-kill baseline, truthful pending-versus-blocked status, and atomic legacy
 generic updates under `IMMEDIATE` plus exact row compare-and-swap.
 
+`LocalAgentRunCallbacks` must cross the production runtime/adapter boundary.
+Execution start is generation-fenced and invoked exactly once:
+
+- Driver/Codex: after runtime creation/readiness and immediately before the
+  semantic provider run;
+- OMP: after initialize plus session creation/resume and immediately before
+  `session.prompt`;
+- Agy: after executable/environment/workspace and linked-worktree metadata
+  containment have been resolved into the complete argument vector, and
+  immediately before the single child spawn.
+
+Callback/CAS rejection emits zero provider prompt/run and zero Agy child. Slow
+runtime or OMP readiness consumes startup budget, not execution budget.
+
+The accepted `13a8eb5` linked-worktree containment must remain effective while
+adding callbacks: `resolveAgyGitMetadataDirs` uses the worktree-scoped
+`git rev-parse --git-dir`; any external add-dir is the canonical
+`<common>/.git/worktrees/<name>` for a verified member worktree; repo-common
+`.git` is never exported; main-worktree in-root Git metadata adds no external
+directory; canonicalization, membership validation, environment scrubbing,
+cwd, workspace add-dir, mode/model/effort/output/timeout, and prompt arguments
+remain unchanged.
+
 The two Goal paths port the accepted `147359` coherent-screen behavior to the
-destructive-delta `ProcessSnapshot` contract physically present at `e3b`:
+destructive-delta `ProcessSnapshot` contract physically present at `13a8eb5`:
 
 - each non-truncated snapshot is ordered novel output bytes, not a cumulative
   prefix and not a replay deduplication key;
@@ -128,32 +173,33 @@ The accepted `147359` commit/tree and tests remain behavioral oracle evidence,
 not a byte requirement for this transport port. The new Goal bytes require
 fresh SHA/tree-bound acceptance.
 
-Every other tree entry must remain byte-identical to `e3b446a`. In particular:
+Every other tree entry must remain byte-identical to `13a8eb5`. In particular:
 
 - `package.json` remains blob `cbf7ce9cbf2fcbd0c5b9c5b2602b28c2f623e51b`;
 - `package-lock.json` remains blob `ab051a2b3ee3278a93bcb754761baecc711fb861`;
 - no new bare-package import is allowed;
 - every relative import from changed production files must resolve within the
-  unchanged `e3b446a` source tree;
-- final scope is exactly the ten paths above, with no deletion or untracked
+  unchanged `13a8eb5` source tree;
+- final scope is exactly the fifteen paths above, with no deletion or untracked
   file.
 
 The initial exact-blob oracle is preserved as failure evidence: exact `d009`
 `local-agent-store.ts` imports absent `better-result`, and the recursive `d009`
-closure also requires source modules not present at `e3b446a`. Copying all
+closure also requires source modules not present at `13a8eb5`. Copying all
 `d009` package/source prerequisites would recreate the forbidden broad history
 import. Do not add `better-result`, change package metadata, add dependency
 files, use network materialization, or alter tool/product surfaces.
 
 The first semantic-port oracle is also preserved: exact `147359` Goal blobs
-require cumulative process snapshots, while `e3b` emits destructive deltas.
+require cumulative process snapshots, while `13a8eb5` emits destructive deltas.
 Do not add `src/process-sessions.ts` or its test. The later process blob also
 introduces replay, status, timeout, retention, TTL, and cleanup behavior beyond
 this Goal adapter and is not authorized by this Card.
 
-If the accepted G3 invariants cannot be implemented inside these eight paths
-against `e3b446a`, stop with `ALLOWED_SCOPE_INSUFFICIENT / CONTRACT_GAP`.
-Compatibility edits inside the eight paths are a new composite Candidate and
+If the accepted G3 invariants and the production callback boundary cannot be
+implemented inside these thirteen G3/provider paths against `13a8eb5`, stop
+with `ALLOWED_SCOPE_INSUFFICIENT / CONTRACT_GAP`.
+Compatibility edits inside the fifteen paths are a new composite Candidate and
 must receive fresh independent acceptance; `d009` acceptance is oracle input,
 not acceptance of the ported bytes.
 
@@ -161,18 +207,19 @@ not acceptance of the ported bytes.
 
 Before commit:
 
-1. Re-read deployed HEAD/tree/dirty paths and all three dirty hashes above.
-2. Verify the isolated parent is exactly `e3b446a` and the worktree was clean
-   before transplant.
-3. Verify package/package-lock blob identities remain exact `e3b446a` and
+1. Re-read deployed/remote HEAD/tree, dirty paths, and all three dirty hashes
+   above.
+2. Verify the isolated parent is exactly `13a8eb5` and the worktree was clean
+   before implementation.
+3. Verify package/package-lock blob identities remain exact `13a8eb5` and
    verify `src/process-sessions.ts` remains blob
    `4424d24b4342e661b8f2253083cfd0062e66e79a`.
 4. Run a dependency-denial check proving every relative production import
    resolves and no changed production file adds a bare-package import.
-5. Verify `git diff --name-only e3b446a` is exactly the ten allowed paths,
+5. Verify `git diff --name-only 13a8eb5` is exactly the fifteen allowed paths,
    with no deletion or untracked file.
 6. Verify `skills/subagent-delegation/SKILL.md` and every other unrelated
-   `e3b446a` blob remain unchanged.
+   `13a8eb5` blob remain unchanged.
 7. Run:
 
 ```bash
@@ -180,13 +227,15 @@ TMPDIR=/private/tmp npx tsx src/local-agent-execution-contract.test.ts
 TMPDIR=/private/tmp npx tsx src/local-agent-sessions.test.ts
 TMPDIR=/private/tmp npx tsx src/local-agent-continuation.test.ts
 TMPDIR=/private/tmp npx tsx src/local-agent-store.test.ts
+TMPDIR=/private/tmp npx tsx src/local-agent-runtime.test.ts
+TMPDIR=/private/tmp npx tsx src/local-agent-adapters.test.ts
 TMPDIR=/private/tmp npx tsx src/server.test.ts
 TMPDIR=/private/tmp npx tsx src/codex-goal-sessions.test.ts
 TMPDIR=/private/tmp npm test
 npm run build
 npx tsc -p tsconfig.json --noEmit
 npx tsc -p tsconfig.build.json --noEmit
-git diff --check e3b446a7507491b653d932284a09dc0923652c3d
+git diff --check 13a8eb50c756e69d60c9deb3007ba6d71ee0978e
 ```
 
 The expected historical counts (G3 execution 71, sessions 13, continuation 8,
@@ -199,10 +248,25 @@ label fragmentation, empty polls, identical real chunks, historical ready rows
 followed by loading/error, trust after readiness, truncation fail-closed, no
 `/goal` bytes on every negative, and zero active-session leak.
 
+Production-boundary tests must exercise real adapter/OMP seams rather than
+only injected runners or manual store transitions:
+
+- Driver/Codex runtime readiness precedes execution start, which precedes run;
+- OMP initialize and session new/resume precede execution start, which precedes
+  prompt;
+- callback rejection and stale-generation rejection produce zero semantic
+  prompt/run/child;
+- slow readiness consumes startup rather than execution budget;
+- linked-worktree Agy containment remains exact on callback success, while a
+  rejected callback spawns no child and never exports repo-common `.git`;
+- main-worktree, forged/unowned/out-of-tree, and symlink/canonical path
+  controls remain fail-closed.
+
 ## Candidate and review gate
 
-Commit one immutable Candidate whose single parent is exactly `e3b446a`.
-Record Candidate commit/tree, ten-path diff hash, command/cwd/exit evidence,
+Commit one immutable Candidate whose single direct parent is exactly
+`13a8eb50c756e69d60c9deb3007ba6d71ee0978e`.
+Record Candidate commit/tree, fifteen-path diff hash, command/cwd/exit evidence,
 dependency-denial evidence, and final clean worktree state. Obtain a fresh
 independent SHA/tree-bound acceptance. The prior `d009` and `147359`
 acceptances are input evidence only; they do not accept the new composite tree.
@@ -217,7 +281,7 @@ and runtime claims remain separate authority/effect gates.
 - no mutation of `/Users/jameschen/Workspace/devspace-chatgpt-mcp`;
 - no reset, stash, clean, overwrite, or deletion of dirty bytes;
 - no 94-file history import, merge, rebase, or cherry-pick;
-- no path outside the ten allowed paths;
+- no path outside the fifteen allowed paths;
 - no package/lock/dependency addition and no network dependency materialization;
 - no dependency install outside the isolated worktree;
 - no push, PR, Issue writeback, branch integration, build installation, reload,

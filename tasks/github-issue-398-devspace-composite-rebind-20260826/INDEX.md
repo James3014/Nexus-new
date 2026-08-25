@@ -11,12 +11,13 @@ auto_chain: false
 
 | Order | Task | Status | SHA-256 | Dependency |
 |---|---|---|---|---|
-| 1 | `TASK-398-DEVSPACE-COMPOSITE-SOURCE-REBIND` | ACTIVE | `eb49eb8192828c60dc49c470c3192dfdf9b5c7a2533e815da003b64d04176f18` | exact-blob and cumulative-snapshot attempts preserved as RED; bounded e3b delta-snapshot semantic port active |
+| 1 | `TASK-398-DEVSPACE-COMPOSITE-SOURCE-REBIND` | ACTIVE | `3d233457db142d89a77090ba73c9a45733f0662936eda8ac9add2699a00205b5` | prior e3b/23d/6ba attempts are REVISE evidence; exact 13a direct-parent 15-path replacement active |
 
 ## Frontier
 
-The only authorized frontier is the source-only isolated ten-blob compatibility
-oracle and, if green, one immutable composite Candidate. Canonical integration,
-runtime reload, MCP discovery, E2E, Issue closure, and production claims are not
-authorized by this Card. `AUTO_CHAIN=false` applies to the worker/Candidate;
-controller continuation and independent verification remain separate.
+The only authorized frontier is one source-only isolated 15-path semantic port
+with direct parent exact DevSpace `13a8eb5` and, if green, one immutable
+replacement Candidate. Canonical integration, runtime reload, MCP discovery,
+E2E, Issue closure, and production claims are not authorized by this Card.
+`AUTO_CHAIN=false` applies to the worker/Candidate; controller continuation and
+independent verification remain separate.
