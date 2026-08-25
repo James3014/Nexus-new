@@ -150,8 +150,8 @@ def test_invalid_registry_falls_back_without_granting_authority() -> None:
 
 def test_primary_coordinator_contract_makes_fast_start_preflight_mandatory() -> None:
     contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(encoding="utf-8")
-    assert "scripts/ops/fast_start_consumer.py --issue <number>" in contract
-    assert "before any implementation source/test body read" in contract
+    assert "python -B scripts/ops/fast_start_consumer.py --issue <number>" in contract
+    assert "before implementation source/test body reads" in contract
     assert "ADVISORY_CACHE_ONLY" in contract
-    assert "CACHE_MISS" in contract
-    assert "CACHE_UNAVAILABLE_OR_INVALID" in contract
+    assert "miss/invalid/stale" in contract
+    assert "fresh authoritative discovery/rebind" in contract
