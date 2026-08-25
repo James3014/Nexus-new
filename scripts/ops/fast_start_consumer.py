@@ -92,6 +92,38 @@ def _compact_entry(entry: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _is_non_authority_comment(body: str) -> bool:
+    upper = body.upper()
+    return "WAKEUP_HINT_ONLY" in upper and "NO_AUTHORITY" in upper
+
+
+def _issue_contract_fresh(client: Any, entry: Mapping[str, Any]) -> bool:
+    issue_number = int(entry["issue"])
+    issue = client.get(f"/repos/{REPOSITORY}/issues/{issue_number}")
+    if not isinstance(issue, Mapping):
+        raise ValueError("issue response malformed")
+    if issue.get("state") not in (None, "open"):
+        return False
+
+    cached_updated = str(entry.get("issue_updated_at") or "")
+    current_updated = str(issue.get("updated_at") or "")
+    if not cached_updated or not current_updated:
+        return False
+    if current_updated == cached_updated:
+        return True
+
+    cached_comment = int(entry.get("latest_material_comment_id") or 0)
+    comments = client.get(f"/repos/{REPOSITORY}/issues/{issue_number}/comments?per_page=100")
+    if not isinstance(comments, list):
+        raise ValueError("issue comments response malformed")
+    newer = [
+        item
+        for item in comments
+        if isinstance(item, Mapping) and int(item.get("id") or 0) > cached_comment
+    ]
+    return bool(newer) and all(_is_non_authority_comment(str(item.get("body") or "")) for item in newer)
+
+
 def consumer_preflight(client: Any, issue_number: int) -> dict[str, Any]:
     """Read #549 first and return the smallest safe next action for one Issue.
 
@@ -136,7 +168,6 @@ def consumer_preflight(client: Any, issue_number: int) -> dict[str, Any]:
         report["registry_hash"] = payload_hash
         return report
 
-    dispatch_state = str(entry.get("dispatch_state") or "")
     report = _base_report(
         outcome="ADVISORY_ENTRY_FOUND",
         next_action="AUTHORITATIVE_REBIND_BEFORE_IMPLEMENTATION",
@@ -145,6 +176,12 @@ def consumer_preflight(client: Any, issue_number: int) -> dict[str, Any]:
     report["registry_hash"] = payload_hash
     report["entry"] = _compact_entry(entry)
 
+    if not _issue_contract_fresh(client, entry):
+        report["outcome"] = "CACHE_STALE_CONTRACT"
+        report["next_action"] = "FULL_AUTHORITATIVE_DISCOVERY"
+        return report
+
+    dispatch_state = str(entry.get("dispatch_state") or "")
     if dispatch_state.startswith("HOST_"):
         report["outcome"] = "EARLY_STOP_HOST_BOUND"
         report["next_action"] = "RETURN_HOST_BLOCKER"
