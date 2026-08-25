@@ -81,40 +81,62 @@ deletes `skills/subagent-delegation/SKILL.md`, and has binary diff SHA-256
 `b90f359c724d04bddaba7ecbbc8c5ea7b743ffc2bcc4b06ecb02c384c8e66d6b`.
 That range is outside this Card.
 
-## Exact content transplant
+## Bounded semantic port
 
 Create one clean isolated DevSpace worktree with parent exactly
-`e3b446a7507491b653d932284a09dc0923652c3d`. Materialize only the ten exact
-tracked blobs below. This is a content transplant, not a merge, cherry-pick,
-rebase, or history import.
+`e3b446a7507491b653d932284a09dc0923652c3d`. Port the already accepted G3
+behavior to the APIs physically present at `e3b446a`; do not transplant G3 Git
+history or require byte equality with the eight `d009` blobs.
 
-| Source | Path | Mode | Blob OID | SHA-256 |
-|---|---|---|---|---|
-| `d009c5c` | `src/local-agent-contract.ts` | `100644` | `f054d268055b06efc8a1756123b991ac56d81588` | `ebbd6b86ebeefac6a7eb3525c13ddf5adc9284ad5d1cc1dca36def8d0c56b982` |
-| `d009c5c` | `src/local-agent-execution-contract.test.ts` | `100644` | `c1120e60d543bc0cc6c8539a8be03b84e795c54a` | `9f02039a5a07f65026ae8e232378fc9c1b9248290bd08f2af0b21a5e723c7f8b` |
-| `d009c5c` | `src/local-agent-sessions.test.ts` | `100644` | `ae00c00964ae16e72591027eb461f3b7533693bf` | `8cd0c9986814c091332b4eea5ca9f3a0e71b6ac0ff9f1447651a6297d5af40b8` |
-| `d009c5c` | `src/local-agent-sessions.ts` | `100644` | `af7b114e9def663ec969721435c42e12fd957fa0` | `8ff52ff2d30702097341ec0b26cdfcd8f06de1ee03842b3533aa2adabef979f7` |
-| `d009c5c` | `src/local-agent-store.test.ts` | `100644` | `479e7baf01cb4a0d017f2b94ebfb704832579760` | `51927410a2e6f41412519b803c4bba9ea0a0b21074c237ead320a34bd90f2369` |
-| `d009c5c` | `src/local-agent-store.ts` | `100644` | `2dadf32d2c1b5195ea821129fb5b8b4ae73dcec8` | `11dbd450483d84fd79d1fb0d1a4d6338b1b1f6bd8eb9c909f50b33eefa7c9534` |
-| `d009c5c` | `src/server.test.ts` | `100644` | `56aa075772fc9121d59fbdd6cbc496b2f8bc7f8f` | `01b81514ca94446a6a06e131947f9a14673d4b786fed56ee2d91ac7cac86e7c8` |
-| `d009c5c` | `src/server.ts` | `100644` | `765c01ad14a5c03183eaf46788498a2ca3f87c7c` | `e8f3c5ebe10cf927c3d35fc6fb47a23b7dcf35ea788c4f015e3fdb6de61989e4` |
-| `147359a` | `src/codex-goal-sessions.test.ts` | `100644` | `b7adad626fdd5f9bcf4fb315417ac5e49ed69b6d` | `8f261ae6004f8f06e61b996b4ed4f83c5f094704d7e8566307b82ac0c570f982` |
-| `147359a` | `src/codex-goal-sessions.ts` | `100644` | `7a028663b20de87c2cac3d9728de72364841bee4` | `33d20560627f22c15037e2a69ca0e672e89f4651ab5b3f3db3d4eb5e1cb5503f` |
+The port is limited to these eight G3 paths:
 
-Every other tree entry must remain byte-identical to `e3b446a`. Final scope is
-exactly these ten paths, with no deletion or untracked file.
+- `src/local-agent-contract.ts`
+- `src/local-agent-execution-contract.test.ts`
+- `src/local-agent-sessions.test.ts`
+- `src/local-agent-sessions.ts`
+- `src/local-agent-store.test.ts`
+- `src/local-agent-store.ts`
+- `src/server.test.ts`
+- `src/server.ts`
 
-## Compatibility oracle
+It must preserve the accepted G3 invariants: one detached-worker lifecycle
+owner; an opaque generation and launch state; durable `terminationPending`;
+PID/token identity retained until verified physical absence and end evidence;
+generation/token/PID-bound compare-and-swap mutations; first-fence-wins;
+pending and corrupt states remain nonterminal and capacity-occupying; legacy
+runtime-pool compatibility; reopen, launch-gap, stale-callback, retry/backoff,
+post-kill baseline, truthful pending-versus-blocked status, and atomic legacy
+generic updates under `IMMEDIATE` plus exact row compare-and-swap.
 
-The exact `d314..d009` patch does not mechanically apply to `e3b446a`: six of
-the eight G3 files conflict. Therefore this Card permits only the exact-blob
-transplant as the first fail-closed oracle.
+The two Goal paths must remain exact `147359` content:
 
-If the ten exact blobs do not compile and pass the required tests on the
-`e3b446a` parent, stop with `ALLOWED_SCOPE_INSUFFICIENT / CONTRACT_GAP`.
-Do not import `d314` ancestry, add compatibility edits, widen paths, or weaken
-tests under this Card. A semantic port requires a separately frozen Card and a
-new independent acceptance.
+| Path | Mode | Blob OID | SHA-256 |
+|---|---|---|---|
+| `src/codex-goal-sessions.test.ts` | `100644` | `b7adad626fdd5f9bcf4fb315417ac5e49ed69b6d` | `8f261ae6004f8f06e61b996b4ed4f83c5f094704d7e8566307b82ac0c570f982` |
+| `src/codex-goal-sessions.ts` | `100644` | `7a028663b20de87c2cac3d9728de72364841bee4` | `33d20560627f22c15037e2a69ca0e672e89f4651ab5b3f3db3d4eb5e1cb5503f` |
+
+Every other tree entry must remain byte-identical to `e3b446a`. In particular:
+
+- `package.json` remains blob `cbf7ce9cbf2fcbd0c5b9c5b2602b28c2f623e51b`;
+- `package-lock.json` remains blob `ab051a2b3ee3278a93bcb754761baecc711fb861`;
+- no new bare-package import is allowed;
+- every relative import from changed production files must resolve within the
+  unchanged `e3b446a` source tree;
+- final scope is exactly the ten paths above, with no deletion or untracked
+  file.
+
+The initial exact-blob oracle is preserved as failure evidence: exact `d009`
+`local-agent-store.ts` imports absent `better-result`, and the recursive `d009`
+closure also requires source modules not present at `e3b446a`. Copying all
+`d009` package/source prerequisites would recreate the forbidden broad history
+import. Do not add `better-result`, change package metadata, add dependency
+files, use network materialization, or alter tool/product surfaces.
+
+If the accepted G3 invariants cannot be implemented inside these eight paths
+against `e3b446a`, stop with `ALLOWED_SCOPE_INSUFFICIENT / CONTRACT_GAP`.
+Compatibility edits inside the eight paths are a new composite Candidate and
+must receive fresh independent acceptance; `d009` acceptance is oracle input,
+not acceptance of the ported bytes.
 
 ## Verification
 
@@ -123,12 +145,15 @@ Before commit:
 1. Re-read deployed HEAD/tree/dirty paths and all three dirty hashes above.
 2. Verify the isolated parent is exactly `e3b446a` and the worktree was clean
    before transplant.
-3. Verify all ten modes/blob OIDs/SHA-256 values against the table.
-4. Verify `git diff --name-only e3b446a` is exactly the ten allowed paths,
+3. Verify the two Goal modes/blob OIDs/SHA-256 values against the table and
+   verify the package/package-lock blob identities remain exact `e3b446a`.
+4. Run a dependency-denial check proving every relative production import
+   resolves and no changed production file adds a bare-package import.
+5. Verify `git diff --name-only e3b446a` is exactly the ten allowed paths,
    with no deletion or untracked file.
-5. Verify `skills/subagent-delegation/SKILL.md` and every other unrelated
+6. Verify `skills/subagent-delegation/SKILL.md` and every other unrelated
    `e3b446a` blob remain unchanged.
-6. Run:
+7. Run:
 
 ```bash
 TMPDIR=/private/tmp npx tsx src/local-agent-execution-contract.test.ts
@@ -152,9 +177,9 @@ assertions or to claim a command passed without execution.
 
 Commit one immutable Candidate whose single parent is exactly `e3b446a`.
 Record Candidate commit/tree, ten-path diff hash, command/cwd/exit evidence,
-and final clean worktree state. Obtain a fresh independent SHA/tree-bound
-acceptance. The prior `d009` and `147359` acceptances are input evidence only;
-they do not accept the new composite tree.
+dependency-denial evidence, and final clean worktree state. Obtain a fresh
+independent SHA/tree-bound acceptance. The prior `d009` and `147359`
+acceptances are input evidence only; they do not accept the new composite tree.
 
 Only after independent acceptance may the coordinator update Issue #398 once
 to bind the exact composite parent/head/tree/diff/scope/acceptance. Canonical
@@ -166,7 +191,8 @@ and runtime claims remain separate authority/effect gates.
 - no mutation of `/Users/jameschen/Workspace/devspace-chatgpt-mcp`;
 - no reset, stash, clean, overwrite, or deletion of dirty bytes;
 - no 94-file history import, merge, rebase, or cherry-pick;
-- no path outside the ten exact paths;
+- no path outside the ten allowed paths;
+- no package/lock/dependency addition and no network dependency materialization;
 - no dependency install outside the isolated worktree;
 - no push, PR, Issue writeback, branch integration, build installation, reload,
   listener, provider, OAuth, Gateway, DevSpace runtime, or port effect;
@@ -180,4 +206,4 @@ Success claim ceiling:
 
 Failure claim ceiling:
 
-`DEVSPACE_COMPOSITE_EXACT_BLOBS_INCOMPATIBLE_WITH_E3B_SCOPE_INSUFFICIENT`
+`DEVSPACE_COMPOSITE_SEMANTIC_PORT_SCOPE_INSUFFICIENT`

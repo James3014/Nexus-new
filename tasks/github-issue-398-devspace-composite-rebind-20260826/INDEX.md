@@ -11,7 +11,7 @@ auto_chain: false
 
 | Order | Task | Status | SHA-256 | Dependency |
 |---|---|---|---|---|
-| 1 | `TASK-398-DEVSPACE-COMPOSITE-SOURCE-REBIND` | ACTIVE | `3cfaadc14aa3dbc1570a8a9588b134dc9940176775f976fa5da51f211f8600b6` | stale Issue #398 identity reconciled; exact accepted `d009` and `147359` inputs |
+| 1 | `TASK-398-DEVSPACE-COMPOSITE-SOURCE-REBIND` | ACTIVE | `cdbadc74c5cf012570a145fc3bbfc47b5db609ff73a0919f697256de649bef7c` | exact-blob attempt stopped on incompatible dependency closure; bounded e3b semantic-port revision active |
 
 ## Frontier
 
