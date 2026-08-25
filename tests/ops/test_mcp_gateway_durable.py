@@ -34,6 +34,7 @@ HOST_OPERATION_PAIRS = [
 ]
 REAL_POSTFLIGHT_GIT_RUNNER = g._fixed_postflight_git_command_runner
 REAL_R1_IMPORT_BUNDLE = g._r1_import_bundle
+REAL_OS_LSTAT = os.lstat
 
 
 def _r1b2_portable_import_bundle(bundle, heads):
@@ -48,6 +49,30 @@ def _r1b2_portable_import_bundle(bundle, heads):
             "owner_gid": fixed.gid,
         }
     )
+
+
+def _r1b2_portable_lstat(path, *, dir_fd=None):
+    from nexus.contracts.gateway_deployment import InterpreterIdentity
+
+    observed = (
+        REAL_OS_LSTAT(path)
+        if dir_fd is None
+        else REAL_OS_LSTAT(path, dir_fd=dir_fd)
+    )
+    if dir_fd is not None:
+        return observed
+    candidate = Path(path)
+    deployments = Path(g.GATEWAY_DEPLOYMENTS_ROOT)
+    if (
+        candidate.name == Path(g.GATEWAY_ENTRYPOINT).name
+        and deployments in candidate.parents
+    ):
+        values = list(observed)
+        fixed = InterpreterIdentity()
+        values[4] = fixed.uid
+        values[5] = fixed.gid
+        return os.stat_result(values)
+    return observed
 
 @pytest.fixture(autouse=True)
 def _isolated_host_authority_store(monkeypatch, tmp_path):
@@ -291,6 +316,7 @@ def _r1b1_fixture(tmp_path, monkeypatch, *, identity_seed=None):
         "_r1_import_bundle",
         _r1b2_portable_import_bundle,
     )
+    monkeypatch.setattr(g.os, "lstat", _r1b2_portable_lstat)
 
     mirror = tmp_path / "authority"
     subprocess.run(["git", "init", "-q", "-b", "main", str(mirror)], check=True)
@@ -768,7 +794,8 @@ def test_r1b1_named_role_swap_extra_refs_and_valid_bundle_encodings(tmp_path, mo
     assert fixture["desired_manifest"].deployment_id == fixture["receipt"].desired_manifest_id
 
 
-def test_r1b1_bounded_subprocess_import_failure_is_rejected(tmp_path):
+def test_r1b1_bounded_subprocess_import_failure_is_rejected(tmp_path, monkeypatch):
+    monkeypatch.setattr(g, "INTERPRETER", sys.executable)
     root = tmp_path / "checkout"
     entrypoint = root / g.GATEWAY_ENTRYPOINT
     entrypoint.parent.mkdir(parents=True)
@@ -4058,6 +4085,7 @@ def _r1b2_apply_runtime_payload(payload):
         setattr(g, name, Path(value) if name in path_names else value)
     g._r1_interpreter_identity = lambda: InterpreterIdentity()
     g._r1_import_bundle = _r1b2_portable_import_bundle
+    g.os.lstat = _r1b2_portable_lstat
 
 
 def _r1b2_mp_recovery_worker(
