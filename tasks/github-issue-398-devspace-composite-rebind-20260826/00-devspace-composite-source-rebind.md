@@ -4,8 +4,8 @@
 task_id: TASK-398-DEVSPACE-COMPOSITE-SOURCE-REBIND
 issue: 398
 contract_repository: James3014/Nexus-new
-contract_base: 3620db1947b6d9864eefe0555c4de9edbf6c7f6a
-contract_base_tree: deeed8206e201cdc94f0c7a6e09f11815a84739d
+contract_base: 8bfcba9850e77a4416a52900e11059a29c250079
+contract_base_tree: 0dc619bcec349aa0cd9c4ea45a77bc4f5a55e352
 source_repository: James3014/devspace
 status: ACTIVE
 execution_realm: SOURCE_ONLY_ISOLATED_WORKTREE
@@ -36,8 +36,8 @@ deployed `2e2139a80c675da06f06e0b7dc63bae4a7608f4f`, Candidate
 `8fcf11fbafcbcfc7740e761c91b7e185e0d3bf10`, and dirty adapter-pair identities
 are historical evidence only for this source slice.
 
-`Nexus-new` main `3620db1947b6d9864eefe0555c4de9edbf6c7f6a` / tree
-`deeed8206e201cdc94f0c7a6e09f11815a84739d` is the current Issue/Card contract
+`Nexus-new` main `8bfcba9850e77a4416a52900e11059a29c250079` / tree
+`0dc619bcec349aa0cd9c4ea45a77bc4f5a55e352` is the current Issue/Card contract
 plane. It is not DevSpace source ancestry.
 
 ## Exact DevSpace identities
