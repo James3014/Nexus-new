@@ -4527,7 +4527,7 @@ def test_r1b2_recovery_concurrent_real_multiprocessing_exactly_one_effect_repeat
     for repeat in range(5):
         repeat_root = tmp_path / f"repeat-{repeat}"
         repeat_root.mkdir()
-        fixture = _r1b2_runtime_fixture(repeat_root, monkeypatch)
+        fixture = _r1b2_prepared_fixture(repeat_root, monkeypatch)
         physical = _r1b2_physical_identity(fixture, "desired")
         postflight = _r1b2_postflight(fixture, physical)
         runtime_payload = _r1b2_runtime_payload(fixture)
