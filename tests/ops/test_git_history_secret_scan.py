@@ -209,6 +209,29 @@ def test_placeholder_comment_does_not_hide_secret_bearing_path(tmp_path: Path) -
     )
 
 
+def test_historical_secret_path_survives_same_blob_move_to_safe_path(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    _commit(repo, "tracked env", {".env": "MODE=development\n"})
+    env_blob = _git(repo, "rev-parse", "HEAD:.env").stdout.strip()
+    (repo / "safe.txt").write_text("MODE=development\n", encoding="utf-8")
+    (repo / ".env").unlink()
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-m", "move env bytes to safe path")
+    assert _git(repo, "rev-parse", "HEAD:safe.txt").stdout.strip() == env_blob
+    _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
+
+    receipt = scan_repository(repo)
+
+    assert receipt["status"] == "FAIL"
+    assert any(
+        finding["detector"] == "secret_bearing_path"
+        and finding["path"] == ".env"
+        and finding["object_id"] == env_blob
+        and finding["blocking"]
+        for finding in receipt["findings"]
+    )
+
+
 def test_output_is_redacted_and_does_not_emit_secret(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
     secret = "sk-" + "q7A4nB9cD2eF6gH8jK1mN5pR3sT0vW4xY7z"
@@ -219,6 +242,25 @@ def test_output_is_redacted_and_does_not_emit_secret(tmp_path: Path) -> None:
     assert secret not in payload
     assert receipt["secret_values_emitted"] is False
     assert all("fingerprint" in finding for finding in receipt["findings"])
+
+
+def test_unavailable_gitlink_target_is_ignored_as_non_blob(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    fake_gitlink_oid = "1" * 40
+    _git(
+        repo,
+        "update-index",
+        "--add",
+        "--cacheinfo",
+        f"160000,{fake_gitlink_oid},vendor/submodule",
+    )
+    _git(repo, "commit", "-m", "add unavailable gitlink")
+    _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
+
+    receipt = scan_repository(repo)
+
+    assert receipt["status"] == "PASS"
+    assert receipt["blocking_finding_count"] == 0
 
 
 def test_git_error_fails_closed(tmp_path: Path) -> None:
