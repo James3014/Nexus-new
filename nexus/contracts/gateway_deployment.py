@@ -104,6 +104,15 @@ RECOVERY_RECEIPT_PATH = (
 OWNER_ACTIVATION_ID = "OWNER_ISSUE526_CONTINUE_20260823"
 OWNER_ACTIVATION_SHA256 = "f0ed77ffe3872b083ef0b6d66526524a7091a8e3125322c84ba632f3c64ba322"
 OWNER_SOURCE_THREAD = "01a02a17-691c-7a20-ad0f-9166456416dc"
+TASK002_RECOVERY_ACTIVATION_ID = "OWNER_ISSUE526_TASK002_GATEWAY_REBIND_20260826"
+TASK002_RECOVERY_ACTIVATION_SHA256 = (
+    "61ebd493c8a405213043382dc1bb0d225185c5528126573311de2cba9cff4eb9"
+)
+TASK002_RECOVERY_SOURCE_COMMENT = "5418927784"
+TASK002_RECOVERY_DESIRED_COMMIT = "b2a9cca573580d2edbd5531bb9e4bf92479e0e3a"
+TASK002_RECOVERY_DESIRED_TREE = "747d9dcecd47dff3d063e7948496d8adb33f50bc"
+TASK002_RECOVERY_PREDECESSOR_COMMIT = "3d28fa7b65df30e207e53de7caadf93a2b7a8fc0"
+TASK002_RECOVERY_PREDECESSOR_TREE = "5e6476b2b12211e7cdcfe9294942b633ffbcef59"
 STANDING_GRANT_ID = "OWNER_STANDING_COORDINATOR_20260818_DURABLE_GITHUB_WORKFLOW"
 STANDING_GRANT_RECEIPT_SHA256 = "3b8895f093692257d6225fbb8150b34f520e667d250c7817ad120cefd42751d5"
 SOURCE_BASE_MERGE = "ac4a9ab1e0180170ca062cdc81f2142bca8bd80f"
@@ -1967,6 +1976,47 @@ parse_host_effect_authority_bundle = validate_host_effect_authority_bundle
 select_host_authority_receipt = select_host_effect_authority_receipt
 
 
+def _validate_recovery_activation_lineage(receipt: RecoveryAuthorityReceipt) -> None:
+    lineage = (
+        receipt.owner_activation_id,
+        receipt.owner_activation_sha256,
+        receipt.source_thread,
+    )
+    target = (
+        receipt.desired_commit,
+        receipt.desired_tree,
+        receipt.predecessor_commit,
+        receipt.predecessor_tree,
+    )
+    historical_lineage = (
+        OWNER_ACTIVATION_ID,
+        OWNER_ACTIVATION_SHA256,
+        OWNER_SOURCE_THREAD,
+    )
+    task002_lineage = (
+        TASK002_RECOVERY_ACTIVATION_ID,
+        TASK002_RECOVERY_ACTIVATION_SHA256,
+        TASK002_RECOVERY_SOURCE_COMMENT,
+    )
+    task002_target = (
+        TASK002_RECOVERY_DESIRED_COMMIT,
+        TASK002_RECOVERY_DESIRED_TREE,
+        TASK002_RECOVERY_PREDECESSOR_COMMIT,
+        TASK002_RECOVERY_PREDECESSOR_TREE,
+    )
+    if lineage == historical_lineage:
+        if target == task002_target:
+            raise ContractError(
+                "R1 historical activation cannot authorize TASK-002 recovery target"
+            )
+        return
+    if lineage == task002_lineage:
+        if target != task002_target:
+            raise ContractError("R1 TASK-002 recovery activation target mismatch")
+        return
+    raise ContractError("R1 recovery authority activation lineage mismatch")
+
+
 def validate_recovery_authority(
     receipt: RecoveryAuthorityReceipt,
     *,
@@ -2003,9 +2053,6 @@ def validate_recovery_authority(
         "issuer_id": "owner-james",
         "coordinator_id": "coordinator-codex",
         "authorized_actor_id": "coordinator-codex",
-        "owner_activation_id": OWNER_ACTIVATION_ID,
-        "owner_activation_sha256": OWNER_ACTIVATION_SHA256,
-        "source_thread": OWNER_SOURCE_THREAD,
         "standing_grant_id": STANDING_GRANT_ID,
         "standing_grant_receipt_sha256": STANDING_GRANT_RECEIPT_SHA256,
         "repository": REPOSITORY,
@@ -2014,6 +2061,7 @@ def validate_recovery_authority(
     for name, expected in exact.items():
         if getattr(receipt, name) != expected:
             raise ContractError(f"R1 recovery authority {name} mismatch")
+    _validate_recovery_activation_lineage(receipt)
     for value, name, length in (
         (receipt.receipt_hash, "recovery receipt", 64),
         (receipt.current_main_sha, "recovery issuance parent", 40),
