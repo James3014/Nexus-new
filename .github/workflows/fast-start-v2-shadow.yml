@@ -76,18 +76,18 @@ jobs:
 
           report = json.load(open(sys.argv[1], encoding="utf-8"))
           expected = {
-              "129": ("CACHE_HIT", {"BLOCKED", "EVIDENCE_BLOCKED"}),
-              "92": ("CACHE_HIT", {"BLOCKED", "EVIDENCE_BLOCKED"}),
-              "419": ("CACHE_HIT", {"BLOCKED", "EVIDENCE_BLOCKED"}),
-              "526": ("CACHE_HIT", {"HOST_REBIND_REQUIRED"}),
-              "398": ("CACHE_HIT", {"HOST_REBIND_REQUIRED"}),
+              "129": ("CACHE_HIT", "BLOCKED"),
+              "92": ("CACHE_HIT", "BLOCKED"),
+              "419": ("CACHE_HIT", "BLOCKED"),
+              "526": ("CACHE_HIT", "HOST_REBIND_REQUIRED"),
+              "398": ("CACHE_HIT", "HOST_REBIND_REQUIRED"),
           }
           assert report["authority"] == "SHADOW_READ_ONLY"
           assert report["implementation_source_or_test_body_reads"] == 0
-          for issue, (action, allowed_frontiers) in expected.items():
+          for issue, (action, frontier) in expected.items():
               decision = report["decisions"][issue]
               assert decision["reconcile_action"] == action, (issue, decision)
-              assert decision["frontier_state"] in allowed_frontiers, (issue, decision)
+              assert decision["frontier_state"] == frontier, (issue, decision)
               assert decision["source_body_reads_allowed"] is False
               assert decision["test_body_reads_allowed"] is False
           PY
