@@ -43,14 +43,15 @@ PEM_PATTERN = re.compile(
 )
 
 ASSIGNMENT_PATTERN = re.compile(
-    rb"(?im)^[ \t]*(?:export[ \t]+)?"
+    rb"(?im)(?:^|[,{])[ \t]*(?:export[ \t]+)?"
+    rb"(?P<key_quote>[\"']?)"
     rb"(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|"
     rb"password|secret[_-]?key|private[_-]?key)"
-    rb"[ \t]*[:=][ \t]*"
+    rb"(?P=key_quote)[ \t]*(?P<separator>[:=])[ \t]*"
     rb"(?:\"(?P<double>[A-Za-z0-9_./+\-=]{20,})\"|"
     rb"'(?P<single>[A-Za-z0-9_./+\-=]{20,})'|"
     rb"(?P<bare>[A-Za-z0-9_./+\-=]{20,}))"
-    rb"[ \t]*(?:#.*)?$"
+    rb"(?=[ \t]*(?:[,}]|#.*$|$))"
 )
 
 SECRET_PATH_RE = re.compile(
@@ -445,6 +446,12 @@ def _scan_bytes(
         if value_group is None:
             raise ScanError("secret-assignment detector returned no value")
         value = match.group(value_group)
+        if (
+            value_group == "bare"
+            and match.group("separator") == b":"
+            and re.fullmatch(rb"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+", value)
+        ):
+            continue
         value_start, value_end = match.span(value_group)
         if any(start <= value_start and value_end <= end for start, end in provider_spans):
             continue
