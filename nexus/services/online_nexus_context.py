@@ -604,6 +604,41 @@ def build_online_nexus_context_from_runtime(
     local_stage = ctx.get("local")
     if isinstance(local_stage, Mapping) and local_stage.get("invoked"):
         try:
+            from nexus.services.verified_assist_contract import validate_vap_runtime_binding
+
+            local_response = local_stage.get("response") if isinstance(local_stage.get("response"), Mapping) else {}
+            packet = local_response.get("verified_assist_packet") if isinstance(local_response.get("verified_assist_packet"), Mapping) else None
+            declared = bool(
+                local_response.get("consume_verified_assist")
+                or local_stage.get("consume_verified_assist")
+            )
+            if declared and packet is None:
+                raise ValueError("vap_runtime_binding_failed:missing_packet")
+            expected_packet_hash = str(
+                local_stage.get("verified_assist_packet_expected_hash") or ""
+            )
+            expected_packet_id = str(local_stage.get("verified_assist_packet_id") or "")
+            if expected_packet_hash and str((packet or {}).get("packet_hash") or "") != expected_packet_hash:
+                raise ValueError("vap_runtime_binding_failed:packet_hash_substitution")
+            if expected_packet_id and str((packet or {}).get("packet_id") or "") != expected_packet_id:
+                raise ValueError("vap_runtime_binding_failed:packet_id_substitution")
+            if str(local_stage.get("vap_integrity_failure") or ""):
+                raise ValueError(
+                    f"vap_runtime_binding_failed:{local_stage.get('vap_integrity_failure')}"
+                )
+            canonical = ctx.get("canonical_execution") if isinstance(ctx.get("canonical_execution"), Mapping) else {}
+            attempt = ctx.get("execution_attempt") if isinstance(ctx.get("execution_attempt"), Mapping) else {}
+            if packet is not None:
+                binding = validate_vap_runtime_binding(
+                    packet,
+                    task_id=str(ctx.get("task_id") or ""),
+                    canonical_execution=canonical,
+                    execution_attempt=attempt,
+                    source_hash=str(ctx.get("source_hash") or ""),
+                    execution_world=str(canonical.get("execution_world") or "product_runtime"),
+                )
+                if not binding.get("ok"):
+                    raise ValueError(str(binding.get("reason") or "vap_runtime_binding_failed"))
             from nexus.services.local_substitution import build_online_safe_local_forward
 
             safe = build_online_safe_local_forward(local_stage)
@@ -618,6 +653,8 @@ def build_online_nexus_context_from_runtime(
                     local_forward["verified_assist_packet_hash"] = str(packet.get("packet_hash"))
                     local_forward["verified_assist_packet_id"] = str(packet.get("packet_id") or "")
         except Exception:
+            if declared or expected_packet_hash or packet is not None:
+                raise
             local_forward = {}
             vap_injection = ""
 
