@@ -327,6 +327,23 @@ def _r1b1_fixture(tmp_path, monkeypatch, *, identity_seed=None):
     entrypoint.parent.mkdir(parents=True)
     entrypoint.write_text(f"ROLE = 'predecessor'\nSEED = '{seed}'\n")
     entrypoint.chmod(0o644)
+    package = mirror / "nexus/orchestrator"
+    package.mkdir(parents=True)
+    (mirror / "nexus/__init__.py").write_text("")
+    (package / "__init__.py").write_text("")
+    tool_names = (f"tool-{seed}-a", f"tool-{seed}-b")
+    tool_manifest = hashlib.sha256(
+        json.dumps(tuple(sorted(tool_names)), separators=(",", ":")).encode()
+    ).hexdigest()
+    schema_hash = hashlib.sha256(f"schema-{seed}".encode()).hexdigest()
+    permission_hash = hashlib.sha256(f"permission-{seed}".encode()).hexdigest()
+    (package / "unified_mcp_gateway.py").write_text(
+        "PUBLIC_TOOL_NAMES = " + repr(tool_names) + "\n"
+        + f"TOOL_MANIFEST_REVISION = '{tool_manifest}'\n"
+        + f"FULL_TOOL_SCHEMA_HASH = '{schema_hash}'\n"
+        + f"PERMISSION_POLICY_HASH = '{permission_hash}'\n"
+        + "LIFECYCLE_REVISION = 'nexus.lifecycle.gateway.v2'\n"
+    )
     subprocess.run(["git", "-C", str(mirror), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(mirror), "commit", "-q", "-m", "b1"], check=True)
     predecessor = subprocess.check_output(["git", "-C", str(mirror), "rev-parse", "HEAD"], text=True).strip()
@@ -3036,30 +3053,28 @@ def _r1b2_physical_identity(fixture, role="desired", **changes):
 def _r1b2_postflight(fixture, physical, **changes):
     receipt = fixture["receipt"]
     expected = g._recovery_expected_postflight(receipt)
-    session_id = f"session-{receipt.receipt_hash[:20]}"
+    canonical_surface = {
+        "root": physical.root,
+        "head": physical.head,
+        "tree": physical.tree,
+        "server_instance": physical.server_instance,
+        "tool_manifest_sha256": expected["tool_manifest_sha256"],
+        "schema_sha256": expected["schema_sha256"],
+        "permission_sha256": expected["permission_sha256"],
+        "lifecycle": expected["lifecycle"],
+    }
     values = {
         "authenticated": True,
-        "health": {
-            "deployment_id": physical.deployment_id,
-            "root": physical.root,
-            "head": physical.head,
-            "tree": physical.tree,
-            "server_instance": physical.server_instance,
-            "permission_policy_hash": expected["permission_policy_hash"],
-        },
-        "initialize": {
-            "session_id": session_id,
-            "server_instance": physical.server_instance,
-            "permission_policy_hash": expected["permission_policy_hash"],
-        },
+        "health": dict(canonical_surface),
+        "initialize": dict(canonical_surface),
         "tools_list": {
-            "session_id": session_id,
-            "actions": expected["actions"],
-            "schema_hash": expected["schema_hash"],
-            "tool_manifest_hash": expected["tool_manifest_hash"],
+            "tool_manifest_sha256": expected["tool_manifest_sha256"],
+            "schema_sha256": expected["schema_sha256"],
+            "tool_count": expected["tool_count"],
+            "actions": tuple(f"tool-{index}" for index in range(expected["tool_count"])),
         },
-        "expected_action": g.GATEWAY_ACTION,
-        "expected_manifest_id": receipt.desired_manifest_id,
+        "previous_server_instance": None,
+        "applied": False,
         **changes,
     }
     return values
@@ -3073,27 +3088,27 @@ def test_r1b2_expected_recovery_identities_are_derived_not_fixture_literals(
     first_root.mkdir()
     second_root.mkdir()
     first = _r1b1_fixture(first_root, monkeypatch, identity_seed="first")
-    second = _r1b1_fixture(second_root, monkeypatch, identity_seed="second")
+    g.stage_verified_git_store(first["request"], first["receipt"])
     first_expected = g._recovery_expected_postflight(first["receipt"])
-    second_expected = g._recovery_expected_postflight(second["receipt"])
-    assert first_expected != second_expected
-    assert first_expected["permission_policy_hash"] != "2" * 64
-    assert first_expected["schema_hash"] != "3" * 64
-    assert first_expected["actions"] == [g.GATEWAY_ACTION]
-    first_session = f"session-{first['receipt'].receipt_hash[:20]}"
-    second_session = f"session-{second['receipt'].receipt_hash[:20]}"
-    assert first_session != second_session
     first_root_path = str(
         Path(first["state"]) / "deployments" / first["receipt"].desired_manifest_id
     )
+    first_plist_sha256 = g._recovery_expected_plist_sha256(first_root_path)
+
+    second = _r1b1_fixture(second_root, monkeypatch, identity_seed="second")
+    g.stage_verified_git_store(second["request"], second["receipt"])
+    second_expected = g._recovery_expected_postflight(second["receipt"])
     second_root_path = str(
         Path(second["state"]) / "deployments" / second["receipt"].desired_manifest_id
     )
-    assert g._recovery_expected_plist_sha256(first_root_path) != "1" * 64
-    assert (
-        g._recovery_expected_plist_sha256(first_root_path)
-        != g._recovery_expected_plist_sha256(second_root_path)
-    )
+
+    assert first_expected != second_expected
+    assert first_expected["permission_sha256"] != "2" * 64
+    assert first_expected["schema_sha256"] != "3" * 64
+    assert first_expected["lifecycle"] == "nexus.lifecycle.gateway.v2"
+    assert first_expected["tool_count"] == 2
+    assert first_plist_sha256 != "1" * 64
+    assert first_plist_sha256 != g._recovery_expected_plist_sha256(second_root_path)
 
 
 def _r1b2_durable_count(path, increment=0):
