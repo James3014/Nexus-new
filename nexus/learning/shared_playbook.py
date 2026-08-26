@@ -301,6 +301,9 @@ _GENERIC_PROMOTION_VERDICTS = frozenset({
     "BLOCK",
     "REPAIRABLE",
 })
+_G10_EXTERNAL_AUTHORITY_CONTRACT_GAP = (
+    "shared_playbook_g10_contract_gap_external_authority_unbound"
+)
 
 
 def _canonical_dataclass_kwargs(cls: type[Any], payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -345,7 +348,7 @@ def _reduce_canonical_acceptance(receipt_data: Mapping[str, Any]) -> None:
             )
         except (TypeError, ValueError) as exc:
             raise SharedPlaybookError("shared_playbook_acceptance_receipt_invalid") from exc
-        raise SharedPlaybookError("shared_playbook_acceptance_verdict_invalid")
+        raise SharedPlaybookError(_G10_EXTERNAL_AUTHORITY_CONTRACT_GAP)
     if schema != "nexus.candidate_acceptance_result.v1":
         raise SharedPlaybookError("shared_playbook_unsupported_acceptance_schema")
 
@@ -570,7 +573,10 @@ def _validate_promotion_provenance(
         instructions_sha=instructions_sha,
     )
 
-    return record, provenance_path
+    # This artifact shares the Candidate's mutation domain. Until the sealed
+    # external acceptance store and authority identity are bound here, even a
+    # structurally valid receipt is evidence only and cannot authorize ACTIVE.
+    raise SharedPlaybookError(_G10_EXTERNAL_AUTHORITY_CONTRACT_GAP)
 
 
 def load_selected_shared_playbook(

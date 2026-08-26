@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from nexus.contracts.target_integration_lifecycle import ExternalAcceptanceReceipt
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.learning import shared_playbook
 from nexus.learning.shared_playbook import (
@@ -543,60 +544,47 @@ def test_falsification_15_subject_substitution_fails_closed(tmp_path: Path) -> N
 # =========================================================================
 
 
-def test_canonical_independent_acceptance_artifact_passes_promotion(
+def test_canonical_independent_acceptance_artifact_requires_external_authority(
     tmp_path: Path,
 ) -> None:
-    """Positive Test 16: Canonical independent acceptance artifact passes promotion to ACTIVE."""
+    """A locally authored canonical receipt cannot authorize ACTIVE promotion."""
+    _copy_diagnose(tmp_path, create_receipt=True)
+
+    with pytest.raises(
+        SharedPlaybookError,
+        match="shared_playbook_g10_contract_gap_external_authority_unbound",
+    ):
+        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
+
+
+def test_external_acceptance_receipt_requires_sealed_authority_binding(tmp_path: Path) -> None:
+    """A valid external receipt schema is evidence, not standalone authority."""
     skill_dir = _copy_diagnose(tmp_path, create_receipt=True)
-    identity = load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
-    assert identity is not None
-    assert identity.status == "ACTIVE"
-    assert identity.playbook_id == "diagnose"
-    assert identity.primary is True
-    assert identity.trace_authority == "DERIVED_ONLY"
-    assert identity.promotion_record_path == ".agents/skills/diagnose/promotion_record.json"
+    receipt_path = skill_dir / "acceptance_receipt.json"
+    receipt = ExternalAcceptanceReceipt(
+        schema="nexus.external_acceptance_receipt.v1",
+        task_id="g10-diagnose-promotion-acceptance",
+        attempt_id="attempt-1",
+        candidate_commit=_G9_COMMIT,
+        receipt_hash="e" * 64,
+        reviewer_id="reviewer-independent-1",
+        passed=True,
+        verifier_artifact="acceptance-artifacts/g10/verifier.json",
+    )
+    raw = json.dumps(receipt.to_dict(), indent=2).encode("utf-8")
+    receipt_path.write_bytes(raw)
 
-    # Verify physical provenance artifact contents
-    prov_path = skill_dir / PROMOTION_RECORD_FILENAME
-    assert prov_path.is_file()
-    record = json.loads(prov_path.read_text(encoding="utf-8"))
-    assert record["schema"] == "nexus.shared_playbook.promotion_record.v1"
-    assert record["playbook_id"] == "diagnose"
-    assert record["status"] == "ACTIVE"
-    assert record["target_manifest_sha256"] == identity.manifest_sha256
-    assert record["target_instructions_sha256"] == identity.instructions_sha256
-    assert record["evaluation_provenance"]["gate"] == "G8"
-    assert record["evaluation_provenance"]["verdict"] == "PASS"
-    assert record["runtime_provenance"]["gate"] == "G9"
-    assert record["runtime_provenance"]["fail_closed_verified"] is True
-    assert record["runtime_provenance"]["final_integration_pr"] == 577
-    assert (
-        record["runtime_provenance"]["final_integration_commit_sha"]
-        == "c8c6de8c330ec8868dc515de4c337007093ad988"
-    )
-    assert record["acceptance_decision"]["gate"] == "G10"
-    assert record["acceptance_decision"]["decision"] == "PROMOTED_TO_ACTIVE"
-    assert record["acceptance_decision"]["self_promotion"] is False
+    promotion_path = skill_dir / PROMOTION_RECORD_FILENAME
+    promotion = json.loads(promotion_path.read_text(encoding="utf-8"))
+    promotion["acceptance_decision"]["acceptance_schema"] = receipt.schema
+    promotion["acceptance_decision"]["acceptance_artifact_hash"] = hashlib.sha256(raw).hexdigest()
+    promotion_path.write_text(json.dumps(promotion, indent=2), encoding="utf-8")
 
-    receipt = json.loads((skill_dir / "acceptance_receipt.json").read_text(encoding="utf-8"))
-    assert receipt["schema"] == "nexus.candidate_acceptance_result.v1"
-    assert receipt["decision"] == "ACCEPT"
-    assert (
-        receipt["independence_classification"] == AcceptanceAuthorityKind.INDEPENDENT_REVIEWER.value
-    )
-    assert receipt["request"]["schema"] == "nexus.candidate_acceptance_request.v1"
-    assert receipt["review"]["schema"] == "nexus.independent_candidate_review.v1"
-    request, review = _canonical_request_review(
-        task_id=receipt["task_id"],
-        attempt_id=receipt["attempt_id"],
-        reviewer_id=receipt["reviewer_id"],
-        implementer_id=receipt["request"]["implementer_id"],
-        candidate_commit_sha=receipt["candidate_commit_sha"],
-        candidate_tree_sha=receipt["request"]["candidate_tree_sha"],
-    )
-    canonical = reduce_candidate_acceptance(request, review)
-    assert canonical.decision.value == "ACCEPT"
-    assert receipt["binding_hash"] == canonical.binding_hash
+    with pytest.raises(
+        SharedPlaybookError,
+        match="shared_playbook_g10_contract_gap_external_authority_unbound",
+    ):
+        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
 
 
 # =========================================================================
@@ -604,13 +592,13 @@ def test_canonical_independent_acceptance_artifact_passes_promotion(
 # =========================================================================
 
 
-def test_falsification_f4_real_default_path_through_capability_planner(
+def test_falsification_f4_default_path_blocks_until_external_authority_bound(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Falsification F4 / Positive Default Witness.
+    """Falsification F4 / fail-closed default-path witness.
 
-    Proof that without explicit skills[] injection, CapabilityPlanner and canonical policy overlay
-    file physically in the repo resolve xray -> diagnose and mount ACTIVE diagnose.
+    Without explicit skills[] injection, the canonical policy resolves xray to
+    diagnose but cannot mount ACTIVE until external acceptance authority is bound.
     """
     assert CANONICAL_RUNTIME_OVERLAY_PATH.is_file(), "Canonical runtime policy overlay must exist"
     assert CANONICAL_SKILL_STATUS_REPORT_PATH.is_file(), "Canonical skill status report must exist"
@@ -639,18 +627,12 @@ def test_falsification_f4_real_default_path_through_capability_planner(
     contracts = snapshot.get("planned_skill_mount_contracts", [])
     violations = snapshot.get("skill_mount_violations", [])
 
-    assert violations == []
     xray_mounts = [c for c in contracts if c.get("capability_mount") == "xray"]
-    assert len(xray_mounts) == 1
-    mount = xray_mounts[0]
-    assert mount["skill_id"] == "diagnose"
-    assert mount["capability_mount"] == "xray"
-    assert mount["planner_selected_capability"] is True
-    assert "shared_playbook" in mount
-    sp = mount["shared_playbook"]
-    assert sp["status"] == "ACTIVE"
-    assert sp["primary"] is True
-    assert sp["promotion_record_path"] == ".agents/skills/diagnose/promotion_record.json"
+    xray_violations = [v for v in violations if v.get("capability_mount") == "xray"]
+    assert [item["reason"] for item in xray_violations] == [
+        "shared_playbook_g10_contract_gap_external_authority_unbound"
+    ]
+    assert xray_mounts == []
 
 
 def test_falsification_f5_negative_default_control_without_xray(

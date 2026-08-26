@@ -30,7 +30,7 @@ def _copy_skill(tmp_path: Path, source_id: str = "diagnose", target_id: str = "d
         if prov_path.exists():
             prov_path.unlink()
     else:
-        _create_canonical_acceptance_receipt(target, set_active_status=True)
+        _create_canonical_acceptance_receipt(target, set_active_status=False)
     return target
 
 
@@ -75,6 +75,7 @@ def test_planner_mount_binds_one_exact_primary_shared_playbook(tmp_path: Path, m
     assert identity is not None
     assert contract["planner_selected_capability"] is True
     assert contract["shared_playbook"] == identity.to_dict()
+    assert identity.status == "CANDIDATE"
     assert "shared_playbook_exact_identity_bound" in contract["load_reason_codes"]
 
 

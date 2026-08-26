@@ -18,7 +18,7 @@ def _copy_diagnose_skill(tmp_path: Path) -> Path:
     target = tmp_path / ".agents" / "skills" / "diagnose"
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source, target)
-    _create_canonical_acceptance_receipt(target, set_active_status=True)
+    _create_canonical_acceptance_receipt(target, set_active_status=False)
     return target
 
 
@@ -37,10 +37,10 @@ def test_diagnose_shared_playbook_binds_exact_manifest_and_instructions_hashes(
     assert identity is not None
     assert identity.playbook_id == "diagnose"
     assert identity.version == "1.0.0"
-    assert identity.status == "ACTIVE"
+    assert identity.status == "CANDIDATE"
     assert identity.primary is True
     assert identity.trace_authority == "DERIVED_ONLY"
-    assert identity.promotion_record_path == ".agents/skills/diagnose/promotion_record.json"
+    assert identity.promotion_record_path is None
     assert (
         identity.manifest_sha256
         == hashlib.sha256((tmp_path / identity.manifest_path).read_bytes()).hexdigest()

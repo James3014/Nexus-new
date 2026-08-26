@@ -22,7 +22,7 @@ def _setup_diagnose_runtime(tmp_path: Path, monkeypatch) -> None:
     target = tmp_path / ".agents" / "skills" / "diagnose"
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source, target)
-    _create_canonical_acceptance_receipt(target, set_active_status=True)
+    _create_canonical_acceptance_receipt(target, set_active_status=False)
     monkeypatch.setattr(shared_playbook, "DEFAULT_REPO_ROOT", tmp_path)
 
 
@@ -44,14 +44,14 @@ def _identity() -> dict[str, Any]:
     return {
         "playbook_id": "diagnose",
         "version": "1.0.0",
-        "status": "ACTIVE",
+        "status": "CANDIDATE",
         "manifest_sha256": hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
         "instructions_sha256": hashlib.sha256(instructions_path.read_bytes()).hexdigest(),
         "manifest_path": ".agents/skills/diagnose/playbook.yaml",
         "instructions_path": ".agents/skills/diagnose/SKILL.md",
         "primary": True,
         "trace_authority": "DERIVED_ONLY",
-        "promotion_record_path": ".agents/skills/diagnose/promotion_record.json",
+        "promotion_record_path": None,
     }
 
 
