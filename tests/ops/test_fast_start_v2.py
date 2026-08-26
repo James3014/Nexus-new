@@ -206,6 +206,18 @@ def test_production_reconciler_inline_python_compiles() -> None:
         compile(textwrap.dedent(block), f"fast-start-inline-{index}", "exec")
 
 
+def test_production_reconciler_covers_every_tracked_issue_metadata_entry() -> None:
+    workflow = _production_workflow_text()
+    assert "for issue in sorted(entries)" in workflow
+    assert 'get(f"/repos/{REPOSITORY}/issues/{issue}")' in workflow
+    assert "tracked issue metadata coverage incomplete" in workflow
+    assert '"tracked_issue_metadata_reads": sorted(tracked_issue_metadata)' in workflow
+    for issue in (129, 92, 419, 526, 398):
+        assert (
+            f"entries[{issue}]" not in workflow.split("contract_blocked = {", 1)[1].split("}", 1)[0]
+        )
+
+
 def test_production_reconciler_explicitly_rejects_implementation_content_reads() -> None:
     workflow = _production_workflow_text()
     for marker in (
