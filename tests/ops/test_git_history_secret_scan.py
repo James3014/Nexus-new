@@ -43,7 +43,12 @@ def _refresh_remote_ref(repo: Path, branch: str, commit: str) -> None:
 def test_secret_on_non_default_historical_branch_after_deletion_is_blocking(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
     _git(repo, "checkout", "-b", "feature")
-    secret_commit = _commit(repo, "add secret", {"secret.txt": "GOOGLE_API_KEY=AIza12345678901234567890123456789012345\n"})
+    google_token = "AIza" + "Q7x9mN2pR4sT6vW8yZ1aB3cD5eF7gH9jK2L"
+    secret_commit = _commit(
+        repo,
+        "add secret",
+        {"secret.txt": f"GOOGLE_API_KEY={google_token}\n"},
+    )
     _commit(repo, "remove secret", {"secret.txt": "removed\n"})
     _refresh_remote_ref(repo, "feature", _git(repo, "rev-parse", "HEAD").stdout.strip())
     receipt = scan_repository(repo)
@@ -55,7 +60,8 @@ def test_secret_on_non_default_historical_branch_after_deletion_is_blocking(tmp_
 
 def test_secret_in_commit_message_is_blocking(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
-    _git(repo, "commit", "--allow-empty", "-m", "token sk-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef123456")
+    openai_token = "sk-" + "q7A4nB9cD2eF6gH8jK1mN5pR3sT0vW4xY7z"
+    _git(repo, "commit", "--allow-empty", "-m", f"token {openai_token}")
     _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
     receipt = scan_repository(repo)
     assert receipt["status"] == "FAIL"
@@ -64,7 +70,11 @@ def test_secret_in_commit_message_is_blocking(tmp_path: Path) -> None:
 
 def test_real_pem_block_is_blocking(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
-    pem = "-----BEGIN PRIVATE KEY-----\n" + ("QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo0123456789+/" * 3) + "\n-----END PRIVATE KEY-----\n"
+    pem = (
+        "-----BEGIN PRIVATE KEY-----\n"
+        + ("QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo0123456789+/" * 3)
+        + "\n-----END PRIVATE KEY-----\n"
+    )
     _commit(repo, "pem", {"key.txt": pem})
     _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
     receipt = scan_repository(repo)
@@ -73,7 +83,8 @@ def test_real_pem_block_is_blocking(tmp_path: Path) -> None:
 
 def test_high_confidence_provider_token_is_blocking(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
-    _commit(repo, "token", {"x.txt": "GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890\n"})
+    github_token = "ghp_" + "q7A4nB9cD2eF6gH8jK1mN5pR3sT0vW4xY7z"
+    _commit(repo, "token", {"x.txt": f"GITHUB_TOKEN={github_token}\n"})
     _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
     receipt = scan_repository(repo)
     blocking = [f for f in receipt["findings"] if f["blocking"]]
@@ -86,7 +97,10 @@ def test_generic_high_entropy_assignment_is_blocking(tmp_path: Path) -> None:
     _commit(repo, "secret", {"x.txt": "client_secret=Q8v6K1mP9zT2yR4uW7nB3cD5fG0hJ2kL\n"})
     _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
     receipt = scan_repository(repo)
-    assert any(f["detector"] == "high_entropy_secret_assignment" and f["blocking"] for f in receipt["findings"])
+    assert any(
+        f["detector"] == "high_entropy_secret_assignment" and f["blocking"]
+        for f in receipt["findings"]
+    )
 
 
 def test_placeholder_fixture_and_env_template_are_nonblocking(tmp_path: Path) -> None:
@@ -105,9 +119,37 @@ def test_placeholder_fixture_and_env_template_are_nonblocking(tmp_path: Path) ->
     assert receipt["blocking_finding_count"] == 0
 
 
+def test_obvious_sequential_provider_fixtures_are_nonblocking(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    google_fixture = "AIza" + "12345678901234567890123456789012345"
+    github_fixture = "ghp_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
+    openai_fixture = "sk-" + "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef123456"
+    _commit(
+        repo,
+        "sequential fixtures",
+        {
+            "fixtures.txt": (
+                f"GOOGLE_API_KEY={google_fixture}\n"
+                f"GITHUB_TOKEN={github_fixture}\n"
+                f"OPENAI_API_KEY={openai_fixture}\n"
+            )
+        },
+    )
+    _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
+    receipt = scan_repository(repo)
+    provider_findings = [
+        finding
+        for finding in receipt["findings"]
+        if finding["detector"] in {"google_api_key", "github_token", "openai_api_key"}
+    ]
+    assert receipt["status"] == "PASS"
+    assert len(provider_findings) == 3
+    assert all(finding["classification"] == "OBVIOUS_FIXTURE" for finding in provider_findings)
+
+
 def test_output_is_redacted_and_does_not_emit_secret(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
-    secret = "sk-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdef123456"
+    secret = "sk-" + "q7A4nB9cD2eF6gH8jK1mN5pR3sT0vW4xY7z"
     _commit(repo, "secret", {"x.txt": f"OPENAI_API_KEY={secret}\n"})
     _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
     receipt = scan_repository(repo)
