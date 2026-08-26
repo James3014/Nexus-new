@@ -23,7 +23,11 @@ def _copy_skill(tmp_path: Path, source_id: str = "diagnose", target_id: str = "d
         payload = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
         payload["playbook_id"] = target_id
         payload["skill_id"] = target_id
+        payload["status"] = "CANDIDATE"
         manifest_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+        prov_path = target / "promotion_record.json"
+        if prov_path.exists():
+            prov_path.unlink()
     return target
 
 
