@@ -1,5 +1,9 @@
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+
+import nexus.orchestrator.worker_competition as competition_module
 from nexus.orchestrator.worker_competition import (
     WorkerCompetitionCoordinator,
     select_deterministic_winner,
@@ -112,6 +116,111 @@ def test_get_persists_winner_after_all_candidates_finish(tmp_path):
 
     assert current["status"] == "WINNER_SELECTED"
     assert current["winner"]["winner_task_id"].endswith("-codex")
+
+
+def test_push_winner_passes_exact_effect_identity_to_governed_push_sink(monkeypatch, tmp_path):
+    class FakeService:
+        state_dir = tmp_path / "service-state"
+
+        def get_task(self, task_id):
+            return {
+                "task_id": task_id,
+                "contract": {"controller_repo_root": str(tmp_path / "repo")},
+            }
+
+    coordinator = WorkerCompetitionCoordinator(FakeService())
+    coordinator._write({
+        "schema": "nexus.worker_competition_state.v1",
+        "competition_id": "push-competition",
+        "status": "INTEGRATED",
+        "winner": {"winner_task_id": "winner-task"},
+        "integration": {
+            "integration_branch": "nexus/integration/main",
+            "integration_commit_sha": "a" * 40,
+            "merge_performed": True,
+            "push_performed": False,
+        },
+        "candidates": [],
+    })
+    observed = {}
+
+    def push(_self, **kwargs):
+        observed["push"] = kwargs
+        return SimpleNamespace(
+            schema="nexus.governed_push_receipt.v2",
+            remote="origin",
+            branch="nexus/integration/main",
+            pushed_commit_sha="a" * 40,
+            remote_commit_sha="a" * 40,
+            push_performed=True,
+            push_attempted=True,
+            push_acknowledged=True,
+            effect_present=True,
+            preexisting_effect=False,
+            reconciled_after_uncertain_ack=False,
+            force_push=False,
+            authorized=True,
+            authorization_hash="1" * 64,
+            authorization_effect_hash="2" * 64,
+            authorization_grant_receipt_hash="3" * 64,
+        )
+
+    monkeypatch.setenv("NEXUS_GOVERNED_PUSH_REMOTES", "origin")
+    monkeypatch.setattr(competition_module.GovernedPushManager, "push", push)
+
+    result = coordinator.push_winner("push-competition", remote="origin")
+
+    assert observed["push"] == {
+        "competition_id": "push-competition",
+        "winner_task_id": "winner-task",
+        "remote": "origin",
+        "branch": "nexus/integration/main",
+        "expected_sha": "a" * 40,
+        "integration_receipt": {
+            "integration_branch": "nexus/integration/main",
+            "integration_commit_sha": "a" * 40,
+            "merge_performed": True,
+            "push_performed": False,
+        },
+    }
+    assert result["status"] == "PUSHED"
+    assert result["push"]["authorization_hash"] == "1" * 64
+
+
+def test_push_winner_sink_authority_failure_preserves_integrated_state(monkeypatch, tmp_path):
+    class FakeService:
+        state_dir = tmp_path / "service-state"
+
+        def get_task(self, task_id):
+            return {
+                "task_id": task_id,
+                "contract": {"controller_repo_root": str(tmp_path / "repo")},
+            }
+
+    coordinator = WorkerCompetitionCoordinator(FakeService())
+    coordinator._write({
+        "schema": "nexus.worker_competition_state.v1",
+        "competition_id": "blocked-push",
+        "status": "INTEGRATED",
+        "winner": {"winner_task_id": "winner-task"},
+        "integration": {
+            "integration_branch": "nexus/integration/main",
+            "integration_commit_sha": "b" * 40,
+            "merge_performed": True,
+            "push_performed": False,
+        },
+        "candidates": [],
+    })
+    def push(_self, **_kwargs):
+        raise PermissionError("governed push requires durable Owner authorization")
+
+    monkeypatch.setenv("NEXUS_GOVERNED_PUSH_REMOTES", "origin")
+    monkeypatch.setattr(competition_module.GovernedPushManager, "push", push)
+
+    with pytest.raises(PermissionError, match="durable Owner authorization"):
+        coordinator.push_winner("blocked-push", remote="origin")
+
+    assert coordinator._read("blocked-push")["status"] == "INTEGRATED"
 
 
 def test_get_preserves_integrated_and_pushed_terminal_status_on_refresh(tmp_path):

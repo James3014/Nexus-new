@@ -19,7 +19,11 @@ from nexus.services.local_heal.local_model_provider import InjectedLocalModelPro
 from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
 from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
 from nexus.services.model_workforce_policy import WorkforcePolicyLoader
-from nexus.services.unified_runtime import UnifiedRuntime, UnifiedRuntimeRequest
+from nexus.services.unified_runtime import (
+    UnifiedRuntime,
+    UnifiedRuntimeRequest,
+    build_structured_online_invoker,
+)
 
 
 POLICY = ROOT / "nexus/config/model_workforce.yaml"
@@ -141,6 +145,7 @@ def _online(context: dict[str, object]) -> dict[str, object]:
 
 _online.provider = "codex"
 _online.online_invoker_provider = "codex"
+_online.physical_provider_transport = False
 
 
 def _verifier(context: dict[str, object]) -> dict[str, object]:
@@ -715,6 +720,64 @@ def test_ambiguous_local_records_are_zero_call() -> None:
     )
     assert receipt["local"]["invoked"] is False
     assert local.calls == 0
+
+
+@pytest.mark.parametrize("flag_value", [None, False])
+def test_physical_local_service_forces_fresh_admission_when_flag_omitted_or_false(flag_value) -> None:
+    planner = _Planner(selected=["local_model_executor"])
+    local = _CapturingLocal()
+    local.physical_model_transport = True
+    route: dict[str, object] = {"recommended_flow": "direct"}
+    if flag_value is not None:
+        route["workforce_admission_enabled"] = flag_value
+    request = _request(route, local=True, online=False)
+
+    receipt = UnifiedRuntime(
+        planner=planner,
+        local_service=local,
+        workforce_policy_loader=_Loader(),
+    ).run(request, verifier=_verifier, learning=_learning)
+
+    assert receipt["workforce_admission"]["overall_decision"] == "BLOCK"
+    assert receipt["local"]["invoked"] is False
+    assert local.calls == 0
+
+
+@pytest.mark.parametrize("flag_value", [None, False])
+def test_physical_online_invoker_forces_fresh_admission_when_flag_omitted_or_false(flag_value) -> None:
+    calls = 0
+
+    def physical_online(context):
+        nonlocal calls
+        calls += 1
+        return _online(context)
+
+    physical_online.provider = "codex"
+    physical_online.online_invoker_provider = "codex"
+    route: dict[str, object] = {"recommended_flow": "direct"}
+    if flag_value is not None:
+        route["workforce_admission_enabled"] = flag_value
+    request = _request(route, local=False, online=True)
+
+    receipt = UnifiedRuntime(
+        planner=_Planner(),
+        workforce_policy_loader=_Loader(),
+    ).run(request, online_invoker=physical_online, verifier=_verifier, learning=_learning)
+
+    assert receipt["workforce_admission"]["overall_decision"] == "BLOCK"
+    assert receipt["online"]["invoked"] is False
+    assert calls == 0
+
+
+def test_structured_provider_adapter_is_explicitly_physical() -> None:
+    invoker = build_structured_online_invoker(
+        lambda **_kwargs: ({"status": "ok"}, "ok"),
+        provider="fixture_gateway",
+    )
+
+    assert invoker.provider == "fixture_gateway"
+    assert invoker.online_invoker_provider == "fixture_gateway"
+    assert invoker.physical_provider_transport is True
 
 
 def test_admission_disabled_preserves_legacy_overlay_and_7b_normalization() -> None:

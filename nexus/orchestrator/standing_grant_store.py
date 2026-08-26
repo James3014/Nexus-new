@@ -24,7 +24,7 @@ import tempfile
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 from pydantic import (
     BaseModel,
@@ -664,6 +664,103 @@ def evaluate_durable_standing_grant(
         )
     except Exception:
         return evaluate_standing_grant_decision({}, {})
+
+
+def _authorize_effect_from_receipt(
+    receipt: StandingGrantReceipt,
+    *,
+    repository: RepositoryIdentity,
+    action: AutonomyActionClass,
+    effect: Mapping[str, Any],
+    requested_at: datetime,
+) -> dict[str, Any]:
+    """Bind one exact effect to the canonical durable Owner standing grant.
+
+    This is an authorization projection only: it never writes or consumes the
+    standing grant.  The caller supplies the requested effect, while Owner,
+    coordinator, durable coordination scope, Goal, and allowed action class are
+    taken only from the validated machine-local receipt.
+    """
+    context = receipt.context
+    if context.repository != repository:
+        raise StandingGrantReceiptError("AUTHORIZATION_REPOSITORY_MISMATCH")
+    try:
+        effect_payload = dict(effect)
+        effect_hash = canonical_autonomy_hash(effect_payload)
+        request = StandingGrantRequest(
+            owner_id=context.owner_id,
+            coordinator_id=context.coordinator_id,
+            repository=repository,
+            thread_id=context.thread_id,
+            goal_id=context.goal_id,
+            action=action,
+            requested_at=requested_at,
+            context_hash=context.context_hash,
+        )
+    except Exception as exc:
+        raise StandingGrantReceiptError("AUTHORIZATION_REQUEST_INVALID") from exc
+    decision = evaluate_standing_grant_decision(context, request)
+    if decision.mutation_authorized is not True:
+        raise StandingGrantReceiptError(f"AUTHORIZATION_{decision.outcome.value}")
+    payload: dict[str, Any] = {
+        "schema": "nexus.standing_grant_effect_authorization.v1",
+        "grant_id": receipt.grant_id,
+        "grant_receipt_hash": receipt.receipt_hash,
+        "context_hash": context.context_hash,
+        "owner_id": context.owner_id,
+        "coordinator_id": context.coordinator_id,
+        "repository": repository.model_dump(mode="json"),
+        "goal_id": context.goal_id,
+        "action": action.value,
+        "requested_at": requested_at.isoformat(),
+        "effect": effect_payload,
+        "effect_hash": effect_hash,
+        "decision_hash": decision.decision_hash,
+        "mutation_authorized": True,
+        "claim_ceiling": decision.claim_ceiling,
+    }
+    payload["authorization_hash"] = canonical_autonomy_hash(payload)
+    return payload
+
+
+def authorize_durable_standing_grant_effect(
+    *,
+    repository: RepositoryIdentity,
+    action: AutonomyActionClass,
+    effect: Mapping[str, Any],
+    requested_at: datetime | None = None,
+) -> dict[str, Any]:
+    """Authorize one request-bound effect from the single canonical receipt."""
+    effective_now = requested_at or datetime.now(timezone.utc)
+    receipt = load_standing_grant_receipt(now=effective_now)
+    if receipt is None:
+        raise StandingGrantReceiptError("RECEIPT_MISSING")
+    return _authorize_effect_from_receipt(
+        receipt,
+        repository=repository,
+        action=action,
+        effect=effect,
+        requested_at=effective_now,
+    )
+
+
+def _authorize_durable_standing_grant_effect_at(
+    path: Path,
+    *,
+    repository: RepositoryIdentity,
+    action: AutonomyActionClass,
+    effect: Mapping[str, Any],
+    requested_at: datetime,
+) -> dict[str, Any]:
+    """Test/internal-only effect authorization bound to an explicit receipt path."""
+    receipt = _load_receipt_at(path, now=requested_at)
+    return _authorize_effect_from_receipt(
+        receipt,
+        repository=repository,
+        action=action,
+        effect=effect,
+        requested_at=requested_at,
+    )
 
 
 def _evaluate_durable_standing_grant_at(
