@@ -243,7 +243,7 @@ class TestOverrideReceipt:
             "policy_id": "P-COST-01",
             "lane": "soft",
             "who": "agent",
-            "why": "Test override",
+            "why": "Cost model tuning",
             "scope": "COST_MODEL.read_file",
             "expiry": "2099-12-31T23:59:59Z",
             "rollback_plan": "Revert to P-COST-01.1.0.0",
