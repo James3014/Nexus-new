@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import copy
 import hashlib
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -10,8 +12,18 @@ import yaml
 
 SHARED_PLAYBOOK_SCHEMA = "nexus.shared_playbook.v1"
 PLAYBOOK_TRACE_SCHEMA = "nexus.playbook_trace.v1"
+PROMOTION_RECORD_SCHEMA = "nexus.shared_playbook.promotion_record.v1"
+PROMOTION_RECORD_FILENAME = "promotion_record.json"
 DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[2]
 REQUIRED_SHARED_PLAYBOOK_IDS = frozenset({"diagnose"})
+KNOWN_SHARED_WORKER_PLAYBOOKS = frozenset({
+    "diagnose",
+    "nexus-crash-consistency-audit",
+    "nexus-bug-family-sweep",
+    "nexus-proven-pattern-reuse",
+    "nexus-openwiki-navigator",
+    "nexus-merge-conflict-resolution",
+})
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
 _ALLOWED_STATUSES = frozenset({"CANDIDATE", "ACTIVE"})
 _REQUIRED_AUTHORITY_FLAGS = frozenset({
@@ -57,9 +69,10 @@ class SharedPlaybookIdentity:
     instructions_path: str
     primary: bool
     trace_authority: str
+    promotion_record_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "playbook_id": self.playbook_id,
             "version": self.version,
             "status": self.status,
@@ -69,6 +82,43 @@ class SharedPlaybookIdentity:
             "instructions_path": self.instructions_path,
             "primary": self.primary,
             "trace_authority": self.trace_authority,
+        }
+        if self.promotion_record_path is not None:
+            data["promotion_record_path"] = self.promotion_record_path
+        return data
+
+
+@dataclass(frozen=True)
+class SharedPlaybookSyncStatus:
+    playbook_id: str
+    version: str
+    status: str
+    manifest_sha256: str
+    instructions_sha256: str
+    last_evaluated_instructions_sha256: str | None
+    last_evaluated_manifest_sha256: str | None
+    upstream_reference_id: str | None
+    upstream_instructions_sha256: str | None
+    drift_detected: bool
+    drift_reason: str | None
+    sync_disposition: str
+    mutation_blocked: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "playbook_id": self.playbook_id,
+            "version": self.version,
+            "status": self.status,
+            "manifest_sha256": self.manifest_sha256,
+            "instructions_sha256": self.instructions_sha256,
+            "last_evaluated_instructions_sha256": self.last_evaluated_instructions_sha256,
+            "last_evaluated_manifest_sha256": self.last_evaluated_manifest_sha256,
+            "upstream_reference_id": self.upstream_reference_id,
+            "upstream_instructions_sha256": self.upstream_instructions_sha256,
+            "drift_detected": self.drift_detected,
+            "drift_reason": self.drift_reason,
+            "sync_disposition": self.sync_disposition,
+            "mutation_blocked": self.mutation_blocked,
         }
 
 
@@ -227,6 +277,75 @@ def _validate_payload(payload: dict[str, Any], *, skill_id: str, capability_moun
     _validate_transitions(payload)
 
 
+def _validate_promotion_provenance(
+    *,
+    skill_dir: Path,
+    skill_id: str,
+    payload: dict[str, Any],
+    manifest_bytes: bytes,
+    instructions_bytes: bytes,
+) -> tuple[dict[str, Any], Path]:
+    provenance_path = skill_dir / PROMOTION_RECORD_FILENAME
+    if not provenance_path.is_file():
+        raise SharedPlaybookError("shared_playbook_missing_promotion_evidence")
+    try:
+        record = json.loads(provenance_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SharedPlaybookError("shared_playbook_promotion_provenance_invalid") from exc
+    record = _mapping(record, reason="shared_playbook_promotion_provenance_invalid")
+
+    if str(record.get("schema") or "") != PROMOTION_RECORD_SCHEMA:
+        raise SharedPlaybookError("shared_playbook_promotion_provenance_invalid")
+    if (
+        str(record.get("playbook_id") or "") != skill_id
+        or str(record.get("skill_id") or "") != skill_id
+        or str(record.get("version") or "") != str(payload.get("version") or "")
+    ):
+        raise SharedPlaybookError("shared_playbook_promotion_provenance_mismatch")
+    if str(record.get("status") or "") != "ACTIVE":
+        raise SharedPlaybookError("shared_playbook_unauthorized_active_promotion")
+    if bool(record.get("self_promotion")):
+        raise SharedPlaybookError("shared_playbook_self_promotion_forbidden")
+
+    manifest_sha = _sha256(manifest_bytes)
+    instructions_sha = _sha256(instructions_bytes)
+    if str(record.get("target_manifest_sha256") or "") != manifest_sha:
+        raise SharedPlaybookError("shared_playbook_promotion_provenance_hash_mismatch")
+    if str(record.get("target_instructions_sha256") or "") != instructions_sha:
+        raise SharedPlaybookError("shared_playbook_promotion_provenance_hash_mismatch")
+
+    eval_prov = _mapping(
+        record.get("evaluation_provenance"),
+        reason="shared_playbook_promotion_provenance_invalid",
+    )
+    if str(eval_prov.get("verdict") or "").upper() != "PASS":
+        raise SharedPlaybookError("shared_playbook_promotion_provenance_invalid")
+    if not bool(eval_prov.get("root_cause_accuracy_preserved")):
+        raise SharedPlaybookError("shared_playbook_promotion_provenance_invalid")
+    if bool(eval_prov.get("authority_escalation_observed")):
+        raise SharedPlaybookError("shared_playbook_promotion_provenance_invalid")
+
+    runtime_prov = _mapping(
+        record.get("runtime_provenance"),
+        reason="shared_playbook_promotion_provenance_invalid",
+    )
+    if not bool(runtime_prov.get("fail_closed_verified")):
+        raise SharedPlaybookError("shared_playbook_promotion_provenance_invalid")
+
+    acceptance = _mapping(
+        record.get("acceptance_decision"),
+        reason="shared_playbook_promotion_provenance_invalid",
+    )
+    if str(acceptance.get("decision") or "") != "PROMOTED_TO_ACTIVE":
+        raise SharedPlaybookError("shared_playbook_promotion_provenance_invalid")
+    if bool(acceptance.get("self_promotion")):
+        raise SharedPlaybookError("shared_playbook_self_promotion_forbidden")
+    if not bool(acceptance.get("independent_review_passed")):
+        raise SharedPlaybookError("shared_playbook_promotion_provenance_invalid")
+
+    return record, provenance_path
+
+
 def load_selected_shared_playbook(
     skill_id: str,
     capability_mount: str,
@@ -252,6 +371,17 @@ def load_selected_shared_playbook(
     payload = _mapping(payload, reason="shared_playbook_manifest_invalid")
     _validate_payload(payload, skill_id=skill_id, capability_mount=capability_mount)
 
+    promotion_record_relpath: str | None = None
+    if str(payload.get("status") or "") == "ACTIVE":
+        _, provenance_path = _validate_promotion_provenance(
+            skill_dir=manifest_path.parent,
+            skill_id=skill_id,
+            payload=payload,
+            manifest_bytes=manifest_bytes,
+            instructions_bytes=instructions_bytes,
+        )
+        promotion_record_relpath = _relative_path(provenance_path, repo_root)
+
     return SharedPlaybookIdentity(
         playbook_id=skill_id,
         version=str(payload["version"]),
@@ -262,7 +392,117 @@ def load_selected_shared_playbook(
         instructions_path=_relative_path(instructions_path, repo_root),
         primary=bool(payload["primary"]),
         trace_authority=str(payload["trace_authority"]),
+        promotion_record_path=promotion_record_relpath,
     )
+
+
+def inspect_shared_playbook_drift(
+    skill_id: str,
+    *,
+    upstream_content: str | bytes | None = None,
+    upstream_reference_id: str | None = None,
+    root: str | Path | None = None,
+) -> SharedPlaybookSyncStatus:
+    repo_root, manifest_path, instructions_path = _skill_paths(skill_id, root=root)
+    if not manifest_path.is_file():
+        raise SharedPlaybookError("shared_playbook_missing")
+    if not instructions_path.is_file():
+        raise SharedPlaybookError("shared_playbook_instructions_missing")
+
+    manifest_bytes = manifest_path.read_bytes()
+    instructions_bytes = instructions_path.read_bytes()
+    try:
+        payload = yaml.safe_load(manifest_bytes.decode("utf-8"))
+    except (UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise SharedPlaybookError("shared_playbook_manifest_invalid") from exc
+    payload = _mapping(payload, reason="shared_playbook_manifest_invalid")
+
+    current_manifest_sha = _sha256(manifest_bytes)
+    current_instructions_sha = _sha256(instructions_bytes)
+    status = str(payload.get("status") or "")
+    version = str(payload.get("version") or "")
+
+    last_eval_manifest_sha: str | None = None
+    last_eval_instructions_sha: str | None = None
+    provenance_path = manifest_path.parent / PROMOTION_RECORD_FILENAME
+    if provenance_path.is_file():
+        try:
+            prov = json.loads(provenance_path.read_text(encoding="utf-8"))
+            if isinstance(prov, dict):
+                last_eval_manifest_sha = prov.get("target_manifest_sha256")
+                last_eval_instructions_sha = prov.get("target_instructions_sha256")
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    upstream_sha: str | None = None
+    if upstream_content is not None:
+        raw_upstream = (
+            upstream_content.encode("utf-8")
+            if isinstance(upstream_content, str)
+            else upstream_content
+        )
+        upstream_sha = _sha256(raw_upstream)
+
+    drift_detected = False
+    drift_reason: str | None = None
+    sync_disposition = "IN_SYNC"
+
+    if status == "ACTIVE":
+        if last_eval_instructions_sha and current_instructions_sha != last_eval_instructions_sha:
+            drift_detected = True
+            drift_reason = "active_instructions_drift_from_evaluation"
+            sync_disposition = "RE_EVALUATION_REQUIRED_CANDIDATE_ONLY"
+        elif last_eval_manifest_sha and current_manifest_sha != last_eval_manifest_sha:
+            drift_detected = True
+            drift_reason = "active_manifest_drift_from_evaluation"
+            sync_disposition = "RE_EVALUATION_REQUIRED_CANDIDATE_ONLY"
+        elif upstream_sha and upstream_sha != current_instructions_sha:
+            drift_detected = True
+            drift_reason = "upstream_source_drift_detected"
+            sync_disposition = "RE_EVALUATION_REQUIRED_CANDIDATE_ONLY"
+    elif status == "CANDIDATE":
+        if upstream_sha and upstream_sha != current_instructions_sha:
+            drift_detected = True
+            drift_reason = "upstream_source_drift_detected"
+            sync_disposition = "UPDATE_CANDIDATE_REQUIRES_EVALUATION"
+        else:
+            sync_disposition = "CANDIDATE_EVALUATION_PENDING"
+    else:
+        sync_disposition = "UNKNOWN_STATUS"
+
+    return SharedPlaybookSyncStatus(
+        playbook_id=skill_id,
+        version=version,
+        status=status,
+        manifest_sha256=current_manifest_sha,
+        instructions_sha256=current_instructions_sha,
+        last_evaluated_instructions_sha256=last_eval_instructions_sha,
+        last_evaluated_manifest_sha256=last_eval_manifest_sha,
+        upstream_reference_id=upstream_reference_id,
+        upstream_instructions_sha256=upstream_sha,
+        drift_detected=drift_detected,
+        drift_reason=drift_reason,
+        sync_disposition=sync_disposition,
+        mutation_blocked=True,
+    )
+
+
+def validate_shared_playbook_candidate_intake(
+    payload: dict[str, Any],
+    *,
+    skill_id: str,
+    capability_mount: str,
+) -> dict[str, Any]:
+    """Validates an intake payload for a new Shared Worker Playbook candidate.
+
+    Enforces that external intake can only produce CANDIDATE playbooks, never ACTIVE.
+    """
+    candidate_payload = copy.deepcopy(payload)
+    if candidate_payload.get("status") == "ACTIVE":
+        raise SharedPlaybookError("shared_playbook_intake_cannot_self_promote_active")
+    candidate_payload["status"] = "CANDIDATE"
+    _validate_payload(candidate_payload, skill_id=skill_id, capability_mount=capability_mount)
+    return candidate_payload
 
 
 def verify_planned_shared_playbook(
