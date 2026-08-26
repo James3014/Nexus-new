@@ -134,10 +134,9 @@ def _is_repeated_sequence_prefix(value: bytes, sequence: bytes) -> bool:
     return value == repeated
 
 
-def _looks_placeholder(value: bytes, *, context: bytes = b"") -> bool:
+def _looks_placeholder(value: bytes) -> bool:
     lowered = value.lower()
-    context_lower = context.lower()
-    if any(word in lowered or word in context_lower for word in PLACEHOLDER_WORDS):
+    if any(word in lowered for word in PLACEHOLDER_WORDS):
         return True
     normalized = lowered
     for prefix in (b"sk-proj-", b"sk-", b"ghp_", b"github_pat_", b"aiza"):
@@ -316,12 +315,6 @@ def _blob_stream(repo: Path, object_ids: Iterable[str]) -> Iterable[tuple[str, b
             proc.wait()
 
 
-def _line_context(data: bytes, start: int, end: int) -> bytes:
-    left = data.rfind(b"\n", 0, start)
-    right = data.find(b"\n", end)
-    return data[(left + 1 if left >= 0 else 0) : (right if right >= 0 else len(data))]
-
-
 def _scan_bytes(
     data: bytes,
     *,
@@ -334,7 +327,7 @@ def _scan_bytes(
 
     for match in PEM_PATTERN.finditer(data):
         body = re.sub(rb"\s+", b"", match.group("body"))
-        if len(body) < 64 or _looks_placeholder(body, context=_line_context(data, *match.span())):
+        if len(body) < 64 or _looks_placeholder(body):
             continue
         findings.append(
             Finding(
@@ -352,8 +345,7 @@ def _scan_bytes(
     for detector, pattern in PROVIDER_PATTERNS:
         for match in pattern.finditer(data):
             provider_spans.append(match.span())
-            context = _line_context(data, *match.span())
-            placeholder = _looks_placeholder(match.group(0), context=context)
+            placeholder = _looks_placeholder(match.group(0))
             findings.append(
                 Finding(
                     detector=detector,
@@ -378,8 +370,7 @@ def _scan_bytes(
         value_start, value_end = match.span(value_group)
         if any(start <= value_start and value_end <= end for start, end in provider_spans):
             continue
-        context = _line_context(data, *match.span())
-        placeholder = _looks_placeholder(value, context=context)
+        placeholder = _looks_placeholder(value)
         if placeholder or _entropy(value) < 3.5:
             continue
         findings.append(
