@@ -11,13 +11,20 @@ owner: James Chen
 owner_authorization: "direct Owner authorization for persistent claim subrecord/recovery under existing SelfHostedTaskService .state.lock plus Issue #129 contract delta 5336198602"
 shared_file_gate: SATISFIED_BY_PR581_MERGE_50A6FBC
 implementation_status: READY_FOR_BOUNDED_IMPLEMENTATION_AFTER_FRESH_ADMISSION_AND_OVERLAP_BIND
-reconciled_main: 50a6fbc766218a17fa9296edf23ce95504fee8c8
-current_main: 50a6fbc766218a17fa9296edf23ce95504fee8c8
+reconciled_main: 929fcb92cccdc60d9bc1f5126b5082a075398b40
+current_main: 929fcb92cccdc60d9bc1f5126b5082a075398b40
+current_main_tree: 94852249f0768448531e38cee0374bae5868fe85
 historical_terminal_marker: ATOMIC_READY_ISSUE_WORK_CLAIM_PROVEN
 terminal_marker: null
 contract_delta: CANONICAL_CLAIM_ENFORCEMENT_INTEGRATION
 contract_delta_comment_id: 5336198602
-overlap_bind: OPEN_PR_SCAN_CLEAR_FOR_SELF_HOSTED_TASK_SERVICE_AT_50A6FBC
+overlap_bind: OPEN_PR_EXACT_FOUR_PATH_SCAN_CLEAR_AT_929FCB92
+overlap_observed_at: 2026-08-26T13:41:03.076355Z
+overlap_evidence_sha256: 62036a3eeecfb962fe551b448d845d336d627b1f7fca0493b0fe3b5aec66364c
+allowed_scope_sha256: 354cda2ab9426878412ca8f924a6360bf223d176babad6a91227444233d84291
+source_blob: b5a1fd7da4e1d27e9607eedc7d352df592580d6e
+test_blob: 41eaf842640d08bd1df45a43eea09afd3e4e220b
+card_sha256: 7f718787c74b9fc2fe960c82d3a2adffc003b5a4f5dedaad19fb979b4f3b94d6
 fresh_admission_required: true
 claim_ceiling: ATOMIC_WORK_CLAIM_ENFORCEMENT_CANDIDATE_PR_ONLY
 ---
@@ -35,11 +42,13 @@ release, or production claims.
 The historical implementation baseline is `8e0986b40db56016c79b03eb81ff3d03c85c6f32`.
 PR #226 is physically merged as historical merge `a787e8e703cc9f0df6a5bb96024db1f10157b04d`,
 so the shared service/test gate is satisfied for that bounded implementation.
-The current reconciliation baseline is `50a6fbc766218a17fa9296edf23ce95504fee8c8`.
-PR #581 has merged the prior shared service overlap and a fresh open-PR file scan
-finds no other open Candidate modifying `self_hosted_task_service.py`. Fresh
-Workforce Admission remains required before implementation dispatch. This
-metadata writeback asserts no terminal closure receipt.
+The current reconciliation baseline is
+`929fcb92cccdc60d9bc1f5126b5082a075398b40` / tree `94852249`. PR #581 and
+`50a6fbc7` remain historical shared-file lineage; the current source/test blobs
+are byte-identical to that baseline. A fresh exact-four-path open-PR scan at
+`2026-08-26T13:41:03.076355Z` is clear. Fresh Workforce Admission remains
+required before implementation dispatch. This metadata writeback asserts no
+terminal closure receipt.
 
 ## Current Frontier
 
