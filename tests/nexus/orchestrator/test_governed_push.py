@@ -60,7 +60,7 @@ def _repo_with_remote(tmp_path: Path):
     return repo, remote, _git(repo, "rev-parse", "nexus/integration")
 
 
-def test_governed_push_requires_server_side_owner_authorization_and_allowlisted_branch(monkeypatch, tmp_path):
+def test_governed_push_requires_authorization_and_allowlisted_integration_branch(monkeypatch, tmp_path):
     repo, _remote, expected = _repo_with_remote(tmp_path)
     manager = GovernedPushManager(repo_root=repo, allowed_remotes={"origin"})
 
@@ -103,7 +103,7 @@ def test_governed_push_requires_server_side_owner_authorization_and_allowlisted_
     assert receipt.remote_commit_sha == expected
 
 
-def test_governed_push_rejects_main_before_authority(monkeypatch, tmp_path):
+def test_governed_push_rejects_main(monkeypatch, tmp_path):
     manager = GovernedPushManager(repo_root=tmp_path, allowed_remotes={"origin"})
     called = False
 
