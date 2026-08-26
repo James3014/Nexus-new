@@ -180,3 +180,55 @@ def test_runtime_receipt_fails_closed_when_playbook_is_not_planner_selected(
     assert receipt["public_claim_safe"] is False
     assert receipt["gate_passed"] is False
     assert receipt["outcome_contributed"] is False
+
+
+def test_runtime_receipt_fails_closed_on_planner_playbook_violation_without_contract(
+    monkeypatch,
+) -> None:
+    plan = {
+        "selected_capabilities": ["xray"],
+        "signal_snapshot": {
+            "planned_skill_mount_contracts": [],
+            "skill_mount_violations": [
+                {
+                    "skill_name": "diagnose",
+                    "path": ".agents/skills/diagnose/SKILL.md",
+                    "reason": "shared_playbook_missing",
+                    "capability_mount": "xray",
+                    "capability": "xray",
+                }
+            ],
+        },
+    }
+    _stub_receipts(monkeypatch, [_receipt(public_claim_safe=True)])
+
+    receipt = build_capability_receipt_payloads(plan, {"capabilities": {}})[0]
+
+    assert receipt["playbook_gate_passed"] is False
+    assert receipt["playbook_violation"] == "shared_playbook_missing"
+    assert receipt["public_claim_safe"] is False
+    assert receipt["gate_passed"] is False
+    assert receipt["outcome_contributed"] is False
+
+
+def test_runtime_receipt_does_not_infer_capability_from_skill_name_only(monkeypatch) -> None:
+    plan = {
+        "selected_capabilities": ["xray"],
+        "signal_snapshot": {
+            "planned_skill_mount_contracts": [],
+            "skill_mount_violations": [
+                {
+                    "skill_name": "diagnose",
+                    "reason": "shared_playbook_missing",
+                }
+            ],
+        },
+    }
+    _stub_receipts(monkeypatch, [_receipt()])
+
+    receipt = build_capability_receipt_payloads(plan, {"capabilities": {}})[0]
+
+    assert "playbook_gate_passed" not in receipt
+    assert "playbook_violation" not in receipt
+    assert receipt["gate_passed"] is True
+    assert receipt["outcome_contributed"] is True

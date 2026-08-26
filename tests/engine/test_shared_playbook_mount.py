@@ -87,6 +87,7 @@ def test_planner_mount_fails_closed_when_required_playbook_is_missing(
     assert [item["reason"] for item in result["skill_mount_violations"]] == [
         "shared_playbook_missing"
     ]
+    assert result["skill_mount_violations"][0]["capability_mount"] == "xray"
 
 
 def test_planner_mount_rejects_unselected_playbook_injection(tmp_path: Path, monkeypatch) -> None:
