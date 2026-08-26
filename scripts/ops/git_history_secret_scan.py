@@ -82,12 +82,6 @@ KNOWN_HISTORICAL_FIXTURES = frozenset({
         "high_entropy_secret_assignment",
         "58ca24245345903eeaf45fcadf3aa357084eb4d5fafa2f6bc9d428ba34e1264f",
     ),
-    (
-        "631f1754786d2e6e9b33c6be8d4da641a1da5b2e",
-        "tests/ops/test_git_history_secret_scan.py",
-        "high_entropy_secret_assignment",
-        "fc2d68651025d2d7c73bdbaec26e9dcf3d7fc4b79f0ab7ebff593bf587fb1699",
-    ),
 })
 
 
@@ -173,6 +167,10 @@ def _has_delimited_placeholder_marker(value: bytes) -> bool:
 
 def _looks_placeholder(value: bytes) -> bool:
     normalized = value.lower().strip(b" \t\r\n\"'")
+    if re.fullmatch(rb"\{[a-z_][a-z0-9_]*\}", normalized):
+        return True
+    if re.fullmatch(rb"\$\{[a-z_][a-z0-9_]*\}", normalized):
+        return True
     for prefix in (b"sk-proj-", b"sk-", b"ghp_", b"github_pat_", b"aiza"):
         if normalized.startswith(prefix):
             normalized = normalized[len(prefix) :]

@@ -150,6 +150,20 @@ def test_base64_like_api_key_is_blocking(tmp_path: Path) -> None:
     )
 
 
+def test_single_template_reference_is_nonblocking(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    template_reference = "{" + "runtime_secret_value" + "}"
+    _commit(
+        repo,
+        "template reference",
+        {"config.json": f'{{"client_secret": "{template_reference}"}}\n'},
+    )
+    _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
+    receipt = scan_repository(repo)
+    assert receipt["status"] == "PASS"
+    assert receipt["blocking_finding_count"] == 0
+
+
 def test_known_historical_fixture_bytes_are_blocking_outside_bound_provenance(
     tmp_path: Path,
 ) -> None:
