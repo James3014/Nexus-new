@@ -134,15 +134,32 @@ def _is_repeated_sequence_prefix(value: bytes, sequence: bytes) -> bool:
     return value == repeated
 
 
+def _has_delimited_placeholder_marker(value: bytes) -> bool:
+    separators = b"-_./"
+    for configured_marker in PLACEHOLDER_WORDS:
+        marker = configured_marker.strip(b"-_")
+        offset = 0
+        while True:
+            index = value.find(marker, offset)
+            if index < 0:
+                break
+            end = index + len(marker)
+            left_boundary = index == 0 or value[index - 1] in separators
+            right_boundary = end == len(value) or value[end] in separators
+            if left_boundary and right_boundary:
+                return True
+            offset = index + 1
+    return False
+
+
 def _looks_placeholder(value: bytes) -> bool:
-    lowered = value.lower()
-    if any(word in lowered for word in PLACEHOLDER_WORDS):
-        return True
-    normalized = lowered
+    normalized = value.lower().strip(b" \t\r\n\"'")
     for prefix in (b"sk-proj-", b"sk-", b"ghp_", b"github_pat_", b"aiza"):
         if normalized.startswith(prefix):
             normalized = normalized[len(prefix) :]
             break
+    if _has_delimited_placeholder_marker(normalized):
+        return True
     if _is_repeated_sequence_prefix(normalized, b"1234567890"):
         return True
     alphabet = b"abcdefghijklmnopqrstuvwxyz"
@@ -426,7 +443,7 @@ def scan_repository(repo: Path) -> dict[str, object]:
                 continue
             if path.lower().endswith((".template", ".example", ".sample")):
                 continue
-            if data.strip() and not _looks_placeholder(data[:4096]):
+            if data.strip():
                 findings.append(
                     Finding(
                         detector="secret_bearing_path",
