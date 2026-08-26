@@ -398,18 +398,24 @@ jobs:
               raise ValueError("unexpected registry entry set")
           before_entries = {issue: copy.deepcopy(entry) for issue, entry in entries.items()}
 
-          issue129 = get(f"/repos/{REPOSITORY}/issues/129")
-          issue92 = get(f"/repos/{REPOSITORY}/issues/92")
-          issue419 = get(f"/repos/{REPOSITORY}/issues/419")
+          tracked_issue_metadata = {
+              issue: get(f"/repos/{REPOSITORY}/issues/{issue}")
+              for issue in sorted(entries)
+          }
+          if set(tracked_issue_metadata) != set(entries):
+              raise RuntimeError("tracked issue metadata coverage incomplete")
+          for issue, metadata in tracked_issue_metadata.items():
+              if not isinstance(metadata, Mapping):
+                  raise RuntimeError(f"issue {issue} metadata response malformed")
+
           pr479 = get(f"/repos/{REPOSITORY}/pulls/479")
           pr403 = get(f"/repos/{REPOSITORY}/pulls/403")
           pr402 = get(f"/repos/{REPOSITORY}/pulls/402")
           issue29 = get(f"/repos/{REPOSITORY}/issues/29")
 
           contract_blocked = {
-              129: apply_contract_fence(entries[129], issue129),
-              92: apply_contract_fence(entries[92], issue92),
-              419: apply_contract_fence(entries[419], issue419),
+              issue: apply_contract_fence(entries[issue], tracked_issue_metadata[issue])
+              for issue in sorted(entries)
           }
           sync_pr_blocker(entries[129], pr479, "BLOCKED_OVERLAP")
           sync_pr_blocker(entries[92], pr403, "BLOCKED_UPSTREAM")
@@ -450,6 +456,7 @@ jobs:
               "current_main": current_main,
               "current_tree": current_tree,
               "changed_entries": changed_entries,
+              "tracked_issue_metadata_reads": sorted(tracked_issue_metadata),
               "implementation_source_or_test_body_reads": 0,
               "requested_url_count": len(requested_paths),
           }
