@@ -118,9 +118,7 @@ class DimensionRevalidationReceipt(_FrozenModel):
         payload = self.model_dump(mode="json", exclude={"receipt_hash"})
         expected = canonical_hash(payload)
         if self.receipt_hash != expected:
-            raise ValueError(
-                f"RECEIPT_HASH_MISMATCH: expected {expected}, got {self.receipt_hash}"
-            )
+            raise ValueError(f"RECEIPT_HASH_MISMATCH: expected {expected}, got {self.receipt_hash}")
         return self
 
 
@@ -229,9 +227,7 @@ class GitHubCompletionPort(Protocol):
         """Return the physical git blob SHA for a given commit/tree and path."""
         ...
 
-    def get_changed_main_paths(
-        self, old_main_sha: str, new_main_sha: str
-    ) -> tuple[str, ...]:
+    def get_changed_main_paths(self, old_main_sha: str, new_main_sha: str) -> tuple[str, ...]:
         """Return paths changed on main between old_main_sha and new_main_sha."""
         ...
 
@@ -466,9 +462,7 @@ def run_github_completion_loop(
                 "checks": cand_base_dict["required_checks"]
             })
             try:
-                base_cand_evidence = GitHubOrchestrationEvidence.model_validate(
-                    cand_base_dict
-                )
+                base_cand_evidence = GitHubOrchestrationEvidence.model_validate(cand_base_dict)
             except Exception as exc:
                 return CompletionLoopResult(
                     outcome=CompletionLoopOutcome.BLOCKED,
@@ -501,15 +495,11 @@ def run_github_completion_loop(
                 )
 
             # Call existing requalify_main_movement
-            requalification = requalify_main_movement(
-                base_cand_evidence, movement, root=git_root
-            )
+            requalification = requalify_main_movement(base_cand_evidence, movement, root=git_root)
 
             if requalification.blocked:
                 blocked_reasons = [
-                    d.reasons
-                    for d in requalification.dimensions
-                    if d.action != "REUSE_UNAFFECTED"
+                    d.reasons for d in requalification.dimensions if d.action != "REUSE_UNAFFECTED"
                 ]
                 return CompletionLoopResult(
                     outcome=CompletionLoopOutcome.BLOCKED,
@@ -617,7 +607,9 @@ def run_github_completion_loop(
                     integration_head_sha=mat_result.integration_head_sha,
                 )
 
-            if not isinstance(observed_int_tree, str) or not _GIT_SHA_RE.fullmatch(observed_int_tree):
+            if not isinstance(observed_int_tree, str) or not _GIT_SHA_RE.fullmatch(
+                observed_int_tree
+            ):
                 return CompletionLoopResult(
                     outcome=CompletionLoopOutcome.BLOCKED,
                     reason=f"OBSERVED_INTEGRATION_TREE_MALFORMED:{observed_int_tree!r}",
@@ -685,12 +677,8 @@ def run_github_completion_loop(
 
             # Construct IntegrationBinding binding receipt hashes into requalification_hash
             combined_requal_data = {
-                "requalification_hash": canonical_hash(
-                    requalification.model_dump(mode="json")
-                ),
-                "revalidation_receipt_hashes": tuple(
-                    r.receipt_hash for r in revalidation_receipts
-                ),
+                "requalification_hash": canonical_hash(requalification.model_dump(mode="json")),
+                "revalidation_receipt_hashes": tuple(r.receipt_hash for r in revalidation_receipts),
             }
             combined_requal_hash = canonical_hash(combined_requal_data)
 
@@ -773,10 +761,7 @@ def run_github_completion_loop(
                             generation=current_generation,
                             integration_head_sha=mat_result.integration_head_sha,
                         )
-                    if (
-                        not chk.terminal
-                        or chk.conclusion.lower() not in {"success", "passed"}
-                    ):
+                    if not chk.terminal or chk.conclusion.lower() not in {"success", "passed"}:
                         return CompletionLoopResult(
                             outcome=CompletionLoopOutcome.BLOCKED,
                             reason=f"CHECK_FAILED_OR_NONTERMINAL:{chk.name}",
@@ -813,9 +798,7 @@ def run_github_completion_loop(
                 tree_sha=mat_result.integration_tree_sha,
                 current_main_sha=current_main_sha,
                 diff_hash=source_candidate_diff_hash,
-                checks_hash=canonical_hash({
-                    "checks": [c.model_dump(mode="json") for c in checks]
-                }),
+                checks_hash=canonical_hash({"checks": [c.model_dump(mode="json") for c in checks]}),
                 reviews_hash=canonical_hash({
                     "reviews": [r.model_dump(mode="json") for r in reviews]
                 }),
@@ -841,9 +824,7 @@ def run_github_completion_loop(
             )
 
             try:
-                current_evidence = GitHubOrchestrationEvidence.model_validate(
-                    new_ev_payload
-                )
+                current_evidence = GitHubOrchestrationEvidence.model_validate(new_ev_payload)
             except Exception as exc:
                 return CompletionLoopResult(
                     outcome=CompletionLoopOutcome.BLOCKED,

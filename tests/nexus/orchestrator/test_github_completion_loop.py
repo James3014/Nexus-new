@@ -75,9 +75,7 @@ class SpyGitHubCompletionPort:
             if cas_merge_results is not None
             else [CasMergeResult(status=CasMergeStatus.SUCCESS, merged_sha="a" * 40)]
         )
-        self.post_merge_results = (
-            list(post_merge_results) if post_merge_results is not None else []
-        )
+        self.post_merge_results = list(post_merge_results) if post_merge_results is not None else []
 
         # Spies
         self.calls: list[tuple[str, dict[str, Any]]] = []
@@ -89,11 +87,7 @@ class SpyGitHubCompletionPort:
         self.reconcile_calls: list[dict[str, Any]] = []
 
     def read_main_state(self) -> tuple[str, str]:
-        state = (
-            self.main_states[0]
-            if len(self.main_states) == 1
-            else self.main_states.pop(0)
-        )
+        state = self.main_states[0] if len(self.main_states) == 1 else self.main_states.pop(0)
         self.calls.append(("read_main_state", {"result": state}))
         return state
 
@@ -119,11 +113,7 @@ class SpyGitHubCompletionPort:
 
     def read_pr_head_sha(self) -> str:
         if self.pr_heads:
-            res = (
-                self.pr_heads[0]
-                if len(self.pr_heads) == 1
-                else self.pr_heads.pop(0)
-            )
+            res = self.pr_heads[0] if len(self.pr_heads) == 1 else self.pr_heads.pop(0)
         else:
             res = self.current_pr_head
         self.calls.append(("read_pr_head_sha", {"result": res}))
@@ -132,26 +122,20 @@ class SpyGitHubCompletionPort:
     def read_blob_sha(self, commit_or_tree_sha: str, path: str) -> str:
         self.read_blob_calls.append((commit_or_tree_sha, path))
         res = self.blob_shas.get((commit_or_tree_sha, path), self.default_blob_sha)
-        self.calls.append(
-            (
-                "read_blob_sha",
-                {"commit_or_tree": commit_or_tree_sha, "path": path, "result": res},
-            )
-        )
+        self.calls.append((
+            "read_blob_sha",
+            {"commit_or_tree": commit_or_tree_sha, "path": path, "result": res},
+        ))
         return res
 
-    def get_changed_main_paths(
-        self, old_main_sha: str, new_main_sha: str
-    ) -> tuple[str, ...]:
+    def get_changed_main_paths(self, old_main_sha: str, new_main_sha: str) -> tuple[str, ...]:
         res = self.changed_main_paths_map.get(
             (old_main_sha, new_main_sha), self.default_changed_paths
         )
-        self.calls.append(
-            (
-                "get_changed_main_paths",
-                {"old": old_main_sha, "new": new_main_sha, "result": res},
-            )
-        )
+        self.calls.append((
+            "get_changed_main_paths",
+            {"old": old_main_sha, "new": new_main_sha, "result": res},
+        ))
         return res
 
     def revalidate_affected_dimension(
@@ -175,12 +159,10 @@ class SpyGitHubCompletionPort:
                 source_candidate_tree_sha=movement.candidate_tree_sha,
                 passed=True,
             )
-        self.calls.append(
-            (
-                "revalidate_affected_dimension",
-                {"dimension": dimension, "generation": generation, "result": res},
-            )
-        )
+        self.calls.append((
+            "revalidate_affected_dimension",
+            {"dimension": dimension, "generation": generation, "result": res},
+        ))
         return res
 
     def materialize_integration_head(
@@ -253,12 +235,10 @@ class SpyGitHubCompletionPort:
         repository: str,
         pull_request_number: int,
     ) -> bool:
-        self.calls.append(
-            (
-                "is_platform_approval_required",
-                {"repository": repository, "pr": pull_request_number},
-            )
-        )
+        self.calls.append((
+            "is_platform_approval_required",
+            {"repository": repository, "pr": pull_request_number},
+        ))
         return self.is_platform_approval
 
     def cas_merge(
@@ -432,7 +412,9 @@ def test_residual1_ambiguous_ack_with_wrong_tree_blocks(monkeypatch):
     port = SpyGitHubCompletionPort(
         main_states=[(new_main_sha, new_main_tree), (new_main_sha, new_main_tree)],
         default_pr_head="b" * 40,
-        cas_merge_results=[CasMergeResult(status=CasMergeStatus.AMBIGUOUS_ACK, merged_sha="a" * 40)],
+        cas_merge_results=[
+            CasMergeResult(status=CasMergeStatus.AMBIGUOUS_ACK, merged_sha="a" * 40)
+        ],
         post_merge_results=[
             PostMergeReconciliationResult(
                 observed_main_commit_sha="a" * 40,
@@ -726,9 +708,7 @@ def test_residual3_caller_rejects_uppercase_or_64hex_blob_shas(monkeypatch):
             ("01" * 20, "nexus/a.py"): "1" * 64,
         },
     )
-    res_64 = run_github_completion_loop(
-        initial_evidence=initial_ev, request=req, port=port_64_blob
-    )
+    res_64 = run_github_completion_loop(initial_evidence=initial_ev, request=req, port=port_64_blob)
     assert res_64.outcome is CompletionLoopOutcome.BLOCKED
     assert "BLOB_SHA_MALFORMED:nexus/a.py" in res_64.reason
 
@@ -983,9 +963,7 @@ def test_d_semantic_overlap_revalidation_receipt_and_blob_proof(monkeypatch):
         default_changed_paths=("nexus/a.py",),
         revalidation_receipts={"SEMANTIC_OVERLAP": valid_receipt},
     )
-    res_ok = run_github_completion_loop(
-        initial_evidence=initial_ev, request=req, port=port_ok
-    )
+    res_ok = run_github_completion_loop(initial_evidence=initial_ev, request=req, port=port_ok)
     assert res_ok.outcome is CompletionLoopOutcome.COMPLETED
 
 
@@ -1123,18 +1101,13 @@ def test_g_unknown_impact_universe_blocks_before_mutation(monkeypatch):
     )
 
     assert result.outcome is CompletionLoopOutcome.BLOCKED
-    assert (
-        "REQUALIFICATION_BLOCKED" in result.reason
-        or "IMPACT_UNKNOWN" in result.reason
-    )
+    assert "REQUALIFICATION_BLOCKED" in result.reason or "IMPACT_UNKNOWN" in result.reason
     assert len(port.materialize_calls) == 0
 
 
 def test_h_foreign_pr_head_mutation_blocks_without_writing():
     """H. external PR-head mutation / second controller / foreign push -> stale actor does not write or merge."""
-    initial_ev = _base_evidence(
-        base_sha="d" * 40, current_main_sha="d" * 40, head_sha="b" * 40
-    )
+    initial_ev = _base_evidence(base_sha="d" * 40, current_main_sha="d" * 40, head_sha="b" * 40)
     ctx = context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,))
     req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
 
@@ -1626,9 +1599,7 @@ def test_p_hostile_reconciliation_checks_on_ambiguous_ack(monkeypatch):
             )
         ],
     )
-    res3 = run_github_completion_loop(
-        initial_evidence=initial_ev, request=req, port=port_ok
-    )
+    res3 = run_github_completion_loop(initial_evidence=initial_ev, request=req, port=port_ok)
     assert res3.outcome is CompletionLoopOutcome.COMPLETED
     assert res3.merged_commit_sha == "a" * 40
 
@@ -1666,9 +1637,7 @@ def test_q_hostile_reconciliation_checks_on_cas_success(monkeypatch):
     port_mismatch = SpyGitHubCompletionPort(
         main_states=[(new_main_sha, new_main_tree), (new_main_sha, new_main_tree)],
         default_pr_head="b" * 40,
-        cas_merge_results=[
-            CasMergeResult(status=CasMergeStatus.SUCCESS, merged_sha="a" * 40)
-        ],
+        cas_merge_results=[CasMergeResult(status=CasMergeStatus.SUCCESS, merged_sha="a" * 40)],
         post_merge_results=[
             PostMergeReconciliationResult(
                 observed_main_commit_sha="9" * 40,
@@ -1966,7 +1935,9 @@ def test_hostile_materialized_tree_mismatch_blocks_without_checks_or_merge(monke
     )
     monkeypatch.setattr(
         "nexus.orchestrator.github_completion_loop.resolve_durable_merge_authorization",
-        lambda *a, **k: evaluate_action(context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,)), req),
+        lambda *a, **k: evaluate_action(
+            context(allowed_actions=(AutonomyActionClass.GITHUB_MERGE,)), req
+        ),
     )
 
     result = run_github_completion_loop(
@@ -1980,7 +1951,7 @@ def test_hostile_materialized_tree_mismatch_blocks_without_checks_or_merge(monke
     assert reported_tree in result.reason
     assert actual_different_tree in result.reason
     assert len(port.read_blob_calls) == 0  # Zero blob reads
-    assert len(port.checks_calls) == 0     # Zero check calls
+    assert len(port.checks_calls) == 0  # Zero check calls
     assert len(port.cas_merge_calls) == 0  # Zero CAS merge calls
 
 
@@ -2015,7 +1986,9 @@ def test_hostile_materialized_tree_malformed_readback_blocks(monkeypatch):
         default_pr_head="b" * 40,
         tree_shas={int_head: "A" * 40},
     )
-    res_upper = run_github_completion_loop(initial_evidence=initial_ev, request=req, port=port_upper)
+    res_upper = run_github_completion_loop(
+        initial_evidence=initial_ev, request=req, port=port_upper
+    )
     assert res_upper.outcome is CompletionLoopOutcome.BLOCKED
     assert "OBSERVED_INTEGRATION_TREE_MALFORMED" in res_upper.reason
     assert len(port_upper.checks_calls) == 0
