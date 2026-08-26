@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import hashlib
 import json
 import re
@@ -9,6 +10,15 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import yaml
+
+from nexus.contracts.target_integration_lifecycle import ExternalAcceptanceReceipt
+from nexus.orchestrator.acceptance_loop import (
+    AcceptanceDecision,
+    CandidateAcceptanceRequest,
+    IndependentReviewReceipt,
+    reduce_candidate_acceptance,
+)
+from nexus.orchestrator.autonomy_policy import AcceptanceAuthorityKind
 
 SHARED_PLAYBOOK_SCHEMA = "nexus.shared_playbook.v1"
 PLAYBOOK_TRACE_SCHEMA = "nexus.playbook_trace.v1"
@@ -277,31 +287,149 @@ def _validate_payload(payload: dict[str, Any], *, skill_id: str, capability_moun
     _validate_transitions(payload)
 
 
-def compute_playbook_acceptance_binding_hash(
+_FORBIDDEN_INDEPENDENCE = frozenset({
+    "SELF_ASSERTED",
+    "INTERNAL_IMPLEMENTER",
+    "UNVERIFIED",
+    "MINTED",
+    "WORKER_OUTPUT",
+})
+_GENERIC_PROMOTION_VERDICTS = frozenset({"PASS", "PROMOTED_TO_ACTIVE", "DEFECT", "BLOCK", "REPAIRABLE"})
+
+
+def _canonical_dataclass_kwargs(cls: type[Any], payload: Mapping[str, Any]) -> dict[str, Any]:
+    names = {field.name for field in dataclasses.fields(cls)}
+    return {key: value for key, value in payload.items() if key in names}
+
+
+def _require_text(value: Any, *, reason: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise SharedPlaybookError(reason)
+    return text
+
+
+def _construct_canonical_request_review(
+    receipt_data: Mapping[str, Any],
+) -> tuple[CandidateAcceptanceRequest, IndependentReviewReceipt]:
+    request_raw = receipt_data.get("request")
+    review_raw = receipt_data.get("review")
+    if not isinstance(request_raw, dict) or not isinstance(review_raw, dict):
+        raise SharedPlaybookError("shared_playbook_acceptance_receipt_invalid")
+    try:
+        request = CandidateAcceptanceRequest(
+            **_canonical_dataclass_kwargs(CandidateAcceptanceRequest, request_raw)
+        )
+        review_kwargs = _canonical_dataclass_kwargs(IndependentReviewReceipt, review_raw)
+        reasons = review_kwargs.get("reasons")
+        if isinstance(reasons, list):
+            review_kwargs["reasons"] = tuple(reasons)
+        review = IndependentReviewReceipt(**review_kwargs)
+    except (TypeError, ValueError) as exc:
+        raise SharedPlaybookError("shared_playbook_acceptance_receipt_invalid") from exc
+    return request, review
+
+
+def _reduce_canonical_acceptance(receipt_data: Mapping[str, Any]) -> None:
+    schema = str(receipt_data.get("schema") or "").strip()
+    if schema == "nexus.external_acceptance_receipt.v1":
+        try:
+            ExternalAcceptanceReceipt(
+                **_canonical_dataclass_kwargs(ExternalAcceptanceReceipt, receipt_data)
+            )
+        except (TypeError, ValueError) as exc:
+            raise SharedPlaybookError("shared_playbook_acceptance_receipt_invalid") from exc
+        raise SharedPlaybookError("shared_playbook_acceptance_verdict_invalid")
+    if schema != "nexus.candidate_acceptance_result.v1":
+        raise SharedPlaybookError("shared_playbook_unsupported_acceptance_schema")
+
+    request, review = _construct_canonical_request_review(receipt_data)
+    result = reduce_candidate_acceptance(request, review)
+    if result.decision is not AcceptanceDecision.ACCEPT:
+        raise SharedPlaybookError("shared_playbook_acceptance_verdict_invalid")
+
+    observed_decision = _require_text(
+        receipt_data.get("decision"), reason="shared_playbook_acceptance_verdict_invalid"
+    )
+    if observed_decision != AcceptanceDecision.ACCEPT.value:
+        raise SharedPlaybookError("shared_playbook_acceptance_verdict_invalid")
+
+    observed_verdict = str(receipt_data.get("verdict") or "").strip()
+    if observed_verdict:
+        if (
+            observed_verdict.upper() in _GENERIC_PROMOTION_VERDICTS
+            or observed_verdict not in {AcceptanceDecision.ACCEPT.value, "ACCEPT_CANDIDATE"}
+        ):
+            raise SharedPlaybookError("shared_playbook_acceptance_verdict_invalid")
+
+    binding_hash = _require_text(
+        receipt_data.get("binding_hash"), reason="shared_playbook_acceptance_binding_missing"
+    )
+    if binding_hash != result.binding_hash:
+        raise SharedPlaybookError("shared_playbook_acceptance_binding_mismatch")
+
+    task_id = _require_text(
+        receipt_data.get("task_id"), reason="shared_playbook_acceptance_task_attempt_missing"
+    )
+    attempt_id = _require_text(
+        receipt_data.get("attempt_id"), reason="shared_playbook_acceptance_task_attempt_missing"
+    )
+    reviewer_id = _require_text(
+        receipt_data.get("reviewer_id"), reason="shared_playbook_acceptance_reviewer_missing"
+    )
+    candidate_commit_sha = _require_text(
+        receipt_data.get("candidate_commit_sha"),
+        reason="shared_playbook_acceptance_subject_mismatch",
+    )
+    if (
+        task_id != request.task_id
+        or task_id != review.task_id
+        or attempt_id != request.attempt_id
+        or attempt_id != review.attempt_id
+        or reviewer_id != review.reviewer_id
+        or candidate_commit_sha != request.candidate_commit_sha
+        or candidate_commit_sha != review.candidate_commit_sha
+    ):
+        raise SharedPlaybookError("shared_playbook_acceptance_subject_mismatch")
+    if request.implementer_id == review.reviewer_id:
+        raise SharedPlaybookError("shared_playbook_self_promotion_forbidden")
+
+
+def _validate_independence_classification(receipt_data: Mapping[str, Any]) -> None:
+    independence = str(receipt_data.get("independence_classification") or "").strip()
+    if not independence:
+        raise SharedPlaybookError("shared_playbook_missing_independence_classification")
+    if independence in _FORBIDDEN_INDEPENDENCE:
+        raise SharedPlaybookError("shared_playbook_self_promotion_forbidden")
+    if independence != AcceptanceAuthorityKind.INDEPENDENT_REVIEWER.value:
+        raise SharedPlaybookError("shared_playbook_insufficient_independence_classification")
+
+
+def _validate_required_subject_binding(
+    receipt_data: Mapping[str, Any],
     *,
-    task_id: str,
-    attempt_id: str,
-    reviewer_id: str,
-    subject_playbook_id: str,
-    subject_manifest_sha256: str,
-    subject_instructions_sha256: str,
-    candidate_commit_sha: str = "",
-    verdict: str = "ACCEPT_CANDIDATE",
-) -> str:
-    """Compute deterministic canonical binding hash for shared playbook candidate acceptance."""
-    payload = {
-        "attempt_id": attempt_id,
-        "candidate_commit_sha": candidate_commit_sha,
-        "reviewer_id": reviewer_id,
-        "subject_instructions_sha256": subject_instructions_sha256,
-        "subject_manifest_sha256": subject_manifest_sha256,
-        "subject_playbook_id": subject_playbook_id,
-        "task_id": task_id,
-        "verdict": verdict,
-    }
-    return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
+    skill_id: str,
+    manifest_sha: str,
+    instructions_sha: str,
+) -> None:
+    subj_playbook = _require_text(
+        receipt_data.get("subject_playbook_id"),
+        reason="shared_playbook_acceptance_subject_mismatch",
+    )
+    if subj_playbook != skill_id:
+        raise SharedPlaybookError("shared_playbook_acceptance_subject_mismatch")
+    subj_manifest = _require_text(
+        receipt_data.get("subject_manifest_sha256"),
+        reason="shared_playbook_acceptance_subject_mismatch",
+    )
+    if subj_manifest != manifest_sha:
+        raise SharedPlaybookError("shared_playbook_acceptance_subject_mismatch")
+    subj_instructions = _require_text(
+        receipt_data.get("subject_instructions_sha256"),
+        reason="shared_playbook_acceptance_subject_mismatch",
+    )
+    if subj_instructions != instructions_sha:
+        raise SharedPlaybookError("shared_playbook_acceptance_subject_mismatch")
 
 
 def _validate_promotion_provenance(
@@ -419,84 +547,22 @@ def _validate_promotion_provenance(
         raise SharedPlaybookError("shared_playbook_acceptance_receipt_invalid") from exc
     receipt_data = _mapping(receipt_data, reason="shared_playbook_acceptance_receipt_invalid")
 
-    # Canonical Schema Check
+    declared_schema = str(acceptance.get("acceptance_schema") or "").strip()
     receipt_schema = str(receipt_data.get("schema") or "").strip()
-    canonical_schemas = {
-        "nexus.candidate_acceptance_result.v1",
-        "nexus.candidate_acceptance.v3",
-        "nexus.external_acceptance_receipt.v1",
-    }
-    if receipt_schema not in canonical_schemas:
+    if declared_schema and declared_schema != receipt_schema:
         raise SharedPlaybookError("shared_playbook_unsupported_acceptance_schema")
 
-    # Reviewer and attempt identity
-    reviewer_id = str(receipt_data.get("reviewer_id") or "").strip()
-    attempt_id = str(receipt_data.get("attempt_id") or "").strip()
-    task_id = str(receipt_data.get("task_id") or "").strip()
-    if not task_id or not attempt_id:
-        raise SharedPlaybookError("shared_playbook_acceptance_task_attempt_missing")
-    if not reviewer_id:
-        raise SharedPlaybookError("shared_playbook_acceptance_reviewer_missing")
-
-    implementer_id = str(receipt_data.get("implementer_id") or "").strip()
-    if implementer_id and reviewer_id == implementer_id:
-        raise SharedPlaybookError("shared_playbook_self_promotion_forbidden")
     if bool(receipt_data.get("self_promotion")):
         raise SharedPlaybookError("shared_playbook_self_promotion_forbidden")
 
-    # Independence classification check (Required)
-    independence_class = str(receipt_data.get("independence_classification") or "").upper().strip()
-    if not independence_class:
-        raise SharedPlaybookError("shared_playbook_missing_independence_classification")
-    if independence_class in {"SELF_ASSERTED", "INTERNAL_IMPLEMENTER", "UNVERIFIED", "MINTED"}:
-        raise SharedPlaybookError("shared_playbook_self_promotion_forbidden")
-    if independence_class not in {
-        "INDEPENDENT_EXTERNAL_REVIEW",
-        "INDEPENDENT_REVIEWER",
-        "CANONICAL_EXTERNAL_ACCEPTANCE",
-    }:
-        raise SharedPlaybookError("shared_playbook_insufficient_independence_classification")
-
-    # Canonical Verdict Check (Must be ACCEPT_CANDIDATE or ACCEPT, generic PASS is forbidden)
-    receipt_verdict = (
-        str(receipt_data.get("verdict") or receipt_data.get("decision") or "").upper().strip()
+    _reduce_canonical_acceptance(receipt_data)
+    _validate_independence_classification(receipt_data)
+    _validate_required_subject_binding(
+        receipt_data,
+        skill_id=skill_id,
+        manifest_sha=manifest_sha,
+        instructions_sha=instructions_sha,
     )
-    if receipt_verdict not in {"ACCEPT_CANDIDATE", "ACCEPT"}:
-        raise SharedPlaybookError("shared_playbook_acceptance_verdict_invalid")
-
-    # Subject binding checks (prevent subject substitution, all fields REQUIRED)
-    subj_playbook = str(receipt_data.get("subject_playbook_id") or "").strip()
-    if not subj_playbook or subj_playbook != skill_id:
-        raise SharedPlaybookError("shared_playbook_acceptance_subject_mismatch")
-
-    subj_manifest = str(receipt_data.get("subject_manifest_sha256") or "").strip()
-    subj_instructions = str(receipt_data.get("subject_instructions_sha256") or "").strip()
-    if not subj_manifest or subj_manifest != manifest_sha:
-        raise SharedPlaybookError("shared_playbook_acceptance_subject_mismatch")
-    if not subj_instructions or subj_instructions != instructions_sha:
-        raise SharedPlaybookError("shared_playbook_acceptance_subject_mismatch")
-
-    candidate_commit_sha = str(receipt_data.get("candidate_commit_sha") or "").strip()
-
-    # Recomputed canonical binding hash check
-    binding_hash = str(
-        receipt_data.get("binding_hash") or receipt_data.get("receipt_hash") or ""
-    ).strip()
-    if not binding_hash:
-        raise SharedPlaybookError("shared_playbook_acceptance_binding_missing")
-
-    expected_binding = compute_playbook_acceptance_binding_hash(
-        task_id=task_id,
-        attempt_id=attempt_id,
-        reviewer_id=reviewer_id,
-        subject_playbook_id=subj_playbook,
-        subject_manifest_sha256=subj_manifest,
-        subject_instructions_sha256=subj_instructions,
-        candidate_commit_sha=candidate_commit_sha,
-        verdict=receipt_verdict,
-    )
-    if binding_hash != expected_binding:
-        raise SharedPlaybookError("shared_playbook_acceptance_binding_mismatch")
 
     return record, provenance_path
 

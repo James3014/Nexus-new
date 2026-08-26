@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+from dataclasses import asdict
 from pathlib import Path
 
 import pytest
@@ -13,11 +14,16 @@ from nexus.learning.shared_playbook import (
     KNOWN_SHARED_WORKER_PLAYBOOKS,
     PROMOTION_RECORD_FILENAME,
     SharedPlaybookError,
-    compute_playbook_acceptance_binding_hash,
     inspect_shared_playbook_drift,
     load_selected_shared_playbook,
     validate_shared_playbook_candidate_intake,
 )
+from nexus.orchestrator.acceptance_loop import (
+    CandidateAcceptanceRequest,
+    IndependentReviewReceipt,
+    reduce_candidate_acceptance,
+)
+from nexus.orchestrator.autonomy_policy import AcceptanceAuthorityKind
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CANONICAL_RUNTIME_OVERLAY_PATH = (
@@ -34,22 +40,69 @@ CANONICAL_SKILL_STATUS_REPORT_PATH = (
 )
 
 
+_G9_COMMIT = "c8c6de8c330ec8868dc515de4c337007093ad988"
+_G9_TREE = "81bb0a4b81912d1a1b931e6f81bfbe9ca307b69c"
+_STATE_HASH = "a" * 64
+_DIFF_HASH = "b" * 64
+_VERIFIED_RECEIPT_HASH = "c" * 64
+_VERIFIER_ARTIFACT_HASH = "d" * 64
+
+
+def _canonical_request_review(
+    *,
+    task_id: str,
+    attempt_id: str,
+    reviewer_id: str,
+    implementer_id: str,
+    candidate_commit_sha: str,
+    candidate_tree_sha: str,
+) -> tuple[CandidateAcceptanceRequest, IndependentReviewReceipt]:
+    request = CandidateAcceptanceRequest(
+        task_id=task_id,
+        attempt_id=attempt_id,
+        implementer_id=implementer_id,
+        candidate_commit_sha=candidate_commit_sha,
+        candidate_tree_sha=candidate_tree_sha,
+        candidate_state_hash=_STATE_HASH,
+        candidate_diff_hash=_DIFF_HASH,
+        verified_receipt_hash=_VERIFIED_RECEIPT_HASH,
+    )
+    review = IndependentReviewReceipt(
+        task_id=task_id,
+        attempt_id=attempt_id,
+        reviewer_id=reviewer_id,
+        candidate_commit_sha=candidate_commit_sha,
+        candidate_tree_sha=candidate_tree_sha,
+        candidate_state_hash=_STATE_HASH,
+        candidate_diff_hash=_DIFF_HASH,
+        verified_receipt_hash=_VERIFIED_RECEIPT_HASH,
+        verifier_artifact_hash=_VERIFIER_ARTIFACT_HASH,
+        review_status="PASS",
+        exit_code=0,
+        reasons=("independent G10 candidate acceptance verified",),
+    )
+    return request, review
+
+
 def _create_canonical_acceptance_receipt(
     skill_dir: Path,
     *,
     task_id: str = "g10-diagnose-promotion-acceptance",
     attempt_id: str = "attempt-1",
     reviewer_id: str = "reviewer-independent-1",
-    verdict: str = "ACCEPT_CANDIDATE",
-    subject_playbook_id: str = "diagnose",
+    implementer_id: str = "worker-implementer-1",
+    verdict: str | None = None,
+    subject_playbook_id: str | None = "diagnose",
     manifest_sha: str | None = None,
     instructions_sha: str | None = None,
-    independence_classification: str = "INDEPENDENT_REVIEWER",
-    candidate_commit_sha: str = "c8c6de8c330ec8868dc515de4c337007093ad988",
+    independence_classification: str | None = AcceptanceAuthorityKind.INDEPENDENT_REVIEWER.value,
+    candidate_commit_sha: str = _G9_COMMIT,
+    candidate_tree_sha: str = _G9_TREE,
     binding_hash: str | None = None,
     self_promotion: bool = False,
     update_promotion_record: bool = True,
     set_active_status: bool = True,
+    include_request_review: bool = True,
 ) -> tuple[Path, str]:
     manifest_path = skill_dir / "playbook.yaml"
     instructions_path = skill_dir / "SKILL.md"
@@ -71,33 +124,32 @@ def _create_canonical_acceptance_receipt(
     )
     receipt_path = skill_dir / "acceptance_receipt.json"
 
-    computed_binding = binding_hash or compute_playbook_acceptance_binding_hash(
+    request, review = _canonical_request_review(
         task_id=task_id,
         attempt_id=attempt_id,
         reviewer_id=reviewer_id,
-        subject_playbook_id=subject_playbook_id,
-        subject_manifest_sha256=m_sha,
-        subject_instructions_sha256=i_sha,
+        implementer_id=implementer_id,
         candidate_commit_sha=candidate_commit_sha,
-        verdict=verdict,
+        candidate_tree_sha=candidate_tree_sha,
     )
-    payload = {
-        "schema": "nexus.candidate_acceptance_result.v1",
-        "decision": "ACCEPT",
-        "verdict": verdict,
-        "task_id": task_id,
-        "attempt_id": attempt_id,
-        "candidate_commit_sha": candidate_commit_sha,
-        "reviewer_id": reviewer_id,
-        "binding_hash": computed_binding,
-        "subject_playbook_id": subject_playbook_id,
-        "subject_manifest_sha256": m_sha,
-        "subject_instructions_sha256": i_sha,
-        "independence_classification": independence_classification,
-        "self_promotion": self_promotion,
-        "reasons": ["independent G10 candidate acceptance verified"],
-        "evidence_cutoff": "2026-08-27T00:00:00Z",
-    }
+    result = reduce_candidate_acceptance(request, review)
+    payload = result.to_dict()
+    if include_request_review:
+        payload["request"] = asdict(request)
+        review_payload = asdict(review)
+        review_payload["reasons"] = list(review.reasons)
+        payload["review"] = review_payload
+    if subject_playbook_id is not None:
+        payload["subject_playbook_id"] = subject_playbook_id
+    payload["subject_manifest_sha256"] = m_sha
+    payload["subject_instructions_sha256"] = i_sha
+    if independence_classification is not None:
+        payload["independence_classification"] = independence_classification
+    payload["self_promotion"] = self_promotion
+    if verdict is not None:
+        payload["verdict"] = verdict
+    if binding_hash is not None:
+        payload["binding_hash"] = binding_hash
     raw_bytes = json.dumps(payload, indent=2).encode("utf-8")
     receipt_path.write_bytes(raw_bytes)
     digest = hashlib.sha256(raw_bytes).hexdigest()
@@ -167,7 +219,17 @@ def test_repository_at_rest_diagnose_is_candidate_and_fails_closed_without_accep
     assert record["acceptance_decision"]["decision"] == "PENDING_INDEPENDENT_ACCEPTANCE"
     assert record["acceptance_decision"]["acceptance_artifact_hash"] == ""
 
-    # At rest, load_selected_shared_playbook loads diagnose as CANDIDATE
+    assert record["runtime_provenance"]["final_integration_pr"] == 577
+    assert (
+        record["runtime_provenance"]["final_integration_commit_sha"]
+        == "c8c6de8c330ec8868dc515de4c337007093ad988"
+    )
+    assert (
+        record["runtime_provenance"]["final_integration_tree_sha"]
+        == "81bb0a4b81912d1a1b931e6f81bfbe9ca307b69c"
+    )
+    assert record["runtime_provenance"]["intermediate_integration_pr"] == 573
+
     identity = load_selected_shared_playbook("diagnose", "xray", root=REPO_ROOT, required=True)
     assert identity is not None
     assert identity.status == "CANDIDATE"
@@ -316,16 +378,6 @@ def test_falsification_8_missing_subject_manifest_hash_fails_closed(tmp_path: Pa
     receipt_path = skill_dir / "acceptance_receipt.json"
     payload = json.loads(receipt_path.read_text(encoding="utf-8"))
     payload["subject_manifest_sha256"] = ""
-    payload["binding_hash"] = compute_playbook_acceptance_binding_hash(
-        task_id=payload["task_id"],
-        attempt_id=payload["attempt_id"],
-        reviewer_id=payload["reviewer_id"],
-        subject_playbook_id=payload["subject_playbook_id"],
-        subject_manifest_sha256="",
-        subject_instructions_sha256=payload["subject_instructions_sha256"],
-        candidate_commit_sha=payload.get("candidate_commit_sha", ""),
-        verdict=payload["verdict"],
-    )
     raw_bytes = json.dumps(payload, indent=2).encode("utf-8")
     receipt_path.write_bytes(raw_bytes)
     prov = skill_dir / PROMOTION_RECORD_FILENAME
@@ -351,16 +403,6 @@ def test_falsification_9_missing_subject_instructions_hash_fails_closed(
     receipt_path = skill_dir / "acceptance_receipt.json"
     payload = json.loads(receipt_path.read_text(encoding="utf-8"))
     payload["subject_instructions_sha256"] = ""
-    payload["binding_hash"] = compute_playbook_acceptance_binding_hash(
-        task_id=payload["task_id"],
-        attempt_id=payload["attempt_id"],
-        reviewer_id=payload["reviewer_id"],
-        subject_playbook_id=payload["subject_playbook_id"],
-        subject_manifest_sha256=payload["subject_manifest_sha256"],
-        subject_instructions_sha256="",
-        candidate_commit_sha=payload.get("candidate_commit_sha", ""),
-        verdict=payload["verdict"],
-    )
     raw_bytes = json.dumps(payload, indent=2).encode("utf-8")
     receipt_path.write_bytes(raw_bytes)
     prov = skill_dir / PROMOTION_RECORD_FILENAME
@@ -392,13 +434,14 @@ def test_falsification_11_fake_reviewer_string_fails_closed(tmp_path: Path) -> N
     skill_dir = _copy_diagnose(tmp_path, create_receipt=False)
     _create_canonical_acceptance_receipt(
         skill_dir,
-        reviewer_id="worker-codex",
-        self_promotion=True,
+        reviewer_id="external-reviewer",
+        include_request_review=False,
+        self_promotion=False,
         set_active_status=True,
         update_promotion_record=True,
     )
 
-    with pytest.raises(SharedPlaybookError, match="shared_playbook_self_promotion_forbidden"):
+    with pytest.raises(SharedPlaybookError, match="shared_playbook_acceptance_receipt_invalid"):
         load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
 
 
@@ -483,16 +526,6 @@ def test_falsification_15_subject_substitution_fails_closed(tmp_path: Path) -> N
     receipt_path = skill_dir / "acceptance_receipt.json"
     payload = json.loads(receipt_path.read_text(encoding="utf-8"))
     payload["subject_instructions_sha256"] = "0" * 64
-    payload["binding_hash"] = compute_playbook_acceptance_binding_hash(
-        task_id=payload["task_id"],
-        attempt_id=payload["attempt_id"],
-        reviewer_id=payload["reviewer_id"],
-        subject_playbook_id=payload["subject_playbook_id"],
-        subject_manifest_sha256=payload["subject_manifest_sha256"],
-        subject_instructions_sha256="0" * 64,
-        candidate_commit_sha=payload.get("candidate_commit_sha", ""),
-        verdict=payload["verdict"],
-    )
     raw_bytes = json.dumps(payload, indent=2).encode("utf-8")
     receipt_path.write_bytes(raw_bytes)
     prov = skill_dir / PROMOTION_RECORD_FILENAME
@@ -544,6 +577,24 @@ def test_canonical_independent_acceptance_artifact_passes_promotion(
     assert record["acceptance_decision"]["gate"] == "G10"
     assert record["acceptance_decision"]["decision"] == "PROMOTED_TO_ACTIVE"
     assert record["acceptance_decision"]["self_promotion"] is False
+
+    receipt = json.loads((skill_dir / "acceptance_receipt.json").read_text(encoding="utf-8"))
+    assert receipt["schema"] == "nexus.candidate_acceptance_result.v1"
+    assert receipt["decision"] == "ACCEPT"
+    assert receipt["independence_classification"] == AcceptanceAuthorityKind.INDEPENDENT_REVIEWER.value
+    assert receipt["request"]["schema"] == "nexus.candidate_acceptance_request.v1"
+    assert receipt["review"]["schema"] == "nexus.independent_candidate_review.v1"
+    request, review = _canonical_request_review(
+        task_id=receipt["task_id"],
+        attempt_id=receipt["attempt_id"],
+        reviewer_id=receipt["reviewer_id"],
+        implementer_id=receipt["request"]["implementer_id"],
+        candidate_commit_sha=receipt["candidate_commit_sha"],
+        candidate_tree_sha=receipt["request"]["candidate_tree_sha"],
+    )
+    canonical = reduce_candidate_acceptance(request, review)
+    assert canonical.decision.value == "ACCEPT"
+    assert receipt["binding_hash"] == canonical.binding_hash
 
 
 # =========================================================================
