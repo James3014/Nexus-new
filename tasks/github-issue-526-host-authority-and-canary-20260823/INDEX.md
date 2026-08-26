@@ -19,16 +19,14 @@ auto_chain: false
 | 7 | `TASK-526-G-AUTHORITY-JSON-IMPACT-MAP` | MERGED | `7f3dabcc4d7277b96a96b4cb02189f800080e5fc21dd5f1ae69826c11b67e577` | main `95fd37d7` |
 | 8 | `TASK-526-H-HERMETIC-ROLLBACK-OBSERVATION-TIME` | MERGED (PR #545) | `d2c2b1a1871f3049788ecca73966b73dd06a337198dcfb918f0d4876c5f07052` | merge `16acce53704969fc9093c1c7d90d7fcfa46e51e6c` |
 | 9 | `TASK-526-R1-DURABLE-DEPLOYMENT-RECONCILIATION` | ACTIVE (B semantic-identity clarification) | `b316a07965b070d1b76fa11fa20105d40bd2be1de325576e719a127bdc1d8609` | prior `c8882d47df5375091808a0d6e5340d6a80e9af6976ea4a8a4eed1d1983809487` superseded to bind rollback-unavailable/already-desired/uncertain replay edges; Candidate `3a97e2f493152e48b66eb2efe18125cbeb1d6f26` = REVISE |
-| 10 | `TASK-526-HOST-1` | BLOCKED_BY_R1 | `f4c581f0062c6b3d65c9ca8f7029a96caa76b2e35d95cc6bccae874c0945f514` | R1 source acceptance + fresh redesigned host receipt |
+| 10 | `TASK-526-HOST-1` | HISTORICAL_TARGET_SUPERSEDED | `f4c581f0062c6b3d65c9ca8f7029a96caa76b2e35d95cc6bccae874c0945f514` | frozen `7ad264e1...` target; must not be reused for TASK-002 rebind |
+| 11 | `TASK-526-I-TASK002-RECOVERY-ACTIVATION-REBIND` | READY_FOR_IMPLEMENTATION | `4c0826c7d8c0e8c9d3bfd66c208222f5add4f9d011aabbdf563464626d611657` | Owner authorization comment `5418927784`; source-only activation lineage delta |
 
 ## Execution frontier
 
-`TASK-526-R1-DURABLE-DEPLOYMENT-RECONCILIATION` is the active source-only
-frontier. It may produce one four-file source Candidate and must stop. The
-R1 Card/INDEX update is coordinator-owned setup and is outside the worker's
-four-file ceiling. `TASK-526-HOST-1` cannot mutate repository or host state
-until R1 is independently source-accepted/merged and a fresh redesigned host
-authority receipt is issued/read back.
+R1 source implementation has been independently accepted and merged; its durable acceptance evidence remains in `10-r1-source-acceptance-evidence.json`. The current source-only frontier is `TASK-526-I-TASK002-RECOVERY-ACTIVATION-REBIND`, created after Owner authorization comment `5418927784` changed the exact recovery target to `b2a9cca...` with predecessor `3d28fa7...`.
+
+The historical `TASK-526-HOST-1` is not rewritten: its frozen `7ad264e1...` target and old activation remain historical evidence and cannot authorize the TASK-002 rebind. Task I may produce one two-file activation-lineage Candidate and must stop. Only after independent source acceptance/merge may the coordinator separately issue a fresh redesigned recovery authority receipt for the new exact target and proceed to the separately authorized host phase.
 
 The Gateway-only local canary performs zero DevSpace effects. The future
 DevSpace/ChatGPT-facing action integration remains `SERIALIZE_AFTER:#398`.
