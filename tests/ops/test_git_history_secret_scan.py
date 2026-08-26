@@ -147,6 +147,28 @@ def test_obvious_sequential_provider_fixtures_are_nonblocking(tmp_path: Path) ->
     assert all(finding["classification"] == "OBVIOUS_FIXTURE" for finding in provider_findings)
 
 
+def test_placeholder_word_in_context_does_not_hide_secret(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    openai_token = "sk-" + "q7A4nB9cD2eF6gH8jK1mN5pR3sT0vW4xY7z"
+    generic_secret = "Q8v6K1mP9zT2yR4uW7nB3cD5fG0hJ2kL"
+    _commit(
+        repo,
+        "context must not suppress secrets",
+        {
+            "x.txt": (
+                f"OPENAI_API_KEY={openai_token}  # example\n"
+                f"client_secret={generic_secret}  # placeholder\n"
+            )
+        },
+    )
+    _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
+    receipt = scan_repository(repo)
+    blocking = [finding for finding in receipt["findings"] if finding["blocking"]]
+    assert receipt["status"] == "FAIL"
+    assert any(finding["detector"] == "openai_api_key" for finding in blocking)
+    assert any(finding["detector"] == "high_entropy_secret_assignment" for finding in blocking)
+
+
 def test_output_is_redacted_and_does_not_emit_secret(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
     secret = "sk-" + "q7A4nB9cD2eF6gH8jK1mN5pR3sT0vW4xY7z"
