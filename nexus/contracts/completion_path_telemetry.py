@@ -140,10 +140,19 @@ class MilestoneEvent(BaseTelemetryEvent):
     repository: StrictStr | None = None
     pr_number: StrictInt | None = None
     candidate_head: StrictStr | None = None
+    integration_head: StrictStr | None = None
+    integration_generation: StrictInt | None = Field(default=None, ge=1)
+    integration_base_sha: StrictStr | None = None
     merge_commit_sha: StrictStr | None = None
     current_main_sha: StrictStr | None = None
 
-    @field_validator("candidate_head", "merge_commit_sha", "current_main_sha")
+    @field_validator(
+        "candidate_head",
+        "integration_head",
+        "integration_base_sha",
+        "merge_commit_sha",
+        "current_main_sha",
+    )
     @classmethod
     def _validate_shas(cls, v: str | None, info: Any) -> str | None:
         if v is not None:
@@ -173,6 +182,9 @@ class MilestoneEvent(BaseTelemetryEvent):
 
     @model_validator(mode="after")
     def _validate_stage_bindings(self) -> MilestoneEvent:
+        int_fields = (self.integration_head, self.integration_generation, self.integration_base_sha)
+        if any(f is not None for f in int_fields) and not all(f is not None for f in int_fields):
+            raise ValueError("PARTIAL_INTEGRATION_SUBJECT_FORBIDDEN")
         order = MILESTONE_ORDER[self.milestone]
         if order >= MILESTONE_ORDER[MilestoneType.CANDIDATE_READY]:
             if not self.candidate_id:
@@ -254,6 +266,9 @@ class AffectedDimensionRebindEvent(BaseTelemetryEvent):
     candidate_id: StrictStr = Field(min_length=1)
     dimension: RebindDimension
     reason: StrictStr | None = None
+    integration_head: StrictStr | None = None
+    integration_generation: StrictInt | None = Field(default=None, ge=1)
+    integration_base_sha: StrictStr | None = None
 
     @field_validator("candidate_id")
     @classmethod
@@ -261,6 +276,20 @@ class AffectedDimensionRebindEvent(BaseTelemetryEvent):
         if not v.strip():
             raise ValueError("CANDIDATE_ID_REQUIRED")
         return v.strip()
+
+    @field_validator("integration_head", "integration_base_sha")
+    @classmethod
+    def _validate_shas(cls, v: str | None, info: Any) -> str | None:
+        if v is not None:
+            return _validate_git_sha(v, info.field_name)
+        return v
+
+    @model_validator(mode="after")
+    def _validate_rebind_bindings(self) -> AffectedDimensionRebindEvent:
+        int_fields = (self.integration_head, self.integration_generation, self.integration_base_sha)
+        if any(f is not None for f in int_fields) and not all(f is not None for f in int_fields):
+            raise ValueError("PARTIAL_INTEGRATION_SUBJECT_FORBIDDEN")
+        return self
 
 
 class ObservationWindowClosureWitness(BaseTelemetryEvent):
@@ -304,6 +333,9 @@ class CompletionPathTelemetryProjection(_TelemetryFrozen):
     repository: StrictStr | None = None
     pr_number: StrictInt | None = None
     candidate_head: StrictStr | None = None
+    integration_head: StrictStr | None = None
+    integration_generation: StrictInt | None = None
+    integration_base_sha: StrictStr | None = None
     merge_commit_sha: StrictStr | None = None
     current_main_sha: StrictStr | None = None
 
@@ -346,11 +378,24 @@ class CompletionPathTelemetryProjection(_TelemetryFrozen):
             raise ValueError("COMPLETION_PATH_TELEMETRY_SCHEMA_INVALID")
         return v
 
-    @field_validator("candidate_head", "merge_commit_sha", "current_main_sha")
+    @field_validator(
+        "candidate_head",
+        "integration_head",
+        "integration_base_sha",
+        "merge_commit_sha",
+        "current_main_sha",
+    )
     @classmethod
     def _validate_projection_shas(cls, v: str | None, info: Any) -> str | None:
         if v is not None:
             return _validate_git_sha(v, info.field_name)
+        return v
+
+    @field_validator("integration_generation")
+    @classmethod
+    def _validate_projection_generation(cls, v: int | None) -> int | None:
+        if v is not None and v < 1:
+            raise ValueError("INTEGRATION_GENERATION_INVALID")
         return v
 
     @field_validator("repository")
@@ -523,6 +568,9 @@ def project_completion_path_telemetry(
     repository: str | None = None
     pr_number: int | None = None
     candidate_head: str | None = None
+    integration_head: str | None = None
+    integration_generation: int | None = None
+    integration_base_sha: str | None = None
     merge_commit_sha: str | None = None
     current_main_sha: str | None = None
 
@@ -569,6 +617,39 @@ def project_completion_path_telemetry(
                 raise ValueError(
                     f"POST_WINDOW_EVENT: event timestamp {ev.timestamp} is after window closure {closure_instant}"
                 )
+
+        # Track integration fields if present
+        ev_int_gen = getattr(ev, "integration_generation", None)
+        ev_int_head = getattr(ev, "integration_head", None)
+        ev_int_base = getattr(ev, "integration_base_sha", None)
+
+        if ev_int_gen is not None:
+            if integration_generation is not None and ev_int_gen < integration_generation:
+                raise ValueError(
+                    f"INTEGRATION_GENERATION_REGRESSION: expected >= {integration_generation}, got {ev_int_gen}"
+                )
+            if integration_generation is not None and ev_int_gen > integration_generation:
+                if ev_int_head is None:
+                    raise ValueError("INTEGRATION_GENERATION_ADVANCE_REQUIRES_HEAD")
+
+        if ev_int_head is not None:
+            if integration_head is not None and ev_int_head != integration_head:
+                if ev_int_gen is None:
+                    raise ValueError("INTEGRATION_HEAD_CHANGED_WITHOUT_GENERATION_INCREMENT")
+                if integration_generation is not None and ev_int_gen <= integration_generation:
+                    raise ValueError("INTEGRATION_HEAD_CHANGED_WITHOUT_GENERATION_INCREMENT")
+            integration_head = ev_int_head
+
+        if ev_int_base is not None:
+            if integration_base_sha is not None and ev_int_base != integration_base_sha:
+                if ev_int_gen is None:
+                    raise ValueError("INTEGRATION_BASE_CHANGED_WITHOUT_GENERATION_INCREMENT")
+                if integration_generation is not None and ev_int_gen <= integration_generation:
+                    raise ValueError("INTEGRATION_BASE_CHANGED_WITHOUT_GENERATION_INCREMENT")
+            integration_base_sha = ev_int_base
+
+        if ev_int_gen is not None:
+            integration_generation = ev_int_gen
 
         # 4. Milestone event handling
         if isinstance(ev, MilestoneEvent):
@@ -752,6 +833,9 @@ def project_completion_path_telemetry(
         repository=repository,
         pr_number=pr_number,
         candidate_head=candidate_head,
+        integration_head=integration_head,
+        integration_generation=integration_generation,
+        integration_base_sha=integration_base_sha,
         merge_commit_sha=merge_commit_sha,
         current_main_sha=current_main_sha,
         ready_at=milestone_timestamps.get(MilestoneType.READY, NOT_OBSERVED),

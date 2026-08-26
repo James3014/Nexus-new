@@ -879,3 +879,337 @@ def test_projection_canonical_hash_stability() -> None:
     h2 = proj2.canonical_hash()
     assert h1 == h2
     assert len(h1) == 64
+
+
+# ==============================================================================
+# Hostile Matrix: Source Candidate vs Integration Subject Separations (#599 Gate A)
+# ==============================================================================
+
+SHA_INT_1 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+SHA_INT_2 = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+SHA_BASE_1 = "cccccccccccccccccccccccccccccccccccccccc"
+SHA_BASE_2 = "dddddddddddddddddddddddddddddddddddddddd"
+
+
+def test_candidate_head_stable_with_distinct_integration_head_and_generation():
+    events: list[TelemetryEvent] = [
+        MilestoneEvent(
+            issue_id="nexus-599",
+            timestamp=T0,
+            evidence_ref=REF_A,
+            milestone=MilestoneType.READY,
+        ),
+        MilestoneEvent(
+            issue_id="nexus-599",
+            timestamp=T1,
+            evidence_ref=REF_B,
+            milestone=MilestoneType.CANDIDATE_READY,
+            candidate_id="cand-1",
+        ),
+        MilestoneEvent(
+            issue_id="nexus-599",
+            timestamp=T2,
+            evidence_ref=REF_C,
+            milestone=MilestoneType.VERIFIED,
+            candidate_id="cand-1",
+        ),
+        # PR_READY with source candidate_head SHA_HEAD and distinct integration_head SHA_INT_1 at gen 1
+        MilestoneEvent(
+            issue_id="nexus-599",
+            timestamp=T3,
+            evidence_ref=REF_D,
+            milestone=MilestoneType.PR_READY,
+            candidate_id="cand-1",
+            repository="James3014/Nexus-new",
+            pr_number=599,
+            candidate_head=SHA_HEAD,
+            integration_head=SHA_INT_1,
+            integration_generation=1,
+            integration_base_sha=SHA_BASE_1,
+        ),
+        # Rebind due to test impact drift -> advances to generation 2 on SHA_INT_2
+        AffectedDimensionRebindEvent(
+            issue_id="nexus-599",
+            timestamp=datetime(2026, 8, 20, 10, 18, 0, tzinfo=timezone.utc),
+            evidence_ref=REF_FR,
+            candidate_id="cand-1",
+            dimension=RebindDimension.TEST_IMPACT,
+            integration_head=SHA_INT_2,
+            integration_generation=2,
+            integration_base_sha=SHA_BASE_2,
+        ),
+        # MERGED with source candidate_head unchanged, latest integration_head SHA_INT_2 at gen 2
+        MilestoneEvent(
+            issue_id="nexus-599",
+            timestamp=T4,
+            evidence_ref=REF_E,
+            milestone=MilestoneType.MERGED,
+            candidate_id="cand-1",
+            repository="James3014/Nexus-new",
+            pr_number=599,
+            candidate_head=SHA_HEAD,
+            integration_head=SHA_INT_2,
+            integration_generation=2,
+            integration_base_sha=SHA_BASE_2,
+            merge_commit_sha=SHA_MERGE,
+            current_main_sha=SHA_MAIN,
+        ),
+        MilestoneEvent(
+            issue_id="nexus-599",
+            timestamp=T5,
+            evidence_ref=REF_F,
+            milestone=MilestoneType.RECONCILED,
+            candidate_id="cand-1",
+            repository="James3014/Nexus-new",
+            pr_number=599,
+            candidate_head=SHA_HEAD,
+            integration_head=SHA_INT_2,
+            integration_generation=2,
+            integration_base_sha=SHA_BASE_2,
+            merge_commit_sha=SHA_MERGE,
+            current_main_sha=SHA_MAIN,
+        ),
+        MilestoneEvent(
+            issue_id="nexus-599",
+            timestamp=T6,
+            evidence_ref=REF_G,
+            milestone=MilestoneType.CLOSED,
+            candidate_id="cand-1",
+            repository="James3014/Nexus-new",
+            pr_number=599,
+            candidate_head=SHA_HEAD,
+            integration_head=SHA_INT_2,
+            integration_generation=2,
+            integration_base_sha=SHA_BASE_2,
+            merge_commit_sha=SHA_MERGE,
+            current_main_sha=SHA_MAIN,
+        ),
+        ObservationWindowClosureWitness(
+            issue_id="nexus-599",
+            timestamp=T7,
+            evidence_ref=REF_W,
+            closed_at=T7,
+        ),
+    ]
+    projection = project_completion_path_telemetry(events)
+    assert projection.candidate_head == SHA_HEAD
+    assert projection.integration_head == SHA_INT_2
+    assert projection.integration_generation == 2
+    assert projection.integration_base_sha == SHA_BASE_2
+    assert projection.compression_gate_evaluable is True
+    assert projection.compression_gate_pass is True
+
+
+def test_integration_generation_regression_fails_closed():
+    # Generation 2 followed by Generation 1 must fail
+    ev1 = MilestoneEvent(
+        issue_id="nexus-599",
+        timestamp=T3,
+        evidence_ref=REF_D,
+        milestone=MilestoneType.PR_READY,
+        candidate_id="cand-1",
+        repository="James3014/Nexus-new",
+        pr_number=599,
+        candidate_head=SHA_HEAD,
+        integration_head=SHA_INT_2,
+        integration_generation=2,
+        integration_base_sha=SHA_BASE_2,
+    )
+    ev2 = MilestoneEvent(
+        issue_id="nexus-599",
+        timestamp=T4,
+        evidence_ref=REF_E,
+        milestone=MilestoneType.MERGED,
+        candidate_id="cand-1",
+        repository="James3014/Nexus-new",
+        pr_number=599,
+        candidate_head=SHA_HEAD,
+        integration_head=SHA_INT_1,
+        integration_generation=1,  # Regression!
+        integration_base_sha=SHA_BASE_1,
+        merge_commit_sha=SHA_MERGE,
+        current_main_sha=SHA_MAIN,
+    )
+    with pytest.raises(ValueError, match="INTEGRATION_GENERATION_REGRESSION"):
+        project_completion_path_telemetry([ev1, ev2])
+
+
+def test_integration_head_changed_without_generation_increment_fails_closed():
+    ev1 = MilestoneEvent(
+        issue_id="nexus-599",
+        timestamp=T3,
+        evidence_ref=REF_D,
+        milestone=MilestoneType.PR_READY,
+        candidate_id="cand-1",
+        repository="James3014/Nexus-new",
+        pr_number=599,
+        candidate_head=SHA_HEAD,
+        integration_head=SHA_INT_1,
+        integration_generation=1,
+        integration_base_sha=SHA_BASE_1,
+    )
+    # Event 2 has changed integration head with same generation (1)
+    ev2 = MilestoneEvent(
+        issue_id="nexus-599",
+        timestamp=T4,
+        evidence_ref=REF_E,
+        milestone=MilestoneType.MERGED,
+        candidate_id="cand-1",
+        repository="James3014/Nexus-new",
+        pr_number=599,
+        candidate_head=SHA_HEAD,
+        integration_head=SHA_INT_2,  # Changed head
+        integration_generation=1,  # But generation didn't increment!
+        integration_base_sha=SHA_BASE_1,
+        merge_commit_sha=SHA_MERGE,
+        current_main_sha=SHA_MAIN,
+    )
+    with pytest.raises(ValueError, match="INTEGRATION_HEAD_CHANGED_WITHOUT_GENERATION_INCREMENT"):
+        project_completion_path_telemetry([ev1, ev2])
+
+
+def test_integration_base_changed_without_generation_increment_fails_closed():
+    ev1 = MilestoneEvent(
+        issue_id="nexus-599",
+        timestamp=T3,
+        evidence_ref=REF_D,
+        milestone=MilestoneType.PR_READY,
+        candidate_id="cand-1",
+        repository="James3014/Nexus-new",
+        pr_number=599,
+        candidate_head=SHA_HEAD,
+        integration_head=SHA_INT_1,
+        integration_generation=1,
+        integration_base_sha=SHA_BASE_1,
+    )
+    ev2 = MilestoneEvent(
+        issue_id="nexus-599",
+        timestamp=T4,
+        evidence_ref=REF_E,
+        milestone=MilestoneType.MERGED,
+        candidate_id="cand-1",
+        repository="James3014/Nexus-new",
+        pr_number=599,
+        candidate_head=SHA_HEAD,
+        integration_head=SHA_INT_1,
+        integration_generation=1,  # Same generation
+        integration_base_sha=SHA_BASE_2,  # Changed base
+        merge_commit_sha=SHA_MERGE,
+        current_main_sha=SHA_MAIN,
+    )
+    with pytest.raises(ValueError, match="INTEGRATION_BASE_CHANGED_WITHOUT_GENERATION_INCREMENT"):
+        project_completion_path_telemetry([ev1, ev2])
+
+
+def test_partial_integration_subject_tuples_fail_closed():
+    # Head without generation / base
+    with pytest.raises(ValidationError, match="PARTIAL_INTEGRATION_SUBJECT_FORBIDDEN"):
+        MilestoneEvent(
+            issue_id="nexus-599",
+            timestamp=T3,
+            evidence_ref=REF_D,
+            milestone=MilestoneType.PR_READY,
+            candidate_id="cand-1",
+            repository="James3014/Nexus-new",
+            pr_number=599,
+            candidate_head=SHA_HEAD,
+            integration_head=SHA_INT_1,
+        )
+
+    # Generation without head / base
+    with pytest.raises(ValidationError, match="PARTIAL_INTEGRATION_SUBJECT_FORBIDDEN"):
+        MilestoneEvent(
+            issue_id="nexus-599",
+            timestamp=T3,
+            evidence_ref=REF_D,
+            milestone=MilestoneType.PR_READY,
+            candidate_id="cand-1",
+            repository="James3014/Nexus-new",
+            pr_number=599,
+            candidate_head=SHA_HEAD,
+            integration_generation=1,
+        )
+
+    # Base without head / generation
+    with pytest.raises(ValidationError, match="PARTIAL_INTEGRATION_SUBJECT_FORBIDDEN"):
+        MilestoneEvent(
+            issue_id="nexus-599",
+            timestamp=T3,
+            evidence_ref=REF_D,
+            milestone=MilestoneType.PR_READY,
+            candidate_id="cand-1",
+            repository="James3014/Nexus-new",
+            pr_number=599,
+            candidate_head=SHA_HEAD,
+            integration_base_sha=SHA_BASE_1,
+        )
+
+    # Partial rebind event
+    with pytest.raises(ValidationError, match="PARTIAL_INTEGRATION_SUBJECT_FORBIDDEN"):
+        AffectedDimensionRebindEvent(
+            issue_id="nexus-599",
+            timestamp=datetime(2026, 8, 20, 10, 18, 0, tzinfo=timezone.utc),
+            evidence_ref=REF_FR,
+            candidate_id="cand-1",
+            dimension=RebindDimension.TEST_IMPACT,
+            integration_generation=2,
+        )
+
+
+def test_substituting_integration_head_for_source_candidate_head_fails_closed():
+    # Attempting to change candidate_head from SHA_HEAD to SHA_INT_1 across milestones fails closed
+    ev1 = MilestoneEvent(
+        issue_id="nexus-599",
+        timestamp=T3,
+        evidence_ref=REF_D,
+        milestone=MilestoneType.PR_READY,
+        candidate_id="cand-1",
+        repository="James3014/Nexus-new",
+        pr_number=599,
+        candidate_head=SHA_HEAD,
+    )
+    ev2 = MilestoneEvent(
+        issue_id="nexus-599",
+        timestamp=T4,
+        evidence_ref=REF_E,
+        milestone=MilestoneType.MERGED,
+        candidate_id="cand-1",
+        repository="James3014/Nexus-new",
+        pr_number=599,
+        candidate_head=SHA_INT_1,  # Substituted integration head as candidate_head!
+        merge_commit_sha=SHA_MERGE,
+        current_main_sha=SHA_MAIN,
+    )
+    with pytest.raises(ValueError, match="CANDIDATE_HEAD_CONFLICT"):
+        project_completion_path_telemetry([ev1, ev2])
+
+
+def test_malformed_integration_shas_fail_closed_in_telemetry():
+    with pytest.raises(ValidationError, match="MALFORMED_INTEGRATION_HEAD"):
+        MilestoneEvent(
+            issue_id="nexus-599",
+            timestamp=T3,
+            evidence_ref=REF_D,
+            milestone=MilestoneType.PR_READY,
+            candidate_id="cand-1",
+            repository="James3014/Nexus-new",
+            pr_number=599,
+            candidate_head=SHA_HEAD,
+            integration_head="not-a-sha",
+            integration_generation=1,
+            integration_base_sha=SHA_BASE_1,
+        )
+    with pytest.raises(ValidationError, match="MALFORMED_INTEGRATION_BASE_SHA"):
+        MilestoneEvent(
+            issue_id="nexus-599",
+            timestamp=T3,
+            evidence_ref=REF_D,
+            milestone=MilestoneType.PR_READY,
+            candidate_id="cand-1",
+            repository="James3014/Nexus-new",
+            pr_number=599,
+            candidate_head=SHA_HEAD,
+            integration_head=SHA_INT_1,
+            integration_generation=1,
+            integration_base_sha="short",
+        )
