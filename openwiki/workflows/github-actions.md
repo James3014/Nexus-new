@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: GitHub Actions Workflows & Operational Lanes
-description: Current inventory and trigger classification of all 12 GitHub Actions workflows, including Fast Start v2 shadow/invalidation/reconciliation lanes, exact-base Pytest impact selection, and trusted deletion-evidence bootstrap.
+description: Current inventory and trigger classification of all 13 GitHub Actions workflows, including Fast Start v2 shadow/invalidation/reconciliation lanes, exact-base Pytest impact selection, G2 published-history audit, and trusted deletion-evidence bootstrap.
 tags: [workflows, github-actions, ci-cd, operational-lanes]
 openwiki:
   roles: [architecture, operations, testing]
@@ -15,7 +15,7 @@ openwiki:
 
 # GitHub Actions Workflows & Operational Lanes
 
-The repository currently contains **all 12 GitHub Actions workflows** under `.github/workflows/`. Display names and trigger modes below are derived from the physical YAML at the synchronized GitHub revision; they are not inferred from filenames or historical workflow intent.
+The repository currently contains **all 13 GitHub Actions workflows** under `.github/workflows/`. Display names and trigger modes below are derived from the physical YAML at the synchronized GitHub revision; they are not inferred from filenames or historical workflow intent.
 
 ---
 
@@ -26,6 +26,7 @@ The repository currently contains **all 12 GitHub Actions workflows** under `.gi
 | `benchmark-ci.yml` | 📊 Nexus Benchmark CI | `schedule` (`0 18 * * *`), `workflow_dispatch` | Scheduled & Manual | Scheduled/manual benchmark evaluation |
 | `fast-start-v2-invalidator.yml` | Fast Start v2 Invalidator | `push` (`main`), `pull_request_target`, `issues`, `issue_comment`, `schedule` (`17 * * * *`), `workflow_dispatch` | Scheduled, Event-driven & Manual | Trusted-default-branch Fast Start wakeup hints plus fenced canonical advisory-cache reconciliation |
 | `fast-start-v2-shadow.yml` | Fast Start v2 Shadow | `pull_request`, `workflow_dispatch` | Event-driven & Manual | Read-only deterministic/live shadow proof for Fast Start v2 |
+| `git-history-secret-audit.yml` | Git History Secret Audit | `pull_request`, `workflow_dispatch` | Event-driven & Manual | G2 full published-ref secret-history evidence runner; least privilege and no merge/release authority |
 | `lint.yml` | Nexus Exact-Base Ruff CI | `push`, `pull_request`, `workflow_dispatch` | Event-driven & Manual | Exact-base Ruff/static lint lane |
 | `nexus-smoke.yml` | Nexus Smoke Benchmark | `push` (`main`, `master`), `schedule` (`0 2 * * *`), `workflow_dispatch` | Scheduled, Event-driven & Manual | Protected-branch/nightly smoke benchmark |
 | `openwiki-update.yml` | OpenWiki Manual Update | `workflow_dispatch` | Manual-Only | Pinned OpenWiki generation with containment checks and artifact upload |
@@ -192,6 +193,7 @@ Consult this page when changing workflow triggers, Fast Start invalidation/shado
 ### Exact Source Files
 - `.github/workflows/fast-start-v2-invalidator.yml`
 - `.github/workflows/fast-start-v2-shadow.yml`
+- `.github/workflows/git-history-secret-audit.yml`
 - `.github/workflows/openwiki-update.yml`
 - `.github/workflows/pytest.yml`
 - `.github/workflows/trusted-deletion-anchor.yml`
