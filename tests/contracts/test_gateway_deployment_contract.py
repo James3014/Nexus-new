@@ -803,14 +803,12 @@ def _r1_rebind_authority(
         for key, value in receipt.source_set.__dict__.items()
         if key != "source_set_sha256"
     }
-    source_values.update(
-        {
-            "desired_commit": desired_commit,
-            "desired_tree": desired_tree,
-            "predecessor_commit": predecessor_commit,
-            "predecessor_tree": predecessor_tree,
-        }
-    )
+    source_values.update({
+        "desired_commit": desired_commit,
+        "desired_tree": desired_tree,
+        "predecessor_commit": predecessor_commit,
+        "predecessor_tree": predecessor_tree,
+    })
     source_set = RecoverySourceSet(
         **source_values,
         source_set_sha256=canonical_hash(source_values),
@@ -837,9 +835,9 @@ def _r1_rebind_authority(
             values["owner_activation_sha256"],
             values["source_thread"],
         ) = owner_activation
-    values["receipt_hash"] = canonical_hash(
-        {key: value for key, value in values.items() if key != "receipt_hash"}
-    )
+    values["receipt_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key != "receipt_hash"
+    })
     return RecoveryAuthorityReceipt(**values)
 
 
@@ -905,9 +903,7 @@ def test_r1_historical_activation_cannot_authorize_task002_target_after_full_reh
         ("predecessor_commit", "f" * 40),
     ],
 )
-def test_r1_task002_owner_activation_rejects_rehashed_target_substitution(
-    field, replacement
-):
+def test_r1_task002_owner_activation_rejects_rehashed_target_substitution(field, replacement):
     from nexus.contracts.gateway_deployment import validate_recovery_authority
 
     receipt = _r1_task002_authority_fixture()
