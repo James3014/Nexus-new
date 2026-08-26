@@ -230,28 +230,89 @@ def _reachable_commits(repo: Path, refs: Iterable[tuple[str, str]]) -> list[str]
     return sorted(set(commits))
 
 
+def _historical_blob_paths(repo: Path, refs: Iterable[tuple[str, str]]) -> dict[str, set[str]]:
+    tips = "".join(f"{oid}\n" for _, oid in refs).encode("ascii")
+    proc = subprocess.run(
+        [
+            "git",
+            "-C",
+            str(repo),
+            "log",
+            "--format=",
+            "--raw",
+            "--root",
+            "-m",
+            "-r",
+            "--no-renames",
+            "--no-abbrev",
+            "-z",
+            "--stdin",
+        ],
+        input=tips,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise ScanError(f"git log historical paths failed with exit {proc.returncode}")
+
+    fields = [field for field in proc.stdout.split(b"\x00") if field]
+    if len(fields) % 2:
+        raise ScanError("git log historical path stream is malformed")
+
+    object_paths: dict[str, set[str]] = {}
+    for index in range(0, len(fields), 2):
+        header = fields[index].lstrip(b"\n")
+        path_bytes = fields[index + 1]
+        parts = header.split()
+        if len(parts) != 5 or not parts[0].startswith(b":"):
+            raise ScanError("git log historical path record is malformed")
+        new_mode = parts[1]
+        new_oid_bytes = parts[3]
+        status = parts[4]
+        if status.startswith(b"D") or not new_oid_bytes.strip(b"0"):
+            continue
+        if new_mode == b"160000":
+            continue
+        if new_mode not in {b"100644", b"100755", b"120000"}:
+            raise ScanError("git log historical path record has an unsupported object mode")
+        try:
+            new_oid = new_oid_bytes.decode("ascii", "strict")
+        except UnicodeDecodeError as exc:
+            raise ScanError("git log historical path object id is non-ASCII") from exc
+        if not re.fullmatch(r"[0-9a-f]{40,64}", new_oid):
+            raise ScanError("git log historical path object id is malformed")
+        path = path_bytes.decode("utf-8", "surrogateescape")
+        if not path:
+            raise ScanError("git log historical path is empty")
+        object_paths.setdefault(new_oid, set()).add(path)
+    return object_paths
+
+
 def _reachable_blob_paths(
     repo: Path, refs: Iterable[tuple[str, str]]
 ) -> tuple[dict[str, set[str]], int]:
+    refs = list(refs)
     tips = "".join(f"{oid}\n" for _, oid in refs)
     lines = _run(repo, "rev-list", "--objects", "--stdin", input_text=tips).splitlines()
-    object_paths: dict[str, set[str]] = {}
     object_ids: list[str] = []
     for line in lines:
         if not line:
             continue
-        oid, sep, path = line.partition(" ")
+        oid = line.partition(" ")[0]
         if not re.fullmatch(r"[0-9a-f]{40,64}", oid):
             raise ScanError("rev-list --objects returned malformed object id")
         object_ids.append(oid)
-        if sep and path:
-            object_paths.setdefault(oid, set()).add(path)
+
+    reachable_objects = set(object_ids)
+    historical_paths = _historical_blob_paths(repo, refs)
+    if any(oid not in reachable_objects for oid in historical_paths):
+        raise ScanError("historical path references an object outside the reachable object set")
 
     check = _run(
         repo,
         "cat-file",
         "--batch-check=%(objectname) %(objecttype) %(objectsize)",
-        input_text="".join(f"{oid}\n" for oid in sorted(set(object_ids))),
+        input_text="".join(f"{oid}\n" for oid in sorted(reachable_objects)),
     )
     blobs: dict[str, set[str]] = {}
     for line in check.splitlines():
@@ -266,8 +327,8 @@ def _reachable_blob_paths(
                 raise ScanError("cat-file returned invalid object size") from exc
             if size > 32 * 1024 * 1024:
                 raise ScanError(f"blob {oid} exceeds 32 MiB scan ceiling")
-            blobs[oid] = object_paths.get(oid, set())
-    return blobs, len(set(object_ids))
+            blobs[oid] = historical_paths.get(oid, set())
+    return blobs, len(reachable_objects)
 
 
 def _commit_messages(repo: Path, refs: Iterable[tuple[str, str]]) -> Iterable[tuple[str, bytes]]:
