@@ -157,6 +157,7 @@ class TestSoftLane:
         """Soft lane: version bump → ALLOW."""
         result = check_lane_gate("P-BUDGET-01", "version_bump")
         assert result["allowed"] is True
+        assert result["lane"] == "soft"
 
     def test_soft_lane_with_valid_override_allowed(self):
         """Soft lane: modify with valid override receipt → ALLOW."""
