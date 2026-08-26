@@ -220,15 +220,15 @@ class NexusSelfHostedMCPServer:
             },
             {
                 "name": "nexus_self_hosted_push_competition",
-                "description": "Explicitly push an integrated winner only to an allowlisted remote and nexus/integration branch.",
+                "description": "Push an integrated winner only after server-side durable Owner authorization to an allowlisted remote and nexus/integration branch.",
                 "inputSchema": {
                     "type": "object",
-                    "required": ["competition_id", "remote", "authorized"],
+                    "required": ["competition_id", "remote"],
                     "properties": {
                         "competition_id": {"type": "string"},
                         "remote": {"type": "string"},
-                        "authorized": {"type": "boolean"},
                     },
+                    "additionalProperties": False,
                 },
             },
             {
@@ -436,7 +436,6 @@ class NexusSelfHostedMCPServer:
             return self.competition.push_winner(
                 str(arguments["competition_id"]),
                 remote=str(arguments["remote"]),
-                authorized=bool(arguments["authorized"]),
             )
         task_id = str(arguments.get("task_id", ""))
         if name == "nexus_self_hosted_get_task":

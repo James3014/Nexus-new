@@ -19,8 +19,6 @@ from nexus.orchestrator.governed_push import GovernedPushManager
 
 TERMINAL_TASK_STATUSES = frozenset({"CANDIDATE_COMMITTED", "FINAL_BLOCK"})
 _SAFE_ID = re.compile(r"[^A-Za-z0-9._-]+")
-
-
 @dataclass(frozen=True)
 class CompetitionCandidate:
     candidate_id: str
@@ -187,7 +185,6 @@ class WorkerCompetitionCoordinator:
         competition_id: str,
         *,
         remote: str,
-        authorized: bool,
     ) -> dict[str, Any]:
         state = self.get(competition_id)
         if state is None:
@@ -205,14 +202,17 @@ class WorkerCompetitionCoordinator:
             for item in os.getenv("NEXUS_GOVERNED_PUSH_REMOTES", "").split(",")
             if item.strip()
         )
+        branch = str(integration.get("integration_branch", ""))
+        expected_sha = str(integration.get("integration_commit_sha", ""))
         receipt = GovernedPushManager(
             repo_root=str(contract.get("controller_repo_root", "")),
             allowed_remotes=configured_remotes,
         ).push(
+            competition_id=competition_id,
+            winner_task_id=winner_task_id,
             remote=remote,
-            branch=str(integration.get("integration_branch", "")),
-            expected_sha=str(integration.get("integration_commit_sha", "")),
-            authorized=authorized,
+            branch=branch,
+            expected_sha=expected_sha,
             integration_receipt=integration,
         )
         state["status"] = "PUSHED"
@@ -225,6 +225,14 @@ class WorkerCompetitionCoordinator:
             "push_performed": receipt.push_performed,
             "force_push": receipt.force_push,
             "authorized": receipt.authorized,
+            "authorization_hash": receipt.authorization_hash,
+            "authorization_effect_hash": receipt.authorization_effect_hash,
+            "authorization_grant_receipt_hash": receipt.authorization_grant_receipt_hash,
+            "push_attempted": receipt.push_attempted,
+            "push_acknowledged": receipt.push_acknowledged,
+            "effect_present": receipt.effect_present,
+            "preexisting_effect": receipt.preexisting_effect,
+            "reconciled_after_uncertain_ack": receipt.reconciled_after_uncertain_ack,
         }
         return self._write(state)
 

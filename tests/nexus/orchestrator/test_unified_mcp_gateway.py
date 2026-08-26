@@ -3,6 +3,7 @@ import io
 import json
 import subprocess
 import sys
+import tempfile
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -20,6 +21,7 @@ from nexus.engine.canonical_task_seam import (  # noqa: E402
     VerifiedTaskCardIdentity,
     build_canonical_planner_admission,
 )
+from nexus.orchestrator.lifecycle_guards import LifecycleGuardError  # noqa: E402
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService  # noqa: E402
 from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     FULL_TOOL_SCHEMA_HASH,
@@ -169,6 +171,23 @@ class FakeService(SelfHostedTaskService):
 
     def build_contract(self, request):
         return super().build_contract(request)
+
+
+def _allow_owner_effect_authority(monkeypatch):
+    def allow(action, effect):
+        return {
+            "schema": "nexus.standing_grant_effect_authorization.v1",
+            "action": action.value,
+            "effect": dict(effect),
+            "mutation_authorized": True,
+            "authorization_hash": "f" * 64,
+        }
+
+    monkeypatch.setattr(
+        UnifiedMCPGateway,
+        "_require_owner_effect_authority",
+        staticmethod(allow),
+    )
 
 
 def _ready_preflight(**overrides):
@@ -1452,7 +1471,8 @@ def test_minimal_direct_finish_accepts_public_base_sha_alias():
     assert service.completed[0]["controller_revision"] == base
 
 
-def test_public_recovery_surface_has_one_actionable_contract():
+def test_public_recovery_surface_has_one_actionable_contract(monkeypatch):
+    _allow_owner_effect_authority(monkeypatch)
     service = FakeService()
     gateway = UnifiedMCPGateway(service=service)
     base40 = "a" * 40
@@ -1787,6 +1807,8 @@ def test_gateway_provider_executable_uses_shared_registered_resolver(monkeypatch
 def test_task_card_create_is_owner_confirmed_non_overwriting_and_hashed(monkeypatch, tmp_path):
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
 
+    _allow_owner_effect_authority(monkeypatch)
+
     monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
     monkeypatch.setattr(gateway_module.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="f" * 40, stderr=""))
     gateway = UnifiedMCPGateway(service=FakeService())
@@ -1814,6 +1836,8 @@ def test_task_card_create_is_owner_confirmed_non_overwriting_and_hashed(monkeypa
 def test_task_card_create_hash_failure_leaves_no_campaign(monkeypatch, tmp_path):
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
 
+    _allow_owner_effect_authority(monkeypatch)
+
     monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
     monkeypatch.setattr(gateway_module.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout="", stderr="hash failed"))
     gateway = UnifiedMCPGateway(service=FakeService())
@@ -1837,6 +1861,8 @@ def _init_detached_git_repo(root: Path) -> str:
 
 def test_task_card_commit_closes_pending_card_bootstrap_and_leaves_controller_clean(monkeypatch, tmp_path):
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    _allow_owner_effect_authority(monkeypatch)
 
     head = _init_detached_git_repo(tmp_path)
     monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
@@ -1864,6 +1890,8 @@ def test_task_card_commit_closes_pending_card_bootstrap_and_leaves_controller_cl
 def test_task_card_commit_fails_closed_on_unrelated_dirty_state(monkeypatch, tmp_path):
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
 
+    _allow_owner_effect_authority(monkeypatch)
+
     head = _init_detached_git_repo(tmp_path)
     monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
     gateway = UnifiedMCPGateway(service=FakeService())
@@ -1881,6 +1909,8 @@ def test_task_card_commit_fails_closed_on_unrelated_dirty_state(monkeypatch, tmp
 
 def test_task_card_commit_rejects_index_content_drift(monkeypatch, tmp_path):
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    _allow_owner_effect_authority(monkeypatch)
 
     head = _init_detached_git_repo(tmp_path)
     monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
@@ -2474,3 +2504,266 @@ def test_unrelated_providers_keep_existing_command_contracts(monkeypatch):
     assert cline[cline.index("--model") + 1] == "cline-pass/glm-5.2"
     with pytest.raises(GatewayInputError):
         gateway._assist_command(executable="/usr/local/bin/unknown", provider="unknown", model="any", prompt="probe")
+
+
+def test_task_card_boolean_confirmation_without_durable_authority_is_zero_mutation(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
+    monkeypatch.setattr(gateway_module, "_git", lambda *args, **kwargs: "a" * 40)
+
+    def deny(**_kwargs):
+        raise gateway_module.StandingGrantReceiptError("RECEIPT_MISSING")
+
+    monkeypatch.setattr(gateway_module, "authorize_durable_standing_grant_effect", deny)
+    gateway = UnifiedMCPGateway(service=FakeService())
+    response = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 801,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_task_card_create",
+            "arguments": {
+                "owner_confirmation": True,
+                "campaign_id": "authority-missing",
+                "task_id": "first-card",
+                "objective": "Must not create without durable authority.",
+                "allowed_files": ["README.md"],
+                "verifier_commands": ["git diff --check"],
+            },
+        },
+    })
+
+    payload = response["result"]["structuredContent"]
+    assert payload["schema"] == "nexus.mcp_gateway_error.v1"
+    assert "OWNER_AUTHORITY_REQUIRED" in payload["error"]
+    assert not (tmp_path / "tasks").exists()
+
+
+def test_task_card_create_authority_does_not_authorize_commit(monkeypatch, tmp_path):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    head = _init_detached_git_repo(tmp_path)
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
+    actions = []
+
+    def one_action_only(action, effect):
+        actions.append(action.value)
+        if action.value != "TASK_CARD_CREATE":
+            raise GatewayInputError("OWNER_AUTHORITY_REQUIRED:OUT_OF_SCOPE")
+        return {"action": action.value, "effect": dict(effect), "mutation_authorized": True}
+
+    monkeypatch.setattr(
+        UnifiedMCPGateway,
+        "_require_owner_effect_authority",
+        staticmethod(one_action_only),
+    )
+    gateway = UnifiedMCPGateway(service=FakeService())
+    created = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 802,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_task_card_create",
+            "arguments": {
+                "owner_confirmation": True,
+                "campaign_id": "create-only",
+                "task_id": "first-card",
+                "objective": "Create authority cannot commit.",
+                "allowed_files": ["README.md"],
+                "verifier_commands": ["git diff --check"],
+            },
+        },
+    })["result"]["structuredContent"]
+    before = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    response = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 803,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_task_card_commit",
+            "arguments": {
+                "owner_confirmation": True,
+                "campaign_id": "create-only",
+                "task_id": "first-card",
+                "expected_head": head,
+                "card_hash": created["card_hash"],
+                "index_hash": created["index_hash"],
+            },
+        },
+    })
+
+    assert response["result"]["structuredContent"]["schema"] == "nexus.mcp_gateway_error.v1"
+    after = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert after == before == head
+    assert actions == ["TASK_CARD_CREATE", "TASK_CARD_COMMIT"]
+
+
+def test_candidate_disposition_missing_owner_authority_is_zero_mutation(monkeypatch):
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    dispose_calls = 0
+
+    def deny(_action, _effect):
+        raise GatewayInputError("OWNER_AUTHORITY_REQUIRED:OUT_OF_SCOPE")
+
+    def dispose_candidate(*_args, **_kwargs):
+        nonlocal dispose_calls
+        dispose_calls += 1
+        raise AssertionError("candidate disposal must not run without Owner authority")
+
+    monkeypatch.setattr(
+        UnifiedMCPGateway,
+        "_require_owner_effect_authority",
+        staticmethod(deny),
+    )
+    monkeypatch.setattr(service, "dispose_candidate", dispose_candidate)
+
+    with pytest.raises(GatewayInputError, match="OWNER_AUTHORITY_REQUIRED"):
+        gateway._candidate_dispose({"task_id": "candidate-reject", "disposition": "REJECTED"})
+
+    assert dispose_calls == 0
+
+
+def test_candidate_disposition_requires_distinct_durable_owner_action(monkeypatch):
+    service = FakeService()
+    gateway = UnifiedMCPGateway(service=service)
+    observed = []
+
+    def allow(action, effect):
+        observed.append((action.value, dict(effect)))
+        return {"action": action.value, "effect": dict(effect), "mutation_authorized": True}
+
+    monkeypatch.setattr(
+        UnifiedMCPGateway,
+        "_require_owner_effect_authority",
+        staticmethod(allow),
+    )
+    rejected = gateway._candidate_dispose({"task_id": "candidate-reject", "disposition": "REJECTED"})
+    superseded = gateway._candidate_dispose({
+        "task_id": "candidate-supersede",
+        "disposition": "SUPERSEDED",
+        "superseded_by": "candidate-successor",
+    })
+
+    assert rejected["owner_authority"]["action"] == "CANDIDATE_REJECT"
+    assert superseded["owner_authority"]["action"] == "CANDIDATE_SUPERSEDE"
+    assert observed[1][1]["superseded_by"] == "candidate-successor"
+
+
+def _failed_assist_for_retry(monkeypatch, tmp_path, task_id):
+    popen_calls = []
+
+    class FakePopen:
+        pid = 54001
+        returncode = None
+
+        def __init__(self, command, **_kwargs):
+            self.command = list(command)
+            popen_calls.append(list(command))
+
+        def poll(self):
+            return self.returncode
+
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    service = FakeService()
+    service.state_dir = tmp_path / task_id
+    gateway = UnifiedMCPGateway(service=service)
+    response = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_assist_submit",
+            "arguments": {
+                "task_id": task_id,
+                "what": "Fix README",
+                "why": "Retry authority regression",
+                "allowed_files": ["README.md"],
+            },
+        },
+    })
+    assert response["result"]["structuredContent"]["status"] == "RUNNING"
+    job = gateway._assist_read(task_id)
+    job["status"] = "FAILED"
+    job["exit_code"] = 1
+    gateway._assist_write(job)
+    return gateway, popen_calls
+
+
+def test_assisted_retry_revalidates_request_hash_before_provider_restart(monkeypatch, tmp_path):
+    gateway, popen_calls = _failed_assist_for_retry(monkeypatch, tmp_path, "retry-request-hash")
+    job = gateway._assist_read("retry-request-hash")
+    job["action"]["request_hash"] = "0" * 64
+    gateway._assist_write(job)
+
+    with pytest.raises(LifecycleGuardError, match="REQUEST_HASH_MISMATCH"):
+        gateway._assist_retry("retry-request-hash")
+
+    assert len(popen_calls) == 1
+
+
+def test_assisted_retry_revalidates_manifest_and_head_before_provider_restart(monkeypatch, tmp_path):
+    gateway, popen_calls = _failed_assist_for_retry(monkeypatch, tmp_path, "retry-manifest")
+    job = gateway._assist_read("retry-manifest")
+    job["action"]["tool_manifest_hash"] = "c" * 64
+    gateway._assist_write(job)
+    with pytest.raises(LifecycleGuardError, match="TOOL_MANIFEST_NAME_DRIFT"):
+        gateway._assist_retry("retry-manifest")
+    assert len(popen_calls) == 1
+
+    gateway2, popen_calls2 = _failed_assist_for_retry(monkeypatch, tmp_path, "retry-head")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "b" * 40)
+    with pytest.raises(LifecycleGuardError, match="EXPECTED_HEAD_MISMATCH"):
+        gateway2._assist_retry("retry-head")
+    assert len(popen_calls2) == 1
+
+
+def test_assisted_retry_rejects_scope_and_command_substitution_before_provider_restart(monkeypatch, tmp_path):
+    gateway, popen_calls = _failed_assist_for_retry(monkeypatch, tmp_path, "retry-scope")
+    job = gateway._assist_read("retry-scope")
+    job["bound_action_request"]["allowed_files"] = ["README.md", "OTHER.md"]
+    gateway._assist_write(job)
+    with pytest.raises(LifecycleGuardError, match="REQUEST_HASH_MISMATCH|ALLOWED_PATH_MISMATCH"):
+        gateway._assist_retry("retry-scope")
+    assert len(popen_calls) == 1
+
+    gateway2, popen_calls2 = _failed_assist_for_retry(monkeypatch, tmp_path, "retry-command")
+    job2 = gateway2._assist_read("retry-command")
+    job2["command"] = ["/bin/echo", "substituted"]
+    gateway2._assist_write(job2)
+    with pytest.raises(LifecycleGuardError, match="COMMAND_SUBSTITUTION_DETECTED"):
+        gateway2._assist_retry("retry-command")
+    assert len(popen_calls2) == 1
+
+
+def test_assisted_retry_valid_same_task_uses_fresh_attempt_action_and_idempotency(monkeypatch, tmp_path):
+    gateway, popen_calls = _failed_assist_for_retry(monkeypatch, tmp_path, "retry-valid")
+    first = gateway._assist_read("retry-valid")
+
+    result = gateway._assist_retry("retry-valid")
+    second = gateway._assist_read("retry-valid")
+
+    assert result["status"] == "RUNNING"
+    assert len(popen_calls) == 2
+    assert second["task_id"] == first["task_id"]
+    assert second["attempt_id"] != first["attempt_id"]
+    assert second["action_id"] != first["action_id"]
+    assert second["idempotency_key"] != first["idempotency_key"]
+    assert second["action"]["action_type"] == "TASK_RETRY"
+    assert second["bound_action_request"] == first["bound_action_request"]
+    assert second["attempt_history"][0]["attempt_id"] == first["attempt_id"]

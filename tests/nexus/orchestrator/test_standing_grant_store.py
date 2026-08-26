@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+import nexus.orchestrator.standing_grant_store as standing_grant_store
 from nexus.contracts.autonomy_goal import (
     AutonomyActionClass,
     RepositoryIdentity,
@@ -18,6 +19,7 @@ from nexus.orchestrator.standing_grant_store import (
     DEFAULT_RECEIPT_PATH,
     StandingGrantReceipt,
     StandingGrantReceiptError,
+    _authorize_durable_standing_grant_effect_at,
     _check_dir,
     _load_receipt_at,
     _write_standing_grant_receipt_at,
@@ -67,8 +69,10 @@ def test_red_default_receipt_path_is_canonical_machine_local(tmp_path):
     assert path.name == "standing-grant.json"
 
 
-def test_default_receipt_is_absent_without_operator_issuance(tmp_path):
-    assert not Path(DEFAULT_RECEIPT_PATH).exists()
+def test_default_receipt_is_absent_without_operator_issuance(tmp_path, monkeypatch):
+    missing = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(standing_grant_store, "DEFAULT_RECEIPT_PATH", missing)
+    assert not missing.exists()
     outcome = load_standing_grant_receipt()
     assert outcome is None
 
@@ -265,7 +269,7 @@ def test_two_requests_and_fresh_reader_reuse_same_grant_without_mutation(tmp_pat
     assert path.read_text(encoding="utf-8") == before
 
 
-def test_expired_or_revoked_receipt_fails_closed_without_mutation(tmp_path):
+def test_expired_or_revoked_receipt_fails_closed_without_mutation(tmp_path, monkeypatch):
     _receipt, expired_path = _make_receipt(
         tmp_path, grant_id="expired", expires_at=(NOW - timedelta(minutes=1))
     )
@@ -279,7 +283,9 @@ def test_expired_or_revoked_receipt_fails_closed_without_mutation(tmp_path):
     )
     with pytest.raises(StandingGrantReceiptError, match="REVOKED"):
         _load_receipt_at(revoked_path)
-    # Evaluation over a missing/default path mutates nothing and yields None.
+    # Evaluation over a missing canonical path mutates nothing and yields None.
+    missing = tmp_path / "missing-authority" / "standing-grant.json"
+    monkeypatch.setattr(standing_grant_store, "DEFAULT_RECEIPT_PATH", missing)
     assert load_standing_grant_receipt(now=NOW) is None
 
 
@@ -402,6 +408,75 @@ def test_interprocess_cas_race_allows_exactly_one_successor(tmp_path):
     )
     winner = _load_receipt_at(path)
     assert winner.grant_id in {"race-a", "race-b"}
+
+
+def test_effect_authorization_binds_exact_action_and_effect_without_mutating_grant(tmp_path):
+    _receipt, path = _make_receipt(
+        tmp_path,
+        grant_id="effect-authority",
+        allowed_actions=(AutonomyActionClass.TASK_CARD_CREATE,),
+    )
+    before = path.read_bytes()
+    effect = {
+        "campaign_id": "g3-security",
+        "task_id": "authority-closure",
+        "expected_head": "a" * 40,
+        "allowed_files": ["nexus/orchestrator/unified_mcp_gateway.py"],
+    }
+
+    authority = _authorize_durable_standing_grant_effect_at(
+        path,
+        repository=_repository(),
+        action=AutonomyActionClass.TASK_CARD_CREATE,
+        effect=effect,
+        requested_at=NOW,
+    )
+
+    assert authority["mutation_authorized"] is True
+    assert authority["action"] == "TASK_CARD_CREATE"
+    assert authority["effect"] == effect
+    assert len(authority["effect_hash"]) == 64
+    assert len(authority["authorization_hash"]) == 64
+    assert authority["grant_receipt_hash"]
+    assert path.read_bytes() == before
+
+
+def test_effect_authorization_fails_closed_when_action_is_out_of_scope(tmp_path):
+    _receipt, path = _make_receipt(
+        tmp_path,
+        grant_id="effect-out-of-scope",
+        allowed_actions=(AutonomyActionClass.CANDIDATE_REJECT,),
+    )
+
+    with pytest.raises(StandingGrantReceiptError, match="AUTHORIZATION_OUT_OF_SCOPE"):
+        _authorize_durable_standing_grant_effect_at(
+            path,
+            repository=_repository(),
+            action=AutonomyActionClass.CANDIDATE_SUPERSEDE,
+            effect={"task_id": "candidate-1", "superseded_by": "candidate-2"},
+            requested_at=NOW,
+        )
+
+
+def test_effect_authorization_rejects_repository_substitution(tmp_path):
+    _receipt, path = _make_receipt(
+        tmp_path,
+        grant_id="effect-repository",
+        allowed_actions=(AutonomyActionClass.REPOSITORY_PUSH,),
+    )
+    wrong = RepositoryIdentity(
+        repository_id="James3014/Other",
+        canonical_remote="https://github.com/James3014/Other.git",
+    )
+
+    with pytest.raises(StandingGrantReceiptError, match="AUTHORIZATION_REPOSITORY_MISMATCH"):
+        _authorize_durable_standing_grant_effect_at(
+            path,
+            repository=wrong,
+            action=AutonomyActionClass.REPOSITORY_PUSH,
+            effect={"remote": "origin", "branch": "nexus/integration/main", "expected_sha": "b" * 40},
+            requested_at=NOW,
+        )
 
 
 def test_exact_mode_and_size(tmp_path):

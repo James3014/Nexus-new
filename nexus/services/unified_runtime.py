@@ -836,11 +836,41 @@ def _validate_workforce_route(route: Mapping[str, Any]) -> None:
             raise ValueError("workforce_rebind_reason_required")
 
 
-def _workforce_admission_required(request: UnifiedRuntimeRequest) -> bool:
+def _workforce_admission_required(
+    request: UnifiedRuntimeRequest,
+    *,
+    physical_local: bool = False,
+    physical_online: bool = False,
+) -> bool:
+    """Return whether fresh Workforce Admission is mandatory for this run.
+
+    Caller route flags may request admission, but they may never disable it for
+    a physical Local model or Online provider edge. Deterministic/injected
+    non-physical test transports remain outside this mandatory physical gate.
+    """
     return (
         request.canonical_planning_bundle is not None
         or request.route.get("workforce_admission_enabled") is True
+        or physical_local
+        or physical_online
     )
+
+
+def _physical_local_service(service: Any) -> bool:
+    if service is None:
+        return False
+    marker = getattr(service, "physical_model_transport", None)
+    if type(marker) is bool:
+        return marker
+    service_type = type(service)
+    return (
+        service_type.__module__ == "nexus.services.local_assist_service"
+        and service_type.__name__ == "LocalAssistService"
+    )
+
+
+def _physical_online_invoker(invoker: Any) -> bool:
+    return bool(invoker is not None and getattr(invoker, "physical_provider_transport", False) is True)
 
 
 def _build_workforce_admission_lineage(
@@ -2121,6 +2151,7 @@ def build_subprocess_online_invoker(
 
     invoke.provider = spec.provider  # type: ignore[attr-defined]
     invoke.online_invoker_provider = spec.provider  # type: ignore[attr-defined]
+    invoke.physical_provider_transport = runner is subprocess.run  # type: ignore[attr-defined]
     return invoke
 
 
@@ -2289,6 +2320,7 @@ def build_registered_online_invoker(
 
     invoke.provider = key  # type: ignore[attr-defined]
     invoke.online_invoker_provider = key  # type: ignore[attr-defined]
+    invoke.physical_provider_transport = True  # type: ignore[attr-defined]
     return invoke
 
 
@@ -2799,9 +2831,10 @@ class UnifiedRuntime:
 
         if "workforce_admission" in previous_receipt:
             prior_canonical = previous_receipt.get("canonical_execution")
-            if not _workforce_admission_required(request) and not isinstance(
-                prior_canonical, Mapping
-            ):
+            if not _workforce_admission_required(
+                request,
+                physical_online=_physical_online_invoker(online_invoker),
+            ) and not isinstance(prior_canonical, Mapping):
                 raise ValueError("replan_workforce_admission_required")
 
         recomputed = build_execution_replan_request(
@@ -3019,10 +3052,24 @@ class UnifiedRuntime:
 
         stages: dict[str, dict[str, Any]] = {"planner": planner_stage}
 
+        physical_local_required = bool(
+            request.local_enabled
+            and "local_model_executor" in set(plan.selected_capabilities)
+            and _physical_local_service(self._local_service)
+        )
+        physical_online_required = bool(
+            request.online_enabled and _physical_online_invoker(online_invoker)
+        )
+        workforce_admission_required = _workforce_admission_required(
+            request,
+            physical_local=physical_local_required,
+            physical_online=physical_online_required,
+        )
+
         workforce_admission_payload: dict[str, Any] | None = None
         gateway_invocation_authority: dict[str, Any] | None = None
         local_model_invocation_authority: dict[str, Any] | None = None
-        if _workforce_admission_required(request):
+        if workforce_admission_required:
             signal_snapshot = plan_payload.get("signal_snapshot")
             raw_workforce_demands = (
                 signal_snapshot.get("workforce_demands")
@@ -3594,7 +3641,11 @@ class UnifiedRuntime:
             stub_invoked=list(evidence_bundle["summary"]["stub_invoked"]),
         )
 
-        local_stage = self._run_local(request, plan_payload)
+        local_stage = self._run_local(
+            request,
+            plan_payload,
+            workforce_admission_required=workforce_admission_required,
+        )
         if request.local_enabled:
             stages["local"] = local_stage
         else:
@@ -3642,7 +3693,7 @@ class UnifiedRuntime:
             # Product auto/require must NOT force inject (physical path needs real auth).
             if online_invoker is not None and not task_policy and not injected_flag:
                 task_policy = "auto"
-                injected_flag = True
+                injected_flag = not physical_online_required
             online_decision = resolve_online_execution_decision(
                 task_online_policy=task_policy,
                 project_root=str(route_map.get("workspace_root") or "."),
@@ -3697,7 +3748,12 @@ class UnifiedRuntime:
             context["gateway_invocation_authority"] = gateway_invocation_authority
         if local_model_invocation_authority is not None:
             context["local_model_invocation_authority"] = local_model_invocation_authority
-        online_stage = self._run_online(request, online_invoker, context)
+        online_stage = self._run_online(
+            request,
+            online_invoker,
+            context,
+            workforce_admission_required=workforce_admission_required,
+        )
         if request.online_enabled:
             stages["online"] = online_stage
         else:
@@ -4616,10 +4672,21 @@ class UnifiedRuntime:
             path.write_text(json.dumps(finalized, indent=2, ensure_ascii=False), encoding="utf-8")
         return finalized
 
-    def _run_local(self, request: UnifiedRuntimeRequest, plan: Mapping[str, Any]) -> dict[str, Any]:
+    def _run_local(
+        self,
+        request: UnifiedRuntimeRequest,
+        plan: Mapping[str, Any],
+        *,
+        workforce_admission_required: bool | None = None,
+    ) -> dict[str, Any]:
         if not request.local_enabled:
             return _stage("local", status="NOT_REQUESTED", reason="local_route_disabled")
-        workforce_admission_enabled = _workforce_admission_required(request)
+        if workforce_admission_required is None:
+            workforce_admission_required = _workforce_admission_required(
+                request,
+                physical_local=_physical_local_service(self._local_service),
+            )
+        workforce_admission_enabled = workforce_admission_required
         local_authority: Mapping[str, Any] | None = None
         if workforce_admission_enabled:
             candidate_authority = plan.get("local_model_invocation_authority")
@@ -4896,11 +4963,18 @@ class UnifiedRuntime:
         request: UnifiedRuntimeRequest,
         invoker: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None,
         context: Mapping[str, Any],
+        *,
+        workforce_admission_required: bool | None = None,
     ) -> dict[str, Any]:
         if not request.online_enabled:
             return _stage("online", status="NOT_REQUESTED", reason="online_route_disabled")
+        if workforce_admission_required is None:
+            workforce_admission_required = _workforce_admission_required(
+                request,
+                physical_online=_physical_online_invoker(invoker),
+            )
 
-        if _workforce_admission_required(request):
+        if workforce_admission_required:
             authority = context.get("gateway_invocation_authority")
             if not isinstance(authority, Mapping):
                 authority = {
@@ -4958,7 +5032,7 @@ class UnifiedRuntime:
         except Exception as exc:
             return _stage("online", status="FAILED", reason=f"online_exception:{exc}")
         response_provider_failure = ""
-        if _workforce_admission_required(request):
+        if workforce_admission_required:
             authority = context.get("gateway_invocation_authority")
             admitted_provider = (
                 str(authority.get("resolved_provider") or "")
