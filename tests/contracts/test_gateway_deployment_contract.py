@@ -783,6 +783,85 @@ def _r1_authority_fixture():
     return receipt
 
 
+def _r1_rebind_authority_fixture(
+    receipt,
+    *,
+    activation_id,
+    activation_sha256,
+    source_thread,
+    desired_commit,
+    desired_tree,
+    predecessor_commit,
+    predecessor_tree,
+):
+    from nexus.contracts.gateway_deployment import (
+        RecoveryAuthorityReceipt,
+        RecoverySourceSet,
+        derive_deployment_manifest,
+    )
+
+    source_values = receipt.source_set.model_dump()
+    source_values.update({
+        "desired_commit": desired_commit,
+        "desired_tree": desired_tree,
+        "predecessor_commit": predecessor_commit,
+        "predecessor_tree": predecessor_tree,
+    })
+    source_values["source_set_sha256"] = canonical_hash({
+        key: value for key, value in source_values.items() if key != "source_set_sha256"
+    })
+    source_set = RecoverySourceSet.model_validate(source_values)
+    desired = derive_deployment_manifest(source_set, role="desired")
+    predecessor = derive_deployment_manifest(source_set, role="predecessor")
+    values = receipt.model_dump()
+    values.update({
+        "owner_activation_id": activation_id,
+        "owner_activation_sha256": activation_sha256,
+        "source_thread": source_thread,
+        "desired_commit": desired_commit,
+        "desired_tree": desired_tree,
+        "predecessor_commit": predecessor_commit,
+        "predecessor_tree": predecessor_tree,
+        "source_set": source_set.model_dump(),
+        "desired_manifest": desired.model_dump(),
+        "desired_manifest_id": desired.deployment_id,
+        "desired_manifest_sha256": desired.manifest_sha256,
+        "predecessor_manifest": predecessor.model_dump(),
+        "predecessor_manifest_id": predecessor.deployment_id,
+        "predecessor_manifest_sha256": predecessor.manifest_sha256,
+    })
+    values["receipt_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key != "receipt_hash"
+    })
+    return RecoveryAuthorityReceipt.model_validate(values)
+
+
+def _r1_task002_authority_fixture(*, historical_activation=False):
+    receipt = _r1_authority_fixture()
+    return _r1_rebind_authority_fixture(
+        receipt,
+        activation_id=(
+            contract.OWNER_ACTIVATION_ID
+            if historical_activation
+            else contract.TASK002_RECOVERY_ACTIVATION_ID
+        ),
+        activation_sha256=(
+            contract.OWNER_ACTIVATION_SHA256
+            if historical_activation
+            else contract.TASK002_RECOVERY_ACTIVATION_SHA256
+        ),
+        source_thread=(
+            contract.OWNER_SOURCE_THREAD
+            if historical_activation
+            else contract.TASK002_RECOVERY_SOURCE_COMMENT
+        ),
+        desired_commit=contract.TASK002_RECOVERY_DESIRED_COMMIT,
+        desired_tree=contract.TASK002_RECOVERY_DESIRED_TREE,
+        predecessor_commit=contract.TASK002_RECOVERY_PREDECESSOR_COMMIT,
+        predecessor_tree=contract.TASK002_RECOVERY_PREDECESSOR_TREE,
+    )
+
+
 def test_r1_recovery_authority_accepts_current_card_and_rejects_rehashed_stale_card():
     from nexus.contracts.gateway_deployment import (
         RecoveryAuthorityReceipt,
@@ -800,6 +879,77 @@ def test_r1_recovery_authority_accepts_current_card_and_rejects_rehashed_stale_c
     })
     with pytest.raises(ContractError, match="Card mismatch"):
         validate_recovery_authority(RecoveryAuthorityReceipt(**values))
+
+
+def test_r1_historical_activation_cannot_authorize_task002_recovery_target():
+    from nexus.contracts.gateway_deployment import validate_recovery_authority
+
+    receipt = _r1_task002_authority_fixture(historical_activation=True)
+    with pytest.raises(ContractError, match="historical activation"):
+        validate_recovery_authority(receipt)
+
+
+def test_r1_task002_activation_accepts_only_exact_authorized_target():
+    from nexus.contracts.gateway_deployment import validate_recovery_authority
+
+    receipt = _r1_task002_authority_fixture()
+    assert validate_recovery_authority(receipt) == receipt
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("desired_commit", "a" * 40),
+        ("desired_tree", "b" * 40),
+        ("predecessor_commit", "c" * 40),
+        ("predecessor_tree", "d" * 40),
+    ],
+)
+def test_r1_task002_activation_rejects_rehashed_target_substitution(field, replacement):
+    from nexus.contracts.gateway_deployment import validate_recovery_authority
+
+    receipt = _r1_task002_authority_fixture()
+    target = {
+        "desired_commit": receipt.desired_commit,
+        "desired_tree": receipt.desired_tree,
+        "predecessor_commit": receipt.predecessor_commit,
+        "predecessor_tree": receipt.predecessor_tree,
+    }
+    target[field] = replacement
+    altered = _r1_rebind_authority_fixture(
+        receipt,
+        activation_id=contract.TASK002_RECOVERY_ACTIVATION_ID,
+        activation_sha256=contract.TASK002_RECOVERY_ACTIVATION_SHA256,
+        source_thread=contract.TASK002_RECOVERY_SOURCE_COMMENT,
+        **target,
+    )
+    with pytest.raises(ContractError, match="TASK-002 recovery activation target"):
+        validate_recovery_authority(altered)
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("owner_activation_id", "OWNER_UNKNOWN"),
+        ("owner_activation_id", contract.OWNER_ACTIVATION_ID),
+        ("owner_activation_sha256", contract.OWNER_ACTIVATION_SHA256),
+        ("source_thread", contract.OWNER_SOURCE_THREAD),
+    ],
+)
+def test_r1_task002_activation_rejects_unknown_or_mixed_lineage(field, replacement):
+    from nexus.contracts.gateway_deployment import (
+        RecoveryAuthorityReceipt,
+        validate_recovery_authority,
+    )
+
+    receipt = _r1_task002_authority_fixture()
+    values = {**receipt.model_dump(), field: replacement}
+    values["receipt_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key != "receipt_hash"
+    })
+    altered = RecoveryAuthorityReceipt.model_validate(values)
+    with pytest.raises(ContractError, match="activation lineage"):
+        validate_recovery_authority(altered)
 
 
 @pytest.mark.parametrize(
