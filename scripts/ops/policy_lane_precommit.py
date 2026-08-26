@@ -13,6 +13,7 @@ Usage (as pre-commit hook):
 Usage (manual):
     python scripts/ops/policy_lane_precommit.py --staged-files file1.py file2.py
 """
+import argparse
 import json
 import subprocess
 import sys
@@ -48,31 +49,59 @@ FILE_TO_POLICY = {
 
 
 def get_staged_files() -> list[str]:
-    """Get list of staged files via git."""
+    """Get list of staged files via git, failing closed when discovery fails."""
     try:
         result = subprocess.run(
             ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMR"],
-            capture_output=True, text=True, check=True
+            capture_output=True,
+            text=True,
+            check=True,
         )
-        return [f.strip() for f in result.stdout.strip().split("\n") if f.strip()]
-    except subprocess.CalledProcessError:
-        return []
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError("unable to enumerate staged files") from exc
+    return [f.strip() for f in result.stdout.strip().split("\n") if f.strip()]
 
 
 def check_lane_gate(policy_id: str, action: str = "modify") -> dict:
-    """Run the lane gate check for a policy."""
+    """Run the lane gate check for a policy and fail closed if it is unavailable."""
     try:
         result = subprocess.run(
             [sys.executable, str(LANE_GATE_SCRIPT), "--policy-id", policy_id, "--action", action],
-            capture_output=True, text=True, timeout=30
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
         return json.loads(result.stdout)
     except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
-        return {"allowed": True, "lane": "unknown", "errors": ["GATE_UNAVAILABLE"], "policy_id": policy_id}
+        return {
+            "allowed": False,
+            "lane": "hard",
+            "errors": ["GATE_UNAVAILABLE"],
+            "policy_id": policy_id,
+        }
 
 
-def main():
-    staged_files = get_staged_files()
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Check policy lanes for staged or explicit files.")
+    parser.add_argument(
+        "--staged-files",
+        nargs="+",
+        default=None,
+        help="Explicit changed files to check instead of reading the Git index.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    if args.staged_files is not None:
+        staged_files = args.staged_files
+    else:
+        try:
+            staged_files = get_staged_files()
+        except RuntimeError as exc:
+            print(f"Policy lane input discovery failed: {exc}", file=sys.stderr)
+            return 2
     if not staged_files:
         print("No staged files found.")
         return 0
