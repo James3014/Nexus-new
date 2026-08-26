@@ -127,16 +127,35 @@ def _entropy(value: bytes) -> float:
     return -sum((count / length) * math.log2(count / length) for count in counts.values())
 
 
+def _is_repeated_sequence_prefix(value: bytes, sequence: bytes) -> bool:
+    if len(value) < 20:
+        return False
+    repeated = (sequence * ((len(value) // len(sequence)) + 1))[: len(value)]
+    return value == repeated
+
+
 def _looks_placeholder(value: bytes, *, context: bytes = b"") -> bool:
     lowered = value.lower()
     context_lower = context.lower()
     if any(word in lowered or word in context_lower for word in PLACEHOLDER_WORDS):
         return True
     normalized = lowered
-    for prefix in (b"sk-proj-", b"sk-", b"ghp_", b"github_pat_"):
+    for prefix in (b"sk-proj-", b"sk-", b"ghp_", b"github_pat_", b"aiza"):
         if normalized.startswith(prefix):
             normalized = normalized[len(prefix) :]
             break
+    if _is_repeated_sequence_prefix(normalized, b"1234567890"):
+        return True
+    alphabet = b"abcdefghijklmnopqrstuvwxyz"
+    if normalized.startswith(alphabet):
+        tail = normalized[len(alphabet) :]
+        if not tail:
+            return True
+        if len(tail) >= 6 and any(
+            template.startswith(tail)
+            for template in (b"1234567890", b"0123456789", b"abcdef1234567890")
+        ):
+            return True
     synthetic_atoms = (
         b"0123456789abcdef",
         b"1234567890abcdef",
@@ -154,8 +173,8 @@ def _looks_placeholder(value: bytes, *, context: bytes = b"") -> bool:
         half = len(value) // 2
         if value[:half] == value[half:]:
             return True
-    alphabet = b"abcdefghijklmnopqrstuvwxyz0123456789"
-    if len(value) >= 20 and value.lower().strip(b"-_./+") in alphabet:
+    alphabet_and_digits = b"abcdefghijklmnopqrstuvwxyz0123456789"
+    if len(value) >= 20 and value.lower().strip(b"-_./+") in alphabet_and_digits:
         return True
     return False
 
@@ -185,7 +204,9 @@ def _published_refs(repo: Path) -> list[tuple[str, str]]:
 
 def _reachable_commits(repo: Path, refs: Iterable[tuple[str, str]]) -> list[str]:
     tips = "".join(f"{oid}\n" for _, oid in refs)
-    commits = [line for line in _run(repo, "rev-list", "--stdin", input_text=tips).splitlines() if line]
+    commits = [
+        line for line in _run(repo, "rev-list", "--stdin", input_text=tips).splitlines() if line
+    ]
     if not commits:
         raise ScanError("published refs produced no reachable commits")
     if any(not re.fullmatch(r"[0-9a-f]{40,64}", commit) for commit in commits):
@@ -233,9 +254,7 @@ def _reachable_blob_paths(
     return blobs, len(set(object_ids))
 
 
-def _commit_messages(
-    repo: Path, refs: Iterable[tuple[str, str]]
-) -> Iterable[tuple[str, bytes]]:
+def _commit_messages(repo: Path, refs: Iterable[tuple[str, str]]) -> Iterable[tuple[str, bytes]]:
     tips = "".join(f"{oid}\n" for _, oid in refs)
     raw = _run(
         repo,
