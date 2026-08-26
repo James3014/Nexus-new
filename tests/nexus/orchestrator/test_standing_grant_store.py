@@ -474,7 +474,11 @@ def test_effect_authorization_rejects_repository_substitution(tmp_path):
             path,
             repository=wrong,
             action=AutonomyActionClass.REPOSITORY_PUSH,
-            effect={"remote": "origin", "branch": "nexus/integration/main", "expected_sha": "b" * 40},
+            effect={
+                "remote": "origin",
+                "branch": "nexus/integration/main",
+                "expected_sha": "b" * 40,
+            },
             requested_at=NOW,
         )
 
