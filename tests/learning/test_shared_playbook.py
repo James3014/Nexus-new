@@ -32,9 +32,10 @@ def test_diagnose_shared_playbook_binds_exact_manifest_and_instructions_hashes()
     assert identity is not None
     assert identity.playbook_id == "diagnose"
     assert identity.version == "1.0.0"
-    assert identity.status == "CANDIDATE"
+    assert identity.status == "ACTIVE"
     assert identity.primary is True
     assert identity.trace_authority == "DERIVED_ONLY"
+    assert identity.promotion_record_path == ".agents/skills/diagnose/promotion_record.json"
     assert (
         identity.manifest_sha256
         == hashlib.sha256((REPO_ROOT / identity.manifest_path).read_bytes()).hexdigest()

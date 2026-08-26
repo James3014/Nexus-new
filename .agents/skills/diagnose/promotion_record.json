@@ -1,0 +1,44 @@
+{
+  "schema": "nexus.shared_playbook.promotion_record.v1",
+  "playbook_id": "diagnose",
+  "skill_id": "diagnose",
+  "version": "1.0.0",
+  "status": "ACTIVE",
+  "target_manifest_sha256": "ca58ae9dc58fb44036ea659926a279caaa3c715cc3954a60eaf6b6f9a59e92a9",
+  "target_instructions_sha256": "a0e846dcc68d84b0ca712fd344b9a68041312ffcdb1dfdaddda193e7b9cc58b6",
+  "promoted_at": "2026-08-27T00:00:00Z",
+  "evaluation_provenance": {
+    "gate": "G8",
+    "evaluation_type": "controlled_ablation",
+    "verdict": "PASS",
+    "arms": {
+      "A": "no_playbook",
+      "B": "current_diagnose_skill",
+      "C": "contract_bound_shared_playbook"
+    },
+    "root_cause_accuracy_preserved": true,
+    "authority_escalation_observed": false,
+    "claim_ceiling_explicit": true,
+    "notes": "G8 controlled evaluation demonstrated root-cause accuracy preservation across arms with zero authority escalation and explicit claim ceiling."
+  },
+  "runtime_provenance": {
+    "gate": "G9",
+    "integration_pr": 573,
+    "fail_closed_verified": true,
+    "exact_identity_bound": true,
+    "runtime_receipt_verified": true,
+    "notes": "PR #573 integrated runtime identity and fail-closed receipt verification on current main."
+  },
+  "acceptance_decision": {
+    "gate": "G10",
+    "decision": "PROMOTED_TO_ACTIVE",
+    "default_capabilities": [
+      "xray",
+      "drone",
+      "memory",
+      "regression_guard"
+    ],
+    "independent_review_passed": true,
+    "self_promotion": false
+  }
+}
