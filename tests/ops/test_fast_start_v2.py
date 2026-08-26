@@ -178,12 +178,14 @@ def _production_workflow_text() -> str:
     )
 
 
-def test_production_reconciler_is_default_branch_hourly_writer() -> None:
+def test_production_reconciler_is_exact_trusted_revision_hourly_writer() -> None:
     workflow = _production_workflow_text()
     assert 'cron: "17 * * * *"' in workflow
     assert "workflow_dispatch:" in workflow
     assert "  reconciler:" in workflow
-    assert "ref: main" in workflow
+    assert "ref: ${{ github.workflow_sha }}" in workflow
+    assert "ref: main" not in workflow
+    assert "persist-credentials: false" in workflow
     assert "issues: write" in workflow
     assert "fast-start-v2-registry-control" in workflow
     assert "REGISTRY_PREWRITE_FENCE_CONFLICT" in workflow
