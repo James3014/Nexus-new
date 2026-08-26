@@ -94,7 +94,8 @@ def test_high_confidence_provider_token_is_blocking(tmp_path: Path) -> None:
 
 def test_generic_high_entropy_assignment_is_blocking(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
-    _commit(repo, "secret", {"x.txt": "client_secret=Q8v6K1mP9zT2yR4uW7nB3cD5fG0hJ2kL\n"})
+    generic_secret = "R7m4C9x2V6b1K8p3" + "T5y0N2w7D4f9H1j6"
+    _commit(repo, "secret", {"x.txt": f"client_secret={generic_secret}\n"})
     _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
     receipt = scan_repository(repo)
     assert any(
@@ -105,7 +106,7 @@ def test_generic_high_entropy_assignment_is_blocking(tmp_path: Path) -> None:
 
 def test_json_quoted_high_entropy_assignment_is_blocking(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
-    json_secret = "Q8v6K1mP9zT2yR4u" + "W7nB3cD5fG0hJ2kL"
+    json_secret = "M9q2V7x4N8b1K6r3" + "T0y5P2w7C4d9F1h8"
     _commit(
         repo,
         "json secret",
@@ -116,6 +117,25 @@ def test_json_quoted_high_entropy_assignment_is_blocking(tmp_path: Path) -> None
     assert receipt["status"] == "FAIL"
     assert any(
         finding["detector"] == "high_entropy_secret_assignment" and finding["blocking"]
+        for finding in receipt["findings"]
+    )
+
+
+def test_known_historical_fixture_fingerprint_is_nonblocking(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    historical_fixture = "Q8v6K1mP9zT2yR4u" + "W7nB3cD5fG0hJ2kL"
+    _commit(
+        repo,
+        "known fixture",
+        {"config.json": f'{{"client_secret": "{historical_fixture}"}}\n'},
+    )
+    _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
+    receipt = scan_repository(repo)
+    assert receipt["status"] == "PASS"
+    assert receipt["blocking_finding_count"] == 0
+    assert any(
+        finding["detector"] == "high_entropy_secret_assignment"
+        and finding["classification"] == "OBVIOUS_FIXTURE"
         for finding in receipt["findings"]
     )
 
@@ -180,7 +200,7 @@ def test_obvious_sequential_provider_fixtures_are_nonblocking(tmp_path: Path) ->
 def test_placeholder_word_in_context_does_not_hide_secret(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
     openai_token = "sk-" + "q7A4nB9cD2eF6gH8jK1mN5pR3sT0vW4xY7z"
-    generic_secret = "Q8v6K1mP9zT2yR4uW7nB3cD5fG0hJ2kL"
+    generic_secret = "S8n5D2x7V4b9K1p6" + "T3y0M7w2C5f8H4j1"
     _commit(
         repo,
         "context must not suppress secrets",
