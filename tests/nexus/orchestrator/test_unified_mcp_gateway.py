@@ -3,6 +3,7 @@ import io
 import json
 import subprocess
 import sys
+import tempfile
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -30,6 +31,7 @@ from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     SERVER_INSTANCE_ID,
     TOOL_MANIFEST_REVISION,
     GatewayInputError,
+    LifecycleGuardError,
     UnifiedMCPGateway,
     _compile_agy_command,
 )
@@ -2474,3 +2476,205 @@ def test_unrelated_providers_keep_existing_command_contracts(monkeypatch):
     assert cline[cline.index("--model") + 1] == "cline-pass/glm-5.2"
     with pytest.raises(GatewayInputError):
         gateway._assist_command(executable="/usr/local/bin/unknown", provider="unknown", model="any", prompt="probe")
+
+
+def test_assisted_retry_revalidates_envelope_and_request_hash_fail_closed(monkeypatch, tmp_path):
+    mkdtemp_calls = []
+    real_mkdtemp = tempfile.mkdtemp
+    def fake_mkdtemp(*args, **kwargs):
+        mkdtemp_calls.append(kwargs)
+        return real_mkdtemp(*args, **kwargs)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.tempfile.mkdtemp", fake_mkdtemp)
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
+
+    gateway.handle({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": "nexus_assist_submit", "arguments": {"task_id": "retry-reval-1", "what": "Fix README", "why": "Test retry", "allowed_files": ["README.md"]}}
+    })
+    mkdtemp_calls.clear()
+
+    job = gateway._assist_read("retry-reval-1")
+    job["status"] = "FAILED"
+    job["action"]["request_hash"] = "0" * 64
+    gateway._assist_write(job)
+
+    with pytest.raises(LifecycleGuardError) as exc_info:
+        gateway._assist_retry("retry-reval-1")
+    assert exc_info.value.code == "REQUEST_HASH_MISMATCH" or "REQUEST_HASH_MISMATCH" in str(exc_info.value)
+    assert len(mkdtemp_calls) == 0
+
+
+def test_assisted_retry_revalidates_tool_manifest_drift_fail_closed(monkeypatch, tmp_path):
+    mkdtemp_calls = []
+    real_mkdtemp = tempfile.mkdtemp
+    def fake_mkdtemp(*args, **kwargs):
+        mkdtemp_calls.append(kwargs)
+        return real_mkdtemp(*args, **kwargs)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.tempfile.mkdtemp", fake_mkdtemp)
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
+
+    gateway.handle({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": "nexus_assist_submit", "arguments": {"task_id": "retry-reval-2", "what": "Fix README", "why": "Test retry", "allowed_files": ["README.md"]}}
+    })
+    mkdtemp_calls.clear()
+
+    job = gateway._assist_read("retry-reval-2")
+    job["status"] = "FAILED"
+    job["action"]["tool_manifest_hash"] = "c" * 64
+    gateway._assist_write(job)
+
+    with pytest.raises(LifecycleGuardError) as exc_info:
+        gateway._assist_retry("retry-reval-2")
+    assert exc_info.value.code == "TOOL_MANIFEST_NAME_DRIFT" or "TOOL_MANIFEST_NAME_DRIFT" in str(exc_info.value)
+    assert len(mkdtemp_calls) == 0
+
+
+def test_assisted_retry_revalidates_head_drift_fail_closed(monkeypatch, tmp_path):
+    mkdtemp_calls = []
+    real_mkdtemp = tempfile.mkdtemp
+    def fake_mkdtemp(*args, **kwargs):
+        mkdtemp_calls.append(kwargs)
+        return real_mkdtemp(*args, **kwargs)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.tempfile.mkdtemp", fake_mkdtemp)
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    current_head = "a" * 40
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: current_head)
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
+
+    gateway.handle({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": "nexus_assist_submit", "arguments": {"task_id": "retry-reval-3", "what": "Fix README", "why": "Test retry", "allowed_files": ["README.md"]}}
+    })
+    mkdtemp_calls.clear()
+
+    job = gateway._assist_read("retry-reval-3")
+    job["status"] = "FAILED"
+    gateway._assist_write(job)
+
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "b" * 40)
+
+    with pytest.raises(LifecycleGuardError) as exc_info:
+        gateway._assist_retry("retry-reval-3")
+    assert exc_info.value.code == "EXPECTED_HEAD_MISMATCH" or "EXPECTED_HEAD_MISMATCH" in str(exc_info.value)
+    assert len(mkdtemp_calls) == 0
+
+
+def test_assisted_retry_revalidates_allowed_scope_drift_fail_closed(monkeypatch, tmp_path):
+    mkdtemp_calls = []
+    real_mkdtemp = tempfile.mkdtemp
+    def fake_mkdtemp(*args, **kwargs):
+        mkdtemp_calls.append(kwargs)
+        return real_mkdtemp(*args, **kwargs)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.tempfile.mkdtemp", fake_mkdtemp)
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
+
+    gateway.handle({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": "nexus_assist_submit", "arguments": {"task_id": "retry-reval-4", "what": "Fix README", "why": "Test retry", "allowed_files": ["README.md"]}}
+    })
+    mkdtemp_calls.clear()
+
+    job = gateway._assist_read("retry-reval-4")
+    job["status"] = "FAILED"
+    job["request"]["allowed_files"] = ["README.md", "OTHER.md"]
+    gateway._assist_write(job)
+
+    with pytest.raises(LifecycleGuardError) as exc_info:
+        gateway._assist_retry("retry-reval-4")
+    assert exc_info.value.code in {"REQUEST_HASH_MISMATCH", "ALLOWED_PATH_MISMATCH"} or "REQUEST_HASH_MISMATCH" in str(exc_info.value) or "ALLOWED_PATH_MISMATCH" in str(exc_info.value)
+    assert len(mkdtemp_calls) == 0
+
+
+def test_assisted_retry_revalidates_command_substitution_fail_closed(monkeypatch, tmp_path):
+    mkdtemp_calls = []
+    real_mkdtemp = tempfile.mkdtemp
+    def fake_mkdtemp(*args, **kwargs):
+        mkdtemp_calls.append(kwargs)
+        return real_mkdtemp(*args, **kwargs)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.tempfile.mkdtemp", fake_mkdtemp)
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
+
+    gateway.handle({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": "nexus_assist_submit", "arguments": {"task_id": "retry-reval-5", "what": "Fix README", "why": "Test retry", "allowed_files": ["README.md"]}}
+    })
+    mkdtemp_calls.clear()
+
+    job = gateway._assist_read("retry-reval-5")
+    job["status"] = "FAILED"
+    job["command"] = ["/bin/echo", "--substituted", "bytes"]
+    gateway._assist_write(job)
+
+    with pytest.raises(LifecycleGuardError) as exc_info:
+        gateway._assist_retry("retry-reval-5")
+    assert exc_info.value.code == "COMMAND_SUBSTITUTION_DETECTED" or "COMMAND_SUBSTITUTION_DETECTED" in str(exc_info.value)
+    assert len(mkdtemp_calls) == 0
+
+
+def test_assisted_retry_valid_same_task_passes_with_fresh_identity(monkeypatch, tmp_path):
+    class FakePopen:
+        pid = 54999
+        returncode = 0
+        def __init__(self, command, *, stdout, stderr, **kwargs):
+            self.command = command
+            stdout.write(json.dumps({"type": "run_result", "text": json.dumps({"patch": "diff --git a/README.md b/README.md"})}) + "\n")
+            stdout.flush()
+        def poll(self):
+            return 0
+
+    monkeypatch.setenv("NEXUS_CLINE_BIN", "/bin/echo")
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway.subprocess.Popen", FakePopen)
+    monkeypatch.setattr("nexus.orchestrator.unified_mcp_gateway._git", lambda *args, **kwargs: "a" * 40)
+    service = FakeService()
+    service.state_dir = tmp_path
+    gateway = UnifiedMCPGateway(service=service)
+
+    gateway.handle({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"name": "nexus_assist_submit", "arguments": {"task_id": "retry-valid-1", "what": "Fix README", "why": "Test retry", "allowed_files": ["README.md"]}}
+    })
+    first_job = gateway._assist_read("retry-valid-1")
+    first_attempt_id = first_job["attempt_id"]
+    first_action_id = first_job["action_id"]
+    first_idempotency_key = first_job["idempotency_key"]
+
+    first_job["status"] = "FAILED"
+    first_job["exit_code"] = 1
+    gateway._assist_write(first_job)
+
+    retried_response = gateway.handle({
+        "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+        "params": {"name": "nexus_task_retry", "arguments": {"task_id": "retry-valid-1"}}
+    })
+    res_payload = retried_response["result"]["structuredContent"]
+    assert res_payload["task_id"] == "retry-valid-1"
+    assert res_payload["status"] in {"RUNNING", "SUBMITTED"}
+
+    new_job = gateway._assist_read("retry-valid-1")
+    assert new_job["task_id"] == "retry-valid-1"
+    assert new_job["attempt_id"] != first_attempt_id
+    assert new_job["action_id"] != first_action_id
+    assert new_job["idempotency_key"] != first_idempotency_key
+    assert new_job["action"]["action_type"] == "TASK_RETRY"
+    assert len(new_job["attempt_history"]) == 1
+    assert new_job["attempt_history"][0]["attempt_id"] == first_attempt_id
+    assert new_job["candidate_only"] is True
