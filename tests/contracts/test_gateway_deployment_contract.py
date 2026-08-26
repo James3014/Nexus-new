@@ -783,6 +783,79 @@ def _r1_authority_fixture():
     return receipt
 
 
+def _r1_rebind_authority(
+    receipt,
+    *,
+    desired_commit,
+    desired_tree,
+    predecessor_commit,
+    predecessor_tree,
+    owner_activation=None,
+):
+    from nexus.contracts.gateway_deployment import (
+        RecoveryAuthorityReceipt,
+        RecoverySourceSet,
+        derive_deployment_manifest,
+    )
+
+    source_values = {
+        key: value
+        for key, value in receipt.source_set.__dict__.items()
+        if key != "source_set_sha256"
+    }
+    source_values.update({
+        "desired_commit": desired_commit,
+        "desired_tree": desired_tree,
+        "predecessor_commit": predecessor_commit,
+        "predecessor_tree": predecessor_tree,
+    })
+    source_set = RecoverySourceSet(
+        **source_values,
+        source_set_sha256=canonical_hash(source_values),
+    )
+    desired = derive_deployment_manifest(source_set, role="desired")
+    predecessor = derive_deployment_manifest(source_set, role="predecessor")
+    values = {
+        **receipt.__dict__,
+        "desired_commit": source_set.desired_commit,
+        "desired_tree": source_set.desired_tree,
+        "predecessor_commit": source_set.predecessor_commit,
+        "predecessor_tree": source_set.predecessor_tree,
+        "source_set": source_set,
+        "desired_manifest": desired,
+        "desired_manifest_id": desired.deployment_id,
+        "desired_manifest_sha256": desired.manifest_sha256,
+        "predecessor_manifest": predecessor,
+        "predecessor_manifest_id": predecessor.deployment_id,
+        "predecessor_manifest_sha256": predecessor.manifest_sha256,
+    }
+    if owner_activation is not None:
+        (
+            values["owner_activation_id"],
+            values["owner_activation_sha256"],
+            values["source_thread"],
+        ) = owner_activation
+    values["receipt_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key != "receipt_hash"
+    })
+    return RecoveryAuthorityReceipt(**values)
+
+
+def _r1_task002_authority_fixture():
+    return _r1_rebind_authority(
+        _r1_authority_fixture(),
+        desired_commit=contract.TASK002_DESIRED_COMMIT,
+        desired_tree=contract.TASK002_DESIRED_TREE,
+        predecessor_commit=contract.TASK002_PREDECESSOR_COMMIT,
+        predecessor_tree=contract.TASK002_PREDECESSOR_TREE,
+        owner_activation=(
+            contract.TASK002_OWNER_ACTIVATION_ID,
+            contract.TASK002_OWNER_ACTIVATION_SHA256,
+            contract.TASK002_OWNER_SOURCE_THREAD,
+        ),
+    )
+
+
 def test_r1_recovery_authority_accepts_current_card_and_rejects_rehashed_stale_card():
     from nexus.contracts.gateway_deployment import (
         RecoveryAuthorityReceipt,
@@ -799,6 +872,68 @@ def test_r1_recovery_authority_accepts_current_card_and_rejects_rehashed_stale_c
         key: value for key, value in values.items() if key != "receipt_hash"
     })
     with pytest.raises(ContractError, match="Card mismatch"):
+        validate_recovery_authority(RecoveryAuthorityReceipt(**values))
+
+
+def test_r1_task002_owner_activation_accepts_only_exact_authorized_target():
+    from nexus.contracts.gateway_deployment import validate_recovery_authority
+
+    receipt = _r1_task002_authority_fixture()
+    assert validate_recovery_authority(receipt) == receipt
+
+
+def test_r1_historical_activation_cannot_authorize_task002_target_after_full_rehash():
+    from nexus.contracts.gateway_deployment import validate_recovery_authority
+
+    receipt = _r1_rebind_authority(
+        _r1_authority_fixture(),
+        desired_commit=contract.TASK002_DESIRED_COMMIT,
+        desired_tree=contract.TASK002_DESIRED_TREE,
+        predecessor_commit=contract.TASK002_PREDECESSOR_COMMIT,
+        predecessor_tree=contract.TASK002_PREDECESSOR_TREE,
+    )
+    with pytest.raises(ContractError, match="historical owner activation"):
+        validate_recovery_authority(receipt)
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("desired_tree", "0" * 40),
+        ("predecessor_commit", "f" * 40),
+    ],
+)
+def test_r1_task002_owner_activation_rejects_rehashed_target_substitution(field, replacement):
+    from nexus.contracts.gateway_deployment import validate_recovery_authority
+
+    receipt = _r1_task002_authority_fixture()
+    target = {
+        "desired_commit": receipt.desired_commit,
+        "desired_tree": receipt.desired_tree,
+        "predecessor_commit": receipt.predecessor_commit,
+        "predecessor_tree": receipt.predecessor_tree,
+    }
+    target[field] = replacement
+    tampered = _r1_rebind_authority(receipt, **target)
+    with pytest.raises(ContractError, match="TASK-002 owner activation target mismatch"):
+        validate_recovery_authority(tampered)
+
+
+def test_r1_task002_owner_activation_rejects_mixed_lineage_after_full_rehash():
+    from nexus.contracts.gateway_deployment import (
+        RecoveryAuthorityReceipt,
+        validate_recovery_authority,
+    )
+
+    receipt = _r1_task002_authority_fixture()
+    values = {
+        **receipt.__dict__,
+        "owner_activation_sha256": contract.OWNER_ACTIVATION_SHA256,
+    }
+    values["receipt_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key != "receipt_hash"
+    })
+    with pytest.raises(ContractError, match="owner activation mismatch"):
         validate_recovery_authority(RecoveryAuthorityReceipt(**values))
 
 
