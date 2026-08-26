@@ -3,13 +3,16 @@
   "playbook_id": "diagnose",
   "skill_id": "diagnose",
   "version": "1.0.0",
-  "status": "ACTIVE",
-  "target_manifest_sha256": "ca58ae9dc58fb44036ea659926a279caaa3c715cc3954a60eaf6b6f9a59e92a9",
+  "status": "CANDIDATE",
+  "target_manifest_sha256": "a1d22be31d2526d28e0f76fe3dfc1c391ee8f8a3550f369ba3d599f95ac08adb",
   "target_instructions_sha256": "a0e846dcc68d84b0ca712fd344b9a68041312ffcdb1dfdaddda193e7b9cc58b6",
-  "promoted_at": "2026-08-27T00:00:00Z",
+  "promoted_at": "",
   "evaluation_provenance": {
     "gate": "G8",
+    "evaluation_evidence_id": "nexus.evaluation.shared_playbook.g8.diagnose",
     "evaluation_type": "controlled_ablation",
+    "evaluated_manifest_sha256": "a1d22be31d2526d28e0f76fe3dfc1c391ee8f8a3550f369ba3d599f95ac08adb",
+    "evaluated_instructions_sha256": "a0e846dcc68d84b0ca712fd344b9a68041312ffcdb1dfdaddda193e7b9cc58b6",
     "verdict": "PASS",
     "arms": {
       "A": "no_playbook",
@@ -23,22 +26,34 @@
   },
   "runtime_provenance": {
     "gate": "G9",
-    "integration_pr": 573,
+    "final_integration_pr": 577,
+    "final_integration_commit_sha": "c8c6de8c330ec8868dc515de4c337007093ad988",
+    "final_integration_tree_sha": "81bb0a4b81912d1a1b931e6f81bfbe9ca307b69c",
+    "intermediate_integration_pr": 573,
+    "intermediate_integration_commit_sha": "3620db1947b6d9864eefe0555c4de9edbf6c7f6a",
+    "intermediate_integration_tree_sha": "9ef26bf7976e1a498b9588bbfb23eb12030f2c49",
+    "integrated_manifest_sha256": "a1d22be31d2526d28e0f76fe3dfc1c391ee8f8a3550f369ba3d599f95ac08adb",
+    "integrated_instructions_sha256": "a0e846dcc68d84b0ca712fd344b9a68041312ffcdb1dfdaddda193e7b9cc58b6",
     "fail_closed_verified": true,
     "exact_identity_bound": true,
     "runtime_receipt_verified": true,
-    "notes": "PR #573 integrated runtime identity and fail-closed receipt verification on current main."
+    "notes": "PR #577 finalized runtime violation receipt binding and fail-closed receipt verification on main (following initial PR #573 integration)."
   },
   "acceptance_decision": {
     "gate": "G10",
-    "decision": "PROMOTED_TO_ACTIVE",
+    "decision": "PENDING_INDEPENDENT_ACCEPTANCE",
+    "acceptance_receipt_path": ".agents/skills/diagnose/acceptance_receipt.json",
+    "acceptance_schema": "nexus.candidate_acceptance_result.v1",
+    "acceptance_artifact_hash": "",
+    "subject_playbook_id": "diagnose",
+    "subject_manifest_sha256": "a1d22be31d2526d28e0f76fe3dfc1c391ee8f8a3550f369ba3d599f95ac08adb",
+    "subject_instructions_sha256": "a0e846dcc68d84b0ca712fd344b9a68041312ffcdb1dfdaddda193e7b9cc58b6",
     "default_capabilities": [
       "xray",
       "drone",
       "memory",
       "regression_guard"
     ],
-    "independent_review_passed": true,
     "self_promotion": false
   }
 }

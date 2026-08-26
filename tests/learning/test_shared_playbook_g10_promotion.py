@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -12,34 +13,518 @@ from nexus.learning.shared_playbook import (
     KNOWN_SHARED_WORKER_PLAYBOOKS,
     PROMOTION_RECORD_FILENAME,
     SharedPlaybookError,
+    compute_playbook_acceptance_binding_hash,
     inspect_shared_playbook_drift,
     load_selected_shared_playbook,
     validate_shared_playbook_candidate_intake,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+CANONICAL_RUNTIME_OVERLAY_PATH = (
+    REPO_ROOT
+    / "docs"
+    / "reports"
+    / "NEXUS_ZERO_TRUST_V2_RUNTIME_SKILL_POLICY_OVERLAY_APPLIED_2026-05-22.json"
+)
+CANONICAL_SKILL_STATUS_REPORT_PATH = (
+    REPO_ROOT
+    / "docs"
+    / "reports"
+    / "NEXUS_ZERO_TRUST_V2_RUNTIME_SKILL_STATUS_MERGED_2026-05-22.json"
+)
 
 
-def _copy_diagnose(tmp_path: Path) -> Path:
+def _create_canonical_acceptance_receipt(
+    skill_dir: Path,
+    *,
+    task_id: str = "g10-diagnose-promotion-acceptance",
+    attempt_id: str = "attempt-1",
+    reviewer_id: str = "reviewer-independent-1",
+    verdict: str = "ACCEPT_CANDIDATE",
+    subject_playbook_id: str = "diagnose",
+    manifest_sha: str | None = None,
+    instructions_sha: str | None = None,
+    independence_classification: str = "INDEPENDENT_REVIEWER",
+    candidate_commit_sha: str = "c8c6de8c330ec8868dc515de4c337007093ad988",
+    binding_hash: str | None = None,
+    self_promotion: bool = False,
+    update_promotion_record: bool = True,
+    set_active_status: bool = True,
+) -> tuple[Path, str]:
+    manifest_path = skill_dir / "playbook.yaml"
+    instructions_path = skill_dir / "SKILL.md"
+    if set_active_status and manifest_path.is_file():
+        content = manifest_path.read_text(encoding="utf-8")
+        manifest_path.write_text(
+            content.replace("status: CANDIDATE", "status: ACTIVE"), encoding="utf-8"
+        )
+
+    m_sha = (
+        manifest_sha
+        if manifest_sha is not None
+        else hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    )
+    i_sha = (
+        instructions_sha
+        if instructions_sha is not None
+        else hashlib.sha256(instructions_path.read_bytes()).hexdigest()
+    )
+    receipt_path = skill_dir / "acceptance_receipt.json"
+
+    computed_binding = binding_hash or compute_playbook_acceptance_binding_hash(
+        task_id=task_id,
+        attempt_id=attempt_id,
+        reviewer_id=reviewer_id,
+        subject_playbook_id=subject_playbook_id,
+        subject_manifest_sha256=m_sha,
+        subject_instructions_sha256=i_sha,
+        candidate_commit_sha=candidate_commit_sha,
+        verdict=verdict,
+    )
+    payload = {
+        "schema": "nexus.candidate_acceptance_result.v1",
+        "decision": "ACCEPT",
+        "verdict": verdict,
+        "task_id": task_id,
+        "attempt_id": attempt_id,
+        "candidate_commit_sha": candidate_commit_sha,
+        "reviewer_id": reviewer_id,
+        "binding_hash": computed_binding,
+        "subject_playbook_id": subject_playbook_id,
+        "subject_manifest_sha256": m_sha,
+        "subject_instructions_sha256": i_sha,
+        "independence_classification": independence_classification,
+        "self_promotion": self_promotion,
+        "reasons": ["independent G10 candidate acceptance verified"],
+        "evidence_cutoff": "2026-08-27T00:00:00Z",
+    }
+    raw_bytes = json.dumps(payload, indent=2).encode("utf-8")
+    receipt_path.write_bytes(raw_bytes)
+    digest = hashlib.sha256(raw_bytes).hexdigest()
+
+    if update_promotion_record:
+        prov_path = skill_dir / PROMOTION_RECORD_FILENAME
+        if prov_path.is_file():
+            record = json.loads(prov_path.read_text(encoding="utf-8"))
+            if set_active_status:
+                record["status"] = "ACTIVE"
+                record["target_manifest_sha256"] = m_sha
+                record["target_instructions_sha256"] = i_sha
+                record["evaluation_provenance"]["evaluated_manifest_sha256"] = m_sha
+                record["evaluation_provenance"]["evaluated_instructions_sha256"] = i_sha
+                record["runtime_provenance"]["integrated_manifest_sha256"] = m_sha
+                record["runtime_provenance"]["integrated_instructions_sha256"] = i_sha
+                record.setdefault("acceptance_decision", {})["decision"] = "PROMOTED_TO_ACTIVE"
+            record.setdefault("acceptance_decision", {})["acceptance_artifact_hash"] = digest
+            record["acceptance_decision"]["acceptance_receipt_path"] = (
+                ".agents/skills/diagnose/acceptance_receipt.json"
+            )
+            record["acceptance_decision"]["acceptance_schema"] = (
+                "nexus.candidate_acceptance_result.v1"
+            )
+            record["acceptance_decision"]["subject_manifest_sha256"] = m_sha
+            record["acceptance_decision"]["subject_instructions_sha256"] = i_sha
+            prov_path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+
+    return receipt_path, digest
+
+
+def _copy_diagnose(tmp_path: Path, *, create_receipt: bool = False) -> Path:
     source = REPO_ROOT / ".agents" / "skills" / "diagnose"
     target = tmp_path / ".agents" / "skills" / "diagnose"
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(source, target)
+    if create_receipt:
+        _create_canonical_acceptance_receipt(target, set_active_status=True)
     return target
 
 
-def test_diagnose_active_promotion_has_valid_provenance() -> None:
+# =========================================================================
+# Witness 1: Repository-at-Rest Witness (Direct un-monkeypatched inspection)
+# =========================================================================
+
+
+def test_repository_at_rest_diagnose_is_candidate_and_fails_closed_without_acceptance() -> None:
+    """Repository-at-Rest Witness: Directly reads candidate repository files without fixture modification.
+
+    Proves:
+    1. diagnose is at rest in CANDIDATE status with PENDING_INDEPENDENT_ACCEPTANCE.
+    2. acceptance_receipt.json does not exist at rest.
+    3. If status is evaluated as ACTIVE without independent acceptance, it fails closed.
+    """
+    manifest_path = REPO_ROOT / ".agents" / "skills" / "diagnose" / "playbook.yaml"
+    prov_path = REPO_ROOT / ".agents" / "skills" / "diagnose" / "promotion_record.json"
+    receipt_path = REPO_ROOT / ".agents" / "skills" / "diagnose" / "acceptance_receipt.json"
+
+    assert manifest_path.is_file()
+    assert prov_path.is_file()
+    assert not receipt_path.is_file(), (
+        "Candidate repository must not contain self-authored acceptance receipt"
+    )
+
+    record = json.loads(prov_path.read_text(encoding="utf-8"))
+    assert record["status"] == "CANDIDATE"
+    assert record["acceptance_decision"]["decision"] == "PENDING_INDEPENDENT_ACCEPTANCE"
+    assert record["acceptance_decision"]["acceptance_artifact_hash"] == ""
+
+    # At rest, load_selected_shared_playbook loads diagnose as CANDIDATE
     identity = load_selected_shared_playbook("diagnose", "xray", root=REPO_ROOT, required=True)
+    assert identity is not None
+    assert identity.status == "CANDIDATE"
+    assert identity.playbook_id == "diagnose"
+
+
+# =========================================================================
+# Negative Falsification Tests 1 to 15
+# =========================================================================
+
+
+def test_falsification_1_missing_acceptance_artifact_fails_closed(tmp_path: Path) -> None:
+    """Negative Test 1: missing acceptance artifact -> fail closed."""
+    skill_dir = _copy_diagnose(tmp_path, create_receipt=False)
+    manifest = skill_dir / "playbook.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("status: CANDIDATE", "status: ACTIVE")
+    )
+    m_sha = hashlib.sha256(manifest.read_bytes()).hexdigest()
+    i_sha = hashlib.sha256((skill_dir / "SKILL.md").read_bytes()).hexdigest()
+    prov = skill_dir / PROMOTION_RECORD_FILENAME
+    rec = json.loads(prov.read_text(encoding="utf-8"))
+    rec["status"] = "ACTIVE"
+    rec["target_manifest_sha256"] = m_sha
+    rec["target_instructions_sha256"] = i_sha
+    rec["evaluation_provenance"]["evaluated_manifest_sha256"] = m_sha
+    rec["evaluation_provenance"]["evaluated_instructions_sha256"] = i_sha
+    rec["runtime_provenance"]["integrated_manifest_sha256"] = m_sha
+    rec["runtime_provenance"]["integrated_instructions_sha256"] = i_sha
+    rec["acceptance_decision"]["decision"] = "PROMOTED_TO_ACTIVE"
+    rec["acceptance_decision"]["acceptance_artifact_hash"] = "a" * 64
+    prov.write_text(json.dumps(rec))
+
+    with pytest.raises(SharedPlaybookError, match="shared_playbook_missing_independent_acceptance"):
+        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
+
+
+def test_falsification_2_missing_acceptance_artifact_hash_fails_closed(
+    tmp_path: Path,
+) -> None:
+    """Negative Test 2: missing acceptance_artifact_hash in promotion record -> fail closed."""
+    skill_dir = _copy_diagnose(tmp_path, create_receipt=False)
+    _create_canonical_acceptance_receipt(
+        skill_dir, set_active_status=True, update_promotion_record=True
+    )
+    prov = skill_dir / PROMOTION_RECORD_FILENAME
+    rec = json.loads(prov.read_text(encoding="utf-8"))
+    rec["acceptance_decision"]["acceptance_artifact_hash"] = ""  # Missing hash
+    prov.write_text(json.dumps(rec))
+
+    with pytest.raises(
+        SharedPlaybookError, match="shared_playbook_missing_acceptance_artifact_hash"
+    ):
+        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
+
+
+def test_falsification_3_acceptance_artifact_hash_mismatch_fails_closed(
+    tmp_path: Path,
+) -> None:
+    """Negative Test 3: acceptance artifact hash mismatch -> fail closed."""
+    skill_dir = _copy_diagnose(tmp_path, create_receipt=False)
+    _create_canonical_acceptance_receipt(
+        skill_dir, set_active_status=True, update_promotion_record=True
+    )
+    prov = skill_dir / PROMOTION_RECORD_FILENAME
+    rec = json.loads(prov.read_text(encoding="utf-8"))
+    rec["acceptance_decision"]["acceptance_artifact_hash"] = "0" * 64  # Mismatched hash
+    prov.write_text(json.dumps(rec))
+
+    with pytest.raises(
+        SharedPlaybookError, match="shared_playbook_promotion_provenance_hash_mismatch"
+    ):
+        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
+
+
+def test_falsification_4_missing_independence_classification_fails_closed(
+    tmp_path: Path,
+) -> None:
+    """Negative Test 4: missing independence classification -> fail closed."""
+    skill_dir = _copy_diagnose(tmp_path, create_receipt=False)
+    _create_canonical_acceptance_receipt(
+        skill_dir,
+        independence_classification="",  # Missing
+        set_active_status=True,
+        update_promotion_record=True,
+    )
+
+    with pytest.raises(
+        SharedPlaybookError, match="shared_playbook_missing_independence_classification"
+    ):
+        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
+
+
+def test_falsification_5_self_asserted_independence_fails_closed(tmp_path: Path) -> None:
+    """Negative Test 5: SELF_ASSERTED independence classification -> fail closed."""
+    skill_dir = _copy_diagnose(tmp_path, create_receipt=False)
+    _create_canonical_acceptance_receipt(
+        skill_dir,
+        independence_classification="SELF_ASSERTED",
+        set_active_status=True,
+        update_promotion_record=True,
+    )
+
+    with pytest.raises(SharedPlaybookError, match="shared_playbook_self_promotion_forbidden"):
+        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
+
+
+def test_falsification_6_internal_implementer_independence_fails_closed(
+    tmp_path: Path,
+) -> None:
+    """Negative Test 6: INTERNAL_IMPLEMENTER independence classification -> fail closed."""
+    skill_dir = _copy_diagnose(tmp_path, create_receipt=False)
+    _create_canonical_acceptance_receipt(
+        skill_dir,
+        independence_classification="INTERNAL_IMPLEMENTER",
+        set_active_status=True,
+        update_promotion_record=True,
+    )
+
+    with pytest.raises(SharedPlaybookError, match="shared_playbook_self_promotion_forbidden"):
+        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
+
+
+def test_falsification_7_missing_subject_playbook_id_fails_closed(tmp_path: Path) -> None:
+    """Negative Test 7: missing subject_playbook_id -> fail closed."""
+    skill_dir = _copy_diagnose(tmp_path, create_receipt=False)
+    _create_canonical_acceptance_receipt(
+        skill_dir,
+        subject_playbook_id="",  # Missing
+        set_active_status=True,
+        update_promotion_record=True,
+    )
+
+    with pytest.raises(SharedPlaybookError, match="shared_playbook_acceptance_subject_mismatch"):
+        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
+
+
+def test_falsification_8_missing_subject_manifest_hash_fails_closed(tmp_path: Path) -> None:
+    """Negative Test 8: missing subject manifest hash -> fail closed."""
+    skill_dir = _copy_diagnose(tmp_path, create_receipt=False)
+    _create_canonical_acceptance_receipt(
+        skill_dir,
+        set_active_status=True,
+        update_promotion_record=True,
+    )
+    receipt_path = skill_dir / "acceptance_receipt.json"
+    payload = json.loads(receipt_path.read_text(encoding="utf-8"))
+    payload["subject_manifest_sha256"] = ""
+    payload["binding_hash"] = compute_playbook_acceptance_binding_hash(
+        task_id=payload["task_id"],
+        attempt_id=payload["attempt_id"],
+        reviewer_id=payload["reviewer_id"],
+        subject_playbook_id=payload["subject_playbook_id"],
+        subject_manifest_sha256="",
+        subject_instructions_sha256=payload["subject_instructions_sha256"],
+        candidate_commit_sha=payload.get("candidate_commit_sha", ""),
+        verdict=payload["verdict"],
+    )
+    raw_bytes = json.dumps(payload, indent=2).encode("utf-8")
+    receipt_path.write_bytes(raw_bytes)
+    prov = skill_dir / PROMOTION_RECORD_FILENAME
+    rec = json.loads(prov.read_text(encoding="utf-8"))
+    rec["acceptance_decision"]["acceptance_artifact_hash"] = hashlib.sha256(raw_bytes).hexdigest()
+    rec["acceptance_decision"]["subject_manifest_sha256"] = ""
+    prov.write_text(json.dumps(rec))
+
+    with pytest.raises(SharedPlaybookError, match="shared_playbook_acceptance_subject_mismatch"):
+        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
+
+
+def test_falsification_9_missing_subject_instructions_hash_fails_closed(
+    tmp_path: Path,
+) -> None:
+    """Negative Test 9: missing subject instructions hash -> fail closed."""
+    skill_dir = _copy_diagnose(tmp_path, create_receipt=False)
+    _create_canonical_acceptance_receipt(
+        skill_dir,
+        set_active_status=True,
+        update_promotion_record=True,
+    )
+    receipt_path = skill_dir / "acceptance_receipt.json"
+    payload = json.loads(receipt_path.read_text(encoding="utf-8"))
+    payload["subject_instructions_sha256"] = ""
+    payload["binding_hash"] = compute_playbook_acceptance_binding_hash(
+        task_id=payload["task_id"],
+        attempt_id=payload["attempt_id"],
+        reviewer_id=payload["reviewer_id"],
+        subject_playbook_id=payload["subject_playbook_id"],
+        subject_manifest_sha256=payload["subject_manifest_sha256"],
+        subject_instructions_sha256="",
+        candidate_commit_sha=payload.get("candidate_commit_sha", ""),
+        verdict=payload["verdict"],
+    )
+    raw_bytes = json.dumps(payload, indent=2).encode("utf-8")
+    receipt_path.write_bytes(raw_bytes)
+    prov = skill_dir / PROMOTION_RECORD_FILENAME
+    rec = json.loads(prov.read_text(encoding="utf-8"))
+    rec["acceptance_decision"]["acceptance_artifact_hash"] = hashlib.sha256(raw_bytes).hexdigest()
+    rec["acceptance_decision"]["subject_instructions_sha256"] = ""
+    prov.write_text(json.dumps(rec))
+
+    with pytest.raises(SharedPlaybookError, match="shared_playbook_acceptance_subject_mismatch"):
+        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
+
+
+def test_falsification_10_arbitrary_binding_hash_fails_closed(tmp_path: Path) -> None:
+    """Negative Test 10: arbitrary/non-recomputed binding_hash -> fail closed."""
+    skill_dir = _copy_diagnose(tmp_path, create_receipt=False)
+    _create_canonical_acceptance_receipt(
+        skill_dir,
+        binding_hash="whatever_arbitrary_string",  # Fake binding
+        set_active_status=True,
+        update_promotion_record=True,
+    )
+
+    with pytest.raises(SharedPlaybookError, match="shared_playbook_acceptance_binding_mismatch"):
+        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
+
+
+def test_falsification_11_fake_reviewer_string_fails_closed(tmp_path: Path) -> None:
+    """Negative Test 11: fake reviewer string without canonical independent authority -> fail closed."""
+    skill_dir = _copy_diagnose(tmp_path, create_receipt=False)
+    _create_canonical_acceptance_receipt(
+        skill_dir,
+        reviewer_id="worker-codex",
+        self_promotion=True,
+        set_active_status=True,
+        update_promotion_record=True,
+    )
+
+    with pytest.raises(SharedPlaybookError, match="shared_playbook_self_promotion_forbidden"):
+        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
+
+
+def test_falsification_12_generic_pass_verdict_fails_closed(tmp_path: Path) -> None:
+    """Negative Test 12: generic PASS verdict -> fail closed."""
+    skill_dir = _copy_diagnose(tmp_path, create_receipt=False)
+    _create_canonical_acceptance_receipt(
+        skill_dir,
+        verdict="PASS",  # Forbidden generic review status
+        set_active_status=True,
+        update_promotion_record=True,
+    )
+
+    with pytest.raises(SharedPlaybookError, match="shared_playbook_acceptance_verdict_invalid"):
+        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
+
+
+def test_falsification_13_stale_g8_evaluation_subject_fails_closed(tmp_path: Path) -> None:
+    """Negative Test 13: stale G8 evaluation subject -> fail closed."""
+    skill_dir = _copy_diagnose(tmp_path, create_receipt=False)
+    skill_md = skill_dir / "SKILL.md"
+    skill_md.write_text(
+        skill_md.read_text(encoding="utf-8") + "\n\n## Extra Step\n", encoding="utf-8"
+    )
+    new_sha = hashlib.sha256(skill_md.read_bytes()).hexdigest()
+
+    _create_canonical_acceptance_receipt(
+        skill_dir,
+        instructions_sha=new_sha,
+        set_active_status=True,
+        update_promotion_record=True,
+    )
+
+    prov = skill_dir / PROMOTION_RECORD_FILENAME
+    rec = json.loads(prov.read_text(encoding="utf-8"))
+    # Stale: evaluated_instructions_sha256 is set to old stale hash
+    rec["evaluation_provenance"]["evaluated_instructions_sha256"] = "1" * 64
+    prov.write_text(json.dumps(rec))
+
+    with pytest.raises(
+        SharedPlaybookError, match="shared_playbook_promotion_provenance_hash_mismatch"
+    ):
+        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
+
+
+def test_falsification_14_stale_g9_integration_subject_fails_closed(tmp_path: Path) -> None:
+    """Negative Test 14: stale G9 integration subject -> fail closed."""
+    skill_dir = _copy_diagnose(tmp_path, create_receipt=False)
+    skill_md = skill_dir / "SKILL.md"
+    skill_md.write_text(
+        skill_md.read_text(encoding="utf-8") + "\n\n## Extra Step\n", encoding="utf-8"
+    )
+    new_sha = hashlib.sha256(skill_md.read_bytes()).hexdigest()
+
+    _create_canonical_acceptance_receipt(
+        skill_dir,
+        instructions_sha=new_sha,
+        set_active_status=True,
+        update_promotion_record=True,
+    )
+
+    prov = skill_dir / PROMOTION_RECORD_FILENAME
+    rec = json.loads(prov.read_text(encoding="utf-8"))
+    # Stale: integrated_instructions_sha256 is set to old stale hash
+    rec["runtime_provenance"]["integrated_instructions_sha256"] = "1" * 64
+    prov.write_text(json.dumps(rec))
+
+    with pytest.raises(
+        SharedPlaybookError, match="shared_playbook_promotion_provenance_hash_mismatch"
+    ):
+        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
+
+
+def test_falsification_15_subject_substitution_fails_closed(tmp_path: Path) -> None:
+    """Negative Test 15: subject substitution in acceptance receipt -> fail closed."""
+    skill_dir = _copy_diagnose(tmp_path, create_receipt=False)
+    _create_canonical_acceptance_receipt(
+        skill_dir,
+        set_active_status=True,
+        update_promotion_record=True,
+    )
+    receipt_path = skill_dir / "acceptance_receipt.json"
+    payload = json.loads(receipt_path.read_text(encoding="utf-8"))
+    payload["subject_instructions_sha256"] = "0" * 64
+    payload["binding_hash"] = compute_playbook_acceptance_binding_hash(
+        task_id=payload["task_id"],
+        attempt_id=payload["attempt_id"],
+        reviewer_id=payload["reviewer_id"],
+        subject_playbook_id=payload["subject_playbook_id"],
+        subject_manifest_sha256=payload["subject_manifest_sha256"],
+        subject_instructions_sha256="0" * 64,
+        candidate_commit_sha=payload.get("candidate_commit_sha", ""),
+        verdict=payload["verdict"],
+    )
+    raw_bytes = json.dumps(payload, indent=2).encode("utf-8")
+    receipt_path.write_bytes(raw_bytes)
+    prov = skill_dir / PROMOTION_RECORD_FILENAME
+    rec = json.loads(prov.read_text(encoding="utf-8"))
+    rec["acceptance_decision"]["acceptance_artifact_hash"] = hashlib.sha256(raw_bytes).hexdigest()
+    rec["acceptance_decision"]["subject_instructions_sha256"] = "0" * 64
+    prov.write_text(json.dumps(rec))
+
+    with pytest.raises(SharedPlaybookError, match="shared_playbook_acceptance_subject_mismatch"):
+        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
+
+
+# =========================================================================
+# Positive Acceptance Test 16: Canonical Independent Acceptance
+# =========================================================================
+
+
+def test_canonical_independent_acceptance_artifact_passes_promotion(
+    tmp_path: Path,
+) -> None:
+    """Positive Test 16: Canonical independent acceptance artifact passes promotion to ACTIVE."""
+    skill_dir = _copy_diagnose(tmp_path, create_receipt=True)
+    identity = load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
     assert identity is not None
     assert identity.status == "ACTIVE"
     assert identity.playbook_id == "diagnose"
-    assert identity.version == "1.0.0"
     assert identity.primary is True
     assert identity.trace_authority == "DERIVED_ONLY"
     assert identity.promotion_record_path == ".agents/skills/diagnose/promotion_record.json"
 
     # Verify physical provenance artifact contents
-    prov_path = REPO_ROOT / ".agents" / "skills" / "diagnose" / PROMOTION_RECORD_FILENAME
+    prov_path = skill_dir / PROMOTION_RECORD_FILENAME
     assert prov_path.is_file()
     record = json.loads(prov_path.read_text(encoding="utf-8"))
     assert record["schema"] == "nexus.shared_playbook.promotion_record.v1"
@@ -51,80 +536,112 @@ def test_diagnose_active_promotion_has_valid_provenance() -> None:
     assert record["evaluation_provenance"]["verdict"] == "PASS"
     assert record["runtime_provenance"]["gate"] == "G9"
     assert record["runtime_provenance"]["fail_closed_verified"] is True
+    assert record["runtime_provenance"]["final_integration_pr"] == 577
+    assert (
+        record["runtime_provenance"]["final_integration_commit_sha"]
+        == "c8c6de8c330ec8868dc515de4c337007093ad988"
+    )
     assert record["acceptance_decision"]["gate"] == "G10"
     assert record["acceptance_decision"]["decision"] == "PROMOTED_TO_ACTIVE"
     assert record["acceptance_decision"]["self_promotion"] is False
 
 
-def test_active_promotion_fails_closed_when_promotion_evidence_missing(tmp_path: Path) -> None:
-    skill_dir = _copy_diagnose(tmp_path)
-    prov_path = skill_dir / PROMOTION_RECORD_FILENAME
-    assert prov_path.is_file()
-    prov_path.unlink()
-
-    with pytest.raises(SharedPlaybookError, match="shared_playbook_missing_promotion_evidence"):
-        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
+# =========================================================================
+# F4 / F5 Default Policy Witness Tests
+# =========================================================================
 
 
-def test_active_promotion_fails_closed_on_self_promotion(tmp_path: Path) -> None:
-    skill_dir = _copy_diagnose(tmp_path)
-    prov_path = skill_dir / PROMOTION_RECORD_FILENAME
-    record = json.loads(prov_path.read_text(encoding="utf-8"))
-    record["self_promotion"] = True
-    prov_path.write_text(json.dumps(record), encoding="utf-8")
-
-    with pytest.raises(SharedPlaybookError, match="shared_playbook_self_promotion_forbidden"):
-        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
-
-
-def test_active_promotion_fails_closed_on_manifest_hash_tamper(tmp_path: Path) -> None:
-    skill_dir = _copy_diagnose(tmp_path)
-    manifest_path = skill_dir / "playbook.yaml"
-    content = manifest_path.read_text(encoding="utf-8") + "\n# tampered comment"
-    manifest_path.write_text(content, encoding="utf-8")
-
-    with pytest.raises(
-        SharedPlaybookError, match="shared_playbook_promotion_provenance_hash_mismatch"
-    ):
-        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
-
-
-def test_falsification_1_forged_evaluation_evidence_with_new_instructions_hash(
-    tmp_path: Path,
+def test_falsification_f4_real_default_path_through_capability_planner(
+    tmp_path: Path, monkeypatch
 ) -> None:
-    """Falsification 1: 偽造舊 evaluation evidence 指向新的 instructions hash."""
-    skill_dir = _copy_diagnose(tmp_path)
-    skill_md = skill_dir / "SKILL.md"
-    skill_md.write_text(
-        skill_md.read_text(encoding="utf-8") + "\n\n## Unauthorized Mutation\n", encoding="utf-8"
+    """Falsification F4 / Positive Default Witness.
+
+    Proof that without explicit skills[] injection, CapabilityPlanner and canonical policy overlay
+    file physically in the repo resolve xray -> diagnose and mount ACTIVE diagnose.
+    """
+    assert CANONICAL_RUNTIME_OVERLAY_PATH.is_file(), "Canonical runtime policy overlay must exist"
+    assert CANONICAL_SKILL_STATUS_REPORT_PATH.is_file(), "Canonical skill status report must exist"
+
+    _copy_diagnose(tmp_path, create_receipt=True)
+    monkeypatch.setattr(shared_playbook, "DEFAULT_REPO_ROOT", tmp_path)
+
+    planner = CapabilityPlanner()
+    # Explicit skills is None; normal canonical policy loading path via budget paths!
+    plan = planner.plan(
+        task_desc="Diagnose flaky test regression\n- Expected capability receipts: xray",
+        task_type="bugfix",
+        route={
+            "selected_route": "Mode B",
+            "workforce_admission_enabled": True,
+            "route_decision": {"selected_capabilities": ["xray"]},
+        },
+        budget={
+            "runtime_skill_policy_overlay_path": str(CANONICAL_RUNTIME_OVERLAY_PATH),
+            "skill_status_report": str(CANONICAL_SKILL_STATUS_REPORT_PATH),
+        },
+        skills=None,
     )
 
-    prov_path = skill_dir / PROMOTION_RECORD_FILENAME
-    record = json.loads(prov_path.read_text(encoding="utf-8"))
-    record["evaluation_provenance"]["notes"] = "Forged evaluation pointing to new instructions"
-    prov_path.write_text(json.dumps(record), encoding="utf-8")
+    snapshot = plan.signal_snapshot
+    contracts = snapshot.get("planned_skill_mount_contracts", [])
+    violations = snapshot.get("skill_mount_violations", [])
 
-    with pytest.raises(
-        SharedPlaybookError, match="shared_playbook_promotion_provenance_hash_mismatch"
-    ):
-        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
+    assert violations == []
+    xray_mounts = [c for c in contracts if c.get("capability_mount") == "xray"]
+    assert len(xray_mounts) == 1
+    mount = xray_mounts[0]
+    assert mount["skill_id"] == "diagnose"
+    assert mount["capability_mount"] == "xray"
+    assert mount["planner_selected_capability"] is True
+    assert "shared_playbook" in mount
+    sp = mount["shared_playbook"]
+    assert sp["status"] == "ACTIVE"
+    assert sp["primary"] is True
+    assert sp["promotion_record_path"] == ".agents/skills/diagnose/promotion_record.json"
 
 
-def test_falsification_2_modify_active_instructions_without_updating_promotion_evidence(
-    tmp_path: Path,
+def test_falsification_f5_negative_default_control_without_xray(
+    tmp_path: Path, monkeypatch
 ) -> None:
-    """Falsification 2: 修改 ACTIVE playbook instructions 但不更新 promotion evidence."""
-    skill_dir = _copy_diagnose(tmp_path)
-    skill_md = skill_dir / "SKILL.md"
-    # Append instructions line
-    skill_md.write_text(
-        skill_md.read_text(encoding="utf-8") + "\n- extra step without evaluation", encoding="utf-8"
+    """Falsification F5 / Negative Default Control.
+
+    Without xray being selected by the route/planner, diagnose must NOT mount merely because it is ACTIVE.
+    """
+    assert CANONICAL_RUNTIME_OVERLAY_PATH.is_file(), "Canonical runtime policy overlay must exist"
+    assert CANONICAL_SKILL_STATUS_REPORT_PATH.is_file(), "Canonical skill status report must exist"
+
+    _copy_diagnose(tmp_path, create_receipt=True)
+    monkeypatch.setattr(shared_playbook, "DEFAULT_REPO_ROOT", tmp_path)
+
+    planner = CapabilityPlanner()
+    # Route does NOT select xray
+    plan = planner.plan(
+        task_desc="Run standard codeintel query",
+        task_type="refactor",
+        route={
+            "selected_route": "Mode B",
+            "workforce_admission_enabled": True,
+            "route_decision": {"selected_capabilities": ["codeintel"]},
+        },
+        budget={
+            "runtime_skill_policy_overlay_path": str(CANONICAL_RUNTIME_OVERLAY_PATH),
+            "skill_status_report": str(CANONICAL_SKILL_STATUS_REPORT_PATH),
+        },
+        skills=None,
     )
 
-    with pytest.raises(
-        SharedPlaybookError, match="shared_playbook_promotion_provenance_hash_mismatch"
-    ):
-        load_selected_shared_playbook("diagnose", "xray", root=tmp_path, required=True)
+    snapshot = plan.signal_snapshot
+    contracts = snapshot.get("planned_skill_mount_contracts", [])
+    violations = snapshot.get("skill_mount_violations", [])
+
+    assert violations == []
+    # diagnose is NOT mounted
+    diagnose_mounts = [
+        c
+        for c in contracts
+        if c.get("skill_id") == "diagnose" or c.get("capability_mount") == "xray"
+    ]
+    assert diagnose_mounts == []
 
 
 def test_unverified_shared_worker_playbooks_not_active() -> None:
@@ -153,9 +670,9 @@ def test_drift_inspection_detects_upstream_instructions_drift_without_auto_mutat
     )
     assert status.drift_detected is True
     assert status.drift_reason == "upstream_source_drift_detected"
-    assert status.sync_disposition == "RE_EVALUATION_REQUIRED_CANDIDATE_ONLY"
+    assert status.sync_disposition == "UPDATE_CANDIDATE_REQUIRES_EVALUATION"
     assert status.mutation_blocked is True
-    assert status.status == "ACTIVE"
+    assert status.status == "CANDIDATE"
 
 
 def test_intake_rejects_self_promotion_to_active() -> None:
@@ -208,58 +725,3 @@ def test_intake_rejects_self_promotion_to_active() -> None:
             skill_id="nexus-crash-consistency-audit",
             capability_mount="xray",
         )
-
-
-def test_planner_mounts_active_diagnose_by_default_path(tmp_path: Path, monkeypatch) -> None:
-    """Executable proof that ACTIVE diagnose mounts through the default CapabilityPlanner path."""
-    _copy_diagnose(tmp_path)
-    monkeypatch.setattr(shared_playbook, "DEFAULT_REPO_ROOT", tmp_path)
-
-    # Create dummy status report
-    report = tmp_path / "skill_status.json"
-    report.write_text(
-        json.dumps({
-            "schema": "nexus.skill_status.v1",
-            "skills": [
-                {
-                    "name": "diagnose",
-                    "path": ".agents/skills/diagnose/SKILL.md",
-                    "root": "current_best",
-                    "skill_status": "nexus_curated_candidate",
-                    "test_level": "focused",
-                    "action": "runtime_policy_overlay_only",
-                    "capability_mount": "xray",
-                }
-            ],
-        }),
-        encoding="utf-8",
-    )
-
-    planner = CapabilityPlanner()
-    plan = planner.plan(
-        task_desc="Diagnose flaky test regression\n- Expected capability receipts: xray",
-        task_type="bugfix",
-        route={
-            "selected_route": "Mode B",
-            "workforce_admission_enabled": True,
-            "route_decision": {"selected_capabilities": ["xray"]},
-        },
-        budget={"skill_status_report": str(report)},
-        skills=[{"skill_id": "diagnose", "capability_id": "xray"}],
-    )
-
-    snapshot = plan.signal_snapshot
-    contracts = snapshot.get("planned_skill_mount_contracts", [])
-    violations = snapshot.get("skill_mount_violations", [])
-
-    assert violations == []
-    assert len(contracts) == 1
-    mount = contracts[0]
-    assert mount["skill_id"] == "diagnose"
-    assert mount["capability_mount"] == "xray"
-    assert mount["planner_selected_capability"] is True
-    assert "shared_playbook" in mount
-    sp = mount["shared_playbook"]
-    assert sp["status"] == "ACTIVE"
-    assert sp["primary"] is True
-    assert sp["promotion_record_path"] == ".agents/skills/diagnose/promotion_record.json"

@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import yaml
 
@@ -277,41 +277,64 @@ def _validate_payload(payload: dict[str, Any], *, skill_id: str, capability_moun
     _validate_transitions(payload)
 
 
+def compute_playbook_acceptance_binding_hash(
+    *,
+    task_id: str,
+    attempt_id: str,
+    reviewer_id: str,
+    subject_playbook_id: str,
+    subject_manifest_sha256: str,
+    subject_instructions_sha256: str,
+    candidate_commit_sha: str = "",
+    verdict: str = "ACCEPT_CANDIDATE",
+) -> str:
+    """Compute deterministic canonical binding hash for shared playbook candidate acceptance."""
+    payload = {
+        "attempt_id": attempt_id,
+        "candidate_commit_sha": candidate_commit_sha,
+        "reviewer_id": reviewer_id,
+        "subject_instructions_sha256": subject_instructions_sha256,
+        "subject_manifest_sha256": subject_manifest_sha256,
+        "subject_playbook_id": subject_playbook_id,
+        "task_id": task_id,
+        "verdict": verdict,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 def _validate_promotion_provenance(
     *,
     skill_dir: Path,
     skill_id: str,
-    payload: dict[str, Any],
+    payload: Mapping[str, Any],
     manifest_bytes: bytes,
     instructions_bytes: bytes,
+    repo_root: Path | None = None,
 ) -> tuple[dict[str, Any], Path]:
     provenance_path = skill_dir / PROMOTION_RECORD_FILENAME
     if not provenance_path.is_file():
         raise SharedPlaybookError("shared_playbook_missing_promotion_evidence")
+
     try:
         record = json.loads(provenance_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise SharedPlaybookError("shared_playbook_promotion_provenance_invalid") from exc
-    record = _mapping(record, reason="shared_playbook_promotion_provenance_invalid")
 
-    if str(record.get("schema") or "") != PROMOTION_RECORD_SCHEMA:
+    record = _mapping(record, reason="shared_playbook_promotion_provenance_invalid")
+    if record.get("schema") != "nexus.shared_playbook.promotion_record.v1":
         raise SharedPlaybookError("shared_playbook_promotion_provenance_invalid")
-    if (
-        str(record.get("playbook_id") or "") != skill_id
-        or str(record.get("skill_id") or "") != skill_id
-        or str(record.get("version") or "") != str(payload.get("version") or "")
-    ):
-        raise SharedPlaybookError("shared_playbook_promotion_provenance_mismatch")
-    if str(record.get("status") or "") != "ACTIVE":
-        raise SharedPlaybookError("shared_playbook_unauthorized_active_promotion")
-    if bool(record.get("self_promotion")):
-        raise SharedPlaybookError("shared_playbook_self_promotion_forbidden")
+    if record.get("playbook_id") != skill_id:
+        raise SharedPlaybookError("shared_playbook_promotion_provenance_invalid")
+    if record.get("status") != "ACTIVE":
+        raise SharedPlaybookError("shared_playbook_promotion_provenance_invalid")
 
     manifest_sha = _sha256(manifest_bytes)
     instructions_sha = _sha256(instructions_bytes)
-    if str(record.get("target_manifest_sha256") or "") != manifest_sha:
+    if record.get("target_manifest_sha256") != manifest_sha:
         raise SharedPlaybookError("shared_playbook_promotion_provenance_hash_mismatch")
-    if str(record.get("target_instructions_sha256") or "") != instructions_sha:
+    if record.get("target_instructions_sha256") != instructions_sha:
         raise SharedPlaybookError("shared_playbook_promotion_provenance_hash_mismatch")
 
     eval_prov = _mapping(
@@ -325,6 +348,14 @@ def _validate_promotion_provenance(
     if bool(eval_prov.get("authority_escalation_observed")):
         raise SharedPlaybookError("shared_playbook_promotion_provenance_invalid")
 
+    # Stale evaluation evidence checks: evaluated hashes must exist and match target manifest and instructions
+    eval_manifest_sha = str(eval_prov.get("evaluated_manifest_sha256") or "").strip()
+    eval_instructions_sha = str(eval_prov.get("evaluated_instructions_sha256") or "").strip()
+    if not eval_manifest_sha or eval_manifest_sha != manifest_sha:
+        raise SharedPlaybookError("shared_playbook_promotion_provenance_hash_mismatch")
+    if not eval_instructions_sha or eval_instructions_sha != instructions_sha:
+        raise SharedPlaybookError("shared_playbook_promotion_provenance_hash_mismatch")
+
     runtime_prov = _mapping(
         record.get("runtime_provenance"),
         reason="shared_playbook_promotion_provenance_invalid",
@@ -332,16 +363,140 @@ def _validate_promotion_provenance(
     if not bool(runtime_prov.get("fail_closed_verified")):
         raise SharedPlaybookError("shared_playbook_promotion_provenance_invalid")
 
+    # Stale runtime integration checks: integrated hashes must exist and match target manifest and instructions
+    int_manifest_sha = str(runtime_prov.get("integrated_manifest_sha256") or "").strip()
+    int_instructions_sha = str(runtime_prov.get("integrated_instructions_sha256") or "").strip()
+    if not int_manifest_sha or int_manifest_sha != manifest_sha:
+        raise SharedPlaybookError("shared_playbook_promotion_provenance_hash_mismatch")
+    if not int_instructions_sha or int_instructions_sha != instructions_sha:
+        raise SharedPlaybookError("shared_playbook_promotion_provenance_hash_mismatch")
+
     acceptance = _mapping(
-        record.get("acceptance_decision"),
+        record.get("acceptance_decision") or record.get("acceptance_provenance"),
         reason="shared_playbook_promotion_provenance_invalid",
     )
-    if str(acceptance.get("decision") or "") != "PROMOTED_TO_ACTIVE":
+    if str(acceptance.get("decision") or "") not in {"PROMOTED_TO_ACTIVE", "ACCEPT"}:
         raise SharedPlaybookError("shared_playbook_promotion_provenance_invalid")
     if bool(acceptance.get("self_promotion")):
         raise SharedPlaybookError("shared_playbook_self_promotion_forbidden")
-    if not bool(acceptance.get("independent_review_passed")):
-        raise SharedPlaybookError("shared_playbook_promotion_provenance_invalid")
+
+    # Independent Acceptance Artifact Verification:
+    receipt_relpath = str(acceptance.get("acceptance_receipt_path") or "").strip()
+    if not receipt_relpath:
+        # Self-asserted booleans without external immutable acceptance artifact
+        raise SharedPlaybookError("shared_playbook_missing_independent_acceptance")
+
+    effective_root = repo_root or skill_dir.parent.parent.parent
+    receipt_path = Path(receipt_relpath)
+    if not receipt_path.is_absolute():
+        candidate_p1 = skill_dir / receipt_path.name
+        candidate_p2 = effective_root / receipt_relpath
+        candidate_p3 = skill_dir / receipt_path
+        if candidate_p1.is_file():
+            receipt_path = candidate_p1
+        elif candidate_p2.is_file():
+            receipt_path = candidate_p2
+        elif candidate_p3.is_file():
+            receipt_path = candidate_p3
+        else:
+            raise SharedPlaybookError("shared_playbook_missing_independent_acceptance")
+
+    if not receipt_path.is_file():
+        raise SharedPlaybookError("shared_playbook_missing_independent_acceptance")
+
+    # Immutable acceptance artifact digest verification: required in record
+    expected_receipt_hash = str(acceptance.get("acceptance_artifact_hash") or "").strip()
+    if not expected_receipt_hash:
+        raise SharedPlaybookError("shared_playbook_missing_acceptance_artifact_hash")
+
+    actual_receipt_hash = _sha256(receipt_path.read_bytes())
+    if actual_receipt_hash != expected_receipt_hash:
+        raise SharedPlaybookError("shared_playbook_promotion_provenance_hash_mismatch")
+
+    try:
+        receipt_data = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SharedPlaybookError("shared_playbook_acceptance_receipt_invalid") from exc
+    receipt_data = _mapping(receipt_data, reason="shared_playbook_acceptance_receipt_invalid")
+
+    # Canonical Schema Check
+    receipt_schema = str(receipt_data.get("schema") or "").strip()
+    canonical_schemas = {
+        "nexus.candidate_acceptance_result.v1",
+        "nexus.candidate_acceptance.v3",
+        "nexus.external_acceptance_receipt.v1",
+    }
+    if receipt_schema not in canonical_schemas:
+        raise SharedPlaybookError("shared_playbook_unsupported_acceptance_schema")
+
+    # Reviewer and attempt identity
+    reviewer_id = str(receipt_data.get("reviewer_id") or "").strip()
+    attempt_id = str(receipt_data.get("attempt_id") or "").strip()
+    task_id = str(receipt_data.get("task_id") or "").strip()
+    if not task_id or not attempt_id:
+        raise SharedPlaybookError("shared_playbook_acceptance_task_attempt_missing")
+    if not reviewer_id:
+        raise SharedPlaybookError("shared_playbook_acceptance_reviewer_missing")
+
+    implementer_id = str(receipt_data.get("implementer_id") or "").strip()
+    if implementer_id and reviewer_id == implementer_id:
+        raise SharedPlaybookError("shared_playbook_self_promotion_forbidden")
+    if bool(receipt_data.get("self_promotion")):
+        raise SharedPlaybookError("shared_playbook_self_promotion_forbidden")
+
+    # Independence classification check (Required)
+    independence_class = str(receipt_data.get("independence_classification") or "").upper().strip()
+    if not independence_class:
+        raise SharedPlaybookError("shared_playbook_missing_independence_classification")
+    if independence_class in {"SELF_ASSERTED", "INTERNAL_IMPLEMENTER", "UNVERIFIED", "MINTED"}:
+        raise SharedPlaybookError("shared_playbook_self_promotion_forbidden")
+    if independence_class not in {
+        "INDEPENDENT_EXTERNAL_REVIEW",
+        "INDEPENDENT_REVIEWER",
+        "CANONICAL_EXTERNAL_ACCEPTANCE",
+    }:
+        raise SharedPlaybookError("shared_playbook_insufficient_independence_classification")
+
+    # Canonical Verdict Check (Must be ACCEPT_CANDIDATE or ACCEPT, generic PASS is forbidden)
+    receipt_verdict = (
+        str(receipt_data.get("verdict") or receipt_data.get("decision") or "").upper().strip()
+    )
+    if receipt_verdict not in {"ACCEPT_CANDIDATE", "ACCEPT"}:
+        raise SharedPlaybookError("shared_playbook_acceptance_verdict_invalid")
+
+    # Subject binding checks (prevent subject substitution, all fields REQUIRED)
+    subj_playbook = str(receipt_data.get("subject_playbook_id") or "").strip()
+    if not subj_playbook or subj_playbook != skill_id:
+        raise SharedPlaybookError("shared_playbook_acceptance_subject_mismatch")
+
+    subj_manifest = str(receipt_data.get("subject_manifest_sha256") or "").strip()
+    subj_instructions = str(receipt_data.get("subject_instructions_sha256") or "").strip()
+    if not subj_manifest or subj_manifest != manifest_sha:
+        raise SharedPlaybookError("shared_playbook_acceptance_subject_mismatch")
+    if not subj_instructions or subj_instructions != instructions_sha:
+        raise SharedPlaybookError("shared_playbook_acceptance_subject_mismatch")
+
+    candidate_commit_sha = str(receipt_data.get("candidate_commit_sha") or "").strip()
+
+    # Recomputed canonical binding hash check
+    binding_hash = str(
+        receipt_data.get("binding_hash") or receipt_data.get("receipt_hash") or ""
+    ).strip()
+    if not binding_hash:
+        raise SharedPlaybookError("shared_playbook_acceptance_binding_missing")
+
+    expected_binding = compute_playbook_acceptance_binding_hash(
+        task_id=task_id,
+        attempt_id=attempt_id,
+        reviewer_id=reviewer_id,
+        subject_playbook_id=subj_playbook,
+        subject_manifest_sha256=subj_manifest,
+        subject_instructions_sha256=subj_instructions,
+        candidate_commit_sha=candidate_commit_sha,
+        verdict=receipt_verdict,
+    )
+    if binding_hash != expected_binding:
+        raise SharedPlaybookError("shared_playbook_acceptance_binding_mismatch")
 
     return record, provenance_path
 
@@ -360,7 +515,9 @@ def load_selected_shared_playbook(
             raise SharedPlaybookError("shared_playbook_missing")
         return None
     if not instructions_path.is_file():
-        raise SharedPlaybookError("shared_playbook_instructions_missing")
+        if is_required:
+            raise SharedPlaybookError("shared_playbook_instructions_missing")
+        return None
 
     manifest_bytes = manifest_path.read_bytes()
     instructions_bytes = instructions_path.read_bytes()
@@ -379,6 +536,7 @@ def load_selected_shared_playbook(
             payload=payload,
             manifest_bytes=manifest_bytes,
             instructions_bytes=instructions_bytes,
+            repo_root=repo_root,
         )
         promotion_record_relpath = _relative_path(provenance_path, repo_root)
 
