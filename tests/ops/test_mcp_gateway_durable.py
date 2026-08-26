@@ -4753,7 +4753,7 @@ def test_r1b2_live_effect_owner_timeout_returns_uncertain_without_contender_effe
     tmp_path, monkeypatch
 ):
     context = multiprocessing.get_context("spawn")
-    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    fixture = _r1b2_prepared_fixture(tmp_path, monkeypatch)
     payload = _r1b2_runtime_payload(fixture)
     physical = _r1b2_physical_identity(fixture, "desired")
     postflight = _r1b2_postflight(fixture, physical)
