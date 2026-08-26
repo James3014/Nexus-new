@@ -72,6 +72,11 @@ PLACEHOLDER_WORDS = (
     b"unconfigured",
 )
 
+KNOWN_FIXTURE_FINGERPRINTS = frozenset({
+    # Historical synthetic JSON secret fixture from G2 scanner regression coverage.
+    "58ca24245345903eeaf45fcadf3aa357084eb4d5fafa2f6bc9d428ba34e1264f",
+})
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -154,6 +159,8 @@ def _has_delimited_placeholder_marker(value: bytes) -> bool:
 
 
 def _looks_placeholder(value: bytes) -> bool:
+    if _fingerprint(value) in KNOWN_FIXTURE_FINGERPRINTS:
+        return True
     normalized = value.lower().strip(b" \t\r\n\"'")
     for prefix in (b"sk-proj-", b"sk-", b"ghp_", b"github_pat_", b"aiza"):
         if normalized.startswith(prefix):
@@ -456,7 +463,21 @@ def _scan_bytes(
         if any(start <= value_start and value_end <= end for start, end in provider_spans):
             continue
         placeholder = _looks_placeholder(value)
-        if placeholder or _entropy(value) < 3.5:
+        if placeholder:
+            findings.append(
+                Finding(
+                    detector="high_entropy_secret_assignment",
+                    subject_type=subject_type,
+                    fingerprint=_fingerprint(value),
+                    blocking=False,
+                    classification="OBVIOUS_FIXTURE",
+                    path=path,
+                    object_id=object_id,
+                    commit_id=commit_id,
+                )
+            )
+            continue
+        if _entropy(value) < 3.5:
             continue
         findings.append(
             Finding(
