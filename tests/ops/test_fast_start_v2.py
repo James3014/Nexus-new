@@ -185,7 +185,10 @@ def test_production_reconciler_is_exact_trusted_revision_hourly_writer() -> None
     assert "  reconciler:" in workflow
     assert "ref: ${{ github.workflow_sha }}" in workflow
     assert "ref: main" not in workflow
-    assert "persist-credentials: false" in workflow
+    assert "persist-credentials: true" in workflow
+    assert workflow.count("Remove checkout credentials") == 2
+    assert "git config --local --unset-all 'http.https://github.com/.extraheader'" in workflow
+    assert "checkout credentials remain configured" in workflow
     assert "issues: write" in workflow
     assert "fast-start-v2-registry-control" in workflow
     assert "REGISTRY_PREWRITE_FENCE_CONFLICT" in workflow

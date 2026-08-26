@@ -21,7 +21,18 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-          persist-credentials: false
+          persist-credentials: true
+
+      - name: Remove checkout credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config --local --unset-all 'http.https://github.com/.extraheader' || true
+          git config --local --unset-all core.sshCommand || true
+          if git config --local --get-regexp '^(http\.https://github\.com/\.extraheader|core\.sshCommand)$' >/dev/null; then
+            echo "checkout credentials remain configured" >&2
+            exit 1
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
