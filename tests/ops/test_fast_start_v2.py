@@ -178,7 +178,7 @@ def _production_workflow_text() -> str:
     )
 
 
-def test_production_reconciler_is_exact_trusted_revision_hourly_writer() -> None:
+def test_production_reconciler_is_default_branch_hourly_writer() -> None:
     workflow = _production_workflow_text()
     assert 'cron: "17 * * * *"' in workflow
     assert "workflow_dispatch:" in workflow
