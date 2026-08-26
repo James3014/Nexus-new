@@ -60,7 +60,8 @@ def test_lite_to_standard_verifier_driven_escalation():
       - STANDARD retry: second candidate hash distinct, verifier PASS
       - solved = True
     """
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import MagicMock, patch
+
     from nexus.services.local_heal.local_model_capability_executors import CapabilityExecutionResult
     from nexus.services.local_heal.local_model_executor import (
         LocalModelExecutor,
