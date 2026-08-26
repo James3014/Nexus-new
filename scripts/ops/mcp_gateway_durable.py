@@ -2092,53 +2092,128 @@ def _recovery_plan(
     )
 
 
-def _recovery_expected_plist_bytes(root: str) -> bytes:
-    return plistlib.dumps(
-        {
-            "Label": GATEWAY_LABEL,
-            "ProgramArguments": [
-                INTERPRETER,
-                str(Path(root) / GATEWAY_ENTRYPOINT),
-            ],
-            "WorkingDirectory": root,
-            "RunAtLoad": True,
-            "KeepAlive": True,
-            "StandardOutPath": "/Users/jameschen/Library/Logs/Nexus/gateway.log",
-            "StandardErrorPath": "/Users/jameschen/Library/Logs/Nexus/gateway.err.log",
-            "EnvironmentVariables": {
-                "NEXUS_MCP_GATEWAY_TOKEN": "FIXED_SECRET_STORE_REFERENCE"
-            },
-        },
-        fmt=plistlib.FMT_XML,
-        sort_keys=False,
+def _recovery_wrapper_command(root: str) -> str:
+    """R1 form of the accepted fixed wrapper, restricted to derived deployment roots."""
+    root_path = Path(root)
+    deployments = Path(GATEWAY_DEPLOYMENTS_ROOT)
+    if (
+        not root_path.is_absolute()
+        or root_path.parent != deployments
+        or not re.fullmatch(r"r1-[0-9a-f]{40}", root_path.name)
+    ):
+        raise _gateway_error("R1 recovery wrapper root substitution")
+    entrypoint = str(root_path / GATEWAY_ENTRYPOINT)
+    if any(
+        token in str(root_path) or token in entrypoint
+        for token in (";", "&&", "|", "$", "`", "\n", "\r", "\x00")
+    ):
+        raise _gateway_error("R1 recovery wrapper path contains shell metacharacter")
+    return (
+        f'cd {root_path} ; source "{ENV_PATH}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
+        f"export NEXUS_CANONICAL_SOURCE_ROOT={root_path} ; "
+        "export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="
+        "/Users/jameschen/Workspace/Nexus-new-self-hosted-state ; "
+        f"exec {INTERPRETER} {entrypoint}"
     )
+
+
+def _recovery_expected_plist_bytes(root: str) -> bytes:
+    """Render the one fixed direct-Gateway wrapper for an R1 deployment root."""
+    root_path = Path(root)
+    wrapper = _recovery_wrapper_command(str(root_path))
+    payload = {
+        "Label": GATEWAY_LABEL,
+        "ProgramArguments": [
+            "/bin/zsh",
+            "-c",
+            wrapper,
+        ],
+        "WorkingDirectory": str(root_path),
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        "StandardOutPath": "/Users/jameschen/Library/Logs/Nexus/gateway.log",
+        "StandardErrorPath": "/Users/jameschen/Library/Logs/Nexus/gateway.err.log",
+    }
+    return plistlib.dumps(payload, fmt=plistlib.FMT_XML)
 
 
 def _recovery_expected_plist_sha256(root: str) -> str:
     return hashlib.sha256(_recovery_expected_plist_bytes(root)).hexdigest()
 
 
+_RECOVERY_RUNTIME_IDENTITY_CODE = """
+import json
+import sys
+sys.path.insert(0, sys.argv[1])
+from nexus.orchestrator.unified_mcp_gateway import (
+    FULL_TOOL_SCHEMA_HASH,
+    LIFECYCLE_REVISION,
+    PERMISSION_POLICY_HASH,
+    PUBLIC_TOOL_NAMES,
+    TOOL_MANIFEST_REVISION,
+)
+print(json.dumps({
+    "tool_manifest_sha256": TOOL_MANIFEST_REVISION,
+    "schema_sha256": FULL_TOOL_SCHEMA_HASH,
+    "permission_sha256": PERMISSION_POLICY_HASH,
+    "lifecycle": LIFECYCLE_REVISION,
+    "tool_count": len(PUBLIC_TOOL_NAMES),
+}, sort_keys=True, separators=(",", ":")))
+""".strip()
+
+
 def _recovery_expected_postflight(
     receipt: RecoveryAuthorityReceipt,
+    *,
+    command_runner: Callable[..., Any] | None = None,
 ) -> dict[str, Any]:
-    actions = [GATEWAY_ACTION]
-    return {
-        "permission_policy_hash": canonical_hash({
-            "kind": "recovery-permission-policy",
-            "source_set_sha256": receipt.source_set.source_set_sha256,
-            "final_manager_sha256": receipt.final_manager_sha256,
-        }),
-        "schema_hash": canonical_hash({
-            "kind": "recovery-tools-schema",
-            "desired_manifest_hash": receipt.desired_manifest_sha256,
-            "actions": actions,
-        }),
-        "tool_manifest_hash": canonical_hash({
-            "kind": "recovery-tool-manifest",
-            "actions": actions,
-        }),
-        "actions": actions,
+    """Derive runtime identity from the exact staged desired source, never live predecessor state."""
+    root = Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.desired_manifest_id
+    _r1_verify_worktree(root, receipt.desired_manifest)
+    command = (INTERPRETER, "-c", _RECOVERY_RUNTIME_IDENTITY_CODE, str(root))
+    run = command_runner or (
+        lambda *args: subprocess.run(
+            args,
+            cwd=root,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=10,
+            check=False,
+        )
+    )
+    try:
+        result = run(*command)
+    except TypeError:
+        result = run(command)
+    if isinstance(result, str):
+        output = result.strip()
+    else:
+        if getattr(result, "returncode", 0) not in (0, None):
+            raise _gateway_error("R1 desired runtime identity derivation failed")
+        output = str(getattr(result, "stdout", "") or "").strip()
+    try:
+        value = json.loads(output, object_pairs_hook=_unique_pairs)
+    except (TypeError, ValueError) as exc:
+        raise _gateway_error("R1 desired runtime identity malformed", exc) from exc
+    required = {
+        "tool_manifest_sha256",
+        "schema_sha256",
+        "permission_sha256",
+        "lifecycle",
+        "tool_count",
     }
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise _gateway_error("R1 desired runtime identity incomplete")
+    for key in ("tool_manifest_sha256", "schema_sha256", "permission_sha256"):
+        if not isinstance(value[key], str) or not re.fullmatch(r"[0-9a-f]{64}", value[key]):
+            raise _gateway_error(f"R1 desired runtime identity hash malformed: {key}")
+    if not isinstance(value["lifecycle"], str) or not value["lifecycle"]:
+        raise _gateway_error("R1 desired runtime lifecycle missing")
+    if type(value["tool_count"]) is not int or value["tool_count"] <= 0:
+        raise _gateway_error("R1 desired runtime tool count invalid")
+    return dict(value)
 
 
 def _recovery_outcome(
@@ -2196,33 +2271,43 @@ def _validate_recovery_postflight(
     if not all(isinstance(item, Mapping) for item in (health, initialize, tools)):
         raise GatewayContractError("recovery postflight response missing")
     expected = _recovery_expected_postflight(receipt)
+    desired_root = str(Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.desired_manifest_id)
     if (
-        health.get("deployment_id") != identity.deployment_id
-        or health.get("root") != identity.root
-        or health.get("head") != identity.head
-        or health.get("tree") != identity.tree
-        or health.get("server_instance") != identity.server_instance
-        or health.get("permission_policy_hash") != expected["permission_policy_hash"]
+        identity.deployment_id != receipt.desired_manifest_id
+        or identity.root != desired_root
+        or identity.head != receipt.desired_manifest.commit
+        or identity.tree != receipt.desired_manifest.tree
     ):
-        raise GatewayContractError("recovery health identity mismatch")
+        raise GatewayContractError("recovery physical identity is not desired source")
+    canonical_identity = {
+        "root": identity.root,
+        "head": identity.head,
+        "tree": identity.tree,
+        "server_instance": identity.server_instance,
+        "permission_sha256": expected["permission_sha256"],
+        "lifecycle": expected["lifecycle"],
+    }
+    for surface, label in ((health, "health"), (initialize, "initialize")):
+        if any(surface.get(key) != value for key, value in canonical_identity.items()):
+            raise GatewayContractError(f"recovery {label} identity mismatch")
+        if (
+            surface.get("tool_manifest_sha256") != expected["tool_manifest_sha256"]
+            or surface.get("schema_sha256") != expected["schema_sha256"]
+        ):
+            raise GatewayContractError(f"recovery {label} runtime identity mismatch")
     if (
-        not isinstance(initialize.get("session_id"), str)
-        or not initialize.get("session_id")
-        or initialize.get("server_instance") != identity.server_instance
-        or initialize.get("permission_policy_hash") != health.get(
-            "permission_policy_hash"
-        )
-    ):
-        raise GatewayContractError("recovery initialize identity mismatch")
-    if (
-        tools.get("session_id") != initialize.get("session_id")
-        or tools.get("actions") != expected["actions"]
-        or tools.get("schema_hash") != expected["schema_hash"]
-        or tools.get("tool_manifest_hash") != expected["tool_manifest_hash"]
-        or postflight.get("expected_action") != GATEWAY_ACTION
-        or postflight.get("expected_manifest_id") != identity.deployment_id
+        tools.get("tool_manifest_sha256") != expected["tool_manifest_sha256"]
+        or tools.get("schema_sha256") != expected["schema_sha256"]
+        or tools.get("tool_count") != expected["tool_count"]
     ):
         raise GatewayContractError("recovery tools identity mismatch")
+    previous = postflight.get("previous_server_instance")
+    if postflight.get("applied") is True and (
+        not isinstance(previous, str)
+        or not previous
+        or previous == identity.server_instance
+    ):
+        raise GatewayContractError("recovery server instance did not change")
 
 
 def _classify_recovery_physical(
@@ -2270,6 +2355,396 @@ def _gateway_reconcile_physical(
     if len(classifications) > 1 or len(candidates) > 1 and classifications:
         raise GatewayContractError("recovery physical identity ambiguous")
     return next(iter(classifications), "unknown")
+
+
+def _recovery_token(token_loader: Callable[[], str] | None = None) -> str:
+    loader = token_loader or (
+        lambda: read_secret_env().get("NEXUS_MCP_GATEWAY_TOKEN", "")
+    )
+    try:
+        token = loader()
+    except Exception as exc:
+        raise _gateway_error("R1 Gateway token unavailable", exc) from exc
+    if not isinstance(token, str) or not token:
+        raise _gateway_error("R1 Gateway token missing")
+    return token
+
+
+def _recovery_process_start_identity(
+    pid: int, *, runner: Callable[..., Any] | None = None
+) -> str:
+    if type(pid) is not int or pid <= 0:
+        raise _gateway_error("R1 Gateway PID missing")
+    run = runner or (
+        lambda *args: subprocess.run(
+            args,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    )
+    result = run("ps", "-p", str(pid), "-o", "lstart=")
+    if getattr(result, "returncode", 0) not in (0, None):
+        raise _gateway_error("R1 Gateway process start observation failed")
+    value = str(getattr(result, "stdout", "") or "").strip()
+    if not value:
+        raise _gateway_error("R1 Gateway process start identity missing")
+    return f"pid-{pid}:{value}"
+
+
+def _recovery_git_identity(root: Path, manifest: DeploymentManifest) -> dict[str, Any]:
+    expected = Path(GATEWAY_DEPLOYMENTS_ROOT) / manifest.deployment_id
+    if root != expected:
+        raise _gateway_error("R1 recovery root substitution")
+    _r1_verify_worktree(root, manifest)
+    head = str(_r1_run("git", "-C", str(root), "rev-parse", "HEAD"))
+    tree = str(_r1_run("git", "-C", str(root), "rev-parse", "HEAD^{tree}"))
+    status = str(_r1_run("git", "-C", str(root), "status", "--porcelain"))
+    if head != manifest.commit or tree != manifest.tree or status:
+        raise _gateway_error("R1 recovery staged Git identity mismatch")
+    return {"root": str(root), "head": head, "tree": tree, "clean": True}
+
+
+def _recovery_health(
+    *, token: str, opener: Any = urllib.request.urlopen
+) -> Mapping[str, Any]:
+    value = _http_json(
+        GATEWAY_ENDPOINT + "/health", token=token, opener=opener
+    )
+    value = value.get("result", value)
+    if not isinstance(value, Mapping):
+        raise _gateway_error("R1 Gateway health malformed")
+    return value
+
+
+def _recovery_observe_physical(
+    plan: RecoveryEffectPlan,
+    receipt: RecoveryAuthorityReceipt,
+    *,
+    runner: Callable[..., Any] | None = None,
+    opener: Any = urllib.request.urlopen,
+    token_loader: Callable[[], str] | None = None,
+    sleeper: Callable[[float], None] = time.sleep,
+    retries: int = 5,
+) -> RecoveryPhysicalIdentity:
+    if retries < 1 or retries > 5:
+        raise _gateway_error("R1 recovery observation retry bound invalid")
+    token = _recovery_token(token_loader)
+    desired_root = Path(plan.desired_root)
+    predecessor_root = Path(plan.predecessor_root)
+    roots = {
+        _recovery_expected_plist_sha256(str(desired_root)): (
+            desired_root,
+            receipt.desired_manifest,
+        ),
+        _recovery_expected_plist_sha256(str(predecessor_root)): (
+            predecessor_root,
+            receipt.predecessor_manifest,
+        ),
+    }
+    last: BaseException | None = None
+    for attempt in range(retries):
+        try:
+            service = _launchctl_observation(runner=runner)
+            pid = service.get("pid")
+            if service.get("loaded") is not True or type(pid) is not int or pid <= 0:
+                raise _gateway_error("R1 Gateway service/PID missing")
+            plist_bytes = Path(GATEWAY_PLIST).read_bytes()
+            plist_sha = hashlib.sha256(plist_bytes).hexdigest()
+            selected = roots.get(plist_sha)
+            if selected is None:
+                raise _gateway_error("R1 Gateway plist does not match staged deployment")
+            root, manifest = selected
+            if plist_bytes != _recovery_expected_plist_bytes(str(root)):
+                raise _gateway_error("R1 Gateway plist bytes drift")
+            git = _recovery_git_identity(root, manifest)
+            health = _recovery_health(token=token, opener=opener)
+            server_instance = _canonical_alias(
+                health,
+                "server_instance",
+                _GATEWAY_PROTOCOL_ALIASES["server_instance"],
+            )
+            health_root = _canonical_alias(health, "root", ("repo_root",))
+            health_head = _canonical_alias(health, "head", ("git_head",))
+            if health_root != git["root"] or health_head != git["head"]:
+                raise _gateway_error("R1 Gateway health/source disagreement")
+            if "tree" in health or "git_tree" in health:
+                if _canonical_alias(health, "tree", ("git_tree",)) != git["tree"]:
+                    raise _gateway_error("R1 Gateway health/tree disagreement")
+            values = {
+                "loaded": True,
+                "service_label": GATEWAY_LABEL,
+                "pid": pid,
+                "start_identity": _recovery_process_start_identity(pid, runner=runner),
+                "listener": GATEWAY_ENDPOINT,
+                "plist_sha256": plist_sha,
+                "deployment_id": manifest.deployment_id,
+                "root": git["root"],
+                "head": git["head"],
+                "tree": git["tree"],
+                "server_instance": server_instance,
+                "observed_at": datetime.now(timezone.utc).isoformat(),
+            }
+            identity = RecoveryPhysicalIdentity(
+                **values, evidence_hash=canonical_hash(values)
+            )
+            return validate_recovery_physical_identity(
+                identity,
+                expected_manifest=manifest,
+                expected_root=str(root),
+                expected_plist_sha256=plist_sha,
+            )
+        except (GatewayContractError, ContractError, OSError) as exc:
+            last = exc
+            if attempt + 1 < retries:
+                sleeper(min(0.25, 0.05 * (2**attempt)))
+    raise _gateway_error("R1 Gateway physical observation remained uncertain", last)
+
+
+def _recovery_live_postflight(
+    plan: RecoveryEffectPlan,
+    identity: RecoveryPhysicalIdentity,
+    receipt: RecoveryAuthorityReceipt,
+    *,
+    previous_server_instance: str | None,
+    applied: bool,
+    opener: Any = urllib.request.urlopen,
+    token_loader: Callable[[], str] | None = None,
+) -> Mapping[str, Any]:
+    token = _recovery_token(token_loader)
+    health = _recovery_health(token=token, opener=opener)
+    initialize_raw = _http_json(
+        GATEWAY_ENDPOINT + "/mcp",
+        token=token,
+        opener=opener,
+        payload={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+    )
+    tools_raw = _http_json(
+        GATEWAY_ENDPOINT + "/mcp",
+        token=token,
+        opener=opener,
+        payload={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+    )
+    initialize_result = initialize_raw.get("result", initialize_raw)
+    tools_result = tools_raw.get("result", tools_raw)
+    if not isinstance(initialize_result, Mapping) or not isinstance(tools_result, Mapping):
+        raise _gateway_error("R1 Gateway MCP postflight malformed")
+    server_info = initialize_result.get("serverInfo")
+    tools = tools_result.get("tools")
+    if not isinstance(server_info, Mapping):
+        raise _gateway_error("R1 Gateway initialize identity missing")
+    if (
+        not isinstance(tools, list)
+        or not tools
+        or any(
+            not isinstance(item, Mapping)
+            or not isinstance(item.get("name"), str)
+            or not item.get("name")
+            for item in tools
+        )
+    ):
+        raise _gateway_error("R1 Gateway tools/list malformed")
+    names = tuple(sorted(str(item["name"]) for item in tools))
+    manifest_hash = hashlib.sha256(
+        json.dumps(names, separators=(",", ":"), ensure_ascii=True).encode()
+    ).hexdigest()
+    schema_hash = hashlib.sha256(
+        json.dumps(
+            tools,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode()
+    ).hexdigest()
+    expected = _recovery_expected_postflight(receipt)
+    health_identity = {
+        key: _canonical_alias(health, key, aliases)
+        for key, aliases in _GATEWAY_PROTOCOL_ALIASES.items()
+    }
+    initialize_identity = {
+        key: _canonical_alias(server_info, key, aliases)
+        for key, aliases in _GATEWAY_PROTOCOL_ALIASES.items()
+    }
+    if health_identity != initialize_identity:
+        raise _gateway_error("R1 health/initialize identity disagreement")
+    root = _canonical_alias(health, "root", ("repo_root",))
+    head = _canonical_alias(health, "head", ("git_head",))
+    if (
+        root != identity.root
+        or head != identity.head
+        or health_identity["server_instance"] != identity.server_instance
+    ):
+        raise _gateway_error("R1 postflight physical identity disagreement")
+    if "tree" in health or "git_tree" in health:
+        if _canonical_alias(health, "tree", ("git_tree",)) != identity.tree:
+            raise _gateway_error("R1 postflight tree disagreement")
+    if (
+        manifest_hash != expected["tool_manifest_sha256"]
+        or schema_hash != expected["schema_sha256"]
+        or health_identity["tool_manifest_sha256"] != manifest_hash
+        or health_identity["schema_sha256"] != schema_hash
+        or health_identity["permission_sha256"] != expected["permission_sha256"]
+        or health_identity["lifecycle"] != expected["lifecycle"]
+        or len(tools) != expected["tool_count"]
+    ):
+        raise _gateway_error("R1 postflight desired-source runtime identity mismatch")
+    canonical_surface = {
+        "root": identity.root,
+        "head": identity.head,
+        "tree": identity.tree,
+        "server_instance": identity.server_instance,
+        "tool_manifest_sha256": manifest_hash,
+        "schema_sha256": schema_hash,
+        "permission_sha256": health_identity["permission_sha256"],
+        "lifecycle": health_identity["lifecycle"],
+    }
+    return {
+        "authenticated": True,
+        "health": dict(canonical_surface),
+        "initialize": dict(canonical_surface),
+        "tools_list": {
+            "tool_manifest_sha256": manifest_hash,
+            "schema_sha256": schema_hash,
+            "tool_count": len(tools),
+            "actions": names,
+        },
+        "previous_server_instance": previous_server_instance,
+        "applied": applied,
+    }
+
+
+def _production_recovery_adapters(
+    receipt: RecoveryAuthorityReceipt,
+    *,
+    runner: Callable[..., Any] | None = None,
+    opener: Any = urllib.request.urlopen,
+    token_loader: Callable[[], str] | None = None,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> _RecoveryAdapters:
+    """Bind R1 to the one fixed direct-Gateway host; optional seams are test-only."""
+    state: dict[str, Any] = {
+        "previous_server_instance": None,
+        "applied": False,
+    }
+    run = runner or (
+        lambda *args: subprocess.run(
+            args,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    )
+
+    def observe(plan: RecoveryEffectPlan) -> RecoveryPhysicalIdentity:
+        return _recovery_observe_physical(
+            plan,
+            receipt,
+            runner=run,
+            opener=opener,
+            token_loader=token_loader,
+            sleeper=sleeper,
+        )
+
+    def effect(plan: RecoveryEffectPlan) -> RecoveryEffectAck:
+        desired_bytes = _recovery_expected_plist_bytes(plan.desired_root)
+        predecessor_bytes = _recovery_expected_plist_bytes(plan.predecessor_root)
+        try:
+            current_bytes = Path(GATEWAY_PLIST).read_bytes()
+        except OSError:
+            current_bytes = b""
+        if current_bytes == desired_bytes:
+            try:
+                current = observe(plan)
+            except Exception:
+                current = None
+            if current is not None and _classify_recovery_physical(current, receipt) == "desired":
+                values = {
+                    "plan_hash": plan.plan_hash,
+                    "acknowledged": True,
+                    "applied": False,
+                    "already_desired": True,
+                    "effect_kind": "GATEWAY_DURABLE_RECOVERY",
+                }
+                return RecoveryEffectAck(
+                    **values, evidence_hash=canonical_hash(values)
+                )
+        token = _recovery_token(token_loader)
+        current_health = _recovery_health(token=token, opener=opener)
+        state["previous_server_instance"] = _canonical_alias(
+            current_health,
+            "server_instance",
+            _GATEWAY_PROTOCOL_ALIASES["server_instance"],
+        )
+        command = ("launchctl", "bootout", f"{UID_TARGET}/{GATEWAY_LABEL}")
+        result = run(*command)
+        if (
+            getattr(result, "returncode", 0) not in (0, None)
+            and not _legacy_absent_service(result, command)
+        ):
+            raise _gateway_error("R1 Gateway bootout failed")
+        _atomic_gateway_write(Path(GATEWAY_PLIST), desired_bytes)
+        result = run("launchctl", "bootstrap", UID_TARGET, str(GATEWAY_PLIST))
+        if getattr(result, "returncode", 0) not in (0, None):
+            _atomic_gateway_write(Path(GATEWAY_PLIST), predecessor_bytes)
+            rollback = run(
+                "launchctl", "bootstrap", UID_TARGET, str(GATEWAY_PLIST)
+            )
+            if getattr(rollback, "returncode", 0) not in (0, None):
+                raise _gateway_error(
+                    "R1 desired bootstrap failed and predecessor restoration failed"
+                )
+            raise _gateway_error(
+                "R1 desired bootstrap failed; exact predecessor restoration attempted"
+            )
+        state["applied"] = True
+        values = {
+            "plan_hash": plan.plan_hash,
+            "acknowledged": True,
+            "applied": True,
+            "already_desired": False,
+            "effect_kind": "GATEWAY_DURABLE_RECOVERY",
+        }
+        return RecoveryEffectAck(**values, evidence_hash=canonical_hash(values))
+
+    def postflight(
+        plan: RecoveryEffectPlan, identity: RecoveryPhysicalIdentity
+    ) -> Mapping[str, Any]:
+        return _recovery_live_postflight(
+            plan,
+            identity,
+            receipt,
+            previous_server_instance=state["previous_server_instance"],
+            applied=bool(state["applied"]),
+            opener=opener,
+            token_loader=token_loader,
+        )
+
+    return _RecoveryAdapters(
+        observe=observe,
+        effect=effect,
+        postflight=postflight,
+        clock=lambda: datetime.now(timezone.utc).isoformat(),
+        crash_hook=lambda _point: None,
+    )
+
+
+def _gateway_recover_live(
+    request: GatewayRecoveryRequest | Mapping[str, Any],
+) -> GatewayReconcileOutcome:
+    """Manager-local R1 host seam; deliberately absent from public CLI/MCP dispatch."""
+    try:
+        typed = GatewayRecoveryRequest.model_validate(request)
+        validate_recovery_request(typed)
+    except ContractError as exc:
+        raise _gateway_error("R1 live recovery request rejected", exc) from exc
+    receipt = _require_recovery_authority(typed)
+    return _gateway_recover_with_adapters(
+        typed,
+        adapters=_production_recovery_adapters(receipt),
+        ledger=GatewayLedger(),
+    )
 
 
 def _revalidate_recovery_artifacts(
