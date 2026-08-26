@@ -3258,7 +3258,7 @@ def _r1b2_physical_identity(fixture, role="desired", **changes):
     elif role == "unknown":
         manifest = receipt.desired_manifest.__class__(**{
             **receipt.desired_manifest.__dict__,
-            "deployment_id": "r1-unknown",
+            "deployment_id": "r1-" + "d" * 40,
             "commit": "e" * 40,
             "tree": "f" * 40,
         })
