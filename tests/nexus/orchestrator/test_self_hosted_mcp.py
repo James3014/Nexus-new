@@ -141,6 +141,10 @@ def test_tools_list_exposes_governed_self_hosted_surface():
     submit_properties = specs["nexus_self_hosted_submit_task"]["inputSchema"]["properties"]
     compete_properties = specs["nexus_self_hosted_compete_task"]["inputSchema"]["properties"]
     campaign_properties = specs["nexus_self_hosted_create_refactor_campaign"]["inputSchema"]["properties"]
+    push_schema = specs["nexus_self_hosted_push_competition"]["inputSchema"]
+    assert set(push_schema["required"]) == {"competition_id", "remote"}
+    assert "authorized" not in push_schema["properties"]
+    assert push_schema["additionalProperties"] is False
     assert "agy" in submit_properties["worker"]["enum"]
     assert "agy" in submit_properties["worker_order"]["items"]["enum"]
     assert "agy" in submit_properties["fallback_worker"]["enum"]

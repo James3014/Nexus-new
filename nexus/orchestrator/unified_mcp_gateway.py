@@ -27,8 +27,10 @@ from pathlib import Path
 from typing import Any, Mapping, Optional
 from uuid import uuid4
 
+from nexus.contracts.autonomy_goal import AutonomyActionClass, RepositoryIdentity
 from nexus.contracts.lifecycle_action import (
     ContractKind,
+    LifecycleActionEnvelope,
     LifecycleActionType,
     MutationDomain,
     PermissionProfile,
@@ -58,6 +60,10 @@ from nexus.orchestrator.self_hosted_task_service import (
     resolve_contract_identity,
     resolve_lifecycle_identity,
     validate_task_card_binding,
+)
+from nexus.orchestrator.standing_grant_store import (
+    StandingGrantReceiptError,
+    authorize_durable_standing_grant_effect,
 )
 from nexus.services.model_capability_lineage import (
     CHANGE_KIND_VALUES,
@@ -102,6 +108,10 @@ MAX_SEARCH_STDERR_BYTES = 64 * 1024
 FRESHNESS_SEMANTICS_REVISION = "nexus.gateway_freshness.v3"
 CLINE_RUN_TIMEOUT_SECONDS = 60
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+GITHUB_REPOSITORY = RepositoryIdentity(
+    repository_id="James3014/Nexus-new",
+    canonical_remote="https://github.com/James3014/Nexus-new.git",
+)
 
 # Populated from ``UnifiedMCPGateway.tool_specs()`` after the class definition.
 # There must be one public manifest truth; status, health, recovery validation,
@@ -941,6 +951,20 @@ class UnifiedMCPGateway:
     def _utc_now() -> str:
         return datetime.now(timezone.utc).isoformat()
 
+    @staticmethod
+    def _require_owner_effect_authority(
+        action: AutonomyActionClass,
+        effect: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        try:
+            return authorize_durable_standing_grant_effect(
+                repository=GITHUB_REPOSITORY,
+                action=action,
+                effect=effect,
+            )
+        except StandingGrantReceiptError as exc:
+            raise GatewayInputError(f"OWNER_AUTHORITY_REQUIRED:{exc}") from exc
+
     def _assist_root(self) -> Path:
         configured = getattr(self.service, "state_dir", None)
         root = Path(configured).expanduser().resolve() if configured else Path("/tmp/nexus-mcp-gateway-assist-jobs")
@@ -1753,7 +1777,18 @@ class UnifiedMCPGateway:
             raise GatewayInputError("allowed_files must contain 1-4 bounded paths")
         for path in allowed:
             _safe_relative_path(path, "allowed_files")
-        prompt = self._assist_prompt(str(arguments.get("what") or "assist"), str(arguments.get("why") or "assist"), allowed, list(arguments.get("verifier_commands") or ["git diff --check"]))
+        what = str(arguments.get("what") or "assist")
+        why = str(arguments.get("why") or "assist")
+        verifiers = [str(command).strip() for command in arguments.get("verifier_commands") or ["git diff --check"] if str(command).strip()]
+        bound_action_request = {
+            "task_id": task_id,
+            "what": what,
+            "why": why,
+            "allowed_files": allowed,
+            "verifier_commands": verifiers,
+            "apply": False,
+        }
+        prompt = self._assist_prompt(what, why, allowed, verifiers)
         command = self._assist_command(executable=executable, provider=provider, model=model, prompt=prompt)
         job_id = f"assist-{uuid4().hex}"
         root = self._assist_root()
@@ -1766,13 +1801,7 @@ class UnifiedMCPGateway:
             action_value = build_action_envelope(
                 task_id=task_id,
                 action_type=LifecycleActionType.TASK_RUN,
-                request={
-                    "task_id": task_id,
-                    "what": str(arguments.get("what") or "assist"),
-                    "why": str(arguments.get("why") or "assist"),
-                    "allowed_files": allowed,
-                    "apply": False,
-                },
+                request=bound_action_request,
                 tool_manifest_hash=TOOL_MANIFEST_REVISION,
                 expected_head=base,
                 allowed_paths=allowed,
@@ -1788,6 +1817,7 @@ class UnifiedMCPGateway:
             "attempt_history": [],
             "action_id": action_value.get("action_id") or f"action-{uuid4().hex}",
             "attempt_id": action_value.get("attempt_id") or f"attempt-{uuid4().hex}",
+            "idempotency_key": action_value.get("idempotency_key"),
             "status": "SUBMITTED",
             "execution_lane": "ASSISTED_CANONICAL",
             "candidate_only": True,
@@ -1814,6 +1844,7 @@ class UnifiedMCPGateway:
             "stdout_artifact": str(stdout_path),
             "stderr_artifact": str(stderr_path),
             "action": action_value,
+            "bound_action_request": bound_action_request,
             "connector_disconnected_at": None,
             "reconnected_at": None,
         }
@@ -1972,9 +2003,147 @@ class UnifiedMCPGateway:
             raise KeyError(f"unknown task_id: {task_id}")
         if job.get("status") not in {"FAILED", "CANCELLED"}:
             raise GatewayInputError("ASSIST_RETRY_REQUIRES_TERMINAL_FAILURE")
-        command = job.get("command")
-        if not isinstance(command, list) or not command:
+
+        action_dict = job.get("action")
+        if not isinstance(action_dict, Mapping):
+            raise LifecycleGuardError("ACTION_ENVELOPE_INVALID", "assisted job missing action envelope")
+        try:
+            original_action = LifecycleActionEnvelope.model_validate(action_dict)
+        except Exception as exc:
+            raise LifecycleGuardError(
+                "ACTION_ENVELOPE_INVALID",
+                "lifecycle action envelope is invalid",
+                details={"error": str(exc)},
+            ) from exc
+        if original_action.task_id != task_id:
+            raise LifecycleGuardError(
+                "RETRY_SEMANTIC_TASK_MISMATCH",
+                "action envelope task_id does not match retry task_id",
+            )
+        if original_action.action_type is not LifecycleActionType.TASK_RUN:
+            raise LifecycleGuardError(
+                "RETRY_SEMANTIC_ACTION_MISMATCH",
+                "assisted retry requires an original TASK_RUN action",
+            )
+
+        live_head = _git("rev-parse", "HEAD").strip()
+        if original_action.tool_manifest_hash != TOOL_MANIFEST_REVISION:
+            raise LifecycleGuardError(
+                "TOOL_MANIFEST_NAME_DRIFT",
+                "action was created against a different public tool-name manifest",
+                details={
+                    "expected": TOOL_MANIFEST_REVISION,
+                    "received": original_action.tool_manifest_hash,
+                    "definition_scope": "tool_names_only",
+                },
+            )
+        if original_action.expected_head is not None and original_action.expected_head != live_head:
+            raise LifecycleGuardError(
+                "EXPECTED_HEAD_MISMATCH",
+                "action expected a different repository HEAD",
+                details={"expected": original_action.expected_head, "observed": live_head},
+            )
+
+        bound_request = job.get("bound_action_request")
+        if not isinstance(bound_request, Mapping) or not bound_request:
+            raise LifecycleGuardError(
+                "BOUND_ACTION_REQUEST_MISSING",
+                "assisted retry cannot re-authorize a legacy job without its exact bound request",
+            )
+        bound_request = dict(bound_request)
+        if not original_action.verify_request(bound_request):
+            raise LifecycleGuardError(
+                "REQUEST_HASH_MISMATCH",
+                "persisted action request hash does not match bound request",
+            )
+        requested_paths = [
+            str(path).strip()
+            for path in bound_request.get("allowed_files", ())
+            if str(path).strip()
+        ]
+        if not requested_paths or len(requested_paths) > 4:
+            raise GatewayInputError("allowed_files must contain 1-4 bounded paths")
+        for path in requested_paths:
+            _safe_relative_path(path, "allowed_files")
+        if set(requested_paths) != set(original_action.allowed_paths):
+            raise LifecycleGuardError(
+                "ALLOWED_PATH_MISMATCH",
+                "request paths exceed or differ from action envelope",
+            )
+        pre_action_guard(
+            original_action,
+            request=bound_request,
+            current_head=live_head,
+            tool_manifest_hash=TOOL_MANIFEST_REVISION,
+        )
+
+        provider = str(job.get("provider") or "cline").strip().lower()
+        model = str(job.get("model") or "glm-5.2").strip()
+        if provider != "cline":
+            raise GatewayInputError("ASSIST_ASYNC_PROVIDER_UNSUPPORTED")
+        metadata = ONLINE_CLI_SPEC_REGISTRY.get(provider)
+        if metadata is None:
+            raise GatewayInputError("ASSIST_PROVIDER_NOT_REGISTERED")
+        binary_env = metadata.get("binary_env", "")
+        configured = os.environ.get(binary_env, "").strip() if binary_env else ""
+        executable = configured or shutil.which(metadata.get("binary_name", provider))
+        if not executable or not Path(executable).is_file():
+            raise GatewayInputError("ASSIST_PROVIDER_UNAVAILABLE")
+        what = str(bound_request.get("what") or "assist")
+        why = str(bound_request.get("why") or "assist")
+        verifiers = [
+            str(command).strip()
+            for command in bound_request.get("verifier_commands") or ["git diff --check"]
+            if str(command).strip()
+        ]
+        prompt = self._assist_prompt(what, why, requested_paths, verifiers)
+        canonical_command = self._assist_command(
+            executable=executable,
+            provider=provider,
+            model=model,
+            prompt=prompt,
+        )
+        stored_command = job.get("command")
+        if not isinstance(stored_command, list) or not stored_command:
             raise GatewayInputError("ASSIST_RETRY_COMMAND_NOT_RETAINED")
+        if stored_command != canonical_command:
+            raise LifecycleGuardError(
+                "COMMAND_SUBSTITUTION_DETECTED",
+                "persisted command bytes do not match reconstructed canonical command",
+            )
+
+        token = uuid4().hex
+        new_attempt_id = f"attempt-{token}"
+        new_action_id = f"action-{token}"
+        previous_key = str(job.get("idempotency_key") or original_action.idempotency_key or task_id)
+        base_key = previous_key.split(":retry-", 1)[0]
+        suffix = f":retry-{token}"
+        new_idempotency_key = f"{base_key[: max(1, 256 - len(suffix))]}{suffix}"
+        retry_action = build_action_envelope(
+            task_id=task_id,
+            action_type=LifecycleActionType.TASK_RETRY,
+            request=bound_request,
+            tool_manifest_hash=TOOL_MANIFEST_REVISION,
+            expected_head=live_head,
+            allowed_paths=requested_paths,
+            mutation=False,
+            task_card_path=original_action.task_card_path,
+            task_card_hash=original_action.task_card_hash,
+            contract_kind=original_action.contract_kind,
+            contract_hash=original_action.contract_hash,
+            attempt_id=new_attempt_id,
+            action_id=new_action_id,
+            idempotency_key=new_idempotency_key,
+            permission_profile=original_action.permission_profile,
+            approval_scope=original_action.approval_scope,
+        ).model_dump(mode="json")
+        pre_action_guard(
+            retry_action,
+            request=bound_request,
+            current_head=live_head,
+            tool_manifest_hash=TOOL_MANIFEST_REVISION,
+        )
+
         history = list(job.get("attempt_history") or [])
         history.append({
             "job_id": job.get("job_id"),
@@ -1983,7 +2152,7 @@ class UnifiedMCPGateway:
             "exit_code": job.get("exit_code"),
             "result_artifact": job.get("result_artifact"),
         })
-        new_job_id = f"{str(job.get('job_kind') or 'assist')}-{uuid4().hex}"
+        new_job_id = f"{str(job.get('job_kind') or 'assist')}-{token}"
         root = self._assist_root()
         stdout_path = root / f"{new_job_id}.stdout"
         stderr_path = root / f"{new_job_id}.stderr"
@@ -1991,7 +2160,9 @@ class UnifiedMCPGateway:
         new_job = dict(job)
         new_job.update({
             "job_id": new_job_id,
-            "attempt_id": f"attempt-{uuid4().hex}",
+            "action_id": new_action_id,
+            "attempt_id": new_attempt_id,
+            "idempotency_key": new_idempotency_key,
             "attempt_history": history,
             "status": "SUBMITTED",
             "submitted_at": self._utc_now(),
@@ -2003,6 +2174,10 @@ class UnifiedMCPGateway:
             "blocker": None,
             "provider_error": "",
             "result": None,
+            "command": canonical_command,
+            "command_hash": hashlib.sha256(
+                json.dumps(canonical_command, separators=(",", ":")).encode("utf-8")
+            ).hexdigest(),
             "stdout_artifact": str(stdout_path),
             "stderr_artifact": str(stderr_path),
             "result_artifact": str(self._assist_path(task_id)),
@@ -2014,21 +2189,40 @@ class UnifiedMCPGateway:
             "process_killed": False,
             "connector_disconnected_at": None,
             "reconnected_at": self._utc_now(),
+            "action": retry_action,
+            "bound_action_request": bound_request,
         })
         self._assist_write(new_job)
         stdout_handle = stdout_path.open("w", encoding="utf-8")
         stderr_handle = stderr_path.open("w", encoding="utf-8")
         try:
-            process = subprocess.Popen(command, cwd=workspace_root, stdout=stdout_handle, stderr=stderr_handle, text=True, start_new_session=True)
+            process = subprocess.Popen(
+                canonical_command,
+                cwd=workspace_root,
+                stdout=stdout_handle,
+                stderr=stderr_handle,
+                text=True,
+                start_new_session=True,
+            )
         except Exception:
             stdout_handle.close()
             stderr_handle.close()
             shutil.rmtree(workspace_root, ignore_errors=True)
-            new_job.update({"status": "FAILED", "finished_at": self._utc_now(), "blocker": "ASSIST_PROVIDER_FAILED", "provider_error": "provider process could not start"})
+            new_job.update({
+                "status": "FAILED",
+                "finished_at": self._utc_now(),
+                "blocker": "ASSIST_PROVIDER_FAILED",
+                "provider_error": "provider process could not start",
+            })
             return self._assist_response(self._assist_write(new_job), operation="retry")
         stdout_handle.close()
         stderr_handle.close()
-        new_job.update({"status": "RUNNING", "pid": process.pid, "pgid": process.pid, "started_at": self._utc_now()})
+        new_job.update({
+            "status": "RUNNING",
+            "pid": process.pid,
+            "pgid": process.pid,
+            "started_at": self._utc_now(),
+        })
         with self._assist_lock:
             self._assist_processes[task_id] = process
         return self._assist_response(self._assist_write(new_job), operation="retry")
@@ -2167,6 +2361,18 @@ class UnifiedMCPGateway:
         verifiers = [str(command).strip() for command in arguments.get("verifier_commands") or [] if str(command).strip()]
         if not verifiers:
             raise GatewayInputError("verifier_commands is required")
+        head = self._exact_hash(_git("rev-parse", "HEAD").strip(), "expected_head", 40)
+        owner_authority = self._require_owner_effect_authority(
+            AutonomyActionClass.TASK_CARD_CREATE,
+            {
+                "campaign_id": campaign,
+                "task_id": task_id,
+                "expected_head": head,
+                "allowed_files": allowed,
+                "verifier_commands": verifiers,
+                "objective_sha256": hashlib.sha256(objective.encode("utf-8")).hexdigest(),
+            },
+        )
         campaign_root = CANONICAL_SOURCE_ROOT / "tasks" / campaign
         index_path = campaign_root / "INDEX.md"
         card_path = campaign_root / f"00-{task_id}.md"
@@ -2225,6 +2431,7 @@ class UnifiedMCPGateway:
             "exact_index_diff": "".join(index_diff_lines),
             "successor_execution": "NOT_STARTED",
             "owner_confirmation": True,
+            "owner_authority": owner_authority,
         }
 
     def _task_card_commit(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
@@ -2271,6 +2478,16 @@ class UnifiedMCPGateway:
         current_head = _git("rev-parse", "HEAD").strip()
         if current_head != expected_head:
             raise GatewayInputError("TASK_CARD_COMMIT_HEAD_MISMATCH")
+        owner_authority = self._require_owner_effect_authority(
+            AutonomyActionClass.TASK_CARD_COMMIT,
+            {
+                "campaign_id": campaign,
+                "task_id": task_id,
+                "expected_head": expected_head,
+                "card_hash": expected_card_hash,
+                "index_hash": expected_index_hash,
+            },
+        )
         branch = subprocess.run(
             ["git", "symbolic-ref", "-q", "--short", "HEAD"],
             cwd=CANONICAL_SOURCE_ROOT,
@@ -2366,6 +2583,7 @@ class UnifiedMCPGateway:
             "controller_clean": True,
             "successor_execution": "READY_FOR_GOVERNED_START",
             "owner_confirmation": True,
+            "owner_authority": owner_authority,
         }
 
     def _model_probe_submit(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
@@ -3846,6 +4064,8 @@ class UnifiedMCPGateway:
         superseded_by = str(arguments.get("superseded_by") or "").strip() or None
         if disposition == "SUPERSEDED" and not superseded_by:
             raise GatewayInputError("superseded_by is required for SUPERSEDED")
+        if superseded_by is not None:
+            superseded_by = self._safe_slug(superseded_by, "superseded_by")
         state = self.service.get_task_snapshot(task_id, include_details=True)
         if not isinstance(state, Mapping):
             raise GatewayInputError("CANDIDATE_TASK_STATE_REQUIRED")
@@ -3853,6 +4073,39 @@ class UnifiedMCPGateway:
         if not re.fullmatch(r"[0-9a-f]{40}", base):
             raise GatewayInputError("CANDIDATE_CONTROLLER_REVISION_REQUIRED")
         packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
+        try:
+            contract_identity = resolve_contract_identity(
+                state,
+                expected_task_id=task_id,
+                expected_head=base,
+            )
+        except RuntimeError as exc:
+            raise GatewayInputError(str(exc)) from exc
+        candidate_binding = {
+            "candidate_commit_sha": packet.get("candidate_commit_sha") or state.get("candidate_commit_sha"),
+            "candidate_tree_sha": packet.get("candidate_tree_sha") or state.get("candidate_tree_sha"),
+            "candidate_state_hash": packet.get("candidate_state_hash") or state.get("candidate_state_hash"),
+            "verified_receipt_hash": packet.get("verified_receipt_hash") or state.get("verified_receipt_hash"),
+        }
+        owner_action = (
+            AutonomyActionClass.CANDIDATE_REJECT
+            if disposition == "REJECTED"
+            else AutonomyActionClass.CANDIDATE_SUPERSEDE
+        )
+        owner_authority = self._require_owner_effect_authority(
+            owner_action,
+            {
+                "task_id": task_id,
+                "attempt_id": str(state.get("attempt_id") or ""),
+                "controller_revision": base,
+                "contract_kind": contract_identity["contract_kind"],
+                "contract_hash": contract_identity["contract_hash"],
+                "task_card_hash": contract_identity["task_card_hash"],
+                "disposition": disposition,
+                "superseded_by": superseded_by,
+                **candidate_binding,
+            },
+        )
         action_request = {**dict(arguments), "source_attempt_id": state.get("attempt_id"), "candidate_binding": {
             "candidate_commit_sha": packet.get("candidate_commit_sha") or state.get("candidate_commit_sha"),
             "candidate_tree_sha": packet.get("candidate_tree_sha") or state.get("candidate_tree_sha"),
@@ -3874,6 +4127,7 @@ class UnifiedMCPGateway:
         result = self.service.dispose_candidate(task_id, disposition=disposition, superseded_by=superseded_by)
         payload = self._recovery_payload(result, operation="candidate_dispose", include_state=True)
         payload["guard_receipt"] = guard_receipt
+        payload["owner_authority"] = owner_authority
         return payload
 
     def _workspace_snapshot(self) -> dict[str, Any]:
