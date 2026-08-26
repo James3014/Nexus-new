@@ -870,7 +870,25 @@ def _physical_local_service(service: Any) -> bool:
 
 
 def _physical_online_invoker(invoker: Any) -> bool:
-    return bool(invoker is not None and getattr(invoker, "physical_provider_transport", False) is True)
+    """Classify Online provider callables without trusting a caller opt-out.
+
+    Registered/structured provider adapters carry provider identity and are
+    therefore physical by default.  A bounded deterministic compatibility
+    callback may explicitly declare ``physical_provider_transport=False`` or
+    remain provider-neutral.  Supplying a provider identity can never silently
+    opt out of fresh Workforce Admission merely by omitting the marker.
+    """
+    if invoker is None:
+        return False
+    marker = getattr(invoker, "physical_provider_transport", None)
+    if type(marker) is bool:
+        return marker
+    provider = str(
+        getattr(invoker, "online_invoker_provider", None)
+        or getattr(invoker, "provider", None)
+        or ""
+    ).strip()
+    return bool(provider)
 
 
 def _build_workforce_admission_lineage(
@@ -2736,6 +2754,7 @@ def build_structured_online_invoker(
 
     invoke.provider = provider  # type: ignore[attr-defined]
     invoke.online_invoker_provider = provider  # type: ignore[attr-defined]
+    invoke.physical_provider_transport = True  # type: ignore[attr-defined]
     return invoke
 
 

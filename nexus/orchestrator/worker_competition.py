@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 import json
 import os
-from pathlib import Path
 import re
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping, Optional, Sequence
 from uuid import uuid4
 
@@ -19,6 +19,8 @@ from nexus.orchestrator.governed_push import GovernedPushManager
 
 TERMINAL_TASK_STATUSES = frozenset({"CANDIDATE_COMMITTED", "FINAL_BLOCK"})
 _SAFE_ID = re.compile(r"[^A-Za-z0-9._-]+")
+
+
 @dataclass(frozen=True)
 class CompetitionCandidate:
     candidate_id: str

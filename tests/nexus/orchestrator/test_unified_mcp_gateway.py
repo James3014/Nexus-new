@@ -3,7 +3,6 @@ import io
 import json
 import subprocess
 import sys
-import tempfile
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path

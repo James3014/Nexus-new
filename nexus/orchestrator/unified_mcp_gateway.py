@@ -54,16 +54,16 @@ from nexus.orchestrator.lifecycle_guards import (
     pre_action_guard,
     validate_approval_grant,
 )
-from nexus.orchestrator.standing_grant_store import (
-    StandingGrantReceiptError,
-    authorize_durable_standing_grant_effect,
-)
 from nexus.orchestrator.self_hosted_task_service import (
     CANONICAL_SOURCE_ROOT,
     SelfHostedTaskService,
     resolve_contract_identity,
     resolve_lifecycle_identity,
     validate_task_card_binding,
+)
+from nexus.orchestrator.standing_grant_store import (
+    StandingGrantReceiptError,
+    authorize_durable_standing_grant_effect,
 )
 from nexus.services.model_capability_lineage import (
     CHANGE_KIND_VALUES,

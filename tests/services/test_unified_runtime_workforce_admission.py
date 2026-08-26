@@ -19,7 +19,11 @@ from nexus.services.local_heal.local_model_provider import InjectedLocalModelPro
 from nexus.services.local_heal.isolated_workspace_apply import IsolatedApplyReceipt
 from nexus.services.local_heal.isolated_verifier import IsolatedVerifierReceipt
 from nexus.services.model_workforce_policy import WorkforcePolicyLoader
-from nexus.services.unified_runtime import UnifiedRuntime, UnifiedRuntimeRequest
+from nexus.services.unified_runtime import (
+    UnifiedRuntime,
+    UnifiedRuntimeRequest,
+    build_structured_online_invoker,
+)
 
 
 POLICY = ROOT / "nexus/config/model_workforce.yaml"
@@ -141,6 +145,7 @@ def _online(context: dict[str, object]) -> dict[str, object]:
 
 _online.provider = "codex"
 _online.online_invoker_provider = "codex"
+_online.physical_provider_transport = False
 
 
 def _verifier(context: dict[str, object]) -> dict[str, object]:
@@ -749,7 +754,6 @@ def test_physical_online_invoker_forces_fresh_admission_when_flag_omitted_or_fal
 
     physical_online.provider = "codex"
     physical_online.online_invoker_provider = "codex"
-    physical_online.physical_provider_transport = True
     route: dict[str, object] = {"recommended_flow": "direct"}
     if flag_value is not None:
         route["workforce_admission_enabled"] = flag_value
@@ -763,6 +767,17 @@ def test_physical_online_invoker_forces_fresh_admission_when_flag_omitted_or_fal
     assert receipt["workforce_admission"]["overall_decision"] == "BLOCK"
     assert receipt["online"]["invoked"] is False
     assert calls == 0
+
+
+def test_structured_provider_adapter_is_explicitly_physical() -> None:
+    invoker = build_structured_online_invoker(
+        lambda **_kwargs: ({"status": "ok"}, "ok"),
+        provider="fixture_gateway",
+    )
+
+    assert invoker.provider == "fixture_gateway"
+    assert invoker.online_invoker_provider == "fixture_gateway"
+    assert invoker.physical_provider_transport is True
 
 
 def test_admission_disabled_preserves_legacy_overlay_and_7b_normalization() -> None:

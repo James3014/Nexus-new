@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 import re
 import subprocess
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Mapping, Optional
 
 from nexus.contracts.autonomy_goal import (
@@ -17,7 +17,6 @@ from nexus.orchestrator.standing_grant_store import (
     StandingGrantReceiptError,
     authorize_durable_standing_grant_effect,
 )
-
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
