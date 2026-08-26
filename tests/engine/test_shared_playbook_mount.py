@@ -37,21 +37,23 @@ def _copy_skill(tmp_path: Path, source_id: str = "diagnose", target_id: str = "d
 def _status_report(tmp_path: Path, names: list[str]) -> Path:
     report = tmp_path / "skill_status.json"
     report.write_text(
-        json.dumps({
-            "schema": "nexus.skill_status.v1",
-            "skills": [
-                {
-                    "name": name,
-                    "path": f".agents/skills/{name}/SKILL.md",
-                    "root": "current_best",
-                    "skill_status": "nexus_curated_candidate",
-                    "test_level": "focused",
-                    "action": "runtime_policy_overlay_only",
-                    "capability_mount": "xray",
-                }
-                for name in names
-            ],
-        }),
+        json.dumps(
+            {
+                "schema": "nexus.skill_status.v1",
+                "skills": [
+                    {
+                        "name": name,
+                        "path": f".agents/skills/{name}/SKILL.md",
+                        "root": "current_best",
+                        "skill_status": "nexus_curated_candidate",
+                        "test_level": "focused",
+                        "action": "runtime_policy_overlay_only",
+                        "capability_mount": "xray",
+                    }
+                    for name in names
+                ],
+            }
+        ),
         encoding="utf-8",
     )
     return report

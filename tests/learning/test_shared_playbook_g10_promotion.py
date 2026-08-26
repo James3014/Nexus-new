@@ -581,7 +581,9 @@ def test_canonical_independent_acceptance_artifact_passes_promotion(
     receipt = json.loads((skill_dir / "acceptance_receipt.json").read_text(encoding="utf-8"))
     assert receipt["schema"] == "nexus.candidate_acceptance_result.v1"
     assert receipt["decision"] == "ACCEPT"
-    assert receipt["independence_classification"] == AcceptanceAuthorityKind.INDEPENDENT_REVIEWER.value
+    assert (
+        receipt["independence_classification"] == AcceptanceAuthorityKind.INDEPENDENT_REVIEWER.value
+    )
     assert receipt["request"]["schema"] == "nexus.candidate_acceptance_request.v1"
     assert receipt["review"]["schema"] == "nexus.independent_candidate_review.v1"
     request, review = _canonical_request_review(

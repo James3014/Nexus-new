@@ -26,40 +26,46 @@ PROMOTION_RECORD_SCHEMA = "nexus.shared_playbook.promotion_record.v1"
 PROMOTION_RECORD_FILENAME = "promotion_record.json"
 DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[2]
 REQUIRED_SHARED_PLAYBOOK_IDS = frozenset({"diagnose"})
-KNOWN_SHARED_WORKER_PLAYBOOKS = frozenset({
-    "diagnose",
-    "nexus-crash-consistency-audit",
-    "nexus-bug-family-sweep",
-    "nexus-proven-pattern-reuse",
-    "nexus-openwiki-navigator",
-    "nexus-merge-conflict-resolution",
-})
+KNOWN_SHARED_WORKER_PLAYBOOKS = frozenset(
+    {
+        "diagnose",
+        "nexus-crash-consistency-audit",
+        "nexus-bug-family-sweep",
+        "nexus-proven-pattern-reuse",
+        "nexus-openwiki-navigator",
+        "nexus-merge-conflict-resolution",
+    }
+)
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]+$")
 _ALLOWED_STATUSES = frozenset({"CANDIDATE", "ACTIVE"})
-_REQUIRED_AUTHORITY_FLAGS = frozenset({
-    "route_selection",
-    "model_selection",
-    "worker_selection",
-    "approval",
-    "integration",
-    "merge",
-    "promotion",
-    "task_receipt",
-    "claim_authority",
-    "self_modify",
-    "permission_expand",
-})
+_REQUIRED_AUTHORITY_FLAGS = frozenset(
+    {
+        "route_selection",
+        "model_selection",
+        "worker_selection",
+        "approval",
+        "integration",
+        "merge",
+        "promotion",
+        "task_receipt",
+        "claim_authority",
+        "self_modify",
+        "permission_expand",
+    }
+)
 _INHERIT_ONLY_PERMISSION_KEYS = ("filesystem", "network", "tools")
-_PLAYBOOK_RECEIPT_KEYS = frozenset({
-    "playbook_id",
-    "playbook_version",
-    "playbook_manifest_sha256",
-    "playbook_instructions_sha256",
-    "playbook_gate_passed",
-    "playbook_violation",
-    "playbook_trace",
-    "shared_playbook",
-})
+_PLAYBOOK_RECEIPT_KEYS = frozenset(
+    {
+        "playbook_id",
+        "playbook_version",
+        "playbook_manifest_sha256",
+        "playbook_instructions_sha256",
+        "playbook_gate_passed",
+        "playbook_violation",
+        "playbook_trace",
+        "shared_playbook",
+    }
+)
 
 
 class SharedPlaybookError(ValueError):
@@ -287,14 +293,18 @@ def _validate_payload(payload: dict[str, Any], *, skill_id: str, capability_moun
     _validate_transitions(payload)
 
 
-_FORBIDDEN_INDEPENDENCE = frozenset({
-    "SELF_ASSERTED",
-    "INTERNAL_IMPLEMENTER",
-    "UNVERIFIED",
-    "MINTED",
-    "WORKER_OUTPUT",
-})
-_GENERIC_PROMOTION_VERDICTS = frozenset({"PASS", "PROMOTED_TO_ACTIVE", "DEFECT", "BLOCK", "REPAIRABLE"})
+_FORBIDDEN_INDEPENDENCE = frozenset(
+    {
+        "SELF_ASSERTED",
+        "INTERNAL_IMPLEMENTER",
+        "UNVERIFIED",
+        "MINTED",
+        "WORKER_OUTPUT",
+    }
+)
+_GENERIC_PROMOTION_VERDICTS = frozenset(
+    {"PASS", "PROMOTED_TO_ACTIVE", "DEFECT", "BLOCK", "REPAIRABLE"}
+)
 
 
 def _canonical_dataclass_kwargs(cls: type[Any], payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -356,10 +366,10 @@ def _reduce_canonical_acceptance(receipt_data: Mapping[str, Any]) -> None:
 
     observed_verdict = str(receipt_data.get("verdict") or "").strip()
     if observed_verdict:
-        if (
-            observed_verdict.upper() in _GENERIC_PROMOTION_VERDICTS
-            or observed_verdict not in {AcceptanceDecision.ACCEPT.value, "ACCEPT_CANDIDATE"}
-        ):
+        if observed_verdict.upper() in _GENERIC_PROMOTION_VERDICTS or observed_verdict not in {
+            AcceptanceDecision.ACCEPT.value,
+            "ACCEPT_CANDIDATE",
+        }:
             raise SharedPlaybookError("shared_playbook_acceptance_verdict_invalid")
 
     binding_hash = _require_text(
@@ -870,19 +880,21 @@ def bind_shared_playbook_runtime_receipts(
                 f"{identity.playbook_id}@{identity.version}:"
                 f"manifest={identity.manifest_sha256}:instructions={identity.instructions_sha256}"
             )
-            receipt.update({
-                "playbook_id": identity.playbook_id,
-                "playbook_version": identity.version,
-                "playbook_manifest_sha256": identity.manifest_sha256,
-                "playbook_instructions_sha256": identity.instructions_sha256,
-                "playbook_gate_passed": True,
-                "playbook_trace": {
-                    "schema": PLAYBOOK_TRACE_SCHEMA,
-                    "authority": "DERIVED_ONLY",
-                    "selected_by": "CapabilityPlanner",
+            receipt.update(
+                {
                     "playbook_id": identity.playbook_id,
-                    "version": identity.version,
-                },
-                "evidence_refs": list(dict.fromkeys(evidence_refs)),
-            })
+                    "playbook_version": identity.version,
+                    "playbook_manifest_sha256": identity.manifest_sha256,
+                    "playbook_instructions_sha256": identity.instructions_sha256,
+                    "playbook_gate_passed": True,
+                    "playbook_trace": {
+                        "schema": PLAYBOOK_TRACE_SCHEMA,
+                        "authority": "DERIVED_ONLY",
+                        "selected_by": "CapabilityPlanner",
+                        "playbook_id": identity.playbook_id,
+                        "version": identity.version,
+                    },
+                    "evidence_refs": list(dict.fromkeys(evidence_refs)),
+                }
+            )
     return bound_receipts
