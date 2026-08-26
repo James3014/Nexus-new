@@ -105,10 +105,11 @@ def test_generic_high_entropy_assignment_is_blocking(tmp_path: Path) -> None:
 
 def test_json_quoted_high_entropy_assignment_is_blocking(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
+    json_secret = "Q8v6K1mP9zT2yR4u" + "W7nB3cD5fG0hJ2kL"
     _commit(
         repo,
         "json secret",
-        {"config.json": '{"client_secret": "Q8v6K1mP9zT2yR4uW7nB3cD5fG0hJ2kL"}\n'},
+        {"config.json": f'{{"client_secret": "{json_secret}"}}\n'},
     )
     _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
     receipt = scan_repository(repo)
