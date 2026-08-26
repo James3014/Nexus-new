@@ -1,8 +1,16 @@
-from typing import List, Dict, Any, Literal
+from typing import Any, Dict, List, Protocol, Sequence
+
 from nexus.search.contracts import RetryDirective
 from nexus.search.diversity import DiversityMeter
-from nexus.search.feedback_router import FeedbackRouter
-from nexus.verifiers.contracts import VerifierVerdict
+
+
+class VerifierSignalLike(Protocol):
+    """Minimal verifier feedback surface read by the sampler."""
+
+    passed: bool
+    failure_tags: Sequence[str]
+    verifier_name: str
+
 
 class AdaptiveResampler:
     """
@@ -16,10 +24,10 @@ class AdaptiveResampler:
                            failure_bucket: str, 
                            candidate_contents: List[str], 
                            current_k: int,
-                           verdicts: List[VerifierVerdict] = None) -> RetryDirective:
+                           verdicts: Sequence[VerifierSignalLike] | None = None) -> RetryDirective:
         
         diversity_score = self.meter.compute_diversity(candidate_contents)
-        feedback = FeedbackRouter.route_failure(verdicts or [])
+        feedback = _route_failure(verdicts or [])
         
         # 1. 優先處理反饋導向的重採樣
         if feedback["feedback_loop_active"]:
@@ -49,3 +57,25 @@ class AdaptiveResampler:
             )
             
         return RetryDirective(should_retry=False, mode="WAIT", modified_params={})
+
+
+def _route_failure(verdicts: Sequence[VerifierSignalLike]) -> Dict[str, Any]:
+    """Map failed verifier signals to bounded search retry hints."""
+    hints = []
+    strategies = []
+
+    for v in verdicts:
+        if not v.passed:
+            tags = " ".join(getattr(v, "failure_tags", []) or [])
+            if "MISSING:" in tags or "UNDEFINED" in tags:
+                hints.append("IMPORT_AWARE_FIX")
+                strategies.append("include_common_imports")
+            if "INHERITANCE" in getattr(v, "verifier_name", "").upper():
+                hints.append("HIERARCHY_PRESERVING")
+                strategies.append("analyze_mro_first")
+
+    return {
+        "retry_hints": list(dict.fromkeys(hints)),
+        "suggested_strategies": list(dict.fromkeys(strategies)),
+        "feedback_loop_active": len(hints) > 0,
+    }
