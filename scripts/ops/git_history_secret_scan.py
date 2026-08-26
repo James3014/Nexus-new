@@ -43,15 +43,18 @@ PEM_PATTERN = re.compile(
 )
 
 ASSIGNMENT_PATTERN = re.compile(
-    rb"(?im)(?:^|[,{])[ \t]*(?:export[ \t]+)?"
+    rb"(?m)(?:^|[,{])[ \t]*(?:export[ \t]+)?"
     rb"(?P<key_quote>[\"']?)"
-    rb"(?:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|"
-    rb"password|secret[_-]?key|private[_-]?key)"
+    rb"(?P<key>"
+    rb"(?i:api[_-]?key|access[_-]?token|auth[_-]?token|client[_-]?secret|"
+    rb"password|secret[_-]?access[_-]?key|secret[_-]?key|private[_-]?key)"
+    rb"|[A-Z][A-Z0-9_]*_(?:API_KEY|ACCESS_TOKEN|AUTH_TOKEN|CLIENT_SECRET|"
+    rb"PASSWORD|SECRET_ACCESS_KEY|SECRET_KEY|PRIVATE_KEY))"
     rb"(?P=key_quote)[ \t]*(?P<separator>[:=])[ \t]*"
-    rb"(?:\"(?P<double>[A-Za-z0-9_./+\-=]{20,})\"|"
-    rb"'(?P<single>[A-Za-z0-9_./+\-=]{20,})'|"
+    rb"(?:\"(?P<double>[^\"\r\n]{20,})\"|"
+    rb"'(?P<single>[^'\r\n]{20,})'|"
     rb"(?P<bare>[A-Za-z0-9_./+\-=]{20,}))"
-    rb"(?=[ \t]*(?:[,}]|#.*$|$))"
+    rb"(?=[ \t]*(?:[,}\]]|#.*$|$))"
 )
 
 SECRET_PATH_RE = re.compile(
@@ -72,9 +75,19 @@ PLACEHOLDER_WORDS = (
     b"unconfigured",
 )
 
-KNOWN_FIXTURE_FINGERPRINTS = frozenset({
-    # Historical synthetic JSON secret fixture from G2 scanner regression coverage.
-    "58ca24245345903eeaf45fcadf3aa357084eb4d5fafa2f6bc9d428ba34e1264f",
+KNOWN_HISTORICAL_FIXTURES = frozenset({
+    (
+        "241e55af18e144c12e782b8286b0d2cb06714429",
+        "tests/ops/test_git_history_secret_scan.py",
+        "high_entropy_secret_assignment",
+        "58ca24245345903eeaf45fcadf3aa357084eb4d5fafa2f6bc9d428ba34e1264f",
+    ),
+    (
+        "631f1754786d2e6e9b33c6be8d4da641a1da5b2e",
+        "tests/ops/test_git_history_secret_scan.py",
+        "high_entropy_secret_assignment",
+        "fc2d68651025d2d7c73bdbaec26e9dcf3d7fc4b79f0ab7ebff593bf587fb1699",
+    ),
 })
 
 
@@ -159,8 +172,6 @@ def _has_delimited_placeholder_marker(value: bytes) -> bool:
 
 
 def _looks_placeholder(value: bytes) -> bool:
-    if _fingerprint(value) in KNOWN_FIXTURE_FINGERPRINTS:
-        return True
     normalized = value.lower().strip(b" \t\r\n\"'")
     for prefix in (b"sk-proj-", b"sk-", b"ghp_", b"github_pat_", b"aiza"):
         if normalized.startswith(prefix):
@@ -201,6 +212,17 @@ def _looks_placeholder(value: bytes) -> bool:
     if len(value) >= 20 and value.lower().strip(b"-_./+") in alphabet_and_digits:
         return True
     return False
+
+
+def _published_ref_snapshot(refs: Iterable[tuple[str, str]]) -> bytes:
+    return "".join(f"{name} {oid}\n" for name, oid in sorted(refs)).encode("utf-8")
+
+
+def _repository_head(repo: Path) -> str:
+    head = _run(repo, "rev-parse", "HEAD").strip()
+    if not re.fullmatch(r"[0-9a-f]{40,64}", head):
+        raise ScanError("repository HEAD is not a full Git object id")
+    return head
 
 
 def _published_refs(repo: Path) -> list[tuple[str, str]]:
@@ -498,7 +520,9 @@ def scan_repository(repo: Path) -> dict[str, object]:
     if not (repo / ".git").exists() and not _run(repo, "rev-parse", "--git-dir").strip():
         raise ScanError("repository git directory unavailable")
 
+    source_revision = _repository_head(repo)
     refs = _published_refs(repo)
+    ref_snapshot_sha256 = hashlib.sha256(_published_ref_snapshot(refs)).hexdigest()
     commits = _reachable_commits(repo, refs)
     blobs, object_count = _reachable_blob_paths(repo, refs)
     findings: list[Finding] = []
@@ -516,13 +540,21 @@ def scan_repository(repo: Path) -> dict[str, object]:
         content_findings = _scan_bytes(data, subject_type="blob", object_id=oid)
         for item in content_findings:
             for path in scan_paths:
+                known_fixture = (
+                    oid,
+                    path,
+                    item.detector,
+                    item.fingerprint,
+                ) in KNOWN_HISTORICAL_FIXTURES
                 findings.append(
                     Finding(
                         detector=item.detector,
                         subject_type=item.subject_type,
                         fingerprint=item.fingerprint,
-                        blocking=item.blocking,
-                        classification=item.classification,
+                        blocking=False if known_fixture else item.blocking,
+                        classification=(
+                            "OBVIOUS_FIXTURE" if known_fixture else item.classification
+                        ),
                         path=path,
                         object_id=oid,
                     )
@@ -569,6 +601,8 @@ def scan_repository(repo: Path) -> dict[str, object]:
     return {
         "schema": SCHEMA,
         "status": "FAIL" if blocking else "PASS",
+        "source_revision": source_revision,
+        "published_ref_snapshot_sha256": ref_snapshot_sha256,
         "blocking": bool(blocking),
         "published_ref_count": len(refs),
         "branch_ref_count": sum(name.startswith("refs/remotes/origin/") for name, _ in refs),

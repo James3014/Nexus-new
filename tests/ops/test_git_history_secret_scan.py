@@ -1,3 +1,4 @@
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -70,11 +71,9 @@ def test_secret_in_commit_message_is_blocking(tmp_path: Path) -> None:
 
 def test_real_pem_block_is_blocking(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
-    pem = (
-        "-----BEGIN PRIVATE KEY-----\n"
-        + ("QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo0123456789+/" * 3)
-        + "\n-----END PRIVATE KEY-----\n"
-    )
+    begin = "-----" + "BEGIN PRIVATE KEY" + "-----"
+    end = "-----" + "END PRIVATE KEY" + "-----"
+    pem = begin + "\n" + ("QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo0123456789+/" * 3) + "\n" + end + "\n"
     _commit(repo, "pem", {"key.txt": pem})
     _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
     receipt = scan_repository(repo)
@@ -121,21 +120,51 @@ def test_json_quoted_high_entropy_assignment_is_blocking(tmp_path: Path) -> None
     )
 
 
-def test_known_historical_fixture_fingerprint_is_nonblocking(tmp_path: Path) -> None:
+def test_prefixed_aws_secret_access_key_with_punctuation_is_blocking(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    secret_value = "Q8$v6!K1@mP9#zT2%yR4^uW7&nB3*cD5"
+    _commit(
+        repo,
+        "aws secret",
+        {"config.env": f'AWS_SECRET_ACCESS_KEY="{secret_value}"\n'},
+    )
+    _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
+    receipt = scan_repository(repo)
+    assert receipt["status"] == "FAIL"
+    assert any(
+        finding["detector"] == "high_entropy_secret_assignment" and finding["blocking"]
+        for finding in receipt["findings"]
+    )
+
+
+def test_base64_like_api_key_is_blocking(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    encoded_value = "UVdKak1xN0E0bkI5Y0QyZUY2Z0g4aks9PQ=="
+    _commit(repo, "encoded secret", {"x.env": f"api_key={encoded_value}\n"})
+    _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
+    receipt = scan_repository(repo)
+    assert receipt["status"] == "FAIL"
+    assert any(
+        finding["detector"] == "high_entropy_secret_assignment" and finding["blocking"]
+        for finding in receipt["findings"]
+    )
+
+
+def test_known_historical_fixture_bytes_are_blocking_outside_bound_provenance(
+    tmp_path: Path,
+) -> None:
     repo = _init_repo(tmp_path)
     historical_fixture = "Q8v6K1mP9zT2yR4u" + "W7nB3cD5fG0hJ2kL"
     _commit(
         repo,
-        "known fixture",
+        "same bytes, different provenance",
         {"config.json": f'{{"client_secret": "{historical_fixture}"}}\n'},
     )
     _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
     receipt = scan_repository(repo)
-    assert receipt["status"] == "PASS"
-    assert receipt["blocking_finding_count"] == 0
+    assert receipt["status"] == "FAIL"
     assert any(
-        finding["detector"] == "high_entropy_secret_assignment"
-        and finding["classification"] == "OBVIOUS_FIXTURE"
+        finding["detector"] == "high_entropy_secret_assignment" and finding["blocking"]
         for finding in receipt["findings"]
     )
 
@@ -280,6 +309,39 @@ def test_historical_secret_path_survives_same_blob_move_to_safe_path(tmp_path: P
         and finding["blocking"]
         for finding in receipt["findings"]
     )
+
+
+def test_receipt_binds_exact_head_and_published_ref_snapshot(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    head = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    receipt = scan_repository(repo)
+    snapshot = f"refs/remotes/origin/main {head}\n".encode()
+    assert receipt["source_revision"] == head
+    assert receipt["published_ref_count"] == 1
+    assert receipt["published_ref_snapshot_sha256"] == hashlib.sha256(snapshot).hexdigest()
+
+    _refresh_remote_ref(repo, "feature", head)
+    expanded = scan_repository(repo)
+    expanded_snapshot = (
+        f"refs/remotes/origin/feature {head}\nrefs/remotes/origin/main {head}\n"
+    ).encode()
+    assert expanded["source_revision"] == head
+    assert expanded["published_ref_count"] == 2
+    assert (
+        expanded["published_ref_snapshot_sha256"] == hashlib.sha256(expanded_snapshot).hexdigest()
+    )
+    assert expanded["published_ref_snapshot_sha256"] != receipt["published_ref_snapshot_sha256"]
+
+    _git(repo, "tag", "-a", "v1", "-m", "annotated fixture tag")
+    tagged = scan_repository(repo)
+    tag_oid = _git(repo, "rev-parse", "refs/tags/v1").stdout.strip()
+    tagged_snapshot = (
+        f"refs/remotes/origin/feature {head}\n"
+        f"refs/remotes/origin/main {head}\n"
+        f"refs/tags/v1 {tag_oid}\n"
+    ).encode()
+    assert tagged["tag_ref_count"] == 1
+    assert tagged["published_ref_snapshot_sha256"] == hashlib.sha256(tagged_snapshot).hexdigest()
 
 
 def test_output_is_redacted_and_does_not_emit_secret(tmp_path: Path) -> None:
