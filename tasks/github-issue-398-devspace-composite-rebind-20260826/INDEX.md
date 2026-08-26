@@ -4,14 +4,14 @@
 campaign_id: github-issue-398-devspace-composite-rebind-20260826
 repository: James3014/Nexus-new
 source_repository: James3014/devspace
-base_main: 8bfcba9850e77a4416a52900e11059a29c250079
-base_tree: 0dc619bcec349aa0cd9c4ea45a77bc4f5a55e352
+base_main: dabb4498e9dd315fb8aa534f6c2e8e998b70e767
+base_tree: 19b85368931728d87745f67b87bc2ca8e53d3d50
 auto_chain: false
 ```
 
 | Order | Task | Status | SHA-256 | Dependency |
 |---|---|---|---|---|
-| 1 | `TASK-398-DEVSPACE-COMPOSITE-SOURCE-REBIND` | ACTIVE | `0db7234676a54fff5fe4ae0ff9aa30008a123209ea4d77946250e7fc3a4bc18e` | prior e3b/23d/6ba attempts are REVISE evidence; exact 13a direct-parent 15-path replacement active |
+| 1 | `TASK-398-DEVSPACE-COMPOSITE-SOURCE-REBIND` | ACTIVE | `e1dbc4698d1bad906e899f40673e7d1f77f63311320291a0229b0da72cfb2178` | prior e3b/23d/6ba attempts are REVISE evidence; exact 13a direct-parent 15-path replacement active |
 
 ## Frontier
 
