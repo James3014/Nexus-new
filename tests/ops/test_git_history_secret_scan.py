@@ -103,6 +103,35 @@ def test_generic_high_entropy_assignment_is_blocking(tmp_path: Path) -> None:
     )
 
 
+def test_json_quoted_high_entropy_assignment_is_blocking(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    _commit(
+        repo,
+        "json secret",
+        {"config.json": '{"client_secret": "Q8v6K1mP9zT2yR4uW7nB3cD5fG0hJ2kL"}\n'},
+    )
+    _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
+    receipt = scan_repository(repo)
+    assert receipt["status"] == "FAIL"
+    assert any(
+        finding["detector"] == "high_entropy_secret_assignment" and finding["blocking"]
+        for finding in receipt["findings"]
+    )
+
+
+def test_go_selector_is_not_treated_as_literal_secret(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    _commit(
+        repo,
+        "go selector",
+        {"config.go": "cfg := Config{Password: fixtures.DefaultTestPassword}\n"},
+    )
+    _refresh_remote_ref(repo, "main", _git(repo, "rev-parse", "HEAD").stdout.strip())
+    receipt = scan_repository(repo)
+    assert receipt["status"] == "PASS"
+    assert receipt["blocking_finding_count"] == 0
+
+
 def test_placeholder_fixture_and_env_template_are_nonblocking(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
     _commit(
