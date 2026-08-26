@@ -3009,6 +3009,241 @@ def _r1b2_runtime_fixture(tmp_path, monkeypatch):
     return fixture
 
 
+def _production_health_opener(server_instance="pre-effect"):
+    class Response:
+        def __init__(self, value):
+            self.value = value
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self):
+            return json.dumps(self.value).encode()
+
+    def opener(request, timeout):
+        assert request.headers.get("Authorization") == "Bearer SECRET"
+        assert request.full_url.endswith("/health")
+        return Response({"server_instance_id": server_instance})
+
+    return opener
+
+
+def test_r1_live_production_wrapper_and_plist_are_fixed_and_secret_free(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    plan = g._recovery_plan(fixture["request"], fixture["receipt"])
+
+    payload = plistlib.loads(g._recovery_expected_plist_bytes(plan.desired_root))
+    assert payload["Label"] == g.GATEWAY_LABEL
+    assert payload["ProgramArguments"] == [
+        "/bin/zsh",
+        "-c",
+        g._recovery_wrapper_command(plan.desired_root),
+    ]
+    assert payload["WorkingDirectory"] == plan.desired_root
+    assert "EnvironmentVariables" not in payload
+    wrapper = payload["ProgramArguments"][2]
+    assert "SECRET" not in wrapper
+    assert "${NEXUS_MCP_GATEWAY_TOKEN}" not in wrapper
+    assert "NEXUS_MCP_GATEWAY_TOKEN=" not in wrapper
+    assert "devspace" not in wrapper.lower()
+    assert g.GATEWAY_LABEL not in {g.LABELS.get("devspace"), "com.nexus.devspace"}
+
+    with pytest.raises(g.GatewayContractError, match="root substitution"):
+        g._recovery_expected_plist_bytes("/tmp/caller-selected")
+
+
+def test_r1_live_production_effect_uses_only_fixed_gateway_launchctl_surface(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    plan = g._recovery_plan(fixture["request"], fixture["receipt"])
+    plist_path = tmp_path / "host" / "gateway.plist"
+    plist_path.parent.mkdir(mode=0o700)
+    monkeypatch.setattr(g, "GATEWAY_PLIST", plist_path)
+    predecessor_bytes = g._recovery_expected_plist_bytes(plan.predecessor_root)
+    desired_bytes = g._recovery_expected_plist_bytes(plan.desired_root)
+    plist_path.write_bytes(predecessor_bytes)
+    plist_path.chmod(0o600)
+    calls = []
+
+    def runner(*args):
+        command = tuple(args)
+        calls.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    adapters = g._production_recovery_adapters(
+        fixture["receipt"],
+        runner=runner,
+        opener=_production_health_opener(),
+        token_loader=lambda: "SECRET",
+        sleeper=lambda _: None,
+    )
+    ack = adapters.effect(plan)
+
+    assert ack.acknowledged is True
+    assert ack.applied is True
+    assert ack.already_desired is False
+    assert calls == [
+        ("launchctl", "bootout", f"{g.UID_TARGET}/{g.GATEWAY_LABEL}"),
+        ("launchctl", "bootstrap", g.UID_TARGET, str(plist_path)),
+    ]
+    assert all("devspace" not in " ".join(call).lower() for call in calls)
+    assert plist_path.read_bytes() == desired_bytes
+
+
+def test_r1_live_production_bootstrap_failure_restores_exact_predecessor_only(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    plan = g._recovery_plan(fixture["request"], fixture["receipt"])
+    plist_path = tmp_path / "host" / "gateway.plist"
+    plist_path.parent.mkdir(mode=0o700)
+    monkeypatch.setattr(g, "GATEWAY_PLIST", plist_path)
+    predecessor_bytes = g._recovery_expected_plist_bytes(plan.predecessor_root)
+    desired_bytes = g._recovery_expected_plist_bytes(plan.desired_root)
+    plist_path.write_bytes(predecessor_bytes)
+    plist_path.chmod(0o600)
+    calls = []
+    bootstrap_payloads = []
+
+    def runner(*args):
+        command = tuple(args)
+        calls.append(command)
+        if command[:2] == ("launchctl", "bootstrap"):
+            bootstrap_payloads.append(plist_path.read_bytes())
+            return subprocess.CompletedProcess(
+                command,
+                1 if len(bootstrap_payloads) == 1 else 0,
+                "",
+                "desired bootstrap failed" if len(bootstrap_payloads) == 1 else "",
+            )
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    adapters = g._production_recovery_adapters(
+        fixture["receipt"],
+        runner=runner,
+        opener=_production_health_opener(),
+        token_loader=lambda: "SECRET",
+        sleeper=lambda _: None,
+    )
+    with pytest.raises(
+        g.GatewayContractError,
+        match="desired bootstrap failed; exact predecessor restoration attempted",
+    ):
+        adapters.effect(plan)
+
+    assert calls == [
+        ("launchctl", "bootout", f"{g.UID_TARGET}/{g.GATEWAY_LABEL}"),
+        ("launchctl", "bootstrap", g.UID_TARGET, str(plist_path)),
+        ("launchctl", "bootstrap", g.UID_TARGET, str(plist_path)),
+    ]
+    assert bootstrap_payloads == [desired_bytes, predecessor_bytes]
+    assert plist_path.read_bytes() == predecessor_bytes
+
+
+def test_r1_live_production_observation_rejects_unknown_plist_before_health(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    plan = g._recovery_plan(fixture["request"], fixture["receipt"])
+    plist_path = tmp_path / "host" / "gateway.plist"
+    plist_path.parent.mkdir()
+    plist_path.write_bytes(b"not-an-authorized-plist")
+    monkeypatch.setattr(g, "GATEWAY_PLIST", plist_path)
+    monkeypatch.setattr(
+        g,
+        "_launchctl_observation",
+        lambda **_kwargs: {"loaded": True, "pid": 4321},
+    )
+
+    with pytest.raises(
+        g.GatewayContractError, match="physical observation remained uncertain"
+    ):
+        g._recovery_observe_physical(
+            plan,
+            fixture["receipt"],
+            runner=lambda *args: pytest.fail(f"unexpected runner call: {args}"),
+            opener=lambda *_args, **_kwargs: pytest.fail("health must not run"),
+            token_loader=lambda: "SECRET",
+            sleeper=lambda _: None,
+            retries=1,
+        )
+
+
+def test_r1_live_production_postflight_requires_changed_server_instance(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    plan = g._recovery_plan(fixture["request"], fixture["receipt"])
+    physical = _r1b2_physical_identity(
+        fixture, "desired", server_instance="server-new"
+    )
+    tools = [
+        {"name": "tool-a", "inputSchema": {"type": "object"}},
+        {"name": "tool-b", "inputSchema": {"type": "object"}},
+    ]
+    manifest = hashlib.sha256(
+        json.dumps(
+            tuple(sorted(item["name"] for item in tools)),
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode()
+    ).hexdigest()
+    schema = hashlib.sha256(
+        json.dumps(
+            tools,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode()
+    ).hexdigest()
+    expected = {
+        "tool_manifest_sha256": manifest,
+        "schema_sha256": schema,
+        "permission_sha256": "a" * 64,
+        "lifecycle": "nexus.lifecycle.gateway.v2",
+        "tool_count": len(tools),
+    }
+    monkeypatch.setattr(g, "_recovery_expected_postflight", lambda _receipt: expected)
+    health = {
+        "server_instance_id": physical.server_instance,
+        "repo_root": physical.root,
+        "git_head": physical.head,
+        "git_tree": physical.tree,
+        "tool_manifest_revision": manifest,
+        "full_tool_schema_hash": schema,
+        "permission_policy_hash": expected["permission_sha256"],
+        "lifecycle_revision": expected["lifecycle"],
+    }
+    server_info = {
+        "serverInstanceId": physical.server_instance,
+        "toolManifestRevision": manifest,
+        "fullToolSchemaHash": schema,
+        "permissionPolicyHash": expected["permission_sha256"],
+        "lifecycleRevision": expected["lifecycle"],
+    }
+    postflight = g._recovery_live_postflight(
+        plan,
+        physical,
+        fixture["receipt"],
+        previous_server_instance=physical.server_instance,
+        applied=True,
+        opener=_surface_opener(health, server_info, tools),
+        token_loader=lambda: "SECRET",
+    )
+    with pytest.raises(
+        g.GatewayContractError, match="server instance did not change"
+    ):
+        g._validate_recovery_postflight(
+            postflight, physical, fixture["receipt"]
+        )
+
+
 def _r1b2_physical_identity(fixture, role="desired", **changes):
     from nexus.contracts.gateway_deployment import (
         RecoveryPhysicalIdentity,
