@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from typing import Any, Mapping, Protocol
+from typing import Any, Literal, Mapping, Protocol, Sequence
 
 from pydantic import (
     AwareDatetime,
@@ -52,6 +52,13 @@ class CheckResult(_Frozen):
     status: StrictStr
     conclusion: StrictStr
     terminal: StrictBool = True
+    head_sha: StrictStr | None = None
+    generation: StrictInt | None = Field(default=None, ge=1)
+
+    @field_validator("head_sha")
+    @classmethod
+    def g(cls, v, info):
+        return None if v is None else _sha(v, info.field_name, 40)
 
     @model_validator(mode="after")
     def valid(self):
@@ -110,6 +117,137 @@ class CandidateLineage(_Frozen):
         return _sha(v, info.field_name, 40)
 
 
+class CandidateBlobEquivalence(_Frozen):
+    path: StrictStr
+    source_blob_sha: StrictStr
+    integration_blob_sha: StrictStr
+
+    @field_validator("source_blob_sha", "integration_blob_sha")
+    @classmethod
+    def g(cls, v, info):
+        return _sha(v, info.field_name, 40)
+
+    @field_validator("path")
+    @classmethod
+    def p(cls, v):
+        if not isinstance(v, str) or not v or v.startswith("/") or ".." in v.split("/"):
+            raise ValueError("PATH_INVALID")
+        return v
+
+    @model_validator(mode="after")
+    def valid(self):
+        if self.source_blob_sha != self.integration_blob_sha:
+            raise ValueError("CANDIDATE_BLOB_SHA_MISMATCH")
+        return self
+
+
+def compute_candidate_equivalence_proof_hash(
+    *,
+    source_candidate_commit_sha: str,
+    source_candidate_tree_sha: str,
+    source_candidate_diff_hash: str,
+    integration_base_sha: str,
+    integration_head_sha: str,
+    integration_tree_sha: str,
+    generation: int,
+    blob_equivalences: Sequence[CandidateBlobEquivalence],
+) -> str:
+    return canonical_hash({
+        "blob_equivalences": [b.model_dump(mode="json") for b in blob_equivalences],
+        "generation": generation,
+        "integration_base_sha": integration_base_sha,
+        "integration_head_sha": integration_head_sha,
+        "integration_tree_sha": integration_tree_sha,
+        "source_candidate_commit_sha": source_candidate_commit_sha,
+        "source_candidate_diff_hash": source_candidate_diff_hash,
+        "source_candidate_tree_sha": source_candidate_tree_sha,
+    })
+
+
+class IntegrationBinding(_Frozen):
+    source_candidate_commit_sha: StrictStr
+    source_candidate_tree_sha: StrictStr
+    source_contract_hash: StrictStr
+    source_candidate_state_hash: StrictStr
+    source_verified_receipt_hash: StrictStr
+    source_independent_acceptance_hash: StrictStr
+    source_candidate_diff_hash: StrictStr
+    integration_base_sha: StrictStr
+    integration_head_sha: StrictStr
+    integration_tree_sha: StrictStr
+    generation: StrictInt = Field(ge=1)
+    requalification_hash: StrictStr
+    check_subject_kind: Literal["INTEGRATION_HEAD"] = "INTEGRATION_HEAD"
+    check_subject_sha: StrictStr
+    check_subject_tree_sha: StrictStr
+    blob_equivalences: tuple[CandidateBlobEquivalence, ...]
+    candidate_equivalence_proof_hash: StrictStr
+
+    @field_validator(
+        "source_candidate_commit_sha",
+        "source_candidate_tree_sha",
+        "integration_base_sha",
+        "integration_head_sha",
+        "integration_tree_sha",
+        "check_subject_sha",
+        "check_subject_tree_sha",
+    )
+    @classmethod
+    def git(cls, v, info):
+        return _sha(v, info.field_name, 40)
+
+    @field_validator(
+        "source_contract_hash",
+        "source_candidate_state_hash",
+        "source_verified_receipt_hash",
+        "source_independent_acceptance_hash",
+        "source_candidate_diff_hash",
+        "requalification_hash",
+        "candidate_equivalence_proof_hash",
+    )
+    @classmethod
+    def hashes(cls, v, info):
+        return _sha(v, info.field_name)
+
+    @field_validator("check_subject_kind", mode="before")
+    @classmethod
+    def kind(cls, v):
+        if v != "INTEGRATION_HEAD":
+            raise ValueError("CHECK_SUBJECT_KIND_INVALID")
+        return v
+
+    @field_validator("blob_equivalences")
+    @classmethod
+    def blobs(cls, v):
+        items = tuple(v)
+        paths = tuple(item.path for item in items)
+        if paths != tuple(sorted(set(paths))):
+            raise ValueError("BLOB_EQUIVALENCES_NOT_SORTED_OR_DUPLICATE")
+        return items
+
+    @model_validator(mode="after")
+    def valid(self):
+        if self.check_subject_kind != "INTEGRATION_HEAD":
+            raise ValueError("CHECK_SUBJECT_KIND_INVALID")
+        if self.check_subject_sha != self.integration_head_sha:
+            raise ValueError("CHECK_SUBJECT_HEAD_SHA_MISMATCH")
+        if self.check_subject_tree_sha != self.integration_tree_sha:
+            raise ValueError("CHECK_SUBJECT_TREE_SHA_MISMATCH")
+        expected_proof = compute_candidate_equivalence_proof_hash(
+            source_candidate_commit_sha=self.source_candidate_commit_sha,
+            source_candidate_tree_sha=self.source_candidate_tree_sha,
+            source_candidate_diff_hash=self.source_candidate_diff_hash,
+            integration_base_sha=self.integration_base_sha,
+            integration_head_sha=self.integration_head_sha,
+            integration_tree_sha=self.integration_tree_sha,
+            generation=self.generation,
+            blob_equivalences=self.blob_equivalences,
+        )
+        if self.candidate_equivalence_proof_hash != expected_proof:
+            raise ValueError("CANDIDATE_EQUIVALENCE_PROOF_HASH_MISMATCH")
+        return self
+
+
 class ImpactResult(_Frozen):
     classification: StrictStr
     known: StrictBool
@@ -151,6 +289,7 @@ class GitHubOrchestrationEvidence(_Frozen):
     reviews: tuple[ReviewResult, ...]
     candidate: CandidateLineage
     impact: ImpactResult
+    integration: IntegrationBinding | None = None
     checks_passed: StrictBool = True
     reviews_resolved: StrictBool = True
     regression_free: StrictBool = True
@@ -199,11 +338,56 @@ class GitHubOrchestrationEvidence(_Frozen):
             raise ValueError("REPOSITORY_IDENTITY_INVALID")
         if self.current_main_sha != self.base_sha:
             raise ValueError("CURRENT_MAIN_SHA_MISMATCH")
-        if (
-            self.candidate.candidate_commit_sha != self.head_sha
-            or self.candidate.candidate_tree_sha != self.tree_sha
-        ):
-            raise ValueError("CANDIDATE_LINEAGE_MISMATCH")
+        if self.integration is None:
+            if (
+                self.candidate.candidate_commit_sha != self.head_sha
+                or self.candidate.candidate_tree_sha != self.tree_sha
+            ):
+                raise ValueError("CANDIDATE_LINEAGE_MISMATCH")
+            for c in self.required_checks:
+                if c.head_sha is not None and c.head_sha != self.head_sha:
+                    raise ValueError("CHECK_HEAD_SHA_MISMATCH")
+        else:
+            if self.head_sha != self.integration.integration_head_sha:
+                raise ValueError("INTEGRATION_HEAD_SHA_MISMATCH")
+            if self.tree_sha != self.integration.integration_tree_sha:
+                raise ValueError("INTEGRATION_TREE_SHA_MISMATCH")
+            if self.base_sha != self.integration.integration_base_sha:
+                raise ValueError("INTEGRATION_BASE_SHA_MISMATCH")
+
+            # Check blob equivalences match changed_paths exactly
+            witness_paths = tuple(b.path for b in self.integration.blob_equivalences)
+            if witness_paths != tuple(self.changed_paths):
+                raise ValueError("BLOB_EQUIVALENCE_PATHS_MISMATCH_CHANGED_PATHS")
+
+            # Pin immutable source candidate lineage against integration source binding
+            if self.candidate.candidate_commit_sha != self.integration.source_candidate_commit_sha:
+                raise ValueError("SOURCE_CANDIDATE_COMMIT_SHA_MISMATCH")
+            if self.candidate.candidate_tree_sha != self.integration.source_candidate_tree_sha:
+                raise ValueError("SOURCE_CANDIDATE_TREE_SHA_MISMATCH")
+            if self.candidate.contract_hash != self.integration.source_contract_hash:
+                raise ValueError("SOURCE_CONTRACT_HASH_MISMATCH")
+            if self.candidate.candidate_state_hash != self.integration.source_candidate_state_hash:
+                raise ValueError("SOURCE_CANDIDATE_STATE_HASH_MISMATCH")
+            if (
+                self.candidate.verified_receipt_hash
+                != self.integration.source_verified_receipt_hash
+            ):
+                raise ValueError("SOURCE_VERIFIED_RECEIPT_HASH_MISMATCH")
+            if (
+                self.candidate.independent_acceptance_hash
+                != self.integration.source_independent_acceptance_hash
+            ):
+                raise ValueError("SOURCE_INDEPENDENT_ACCEPTANCE_HASH_MISMATCH")
+            if self.diff_hash != self.integration.source_candidate_diff_hash:
+                raise ValueError("SOURCE_CANDIDATE_DIFF_HASH_MISMATCH")
+
+            # Every required check entry must carry both exact head_sha and exact generation
+            for c in self.required_checks:
+                if c.head_sha is None or c.head_sha != self.integration.integration_head_sha:
+                    raise ValueError("CHECK_HEAD_SHA_MISMATCH")
+                if c.generation is None or c.generation != self.integration.generation:
+                    raise ValueError("CHECK_GENERATION_MISMATCH")
         if self.candidate.reviewer.strip() == self.candidate.implementer.strip():
             raise ValueError("REVIEWER_IMPLEMENTER_MUST_DIFFER")
         if not self.reviews:

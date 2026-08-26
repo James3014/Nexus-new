@@ -6,12 +6,82 @@ Usage:
     python -m pytest tests/ops/test_policy_lane_gate.py -v
 """
 
+import subprocess
 from pathlib import Path
 
+from scripts.ops import policy_lane_precommit
 from scripts.ops.check_policy_lane_gate import check_lane_gate, find_policy, load_manifest
 from scripts.ops.check_policy_override_receipt import validate_override_receipt
 
-MANIFEST_PATH = Path(__file__).resolve().parents[2] / "docs" / "reports" / "policy-manifest.v2.json"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+MANIFEST_PATH = REPO_ROOT / "docs" / "reports" / "policy-manifest.v2.json"
+WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "policy-lane-gate.yml"
+
+
+def test_policy_lane_workflow_keeps_changed_paths_out_of_shell_source() -> None:
+    workflow = WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert "git diff --name-only -z" in workflow
+    assert "while IFS= read -r -d '' file" in workflow
+    assert 'python scripts/ops/policy_lane_precommit.py --staged-files "$file"' in workflow
+    assert "${{ steps.files.outputs.changed_files }}" not in workflow
+
+
+def test_precommit_explicit_files_are_actually_checked(monkeypatch) -> None:
+    calls: list[tuple[str, str]] = []
+
+    def _unexpected_index_read() -> list[str]:
+        raise AssertionError("explicit --staged-files must not fall back to the Git index")
+
+    def _record_gate(policy_id: str, action: str = "modify") -> dict:
+        calls.append((policy_id, action))
+        return {"allowed": True, "lane": "soft", "errors": [], "policy_id": policy_id}
+
+    monkeypatch.setattr(policy_lane_precommit, "get_staged_files", _unexpected_index_read)
+    monkeypatch.setattr(policy_lane_precommit, "check_lane_gate", _record_gate)
+
+    result = policy_lane_precommit.main(["--staged-files", "nexus/core/critique_engine.py"])
+
+    assert result == 0
+    assert calls == [("P-CLAIM-01", "modify")]
+
+
+def test_precommit_explicit_hard_violation_blocks(monkeypatch) -> None:
+    monkeypatch.setattr(
+        policy_lane_precommit,
+        "check_lane_gate",
+        lambda policy_id, action="modify": {
+            "allowed": False,
+            "lane": "hard",
+            "errors": ["TEST_BLOCK"],
+            "policy_id": policy_id,
+        },
+    )
+
+    result = policy_lane_precommit.main(["--staged-files", "nexus/core/critique_engine.py"])
+
+    assert result == 1
+
+
+def test_precommit_gate_unavailable_fails_closed(monkeypatch) -> None:
+    def _timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="lane-gate", timeout=30)
+
+    monkeypatch.setattr(policy_lane_precommit.subprocess, "run", _timeout)
+
+    result = policy_lane_precommit.check_lane_gate("P-CLAIM-01")
+
+    assert result["allowed"] is False
+    assert result["lane"] == "hard"
+    assert result["errors"] == ["GATE_UNAVAILABLE"]
+
+
+def test_precommit_staged_file_discovery_failure_blocks(monkeypatch) -> None:
+    def _failed_discovery() -> list[str]:
+        raise RuntimeError("synthetic git failure")
+
+    monkeypatch.setattr(policy_lane_precommit, "get_staged_files", _failed_discovery)
+
+    assert policy_lane_precommit.main([]) == 2
 
 
 # ─── Hard Lane Tests ──────────────────────────────────────────────────
@@ -173,7 +243,7 @@ class TestOverrideReceipt:
             "policy_id": "P-COST-01",
             "lane": "soft",
             "who": "agent",
-            "why": "Cost model tuning",
+            "why": "Test override",
             "scope": "COST_MODEL.read_file",
             "expiry": "2099-12-31T23:59:59Z",
             "rollback_plan": "Revert to P-COST-01.1.0.0",
