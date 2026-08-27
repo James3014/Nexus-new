@@ -409,7 +409,9 @@ def test_workflow_enforces_continuous_repository_coverage() -> None:
 def test_workflow_preserves_least_privilege_and_immutable_actions() -> None:
     workflow = Path(".github/workflows/git-history-secret-audit.yml").read_text(encoding="utf-8")
     assert "permissions:\n  contents: read\n" in workflow
-    action_lines = [line.strip() for line in workflow.splitlines() if line.strip().startswith("uses: ")]
+    action_lines = [
+        line.strip() for line in workflow.splitlines() if line.strip().startswith("uses: ")
+    ]
     assert action_lines
     for line in action_lines:
         ref = line.split("@", 1)[1].split()[0]
