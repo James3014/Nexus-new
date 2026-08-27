@@ -64,6 +64,10 @@ class CodexWorkerAdapter:
         timeout_seconds: Optional[float] = None,
         on_process_group: Any = None,
         model: Optional[str] = None,
+        admission_receipt: Any = None,
+        fast_start_snapshot: Any = None,
+        metadata_fetcher: Any = None,
+        **options: Any,
     ) -> WorkerExecutionReceipt:
         preflight = self.preflight()
         if not preflight.ready:
@@ -83,11 +87,18 @@ class CodexWorkerAdapter:
                 model=model or getattr(self.executor, "model", None),
                 reasoning_effort=getattr(self.executor, "reasoning_effort", None),
                 on_process_group=on_process_group,
+                fast_start_snapshot=fast_start_snapshot or getattr(self.executor, "fast_start_snapshot", None),
             )
-        if model is None:
-            receipt = executor.invoke(contract, lease, prompt=prompt)
-        else:
-            receipt = executor.invoke(contract, lease, prompt=prompt, model=model)
+        invoke_kwargs: dict[str, Any] = {"prompt": prompt}
+        if model is not None:
+            invoke_kwargs["model"] = model
+        if admission_receipt is not None:
+            invoke_kwargs["admission_receipt"] = admission_receipt
+        if fast_start_snapshot is not None:
+            invoke_kwargs["fast_start_snapshot"] = fast_start_snapshot
+        if metadata_fetcher is not None:
+            invoke_kwargs["metadata_fetcher"] = metadata_fetcher
+        receipt = executor.invoke(contract, lease, **invoke_kwargs)
         if receipt.worker_status == CliWorkerStatus.TIMED_OUT.value:
             outcome = WorkerOutcome.INCOMPLETE
         elif receipt.worker_status != CliWorkerStatus.COMPLETED.value or receipt.exit_code != 0:
