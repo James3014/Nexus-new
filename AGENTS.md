@@ -23,6 +23,7 @@ source behavior, tests, and required verifiers remain authoritative.
 
 - The collaboration repository is `James3014/Nexus-new`; default and
   collaboration branch is `main`.
+- G12 Fast Start advisory-cache gate: before any GitHub Issue implementation source/test body reads, primary Codex/coordinator must consult #549 as `ADVISORY_CACHE_ONLY`. `BLOCKED`, `HOST_REBIND_REQUIRED`, `NEEDS_DECISION`, and `EVIDENCE_BLOCKED` require fresh metadata-only rebind and must not read diff, patch, or implementation bodies; if still non-ready, stop. `READY_CANDIDATE` is not authority; fresh Issue/dependencies/main/host and normal gates remain required. Missing, stale, malformed, hash-invalid, wrong-authority, or contradictory cache fails closed to normal authoritative discovery. Fast Start consumers are read-only for #549/product Issues; see `docs/agents/TASK_EXECUTION_CONTRACT.md`.
 - A Ready GitHub Issue is a worker-neutral bounded collaboration contract; it
   does not select local lifecycle. Draft, triage, and unready Issues grant no
   mutation. An eligible governed worker implements on an issue-specific branch
