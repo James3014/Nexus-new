@@ -19,18 +19,25 @@ allowed_files:
   - tasks/github-issue-129-atomic-work-claim-20260813/INDEX.md
   - tasks/github-issue-129-atomic-work-claim-20260813/00-atomic-work-claim.md
 authorized_deletions: []
-reconciled_main: 4def873d60f3b970ba80271efd18ed22deccb367
-current_main: 4def873d60f3b970ba80271efd18ed22deccb367
-current_main_tree: 4c36e4f3a6e44ad94fcd4179967bd2785de3d4be
+reconciled_main: 18fb8c5a1849908e28e8f37c2a4e13e2c2837a8b
+current_main: 18fb8c5a1849908e28e8f37c2a4e13e2c2837a8b
+current_main_tree: a1689d50f46ce03aa03455668ef825c8d8fc5e72
 historical_terminal_marker: ATOMIC_READY_ISSUE_WORK_CLAIM_PROVEN
 terminal_marker: null
 claim_ceiling: ATOMIC_WORK_CLAIM_ENFORCEMENT_CANDIDATE_PR_ONLY
 shared_file_gate: SATISFIED_BY_PR581_MERGE_50A6FBC
 contract_delta: CANONICAL_CLAIM_ENFORCEMENT_INTEGRATION
 contract_delta_comment_id: 5336198602
-overlap_bind: OPEN_PR_EXACT_FOUR_PATH_SCAN_CLEAR_AT_4DEF873D
-overlap_observed_at: 2026-08-27T00:38:41Z
+overlap_bind: OPEN_PR_EXACT_FOUR_PATH_SCAN_CLEAR_EXCLUDING_SELF_AT_18FB8C5A
+overlap_observed_at: 2026-08-27T08:59:15Z
 overlap_evidence_sha256: 4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
+fast_start_cache_authority: ADVISORY_CACHE_ONLY
+fast_start_cache_registry_revision: 7
+fast_start_cache_entry_state: EVIDENCE_BLOCKED_REBOUND
+fast_start_rebind_result: TARGETED_REBIND_CLEAR
+fast_start_blocker_pr: 479
+fast_start_blocker_head: aa042582ccc55227db89a8a6ae86cf2d0286f31e
+fast_start_blocker_state: CLOSED
 allowed_scope_sha256: 354cda2ab9426878412ca8f924a6360bf223d176babad6a91227444233d84291
 source_blob: b5a1fd7da4e1d27e9607eedc7d352df592580d6e
 source_sha256: d566cdc7f546b6f2d754f2b1c8da8aee07220ab92e28904d3dea37f58f00722a
@@ -52,12 +59,16 @@ primitive-only frontier without rewriting its evidence. The atomic claim
 primitive is already present; the current bounded objective is to wire that
 primitive into the existing `SelfHostedTaskService` production dispatch path.
 
-Current baseline is `4def873d60f3b970ba80271efd18ed22deccb367` / tree
-`4c36e4f3a6e44ad94fcd4179967bd2785de3d4be`. The two implementation blobs are
+Current baseline is `18fb8c5a1849908e28e8f37c2a4e13e2c2837a8b` / tree
+`a1689d50f46ce03aa03455668ef825c8d8fc5e72`. The two implementation blobs are
 byte-identical to historical shared-file baseline `50a6fbc7`; PR #581 remains
 the historical merge that closed the prior #467 overlap. A fresh GitHub scan at
-`2026-08-27T00:38:41Z` found no open PR changing any of the exact four
+`2026-08-27T08:59:15Z` found no other open PR changing any of the exact four
 allowed paths. Fresh Workforce Admission is still required at dispatch time.
+The mandatory #549 Fast Start cache was consumed as `ADVISORY_CACHE_ONLY`:
+registry revision 7 reported stale evidence blocking on PR #479, whose exact
+head remains closed; target blobs and overlap were freshly rebound, producing
+`TARGETED_REBIND_CLEAR` without treating the cache as authority.
 
 Canonical boundaries for this delta:
 
@@ -229,7 +240,7 @@ debt and no hostile behavioral finding.
 This historical receipt is preserved as repository-contained physical evidence
 only. The historical metadata reconciliation baseline was
 `9622b24c321d02a59cb5cc2de2d948a60fa90df1`; the current enforcement-delta
-baseline is `4def873d60f3b970ba80271efd18ed22deccb367`. Historical
+baseline is `18fb8c5a1849908e28e8f37c2a4e13e2c2837a8b`. Historical
 `50a6fbc766218a17fa9296edf23ce95504fee8c8` remains ancestor/shared-file
 evidence only. No new terminal/closure receipt is asserted.
 
