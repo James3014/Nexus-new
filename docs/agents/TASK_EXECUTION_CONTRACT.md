@@ -215,6 +215,14 @@ and must be revalidated before CAS.
 `MERGE_INTENT` is evidence and standing authority is authorization only; neither
 substitutes for the verification gates. This GitHub action does not approve or
 integrate local Nexus lifecycle state.
+When the live MCP surface exposes `github_complete_pull_request`, ordinary
+protected-merge completion after independent acceptance uses that action rather
+than reconstructing merge evidence by hand. The action binds
+`run_github_completion_loop()` to server-configured `NEXUS_CANONICAL_SOURCE_ROOT`
+and `NEXUS_PYTHON_BIN`; required checks still execute on the exact current
+integration subject; physical merge remains expected-head/CAS. Absence of the
+action is not a new Owner-approval boundary; fall back to the existing
+coordinator CAS path. The action cannot mint standing-grant or merge authority.
 
 ## Blocks and residual debt
 

@@ -62,6 +62,18 @@ source behavior, tests, and required verifiers remain authoritative.
   A standing grant is durable and machine-bound only when validated from the
   single canonical local receipt path (see Task Execution Contract); it is
   never a projection of this document.
+- Ordinary protected-merge completion after independent acceptance uses the live
+  host action `github_complete_pull_request` when that action is present on the
+  bound MCP surface. It runs `run_github_completion_loop()`, consumes
+  `requalify_main_movement()`, reruns required checks on the exact current
+  integration subject, and delegates physical merge to existing expected-head/CAS
+  (`git_merge_pull_request`). It does not mint acceptance, standing-grant, or
+  merge authority, and is not a second merge controller. If the action is absent,
+  fall back to the existing coordinator expected-head/CAS path.
+- The live `NEXUS_CANONICAL_SOURCE_ROOT` for that action must be a clean checkout
+  of current GitHub `main` that contains
+  `nexus/orchestrator/github_completion_loop.py`. A dirty or stale checkout that
+  lacks the caller fails closed.
 - The coordinator handles ordinary implementation, rebind, retry, and evidence
   autonomously. It asks again only for contract widening/change, weaker
   security, a new irreversible external effect, or release/production claims.
