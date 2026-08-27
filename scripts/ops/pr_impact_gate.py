@@ -1085,6 +1085,24 @@ def _replaced_parameterized_node_keys(
     return replaced_base, replacement_head, False
 
 
+def _zero_collection_bootstrap_repaired(
+    base: PytestRunResult, head: PytestRunResult
+) -> bool:
+    return (
+        base.status == "CI_BOOTSTRAP_DEFECT"
+        and base.exit_code == 2
+        and base.collection_count == 0
+        and not base.node_ids
+        and head.status == "COMPLETE"
+        and head.exit_code == 0
+        and head.collection_count > 0
+        and set(head.node_ids) == set(head.passed_node_ids)
+        and not head.failed_node_ids
+        and not head.error_node_ids
+        and not head.skipped_node_ids
+    )
+
+
 def _metadata_mismatch(base: PytestRunResult, head: PytestRunResult) -> bool:
     base_index = _logical_node_index(base.node_ids)
     head_index = _logical_node_index(head.node_ids)
@@ -1114,7 +1132,11 @@ def _metadata_mismatch(base: PytestRunResult, head: PytestRunResult) -> bool:
     base_nodes = set(base_index)
     head_nodes = set(head_index)
     if not base_nodes and not head_nodes:
-        return False
+        return True
+    if not base_nodes:
+        return not _zero_collection_bootstrap_repaired(base, head)
+    if not head_nodes:
+        return True
     expanded_base, expanded_head, expansion_ambiguous = _expanded_node_keys(
         base, head, base_index, head_index
     )
@@ -1245,6 +1267,12 @@ def classify_regression(base: PytestRunResult, head: PytestRunResult) -> Regress
         )
         logical_failure_collision = False
 
+    zero_collection_bootstrap_repaired = _zero_collection_bootstrap_repaired(base, head)
+    unknown_impact_allowed = (
+        zero_collection_bootstrap_repaired
+        and base.impact_class == _UNKNOWN
+        and head.impact_class == _UNKNOWN
+    )
     evidence_mismatch = (
         logical_failure_collision
         or not base.plan_digest
@@ -1282,8 +1310,10 @@ def classify_regression(base: PytestRunResult, head: PytestRunResult) -> Regress
         != sorted(set(base.selected_targets))
         or sorted(set(head.executed_targets + head.missing_targets))
         != sorted(set(head.selected_targets))
-        or base.impact_class == "IMPACT_UNKNOWN"
-        or head.impact_class == "IMPACT_UNKNOWN"
+        or (
+            (base.impact_class == _UNKNOWN or head.impact_class == _UNKNOWN)
+            and not unknown_impact_allowed
+        )
     )
     if evidence_mismatch or base.status == "IMPACT_UNKNOWN" or head.status == "IMPACT_UNKNOWN":
         return RegressionClassification(
