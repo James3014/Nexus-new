@@ -30,6 +30,9 @@
 | nexus/engine | tests/engine, tests/test_engine_*.py | active | high | governance |
 | nexus/engine/sandbox_runner.py | tests/engine/test_sandbox_actions.py | active | high | sandbox_physical_runner_contract |
 | nexus/executors/worker_registry.py | tests/nexus/executors/test_worker_contract.py, tests/services/test_agy_account_pool.py | active | high | worker_registry_contract |
+| nexus/executors/codex_executor.py | tests/ops/test_fast_start_admission_g14.py, tests/nexus/executors/test_codex_executor.py | active | medium | codex_executor_contract |
+| nexus/orchestrator/fast_start_admission.py | tests/ops/test_fast_start_admission_g14.py | active | medium | fast_start_admission_contract |
+| nexus/contracts/fast_start_admission.py | tests/ops/test_fast_start_admission_g14.py | active | medium | fast_start_admission_contract |
 | nexus/engine/asi_constraints.py | tests/engine/test_asi_constraints.py::test_asi_constraint_extractor_orders_families_and_preserves_evidence_refs, tests/engine/test_asi_constraints.py | active | medium | asi_constraint_ordering_contract |
 | nexus/contracts/s2t_export.py | tests/contracts/test_s2t_contracts.py::test_s2t_agent_lightning_export_emits_preference_pairs, tests/contracts/test_s2t_contracts.py::test_s2t_export_selects_highest_scored_failed_rejected_candidate_stably | active | medium | s2t_export_ordering_contract |
 | nexus/contracts/hybrid_retrieval.py | tests/contracts/test_hybrid_retrieval.py | active | high | hybrid_retrieval_rrf_contract |
