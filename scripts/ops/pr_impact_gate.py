@@ -1085,9 +1085,7 @@ def _replaced_parameterized_node_keys(
     return replaced_base, replacement_head, False
 
 
-def _zero_collection_bootstrap_repaired(
-    base: PytestRunResult, head: PytestRunResult
-) -> bool:
+def _zero_collection_bootstrap_repaired(base: PytestRunResult, head: PytestRunResult) -> bool:
     return (
         base.status == "CI_BOOTSTRAP_DEFECT"
         and base.exit_code == 2
