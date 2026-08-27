@@ -9,14 +9,10 @@ from typing import Any, Callable, Mapping, Optional
 
 from nexus.contracts.fast_start_admission import (
     FastStartAdmissionDeniedError,
-    FastStartAdmissionRequest,
     FastStartAdmissionResult,
 )
 from nexus.executors.cli_worker import CliWorkerRequest, CliWorkerResult, run_cli_worker
-from nexus.orchestrator.fast_start_admission import (
-    evaluate_fast_start_admission,
-    extract_issue_number,
-)
+from nexus.orchestrator.fast_start_admission import admit_managed_codex_launch
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
 from nexus.orchestrator.worktree_manager import TargetWorktreeLease
 
@@ -72,9 +68,9 @@ class CodexCliExecutor:
         if self.reasoning_effort not in self.VALID_REASONING_EFFORTS:
             raise ValueError("NEXUS_CODEX_REASONING_EFFORT must be one of low, medium, high, xhigh")
         self.on_process_group = on_process_group
-        self.fast_start_snapshot = fast_start_snapshot
-        self.registry_fetcher = registry_fetcher
-        self.metadata_fetcher = metadata_fetcher
+        # Caller snapshot/fetchers are compatibility-only and are not retained
+        # as launch authority.
+        _ = (fast_start_snapshot, registry_fetcher, metadata_fetcher)
 
     def _request(
         self,
@@ -148,29 +144,14 @@ class CodexCliExecutor:
         registry_fetcher: Optional[Callable[[], Mapping[str, Any] | None]] = None,
         metadata_fetcher: Optional[Callable[..., Mapping[str, Any]]] = None,
     ) -> CodexExecutionReceipt:
-        # G14 Deterministic Fast Start Pre-Launch Admission Gate
-        effective_snapshot = (
-            fast_start_snapshot if fast_start_snapshot is not None else self.fast_start_snapshot
-        )
-        effective_reg_fetcher = (
-            registry_fetcher if registry_fetcher is not None else self.registry_fetcher
-        )
-        effective_meta_fetcher = (
-            metadata_fetcher if metadata_fetcher is not None else self.metadata_fetcher
-        )
-        issue_number = extract_issue_number(contract.task_id, prompt)
-        # Caller admission_receipt is compatibility/evidence only. It never
-        # grants launch authority and cannot skip mandatory Fast Start evaluation.
-        _ = admission_receipt
-        admission = evaluate_fast_start_admission(
-            FastStartAdmissionRequest(
-                issue_number=issue_number,
-                current_main_sha=lease.initial_head,
-                task_id=contract.task_id,
-                registry_snapshot=effective_snapshot,
-            ),
-            registry_fetcher=effective_reg_fetcher,
-            metadata_fetcher=effective_meta_fetcher,
+        # G14 production admission: caller receipt/snapshot/fetchers are not
+        # launch authority. Canonical #549 + metadata providers decide.
+        _ = (admission_receipt, fast_start_snapshot, registry_fetcher, metadata_fetcher)
+        admission = admit_managed_codex_launch(
+            structured_issue=getattr(contract, "github_issue_number", None),
+            task_id=contract.task_id,
+            prompt=prompt,
+            current_main_sha=lease.initial_head,
         )
 
         if not admission.codex_launch_allowed:
@@ -185,9 +166,6 @@ class CodexCliExecutor:
                 model=model,
                 reasoning_effort=self.reasoning_effort,
                 on_process_group=self.on_process_group,
-                fast_start_snapshot=effective_snapshot,
-                registry_fetcher=effective_reg_fetcher,
-                metadata_fetcher=effective_meta_fetcher,
             )
         )
         request = executor._request(contract, lease, prompt)

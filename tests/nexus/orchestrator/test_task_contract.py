@@ -241,6 +241,17 @@ def test_self_hosted_contract_hash_is_deterministic(tmp_path):
     assert ApprovalStatus.PENDING.value == "PENDING"
 
 
+def test_self_hosted_contract_github_issue_number_is_optional(tmp_path):
+    bare = _self_hosted_contract(tmp_path)
+    bound = _self_hosted_contract(tmp_path, github_issue_number=92)
+
+    assert bare.github_issue_number is None
+    assert bound.github_issue_number == 92
+    assert json.loads(bound.model_dump_json())["github_issue_number"] == 92
+    with pytest.raises(ValueError):
+        _self_hosted_contract(tmp_path, github_issue_number=0)
+
+
 def _architect_contract(tmp_path, **overrides):
     values = {
         "task_id": "architect-contract",

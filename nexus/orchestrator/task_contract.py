@@ -86,6 +86,7 @@ class SelfHostedTaskContract(BaseModel):
     protected_contracts: List[str] = Field(default_factory=list)
     preferred_provider: Optional[str] = None
     fallback_provider: Optional[str] = None
+    github_issue_number: Optional[int] = Field(default=None, ge=1)
     provider_order: List[str] = Field(default_factory=list)
     maximum_provider_calls: int = Field(default=0, ge=0)
     maximum_replans: int = Field(default=0, ge=0)

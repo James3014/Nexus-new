@@ -87,19 +87,14 @@ class CodexWorkerAdapter:
                 model=model or getattr(self.executor, "model", None),
                 reasoning_effort=getattr(self.executor, "reasoning_effort", None),
                 on_process_group=on_process_group,
-                fast_start_snapshot=fast_start_snapshot or getattr(self.executor, "fast_start_snapshot", None),
             )
         invoke_kwargs: dict[str, Any] = {"prompt": prompt}
         if model is not None:
             invoke_kwargs["model"] = model
         if admission_receipt is not None:
             invoke_kwargs["admission_receipt"] = admission_receipt
-        if fast_start_snapshot is not None:
-            invoke_kwargs["fast_start_snapshot"] = fast_start_snapshot
-        if "registry_fetcher" in options and options["registry_fetcher"] is not None:
-            invoke_kwargs["registry_fetcher"] = options["registry_fetcher"]
-        if metadata_fetcher is not None:
-            invoke_kwargs["metadata_fetcher"] = metadata_fetcher
+        # Caller snapshot/fetchers are compatibility-only and never launch authority.
+        _ = (fast_start_snapshot, metadata_fetcher, options)
         receipt = executor.invoke(contract, lease, **invoke_kwargs)
         if receipt.worker_status == CliWorkerStatus.TIMED_OUT.value:
             outcome = WorkerOutcome.INCOMPLETE
@@ -127,7 +122,9 @@ class CodexWorkerAdapter:
             commit_created=receipt.commit_created,
             merge_performed=receipt.merge_performed,
             push_performed=False,
-            failure_reason=None if outcome == WorkerOutcome.EXECUTION_COMPLETED else "Codex execution did not complete successfully",
+            failure_reason=None
+            if outcome == WorkerOutcome.EXECUTION_COMPLETED
+            else "Codex execution did not complete successfully",
             provider_attempt_count=getattr(receipt, "provider_attempt_count", None),
         )
 
@@ -149,7 +146,9 @@ class UnimplementedWorkerAdapter:
             reason="provider adapter is not implemented; binary presence is not execution proof",
         )
 
-    def invoke(self, contract: Any, lease: Any, *, prompt: str, **options: Any) -> WorkerExecutionReceipt:
+    def invoke(
+        self, contract: Any, lease: Any, *, prompt: str, **options: Any
+    ) -> WorkerExecutionReceipt:
         raise WorkerProviderUnavailable(
             f"{self.provider}: provider adapter is not implemented; refusing execution"
         )
@@ -158,7 +157,9 @@ class UnimplementedWorkerAdapter:
 class DirectCliWorkerAdapter:
     """Direct CLI adapter enabled only with explicit external-runtime authorization."""
 
-    def __init__(self, provider: str, executable: str, model_env: str, default_model: str, argv_builder):
+    def __init__(
+        self, provider: str, executable: str, model_env: str, default_model: str, argv_builder
+    ):
         self.provider = provider
         self.executable = executable
         self.model_env = model_env
@@ -230,7 +231,9 @@ class DirectCliWorkerAdapter:
             commit_created=False,
             merge_performed=False,
             push_performed=False,
-            failure_reason=None if outcome == WorkerOutcome.EXECUTION_COMPLETED else f"{self.provider} execution did not complete successfully",
+            failure_reason=None
+            if outcome == WorkerOutcome.EXECUTION_COMPLETED
+            else f"{self.provider} execution did not complete successfully",
         )
 
 
@@ -286,19 +289,47 @@ class AgyWorkerAdapter:
         enabled_val = os.getenv("NEXUS_AGY_ACCOUNT_POOL_ENABLED", "").strip().lower()
         if enabled_val in ("1", "true", "yes"):
             from nexus.services.agy_account_pool import get_account_pool_manager
+
             return get_account_pool_manager()
         return None
 
     @staticmethod
-    def _classify_failure_static(status: CliWorkerStatus, exit_code: Optional[int], stdout: bytes, stderr: bytes) -> AccountFailureKind:
+    def _classify_failure_static(
+        status: CliWorkerStatus, exit_code: Optional[int], stdout: bytes, stderr: bytes
+    ) -> AccountFailureKind:
         if status is CliWorkerStatus.TIMED_OUT:
             return AccountFailureKind.TIMEOUT
-        text = (stdout.decode("utf-8", errors="replace") + "\n" + stderr.decode("utf-8", errors="replace")).lower()
-        if any(kw in text for kw in ("quota", "resource_exhausted", "exceeded your current quota", "insufficient_quota")):
+        text = (
+            stdout.decode("utf-8", errors="replace")
+            + "\n"
+            + stderr.decode("utf-8", errors="replace")
+        ).lower()
+        if any(
+            kw in text
+            for kw in (
+                "quota",
+                "resource_exhausted",
+                "exceeded your current quota",
+                "insufficient_quota",
+            )
+        ):
             return AccountFailureKind.QUOTA_EXHAUSTED
         if any(kw in text for kw in ("429", "rate limit", "ratelimit")):
             return AccountFailureKind.RATE_LIMITED
-        if any(kw in text for kw in ("unauthorized", "authenticated", "authentication", "invalid api key", "invalid_api_key", "401", "token expired", "invalid token", "login required")):
+        if any(
+            kw in text
+            for kw in (
+                "unauthorized",
+                "authenticated",
+                "authentication",
+                "invalid api key",
+                "invalid_api_key",
+                "401",
+                "token expired",
+                "invalid token",
+                "login required",
+            )
+        ):
             if "expired" in text:
                 return AccountFailureKind.TOKEN_EXPIRED
             return AccountFailureKind.AUTH_OR_SESSION_INVALID
@@ -314,11 +345,15 @@ class AgyWorkerAdapter:
             return AccountFailureKind.SYNTAX_OR_IMPLEMENTATION_ERROR
         return AccountFailureKind.UNKNOWN
 
-    def _classify_failure(self, status: CliWorkerStatus, exit_code: Optional[int], stdout: bytes, stderr: bytes) -> AccountFailureKind:
+    def _classify_failure(
+        self, status: CliWorkerStatus, exit_code: Optional[int], stdout: bytes, stderr: bytes
+    ) -> AccountFailureKind:
         return self._classify_failure_static(status, exit_code, stdout, stderr)
 
     @staticmethod
-    def _is_auth_or_quota_failure(status: CliWorkerStatus, exit_code: Optional[int], stdout: bytes, stderr: bytes) -> bool:
+    def _is_auth_or_quota_failure(
+        status: CliWorkerStatus, exit_code: Optional[int], stdout: bytes, stderr: bytes
+    ) -> bool:
         kind = AgyWorkerAdapter._classify_failure_static(status, exit_code, stdout, stderr)
         return is_rotation_eligible(kind)
 
@@ -481,7 +516,9 @@ class AgyWorkerAdapter:
                 commit_created=False,
                 merge_performed=False,
                 push_performed=False,
-                failure_reason=None if outcome == WorkerOutcome.EXECUTION_COMPLETED else f"{self.provider} execution did not complete successfully",
+                failure_reason=None
+                if outcome == WorkerOutcome.EXECUTION_COMPLETED
+                else f"{self.provider} execution did not complete successfully",
                 account_alias_hash=None,
                 provider_attempt_count=1,
             )
@@ -522,7 +559,11 @@ class AgyWorkerAdapter:
                             failure_reason = f"account pool active account error: {exc}"
                             break
 
-                        if pool is not None and hasattr(pool, "active_account_alias_hash") and pool.active_account_alias_hash:
+                        if (
+                            pool is not None
+                            and hasattr(pool, "active_account_alias_hash")
+                            and pool.active_account_alias_hash
+                        ):
                             active_hash = pool.active_account_alias_hash
                         elif active_acc is not None and hasattr(active_acc, "alias_hash"):
                             active_hash = getattr(active_acc, "alias_hash")
@@ -530,7 +571,10 @@ class AgyWorkerAdapter:
                             active_hash = active_acc["alias_hash"]
                         elif active_acc is not None and hasattr(active_acc, "alias"):
                             import hashlib
-                            active_hash = hashlib.sha256(str(getattr(active_acc, "alias")).encode("utf-8")).hexdigest()[:12]
+
+                            active_hash = hashlib.sha256(
+                                str(getattr(active_acc, "alias")).encode("utf-8")
+                            ).hexdigest()[:12]
                         else:
                             active_hash = "unknown"
 
@@ -538,9 +582,11 @@ class AgyWorkerAdapter:
                             sub_env = pool.build_isolated_env()
                         elif active_acc is not None and hasattr(active_acc, "home_dir"):
                             from nexus.services.agy_account_pool import build_isolated_env
+
                             sub_env = build_isolated_env(home_dir=getattr(active_acc, "home_dir"))
                         else:
                             from nexus.services.agy_account_pool import build_isolated_env
+
                             sub_env = build_isolated_env()
 
                     last_account_hash = active_hash
@@ -595,7 +641,9 @@ class AgyWorkerAdapter:
                     elif result.status is CliWorkerStatus.COMPLETED and result.exit_code == 0:
                         break
                     else:
-                        failure_kind = self._classify_failure(result.status, result.exit_code, result.stdout, result.stderr)
+                        failure_kind = self._classify_failure(
+                            result.status, result.exit_code, result.stdout, result.stderr
+                        )
                         last_failure_kind = failure_kind
 
                         if is_rotation_eligible(failure_kind):
@@ -606,19 +654,33 @@ class AgyWorkerAdapter:
                             if attempt < max_subprocesses - 1:
                                 try:
                                     previous_account_hash = active_hash
-                                    if has_lease_api and current_lease is not None and pool is not None:
-                                        next_lease = pool.report_failure(current_lease, failure_kind)
+                                    if (
+                                        has_lease_api
+                                        and current_lease is not None
+                                        and pool is not None
+                                    ):
+                                        next_lease = pool.report_failure(
+                                            current_lease, failure_kind
+                                        )
                                         if next_lease is None:
                                             failure_reason = "account pool rotation returned no replacement lease"
                                             break
                                         current_lease = next_lease
                                     else:
                                         if pool is not None and hasattr(pool, "rotate_account"):
-                                            pool.rotate_account(reason=failure_kind.value, failed_account_hash=active_hash)
+                                            pool.rotate_account(
+                                                reason=failure_kind.value,
+                                                failed_account_hash=active_hash,
+                                            )
                                         elif pool is not None and hasattr(pool, "rotate"):
-                                            pool.rotate(reason=failure_kind.value, failed_account_hash=active_hash)
+                                            pool.rotate(
+                                                reason=failure_kind.value,
+                                                failed_account_hash=active_hash,
+                                            )
                                         else:
-                                            failure_reason = "account pool does not support rotation"
+                                            failure_reason = (
+                                                "account pool does not support rotation"
+                                            )
                                             break
                                 except Exception as exc:
                                     failure_reason = f"account pool rotation failed: {exc}"
@@ -657,7 +719,8 @@ class AgyWorkerAdapter:
                 commit_created=False,
                 merge_performed=False,
                 push_performed=False,
-                failure_reason=failure_reason or "ensure-active failed before first subprocess call",
+                failure_reason=failure_reason
+                or "ensure-active failed before first subprocess call",
                 account_alias_hash=last_account_hash,
                 provider_attempt_count=0,
             )
@@ -689,7 +752,9 @@ class AgyWorkerAdapter:
             commit_created=False,
             merge_performed=False,
             push_performed=False,
-            failure_reason=None if outcome_val == WorkerOutcome.EXECUTION_COMPLETED.value else (failure_reason or f"{self.provider} execution did not complete successfully"),
+            failure_reason=None
+            if outcome_val == WorkerOutcome.EXECUTION_COMPLETED.value
+            else (failure_reason or f"{self.provider} execution did not complete successfully"),
             account_alias_hash=last_account_hash,
             provider_attempt_count=actual_calls,
         )
@@ -748,7 +813,11 @@ class OllamaPatchWorkerAdapter:
         model = model or os.getenv(self.model_env, "qwen2.5-coder:7b")
         request = CliWorkerRequest(
             executable=self.executable,
-            argv=("run", model, prompt + "\nReturn only a unified git diff beginning with diff --git."),
+            argv=(
+                "run",
+                model,
+                prompt + "\nReturn only a unified git diff beginning with diff --git.",
+            ),
             cwd=str(Path(lease.target_worktree).resolve()),
             timeout_seconds=timeout_seconds or 900.0,
         )
@@ -804,7 +873,17 @@ class OllamaPatchWorkerAdapter:
 
 
 def _gemini_args(prompt: str, model: str) -> tuple[str, ...]:
-    return ("--skip-trust", "--approval-mode", "auto_edit", "-m", model, "-p", prompt, "--output-format", "json")
+    return (
+        "--skip-trust",
+        "--approval-mode",
+        "auto_edit",
+        "-m",
+        model,
+        "-p",
+        prompt,
+        "--output-format",
+        "json",
+    )
 
 
 def _opencode_args(prompt: str, model: str) -> tuple[str, ...]:
@@ -832,11 +911,15 @@ class WorkerRegistry:
             adapters.setdefault("agy", AgyWorkerAdapter())
             adapters.setdefault(
                 "grok",
-                DirectCliWorkerAdapter("grok", "grok", "NEXUS_GROK_WORKER_MODEL", "grok-4.5", _grok_args),
+                DirectCliWorkerAdapter(
+                    "grok", "grok", "NEXUS_GROK_WORKER_MODEL", "grok-4.5", _grok_args
+                ),
             )
             adapters.setdefault(
                 "cline",
-                DirectCliWorkerAdapter("cline", "cline", "NEXUS_CLINE_WORKER_MODEL", "glm-5.2", _cline_args),
+                DirectCliWorkerAdapter(
+                    "cline", "cline", "NEXUS_CLINE_WORKER_MODEL", "glm-5.2", _cline_args
+                ),
             )
             missing = set()
         unknown = set(adapters) - set(SUPPORTED_WORKER_PROVIDERS)
@@ -848,18 +931,30 @@ class WorkerRegistry:
 
     @classmethod
     def default(cls) -> "WorkerRegistry":
-        return cls(
-            {
-                "codex": CodexWorkerAdapter(),
-                "gemini": DirectCliWorkerAdapter("gemini", "gemini", "NEXUS_GEMINI_WORKER_MODEL", "gemini-2.5-flash", _gemini_args),
-                "agy": AgyWorkerAdapter(),
-                "opencode": DirectCliWorkerAdapter("opencode", "opencode", "NEXUS_OPENCODE_WORKER_MODEL", "opencode/big-pickle", _opencode_args),
-                "mimo": DirectCliWorkerAdapter("mimo", "mimo", "NEXUS_MIMO_WORKER_MODEL", "xiaomi/mimo-v2.5", _mimo_args),
-                "ollama": OllamaPatchWorkerAdapter(),
-                "cline": DirectCliWorkerAdapter("cline", "cline", "NEXUS_CLINE_WORKER_MODEL", "glm-5.2", _cline_args),
-                "grok": DirectCliWorkerAdapter("grok", "grok", "NEXUS_GROK_WORKER_MODEL", "grok-4.5", _grok_args),
-            }
-        )
+        return cls({
+            "codex": CodexWorkerAdapter(),
+            "gemini": DirectCliWorkerAdapter(
+                "gemini", "gemini", "NEXUS_GEMINI_WORKER_MODEL", "gemini-2.5-flash", _gemini_args
+            ),
+            "agy": AgyWorkerAdapter(),
+            "opencode": DirectCliWorkerAdapter(
+                "opencode",
+                "opencode",
+                "NEXUS_OPENCODE_WORKER_MODEL",
+                "opencode/big-pickle",
+                _opencode_args,
+            ),
+            "mimo": DirectCliWorkerAdapter(
+                "mimo", "mimo", "NEXUS_MIMO_WORKER_MODEL", "xiaomi/mimo-v2.5", _mimo_args
+            ),
+            "ollama": OllamaPatchWorkerAdapter(),
+            "cline": DirectCliWorkerAdapter(
+                "cline", "cline", "NEXUS_CLINE_WORKER_MODEL", "glm-5.2", _cline_args
+            ),
+            "grok": DirectCliWorkerAdapter(
+                "grok", "grok", "NEXUS_GROK_WORKER_MODEL", "grok-4.5", _grok_args
+            ),
+        })
 
     @property
     def providers(self) -> tuple[str, ...]:

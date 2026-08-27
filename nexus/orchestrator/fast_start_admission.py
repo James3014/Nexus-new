@@ -31,18 +31,27 @@ def extract_issue_number(
     prompt: str | None = None,
     context: Mapping[str, Any] | None = None,
 ) -> int | None:
-    """Extract a GitHub issue number from task_id, context, or prompt."""
-    if context and "issue" in context:
-        try:
-            return int(context["issue"])
-        except (TypeError, ValueError):
-            pass
-    if context and "issue_number" in context:
-        try:
-            return int(context["issue_number"])
-        except (TypeError, ValueError):
-            pass
+    """Extract a GitHub issue number from task_id, context, or prompt.
 
+    Launch choke points must use resolve_issue_identity(); this helper remains
+    for legacy text/context lookup and does not grant launch authority.
+    """
+    if context:
+        for key in ("github_issue_number", "issue_number", "issue"):
+            if key not in context:
+                continue
+            parsed = _parse_structured_issue(context.get(key), fail_closed=False)
+            if parsed is not None:
+                return parsed
+
+    return extract_issue_number_from_text(task_id, prompt)
+
+
+def extract_issue_number_from_text(
+    task_id: str | None = None,
+    prompt: str | None = None,
+) -> int | None:
+    """Legacy text-only Issue number extraction. Not launch authority."""
     for candidate in (task_id, prompt):
         if not candidate:
             continue
@@ -53,6 +62,111 @@ def extract_issue_number(
             except (TypeError, ValueError):
                 continue
     return None
+
+
+def _parse_structured_issue(value: Any, *, fail_closed: bool = True) -> int | None:
+    if value is None or value == "":
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        if fail_closed:
+            raise ValueError("invalid structured GitHub issue identity")
+        return None
+    if parsed < 1:
+        if fail_closed:
+            raise ValueError("invalid structured GitHub issue identity")
+        return None
+    return parsed
+
+
+def structured_issue_from_context(context: Mapping[str, Any] | None) -> Any:
+    if not isinstance(context, Mapping):
+        return None
+    for key in ("github_issue_number", "issue_number", "issue"):
+        if key in context and context.get(key) not in (None, ""):
+            return context.get(key)
+    return None
+
+
+def resolve_issue_identity(
+    *,
+    structured_issue: Any = None,
+    task_id: str | None = None,
+    prompt: str | None = None,
+) -> tuple[int | None, str, int | None, int | None]:
+    """Resolve current Issue identity.
+
+    Returns (issue_number, source, structured_issue, text_issue).
+    source is STRUCTURED, TEXT_FALLBACK, NON_ISSUE, or CONFLICT.
+    """
+    try:
+        structured = _parse_structured_issue(structured_issue)
+    except ValueError:
+        text = extract_issue_number_from_text(task_id, prompt)
+        return None, "CONFLICT", None, text
+
+    text = extract_issue_number_from_text(task_id, prompt)
+    if structured is not None and text is not None and structured != text:
+        return None, "CONFLICT", structured, text
+    if structured is not None:
+        return structured, "STRUCTURED", structured, text
+    if text is not None:
+        return text, "TEXT_FALLBACK", None, text
+    return None, "NON_ISSUE", None, None
+
+
+def issue_identity_conflict_result(
+    *,
+    structured_issue: int | None,
+    text_issue: int | None,
+    current_main_sha: str | None = None,
+    task_id: str | None = None,
+) -> FastStartAdmissionResult:
+    return FastStartAdmissionResult(
+        schema=SCHEMA,
+        issue=structured_issue,
+        decision=FastStartDecision.DENY_EVIDENCE_BLOCKED,
+        codex_launch_allowed=False,
+        reason=(
+            f"Structured Issue #{structured_issue} conflicts with text Issue #{text_issue} "
+            "- fail closed"
+        ),
+        cache_disposition="IDENTITY_CONFLICT",
+        observed_main_sha=current_main_sha,
+    )
+
+
+def admit_managed_codex_launch(
+    *,
+    structured_issue: Any = None,
+    task_id: str | None = None,
+    prompt: str | None = None,
+    current_main_sha: str | None = None,
+    current_main_tree: str | None = None,
+) -> FastStartAdmissionResult:
+    """Production Fast Start admission. Caller snapshot/fetchers are not accepted."""
+    issue_number, source, structured, text = resolve_issue_identity(
+        structured_issue=structured_issue,
+        task_id=task_id,
+        prompt=prompt,
+    )
+    if source == "CONFLICT":
+        return issue_identity_conflict_result(
+            structured_issue=structured,
+            text_issue=text,
+            current_main_sha=current_main_sha,
+            task_id=task_id,
+        )
+    return evaluate_fast_start_admission(
+        FastStartAdmissionRequest(
+            issue_number=issue_number,
+            current_main_sha=current_main_sha,
+            current_main_tree=current_main_tree,
+            task_id=task_id,
+            registry_snapshot=None,
+        )
+    )
 
 
 def canonical_fast_start_registry_fetcher(

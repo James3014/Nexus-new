@@ -2092,36 +2092,24 @@ def build_subprocess_online_invoker(
             }
 
         if spec.provider == "codex":
-            from nexus.contracts.fast_start_admission import FastStartAdmissionRequest
             from nexus.orchestrator.fast_start_admission import (
-                evaluate_fast_start_admission,
-                extract_issue_number,
+                admit_managed_codex_launch,
+                structured_issue_from_context,
             )
 
-            issue_num = extract_issue_number(task_id, prompt, context)
-            fast_start_snap = (
-                context.get("fast_start_snapshot") if isinstance(context, Mapping) else None
-            )
-            reg_fetcher = (
-                context.get("registry_fetcher") if isinstance(context, Mapping) else None
-            )
-            meta_fetcher = (
-                context.get("metadata_fetcher") if isinstance(context, Mapping) else None
-            )
+            # Context snapshot/fetchers are not launch authority.
             main_sha = (
                 str(context.get("expected_head") or "")
                 if isinstance(context, Mapping)
                 else None
             )
-            admission = evaluate_fast_start_admission(
-                FastStartAdmissionRequest(
-                    issue_number=issue_num,
-                    current_main_sha=main_sha,
-                    task_id=task_id,
-                    registry_snapshot=fast_start_snap,
+            admission = admit_managed_codex_launch(
+                structured_issue=structured_issue_from_context(
+                    context if isinstance(context, Mapping) else None
                 ),
-                registry_fetcher=reg_fetcher,
-                metadata_fetcher=meta_fetcher,
+                task_id=task_id,
+                prompt=prompt,
+                current_main_sha=main_sha,
             )
             if not admission.codex_launch_allowed:
                 return normalize_online_invoker_payload(
