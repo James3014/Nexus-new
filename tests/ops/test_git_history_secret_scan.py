@@ -394,3 +394,26 @@ def test_git_error_fails_closed(tmp_path: Path) -> None:
     nonrepo.mkdir()
     with pytest.raises(ScanError):
         scan_repository(nonrepo)
+
+
+def test_workflow_enforces_continuous_repository_coverage() -> None:
+    workflow = Path(".github/workflows/git-history-secret-audit.yml").read_text(encoding="utf-8")
+    pull_request_block = workflow.split("  pull_request:\n", 1)[1].split("  push:\n", 1)[0]
+    assert "branches: [main]" in pull_request_block
+    assert "paths:" not in pull_request_block
+    assert "  push:\n    branches: [main]\n" in workflow
+    assert "  schedule:\n    - cron:" in workflow
+    assert "  workflow_dispatch:\n" in workflow
+
+
+def test_workflow_preserves_least_privilege_and_immutable_actions() -> None:
+    workflow = Path(".github/workflows/git-history-secret-audit.yml").read_text(encoding="utf-8")
+    assert "permissions:\n  contents: read\n" in workflow
+    action_lines = [
+        line.strip() for line in workflow.splitlines() if line.strip().startswith("uses: ")
+    ]
+    assert action_lines
+    for line in action_lines:
+        ref = line.split("@", 1)[1].split()[0]
+        assert len(ref) == 40
+        assert all(char in "0123456789abcdef" for char in ref)
