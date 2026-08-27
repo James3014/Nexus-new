@@ -139,6 +139,28 @@ the durable coordination scope from the validated receipt, then re-check Owner,
 coordinator, repository, Goal, action, expiry/revocation, and receipt integrity.
 A session change alone is not a new Owner authorization boundary.
 
+## G12 Fast Start advisory-cache gate
+
+For GitHub Issue work, before any implementation source/test body reads, the
+primary Codex/coordinator must consult canonical Fast Start registry GitHub Issue
+#549 and verify the registry is `ADVISORY_CACHE_ONLY`.
+
+- #549 and `WAKEUP_HINT_ONLY` events are advisory evidence only; they never grant
+  execution, mutation, route, claim, approval, merge, runtime, release, or
+  production authority.
+- For `BLOCKED`, `HOST_REBIND_REQUIRED`, `NEEDS_DECISION`, or
+  `EVIDENCE_BLOCKED`, perform only the fresh authoritative metadata rebind needed
+  to confirm that frontier. PR-blocker checks are metadata-only and must not read
+  diff, patch, changed-file implementation content, or source/test bodies. If
+  the frontier remains non-ready, stop before implementation source/test reads.
+- `READY_CANDIDATE` is not execution authority. Before mutation, rebind the fresh
+  Issue contract, dependencies, current `main`, host requirements, and the
+  normal claim/authority gates.
+- A missing entry or stale, malformed, hash-invalid, wrong-authority, or
+  contradictory registry fails closed to normal authoritative discovery; cache
+  evidence never substitutes for current GitHub or host truth.
+- Fast Start consumers are read-only with respect to #549 and product Issues.
+
 ## GitHub collaboration and local lifecycle domains
 
 - A GitHub PR Candidate is an Issue-branch commit governed by the Ready Issue,
