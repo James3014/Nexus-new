@@ -16,7 +16,6 @@ from nexus.executors.cli_worker import CliWorkerRequest, CliWorkerResult, run_cl
 from nexus.orchestrator.fast_start_admission import (
     evaluate_fast_start_admission,
     extract_issue_number,
-    validate_admission_fence,
 )
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
 from nexus.orchestrator.worktree_manager import TargetWorktreeLease
@@ -160,40 +159,21 @@ class CodexCliExecutor:
             metadata_fetcher if metadata_fetcher is not None else self.metadata_fetcher
         )
         issue_number = extract_issue_number(contract.task_id, prompt)
-
-        admission: Optional[FastStartAdmissionResult] = admission_receipt
-        if admission is None:
-            admission_req = FastStartAdmissionRequest(
+        # Caller admission_receipt is compatibility/evidence only. It never
+        # grants launch authority and cannot skip mandatory Fast Start evaluation.
+        _ = admission_receipt
+        admission = evaluate_fast_start_admission(
+            FastStartAdmissionRequest(
                 issue_number=issue_number,
                 current_main_sha=lease.initial_head,
                 task_id=contract.task_id,
                 registry_snapshot=effective_snapshot,
-            )
-            admission = evaluate_fast_start_admission(
-                admission_req,
-                registry_fetcher=effective_reg_fetcher,
-                metadata_fetcher=effective_meta_fetcher,
-            )
-        else:
-            # TOCTOU Launch-time Fence check
-            if not validate_admission_fence(
-                admission,
-                current_main_sha=lease.initial_head,
-            ):
-                # Receipt is stale - recompute
-                admission_req = FastStartAdmissionRequest(
-                    issue_number=admission.issue or issue_number,
-                    current_main_sha=lease.initial_head,
-                    task_id=contract.task_id,
-                    registry_snapshot=effective_snapshot,
-                )
-                admission = evaluate_fast_start_admission(
-                    admission_req,
-                    registry_fetcher=effective_reg_fetcher,
-                    metadata_fetcher=effective_meta_fetcher,
-                )
+            ),
+            registry_fetcher=effective_reg_fetcher,
+            metadata_fetcher=effective_meta_fetcher,
+        )
 
-        if admission is not None and not admission.codex_launch_allowed:
+        if not admission.codex_launch_allowed:
             raise FastStartAdmissionDeniedError(admission)
 
         executor = (

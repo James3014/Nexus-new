@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from nexus.contracts.fast_start_admission import (
     FastStartAdmissionDeniedError,
     FastStartAdmissionRequest,
+    FastStartAdmissionResult,
     FastStartDecision,
 )
 from nexus.executors.cli_worker import CliWorkerResult, CliWorkerStatus
@@ -805,6 +807,288 @@ def test_t17_unified_runtime_bypass_closed():
     assert len(reg_calls) == 1
     assert len(meta_calls) == 1
     assert "fast_start_admission" in result
+
+
+def _open_blocker_metadata(pr=None, issue=None):
+    return {
+        "pr_state": "open",
+        "pr_merged": False,
+        "pr_head_sha": "9cebb6457a06cf696964e5902c33075f53395be0",
+        "issue_state": "open",
+    }
+
+
+def test_t18_fabricated_allow_receipt_cannot_bypass_blocked_issue(tmp_path, monkeypatch):
+    """T18: Caller ALLOW_READY receipt does not skip blocked-issue preflight."""
+    launch_calls = []
+    reg_calls = []
+    meta_calls = []
+
+    monkeypatch.setattr(
+        "nexus.executors.codex_executor.run_cli_worker",
+        lambda req: launch_calls.append(req),
+    )
+
+    def mock_reg_fetcher():
+        reg_calls.append(True)
+        return SAMPLE_549_SNAPSHOT
+
+    def mock_meta_fetcher(pr=None, issue=None):
+        meta_calls.append((pr, issue))
+        return _open_blocker_metadata(pr=pr, issue=issue)
+
+    ready_snapshot = {
+        **SAMPLE_549_SNAPSHOT,
+        "entries": [
+            {
+                "issue": 92,
+                "dispatch_state": "READY_CANDIDATE",
+                "early_stop": False,
+                "kind": "IMPLEMENTATION_BASE",
+            }
+        ],
+    }
+    contract = _make_contract(tmp_path, "github-issue-92-source-identity")
+    lease = _make_lease(tmp_path, contract.task_id)
+    fabricated = evaluate_fast_start_admission(
+        FastStartAdmissionRequest(
+            issue_number=92,
+            current_main_sha=lease.initial_head,
+            task_id=contract.task_id,
+            registry_snapshot=ready_snapshot,
+        )
+    )
+    assert fabricated.decision == FastStartDecision.ALLOW_READY
+    assert fabricated.codex_launch_allowed is True
+
+    executor = CodexCliExecutor(executable="/bin/sh")
+    with pytest.raises(FastStartAdmissionDeniedError) as exc_info:
+        executor.invoke(
+            contract,
+            lease,
+            prompt="Implement issue 92 declared source hash validation",
+            admission_receipt=fabricated,
+            registry_fetcher=mock_reg_fetcher,
+            metadata_fetcher=mock_meta_fetcher,
+        )
+
+    assert len(reg_calls) == 1
+    assert len(meta_calls) == 1
+    assert exc_info.value.decision.decision == FastStartDecision.DENY_BLOCKED
+    assert exc_info.value.decision.codex_launch_allowed is False
+    assert len(launch_calls) == 0
+
+
+def test_t19_flipped_codex_launch_allowed_cannot_bypass(tmp_path, monkeypatch):
+    """T19: Copying a blocked receipt and flipping codex_launch_allowed cannot launch."""
+    launch_calls = []
+    reg_calls = []
+    meta_calls = []
+
+    monkeypatch.setattr(
+        "nexus.executors.codex_executor.run_cli_worker",
+        lambda req: launch_calls.append(req),
+    )
+
+    def mock_reg_fetcher():
+        reg_calls.append(True)
+        return SAMPLE_549_SNAPSHOT
+
+    def mock_meta_fetcher(pr=None, issue=None):
+        meta_calls.append((pr, issue))
+        return _open_blocker_metadata(pr=pr, issue=issue)
+
+    contract = _make_contract(tmp_path, "github-issue-92-source-identity")
+    lease = _make_lease(tmp_path, contract.task_id)
+    blocked = evaluate_fast_start_admission(
+        FastStartAdmissionRequest(
+            issue_number=92,
+            current_main_sha=lease.initial_head,
+            task_id=contract.task_id,
+            registry_snapshot=SAMPLE_549_SNAPSHOT,
+        ),
+        metadata_fetcher=mock_meta_fetcher,
+    )
+    assert blocked.decision == FastStartDecision.DENY_BLOCKED
+    assert blocked.codex_launch_allowed is False
+    tampered = replace(blocked, codex_launch_allowed=True)
+    assert tampered.fence_digest == blocked.fence_digest
+    assert tampered.decision == FastStartDecision.DENY_BLOCKED
+    assert tampered.codex_launch_allowed is True
+
+    executor = CodexCliExecutor(executable="/bin/sh")
+    with pytest.raises(FastStartAdmissionDeniedError) as exc_info:
+        executor.invoke(
+            contract,
+            lease,
+            prompt="Implement issue 92 declared source hash validation",
+            admission_receipt=tampered,
+            registry_fetcher=mock_reg_fetcher,
+            metadata_fetcher=mock_meta_fetcher,
+        )
+
+    assert len(reg_calls) == 1
+    assert len(meta_calls) >= 1
+    assert exc_info.value.decision.codex_launch_allowed is False
+    assert exc_info.value.decision.decision == FastStartDecision.DENY_BLOCKED
+    assert len(launch_calls) == 0
+
+
+def test_t20_cross_issue_ready_receipt_reuse_denied(tmp_path, monkeypatch):
+    """T20: Issue #129 READY receipt cannot authorize blocked Issue #92."""
+    launch_calls = []
+    reg_calls = []
+    meta_calls = []
+
+    monkeypatch.setattr(
+        "nexus.executors.codex_executor.run_cli_worker",
+        lambda req: launch_calls.append(req),
+    )
+
+    def mock_reg_fetcher():
+        reg_calls.append(True)
+        return SAMPLE_549_SNAPSHOT
+
+    def mock_meta_fetcher(pr=None, issue=None):
+        meta_calls.append((pr, issue))
+        return _open_blocker_metadata(pr=pr, issue=issue)
+
+    contract = _make_contract(tmp_path, "github-issue-92-source-identity")
+    lease = _make_lease(tmp_path, contract.task_id)
+    ready_129 = evaluate_fast_start_admission(
+        FastStartAdmissionRequest(
+            issue_number=129,
+            current_main_sha=lease.initial_head,
+            task_id="github-issue-129-atomic-work-claim",
+            registry_snapshot=SAMPLE_549_SNAPSHOT,
+        )
+    )
+    assert ready_129.issue == 129
+    assert ready_129.decision == FastStartDecision.ALLOW_READY
+    assert ready_129.codex_launch_allowed is True
+
+    executor = CodexCliExecutor(executable="/bin/sh")
+    with pytest.raises(FastStartAdmissionDeniedError) as exc_info:
+        executor.invoke(
+            contract,
+            lease,
+            prompt="Implement issue 92 declared source hash validation",
+            admission_receipt=ready_129,
+            registry_fetcher=mock_reg_fetcher,
+            metadata_fetcher=mock_meta_fetcher,
+        )
+
+    assert len(reg_calls) == 1
+    assert len(meta_calls) == 1
+    assert exc_info.value.decision.issue == 92
+    assert exc_info.value.decision.decision == FastStartDecision.DENY_BLOCKED
+    assert len(launch_calls) == 0
+
+
+def test_t21_worker_registry_caller_receipt_bypass_closed(tmp_path, monkeypatch):
+    """T21: CodexWorkerAdapter cannot forward an ALLOW receipt as launch authority."""
+    launch_calls = []
+    reg_calls = []
+    meta_calls = []
+
+    monkeypatch.setattr(
+        "nexus.executors.codex_executor.run_cli_worker",
+        lambda req: launch_calls.append(req),
+    )
+
+    def mock_reg_fetcher():
+        reg_calls.append(True)
+        return SAMPLE_549_SNAPSHOT
+
+    def mock_meta_fetcher(pr=None, issue=None):
+        meta_calls.append((pr, issue))
+        return _open_blocker_metadata(pr=pr, issue=issue)
+
+    contract = _make_contract(tmp_path, "github-issue-92-source-identity")
+    lease = _make_lease(tmp_path, contract.task_id)
+    allow_receipt = FastStartAdmissionResult(
+        issue=92,
+        decision=FastStartDecision.ALLOW_READY,
+        codex_launch_allowed=True,
+        reason="caller fabricated worker-registry receipt",
+        observed_main_sha=lease.initial_head,
+    )
+
+    adapter = CodexWorkerAdapter(
+        executor=CodexCliExecutor(
+            executable="/bin/sh",
+            registry_fetcher=mock_reg_fetcher,
+            metadata_fetcher=mock_meta_fetcher,
+        )
+    )
+    with pytest.raises(FastStartAdmissionDeniedError) as exc_info:
+        adapter.invoke(
+            contract,
+            lease,
+            prompt="Implement issue 92 declared source hash validation",
+            admission_receipt=allow_receipt,
+            registry_fetcher=mock_reg_fetcher,
+            metadata_fetcher=mock_meta_fetcher,
+        )
+
+    assert len(reg_calls) >= 1
+    assert len(meta_calls) >= 1
+    assert exc_info.value.decision.decision == FastStartDecision.DENY_BLOCKED
+    assert exc_info.value.decision.codex_launch_allowed is False
+    assert len(launch_calls) == 0
+
+
+def test_t22_issue_ready_with_irrelevant_caller_receipt_launches_once(tmp_path, monkeypatch):
+    """T22: Fresh ALLOW_READY evaluation launches once; caller receipt is not returned."""
+    launch_calls = []
+    reg_calls = []
+
+    def fake_worker(request):
+        launch_calls.append(request)
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=b"{}",
+            stderr=b"",
+            wall_time_ms=10,
+            process_group_id=1,
+        )
+
+    monkeypatch.setattr("nexus.executors.codex_executor.run_cli_worker", fake_worker)
+
+    def mock_reg_fetcher():
+        reg_calls.append(True)
+        return SAMPLE_549_SNAPSHOT
+
+    contract = _make_contract(tmp_path, "github-issue-129-atomic-work-claim")
+    lease = _make_lease(tmp_path, contract.task_id)
+    caller_receipt = FastStartAdmissionResult(
+        issue=92,
+        decision=FastStartDecision.DENY_BLOCKED,
+        codex_launch_allowed=False,
+        reason="irrelevant caller deny receipt",
+    )
+
+    executor = CodexCliExecutor(
+        executable="/bin/sh",
+        registry_fetcher=mock_reg_fetcher,
+    )
+    receipt = executor.invoke(
+        contract,
+        lease,
+        prompt="Execute issue 129 claim",
+        admission_receipt=caller_receipt,
+    )
+    assert receipt.worker_status == "COMPLETED"
+    assert len(launch_calls) == 1
+    assert len(reg_calls) == 1
+    assert receipt.admission_receipt is not None
+    assert receipt.admission_receipt.issue == 129
+    assert receipt.admission_receipt.decision == FastStartDecision.ALLOW_READY
+    assert receipt.admission_receipt.reason != caller_receipt.reason
 
 
 def test_online_cli_worker_codex_admission_denied(monkeypatch):
