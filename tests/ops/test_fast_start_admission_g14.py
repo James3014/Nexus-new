@@ -541,37 +541,84 @@ def test_t12_registry_preflight_failure_does_not_launch(tmp_path, monkeypatch):
 
 
 def test_t13_blocked_requires_fresh_metadata(tmp_path, monkeypatch):
-    """T13: Cache shows blocked, but fresh metadata provider fails to return evidence -> deny & zero launch."""
+    """T13: Cache shows blocked; insufficient fresh metadata denies and does not launch."""
     launch_calls = []
-    meta_calls = []
-
     monkeypatch.setattr(
         "nexus.executors.codex_executor.run_cli_worker",
         lambda req: launch_calls.append(req),
     )
 
+    def _deny_issue_419(*, metadata_fetcher):
+        contract = _make_contract(tmp_path, "github-issue-419-task")
+        lease = _make_lease(tmp_path, contract.task_id)
+        executor = CodexCliExecutor(
+            executable="/bin/sh",
+            registry_fetcher=lambda: SAMPLE_549_SNAPSHOT,
+            metadata_fetcher=metadata_fetcher,
+        )
+        with pytest.raises(FastStartAdmissionDeniedError) as exc_info:
+            executor.invoke(contract, lease, prompt="Work on issue 419")
+        return exc_info.value.decision
+
+    meta_raise_calls = []
+
     def failing_meta_fetcher(pr=None, issue=None):
-        meta_calls.append((pr, issue))
+        meta_raise_calls.append((pr, issue))
         raise RuntimeError("PR metadata fetch error")
 
-    contract = _make_contract(tmp_path, "github-issue-419-task")
+    raised = _deny_issue_419(metadata_fetcher=failing_meta_fetcher)
+    assert len(meta_raise_calls) == 1
+    assert raised.decision == FastStartDecision.DENY_EVIDENCE_BLOCKED
+    assert raised.codex_launch_allowed is False
+    assert len(launch_calls) == 0
+
+    meta_empty_calls = []
+
+    def empty_meta_fetcher(pr=None, issue=None):
+        meta_empty_calls.append((pr, issue))
+        return {}
+
+    empty = _deny_issue_419(metadata_fetcher=empty_meta_fetcher)
+    assert len(meta_empty_calls) == 1
+    assert empty.decision == FastStartDecision.DENY_EVIDENCE_BLOCKED
+    assert empty.codex_launch_allowed is False
+    assert len(launch_calls) == 0
+
+    stale_snapshot = {
+        **SAMPLE_549_SNAPSHOT,
+        "entries": [
+            {
+                "issue": 419,
+                "dispatch_state": "BLOCKED_PR",
+                "early_stop": True,
+                "blocker": {
+                    "pr": 402,
+                    "reason": "stale cache already looks closed",
+                    "state": "closed",
+                    "head_sha": "f37242f8e58f09826fa6b0e817b6e97b6a5bf5f1",
+                    "type": "ACTIVE_PR_OVERLAP",
+                },
+            }
+        ],
+    }
+    meta_stale_calls = []
+
+    def stale_empty_meta_fetcher(pr=None, issue=None):
+        meta_stale_calls.append((pr, issue))
+        return {}
+
+    contract = _make_contract(tmp_path, "github-issue-419-stale")
     lease = _make_lease(tmp_path, contract.task_id)
     executor = CodexCliExecutor(
         executable="/bin/sh",
-        registry_fetcher=lambda: SAMPLE_549_SNAPSHOT,
-        metadata_fetcher=failing_meta_fetcher,
+        registry_fetcher=lambda: stale_snapshot,
+        metadata_fetcher=stale_empty_meta_fetcher,
     )
-
-    with pytest.raises(FastStartAdmissionDeniedError) as exc_info:
-        executor.invoke(
-            contract,
-            lease,
-            prompt="Work on issue 419",
-        )
-
-    assert len(meta_calls) == 1
-    assert exc_info.value.decision.decision == FastStartDecision.DENY_BLOCKED
-    assert exc_info.value.decision.codex_launch_allowed is False
+    with pytest.raises(FastStartAdmissionDeniedError) as stale_exc:
+        executor.invoke(contract, lease, prompt="Work on issue 419")
+    assert len(meta_stale_calls) == 1
+    assert stale_exc.value.decision.decision == FastStartDecision.DENY_EVIDENCE_BLOCKED
+    assert stale_exc.value.decision.codex_launch_allowed is False
     assert len(launch_calls) == 0
 
 

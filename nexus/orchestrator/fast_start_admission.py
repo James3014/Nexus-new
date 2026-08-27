@@ -227,74 +227,97 @@ def evaluate_fast_start_admission(
     if dispatch_state in {"BLOCKED_UPSTREAM", "BLOCKED_PR", "BLOCKED"}:
         blocker_pr = blocker_dict.get("pr")
         blocker_issue = blocker_dict.get("issue")
-        if blocker_pr is not None or blocker_issue is not None:
+        if blocker_pr is None and blocker_issue is None:
+            decision = FastStartDecision.DENY_BLOCKED
+            codex_allowed = False
+            reason = "Entry marked BLOCKED without specific rebind targets"
+        else:
             observed_b: dict[str, Any] = {}
             if blocker_pr is not None:
                 observed_b["pr"] = blocker_pr
-                observed_b["state"] = blocker_dict.get("state", "open")
-                observed_b["head_sha"] = blocker_dict.get("head_sha")
             if blocker_issue is not None:
                 observed_b["issue"] = blocker_issue
-                observed_b["state"] = "open"
 
-            # Metadata-only fresh rebind
+            # Metadata-only fresh rebind. Cache cannot prove a blocker is gone.
             meta_fetcher = (
                 metadata_fetcher
                 if metadata_fetcher is not None
                 else canonical_fast_start_metadata_fetcher
             )
+            rebind_failed = False
             try:
                 rebound = meta_fetcher(pr=blocker_pr, issue=blocker_issue)
                 if isinstance(rebound, Mapping):
                     fresh_evidence.update(rebound)
-                    if "pr_state" in rebound and rebound["pr_state"] is not None:
+                    if rebound.get("pr_state") is not None:
                         observed_b["state"] = rebound["pr_state"]
-                    if "pr_merged" in rebound and rebound["pr_merged"] is not None:
+                    if rebound.get("pr_merged") is not None:
                         observed_b["merged"] = rebound["pr_merged"]
-                    if "pr_head_sha" in rebound and rebound["pr_head_sha"] is not None:
+                    if rebound.get("pr_head_sha") is not None:
                         observed_b["head_sha"] = rebound["pr_head_sha"]
-                    if "issue_state" in rebound and rebound["issue_state"] is not None:
+                    if rebound.get("issue_state") is not None:
                         observed_b["issue_state"] = rebound["issue_state"]
+                else:
+                    rebind_failed = True
+                    fresh_evidence["rebind_error"] = "metadata_fetcher returned non-mapping"
             except Exception as exc:
+                rebind_failed = True
                 fresh_evidence["rebind_error"] = str(exc)
+
+            if "rebind_error" in fresh_evidence:
+                rebind_failed = True
 
             observed_blockers.append(observed_b)
 
-            pr_state = str(observed_b.get("state", "open")).lower()
-            pr_merged = bool(observed_b.get("merged", False))
-            issue_state = str(observed_b.get("issue_state", "open")).lower()
+            has_pr_state = fresh_evidence.get("pr_state") not in (None, "")
+            has_pr_merged = fresh_evidence.get("pr_merged") is not None
+            has_issue_state = fresh_evidence.get("issue_state") not in (None, "")
+            sufficient = (
+                (has_pr_state or has_pr_merged) if blocker_pr is not None else has_issue_state
+            )
 
-            pr_is_blocked = (blocker_pr is not None) and (pr_state == "open" and not pr_merged)
-            issue_is_blocked = (blocker_issue is not None) and (issue_state == "open")
-
-            if pr_is_blocked:
-                decision = FastStartDecision.DENY_BLOCKED
+            if rebind_failed or not sufficient:
+                decision = FastStartDecision.DENY_EVIDENCE_BLOCKED
                 codex_allowed = False
-                reason = f"Upstream blocker PR #{blocker_pr} is still {pr_state.upper()} (head {observed_b.get('head_sha')})"
-                disposition = (
-                    "LIGHT_REBIND"
-                    if fresh_evidence and "rebind_error" not in fresh_evidence
-                    else "CACHE_HIT"
+                reason = (
+                    "Blocked Fast Start entry requires fresh metadata-only rebind; "
+                    "blocker evidence missing or rebind failed"
                 )
-            elif blocker_pr is None and issue_is_blocked:
-                decision = FastStartDecision.DENY_BLOCKED
-                codex_allowed = False
-                reason = f"Upstream blocker Issue #{blocker_issue} is still {issue_state.upper()}"
-                disposition = (
-                    "LIGHT_REBIND"
-                    if fresh_evidence and "rebind_error" not in fresh_evidence
-                    else "CACHE_HIT"
-                )
+                disposition = "CACHE_HIT"
             else:
-                # Blocker was verified terminal/resolved
-                decision = FastStartDecision.ALLOW_FULL_DISCOVERY
-                codex_allowed = True
-                reason = "Upstream blocker resolved in fresh metadata - proceeding to authoritative full discovery"
-                disposition = "TARGETED_REBIND"
-        else:
-            decision = FastStartDecision.DENY_BLOCKED
-            codex_allowed = False
-            reason = "Entry marked BLOCKED without specific rebind targets"
+                pr_state = str(fresh_evidence.get("pr_state") or "").lower()
+                pr_merged = bool(fresh_evidence.get("pr_merged", False))
+                issue_state = str(fresh_evidence.get("issue_state") or "").lower()
+                pr_terminal = blocker_pr is not None and (
+                    pr_merged or pr_state in {"closed", "merged"}
+                )
+                issue_terminal = (
+                    blocker_pr is None and blocker_issue is not None and issue_state == "closed"
+                )
+                if pr_terminal or issue_terminal:
+                    decision = FastStartDecision.ALLOW_FULL_DISCOVERY
+                    codex_allowed = True
+                    reason = (
+                        "Upstream blocker resolved in fresh metadata - "
+                        "proceeding to authoritative full discovery"
+                    )
+                    disposition = "TARGETED_REBIND"
+                elif blocker_pr is not None:
+                    decision = FastStartDecision.DENY_BLOCKED
+                    codex_allowed = False
+                    reason = (
+                        f"Upstream blocker PR #{blocker_pr} is still "
+                        f"{pr_state.upper() or 'OPEN'} (head {observed_b.get('head_sha')})"
+                    )
+                    disposition = "LIGHT_REBIND"
+                else:
+                    decision = FastStartDecision.DENY_BLOCKED
+                    codex_allowed = False
+                    reason = (
+                        f"Upstream blocker Issue #{blocker_issue} is still "
+                        f"{issue_state.upper() or 'OPEN'}"
+                    )
+                    disposition = "LIGHT_REBIND"
 
     elif dispatch_state in {"HOST_REBIND_REQUIRED", "HOST_BOUND"}:
         decision = FastStartDecision.DENY_HOST_BOUND
@@ -302,7 +325,6 @@ def evaluate_fast_start_admission(
         reason = (
             "Task requires host-bound local authority/OAuth session - GitHub Codex dispatch denied"
         )
-        disposition = "CACHE_HIT"
         disposition = "CACHE_HIT"
 
     elif dispatch_state == "NEEDS_DECISION":
