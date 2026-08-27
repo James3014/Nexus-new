@@ -116,17 +116,18 @@ def _with_node_outcomes(
     errors: list[str] | None = None,
     skipped: list[str] | None = None,
     test_inventory_tree: str | None = None,
+    exit_code: int | None = None,
 ) -> PytestRunResult:
     failed = failed or []
     errors = errors or []
     skipped = skipped or []
     node_ids = sorted(set(passed) | set(failed) | set(errors) | set(skipped))
     failures = sorted(set(failed) | set(errors))
-    exit_code = 1 if failures else 0
+    resolved_exit_code = (1 if failures else 0) if exit_code is None else exit_code
     inventory_tree = test_inventory_tree or run.test_inventory_tree
     return replace(
         run,
-        exit_code=exit_code,
+        exit_code=resolved_exit_code,
         failures=failures,
         test_inventory_tree=inventory_tree,
         bound_test_inventory_tree=inventory_tree,
@@ -149,7 +150,7 @@ def _with_node_outcomes(
             error_node_ids=sorted(errors),
             skipped_node_ids=sorted(skipped),
             terminal_status=run.terminal_status,
-            exit_code=exit_code,
+            exit_code=resolved_exit_code,
             status=run.status,
             failures=failures,
             executed_targets=run.executed_targets,
@@ -1278,6 +1279,76 @@ def test_head_may_repair_an_exact_base_bootstrap_defect():
 
     assert result.classification == "PASS"
     assert result.blocking is False
+
+
+def test_all_green_head_repairs_zero_collection_base_bootstrap_defect():
+    base = _with_node_outcomes(
+        _run(
+            2,
+            [],
+            status="CI_BOOTSTRAP_DEFECT",
+            revision="base",
+            impact_class="IMPACT_UNKNOWN",
+        ),
+        passed=[],
+        exit_code=2,
+    )
+    head = _with_node_outcomes(
+        _run(0, [], status="COMPLETE", revision="head", impact_class="IMPACT_UNKNOWN"),
+        passed=["tests.test_contract::test_repaired_import"],
+    )
+
+    result = classify_regression(base, head)
+
+    assert result.classification == "PASS"
+    assert result.blocking is False
+
+
+def test_zero_collection_complete_base_cannot_use_bootstrap_repair_exception():
+    base = _with_node_outcomes(
+        _run(2, [], status="COMPLETE", revision="base"),
+        passed=[],
+        exit_code=2,
+    )
+    head = _with_node_outcomes(
+        _run(0, [], status="COMPLETE", revision="head"),
+        passed=["tests.test_contract::test_repaired_import"],
+    )
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+@pytest.mark.parametrize("base_exit_code", [0, 1])
+def test_zero_collection_bootstrap_repair_requires_bootstrap_exit(base_exit_code):
+    base = _with_node_outcomes(
+        _run(2, [], status="CI_BOOTSTRAP_DEFECT", revision="base"),
+        passed=[],
+        exit_code=base_exit_code,
+    )
+    head = _with_node_outcomes(
+        _run(0, [], status="COMPLETE", revision="head"),
+        passed=["tests.test_contract::test_repaired_import"],
+    )
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
+
+
+@pytest.mark.parametrize("outcome", ["failed", "skipped"])
+def test_zero_collection_bootstrap_repair_requires_every_head_node_to_pass(outcome):
+    node = "tests.test_contract::test_repaired_import"
+    base = _with_node_outcomes(
+        _run(2, [], status="CI_BOOTSTRAP_DEFECT", revision="base"),
+        passed=[],
+        exit_code=2,
+    )
+    head = _with_node_outcomes(
+        _run(1 if outcome == "failed" else 0, [], status="COMPLETE", revision="head"),
+        passed=[],
+        failed=[node] if outcome == "failed" else [],
+        skipped=[node] if outcome == "skipped" else [],
+    )
+
+    assert classify_regression(base, head).classification == "IMPACT_UNKNOWN"
 
 
 def test_mismatched_plan_provenance_fails_closed():
