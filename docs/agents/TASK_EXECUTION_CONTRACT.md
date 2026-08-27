@@ -139,6 +139,10 @@ the durable coordination scope from the validated receipt, then re-check Owner,
 coordinator, repository, Goal, action, expiry/revocation, and receipt integrity.
 A session change alone is not a new Owner authorization boundary.
 
+## G12 Fast Start advisory-cache gate
+
+Apply the root `AGENTS.md` #549 `ADVISORY_CACHE_ONLY` preflight before any implementation source/test body reads.
+
 ## GitHub collaboration and local lifecycle domains
 
 - A GitHub PR Candidate is an Issue-branch commit governed by the Ready Issue,
