@@ -29,6 +29,12 @@ from nexus.orchestrator.task_contract import (
 from nexus.orchestrator.worktree_manager import TargetWorktreeLease
 from nexus.services.unified_runtime import OnlineCliSpec, build_subprocess_online_invoker
 
+
+@pytest.fixture(autouse=True)
+def setup_codex_bin(monkeypatch):
+    monkeypatch.setenv("NEXUS_CODEX_BIN", "/bin/sh")
+
+
 SAMPLE_549_SNAPSHOT = {
     "schema": "nexus.fast_start_cache.v1",
     "repository": "James3014/Nexus-new",
@@ -324,7 +330,7 @@ def test_t6_cache_miss_allows_full_discovery(tmp_path, monkeypatch):
     # Codex can run normally for cache miss
     contract = _make_contract(tmp_path, "github-issue-9999-new-feature")
     lease = _make_lease(tmp_path, contract.task_id)
-    executor = CodexCliExecutor(fast_start_snapshot=SAMPLE_549_SNAPSHOT)
+    executor = CodexCliExecutor(executable="/bin/sh", fast_start_snapshot=SAMPLE_549_SNAPSHOT)
     receipt = executor.invoke(contract, lease, prompt="Build new feature")
     assert receipt.worker_status == "COMPLETED"
     assert len(launch_calls) == 1
@@ -362,7 +368,7 @@ def test_t7_ready_candidate_fresh_evidence_allows_launch(tmp_path, monkeypatch):
 
     contract = _make_contract(tmp_path, "github-issue-129-atomic-work-claim")
     lease = _make_lease(tmp_path, contract.task_id)
-    executor = CodexCliExecutor(fast_start_snapshot=SAMPLE_549_SNAPSHOT)
+    executor = CodexCliExecutor(executable="/bin/sh", fast_start_snapshot=SAMPLE_549_SNAPSHOT)
     receipt = executor.invoke(contract, lease, prompt="Execute issue 129 claim")
     assert receipt.worker_status == "COMPLETED"
     assert len(launch_calls) == 1
