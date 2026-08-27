@@ -19,18 +19,18 @@ allowed_files:
   - tasks/github-issue-129-atomic-work-claim-20260813/INDEX.md
   - tasks/github-issue-129-atomic-work-claim-20260813/00-atomic-work-claim.md
 authorized_deletions: []
-reconciled_main: 929fcb92cccdc60d9bc1f5126b5082a075398b40
-current_main: 929fcb92cccdc60d9bc1f5126b5082a075398b40
-current_main_tree: 94852249f0768448531e38cee0374bae5868fe85
+reconciled_main: 4def873d60f3b970ba80271efd18ed22deccb367
+current_main: 4def873d60f3b970ba80271efd18ed22deccb367
+current_main_tree: 4c36e4f3a6e44ad94fcd4179967bd2785de3d4be
 historical_terminal_marker: ATOMIC_READY_ISSUE_WORK_CLAIM_PROVEN
 terminal_marker: null
 claim_ceiling: ATOMIC_WORK_CLAIM_ENFORCEMENT_CANDIDATE_PR_ONLY
 shared_file_gate: SATISFIED_BY_PR581_MERGE_50A6FBC
 contract_delta: CANONICAL_CLAIM_ENFORCEMENT_INTEGRATION
 contract_delta_comment_id: 5336198602
-overlap_bind: OPEN_PR_EXACT_FOUR_PATH_SCAN_CLEAR_AT_929FCB92
-overlap_observed_at: 2026-08-26T13:41:03.076355Z
-overlap_evidence_sha256: 62036a3eeecfb962fe551b448d845d336d627b1f7fca0493b0fe3b5aec66364c
+overlap_bind: OPEN_PR_EXACT_FOUR_PATH_SCAN_CLEAR_AT_4DEF873D
+overlap_observed_at: 2026-08-27T00:38:41Z
+overlap_evidence_sha256: 4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
 allowed_scope_sha256: 354cda2ab9426878412ca8f924a6360bf223d176babad6a91227444233d84291
 source_blob: b5a1fd7da4e1d27e9607eedc7d352df592580d6e
 source_sha256: d566cdc7f546b6f2d754f2b1c8da8aee07220ab92e28904d3dea37f58f00722a
@@ -52,11 +52,11 @@ primitive-only frontier without rewriting its evidence. The atomic claim
 primitive is already present; the current bounded objective is to wire that
 primitive into the existing `SelfHostedTaskService` production dispatch path.
 
-Current baseline is `929fcb92cccdc60d9bc1f5126b5082a075398b40` / tree
-`94852249f0768448531e38cee0374bae5868fe85`. The two implementation blobs are
+Current baseline is `4def873d60f3b970ba80271efd18ed22deccb367` / tree
+`4c36e4f3a6e44ad94fcd4179967bd2785de3d4be`. The two implementation blobs are
 byte-identical to historical shared-file baseline `50a6fbc7`; PR #581 remains
 the historical merge that closed the prior #467 overlap. A fresh GitHub scan at
-`2026-08-26T13:41:03.076355Z` found no open PR changing any of the exact four
+`2026-08-27T00:38:41Z` found no open PR changing any of the exact four
 allowed paths. Fresh Workforce Admission is still required at dispatch time.
 
 Canonical boundaries for this delta:
@@ -229,7 +229,7 @@ debt and no hostile behavioral finding.
 This historical receipt is preserved as repository-contained physical evidence
 only. The historical metadata reconciliation baseline was
 `9622b24c321d02a59cb5cc2de2d948a60fa90df1`; the current enforcement-delta
-baseline is `929fcb92cccdc60d9bc1f5126b5082a075398b40`. Historical
+baseline is `4def873d60f3b970ba80271efd18ed22deccb367`. Historical
 `50a6fbc766218a17fa9296edf23ce95504fee8c8` remains ancestor/shared-file
 evidence only. No new terminal/closure receipt is asserted.
 
