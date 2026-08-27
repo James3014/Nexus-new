@@ -301,9 +301,7 @@ _GENERIC_PROMOTION_VERDICTS = frozenset({
     "BLOCK",
     "REPAIRABLE",
 })
-_G10_EXTERNAL_AUTHORITY_CONTRACT_GAP = (
-    "shared_playbook_g10_contract_gap_external_authority_unbound"
-)
+_G10_EXTERNAL_AUTHORITY_CONTRACT_GAP = "shared_playbook_g10_contract_gap_external_authority_unbound"
 
 
 def _canonical_dataclass_kwargs(cls: type[Any], payload: Mapping[str, Any]) -> dict[str, Any]:
