@@ -2099,40 +2099,49 @@ def build_subprocess_online_invoker(
             )
 
             issue_num = extract_issue_number(task_id, prompt, context)
-            fast_start_snap = context.get("fast_start_snapshot") if isinstance(context, Mapping) else None
-            if issue_num is not None or fast_start_snap is not None:
-                main_sha = (
-                    str(context.get("expected_head") or "")
-                    if isinstance(context, Mapping)
-                    else None
+            fast_start_snap = (
+                context.get("fast_start_snapshot") if isinstance(context, Mapping) else None
+            )
+            reg_fetcher = (
+                context.get("registry_fetcher") if isinstance(context, Mapping) else None
+            )
+            meta_fetcher = (
+                context.get("metadata_fetcher") if isinstance(context, Mapping) else None
+            )
+            main_sha = (
+                str(context.get("expected_head") or "")
+                if isinstance(context, Mapping)
+                else None
+            )
+            admission = evaluate_fast_start_admission(
+                FastStartAdmissionRequest(
+                    issue_number=issue_num,
+                    current_main_sha=main_sha,
+                    task_id=task_id,
+                    registry_snapshot=fast_start_snap,
+                ),
+                registry_fetcher=reg_fetcher,
+                metadata_fetcher=meta_fetcher,
+            )
+            if not admission.codex_launch_allowed:
+                return normalize_online_invoker_payload(
+                    provider=spec.provider,
+                    task_id=task_id,
+                    invoked=False,
+                    output_delivered=False,
+                    gate_passed=False,
+                    provider_call_count=0,
+                    response="",
+                    raw_response="",
+                    usage={},
+                    error=f"fast_start_admission_denied:{admission.decision.value}",
+                    evidence_refs=[
+                        f"online:{spec.provider}:{task_id}:fast_start_admission_denied"
+                    ],
+                    transport=TRANSPORT_REGISTERED_CLI,
+                    selection_source=SELECTION_EXPLICIT_REQUEST,
+                    extra={"fast_start_admission": admission.to_dict()},
                 )
-                admission = evaluate_fast_start_admission(
-                    FastStartAdmissionRequest(
-                        issue_number=issue_num,
-                        current_main_sha=main_sha,
-                        task_id=task_id,
-                        registry_snapshot=fast_start_snap,
-                    )
-                )
-                if not admission.codex_launch_allowed:
-                    return normalize_online_invoker_payload(
-                        provider=spec.provider,
-                        task_id=task_id,
-                        invoked=False,
-                        output_delivered=False,
-                        gate_passed=False,
-                        provider_call_count=0,
-                        response="",
-                        raw_response="",
-                        usage={},
-                        error=f"fast_start_admission_denied:{admission.decision.value}",
-                        evidence_refs=[
-                            f"online:{spec.provider}:{task_id}:fast_start_admission_denied"
-                        ],
-                        transport=TRANSPORT_REGISTERED_CLI,
-                        selection_source=SELECTION_EXPLICIT_REQUEST,
-                        extra={"fast_start_admission": admission.to_dict()},
-                    )
 
         try:
             result = runner(

@@ -54,6 +54,8 @@ class CodexCliExecutor:
         reasoning_effort: str | None = None,
         on_process_group: Optional[Callable[[Optional[int]], None]] = None,
         fast_start_snapshot: Optional[Mapping[str, Any]] = None,
+        registry_fetcher: Optional[Callable[[], Mapping[str, Any] | None]] = None,
+        metadata_fetcher: Optional[Callable[..., Mapping[str, Any]]] = None,
     ):
         self.executable = executable
         self.timeout_seconds = timeout_seconds
@@ -72,6 +74,8 @@ class CodexCliExecutor:
             raise ValueError("NEXUS_CODEX_REASONING_EFFORT must be one of low, medium, high, xhigh")
         self.on_process_group = on_process_group
         self.fast_start_snapshot = fast_start_snapshot
+        self.registry_fetcher = registry_fetcher
+        self.metadata_fetcher = metadata_fetcher
 
     def _request(
         self,
@@ -142,16 +146,23 @@ class CodexCliExecutor:
         model: str | None = None,
         admission_receipt: Optional[FastStartAdmissionResult] = None,
         fast_start_snapshot: Optional[Mapping[str, Any]] = None,
+        registry_fetcher: Optional[Callable[[], Mapping[str, Any] | None]] = None,
         metadata_fetcher: Optional[Callable[..., Mapping[str, Any]]] = None,
     ) -> CodexExecutionReceipt:
         # G14 Deterministic Fast Start Pre-Launch Admission Gate
         effective_snapshot = (
             fast_start_snapshot if fast_start_snapshot is not None else self.fast_start_snapshot
         )
+        effective_reg_fetcher = (
+            registry_fetcher if registry_fetcher is not None else self.registry_fetcher
+        )
+        effective_meta_fetcher = (
+            metadata_fetcher if metadata_fetcher is not None else self.metadata_fetcher
+        )
         issue_number = extract_issue_number(contract.task_id, prompt)
 
         admission: Optional[FastStartAdmissionResult] = admission_receipt
-        if admission is None and (issue_number is not None or effective_snapshot is not None):
+        if admission is None:
             admission_req = FastStartAdmissionRequest(
                 issue_number=issue_number,
                 current_main_sha=lease.initial_head,
@@ -160,9 +171,10 @@ class CodexCliExecutor:
             )
             admission = evaluate_fast_start_admission(
                 admission_req,
-                metadata_fetcher=metadata_fetcher,
+                registry_fetcher=effective_reg_fetcher,
+                metadata_fetcher=effective_meta_fetcher,
             )
-        elif admission is not None:
+        else:
             # TOCTOU Launch-time Fence check
             if not validate_admission_fence(
                 admission,
@@ -177,7 +189,8 @@ class CodexCliExecutor:
                 )
                 admission = evaluate_fast_start_admission(
                     admission_req,
-                    metadata_fetcher=metadata_fetcher,
+                    registry_fetcher=effective_reg_fetcher,
+                    metadata_fetcher=effective_meta_fetcher,
                 )
 
         if admission is not None and not admission.codex_launch_allowed:
@@ -193,6 +206,8 @@ class CodexCliExecutor:
                 reasoning_effort=self.reasoning_effort,
                 on_process_group=self.on_process_group,
                 fast_start_snapshot=effective_snapshot,
+                registry_fetcher=effective_reg_fetcher,
+                metadata_fetcher=effective_meta_fetcher,
             )
         )
         request = executor._request(contract, lease, prompt)

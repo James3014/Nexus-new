@@ -96,6 +96,8 @@ class CodexWorkerAdapter:
             invoke_kwargs["admission_receipt"] = admission_receipt
         if fast_start_snapshot is not None:
             invoke_kwargs["fast_start_snapshot"] = fast_start_snapshot
+        if "registry_fetcher" in options and options["registry_fetcher"] is not None:
+            invoke_kwargs["registry_fetcher"] = options["registry_fetcher"]
         if metadata_fetcher is not None:
             invoke_kwargs["metadata_fetcher"] = metadata_fetcher
         receipt = executor.invoke(contract, lease, **invoke_kwargs)

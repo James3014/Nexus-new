@@ -55,10 +55,76 @@ def extract_issue_number(
     return None
 
 
+def canonical_fast_start_registry_fetcher(
+    token: str | None = None,
+    opener: Callable[..., Any] | None = None,
+) -> Mapping[str, Any] | None:
+    """Canonical fetcher for #549 advisory cache registry."""
+    import os
+
+    from scripts.ops.fast_start_v2 import (
+        REGISTRY_ISSUE,
+        REPOSITORY,
+        GitHubReadClient,
+        _extract_header_hash,
+        parse_registry_body,
+        registry_payload_hash,
+    )
+
+    auth_token = token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
+    if not auth_token:
+        return None
+
+    try:
+        client = GitHubReadClient(auth_token, opener=opener)
+        registry_issue = client.get(f"/repos/{REPOSITORY}/issues/{REGISTRY_ISSUE}")
+        body = str(registry_issue.get("body") or "")
+        payload = parse_registry_body(body)
+        expected_hash = _extract_header_hash(body)
+        actual_hash = registry_payload_hash(payload)
+        if expected_hash != actual_hash:
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+def canonical_fast_start_metadata_fetcher(
+    pr: int | None = None,
+    issue: int | None = None,
+    token: str | None = None,
+    opener: Callable[..., Any] | None = None,
+) -> Mapping[str, Any]:
+    """Canonical metadata-only fetcher for blocker PR/Issue."""
+    import os
+
+    from scripts.ops.fast_start_v2 import REPOSITORY, GitHubReadClient
+
+    auth_token = token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
+    if not auth_token:
+        return {}
+
+    evidence: dict[str, Any] = {}
+    try:
+        client = GitHubReadClient(auth_token, opener=opener)
+        if pr is not None:
+            pr_data = client.get(f"/repos/{REPOSITORY}/pulls/{pr}")
+            evidence["pr_state"] = pr_data.get("state")
+            evidence["pr_merged"] = bool(pr_data.get("merged", False))
+            head = pr_data.get("head") if isinstance(pr_data.get("head"), Mapping) else {}
+            evidence["pr_head_sha"] = head.get("sha")
+        if issue is not None:
+            issue_data = client.get(f"/repos/{REPOSITORY}/issues/{issue}")
+            evidence["issue_state"] = issue_data.get("state")
+    except Exception as exc:
+        evidence["rebind_error"] = str(exc)
+    return evidence
+
+
 def evaluate_fast_start_admission(
     request: FastStartAdmissionRequest,
     *,
-    registry_fetcher: Callable[[], Mapping[str, Any]] | None = None,
+    registry_fetcher: Callable[[], Mapping[str, Any] | None] | None = None,
     metadata_fetcher: Callable[..., Mapping[str, Any]] | None = None,
 ) -> FastStartAdmissionResult:
     """Deterministically evaluate Fast Start admission for a managed Codex task.
@@ -81,11 +147,16 @@ def evaluate_fast_start_admission(
             observed_main_tree=request.current_main_tree,
         )
 
-    # Step 2: Obtain registry snapshot
+    # Step 2: Obtain registry snapshot (mandatory preflight for Issue-backed tasks)
     snapshot: Mapping[str, Any] | None = request.registry_snapshot
-    if snapshot is None and registry_fetcher is not None:
+    if snapshot is None:
+        fetcher = (
+            registry_fetcher
+            if registry_fetcher is not None
+            else canonical_fast_start_registry_fetcher
+        )
         try:
-            snapshot = registry_fetcher()
+            snapshot = fetcher()
         except Exception:
             snapshot = None
 
@@ -93,9 +164,9 @@ def evaluate_fast_start_admission(
         return FastStartAdmissionResult(
             schema=SCHEMA,
             issue=issue_number,
-            decision=FastStartDecision.ALLOW_FULL_DISCOVERY,
-            codex_launch_allowed=True,
-            reason="Fast Start advisory cache unavailable - fallback to full discovery",
+            decision=FastStartDecision.DENY_EVIDENCE_BLOCKED,
+            codex_launch_allowed=False,
+            reason="Fast Start registry preflight failed or cache unavailable for GitHub Issue task - fail closed to prevent ungated execution",
             cache_disposition="CACHE_UNAVAILABLE",
             observed_main_sha=request.current_main_sha,
             observed_main_tree=request.current_main_tree,
@@ -166,22 +237,26 @@ def evaluate_fast_start_admission(
                 observed_b["issue"] = blocker_issue
                 observed_b["state"] = "open"
 
-            # Metadata-only fresh rebind if fetcher available
-            if metadata_fetcher is not None:
-                try:
-                    rebound = metadata_fetcher(pr=blocker_pr, issue=blocker_issue)
-                    if isinstance(rebound, Mapping):
-                        fresh_evidence.update(rebound)
-                        if "pr_state" in rebound:
-                            observed_b["state"] = rebound["pr_state"]
-                        if "pr_merged" in rebound:
-                            observed_b["merged"] = rebound["pr_merged"]
-                        if "pr_head_sha" in rebound:
-                            observed_b["head_sha"] = rebound["pr_head_sha"]
-                        if "issue_state" in rebound:
-                            observed_b["issue_state"] = rebound["issue_state"]
-                except Exception as exc:
-                    fresh_evidence["rebind_error"] = str(exc)
+            # Metadata-only fresh rebind
+            meta_fetcher = (
+                metadata_fetcher
+                if metadata_fetcher is not None
+                else canonical_fast_start_metadata_fetcher
+            )
+            try:
+                rebound = meta_fetcher(pr=blocker_pr, issue=blocker_issue)
+                if isinstance(rebound, Mapping):
+                    fresh_evidence.update(rebound)
+                    if "pr_state" in rebound and rebound["pr_state"] is not None:
+                        observed_b["state"] = rebound["pr_state"]
+                    if "pr_merged" in rebound and rebound["pr_merged"] is not None:
+                        observed_b["merged"] = rebound["pr_merged"]
+                    if "pr_head_sha" in rebound and rebound["pr_head_sha"] is not None:
+                        observed_b["head_sha"] = rebound["pr_head_sha"]
+                    if "issue_state" in rebound and rebound["issue_state"] is not None:
+                        observed_b["issue_state"] = rebound["issue_state"]
+            except Exception as exc:
+                fresh_evidence["rebind_error"] = str(exc)
 
             observed_blockers.append(observed_b)
 
@@ -196,12 +271,20 @@ def evaluate_fast_start_admission(
                 decision = FastStartDecision.DENY_BLOCKED
                 codex_allowed = False
                 reason = f"Upstream blocker PR #{blocker_pr} is still {pr_state.upper()} (head {observed_b.get('head_sha')})"
-                disposition = "LIGHT_REBIND" if fresh_evidence else "CACHE_HIT"
+                disposition = (
+                    "LIGHT_REBIND"
+                    if fresh_evidence and "rebind_error" not in fresh_evidence
+                    else "CACHE_HIT"
+                )
             elif blocker_pr is None and issue_is_blocked:
                 decision = FastStartDecision.DENY_BLOCKED
                 codex_allowed = False
                 reason = f"Upstream blocker Issue #{blocker_issue} is still {issue_state.upper()}"
-                disposition = "LIGHT_REBIND" if fresh_evidence else "CACHE_HIT"
+                disposition = (
+                    "LIGHT_REBIND"
+                    if fresh_evidence and "rebind_error" not in fresh_evidence
+                    else "CACHE_HIT"
+                )
             else:
                 # Blocker was verified terminal/resolved
                 decision = FastStartDecision.ALLOW_FULL_DISCOVERY
@@ -219,6 +302,7 @@ def evaluate_fast_start_admission(
         reason = (
             "Task requires host-bound local authority/OAuth session - GitHub Codex dispatch denied"
         )
+        disposition = "CACHE_HIT"
         disposition = "CACHE_HIT"
 
     elif dispatch_state == "NEEDS_DECISION":
