@@ -63,7 +63,9 @@ class FastStartAdmissionResult:
         return {
             "schema": self.schema,
             "issue": self.issue,
-            "decision": self.decision.value if isinstance(self.decision, Enum) else str(self.decision),
+            "decision": self.decision.value
+            if isinstance(self.decision, Enum)
+            else str(self.decision),
             "codex_launch_allowed": self.codex_launch_allowed,
             "reason": self.reason,
             "registry_revision": self.registry_revision,
@@ -83,4 +85,6 @@ class FastStartAdmissionDeniedError(RuntimeError):
 
     def __init__(self, decision: FastStartAdmissionResult):
         self.decision = decision
-        super().__init__(f"FAST_START_ADMISSION_DENIED: {decision.decision.value} - {decision.reason}")
+        super().__init__(
+            f"FAST_START_ADMISSION_DENIED: {decision.decision.value} - {decision.reason}"
+        )

@@ -57,12 +57,16 @@ class CodexCliExecutor:
     ):
         self.executable = executable
         self.timeout_seconds = timeout_seconds
-        self.model = model if model is not None else (
-            os.getenv("NEXUS_CODEX_WORKER_MODEL", "").strip() or self.DEFAULT_MODEL
+        self.model = (
+            model
+            if model is not None
+            else (os.getenv("NEXUS_CODEX_WORKER_MODEL", "").strip() or self.DEFAULT_MODEL)
         )
-        configured_effort = reasoning_effort if reasoning_effort is not None else os.getenv(
-            "NEXUS_CODEX_REASONING_EFFORT", ""
-        ).strip()
+        configured_effort = (
+            reasoning_effort
+            if reasoning_effort is not None
+            else os.getenv("NEXUS_CODEX_REASONING_EFFORT", "").strip()
+        )
         self.reasoning_effort = configured_effort or self.DEFAULT_REASONING_EFFORT
         if self.reasoning_effort not in self.VALID_REASONING_EFFORTS:
             raise ValueError("NEXUS_CODEX_REASONING_EFFORT must be one of low, medium, high, xhigh")
@@ -141,7 +145,9 @@ class CodexCliExecutor:
         metadata_fetcher: Optional[Callable[..., Mapping[str, Any]]] = None,
     ) -> CodexExecutionReceipt:
         # G14 Deterministic Fast Start Pre-Launch Admission Gate
-        effective_snapshot = fast_start_snapshot if fast_start_snapshot is not None else self.fast_start_snapshot
+        effective_snapshot = (
+            fast_start_snapshot if fast_start_snapshot is not None else self.fast_start_snapshot
+        )
         issue_number = extract_issue_number(contract.task_id, prompt)
 
         admission: Optional[FastStartAdmissionResult] = admission_receipt
@@ -177,11 +183,17 @@ class CodexCliExecutor:
         if admission is not None and not admission.codex_launch_allowed:
             raise FastStartAdmissionDeniedError(admission)
 
-        executor = self if model is None else CodexCliExecutor(
-            executable=self.executable, timeout_seconds=self.timeout_seconds,
-            model=model, reasoning_effort=self.reasoning_effort,
-            on_process_group=self.on_process_group,
-            fast_start_snapshot=effective_snapshot,
+        executor = (
+            self
+            if model is None
+            else CodexCliExecutor(
+                executable=self.executable,
+                timeout_seconds=self.timeout_seconds,
+                model=model,
+                reasoning_effort=self.reasoning_effort,
+                on_process_group=self.on_process_group,
+                fast_start_snapshot=effective_snapshot,
+            )
         )
         request = executor._request(contract, lease, prompt)
         if self.on_process_group is None:

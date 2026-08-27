@@ -85,7 +85,9 @@ SAMPLE_549_SNAPSHOT = {
 }
 
 
-def _make_lease(tmp_path: Path, task_id: str, base_rev: str = "74d91779347667b997eb2c51f1d0873bbdf3e6a6") -> TargetWorktreeLease:
+def _make_lease(
+    tmp_path: Path, task_id: str, base_rev: str = "74d91779347667b997eb2c51f1d0873bbdf3e6a6"
+) -> TargetWorktreeLease:
     target = tmp_path / f"target_{task_id}"
     target.mkdir(parents=True, exist_ok=True)
     return TargetWorktreeLease(
@@ -205,7 +207,11 @@ def test_t2_blocked_pr_overlap_denied_zero_launch(tmp_path, monkeypatch):
     )
 
     def mock_metadata_fetcher(pr=None, issue=None):
-        return {"pr_state": "open", "pr_merged": False, "pr_head_sha": "f37242f8e58f09826fa6b0e817b6e97b6a5bf5f1"}
+        return {
+            "pr_state": "open",
+            "pr_merged": False,
+            "pr_head_sha": "f37242f8e58f09826fa6b0e817b6e97b6a5bf5f1",
+        }
 
     req = FastStartAdmissionRequest(
         issue_number=419,
@@ -253,6 +259,7 @@ def test_t3_host_and_evidence_blocked(tmp_path, monkeypatch):
 
 def test_t4_blocker_transition_unblocks_to_discovery(tmp_path):
     """T4: Cache says blocked, but fresh blocker has merged -> unblocks to full discovery."""
+
     def mock_resolved_fetcher(pr=None, issue=None):
         return {
             "pr_state": "closed",
@@ -386,18 +393,24 @@ def test_t9_launch_time_fence_rejects_drifted_receipt(tmp_path):
     assert receipt.decision == FastStartDecision.ALLOW_READY
 
     # Matching state: fence valid
-    assert validate_admission_fence(
-        receipt,
-        current_main_sha="74d91779347667b997eb2c51f1d0873bbdf3e6a6",
-        current_main_tree="826c9464f0746ff8265368452924102a4e77f92d",
-    ) is True
+    assert (
+        validate_admission_fence(
+            receipt,
+            current_main_sha="74d91779347667b997eb2c51f1d0873bbdf3e6a6",
+            current_main_tree="826c9464f0746ff8265368452924102a4e77f92d",
+        )
+        is True
+    )
 
     # Main drifted: fence fails
-    assert validate_admission_fence(
-        receipt,
-        current_main_sha="changed_sha_1234567890",
-        current_main_tree="826c9464f0746ff8265368452924102a4e77f92d",
-    ) is False
+    assert (
+        validate_admission_fence(
+            receipt,
+            current_main_sha="changed_sha_1234567890",
+            current_main_tree="826c9464f0746ff8265368452924102a4e77f92d",
+        )
+        is False
+    )
 
 
 def test_t10_unrelated_non_issue_task_works_unimpeded(tmp_path, monkeypatch):
@@ -419,6 +432,7 @@ def test_t10_unrelated_non_issue_task_works_unimpeded(tmp_path, monkeypatch):
         )
 
     monkeypatch.setattr("nexus.executors.codex_executor.run_cli_worker", fake_worker)
+    monkeypatch.setenv("NEXUS_CODEX_BIN", "/bin/sh")
 
     contract = _make_contract(tmp_path, "local-refactor-cleanup")
     lease = _make_lease(tmp_path, contract.task_id)
@@ -434,10 +448,12 @@ def test_online_cli_worker_codex_admission_denied(monkeypatch):
 
     def fake_runner(*args, **kwargs):
         runner_calls.append(args)
+
         class FakeCompleted:
             returncode = 0
             stdout = "{}"
             stderr = ""
+
         return FakeCompleted()
 
     spec = OnlineCliSpec(

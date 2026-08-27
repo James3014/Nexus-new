@@ -123,7 +123,9 @@ def evaluate_fast_start_admission(
     entries = snapshot.get("entries")
     if not isinstance(entries, Sequence):
         entries = []
-    entry = next((e for e in entries if isinstance(e, Mapping) and e.get("issue") == issue_number), None)
+    entry = next(
+        (e for e in entries if isinstance(e, Mapping) and e.get("issue") == issue_number), None
+    )
 
     if entry is None:
         return FastStartAdmissionResult(
@@ -214,7 +216,9 @@ def evaluate_fast_start_admission(
     elif dispatch_state in {"HOST_REBIND_REQUIRED", "HOST_BOUND"}:
         decision = FastStartDecision.DENY_HOST_BOUND
         codex_allowed = False
-        reason = "Task requires host-bound local authority/OAuth session - GitHub Codex dispatch denied"
+        reason = (
+            "Task requires host-bound local authority/OAuth session - GitHub Codex dispatch denied"
+        )
         disposition = "CACHE_HIT"
 
     elif dispatch_state == "NEEDS_DECISION":
@@ -296,9 +300,7 @@ def validate_admission_fence(
 
     if current_blockers is not None and receipt.observed_blockers:
         # Check that blockers have not drifted
-        receipt_blocker_map = {
-            b.get("pr"): b for b in receipt.observed_blockers if "pr" in b
-        }
+        receipt_blocker_map = {b.get("pr"): b for b in receipt.observed_blockers if "pr" in b}
         for cb in current_blockers:
             pr = cb.get("pr")
             if pr in receipt_blocker_map:
@@ -314,6 +316,8 @@ def validate_admission_fence(
         "registry_revision": receipt.registry_revision,
         "registry_hash": receipt.registry_hash,
         "blockers": list(receipt.observed_blockers),
-        "decision": receipt.decision.value if isinstance(receipt.decision, FastStartDecision) else str(receipt.decision),
+        "decision": receipt.decision.value
+        if isinstance(receipt.decision, FastStartDecision)
+        else str(receipt.decision),
     })
     return receipt.fence_digest == expected_digest

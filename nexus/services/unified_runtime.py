@@ -2101,10 +2101,15 @@ def build_subprocess_online_invoker(
             issue_num = extract_issue_number(task_id, prompt, context)
             fast_start_snap = context.get("fast_start_snapshot") if isinstance(context, Mapping) else None
             if issue_num is not None or fast_start_snap is not None:
+                main_sha = (
+                    str(context.get("expected_head") or "")
+                    if isinstance(context, Mapping)
+                    else None
+                )
                 admission = evaluate_fast_start_admission(
                     FastStartAdmissionRequest(
                         issue_number=issue_num,
-                        current_main_sha=str(context.get("expected_head") or "") if isinstance(context, Mapping) else None,
+                        current_main_sha=main_sha,
                         task_id=task_id,
                         registry_snapshot=fast_start_snap,
                     )
