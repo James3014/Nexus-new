@@ -20,6 +20,7 @@ from nexus.orchestrator.fast_start_admission import (
     evaluate_fast_start_admission,
     validate_admission_fence,
 )
+from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 from nexus.orchestrator.task_contract import (
     AcceptanceProfile,
     ArchitectTaskContract,
@@ -121,10 +122,19 @@ def _patch_canonical_providers(
     snapshot=SAMPLE_549_SNAPSHOT,
     metadata=None,
     registry_error: BaseException | None = None,
+    main_sha: str | None = None,
+    main_tree: str | None = None,
+    main_sequence: list[tuple[str, str] | None] | None = None,
+    main_calls: list[object] | None = None,
 ):
     """Test seam: monkeypatch production canonical providers. Not request-selectable."""
     reg_calls: list[object] = []
     meta_calls: list[object] = []
+    if main_calls is None:
+        main_calls = []
+    snap = snapshot if isinstance(snapshot, dict) else {}
+    default_sha = main_sha or str((snap.get("snapshot") or {}).get("main_sha") or "")
+    default_tree = main_tree or str((snap.get("snapshot") or {}).get("main_tree") or "")
 
     def fake_registry(*args, **kwargs):
         reg_calls.append(True)
@@ -147,6 +157,15 @@ def _patch_canonical_providers(
             }
         return dict(metadata)
 
+    def fake_main(*args, **kwargs):
+        main_calls.append(True)
+        if main_sequence is not None:
+            idx = min(len(main_calls) - 1, len(main_sequence) - 1)
+            return main_sequence[idx]
+        if not default_sha or not default_tree:
+            return None
+        return default_sha, default_tree
+
     monkeypatch.setattr(
         "nexus.orchestrator.fast_start_admission.canonical_fast_start_registry_fetcher",
         fake_registry,
@@ -154,6 +173,10 @@ def _patch_canonical_providers(
     monkeypatch.setattr(
         "nexus.orchestrator.fast_start_admission.canonical_fast_start_metadata_fetcher",
         fake_metadata,
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.fast_start_admission.canonical_current_main_identity",
+        fake_main,
     )
     return reg_calls, meta_calls
 
@@ -692,8 +715,8 @@ def test_t14_blocker_resolved_allows_launch(tmp_path, monkeypatch):
     receipt = executor.invoke(contract, lease, prompt="Work on issue 92")
     assert receipt.worker_status == "COMPLETED"
     assert len(launch_calls) == 1
-    assert len(patched_meta) == 1
-    assert len(meta_calls) == 1
+    assert len(patched_meta) >= 1
+    assert len(meta_calls) >= 1
     assert receipt.admission_receipt is not None
     assert receipt.admission_receipt.decision == FastStartDecision.ALLOW_FULL_DISCOVERY
     assert receipt.admission_receipt.cache_disposition == "TARGETED_REBIND"
@@ -1295,6 +1318,234 @@ def test_t29_adapter_preserves_structured_issue_identity(tmp_path, monkeypatch):
     assert exc_info.value.decision.issue == 92
     assert exc_info.value.decision.decision == FastStartDecision.DENY_BLOCKED
     assert len(launch_calls) == 0
+
+
+def _production_contract_request(tmp_path: Path, **overrides) -> dict:
+    values = {
+        "task_id": "source-hash-repair",
+        "what": "Implement approved repair",
+        "why": "Prove production Issue identity binding",
+        "controller_revision": "a" * 40,
+        "target_base_revision": "b" * 40,
+        "controller_repo_root": str(tmp_path / "controller"),
+        "target_repo_root": str(tmp_path / "targets" / "source-hash-repair"),
+        "target_worktree_root": str(tmp_path / "targets"),
+        "allowed_files": ["nexus/"],
+        "worker": "codex",
+    }
+    values.update(overrides)
+    return values
+
+
+def test_t30_build_contract_preserves_trusted_issue_identity(tmp_path, monkeypatch):
+    """T30: SelfHostedTaskService.build_contract binds trusted Issue origin #92."""
+    launch_calls = []
+    monkeypatch.setattr(
+        "nexus.executors.codex_executor.run_cli_worker",
+        lambda req: launch_calls.append(req),
+    )
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    request = _production_contract_request(
+        tmp_path,
+        task_card_path="tasks/github-issue-92-source-hash-repair/00-card.md",
+        campaign_id="github-issue-92-source-hash-repair",
+    )
+    contract = service.build_contract(request)
+    assert contract.github_issue_number == 92
+    assert "92" not in contract.task_id
+    assert "92" not in contract.objective
+    reconstructed = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )._contract_from_state({"request": request, "contract": contract.model_dump(mode="json")})
+    assert reconstructed.github_issue_number == 92
+    _patch_canonical_providers(monkeypatch)
+    lease = _make_lease(tmp_path, contract.task_id)
+    with pytest.raises(FastStartAdmissionDeniedError) as exc_info:
+        CodexCliExecutor(executable="/bin/sh").invoke(
+            contract, lease, prompt="Implement approved repair"
+        )
+    assert exc_info.value.decision.issue == 92
+    assert exc_info.value.decision.decision == FastStartDecision.DENY_BLOCKED
+    assert len(launch_calls) == 0
+
+
+def test_t31_issue_backed_missing_structured_identity_fails_closed(tmp_path, monkeypatch):
+    """T31: GitHub-Issue origin without a number fails closed, not NON_ISSUE."""
+    launch_calls = []
+    monkeypatch.setattr(
+        "nexus.executors.codex_executor.run_cli_worker",
+        lambda req: launch_calls.append(req),
+    )
+    patched_reg, _meta = _patch_canonical_providers(monkeypatch)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    with pytest.raises(ValueError, match="GITHUB_ISSUE_IDENTITY_MISSING"):
+        service.build_contract(
+            _production_contract_request(
+                tmp_path,
+                task_card_path="tasks/github-issue-/00-card.md",
+                campaign_id="github-issue-unnumbered",
+            )
+        )
+    assert len(patched_reg) == 0
+    assert len(launch_calls) == 0
+
+
+def test_t32_conflicting_structured_identities_fail_closed(tmp_path, monkeypatch):
+    """T32: trusted origin #92 vs alias issue_number=129 fails closed."""
+    launch_calls = []
+    monkeypatch.setattr(
+        "nexus.executors.codex_executor.run_cli_worker",
+        lambda req: launch_calls.append(req),
+    )
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    with pytest.raises(ValueError, match="GITHUB_ISSUE_IDENTITY_CONFLICT"):
+        service.build_contract(
+            _production_contract_request(
+                tmp_path,
+                task_card_path="tasks/github-issue-92-source-hash-repair/00-card.md",
+                github_issue_number=92,
+                issue_number=129,
+            )
+        )
+    assert len(launch_calls) == 0
+
+
+def test_t33_coercive_structured_identities_rejected(tmp_path):
+    """T33: bool/float/zero/malformed strings never become a valid Issue."""
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
+    origin = _production_contract_request(
+        tmp_path,
+        task_card_path="tasks/github-issue-92-source-hash-repair/00-card.md",
+    )
+    for bad in (True, 92.7, 0, -1, "92.7"):
+        with pytest.raises(ValueError):
+            service.build_contract({**origin, "github_issue_number": bad})
+        with pytest.raises(ValueError):
+            _make_contract(tmp_path, "source-hash-repair", github_issue_number=bad)
+
+
+def test_t34_stale_lease_and_cache_cannot_fake_ready(tmp_path, monkeypatch):
+    """T34: stale lease/cache main cannot authorize READY against fresh main."""
+    launch_calls = []
+
+    def fake_worker(request):
+        launch_calls.append(request)
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=b"{}",
+            stderr=b"",
+            wall_time_ms=10,
+            process_group_id=1,
+        )
+
+    monkeypatch.setattr("nexus.executors.codex_executor.run_cli_worker", fake_worker)
+    old_sha = "74d91779347667b997eb2c51f1d0873bbdf3e6a6"
+    new_sha = "45d39c6ca7940ac42752d2c6e5bba41bf6b968da"
+    new_tree = "686c1d70df8d525b386c6da55458a50bc98f9f4d"
+    _patch_canonical_providers(monkeypatch, main_sha=new_sha, main_tree=new_tree)
+    contract = _make_contract(tmp_path, "github-issue-129-atomic-work-claim")
+    lease = _make_lease(tmp_path, contract.task_id, base_rev=old_sha)
+    receipt = CodexCliExecutor(executable="/bin/sh").invoke(
+        contract, lease, prompt="Execute issue 129 claim"
+    )
+    assert receipt.worker_status == "COMPLETED"
+    assert len(launch_calls) == 1
+    assert receipt.admission_receipt is not None
+    assert receipt.admission_receipt.decision == FastStartDecision.ALLOW_FULL_DISCOVERY
+    assert receipt.admission_receipt.cache_disposition == "TARGETED_REBIND"
+    assert receipt.admission_receipt.observed_main_sha == new_sha
+    assert receipt.admission_receipt.observed_main_sha != lease.initial_head
+
+
+def test_t35_main_moves_after_admission_before_physical_launch(tmp_path, monkeypatch):
+    """T35: stale ALLOW fence cannot launch; recompute uses the later main."""
+    launch_calls = []
+
+    def fake_worker(request):
+        launch_calls.append(request)
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=b"{}",
+            stderr=b"",
+            wall_time_ms=10,
+            process_group_id=1,
+        )
+
+    monkeypatch.setattr("nexus.executors.codex_executor.run_cli_worker", fake_worker)
+    old = (
+        "74d91779347667b997eb2c51f1d0873bbdf3e6a6",
+        "826c9464f0746ff8265368452924102a4e77f92d",
+    )
+    new = (
+        "45d39c6ca7940ac42752d2c6e5bba41bf6b968da",
+        "686c1d70df8d525b386c6da55458a50bc98f9f4d",
+    )
+    main_calls: list[object] = []
+    _patch_canonical_providers(
+        monkeypatch,
+        main_sequence=[old, new, new],
+        main_calls=main_calls,
+    )
+    contract = _make_contract(tmp_path, "github-issue-129-atomic-work-claim")
+    lease = _make_lease(tmp_path, contract.task_id, base_rev=old[0])
+    receipt = CodexCliExecutor(executable="/bin/sh").invoke(
+        contract, lease, prompt="Execute issue 129 claim"
+    )
+    assert len(main_calls) >= 2
+    assert receipt.admission_receipt is not None
+    assert receipt.admission_receipt.observed_main_sha == new[0]
+    assert receipt.admission_receipt.decision == FastStartDecision.ALLOW_FULL_DISCOVERY
+    assert len(launch_calls) == 1
+
+
+def test_t36_true_non_issue_skips_main_and_registry(tmp_path, monkeypatch):
+    """T36: genuine non-Issue does not fetch canonical main or #549."""
+    launch_calls = []
+
+    def fake_worker(request):
+        launch_calls.append(request)
+        return CliWorkerResult(
+            status=CliWorkerStatus.COMPLETED,
+            executable_identity=request.executable,
+            argv=request.argv,
+            cwd=request.cwd,
+            exit_code=0,
+            stdout=b"{}",
+            stderr=b"",
+            wall_time_ms=10,
+            process_group_id=1,
+        )
+
+    monkeypatch.setattr("nexus.executors.codex_executor.run_cli_worker", fake_worker)
+    main_calls: list[object] = []
+    patched_reg, _meta = _patch_canonical_providers(monkeypatch, main_calls=main_calls)
+    contract = _make_contract(tmp_path, "local-refactor")
+    lease = _make_lease(tmp_path, contract.task_id)
+    receipt = CodexCliExecutor(executable="/bin/sh").invoke(
+        contract, lease, prompt="Clean unused imports"
+    )
+    assert receipt.worker_status == "COMPLETED"
+    assert len(main_calls) == 0
+    assert len(patched_reg) == 0
+    assert len(launch_calls) == 1
+    assert receipt.admission_receipt is not None
+    assert receipt.admission_receipt.cache_disposition == "NON_ISSUE_TASK"
 
 
 def test_online_cli_worker_codex_admission_denied(monkeypatch):

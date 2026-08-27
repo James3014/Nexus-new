@@ -2526,6 +2526,10 @@ class SelfHostedTaskService:
 
         raw_collaboration_realm = request.get("collaboration_realm")
         collaboration_realm: Optional[CollaborationExecutionRealm] = None
+        from nexus.orchestrator.fast_start_admission import bind_trusted_github_issue_identity
+
+        github_issue_number = bind_trusted_github_issue_identity(request)
+
         if raw_collaboration_realm is not None:
             if not isinstance(raw_collaboration_realm, Mapping):
                 raise ValueError("COLLABORATION_REALM_INVALID")
@@ -2570,6 +2574,7 @@ class SelfHostedTaskService:
             mutation_mode=MutationMode.WORKING_TREE_ONLY,
             human_approval_required=True,
             collaboration_realm=collaboration_realm,
+            github_issue_number=github_issue_number,
         )
 
     @staticmethod

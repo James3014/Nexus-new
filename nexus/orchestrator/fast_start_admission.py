@@ -64,20 +64,33 @@ def extract_issue_number_from_text(
     return None
 
 
+def parse_strict_github_issue_number(value: Any) -> int:
+    """Strict Issue identity parser. Rejects bool/float/zero/truncation."""
+    if isinstance(value, bool) or isinstance(value, float):
+        raise ValueError("invalid structured GitHub issue identity")
+    if isinstance(value, int):
+        if value < 1:
+            raise ValueError("invalid structured GitHub issue identity")
+        return value
+    if isinstance(value, str):
+        if not value.isdigit() or value != str(int(value)):
+            raise ValueError("invalid structured GitHub issue identity")
+        parsed = int(value)
+        if parsed < 1:
+            raise ValueError("invalid structured GitHub issue identity")
+        return parsed
+    raise ValueError("invalid structured GitHub issue identity")
+
+
 def _parse_structured_issue(value: Any, *, fail_closed: bool = True) -> int | None:
     if value is None or value == "":
         return None
     try:
-        parsed = int(value)
-    except (TypeError, ValueError):
+        return parse_strict_github_issue_number(value)
+    except ValueError:
         if fail_closed:
-            raise ValueError("invalid structured GitHub issue identity")
+            raise
         return None
-    if parsed < 1:
-        if fail_closed:
-            raise ValueError("invalid structured GitHub issue identity")
-        return None
-    return parsed
 
 
 def structured_issue_from_context(context: Mapping[str, Any] | None) -> Any:
@@ -87,6 +100,72 @@ def structured_issue_from_context(context: Mapping[str, Any] | None) -> Any:
         if key in context and context.get(key) not in (None, ""):
             return context.get(key)
     return None
+
+
+_GITHUB_ISSUE_ORIGIN_RE = re.compile(r"github[-_]issue(?:-(\d+))?", re.IGNORECASE)
+
+
+def _origin_issue_from_text(value: Any) -> tuple[bool, int | None]:
+    if value is None:
+        return False, None
+    text = str(value).strip()
+    if not text:
+        return False, None
+    match = _GITHUB_ISSUE_ORIGIN_RE.search(text)
+    if not match:
+        return False, None
+    if match.group(1):
+        return True, int(match.group(1))
+    return True, None
+
+
+def bind_trusted_github_issue_identity(request: Mapping[str, Any]) -> int | None:
+    """Bind Issue identity from durable origin, not caller field names."""
+    origin_values: list[Any] = [
+        request.get("task_card_path"),
+        request.get("campaign_id"),
+    ]
+    identity = request.get("task_card_identity")
+    if isinstance(identity, Mapping):
+        origin_values.extend((
+            identity.get("task_card_path"),
+            identity.get("canonical_task_card_path"),
+        ))
+
+    trusted: list[int] = []
+    origin_present = False
+    missing_origin_number = False
+    for raw in origin_values:
+        is_origin, number = _origin_issue_from_text(raw)
+        if not is_origin:
+            continue
+        origin_present = True
+        if number is None:
+            missing_origin_number = True
+            continue
+        trusted.append(number)
+    if trusted and len(set(trusted)) > 1:
+        raise ValueError("GITHUB_ISSUE_IDENTITY_CONFLICT")
+    if origin_present and not trusted:
+        raise ValueError("GITHUB_ISSUE_IDENTITY_MISSING")
+    if missing_origin_number and not trusted:
+        raise ValueError("GITHUB_ISSUE_IDENTITY_MISSING")
+
+    aliases: list[int] = []
+    for key in ("github_issue_number", "issue_number", "issue"):
+        if key not in request or request.get(key) in (None, ""):
+            continue
+        aliases.append(parse_strict_github_issue_number(request.get(key)))
+    if aliases and len(set(aliases)) > 1:
+        raise ValueError("GITHUB_ISSUE_IDENTITY_CONFLICT")
+
+    trusted_issue = trusted[0] if trusted else None
+    alias_issue = aliases[0] if aliases else None
+    if trusted_issue is not None and alias_issue is not None and trusted_issue != alias_issue:
+        raise ValueError("GITHUB_ISSUE_IDENTITY_CONFLICT")
+    if origin_present and trusted_issue is None:
+        raise ValueError("GITHUB_ISSUE_IDENTITY_MISSING")
+    return trusted_issue
 
 
 def resolve_issue_identity(
@@ -137,6 +216,24 @@ def issue_identity_conflict_result(
     )
 
 
+def _main_unavailable_result(
+    *,
+    issue: int | None,
+    current_main_sha: str | None = None,
+    current_main_tree: str | None = None,
+) -> FastStartAdmissionResult:
+    return FastStartAdmissionResult(
+        schema=SCHEMA,
+        issue=issue,
+        decision=FastStartDecision.DENY_EVIDENCE_BLOCKED,
+        codex_launch_allowed=False,
+        reason="Fresh canonical main SHA/tree unavailable for GitHub Issue-backed Codex admission",
+        cache_disposition="MAIN_UNAVAILABLE",
+        observed_main_sha=current_main_sha,
+        observed_main_tree=current_main_tree,
+    )
+
+
 def admit_managed_codex_launch(
     *,
     structured_issue: Any = None,
@@ -145,7 +242,8 @@ def admit_managed_codex_launch(
     current_main_sha: str | None = None,
     current_main_tree: str | None = None,
 ) -> FastStartAdmissionResult:
-    """Production Fast Start admission. Caller snapshot/fetchers are not accepted."""
+    """Production Fast Start admission. Caller snapshot/fetchers/main are not accepted."""
+    _ = (current_main_sha, current_main_tree)
     issue_number, source, structured, text = resolve_issue_identity(
         structured_issue=structured_issue,
         task_id=task_id,
@@ -155,18 +253,116 @@ def admit_managed_codex_launch(
         return issue_identity_conflict_result(
             structured_issue=structured,
             text_issue=text,
-            current_main_sha=current_main_sha,
             task_id=task_id,
         )
+    if issue_number is None:
+        return evaluate_fast_start_admission(
+            FastStartAdmissionRequest(
+                issue_number=None,
+                task_id=task_id,
+                registry_snapshot=None,
+            )
+        )
+    main = canonical_current_main_identity()
+    if main is None:
+        return _main_unavailable_result(issue=issue_number)
     return evaluate_fast_start_admission(
         FastStartAdmissionRequest(
             issue_number=issue_number,
-            current_main_sha=current_main_sha,
-            current_main_tree=current_main_tree,
+            current_main_sha=main[0],
+            current_main_tree=main[1],
             task_id=task_id,
             registry_snapshot=None,
         )
     )
+
+
+def revalidate_managed_codex_admission_at_launch(
+    admission: FastStartAdmissionResult,
+    *,
+    structured_issue: Any = None,
+    task_id: str | None = None,
+    prompt: str | None = None,
+) -> FastStartAdmissionResult:
+    """TOCTOU fence immediately before physical Codex launch."""
+    if admission.cache_disposition == "NON_ISSUE_TASK" or admission.issue is None:
+        return admission
+    if not admission.codex_launch_allowed:
+        return admission
+    fresh = canonical_current_main_identity()
+    if fresh is None:
+        return _main_unavailable_result(issue=admission.issue)
+    current_blockers: list[dict[str, Any]] | None = None
+    if admission.observed_blockers:
+        current_blockers = []
+        for blocker in admission.observed_blockers:
+            rebound = canonical_fast_start_metadata_fetcher(
+                pr=blocker.get("pr"),
+                issue=blocker.get("issue"),
+            )
+            if not isinstance(rebound, Mapping) or rebound.get("rebind_error"):
+                return FastStartAdmissionResult(
+                    schema=SCHEMA,
+                    issue=admission.issue,
+                    decision=FastStartDecision.DENY_EVIDENCE_BLOCKED,
+                    codex_launch_allowed=False,
+                    reason="Launch-time blocker metadata rebind failed",
+                    cache_disposition="CACHE_UNAVAILABLE",
+                    observed_main_sha=fresh[0],
+                    observed_main_tree=fresh[1],
+                )
+            current_blockers.append({
+                "pr": blocker.get("pr"),
+                "state": rebound.get("pr_state", blocker.get("state")),
+                "head_sha": rebound.get("pr_head_sha", blocker.get("head_sha")),
+                "merged": rebound.get("pr_merged", blocker.get("merged")),
+                "issue": blocker.get("issue"),
+            })
+    if validate_admission_fence(
+        admission,
+        current_main_sha=fresh[0],
+        current_main_tree=fresh[1],
+        current_blockers=current_blockers,
+    ):
+        return admission
+    return admit_managed_codex_launch(
+        structured_issue=structured_issue,
+        task_id=task_id,
+        prompt=prompt,
+    )
+
+
+def canonical_current_main_identity(
+    token: str | None = None,
+    opener: Callable[..., Any] | None = None,
+) -> tuple[str, str] | None:
+    """Fresh canonical main SHA/tree for James3014/Nexus-new. Not caller evidence."""
+    import os
+
+    from scripts.ops.fast_start_v2 import REPOSITORY, GitHubReadClient
+
+    auth_token = token or os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN") or ""
+    if not auth_token:
+        return None
+    try:
+        client = GitHubReadClient(auth_token, opener=opener)
+        branch = client.get(f"/repos/{REPOSITORY}/branches/main")
+        commit = branch.get("commit") if isinstance(branch, Mapping) else None
+        if not isinstance(commit, Mapping):
+            return None
+        sha = str(commit.get("sha") or "")
+        nested_commit = commit.get("commit")
+        if not isinstance(nested_commit, Mapping):
+            return None
+        tree = nested_commit.get("tree")
+        if not isinstance(tree, Mapping):
+            return None
+        tree_sha = str(tree.get("sha") or "")
+        if not sha or not tree_sha:
+            return None
+        return sha, tree_sha
+    except Exception:
+        return None
 
 
 def canonical_fast_start_registry_fetcher(
@@ -455,12 +651,18 @@ def evaluate_fast_start_admission(
 
     elif dispatch_state == "READY_CANDIDATE":
         cached_main = snapshot.get("snapshot", {}).get("main_sha")
-
-        # Check for main drift
-        if request.current_main_sha and cached_main and request.current_main_sha != cached_main:
+        if not request.current_main_sha:
+            decision = FastStartDecision.DENY_EVIDENCE_BLOCKED
+            codex_allowed = False
+            reason = "READY_CANDIDATE requires fresh canonical main SHA"
+            disposition = "MAIN_UNAVAILABLE"
+        elif cached_main and request.current_main_sha != cached_main:
             decision = FastStartDecision.ALLOW_FULL_DISCOVERY
             codex_allowed = True
-            reason = f"Main SHA drifted ({cached_main[:8]} -> {request.current_main_sha[:8]}) - targeted discovery required"
+            reason = (
+                f"Main SHA drifted ({cached_main[:8]} -> {request.current_main_sha[:8]}) "
+                "- targeted discovery required"
+            )
             disposition = "TARGETED_REBIND"
         else:
             decision = FastStartDecision.ALLOW_READY

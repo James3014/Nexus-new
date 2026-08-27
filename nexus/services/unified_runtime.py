@@ -2094,23 +2094,26 @@ def build_subprocess_online_invoker(
         if spec.provider == "codex":
             from nexus.orchestrator.fast_start_admission import (
                 admit_managed_codex_launch,
+                revalidate_managed_codex_admission_at_launch,
                 structured_issue_from_context,
             )
 
-            # Context snapshot/fetchers are not launch authority.
-            main_sha = (
-                str(context.get("expected_head") or "")
-                if isinstance(context, Mapping)
-                else None
+            # Context snapshot/fetchers/expected_head are not launch authority.
+            structured_issue = structured_issue_from_context(
+                context if isinstance(context, Mapping) else None
             )
             admission = admit_managed_codex_launch(
-                structured_issue=structured_issue_from_context(
-                    context if isinstance(context, Mapping) else None
-                ),
+                structured_issue=structured_issue,
                 task_id=task_id,
                 prompt=prompt,
-                current_main_sha=main_sha,
             )
+            if admission.codex_launch_allowed:
+                admission = revalidate_managed_codex_admission_at_launch(
+                    admission,
+                    structured_issue=structured_issue,
+                    task_id=task_id,
+                    prompt=prompt,
+                )
             if not admission.codex_launch_allowed:
                 return normalize_online_invoker_payload(
                     provider=spec.provider,

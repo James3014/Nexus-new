@@ -86,7 +86,7 @@ class SelfHostedTaskContract(BaseModel):
     protected_contracts: List[str] = Field(default_factory=list)
     preferred_provider: Optional[str] = None
     fallback_provider: Optional[str] = None
-    github_issue_number: Optional[int] = Field(default=None, ge=1)
+    github_issue_number: Optional[int] = Field(default=None)
     provider_order: List[str] = Field(default_factory=list)
     maximum_provider_calls: int = Field(default=0, ge=0)
     maximum_replans: int = Field(default=0, ge=0)
@@ -99,6 +99,15 @@ class SelfHostedTaskContract(BaseModel):
     mutation_mode: MutationMode = MutationMode.WORKING_TREE_ONLY
     human_approval_required: bool = True
     collaboration_realm: Optional[CollaborationExecutionRealm] = None
+
+    @field_validator("github_issue_number", mode="before")
+    @classmethod
+    def _validate_github_issue_number(cls, value):
+        if value is None or value == "":
+            return None
+        from nexus.orchestrator.fast_start_admission import parse_strict_github_issue_number
+
+        return parse_strict_github_issue_number(value)
 
     @field_validator("task_id")
     @classmethod

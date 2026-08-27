@@ -12,7 +12,10 @@ from nexus.contracts.fast_start_admission import (
     FastStartAdmissionResult,
 )
 from nexus.executors.cli_worker import CliWorkerRequest, CliWorkerResult, run_cli_worker
-from nexus.orchestrator.fast_start_admission import admit_managed_codex_launch
+from nexus.orchestrator.fast_start_admission import (
+    admit_managed_codex_launch,
+    revalidate_managed_codex_admission_at_launch,
+)
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
 from nexus.orchestrator.worktree_manager import TargetWorktreeLease
 
@@ -147,13 +150,21 @@ class CodexCliExecutor:
         # G14 production admission: caller receipt/snapshot/fetchers are not
         # launch authority. Canonical #549 + metadata providers decide.
         _ = (admission_receipt, fast_start_snapshot, registry_fetcher, metadata_fetcher)
+        structured_issue = getattr(contract, "github_issue_number", None)
         admission = admit_managed_codex_launch(
-            structured_issue=getattr(contract, "github_issue_number", None),
+            structured_issue=structured_issue,
             task_id=contract.task_id,
             prompt=prompt,
-            current_main_sha=lease.initial_head,
         )
 
+        if not admission.codex_launch_allowed:
+            raise FastStartAdmissionDeniedError(admission)
+        admission = revalidate_managed_codex_admission_at_launch(
+            admission,
+            structured_issue=structured_issue,
+            task_id=contract.task_id,
+            prompt=prompt,
+        )
         if not admission.codex_launch_allowed:
             raise FastStartAdmissionDeniedError(admission)
 
