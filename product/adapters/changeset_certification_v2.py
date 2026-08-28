@@ -805,7 +805,7 @@ def _minimal(result: ChangeSetCertification) -> dict[str, Any]:
 
 
 def _minimal_invalid(reason: str) -> dict[str, Any]:
-    factual = reduce_verification(_condition_for_errors((reason,)), reasons=(reason,))
+    factual = reduce_verification(EvidenceCondition.MISSING, reasons=(reason,))
     disposition = certify_result(factual, CertificationPolicy()).value
     return _new_envelope(
         task={"task_id": "missing", "attempt_id": "missing"},
