@@ -86,8 +86,12 @@ class CaseOutcome:
 
     def __post_init__(self) -> None:
         kinds = {
-            "CERTIFICATION", "INPUT_REJECTED", "INPUT_ACCEPTED",
-            "RECEIPT_INVALID", "RECEIPT_VALID", "INFRA_INVALID",
+            "CERTIFICATION",
+            "INPUT_REJECTED",
+            "INPUT_ACCEPTED",
+            "RECEIPT_INVALID",
+            "RECEIPT_VALID",
+            "INFRA_INVALID",
         }
         if type(self.outcome_kind) is not str or self.outcome_kind not in kinds:
             raise ValueError("invalid outcome kind")
@@ -97,7 +101,14 @@ class CaseOutcome:
                 raise ValueError("certification fields required")
             if self.verification_status not in {"VERIFIED", "FAILED_VERIFICATION", "UNVERIFIABLE"}:
                 raise ValueError("invalid verification status")
-            if self.evidence_condition not in {"VALID", "MISSING", "DUPLICATE", "LEGACY_NON_CERTIFIABLE", "STALE", "TAMPERED"}:
+            if self.evidence_condition not in {
+                "VALID",
+                "MISSING",
+                "DUPLICATE",
+                "LEGACY_NON_CERTIFIABLE",
+                "STALE",
+                "TAMPERED",
+            }:
                 raise ValueError("invalid evidence condition")
             if self.disposition not in {"CERTIFIED", "REJECTED", "BLOCKED"}:
                 raise ValueError("invalid disposition")
@@ -197,7 +208,11 @@ class FalseCompletionReport:
     report_hash: str
 
     def __post_init__(self) -> None:
-        if type(self.schema) is not str or type(self.benchmark_id) is not str or type(self.task_set_hash) is not str:
+        if (
+            type(self.schema) is not str
+            or type(self.benchmark_id) is not str
+            or type(self.task_set_hash) is not str
+        ):
             raise TypeError("report identity")
         if type(self.eligible_count) is not int or type(self.infra_invalid_count) is not int:
             raise TypeError("report counts")
@@ -591,19 +606,28 @@ def _spec_jsonable(v: Any) -> Any:
 def _freeze(v: Any, _active: set[int] | None = None) -> Any:
     active = set() if _active is None else _active
     if isinstance(v, Mapping):
-        if id(v) in active: raise ValueError("cycle")
-        if any(type(k) is not str for k in v): raise TypeError("mapping key")
+        if id(v) in active:
+            raise ValueError("cycle")
+        if any(type(k) is not str for k in v):
+            raise TypeError("mapping key")
         active.add(id(v))
-        try: return {k: _freeze(x, active) for k, x in v.items()}
-        finally: active.remove(id(v))
+        try:
+            return {k: _freeze(x, active) for k, x in v.items()}
+        finally:
+            active.remove(id(v))
     if isinstance(v, (tuple, list)):
-        if id(v) in active: raise ValueError("cycle")
+        if id(v) in active:
+            raise ValueError("cycle")
         active.add(id(v))
-        try: return tuple(_freeze(x, active) for x in v)
-        finally: active.remove(id(v))
-    if type(v) in (str, bool, int) or v is None: return v
+        try:
+            return tuple(_freeze(x, active) for x in v)
+        finally:
+            active.remove(id(v))
+    if type(v) in (str, bool, int) or v is None:
+        return v
     if type(v) is float:
-        if not math.isfinite(v): raise ValueError("non-finite")
+        if not math.isfinite(v):
+            raise ValueError("non-finite")
         return v
     raise TypeError(type(v).__name__)
 
@@ -842,33 +866,91 @@ def _make_public_api() -> tuple[
 ]:
     # Resolve every dependency once, then build two genuinely disjoint contexts.
     # This makes later mutation/rebinding of module globals irrelevant.
-    product_classes = (AcceptanceContract, ChangeSet, EvidenceBundle, VerificationPlan,
-                       Observation, ObservationStatus, IntegrityStatus, CertificationInput,
-                       CertificationDisposition, CertificationPolicy)
-    product_fns = (certify, certify_changeset, validate_receipt, reduce_verification, replace, cast, _hash)
+    product_classes = (
+        AcceptanceContract,
+        ChangeSet,
+        EvidenceBundle,
+        VerificationPlan,
+        Observation,
+        ObservationStatus,
+        IntegrityStatus,
+        CertificationInput,
+        CertificationDisposition,
+        CertificationPolicy,
+    )
+    product_fns = (
+        certify,
+        certify_changeset,
+        validate_receipt,
+        reduce_verification,
+        replace,
+        cast,
+        _hash,
+    )
     classes = (BenchmarkCaseResult, CaseOutcome, FalseCompletionReport)
 
     def _make_execution_context():
-        (contract_cls, change_cls, bundle_cls, plan_cls, observation_cls, status_cls,
-         observation_status_cls, certification_input_cls, disposition_cls, policy_cls) = product_classes
-        certify_fn, legacy_certify_fn, validate_fn, reduce_fn, replace_fn, cast_fn, hash_fn = product_fns
+        (
+            contract_cls,
+            change_cls,
+            bundle_cls,
+            plan_cls,
+            observation_cls,
+            status_cls,
+            observation_status_cls,
+            certification_input_cls,
+            disposition_cls,
+            policy_cls,
+        ) = product_classes
+        certify_fn, legacy_certify_fn, validate_fn, reduce_fn, replace_fn, cast_fn, hash_fn = (
+            product_fns
+        )
         result_cls, outcome_cls, report_cls = classes
 
         def input_fn(*, observations=None, change_paths=("src/a.py",), **flags):
-            c = contract_cls("bench-contract", hash_fn("requirements"), ("unit", "lint"), ("src/a.py",), "FORBID")
-            ch = change_cls("bench-change", "source", "target", hash_fn("diff"), tuple(change_paths))
+            c = contract_cls(
+                "bench-contract", hash_fn("requirements"), ("unit", "lint"), ("src/a.py",), "FORBID"
+            )
+            ch = change_cls(
+                "bench-change", "source", "target", hash_fn("diff"), tuple(change_paths)
+            )
             plan = plan_cls("bench-plan", c.hash, ch.hash, ("unit", "lint"))
-            obs = observations or (observation_cls("unit", "artifact-unit", hash_fn("unit"), status_cls.PASS),
-                                   observation_cls("lint", "artifact-lint", hash_fn("lint"), status_cls.PASS))
-            return certification_input_cls(c, ch, plan, bundle_cls("bench-evidence", c.hash, ch.hash, plan.hash, tuple(obs)), **flags)
+            obs = observations or (
+                observation_cls("unit", "artifact-unit", hash_fn("unit"), status_cls.PASS),
+                observation_cls("lint", "artifact-lint", hash_fn("lint"), status_cls.PASS),
+            )
+            return certification_input_cls(
+                c,
+                ch,
+                plan,
+                bundle_cls("bench-evidence", c.hash, ch.hash, plan.hash, tuple(obs)),
+                **flags,
+            )
 
         def direct_fn(**kw):
             r = certify_fn(input_fn(**kw))
-            return outcome_cls("CERTIFICATION", r.verification.status.value, r.verification.integrity.value, r.disposition.value)
+            return outcome_cls(
+                "CERTIFICATION",
+                r.verification.status.value,
+                r.verification.integrity.value,
+                r.disposition.value,
+            )
 
         def legacy_fn(status: str, **extra):
-            r = legacy_certify_fn({"schema": "nexus.changeset_certification.v1", "version": 1, "status": status, **extra})
-            return outcome_cls("CERTIFICATION", r.verification_result.status.value, r.verification_result.integrity.value, r.status.value)
+            r = legacy_certify_fn(
+                {
+                    "schema": "nexus.changeset_certification.v1",
+                    "version": 1,
+                    "status": status,
+                    **extra,
+                }
+            )
+            return outcome_cls(
+                "CERTIFICATION",
+                r.verification_result.status.value,
+                r.verification_result.integrity.value,
+                r.status.value,
+            )
 
         def reject_fn(kind: str):
             try:
@@ -877,18 +959,31 @@ def _make_public_api() -> tuple[
                 elif kind == "status":
                     observation_cls("unit", "a", hash_fn("a"), cast_fn(Any, "PASS"))
                 else:
-                    certification_input_cls(**cast_fn(Any, input_fn().__dict__ | {"disposition": "CERTIFIED"}))
+                    certification_input_cls(
+                        **cast_fn(Any, input_fn().__dict__ | {"disposition": "CERTIFIED"})
+                    )
             except (TypeError, ValueError):
                 return outcome_cls("INPUT_REJECTED")
             return outcome_cls("INPUT_ACCEPTED")
 
         def receipt_fn(kind: str):
-            s = input_fn(policy_accepted=True, authority_present=True, approval_present=True, signing_present=True)
-            r = certify_fn(s); q = r.receipt
+            s = input_fn(
+                policy_accepted=True,
+                authority_present=True,
+                approval_present=True,
+                signing_present=True,
+            )
+            r = certify_fn(s)
+            q = r.receipt
             if kind in ("tamper", "disposition"):
                 q = replace_fn(q, disposition=disposition_cls.REJECTED)
             elif kind == "verification":
-                q = replace_fn(q, verification=reduce_fn(observation_status_cls.VALID, (status_cls.FAIL,), ("VERIFIER_FAILED",)))
+                q = replace_fn(
+                    q,
+                    verification=reduce_fn(
+                        observation_status_cls.VALID, (status_cls.FAIL,), ("VERIFIER_FAILED",)
+                    ),
+                )
             elif kind == "policy":
                 q = replace_fn(q, policy=policy_cls(False, True, True, True))
             elif kind == "prerequisite":
@@ -898,88 +993,188 @@ def _make_public_api() -> tuple[
             return outcome_cls("RECEIPT_INVALID" if not validate_fn(q, s) else "RECEIPT_VALID")
 
         def special_fn(kind: str):
-            s = input_fn(policy_accepted=True, authority_present=True, approval_present=True, signing_present=True)
-            evidence = replace_fn(s.evidence, **({"change_set_hash": hash_fn("different-change-set")} if kind == "stale" else {"claimed_bundle_hash": hash_fn("tampered-evidence")}))
+            s = input_fn(
+                policy_accepted=True,
+                authority_present=True,
+                approval_present=True,
+                signing_present=True,
+            )
+            evidence = replace_fn(
+                s.evidence,
+                **(
+                    {"change_set_hash": hash_fn("different-change-set")}
+                    if kind == "stale"
+                    else {"claimed_bundle_hash": hash_fn("tampered-evidence")}
+                ),
+            )
             r = certify_fn(replace_fn(s, evidence=evidence))
-            return outcome_cls("CERTIFICATION", r.verification.status.value, r.verification.integrity.value, r.disposition.value)
+            return outcome_cls(
+                "CERTIFICATION",
+                r.verification.status.value,
+                r.verification.integrity.value,
+                r.disposition.value,
+            )
 
         def dispatch(op: str, params: Mapping[str, Any]):
-            q = dict(params); marker = q.get("observations")
+            q = dict(params)
+            marker = q.get("observations")
             if op == "direct":
                 if marker == "fail":
-                    q["observations"] = (observation_cls("unit", "artifact-unit", hash_fn("unit"), status_cls.FAIL), observation_cls("lint", "artifact-lint", hash_fn("lint"), status_cls.PASS))
-                elif marker == "missing": q["observations"] = (observation_cls("unit", "u", hash_fn("u"), status_cls.PASS),)
-                elif marker == "duplicate_verifier": q["observations"] = (observation_cls("unit", "u", hash_fn("u"), status_cls.PASS), observation_cls("unit", "l", hash_fn("l"), status_cls.PASS))
-                elif marker == "duplicate_artifact": q["observations"] = (observation_cls("unit", "same", hash_fn("u"), status_cls.PASS), observation_cls("lint", "same", hash_fn("l"), status_cls.PASS))
+                    q["observations"] = (
+                        observation_cls("unit", "artifact-unit", hash_fn("unit"), status_cls.FAIL),
+                        observation_cls("lint", "artifact-lint", hash_fn("lint"), status_cls.PASS),
+                    )
+                elif marker == "missing":
+                    q["observations"] = (
+                        observation_cls("unit", "u", hash_fn("u"), status_cls.PASS),
+                    )
+                elif marker == "duplicate_verifier":
+                    q["observations"] = (
+                        observation_cls("unit", "u", hash_fn("u"), status_cls.PASS),
+                        observation_cls("unit", "l", hash_fn("l"), status_cls.PASS),
+                    )
+                elif marker == "duplicate_artifact":
+                    q["observations"] = (
+                        observation_cls("unit", "same", hash_fn("u"), status_cls.PASS),
+                        observation_cls("lint", "same", hash_fn("l"), status_cls.PASS),
+                    )
                 return direct_fn(**q)
-            if op == "legacy": return legacy_fn(**q)
-            if op == "reject": return reject_fn(**q)
-            if op == "receipt": return receipt_fn(**q)
+            if op == "legacy":
+                return legacy_fn(**q)
+            if op == "reject":
+                return reject_fn(**q)
+            if op == "receipt":
+                return receipt_fn(**q)
             return special_fn(q["kind"])
+
         return dispatch
 
     def _make_hash_context():
         dumps, sha256, isfinite, fraction_cls = json.dumps, hashlib.sha256, math.isfinite, Fraction
+
         def canonical(value: Any) -> str:
             active: set[int] = set()
+
             def enc(v: Any) -> Any:
-                if v is None or type(v) in (bool, int, str): return v
+                if v is None or type(v) in (bool, int, str):
+                    return v
                 if type(v) is float:
-                    if not isfinite(v): raise ValueError("non-finite")
+                    if not isfinite(v):
+                        raise ValueError("non-finite")
                     return v
                 if isinstance(v, Mapping):
-                    if any(type(k) is not str for k in v): raise TypeError("mapping key")
-                    if id(v) in active: raise ValueError("cycle")
+                    if any(type(k) is not str for k in v):
+                        raise TypeError("mapping key")
+                    if id(v) in active:
+                        raise ValueError("cycle")
                     active.add(id(v))
-                    try: return {k: enc(v[k]) for k in sorted(v)}
-                    finally: active.remove(id(v))
+                    try:
+                        return {k: enc(v[k]) for k in sorted(v)}
+                    finally:
+                        active.remove(id(v))
                 if isinstance(v, (list, tuple)):
-                    if id(v) in active: raise ValueError("cycle")
+                    if id(v) in active:
+                        raise ValueError("cycle")
                     active.add(id(v))
-                    try: return [enc(x) for x in v]
-                    finally: active.remove(id(v))
+                    try:
+                        return [enc(x) for x in v]
+                    finally:
+                        active.remove(id(v))
                 raise TypeError(type(v).__name__)
-            return dumps(enc(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
-        def digest(value: Any) -> str: return "sha256:" + sha256(canonical(value).encode()).hexdigest()
-        def rate(n: int, d: int) -> float | None: return round(float(fraction_cls(n, d)), 12) if d else None
-        def false(c: CaseDefinition, a: CaseOutcome) -> bool: return c.hostile and a.outcome_kind == "CERTIFICATION" and a.disposition == "CERTIFIED"
+
+            return dumps(
+                enc(value),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+
+        def digest(value: Any) -> str:
+            return "sha256:" + sha256(canonical(value).encode()).hexdigest()
+
+        def rate(n: int, d: int) -> float | None:
+            return round(float(fraction_cls(n, d)), 12) if d else None
+
+        def false(c: CaseDefinition, a: CaseOutcome) -> bool:
+            return c.hostile and a.outcome_kind == "CERTIFICATION" and a.disposition == "CERTIFIED"
+
         def shape(p: Mapping[str, Any]) -> list[str]:
             # Stable ordering is part of the verifier interface.
             errors: list[str] = []
             for key in sorted(p):
-                if key not in _required: errors.append(key)
+                if key not in _required:
+                    errors.append(key)
             for key in sorted(_required):
-                if key not in p: errors.append(key)
-            if errors: return sorted(set(errors))
+                if key not in p:
+                    errors.append(key)
+            if errors:
+                return sorted(set(errors))
+
             def exact(path: str, value: Any, typ: type, nullable: bool = False) -> None:
-                if not (nullable and value is None) and type(value) is not typ: errors.append(path)
-            for key in ("schema", "benchmark_id", "task_set_hash", "protocol_version", "implementation_schema", "public_claim_gate"):
+                if not (nullable and value is None) and type(value) is not typ:
+                    errors.append(path)
+
+            for key in (
+                "schema",
+                "benchmark_id",
+                "task_set_hash",
+                "protocol_version",
+                "implementation_schema",
+                "public_claim_gate",
+            ):
                 exact(key, p[key], str)
-            for key in ("case_ids", "claim_ceiling", "cases"): exact(key, p[key], list)
-            for key in ("eligible_count", "infra_invalid_count", "hostile_case_count", "detected_count", "false_completion_count", "trust_mismatch_count"):
-                if type(p[key]) is not int or p[key] < 0: errors.append(key)
+            for key in ("case_ids", "claim_ceiling", "cases"):
+                exact(key, p[key], list)
+            for key in (
+                "eligible_count",
+                "infra_invalid_count",
+                "hostile_case_count",
+                "detected_count",
+                "false_completion_count",
+                "trust_mismatch_count",
+            ):
+                if type(p[key]) is not int or p[key] < 0:
+                    errors.append(key)
             for key in ("false_completion_rate", "detection_rate", "trust_mismatch_rate"):
-                if p[key] is not None and (type(p[key]) is not float or not isfinite(p[key])): errors.append(key)
+                if p[key] is not None and (type(p[key]) is not float or not isfinite(p[key])):
+                    errors.append(key)
             if type(p["cases"]) is list:
                 allowed = {"case_id", "expected", "actual", "detected", "infra_invalid", "error"}
-                outcome = {"outcome_kind", "verification_status", "evidence_condition", "disposition"}
+                outcome = {
+                    "outcome_kind",
+                    "verification_status",
+                    "evidence_condition",
+                    "disposition",
+                }
                 for i, case in enumerate(p["cases"]):
                     path = f"cases[{i}]"
-                    if type(case) is not dict: errors.append(path); continue
+                    if type(case) is not dict:
+                        errors.append(path)
+                        continue
                     errors.extend(f"{path}.{k}" for k in sorted(set(case) ^ allowed))
                     for k in sorted(allowed & set(case)):
-                        if k in ("case_id",): exact(f"{path}.{k}", case[k], str)
-                        elif k in ("detected", "infra_invalid"): exact(f"{path}.{k}", case[k], bool)
-                        elif k == "error": exact(f"{path}.{k}", case[k], str, True)
-                    for k in sorted(allowed - set(case)): errors.append(f"{path}.{k}")
+                        if k in ("case_id",):
+                            exact(f"{path}.{k}", case[k], str)
+                        elif k in ("detected", "infra_invalid"):
+                            exact(f"{path}.{k}", case[k], bool)
+                        elif k == "error":
+                            exact(f"{path}.{k}", case[k], str, True)
+                    for k in sorted(allowed - set(case)):
+                        errors.append(f"{path}.{k}")
                     for name in ("expected", "actual"):
-                        qp = f"{path}.{name}"; q = case.get(name)
-                        if type(q) is not dict: errors.append(qp); continue
+                        qp = f"{path}.{name}"
+                        q = case.get(name)
+                        if type(q) is not dict:
+                            errors.append(qp)
+                            continue
                         errors.extend(f"{qp}.{k}" for k in sorted(set(q) ^ outcome))
-                        for k in sorted(outcome - set(q)): errors.append(f"{qp}.{k}")
+                        for k in sorted(outcome - set(q)):
+                            errors.append(f"{qp}.{k}")
                         for k in sorted(outcome & set(q)):
                             exact(f"{qp}.{k}", q[k], str, k != "outcome_kind")
             return sorted(set(errors))
+
         return canonical, digest, rate, shape, false
 
     run_spec, verify_spec = _make_specs(), _make_specs()
@@ -991,8 +1186,30 @@ def _make_public_api() -> tuple[
     protocol_const, implementation_const = PUBLIC_PROTOCOL_VERSION, IMPLEMENTATION_SCHEMA
     claim_gate_const, ceiling_const = PUBLIC_CLAIM_GATE, CLAIM_CEILING
     result_cls, outcome_cls, report_cls = classes
-    false_predicate, rate, digest, shape = run_false, run_rate, run_digest, _run_shape
-    _required = frozenset({"schema", "benchmark_id", "task_set_hash", "protocol_version", "implementation_schema", "case_ids", "eligible_count", "infra_invalid_count", "hostile_case_count", "detected_count", "false_completion_count", "false_completion_rate", "detection_rate", "trust_mismatch_count", "trust_mismatch_rate", "public_claim_gate", "claim_ceiling", "cases", "report_hash"})
+    false_predicate, rate, digest = run_false, run_rate, run_digest
+    _required = frozenset(
+        {
+            "schema",
+            "benchmark_id",
+            "task_set_hash",
+            "protocol_version",
+            "implementation_schema",
+            "case_ids",
+            "eligible_count",
+            "infra_invalid_count",
+            "hostile_case_count",
+            "detected_count",
+            "false_completion_count",
+            "false_completion_rate",
+            "detection_rate",
+            "trust_mismatch_count",
+            "trust_mismatch_rate",
+            "public_claim_gate",
+            "claim_ceiling",
+            "cases",
+            "report_hash",
+        }
+    )
 
     def execute(spec, dispatch):
         rows = []
@@ -1061,7 +1278,12 @@ def _make_public_api() -> tuple[
 
     def check(report):
         try:
-            false_predicate, rate, digest, shape = verify_false, verify_rate, verify_digest, verify_shape
+            false_predicate, rate, digest, shape = (
+                verify_false,
+                verify_rate,
+                verify_digest,
+                verify_shape,
+            )
             payload = report.payload() if isinstance(report, report_cls) else dict(report)
             required = {
                 "schema",

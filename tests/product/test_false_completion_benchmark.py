@@ -4,6 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+
 import product.benchmark as bm
 from product.benchmark import (
     BENCHMARK_ID,
@@ -59,7 +60,9 @@ def test_normal_suite_descriptor_hash_repeatability_and_gate():
 
 def test_exported_globals_cannot_rebind_run_or_verifier(monkeypatch):
     genuine = run_benchmark()
-    fake = CaseDefinition("fake", False, CaseOutcome("INPUT_REJECTED"), "reject", {"kind": "status"})
+    fake = CaseDefinition(
+        "fake", False, CaseOutcome("INPUT_REJECTED"), "reject", {"kind": "status"}
+    )
     for name, value in {
         "CASES": (fake,),
         "CASE_SPEC": (("fake", False, "CERTIFICATION", "reject", ()),),
