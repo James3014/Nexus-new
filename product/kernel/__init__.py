@@ -66,7 +66,7 @@ class Receipt:
             self.verification_plan_hash,
             self.evidence_hash,
             self.verification.status.value,
-            self.verification.failed_checks,
+            self.verification.reason_codes,
             self.verification.integrity.value,
             self.disposition.value,
             self.policy.accepted,

@@ -29,16 +29,17 @@ def certify_result(
     if not isinstance(result.integrity, IntegrityStatus):
         return CertificationDisposition.BLOCKED
     if (
-        not isinstance(result.failed_checks, tuple)
+        not isinstance(result.reason_codes, tuple)
         or any(
             not isinstance(check, str) or not check or check != check.strip()
-            for check in result.failed_checks
+            for check in result.reason_codes
         )
-        or len(result.failed_checks) != len(set(result.failed_checks))
+        or len(result.reason_codes) != len(set(result.reason_codes))
+        or result.reason_codes != tuple(sorted(result.reason_codes))
     ):
         return CertificationDisposition.BLOCKED
     if result.status is VerificationStatus.VERIFIED and (
-        result.integrity is not IntegrityStatus.VALID or result.failed_checks
+        result.integrity is not IntegrityStatus.VALID or result.reason_codes
     ):
         return CertificationDisposition.BLOCKED
     if (
@@ -55,7 +56,7 @@ def certify_result(
     if result.status is VerificationStatus.UNVERIFIABLE:
         return (
             CertificationDisposition.REJECTED
-            if result.integrity.value == "TAMPERED"
+            if result.integrity in {IntegrityStatus.TAMPERED, IntegrityStatus.MALFORMED, IntegrityStatus.CROSS_BOUND, IntegrityStatus.DUPLICATE}
             else CertificationDisposition.BLOCKED
         )
     if policy.accepted is False:

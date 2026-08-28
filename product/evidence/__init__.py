@@ -26,9 +26,17 @@ def _hash(value):
 
 class IntegrityStatus(str, Enum):
     VALID = "VALID"
-    CROSS_BINDING_INVALID = "CROSS_BINDING_INVALID"
+    MISSING = "MISSING"
+    STALE = "STALE"
     TAMPERED = "TAMPERED"
+    MALFORMED = "MALFORMED"
+    CROSS_BOUND = "CROSS_BOUND"
     DUPLICATE = "DUPLICATE"
+    LEGACY_NON_CERTIFIABLE = "LEGACY_NON_CERTIFIABLE"
+    CROSS_BINDING_INVALID = "CROSS_BOUND"
+
+
+EvidenceCondition = IntegrityStatus
 
 
 class ObservationStatus(str, Enum):
@@ -212,7 +220,10 @@ class EvidenceBundle:
             return IntegrityStatus.TAMPERED
         if (
             self.acceptance_contract_hash != contract.hash
-            or self.change_set_hash != change_set.hash
+        ):
+            return IntegrityStatus.STALE
+        if (
+            self.change_set_hash != change_set.hash
             or self.verification_plan_hash != plan.hash
             or plan.acceptance_contract_hash != contract.hash
             or plan.change_set_hash != change_set.hash
@@ -220,8 +231,8 @@ class EvidenceBundle:
             return IntegrityStatus.CROSS_BINDING_INVALID
         verifier_ids = [o.verifier_id for o in self.observations]
         artifact_ids = [o.artifact_id for o in self.observations]
-        if len(verifier_ids) != len(set(verifier_ids)) or len(artifact_ids) != len(
-            set(artifact_ids)
-        ):
+        if len(verifier_ids) != len(set(verifier_ids)):
             return IntegrityStatus.DUPLICATE
+        if len(artifact_ids) != len(set(artifact_ids)):
+            return IntegrityStatus.MISSING
         return IntegrityStatus.VALID
