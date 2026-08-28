@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from product.evidence import IntegrityStatus
-from product.verification import VerificationResult, VerificationStatus
+from product.verification import VerificationResult, VerificationStatus, is_reduced_result
 
 
 class CertificationDisposition(str, Enum):
@@ -22,7 +22,7 @@ class CertificationPolicy:
 def certify_result(
     result: VerificationResult, policy: CertificationPolicy
 ) -> CertificationDisposition:
-    if not isinstance(result, VerificationResult):
+    if not isinstance(result, VerificationResult) or not is_reduced_result(result):
         return CertificationDisposition.BLOCKED
     if not isinstance(result.status, VerificationStatus):
         return CertificationDisposition.BLOCKED

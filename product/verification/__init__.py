@@ -16,19 +16,8 @@ class VerificationResult:
     reason_codes: tuple[str, ...] = ()
     integrity: IntegrityStatus = IntegrityStatus.VALID
 
-    def __init__(self, status, reason_codes=(), integrity=IntegrityStatus.VALID, **kwargs):
-        if kwargs.pop("_token", None) is not _INTERNAL_TOKEN:
-            raise TypeError("VerificationResult is created by reduce_verification")
-        if "failed_checks" in kwargs:
-            if reason_codes != ():
-                raise TypeError("use reason_codes or failed_checks, not both")
-            reason_codes = kwargs.pop("failed_checks")
-        if kwargs:
-            raise TypeError(f"unexpected arguments: {', '.join(kwargs)}")
-        object.__setattr__(self, "status", status)
-        object.__setattr__(self, "reason_codes", reason_codes)
-        object.__setattr__(self, "integrity", integrity)
-        self.__post_init__()
+    def __init__(self, *args, **kwargs):
+        raise TypeError("VerificationResult is created by reduce_verification")
 
     def __post_init__(self):
         if not isinstance(self.status, VerificationStatus):
@@ -58,21 +47,36 @@ class VerificationResult:
     def failed_checks(self):
         return self.reason_codes
 
-_INTERNAL_TOKEN = object()
+_REDUCED_RESULTS = set()
+
+
+def is_reduced_result(result):
+    return isinstance(result, VerificationResult) and id(result) in _REDUCED_RESULTS
+
+
+def _validate_reasons(reasons):
+    if not isinstance(reasons, tuple):
+        raise TypeError("reasons must be a tuple")
+    for reason in reasons:
+        if not isinstance(reason, str) or not reason or reason != reason.strip() or len(reason) > 128:
+            raise ValueError("reasons must contain bounded nonblank strings")
+    if reasons != tuple(sorted(set(reasons))):
+        raise ValueError("reasons must be unique and sorted")
 
 
 def reduce_verification(condition, observations=(), reasons=()):
     if not isinstance(condition, IntegrityStatus):
         raise TypeError("condition must be IntegrityStatus")
+    _validate_reasons(reasons)
+    if not isinstance(observations, tuple):
+        raise TypeError("observations must be a tuple")
     codes = list(reasons)
     if condition is IntegrityStatus.SCOPE_ESCAPE:
+        codes.append("SCOPE_ESCAPE")
         status, integrity = VerificationStatus.FAILED_VERIFICATION, IntegrityStatus.VALID
     elif condition is not IntegrityStatus.VALID:
         codes.append(condition.value)
         status, integrity = VerificationStatus.UNVERIFIABLE, condition
-    elif not isinstance(observations, tuple):
-        status, integrity = VerificationStatus.UNVERIFIABLE, IntegrityStatus.MALFORMED
-        codes.append(IntegrityStatus.MALFORMED.value)
     elif not observations:
         status, integrity = VerificationStatus.UNVERIFIABLE, IntegrityStatus.MISSING
         codes.append(IntegrityStatus.MISSING.value)
@@ -87,9 +91,16 @@ def reduce_verification(condition, observations=(), reasons=()):
         codes.append(IntegrityStatus.MALFORMED.value)
     elif any(item is ObservationStatus.FAIL for item in observations):
         status, integrity = VerificationStatus.FAILED_VERIFICATION, IntegrityStatus.VALID
+        codes.append("VERIFIER_FAILED")
     else:
         status, integrity = VerificationStatus.VERIFIED, IntegrityStatus.VALID
-    return VerificationResult(status, tuple(sorted(set(codes))), integrity, _token=_INTERNAL_TOKEN)
+    result = object.__new__(VerificationResult)
+    object.__setattr__(result, "status", status)
+    object.__setattr__(result, "reason_codes", tuple(sorted(set(codes))) if status is not VerificationStatus.VERIFIED else ())
+    object.__setattr__(result, "integrity", integrity)
+    VerificationResult.__post_init__(result)
+    _REDUCED_RESULTS.add(id(result))
+    return result
 
 
 def verify(contract, change_set, plan, evidence):

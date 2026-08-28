@@ -28,7 +28,7 @@ def test_factual_reducer_matrix(condition, observations, complete, scope_escape,
 
 
 def test_reason_codes_are_sorted_unique_and_compatibly_exposed():
-    result = reduce_verification(IntegrityStatus.MALFORMED, reasons=("z", "a"))
+    result = reduce_verification(IntegrityStatus.MALFORMED, reasons=("a", "z"))
     assert result.reason_codes == ("MALFORMED", "a", "z")
     assert result.failed_checks == result.reason_codes
 
@@ -47,6 +47,25 @@ def test_direct_truth_and_caller_disposition_inputs_are_rejected():
         reduce_verification(IntegrityStatus.VALID, status=VerificationStatus.VERIFIED)  # type: ignore[call-arg]
     with pytest.raises(TypeError):
         reduce_verification(IntegrityStatus.VALID, disposition=CertificationDisposition.CERTIFIED)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        VerificationResult(VerificationStatus.VERIFIED, _token=object())
+    with pytest.raises((ImportError, AttributeError)):
+        exec("from product.verification import _INTERNAL_TOKEN", {})
+
+
+@pytest.mark.parametrize("reasons", [[], {"x"}, "x", ("x", 1), ("x", "x"), (" x",)])
+def test_reason_container_is_strictly_validated(reasons):
+    with pytest.raises((TypeError, ValueError)):
+        reduce_verification(IntegrityStatus.VALID, (ObservationStatus.PASS,), reasons)
+
+
+def test_failed_results_have_canonical_reason_and_distinct_receipt_payload():
+    failed = reduce_verification(IntegrityStatus.VALID, (ObservationStatus.FAIL,), ("unit",))
+    scoped = reduce_verification(IntegrityStatus.SCOPE_ESCAPE)
+    assert "VERIFIER_FAILED" in failed.reason_codes
+    assert "unit" in failed.reason_codes
+    assert "SCOPE_ESCAPE" in scoped.reason_codes
+    assert failed != scoped
 
 
 @pytest.mark.parametrize(
