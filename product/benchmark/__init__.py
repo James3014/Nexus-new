@@ -374,21 +374,24 @@ def _receipt(
     )
     r = certify_fn(s)
     q = r.receipt
-    if kind in ("tamper", "disposition"):
-        q = replace_fn(q, disposition=disposition_cls.REJECTED)
-    elif kind == "verification":
-        q = replace_fn(
-            q,
-            verification=reduce_fn(
-                integrity_status.VALID, (observation_status.FAIL,), ("VERIFIER_FAILED",)
-            ),
-        )
-    elif kind == "policy":
-        q = replace_fn(q, policy=policy_cls(False, True, True, True))
-    elif kind == "prerequisite":
-        q = replace_fn(q, policy=policy_cls(True, None, True, True))
-    elif kind == "claimed_hash":
-        q = replace_fn(q, claimed_receipt_hash=hash_fn("tampered-receipt"))
+    try:
+        if kind in ("tamper", "disposition"):
+            q = replace_fn(q, disposition=disposition_cls.REJECTED)
+        elif kind == "verification":
+            q = replace_fn(
+                q,
+                verification=reduce_fn(
+                    integrity_status.VALID, (observation_status.FAIL,), ("VERIFIER_FAILED",)
+                ),
+            )
+        elif kind == "policy":
+            q = replace_fn(q, policy=policy_cls(False, True, True, True))
+        elif kind == "prerequisite":
+            q = replace_fn(q, policy=policy_cls(True, None, True, True))
+        elif kind == "claimed_hash":
+            q = replace_fn(q, claimed_receipt_hash=hash_fn("tampered-receipt"))
+    except (TypeError, ValueError):
+        return outcome_cls("RECEIPT_INVALID")
     return outcome_cls("RECEIPT_INVALID" if not validate_fn(q, s) else "CERTIFICATION")
 
 
@@ -734,6 +737,32 @@ def _run(
                     c.hostile and a == c.expected and not false_predicate(c, a),
                 )
             )
+        except (TypeError, ValueError) as e:
+            # Strict Receipt construction intentionally rejects contradictory
+            # dataclass.replace mutations.  Those are benchmark assertions,
+            # not infrastructure failures.
+            if c.operation == "receipt":
+                out.append(
+                    result_cls(
+                        c.case_id,
+                        c.expected,
+                        outcome_cls("RECEIPT_INVALID"),
+                        c.hostile and outcome_cls("RECEIPT_INVALID") == c.expected,
+                        False,
+                        type(e).__name__,
+                    )
+                )
+                continue
+            out.append(
+                result_cls(
+                    c.case_id,
+                    c.expected,
+                    outcome_cls("INFRA_INVALID"),
+                    False,
+                    True,
+                    type(e).__name__,
+                )
+            )
         except Exception as e:
             out.append(
                 result_cls(
@@ -994,21 +1023,24 @@ def _make_public_api() -> tuple[
             )
             r = certify_fn(s)
             q = r.receipt
-            if kind in ("tamper", "disposition"):
-                q = replace_fn(q, disposition=disposition_cls.REJECTED)
-            elif kind == "verification":
-                q = replace_fn(
-                    q,
-                    verification=reduce_fn(
-                        observation_status_cls.VALID, (status_cls.FAIL,), ("VERIFIER_FAILED",)
-                    ),
-                )
-            elif kind == "policy":
-                q = replace_fn(q, policy=policy_cls(False, True, True, True))
-            elif kind == "prerequisite":
-                q = replace_fn(q, policy=policy_cls(True, None, True, True))
-            elif kind == "claimed_hash":
-                q = replace_fn(q, claimed_receipt_hash=hash_fn("tampered-receipt"))
+            try:
+                if kind in ("tamper", "disposition"):
+                    q = replace_fn(q, disposition=disposition_cls.REJECTED)
+                elif kind == "verification":
+                    q = replace_fn(
+                        q,
+                        verification=reduce_fn(
+                            observation_status_cls.VALID, (status_cls.FAIL,), ("VERIFIER_FAILED",)
+                        ),
+                    )
+                elif kind == "policy":
+                    q = replace_fn(q, policy=policy_cls(False, True, True, True))
+                elif kind == "prerequisite":
+                    q = replace_fn(q, policy=policy_cls(True, None, True, True))
+                elif kind == "claimed_hash":
+                    q = replace_fn(q, claimed_receipt_hash=hash_fn("tampered-receipt"))
+            except (TypeError, ValueError):
+                return outcome_cls("RECEIPT_INVALID")
             return outcome_cls("RECEIPT_INVALID" if not validate_fn(q, s) else "RECEIPT_VALID")
 
         def special_fn(kind: str):
@@ -1245,6 +1277,16 @@ def _make_public_api() -> tuple[
                         and not false_predicate(case, actual),
                     )
                 )
+            except (TypeError, ValueError) as exc:
+                if case.operation == "receipt":
+                    invalid = outcome_cls("RECEIPT_INVALID")
+                    rows.append(result_cls(case.case_id, case.expected, invalid,
+                                           case.hostile and invalid == case.expected,
+                                           False, type(exc).__name__))
+                    continue
+                rows.append(result_cls(case.case_id, case.expected,
+                                       outcome_cls("INFRA_INVALID"), False, True,
+                                       type(exc).__name__))
             except Exception as exc:
                 rows.append(
                     result_cls(
@@ -1354,6 +1396,16 @@ def _make_public_api() -> tuple[
                             and not false_predicate(case, actual),
                         )
                     )
+                except (TypeError, ValueError) as exc:
+                    if case.operation == "receipt":
+                        invalid = outcome_cls("RECEIPT_INVALID")
+                        rows.append(result_cls(case.case_id, case.expected, invalid,
+                                               case.hostile and invalid == case.expected,
+                                               False, type(exc).__name__))
+                        continue
+                    rows.append(result_cls(case.case_id, case.expected,
+                                           outcome_cls("INFRA_INVALID"), False, True,
+                                           type(exc).__name__))
                 except Exception as exc:
                     rows.append(
                         result_cls(

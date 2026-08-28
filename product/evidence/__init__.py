@@ -50,7 +50,7 @@ _HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def _require_text(value, field):
-    if not isinstance(value, str):
+    if type(value) is not str:
         raise TypeError(f"{field} must be a string")
     if not value or value != value.strip() or "\x00" in value:
         raise ValueError(f"{field} must be non-empty and normalized")
@@ -183,7 +183,7 @@ class Observation:
         _require_text(self.verifier_id, "verifier_id")
         _require_text(self.artifact_id, "artifact_id")
         _require_hash(self.artifact_hash, "artifact_hash")
-        if not isinstance(self.status, ObservationStatus):
+        if type(self.status) is not ObservationStatus:
             raise TypeError("status must be ObservationStatus")
 
 
@@ -201,8 +201,10 @@ class EvidenceBundle:
         _require_hash(self.acceptance_contract_hash, "acceptance_contract_hash")
         _require_hash(self.change_set_hash, "change_set_hash")
         _require_hash(self.verification_plan_hash, "verification_plan_hash")
-        if not isinstance(self.observations, tuple) or not self.observations:
+        if type(self.observations) is not tuple or not self.observations:
             raise ValueError("observations must be non-empty tuple")
+        if any(type(observation) is not Observation for observation in self.observations):
+            raise TypeError("observations must contain Observation values")
         if self.claimed_bundle_hash is not None:
             _require_hash(self.claimed_bundle_hash, "claimed_bundle_hash")
 

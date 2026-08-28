@@ -33,7 +33,7 @@ def _strict_json(value, active=None):
 
 
 def _policy_valid(policy):
-    return isinstance(policy, CertificationPolicy) and all(
+    return type(policy) is CertificationPolicy and all(
         value is None or type(value) is bool
         for value in (policy.accepted, policy.authority_present, policy.approval_present, policy.signing_present)
     )
@@ -56,9 +56,9 @@ class Receipt:
     def __post_init__(self):
         for field in ("acceptance_contract_hash", "change_set_hash", "verification_plan_hash", "evidence_hash"):
             _require_hash(getattr(self, field), field)
-        if not isinstance(self.verification, VerificationResult) or not is_reduced_result(self.verification):
+        if type(self.verification) is not VerificationResult or not is_reduced_result(self.verification):
             raise TypeError("verification must be reducer-produced VerificationResult")
-        if not isinstance(self.disposition, CertificationDisposition):
+        if type(self.disposition) is not CertificationDisposition:
             raise TypeError("disposition must be CertificationDisposition")
         if not _policy_valid(self.policy): raise TypeError("policy fields must be bool or None")
         if self.claim_ceiling != CLAIM_CEILING: raise ValueError("claim_ceiling must equal CLAIM_CEILING")
@@ -66,7 +66,8 @@ class Receipt:
         if self.implementation_schema != IMPLEMENTATION_SCHEMA: raise ValueError("implementation_schema must equal IMPLEMENTATION_SCHEMA")
         if certify_result(self.verification, self.policy) is not self.disposition:
             raise ValueError("disposition must match reducer")
-        if self.claimed_receipt_hash is not None: _require_hash(self.claimed_receipt_hash, "claimed_receipt_hash")
+        if self.claimed_receipt_hash is not None:
+            _require_hash(self.claimed_receipt_hash, "claimed_receipt_hash")
 
     @property
     def canonical_value(self):
@@ -85,9 +86,9 @@ class CertificationResult:
     receipt: Receipt
 
     def __post_init__(self):
-        if not isinstance(self.verification, VerificationResult) or not is_reduced_result(self.verification):
+        if type(self.verification) is not VerificationResult or not is_reduced_result(self.verification):
             raise TypeError("verification must be reducer-produced VerificationResult")
-        if not isinstance(self.disposition, CertificationDisposition) or not isinstance(self.receipt, Receipt):
+        if type(self.disposition) is not CertificationDisposition or type(self.receipt) is not Receipt:
             raise TypeError("invalid certification result types")
         if self.receipt.verification != self.verification or self.receipt.disposition != self.disposition:
             raise ValueError("certification result must match receipt")

@@ -154,7 +154,10 @@ def _assert_import_is_allowed(node: ast.AST, package: str) -> None:
     else:
         return
     assert not _BANNED_IMPORT_TOKENS.intersection(names)
-    assert product_imports <= _ALLOWED_PRODUCT_IMPORTS[package]
+    # A package submodule may import the types defined by its own package
+    # initializer; this remains inward/self-contained and is not an outward
+    # dependency.
+    assert product_imports <= (_ALLOWED_PRODUCT_IMPORTS[package] | {package})
     assert not (package != "execution" and "execution" in product_imports)
 
 
@@ -171,6 +174,14 @@ def test_product_imports_obey_layer_dag_and_external_boundary():
         for node in ast.walk(tree):
             _assert_import_is_allowed(node, package)
     assert discovered == packages
+
+
+def test_receipt_submodule_imports_only_allowed_inward_layers():
+    tree = ast.parse(
+        (Path(__file__).parents[2] / "product/certification/receipt.py").read_text()
+    )
+    for node in ast.walk(tree):
+        _assert_import_is_allowed(node, "certification")
 
 
 @pytest.mark.parametrize(
@@ -287,19 +298,23 @@ def test_receipt_round_trip_and_tamper_validation():
     with pytest.raises(ValueError):
         replace(receipt, claimed_receipt_hash="sha256:bad")
 
-    tampered = (
+    subject_tampered = (
         replace(receipt, acceptance_contract_hash=_hash("bad")),
         replace(receipt, change_set_hash=_hash("bad")),
         replace(receipt, verification_plan_hash=_hash("bad")),
         replace(receipt, evidence_hash=_hash("bad")),
-        replace(receipt, verification=reduce_verification(IntegrityStatus.MISSING)),
-        replace(receipt, disposition=CertificationDisposition.REJECTED),
-        replace(receipt, policy=CertificationPolicy(False, True, True, True)),
-        replace(receipt, claim_ceiling=("TAMPERED",)),
-        replace(receipt, protocol_version="0.0.0"),
-        replace(receipt, implementation_schema="tampered"),
     )
-    assert all(not validate_receipt(candidate, input_data) for candidate in tampered)
+    assert all(not validate_receipt(candidate, input_data) for candidate in subject_tampered)
+    for changes in (
+        {"verification": reduce_verification(IntegrityStatus.MISSING)},
+        {"disposition": CertificationDisposition.REJECTED},
+        {"policy": CertificationPolicy(False, True, True, True)},
+        {"claim_ceiling": ("TAMPERED",)},
+        {"protocol_version": "0.0.0"},
+        {"implementation_schema": "tampered"},
+    ):
+        with pytest.raises((TypeError, ValueError)):
+            replace(receipt, **changes)
 
 
 def test_stale_bindings_are_unverifiable_and_blocked():
