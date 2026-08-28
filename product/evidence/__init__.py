@@ -42,8 +42,8 @@ _HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 def _require_text(value, field):
     if not isinstance(value, str):
         raise TypeError(f"{field} must be a string")
-    if not value:
-        raise ValueError(f"{field} must be non-empty")
+    if not value or value != value.strip() or "\x00" in value:
+        raise ValueError(f"{field} must be non-empty and normalized")
 
 
 def _require_hash(value, field):
@@ -66,7 +66,11 @@ def _require_ids(values, field):
 def _require_paths(values, field):
     _require_ids(values, field)
     for value in values:
-        if value.startswith("/"):
+        if (
+            value.startswith("/")
+            or "\\" in value
+            or any(part in {"", ".", ".."} for part in value.split("/"))
+        ):
             raise ValueError(f"{field} must contain relative paths")
 
 

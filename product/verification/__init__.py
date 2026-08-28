@@ -21,6 +21,22 @@ class VerificationResult:
             raise TypeError("status must be VerificationStatus")
         if not isinstance(self.integrity, IntegrityStatus):
             raise TypeError("integrity must be IntegrityStatus")
+        if not isinstance(self.failed_checks, tuple):
+            raise TypeError("failed_checks must be a tuple")
+        for check in self.failed_checks:
+            if not isinstance(check, str) or not check or check != check.strip():
+                raise ValueError("failed_checks must contain unique nonblank strings")
+        if len(self.failed_checks) != len(set(self.failed_checks)):
+            raise ValueError("failed_checks must contain unique nonblank strings")
+        if self.status is VerificationStatus.VERIFIED and (
+            self.integrity is not IntegrityStatus.VALID or self.failed_checks
+        ):
+            raise ValueError("VERIFIED requires valid integrity and no failed checks")
+        if (
+            self.integrity is not IntegrityStatus.VALID
+            and self.status is not VerificationStatus.UNVERIFIABLE
+        ):
+            raise ValueError("non-valid integrity requires UNVERIFIABLE status")
 
 
 def verify(contract, change_set, plan, evidence):

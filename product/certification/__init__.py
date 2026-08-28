@@ -29,6 +29,24 @@ def certify_result(
     if not isinstance(result.integrity, IntegrityStatus):
         return CertificationDisposition.BLOCKED
     if (
+        not isinstance(result.failed_checks, tuple)
+        or any(
+            not isinstance(check, str) or not check or check != check.strip()
+            for check in result.failed_checks
+        )
+        or len(result.failed_checks) != len(set(result.failed_checks))
+    ):
+        return CertificationDisposition.BLOCKED
+    if result.status is VerificationStatus.VERIFIED and (
+        result.integrity is not IntegrityStatus.VALID or result.failed_checks
+    ):
+        return CertificationDisposition.BLOCKED
+    if (
+        result.integrity is not IntegrityStatus.VALID
+        and result.status is not VerificationStatus.UNVERIFIABLE
+    ):
+        return CertificationDisposition.BLOCKED
+    if (
         result.status is VerificationStatus.FAILED_VERIFICATION
         or result.integrity is not None
         and result.integrity.value == "TAMPERED"

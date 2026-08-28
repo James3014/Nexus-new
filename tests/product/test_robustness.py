@@ -8,6 +8,7 @@ from product.evidence import (
     AcceptanceContract,
     ChangeSet,
     EvidenceBundle,
+    IntegrityStatus,
     Observation,
     ObservationStatus,
     VerificationPlan,
@@ -15,6 +16,7 @@ from product.evidence import (
 )
 from product.kernel import CertificationInput, certify
 from product.verification import VerificationResult, VerificationStatus
+from tests.product.test_kernel import _assert_import_is_allowed
 
 H = _hash("fixture")
 
@@ -85,7 +87,33 @@ def test_invalid_enum_values_cannot_reach_certification():
 def test_dag_gate_rejects_relative_imports():
     node = ast.parse("from ..execution import ExecutionRequest").body[0]
     assert isinstance(node, ast.ImportFrom)
-    assert node.level > 0
+    with pytest.raises(AssertionError):
+        _assert_import_is_allowed(node, "kernel")
+    absolute = ast.parse("from product.verification import VerificationResult").body[0]
+    _assert_import_is_allowed(absolute, "kernel")
+
+
+@pytest.mark.parametrize(
+    "path", ["../escape", "a/../b", "./a", "a//b", "a\\b", " a", "a ", "a\x00b", ".", "..", "a/"]
+)
+def test_paths_are_normalized_repo_relative_posix(path):
+    with pytest.raises(ValueError):
+        AcceptanceContract("ac", H, ("unit",), (path,), "FORBID")
+
+
+def test_verification_result_rejects_contradictory_states():
+    with pytest.raises(ValueError):
+        VerificationResult(VerificationStatus.VERIFIED, ("check",))
+    with pytest.raises(ValueError):
+        VerificationResult(
+            VerificationStatus.VERIFIED, integrity=IntegrityStatus.CROSS_BINDING_INVALID
+        )
+    with pytest.raises(ValueError):
+        VerificationResult(
+            VerificationStatus.FAILED_VERIFICATION, integrity=IntegrityStatus.TAMPERED
+        )
+    with pytest.raises(ValueError):
+        VerificationResult(VerificationStatus.VERIFIED, ("check", "check"))
 
 
 def test_poetry_packages_include_product_without_version_change():
