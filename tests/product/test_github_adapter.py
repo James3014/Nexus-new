@@ -212,6 +212,20 @@ def test_loader_revalidates_after_post_init_rebinding(monkeypatch):
         load_github_pull_request_snapshot(values)
 
 
+def test_loader_rejects_valid_constructor_substitution(monkeypatch):
+    original_init = GitHubPullRequestSnapshot.__init__
+    payload = serialize_github_pull_request_snapshot(snapshot())
+
+    def substitute(self, *args, **kwargs):
+        original_init(
+            self, "other", "repository", 99, "c" * 40, "d" * 40, "sha256:" + "e" * 64, ("other.py",)
+        )
+
+    monkeypatch.setattr(GitHubPullRequestSnapshot, "__init__", substitute)
+    with pytest.raises(ValueError, match="loaded snapshot differs"):
+        load_github_pull_request_snapshot(payload)
+
+
 def test_valid_snapshot_diff_change_is_stale_and_blocked():
     contract, plan, evidence = certification_case()
     altered = replace(snapshot(), diff_hash="sha256:" + "d" * 64)
