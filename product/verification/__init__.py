@@ -54,11 +54,17 @@ class VerificationResult:
             "reason_codes": list(self.reason_codes),
         }
 
+
 def _validate_reasons(reasons):
     if not isinstance(reasons, tuple):
         raise TypeError("reasons must be a tuple")
     for reason in reasons:
-        if not isinstance(reason, str) or not reason or reason != reason.strip() or len(reason) > 128:
+        if (
+            not isinstance(reason, str)
+            or not reason
+            or reason != reason.strip()
+            or len(reason) > 128
+        ):
             raise ValueError("reasons must contain bounded nonblank strings")
     if reasons != tuple(sorted(set(reasons))):
         raise ValueError("reasons must be unique and sorted")
@@ -75,16 +81,23 @@ def _make_reducer():
             raise TypeError("observations must be a tuple")
         codes = list(reasons)
         if condition is IntegrityStatus.SCOPE_ESCAPE:
-            codes.append("SCOPE_ESCAPE")
+            if not reasons:
+                codes.append(condition.value)
             status, integrity = VerificationStatus.FAILED_VERIFICATION, IntegrityStatus.VALID
         elif condition is not IntegrityStatus.VALID:
-            codes.append(condition.value)
+            if not reasons:
+                codes.append(condition.value)
             status, integrity = VerificationStatus.UNVERIFIABLE, condition
         elif not observations:
             status, integrity = VerificationStatus.UNVERIFIABLE, IntegrityStatus.MISSING
             codes.append(IntegrityStatus.MISSING.value)
-        elif any(type(item) is str for item in observations) and all(item in {"PASS", "FAIL"} for item in observations):
-            status, integrity = VerificationStatus.UNVERIFIABLE, IntegrityStatus.LEGACY_NON_CERTIFIABLE
+        elif any(type(item) is str for item in observations) and all(
+            item in {"PASS", "FAIL"} for item in observations
+        ):
+            status, integrity = (
+                VerificationStatus.UNVERIFIABLE,
+                IntegrityStatus.LEGACY_NON_CERTIFIABLE,
+            )
             codes.append(IntegrityStatus.LEGACY_NON_CERTIFIABLE.value)
         elif any(type(item) is str for item in observations):
             status, integrity = VerificationStatus.UNVERIFIABLE, IntegrityStatus.MALFORMED
@@ -99,7 +112,11 @@ def _make_reducer():
             status, integrity = VerificationStatus.VERIFIED, IntegrityStatus.VALID
         result = object.__new__(VerificationResult)
         object.__setattr__(result, "status", status)
-        object.__setattr__(result, "reason_codes", tuple(sorted(set(codes))) if status is not VerificationStatus.VERIFIED else ())
+        object.__setattr__(
+            result,
+            "reason_codes",
+            tuple(sorted(set(codes))) if status is not VerificationStatus.VERIFIED else (),
+        )
         object.__setattr__(result, "integrity", integrity)
         VerificationResult.__post_init__(result)
         registry[id(result)] = result
@@ -132,8 +149,20 @@ def verify(contract, change_set, plan, evidence):
         for o in evidence.observations
     ):
         return reduce_verification(IntegrityStatus.MALFORMED)
-    missing = tuple(sorted(x for x in contract.required_verifier_ids if x not in obs or x not in plan.required_verifier_ids))
+    missing = tuple(
+        sorted(
+            x
+            for x in contract.required_verifier_ids
+            if x not in obs or x not in plan.required_verifier_ids
+        )
+    )
     if missing or not evidence.observations:
         return reduce_verification(IntegrityStatus.MISSING, reasons=missing)
-    failed = tuple(sorted(x for x in contract.required_verifier_ids if obs[x].status is not ObservationStatus.PASS))
-    return reduce_verification(IntegrityStatus.VALID, tuple(obs[x].status for x in contract.required_verifier_ids), failed)
+    failed = tuple(
+        sorted(
+            x for x in contract.required_verifier_ids if obs[x].status is not ObservationStatus.PASS
+        )
+    )
+    return reduce_verification(
+        IntegrityStatus.VALID, tuple(obs[x].status for x in contract.required_verifier_ids), failed
+    )
