@@ -5,7 +5,12 @@ import pytest
 from product.certification import CertificationDisposition, CertificationPolicy
 from product.certification.receipt import Receipt
 from product.evidence import EvidenceBundle, IntegrityStatus, _hash
-from product.kernel import CertificationInput, certify, validate_serialized_receipt
+from product.kernel import (
+    CertificationInput,
+    certify,
+    validate_receipt,
+    validate_serialized_receipt,
+)
 from product.protocol import CERTIFICATION_RECEIPT_SCHEMA, EVIDENCE_BUNDLE_SCHEMA
 from product.verification import reduce_verification
 
@@ -633,6 +638,23 @@ def test_certification_revalidates_malformed_graph_after_trust_root_rebinding(mo
         certify(forged_input)
     assert validate_serialized_receipt({}, forged_input) == ("MALFORMED:input",)
     assert data.evidence is not bundle
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        (field, value)
+        for field in ("policy_accepted", "authority_present", "approval_present", "signing_present")
+        for value in ("true", 1, [])
+    ],
+)
+def test_certification_rejects_non_boolean_policy_fields(field, value):
+    data = _input()
+    malformed = replace(data, **{field: value})
+    with pytest.raises(ValueError, match=f"invalid_certification_input:MALFORMED:{field}"):
+        certify(malformed)
+    assert validate_receipt(object(), malformed) is False
+    assert validate_serialized_receipt({}, malformed) == ("MALFORMED:input",)
 
 
 def test_receipt_rejects_contradictory_certified_missing_result():

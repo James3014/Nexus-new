@@ -64,6 +64,14 @@ def _make_kernel(
             errors += ("MALFORMED:plan",)
         if type(data["evidence"]) is not evidence_type:
             errors += ("MALFORMED:evidence",)
+        for field in (
+            "policy_accepted",
+            "authority_present",
+            "approval_present",
+            "signing_present",
+        ):
+            if data[field] is not None and type(data[field]) is not bool:
+                errors += (f"MALFORMED:{field}",)
         return tuple(dict.fromkeys(errors))
 
     def certify(value):
