@@ -259,7 +259,10 @@ def test_evidence_subclass_trust_root_is_rejected():
     for function in (validate_evidence_bundle_envelope, load_evidence_bundle_envelope):
         with pytest.raises(TypeError, match="expected_bundle"):
             function(
-                data.evidence.to_dict(), data.contract, data.change_set, data.plan,
+                data.evidence.to_dict(),
+                data.contract,
+                data.change_set,
+                data.plan,
                 expected_bundle=forged,
             )
 
@@ -276,13 +279,24 @@ def _serialized_mutation(data, mutate):
 @pytest.mark.parametrize(
     "mutate, expected",
     [
-        (lambda p: p["observations"].__setitem__(0, {**p["observations"][0], "status": "FAIL"}), "TAMPERED:fields"),
+        (
+            lambda p: p["observations"].__setitem__(0, {**p["observations"][0], "status": "FAIL"}),
+            "TAMPERED:fields",
+        ),
         (lambda p: p["observations"].append(dict(p["observations"][0])), "DUPLICATE:observations"),
         (
-            lambda p: (p["observations"].append({**p["observations"][0], "verifier_id": "zzz", "artifact_id": "artifact-2"}), p["observations"].reverse()),
+            lambda p: (
+                p["observations"].append(
+                    {**p["observations"][0], "verifier_id": "zzz", "artifact_id": "artifact-2"}
+                ),
+                p["observations"].reverse(),
+            ),
             "MALFORMED:observation_order",
         ),
-        (lambda p: p.__setitem__("acceptance_contract_hash", _hash("other")), "CROSS_BOUND:acceptance_contract_hash"),
+        (
+            lambda p: p.__setitem__("acceptance_contract_hash", _hash("other")),
+            "CROSS_BOUND:acceptance_contract_hash",
+        ),
         (lambda p: p.__setitem__("change_set_hash", _hash("other")), "STALE:change_set_hash"),
         (lambda p: p.__setitem__("unknown", True), "MALFORMED:keys"),
     ],
@@ -296,9 +310,12 @@ def test_serialized_evidence_mutations_fail_and_loader_returns_none(mutate, expe
         payload, data.contract, data.change_set, data.plan, expected_bundle=data.evidence
     )
     assert expected in errors
-    assert load_evidence_bundle_envelope(
-        payload, data.contract, data.change_set, data.plan, expected_bundle=data.evidence
-    ) is None
+    assert (
+        load_evidence_bundle_envelope(
+            payload, data.contract, data.change_set, data.plan, expected_bundle=data.evidence
+        )
+        is None
+    )
 
 
 def test_serialized_duplicate_verifier_and_artifact_are_distinct_errors():
