@@ -1,8 +1,7 @@
-import hashlib
 from dataclasses import dataclass
 
 from product.certification import CertificationDisposition, CertificationPolicy, certify_result
-from product.evidence import AcceptanceContract, ChangeSet, EvidenceBundle, VerificationPlan
+from product.evidence import AcceptanceContract, ChangeSet, EvidenceBundle, VerificationPlan, _hash
 from product.protocol import IMPLEMENTATION_SCHEMA, PUBLIC_PROTOCOL_VERSION
 from product.verification import VerificationResult, verify
 
@@ -42,8 +41,28 @@ class Receipt:
     claimed_receipt_hash: str | None = None
 
     @property
+    def canonical_value(self):
+        return (
+            self.acceptance_contract_hash,
+            self.change_set_hash,
+            self.verification_plan_hash,
+            self.evidence_hash,
+            self.verification.status.value,
+            self.verification.failed_checks,
+            self.verification.integrity.value,
+            self.disposition.value,
+            self.policy.accepted,
+            self.policy.authority_present,
+            self.policy.approval_present,
+            self.policy.signing_present,
+            self.claim_ceiling,
+            self.protocol_version,
+            self.implementation_schema,
+        )
+
+    @property
     def hash(self):
-        return "sha256:" + hashlib.sha256(repr(self).encode()).hexdigest()
+        return _hash(self.canonical_value)
 
     def validate(self):
         return self.claimed_receipt_hash is None or self.claimed_receipt_hash == self.hash
@@ -75,3 +94,8 @@ def certify(input: CertificationInput):
         policy,
     )
     return CertificationResult(result, disposition, receipt)
+
+
+def validate_receipt(receipt: Receipt, input: CertificationInput) -> bool:
+    expected = certify(input).receipt
+    return receipt.hash == expected.hash and receipt.validate()

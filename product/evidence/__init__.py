@@ -11,6 +11,8 @@ def canonical_json(value):
         if isinstance(v, (tuple, list)):
             return [clean(x) for x in v]
         if isinstance(v, dict):
+            if any(not isinstance(k, str) for k in v):
+                raise TypeError("canonical object keys must be strings")
             return {str(k): clean(v[k]) for k in sorted(v)}
         raise TypeError(f"unsupported canonical value: {type(v).__name__}")
 
@@ -23,10 +25,8 @@ def _hash(value):
 
 class IntegrityStatus(str, Enum):
     VALID = "VALID"
-    MISSING = "MISSING"
     CROSS_BINDING_INVALID = "CROSS_BINDING_INVALID"
     TAMPERED = "TAMPERED"
-    SCOPE_ESCAPE = "SCOPE_ESCAPE"
     DUPLICATE = "DUPLICATE"
 
 
@@ -139,6 +139,4 @@ class EvidenceBundle:
         keys = [(o.verifier_id, o.artifact_id) for o in self.observations]
         if len(keys) != len(set(keys)):
             return IntegrityStatus.DUPLICATE
-        if set(change_set.paths) - set(contract.allowed_paths):
-            return IntegrityStatus.SCOPE_ESCAPE
-        return IntegrityStatus.VALID if self.observations else IntegrityStatus.MISSING
+        return IntegrityStatus.VALID

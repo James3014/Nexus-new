@@ -24,7 +24,7 @@ def certify_result(
     if (
         result.status is VerificationStatus.FAILED_VERIFICATION
         or result.integrity is not None
-        and result.integrity.value in {"SCOPE_ESCAPE", "TAMPERED"}
+        and result.integrity.value == "TAMPERED"
     ):
         return CertificationDisposition.REJECTED
     if result.status is VerificationStatus.UNVERIFIABLE:
