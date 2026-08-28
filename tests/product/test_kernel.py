@@ -110,6 +110,7 @@ _PRODUCT_PACKAGES = {
     "kernel",
     "execution",
     "adapters",
+    "benchmark",
 }
 _BANNED_IMPORT_TOKENS = {
     "nexus",
@@ -133,6 +134,7 @@ _ALLOWED_PRODUCT_IMPORTS = {
     "kernel": {"protocol", "evidence", "verification", "certification"},
     "execution": {"protocol", "evidence"},
     "adapters": {"protocol", "evidence", "verification", "certification", "kernel"},
+    "benchmark": {"protocol", "evidence", "verification", "certification", "kernel", "adapters"},
 }
 
 
