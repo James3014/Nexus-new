@@ -1,4 +1,6 @@
+import ast
 import hashlib
+from pathlib import Path
 
 import pytest
 
@@ -100,7 +102,7 @@ def test_github_name_grammar_prevents_change_set_id_collisions():
         "a", "b.c", 1, "a" * 40, "b" * 40, "sha256:" + "c" * 64, ("x",)
     )
     right = GitHubPullRequestSnapshot(
-        "a.b", "c", 1, "a" * 40, "b" * 40, "sha256:" + "c" * 64, ("x",)
+        "a-b", "c", 1, "a" * 40, "b" * 40, "sha256:" + "c" * 64, ("x",)
     )
     assert to_changeset(left).change_set_id != to_changeset(right).change_set_id
     with pytest.raises(ValueError):
@@ -121,6 +123,66 @@ def test_public_adapter_revalidates_forged_snapshot_after_module_rebinding(monke
     monkeypatch.setattr(github, "ChangeSet", lambda *args: pytest.fail("rebound ChangeSet used"))
     with pytest.raises(ValueError):
         github.to_changeset(forged)
+
+
+def test_loader_revalidates_after_post_init_rebinding(monkeypatch):
+    values = serialize_github_pull_request_snapshot(snapshot())
+    values["diff_hash"] = "bad"
+    monkeypatch.setattr(GitHubPullRequestSnapshot, "__post_init__", lambda self: None)
+    with pytest.raises(ValueError):
+        load_github_pull_request_snapshot(values)
+
+
+@pytest.mark.parametrize(
+    "paths",
+    [
+        (),
+        ("src/a.py", "src/a.py"),
+        ("/tmp/a",),
+        ("src\\a.py",),
+        (".",),
+        ("..",),
+        ("src//a",),
+        (" src/a",),
+        (1,),
+    ],
+)
+def test_snapshot_rejects_path_matrix(paths):
+    values = serialize_github_pull_request_snapshot(snapshot())
+    values["changed_paths"] = list(paths)
+    with pytest.raises((TypeError, ValueError)):
+        load_github_pull_request_snapshot(values)
+
+
+def test_adapter_has_no_network_sdk_or_mutation_surface():
+    tree = ast.parse(Path(github.__file__).read_text())
+    forbidden = {
+        "requests",
+        "http",
+        "urllib",
+        "socket",
+        "gh",
+        "github",
+        "boto3",
+        "merge",
+        "comment",
+        "check",
+        "network",
+        "planner",
+        "workforce",
+        "provider",
+        "model",
+    }
+    imports = [node.module or "" for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
+    assert all(not any(token in item.lower() for token in forbidden) for item in imports)
+    calls = [
+        node.func.attr.lower()
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    ]
+    assert not any(
+        token in call for call in calls for token in {"request", "merge", "comment", "check"}
+    )
 
 
 @pytest.mark.parametrize(

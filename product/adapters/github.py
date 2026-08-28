@@ -8,7 +8,8 @@ from product.kernel import CertificationInput, certify
 
 _SHA40 = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256 = re.compile(r"sha256:[0-9a-f]{64}\Z")
-_GITHUB_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\Z")
+_GITHUB_OWNER = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?\Z")
+_GITHUB_REPOSITORY = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,99})?\Z")
 _FIELDS = frozenset(
     {
         "repository_owner",
@@ -41,7 +42,8 @@ class GitHubPullRequestSnapshot:
         _text(self.repository_owner, "repository_owner")
         _text(self.repository_name, "repository_name")
         for field in ("repository_owner", "repository_name"):
-            if _GITHUB_NAME.fullmatch(getattr(self, field)) is None:
+            pattern = _GITHUB_OWNER if field == "repository_owner" else _GITHUB_REPOSITORY
+            if pattern.fullmatch(getattr(self, field)) is None:
                 raise ValueError(f"{field} must be a GitHub-compatible name")
         if type(self.pr_number) is not int or self.pr_number <= 0:
             raise ValueError("pr_number must be a positive exact int")
@@ -118,7 +120,8 @@ github_snapshot_to_changeset = to_changeset
 
 
 def _make_trust_sealed_api(snapshot_type, change_set_type, input_type, kernel_certify):
-    name_pattern = _GITHUB_NAME.fullmatch
+    owner_pattern = _GITHUB_OWNER.fullmatch
+    repository_pattern = _GITHUB_REPOSITORY.fullmatch
     sha40 = _SHA40.fullmatch
     sha256 = _SHA256.fullmatch
     fields = frozenset(_FIELDS)
@@ -138,9 +141,12 @@ def _make_trust_sealed_api(snapshot_type, change_set_type, input_type, kernel_ce
         data = vars(value)
         if set(data) != fields:
             raise ValueError("malformed GitHub pull-request snapshot fields")
-        for field in ("repository_owner", "repository_name"):
+        for field, pattern in (
+            ("repository_owner", owner_pattern),
+            ("repository_name", repository_pattern),
+        ):
             item = data[field]
-            if type(item) is not str or name_pattern(item) is None:
+            if type(item) is not str or pattern(item) is None:
                 raise ValueError(f"{field} must be a GitHub-compatible name")
         if type(data["pr_number"]) is not int or data["pr_number"] <= 0:
             raise ValueError("pr_number must be a positive exact int")
@@ -170,19 +176,37 @@ def _make_trust_sealed_api(snapshot_type, change_set_type, input_type, kernel_ce
 
     def sealed_to_changeset(value):
         data = validate(value)
-        change_set_id = f"github:{data['repository_owner']}/{data['repository_name']}#pr-{data['pr_number']}@{data['head_sha']}"
-        return change_set_type(
+        owner = data["repository_owner"].lower()
+        repository = data["repository_name"].lower()
+        change_set_id = f"github:{owner}/{repository}#pr-{data['pr_number']}@{data['head_sha']}"
+        result = change_set_type(
             change_set_id,
             data["base_sha"],
             data["head_sha"],
             data["diff_hash"],
             tuple(sorted(data["changed_paths"])),
         )
+        expected = {
+            "change_set_id": change_set_id,
+            "source_revision": data["base_sha"],
+            "target_revision": data["head_sha"],
+            "diff_hash": data["diff_hash"],
+            "paths": tuple(sorted(data["changed_paths"])),
+        }
+        if type(result) is not change_set_type or vars(result) != expected:
+            raise ValueError("malformed mapped ChangeSet")
+        return result
 
     def sealed_snapshot_to_dict(value):
         data = validate(value)
         return {
-            key: (sorted(data[key]) if key == "changed_paths" else data[key])
+            key: (
+                sorted(data[key])
+                if key == "changed_paths"
+                else data[key].lower()
+                if key in {"repository_owner", "repository_name"}
+                else data[key]
+            )
             for key in ordered_fields
         }
 
@@ -193,7 +217,9 @@ def _make_trust_sealed_api(snapshot_type, change_set_type, input_type, kernel_ce
         if type(values["changed_paths"]) is not list:
             raise TypeError("changed_paths must be a list in serialized snapshots")
         values["changed_paths"] = tuple(values["changed_paths"])
-        return snapshot_type(**values)
+        loaded = snapshot_type(**values)
+        validate(loaded)
+        return loaded
 
     def sealed_certify(
         value,
