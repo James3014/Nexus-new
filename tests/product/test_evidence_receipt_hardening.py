@@ -240,6 +240,50 @@ def test_evidence_subject_roots_require_exact_types():
             )
 
 
+def test_claimed_hashes_cannot_be_serialized_or_used_as_trust_roots():
+    data = _input()
+    forged_evidence = replace(data.evidence, claimed_bundle_hash=_hash("forged"))
+    with pytest.raises(ValueError, match="claimed_bundle_hash"):
+        forged_evidence.to_dict()
+    from product.evidence import validate_evidence_bundle_envelope
+
+    with pytest.raises(ValueError, match="claimed hash"):
+        validate_evidence_bundle_envelope(
+            data.evidence.to_dict(),
+            data.contract,
+            data.change_set,
+            data.plan,
+            expected_bundle=forged_evidence,
+        )
+    receipt = certify(data).receipt
+    forged_receipt = replace(receipt, claimed_receipt_hash=_hash("forged"))
+    with pytest.raises(ValueError, match="claimed_receipt_hash"):
+        forged_receipt.to_dict()
+
+
+def test_hashes_are_sealed_against_module_rebinding(monkeypatch):
+    import product.certification.receipt as receipt_module
+    import product.evidence as evidence_module
+
+    data = _input()
+    before = (data.contract.hash, data.change_set.hash, data.plan.hash, data.evidence.hash)
+    receipt = certify(data).receipt
+    receipt_before = receipt.hash
+
+    class ZeroDigest:
+        def hexdigest(self):
+            return "0" * 64
+
+    monkeypatch.setattr(evidence_module.hashlib, "sha256", lambda value: ZeroDigest())
+    monkeypatch.setattr(evidence_module.json, "dumps", lambda *args, **kwargs: "forged")
+    monkeypatch.setattr(evidence_module, "canonical_json", lambda value: "forged")
+    monkeypatch.setattr(evidence_module, "_hash", lambda value: "sha256:" + "0" * 64)
+    monkeypatch.setattr(receipt_module, "_hash", lambda value: "sha256:" + "0" * 64)
+    assert before == (data.contract.hash, data.change_set.hash, data.plan.hash, data.evidence.hash)
+    assert receipt.hash == receipt_before
+    assert certify(data).receipt.hash == receipt_before
+
+
 def test_evidence_subclass_trust_root_is_rejected():
     class ForgedEvidence(EvidenceBundle):
         def to_dict(self):

@@ -7,37 +7,49 @@ from enum import Enum
 from product.protocol import EVIDENCE_BUNDLE_SCHEMA
 
 
-def canonical_json(value):
-    active = set()
+def _make_canonical_json(dumps):
+    def canonical_json(value):
+        active = set()
 
-    def clean(v):
-        if v is None or type(v) in (str, int, bool):
-            return v
-        if type(v) in (tuple, list):
-            marker = id(v)
-            if marker in active:
-                raise ValueError("cyclic canonical value")
-            active.add(marker)
-            result = [clean(x) for x in v]
-            active.remove(marker)
-            return result
-        if type(v) is dict:
-            marker = id(v)
-            if marker in active:
-                raise ValueError("cyclic canonical value")
-            active.add(marker)
-            if any(not isinstance(k, str) for k in v):
-                raise TypeError("canonical object keys must be strings")
-            result = {k: clean(v[k]) for k in sorted(v)}
-            active.remove(marker)
-            return result
-        raise TypeError(f"unsupported canonical value: {type(v).__name__}")
+        def clean(v):
+            if v is None or type(v) in (str, int, bool):
+                return v
+            if type(v) in (tuple, list):
+                marker = id(v)
+                if marker in active:
+                    raise ValueError("cyclic canonical value")
+                active.add(marker)
+                result = [clean(x) for x in v]
+                active.remove(marker)
+                return result
+            if type(v) is dict:
+                marker = id(v)
+                if marker in active:
+                    raise ValueError("cyclic canonical value")
+                active.add(marker)
+                if any(not isinstance(k, str) for k in v):
+                    raise TypeError("canonical object keys must be strings")
+                result = {k: clean(v[k]) for k in sorted(v)}
+                active.remove(marker)
+                return result
+            raise TypeError(f"unsupported canonical value: {type(v).__name__}")
 
-    return json.dumps(clean(value), sort_keys=True, separators=(",", ":"), allow_nan=False)
+        return dumps(clean(value), sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+    return canonical_json
 
 
-def _hash(value):
-    return "sha256:" + hashlib.sha256(canonical_json(value).encode()).hexdigest()
+canonical_json = _make_canonical_json(json.dumps)
+
+
+def _make_hash(canonical, sha256):
+    def hash_value(value):
+        return "sha256:" + sha256(canonical(value).encode()).hexdigest()
+
+    return hash_value
+
+
+_hash = _make_hash(canonical_json, hashlib.sha256)
 
 
 class IntegrityStatus(str, Enum):
@@ -62,6 +74,7 @@ class ObservationStatus(str, Enum):
 
 
 _HASH_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_SEALED_HASH_RE_FULLMATCH = _HASH_RE.fullmatch
 
 
 def _require_text(value, field):
@@ -73,7 +86,7 @@ def _require_text(value, field):
 
 def _require_hash(value, field):
     _require_text(value, field)
-    if not _HASH_RE.fullmatch(value):
+    if _SEALED_HASH_RE_FULLMATCH(value) is None:
         raise ValueError(f"{field} must be sha256:<64 lowercase hex>")
 
 
@@ -123,7 +136,7 @@ class AcceptanceContract:
 
     @property
     def hash(self):
-        return _hash(
+        return _AC_HASH(
             (
                 self.contract_id,
                 self.requirements_hash,
@@ -151,7 +164,7 @@ class ChangeSet:
 
     @property
     def hash(self):
-        return _hash(
+        return _CS_HASH(
             (
                 self.change_set_id,
                 self.source_revision,
@@ -177,7 +190,7 @@ class VerificationPlan:
 
     @property
     def hash(self):
-        return _hash(
+        return _VP_HASH(
             (
                 self.plan_id,
                 self.acceptance_contract_hash,
@@ -238,7 +251,7 @@ class EvidenceBundle:
 
     @property
     def hash(self):
-        return _hash(self.canonical_value)
+        return _EB_HASH(self.canonical_value)
 
     @property
     def envelope_hash(self):
@@ -267,6 +280,8 @@ class EvidenceBundle:
         return IntegrityStatus.VALID
 
     def to_dict(self):
+        if self.claimed_bundle_hash is not None and self.claimed_bundle_hash != self.hash:
+            raise ValueError("claimed_bundle_hash does not match computed hash")
         body = {
             "evidence_bundle_schema": EVIDENCE_BUNDLE_SCHEMA,
             "bundle_id": self.bundle_id,
@@ -283,8 +298,15 @@ class EvidenceBundle:
                 for o in sorted(self.observations, key=lambda x: (x.verifier_id, x.artifact_id))
             ],
         }
-        body["bundle_hash"] = _hash(body)
+        body["bundle_hash"] = _EB_ENVELOPE_HASH(body)
         return body
+
+
+_AC_HASH = _make_hash(canonical_json, hashlib.sha256)
+_CS_HASH = _make_hash(canonical_json, hashlib.sha256)
+_VP_HASH = _make_hash(canonical_json, hashlib.sha256)
+_EB_HASH = _make_hash(canonical_json, hashlib.sha256)
+_EB_ENVELOPE_HASH = _make_hash(canonical_json, hashlib.sha256)
 
 
 def validate_evidence_bundle_envelope(
@@ -296,6 +318,9 @@ def validate_evidence_bundle_envelope(
         )
     if expected_bundle is not None and type(expected_bundle) is not EvidenceBundle:
         raise TypeError("expected_bundle must be EvidenceBundle")
+    if expected_bundle is not None and expected_bundle.claimed_bundle_hash is not None:
+        if expected_bundle.claimed_bundle_hash != expected_bundle.hash:
+            raise ValueError("expected_bundle claimed hash does not match computed hash")
     if expected_envelope_hash is not None:
         _require_hash(expected_envelope_hash, "expected_envelope_hash")
     if type(contract) is not AcceptanceContract:
@@ -376,7 +401,7 @@ def validate_evidence_bundle_envelope(
         if rows != sorted(rows, key=lambda r: (r[0], r[1])):
             errors.append("MALFORMED:observation_order")
         body = {k: payload[k] for k in expected_keys - {"bundle_hash"} if k in payload}
-        if not errors and payload.get("bundle_hash") != _hash(body):
+        if not errors and payload.get("bundle_hash") != _EB_ENVELOPE_HASH(body):
             errors.append("TAMPERED:bundle_hash")
         if payload.get("acceptance_contract_hash") != contract.hash:
             errors.append("CROSS_BOUND:acceptance_contract_hash")

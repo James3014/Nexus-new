@@ -10,6 +10,9 @@ from product.protocol import (
 )
 from product.verification import VerificationResult, is_reduced_result
 
+_RECEIPT_HASH = _hash
+_REQUIRE_HASH = _require_hash
+
 CLAIM_CEILING = (
     "NO_MERGE_AUTHORIZATION",
     "NO_DEPLOYMENT_TRUTH",
@@ -91,7 +94,7 @@ class Receipt:
             "verification_plan_hash",
             "evidence_hash",
         ):
-            _require_hash(getattr(self, field), field)
+            _REQUIRE_HASH(getattr(self, field), field)
         if type(self.verification) is not VerificationResult or not is_reduced_result(
             self.verification
         ):
@@ -109,7 +112,7 @@ class Receipt:
         if certify_result(self.verification, self.policy) is not self.disposition:
             raise ValueError("disposition must match reducer")
         if self.claimed_receipt_hash is not None:
-            _require_hash(self.claimed_receipt_hash, "claimed_receipt_hash")
+            _REQUIRE_HASH(self.claimed_receipt_hash, "claimed_receipt_hash")
 
     @property
     def canonical_value(self):
@@ -140,9 +143,11 @@ class Receipt:
 
     @property
     def hash(self):
-        return _hash(self.canonical_value)
+        return _RECEIPT_HASH(self.canonical_value)
 
     def to_dict(self):
+        if self.claimed_receipt_hash is not None and self.claimed_receipt_hash != self.hash:
+            raise ValueError("claimed_receipt_hash does not match computed hash")
         return {**self.canonical_value, "receipt_hash": self.hash}
 
     def validate(self):
@@ -174,11 +179,17 @@ class CertificationResult:
             raise ValueError("disposition must match reducer")
 
 
-def validate_receipt_envelope(payload, expected_receipt):
+def _validate_receipt_envelope(payload, expected_receipt):
+    """Validate envelope structure against an already recomputed receipt.
+
+    This is an internal structural check; callers must not treat a supplied
+    Receipt as certification authority.  Kernel validation recomputes it.
+    """
     if type(expected_receipt) is not Receipt:
         raise TypeError("expected_receipt must be Receipt")
     if type(payload) is not dict:
         return ("MALFORMED:payload",)
+
     errors = []
     try:
         _strict_json(payload)
@@ -187,9 +198,9 @@ def validate_receipt_envelope(payload, expected_receipt):
             errors.append("MALFORMED:keys")
         if isinstance(payload.get("receipt_hash"), str):
             try:
-                _require_hash(payload["receipt_hash"], "receipt_hash")
+                _REQUIRE_HASH(payload["receipt_hash"], "receipt_hash")
                 body = {key: payload[key] for key in payload if key != "receipt_hash"}
-                if payload["receipt_hash"] != _hash(body):
+                if payload["receipt_hash"] != _RECEIPT_HASH(body):
                     errors.append("TAMPERED:receipt_hash")
             except (TypeError, ValueError):
                 errors.append("TAMPERED:receipt_hash")
@@ -210,7 +221,7 @@ def validate_receipt_envelope(payload, expected_receipt):
                 errors.append(f"MALFORMED:{field}")
             elif field != "receipt_hash":
                 try:
-                    _require_hash(payload[field], field)
+                    _REQUIRE_HASH(payload[field], field)
                 except (TypeError, ValueError):
                     errors.append(f"MALFORMED:{field}")
         verification = payload.get("verification")
@@ -254,3 +265,8 @@ def validate_receipt_envelope(payload, expected_receipt):
         return tuple(dict.fromkeys(errors))
     except (TypeError, ValueError, RecursionError, OverflowError):
         return ("MALFORMED:payload",)
+
+
+# Compatibility import for existing structural callers. Certification code
+# uses the private name above and never accepts this as an authority root.
+validate_receipt_envelope = _validate_receipt_envelope

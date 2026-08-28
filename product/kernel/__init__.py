@@ -5,7 +5,7 @@ from product.certification.receipt import (
     CLAIM_CEILING,
     CertificationResult,
     Receipt,
-    validate_receipt_envelope,
+    _validate_receipt_envelope,
 )
 from product.evidence import (
     AcceptanceContract,
@@ -57,7 +57,12 @@ def validate_receipt(receipt: Receipt, input: CertificationInput) -> bool:
 
 
 def validate_serialized_receipt(payload, input: CertificationInput) -> tuple[str, ...]:
-    return validate_receipt_envelope(payload, certify(input).receipt)
+    return _validate_receipt_envelope(payload, certify(input).receipt)
+
+
+# Legacy structural name retained for import compatibility only.  It is not
+# used by the certification path; callers should use validate_serialized_receipt.
+validate_receipt_envelope = _validate_receipt_envelope
 
 
 __all__ = [
