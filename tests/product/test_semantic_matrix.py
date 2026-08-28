@@ -1,5 +1,9 @@
+import gc
+import weakref
+
 import pytest
 
+import product.verification as verification_module
 from product.certification import CertificationDisposition, CertificationPolicy, certify_result
 from product.evidence import IntegrityStatus, ObservationStatus
 from product.verification import VerificationResult, VerificationStatus, reduce_verification
@@ -66,6 +70,20 @@ def test_failed_results_have_canonical_reason_and_distinct_receipt_payload():
     assert "unit" in failed.reason_codes
     assert "SCOPE_ESCAPE" in scoped.reason_codes
     assert failed != scoped
+
+
+def test_reducer_registry_is_private_weak_and_forgery_does_not_pass():
+    assert not hasattr(verification_module, "_REDUCED_RESULTS")
+    assert not hasattr(verification_module, "_INTERNAL_TOKEN")
+    assert not hasattr(verification_module, "_make_reducer")
+    result = reduce_verification(IntegrityStatus.VALID, (ObservationStatus.PASS,))
+    ref = weakref.ref(result)
+    assert verification_module.is_reduced_result(result)
+    del result
+    gc.collect()
+    assert ref() is None
+    forged = object.__new__(VerificationResult)
+    assert not verification_module.is_reduced_result(forged)
 
 
 @pytest.mark.parametrize(
