@@ -8,6 +8,7 @@ from product.kernel import CertificationInput, certify
 
 _SHA40 = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256 = re.compile(r"sha256:[0-9a-f]{64}\Z")
+_GITHUB_NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?\Z")
 _FIELDS = frozenset(
     {
         "repository_owner",
@@ -39,6 +40,9 @@ class GitHubPullRequestSnapshot:
     def __post_init__(self):
         _text(self.repository_owner, "repository_owner")
         _text(self.repository_name, "repository_name")
+        for field in ("repository_owner", "repository_name"):
+            if _GITHUB_NAME.fullmatch(getattr(self, field)) is None:
+                raise ValueError(f"{field} must be a GitHub-compatible name")
         if type(self.pr_number) is not int or self.pr_number <= 0:
             raise ValueError("pr_number must be a positive exact int")
         for field in ("base_sha", "head_sha"):
@@ -113,30 +117,118 @@ def to_changeset(snapshot):
 github_snapshot_to_changeset = to_changeset
 
 
-def certify_pull_request(
-    snapshot,
-    contract,
-    plan,
-    evidence,
-    *,
-    policy_accepted=None,
-    authority_present=None,
-    approval_present=None,
-    signing_present=None,
-):
-    change_set = to_changeset(snapshot)
-    return certify(
-        CertificationInput(
-            contract,
-            change_set,
-            plan,
-            evidence,
-            policy_accepted,
-            authority_present,
-            approval_present,
-            signing_present,
-        )
+def _make_trust_sealed_api(snapshot_type, change_set_type, input_type, kernel_certify):
+    name_pattern = _GITHUB_NAME.fullmatch
+    sha40 = _SHA40.fullmatch
+    sha256 = _SHA256.fullmatch
+    fields = frozenset(_FIELDS)
+    ordered_fields = (
+        "repository_owner",
+        "repository_name",
+        "pr_number",
+        "base_sha",
+        "head_sha",
+        "diff_hash",
+        "changed_paths",
     )
+
+    def validate(value):
+        if type(value) is not snapshot_type:
+            raise TypeError("snapshot must be GitHubPullRequestSnapshot")
+        data = vars(value)
+        if set(data) != fields:
+            raise ValueError("malformed GitHub pull-request snapshot fields")
+        for field in ("repository_owner", "repository_name"):
+            item = data[field]
+            if type(item) is not str or name_pattern(item) is None:
+                raise ValueError(f"{field} must be a GitHub-compatible name")
+        if type(data["pr_number"]) is not int or data["pr_number"] <= 0:
+            raise ValueError("pr_number must be a positive exact int")
+        if type(data["base_sha"]) is not str or sha40(data["base_sha"]) is None:
+            raise ValueError("base_sha must be lowercase 40-hex SHA")
+        if type(data["head_sha"]) is not str or sha40(data["head_sha"]) is None:
+            raise ValueError("head_sha must be lowercase 40-hex SHA")
+        if data["base_sha"] == data["head_sha"]:
+            raise ValueError("base_sha and head_sha must differ")
+        if type(data["diff_hash"]) is not str or sha256(data["diff_hash"]) is None:
+            raise ValueError("diff_hash must be sha256:<64 lowercase hex>")
+        paths = data["changed_paths"]
+        if type(paths) is not tuple or not paths or len(paths) != len(set(paths)):
+            raise ValueError("changed_paths must be a non-empty unique tuple")
+        for path in paths:
+            if (
+                type(path) is not str
+                or not path
+                or path != path.strip()
+                or path.startswith("/")
+                or "\\" in path
+            ):
+                raise ValueError("changed_paths must contain normalized relative paths")
+            if any(part in {"", ".", ".."} for part in path.split("/")):
+                raise ValueError("changed_paths must contain normalized relative paths")
+        return data
+
+    def sealed_to_changeset(value):
+        data = validate(value)
+        change_set_id = f"github:{data['repository_owner']}/{data['repository_name']}#pr-{data['pr_number']}@{data['head_sha']}"
+        return change_set_type(
+            change_set_id,
+            data["base_sha"],
+            data["head_sha"],
+            data["diff_hash"],
+            tuple(sorted(data["changed_paths"])),
+        )
+
+    def sealed_snapshot_to_dict(value):
+        data = validate(value)
+        return {
+            key: (sorted(data[key]) if key == "changed_paths" else data[key])
+            for key in ordered_fields
+        }
+
+    def sealed_load(payload):
+        if type(payload) is not dict or set(payload) != fields:
+            raise ValueError("malformed GitHub pull-request snapshot keys")
+        values = dict(payload)
+        if type(values["changed_paths"]) is not list:
+            raise TypeError("changed_paths must be a list in serialized snapshots")
+        values["changed_paths"] = tuple(values["changed_paths"])
+        return snapshot_type(**values)
+
+    def sealed_certify(
+        value,
+        contract,
+        plan,
+        evidence,
+        *,
+        policy_accepted=None,
+        authority_present=None,
+        approval_present=None,
+        signing_present=None,
+    ):
+        change_set = sealed_to_changeset(value)
+        return kernel_certify(
+            input_type(
+                contract,
+                change_set,
+                plan,
+                evidence,
+                policy_accepted,
+                authority_present,
+                approval_present,
+                signing_present,
+            )
+        )
+
+    return sealed_to_changeset, sealed_snapshot_to_dict, sealed_load, sealed_certify
+
+
+to_changeset, snapshot_to_dict, load_snapshot, certify_pull_request = _make_trust_sealed_api(  # type: ignore[reportAssignmentType]
+    GitHubPullRequestSnapshot, ChangeSet, CertificationInput, certify
+)
+github_snapshot_to_changeset = to_changeset
+load_github_pull_request_snapshot = load_snapshot
+serialize_github_pull_request_snapshot = snapshot_to_dict
 
 
 __all__ = [
