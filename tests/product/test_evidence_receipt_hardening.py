@@ -357,13 +357,22 @@ def test_evidence_schema_constants_and_envelope_hash_trust_root_fail_closed():
     data = _input()
     payload = data.evidence.to_dict()
     assert validate_evidence_bundle_envelope(
-        payload, data.contract, data.change_set, data.plan,
+        payload,
+        data.contract,
+        data.change_set,
+        data.plan,
         expected_envelope_hash=_hash("wrong"),
     ) == ("TAMPERED:fields",)
-    assert load_evidence_bundle_envelope(
-        payload, data.contract, data.change_set, data.plan,
-        expected_envelope_hash=_hash("wrong"),
-    ) is None
+    assert (
+        load_evidence_bundle_envelope(
+            payload,
+            data.contract,
+            data.change_set,
+            data.plan,
+            expected_envelope_hash=_hash("wrong"),
+        )
+        is None
+    )
 
 
 @pytest.mark.parametrize("field", ["status", "artifact_hash"])
@@ -373,16 +382,27 @@ def test_rehashed_evidence_mutations_fail_against_external_envelope_hash(field):
     data = _input()
     payload = data.evidence.to_dict()
     payload["observations"][0][field] = "FAIL" if field == "status" else _hash("other-artifact")
-    payload["bundle_hash"] = _hash({key: value for key, value in payload.items() if key != "bundle_hash"})
+    payload["bundle_hash"] = _hash(
+        {key: value for key, value in payload.items() if key != "bundle_hash"}
+    )
     errors = validate_evidence_bundle_envelope(
-        payload, data.contract, data.change_set, data.plan,
+        payload,
+        data.contract,
+        data.change_set,
+        data.plan,
         expected_envelope_hash=data.evidence.envelope_hash,
     )
     assert errors == ("TAMPERED:fields",)
-    assert load_evidence_bundle_envelope(
-        payload, data.contract, data.change_set, data.plan,
-        expected_envelope_hash=data.evidence.envelope_hash,
-    ) is None
+    assert (
+        load_evidence_bundle_envelope(
+            payload,
+            data.contract,
+            data.change_set,
+            data.plan,
+            expected_envelope_hash=data.evidence.envelope_hash,
+        )
+        is None
+    )
 
 
 def test_rehashed_schema_mutation_is_stale_for_both_trust_roots():
@@ -391,15 +411,23 @@ def test_rehashed_schema_mutation_is_stale_for_both_trust_roots():
     data = _input()
     payload = data.evidence.to_dict()
     payload["evidence_bundle_schema"] = "nexus.evidence_bundle.v0"
-    payload["bundle_hash"] = _hash({key: value for key, value in payload.items() if key != "bundle_hash"})
-    for root in ({"expected_bundle": data.evidence}, {"expected_envelope_hash": data.evidence.envelope_hash}):
+    payload["bundle_hash"] = _hash(
+        {key: value for key, value in payload.items() if key != "bundle_hash"}
+    )
+    for root in (
+        {"expected_bundle": data.evidence},
+        {"expected_envelope_hash": data.evidence.envelope_hash},
+    ):
         errors = validate_evidence_bundle_envelope(
             payload, data.contract, data.change_set, data.plan, **root
         )
         assert "STALE:evidence_bundle_schema" in errors
-        assert load_evidence_bundle_envelope(
-            payload, data.contract, data.change_set, data.plan, **root
-        ) is None
+        assert (
+            load_evidence_bundle_envelope(
+                payload, data.contract, data.change_set, data.plan, **root
+            )
+            is None
+        )
 
 
 @pytest.mark.parametrize("field", ["verification", "condition", "disposition", "certification"])
@@ -410,15 +438,23 @@ def test_injected_authority_fields_are_rejected_for_both_trust_roots(field):
     genuine = data.evidence.to_dict()
     assert not set(genuine) & {"verification", "condition", "disposition", "certification"}
     payload = {**genuine, field: "forged"}
-    payload["bundle_hash"] = _hash({key: value for key, value in payload.items() if key != "bundle_hash"})
-    for root in ({"expected_bundle": data.evidence}, {"expected_envelope_hash": data.evidence.envelope_hash}):
+    payload["bundle_hash"] = _hash(
+        {key: value for key, value in payload.items() if key != "bundle_hash"}
+    )
+    for root in (
+        {"expected_bundle": data.evidence},
+        {"expected_envelope_hash": data.evidence.envelope_hash},
+    ):
         errors = validate_evidence_bundle_envelope(
             payload, data.contract, data.change_set, data.plan, **root
         )
         assert "MALFORMED:keys" in errors
-        assert load_evidence_bundle_envelope(
-            payload, data.contract, data.change_set, data.plan, **root
-        ) is None
+        assert (
+            load_evidence_bundle_envelope(
+                payload, data.contract, data.change_set, data.plan, **root
+            )
+            is None
+        )
 
 
 def test_receipt_schema_constant_is_exact():
