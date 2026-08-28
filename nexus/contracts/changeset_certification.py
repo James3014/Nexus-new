@@ -351,7 +351,7 @@ def build_changeset_certification(
         )
     source = str(change_set["source_revision"])
     target = str(change_set["target_revision"])
-    return _new_envelope(
+    request = _new_envelope(
         task={"task_id": str(change_set["change_set_id"]), "attempt_id": "attempt-1"},
         repository={"repository": "local", "source": source},
         base={"commit": source, "tree": source},
@@ -362,6 +362,7 @@ def build_changeset_certification(
         disposition="BLOCKED",
         reasons=["policy_missing"],
     )
+    return certify_changeset(request).to_dict()
 
 
 def _certify_compatibility_input(payload: Mapping[str, Any]) -> ChangeSetCertification:
@@ -386,6 +387,12 @@ def validate_changeset_certification(
     )
     if not isinstance(payload, Mapping):
         return ("identity_malformed",)
+    if (
+        payload.get("schema") == CHANGESET_CERTIFICATION_SCHEMA
+        and payload.get("version") == CHANGESET_CERTIFICATION_VERSION
+        and "verification_result" not in payload
+    ):
+        return ("evidence_missing",)
     errors = _validate(payload, allow_verification_result=True)
     if errors:
         return errors

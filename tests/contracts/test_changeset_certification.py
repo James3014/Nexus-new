@@ -334,11 +334,12 @@ def test_every_disposition_is_deeply_hash_validated(disposition: str) -> None:
         payload["reasons"] = ["approval_missing"]
     payload["disposition"] = disposition
     _rehash(payload)
-    assert validate_changeset_certification(payload) == ()
-    base = payload["base"]
+    receipt = certify_changeset(payload).to_dict()
+    assert validate_changeset_certification(receipt) == ()
+    base = receipt["base"]
     assert isinstance(base, dict)
     base["tree"] = "tampered-tree"
-    assert validate_changeset_certification(payload) in {
+    assert validate_changeset_certification(receipt) in {
         ("payload_hash_mismatch",),
         ("cross_binding_mismatch",),
     }
@@ -527,9 +528,17 @@ def test_validator_rejects_rehashed_factual_verification_tamper(mutation) -> Non
     assert validate_changeset_certification(payload) == ("status_substitution",)
 
 
+def test_validator_rejects_v2_receipt_missing_verification_result() -> None:
+    receipt = certify_changeset(_envelope()).to_dict()
+    receipt.pop("verification_result")
+    _rehash(receipt)
+
+    assert validate_changeset_certification(receipt) != ()
+
+
 @pytest.mark.parametrize("field", ["approval", "authority", "signing"])
 def test_validator_rejects_rehashed_false_prerequisite(field: str) -> None:
-    payload = _envelope()
+    payload = certify_changeset(_envelope()).to_dict()
     payload[field] = {"complete": False}
     _rehash(payload)
 
@@ -599,7 +608,7 @@ def test_v1_receipt_never_upgrades_to_v2_factual_truth(verifier_status: str) -> 
 
 
 def test_rejected_disposition_requires_bounded_non_empty_reason_codes() -> None:
-    payload = _envelope()
+    payload = certify_changeset(_envelope()).to_dict()
     payload["disposition"] = "REJECTED"
     payload["reasons"] = []
     _rehash(payload)
