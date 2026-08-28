@@ -1,14 +1,19 @@
 from dataclasses import dataclass
 
-from product.certification import CertificationDisposition, CertificationPolicy, certify_result
+from product.certification import CertificationPolicy, certify_result
+from product.certification.receipt import (
+    CLAIM_CEILING,
+    CertificationResult,
+    Receipt,
+    validate_receipt_envelope,
+)
 from product.evidence import (
     AcceptanceContract,
     ChangeSet,
     EvidenceBundle,
     VerificationPlan,
 )
-from product.verification import VerificationResult, verify
-from product.certification.receipt import Receipt, CertificationResult, validate_receipt_envelope, CLAIM_CEILING
+from product.verification import verify
 
 
 @dataclass(frozen=True)

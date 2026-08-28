@@ -3,6 +3,7 @@ import json
 import re
 from dataclasses import dataclass
 from enum import Enum
+
 from product.protocol import EVIDENCE_BUNDLE_SCHEMA
 
 
@@ -273,8 +274,12 @@ class EvidenceBundle:
             "change_set_hash": self.change_set_hash,
             "verification_plan_hash": self.verification_plan_hash,
             "observations": [
-                {"verifier_id": o.verifier_id, "artifact_id": o.artifact_id,
-                 "artifact_hash": o.artifact_hash, "status": o.status.value}
+                {
+                    "verifier_id": o.verifier_id,
+                    "artifact_id": o.artifact_id,
+                    "artifact_hash": o.artifact_hash,
+                    "status": o.status.value,
+                }
                 for o in sorted(self.observations, key=lambda x: (x.verifier_id, x.artifact_id))
             ],
         }
@@ -286,45 +291,101 @@ def validate_evidence_bundle_envelope(
     payload, contract, change_set, plan, *, expected_bundle=None, expected_envelope_hash=None
 ):
     if (expected_bundle is None) == (expected_envelope_hash is None):
-        raise TypeError("exactly one independently supplied expected bundle or envelope hash is required")
+        raise TypeError(
+            "exactly one independently supplied expected bundle or envelope hash is required"
+        )
     if expected_bundle is not None and not isinstance(expected_bundle, EvidenceBundle):
         raise TypeError("expected_bundle must be EvidenceBundle")
     if expected_envelope_hash is not None:
         _require_hash(expected_envelope_hash, "expected_envelope_hash")
     errors = []
     try:
-        if type(payload) is not dict: return ("MALFORMED:payload",)
-        expected_keys = {"evidence_bundle_schema", "bundle_id", "acceptance_contract_hash", "change_set_hash", "verification_plan_hash", "observations", "bundle_hash"}
-        if set(payload) != expected_keys: errors.append("MALFORMED:keys")
-        if payload.get("evidence_bundle_schema") != EVIDENCE_BUNDLE_SCHEMA: errors.append("STALE:evidence_bundle_schema")
-        for field in ("bundle_id", "acceptance_contract_hash", "change_set_hash", "verification_plan_hash", "bundle_hash"):
-            if field not in payload or not isinstance(payload[field], str): errors.append(f"MALFORMED:{field}")
-        if isinstance(payload.get("bundle_id"), str): _require_text(payload["bundle_id"], "bundle_id")
-        for field in ("acceptance_contract_hash", "change_set_hash", "verification_plan_hash", "bundle_hash"):
-            if isinstance(payload.get(field), str): _require_hash(payload[field], field)
+        if type(payload) is not dict:
+            return ("MALFORMED:payload",)
+        expected_keys = {
+            "evidence_bundle_schema",
+            "bundle_id",
+            "acceptance_contract_hash",
+            "change_set_hash",
+            "verification_plan_hash",
+            "observations",
+            "bundle_hash",
+        }
+        if set(payload) != expected_keys:
+            errors.append("MALFORMED:keys")
+        if payload.get("evidence_bundle_schema") != EVIDENCE_BUNDLE_SCHEMA:
+            errors.append("STALE:evidence_bundle_schema")
+        for field in (
+            "bundle_id",
+            "acceptance_contract_hash",
+            "change_set_hash",
+            "verification_plan_hash",
+            "bundle_hash",
+        ):
+            if field not in payload or not isinstance(payload[field], str):
+                errors.append(f"MALFORMED:{field}")
+        if isinstance(payload.get("bundle_id"), str):
+            _require_text(payload["bundle_id"], "bundle_id")
+        for field in (
+            "acceptance_contract_hash",
+            "change_set_hash",
+            "verification_plan_hash",
+            "bundle_hash",
+        ):
+            if isinstance(payload.get(field), str):
+                _require_hash(payload[field], field)
         observations = payload.get("observations")
-        if not isinstance(observations, list) or not observations: errors.append("MALFORMED:observations")
+        if not isinstance(observations, list) or not observations:
+            errors.append("MALFORMED:observations")
         rows = []
         if type(observations) is list:
             for i, row in enumerate(observations):
-                if type(row) is not dict or set(row) != {"verifier_id", "artifact_id", "artifact_hash", "status"}:
-                    errors.append(f"MALFORMED:observations[{i}]"); continue
-                if not all(isinstance(row.get(k), str) for k in ("verifier_id", "artifact_id", "artifact_hash", "status")):
-                    errors.append(f"MALFORMED:observations[{i}]"); continue
-                if row["status"] not in {"PASS", "FAIL"}: errors.append(f"MALFORMED:observations[{i}].status")
-                try: _require_text(row["verifier_id"], "verifier_id"); _require_text(row["artifact_id"], "artifact_id"); _require_hash(row["artifact_hash"], "artifact_hash")
-                except (TypeError, ValueError): errors.append(f"MALFORMED:observations[{i}]")
-                rows.append((row["verifier_id"], row["artifact_id"], row["artifact_hash"], row["status"]))
-        if len({r[0] for r in rows}) != len(rows) or len({r[1] for r in rows}) != len(rows): errors.append("DUPLICATE:observations")
-        if rows != sorted(rows, key=lambda r: (r[0], r[1])): errors.append("MALFORMED:observation_order")
+                if type(row) is not dict or set(row) != {
+                    "verifier_id",
+                    "artifact_id",
+                    "artifact_hash",
+                    "status",
+                }:
+                    errors.append(f"MALFORMED:observations[{i}]")
+                    continue
+                if not all(
+                    isinstance(row.get(k), str)
+                    for k in ("verifier_id", "artifact_id", "artifact_hash", "status")
+                ):
+                    errors.append(f"MALFORMED:observations[{i}]")
+                    continue
+                if row["status"] not in {"PASS", "FAIL"}:
+                    errors.append(f"MALFORMED:observations[{i}].status")
+                try:
+                    _require_text(row["verifier_id"], "verifier_id")
+                    _require_text(row["artifact_id"], "artifact_id")
+                    _require_hash(row["artifact_hash"], "artifact_hash")
+                except (TypeError, ValueError):
+                    errors.append(f"MALFORMED:observations[{i}]")
+                rows.append(
+                    (row["verifier_id"], row["artifact_id"], row["artifact_hash"], row["status"])
+                )
+        if len({r[0] for r in rows}) != len(rows) or len({r[1] for r in rows}) != len(rows):
+            errors.append("DUPLICATE:observations")
+        if rows != sorted(rows, key=lambda r: (r[0], r[1])):
+            errors.append("MALFORMED:observation_order")
         body = {k: payload[k] for k in expected_keys - {"bundle_hash"} if k in payload}
-        if not errors and payload.get("bundle_hash") != _hash(body): errors.append("TAMPERED:bundle_hash")
-        if payload.get("acceptance_contract_hash") != contract.hash: errors.append("CROSS_BOUND:acceptance_contract_hash")
-        if payload.get("change_set_hash") != change_set.hash: errors.append("STALE:change_set_hash")
-        if payload.get("verification_plan_hash") != plan.hash or plan.acceptance_contract_hash != contract.hash or plan.change_set_hash != change_set.hash: errors.append("CROSS_BINDING_INVALID:verification_plan_hash")
+        if not errors and payload.get("bundle_hash") != _hash(body):
+            errors.append("TAMPERED:bundle_hash")
+        if payload.get("acceptance_contract_hash") != contract.hash:
+            errors.append("CROSS_BOUND:acceptance_contract_hash")
+        if payload.get("change_set_hash") != change_set.hash:
+            errors.append("STALE:change_set_hash")
+        if (
+            payload.get("verification_plan_hash") != plan.hash
+            or plan.acceptance_contract_hash != contract.hash
+            or plan.change_set_hash != change_set.hash
+        ):
+            errors.append("CROSS_BINDING_INVALID:verification_plan_hash")
         if not errors:
             if expected_bundle is not None:
-                if payload != expected_bundle.to_dict(): errors.append("TAMPERED:fields")
+                if payload != expected_bundle.to_dict():
+                    errors.append("TAMPERED:fields")
             elif payload.get("bundle_hash") != expected_envelope_hash:
                 errors.append("TAMPERED:fields")
     except (TypeError, ValueError, RecursionError, OverflowError):
@@ -336,8 +397,27 @@ def load_evidence_bundle_envelope(
     payload, contract, change_set, plan, *, expected_bundle=None, expected_envelope_hash=None
 ):
     errors = validate_evidence_bundle_envelope(
-        payload, contract, change_set, plan,
-        expected_bundle=expected_bundle, expected_envelope_hash=expected_envelope_hash,
+        payload,
+        contract,
+        change_set,
+        plan,
+        expected_bundle=expected_bundle,
+        expected_envelope_hash=expected_envelope_hash,
     )
-    if errors: return None
-    return EvidenceBundle(payload["bundle_id"], payload["acceptance_contract_hash"], payload["change_set_hash"], payload["verification_plan_hash"], tuple(Observation(r["verifier_id"], r["artifact_id"], r["artifact_hash"], ObservationStatus(r["status"])) for r in payload["observations"]))
+    if errors:
+        return None
+    return EvidenceBundle(
+        payload["bundle_id"],
+        payload["acceptance_contract_hash"],
+        payload["change_set_hash"],
+        payload["verification_plan_hash"],
+        tuple(
+            Observation(
+                r["verifier_id"],
+                r["artifact_id"],
+                r["artifact_hash"],
+                ObservationStatus(r["status"]),
+            )
+            for r in payload["observations"]
+        ),
+    )
