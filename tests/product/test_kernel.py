@@ -295,11 +295,11 @@ def test_stale_bindings_are_unverifiable_and_blocked():
     p = case().plan
     e = case().evidence
     stale = EvidenceBundle(
-        e.bundle_id, _hash("stale"), e.change_set_hash, e.verification_plan_hash, e.observations
+        e.bundle_id, e.acceptance_contract_hash, _hash("stale"), e.verification_plan_hash, e.observations
     )
     result = certify(CertificationInput(c, ch, p, stale, True, True, True, True))
     assert result.verification.status is VerificationStatus.UNVERIFIABLE
-    assert result.disposition is CertificationDisposition.REJECTED
+    assert result.disposition is CertificationDisposition.BLOCKED
 
 
 def test_claimed_evidence_hash_tamper_is_unverifiable_and_rejected():

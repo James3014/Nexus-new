@@ -47,3 +47,40 @@ def test_direct_truth_and_caller_disposition_inputs_are_rejected():
         reduce_verification(IntegrityStatus.VALID, status=VerificationStatus.VERIFIED)  # type: ignore[call-arg]
     with pytest.raises(TypeError):
         reduce_verification(IntegrityStatus.VALID, disposition=CertificationDisposition.CERTIFIED)  # type: ignore[call-arg]
+
+
+@pytest.mark.parametrize(
+    "observations, condition, expected_condition, status, disposition",
+    [
+        ((ObservationStatus.PASS,), IntegrityStatus.VALID, IntegrityStatus.VALID, VerificationStatus.VERIFIED, CertificationDisposition.CERTIFIED),
+        ((ObservationStatus.FAIL,), IntegrityStatus.VALID, IntegrityStatus.VALID, VerificationStatus.FAILED_VERIFICATION, CertificationDisposition.REJECTED),
+        ((), IntegrityStatus.MISSING, IntegrityStatus.MISSING, VerificationStatus.UNVERIFIABLE, CertificationDisposition.BLOCKED),
+        (("PASS",), IntegrityStatus.VALID, IntegrityStatus.LEGACY_NON_CERTIFIABLE, VerificationStatus.UNVERIFIABLE, CertificationDisposition.BLOCKED),
+        (("FAIL",), IntegrityStatus.VALID, IntegrityStatus.LEGACY_NON_CERTIFIABLE, VerificationStatus.UNVERIFIABLE, CertificationDisposition.BLOCKED),
+        (("MAYBE",), IntegrityStatus.VALID, IntegrityStatus.MALFORMED, VerificationStatus.UNVERIFIABLE, CertificationDisposition.REJECTED),
+        ((VerificationStatus.VERIFIED,), IntegrityStatus.VALID, IntegrityStatus.MALFORMED, VerificationStatus.UNVERIFIABLE, CertificationDisposition.REJECTED),
+    ],
+)
+def test_named_compatibility_rows(observations, condition, expected_condition, status, disposition):
+    result = reduce_verification(condition, observations)
+    assert (result.status, result.integrity) == (status, expected_condition)
+    assert certify_result(result, CertificationPolicy(True, True, True, True)) is disposition
+
+
+@pytest.mark.parametrize(
+    "condition, disposition",
+    [
+        (IntegrityStatus.SCOPE_ESCAPE, CertificationDisposition.REJECTED),
+        (IntegrityStatus.MISSING, CertificationDisposition.BLOCKED),
+        (IntegrityStatus.STALE, CertificationDisposition.BLOCKED),
+        (IntegrityStatus.TAMPERED, CertificationDisposition.REJECTED),
+        (IntegrityStatus.MALFORMED, CertificationDisposition.REJECTED),
+        (IntegrityStatus.CROSS_BOUND, CertificationDisposition.REJECTED),
+        (IntegrityStatus.DUPLICATE, CertificationDisposition.REJECTED),
+        (IntegrityStatus.LEGACY_NON_CERTIFIABLE, CertificationDisposition.BLOCKED),
+    ],
+)
+def test_condition_disposition_matrix(condition, disposition):
+    result = reduce_verification(condition)
+    assert result.status is (VerificationStatus.FAILED_VERIFICATION if condition is IntegrityStatus.SCOPE_ESCAPE else VerificationStatus.UNVERIFIABLE)
+    assert certify_result(result, CertificationPolicy(True, True, True, True)) is disposition

@@ -76,9 +76,12 @@ def reduce_verification(condition, observations=(), reasons=()):
     elif not observations:
         status, integrity = VerificationStatus.UNVERIFIABLE, IntegrityStatus.MISSING
         codes.append(IntegrityStatus.MISSING.value)
-    elif any(type(item) is str for item in observations):
+    elif any(type(item) is str for item in observations) and all(item in {"PASS", "FAIL"} for item in observations):
         status, integrity = VerificationStatus.UNVERIFIABLE, IntegrityStatus.LEGACY_NON_CERTIFIABLE
         codes.append(IntegrityStatus.LEGACY_NON_CERTIFIABLE.value)
+    elif any(type(item) is str for item in observations):
+        status, integrity = VerificationStatus.UNVERIFIABLE, IntegrityStatus.MALFORMED
+        codes.append(IntegrityStatus.MALFORMED.value)
     elif not all(isinstance(item, ObservationStatus) for item in observations):
         status, integrity = VerificationStatus.UNVERIFIABLE, IntegrityStatus.MALFORMED
         codes.append(IntegrityStatus.MALFORMED.value)

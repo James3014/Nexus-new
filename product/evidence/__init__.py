@@ -221,9 +221,12 @@ class EvidenceBundle:
             return IntegrityStatus.TAMPERED
         if (
             self.acceptance_contract_hash != contract.hash
-            or
-            self.change_set_hash != change_set.hash
-            or self.verification_plan_hash != plan.hash
+        ):
+            return IntegrityStatus.CROSS_BOUND
+        if self.change_set_hash != change_set.hash:
+            return IntegrityStatus.STALE
+        if (
+            self.verification_plan_hash != plan.hash
             or plan.acceptance_contract_hash != contract.hash
             or plan.change_set_hash != change_set.hash
         ):
