@@ -212,6 +212,32 @@ def test_loader_revalidates_after_post_init_rebinding(monkeypatch):
         load_github_pull_request_snapshot(values)
 
 
+def test_valid_snapshot_diff_change_is_stale_and_blocked():
+    contract, plan, evidence = certification_case()
+    altered = replace(snapshot(), diff_hash="sha256:" + "d" * 64)
+    result = certify_pull_request(
+        altered,
+        contract,
+        plan,
+        evidence,
+        policy_accepted=True,
+        authority_present=True,
+        approval_present=True,
+        signing_present=True,
+    )
+    assert result.verification.status is VerificationStatus.UNVERIFIABLE
+    assert result.verification.integrity is IntegrityStatus.STALE
+    assert result.disposition is CertificationDisposition.BLOCKED
+    assert result.disposition is not CertificationDisposition.CERTIFIED
+
+
+def test_mapping_rejects_rebound_changeset_constructor(monkeypatch):
+    monkeypatch.setattr(github.ChangeSet, "__init__", lambda self, *args, **kwargs: None)
+    monkeypatch.setattr(github.ChangeSet, "__post_init__", lambda self: None)
+    with pytest.raises(ValueError, match="malformed mapped ChangeSet"):
+        github.to_changeset(snapshot())
+
+
 @pytest.mark.parametrize(
     "paths",
     [
