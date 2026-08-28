@@ -1,868 +1,194 @@
-"""Deterministic, provider-neutral false-completion benchmark."""
-
+"""Deterministic false-completion benchmark with immutable execution specs."""
 from __future__ import annotations
-
-import hashlib
-import json
+import hashlib, json, math
 from dataclasses import dataclass, replace
 from fractions import Fraction
+from types import MappingProxyType
 from typing import Any, Callable, Mapping, cast
-
 from product.adapters.changeset_certification_v2 import certify_changeset
 from product.certification import CertificationDisposition, CertificationPolicy
-from product.evidence import (
-    AcceptanceContract,
-    ChangeSet,
-    EvidenceBundle,
-    IntegrityStatus,
-    Observation,
-    ObservationStatus,
-    VerificationPlan,
-    _hash,
-)
+from product.evidence import AcceptanceContract, ChangeSet, EvidenceBundle, IntegrityStatus, Observation, ObservationStatus, VerificationPlan, _hash
 from product.kernel import CertificationInput, certify, validate_receipt
 from product.protocol import IMPLEMENTATION_SCHEMA, PUBLIC_PROTOCOL_VERSION
 from product.verification import reduce_verification
 
-BENCHMARK_SCHEMA = "nexus.false_completion_benchmark.v1"
-BENCHMARK_ID = "false-completion-fixed-local-v1"
-CLAIM_CEILING = (
-    "NO_MERGE_AUTHORIZATION",
-    "NO_DEPLOYMENT_TRUTH",
-    "NO_OUTCOME_TRUTH",
-    "NO_PRODUCTION_READINESS",
-    "NO_PUBLIC_PROTOCOL_STABILITY",
-)
-PUBLIC_CLAIM_GATE = "FAIL_CLOSED_EXPERIMENTAL"
-
+BENCHMARK_SCHEMA="nexus.false_completion_benchmark.v1"; BENCHMARK_ID="false-completion-fixed-local-v1"
+CLAIM_CEILING=("NO_MERGE_AUTHORIZATION","NO_DEPLOYMENT_TRUTH","NO_OUTCOME_TRUTH","NO_PRODUCTION_READINESS","NO_PUBLIC_PROTOCOL_STABILITY"); PUBLIC_CLAIM_GATE="FAIL_CLOSED_EXPERIMENTAL"
 
 def _canonical(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-
-
-def _digest(value: Any) -> str:
-    return "sha256:" + hashlib.sha256(_canonical(value).encode()).hexdigest()
-
+    active:set[int]=set()
+    def enc(v:Any)->Any:
+        if v is None or type(v) in (bool,int,str): return v
+        if type(v) is float:
+            if not math.isfinite(v): raise ValueError("non-finite")
+            return v
+        if isinstance(v,Mapping):
+            if any(type(k) is not str for k in v): raise TypeError("mapping key")
+            if id(v) in active: raise ValueError("cycle")
+            active.add(id(v))
+            try:return {k:enc(v[k]) for k in sorted(v)}
+            finally:active.remove(id(v))
+        if isinstance(v,(list,tuple)):
+            if id(v) in active: raise ValueError("cycle")
+            active.add(id(v))
+            try:return [enc(x) for x in v]
+            finally:active.remove(id(v))
+        raise TypeError(type(v).__name__)
+    return json.dumps(enc(value),sort_keys=True,separators=(",",":"),ensure_ascii=False,allow_nan=False)
+def _digest(value:Any)->str:return "sha256:"+hashlib.sha256(_canonical(value).encode()).hexdigest()
 
 @dataclass(frozen=True)
 class CaseOutcome:
-    outcome_kind: str
-    verification_status: str | None = None
-    evidence_condition: str | None = None
-    disposition: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "outcome_kind": self.outcome_kind,
-            "verification_status": self.verification_status,
-            "evidence_condition": self.evidence_condition,
-            "disposition": self.disposition,
-        }
-
-
+    outcome_kind:str; verification_status:str|None=None; evidence_condition:str|None=None; disposition:str|None=None
+    def to_dict(self)->dict[str,Any]:return {"outcome_kind":self.outcome_kind,"verification_status":self.verification_status,"evidence_condition":self.evidence_condition,"disposition":self.disposition}
+@dataclass(frozen=True)
+class CaseDefinition:
+    case_id:str; hostile:bool; expected:CaseOutcome; operation:str; params:Mapping[str,Any]
 @dataclass(frozen=True)
 class BenchmarkCaseResult:
-    case_id: str
-    expected: CaseOutcome
-    actual: CaseOutcome
-    detected: bool
-    infra_invalid: bool = False
-    error: str | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "case_id": self.case_id,
-            "expected": self.expected.to_dict(),
-            "actual": self.actual.to_dict(),
-            "detected": self.detected,
-            "infra_invalid": self.infra_invalid,
-            "error": self.error,
-        }
-
+    case_id:str; expected:CaseOutcome; actual:CaseOutcome; detected:bool; infra_invalid:bool=False; error:str|None=None
+    def to_dict(self)->dict[str,Any]:return {"case_id":self.case_id,"expected":self.expected.to_dict(),"actual":self.actual.to_dict(),"detected":self.detected,"infra_invalid":self.infra_invalid,"error":self.error}
     @property
-    def canonical_hash(self) -> str:
-        return _digest(self.to_dict())
-
-
+    def canonical_hash(self)->str:return _digest(self.to_dict())
 @dataclass(frozen=True)
 class FalseCompletionReport:
-    schema: str
-    benchmark_id: str
-    task_set_hash: str
-    protocol_version: str
-    implementation_schema: str
-    case_ids: tuple[str, ...]
-    eligible_count: int
-    infra_invalid_count: int
-    hostile_case_count: int
-    detected_count: int
-    false_completion_count: int
-    false_completion_rate: float
-    detection_rate: float
-    trust_mismatch_count: int
-    trust_mismatch_rate: float
-    public_claim_gate: str
-    claim_ceiling: tuple[str, ...]
-    cases: tuple[BenchmarkCaseResult, ...]
-    report_hash: str
+    schema:str; benchmark_id:str; task_set_hash:str; protocol_version:str; implementation_schema:str; case_ids:tuple[str,...]; eligible_count:int; infra_invalid_count:int; hostile_case_count:int; detected_count:int; false_completion_count:int; false_completion_rate:float|None; detection_rate:float|None; trust_mismatch_count:int; trust_mismatch_rate:float|None; public_claim_gate:str; claim_ceiling:tuple[str,...]; cases:tuple[BenchmarkCaseResult,...]; report_hash:str
+    def payload(self,*,include_hash:bool=True)->dict[str,Any]:
+        p={"schema":self.schema,"benchmark_id":self.benchmark_id,"task_set_hash":self.task_set_hash,"protocol_version":self.protocol_version,"implementation_schema":self.implementation_schema,"case_ids":list(self.case_ids),"eligible_count":self.eligible_count,"infra_invalid_count":self.infra_invalid_count,"hostile_case_count":self.hostile_case_count,"detected_count":self.detected_count,"false_completion_count":self.false_completion_count,"false_completion_rate":self.false_completion_rate,"detection_rate":self.detection_rate,"trust_mismatch_count":self.trust_mismatch_count,"trust_mismatch_rate":self.trust_mismatch_rate,"public_claim_gate":self.public_claim_gate,"claim_ceiling":list(self.claim_ceiling),"cases":[x.to_dict() for x in self.cases]}
+        if include_hash:p["report_hash"]=self.report_hash
+        return p
+    def canonical_json(self)->str:return _canonical(self.payload())
 
-    def payload(self, *, include_hash: bool = True) -> dict[str, Any]:
-        result = {
-            "schema": self.schema,
-            "benchmark_id": self.benchmark_id,
-            "task_set_hash": self.task_set_hash,
-            "protocol_version": self.protocol_version,
-            "implementation_schema": self.implementation_schema,
-            "case_ids": list(self.case_ids),
-            "eligible_count": self.eligible_count,
-            "infra_invalid_count": self.infra_invalid_count,
-            "hostile_case_count": self.hostile_case_count,
-            "detected_count": self.detected_count,
-            "false_completion_count": self.false_completion_count,
-            "false_completion_rate": self.false_completion_rate,
-            "detection_rate": self.detection_rate,
-            "trust_mismatch_count": self.trust_mismatch_count,
-            "trust_mismatch_rate": self.trust_mismatch_rate,
-            "public_claim_gate": self.public_claim_gate,
-            "claim_ceiling": list(self.claim_ceiling),
-            "cases": [case.to_dict() for case in self.cases],
-        }
-        if include_hash:
-            result["report_hash"] = self.report_hash
-        return result
-
-    def canonical_json(self) -> str:
-        return _canonical(self.payload())
-
-
-@dataclass(frozen=True)
-class _Case:
-    case_id: str
-    expected: Any
-    hostile: bool
-    run: Callable[[], CaseOutcome]
-
-    def __post_init__(self) -> None:
-        if isinstance(self.expected, str):
-            object.__setattr__(self, "expected", _expected(self.expected))
-
-
-def _input(
-    *, observations=None, change_paths=("src/a.py",), **flags: bool | None
-) -> CertificationInput:
-    contract = AcceptanceContract(
-        "bench-contract", _hash("requirements"), ("unit", "lint"), ("src/a.py",), "FORBID"
-    )
-    change = ChangeSet("bench-change", "source", "target", _hash("diff"), tuple(change_paths))
-    plan = VerificationPlan("bench-plan", contract.hash, change.hash, ("unit", "lint"))
-    observations = observations or (
-        Observation("unit", "artifact-unit", _hash("unit"), ObservationStatus.PASS),
-        Observation("lint", "artifact-lint", _hash("lint"), ObservationStatus.PASS),
-    )
-    evidence = EvidenceBundle(
-        "bench-evidence", contract.hash, change.hash, plan.hash, tuple(observations)
-    )
-    return CertificationInput(contract, change, plan, evidence, **flags)
-
-
-def _direct(*_ignored: Any, **kwargs: Any) -> CaseOutcome:
-    result = certify(_input(**kwargs))
-    return CaseOutcome(
-        "CERTIFICATION",
-        result.verification.status.value,
-        result.verification.integrity.value,
-        result.disposition.value,
-    )
-
-
-def _legacy(status: str, **extra: Any) -> CaseOutcome:
-    payload = {
-        "schema": "nexus.changeset_certification.v1",
-        "version": 1,
-        "status": status,
-        **extra,
-    }
-    result = certify_changeset(payload)
-    return CaseOutcome(
-        "CERTIFICATION",
-        result.verification_result.status.value,
-        result.verification_result.integrity.value,
-        result.status.value,
-    )
-
-
-def _rejected(call: Callable[[], Any]) -> CaseOutcome:
+def _input(*,observations=None,change_paths=("src/a.py",),**flags:bool|None)->CertificationInput:
+    c=AcceptanceContract("bench-contract",_hash("requirements"),("unit","lint"),("src/a.py",),"FORBID"); ch=ChangeSet("bench-change","source","target",_hash("diff"),tuple(change_paths)); plan=VerificationPlan("bench-plan",c.hash,ch.hash,("unit","lint")); observations=observations or (Observation("unit","artifact-unit",_hash("unit"),ObservationStatus.PASS),Observation("lint","artifact-lint",_hash("lint"),ObservationStatus.PASS)); return CertificationInput(c,ch,plan,EvidenceBundle("bench-evidence",c.hash,ch.hash,plan.hash,tuple(observations)),**flags)
+def _direct(**kw:Any)->CaseOutcome:
+    r=certify(_input(**kw)); return CaseOutcome("CERTIFICATION",r.verification.status.value,r.verification.integrity.value,r.disposition.value)
+def _legacy(status:str,**extra:Any)->CaseOutcome:
+    r=certify_changeset({"schema":"nexus.changeset_certification.v1","version":1,"status":status,**extra}); return CaseOutcome("CERTIFICATION",r.verification_result.status.value,r.verification_result.integrity.value,r.status.value)
+def _reject(kind:str)->CaseOutcome:
     try:
-        call()
-    except (TypeError, ValueError):
-        return CaseOutcome("INPUT_REJECTED")
-    return CaseOutcome("CERTIFICATION", disposition="INPUT_ACCEPTED")
+        if kind=="traversal":AcceptanceContract("x",_hash("r"),("unit",),("../escape",),"FORBID")
+        elif kind=="status":Observation("unit","a",_hash("a"),cast(Any,"PASS"))
+        else:CertificationInput(**cast(Any,_input().__dict__|{"disposition":"CERTIFIED"}))
+    except(TypeError,ValueError):return CaseOutcome("INPUT_REJECTED")
+    return CaseOutcome("CERTIFICATION",disposition="INPUT_ACCEPTED")
+def _receipt(kind:str)->CaseOutcome:
+    s=_input(policy_accepted=True,authority_present=True,approval_present=True,signing_present=True); r=certify(s); q=r.receipt
+    if kind in ("tamper","disposition"):q=replace(q,disposition=CertificationDisposition.REJECTED)
+    elif kind=="verification":q=replace(q,verification=reduce_verification(IntegrityStatus.VALID,(ObservationStatus.FAIL,),("VERIFIER_FAILED",)))
+    elif kind=="policy":q=replace(q,policy=CertificationPolicy(False,True,True,True))
+    elif kind=="prerequisite":q=replace(q,policy=CertificationPolicy(True,None,True,True))
+    elif kind=="claimed_hash":q=replace(q,claimed_receipt_hash=_hash("tampered-receipt"))
+    return CaseOutcome("RECEIPT_INVALID" if not validate_receipt(q,s) else "CERTIFICATION")
+def _special(kind:str)->CaseOutcome:
+    s=_input(policy_accepted=True,authority_present=True,approval_present=True,signing_present=True); s=replace(s,evidence=replace(s.evidence,**({"change_set_hash":_hash("different-change-set")} if kind=="stale" else {"claimed_bundle_hash":_hash("tampered-evidence")}))); r=certify(s); return CaseOutcome("CERTIFICATION",r.verification.status.value,r.verification.integrity.value,r.disposition.value)
+def _expected(v:str)->CaseOutcome:
+    if v in ("INPUT_REJECTED","RECEIPT_INVALID"):return CaseOutcome(v)
+    sc,d=v.split(":"); a=sc.split("|"); return CaseOutcome("CERTIFICATION",a[0],a[1] if len(a)>1 else ("VALID" if a[0]!="UNVERIFIABLE" else "MISSING"),d)
+def _p(**x:Any)->tuple[tuple[str,Any],...]:return tuple(x.items())
 
-
-def _expected(value: str) -> CaseOutcome:
-    if value == "INPUT_REJECTED":
-        return CaseOutcome("INPUT_REJECTED")
-    if value == "RECEIPT_INVALID":
-        return CaseOutcome("RECEIPT_INVALID")
-    status_and_condition, disposition = value.split(":")
-    parts = status_and_condition.split("|")
-    status = parts[0]
-    condition = parts[1] if len(parts) > 1 else ("VALID" if status != "UNVERIFIABLE" else "MISSING")
-    return CaseOutcome("CERTIFICATION", status, condition, disposition)
-
-
-def _cases() -> tuple[_Case, ...]:
-    fail = (
-        Observation("unit", "artifact-unit", _hash("unit"), ObservationStatus.FAIL),
-        Observation("lint", "artifact-lint", _hash("lint"), ObservationStatus.PASS),
-    )
-    duplicate_verifier = (
-        Observation("unit", "u", _hash("u"), ObservationStatus.PASS),
-        Observation("unit", "l", _hash("l"), ObservationStatus.PASS),
-    )
-    duplicate_artifact = (
-        Observation("unit", "same", _hash("u"), ObservationStatus.PASS),
-        Observation("lint", "same", _hash("l"), ObservationStatus.PASS),
-    )
-    cases: list[_Case] = [
-        _Case(
-            "direct_happy_certified",
-            "VERIFIED:CERTIFIED",
-            False,
-            lambda: _direct(
-                "",
-                policy_accepted=True,
-                authority_present=True,
-                approval_present=True,
-                signing_present=True,
-            ),
-        ),
-        _Case(
-            "direct_verifier_fail",
-            "FAILED_VERIFICATION:REJECTED",
-            True,
-            lambda: _direct(
-                "",
-                observations=fail,
-                policy_accepted=True,
-                authority_present=True,
-                approval_present=True,
-                signing_present=True,
-            ),
-        ),
-        _Case(
-            "direct_missing_required_verifier",
-            "UNVERIFIABLE:BLOCKED",
-            True,
-            lambda: _direct(
-                "",
-                observations=(Observation("unit", "u", _hash("u"), ObservationStatus.PASS),),
-                policy_accepted=True,
-                authority_present=True,
-                approval_present=True,
-                signing_present=True,
-            ),
-        ),
-        _Case(
-            "direct_scope_escape",
-            "FAILED_VERIFICATION:REJECTED",
-            True,
-            lambda: _direct(
-                "",
-                change_paths=("src/secret.py",),
-                policy_accepted=True,
-                authority_present=True,
-                approval_present=True,
-                signing_present=True,
-            ),
-        ),
-        _Case(
-            "direct_duplicate_verifier",
-            "UNVERIFIABLE|DUPLICATE:REJECTED",
-            True,
-            lambda: _direct(
-                "",
-                observations=duplicate_verifier,
-                policy_accepted=True,
-                authority_present=True,
-                approval_present=True,
-                signing_present=True,
-            ),
-        ),
-        _Case(
-            "direct_duplicate_artifact",
-            "UNVERIFIABLE|DUPLICATE:REJECTED",
-            True,
-            lambda: _direct(
-                "",
-                observations=duplicate_artifact,
-                policy_accepted=True,
-                authority_present=True,
-                approval_present=True,
-                signing_present=True,
-            ),
-        ),
-        _Case(
-            "direct_policy_false",
-            "VERIFIED:REJECTED",
-            True,
-            lambda: _direct(
-                "",
-                policy_accepted=False,
-                authority_present=True,
-                approval_present=True,
-                signing_present=True,
-            ),
-        ),
-        _Case(
-            "direct_policy_missing",
-            "VERIFIED:BLOCKED",
-            True,
-            lambda: _direct(
-                "",
-                policy_accepted=None,
-                authority_present=True,
-                approval_present=True,
-                signing_present=True,
-            ),
-        ),
-    ]
-    for flag in ("authority_present", "approval_present", "signing_present"):
-        flags: dict[str, bool | None] = {
-            "policy_accepted": True,
-            "authority_present": True,
-            "approval_present": True,
-            "signing_present": True,
-        }
-        flags[flag] = None
-        cases.append(
-            _Case(
-                f"direct_missing_{flag}",
-                "VERIFIED:BLOCKED",
-                True,
-                lambda flags=flags: _direct("", **flags),
-            )
-        )
-    cases += [
-        _Case(
-            "legacy_v1_raw_pass",
-            "UNVERIFIABLE|LEGACY_NON_CERTIFIABLE:BLOCKED",
-            True,
-            lambda: _legacy("PASS"),
-        ),
-        _Case(
-            "legacy_v1_raw_fail",
-            "UNVERIFIABLE|LEGACY_NON_CERTIFIABLE:BLOCKED",
-            True,
-            lambda: _legacy("FAIL"),
-        ),
-        _Case(
-            "legacy_caller_reason_cannot_override_fail",
-            "UNVERIFIABLE|LEGACY_NON_CERTIFIABLE:BLOCKED",
-            True,
-            lambda: _legacy("FAIL", disposition="CERTIFIED", reasons=[]),
-        ),
-        _Case(
-            "traversal_path_input_rejected",
-            "INPUT_REJECTED",
-            True,
-            lambda: _rejected(
-                lambda: AcceptanceContract("x", _hash("r"), ("unit",), ("../escape",), "FORBID")
-            ),
-        ),
-        _Case(
-            "malformed_status_input_rejected",
-            "INPUT_REJECTED",
-            True,
-            lambda: _rejected(lambda: Observation("unit", "a", _hash("a"), cast(Any, "PASS"))),
-        ),
-        _Case(
-            "caller_claimed_disposition_rejected",
-            "INPUT_REJECTED",
-            True,
-            lambda: _rejected(
-                lambda: CertificationInput(
-                    **cast(Any, _input().__dict__ | {"disposition": "CERTIFIED"})
-                )
-            ),
-        ),
-        _Case("receipt_tamper_rejected", "RECEIPT_INVALID", True, lambda: _receipt_tamper()),
-        _Case(
-            "stale_change_set_hash_mismatch",
-            CaseOutcome("CERTIFICATION", "UNVERIFIABLE", "STALE", "BLOCKED"),
-            True,
-            lambda: _stale_change_set(),
-        ),
-        _Case(
-            "tampered_evidence_claimed_hash",
-            CaseOutcome("CERTIFICATION", "UNVERIFIABLE", "TAMPERED", "REJECTED"),
-            True,
-            lambda: _direct_with_evidence_claim("tampered-evidence"),
-        ),
-        _Case(
-            "receipt_alternate_reducer_verification",
-            "RECEIPT_INVALID",
-            True,
-            lambda: _receipt_variant("verification"),
-        ),
-        _Case(
-            "receipt_disposition_tamper_rejected",
-            "RECEIPT_INVALID",
-            True,
-            lambda: _receipt_variant("disposition"),
-        ),
-        _Case(
-            "receipt_policy_tamper_rejected",
-            "RECEIPT_INVALID",
-            True,
-            lambda: _receipt_variant("policy"),
-        ),
-        _Case(
-            "receipt_prerequisite_tamper_rejected",
-            "RECEIPT_INVALID",
-            True,
-            lambda: _receipt_variant("prerequisite"),
-        ),
-        _Case(
-            "receipt_claimed_hash_tamper_rejected",
-            "RECEIPT_INVALID",
-            True,
-            lambda: _receipt_variant("claimed_hash"),
-        ),
-    ]
-    return tuple(cases)
-
-
-def _receipt_tamper(*, factual: bool = False) -> CaseOutcome:
-    source = _input(
-        policy_accepted=True, authority_present=True, approval_present=True, signing_present=True
-    )
-    result = certify(source)
-    receipt = (
-        replace(result.receipt, disposition=CertificationDisposition.REJECTED)
-        if not factual
-        else replace(result.receipt, policy=CertificationPolicy(False, True, True, True))
-    )
-    return CaseOutcome(
-        "RECEIPT_INVALID" if not validate_receipt(receipt, source) else "CERTIFICATION"
-    )
-
-
-def _direct_with_evidence_claim(claim: str) -> CaseOutcome:
-    source = _input(
-        policy_accepted=True, authority_present=True, approval_present=True, signing_present=True
-    )
-    tampered = replace(source.evidence, claimed_bundle_hash=_hash(claim))
-    return _direct_input(replace(source, evidence=tampered))
-
-
-def _stale_change_set() -> CaseOutcome:
-    source = _input(
-        policy_accepted=True, authority_present=True, approval_present=True, signing_present=True
-    )
-    stale = replace(source.evidence, change_set_hash=_hash("different-change-set"))
-    return _direct_input(replace(source, evidence=stale))
-
-
-def _direct_input(source: CertificationInput) -> CaseOutcome:
-    result = certify(source)
-    return CaseOutcome(
-        "CERTIFICATION",
-        result.verification.status.value,
-        result.verification.integrity.value,
-        result.disposition.value,
-    )
-
-
-def _receipt_variant(kind: str) -> CaseOutcome:
-    source = _input(
-        policy_accepted=True, authority_present=True, approval_present=True, signing_present=True
-    )
-    result = certify(source)
-    receipt = result.receipt
-    if kind == "verification":
-        receipt = replace(
-            receipt,
-            verification=reduce_verification(
-                IntegrityStatus.VALID, (ObservationStatus.FAIL,), ("VERIFIER_FAILED",)
-            ),
-        )
-    elif kind == "disposition":
-        receipt = replace(receipt, disposition=CertificationDisposition.REJECTED)
-    elif kind == "policy":
-        receipt = replace(receipt, policy=CertificationPolicy(False, True, True, True))
-    elif kind == "prerequisite":
-        receipt = replace(receipt, policy=CertificationPolicy(True, None, True, True))
-    elif kind == "claimed_hash":
-        receipt = replace(receipt, claimed_receipt_hash=_hash("tampered-receipt"))
-    else:
-        raise ValueError(kind)
-    return CaseOutcome(
-        "RECEIPT_INVALID" if not validate_receipt(receipt, source) else "CERTIFICATION"
-    )
-
-
-CASES = _cases()
-
-EXPECTED_CASE_IDS = (
-    "direct_happy_certified",
-    "direct_verifier_fail",
-    "direct_missing_required_verifier",
-    "direct_scope_escape",
-    "direct_duplicate_verifier",
-    "direct_duplicate_artifact",
-    "direct_policy_false",
-    "direct_policy_missing",
-    "direct_missing_authority_present",
-    "direct_missing_approval_present",
-    "direct_missing_signing_present",
-    "legacy_v1_raw_pass",
-    "legacy_v1_raw_fail",
-    "legacy_caller_reason_cannot_override_fail",
-    "traversal_path_input_rejected",
-    "malformed_status_input_rejected",
-    "caller_claimed_disposition_rejected",
-    "receipt_tamper_rejected",
-    "stale_change_set_hash_mismatch",
-    "tampered_evidence_claimed_hash",
-    "receipt_alternate_reducer_verification",
-    "receipt_disposition_tamper_rejected",
-    "receipt_policy_tamper_rejected",
-    "receipt_prerequisite_tamper_rejected",
-    "receipt_claimed_hash_tamper_rejected",
+_CASE_SPEC_LITERAL=(
+("direct_happy_certified",False,"VERIFIED:CERTIFIED","direct",_p(policy_accepted=True,authority_present=True,approval_present=True,signing_present=True)),
+("direct_verifier_fail",True,"FAILED_VERIFICATION:REJECTED","direct",_p(observations="fail",policy_accepted=True,authority_present=True,approval_present=True,signing_present=True)),
+("direct_missing_required_verifier",True,"UNVERIFIABLE:BLOCKED","direct",_p(observations="missing",policy_accepted=True,authority_present=True,approval_present=True,signing_present=True)),
+("direct_scope_escape",True,"FAILED_VERIFICATION:REJECTED","direct",_p(change_paths=("src/secret.py",),policy_accepted=True,authority_present=True,approval_present=True,signing_present=True)),
+("direct_duplicate_verifier",True,"UNVERIFIABLE|DUPLICATE:REJECTED","direct",_p(observations="duplicate_verifier",policy_accepted=True,authority_present=True,approval_present=True,signing_present=True)),
+("direct_duplicate_artifact",True,"UNVERIFIABLE|DUPLICATE:REJECTED","direct",_p(observations="duplicate_artifact",policy_accepted=True,authority_present=True,approval_present=True,signing_present=True)),
+("direct_policy_false",True,"VERIFIED:REJECTED","direct",_p(policy_accepted=False,authority_present=True,approval_present=True,signing_present=True)),
+("direct_policy_missing",True,"VERIFIED:BLOCKED","direct",_p(policy_accepted=None,authority_present=True,approval_present=True,signing_present=True)),
 )
-CASE_SPEC = (
-    (
-        "direct_happy_certified",
-        False,
-        CaseOutcome("CERTIFICATION", "VERIFIED", "VALID", "CERTIFIED"),
-    ),
-    (
-        "direct_verifier_fail",
-        True,
-        CaseOutcome("CERTIFICATION", "FAILED_VERIFICATION", "VALID", "REJECTED"),
-    ),
-    (
-        "direct_missing_required_verifier",
-        True,
-        CaseOutcome("CERTIFICATION", "UNVERIFIABLE", "MISSING", "BLOCKED"),
-    ),
-    (
-        "direct_scope_escape",
-        True,
-        CaseOutcome("CERTIFICATION", "FAILED_VERIFICATION", "VALID", "REJECTED"),
-    ),
-    (
-        "direct_duplicate_verifier",
-        True,
-        CaseOutcome("CERTIFICATION", "UNVERIFIABLE", "DUPLICATE", "REJECTED"),
-    ),
-    (
-        "direct_duplicate_artifact",
-        True,
-        CaseOutcome("CERTIFICATION", "UNVERIFIABLE", "DUPLICATE", "REJECTED"),
-    ),
-    ("direct_policy_false", True, CaseOutcome("CERTIFICATION", "VERIFIED", "VALID", "REJECTED")),
-    ("direct_policy_missing", True, CaseOutcome("CERTIFICATION", "VERIFIED", "VALID", "BLOCKED")),
-    (
-        "direct_missing_authority_present",
-        True,
-        CaseOutcome("CERTIFICATION", "VERIFIED", "VALID", "BLOCKED"),
-    ),
-    (
-        "direct_missing_approval_present",
-        True,
-        CaseOutcome("CERTIFICATION", "VERIFIED", "VALID", "BLOCKED"),
-    ),
-    (
-        "direct_missing_signing_present",
-        True,
-        CaseOutcome("CERTIFICATION", "VERIFIED", "VALID", "BLOCKED"),
-    ),
-    (
-        "legacy_v1_raw_pass",
-        True,
-        CaseOutcome("CERTIFICATION", "UNVERIFIABLE", "LEGACY_NON_CERTIFIABLE", "BLOCKED"),
-    ),
-    (
-        "legacy_v1_raw_fail",
-        True,
-        CaseOutcome("CERTIFICATION", "UNVERIFIABLE", "LEGACY_NON_CERTIFIABLE", "BLOCKED"),
-    ),
-    (
-        "legacy_caller_reason_cannot_override_fail",
-        True,
-        CaseOutcome("CERTIFICATION", "UNVERIFIABLE", "LEGACY_NON_CERTIFIABLE", "BLOCKED"),
-    ),
-    ("traversal_path_input_rejected", True, CaseOutcome("INPUT_REJECTED")),
-    ("malformed_status_input_rejected", True, CaseOutcome("INPUT_REJECTED")),
-    ("caller_claimed_disposition_rejected", True, CaseOutcome("INPUT_REJECTED")),
-    ("receipt_tamper_rejected", True, CaseOutcome("RECEIPT_INVALID")),
-    (
-        "stale_change_set_hash_mismatch",
-        True,
-        CaseOutcome("CERTIFICATION", "UNVERIFIABLE", "STALE", "BLOCKED"),
-    ),
-    (
-        "tampered_evidence_claimed_hash",
-        True,
-        CaseOutcome("CERTIFICATION", "UNVERIFIABLE", "TAMPERED", "REJECTED"),
-    ),
-    ("receipt_alternate_reducer_verification", True, CaseOutcome("RECEIPT_INVALID")),
-    ("receipt_disposition_tamper_rejected", True, CaseOutcome("RECEIPT_INVALID")),
-    ("receipt_policy_tamper_rejected", True, CaseOutcome("RECEIPT_INVALID")),
-    ("receipt_prerequisite_tamper_rejected", True, CaseOutcome("RECEIPT_INVALID")),
-    ("receipt_claimed_hash_tamper_rejected", True, CaseOutcome("RECEIPT_INVALID")),
-)
+for f in ("authority_present","approval_present","signing_present"):_CASE_SPEC_LITERAL+=((f"direct_missing_{f}",True,"VERIFIED:BLOCKED","direct",_p(policy_accepted=True,authority_present=None if f=="authority_present" else True,approval_present=None if f=="approval_present" else True,signing_present=None if f=="signing_present" else True)),)
+_CASE_SPEC_LITERAL+=(("legacy_v1_raw_pass",True,"UNVERIFIABLE|LEGACY_NON_CERTIFIABLE:BLOCKED","legacy",_p(status="PASS")),("legacy_v1_raw_fail",True,"UNVERIFIABLE|LEGACY_NON_CERTIFIABLE:BLOCKED","legacy",_p(status="FAIL")),("legacy_caller_reason_cannot_override_fail",True,"UNVERIFIABLE|LEGACY_NON_CERTIFIABLE:BLOCKED","legacy",_p(status="FAIL",disposition="CERTIFIED",reasons=[])),("traversal_path_input_rejected",True,"INPUT_REJECTED","reject",_p(kind="traversal")),("malformed_status_input_rejected",True,"INPUT_REJECTED","reject",_p(kind="status")),("caller_claimed_disposition_rejected",True,"INPUT_REJECTED","reject",_p(kind="disposition")),("receipt_tamper_rejected",True,"RECEIPT_INVALID","receipt",_p(kind="tamper")),("stale_change_set_hash_mismatch",True,"UNVERIFIABLE|STALE:BLOCKED","special",_p(kind="stale")),("tampered_evidence_claimed_hash",True,"UNVERIFIABLE|TAMPERED:REJECTED","special",_p(kind="tampered")))
+for k in ("verification","disposition","policy","prerequisite","claimed_hash"):_CASE_SPEC_LITERAL+=((f"receipt_{k}_tamper_rejected",True,"RECEIPT_INVALID","receipt",_p(kind=k)),)
 
+def _spec_jsonable(v:Any)->Any:
+    if isinstance(v,CaseOutcome): return v.to_dict()
+    if isinstance(v,Mapping): return {k:_spec_jsonable(x) for k,x in v.items()}
+    if isinstance(v,(tuple,list)): return [_spec_jsonable(x) for x in v]
+    return v
+def _freeze(v:Any)->Any:
+    if isinstance(v,Mapping):return MappingProxyType({k:_freeze(x) for k,x in v.items()})
+    if isinstance(v,tuple):return tuple(_freeze(x) for x in v)
+    if isinstance(v,list):return tuple(_freeze(x) for x in v)
+    return v
+def _make_specs()->tuple[CaseDefinition,...]:return tuple(CaseDefinition(i,h,_expected(e),op,MappingProxyType(dict(_freeze(p)))) for i,h,e,op,p in _CASE_SPEC_LITERAL)
+_AUTHORITATIVE_SPEC=_make_specs(); EXPECTED_CASE_IDS=tuple(x.case_id for x in _AUTHORITATIVE_SPEC); CASE_SPEC=tuple((x.case_id,x.hostile,x.expected,x.operation,x.params) for x in _AUTHORITATIVE_SPEC); CASES=_AUTHORITATIVE_SPEC; TASK_SET_HASH="sha256:afa32ac1ed78076e9d00c16b707a94ba025bc64cae7f028a06cba7cfcd08703b"
 
-def _spec_jsonable(value: Any) -> Any:
-    if isinstance(value, CaseOutcome):
-        return value.to_dict()
-    if isinstance(value, tuple):
-        return [_spec_jsonable(item) for item in value]
-    return value
-
-
-TASK_SET_HASH = "sha256:a95d72e884367709208356b3bef75c3776ad49268ba63bab9d2a76ed9001a2b9"
-if tuple((case.case_id, case.hostile, case.expected) for case in CASES) != CASE_SPEC:
-    raise RuntimeError("CASE_SPEC does not match CASES")
-if tuple(case.case_id for case in CASES) != EXPECTED_CASE_IDS:
-    raise RuntimeError("EXPECTED_CASE_IDS does not match CASES")
-if _digest(_spec_jsonable(CASE_SPEC)) != TASK_SET_HASH:
-    raise RuntimeError("TASK_SET_HASH does not match CASE_SPEC")
-
-
-def _rate(numerator: int, denominator: int) -> float:
-    return round(float(Fraction(numerator, denominator)) if denominator else 0.0, 12)
-
-
-def run_benchmark() -> FalseCompletionReport:
-    results = []
-    for case in CASES:
+def _make_dispatch()->Callable[[str,Mapping[str,Any]],CaseOutcome]:
+    def dispatch(op:str,p:Mapping[str,Any])->CaseOutcome:
+        q=dict(p)
+        if op=="direct":
+            o=q.get("observations")
+            if o=="fail":q["observations"]=(Observation("unit","artifact-unit",_hash("unit"),ObservationStatus.FAIL),Observation("lint","artifact-lint",_hash("lint"),ObservationStatus.PASS))
+            elif o=="missing":q["observations"]=(Observation("unit","u",_hash("u"),ObservationStatus.PASS),)
+            elif o=="duplicate_verifier":q["observations"]=(Observation("unit","u",_hash("u"),ObservationStatus.PASS),Observation("unit","l",_hash("l"),ObservationStatus.PASS))
+            elif o=="duplicate_artifact":q["observations"]=(Observation("unit","same",_hash("u"),ObservationStatus.PASS),Observation("lint","same",_hash("l"),ObservationStatus.PASS))
+            return _direct(**q)
+        if op=="legacy":return _legacy(**q)
+        if op=="reject":return _reject(**q)
+        if op=="receipt":return _receipt(**q)
+        return _special(q["kind"])
+    return dispatch
+def _false(c:CaseDefinition,a:CaseOutcome)->bool:return c.hostile and a.outcome_kind=="CERTIFICATION" and a.disposition=="CERTIFIED"
+def _run(spec:tuple[CaseDefinition,...],dispatch:Callable[[str,Mapping[str,Any]],CaseOutcome])->tuple[BenchmarkCaseResult,...]:
+    out=[]
+    for c in spec:
         try:
-            actual = case.run()
-            detected = (
-                case.hostile and actual == case.expected and actual.disposition != "CERTIFIED"
-            )
-            results.append(
-                BenchmarkCaseResult(
-                    case.case_id, cast(CaseOutcome, case.expected), actual, detected
-                )
-            )
-        except Exception as exc:  # bounded classification; exceptions never escape runner
-            results.append(
-                BenchmarkCaseResult(
-                    case.case_id,
-                    cast(CaseOutcome, case.expected),
-                    CaseOutcome("INFRA_INVALID"),
-                    False,
-                    True,
-                    type(exc).__name__,
-                )
-            )
-    eligible = tuple(result for result in results if not result.infra_invalid)
-    hostile = sum(
-        case.hostile
-        for case in CASES
-        if not next(r for r in results if r.case_id == case.case_id).infra_invalid
-    )
-    eligible_hostile = sum(
-        case.hostile
-        for case in CASES
-        if not next(r for r in results if r.case_id == case.case_id).infra_invalid
-    )
-    detected = sum(result.detected for result in eligible)
-    false_completion = sum(
-        result.actual.outcome_kind == "CERTIFICATION" and result.actual.disposition == "CERTIFIED"
-        for result in eligible
-        if next(case for case in CASES if case.case_id == result.case_id).hostile
-    )
-    mismatches = sum(result.actual != result.expected for result in eligible)
-    payload = {
-        "schema": BENCHMARK_SCHEMA,
-        "benchmark_id": BENCHMARK_ID,
-        "task_set_hash": TASK_SET_HASH,
-        "protocol_version": PUBLIC_PROTOCOL_VERSION,
-        "implementation_schema": IMPLEMENTATION_SCHEMA,
-        "case_ids": [result.case_id for result in results],
-        "eligible_count": len(eligible),
-        "infra_invalid_count": len(results) - len(eligible),
-        "hostile_case_count": hostile,
-        "detected_count": detected,
-        "false_completion_count": false_completion,
-        "false_completion_rate": _rate(false_completion, eligible_hostile),
-        "detection_rate": _rate(detected, eligible_hostile),
-        "trust_mismatch_count": mismatches,
-        "trust_mismatch_rate": _rate(mismatches, len(eligible)),
-        "public_claim_gate": PUBLIC_CLAIM_GATE,
-        "claim_ceiling": list(CLAIM_CEILING),
-        "cases": [result.to_dict() for result in results],
-    }
-    return FalseCompletionReport(
-        **{
-            key: value
-            for key, value in payload.items()
-            if key not in {"cases", "case_ids", "claim_ceiling"}
-        },
-        case_ids=tuple(result.case_id for result in results),
-        claim_ceiling=CLAIM_CEILING,
-        cases=tuple(results),
-        report_hash=_digest(payload),
-    )
-
-
-def verify_report(report: FalseCompletionReport | Mapping[str, Any]) -> tuple[str, ...]:
+            a=dispatch(c.operation,c.params); out.append(BenchmarkCaseResult(c.case_id,c.expected,a,c.hostile and a==c.expected and not _false(c,a)))
+        except Exception as e:out.append(BenchmarkCaseResult(c.case_id,c.expected,CaseOutcome("INFRA_INVALID"),False,True,type(e).__name__))
+    return tuple(out)
+def _rate(n:int,d:int)->float|None:return round(float(Fraction(n,d)),12) if d else None
+def _shape(p: Mapping[str, Any]) -> list[str]:
     errors: list[str] = []
+    def exact(path: str, value: Any, typ: type, nullable: bool = False) -> None:
+        if nullable and value is None: return
+        if type(value) is not typ: errors.append(path)
+    for k in ("schema", "benchmark_id", "task_set_hash", "protocol_version", "implementation_schema", "public_claim_gate"): exact(k,p[k],str)
+    exact("case_ids",p["case_ids"],list)
+    exact("claim_ceiling",p["claim_ceiling"],list)
+    for k in ("eligible_count","infra_invalid_count","hostile_case_count","detected_count","false_completion_count","trust_mismatch_count"):
+        if type(p[k]) is not int or p[k] < 0: errors.append(k)
+    for k in ("false_completion_rate","detection_rate","trust_mismatch_rate"):
+        if p[k] is not None and (type(p[k]) is not float or not math.isfinite(p[k])): errors.append(k)
+    exact("cases",p["cases"],list)
+    if type(p["cases"]) is list:
+        ck={"case_id","expected","actual","detected","infra_invalid","error"}; ok={"outcome_kind","verification_status","evidence_condition","disposition"}
+        for i,c in enumerate(p["cases"]):
+            path=f"cases[{i}]"
+            if type(c) is not dict: errors.append(path); continue
+            for k in c:
+                if k not in ck: errors.append(f"{path}.{k}")
+            for k in ck:
+                if k not in c: errors.append(f"{path}.{k}")
+            if "case_id" in c: exact(f"{path}.case_id",c["case_id"],str)
+            if "detected" in c: exact(f"{path}.detected",c["detected"],bool)
+            if "infra_invalid" in c: exact(f"{path}.infra_invalid",c["infra_invalid"],bool)
+            if "error" in c: exact(f"{path}.error",c["error"],str,True)
+            for name in ("expected","actual"):
+                q=c.get(name); qp=f"{path}.{name}"
+                if type(q) is not dict: errors.append(qp); continue
+                for k in q:
+                    if k not in ok: errors.append(f"{qp}.{k}")
+                for k in ok:
+                    if k not in q: errors.append(f"{qp}.{k}")
+                if "outcome_kind" in q: exact(f"{qp}.outcome_kind",q["outcome_kind"],str)
+                for k in ("verification_status","evidence_condition","disposition"):
+                    if k in q: exact(f"{qp}.{k}",q[k],str,True)
+    return errors
+def _build(spec:tuple[CaseDefinition,...],res:tuple[BenchmarkCaseResult,...])->FalseCompletionReport:
+    good=tuple(r for r in res if not r.infra_invalid); hostile=sum(c.hostile for c,r in zip(spec,res) if not r.infra_invalid); false=sum(_false(c,r.actual) for c,r in zip(spec,res) if not r.infra_invalid); detected=sum(r.detected for r in good); mismatch=sum(r.actual!=r.expected for r in good); p={"schema":BENCHMARK_SCHEMA,"benchmark_id":BENCHMARK_ID,"task_set_hash":TASK_SET_HASH,"protocol_version":PUBLIC_PROTOCOL_VERSION,"implementation_schema":IMPLEMENTATION_SCHEMA,"case_ids":[r.case_id for r in res],"eligible_count":len(good),"infra_invalid_count":len(res)-len(good),"hostile_case_count":hostile,"detected_count":detected,"false_completion_count":false,"false_completion_rate":_rate(false,hostile),"detection_rate":_rate(detected,hostile),"trust_mismatch_count":mismatch,"trust_mismatch_rate":_rate(mismatch,len(good)),"public_claim_gate":PUBLIC_CLAIM_GATE,"claim_ceiling":list(CLAIM_CEILING),"cases":[r.to_dict() for r in res]}; return FalseCompletionReport(**{k:v for k,v in p.items() if k not in ("case_ids","claim_ceiling","cases")},case_ids=tuple(p["case_ids"]),claim_ceiling=CLAIM_CEILING,cases=res,report_hash=_digest(p))
+_RUN_SPEC=_make_specs(); _VERIFY_SPEC=_make_specs(); _RUN_DISPATCH=_make_dispatch(); _VERIFY_DISPATCH=_make_dispatch()
+def run_benchmark()->FalseCompletionReport:return _build(_RUN_SPEC,_run(_RUN_SPEC,_RUN_DISPATCH))
+def verify_report(report:FalseCompletionReport|Mapping[str,Any])->tuple[str,...]:
     try:
-        payload = report.payload() if isinstance(report, FalseCompletionReport) else dict(report)
-        report_keys = {
-            "schema",
-            "benchmark_id",
-            "task_set_hash",
-            "protocol_version",
-            "implementation_schema",
-            "case_ids",
-            "eligible_count",
-            "infra_invalid_count",
-            "hostile_case_count",
-            "detected_count",
-            "false_completion_count",
-            "false_completion_rate",
-            "detection_rate",
-            "trust_mismatch_count",
-            "trust_mismatch_rate",
-            "public_claim_gate",
-            "claim_ceiling",
-            "cases",
-            "report_hash",
-        }
-        for key in payload:
-            if key not in report_keys:
-                errors.append(key)
-        if payload.get("report_hash") != _digest(
-            {k: v for k, v in payload.items() if k != "report_hash"}
-        ):
-            errors.append("report_hash")
-        expected_ids = list(EXPECTED_CASE_IDS)
-        if payload.get("task_set_hash") != TASK_SET_HASH:
-            errors.append("task_set_hash")
-        fixed = {
-            "schema": BENCHMARK_SCHEMA,
-            "benchmark_id": BENCHMARK_ID,
-            "protocol_version": PUBLIC_PROTOCOL_VERSION,
-            "implementation_schema": IMPLEMENTATION_SCHEMA,
-            "public_claim_gate": PUBLIC_CLAIM_GATE,
-            "claim_ceiling": list(CLAIM_CEILING),
-        }
-        for key, value in fixed.items():
-            if payload.get(key) != value:
-                errors.append(key)
-        if payload.get("case_ids") != expected_ids:
-            errors.append("case_ids")
-
-        # This is deliberately a separate execution path from run_benchmark.
-        recomputed: list[BenchmarkCaseResult] = []
-        for case in CASES:
-            try:
-                actual = case.run()
-                detected = (
-                    case.hostile and actual == case.expected and actual.disposition != "CERTIFIED"
-                )
-                recomputed.append(
-                    BenchmarkCaseResult(case.case_id, case.expected, actual, detected)
-                )
-            except Exception as exc:
-                recomputed.append(
-                    BenchmarkCaseResult(
-                        case.case_id,
-                        case.expected,
-                        CaseOutcome("INFRA_INVALID"),
-                        False,
-                        True,
-                        type(exc).__name__,
-                    )
-                )
-        expected_cases = [result.to_dict() for result in recomputed]
-        actual_cases = payload.get("cases")
-        if not isinstance(actual_cases, list) or len(actual_cases) != len(expected_cases):
-            errors.append("cases")
-        else:
-            for index, (actual, expected) in enumerate(zip(actual_cases, expected_cases)):
-                if not isinstance(actual, dict):
-                    errors.append(f"cases[{index}]")
-                    continue
-                case_keys = {"case_id", "expected", "actual", "detected", "infra_invalid", "error"}
-                for key in actual:
-                    if key not in case_keys:
-                        errors.append(f"cases[{index}].{key}")
-                for field in ("case_id", "detected", "infra_invalid", "error"):
-                    if actual.get(field) != expected[field]:
-                        errors.append(f"cases[{index}].{field}")
-                for outcome_name in ("expected", "actual"):
-                    got, want = actual.get(outcome_name), expected[outcome_name]
-                    if not isinstance(got, dict):
-                        errors.append(f"cases[{index}].{outcome_name}")
-                        continue
-                    for key in got:
-                        if key not in {
-                            "outcome_kind",
-                            "verification_status",
-                            "evidence_condition",
-                            "disposition",
-                        }:
-                            errors.append(f"cases[{index}].{outcome_name}.{key}")
-                    for field in (
-                        "outcome_kind",
-                        "verification_status",
-                        "evidence_condition",
-                        "disposition",
-                    ):
-                        if got.get(field) != want.get(field):
-                            errors.append(f"cases[{index}].{outcome_name}.{field}")
-
-        eligible = [r for r in recomputed if not r.infra_invalid]
-        hostile = sum(
-            case.hostile for case, result in zip(CASES, recomputed) if not result.infra_invalid
-        )
-        eligible_hostile = sum(
-            case.hostile for case, result in zip(CASES, recomputed) if not result.infra_invalid
-        )
-        detected = sum(r.detected for r in eligible)
-        false_completion = sum(
-            case.hostile and r.actual.disposition == "CERTIFIED"
-            for case, r in zip(CASES, recomputed)
-            if not r.infra_invalid
-        )
-        mismatches = sum(r.actual != r.expected for r in eligible)
-        counts = {
-            "eligible_count": len(eligible),
-            "infra_invalid_count": len(recomputed) - len(eligible),
-            "hostile_case_count": hostile,
-            "detected_count": detected,
-            "false_completion_count": false_completion,
-            "false_completion_rate": _rate(false_completion, eligible_hostile),
-            "detection_rate": _rate(detected, eligible_hostile),
-            "trust_mismatch_count": mismatches,
-            "trust_mismatch_rate": _rate(mismatches, len(eligible)),
-        }
-        for key, value in counts.items():
-            if payload.get(key) != value:
-                errors.append(key)
-    except (TypeError, ValueError, AttributeError, KeyError):
-        return ("malformed_report",)
-    return tuple(dict.fromkeys(errors))
-
-
-__all__ = [
-    "BENCHMARK_SCHEMA",
-    "BENCHMARK_ID",
-    "TASK_SET_HASH",
-    "EXPECTED_CASE_IDS",
-    "CASE_SPEC",
-    "CASES",
-    "BenchmarkCaseResult",
-    "FalseCompletionReport",
-    "run_benchmark",
-    "verify_report",
-]
+        p=report.payload() if isinstance(report,FalseCompletionReport) else dict(report); keys=set(p); required={"schema","benchmark_id","task_set_hash","protocol_version","implementation_schema","case_ids","eligible_count","infra_invalid_count","hostile_case_count","detected_count","false_completion_count","false_completion_rate","detection_rate","trust_mismatch_count","trust_mismatch_rate","public_claim_gate","claim_ceiling","cases","report_hash"}; err=[k for k in keys-required]+[k for k in required-keys]
+        if err:return tuple(dict.fromkeys(err))
+        err.extend(_shape(p))
+        if err:return tuple(dict.fromkeys(err))
+        if p["report_hash"]!=_digest({k:v for k,v in p.items() if k!="report_hash"}):err.append("report_hash")
+        expected=_build(_VERIFY_SPEC,_run(_VERIFY_SPEC,_VERIFY_DISPATCH)).payload()
+        for k in required-{"report_hash"}:
+            if p[k]!=expected[k]:err.append(k)
+        return tuple(dict.fromkeys(err))
+    except Exception:return ("malformed_report",)
+__all__=["BENCHMARK_SCHEMA","BENCHMARK_ID","TASK_SET_HASH","EXPECTED_CASE_IDS","CASE_SPEC","CASES","CaseDefinition","BenchmarkCaseResult","FalseCompletionReport","run_benchmark","verify_report"]
