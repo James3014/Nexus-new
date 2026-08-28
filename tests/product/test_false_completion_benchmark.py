@@ -2,9 +2,9 @@ import ast
 import math
 from dataclasses import replace
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
-from types import MappingProxyType
 
 import product.benchmark as bm
 from product.benchmark import (
