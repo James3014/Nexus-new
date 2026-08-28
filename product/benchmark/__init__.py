@@ -1280,13 +1280,27 @@ def _make_public_api() -> tuple[
             except (TypeError, ValueError) as exc:
                 if case.operation == "receipt":
                     invalid = outcome_cls("RECEIPT_INVALID")
-                    rows.append(result_cls(case.case_id, case.expected, invalid,
-                                           case.hostile and invalid == case.expected,
-                                           False, type(exc).__name__))
+                    rows.append(
+                        result_cls(
+                            case.case_id,
+                            case.expected,
+                            invalid,
+                            case.hostile and invalid == case.expected,
+                            False,
+                            type(exc).__name__,
+                        )
+                    )
                     continue
-                rows.append(result_cls(case.case_id, case.expected,
-                                       outcome_cls("INFRA_INVALID"), False, True,
-                                       type(exc).__name__))
+                rows.append(
+                    result_cls(
+                        case.case_id,
+                        case.expected,
+                        outcome_cls("INFRA_INVALID"),
+                        False,
+                        True,
+                        type(exc).__name__,
+                    )
+                )
             except Exception as exc:
                 rows.append(
                     result_cls(
@@ -1399,13 +1413,27 @@ def _make_public_api() -> tuple[
                 except (TypeError, ValueError) as exc:
                     if case.operation == "receipt":
                         invalid = outcome_cls("RECEIPT_INVALID")
-                        rows.append(result_cls(case.case_id, case.expected, invalid,
-                                               case.hostile and invalid == case.expected,
-                                               False, type(exc).__name__))
+                        rows.append(
+                            result_cls(
+                                case.case_id,
+                                case.expected,
+                                invalid,
+                                case.hostile and invalid == case.expected,
+                                False,
+                                type(exc).__name__,
+                            )
+                        )
                         continue
-                    rows.append(result_cls(case.case_id, case.expected,
-                                           outcome_cls("INFRA_INVALID"), False, True,
-                                           type(exc).__name__))
+                    rows.append(
+                        result_cls(
+                            case.case_id,
+                            case.expected,
+                            outcome_cls("INFRA_INVALID"),
+                            False,
+                            True,
+                            type(exc).__name__,
+                        )
+                    )
                 except Exception as exc:
                     rows.append(
                         result_cls(

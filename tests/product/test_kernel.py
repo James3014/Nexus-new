@@ -177,9 +177,7 @@ def test_product_imports_obey_layer_dag_and_external_boundary():
 
 
 def test_receipt_submodule_imports_only_allowed_inward_layers():
-    tree = ast.parse(
-        (Path(__file__).parents[2] / "product/certification/receipt.py").read_text()
-    )
+    tree = ast.parse((Path(__file__).parents[2] / "product/certification/receipt.py").read_text())
     for node in ast.walk(tree):
         _assert_import_is_allowed(node, "certification")
 
