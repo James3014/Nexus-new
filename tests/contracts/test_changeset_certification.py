@@ -6,8 +6,12 @@ import pytest
 
 from nexus.contracts.changeset_certification import (
     CHANGESET_CERTIFICATION_SCHEMA,
+    CHANGESET_CERTIFICATION_VERSION,
     CLAIM_CEILING,
+    LEGACY_CHANGESET_CERTIFICATION_SCHEMA,
+    LEGACY_CHANGESET_CERTIFICATION_VERSION,
     CertificationStatus,
+    VerificationStatus,
     build_changeset_certification,
     canonical_hash,
     canonical_json,
@@ -101,14 +105,17 @@ def test_hostile_identity_or_evidence_substitution_rejects(payload_factory, reas
 
 
 def test_explicit_status_cannot_override_derived_certification() -> None:
-    result = certify_changeset({
-        "change_set": _identity(),
-        "evidence": [_evidence()],
-        "status": "BLOCKED",
-    })
+    result = certify_changeset(
+        {
+            "change_set": _identity(),
+            "evidence": [_evidence()],
+            "status": "BLOCKED",
+        }
+    )
 
-    assert result.status is CertificationStatus.REJECTED
-    assert result.reason_codes == ("status_substitution",)
+    assert result.status is CertificationStatus.BLOCKED
+    assert result.verification_result.status is VerificationStatus.UNVERIFIABLE
+    assert result.reason_codes == ("legacy_v1_reverification_required",)
 
 
 def test_missing_change_set_is_blocked() -> None:
@@ -120,14 +127,17 @@ def test_missing_change_set_is_blocked() -> None:
 
 def test_canonical_hash_binding_rejects_tamper() -> None:
     result = certify_changeset({"change_set": _identity(), "evidence": [_evidence()]})
-    tampered = certify_changeset({
-        "change_set": _identity(),
-        "evidence": [_evidence()],
-        "canonical_hash": result.canonical_hash().replace("a", "c", 1),
-    })
+    tampered = certify_changeset(
+        {
+            "change_set": _identity(),
+            "evidence": [_evidence()],
+            "canonical_hash": result.canonical_hash().replace("a", "c", 1),
+        }
+    )
 
-    assert tampered.status is CertificationStatus.REJECTED
-    assert tampered.reason_codes == ("canonical_hash_mismatch",)
+    assert tampered.status is CertificationStatus.BLOCKED
+    assert tampered.verification_result.status is VerificationStatus.UNVERIFIABLE
+    assert tampered.reason_codes == ("legacy_v1_reverification_required",)
 
 
 @pytest.mark.parametrize(
@@ -155,17 +165,20 @@ def test_compatibility_failures_emit_self_validating_v1_envelopes(
     result = certify_changeset(payload)
     wire = result.to_dict()
 
-    assert result.status is status
-    assert wire["disposition"] == status.value
-    assert wire["reasons"] == [reason]
-    assert validate_changeset_certification(wire) == ()
+    del status, reason
+    assert result.status is CertificationStatus.BLOCKED
+    assert result.verification_result.status is VerificationStatus.UNVERIFIABLE
+    assert result.reason_codes == ("legacy_v1_reverification_required",)
+    assert wire["schema"] == CHANGESET_CERTIFICATION_SCHEMA
+    assert wire["version"] == CHANGESET_CERTIFICATION_VERSION
 
 
 def test_builder_returns_only_contract_data_and_no_execution_authority() -> None:
     payload = build_changeset_certification(change_set=_identity(), evidence=[_evidence()])
 
     assert payload["schema"] == CHANGESET_CERTIFICATION_SCHEMA
-    assert payload["disposition"] == "CERTIFIED"
+    assert payload["disposition"] == "BLOCKED"
+    assert payload["reasons"] == ["policy_missing"]
     assert "runtime" not in payload
     assert "apply" not in payload
     assert payload["claim_ceiling"] == CLAIM_CEILING
@@ -201,7 +214,7 @@ def _envelope(*, verifier_status: str = "PASS") -> dict[str, object]:
     manifest["manifest_hash"] = canonical_hash(manifest)
     payload: dict[str, object] = {
         "schema": CHANGESET_CERTIFICATION_SCHEMA,
-        "version": 1,
+        "version": CHANGESET_CERTIFICATION_VERSION,
         "task": {"task_id": "task-367", "attempt_id": "attempt-1"},
         "repository": {"repository": "James3014/Nexus-new", "source": "source-tree-1"},
         "base": {"commit": "base-commit-1", "tree": "tree-base-1"},
@@ -222,6 +235,10 @@ def _envelope(*, verifier_status: str = "PASS") -> dict[str, object]:
         "disposition": "CERTIFIED",
         "reasons": [],
         "claim_ceiling": CLAIM_CEILING,
+        "approval": {"complete": True},
+        "authority": {"complete": True},
+        "signing": {"complete": True},
+        "policy": {"allowed": True},
     }
     payload["canonical_payload_hash"] = canonical_hash(payload)
     return payload
@@ -243,7 +260,7 @@ def test_full_envelope_certifies_and_validates() -> None:
     result = certify_changeset(payload)
     assert result.status is CertificationStatus.CERTIFIED
     assert validate_changeset_certification(result) == ()
-    assert result.to_dict()["version"] == 1
+    assert result.to_dict()["version"] == CHANGESET_CERTIFICATION_VERSION
 
 
 @pytest.mark.parametrize(
@@ -309,8 +326,13 @@ def _rehash(payload: dict[str, object]) -> dict[str, object]:
 @pytest.mark.parametrize("disposition", ["REJECTED", "BLOCKED"])
 def test_every_disposition_is_deeply_hash_validated(disposition: str) -> None:
     payload = _envelope()
+    if disposition == "REJECTED":
+        payload["policy"] = {"allowed": False}
+        payload["reasons"] = ["policy_disallowed"]
+    else:
+        payload.pop("approval")
+        payload["reasons"] = ["approval_missing"]
     payload["disposition"] = disposition
-    payload["reasons"] = ["verifier_failed"]
     _rehash(payload)
     assert validate_changeset_certification(payload) == ()
     base = payload["base"]
@@ -326,16 +348,229 @@ def test_duplicate_artifact_id_rejects_even_with_unique_verifier_ids() -> None:
     payload = _envelope()
     manifest = payload["verifier_manifest"]
     assert isinstance(manifest, dict)
-    manifest["verifiers"].append({
-        "verifier_id": "bandit",
-        "artifact_id": "pytest:attempt-1",
-        "artifact_hash": "sha256:" + "e" * 64,
-        "status": "PASS",
-    })
+    manifest["verifiers"].append(
+        {
+            "verifier_id": "bandit",
+            "artifact_id": "pytest:attempt-1",
+            "artifact_hash": "sha256:" + "e" * 64,
+            "status": "PASS",
+        }
+    )
     _rehash(payload)
     result = certify_changeset(payload)
     assert result.status is CertificationStatus.REJECTED
     assert result.reason_codes == ("artifact_duplicate",)
+
+
+def test_failed_verification_disposition_is_deterministic_and_caller_independent() -> None:
+    outcomes = []
+    for disposition in ("BLOCKED", "REJECTED"):
+        payload = _envelope(verifier_status="FAIL")
+        payload["disposition"] = disposition
+        payload["reasons"] = ["verifier_failed"]
+        _rehash(payload)
+        result = certify_changeset(payload)
+        outcomes.append((result.status, result.verification_result.status))
+
+    assert outcomes == [
+        (CertificationStatus.REJECTED, "FAILED_VERIFICATION"),
+        (CertificationStatus.REJECTED, "FAILED_VERIFICATION"),
+    ]
+
+
+@pytest.mark.parametrize("missing", ["approval", "authority", "signing"])
+def test_verified_without_each_prerequisite_is_blocked(missing: str) -> None:
+    payload = _envelope()
+    for key in ("approval", "authority", "signing"):
+        payload[key] = {"complete": True}
+    payload.pop(missing)
+    payload["disposition"] = "CERTIFIED"
+    _rehash(payload)
+
+    result = certify_changeset(payload)
+
+    assert result.status is CertificationStatus.BLOCKED
+    assert result.verification_result.status == "VERIFIED"
+
+
+def test_failed_verification_with_waiver_remains_rejected() -> None:
+    payload = _envelope(verifier_status="FAIL")
+    payload["waiver"] = {"approved": True}
+    payload["disposition"] = "CERTIFIED"
+    payload["reasons"] = []
+    _rehash(payload)
+
+    result = certify_changeset(payload)
+
+    assert result.verification_result.status is VerificationStatus.FAILED_VERIFICATION
+    assert result.status is CertificationStatus.REJECTED
+
+
+def test_missing_manifest_is_unverifiable_and_blocked() -> None:
+    payload = _envelope()
+    payload.pop("verifier_manifest")
+
+    result = certify_changeset(payload)
+
+    assert result.verification_result.status is VerificationStatus.UNVERIFIABLE
+    assert result.status is CertificationStatus.BLOCKED
+
+
+def test_tampered_hash_is_unverifiable_but_submission_rejected() -> None:
+    payload = _envelope()
+    payload["canonical_payload_hash"] = "sha256:" + "f" * 64
+
+    result = certify_changeset(payload)
+
+    assert result.verification_result.status is VerificationStatus.UNVERIFIABLE
+    assert result.status is CertificationStatus.REJECTED
+
+
+def test_changed_candidate_without_requalification_is_blocked() -> None:
+    payload = _envelope()
+    candidate = payload["candidate"]
+    assert isinstance(candidate, dict)
+    candidate["commit"] = "candidate-2"
+    _rehash(payload)
+
+    result = certify_changeset(payload)
+
+    assert result.verification_result.status is VerificationStatus.UNVERIFIABLE
+    assert result.status is CertificationStatus.BLOCKED
+
+
+def test_scope_escape_is_failed_verification_and_rejected() -> None:
+    payload = _envelope()
+    diff = payload["diff"]
+    assert isinstance(diff, dict)
+    diff["paths"] = ["outside.py"]
+    _rehash(payload)
+
+    result = certify_changeset(payload)
+
+    assert result.verification_result.status is VerificationStatus.FAILED_VERIFICATION
+    assert result.status is CertificationStatus.REJECTED
+    assert "scope_escape" in result.reason_codes
+
+
+def test_caller_claimed_factual_result_cannot_mint_certification() -> None:
+    payload = _envelope()
+    payload["verification_result"] = {"status": "VERIFIED"}
+    payload["disposition"] = "CERTIFIED"
+    _rehash(payload)
+
+    result = certify_changeset(payload)
+
+    assert result.verification_result.status is VerificationStatus.VERIFIED
+    assert result.status is CertificationStatus.REJECTED
+    assert result.reason_codes == ("unknown_field",)
+    assert result.to_dict()["verification_result"] == result.verification_result.to_dict()
+
+
+def test_explicit_policy_denial_rejects_verified_submission() -> None:
+    payload = _envelope()
+    payload["policy"] = {"allowed": False}
+    _rehash(payload)
+
+    result = certify_changeset(payload)
+
+    assert result.verification_result.status is VerificationStatus.VERIFIED
+    assert result.status is CertificationStatus.REJECTED
+    assert result.reason_codes == ("policy_disallowed",)
+
+
+def test_verified_without_policy_is_blocked() -> None:
+    payload = _envelope()
+    payload.pop("policy")
+    _rehash(payload)
+
+    result = certify_changeset(payload)
+
+    assert result.verification_result.status is VerificationStatus.VERIFIED
+    assert result.status is CertificationStatus.BLOCKED
+    assert result.reason_codes == ("policy_missing",)
+
+
+def test_validator_rejects_caller_certified_receipt_missing_prerequisite() -> None:
+    payload = _envelope()
+    payload.pop("approval")
+    _rehash(payload)
+
+    assert validate_changeset_certification(payload) != ()
+
+
+def test_validator_rejects_fail_claimed_as_blocked() -> None:
+    payload = _envelope(verifier_status="FAIL")
+    payload["disposition"] = "BLOCKED"
+    payload["reasons"] = ["verifier_failed"]
+    _rehash(payload)
+
+    assert validate_changeset_certification(payload) != ()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda factual: factual.__setitem__("status", "FAILED_VERIFICATION"),
+        lambda factual: factual.__setitem__("reason_codes", ["verifier_failed"]),
+    ],
+)
+def test_validator_rejects_rehashed_factual_verification_tamper(mutation) -> None:
+    payload = _envelope()
+    result = certify_changeset(payload)
+    payload["verification_result"] = result.verification_result.to_dict()
+    factual = payload["verification_result"]
+    assert isinstance(factual, dict)
+    mutation(factual)
+    _rehash(payload)
+
+    assert validate_changeset_certification(payload) == ("status_substitution",)
+
+
+@pytest.mark.parametrize("field", ["approval", "authority", "signing"])
+def test_validator_rejects_rehashed_false_prerequisite(field: str) -> None:
+    payload = _envelope()
+    payload[field] = {"complete": False}
+    _rehash(payload)
+
+    assert validate_changeset_certification(payload) == ("status_substitution",)
+
+
+def test_extra_policy_fields_cannot_certify() -> None:
+    payload = _envelope()
+    payload["policy"] = {"allowed": True, "caller_claim": True}
+    _rehash(payload)
+
+    result = certify_changeset(payload)
+
+    assert result.verification_result.status is VerificationStatus.VERIFIED
+    assert result.status is CertificationStatus.REJECTED
+    assert result.reason_codes == ("policy_disallowed",)
+
+
+@pytest.mark.parametrize("field", ["approval", "authority", "signing"])
+def test_extra_prerequisite_fields_cannot_certify(field: str) -> None:
+    payload = _envelope()
+    payload[field] = {"complete": True, "caller_claim": True}
+    _rehash(payload)
+
+    result = certify_changeset(payload)
+
+    assert result.verification_result.status is VerificationStatus.VERIFIED
+    assert result.status is CertificationStatus.BLOCKED
+    assert result.reason_codes == (f"{field}_missing",)
+
+
+def test_malformed_waiver_cannot_change_factual_truth() -> None:
+    payload = _envelope()
+    payload["waiver"] = {"approved": True, "caller_claim": True}
+    _rehash(payload)
+
+    result = certify_changeset(payload)
+
+    assert result.verification_result.status is VerificationStatus.VERIFIED
+    assert result.status is CertificationStatus.REJECTED
+    assert result.reason_codes == ("reason_invalid",)
 
 
 def test_builder_rejects_duplicate_evidence_kinds_before_emission() -> None:
@@ -345,7 +580,22 @@ def test_builder_rejects_duplicate_evidence_kinds_before_emission() -> None:
     )
     assert payload["disposition"] == "BLOCKED"
     assert payload["reasons"] == ["verifier_duplicate"]
-    assert validate_changeset_certification(payload) == ()
+    assert validate_changeset_certification(payload) != ()
+
+
+@pytest.mark.parametrize("verifier_status", ["PASS", "FAIL"])
+def test_v1_receipt_never_upgrades_to_v2_factual_truth(verifier_status: str) -> None:
+    payload = _envelope(verifier_status=verifier_status)
+    payload["schema"] = LEGACY_CHANGESET_CERTIFICATION_SCHEMA
+    payload["version"] = LEGACY_CHANGESET_CERTIFICATION_VERSION
+    _rehash(payload)
+
+    result = certify_changeset(payload)
+
+    assert result.status is CertificationStatus.BLOCKED
+    assert result.verification_result.status is VerificationStatus.UNVERIFIABLE
+    assert result.reason_codes == ("legacy_v1_reverification_required",)
+    assert validate_changeset_certification(payload) == ("schema_invalid",)
 
 
 def test_rejected_disposition_requires_bounded_non_empty_reason_codes() -> None:
@@ -382,8 +632,19 @@ def test_nonfinite_input_returns_structured_fail_closed_result() -> None:
     assert result.reason_codes == ("identity_malformed",)
 
 
-@pytest.mark.parametrize("field", ["repository", "base", "candidate"])
-def test_repository_base_candidate_manifest_bindings_are_not_substitutable(field: str) -> None:
+@pytest.mark.parametrize(
+    ("field", "expected_status", "expected_reason"),
+    [
+        ("repository", CertificationStatus.REJECTED, "cross_binding_mismatch"),
+        ("base", CertificationStatus.REJECTED, "cross_binding_mismatch"),
+        ("candidate", CertificationStatus.BLOCKED, "stale_changeset"),
+    ],
+)
+def test_repository_base_candidate_manifest_bindings_are_not_substitutable(
+    field: str,
+    expected_status: CertificationStatus,
+    expected_reason: str,
+) -> None:
     payload = _envelope()
     manifest = payload["verifier_manifest"]
     assert isinstance(manifest, dict)
@@ -395,5 +656,5 @@ def test_repository_base_candidate_manifest_bindings_are_not_substitutable(field
         manifest["candidate_commit"] = "other-candidate"
     _rehash(payload)
     result = certify_changeset(payload)
-    assert result.status is CertificationStatus.REJECTED
-    assert result.reason_codes == ("cross_binding_mismatch",)
+    assert result.status is expected_status
+    assert result.reason_codes == (expected_reason,)

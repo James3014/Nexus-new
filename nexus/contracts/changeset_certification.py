@@ -1,4 +1,4 @@
-"""Provider-neutral v1 ChangeSet certification wire contract."""
+"""Provider-neutral v2 ChangeSet certification wire contract."""
 
 from __future__ import annotations
 
@@ -9,53 +9,83 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Mapping
 
-CHANGESET_CERTIFICATION_SCHEMA = "nexus.changeset_certification.v1"
-CHANGESET_CERTIFICATION_VERSION = 1
-CLAIM_CEILING = "LOCAL_CHANGESET_CERTIFICATION_V1_CONTRACT_CANDIDATE_ONLY"
+LEGACY_CHANGESET_CERTIFICATION_SCHEMA = "nexus.changeset_certification.v1"
+LEGACY_CHANGESET_CERTIFICATION_VERSION = 1
+CHANGESET_CERTIFICATION_SCHEMA = "nexus.changeset_certification.v2"
+CHANGESET_CERTIFICATION_VERSION = 2
+CLAIM_CEILING = "LOCAL_CHANGESET_CERTIFICATION_V2_CONTRACT_CANDIDATE_ONLY"
 _STATUSES = frozenset({"CERTIFIED", "REJECTED", "BLOCKED"})
 _VERIFIER_STATUSES = frozenset({"PASS", "FAIL"})
 _HASH_LEN = 71
 _MAX_REASONS = 16
-_REASONS = frozenset({
-    "identity_missing",
-    "identity_malformed",
-    "evidence_missing",
-    "evidence_malformed",
-    "scope_missing",
-    "scope_malformed",
-    "candidate_missing",
-    "candidate_malformed",
-    "verifier_manifest_missing",
-    "verifier_manifest_malformed",
-    "verifier_missing",
-    "verifier_failed",
-    "verifier_artifact_missing",
-    "verifier_artifact_malformed",
-    "verifier_duplicate",
-    "artifact_duplicate",
-    "hash_mismatch",
-    "manifest_hash_mismatch",
-    "payload_hash_mismatch",
-    "cross_binding_mismatch",
-    "status_invalid",
-    "reason_invalid",
-    "schema_invalid",
-    "unknown_field",
-    "status_substitution",
-    "change_set_missing",
-    "identity_diff_hash_invalid",
-    "evidence_0_invalid",
-    "evidence_duplicate_id",
-    "evidence_empty",
-    "evidence_not_sequence",
-    "canonical_hash_mismatch",
-})
+_REASONS = frozenset(
+    {
+        "identity_missing",
+        "identity_malformed",
+        "evidence_missing",
+        "evidence_malformed",
+        "scope_missing",
+        "scope_malformed",
+        "candidate_missing",
+        "candidate_malformed",
+        "verifier_manifest_missing",
+        "verifier_manifest_malformed",
+        "verifier_missing",
+        "verifier_failed",
+        "verifier_artifact_missing",
+        "verifier_artifact_malformed",
+        "verifier_duplicate",
+        "artifact_duplicate",
+        "hash_mismatch",
+        "manifest_hash_mismatch",
+        "payload_hash_mismatch",
+        "cross_binding_mismatch",
+        "status_invalid",
+        "reason_invalid",
+        "schema_invalid",
+        "unknown_field",
+        "status_substitution",
+        "change_set_missing",
+        "identity_diff_hash_invalid",
+        "evidence_0_invalid",
+        "evidence_duplicate_id",
+        "evidence_empty",
+        "evidence_not_sequence",
+        "canonical_hash_mismatch",
+        "approval_missing",
+        "authority_missing",
+        "signing_missing",
+        "policy_missing",
+        "policy_disallowed",
+        "scope_escape",
+        "stale_changeset",
+        "legacy_v1_reverification_required",
+    }
+)
 
 
 class CertificationStatus(str, Enum):
     CERTIFIED = "CERTIFIED"
     REJECTED = "REJECTED"
     BLOCKED = "BLOCKED"
+
+
+class VerificationStatus(str, Enum):
+    VERIFIED = "VERIFIED"
+    FAILED_VERIFICATION = "FAILED_VERIFICATION"
+    UNVERIFIABLE = "UNVERIFIABLE"
+
+
+@dataclass(frozen=True)
+class VerificationResult:
+    status: VerificationStatus
+    reason_codes: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status.value,
+            "reason_codes": list(self.reason_codes),
+        }
 
 
 @dataclass(frozen=True)
@@ -82,6 +112,7 @@ class ChangeSetCertification:
     reason_codes: tuple[str, ...] = ()
     envelope: Mapping[str, Any] | None = None
     schema: str = CHANGESET_CERTIFICATION_SCHEMA
+    verification_result: VerificationResult = VerificationResult(VerificationStatus.UNVERIFIABLE)
 
     def to_dict(self) -> dict[str, Any]:
         # Compatibility dataclasses never emit the superseded legacy wire form.
@@ -108,29 +139,179 @@ def canonical_hash(value: Any) -> str:
     return "sha256:" + hashlib.sha256(canonical_json(value).encode()).hexdigest()
 
 
+def derive_verification_result(
+    payload: Mapping[str, Any], errors: tuple[str, ...] = ()
+) -> VerificationResult:
+    """Derive factual verifier truth without consulting caller disposition."""
+    if "scope_escape" in errors:
+        return VerificationResult(VerificationStatus.FAILED_VERIFICATION, ("scope_escape",))
+    if errors or not isinstance(payload, Mapping):
+        return VerificationResult(VerificationStatus.UNVERIFIABLE, tuple(sorted(set(errors))))
+    manifest = payload.get("verifier_manifest")
+    if not isinstance(manifest, Mapping) or not _hashes_match(payload):
+        reasons = _hash_errors(payload) if isinstance(manifest, Mapping) else ("evidence_missing",)
+        return VerificationResult(VerificationStatus.UNVERIFIABLE, reasons)
+    verifiers = manifest.get("verifiers")
+    if not isinstance(verifiers, list) or not verifiers:
+        return VerificationResult(VerificationStatus.UNVERIFIABLE, ("verifier_missing",))
+    if any(verifier.get("status") == "FAIL" for verifier in verifiers):
+        return VerificationResult(VerificationStatus.FAILED_VERIFICATION, ("verifier_failed",))
+    return VerificationResult(VerificationStatus.VERIFIED)
+
+
+def _missing_prerequisites(payload: Mapping[str, Any]) -> tuple[str, ...]:
+    missing = []
+    for key in ("approval", "authority", "signing"):
+        value = payload.get(key)
+        complete = (
+            isinstance(value, Mapping)
+            and _exact(value, {"complete"})
+            and value.get("complete") is True
+        )
+        if not complete:
+            missing.append(f"{key}_missing")
+    return tuple(missing)
+
+
+def _policy_reasons(payload: Mapping[str, Any]) -> tuple[str, ...]:
+    policy = payload.get("policy")
+    if policy is None:
+        return ("policy_missing",)
+    if (
+        not isinstance(policy, Mapping)
+        or not _exact(policy, {"allowed"})
+        or policy.get("allowed") is not True
+    ):
+        return ("policy_disallowed",)
+    return ()
+
+
+def _waiver_is_malformed(payload: Mapping[str, Any]) -> bool:
+    waiver = payload.get("waiver")
+    return waiver is not None and (
+        not isinstance(waiver, Mapping)
+        or not _exact(waiver, {"approved"})
+        or not isinstance(waiver.get("approved"), bool)
+    )
+
+
 def certify_changeset(payload: Mapping[str, Any]) -> ChangeSetCertification:
     if not isinstance(payload, Mapping):
         return _blocked("identity_missing")
     if _contains_nonfinite(payload):
         return _blocked("identity_malformed")
+    if (
+        payload.get("schema") == LEGACY_CHANGESET_CERTIFICATION_SCHEMA
+        and payload.get("version") == LEGACY_CHANGESET_CERTIFICATION_VERSION
+    ):
+        return _blocked(
+            "legacy_v1_reverification_required",
+            VerificationResult(
+                VerificationStatus.UNVERIFIABLE,
+                ("legacy_v1_reverification_required",),
+            ),
+        )
     if "change_set" in payload:
         return _certify_compatibility_input(payload)
+    if "verification_result" in payload:
+        sanitized = _copy(payload)
+        sanitized.pop("verification_result", None)
+        sanitized["canonical_payload_hash"] = canonical_hash(_payload_input(sanitized))
+        verification = derive_verification_result(sanitized)
+        return _result(
+            sanitized,
+            CertificationStatus.REJECTED,
+            ("unknown_field",),
+            verification,
+        )
     if any(key not in payload for key in ("task", "repository", "base", "diff")):
         return _result(payload, CertificationStatus.BLOCKED, ("identity_missing",))
     errors = _validate(payload)
     if errors:
-        return _result(payload, _status_for(errors), errors)
-    manifest = payload["verifier_manifest"]
-    disposition = payload["disposition"]
-    if disposition == "CERTIFIED" and any(v["status"] == "FAIL" for v in manifest["verifiers"]):
-        return _result(payload, CertificationStatus.REJECTED, ("verifier_failed",))
-    if disposition == "CERTIFIED" and payload["reasons"]:
-        return _result(payload, CertificationStatus.REJECTED, ("status_invalid",))
-    if disposition == "BLOCKED" and not payload["reasons"]:
-        return _result(payload, CertificationStatus.REJECTED, ("reason_invalid",))
+        if errors == ("cross_binding_mismatch",) and _candidate_binding_is_stale(payload):
+            verification = VerificationResult(VerificationStatus.UNVERIFIABLE, ("stale_changeset",))
+            return _result(
+                payload,
+                CertificationStatus.BLOCKED,
+                ("stale_changeset",),
+                verification,
+            )
+        verification = derive_verification_result(payload, errors)
+        return _result(
+            payload,
+            _status_for(errors),
+            errors,
+            verification,
+        )
+    verification = derive_verification_result(payload)
+    if verification.status is VerificationStatus.FAILED_VERIFICATION:
+        return _result(
+            payload,
+            CertificationStatus.REJECTED,
+            ("verifier_failed",),
+            verification,
+        )
     if not _hashes_match(payload):
-        return _result(payload, CertificationStatus.REJECTED, _hash_errors(payload))
-    return _result(payload, CertificationStatus(disposition), tuple(payload["reasons"]))
+        return _result(
+            payload,
+            CertificationStatus.REJECTED,
+            _hash_errors(payload),
+            verification,
+        )
+    if _waiver_is_malformed(payload):
+        return _result(
+            payload,
+            CertificationStatus.REJECTED,
+            ("reason_invalid",),
+            verification,
+        )
+    policy_reasons = _policy_reasons(payload)
+    if policy_reasons:
+        status = (
+            CertificationStatus.BLOCKED
+            if policy_reasons == ("policy_missing",)
+            else CertificationStatus.REJECTED
+        )
+        return _result(payload, status, policy_reasons, verification)
+    missing_prerequisites = _missing_prerequisites(payload)
+    if missing_prerequisites:
+        return _result(
+            payload,
+            CertificationStatus.BLOCKED,
+            missing_prerequisites,
+            verification,
+        )
+    return _result(
+        payload,
+        CertificationStatus.CERTIFIED,
+        (),
+        verification,
+    )
+
+
+def _candidate_binding_is_stale(payload: Mapping[str, Any]) -> bool:
+    task = _as_mapping(payload.get("task"))
+    repository = _as_mapping(payload.get("repository"))
+    base = _as_mapping(payload.get("base"))
+    diff = _as_mapping(payload.get("diff"))
+    candidate = _as_mapping(payload.get("candidate"))
+    manifest = _as_mapping(payload.get("verifier_manifest"))
+    if not all((task, repository, base, diff, candidate, manifest)):
+        return False
+    stable_bindings = (
+        manifest.get("task_id") == task.get("task_id")
+        and manifest.get("attempt_id") == task.get("attempt_id")
+        and manifest.get("repository") == repository.get("repository")
+        and manifest.get("source") == repository.get("source")
+        and manifest.get("base_commit") == base.get("commit")
+        and manifest.get("base_tree") == base.get("tree")
+        and manifest.get("diff_hash") == diff.get("hash")
+        and candidate.get("diff_hash") == diff.get("hash")
+    )
+    candidate_moved = manifest.get("candidate_commit") != candidate.get("commit") or manifest.get(
+        "candidate_tree"
+    ) != candidate.get("tree")
+    return stable_bindings and candidate_moved
 
 
 def build_changeset_certification(
@@ -138,7 +319,7 @@ def build_changeset_certification(
     change_set: Mapping[str, Any],
     evidence: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...] | None,
 ) -> dict[str, Any]:
-    """Build a complete v1 envelope from the compatibility convenience API."""
+    """Build a non-authorizing v2 envelope from the convenience API."""
     if (
         not isinstance(change_set, Mapping)
         or not _texts(change_set, ("change_set_id", "source_revision", "target_revision"))
@@ -160,12 +341,14 @@ def build_changeset_certification(
         if item["kind"] in verifier_ids:
             return _minimal_invalid("verifier_duplicate")
         verifier_ids.add(item["kind"])
-        verifiers.append({
-            "verifier_id": item["kind"],
-            "artifact_id": f"{item['kind']}:attempt-1",
-            "artifact_hash": item["content_hash"],
-            "status": "PASS",
-        })
+        verifiers.append(
+            {
+                "verifier_id": item["kind"],
+                "artifact_id": f"{item['kind']}:attempt-1",
+                "artifact_hash": item["content_hash"],
+                "status": "PASS",
+            }
+        )
     source = str(change_set["source_revision"])
     target = str(change_set["target_revision"])
     return _new_envelope(
@@ -176,45 +359,21 @@ def build_changeset_certification(
         allowed_scope={"paths": paths, "deletion_policy": "FORBID"},
         candidate={"commit": target, "tree": target, "diff_hash": change_set["diff_hash"]},
         verifiers=verifiers,
-        disposition="CERTIFIED",
-        reasons=[],
+        disposition="BLOCKED",
+        reasons=["policy_missing"],
     )
 
 
 def _certify_compatibility_input(payload: Mapping[str, Any]) -> ChangeSetCertification:
-    """Parse the retired convenience shape, but never emit it on the wire."""
-    identity = payload.get("change_set")
-    if not isinstance(identity, Mapping):
-        return _blocked("change_set_missing")
-    if payload.get("status") is not None:
-        return _reject("status_substitution")
-    if payload.get("canonical_hash") is not None:
-        return _reject("canonical_hash_mismatch")
-    if not _texts(identity, ("change_set_id", "source_revision", "target_revision")):
-        return _blocked("identity_malformed")
-    if not _hash(identity.get("diff_hash")):
-        return _reject("identity_diff_hash_invalid")
-    evidence = payload.get("evidence")
-    if evidence is None:
-        return _blocked("evidence_missing")
-    if not isinstance(evidence, (list, tuple)):
-        return _reject("evidence_not_sequence")
-    if not evidence:
-        return _blocked("evidence_empty")
-    ids = []
-    for item in evidence:
-        if (
-            not isinstance(item, Mapping)
-            or not _texts(item, ("evidence_id", "kind", "source"))
-            or not _hash(item.get("content_hash"))
-        ):
-            return _reject("evidence_0_invalid")
-        ids.append(item["evidence_id"])
-    if len(ids) != len(set(ids)):
-        return _reject("evidence_duplicate_id")
-    built = build_changeset_certification(change_set=identity, evidence=evidence)
-    result = certify_changeset(built)
-    return result
+    """Refuse to reinterpret the retired convenience/v1 input as v2 truth."""
+    del payload
+    return _blocked(
+        "legacy_v1_reverification_required",
+        VerificationResult(
+            VerificationStatus.UNVERIFIABLE,
+            ("legacy_v1_reverification_required",),
+        ),
+    )
 
 
 def validate_changeset_certification(
@@ -227,21 +386,46 @@ def validate_changeset_certification(
     )
     if not isinstance(payload, Mapping):
         return ("identity_malformed",)
-    errors = _validate(payload)
+    errors = _validate(payload, allow_verification_result=True)
     if errors:
         return errors
-    if payload["disposition"] == "CERTIFIED" and any(
-        v["status"] == "FAIL" for v in payload["verifier_manifest"]["verifiers"]
-    ):
-        return ("verifier_failed",)
-    if payload["disposition"] == "CERTIFIED" and payload["reasons"]:
-        return ("status_invalid",)
-    if payload["disposition"] == "BLOCKED" and not payload["reasons"]:
-        return ("reason_invalid",)
-    return _hash_errors(payload) if not _hashes_match(payload) else ()
+    if not _hashes_match(payload):
+        return _hash_errors(payload)
+    verification = derive_verification_result(payload)
+    claimed_verification = payload.get("verification_result")
+    if claimed_verification is not None and claimed_verification != verification.to_dict():
+        return ("status_substitution",)
+    if verification.status is VerificationStatus.FAILED_VERIFICATION:
+        expected_status = CertificationStatus.REJECTED
+        expected_reasons = ("verifier_failed",)
+    elif verification.status is VerificationStatus.VERIFIED:
+        policy_reasons = _policy_reasons(payload)
+        missing_prerequisites = _missing_prerequisites(payload)
+        if policy_reasons:
+            expected_status = (
+                CertificationStatus.BLOCKED
+                if policy_reasons == ("policy_missing",)
+                else CertificationStatus.REJECTED
+            )
+            expected_reasons = policy_reasons
+        elif missing_prerequisites:
+            expected_status = CertificationStatus.BLOCKED
+            expected_reasons = missing_prerequisites
+        else:
+            expected_status = CertificationStatus.CERTIFIED
+            expected_reasons = ()
+    else:
+        expected_reasons = verification.reason_codes or ("evidence_missing",)
+        expected_status = _status_for(expected_reasons)
+    actual_reasons = tuple(payload["reasons"])
+    if payload["disposition"] != expected_status.value or actual_reasons != expected_reasons:
+        return ("status_substitution",)
+    return ()
 
 
-def _validate(payload: Mapping[str, Any]) -> tuple[str, ...]:
+def _validate(
+    payload: Mapping[str, Any], *, allow_verification_result: bool = False
+) -> tuple[str, ...]:
     allowed = {
         "schema",
         "version",
@@ -256,7 +440,14 @@ def _validate(payload: Mapping[str, Any]) -> tuple[str, ...]:
         "reasons",
         "claim_ceiling",
         "canonical_payload_hash",
+        "approval",
+        "authority",
+        "signing",
+        "policy",
+        "waiver",
     }
+    if allow_verification_result:
+        allowed.add("verification_result")
     if set(payload) - allowed:
         return ("unknown_field",)
     if (
@@ -264,6 +455,18 @@ def _validate(payload: Mapping[str, Any]) -> tuple[str, ...]:
         or payload.get("version") != CHANGESET_CERTIFICATION_VERSION
     ):
         return ("schema_invalid",)
+    if allow_verification_result and "verification_result" in payload:
+        factual = payload["verification_result"]
+        if (
+            not isinstance(factual, Mapping)
+            or not _exact(factual, {"status", "reason_codes"})
+            or factual.get("status") not in {item.value for item in VerificationStatus}
+            or not isinstance(factual.get("reason_codes"), list)
+            or len(factual["reason_codes"]) > _MAX_REASONS
+            or len(set(factual["reason_codes"])) != len(factual["reason_codes"])
+            or any(reason not in _REASONS for reason in factual["reason_codes"])
+        ):
+            return ("evidence_malformed",)
     task, repo, base, diff, scope = (
         payload.get(k) for k in ("task", "repository", "base", "diff", "allowed_scope")
     )
@@ -304,7 +507,7 @@ def _validate(payload: Mapping[str, Any]) -> tuple[str, ...]:
     ):
         return ("scope_malformed",)
     if not set(diff["paths"]).issubset(scope["paths"]):
-        return ("cross_binding_mismatch",)
+        return ("scope_escape",)
     candidate = payload.get("candidate")
     if candidate is not None and (
         not isinstance(candidate, Mapping)
@@ -470,13 +673,18 @@ def _new_envelope(
 
 
 def _result(
-    payload: Mapping[str, Any], status: CertificationStatus, reasons: tuple[str, ...]
+    payload: Mapping[str, Any],
+    status: CertificationStatus,
+    reasons: tuple[str, ...],
+    verification_result: VerificationResult | None = None,
 ) -> ChangeSetCertification:
+    factual = verification_result or derive_verification_result(payload)
     result = _copy(payload)
     result["schema"] = CHANGESET_CERTIFICATION_SCHEMA
     result["version"] = CHANGESET_CERTIFICATION_VERSION
     result["disposition"] = status.value
     result["reasons"] = list(sorted(set(reasons)))
+    result["verification_result"] = factual.to_dict()
     if isinstance(result.get("verifier_manifest"), dict):
         result["verifier_manifest"]["manifest_hash"] = canonical_hash(
             _manifest_input(result["verifier_manifest"])
@@ -493,7 +701,11 @@ def _result(
         str(diff.get("hash", "")),
     )
     return ChangeSetCertification(
-        identity, status=status, reason_codes=tuple(sorted(set(reasons))), envelope=result
+        identity,
+        status=status,
+        reason_codes=tuple(sorted(set(reasons))),
+        envelope=result,
+        verification_result=factual,
     )
 
 
@@ -552,10 +764,13 @@ def _manifest_input(manifest: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _minimal(result: ChangeSetCertification) -> dict[str, Any]:
-    return _minimal_invalid(
+    payload = _minimal_invalid(
         result.reason_codes[0] if result.reason_codes else "identity_missing",
         disposition=result.status.value,
     )
+    payload["verification_result"] = result.verification_result.to_dict()
+    payload["canonical_payload_hash"] = canonical_hash(_payload_input(payload))
+    return payload
 
 
 def _minimal_invalid(reason: str, *, disposition: str = "BLOCKED") -> dict[str, Any]:
@@ -579,11 +794,16 @@ def _minimal_invalid(reason: str, *, disposition: str = "BLOCKED") -> dict[str, 
     )
 
 
-def _blocked(reason: str) -> ChangeSetCertification:
+def _blocked(
+    reason: str,
+    verification_result: VerificationResult | None = None,
+) -> ChangeSetCertification:
     return ChangeSetCertification(
         ChangeSetIdentity("", "", "", ""),
         status=CertificationStatus.BLOCKED,
         reason_codes=(reason,),
+        verification_result=verification_result
+        or VerificationResult(VerificationStatus.UNVERIFIABLE, (reason,)),
     )
 
 
@@ -636,7 +856,7 @@ def _normalize(value: Any, path: tuple[str, ...]) -> Any:
         items = [_normalize(item, path) for item in value]
         return (
             sorted(items, key=canonical_json)
-            if path and path[-1] in {"paths", "reasons", "verifiers", "evidence"}
+            if path and path[-1] in {"paths", "reasons", "reason_codes", "verifiers", "evidence"}
             else items
         )
     raise TypeError(f"unsupported canonical JSON value: {type(value).__name__}")
