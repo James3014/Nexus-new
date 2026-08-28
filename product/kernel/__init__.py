@@ -2,13 +2,13 @@ from dataclasses import dataclass
 
 from product.certification import CertificationPolicy, certify_result
 from product.certification.receipt import (
+    _SEALED_RECEIPT_CORE_HASH,
     CLAIM_CEILING,
     CertificationResult,
     Receipt,
-    _validate_receipt_envelope,
-    _create_receipt,
     _create_certification_result,
-    _SEALED_RECEIPT_CORE_HASH,
+    _create_receipt,
+    _validate_receipt_envelope,
 )
 from product.evidence import (
     AcceptanceContract,
@@ -35,8 +35,12 @@ class CertificationInput:
 def _make_policy_factory(policy_type):
     def create(accepted, authority_present, approval_present, signing_present):
         policy = object.__new__(policy_type)
-        for name, value in (("accepted", accepted), ("authority_present", authority_present),
-                            ("approval_present", approval_present), ("signing_present", signing_present)):
+        for name, value in (
+            ("accepted", accepted),
+            ("authority_present", authority_present),
+            ("approval_present", approval_present),
+            ("signing_present", signing_present),
+        ):
             object.__setattr__(policy, name, value)
         return policy
 
@@ -124,9 +128,8 @@ def _make_kernel(
         expected = certify(value).receipt
         fields = vars(receipt)
         claimed = fields["claimed_receipt_hash"]
-        return (
-            _SEALED_RECEIPT_CORE_HASH(receipt) == _SEALED_RECEIPT_CORE_HASH(expected)
-            and (claimed is None or claimed == _SEALED_RECEIPT_CORE_HASH(receipt))
+        return _SEALED_RECEIPT_CORE_HASH(receipt) == _SEALED_RECEIPT_CORE_HASH(expected) and (
+            claimed is None or claimed == _SEALED_RECEIPT_CORE_HASH(receipt)
         )
 
     def validate_serialized_receipt(payload, value):

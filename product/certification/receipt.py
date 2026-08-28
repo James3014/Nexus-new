@@ -21,7 +21,7 @@ _VALIDATOR_RECEIPT_REQUIRE_HASH = _SEALED_RECEIPT_REQUIRE_HASH
 
 def _make_receipt_hash_property(hash_fn):
     def get_hash(self):
-        return hash_fn(self.canonical_value)
+        return hash_fn(self)
 
     return property(get_hash)
 
@@ -226,9 +226,15 @@ def _make_sealed_receipt_body():
             },
             "certification": {
                 "disposition": fields["disposition"].value,
-                "policy": {name: vars(policy)[name] for name in (
-                    "accepted", "authority_present", "approval_present", "signing_present"
-                )},
+                "policy": {
+                    name: vars(policy)[name]
+                    for name in (
+                        "accepted",
+                        "authority_present",
+                        "approval_present",
+                        "signing_present",
+                    )
+                },
             },
             "claim_ceiling": list(fields["claim_ceiling"]),
         }
@@ -260,13 +266,26 @@ _SEALED_RECEIPT_CORE_HASH = _make_receipt_core_hash(_SEALED_RECEIPT_BODY, _SEALE
 def _make_receipt_invariant(certifier, require_hash):
     def validate(receipt):
         fields = vars(receipt)
-        for field in ("acceptance_contract_hash", "change_set_hash", "verification_plan_hash", "evidence_hash"):
+        for field in (
+            "acceptance_contract_hash",
+            "change_set_hash",
+            "verification_plan_hash",
+            "evidence_hash",
+        ):
             require_hash(fields[field], field)
-        if type(fields["verification"]) is not VerificationResult or not is_reduced_result(fields["verification"]):
+        if type(fields["verification"]) is not VerificationResult or not is_reduced_result(
+            fields["verification"]
+        ):
             raise TypeError("verification must be reducer-produced VerificationResult")
-        if type(fields["disposition"]) is not CertificationDisposition or not _policy_valid(fields["policy"]):
+        if type(fields["disposition"]) is not CertificationDisposition or not _policy_valid(
+            fields["policy"]
+        ):
             raise TypeError("invalid receipt certification fields")
-        if fields["claim_ceiling"] != CLAIM_CEILING or fields["protocol_version"] != PUBLIC_PROTOCOL_VERSION or fields["implementation_schema"] != IMPLEMENTATION_SCHEMA:
+        if (
+            fields["claim_ceiling"] != CLAIM_CEILING
+            or fields["protocol_version"] != PUBLIC_PROTOCOL_VERSION
+            or fields["implementation_schema"] != IMPLEMENTATION_SCHEMA
+        ):
             raise ValueError("receipt constants do not match")
         if certifier(fields["verification"], fields["policy"]) is not fields["disposition"]:
             raise ValueError("disposition must match reducer")
@@ -279,24 +298,64 @@ def _make_receipt_invariant(certifier, require_hash):
 _SEALED_RECEIPT_INVARIANT = _make_receipt_invariant(certify_result, _SEALED_RECEIPT_REQUIRE_HASH)
 
 
-def _create_receipt(
-    acceptance_contract_hash, change_set_hash, verification_plan_hash, evidence_hash,
-    verification, disposition, policy, claim_ceiling=CLAIM_CEILING,
-    protocol_version=PUBLIC_PROTOCOL_VERSION, implementation_schema=IMPLEMENTATION_SCHEMA,
-    claimed_receipt_hash=None,
+def _make_receipt_factory(
+    receipt_type,
+    invariant,
+    ceiling,
+    protocol_version,
+    implementation_schema,
 ):
-    receipt = object.__new__(Receipt)
-    for name, value in zip(Receipt.__dataclass_fields__, (
-        acceptance_contract_hash, change_set_hash, verification_plan_hash, evidence_hash,
-        verification, disposition, policy, claim_ceiling, protocol_version,
-        implementation_schema, claimed_receipt_hash,
-    )):
-        object.__setattr__(receipt, name, value)
-    _SEALED_RECEIPT_INVARIANT(receipt)
-    return receipt
+    field_names = tuple(receipt_type.__dataclass_fields__)
+
+    def create_receipt(
+        acceptance_contract_hash,
+        change_set_hash,
+        verification_plan_hash,
+        evidence_hash,
+        verification,
+        disposition,
+        policy,
+        **options,
+    ):
+        claim_ceiling = options.pop("claim_ceiling", ceiling)
+        receipt_protocol_version = options.pop("protocol_version", protocol_version)
+        receipt_implementation_schema = options.pop("implementation_schema", implementation_schema)
+        claimed_receipt_hash = options.pop("claimed_receipt_hash", None)
+        if options:
+            raise TypeError(f"unexpected receipt options: {', '.join(sorted(options))}")
+        receipt = object.__new__(receipt_type)
+        values = (
+            acceptance_contract_hash,
+            change_set_hash,
+            verification_plan_hash,
+            evidence_hash,
+            verification,
+            disposition,
+            policy,
+            claim_ceiling,
+            receipt_protocol_version,
+            receipt_implementation_schema,
+            claimed_receipt_hash,
+        )
+        for name, value in zip(field_names, values):
+            object.__setattr__(receipt, name, value)
+        invariant(receipt)
+        return receipt
+
+    return create_receipt
 
 
-Receipt.hash = property(lambda self: _SEALED_RECEIPT_CORE_HASH(self))
+_create_receipt = _make_receipt_factory(
+    Receipt,
+    _SEALED_RECEIPT_INVARIANT,
+    CLAIM_CEILING,
+    PUBLIC_PROTOCOL_VERSION,
+    IMPLEMENTATION_SCHEMA,
+)
+
+Receipt.hash = _make_receipt_hash_property(  # pyright: ignore[reportAttributeAccessIssue]
+    _SEALED_RECEIPT_CORE_HASH
+)
 
 
 def _validate_receipt_envelope(payload, expected_receipt):
@@ -412,13 +471,27 @@ CertificationResult.__post_init__ = _freeze_function_globals(CertificationResult
 _validate_receipt_envelope = _freeze_function_globals(_validate_receipt_envelope)
 
 
-def _create_certification_result(verification, disposition, receipt):
-    receipt_fields = vars(receipt)
-    if receipt_fields["verification"] != verification or receipt_fields["disposition"] != disposition:
-        raise ValueError("certification result must match receipt")
-    if certify_result(verification, receipt_fields["policy"]) is not disposition:
-        raise ValueError("disposition must match reducer")
-    result = object.__new__(CertificationResult)
-    for name, value in (("verification", verification), ("disposition", disposition), ("receipt", receipt)):
-        object.__setattr__(result, name, value)
-    return result
+def _make_certification_result_factory(result_type, receipt_type, certifier):
+    def create_result(verification, disposition, receipt):
+        if type(receipt) is not receipt_type:
+            raise TypeError("receipt must be Receipt")
+        receipt_fields = vars(receipt)
+        if (
+            receipt_fields["verification"] != verification
+            or receipt_fields["disposition"] != disposition
+        ):
+            raise ValueError("certification result must match receipt")
+        if certifier(verification, receipt_fields["policy"]) is not disposition:
+            raise ValueError("disposition must match reducer")
+        result = object.__new__(result_type)
+        object.__setattr__(result, "verification", verification)
+        object.__setattr__(result, "disposition", disposition)
+        object.__setattr__(result, "receipt", receipt)
+        return result
+
+    return create_result
+
+
+_create_certification_result = _make_certification_result_factory(
+    CertificationResult, Receipt, certify_result
+)

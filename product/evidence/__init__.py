@@ -375,8 +375,16 @@ _VALIDATOR_EB_ENVELOPE_HASH = _SEALED_EB_ENVELOPE_HASH
 def _make_bundle_core_serializer():
     def serialize(bundle):
         observations = tuple(
-            (vars(o)["verifier_id"], vars(o)["artifact_id"], vars(o)["artifact_hash"], vars(o)["status"].value)
-            for o in sorted(vars(bundle)["observations"], key=lambda x: (vars(x)["verifier_id"], vars(x)["artifact_id"]))
+            (
+                vars(o)["verifier_id"],
+                vars(o)["artifact_id"],
+                vars(o)["artifact_hash"],
+                vars(o)["status"].value,
+            )
+            for o in sorted(
+                vars(bundle)["observations"],
+                key=lambda x: (vars(x)["verifier_id"], vars(x)["artifact_id"]),
+            )
         )
         return (
             vars(bundle)["bundle_id"],
@@ -404,7 +412,10 @@ _SEALED_BUNDLE_CORE_HASH = _make_bundle_core_hash(_SEALED_BUNDLE_CORE_SERIALIZER
 
 def _make_bundle_serializer(envelope_hash, schema):
     def serialize(self):
-        if self.claimed_bundle_hash is not None and self.claimed_bundle_hash != _SEALED_BUNDLE_CORE_HASH(self):
+        if (
+            self.claimed_bundle_hash is not None
+            and self.claimed_bundle_hash != _SEALED_BUNDLE_CORE_HASH(self)
+        ):
             raise ValueError("claimed_bundle_hash does not match computed hash")
         body = {
             "evidence_bundle_schema": schema,

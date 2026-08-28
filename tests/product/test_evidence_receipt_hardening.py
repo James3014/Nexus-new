@@ -334,11 +334,18 @@ def test_evidence_validation_ignores_mutable_bundle_methods(monkeypatch):
     data = _input()
     payload = data.evidence.to_dict()
     monkeypatch.setattr(evidence_module.EvidenceBundle, "to_dict", lambda self: {"forged": True})
-    monkeypatch.setattr(evidence_module.EvidenceBundle, "canonical_value", property(lambda self: ("forged",)))
-    monkeypatch.setattr(evidence_module.EvidenceBundle, "integrity", lambda *args: IntegrityStatus.TAMPERED)
-    assert evidence_module.validate_evidence_bundle_envelope(
-        payload, data.contract, data.change_set, data.plan, expected_bundle=data.evidence
-    ) == ()
+    monkeypatch.setattr(
+        evidence_module.EvidenceBundle, "canonical_value", property(lambda self: ("forged",))
+    )
+    monkeypatch.setattr(
+        evidence_module.EvidenceBundle, "integrity", lambda *args: IntegrityStatus.TAMPERED
+    )
+    assert (
+        evidence_module.validate_evidence_bundle_envelope(
+            payload, data.contract, data.change_set, data.plan, expected_bundle=data.evidence
+        )
+        == ()
+    )
 
 
 def test_receipt_validation_ignores_mutable_receipt_methods(monkeypatch):
@@ -348,7 +355,9 @@ def test_receipt_validation_ignores_mutable_receipt_methods(monkeypatch):
     receipt = certify(data).receipt
     payload = receipt.to_dict()
     monkeypatch.setattr(receipt_module.Receipt, "to_dict", lambda self: {"forged": True})
-    monkeypatch.setattr(receipt_module.Receipt, "canonical_value", property(lambda self: {"forged": True}))
+    monkeypatch.setattr(
+        receipt_module.Receipt, "canonical_value", property(lambda self: {"forged": True})
+    )
     monkeypatch.setattr(receipt_module.Receipt, "validate", lambda self: False)
     assert validate_serialized_receipt(payload, data) == ()
 
@@ -358,11 +367,33 @@ def test_kernel_factories_ignore_constructor_monkeypatches(monkeypatch):
     import product.certification.receipt as receipt_module
 
     data = _input()
+    genuine = certify(data)
+    genuine_hash = genuine.receipt.hash
     monkeypatch.setattr(certification_module.CertificationPolicy, "__init__", lambda *args: None)
-    monkeypatch.setattr(certification_module.CertificationPolicy, "__post_init__", lambda self: None, raising=False)
+    monkeypatch.setattr(
+        certification_module.CertificationPolicy, "__post_init__", lambda self: None, raising=False
+    )
     monkeypatch.setattr(receipt_module.Receipt, "__init__", lambda *args: None)
     monkeypatch.setattr(receipt_module.CertificationResult, "__init__", lambda *args: None)
+    monkeypatch.setattr(
+        receipt_module, "_SEALED_RECEIPT_CORE_HASH", lambda value: "sha256:" + "0" * 64
+    )
+    monkeypatch.setattr(receipt_module, "_SEALED_RECEIPT_INVARIANT", lambda value: None)
+    monkeypatch.setattr(receipt_module, "Receipt", object)
+    monkeypatch.setattr(receipt_module, "CertificationResult", object)
+    monkeypatch.setattr(
+        receipt_module,
+        "_create_receipt",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError()),
+    )
+    monkeypatch.setattr(
+        receipt_module,
+        "_create_certification_result",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError()),
+    )
     assert certify(data).disposition is CertificationDisposition.CERTIFIED
+    assert certify(data).receipt.hash == genuine_hash
+    assert validate_serialized_receipt(genuine.receipt.to_dict(), data) == ()
     rejected = _input()
     rejected = replace(rejected, policy_accepted=False)
     assert certify(rejected).disposition is CertificationDisposition.REJECTED
