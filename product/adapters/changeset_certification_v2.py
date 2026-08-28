@@ -743,7 +743,7 @@ def _result(
 
 def _policy(payload: Mapping[str, Any]) -> CertificationPolicy:
     policy = payload.get("policy")
-    if "policy" not in payload:
+    if "policy" not in payload or policy is None:
         return CertificationPolicy()
     if not isinstance(policy, Mapping):
         return CertificationPolicy(accepted=False)

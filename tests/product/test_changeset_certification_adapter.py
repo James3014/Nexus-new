@@ -420,6 +420,18 @@ def test_present_invalid_policy_is_rejected_and_roundtrips(policy):
     assert adapter.validate_changeset_certification(output) == ()
 
 
+def test_explicit_none_policy_is_missing_and_roundtrips():
+    payload = _envelope()
+    payload["policy"] = None
+    payload["reasons"] = ["policy_missing"]
+    payload["disposition"] = "BLOCKED"
+    _rehash(payload)
+    output = adapter.certify_changeset(payload).to_dict()
+    assert output["disposition"] == "BLOCKED"
+    assert output["reasons"] == ["policy_missing"]
+    assert adapter.validate_changeset_certification(output) == ()
+
+
 def test_hash_mismatch_is_tampered_for_direct_and_certification_paths():
     payload = _envelope()
     payload["verifier_manifest"]["manifest_hash"] = "sha256:" + "f" * 64
