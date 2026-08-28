@@ -55,6 +55,7 @@ version = "28.3.0"
 description = "Nexus Singularity OS: Hardened Governance & Swarm Engine"
 authors = ["Nexus Engineers <eng@nexus-singularity.os>"]
 packages = [
+    {include = "product"},
     {include = "nexus"},
     {include = "scripts"},
 ]

@@ -1,7 +1,14 @@
 from dataclasses import dataclass
 
 from product.certification import CertificationDisposition, CertificationPolicy, certify_result
-from product.evidence import AcceptanceContract, ChangeSet, EvidenceBundle, VerificationPlan, _hash
+from product.evidence import (
+    AcceptanceContract,
+    ChangeSet,
+    EvidenceBundle,
+    VerificationPlan,
+    _hash,
+    _require_hash,
+)
 from product.protocol import IMPLEMENTATION_SCHEMA, PUBLIC_PROTOCOL_VERSION
 from product.verification import VerificationResult, verify
 
@@ -39,6 +46,17 @@ class Receipt:
     protocol_version: str = PUBLIC_PROTOCOL_VERSION
     implementation_schema: str = IMPLEMENTATION_SCHEMA
     claimed_receipt_hash: str | None = None
+
+    def __post_init__(self):
+        for field in (
+            "acceptance_contract_hash",
+            "change_set_hash",
+            "verification_plan_hash",
+            "evidence_hash",
+        ):
+            _require_hash(getattr(self, field), field)
+        if self.claimed_receipt_hash is not None:
+            _require_hash(self.claimed_receipt_hash, "claimed_receipt_hash")
 
     @property
     def canonical_value(self):

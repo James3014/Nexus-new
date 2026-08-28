@@ -12,7 +12,9 @@ from product.evidence import (
     ChangeSet,
     EvidenceBundle,
     Observation,
+    ObservationStatus,
     VerificationPlan,
+    _hash,
 )
 from product.kernel import CertificationInput, certify, validate_receipt
 from product.protocol import IMPLEMENTATION_SCHEMA, PUBLIC_PROTOCOL_VERSION
@@ -20,15 +22,15 @@ from product.verification import VerificationResult, VerificationStatus
 
 
 def case(**kwargs):
-    contract = AcceptanceContract("ac-1", "req-1", ("unit", "lint"), ("src/a.py",), "DENY")
-    change = ChangeSet("cs-1", "rev-a", "rev-b", "diff-1", ("src/a.py",))
+    contract = AcceptanceContract("ac-1", _hash("req-1"), ("unit", "lint"), ("src/a.py",), "FORBID")
+    change = ChangeSet("cs-1", "rev-a", "rev-b", _hash("diff-1"), ("src/a.py",))
     plan = VerificationPlan("vp-1", contract.hash, change.hash, ("unit", "lint"))
     observations = tuple(
         kwargs.pop(
             "observations",
             (
-                Observation("unit", "art-u", "hash-u", "PASS"),
-                Observation("lint", "art-l", "hash-l", "PASS"),
+                Observation("unit", "art-u", _hash("hash-u"), ObservationStatus.PASS),
+                Observation("lint", "art-l", _hash("hash-l"), ObservationStatus.PASS),
             ),
         )
     )
@@ -68,8 +70,8 @@ def test_fail_missing_and_scope_escape_are_fail_closed():
     failed = certify(
         case(
             observations=(
-                Observation("unit", "u", "hu", "FAIL"),
-                Observation("lint", "l", "hl", "PASS"),
+                Observation("unit", "u", _hash("hu"), ObservationStatus.FAIL),
+                Observation("lint", "l", _hash("hl"), ObservationStatus.PASS),
             ),
             policy_accepted=True,
             authority_present=True,
@@ -79,7 +81,9 @@ def test_fail_missing_and_scope_escape_are_fail_closed():
     )
     assert failed.verification.status is VerificationStatus.FAILED_VERIFICATION
     assert failed.disposition is CertificationDisposition.REJECTED
-    missing = certify(case(observations=(Observation("unit", "u", "hu", "PASS"),)))
+    missing = certify(
+        case(observations=(Observation("unit", "u", _hash("hu"), ObservationStatus.PASS),))
+    )
     assert missing.verification.status is VerificationStatus.UNVERIFIABLE
     assert missing.disposition is CertificationDisposition.BLOCKED
 
@@ -131,6 +135,7 @@ def _assert_import_is_allowed(node: ast.AST, package: str) -> None:
             module.split(".")[1] for module in modules if module.startswith("product.")
         }
     elif isinstance(node, ast.ImportFrom):
+        assert node.level == 0
         module = (node.module or "").lower()
         names = module.split(".") + [alias.name.lower() for alias in node.names]
         product_imports = {module.split(".")[1]} if module.startswith("product.") else set()
@@ -203,11 +208,15 @@ def test_kernel_input_does_not_accept_claimed_results():
 
 
 def test_scope_is_derived_and_evidence_is_exact():
-    contract = AcceptanceContract("ac", "req", ("unit",), ("src/a.py",), "DENY")
-    change = ChangeSet("cs", "a", "b", "d", ("src/secret.py",))
+    contract = AcceptanceContract("ac", _hash("req"), ("unit",), ("src/a.py",), "FORBID")
+    change = ChangeSet("cs", "a", "b", _hash("d"), ("src/secret.py",))
     plan = VerificationPlan("vp", contract.hash, change.hash, ("unit",))
     evidence = EvidenceBundle(
-        "eb", contract.hash, change.hash, plan.hash, (Observation("unit", "art", "ah", "PASS"),)
+        "eb",
+        contract.hash,
+        change.hash,
+        plan.hash,
+        (Observation("unit", "art", _hash("ah"), ObservationStatus.PASS),),
     )
     result = certify(CertificationInput(contract, change, plan, evidence, True, True, True, True))
     assert result.verification.status is VerificationStatus.FAILED_VERIFICATION
@@ -216,16 +225,19 @@ def test_scope_is_derived_and_evidence_is_exact():
 
 def test_observation_has_no_caller_scope_flag_and_duplicate_identity_blocks():
     with pytest.raises(TypeError):
-        Observation("unit", "art", "hash", "PASS", **{"scope_escaped": True})  # type: ignore[call-arg]
-    contract = AcceptanceContract("ac", "req", ("unit", "lint"), ("src/a.py",), "DENY")
-    change = ChangeSet("cs", "a", "b", "d", ("src/a.py",))
+        Observation("unit", "art", _hash("hash"), ObservationStatus.PASS, **{"scope_escaped": True})  # type: ignore[call-arg]
+    contract = AcceptanceContract("ac", _hash("req"), ("unit", "lint"), ("src/a.py",), "FORBID")
+    change = ChangeSet("cs", "a", "b", _hash("d"), ("src/a.py",))
     plan = VerificationPlan("vp", contract.hash, change.hash, ("unit", "lint"))
     evidence = EvidenceBundle(
         "eb",
         contract.hash,
         change.hash,
         plan.hash,
-        (Observation("unit", "a", "h", "PASS"), Observation("unit", "a", "h", "PASS")),
+        (
+            Observation("unit", "a", _hash("h"), ObservationStatus.PASS),
+            Observation("unit", "a", _hash("h"), ObservationStatus.PASS),
+        ),
     )
     result = certify(CertificationInput(contract, change, plan, evidence, True, True, True, True))
     assert result.verification.status is VerificationStatus.UNVERIFIABLE
@@ -258,13 +270,14 @@ def test_receipt_round_trip_and_tamper_validation():
         == "sha256:" + hashlib.sha256(canonical_json(receipt.canonical_value).encode()).hexdigest()
     )
     assert validate_receipt(replace(receipt, claimed_receipt_hash=receipt.hash), input_data)
-    assert not validate_receipt(replace(receipt, claimed_receipt_hash="sha256:bad"), input_data)
+    with pytest.raises(ValueError):
+        replace(receipt, claimed_receipt_hash="sha256:bad")
 
     tampered = (
-        replace(receipt, acceptance_contract_hash="sha256:bad"),
-        replace(receipt, change_set_hash="sha256:bad"),
-        replace(receipt, verification_plan_hash="sha256:bad"),
-        replace(receipt, evidence_hash="sha256:bad"),
+        replace(receipt, acceptance_contract_hash=_hash("bad")),
+        replace(receipt, change_set_hash=_hash("bad")),
+        replace(receipt, verification_plan_hash=_hash("bad")),
+        replace(receipt, evidence_hash=_hash("bad")),
         replace(receipt, verification=VerificationResult(VerificationStatus.UNVERIFIABLE)),
         replace(receipt, disposition=CertificationDisposition.REJECTED),
         replace(receipt, policy=CertificationPolicy(False, True, True, True)),
@@ -281,7 +294,7 @@ def test_stale_bindings_are_unverifiable_and_blocked():
     p = case().plan
     e = case().evidence
     stale = EvidenceBundle(
-        e.bundle_id, "sha256:stale", e.change_set_hash, e.verification_plan_hash, e.observations
+        e.bundle_id, _hash("stale"), e.change_set_hash, e.verification_plan_hash, e.observations
     )
     result = certify(CertificationInput(c, ch, p, stale, True, True, True, True))
     assert result.verification.status is VerificationStatus.UNVERIFIABLE
@@ -297,7 +310,7 @@ def test_claimed_evidence_hash_tamper_is_unverifiable_and_rejected():
         e.change_set_hash,
         e.verification_plan_hash,
         e.observations,
-        "sha256:bad",
+        _hash("not-the-bundle"),
     )
     r = certify(CertificationInput(x.contract, x.change_set, x.plan, bad, True, True, True, True))
     assert r.verification.status is VerificationStatus.UNVERIFIABLE
@@ -332,11 +345,9 @@ def test_claim_ceiling_and_schema_contract():
     assert not hasattr(r, "kernel_version")
 
 
-def test_invalid_status_is_unverifiable():
-    x = case(
-        observations=(Observation("unit", "u", "h", "MAYBE"), Observation("lint", "l", "h", "PASS"))
-    )
-    assert certify(x).verification.status is VerificationStatus.UNVERIFIABLE
+def test_invalid_status_is_rejected_at_construction():
+    with pytest.raises(TypeError):
+        Observation("unit", "u", _hash("h"), "MAYBE")
 
 
 def test_canonical_json_rejects_unsupported_values_and_sorts_sets():

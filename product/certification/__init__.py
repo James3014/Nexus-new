@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
 
+from product.evidence import IntegrityStatus
 from product.verification import VerificationResult, VerificationStatus
 
 
@@ -21,6 +22,12 @@ class CertificationPolicy:
 def certify_result(
     result: VerificationResult, policy: CertificationPolicy
 ) -> CertificationDisposition:
+    if not isinstance(result, VerificationResult):
+        return CertificationDisposition.BLOCKED
+    if not isinstance(result.status, VerificationStatus):
+        return CertificationDisposition.BLOCKED
+    if not isinstance(result.integrity, IntegrityStatus):
+        return CertificationDisposition.BLOCKED
     if (
         result.status is VerificationStatus.FAILED_VERIFICATION
         or result.integrity is not None
