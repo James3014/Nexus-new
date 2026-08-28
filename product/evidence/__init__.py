@@ -294,10 +294,16 @@ def validate_evidence_bundle_envelope(
         raise TypeError(
             "exactly one independently supplied expected bundle or envelope hash is required"
         )
-    if expected_bundle is not None and not isinstance(expected_bundle, EvidenceBundle):
+    if expected_bundle is not None and type(expected_bundle) is not EvidenceBundle:
         raise TypeError("expected_bundle must be EvidenceBundle")
     if expected_envelope_hash is not None:
         _require_hash(expected_envelope_hash, "expected_envelope_hash")
+    if type(contract) is not AcceptanceContract:
+        raise TypeError("contract must be AcceptanceContract")
+    if type(change_set) is not ChangeSet:
+        raise TypeError("change_set must be ChangeSet")
+    if type(plan) is not VerificationPlan:
+        raise TypeError("plan must be VerificationPlan")
     errors = []
     try:
         if type(payload) is not dict:
