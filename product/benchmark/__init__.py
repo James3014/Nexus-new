@@ -177,18 +177,52 @@ def _shape(p: Mapping[str, Any]) -> list[str]:
     return errors
 def _build(spec:tuple[CaseDefinition,...],res:tuple[BenchmarkCaseResult,...])->FalseCompletionReport:
     good=tuple(r for r in res if not r.infra_invalid); hostile=sum(c.hostile for c,r in zip(spec,res) if not r.infra_invalid); false=sum(_false(c,r.actual) for c,r in zip(spec,res) if not r.infra_invalid); detected=sum(r.detected for r in good); mismatch=sum(r.actual!=r.expected for r in good); p={"schema":BENCHMARK_SCHEMA,"benchmark_id":BENCHMARK_ID,"task_set_hash":TASK_SET_HASH,"protocol_version":PUBLIC_PROTOCOL_VERSION,"implementation_schema":IMPLEMENTATION_SCHEMA,"case_ids":[r.case_id for r in res],"eligible_count":len(good),"infra_invalid_count":len(res)-len(good),"hostile_case_count":hostile,"detected_count":detected,"false_completion_count":false,"false_completion_rate":_rate(false,hostile),"detection_rate":_rate(detected,hostile),"trust_mismatch_count":mismatch,"trust_mismatch_rate":_rate(mismatch,len(good)),"public_claim_gate":PUBLIC_CLAIM_GATE,"claim_ceiling":list(CLAIM_CEILING),"cases":[r.to_dict() for r in res]}; return FalseCompletionReport(**{k:v for k,v in p.items() if k not in ("case_ids","claim_ceiling","cases")},case_ids=tuple(p["case_ids"]),claim_ceiling=CLAIM_CEILING,cases=res,report_hash=_digest(p))
-_RUN_SPEC=_make_specs(); _VERIFY_SPEC=_make_specs(); _RUN_DISPATCH=_make_dispatch(); _VERIFY_DISPATCH=_make_dispatch()
-def run_benchmark()->FalseCompletionReport:return _build(_RUN_SPEC,_run(_RUN_SPEC,_RUN_DISPATCH))
-def verify_report(report:FalseCompletionReport|Mapping[str,Any])->tuple[str,...]:
-    try:
-        p=report.payload() if isinstance(report,FalseCompletionReport) else dict(report); keys=set(p); required={"schema","benchmark_id","task_set_hash","protocol_version","implementation_schema","case_ids","eligible_count","infra_invalid_count","hostile_case_count","detected_count","false_completion_count","false_completion_rate","detection_rate","trust_mismatch_count","trust_mismatch_rate","public_claim_gate","claim_ceiling","cases","report_hash"}; err=[k for k in keys-required]+[k for k in required-keys]
-        if err:return tuple(dict.fromkeys(err))
-        err.extend(_shape(p))
-        if err:return tuple(dict.fromkeys(err))
-        if p["report_hash"]!=_digest({k:v for k,v in p.items() if k!="report_hash"}):err.append("report_hash")
-        expected=_build(_VERIFY_SPEC,_run(_VERIFY_SPEC,_VERIFY_DISPATCH)).payload()
-        for k in required-{"report_hash"}:
-            if p[k]!=expected[k]:err.append(k)
-        return tuple(dict.fromkeys(err))
-    except Exception:return ("malformed_report",)
+def _make_public_api() -> tuple[Callable[[],FalseCompletionReport], Callable[[FalseCompletionReport|Mapping[str,Any]],tuple[str,...]]]:
+    run_spec, verify_spec = _make_specs(), _make_specs()
+    run_dispatch, verify_dispatch = _make_dispatch(), _make_dispatch()
+    task_hash = TASK_SET_HASH
+    false_predicate, rate, digest, shape = _false, _rate, _digest, _shape
+    def execute(spec, dispatch):
+        rows=[]
+        for case in spec:
+            try:
+                actual=dispatch(case.operation,case.params)
+                rows.append(BenchmarkCaseResult(case.case_id,case.expected,actual,case.hostile and actual==case.expected and not false_predicate(case,actual)))
+            except Exception as exc:
+                rows.append(BenchmarkCaseResult(case.case_id,case.expected,CaseOutcome("INFRA_INVALID"),False,True,type(exc).__name__))
+        return tuple(rows)
+    def aggregate(spec, rows):
+        eligible=tuple(r for r in rows if not r.infra_invalid)
+        hostile=sum(c.hostile for c,r in zip(spec,rows) if not r.infra_invalid)
+        false=sum(false_predicate(c,r.actual) for c,r in zip(spec,rows) if not r.infra_invalid)
+        detected=sum(r.detected for r in eligible); mismatch=sum(r.actual!=r.expected for r in eligible)
+        payload={"schema":BENCHMARK_SCHEMA,"benchmark_id":BENCHMARK_ID,"task_set_hash":task_hash,"protocol_version":PUBLIC_PROTOCOL_VERSION,"implementation_schema":IMPLEMENTATION_SCHEMA,"case_ids":[r.case_id for r in rows],"eligible_count":len(eligible),"infra_invalid_count":len(rows)-len(eligible),"hostile_case_count":hostile,"detected_count":detected,"false_completion_count":false,"false_completion_rate":rate(false,hostile),"detection_rate":rate(detected,hostile),"trust_mismatch_count":mismatch,"trust_mismatch_rate":rate(mismatch,len(eligible)),"public_claim_gate":PUBLIC_CLAIM_GATE,"claim_ceiling":list(CLAIM_CEILING),"cases":[r.to_dict() for r in rows]}
+        return FalseCompletionReport(**{k:v for k,v in payload.items() if k not in ("case_ids","claim_ceiling","cases")},case_ids=tuple(payload["case_ids"]),claim_ceiling=CLAIM_CEILING,cases=rows,report_hash=digest(payload))
+    def produce():
+        return aggregate(run_spec,execute(run_spec,run_dispatch))
+    def check(report):
+        try:
+            payload=report.payload() if isinstance(report,FalseCompletionReport) else dict(report)
+            required={"schema","benchmark_id","task_set_hash","protocol_version","implementation_schema","case_ids","eligible_count","infra_invalid_count","hostile_case_count","detected_count","false_completion_count","false_completion_rate","detection_rate","trust_mismatch_count","trust_mismatch_rate","public_claim_gate","claim_ceiling","cases","report_hash"}
+            errors=[k for k in payload if k not in required]+[k for k in required if k not in payload]
+            if errors:return tuple(dict.fromkeys(errors))
+            errors.extend(shape(payload))
+            if errors:return tuple(dict.fromkeys(errors))
+            if payload["report_hash"]!=digest({k:v for k,v in payload.items() if k!="report_hash"}):errors.append("report_hash")
+            # Independent verifier execution and aggregation; producer helpers are not used.
+            rows=[]
+            for case in verify_spec:
+                try:
+                    actual=verify_dispatch(case.operation,case.params)
+                    rows.append(BenchmarkCaseResult(case.case_id,case.expected,actual,case.hostile and actual==case.expected and not false_predicate(case,actual)))
+                except Exception as exc:
+                    rows.append(BenchmarkCaseResult(case.case_id,case.expected,CaseOutcome("INFRA_INVALID"),False,True,type(exc).__name__))
+            eligible=tuple(r for r in rows if not r.infra_invalid); hostile=sum(c.hostile for c,r in zip(verify_spec,rows) if not r.infra_invalid); false=sum(false_predicate(c,r.actual) for c,r in zip(verify_spec,rows) if not r.infra_invalid); detected=sum(r.detected for r in eligible); mismatch=sum(r.actual!=r.expected for r in eligible)
+            expected={"schema":BENCHMARK_SCHEMA,"benchmark_id":BENCHMARK_ID,"task_set_hash":task_hash,"protocol_version":PUBLIC_PROTOCOL_VERSION,"implementation_schema":IMPLEMENTATION_SCHEMA,"case_ids":[r.case_id for r in rows],"eligible_count":len(eligible),"infra_invalid_count":len(rows)-len(eligible),"hostile_case_count":hostile,"detected_count":detected,"false_completion_count":false,"false_completion_rate":rate(false,hostile),"detection_rate":rate(detected,hostile),"trust_mismatch_count":mismatch,"trust_mismatch_rate":rate(mismatch,len(eligible)),"public_claim_gate":PUBLIC_CLAIM_GATE,"claim_ceiling":list(CLAIM_CEILING),"cases":[r.to_dict() for r in rows]}
+            for key,value in expected.items():
+                if payload[key]!=value:errors.append(key)
+            return tuple(dict.fromkeys(errors))
+        except Exception:return ("malformed_report",)
+    return produce,check
+run_benchmark, verify_report = _make_public_api()
 __all__=["BENCHMARK_SCHEMA","BENCHMARK_ID","TASK_SET_HASH","EXPECTED_CASE_IDS","CASE_SPEC","CASES","CaseDefinition","BenchmarkCaseResult","FalseCompletionReport","run_benchmark","verify_report"]
