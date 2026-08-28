@@ -328,6 +328,46 @@ def test_hashes_are_sealed_against_module_rebinding(monkeypatch):
     )
 
 
+def test_evidence_validation_ignores_mutable_bundle_methods(monkeypatch):
+    import product.evidence as evidence_module
+
+    data = _input()
+    payload = data.evidence.to_dict()
+    monkeypatch.setattr(evidence_module.EvidenceBundle, "to_dict", lambda self: {"forged": True})
+    monkeypatch.setattr(evidence_module.EvidenceBundle, "canonical_value", property(lambda self: ("forged",)))
+    monkeypatch.setattr(evidence_module.EvidenceBundle, "integrity", lambda *args: IntegrityStatus.TAMPERED)
+    assert evidence_module.validate_evidence_bundle_envelope(
+        payload, data.contract, data.change_set, data.plan, expected_bundle=data.evidence
+    ) == ()
+
+
+def test_receipt_validation_ignores_mutable_receipt_methods(monkeypatch):
+    import product.certification.receipt as receipt_module
+
+    data = _input()
+    receipt = certify(data).receipt
+    payload = receipt.to_dict()
+    monkeypatch.setattr(receipt_module.Receipt, "to_dict", lambda self: {"forged": True})
+    monkeypatch.setattr(receipt_module.Receipt, "canonical_value", property(lambda self: {"forged": True}))
+    monkeypatch.setattr(receipt_module.Receipt, "validate", lambda self: False)
+    assert validate_serialized_receipt(payload, data) == ()
+
+
+def test_kernel_factories_ignore_constructor_monkeypatches(monkeypatch):
+    import product.certification as certification_module
+    import product.certification.receipt as receipt_module
+
+    data = _input()
+    monkeypatch.setattr(certification_module.CertificationPolicy, "__init__", lambda *args: None)
+    monkeypatch.setattr(certification_module.CertificationPolicy, "__post_init__", lambda self: None, raising=False)
+    monkeypatch.setattr(receipt_module.Receipt, "__init__", lambda *args: None)
+    monkeypatch.setattr(receipt_module.CertificationResult, "__init__", lambda *args: None)
+    assert certify(data).disposition is CertificationDisposition.CERTIFIED
+    rejected = _input()
+    rejected = replace(rejected, policy_accepted=False)
+    assert certify(rejected).disposition is CertificationDisposition.REJECTED
+
+
 def test_evidence_subclass_trust_root_is_rejected():
     class ForgedEvidence(EvidenceBundle):
         def to_dict(self):

@@ -206,9 +206,97 @@ class CertificationResult:
             raise ValueError("disposition must match reducer")
 
 
-Receipt.hash = _make_receipt_hash_property(  # pyright: ignore[reportAttributeAccessIssue]
-    _SEALED_RECEIPT_HASH
-)
+def _make_sealed_receipt_body():
+    def body(receipt):
+        fields = vars(receipt)
+        verification = fields["verification"]
+        policy = fields["policy"]
+        return {
+            "receipt_schema": CERTIFICATION_RECEIPT_SCHEMA,
+            "protocol_version": fields["protocol_version"],
+            "implementation_schema": fields["implementation_schema"],
+            "acceptance_contract_hash": fields["acceptance_contract_hash"],
+            "change_set_hash": fields["change_set_hash"],
+            "verification_plan_hash": fields["verification_plan_hash"],
+            "evidence_hash": fields["evidence_hash"],
+            "verification": {
+                "status": vars(verification)["status"].value,
+                "condition": vars(verification)["integrity"].value,
+                "reason_codes": list(vars(verification)["reason_codes"]),
+            },
+            "certification": {
+                "disposition": fields["disposition"].value,
+                "policy": {name: vars(policy)[name] for name in (
+                    "accepted", "authority_present", "approval_present", "signing_present"
+                )},
+            },
+            "claim_ceiling": list(fields["claim_ceiling"]),
+        }
+
+    return body
+
+
+_SEALED_RECEIPT_BODY = _make_sealed_receipt_body()
+
+
+def _make_receipt_serializer(body, hash_fn):
+    def serialize(receipt):
+        return {**body(receipt), "receipt_hash": hash_fn(body(receipt))}
+
+    return serialize
+
+
+def _make_receipt_core_hash(body, hash_fn):
+    def compute(receipt):
+        return hash_fn(body(receipt))
+
+    return compute
+
+
+_SEALED_RECEIPT_SERIALIZER = _make_receipt_serializer(_SEALED_RECEIPT_BODY, _SEALED_RECEIPT_HASH)
+_SEALED_RECEIPT_CORE_HASH = _make_receipt_core_hash(_SEALED_RECEIPT_BODY, _SEALED_RECEIPT_HASH)
+
+
+def _make_receipt_invariant(certifier, require_hash):
+    def validate(receipt):
+        fields = vars(receipt)
+        for field in ("acceptance_contract_hash", "change_set_hash", "verification_plan_hash", "evidence_hash"):
+            require_hash(fields[field], field)
+        if type(fields["verification"]) is not VerificationResult or not is_reduced_result(fields["verification"]):
+            raise TypeError("verification must be reducer-produced VerificationResult")
+        if type(fields["disposition"]) is not CertificationDisposition or not _policy_valid(fields["policy"]):
+            raise TypeError("invalid receipt certification fields")
+        if fields["claim_ceiling"] != CLAIM_CEILING or fields["protocol_version"] != PUBLIC_PROTOCOL_VERSION or fields["implementation_schema"] != IMPLEMENTATION_SCHEMA:
+            raise ValueError("receipt constants do not match")
+        if certifier(fields["verification"], fields["policy"]) is not fields["disposition"]:
+            raise ValueError("disposition must match reducer")
+        if fields["claimed_receipt_hash"] is not None:
+            require_hash(fields["claimed_receipt_hash"], "claimed_receipt_hash")
+
+    return validate
+
+
+_SEALED_RECEIPT_INVARIANT = _make_receipt_invariant(certify_result, _SEALED_RECEIPT_REQUIRE_HASH)
+
+
+def _create_receipt(
+    acceptance_contract_hash, change_set_hash, verification_plan_hash, evidence_hash,
+    verification, disposition, policy, claim_ceiling=CLAIM_CEILING,
+    protocol_version=PUBLIC_PROTOCOL_VERSION, implementation_schema=IMPLEMENTATION_SCHEMA,
+    claimed_receipt_hash=None,
+):
+    receipt = object.__new__(Receipt)
+    for name, value in zip(Receipt.__dataclass_fields__, (
+        acceptance_contract_hash, change_set_hash, verification_plan_hash, evidence_hash,
+        verification, disposition, policy, claim_ceiling, protocol_version,
+        implementation_schema, claimed_receipt_hash,
+    )):
+        object.__setattr__(receipt, name, value)
+    _SEALED_RECEIPT_INVARIANT(receipt)
+    return receipt
+
+
+Receipt.hash = property(lambda self: _SEALED_RECEIPT_CORE_HASH(self))
 
 
 def _validate_receipt_envelope(payload, expected_receipt):
@@ -225,7 +313,7 @@ def _validate_receipt_envelope(payload, expected_receipt):
     errors = []
     try:
         _VALIDATOR_STRICT_JSON(payload)
-        keys = set(expected_receipt.to_dict())
+        keys = set(_SEALED_RECEIPT_SERIALIZER(expected_receipt))
         if set(payload) != keys:
             errors.append("MALFORMED:keys")
         if isinstance(payload.get("receipt_hash"), str):
@@ -292,7 +380,7 @@ def _validate_receipt_envelope(payload, expected_receipt):
                 errors.append("MALFORMED:policy")
         if payload.get("claim_ceiling") != list(CLAIM_CEILING):
             errors.append("MALFORMED:claim_ceiling")
-        if not errors and payload != expected_receipt.to_dict():
+        if not errors and payload != _SEALED_RECEIPT_SERIALIZER(expected_receipt):
             errors.append("TAMPERED:fields")
         return tuple(dict.fromkeys(errors))
     except (TypeError, ValueError, RecursionError, OverflowError):
@@ -322,3 +410,15 @@ Receipt.canonical_value = property(  # pyright: ignore[reportAttributeAccessIssu
 )
 CertificationResult.__post_init__ = _freeze_function_globals(CertificationResult.__post_init__)
 _validate_receipt_envelope = _freeze_function_globals(_validate_receipt_envelope)
+
+
+def _create_certification_result(verification, disposition, receipt):
+    receipt_fields = vars(receipt)
+    if receipt_fields["verification"] != verification or receipt_fields["disposition"] != disposition:
+        raise ValueError("certification result must match receipt")
+    if certify_result(verification, receipt_fields["policy"]) is not disposition:
+        raise ValueError("disposition must match reducer")
+    result = object.__new__(CertificationResult)
+    for name, value in (("verification", verification), ("disposition", disposition), ("receipt", receipt)):
+        object.__setattr__(result, name, value)
+    return result

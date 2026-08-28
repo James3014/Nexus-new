@@ -372,9 +372,39 @@ _SEALED_EB_ENVELOPE_HASH = _EB_ENVELOPE_HASH
 _VALIDATOR_EB_ENVELOPE_HASH = _SEALED_EB_ENVELOPE_HASH
 
 
+def _make_bundle_core_serializer():
+    def serialize(bundle):
+        observations = tuple(
+            (vars(o)["verifier_id"], vars(o)["artifact_id"], vars(o)["artifact_hash"], vars(o)["status"].value)
+            for o in sorted(vars(bundle)["observations"], key=lambda x: (vars(x)["verifier_id"], vars(x)["artifact_id"]))
+        )
+        return (
+            vars(bundle)["bundle_id"],
+            vars(bundle)["acceptance_contract_hash"],
+            vars(bundle)["change_set_hash"],
+            vars(bundle)["verification_plan_hash"],
+            observations,
+        )
+
+    return serialize
+
+
+_SEALED_BUNDLE_CORE_SERIALIZER = _make_bundle_core_serializer()
+
+
+def _make_bundle_core_hash(serializer, hash_fn):
+    def compute(bundle):
+        return hash_fn(serializer(bundle))
+
+    return compute
+
+
+_SEALED_BUNDLE_CORE_HASH = _make_bundle_core_hash(_SEALED_BUNDLE_CORE_SERIALIZER, _EB_HASH)
+
+
 def _make_bundle_serializer(envelope_hash, schema):
     def serialize(self):
-        if self.claimed_bundle_hash is not None and self.claimed_bundle_hash != self.hash:
+        if self.claimed_bundle_hash is not None and self.claimed_bundle_hash != _SEALED_BUNDLE_CORE_HASH(self):
             raise ValueError("claimed_bundle_hash does not match computed hash")
         body = {
             "evidence_bundle_schema": schema,
@@ -445,7 +475,7 @@ VerificationPlan.hash = _make_identity_property(  # pyright: ignore[reportAttrib
     ),
 )
 EvidenceBundle.hash = _make_identity_property(  # pyright: ignore[reportAttributeAccessIssue]
-    _EB_HASH, lambda value: value.canonical_value
+    _SEALED_BUNDLE_CORE_HASH, lambda value: value
 )
 
 
@@ -687,7 +717,7 @@ def validate_evidence_bundle_envelope(
     if expected_bundle is not None and type(expected_bundle) is not EvidenceBundle:
         raise TypeError("expected_bundle must be EvidenceBundle")
     if expected_bundle is not None and expected_bundle.claimed_bundle_hash is not None:
-        if expected_bundle.claimed_bundle_hash != expected_bundle.hash:
+        if expected_bundle.claimed_bundle_hash != _SEALED_BUNDLE_CORE_HASH(expected_bundle):
             raise ValueError("expected_bundle claimed hash does not match computed hash")
     if expected_envelope_hash is not None:
         _VALIDATOR_REQUIRE_HASH(expected_envelope_hash, "expected_envelope_hash")
@@ -783,7 +813,7 @@ def validate_evidence_bundle_envelope(
             errors.append("CROSS_BINDING_INVALID:verification_plan_hash")
         if not errors:
             if expected_bundle is not None:
-                if payload != expected_bundle.to_dict():
+                if payload != _SEALED_BUNDLE_SERIALIZER(expected_bundle):
                     errors.append("TAMPERED:fields")
             elif payload.get("bundle_hash") != expected_envelope_hash:
                 errors.append("TAMPERED:fields")

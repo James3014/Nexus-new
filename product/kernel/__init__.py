@@ -6,6 +6,9 @@ from product.certification.receipt import (
     CertificationResult,
     Receipt,
     _validate_receipt_envelope,
+    _create_receipt,
+    _create_certification_result,
+    _SEALED_RECEIPT_CORE_HASH,
 )
 from product.evidence import (
     AcceptanceContract,
@@ -29,6 +32,20 @@ class CertificationInput:
     signing_present: bool | None = None
 
 
+def _make_policy_factory(policy_type):
+    def create(accepted, authority_present, approval_present, signing_present):
+        policy = object.__new__(policy_type)
+        for name, value in (("accepted", accepted), ("authority_present", authority_present),
+                            ("approval_present", approval_present), ("signing_present", signing_present)):
+            object.__setattr__(policy, name, value)
+        return policy
+
+    return create
+
+
+_SEALED_POLICY_FACTORY = _make_policy_factory(CertificationPolicy)
+
+
 def _make_kernel(
     certification_input_type,
     contract_type,
@@ -46,6 +63,9 @@ def _make_kernel(
     change_hash,
     plan_hash,
     evidence_hash,
+    policy_factory,
+    receipt_factory,
+    result_factory,
 ):
     def validate_input(value):
         if type(value) is not certification_input_type:
@@ -80,14 +100,14 @@ def _make_kernel(
             raise ValueError("invalid_certification_input:" + ",".join(errors))
         data = vars(value)
         result = verify_fn(data["contract"], data["change_set"], data["plan"], data["evidence"])
-        policy = policy_type(
+        policy = policy_factory(
             data["policy_accepted"],
             data["authority_present"],
             data["approval_present"],
             data["signing_present"],
         )
         disposition = result_certifier(result, policy)
-        receipt = receipt_type(
+        receipt = receipt_factory(
             contract_hash(data["contract"]),
             change_hash(data["change_set"]),
             plan_hash(data["plan"]),
@@ -96,13 +116,18 @@ def _make_kernel(
             disposition,
             policy,
         )
-        return result_type(result, disposition, receipt)
+        return result_factory(result, disposition, receipt)
 
     def validate_receipt(receipt, value):
         if type(receipt) is not receipt_type or validate_input(value):
             return False
         expected = certify(value).receipt
-        return receipt.hash == expected.hash and receipt.validate()
+        fields = vars(receipt)
+        claimed = fields["claimed_receipt_hash"]
+        return (
+            _SEALED_RECEIPT_CORE_HASH(receipt) == _SEALED_RECEIPT_CORE_HASH(expected)
+            and (claimed is None or claimed == _SEALED_RECEIPT_CORE_HASH(receipt))
+        )
 
     def validate_serialized_receipt(payload, value):
         if validate_input(value):
@@ -129,6 +154,9 @@ certify, validate_receipt, validate_serialized_receipt = _make_kernel(
     ChangeSet.hash.fget,
     VerificationPlan.hash.fget,
     EvidenceBundle.hash.fget,
+    _SEALED_POLICY_FACTORY,
+    _create_receipt,
+    _create_certification_result,
 )
 
 
