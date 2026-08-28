@@ -48,6 +48,12 @@ class VerificationResult:
     def failed_checks(self):
         return self.reason_codes
 
+    def to_dict(self):
+        return {
+            "status": self.status.value,
+            "reason_codes": list(self.reason_codes),
+        }
+
 def _validate_reasons(reasons):
     if not isinstance(reasons, tuple):
         raise TypeError("reasons must be a tuple")
