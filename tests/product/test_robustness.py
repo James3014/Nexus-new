@@ -90,6 +90,13 @@ def test_dag_gate_rejects_relative_imports():
         _assert_import_is_allowed(node, "kernel")
     absolute = ast.parse("from product.verification import VerificationResult").body[0]
     _assert_import_is_allowed(absolute, "kernel")
+    for source in (
+        "from product.adapters import changeset_certification_v2",
+        "from .adapters import changeset_certification_v2",
+    ):
+        node = ast.parse(source).body[0]
+        with pytest.raises(AssertionError):
+            _assert_import_is_allowed(node, "kernel")
 
 
 @pytest.mark.parametrize(

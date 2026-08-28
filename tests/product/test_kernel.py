@@ -102,7 +102,15 @@ def test_protocol_versions_are_distinct():
     assert IMPLEMENTATION_SCHEMA == "nexus.changeset_certification.v2"
 
 
-_PRODUCT_PACKAGES = {"protocol", "evidence", "verification", "certification", "kernel", "execution"}
+_PRODUCT_PACKAGES = {
+    "protocol",
+    "evidence",
+    "verification",
+    "certification",
+    "kernel",
+    "execution",
+    "adapters",
+}
 _BANNED_IMPORT_TOKENS = {
     "nexus",
     "github",
@@ -124,6 +132,7 @@ _ALLOWED_PRODUCT_IMPORTS = {
     "certification": {"protocol", "evidence", "verification"},
     "kernel": {"protocol", "evidence", "verification", "certification"},
     "execution": {"protocol", "evidence"},
+    "adapters": {"protocol", "evidence", "verification", "certification", "kernel"},
 }
 
 

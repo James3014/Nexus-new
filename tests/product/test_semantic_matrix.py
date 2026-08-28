@@ -33,7 +33,8 @@ def test_factual_reducer_matrix(condition, observations, complete, scope_escape,
 
 def test_reason_codes_are_sorted_unique_and_compatibly_exposed():
     result = reduce_verification(IntegrityStatus.MALFORMED, reasons=("a", "z"))
-    assert result.reason_codes == ("MALFORMED", "a", "z")
+    assert result.reason_codes == ("a", "z")
+    assert result.integrity is IntegrityStatus.MALFORMED
     assert result.failed_checks == result.reason_codes
 
 
