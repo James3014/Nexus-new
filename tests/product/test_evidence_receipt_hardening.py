@@ -266,6 +266,19 @@ def test_claimed_hashes_cannot_be_serialized_or_used_as_trust_roots():
         forged_receipt.to_dict()
 
 
+def test_bundle_serializer_core_hash_is_sealed_against_alias_rebinding(monkeypatch):
+    import product.evidence as evidence_module
+
+    data = _input()
+    forged = replace(data.evidence, claimed_bundle_hash=_hash("forged"))
+    assert forged.claimed_bundle_hash != data.evidence.hash
+    monkeypatch.setattr(
+        evidence_module, "_SEALED_BUNDLE_CORE_HASH", lambda value: forged.claimed_bundle_hash
+    )
+    with pytest.raises(ValueError, match="claimed_bundle_hash"):
+        forged.to_dict()
+
+
 def test_hashes_are_sealed_against_module_rebinding(monkeypatch):
     import product.certification.receipt as receipt_module
     import product.evidence as evidence_module

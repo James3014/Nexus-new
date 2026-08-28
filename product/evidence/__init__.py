@@ -410,12 +410,9 @@ def _make_bundle_core_hash(serializer, hash_fn):
 _SEALED_BUNDLE_CORE_HASH = _make_bundle_core_hash(_SEALED_BUNDLE_CORE_SERIALIZER, _EB_HASH)
 
 
-def _make_bundle_serializer(envelope_hash, schema):
+def _make_bundle_serializer(envelope_hash, schema, core_hash):
     def serialize(self):
-        if (
-            self.claimed_bundle_hash is not None
-            and self.claimed_bundle_hash != _SEALED_BUNDLE_CORE_HASH(self)
-        ):
+        if self.claimed_bundle_hash is not None and self.claimed_bundle_hash != core_hash(self):
             raise ValueError("claimed_bundle_hash does not match computed hash")
         body = {
             "evidence_bundle_schema": schema,
@@ -440,7 +437,7 @@ def _make_bundle_serializer(envelope_hash, schema):
 
 
 _SEALED_BUNDLE_SERIALIZER = _make_bundle_serializer(
-    _SEALED_EB_ENVELOPE_HASH, EVIDENCE_BUNDLE_SCHEMA
+    _SEALED_EB_ENVELOPE_HASH, EVIDENCE_BUNDLE_SCHEMA, _SEALED_BUNDLE_CORE_HASH
 )
 EvidenceBundle.to_dict = _SEALED_BUNDLE_SERIALIZER
 
