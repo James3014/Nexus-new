@@ -130,10 +130,24 @@ def test_canonicalizer_rejects_hostile_values_and_verifier_never_raises():
 
 def test_ast_verifier_has_no_execution_dependency_and_stdlib_product_imports_only():
     tree = ast.parse(Path(bm.__file__).read_text())
-    verifier = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "verify_report")
-    calls = [n.func.id for n in ast.walk(verifier) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)]
-    assert "run_benchmark" not in calls
-    assert not any(name in calls for name in ("_run", "_dispatch", "_build_report", "_aggregate_report"))
+    def closure_code_names(function, depth=0):
+        if depth > 3 or not callable(function) or not hasattr(function, "__code__"):
+            return set()
+        names = set(function.__code__.co_names)
+        for cell in function.__closure__ or ():
+            contents = cell.cell_contents
+            if callable(contents):
+                names.update(closure_code_names(contents, depth + 1))
+        return names
+
+    verify_names = closure_code_names(verify_report)
+    run_names = closure_code_names(run_benchmark)
+    assert not verify_names.intersection({"run_benchmark", "_run", "_build", "execute", "aggregate", "dispatch"})
+    assert {"digest", "false_predicate", "rate", "shape", "verify_spec", "verify_dispatch"} <= set(verify_report.__code__.co_freevars)
+    verify_callables = {id(c.cell_contents) for c in verify_report.__closure__ or () if callable(c.cell_contents)}
+    run_callables = {id(c.cell_contents) for c in run_benchmark.__closure__ or () if callable(c.cell_contents)}
+    assert not verify_callables.intersection(run_callables)
+    assert "run_dispatch" not in verify_report.__code__.co_freevars
     roots = []
     for node in tree.body:
         if isinstance(node, ast.Import): roots.extend(a.name.split(".")[0] for a in node.names)
