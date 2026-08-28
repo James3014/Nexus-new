@@ -45,8 +45,23 @@ def certify(input: CertificationInput):
 
 
 def validate_receipt(receipt: Receipt, input: CertificationInput) -> bool:
+    if type(receipt) is not Receipt:
+        raise TypeError("receipt must be Receipt")
     expected = certify(input).receipt
     return receipt.hash == expected.hash and receipt.validate()
 
+
 def validate_serialized_receipt(payload, input: CertificationInput) -> tuple[str, ...]:
     return validate_receipt_envelope(payload, certify(input).receipt)
+
+
+__all__ = [
+    "CLAIM_CEILING",
+    "CertificationInput",
+    "CertificationResult",
+    "Receipt",
+    "certify",
+    "validate_receipt",
+    "validate_receipt_envelope",
+    "validate_serialized_receipt",
+]

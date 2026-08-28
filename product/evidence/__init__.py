@@ -7,15 +7,29 @@ from product.protocol import EVIDENCE_BUNDLE_SCHEMA
 
 
 def canonical_json(value):
+    active = set()
+
     def clean(v):
-        if isinstance(v, (str, int, bool)) or v is None:
+        if v is None or type(v) in (str, int, bool):
             return v
-        if isinstance(v, (tuple, list)):
-            return [clean(x) for x in v]
-        if isinstance(v, dict):
+        if type(v) in (tuple, list):
+            marker = id(v)
+            if marker in active:
+                raise ValueError("cyclic canonical value")
+            active.add(marker)
+            result = [clean(x) for x in v]
+            active.remove(marker)
+            return result
+        if type(v) is dict:
+            marker = id(v)
+            if marker in active:
+                raise ValueError("cyclic canonical value")
+            active.add(marker)
             if any(not isinstance(k, str) for k in v):
                 raise TypeError("canonical object keys must be strings")
-            return {str(k): clean(v[k]) for k in sorted(v)}
+            result = {k: clean(v[k]) for k in sorted(v)}
+            active.remove(marker)
+            return result
         raise TypeError(f"unsupported canonical value: {type(v).__name__}")
 
     return json.dumps(clean(value), sort_keys=True, separators=(",", ":"), allow_nan=False)
@@ -103,7 +117,7 @@ class AcceptanceContract:
         _require_hash(self.requirements_hash, "requirements_hash")
         _require_ids(self.required_verifier_ids, "required_verifier_ids")
         _require_paths(self.allowed_paths, "allowed_paths")
-        if self.deletion_policy not in {"FORBID", "ALLOW"}:
+        if type(self.deletion_policy) is not str or self.deletion_policy not in {"FORBID", "ALLOW"}:
             raise ValueError("deletion_policy must be FORBID or ALLOW")
 
     @property
@@ -279,7 +293,7 @@ def validate_evidence_bundle_envelope(
         _require_hash(expected_envelope_hash, "expected_envelope_hash")
     errors = []
     try:
-        if not isinstance(payload, dict): return ("MALFORMED:payload",)
+        if type(payload) is not dict: return ("MALFORMED:payload",)
         expected_keys = {"evidence_bundle_schema", "bundle_id", "acceptance_contract_hash", "change_set_hash", "verification_plan_hash", "observations", "bundle_hash"}
         if set(payload) != expected_keys: errors.append("MALFORMED:keys")
         if payload.get("evidence_bundle_schema") != EVIDENCE_BUNDLE_SCHEMA: errors.append("STALE:evidence_bundle_schema")
@@ -291,9 +305,9 @@ def validate_evidence_bundle_envelope(
         observations = payload.get("observations")
         if not isinstance(observations, list) or not observations: errors.append("MALFORMED:observations")
         rows = []
-        if isinstance(observations, list):
+        if type(observations) is list:
             for i, row in enumerate(observations):
-                if not isinstance(row, dict) or set(row) != {"verifier_id", "artifact_id", "artifact_hash", "status"}:
+                if type(row) is not dict or set(row) != {"verifier_id", "artifact_id", "artifact_hash", "status"}:
                     errors.append(f"MALFORMED:observations[{i}]"); continue
                 if not all(isinstance(row.get(k), str) for k in ("verifier_id", "artifact_id", "artifact_hash", "status")):
                     errors.append(f"MALFORMED:observations[{i}]"); continue

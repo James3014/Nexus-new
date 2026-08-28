@@ -13,15 +13,16 @@ _INTEGRITY_STATUSES = {"VALID", "SCOPE_ESCAPE", "MISSING", "STALE", "TAMPERED", 
 
 def _strict_json(value, active=None):
     if active is None: active = set()
-    if value is None or type(value) in (str, bool, int): return
+    if value is None or type(value) in (str, bool, int):
+        return
     if type(value) is float:
         if not isfinite(value): raise ValueError("non-finite value")
         return
-    if isinstance(value, (list, tuple, dict)):
+    if type(value) in (list, tuple, dict):
         marker = id(value)
         if marker in active: raise ValueError("cyclic value")
         active.add(marker)
-        if isinstance(value, dict):
+        if type(value) is dict:
             for key, item in value.items():
                 if type(key) is not str: raise TypeError("object keys must be strings")
                 _strict_json(item, active)
@@ -97,8 +98,10 @@ class CertificationResult:
 
 
 def validate_receipt_envelope(payload, expected_receipt):
-    if not isinstance(expected_receipt, Receipt): raise TypeError("expected_receipt must be Receipt")
-    if not isinstance(payload, dict): return ("MALFORMED:payload",)
+    if type(expected_receipt) is not Receipt:
+        raise TypeError("expected_receipt must be Receipt")
+    if type(payload) is not dict:
+        return ("MALFORMED:payload",)
     errors = []
     try:
         _strict_json(payload)
