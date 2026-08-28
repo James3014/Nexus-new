@@ -3,6 +3,7 @@ import math
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 import product.benchmark as bm
 from product.benchmark import (
     BENCHMARK_ID,
@@ -58,7 +59,7 @@ def test_normal_suite_descriptor_hash_repeatability_and_gate():
 
 def test_exported_globals_cannot_rebind_run_or_verifier(monkeypatch):
     genuine = run_benchmark()
-    fake = CaseDefinition("fake", False, CaseOutcome("CERTIFICATION"), "reject", {"kind": "status"})
+    fake = CaseDefinition("fake", False, CaseOutcome("INPUT_REJECTED"), "reject", {"kind": "status"})
     for name, value in {
         "CASES": (fake,),
         "CASE_SPEC": (("fake", False, "CERTIFICATION", "reject", ()),),
@@ -246,16 +247,12 @@ def test_strict_schema_types_unknown_missing_and_nested_fields():
 
 
 def test_false_completion_predicate_parity_for_malformed_kind():
-    spec = (CaseDefinition("malformed", True, CaseOutcome("CERTIFIED"), "x", {}),)
-    result = _run(spec, lambda _op, _params: CaseOutcome("CERTIFIED", disposition="CERTIFIED"))[0]
-    assert result.detected is False
-    assert not bm._false(spec[0], result.actual)
-    report = _build(spec, (result,))
-    assert (report.false_completion_count, report.false_completion_rate) == (0, 0.0)
+    with pytest.raises(ValueError):
+        CaseOutcome("CERTIFIED")
 
 
 def test_zero_eligible_hostile_and_hostile_denominator():
-    spec = tuple(replace(c, hostile=True, operation="hostile") for c in _make_specs()[:2])
+    spec = tuple(replace(c, hostile=True, operation="direct") for c in _make_specs()[:2])
     all_infra = _run(spec, lambda _op, _params: (_ for _ in ()).throw(RuntimeError("infra")))
     report = _build(spec, all_infra)
     assert (report.eligible_count, report.infra_invalid_count) == (0, 2)
@@ -263,7 +260,7 @@ def test_zero_eligible_hostile_and_hostile_denominator():
         report.false_completion_rate is report.detection_rate is report.trust_mismatch_rate is None
     )
     certified = _run(
-        spec, lambda _op, _params: CaseOutcome("CERTIFICATION", disposition="CERTIFIED")
+        spec, lambda _op, _params: CaseOutcome("CERTIFICATION", "VERIFIED", "VALID", "CERTIFIED")
     )[0]
     report = _build(spec, (certified, all_infra[1]))
     assert (
@@ -305,7 +302,7 @@ def test_ast_verifier_has_no_execution_dependency_and_stdlib_product_imports_onl
     assert not verify_names.intersection(
         {"run_benchmark", "_run", "_build", "execute", "aggregate", "dispatch"}
     )
-    assert {"digest", "false_predicate", "rate", "shape", "verify_spec", "verify_dispatch"} <= set(
+    assert {"verify_spec", "verify_dispatch", "verify_digest", "verify_false"} <= set(
         verify_report.__code__.co_freevars
     )
     verify_callables = {
