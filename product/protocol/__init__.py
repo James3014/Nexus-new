@@ -1,0 +1,4 @@
+PUBLIC_PROTOCOL_VERSION = "0.1.0-experimental"
+IMPLEMENTATION_SCHEMA = "nexus.changeset_certification.v2"
+
+__all__ = ["PUBLIC_PROTOCOL_VERSION", "IMPLEMENTATION_SCHEMA"]
