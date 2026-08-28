@@ -56,7 +56,13 @@ def certify_result(
     if result.status is VerificationStatus.UNVERIFIABLE:
         return (
             CertificationDisposition.REJECTED
-            if result.integrity in {IntegrityStatus.TAMPERED, IntegrityStatus.MALFORMED, IntegrityStatus.CROSS_BOUND, IntegrityStatus.DUPLICATE}
+            if result.integrity
+            in {
+                IntegrityStatus.TAMPERED,
+                IntegrityStatus.MALFORMED,
+                IntegrityStatus.CROSS_BOUND,
+                IntegrityStatus.DUPLICATE,
+            }
             else CertificationDisposition.BLOCKED
         )
     if policy.accepted is False:

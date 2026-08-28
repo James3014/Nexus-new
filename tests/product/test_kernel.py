@@ -198,18 +198,16 @@ def test_certification_input_fields_are_factual_only():
         "approval_present",
         "signing_present",
     }
-    assert {field.name for field in fields(CertificationInput)}.isdisjoint(
-        {
-            "factual_result",
-            "verification",
-            "verification_result",
-            "status",
-            "disposition",
-            "claim_ceiling",
-            "receipt",
-            "receipt_hash",
-        }
-    )
+    assert {field.name for field in fields(CertificationInput)}.isdisjoint({
+        "factual_result",
+        "verification",
+        "verification_result",
+        "status",
+        "disposition",
+        "claim_ceiling",
+        "receipt",
+        "receipt_hash",
+    })
 
 
 def test_kernel_input_does_not_accept_claimed_results():
@@ -261,7 +259,9 @@ def test_receipt_round_trip_and_tamper_validation():
     assert receipt.change_set_hash == input_data.change_set.hash
     assert receipt.verification_plan_hash == input_data.plan.hash
     assert receipt.evidence_hash == input_data.evidence.hash
-    assert receipt.verification == reduce_verification(IntegrityStatus.VALID, (ObservationStatus.PASS, ObservationStatus.PASS))
+    assert receipt.verification == reduce_verification(
+        IntegrityStatus.VALID, (ObservationStatus.PASS, ObservationStatus.PASS)
+    )
     assert receipt.policy == CertificationPolicy(True, True, True, True)
     assert receipt.disposition is CertificationDisposition.CERTIFIED
     assert receipt.claim_ceiling == (
@@ -304,7 +304,11 @@ def test_stale_bindings_are_unverifiable_and_blocked():
     p = case().plan
     e = case().evidence
     stale = EvidenceBundle(
-        e.bundle_id, e.acceptance_contract_hash, _hash("stale"), e.verification_plan_hash, e.observations
+        e.bundle_id,
+        e.acceptance_contract_hash,
+        _hash("stale"),
+        e.verification_plan_hash,
+        e.observations,
     )
     result = certify(CertificationInput(c, ch, p, stale, True, True, True, True))
     assert result.verification.status is VerificationStatus.UNVERIFIABLE
