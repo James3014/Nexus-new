@@ -178,28 +178,34 @@ class FalseCompletionReport:
 
 
 def _input(
-    *, observations=None, change_paths=("src/a.py",), **flags: bool | None
+    *, observations=None, change_paths=("src/a.py",),
+    contract_cls=AcceptanceContract, change_cls=ChangeSet,
+    plan_cls=VerificationPlan, bundle_cls=EvidenceBundle,
+    observation_cls=Observation, status_cls=ObservationStatus, hash_fn=_hash,
+    **flags: bool | None
 ) -> CertificationInput:
-    c = AcceptanceContract(
-        "bench-contract", _hash("requirements"), ("unit", "lint"), ("src/a.py",), "FORBID"
+    c = contract_cls(
+        "bench-contract", hash_fn("requirements"), ("unit", "lint"), ("src/a.py",), "FORBID"
     )
-    ch = ChangeSet("bench-change", "source", "target", _hash("diff"), tuple(change_paths))
-    plan = VerificationPlan("bench-plan", c.hash, ch.hash, ("unit", "lint"))
+    ch = change_cls("bench-change", "source", "target", hash_fn("diff"), tuple(change_paths))
+    plan = plan_cls("bench-plan", c.hash, ch.hash, ("unit", "lint"))
     observations = observations or (
-        Observation("unit", "artifact-unit", _hash("unit"), ObservationStatus.PASS),
-        Observation("lint", "artifact-lint", _hash("lint"), ObservationStatus.PASS),
+        observation_cls("unit", "artifact-unit", hash_fn("unit"), status_cls.PASS),
+        observation_cls("lint", "artifact-lint", hash_fn("lint"), status_cls.PASS),
     )
     return CertificationInput(
         c,
         ch,
         plan,
-        EvidenceBundle("bench-evidence", c.hash, ch.hash, plan.hash, tuple(observations)),
+        bundle_cls("bench-evidence", c.hash, ch.hash, plan.hash, tuple(observations)),
         **flags,
     )
 
 
-def _direct(**kw: Any) -> CaseOutcome:
-    r = certify(_input(**kw))
+def _direct(
+    *, certify_fn=certify, input_fn=_input, **kw: Any
+) -> CaseOutcome:
+    r = certify_fn(input_fn(**kw))
     return CaseOutcome(
         "CERTIFICATION",
         r.verification.status.value,
@@ -208,8 +214,8 @@ def _direct(**kw: Any) -> CaseOutcome:
     )
 
 
-def _legacy(status: str, **extra: Any) -> CaseOutcome:
-    r = certify_changeset(
+def _legacy(status: str, *, certify_fn=certify_changeset, **extra: Any) -> CaseOutcome:
+    r = certify_fn(
         {"schema": "nexus.changeset_certification.v1", "version": 1, "status": status, **extra}
     )
     return CaseOutcome(
@@ -506,35 +512,39 @@ TASK_SET_HASH = "sha256:afa32ac1ed78076e9d00c16b707a94ba025bc64cae7f028a06cba7cf
 
 
 def _make_dispatch() -> Callable[[str, Mapping[str, Any]], CaseOutcome]:
+    direct_fn, legacy_fn, reject_fn, receipt_fn, special_fn = (
+        _direct, _legacy, _reject, _receipt, _special
+    )
+    observation, status, digest = Observation, ObservationStatus, _hash
     def dispatch(op: str, p: Mapping[str, Any]) -> CaseOutcome:
         q = dict(p)
         if op == "direct":
             o = q.get("observations")
             if o == "fail":
                 q["observations"] = (
-                    Observation("unit", "artifact-unit", _hash("unit"), ObservationStatus.FAIL),
-                    Observation("lint", "artifact-lint", _hash("lint"), ObservationStatus.PASS),
+                    observation("unit", "artifact-unit", digest("unit"), status.FAIL),
+                    observation("lint", "artifact-lint", digest("lint"), status.PASS),
                 )
             elif o == "missing":
-                q["observations"] = (Observation("unit", "u", _hash("u"), ObservationStatus.PASS),)
+                q["observations"] = (observation("unit", "u", digest("u"), status.PASS),)
             elif o == "duplicate_verifier":
                 q["observations"] = (
-                    Observation("unit", "u", _hash("u"), ObservationStatus.PASS),
-                    Observation("unit", "l", _hash("l"), ObservationStatus.PASS),
+                    observation("unit", "u", digest("u"), status.PASS),
+                    observation("unit", "l", digest("l"), status.PASS),
                 )
             elif o == "duplicate_artifact":
                 q["observations"] = (
-                    Observation("unit", "same", _hash("u"), ObservationStatus.PASS),
-                    Observation("lint", "same", _hash("l"), ObservationStatus.PASS),
+                    observation("unit", "same", digest("u"), status.PASS),
+                    observation("lint", "same", digest("l"), status.PASS),
                 )
-            return _direct(**q)
+            return direct_fn(**q)
         if op == "legacy":
-            return _legacy(**q)
+            return legacy_fn(**q)
         if op == "reject":
-            return _reject(**q)
+            return reject_fn(**q)
         if op == "receipt":
-            return _receipt(**q)
-        return _special(q["kind"])
+            return receipt_fn(**q)
+        return special_fn(q["kind"])
 
     return dispatch
 
