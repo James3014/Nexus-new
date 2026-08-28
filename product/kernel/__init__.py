@@ -6,11 +6,9 @@ from product.evidence import (
     ChangeSet,
     EvidenceBundle,
     VerificationPlan,
-    _hash,
-    _require_hash,
 )
-from product.protocol import IMPLEMENTATION_SCHEMA, PUBLIC_PROTOCOL_VERSION
 from product.verification import VerificationResult, verify
+from product.certification.receipt import Receipt, CertificationResult, validate_receipt_envelope
 
 CLAIM_CEILING = (
     "NO_MERGE_AUTHORIZATION",
@@ -31,66 +29,6 @@ class CertificationInput:
     authority_present: bool | None = None
     approval_present: bool | None = None
     signing_present: bool | None = None
-
-
-@dataclass(frozen=True)
-class Receipt:
-    acceptance_contract_hash: str
-    change_set_hash: str
-    verification_plan_hash: str
-    evidence_hash: str
-    verification: VerificationResult
-    disposition: CertificationDisposition
-    policy: CertificationPolicy
-    claim_ceiling: tuple[str, ...] = CLAIM_CEILING
-    protocol_version: str = PUBLIC_PROTOCOL_VERSION
-    implementation_schema: str = IMPLEMENTATION_SCHEMA
-    claimed_receipt_hash: str | None = None
-
-    def __post_init__(self):
-        for field in (
-            "acceptance_contract_hash",
-            "change_set_hash",
-            "verification_plan_hash",
-            "evidence_hash",
-        ):
-            _require_hash(getattr(self, field), field)
-        if self.claimed_receipt_hash is not None:
-            _require_hash(self.claimed_receipt_hash, "claimed_receipt_hash")
-
-    @property
-    def canonical_value(self):
-        return (
-            self.acceptance_contract_hash,
-            self.change_set_hash,
-            self.verification_plan_hash,
-            self.evidence_hash,
-            self.verification.status.value,
-            self.verification.reason_codes,
-            self.verification.integrity.value,
-            self.disposition.value,
-            self.policy.accepted,
-            self.policy.authority_present,
-            self.policy.approval_present,
-            self.policy.signing_present,
-            self.claim_ceiling,
-            self.protocol_version,
-            self.implementation_schema,
-        )
-
-    @property
-    def hash(self):
-        return _hash(self.canonical_value)
-
-    def validate(self):
-        return self.claimed_receipt_hash is None or self.claimed_receipt_hash == self.hash
-
-
-@dataclass(frozen=True)
-class CertificationResult:
-    verification: VerificationResult
-    disposition: CertificationDisposition
-    receipt: Receipt
 
 
 def certify(input: CertificationInput):
@@ -117,3 +55,6 @@ def certify(input: CertificationInput):
 def validate_receipt(receipt: Receipt, input: CertificationInput) -> bool:
     expected = certify(input).receipt
     return receipt.hash == expected.hash and receipt.validate()
+
+def validate_serialized_receipt(payload, input: CertificationInput) -> tuple[str, ...]:
+    return validate_receipt_envelope(payload, certify(input).receipt)
