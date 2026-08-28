@@ -108,10 +108,26 @@ class CaseOutcome:
                 "LEGACY_NON_CERTIFIABLE",
                 "STALE",
                 "TAMPERED",
+                "MALFORMED",
+                "CROSS_BOUND",
             }:
                 raise ValueError("invalid evidence condition")
             if self.disposition not in {"CERTIFIED", "REJECTED", "BLOCKED"}:
                 raise ValueError("invalid disposition")
+            valid = {
+                "VERIFIED": {"VALID": {"CERTIFIED", "REJECTED", "BLOCKED"}},
+                "FAILED_VERIFICATION": {"VALID": {"REJECTED"}},
+                "UNVERIFIABLE": {
+                    "MISSING": {"BLOCKED"}, "STALE": {"BLOCKED"},
+                    "LEGACY_NON_CERTIFIABLE": {"BLOCKED"},
+                    "TAMPERED": {"REJECTED"}, "MALFORMED": {"REJECTED"},
+                    "CROSS_BOUND": {"REJECTED"}, "DUPLICATE": {"REJECTED"},
+                },
+            }
+            if self.evidence_condition not in valid.get(self.verification_status, {}):
+                raise ValueError("invalid certification combination")
+            if self.disposition not in valid[self.verification_status][self.evidence_condition]:
+                raise ValueError("invalid certification combination")
         elif any(x is not None for x in fields):
             raise ValueError("non-certification fields must be null")
 
@@ -612,7 +628,7 @@ def _freeze(v: Any, _active: set[int] | None = None) -> Any:
             raise TypeError("mapping key")
         active.add(id(v))
         try:
-            return {k: _freeze(x, active) for k, x in v.items()}
+            return MappingProxyType({k: _freeze(x, active) for k, x in v.items()})
         finally:
             active.remove(id(v))
     if isinstance(v, (tuple, list)):

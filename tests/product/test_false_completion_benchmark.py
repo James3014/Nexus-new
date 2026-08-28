@@ -4,6 +4,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from types import MappingProxyType
 
 import product.benchmark as bm
 from product.benchmark import (
@@ -286,6 +287,32 @@ def test_canonicalizer_rejects_hostile_values_and_verifier_never_raises():
             raise AssertionError(value)
     for malformed in ({"report_hash": "bad"}, {"cases": cyclic}, {"schema": object()}):
         assert verify_report(malformed)
+
+
+def test_case_definition_deep_freezes_mapping_aliases():
+    nested = {"items": [{"z": 1}], "inner": {"flag": True}}
+    case = CaseDefinition(" frozen ", False, CaseOutcome("INPUT_REJECTED"), "reject", nested)
+    nested["items"][0]["z"] = 99
+    nested["inner"]["flag"] = False
+    assert case.case_id == "frozen"
+    assert isinstance(case.params, MappingProxyType)
+    assert isinstance(case.params["inner"], MappingProxyType)
+    assert isinstance(case.params["items"], tuple)
+    assert case.params["items"][0]["z"] == 1
+    with pytest.raises(TypeError):
+        case.params["inner"]["flag"] = False
+
+
+def test_case_outcome_rejects_contradictory_certification_matrix():
+    for status, condition, disposition in (
+        ("FAILED_VERIFICATION", "MISSING", "REJECTED"),
+        ("FAILED_VERIFICATION", "VALID", "BLOCKED"),
+        ("UNVERIFIABLE", "VALID", "REJECTED"),
+        ("UNVERIFIABLE", "DUPLICATE", "BLOCKED"),
+        ("VERIFIED", "MISSING", "CERTIFIED"),
+    ):
+        with pytest.raises(ValueError):
+            CaseOutcome("CERTIFICATION", status, condition, disposition)
 
 
 def test_ast_verifier_has_no_execution_dependency_and_stdlib_product_imports_only():
