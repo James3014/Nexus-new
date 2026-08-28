@@ -8,15 +8,7 @@ from product.evidence import (
     VerificationPlan,
 )
 from product.verification import VerificationResult, verify
-from product.certification.receipt import Receipt, CertificationResult, validate_receipt_envelope
-
-CLAIM_CEILING = (
-    "NO_MERGE_AUTHORIZATION",
-    "NO_DEPLOYMENT_TRUTH",
-    "NO_OUTCOME_TRUTH",
-    "NO_PRODUCTION_READINESS",
-    "NO_PUBLIC_PROTOCOL_STABILITY",
-)
+from product.certification.receipt import Receipt, CertificationResult, validate_receipt_envelope, CLAIM_CEILING
 
 
 @dataclass(frozen=True)

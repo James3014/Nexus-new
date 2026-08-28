@@ -1,22 +1,55 @@
 from dataclasses import dataclass
-from typing import Any
+from math import isfinite
 
 from product.evidence import _hash, _require_hash
+_certification_types = __import__("product.certification", fromlist=("CertificationDisposition", "CertificationPolicy"))
+CertificationDisposition = _certification_types.CertificationDisposition
+CertificationPolicy = _certification_types.CertificationPolicy
+from product.verification import is_reduced_result
 from product.protocol import CERTIFICATION_RECEIPT_SCHEMA, IMPLEMENTATION_SCHEMA, PUBLIC_PROTOCOL_VERSION
 from product.verification import VerificationResult
 
 CLAIM_CEILING = ("NO_MERGE_AUTHORIZATION", "NO_DEPLOYMENT_TRUTH", "NO_OUTCOME_TRUTH", "NO_PRODUCTION_READINESS", "NO_PUBLIC_PROTOCOL_STABILITY")
 
+def _strict_json(value, active=None):
+    if active is None: active = set()
+    if value is None or type(value) in (str, bool, int): return
+    if type(value) is float:
+        if not isfinite(value): raise ValueError("non-finite value")
+        return
+    if isinstance(value, (list, tuple, dict)):
+        marker = id(value)
+        if marker in active: raise ValueError("cyclic value")
+        active.add(marker)
+        if isinstance(value, dict):
+            for key, item in value.items():
+                if type(key) is not str: raise TypeError("object keys must be strings")
+                _strict_json(item, active)
+        else:
+            for item in value: _strict_json(item, active)
+        active.remove(marker)
+        return
+    raise TypeError("unsupported value")
+
 @dataclass(frozen=True)
 class Receipt:
     acceptance_contract_hash: str; change_set_hash: str; verification_plan_hash: str; evidence_hash: str
-    verification: VerificationResult; disposition: Any; policy: Any
+    verification: VerificationResult; disposition: CertificationDisposition; policy: CertificationPolicy
     claim_ceiling: tuple[str, ...] = CLAIM_CEILING
     protocol_version: str = PUBLIC_PROTOCOL_VERSION; implementation_schema: str = IMPLEMENTATION_SCHEMA
     claimed_receipt_hash: str | None = None
     def __post_init__(self):
         for f in ("acceptance_contract_hash", "change_set_hash", "verification_plan_hash", "evidence_hash"):
             _require_hash(getattr(self, f), f)
+        if not isinstance(self.verification, VerificationResult) or not is_reduced_result(self.verification):
+            raise TypeError("verification must be reducer-produced VerificationResult")
+        if not isinstance(self.disposition, CertificationDisposition):
+            raise TypeError("disposition must be CertificationDisposition")
+        if not isinstance(self.policy, CertificationPolicy) or any(
+            value is not None and type(value) is not bool
+            for value in (self.policy.accepted, self.policy.authority_present, self.policy.approval_present, self.policy.signing_present)
+        ):
+            raise TypeError("policy fields must be bool or None")
         if self.claimed_receipt_hash is not None:
             _require_hash(self.claimed_receipt_hash, "claimed_receipt_hash")
     @property
@@ -31,15 +64,32 @@ class Receipt:
 @dataclass(frozen=True)
 class CertificationResult:
     verification: VerificationResult
-    disposition: Any
+    disposition: CertificationDisposition
     receipt: Receipt
+
+    def __post_init__(self):
+        if not isinstance(self.verification, VerificationResult) or not is_reduced_result(self.verification):
+            raise TypeError("verification must be reducer-produced VerificationResult")
+        if not isinstance(self.disposition, CertificationDisposition) or not isinstance(self.receipt, Receipt):
+            raise TypeError("invalid certification result types")
 
 def validate_receipt_envelope(payload, expected_receipt):
     try:
         if not isinstance(payload, dict): return ("MALFORMED:payload",)
+        _strict_json(payload)
         keys={"receipt_schema","protocol_version","implementation_schema","acceptance_contract_hash","change_set_hash","verification_plan_hash","evidence_hash","verification","certification","claim_ceiling","receipt_hash"}
         errors=[]
         if set(payload)!=keys: errors.append("MALFORMED:keys")
+        # Check the envelope's own canonical hash first.  A changed semantic
+        # field with a stale hash is a hash failure, while a rehashed envelope
+        # is reported as a semantic mismatch below.
+        if not errors and isinstance(payload.get("receipt_hash"), str):
+            try:
+                _require_hash(payload["receipt_hash"], "receipt_hash")
+                canonical = {k: payload[k] for k in payload if k != "receipt_hash"}
+                if payload["receipt_hash"] != _hash(canonical): errors.append("TAMPERED:receipt_hash")
+            except (TypeError, ValueError, RecursionError, OverflowError):
+                errors.append("TAMPERED:receipt_hash")
         if payload.get("receipt_schema")!=CERTIFICATION_RECEIPT_SCHEMA: errors.append("STALE:receipt_schema")
         for f in ("protocol_version","implementation_schema","acceptance_contract_hash","change_set_hash","verification_plan_hash","evidence_hash","receipt_hash"):
             if not isinstance(payload.get(f),str): errors.append(f"MALFORMED:{f}")

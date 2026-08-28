@@ -223,6 +223,11 @@ class EvidenceBundle:
     def hash(self):
         return _hash(self.canonical_value)
 
+    @property
+    def envelope_hash(self):
+        """Hash of the native serialized envelope (distinct from ``hash``)."""
+        return self.to_dict()["bundle_hash"]
+
     def integrity(self, contract, change_set, plan):
         if self.claimed_bundle_hash is not None and self.claimed_bundle_hash != self.hash:
             return IntegrityStatus.TAMPERED
@@ -261,7 +266,15 @@ class EvidenceBundle:
         return body
 
 
-def validate_evidence_bundle_envelope(payload, contract, change_set, plan):
+def validate_evidence_bundle_envelope(
+    payload, contract, change_set, plan, *, expected_bundle=None, expected_envelope_hash=None
+):
+    if (expected_bundle is None) == (expected_envelope_hash is None):
+        raise TypeError("exactly one independently supplied expected bundle or envelope hash is required")
+    if expected_bundle is not None and not isinstance(expected_bundle, EvidenceBundle):
+        raise TypeError("expected_bundle must be EvidenceBundle")
+    if expected_envelope_hash is not None:
+        _require_hash(expected_envelope_hash, "expected_envelope_hash")
     errors = []
     try:
         if not isinstance(payload, dict): return ("MALFORMED:payload",)
@@ -293,12 +306,22 @@ def validate_evidence_bundle_envelope(payload, contract, change_set, plan):
         if payload.get("acceptance_contract_hash") != contract.hash: errors.append("CROSS_BOUND:acceptance_contract_hash")
         if payload.get("change_set_hash") != change_set.hash: errors.append("STALE:change_set_hash")
         if payload.get("verification_plan_hash") != plan.hash or plan.acceptance_contract_hash != contract.hash or plan.change_set_hash != change_set.hash: errors.append("CROSS_BINDING_INVALID:verification_plan_hash")
+        if not errors:
+            if expected_bundle is not None:
+                if payload != expected_bundle.to_dict(): errors.append("TAMPERED:fields")
+            elif payload.get("bundle_hash") != expected_envelope_hash:
+                errors.append("TAMPERED:fields")
     except (TypeError, ValueError, RecursionError, OverflowError):
         errors.append("MALFORMED:payload")
     return tuple(dict.fromkeys(errors))
 
 
-def load_evidence_bundle_envelope(payload, contract, change_set, plan):
-    errors = validate_evidence_bundle_envelope(payload, contract, change_set, plan)
+def load_evidence_bundle_envelope(
+    payload, contract, change_set, plan, *, expected_bundle=None, expected_envelope_hash=None
+):
+    errors = validate_evidence_bundle_envelope(
+        payload, contract, change_set, plan,
+        expected_bundle=expected_bundle, expected_envelope_hash=expected_envelope_hash,
+    )
     if errors: return None
     return EvidenceBundle(payload["bundle_id"], payload["acceptance_contract_hash"], payload["change_set_hash"], payload["verification_plan_hash"], tuple(Observation(r["verifier_id"], r["artifact_id"], r["artifact_hash"], ObservationStatus(r["status"])) for r in payload["observations"]))
