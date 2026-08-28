@@ -315,6 +315,16 @@ def test_case_outcome_rejects_contradictory_certification_matrix():
             CaseOutcome("CERTIFICATION", status, condition, disposition)
 
 
+def test_verifier_schema_errors_have_cross_process_stable_order():
+    empty = verify_report({})
+    assert empty == tuple(sorted(empty))
+    assert empty == verify_report({})
+    first = {"zeta": 1, "alpha": 2}
+    second = {"alpha": 2, "zeta": 1}
+    assert verify_report(first) == verify_report(second)
+    assert verify_report(first)[:2] == ("alpha", "zeta")
+
+
 def test_ast_verifier_has_no_execution_dependency_and_stdlib_product_imports_only():
     tree = ast.parse(Path(bm.__file__).read_text())
 

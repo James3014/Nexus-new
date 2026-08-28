@@ -1325,11 +1325,13 @@ def _make_public_api() -> tuple[
                 "cases",
                 "report_hash",
             }
-            errors = [k for k in payload if k not in required] + [
+            # Unknown keys precede missing keys, each in lexical order; this
+            # remains stable across mapping insertion order and hash seeds.
+            errors = sorted(k for k in payload if k not in required) + sorted(
                 k for k in required if k not in payload
-            ]
+            )
             if errors:
-                return tuple(dict.fromkeys(errors))
+                return tuple(errors)
             errors.extend(shape(payload))
             if errors:
                 return tuple(dict.fromkeys(errors))
