@@ -1,8 +1,12 @@
+import ast
+import hashlib
+from dataclasses import fields, replace
+from pathlib import Path
 from typing import Any
 
 import pytest
 
-from product.certification import CertificationDisposition
+from product.certification import CertificationDisposition, CertificationPolicy
 from product.evidence import (
     AcceptanceContract,
     ChangeSet,
@@ -12,7 +16,7 @@ from product.evidence import (
 )
 from product.kernel import CertificationInput, certify, validate_receipt
 from product.protocol import IMPLEMENTATION_SCHEMA, PUBLIC_PROTOCOL_VERSION
-from product.verification import VerificationStatus
+from product.verification import VerificationResult, VerificationStatus
 
 
 def case(**kwargs):
@@ -81,13 +85,116 @@ def test_fail_missing_and_scope_escape_are_fail_closed():
 
 
 def test_policy_and_prerequisites_are_certification_only():
-    assert certify(case(policy_accepted=False)).disposition is CertificationDisposition.REJECTED
+    rejected = certify(case(policy_accepted=False))
+    assert rejected.verification.status is VerificationStatus.VERIFIED
+    assert rejected.disposition is CertificationDisposition.REJECTED
     assert certify(case(policy_accepted=None)).disposition is CertificationDisposition.BLOCKED
     assert certify(case(authority_present=False)).disposition is CertificationDisposition.BLOCKED
 
 
 def test_protocol_versions_are_distinct():
-    assert PUBLIC_PROTOCOL_VERSION != IMPLEMENTATION_SCHEMA
+    assert PUBLIC_PROTOCOL_VERSION == "0.1.0-experimental"
+    assert IMPLEMENTATION_SCHEMA == "nexus.changeset_certification.v2"
+
+
+_PRODUCT_PACKAGES = {"protocol", "evidence", "verification", "certification", "kernel", "execution"}
+_BANNED_IMPORT_TOKENS = {
+    "nexus",
+    "github",
+    "gh",
+    "mcp",
+    "agent",
+    "model",
+    "provider",
+    "capabilityplanner",
+    "planner",
+    "workforce",
+    "runtime",
+    "cloud",
+}
+_ALLOWED_PRODUCT_IMPORTS = {
+    "protocol": set(),
+    "evidence": {"protocol"},
+    "verification": {"protocol", "evidence"},
+    "certification": {"protocol", "evidence", "verification"},
+    "kernel": {"protocol", "evidence", "verification", "certification"},
+    "execution": {"protocol", "evidence"},
+}
+
+
+def _assert_import_is_allowed(node: ast.AST, package: str) -> None:
+    if isinstance(node, ast.Import):
+        modules = [alias.name.lower() for alias in node.names]
+        names = [part for module in modules for part in module.split(".")]
+        names.extend(alias.asname.lower() for alias in node.names if alias.asname)
+        product_imports = {
+            module.split(".")[1] for module in modules if module.startswith("product.")
+        }
+    elif isinstance(node, ast.ImportFrom):
+        module = (node.module or "").lower()
+        names = module.split(".") + [alias.name.lower() for alias in node.names]
+        product_imports = {module.split(".")[1]} if module.startswith("product.") else set()
+    else:
+        return
+    assert not _BANNED_IMPORT_TOKENS.intersection(names)
+    assert product_imports <= _ALLOWED_PRODUCT_IMPORTS[package]
+    assert not (package != "execution" and "execution" in product_imports)
+
+
+def test_product_imports_obey_layer_dag_and_external_boundary():
+    packages = _PRODUCT_PACKAGES
+    discovered: set[str] = set()
+    product_root = Path(__file__).parents[2] / "product"
+    for path in product_root.rglob("*.py"):
+        package = path.relative_to(product_root).parts[0]
+        if package not in packages:
+            continue
+        discovered.add(package)
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            _assert_import_is_allowed(node, package)
+    assert discovered == packages
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import github",
+        "import mcp",
+        "import agent",
+        "from planner import X",
+        "from workforce import Y",
+    ],
+)
+def test_forbidden_import_tokens_are_rejected_by_gate(source):
+    node = ast.parse(source).body[0]
+    with pytest.raises(AssertionError):
+        _assert_import_is_allowed(node, "kernel")
+
+
+def test_certification_input_fields_are_factual_only():
+    assert {field.name for field in fields(CertificationInput)} == {
+        "contract",
+        "change_set",
+        "plan",
+        "evidence",
+        "policy_accepted",
+        "authority_present",
+        "approval_present",
+        "signing_present",
+    }
+    assert {field.name for field in fields(CertificationInput)}.isdisjoint(
+        {
+            "factual_result",
+            "verification",
+            "verification_result",
+            "status",
+            "disposition",
+            "claim_ceiling",
+            "receipt",
+            "receipt_hash",
+        }
+    )
 
 
 def test_kernel_input_does_not_accept_claimed_results():
@@ -125,16 +232,50 @@ def test_observation_has_no_caller_scope_flag_and_duplicate_identity_blocks():
 
 
 def test_receipt_round_trip_and_tamper_validation():
-    result = certify(case())
-    assert validate_receipt(result.receipt, case())
-    from dataclasses import replace
-
-    assert not validate_receipt(
-        replace(result.receipt, disposition=CertificationDisposition.REJECTED), case()
+    input_data = case()
+    result = certify(input_data)
+    receipt = result.receipt
+    assert receipt.acceptance_contract_hash == input_data.contract.hash
+    assert receipt.change_set_hash == input_data.change_set.hash
+    assert receipt.verification_plan_hash == input_data.plan.hash
+    assert receipt.evidence_hash == input_data.evidence.hash
+    assert receipt.verification == VerificationResult(VerificationStatus.VERIFIED)
+    assert receipt.policy == CertificationPolicy(True, True, True, True)
+    assert receipt.disposition is CertificationDisposition.CERTIFIED
+    assert receipt.claim_ceiling == (
+        "NO_MERGE_AUTHORIZATION",
+        "NO_DEPLOYMENT_TRUTH",
+        "NO_OUTCOME_TRUTH",
+        "NO_PRODUCTION_READINESS",
+        "NO_PUBLIC_PROTOCOL_STABILITY",
     )
+    assert receipt.protocol_version == PUBLIC_PROTOCOL_VERSION
+    assert receipt.implementation_schema == IMPLEMENTATION_SCHEMA
+    from product.evidence import canonical_json
+
+    assert (
+        receipt.hash
+        == "sha256:" + hashlib.sha256(canonical_json(receipt.canonical_value).encode()).hexdigest()
+    )
+    assert validate_receipt(replace(receipt, claimed_receipt_hash=receipt.hash), input_data)
+    assert not validate_receipt(replace(receipt, claimed_receipt_hash="sha256:bad"), input_data)
+
+    tampered = (
+        replace(receipt, acceptance_contract_hash="sha256:bad"),
+        replace(receipt, change_set_hash="sha256:bad"),
+        replace(receipt, verification_plan_hash="sha256:bad"),
+        replace(receipt, evidence_hash="sha256:bad"),
+        replace(receipt, verification=VerificationResult(VerificationStatus.UNVERIFIABLE)),
+        replace(receipt, disposition=CertificationDisposition.REJECTED),
+        replace(receipt, policy=CertificationPolicy(False, True, True, True)),
+        replace(receipt, claim_ceiling=("TAMPERED",)),
+        replace(receipt, protocol_version="0.0.0"),
+        replace(receipt, implementation_schema="tampered"),
+    )
+    assert all(not validate_receipt(candidate, input_data) for candidate in tampered)
 
 
-def test_stale_bindings_are_unverifiable():
+def test_stale_bindings_are_unverifiable_and_blocked():
     c = case().contract
     ch = case().change_set
     p = case().plan
@@ -142,13 +283,12 @@ def test_stale_bindings_are_unverifiable():
     stale = EvidenceBundle(
         e.bundle_id, "sha256:stale", e.change_set_hash, e.verification_plan_hash, e.observations
     )
-    assert (
-        certify(CertificationInput(c, ch, p, stale, True, True, True, True)).verification.status
-        is VerificationStatus.UNVERIFIABLE
-    )
+    result = certify(CertificationInput(c, ch, p, stale, True, True, True, True))
+    assert result.verification.status is VerificationStatus.UNVERIFIABLE
+    assert result.disposition is CertificationDisposition.BLOCKED
 
 
-def test_claimed_evidence_hash_tamper_rejects():
+def test_claimed_evidence_hash_tamper_is_unverifiable_and_rejected():
     x = case()
     e = x.evidence
     bad = EvidenceBundle(
@@ -160,6 +300,7 @@ def test_claimed_evidence_hash_tamper_rejects():
         "sha256:bad",
     )
     r = certify(CertificationInput(x.contract, x.change_set, x.plan, bad, True, True, True, True))
+    assert r.verification.status is VerificationStatus.UNVERIFIABLE
     assert r.disposition is CertificationDisposition.REJECTED
 
 
