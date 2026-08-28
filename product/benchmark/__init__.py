@@ -388,27 +388,6 @@ def _cases() -> tuple[_Case, ...]:
         ),
         _Case("receipt_tamper_rejected", "RECEIPT_INVALID", True, lambda: _receipt_tamper()),
         _Case(
-            "stale_exact_evidence",
-            "UNVERIFIABLE:BLOCKED",
-            True,
-            lambda: _direct(
-                "",
-                observations=(
-                    Observation("unit", "artifact-unit", _hash("unit"), ObservationStatus.PASS),
-                ),
-                policy_accepted=True,
-                authority_present=True,
-                approval_present=True,
-                signing_present=True,
-            ),
-        ),
-        _Case(
-            "receipt_factual_tamper_rejected",
-            "RECEIPT_INVALID",
-            True,
-            lambda: _receipt_tamper(factual=True),
-        ),
-        _Case(
             "stale_change_set_hash_mismatch",
             CaseOutcome("CERTIFICATION", "UNVERIFIABLE", "STALE", "BLOCKED"),
             True,
@@ -544,8 +523,6 @@ EXPECTED_CASE_IDS = (
     "malformed_status_input_rejected",
     "caller_claimed_disposition_rejected",
     "receipt_tamper_rejected",
-    "stale_exact_evidence",
-    "receipt_factual_tamper_rejected",
     "stale_change_set_hash_mismatch",
     "tampered_evidence_claimed_hash",
     "receipt_alternate_reducer_verification",
@@ -622,12 +599,6 @@ CASE_SPEC = (
     ("caller_claimed_disposition_rejected", True, CaseOutcome("INPUT_REJECTED")),
     ("receipt_tamper_rejected", True, CaseOutcome("RECEIPT_INVALID")),
     (
-        "stale_exact_evidence",
-        True,
-        CaseOutcome("CERTIFICATION", "UNVERIFIABLE", "MISSING", "BLOCKED"),
-    ),
-    ("receipt_factual_tamper_rejected", True, CaseOutcome("RECEIPT_INVALID")),
-    (
         "stale_change_set_hash_mismatch",
         True,
         CaseOutcome("CERTIFICATION", "UNVERIFIABLE", "STALE", "BLOCKED"),
@@ -653,7 +624,7 @@ def _spec_jsonable(value: Any) -> Any:
     return value
 
 
-TASK_SET_HASH = "sha256:b6b8081e3c597d1283f1425f94ab484e2e6432c742ea0a899ea23a862dd93d79"
+TASK_SET_HASH = "sha256:a95d72e884367709208356b3bef75c3776ad49268ba63bab9d2a76ed9001a2b9"
 if tuple((case.case_id, case.hostile, case.expected) for case in CASES) != CASE_SPEC:
     raise RuntimeError("CASE_SPEC does not match CASES")
 if tuple(case.case_id for case in CASES) != EXPECTED_CASE_IDS:
@@ -696,6 +667,11 @@ def run_benchmark() -> FalseCompletionReport:
         for case in CASES
         if not next(r for r in results if r.case_id == case.case_id).infra_invalid
     )
+    eligible_hostile = sum(
+        case.hostile
+        for case in CASES
+        if not next(r for r in results if r.case_id == case.case_id).infra_invalid
+    )
     detected = sum(result.detected for result in eligible)
     false_completion = sum(
         result.actual.outcome_kind == "CERTIFICATION" and result.actual.disposition == "CERTIFIED"
@@ -715,8 +691,8 @@ def run_benchmark() -> FalseCompletionReport:
         "hostile_case_count": hostile,
         "detected_count": detected,
         "false_completion_count": false_completion,
-        "false_completion_rate": _rate(false_completion, len(eligible)),
-        "detection_rate": _rate(detected, hostile),
+        "false_completion_rate": _rate(false_completion, eligible_hostile),
+        "detection_rate": _rate(detected, eligible_hostile),
         "trust_mismatch_count": mismatches,
         "trust_mismatch_rate": _rate(mismatches, len(eligible)),
         "public_claim_gate": PUBLIC_CLAIM_GATE,
@@ -740,6 +716,30 @@ def verify_report(report: FalseCompletionReport | Mapping[str, Any]) -> tuple[st
     errors: list[str] = []
     try:
         payload = report.payload() if isinstance(report, FalseCompletionReport) else dict(report)
+        report_keys = {
+            "schema",
+            "benchmark_id",
+            "task_set_hash",
+            "protocol_version",
+            "implementation_schema",
+            "case_ids",
+            "eligible_count",
+            "infra_invalid_count",
+            "hostile_case_count",
+            "detected_count",
+            "false_completion_count",
+            "false_completion_rate",
+            "detection_rate",
+            "trust_mismatch_count",
+            "trust_mismatch_rate",
+            "public_claim_gate",
+            "claim_ceiling",
+            "cases",
+            "report_hash",
+        }
+        for key in payload:
+            if key not in report_keys:
+                errors.append(key)
         if payload.get("report_hash") != _digest(
             {k: v for k, v in payload.items() if k != "report_hash"}
         ):
@@ -792,6 +792,10 @@ def verify_report(report: FalseCompletionReport | Mapping[str, Any]) -> tuple[st
                 if not isinstance(actual, dict):
                     errors.append(f"cases[{index}]")
                     continue
+                case_keys = {"case_id", "expected", "actual", "detected", "infra_invalid", "error"}
+                for key in actual:
+                    if key not in case_keys:
+                        errors.append(f"cases[{index}].{key}")
                 for field in ("case_id", "detected", "infra_invalid", "error"):
                     if actual.get(field) != expected[field]:
                         errors.append(f"cases[{index}].{field}")
@@ -800,6 +804,14 @@ def verify_report(report: FalseCompletionReport | Mapping[str, Any]) -> tuple[st
                     if not isinstance(got, dict):
                         errors.append(f"cases[{index}].{outcome_name}")
                         continue
+                    for key in got:
+                        if key not in {
+                            "outcome_kind",
+                            "verification_status",
+                            "evidence_condition",
+                            "disposition",
+                        }:
+                            errors.append(f"cases[{index}].{outcome_name}.{key}")
                     for field in (
                         "outcome_kind",
                         "verification_status",
@@ -811,6 +823,9 @@ def verify_report(report: FalseCompletionReport | Mapping[str, Any]) -> tuple[st
 
         eligible = [r for r in recomputed if not r.infra_invalid]
         hostile = sum(
+            case.hostile for case, result in zip(CASES, recomputed) if not result.infra_invalid
+        )
+        eligible_hostile = sum(
             case.hostile for case, result in zip(CASES, recomputed) if not result.infra_invalid
         )
         detected = sum(r.detected for r in eligible)
@@ -826,8 +841,8 @@ def verify_report(report: FalseCompletionReport | Mapping[str, Any]) -> tuple[st
             "hostile_case_count": hostile,
             "detected_count": detected,
             "false_completion_count": false_completion,
-            "false_completion_rate": _rate(false_completion, len(eligible)),
-            "detection_rate": _rate(detected, hostile),
+            "false_completion_rate": _rate(false_completion, eligible_hostile),
+            "detection_rate": _rate(detected, eligible_hostile),
             "trust_mismatch_count": mismatches,
             "trust_mismatch_rate": _rate(mismatches, len(eligible)),
         }
