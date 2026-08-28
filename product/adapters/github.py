@@ -255,6 +255,7 @@ to_changeset, snapshot_to_dict, load_snapshot, certify_pull_request = _make_trus
 github_snapshot_to_changeset = to_changeset
 load_github_pull_request_snapshot = load_snapshot
 serialize_github_pull_request_snapshot = snapshot_to_dict
+GitHubPullRequestSnapshot.to_dict = snapshot_to_dict  # type: ignore[reportAttributeAccessIssue]
 
 
 __all__ = [

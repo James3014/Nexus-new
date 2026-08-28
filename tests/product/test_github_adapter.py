@@ -1,5 +1,6 @@
 import ast
 import hashlib
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -10,11 +11,14 @@ from product.adapters.github import (
     certify_pull_request,
     load_github_pull_request_snapshot,
     serialize_github_pull_request_snapshot,
+    snapshot_to_dict,
     to_changeset,
 )
+from product.certification import CertificationDisposition
 from product.evidence import (
     AcceptanceContract,
     EvidenceBundle,
+    IntegrityStatus,
     Observation,
     ObservationStatus,
     VerificationPlan,
@@ -55,6 +59,7 @@ def test_snapshot_mapping_and_serialized_replay_are_deterministic():
     )
     assert to_changeset(reversed_value).paths == ("a", "z")
     assert serialize_github_pull_request_snapshot(reversed_value)["changed_paths"] == ["a", "z"]
+    assert reversed_value.to_dict() == serialize_github_pull_request_snapshot(reversed_value)
 
 
 def test_certification_delegates_with_explicit_policy_and_bound_evidence():
@@ -125,6 +130,80 @@ def test_public_adapter_revalidates_forged_snapshot_after_module_rebinding(monke
         github.to_changeset(forged)
 
 
+def test_valid_adapter_path_survives_module_and_class_rebinding(monkeypatch):
+    value = snapshot()
+    contract, plan, evidence = certification_case()
+    expected = github.certify_pull_request(
+        value,
+        contract,
+        plan,
+        evidence,
+        policy_accepted=True,
+        authority_present=True,
+        approval_present=True,
+        signing_present=True,
+    )
+    monkeypatch.setattr(github, "GitHubPullRequestSnapshot", lambda *args: None)
+    monkeypatch.setattr(github, "ChangeSet", lambda *args: None)
+    monkeypatch.setattr(github, "CertificationInput", lambda *args: None)
+    monkeypatch.setattr(github, "certify", lambda *args: pytest.fail("rebound certify used"))
+    monkeypatch.setattr(type(value), "to_dict", lambda self: {"forged": True})
+    actual = github.certify_pull_request(
+        value,
+        contract,
+        plan,
+        evidence,
+        policy_accepted=True,
+        authority_present=True,
+        approval_present=True,
+        signing_present=True,
+    )
+    assert actual.receipt.hash == expected.receipt.hash
+    assert github.to_changeset(value) == to_changeset(value)
+    assert github.serialize_github_pull_request_snapshot(value) == snapshot_to_dict(value)
+
+
+@pytest.mark.parametrize(
+    "field,expected_status,expected_disposition",
+    [
+        ("change_set_hash", VerificationStatus.UNVERIFIABLE, CertificationDisposition.BLOCKED),
+        (
+            "acceptance_contract_hash",
+            VerificationStatus.UNVERIFIABLE,
+            CertificationDisposition.REJECTED,
+        ),
+        (
+            "verification_plan_hash",
+            VerificationStatus.UNVERIFIABLE,
+            CertificationDisposition.REJECTED,
+        ),
+    ],
+)
+def test_cross_bound_snapshot_evidence_is_factual_and_never_certified(
+    field, expected_status, expected_disposition
+):
+    contract, plan, evidence = certification_case()
+    altered = replace(evidence, **{field: _hash("other")})
+    result = certify_pull_request(
+        snapshot(),
+        contract,
+        plan,
+        altered,
+        policy_accepted=True,
+        authority_present=True,
+        approval_present=True,
+        signing_present=True,
+    )
+    assert result.verification.status is expected_status
+    assert result.disposition is expected_disposition
+    assert result.disposition is not CertificationDisposition.CERTIFIED
+    assert result.verification.integrity in {
+        IntegrityStatus.STALE,
+        IntegrityStatus.CROSS_BOUND,
+        IntegrityStatus.CROSS_BINDING_INVALID,
+    }
+
+
 def test_loader_revalidates_after_post_init_rebinding(monkeypatch):
     values = serialize_github_pull_request_snapshot(snapshot())
     values["diff_hash"] = "bad"
@@ -174,6 +253,13 @@ def test_adapter_has_no_network_sdk_or_mutation_surface():
         "model",
     }
     imports = [node.module or "" for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)]
+    imports += [
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    ]
+    assert set(imports) <= {"re", "dataclasses", "product.evidence", "product.kernel"}
     assert all(not any(token in item.lower() for token in forbidden) for item in imports)
     calls = [
         node.func.attr.lower()
