@@ -73,6 +73,74 @@ def test_exported_globals_cannot_rebind_run_or_verifier(monkeypatch):
     assert verify_report(forged)
 
 
+def test_public_api_is_sealed_against_transitive_module_rebinding(monkeypatch):
+    genuine = run_benchmark()
+    forged_cases = [
+        {**case, "actual": case["expected"], "detected": False, "infra_invalid": False}
+        for case in genuine.payload()["cases"]
+    ]
+    forged_body = {**genuine.payload(), "cases": forged_cases}
+    forged = _rehash(forged_body)
+    assert verify_report(forged)
+
+    names = (
+        "_direct",
+        "_legacy",
+        "_reject",
+        "_receipt",
+        "_special",
+        "_input",
+        "_hash",
+        "certify",
+        "certify_changeset",
+        "validate_receipt",
+        "reduce_verification",
+        "replace",
+        "cast",
+        "AcceptanceContract",
+        "ChangeSet",
+        "EvidenceBundle",
+        "VerificationPlan",
+        "Observation",
+        "ObservationStatus",
+        "IntegrityStatus",
+        "CertificationInput",
+        "CertificationDisposition",
+        "CertificationPolicy",
+        "CaseOutcome",
+        "BenchmarkCaseResult",
+        "FalseCompletionReport",
+        "BENCHMARK_SCHEMA",
+        "BENCHMARK_ID",
+        "TASK_SET_HASH",
+        "PUBLIC_PROTOCOL_VERSION",
+        "IMPLEMENTATION_SCHEMA",
+        "PUBLIC_CLAIM_GATE",
+        "CLAIM_CEILING",
+        "_canonical",
+        "_digest",
+        "_rate",
+        "_shape",
+        "_false",
+        "_run",
+        "_build",
+        "_make_dispatch",
+    )
+
+    class Poison:
+        def __call__(self, *_args, **_kwargs):
+            raise AssertionError("rebound benchmark dependency used")
+
+        def __getattr__(self, _name):
+            raise AssertionError("rebound benchmark dependency used")
+
+    for name in names:
+        monkeypatch.setattr(bm, name, Poison())
+        assert run_benchmark().canonical_json() == genuine.canonical_json(), name
+        assert verify_report(genuine) == (), name
+        monkeypatch.undo()
+
+
 def test_report_verifier_rejects_full_mutation_matrix_with_rehashed_attacks():
     base = run_benchmark().payload()
     top_values = {
