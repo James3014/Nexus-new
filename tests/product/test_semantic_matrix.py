@@ -2,7 +2,7 @@ import pytest
 
 from product.certification import CertificationDisposition, CertificationPolicy, certify_result
 from product.evidence import IntegrityStatus, ObservationStatus
-from product.verification import VerificationResult, VerificationStatus
+from product.verification import VerificationResult, VerificationStatus, reduce_verification
 
 
 @pytest.mark.parametrize(
@@ -21,18 +21,29 @@ from product.verification import VerificationResult, VerificationStatus
     ],
 )
 def test_factual_reducer_matrix(condition, observations, complete, scope_escape, status):
-    result = VerificationResult.reduce(condition, observations, complete=complete, scope_escape=scope_escape)
+    if scope_escape:
+        condition = IntegrityStatus.SCOPE_ESCAPE
+    result = reduce_verification(condition, observations)
     assert result.status is status
 
 
 def test_reason_codes_are_sorted_unique_and_compatibly_exposed():
-    result = VerificationResult.reduce(IntegrityStatus.MALFORMED, reasons=("z", "a"))
+    result = reduce_verification(IntegrityStatus.MALFORMED, reasons=("z", "a"))
     assert result.reason_codes == ("MALFORMED", "a", "z")
     assert result.failed_checks == result.reason_codes
 
 
 def test_certification_reduces_only_from_factual_result():
     policy = CertificationPolicy(True, True, True, True)
-    assert certify_result(VerificationResult.reduce(IntegrityStatus.TAMPERED), policy) is CertificationDisposition.REJECTED
-    assert certify_result(VerificationResult.reduce(IntegrityStatus.MISSING), policy) is CertificationDisposition.BLOCKED
-    assert certify_result(VerificationResult.reduce(IntegrityStatus.VALID, (ObservationStatus.PASS,), complete=True), policy) is CertificationDisposition.CERTIFIED
+    assert certify_result(reduce_verification(IntegrityStatus.TAMPERED), policy) is CertificationDisposition.REJECTED
+    assert certify_result(reduce_verification(IntegrityStatus.MISSING), policy) is CertificationDisposition.BLOCKED
+    assert certify_result(reduce_verification(IntegrityStatus.VALID, (ObservationStatus.PASS,)), policy) is CertificationDisposition.CERTIFIED
+
+
+def test_direct_truth_and_caller_disposition_inputs_are_rejected():
+    with pytest.raises(TypeError):
+        VerificationResult(VerificationStatus.VERIFIED)
+    with pytest.raises(TypeError):
+        reduce_verification(IntegrityStatus.VALID, status=VerificationStatus.VERIFIED)  # type: ignore[call-arg]
+    with pytest.raises(TypeError):
+        reduce_verification(IntegrityStatus.VALID, disposition=CertificationDisposition.CERTIFIED)  # type: ignore[call-arg]

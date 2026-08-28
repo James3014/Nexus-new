@@ -8,7 +8,6 @@ from product.evidence import (
     AcceptanceContract,
     ChangeSet,
     EvidenceBundle,
-    IntegrityStatus,
     Observation,
     ObservationStatus,
     VerificationPlan,
@@ -38,7 +37,7 @@ def test_duplicate_artifact_across_verifiers_is_order_independent_unverifiable()
     for observations in ((one, two), (two, one)):
         result = certify(valid_case(observations=observations))
         assert result.verification.status is VerificationStatus.UNVERIFIABLE
-        assert result.disposition is CertificationDisposition.BLOCKED
+        assert result.disposition is CertificationDisposition.REJECTED
 
 
 @pytest.mark.parametrize("field", ["requirements_hash", "diff_hash", "artifact_hash"])
@@ -102,18 +101,13 @@ def test_paths_are_normalized_repo_relative_posix(path):
 
 
 def test_verification_result_rejects_contradictory_states():
-    with pytest.raises(ValueError):
-        VerificationResult(VerificationStatus.VERIFIED, ("check",))
-    with pytest.raises(ValueError):
-        VerificationResult(
-            VerificationStatus.VERIFIED, integrity=IntegrityStatus.CROSS_BINDING_INVALID
-        )
-    with pytest.raises(ValueError):
-        VerificationResult(
-            VerificationStatus.FAILED_VERIFICATION, integrity=IntegrityStatus.TAMPERED
-        )
-    with pytest.raises(ValueError):
-        VerificationResult(VerificationStatus.VERIFIED, ("check", "check"))
+    for args in (
+        (VerificationStatus.VERIFIED, ("check",)),
+        (VerificationStatus.VERIFIED,),
+        (VerificationStatus.FAILED_VERIFICATION,),
+    ):
+        with pytest.raises(TypeError):
+            VerificationResult(*args)  # type: ignore[call-arg]
 
 
 def test_poetry_packages_include_product_without_version_change():

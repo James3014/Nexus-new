@@ -17,6 +17,8 @@ class VerificationResult:
     integrity: IntegrityStatus = IntegrityStatus.VALID
 
     def __init__(self, status, reason_codes=(), integrity=IntegrityStatus.VALID, **kwargs):
+        if kwargs.pop("_token", None) is not _INTERNAL_TOKEN:
+            raise TypeError("VerificationResult is created by reduce_verification")
         if "failed_checks" in kwargs:
             if reason_codes != ():
                 raise TypeError("use reason_codes or failed_checks, not both")
@@ -56,49 +58,62 @@ class VerificationResult:
     def failed_checks(self):
         return self.reason_codes
 
-    @classmethod
-    def reduce(cls, condition, observations=(), reasons=(), *, complete=False, scope_escape=False):
-        if not isinstance(condition, IntegrityStatus):
-            raise TypeError("condition must be IntegrityStatus")
-        codes = list(reasons)
-        if scope_escape:
-            return cls(VerificationStatus.FAILED_VERIFICATION, tuple(sorted(set(codes + ["SCOPE_ESCAPE"]))))
-        if condition is not IntegrityStatus.VALID:
-            return cls(VerificationStatus.UNVERIFIABLE, tuple(sorted(set(codes + [condition.value]))), condition)
-        failures = [str(i) for i, observation in enumerate(observations) if observation is ObservationStatus.FAIL or observation == "FAIL"]
-        codes.extend(failures)
-        if failures:
-            return cls(VerificationStatus.FAILED_VERIFICATION, tuple(sorted(set(codes))))
-        return cls(VerificationStatus.VERIFIED if complete else VerificationStatus.UNVERIFIABLE, tuple(sorted(set(codes))))
+_INTERNAL_TOKEN = object()
 
-    from_evidence = reduce
+
+def reduce_verification(condition, observations=(), reasons=()):
+    if not isinstance(condition, IntegrityStatus):
+        raise TypeError("condition must be IntegrityStatus")
+    codes = list(reasons)
+    if condition is IntegrityStatus.SCOPE_ESCAPE:
+        status, integrity = VerificationStatus.FAILED_VERIFICATION, IntegrityStatus.VALID
+    elif condition is not IntegrityStatus.VALID:
+        codes.append(condition.value)
+        status, integrity = VerificationStatus.UNVERIFIABLE, condition
+    elif not isinstance(observations, tuple):
+        status, integrity = VerificationStatus.UNVERIFIABLE, IntegrityStatus.MALFORMED
+        codes.append(IntegrityStatus.MALFORMED.value)
+    elif not observations:
+        status, integrity = VerificationStatus.UNVERIFIABLE, IntegrityStatus.MISSING
+        codes.append(IntegrityStatus.MISSING.value)
+    elif any(type(item) is str for item in observations):
+        status, integrity = VerificationStatus.UNVERIFIABLE, IntegrityStatus.LEGACY_NON_CERTIFIABLE
+        codes.append(IntegrityStatus.LEGACY_NON_CERTIFIABLE.value)
+    elif not all(isinstance(item, ObservationStatus) for item in observations):
+        status, integrity = VerificationStatus.UNVERIFIABLE, IntegrityStatus.MALFORMED
+        codes.append(IntegrityStatus.MALFORMED.value)
+    elif any(item is ObservationStatus.FAIL for item in observations):
+        status, integrity = VerificationStatus.FAILED_VERIFICATION, IntegrityStatus.VALID
+    else:
+        status, integrity = VerificationStatus.VERIFIED, IntegrityStatus.VALID
+    return VerificationResult(status, tuple(sorted(set(codes))), integrity, _token=_INTERNAL_TOKEN)
 
 
 def verify(contract, change_set, plan, evidence):
     integrity = evidence.integrity(contract, change_set, plan)
     if integrity is not IntegrityStatus.VALID:
-        return VerificationResult.reduce(integrity)
+        return reduce_verification(integrity)
     if set(change_set.paths) - set(contract.allowed_paths):
-        return VerificationResult.reduce(IntegrityStatus.VALID, scope_escape=True)
+        return reduce_verification(IntegrityStatus.SCOPE_ESCAPE)
     if set(contract.required_verifier_ids) != set(plan.required_verifier_ids):
-        return VerificationResult.reduce(IntegrityStatus.MISSING)
+        return reduce_verification(IntegrityStatus.MISSING)
     obs = {o.verifier_id: o for o in evidence.observations}
     observed_ids = set(obs)
     if observed_ids != set(plan.required_verifier_ids):
-        return VerificationResult.reduce(IntegrityStatus.MISSING)
+        return reduce_verification(IntegrityStatus.MISSING)
     if any(
         o.status not in {ObservationStatus.PASS, ObservationStatus.FAIL}
         for o in evidence.observations
     ):
-        return VerificationResult.reduce(IntegrityStatus.MALFORMED)
+        return reduce_verification(IntegrityStatus.MALFORMED)
     missing = tuple(
         x
         for x in contract.required_verifier_ids
         if x not in obs or x not in plan.required_verifier_ids
     )
     if missing or not evidence.observations:
-        return VerificationResult.reduce(IntegrityStatus.MISSING, missing)
+        return reduce_verification(IntegrityStatus.MISSING, reasons=missing)
     failed = tuple(
         x for x in contract.required_verifier_ids if obs[x].status is not ObservationStatus.PASS
     )
-    return VerificationResult.reduce(IntegrityStatus.VALID, tuple(obs[x].status for x in contract.required_verifier_ids), failed, complete=not failed)
+    return reduce_verification(IntegrityStatus.VALID, tuple(obs[x].status for x in contract.required_verifier_ids), failed)

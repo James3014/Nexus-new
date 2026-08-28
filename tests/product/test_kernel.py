@@ -11,6 +11,7 @@ from product.evidence import (
     AcceptanceContract,
     ChangeSet,
     EvidenceBundle,
+    IntegrityStatus,
     Observation,
     ObservationStatus,
     VerificationPlan,
@@ -18,7 +19,7 @@ from product.evidence import (
 )
 from product.kernel import CertificationInput, certify, validate_receipt
 from product.protocol import IMPLEMENTATION_SCHEMA, PUBLIC_PROTOCOL_VERSION
-from product.verification import VerificationResult, VerificationStatus
+from product.verification import VerificationStatus, reduce_verification
 
 
 def case(**kwargs):
@@ -251,7 +252,7 @@ def test_receipt_round_trip_and_tamper_validation():
     assert receipt.change_set_hash == input_data.change_set.hash
     assert receipt.verification_plan_hash == input_data.plan.hash
     assert receipt.evidence_hash == input_data.evidence.hash
-    assert receipt.verification == VerificationResult(VerificationStatus.VERIFIED)
+    assert receipt.verification == reduce_verification(IntegrityStatus.VALID, (ObservationStatus.PASS, ObservationStatus.PASS))
     assert receipt.policy == CertificationPolicy(True, True, True, True)
     assert receipt.disposition is CertificationDisposition.CERTIFIED
     assert receipt.claim_ceiling == (
@@ -278,7 +279,7 @@ def test_receipt_round_trip_and_tamper_validation():
         replace(receipt, change_set_hash=_hash("bad")),
         replace(receipt, verification_plan_hash=_hash("bad")),
         replace(receipt, evidence_hash=_hash("bad")),
-        replace(receipt, verification=VerificationResult(VerificationStatus.UNVERIFIABLE)),
+        replace(receipt, verification=reduce_verification(IntegrityStatus.MISSING)),
         replace(receipt, disposition=CertificationDisposition.REJECTED),
         replace(receipt, policy=CertificationPolicy(False, True, True, True)),
         replace(receipt, claim_ceiling=("TAMPERED",)),
@@ -298,7 +299,7 @@ def test_stale_bindings_are_unverifiable_and_blocked():
     )
     result = certify(CertificationInput(c, ch, p, stale, True, True, True, True))
     assert result.verification.status is VerificationStatus.UNVERIFIABLE
-    assert result.disposition is CertificationDisposition.BLOCKED
+    assert result.disposition is CertificationDisposition.REJECTED
 
 
 def test_claimed_evidence_hash_tamper_is_unverifiable_and_rejected():
