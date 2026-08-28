@@ -300,7 +300,7 @@ def test_case_definition_deep_freezes_mapping_aliases():
     assert isinstance(case.params["items"], tuple)
     assert case.params["items"][0]["z"] == 1
     with pytest.raises(TypeError):
-        case.params["inner"]["flag"] = False
+        case.params["inner"]["flag"] = False  # type: ignore[index]
 
 
 def test_case_outcome_rejects_contradictory_certification_matrix():

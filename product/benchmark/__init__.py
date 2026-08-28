@@ -118,10 +118,13 @@ class CaseOutcome:
                 "VERIFIED": {"VALID": {"CERTIFIED", "REJECTED", "BLOCKED"}},
                 "FAILED_VERIFICATION": {"VALID": {"REJECTED"}},
                 "UNVERIFIABLE": {
-                    "MISSING": {"BLOCKED"}, "STALE": {"BLOCKED"},
+                    "MISSING": {"BLOCKED"},
+                    "STALE": {"BLOCKED"},
                     "LEGACY_NON_CERTIFIABLE": {"BLOCKED"},
-                    "TAMPERED": {"REJECTED"}, "MALFORMED": {"REJECTED"},
-                    "CROSS_BOUND": {"REJECTED"}, "DUPLICATE": {"REJECTED"},
+                    "TAMPERED": {"REJECTED"},
+                    "MALFORMED": {"REJECTED"},
+                    "CROSS_BOUND": {"REJECTED"},
+                    "DUPLICATE": {"REJECTED"},
                 },
             }
             if self.evidence_condition not in valid.get(self.verification_status, {}):
