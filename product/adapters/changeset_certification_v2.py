@@ -229,11 +229,11 @@ def _waiver_is_malformed(payload: Mapping[str, Any]) -> bool:
 def certify_changeset(payload: Mapping[str, Any]) -> ChangeSetCertification:
     if not isinstance(payload, Mapping):
         return _blocked("identity_missing")
-    if _contains_nonfinite(payload):
-        return _blocked("identity_malformed")
     try:
+        if _contains_nonfinite(payload):
+            return _blocked("identity_malformed")
         payload = _copy(payload)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, RecursionError):
         return _blocked("identity_malformed")
     if (
         payload.get("schema") == LEGACY_CHANGESET_CERTIFICATION_SCHEMA
@@ -410,7 +410,7 @@ def validate_changeset_certification(
             if isinstance(certification, ChangeSetCertification)
             else _copy(certification)
         )
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, RecursionError):
         return ("identity_malformed",)
     if not isinstance(payload, Mapping):
         return ("identity_malformed",)
@@ -743,8 +743,12 @@ def _result(
 
 def _policy(payload: Mapping[str, Any]) -> CertificationPolicy:
     policy = payload.get("policy")
-    if not isinstance(policy, Mapping):
+    if "policy" not in payload:
         return CertificationPolicy()
+    if not isinstance(policy, Mapping):
+        return CertificationPolicy(accepted=False)
+    if set(policy) != {"allowed"} or not isinstance(policy.get("allowed"), bool):
+        return CertificationPolicy(accepted=False)
     return CertificationPolicy(
         accepted=policy.get("allowed"),
         authority_present=_complete(payload.get("authority")),

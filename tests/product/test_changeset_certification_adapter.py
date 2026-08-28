@@ -389,7 +389,35 @@ def test_paths_reject_traversal_and_non_normalized_forms(path):
         validate_normalized_paths((path,))
     payload = _envelope()
     payload["diff"]["paths"] = [path]
+    payload["allowed_scope"]["paths"] = [path]
+    _rehash(payload)
     assert adapter.certify_changeset(payload).status is not CertificationDisposition.CERTIFIED
+
+
+@pytest.mark.parametrize("container", ["dict", "list"])
+def test_recursive_cycles_fail_closed_at_json_boundary(container):
+    payload = _envelope()
+    cycle = {}
+    if container == "dict":
+        cycle["self"] = cycle
+    else:
+        cycle = []
+        cycle.append(cycle)
+    payload["cycle"] = cycle
+    assert adapter.certify_changeset(payload).status is CertificationDisposition.BLOCKED
+    assert adapter.validate_changeset_certification(payload) == ("identity_malformed",)
+
+
+@pytest.mark.parametrize("policy", [False, "yes", 1, 0, {}, [], {"allowed": True, "extra": 1}])
+def test_present_invalid_policy_is_rejected_and_roundtrips(policy):
+    payload = _envelope()
+    payload["policy"] = policy
+    payload["reasons"] = ["policy_disallowed"]
+    payload["disposition"] = "REJECTED"
+    _rehash(payload)
+    output = adapter.certify_changeset(payload).to_dict()
+    assert output["disposition"] == "REJECTED"
+    assert adapter.validate_changeset_certification(output) == ()
 
 
 def test_hash_mismatch_is_tampered_for_direct_and_certification_paths():
