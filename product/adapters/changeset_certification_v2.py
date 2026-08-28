@@ -10,7 +10,7 @@ from dataclasses import field as dataclass_field
 from typing import Any, Mapping
 
 from product.certification import CertificationDisposition, CertificationPolicy, certify_result
-from product.evidence import EvidenceCondition, ObservationStatus
+from product.evidence import EvidenceCondition, ObservationStatus, validate_normalized_paths
 from product.protocol import IMPLEMENTATION_SCHEMA
 from product.verification import VerificationResult, VerificationStatus, reduce_verification
 
@@ -141,7 +141,12 @@ def derive_verification_result(
     manifest = payload.get("verifier_manifest")
     if not isinstance(manifest, Mapping) or not _hashes_match(payload):
         reasons = _hash_errors(payload) if isinstance(manifest, Mapping) else ("evidence_missing",)
-        return reduce_verification(EvidenceCondition.MISSING, reasons=reasons)
+        condition = (
+            EvidenceCondition.TAMPERED
+            if isinstance(manifest, Mapping)
+            else EvidenceCondition.MISSING
+        )
+        return reduce_verification(condition, reasons=reasons)
     verifiers = manifest.get("verifiers")
     if not isinstance(verifiers, list) or not verifiers:
         return reduce_verification(EvidenceCondition.MISSING, reasons=("verifier_missing",))
@@ -225,6 +230,10 @@ def certify_changeset(payload: Mapping[str, Any]) -> ChangeSetCertification:
     if not isinstance(payload, Mapping):
         return _blocked("identity_missing")
     if _contains_nonfinite(payload):
+        return _blocked("identity_malformed")
+    try:
+        payload = _copy(payload)
+    except (TypeError, ValueError):
         return _blocked("identity_malformed")
     if (
         payload.get("schema") == LEGACY_CHANGESET_CERTIFICATION_SCHEMA
@@ -395,11 +404,14 @@ def _certify_compatibility_input(payload: Mapping[str, Any]) -> ChangeSetCertifi
 def validate_changeset_certification(
     certification: ChangeSetCertification | Mapping[str, Any],
 ) -> tuple[str, ...]:
-    payload = (
-        certification.to_dict()
-        if isinstance(certification, ChangeSetCertification)
-        else certification
-    )
+    try:
+        payload = (
+            certification.to_dict()
+            if isinstance(certification, ChangeSetCertification)
+            else _copy(certification)
+        )
+    except (TypeError, ValueError):
+        return ("identity_malformed",)
     if not isinstance(payload, Mapping):
         return ("identity_malformed",)
     if (
@@ -413,20 +425,30 @@ def validate_changeset_certification(
         return errors
     if not _hashes_match(payload):
         return _hash_errors(payload)
+    actual_reasons = tuple(payload["reasons"])
+    structural_reasons = {"identity_missing", "identity_malformed", "evidence_missing"}
+    if structural_reasons.intersection(actual_reasons):
+        return (sorted(structural_reasons.intersection(actual_reasons))[0],)
     verification = derive_verification_result(payload)
     claimed_verification = payload.get("verification_result")
-    if claimed_verification is not None and claimed_verification != verification.to_dict():
+    if claimed_verification is not None and claimed_verification != _project_verification_result(
+        verification
+    ):
         return ("status_substitution",)
     policy_reasons = _policy_reasons(payload)
     missing_prerequisites = _missing_prerequisites(payload)
     expected_reasons = (
         ("verifier_failed",)
         if verification.status is VerificationStatus.FAILED_VERIFICATION
-        else policy_reasons or missing_prerequisites or verification.reason_codes or ()
+        else policy_reasons
+        or missing_prerequisites
+        or (
+            ("reason_invalid",) if _waiver_is_malformed(payload) else _project_reasons(verification)
+        )
+        or ()
     )
-    expected_policy = _policy(payload)
+    expected_policy = _effective_policy(payload, actual_reasons)
     expected_status = certify_result(verification, expected_policy).value
-    actual_reasons = tuple(payload["reasons"])
     if payload["disposition"] != expected_status or actual_reasons != expected_reasons:
         return ("status_substitution",)
     return ()
@@ -687,33 +709,14 @@ def _result(
     verification_result: VerificationResult | None = None,
 ) -> ChangeSetCertification:
     factual = verification_result or derive_verification_result(payload)
-    policy = _policy(payload)
-    if (
-        (isinstance(payload.get("policy"), Mapping) and set(payload["policy"]) != {"allowed"})
-        or (isinstance(payload.get("waiver"), Mapping) and set(payload["waiver"]) != {"approved"})
-        or any(
-            reason
-            in {
-                "unknown_field",
-                "reason_invalid",
-                "status_substitution",
-                "hash_mismatch",
-                "payload_hash_mismatch",
-                "manifest_hash_mismatch",
-            }
-            for reason in reasons
-        )
-    ):
-        policy = CertificationPolicy(
-            accepted=False, authority_present=True, approval_present=True, signing_present=True
-        )
+    policy = _effective_policy(payload, reasons)
     disposition = certify_result(factual, policy)
     result = _copy(payload)
     result["schema"] = CHANGESET_CERTIFICATION_SCHEMA
     result["version"] = CHANGESET_CERTIFICATION_VERSION
     result["disposition"] = disposition.value
     result["reasons"] = list(sorted(set(reasons)))
-    result["verification_result"] = factual.to_dict()
+    result["verification_result"] = _project_verification_result(factual)
     if isinstance(result.get("verifier_manifest"), dict):
         result["verifier_manifest"]["manifest_hash"] = canonical_hash(
             _manifest_input(result["verifier_manifest"])
@@ -748,6 +751,58 @@ def _policy(payload: Mapping[str, Any]) -> CertificationPolicy:
         approval_present=_complete(payload.get("approval")),
         signing_present=_complete(payload.get("signing")),
     )
+
+
+def _effective_policy(payload: Mapping[str, Any], reasons: tuple[str, ...]) -> CertificationPolicy:
+    """Apply the same fail-closed policy semantics to result and validation."""
+    malformed = (
+        (isinstance(payload.get("policy"), Mapping) and set(payload["policy"]) != {"allowed"})
+        or (isinstance(payload.get("waiver"), Mapping) and set(payload["waiver"]) != {"approved"})
+        or any(
+            reason
+            in {
+                "unknown_field",
+                "reason_invalid",
+                "status_substitution",
+                "hash_mismatch",
+                "payload_hash_mismatch",
+                "manifest_hash_mismatch",
+            }
+            for reason in reasons
+        )
+    )
+    if malformed:
+        return CertificationPolicy(False, True, True, True)
+    return _policy(payload)
+
+
+_EXTERNAL_REASON_CODES = frozenset(_REASONS)
+_INTERNAL_REASON_MAP = {
+    "MISSING": "evidence_missing",
+    "MALFORMED": "evidence_malformed",
+    "TAMPERED": "hash_mismatch",
+    "CROSS_BOUND": "cross_binding_mismatch",
+    "DUPLICATE": "verifier_duplicate",
+    "STALE": "stale_changeset",
+    "LEGACY_NON_CERTIFIABLE": "legacy_v1_reverification_required",
+    "VERIFIER_FAILED": "verifier_failed",
+}
+
+
+def _project_reasons(result: VerificationResult) -> tuple[str, ...]:
+    return tuple(
+        sorted(
+            {
+                _INTERNAL_REASON_MAP.get(code, code)
+                for code in result.reason_codes
+                if _INTERNAL_REASON_MAP.get(code, code) in _EXTERNAL_REASON_CODES
+            }
+        )
+    )
+
+
+def _project_verification_result(result: VerificationResult) -> dict[str, Any]:
+    return {"status": result.status.value, "reason_codes": list(_project_reasons(result))}
 
 
 def _complete(value: Any) -> bool | None:
@@ -799,7 +854,7 @@ def _minimal(result: ChangeSetCertification) -> dict[str, Any]:
     payload = _minimal_invalid(
         result.reason_codes[0] if result.reason_codes else "identity_missing",
     )
-    payload["verification_result"] = result.verification_result.to_dict()
+    payload["verification_result"] = _project_verification_result(result.verification_result)
     payload["canonical_payload_hash"] = canonical_hash(_payload_input(payload))
     return payload
 
@@ -865,12 +920,13 @@ def _hash(value: Any) -> bool:
 
 
 def _paths(value: Any) -> bool:
-    return (
-        isinstance(value, list)
-        and bool(value)
-        and len(set(value)) == len(value)
-        and all(isinstance(p, str) and p and not p.startswith("/") for p in value)
-    )
+    if not isinstance(value, list):
+        return False
+    try:
+        validate_normalized_paths(tuple(value))
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 def _normalize(value: Any, path: tuple[str, ...]) -> Any:
@@ -891,6 +947,8 @@ def _normalize(value: Any, path: tuple[str, ...]) -> Any:
             if path and path[-1] in {"paths", "reasons", "reason_codes", "verifiers", "evidence"}
             else items
         )
+    if isinstance(value, tuple):
+        return _normalize(list(value), path)
     raise TypeError(f"unsupported canonical JSON value: {type(value).__name__}")
 
 
@@ -901,8 +959,12 @@ def _contains_nonfinite(value: Any) -> bool:
         return any(_contains_nonfinite(item) for item in value.values())
     if isinstance(value, list):
         return any(_contains_nonfinite(item) for item in value)
+    if isinstance(value, tuple):
+        return any(_contains_nonfinite(item) for item in value)
     return False
 
 
 def _copy(value: Any) -> dict[str, Any]:
-    return json.loads(json.dumps(value, ensure_ascii=False, allow_nan=False))
+    # Validate recursively before JSON's encoder coerces non-string keys.
+    normalized = _normalize(value, ())
+    return json.loads(json.dumps(normalized, ensure_ascii=False, allow_nan=False))

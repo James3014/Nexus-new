@@ -7,7 +7,7 @@ import pytest
 import nexus.contracts.changeset_certification as facade
 import product.adapters.changeset_certification_v2 as adapter
 from product.certification import CertificationDisposition, CertificationPolicy, certify_result
-from product.evidence import EvidenceCondition
+from product.evidence import EvidenceCondition, validate_normalized_paths
 from product.protocol import IMPLEMENTATION_SCHEMA, PUBLIC_PROTOCOL_VERSION
 from product.verification import VerificationStatus, reduce_verification
 
@@ -369,3 +369,65 @@ def test_builder_duplicate_verifier_is_product_derived_and_blocked():
     assert factual.status is VerificationStatus.UNVERIFIABLE
     assert factual.integrity is EvidenceCondition.MISSING
     assert certify_result(factual, CertificationPolicy()) is CertificationDisposition.BLOCKED
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/etc/passwd",
+        "src//a.py",
+        "src/./a.py",
+        "src/../a.py",
+        "src\\a.py",
+        "src/a.py/",
+        " src/a.py",
+        "src/a.py\x00",
+    ],
+)
+def test_paths_reject_traversal_and_non_normalized_forms(path):
+    with pytest.raises((TypeError, ValueError)):
+        validate_normalized_paths((path,))
+    payload = _envelope()
+    payload["diff"]["paths"] = [path]
+    assert adapter.certify_changeset(payload).status is not CertificationDisposition.CERTIFIED
+
+
+def test_hash_mismatch_is_tampered_for_direct_and_certification_paths():
+    payload = _envelope()
+    payload["verifier_manifest"]["manifest_hash"] = "sha256:" + "f" * 64
+    direct = adapter.derive_verification_result(payload)
+    certified = adapter.certify_changeset(deepcopy(payload))
+    assert direct.integrity is EvidenceCondition.TAMPERED
+    assert certified.verification_result.integrity is EvidenceCondition.TAMPERED
+    assert certified.status is CertificationDisposition.REJECTED
+
+
+@pytest.mark.parametrize(
+    "bad", [{1: "value"}, {"x": {1, 2}}, {"x": b"bytes"}, {"x": (float("nan"),)}]
+)
+def test_json_boundary_rejects_noncanonical_values_without_raising(bad):
+    payload = _envelope()
+    payload["bad"] = bad
+    result = adapter.certify_changeset(payload)
+    assert result.status is CertificationDisposition.BLOCKED
+    assert adapter.validate_changeset_certification(payload) == ("identity_malformed",)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda p: p["verifier_manifest"]["verifiers"][0].__setitem__("status", "FAIL"),
+        lambda p: p.__setitem__("policy", {"allowed": False}),
+        lambda p: p.pop("policy"),
+        lambda p: p.pop("approval"),
+        lambda p: p.pop("authority"),
+        lambda p: p.pop("signing"),
+        lambda p: p.__setitem__("waiver", {"approved": "yes"}),
+    ],
+)
+def test_semantic_outputs_roundtrip_through_validator(mutation):
+    payload = _envelope()
+    mutation(payload)
+    _rehash(payload)
+    output = adapter.certify_changeset(payload).to_dict()
+    assert adapter.validate_changeset_certification(output) == ()

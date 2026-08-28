@@ -83,6 +83,12 @@ def _require_paths(values, field):
             raise ValueError(f"{field} must contain relative paths")
 
 
+def validate_normalized_paths(values, field="paths"):
+    """Validate a normalized tuple of repository-relative POSIX paths."""
+    _require_paths(values, field)
+    return values
+
+
 @dataclass(frozen=True)
 class AcceptanceContract:
     contract_id: str
@@ -219,9 +225,7 @@ class EvidenceBundle:
     def integrity(self, contract, change_set, plan):
         if self.claimed_bundle_hash is not None and self.claimed_bundle_hash != self.hash:
             return IntegrityStatus.TAMPERED
-        if (
-            self.acceptance_contract_hash != contract.hash
-        ):
+        if self.acceptance_contract_hash != contract.hash:
             return IntegrityStatus.CROSS_BOUND
         if self.change_set_hash != change_set.hash:
             return IntegrityStatus.STALE
@@ -233,6 +237,8 @@ class EvidenceBundle:
             return IntegrityStatus.CROSS_BINDING_INVALID
         verifier_ids = [o.verifier_id for o in self.observations]
         artifact_ids = [o.artifact_id for o in self.observations]
-        if len(verifier_ids) != len(set(verifier_ids)) or len(artifact_ids) != len(set(artifact_ids)):
+        if len(verifier_ids) != len(set(verifier_ids)) or len(artifact_ids) != len(
+            set(artifact_ids)
+        ):
             return IntegrityStatus.DUPLICATE
         return IntegrityStatus.VALID
