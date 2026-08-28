@@ -1,10 +1,18 @@
-from dataclasses import dataclass
 import hashlib
-import json
-from product.protocol import IMPLEMENTATION_SCHEMA, PUBLIC_PROTOCOL_VERSION
-from product.evidence import AcceptanceContract, ChangeSet, EvidenceBundle, Observation, VerificationPlan
-from product.verification import VerificationResult, verify
+from dataclasses import dataclass
+
 from product.certification import CertificationDisposition, CertificationPolicy, certify_result
+from product.evidence import AcceptanceContract, ChangeSet, EvidenceBundle, VerificationPlan
+from product.protocol import IMPLEMENTATION_SCHEMA, PUBLIC_PROTOCOL_VERSION
+from product.verification import VerificationResult, verify
+
+CLAIM_CEILING = (
+    "NO_MERGE_AUTHORIZATION",
+    "NO_DEPLOYMENT_TRUTH",
+    "NO_OUTCOME_TRUTH",
+    "NO_PRODUCTION_READINESS",
+    "NO_PUBLIC_PROTOCOL_STABILITY",
+)
 
 
 @dataclass(frozen=True)
@@ -12,12 +20,11 @@ class CertificationInput:
     contract: AcceptanceContract
     change_set: ChangeSet
     plan: VerificationPlan
-    observations: tuple[Observation, ...]
+    evidence: EvidenceBundle
     policy_accepted: bool | None = None
     authority_present: bool | None = None
     approval_present: bool | None = None
     signing_present: bool | None = None
-    evidence_hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -29,17 +36,17 @@ class Receipt:
     verification: VerificationResult
     disposition: CertificationDisposition
     policy: CertificationPolicy
-    claim_ceiling: tuple[str, ...]
+    claim_ceiling: tuple[str, ...] = CLAIM_CEILING
     protocol_version: str = PUBLIC_PROTOCOL_VERSION
     implementation_schema: str = IMPLEMENTATION_SCHEMA
+    claimed_receipt_hash: str | None = None
 
     @property
-    def hash(self) -> str:
-        payload = {"acceptance_contract_hash": self.acceptance_contract_hash, "change_set_hash": self.change_set_hash, "verification_plan_hash": self.verification_plan_hash, "evidence_hash": self.evidence_hash, "verification": (self.verification.status.value, self.verification.failed_checks, self.verification.integrity.value), "disposition": self.disposition.value, "policy": self.policy.__dict__, "claim_ceiling": self.claim_ceiling, "protocol_version": self.protocol_version, "implementation_schema": self.implementation_schema}
-        return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    def hash(self):
+        return "sha256:" + hashlib.sha256(repr(self).encode()).hexdigest()
 
-    def validate_hash(self, expected: str) -> bool:
-        return self.hash == expected
+    def validate(self):
+        return self.claimed_receipt_hash is None or self.claimed_receipt_hash == self.hash
 
 
 @dataclass(frozen=True)
@@ -49,13 +56,22 @@ class CertificationResult:
     receipt: Receipt
 
 
-CLAIM_CEILING = ("NO_MERGE_AUTHORIZATION", "NO_DEPLOYMENT_TRUTH", "NO_OUTCOME_TRUTH", "NO_PRODUCTION_READINESS", "NO_PUBLIC_PROTOCOL_STABILITY")
-
-
-def certify(input: CertificationInput) -> CertificationResult:
-    evidence = EvidenceBundle(input.contract.hash, input.change_set.hash, input.plan.hash, tuple(input.observations), input.evidence_hash)
-    result = verify(input.contract, input.change_set, input.plan, evidence)
-    policy = CertificationPolicy(input.policy_accepted, input.authority_present, input.approval_present, input.signing_present)
+def certify(input: CertificationInput):
+    result = verify(input.contract, input.change_set, input.plan, input.evidence)
+    policy = CertificationPolicy(
+        input.policy_accepted,
+        input.authority_present,
+        input.approval_present,
+        input.signing_present,
+    )
     disposition = certify_result(result, policy)
-    receipt = Receipt(input.contract.hash, input.change_set.hash, input.plan.hash, evidence.hash, result, disposition, policy, CLAIM_CEILING)
+    receipt = Receipt(
+        input.contract.hash,
+        input.change_set.hash,
+        input.plan.hash,
+        input.evidence.hash,
+        result,
+        disposition,
+        policy,
+    )
     return CertificationResult(result, disposition, receipt)

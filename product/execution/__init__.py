@@ -1,5 +1,7 @@
 """Pure execution ports; implementations belong outside the product core."""
+
 from dataclasses import dataclass
+
 from product.protocol import IMPLEMENTATION_SCHEMA, PUBLIC_PROTOCOL_VERSION
 
 
