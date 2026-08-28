@@ -72,9 +72,9 @@ def test_plan_contract_and_evidence_verifier_sets_must_match():
 
 def test_invalid_enum_values_cannot_reach_certification():
     with pytest.raises(TypeError):
-        Observation("unit", "artifact", H, "PASS")
+        Observation("unit", "artifact", H, "PASS")  # type: ignore[arg-type]
     with pytest.raises(TypeError):
-        VerificationResult("FAILED_VERIFICATION")
+        VerificationResult("FAILED_VERIFICATION")  # type: ignore[arg-type]
     forged = object.__new__(VerificationResult)
     object.__setattr__(forged, "status", "VERIFIED")
     object.__setattr__(forged, "integrity", object())

@@ -347,7 +347,7 @@ def test_claim_ceiling_and_schema_contract():
 
 def test_invalid_status_is_rejected_at_construction():
     with pytest.raises(TypeError):
-        Observation("unit", "u", _hash("h"), "MAYBE")
+        Observation("unit", "u", _hash("h"), "MAYBE")  # type: ignore[arg-type]
 
 
 def test_canonical_json_rejects_unsupported_values_and_sorts_sets():
