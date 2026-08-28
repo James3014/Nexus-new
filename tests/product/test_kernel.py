@@ -198,16 +198,18 @@ def test_certification_input_fields_are_factual_only():
         "approval_present",
         "signing_present",
     }
-    assert {field.name for field in fields(CertificationInput)}.isdisjoint({
-        "factual_result",
-        "verification",
-        "verification_result",
-        "status",
-        "disposition",
-        "claim_ceiling",
-        "receipt",
-        "receipt_hash",
-    })
+    assert {field.name for field in fields(CertificationInput)}.isdisjoint(
+        {
+            "factual_result",
+            "verification",
+            "verification_result",
+            "status",
+            "disposition",
+            "claim_ceiling",
+            "receipt",
+            "receipt_hash",
+        }
+    )
 
 
 def test_kernel_input_does_not_accept_claimed_results():
