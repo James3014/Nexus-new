@@ -119,6 +119,38 @@ def _make_sealed_require_hash(require_text, fullmatch):
 _VALIDATOR_REQUIRE_HASH = _make_sealed_require_hash(_require_text, _SEALED_HASH_RE_FULLMATCH)
 
 
+def _make_sealed_require_ids(require_text):
+    def require_ids(values, field):
+        if type(values) is not tuple:
+            raise TypeError(f"{field} must be a tuple")
+        for value in values:
+            require_text(value, field)
+        if len(values) != len(set(values)):
+            raise ValueError(f"{field} must not contain duplicates")
+        if not values:
+            raise ValueError(f"{field} must be non-empty")
+
+    return require_ids
+
+
+def _make_sealed_require_paths(require_ids):
+    def require_paths(values, field):
+        require_ids(values, field)
+        for value in values:
+            if (
+                value.startswith("/")
+                or "\\" in value
+                or any(part in {"", ".", ".."} for part in value.split("/"))
+            ):
+                raise ValueError(f"{field} must contain relative paths")
+
+    return require_paths
+
+
+_VALIDATOR_REQUIRE_IDS = _make_sealed_require_ids(_require_text)
+_VALIDATOR_REQUIRE_PATHS = _make_sealed_require_paths(_VALIDATOR_REQUIRE_IDS)
+
+
 def _require_ids(values, field):
     if not isinstance(values, tuple):
         raise TypeError(f"{field} must be a tuple")
@@ -414,6 +446,234 @@ VerificationPlan.hash = _make_identity_property(  # pyright: ignore[reportAttrib
 )
 EvidenceBundle.hash = _make_identity_property(  # pyright: ignore[reportAttributeAccessIssue]
     _EB_HASH, lambda value: value.canonical_value
+)
+
+
+def _make_subject_validator(
+    contract_type,
+    change_set_type,
+    plan_type,
+    evidence_type,
+    observation_type,
+    observation_status_type,
+    require_text,
+    require_hash,
+    require_ids,
+    require_paths,
+):
+    """Build an input validator whose dependencies cannot be rebound later."""
+
+    def validate(contract, change_set, plan, evidence):
+        errors = []
+
+        def check(expected, value, name):
+            if type(value) is not expected:
+                errors.append(f"MALFORMED:{name}")
+                return False
+            return True
+
+        def fields(value, expected, name):
+            if not check(expected, value, name):
+                return None
+            data = vars(value)
+            if set(data) != set(expected.__dataclass_fields__):
+                errors.append(f"MALFORMED:{name}")
+                return None
+            return data
+
+        c = fields(contract, contract_type, "contract")
+        cs = fields(change_set, change_set_type, "change_set")
+        p = fields(plan, plan_type, "plan")
+        e = fields(evidence, evidence_type, "evidence")
+
+        def text(data, key, prefix):
+            if data is not None:
+                try:
+                    require_text(data[key], key)
+                except (TypeError, ValueError, KeyError):
+                    errors.append(f"MALFORMED:{prefix}.{key}")
+
+        def hash_value(data, key, prefix):
+            if data is not None:
+                try:
+                    require_hash(data[key], key)
+                except (TypeError, ValueError, KeyError):
+                    errors.append(f"MALFORMED:{prefix}.{key}")
+
+        if c is not None:
+            text(c, "contract_id", "contract")
+            hash_value(c, "requirements_hash", "contract")
+            try:
+                require_ids(c["required_verifier_ids"], "required_verifier_ids")
+            except (TypeError, ValueError, KeyError):
+                errors.append("MALFORMED:contract.required_verifier_ids")
+            try:
+                require_paths(c["allowed_paths"], "allowed_paths")
+            except (TypeError, ValueError, KeyError):
+                errors.append("MALFORMED:contract.allowed_paths")
+            if type(c.get("deletion_policy")) is not str or c["deletion_policy"] not in {
+                "FORBID",
+                "ALLOW",
+            }:
+                errors.append("MALFORMED:contract.deletion_policy")
+        if cs is not None:
+            for key in ("change_set_id", "source_revision", "target_revision"):
+                text(cs, key, "change_set")
+            hash_value(cs, "diff_hash", "change_set")
+            try:
+                require_paths(cs["paths"], "paths")
+            except (TypeError, ValueError, KeyError):
+                errors.append("MALFORMED:change_set.paths")
+        if p is not None:
+            text(p, "plan_id", "plan")
+            for key in ("acceptance_contract_hash", "change_set_hash"):
+                hash_value(p, key, "plan")
+            try:
+                require_ids(p["required_verifier_ids"], "required_verifier_ids")
+            except (TypeError, ValueError, KeyError):
+                errors.append("MALFORMED:plan.required_verifier_ids")
+        if e is not None:
+            text(e, "bundle_id", "evidence")
+            for key in ("acceptance_contract_hash", "change_set_hash", "verification_plan_hash"):
+                hash_value(e, key, "evidence")
+            if e.get("claimed_bundle_hash") is not None:
+                hash_value(e, "claimed_bundle_hash", "evidence")
+            observations = e.get("observations")
+            if type(observations) is not tuple or not observations:
+                errors.append("MALFORMED:evidence.observations")
+            else:
+                for index, observation in enumerate(observations):
+                    od = fields(observation, observation_type, f"evidence.observations[{index}]")
+                    if od is None:
+                        continue
+                    text(od, "verifier_id", f"evidence.observations[{index}]")
+                    text(od, "artifact_id", f"evidence.observations[{index}]")
+                    hash_value(od, "artifact_hash", f"evidence.observations[{index}]")
+                    if type(od.get("status")) is not observation_status_type:
+                        errors.append(f"MALFORMED:evidence.observations[{index}].status")
+        return tuple(dict.fromkeys(errors))
+
+    return validate
+
+
+validate_evidence_subjects = _make_subject_validator(
+    AcceptanceContract,
+    ChangeSet,
+    VerificationPlan,
+    EvidenceBundle,
+    Observation,
+    ObservationStatus,
+    _require_text,
+    _VALIDATOR_REQUIRE_HASH,
+    _VALIDATOR_REQUIRE_IDS,
+    _VALIDATOR_REQUIRE_PATHS,
+)
+
+
+def _make_integrity_deriver(
+    contract_type,
+    change_set_type,
+    plan_type,
+    evidence_type,
+    observation_type,
+    status_type,
+    hash_contract,
+    hash_change_set,
+    hash_plan,
+    hash_evidence,
+    subject_validator,
+):
+    def derive(contract, change_set, plan, evidence):
+        if (
+            type(contract) is not contract_type
+            or type(change_set) is not change_set_type
+            or type(plan) is not plan_type
+            or type(evidence) is not evidence_type
+        ):
+            return status_type.MALFORMED
+        if subject_validator(contract, change_set, plan, evidence):
+            return status_type.MALFORMED
+        c, cs, p, e = (vars(contract), vars(change_set), vars(plan), vars(evidence))
+        contract_hash = hash_contract(
+            (
+                c["contract_id"],
+                c["requirements_hash"],
+                tuple(sorted(c["required_verifier_ids"])),
+                tuple(sorted(c["allowed_paths"])),
+                c["deletion_policy"],
+            )
+        )
+        change_hash = hash_change_set(
+            (
+                cs["change_set_id"],
+                cs["source_revision"],
+                cs["target_revision"],
+                cs["diff_hash"],
+                tuple(sorted(cs["paths"])),
+            )
+        )
+        plan_hash = hash_plan(
+            (
+                p["plan_id"],
+                p["acceptance_contract_hash"],
+                p["change_set_hash"],
+                tuple(sorted(p["required_verifier_ids"])),
+            )
+        )
+        observations = e["observations"]
+        canonical = (
+            e["bundle_id"],
+            e["acceptance_contract_hash"],
+            e["change_set_hash"],
+            e["verification_plan_hash"],
+            tuple(
+                (
+                    vars(o)["verifier_id"],
+                    vars(o)["artifact_id"],
+                    vars(o)["artifact_hash"],
+                    vars(o)["status"].value,
+                )
+                for o in sorted(
+                    observations, key=lambda x: (vars(x)["verifier_id"], vars(x)["artifact_id"])
+                )
+            ),
+        )
+        evidence_hash = hash_evidence(canonical)
+        if e["claimed_bundle_hash"] is not None and e["claimed_bundle_hash"] != evidence_hash:
+            return status_type.TAMPERED
+        if e["acceptance_contract_hash"] != contract_hash:
+            return status_type.CROSS_BOUND
+        if e["change_set_hash"] != change_hash:
+            return status_type.STALE
+        if (
+            e["verification_plan_hash"] != plan_hash
+            or p["acceptance_contract_hash"] != contract_hash
+            or p["change_set_hash"] != change_hash
+        ):
+            return status_type.CROSS_BINDING_INVALID
+        verifier_ids = [vars(o)["verifier_id"] for o in observations]
+        artifact_ids = [vars(o)["artifact_id"] for o in observations]
+        if len(verifier_ids) != len(set(verifier_ids)) or len(artifact_ids) != len(
+            set(artifact_ids)
+        ):
+            return status_type.DUPLICATE
+        return status_type.VALID
+
+    return derive
+
+
+derive_evidence_integrity = _make_integrity_deriver(
+    AcceptanceContract,
+    ChangeSet,
+    VerificationPlan,
+    EvidenceBundle,
+    Observation,
+    IntegrityStatus,
+    _AC_HASH,
+    _CS_HASH,
+    _VP_HASH,
+    _EB_HASH,
+    validate_evidence_subjects,
 )
 
 

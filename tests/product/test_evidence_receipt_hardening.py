@@ -544,6 +544,97 @@ def test_receipt_schema_constant_is_exact():
     assert CERTIFICATION_RECEIPT_SCHEMA == "nexus.certification_receipt.v1-experimental"
 
 
+def test_certification_revalidates_malformed_graph_after_trust_root_rebinding(monkeypatch):
+    import product.evidence as evidence_module
+    import product.verification as verification_module
+
+    data = _input()
+    for name in ("_require_hash", "_require_text", "_require_ids", "_require_paths"):
+        monkeypatch.setattr(evidence_module, name, lambda *args: None)
+    for cls in (
+        evidence_module.AcceptanceContract,
+        evidence_module.ChangeSet,
+        evidence_module.VerificationPlan,
+        evidence_module.Observation,
+        evidence_module.EvidenceBundle,
+    ):
+        monkeypatch.setattr(cls, "__post_init__", lambda self: None)
+        monkeypatch.setattr(cls, "hash", property(lambda self: _hash("forged")), raising=False)
+    monkeypatch.setattr(
+        evidence_module.EvidenceBundle, "integrity", lambda *args: IntegrityStatus.VALID
+    )
+    monkeypatch.setattr(
+        evidence_module, "derive_evidence_integrity", lambda *args: IntegrityStatus.VALID
+    )
+    monkeypatch.setattr(evidence_module, "validate_evidence_subjects", lambda *args: ())
+    monkeypatch.setattr(
+        verification_module,
+        "verify",
+        lambda *args: verification_module.reduce_verification(IntegrityStatus.VALID),
+    )
+
+    def forged(cls, values):
+        value = object.__new__(cls)
+        for key, item in values.items():
+            object.__setattr__(value, key, item)
+        return value
+
+    contract = forged(
+        evidence_module.AcceptanceContract,
+        {
+            "contract_id": "ac",
+            "requirements_hash": "bad",
+            "required_verifier_ids": ("unit",),
+            "allowed_paths": ("src/a.py",),
+            "deletion_policy": "FORBID",
+        },
+    )
+    change = forged(
+        evidence_module.ChangeSet,
+        {
+            "change_set_id": "cs",
+            "source_revision": "base",
+            "target_revision": "head",
+            "diff_hash": "bad",
+            "paths": ("src/a.py",),
+        },
+    )
+    plan = forged(
+        evidence_module.VerificationPlan,
+        {
+            "plan_id": "plan",
+            "acceptance_contract_hash": "bad",
+            "change_set_hash": "bad",
+            "required_verifier_ids": ("unit",),
+        },
+    )
+    observation = forged(
+        evidence_module.Observation,
+        {
+            "verifier_id": "unit",
+            "artifact_id": "artifact",
+            "artifact_hash": "bad",
+            "status": evidence_module.ObservationStatus.PASS,
+        },
+    )
+    bundle = forged(
+        evidence_module.EvidenceBundle,
+        {
+            "bundle_id": "bundle",
+            "acceptance_contract_hash": "bad",
+            "change_set_hash": "bad",
+            "verification_plan_hash": "bad",
+            "observations": (observation,),
+            "claimed_bundle_hash": None,
+        },
+    )
+    forged_input = CertificationInput(contract, change, plan, bundle, True, True, True, True)
+    with pytest.raises(ValueError, match="invalid_certification_input:MALFORMED"):
+        certify(forged_input)
+    assert validate_serialized_receipt({}, forged_input) == ("MALFORMED:input",)
+    assert data.evidence is not bundle
+
+
 def test_receipt_rejects_contradictory_certified_missing_result():
     result = reduce_verification(IntegrityStatus.MISSING)
     with pytest.raises(ValueError, match="disposition must match reducer"):

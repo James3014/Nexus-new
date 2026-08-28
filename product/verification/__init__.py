@@ -2,7 +2,13 @@ from dataclasses import dataclass
 from enum import Enum
 from weakref import WeakValueDictionary
 
-from product.evidence import IntegrityStatus, ObservationStatus
+from product.evidence import (
+    IntegrityStatus,
+    Observation,
+    ObservationStatus,
+    derive_evidence_integrity,
+    validate_evidence_subjects,
+)
 
 
 class VerificationStatus(str, Enum):
@@ -132,37 +138,68 @@ reduce_verification, is_reduced_result = _make_reducer()
 del _make_reducer
 
 
-def verify(contract, change_set, plan, evidence):
-    integrity = evidence.integrity(contract, change_set, plan)
-    if integrity is not IntegrityStatus.VALID:
-        return reduce_verification(integrity)
-    if set(change_set.paths) - set(contract.allowed_paths):
-        return reduce_verification(IntegrityStatus.SCOPE_ESCAPE)
-    if set(contract.required_verifier_ids) != set(plan.required_verifier_ids):
-        return reduce_verification(IntegrityStatus.MISSING)
-    obs = {o.verifier_id: o for o in evidence.observations}
-    observed_ids = set(obs)
-    if observed_ids != set(plan.required_verifier_ids):
-        return reduce_verification(IntegrityStatus.MISSING)
-    if any(
-        o.status not in {ObservationStatus.PASS, ObservationStatus.FAIL}
-        for o in evidence.observations
-    ):
-        return reduce_verification(IntegrityStatus.MALFORMED)
-    missing = tuple(
-        sorted(
-            x
-            for x in contract.required_verifier_ids
-            if x not in obs or x not in plan.required_verifier_ids
+def _make_verify(
+    integrity_deriver,
+    subject_validator,
+    reducer,
+    observation_type,
+    observation_status,
+    integrity_status,
+):
+    def verify(contract, change_set, plan, evidence):
+        if subject_validator(contract, change_set, plan, evidence):
+            return reducer(integrity_status.MALFORMED)
+        integrity = integrity_deriver(contract, change_set, plan, evidence)
+        if integrity is not integrity_status.VALID:
+            return reducer(integrity)
+        contract_data = vars(contract)
+        change_data = vars(change_set)
+        plan_data = vars(plan)
+        evidence_data = vars(evidence)
+        if set(change_data["paths"]) - set(contract_data["allowed_paths"]):
+            return reducer(integrity_status.SCOPE_ESCAPE)
+        if set(contract_data["required_verifier_ids"]) != set(plan_data["required_verifier_ids"]):
+            return reducer(integrity_status.MISSING)
+        observations = evidence_data["observations"]
+        obs = {vars(o)["verifier_id"]: o for o in observations}
+        observed_ids = set(obs)
+        if observed_ids != set(plan_data["required_verifier_ids"]):
+            return reducer(integrity_status.MISSING)
+        if any(
+            vars(o)["status"] not in {observation_status.PASS, observation_status.FAIL}
+            for o in observations
+        ):
+            return reducer(integrity_status.MALFORMED)
+        missing = tuple(
+            sorted(
+                x
+                for x in contract_data["required_verifier_ids"]
+                if x not in obs or x not in plan_data["required_verifier_ids"]
+            )
         )
-    )
-    if missing or not evidence.observations:
-        return reduce_verification(IntegrityStatus.MISSING, reasons=missing)
-    failed = tuple(
-        sorted(
-            x for x in contract.required_verifier_ids if obs[x].status is not ObservationStatus.PASS
+        if missing or not observations:
+            return reducer(integrity_status.MISSING, reasons=missing)
+        failed = tuple(
+            sorted(
+                x
+                for x in contract_data["required_verifier_ids"]
+                if vars(obs[x])["status"] is not observation_status.PASS
+            )
         )
-    )
-    return reduce_verification(
-        IntegrityStatus.VALID, tuple(obs[x].status for x in contract.required_verifier_ids), failed
-    )
+        return reducer(
+            integrity_status.VALID,
+            tuple(vars(obs[x])["status"] for x in contract_data["required_verifier_ids"]),
+            failed,
+        )
+
+    return verify
+
+
+verify = _make_verify(
+    derive_evidence_integrity,
+    validate_evidence_subjects,
+    reduce_verification,
+    Observation,
+    ObservationStatus,
+    IntegrityStatus,
+)
