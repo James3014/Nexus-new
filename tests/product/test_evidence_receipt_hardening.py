@@ -197,10 +197,10 @@ def test_receipt_envelope_schema_mutations_fail(field):
 
 
 def test_receipt_rejects_non_receipt_expected_root():
-    from product.certification.receipt import validate_receipt_envelope
+    from product.certification.receipt import _validate_receipt_envelope
 
     with pytest.raises(TypeError, match="expected_receipt"):
-        validate_receipt_envelope({}, object())
+        _validate_receipt_envelope({}, object())
 
 
 @pytest.mark.parametrize("bad", [b"bytes", {"set"}, float("nan"), float("inf"), {1: "bad"}])
@@ -224,7 +224,7 @@ def test_kernel_reexports_receipt_contract():
     import product.kernel as kernel
 
     assert kernel.Receipt is Receipt
-    assert callable(kernel.validate_receipt_envelope)
+    assert not hasattr(kernel, "validate_receipt_envelope")
 
 
 def test_evidence_subject_roots_require_exact_types():
@@ -264,11 +264,14 @@ def test_claimed_hashes_cannot_be_serialized_or_used_as_trust_roots():
 def test_hashes_are_sealed_against_module_rebinding(monkeypatch):
     import product.certification.receipt as receipt_module
     import product.evidence as evidence_module
+    from product.evidence import validate_evidence_bundle_envelope
 
     data = _input()
     before = (data.contract.hash, data.change_set.hash, data.plan.hash, data.evidence.hash)
     receipt = certify(data).receipt
     receipt_before = receipt.hash
+    evidence_payload = data.evidence.to_dict()
+    receipt_payload = receipt.to_dict()
 
     class ZeroDigest:
         def hexdigest(self):
@@ -279,9 +282,45 @@ def test_hashes_are_sealed_against_module_rebinding(monkeypatch):
     monkeypatch.setattr(evidence_module, "canonical_json", lambda value: "forged")
     monkeypatch.setattr(evidence_module, "_hash", lambda value: "sha256:" + "0" * 64)
     monkeypatch.setattr(receipt_module, "_hash", lambda value: "sha256:" + "0" * 64)
+    for name in (
+        "_AC_HASH",
+        "_CS_HASH",
+        "_VP_HASH",
+        "_EB_HASH",
+        "_EB_ENVELOPE_HASH",
+        "_SEALED_EB_ENVELOPE_HASH",
+        "_VALIDATOR_EB_ENVELOPE_HASH",
+    ):
+        monkeypatch.setattr(evidence_module, name, lambda value: "sha256:" + "0" * 64)
+    for name in ("_require_hash", "_VALIDATOR_REQUIRE_HASH", "_SEALED_HASH_RE_FULLMATCH"):
+        monkeypatch.setattr(evidence_module, name, lambda *args: None)
+    for name in (
+        "_RECEIPT_HASH",
+        "_SEALED_RECEIPT_HASH",
+        "_VALIDATOR_RECEIPT_HASH",
+    ):
+        monkeypatch.setattr(receipt_module, name, lambda value: "sha256:" + "0" * 64)
+    for name in (
+        "_REQUIRE_HASH",
+        "_SEALED_RECEIPT_REQUIRE_HASH",
+        "_VALIDATOR_RECEIPT_REQUIRE_HASH",
+    ):
+        monkeypatch.setattr(receipt_module, name, lambda *args: None)
+    monkeypatch.setattr(receipt_module, "_strict_json", lambda *args: None)
     assert before == (data.contract.hash, data.change_set.hash, data.plan.hash, data.evidence.hash)
     assert receipt.hash == receipt_before
     assert certify(data).receipt.hash == receipt_before
+    assert validate_serialized_receipt(receipt_payload, data) == ()
+    assert (
+        validate_evidence_bundle_envelope(
+            evidence_payload,
+            data.contract,
+            data.change_set,
+            data.plan,
+            expected_bundle=data.evidence,
+        )
+        == ()
+    )
 
 
 def test_evidence_subclass_trust_root_is_rejected():

@@ -3,6 +3,7 @@ import json
 import re
 from dataclasses import dataclass
 from enum import Enum
+from types import FunctionType
 
 from product.protocol import EVIDENCE_BUNDLE_SCHEMA
 
@@ -52,6 +53,13 @@ def _make_hash(canonical, sha256):
 _hash = _make_hash(canonical_json, hashlib.sha256)
 
 
+def _make_identity_property(hash_fn, value_fn):
+    def identity(self):
+        return hash_fn(value_fn(self))
+
+    return property(identity)
+
+
 class IntegrityStatus(str, Enum):
     VALID = "VALID"
     SCOPE_ESCAPE = "SCOPE_ESCAPE"
@@ -84,10 +92,31 @@ def _require_text(value, field):
         raise ValueError(f"{field} must be non-empty and normalized")
 
 
-def _require_hash(value, field):
-    _require_text(value, field)
-    if _SEALED_HASH_RE_FULLMATCH(value) is None:
-        raise ValueError(f"{field} must be sha256:<64 lowercase hex>")
+def _make_require_hash(fullmatch):
+    def require_hash(value, field):
+        if type(value) is not str:
+            raise TypeError(f"{field} must be a string")
+        if not value or value != value.strip() or "\x00" in value:
+            raise ValueError(f"{field} must be non-empty and normalized")
+        if fullmatch(value) is None:
+            raise ValueError(f"{field} must be sha256:<64 lowercase hex>")
+
+    return require_hash
+
+
+_require_hash = _make_require_hash(_SEALED_HASH_RE_FULLMATCH)
+
+
+def _make_sealed_require_hash(require_text, fullmatch):
+    def require_hash(value, field):
+        require_text(value, field)
+        if fullmatch(value) is None:
+            raise ValueError(f"{field} must be sha256:<64 lowercase hex>")
+
+    return require_hash
+
+
+_VALIDATOR_REQUIRE_HASH = _make_sealed_require_hash(_require_text, _SEALED_HASH_RE_FULLMATCH)
 
 
 def _require_ids(values, field):
@@ -307,6 +336,85 @@ _CS_HASH = _make_hash(canonical_json, hashlib.sha256)
 _VP_HASH = _make_hash(canonical_json, hashlib.sha256)
 _EB_HASH = _make_hash(canonical_json, hashlib.sha256)
 _EB_ENVELOPE_HASH = _make_hash(canonical_json, hashlib.sha256)
+_SEALED_EB_ENVELOPE_HASH = _EB_ENVELOPE_HASH
+_VALIDATOR_EB_ENVELOPE_HASH = _SEALED_EB_ENVELOPE_HASH
+
+
+def _make_bundle_serializer(envelope_hash, schema):
+    def serialize(self):
+        if self.claimed_bundle_hash is not None and self.claimed_bundle_hash != self.hash:
+            raise ValueError("claimed_bundle_hash does not match computed hash")
+        body = {
+            "evidence_bundle_schema": schema,
+            "bundle_id": self.bundle_id,
+            "acceptance_contract_hash": self.acceptance_contract_hash,
+            "change_set_hash": self.change_set_hash,
+            "verification_plan_hash": self.verification_plan_hash,
+            "observations": [
+                {
+                    "verifier_id": o.verifier_id,
+                    "artifact_id": o.artifact_id,
+                    "artifact_hash": o.artifact_hash,
+                    "status": o.status.value,
+                }
+                for o in sorted(self.observations, key=lambda x: (x.verifier_id, x.artifact_id))
+            ],
+        }
+        body["bundle_hash"] = envelope_hash(body)
+        return body
+
+    return serialize
+
+
+_SEALED_BUNDLE_SERIALIZER = _make_bundle_serializer(
+    _SEALED_EB_ENVELOPE_HASH, EVIDENCE_BUNDLE_SCHEMA
+)
+EvidenceBundle.to_dict = _SEALED_BUNDLE_SERIALIZER
+
+
+def _make_envelope_hash_property(serializer):
+    def envelope_hash(self):
+        return serializer(self)["bundle_hash"]
+
+    return property(envelope_hash)
+
+
+EvidenceBundle.envelope_hash = _make_envelope_hash_property(  # pyright: ignore[reportAttributeAccessIssue]
+    _SEALED_BUNDLE_SERIALIZER
+)
+
+AcceptanceContract.hash = _make_identity_property(  # pyright: ignore[reportAttributeAccessIssue]
+    _AC_HASH,
+    lambda value: (
+        value.contract_id,
+        value.requirements_hash,
+        tuple(sorted(value.required_verifier_ids)),
+        tuple(sorted(value.allowed_paths)),
+        value.deletion_policy,
+    ),
+)
+ChangeSet.hash = _make_identity_property(  # pyright: ignore[reportAttributeAccessIssue]
+    _CS_HASH,
+    lambda value: (
+        value.change_set_id,
+        value.source_revision,
+        value.target_revision,
+        value.diff_hash,
+        tuple(sorted(value.paths)),
+    ),
+)
+VerificationPlan.hash = _make_identity_property(  # pyright: ignore[reportAttributeAccessIssue]
+    _VP_HASH,
+    lambda value: (
+        value.plan_id,
+        value.acceptance_contract_hash,
+        value.change_set_hash,
+        tuple(sorted(value.required_verifier_ids)),
+    ),
+)
+EvidenceBundle.hash = _make_identity_property(  # pyright: ignore[reportAttributeAccessIssue]
+    _EB_HASH, lambda value: value.canonical_value
+)
 
 
 def validate_evidence_bundle_envelope(
@@ -322,7 +430,7 @@ def validate_evidence_bundle_envelope(
         if expected_bundle.claimed_bundle_hash != expected_bundle.hash:
             raise ValueError("expected_bundle claimed hash does not match computed hash")
     if expected_envelope_hash is not None:
-        _require_hash(expected_envelope_hash, "expected_envelope_hash")
+        _VALIDATOR_REQUIRE_HASH(expected_envelope_hash, "expected_envelope_hash")
     if type(contract) is not AcceptanceContract:
         raise TypeError("contract must be AcceptanceContract")
     if type(change_set) is not ChangeSet:
@@ -364,7 +472,7 @@ def validate_evidence_bundle_envelope(
             "bundle_hash",
         ):
             if isinstance(payload.get(field), str):
-                _require_hash(payload[field], field)
+                _VALIDATOR_REQUIRE_HASH(payload[field], field)
         observations = payload.get("observations")
         if not isinstance(observations, list) or not observations:
             errors.append("MALFORMED:observations")
@@ -390,7 +498,7 @@ def validate_evidence_bundle_envelope(
                 try:
                     _require_text(row["verifier_id"], "verifier_id")
                     _require_text(row["artifact_id"], "artifact_id")
-                    _require_hash(row["artifact_hash"], "artifact_hash")
+                    _VALIDATOR_REQUIRE_HASH(row["artifact_hash"], "artifact_hash")
                 except (TypeError, ValueError):
                     errors.append(f"MALFORMED:observations[{i}]")
                 rows.append(
@@ -401,7 +509,7 @@ def validate_evidence_bundle_envelope(
         if rows != sorted(rows, key=lambda r: (r[0], r[1])):
             errors.append("MALFORMED:observation_order")
         body = {k: payload[k] for k in expected_keys - {"bundle_hash"} if k in payload}
-        if not errors and payload.get("bundle_hash") != _EB_ENVELOPE_HASH(body):
+        if not errors and payload.get("bundle_hash") != _VALIDATOR_EB_ENVELOPE_HASH(body):
             errors.append("TAMPERED:bundle_hash")
         if payload.get("acceptance_contract_hash") != contract.hash:
             errors.append("CROSS_BOUND:acceptance_contract_hash")
@@ -452,3 +560,24 @@ def load_evidence_bundle_envelope(
             for r in payload["observations"]
         ),
     )
+
+
+def _freeze_function_globals(function):
+    frozen = FunctionType(
+        function.__code__,
+        dict(function.__globals__),
+        function.__name__,
+        function.__defaults__,
+        function.__closure__,
+    )
+    frozen.__kwdefaults__ = (
+        dict(function.__kwdefaults__) if function.__kwdefaults__ is not None else None
+    )
+    frozen.__annotations__ = dict(function.__annotations__)
+    return frozen
+
+
+# Snapshot validator dependencies after all authoritative types and sealed
+# primitives exist. Later module-level rebinding cannot change these functions.
+validate_evidence_bundle_envelope = _freeze_function_globals(validate_evidence_bundle_envelope)
+load_evidence_bundle_envelope = _freeze_function_globals(load_evidence_bundle_envelope)

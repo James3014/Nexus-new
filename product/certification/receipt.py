@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from math import isfinite
+from types import FunctionType
 
 from product.certification import CertificationDisposition, CertificationPolicy, certify_result
 from product.evidence import _hash, _require_hash
@@ -12,6 +13,18 @@ from product.verification import VerificationResult, is_reduced_result
 
 _RECEIPT_HASH = _hash
 _REQUIRE_HASH = _require_hash
+_SEALED_RECEIPT_HASH = _RECEIPT_HASH
+_SEALED_RECEIPT_REQUIRE_HASH = _REQUIRE_HASH
+_VALIDATOR_RECEIPT_HASH = _SEALED_RECEIPT_HASH
+_VALIDATOR_RECEIPT_REQUIRE_HASH = _SEALED_RECEIPT_REQUIRE_HASH
+
+
+def _make_receipt_hash_property(hash_fn):
+    def get_hash(self):
+        return hash_fn(self.canonical_value)
+
+    return property(get_hash)
+
 
 CLAIM_CEILING = (
     "NO_MERGE_AUTHORIZATION",
@@ -34,31 +47,45 @@ _INTEGRITY_STATUSES = {
 }
 
 
-def _strict_json(value, active=None):
-    if active is None:
+def _make_strict_json(isfinite_fn):
+    def strict_json(value):
         active = set()
-    if value is None or type(value) in (str, bool, int):
-        return
-    if type(value) is float:
-        if not isfinite(value):
-            raise ValueError("non-finite value")
-        return
-    if type(value) in (list, tuple, dict):
-        marker = id(value)
-        if marker in active:
-            raise ValueError("cyclic value")
-        active.add(marker)
-        if type(value) is dict:
-            for key, item in value.items():
-                if type(key) is not str:
-                    raise TypeError("object keys must be strings")
-                _strict_json(item, active)
-        else:
-            for item in value:
-                _strict_json(item, active)
-        active.remove(marker)
-        return
-    raise TypeError("unsupported value")
+
+        def visit(item):
+            if item is None or type(item) in (str, bool, int):
+                return
+            if type(item) is float:
+                if not isfinite_fn(item):
+                    raise ValueError("non-finite value")
+                return
+            if type(item) in (list, tuple, dict):
+                marker = id(item)
+                if marker in active:
+                    raise ValueError("cyclic value")
+                active.add(marker)
+                try:
+                    if type(item) is dict:
+                        for key, nested in item.items():
+                            if type(key) is not str:
+                                raise TypeError("object keys must be strings")
+                            visit(nested)
+                    else:
+                        for nested in item:
+                            visit(nested)
+                finally:
+                    active.remove(marker)
+                return
+            raise TypeError("unsupported value")
+
+        visit(value)
+
+    return strict_json
+
+
+_strict_json = _make_strict_json(isfinite)
+
+
+_VALIDATOR_STRICT_JSON = _strict_json
 
 
 def _policy_valid(policy):
@@ -94,7 +121,7 @@ class Receipt:
             "verification_plan_hash",
             "evidence_hash",
         ):
-            _REQUIRE_HASH(getattr(self, field), field)
+            _SEALED_RECEIPT_REQUIRE_HASH(getattr(self, field), field)
         if type(self.verification) is not VerificationResult or not is_reduced_result(
             self.verification
         ):
@@ -112,7 +139,7 @@ class Receipt:
         if certify_result(self.verification, self.policy) is not self.disposition:
             raise ValueError("disposition must match reducer")
         if self.claimed_receipt_hash is not None:
-            _REQUIRE_HASH(self.claimed_receipt_hash, "claimed_receipt_hash")
+            _SEALED_RECEIPT_REQUIRE_HASH(self.claimed_receipt_hash, "claimed_receipt_hash")
 
     @property
     def canonical_value(self):
@@ -143,7 +170,7 @@ class Receipt:
 
     @property
     def hash(self):
-        return _RECEIPT_HASH(self.canonical_value)
+        return _SEALED_RECEIPT_HASH(self.canonical_value)
 
     def to_dict(self):
         if self.claimed_receipt_hash is not None and self.claimed_receipt_hash != self.hash:
@@ -179,6 +206,11 @@ class CertificationResult:
             raise ValueError("disposition must match reducer")
 
 
+Receipt.hash = _make_receipt_hash_property(  # pyright: ignore[reportAttributeAccessIssue]
+    _SEALED_RECEIPT_HASH
+)
+
+
 def _validate_receipt_envelope(payload, expected_receipt):
     """Validate envelope structure against an already recomputed receipt.
 
@@ -192,15 +224,15 @@ def _validate_receipt_envelope(payload, expected_receipt):
 
     errors = []
     try:
-        _strict_json(payload)
+        _VALIDATOR_STRICT_JSON(payload)
         keys = set(expected_receipt.to_dict())
         if set(payload) != keys:
             errors.append("MALFORMED:keys")
         if isinstance(payload.get("receipt_hash"), str):
             try:
-                _REQUIRE_HASH(payload["receipt_hash"], "receipt_hash")
+                _VALIDATOR_RECEIPT_REQUIRE_HASH(payload["receipt_hash"], "receipt_hash")
                 body = {key: payload[key] for key in payload if key != "receipt_hash"}
-                if payload["receipt_hash"] != _RECEIPT_HASH(body):
+                if payload["receipt_hash"] != _VALIDATOR_RECEIPT_HASH(body):
                     errors.append("TAMPERED:receipt_hash")
             except (TypeError, ValueError):
                 errors.append("TAMPERED:receipt_hash")
@@ -221,7 +253,7 @@ def _validate_receipt_envelope(payload, expected_receipt):
                 errors.append(f"MALFORMED:{field}")
             elif field != "receipt_hash":
                 try:
-                    _REQUIRE_HASH(payload[field], field)
+                    _VALIDATOR_RECEIPT_REQUIRE_HASH(payload[field], field)
                 except (TypeError, ValueError):
                     errors.append(f"MALFORMED:{field}")
         verification = payload.get("verification")
@@ -267,6 +299,26 @@ def _validate_receipt_envelope(payload, expected_receipt):
         return ("MALFORMED:payload",)
 
 
-# Compatibility import for existing structural callers. Certification code
-# uses the private name above and never accepts this as an authority root.
-validate_receipt_envelope = _validate_receipt_envelope
+def _freeze_function_globals(function):
+    frozen = FunctionType(
+        function.__code__,
+        dict(function.__globals__),
+        function.__name__,
+        function.__defaults__,
+        function.__closure__,
+    )
+    frozen.__kwdefaults__ = (
+        dict(function.__kwdefaults__) if function.__kwdefaults__ is not None else None
+    )
+    frozen.__annotations__ = dict(function.__annotations__)
+    return frozen
+
+
+# Freeze class invariant and envelope-validation dependencies. Receipt hashing
+# itself is already a property closure over the sealed hash function.
+Receipt.__post_init__ = _freeze_function_globals(Receipt.__post_init__)
+Receipt.canonical_value = property(  # pyright: ignore[reportAttributeAccessIssue]
+    _freeze_function_globals(Receipt.canonical_value.fget)
+)
+CertificationResult.__post_init__ = _freeze_function_globals(CertificationResult.__post_init__)
+_validate_receipt_envelope = _freeze_function_globals(_validate_receipt_envelope)
