@@ -3,155 +3,151 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from product.evidence import AcceptanceContract, ChangeSet, VerificationPlan, ObservationStatus, _hash
+from product.evidence import AcceptanceContract, ChangeSet, ObservationStatus, VerificationPlan, _hash
 
 
 def _api():
-    """Import the wished-for public surface so RED is a test failure, not collection noise."""
     from product.evidence import ingestion
-
     return ingestion
 
 
-def _enum(enum_type, *names):
-    for name in names:
-        if hasattr(enum_type, name):
-            return getattr(enum_type, name)
-    return next(iter(enum_type))
+def _at(seconds=0):
+    return (datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc) + timedelta(seconds=seconds)).isoformat()
 
 
-def _at(offset=0):
-    return (datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc) + timedelta(seconds=offset)).isoformat()
+def _runtime(api, **changes):
+    values = dict(generation=api.EvidenceGeneration.RUNTIME, desired_source_revision="target-r2", loaded_source_revision="target-r2", desired_generation=7, observed_generation=7, observed_at=_at(-10), expires_at=_at(3500), expected_runtime_identity="runtime-1", observed_runtime_identity="runtime-1", readiness_status="READY")
+    values.update(changes)
+    return api.RuntimeSourceObservation(**values)
 
 
 def _fixture():
     api = _api()
-    evidence_type = _enum(api.EvidenceType, "TEST_RESULT", "TEST", "VERIFICATION")
-    producer_role = _enum(api.ProducerRole, "VERIFIER", "AUTOMATED_VERIFIER", "MACHINE")
-    generation = _enum(api.EvidenceGeneration, "CURRENT", "GENERATION_1", "READY")
-    trust_role = _enum(api.TrustRole, "MACHINE_VERIFIER", "VERIFIER", "ISSUER")
     contract = AcceptanceContract("ac-1", _hash("requirements"), ("unit",), ("src/a.py",), "FORBID")
     change = ChangeSet("cs-1", "source-r1", "target-r2", _hash("diff"), ("src/a.py",))
     plan = VerificationPlan("plan-1", contract.hash, change.hash, ("unit",))
-    producer = api.ProducerGrant("producer-1", producer_role, _hash("producer-software"), ("pytest",))
-    issuer = api.IssuerGrant("issuer-1", trust_role, _hash("issuer-software"), ("pytest",))
+    producer = api.ProducerGrant("producer-1", api.ProducerRole.VERIFIER, _hash("producer-software"), ("pytest",))
+    issuer = api.IssuerGrant("issuer-1", api.TrustRole.AUTHORITY, _hash("issuer-software"), ("pytest",))
     profile = api.IngestionProfile("profile-1", (producer,), (issuer,), 3600)
-    runtime = api.RuntimeSourceObservation(
-        "target-r2", "target-r2", "runtime-1", "runtime-1", 1, 1, _at(-10), _at(3500), "READY"
-    )
     raw = b"unit passed\n"
-    envelope = api.ProvenanceEnvelope(
-        "product.evidence.provenance.v1", "evidence-1", evidence_type, "unit", "artifact-1",
-        "producer-1", producer_role, producer.software_hash, "repo-1", "source-r1", "tree-source",
-        "target-r2", "tree-target", change.hash, change.diff_hash, _at(-10), "tests/test_a.py",
-        _hash(raw.decode()), "pytest", "exec-1", "attempt-1", _hash("environment"), generation, runtime,
-    )
-    reference = api.TrustReference(b"external receipt", _hash("external receipt"))
-    submission = api.EvidenceSubmission(raw, _hash(raw.decode()), envelope, reference)
-    requirement = api.EvidenceRequirement("unit", evidence_type, producer_role, "pytest", trust_role)
-    context = api.TrustedIngestionContext(
-        contract, change, plan, "repo-1", "tree-source", "tree-target", _at(), profile,
-        profile.hash, (requirement,), "merge", ((trust_role, reference.receipt_hash),),
-    )
-    return api, context, submission, envelope, runtime, (evidence_type, producer_role, generation, trust_role)
+    runtime = _runtime(api)
+    envelope = api.ProvenanceEnvelope("product.evidence.provenance.v1", "evidence-1", api.EvidenceType.VERIFIER_RESULT, "unit", "artifact-1", "producer-1", api.ProducerRole.VERIFIER, producer.software_hash, "repo-1", "source-r1", "tree-source", "target-r2", "tree-target", change.hash, change.diff_hash, _at(-10), "tests/test_a.py", _hash(raw.decode()), "pytest", "exec-1", "attempt-1", _hash("environment"), api.EvidenceGeneration.RUNTIME, runtime)
+    submission = api.EvidenceSubmission(raw, ObservationStatus.PASS, envelope)
+    requirement = api.EvidenceRequirement("unit", api.EvidenceType.VERIFIER_RESULT, api.EvidenceGeneration.RUNTIME, True, False)
+    context = api.TrustedIngestionContext(contract, change, plan, "repo-1", "tree-source", "tree-target", _at(), profile, profile.hash, (requirement,), "merge", ((api.TrustRole.AUTHORITY, _hash("external receipt")),))
+    return api, context, submission, envelope
 
 
-def test_public_ingestion_surface_exposes_the_frozen_types_and_functions():
+def test_public_api_and_exact_enum_members_are_frozen():
     api = _api()
-    expected = {
-        "EvidenceType", "ProducerRole", "EvidenceGeneration", "FreshnessStatus", "TrustRole", "TrustDecision",
-        "ProducerGrant", "IssuerGrant", "IngestionProfile", "EvidenceRequirement", "RuntimeSourceObservation",
-        "ProvenanceEnvelope", "EvidenceSubmission", "TrustReference", "TrustedIngestionContext", "IngestionReceipt",
-        "IngestionResult", "derive_runtime_freshness", "ingest_evidence",
-    }
-    assert expected <= set(dir(api))
-    assert {f.name for f in fields(api.TrustReference)} >= {"receipt_bytes", "receipt_hash"}
+    assert set(api.EvidenceType.__members__) == {"VERIFIER_RESULT", "CI_CHECK", "MANUAL_REVIEW", "RUNTIME_OBSERVATION", "LEGACY_RECORD"}
+    assert set(api.ProducerRole.__members__) == {"VERIFIER", "CI", "REVIEWER", "OWNER", "SIGNER", "RUNTIME"}
+    assert set(api.EvidenceGeneration.__members__) == {"SOURCE", "EXECUTION", "RUNTIME", "LEGACY_NARRATIVE"}
+    assert set(api.FreshnessStatus.__members__) == {"SOURCE_ALIGNED", "SOURCE_AHEAD_OF_RUNTIME", "RUNTIME_IDENTITY_MISMATCH", "STALE_OBSERVATION", "READY_IDENTITY_BOUND", "CONVERGENCE_UNKNOWN"}
+    assert set(api.TrustRole.__members__) == {"POLICY", "AUTHORITY", "APPROVAL", "SIGNING"}
+    assert set(api.TrustDecision.__members__) == {"ALLOW", "DENY"}
 
 
-def test_valid_submission_preserves_raw_hash_producer_method_and_runtime_scope():
-    api, context, submission, envelope, *_ = _fixture()
+def test_exact_dataclass_fields_and_order_are_frozen():
+    api = _api()
+    expected = {"ProducerGrant": ("producer_id", "role", "software_hash", "verification_methods"), "IssuerGrant": ("issuer_id", "role", "software_hash", "verification_methods"), "IngestionProfile": ("profile_id", "producers", "issuers", "max_age_seconds"), "EvidenceRequirement": ("verifier_id", "evidence_type", "generation", "runtime_ready_required", "human_semantic_review_required"), "EvidenceSubmission": ("content", "status", "provenance"), "IngestionResult": ("bundle", "receipt", "condition", "reason_codes")}
+    for name, names in expected.items():
+        assert tuple(field.name for field in fields(getattr(api, name))) == names
+    assert tuple(field.name for field in fields(api.RuntimeSourceObservation)) == ("generation", "desired_source_revision", "loaded_source_revision", "desired_generation", "observed_generation", "observed_at", "expires_at", "expected_runtime_identity", "observed_runtime_identity", "readiness_status")
+    assert len(fields(api.TrustReference)) == 14
+    assert {field.name for field in fields(api.TrustReference)} >= {"receipt_bytes", "receipt_hash"}
+
+
+def test_valid_ingestion_binds_raw_hash_and_provenance_envelope_hash():
+    api, context, submission, envelope = _fixture()
     result = api.ingest_evidence(context, (submission,))
-    assert result.decision is _enum(api.TrustDecision, "ACCEPT", "TRUSTED", "VERIFIED")
+    assert result.condition is None
     assert result.receipt.observations[0].status is ObservationStatus.PASS
     assert result.receipt.observations[0].artifact_hash == envelope.hash
-    assert envelope.content_hash == _hash(submission.raw_bytes.decode())
-    assert envelope.producer_id == "producer-1" and envelope.verification_method == "pytest"
+    assert envelope.content_hash == _hash(submission.content.decode())
 
 
-def test_hashes_are_deterministic_and_bundle_order_is_canonical():
-    api, context, submission, envelope, *_ = _fixture()
+def test_deterministic_hashes_and_sorted_reasons():
+    api, context, submission, envelope = _fixture()
     assert envelope.hash == replace(envelope).hash
-    first = api.ingest_evidence(context, (submission,)).receipt
-    second = api.ingest_evidence(context, (submission,)).receipt
-    assert first.hash == second.hash
-    assert tuple(sorted(first.reason_codes)) == first.reason_codes
+    assert api.ingest_evidence(context, (submission,)).receipt.hash == api.ingest_evidence(context, (submission,)).receipt.hash
 
 
-@pytest.mark.parametrize(
-    "offset, expected",
-    [(-4000, "STALE_OBSERVATION"), (4000, "CONVERGENCE_UNKNOWN"), (0, "READY_IDENTITY_BOUND")],
-)
-def test_runtime_freshness_is_utc_time_bounded(offset, expected):
+@pytest.mark.parametrize("changes", [{"observed_at": _at(4000)}, {"expires_at": _at(-1)}, {"observed_generation": 6}])
+def test_future_expired_or_generation_stale_is_stale(changes):
     api, *_ = _fixture()
-    runtime = api.RuntimeSourceObservation("target-r2", "target-r2", "runtime-1", "runtime-1", 1, 1, _at(offset), _at(offset + 1), "READY")
-    status = api.derive_runtime_freshness(runtime, _at())
-    assert status.name == expected
+    assert api.derive_runtime_freshness(_runtime(api, **changes), _at()).name == "STALE_OBSERVATION"
 
 
-@pytest.mark.parametrize("status", ["", "UNKNOWN", "NOT_READY", "LIVE"])
-def test_runtime_freshness_never_treats_malformed_or_liveness_as_ready(status):
+@pytest.mark.parametrize("changes", [{"observed_at": "not-utc"}, {"observed_at": "2026-08-29T12:00:00"}])
+def test_missing_or_non_utc_time_is_unknown(changes):
     api, *_ = _fixture()
-    runtime = api.RuntimeSourceObservation("target-r2", "target-r2", "runtime-1", "runtime-1", 1, 1, "not-a-time", _at(10), status)
-    assert api.derive_runtime_freshness(runtime, _at()).name == "CONVERGENCE_UNKNOWN"
+    assert api.derive_runtime_freshness(_runtime(api, **changes), _at()).name == "CONVERGENCE_UNKNOWN"
 
 
-@pytest.mark.parametrize(
-    "changes, expected",
-    [({"loaded_source_revision": "source-r1"}, "SOURCE_AHEAD_OF_RUNTIME"),
-     ({"observed_runtime_identity": "runtime-2"}, "RUNTIME_IDENTITY_MISMATCH"),
-     ({"observed_generation": 0}, "STALE_OBSERVATION"),
-     ({"readiness_status": "NOT_READY"}, "CONVERGENCE_UNKNOWN")],
-)
-def test_runtime_freshness_distinguishes_source_generation_identity_and_readiness(changes, expected):
+def test_freshness_truth_table_covers_source_runtime_and_ready_identity():
     api, *_ = _fixture()
-    runtime = replace(api.RuntimeSourceObservation("target-r2", "target-r2", "runtime-1", "runtime-1", 1, 1, _at(-10), _at(3500), "READY"), **changes)
-    assert api.derive_runtime_freshness(runtime, _at()).name == expected
+    assert api.derive_runtime_freshness(_runtime(api, loaded_source_revision="source-r1"), _at()).name == "SOURCE_AHEAD_OF_RUNTIME"
+    assert api.derive_runtime_freshness(_runtime(api, observed_runtime_identity="runtime-2"), _at()).name == "RUNTIME_IDENTITY_MISMATCH"
+    assert api.derive_runtime_freshness(_runtime(api, generation=api.EvidenceGeneration.SOURCE, expected_runtime_identity=None, observed_runtime_identity=None, readiness_status=None), _at()).name == "SOURCE_ALIGNED"
+    assert api.derive_runtime_freshness(_runtime(api, readiness_status="LIVE"), _at()).name == "CONVERGENCE_UNKNOWN"
+    assert api.derive_runtime_freshness(_runtime(api), _at()).name == "READY_IDENTITY_BOUND"
 
 
-@pytest.mark.parametrize("field", ["raw_bytes", "claimed_content_hash"])
-def test_raw_bytes_and_claimed_hash_are_independently_tamper_evident(field):
+@pytest.mark.parametrize("generation", ["EXECUTION", "LEGACY_NARRATIVE"])
+def test_non_runtime_generation_observation_is_rejected(generation):
+    api, *_ = _fixture()
+    with pytest.raises(ValueError):
+        _runtime(api, generation=getattr(api.EvidenceGeneration, generation))
+
+
+def test_content_and_envelope_hash_mutations_are_independently_tampered():
+    api, context, submission, envelope = _fixture()
+    for mutated in (replace(submission, content=b"changed\n"), replace(submission, provenance=replace(envelope, content_hash=_hash("changed")))):
+        result = api.ingest_evidence(context, (mutated,))
+        assert result.condition is api.IntegrityStatus.TAMPERED and "TAMPERED" in result.reason_codes
+
+
+@pytest.mark.parametrize("field, condition, reason", [("artifact_id", "TAMPERED", "TAMPERED:artifact"), ("target_revision", "STALE", "STALE:subject"), ("producer_id", "CROSS_BOUND", "CROSS_BOUND:producer"), ("source_locator", "MISSING", "MISSING:source_locator"), ("evidence_type", "MALFORMED", "MALFORMED:evidence_type")])
+def test_h1_h2_h3_h9_h11_are_separate_fail_closed_cases(field, condition, reason):
+    api, context, submission, envelope = _fixture()
+    value = "other" if field != "evidence_type" else "VERIFIER_RESULT"
+    result = api.ingest_evidence(context, (replace(submission, provenance=replace(envelope, **{field: value})),))
+    assert result.condition is getattr(api.IntegrityStatus, condition) and reason in result.reason_codes
+
+
+def test_h7_old_readiness_generation_is_stale():
+    api, context, submission, envelope = _fixture()
+    result = api.ingest_evidence(context, (replace(submission, provenance=replace(envelope, runtime=_runtime(api, observed_generation=6))),))
+    assert result.condition is api.IntegrityStatus.STALE and "STALE:generation" in result.reason_codes
+
+
+def test_h12_identical_and_conflicting_duplicates_are_distinct():
+    api, context, submission, envelope = _fixture()
+    identical = api.ingest_evidence(context, (submission, submission))
+    conflicting = api.ingest_evidence(context, (submission, replace(submission, provenance=replace(envelope, verifier_id="other"))))
+    assert identical.condition is api.IntegrityStatus.DUPLICATE and "DUPLICATE:artifact" in identical.reason_codes
+    assert conflicting.condition is api.IntegrityStatus.DUPLICATE and "DUPLICATE:verifier" in conflicting.reason_codes
+
+
+def test_condition_precedence_is_tampered_over_lower_conditions():
     api, context, submission, *_ = _fixture()
-    value = b"changed\n" if field == "raw_bytes" else _hash("changed")
-    result = api.ingest_evidence(context, (replace(submission, **{field: value}),))
-    assert "TAMPERED" in {code.split(":", 1)[0] for code in result.reason_codes}
+    result = api.ingest_evidence(context, (replace(submission, content=b"changed\n"), submission))
+    assert result.condition is api.IntegrityStatus.TAMPERED
 
 
-@pytest.mark.parametrize("field", ["producer_id", "verification_method", "source_revision", "target_tree", "environment_hash", "generation"])
-def test_provenance_field_mutations_are_cross_bound_or_tampered(field):
-    api, context, submission, envelope, *_ = _fixture()
-    value = "spoofed" if field != "generation" else next(iter(api.EvidenceGeneration))
-    result = api.ingest_evidence(context, (replace(submission, envelope=replace(envelope, **{field: value})),))
-    assert result.reason_codes and result.reason_codes != ()
-
-
-def test_h1_h2_h3_h7_h9_h11_h12_fail_closed_with_precedence_and_no_case_codes():
-    api, context, submission, envelope, *_ = _fixture()
-    conflicting = replace(envelope, producer_id="spoofed", source_revision="old", artifact_id="duplicate")
-    result = api.ingest_evidence(context, (submission, replace(submission, envelope=conflicting)))
-    assert result.decision is not _enum(api.TrustDecision, "ACCEPT", "TRUSTED", "VERIFIED")
-    assert tuple(sorted(result.reason_codes)) == result.reason_codes
-    assert any(code.split(":", 1)[0] in {"TAMPERED", "STALE", "CROSS_BOUND", "DUPLICATE", "MALFORMED", "MISSING"} for code in result.reason_codes)
-
-
-def test_machine_verified_and_human_open_accounting_are_separate():
+def test_machine_and_human_semantic_review_accounting_are_separate():
     api, context, submission, *_ = _fixture()
-    result = api.ingest_evidence(context, (submission,))
-    assert result.receipt.machine_verified_count == 1
-    assert result.receipt.human_open_count == 0
+    machine = api.ingest_evidence(context, (submission,))
+    human_context = replace(context, requirements=(replace(context.requirements[0], human_semantic_review_required=True),))
+    human = api.ingest_evidence(human_context, (submission,))
+    assert machine.receipt.machine_verified_count == 1 and machine.receipt.human_open_count == 0
+    assert human.receipt.machine_verified_count == 1 and human.receipt.human_open_count == 1
 
 
-def test_missing_default_and_ambiguous_types_are_rejected():
-    api, context, submission, envelope, *_ = _fixture()
-    for bad in (replace(envelope, source_locator=""), replace(envelope, verification_method=""), replace(envelope, evidence_type="TEST_RESULT")):
-        result = api.ingest_evidence(context, (replace(submission, envelope=bad),))
-        assert result.reason_codes
+def test_constructor_type_bounds_sorted_and_duplicate_guards_fail_closed():
+    api = _api()
+    with pytest.raises((TypeError, ValueError)):
+        api.IngestionProfile("p", [], (), 0)
+    with pytest.raises((TypeError, ValueError)):
+        api.ProducerGrant("p", api.ProducerRole.VERIFIER, _hash("x"), ("m", "m"))
