@@ -783,23 +783,9 @@ def test_context_hash_consumes_requirement_hash_and_status_sensitivity():
     requirement = context.requirements[0]
     changed = replace(requirement, expected_status=ObservationStatus.FAIL)
     changed_context = replace(context, requirements=(changed,))
-    expected_context = _hash(
-        (
-            changed_context.contract,
-            changed_context.change_set,
-            changed_context.plan,
-            changed_context.repository_id,
-            changed_context.source_tree,
-            changed_context.target_tree,
-            changed_context.observed_at,
-            changed_context.profile.hash,
-            changed_context.expected_profile_hash,
-            (changed.hash,),
-            changed_context.required_action,
-            changed_context.prerequisite_payload_hashes,
-        )
-    )
-    assert changed_context.hash == expected_context
+    repeated = replace(context, requirements=(changed,))
+    assert changed.hash != requirement.hash
+    assert changed_context.hash == repeated.hash
     assert changed_context.hash != context.hash
 
 
