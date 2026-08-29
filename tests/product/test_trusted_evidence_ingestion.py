@@ -660,6 +660,10 @@ def test_expected_status_is_required_and_not_inferred_from_submission():
     assert mismatch.bundle is None
     assert mismatch.condition is api.IntegrityStatus.CROSS_BOUND
     assert mismatch.reason_codes == ("CROSS_BOUND:observation_status",)
+    assert mismatch.receipt.observations == ()
+    assert mismatch.receipt.machine_verified_artifact_ids == ()
+    assert mismatch.receipt.human_open_artifact_ids == ()
+    assert mismatch.receipt.human_open_reasons == ()
     failed_requirement = replace(requirement, expected_status=ObservationStatus.FAIL)
     failed_context = replace(context, requirements=(failed_requirement,))
     accepted = api.ingest_evidence(failed_context, (failed_submission,))
@@ -668,6 +672,35 @@ def test_expected_status_is_required_and_not_inferred_from_submission():
     assert passed_mismatch.bundle is None
     assert passed_mismatch.condition is api.IntegrityStatus.CROSS_BOUND
     assert passed_mismatch.reason_codes == ("CROSS_BOUND:observation_status",)
+    assert passed_mismatch.receipt.observations == ()
+    assert passed_mismatch.receipt.machine_verified_artifact_ids == ()
+    assert passed_mismatch.receipt.human_open_artifact_ids == ()
+    assert passed_mismatch.receipt.human_open_reasons == ()
+
+
+@pytest.mark.parametrize(
+    "expected, submitted",
+    [
+        (ObservationStatus.PASS, ObservationStatus.FAIL),
+        (ObservationStatus.FAIL, ObservationStatus.PASS),
+    ],
+)
+def test_status_mismatch_never_creates_human_open_accounting(expected, submitted):
+    api, context, submission, _ = _fixture()
+    requirement = replace(
+        context.requirements[0],
+        expected_status=expected,
+        human_semantic_review_required=True,
+    )
+    status_context = replace(context, requirements=(requirement,))
+    result = api.ingest_evidence(status_context, (replace(submission, status=submitted),))
+    assert result.bundle is None
+    assert result.condition is api.IntegrityStatus.CROSS_BOUND
+    assert result.reason_codes == ("CROSS_BOUND:observation_status",)
+    assert result.receipt.observations == ()
+    assert result.receipt.machine_verified_artifact_ids == ()
+    assert result.receipt.human_open_artifact_ids == ()
+    assert result.receipt.human_open_reasons == ()
 
 
 @pytest.mark.parametrize("invalid", (None, "PASS", ObservationStatus.PASS.value))
