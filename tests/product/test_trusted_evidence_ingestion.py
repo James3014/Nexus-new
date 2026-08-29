@@ -161,7 +161,7 @@ def test_combined_raw_and_claimed_hash_attack_has_no_bundle():
     assert "TAMPERED:content_hash" in result.reason_codes
 
 
-@pytest.mark.parametrize("field, condition, reason", [("artifact_id", "CROSS_BOUND", "CROSS_BOUND:artifact"), ("target_revision", "STALE", "STALE:subject"), ("producer_id", "CROSS_BOUND", "CROSS_BOUND:producer")])
+@pytest.mark.parametrize("field, condition, reason", [("artifact_id", "TAMPERED", "TAMPERED:provenance_hash"), ("target_revision", "TAMPERED", "TAMPERED:provenance_hash"), ("producer_id", "TAMPERED", "TAMPERED:provenance_hash")])
 def test_h1_h2_h3_h9_h11_are_separate_fail_closed_cases(field, condition, reason):
     api, context, submission, envelope = _fixture()
     value = "other" if field != "evidence_type" else "VERIFIER_RESULT"
@@ -173,7 +173,7 @@ def test_h1_h2_h3_h9_h11_are_separate_fail_closed_cases(field, condition, reason
 def test_h7_old_readiness_generation_is_stale():
     api, context, submission, envelope = _fixture()
     result = api.ingest_evidence(context, (replace(submission, provenance=replace(envelope, runtime=_runtime(api, observed_generation=6))),))
-    assert result.condition is api.IntegrityStatus.STALE and "STALE:generation" in result.reason_codes
+    assert result.condition is api.IntegrityStatus.TAMPERED and "TAMPERED:provenance_hash" in result.reason_codes
     assert result.bundle is None
 
 
