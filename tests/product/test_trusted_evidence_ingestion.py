@@ -1136,21 +1136,35 @@ def test_reversed_submission_order_has_canonical_receipt_and_bundle_hashes():
         envelope,
         evidence_id="evidence-2",
         artifact_id="artifact-2",
+        verifier_id="lint",
         content_hash="sha256:" + hashlib.sha256(b"second").hexdigest(),
     )
     requirement = replace(
         context.requirements[0],
+        verifier_id="lint",
         artifact_id="artifact-2",
         provenance_hash=second.hash,
         content_hash=second.content_hash,
     )
     other = api.EvidenceSubmission(b"second", ObservationStatus.PASS, second)
-    left = api.ingest_evidence(
-        replace(context, requirements=(context.requirements[0], requirement)), (submission, other)
+    two_contract = replace(context.contract, required_verifier_ids=("unit", "lint"))
+    two_plan = replace(
+        context.plan,
+        acceptance_contract_hash=two_contract.hash,
+        required_verifier_ids=("unit", "lint"),
     )
+    two_verifier_context = replace(
+        context,
+        contract=two_contract,
+        plan=two_plan,
+        requirements=(context.requirements[0], requirement),
+    )
+    left = api.ingest_evidence(two_verifier_context, (submission, other))
     right = api.ingest_evidence(
-        replace(context, requirements=(requirement, context.requirements[0])), (other, submission)
+        replace(two_verifier_context, requirements=(requirement, context.requirements[0])),
+        (other, submission),
     )
+    assert left.bundle is not None and right.bundle is not None
     assert left.receipt.hash == right.receipt.hash and left.bundle.hash == right.bundle.hash
 
 
@@ -1383,14 +1397,20 @@ def test_duplicate_verifier_and_artifact_conflicts_are_distinct_and_unbundled():
         requirements=(context.requirements[0], second_requirement),
     )
     verifier_duplicate = api.ingest_evidence(duplicate_context, (submission, second))
-    artifact_envelope = replace(second_envelope, artifact_id="artifact-1")
+    artifact_envelope = replace(second_envelope, verifier_id="other", artifact_id="artifact-1")
     artifact_submission = api.EvidenceSubmission(
         submission.content, submission.status, artifact_envelope
     )
+    artifact_contract = replace(context.contract, required_verifier_ids=("unit", "other"))
+    artifact_plan = replace(
+        context.plan,
+        acceptance_contract_hash=artifact_contract.hash,
+        required_verifier_ids=("unit", "other"),
+    )
     artifact_context = replace(
         context,
-        contract=replace(context.contract, required_verifier_ids=("unit", "other")),
-        plan=replace(context.plan, required_verifier_ids=("unit", "other")),
+        contract=artifact_contract,
+        plan=artifact_plan,
         requirements=(
             context.requirements[0],
             replace(
