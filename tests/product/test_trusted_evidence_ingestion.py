@@ -1,4 +1,5 @@
 import hashlib
+import itertools
 from dataclasses import fields, replace
 from datetime import datetime, timedelta, timezone
 
@@ -120,8 +121,11 @@ def test_condition_helper_has_closed_vocabulary_and_exact_precedence():
         assert api.condition_for_ingestion_reasons(tuple(ordered[index:])) is getattr(api.IntegrityStatus, reason.split(":")[0])
     with pytest.raises(ValueError):
         api.condition_for_ingestion_reasons(("UNKNOWN:reason",))
-    for higher, lower in zip(ordered, ordered[1:]):
-        assert api.condition_for_ingestion_reasons((lower, higher)) is getattr(api.IntegrityStatus, higher.split(":")[0])
+    for permutation in itertools.permutations(ordered):
+        assert api.condition_for_ingestion_reasons(permutation) is api.IntegrityStatus.TAMPERED
+    for index, higher in enumerate(ordered):
+        for lower in ordered[index + 1:]:
+            assert api.condition_for_ingestion_reasons((lower, higher)) is getattr(api.IntegrityStatus, higher.split(":")[0])
 
 
 def test_content_and_envelope_hash_mutations_are_independently_tampered():
@@ -130,6 +134,24 @@ def test_content_and_envelope_hash_mutations_are_independently_tampered():
     envelope_result = api.ingest_evidence(context, (replace(submission, provenance=replace(envelope, content_hash=_hash("changed"))),))
     assert content_result.condition is api.IntegrityStatus.TAMPERED and "TAMPERED:content_hash" in content_result.reason_codes
     assert envelope_result.condition is api.IntegrityStatus.TAMPERED and "TAMPERED:provenance_hash" in envelope_result.reason_codes
+
+
+def test_requirement_content_and_provenance_trust_roots_are_independently_pinned():
+    api, context, submission, _ = _fixture()
+    content = replace(context.requirements[0], content_hash=_hash("wrong"))
+    provenance = replace(context.requirements[0], provenance_hash=_hash("wrong"))
+    content_result = api.ingest_evidence(replace(context, requirements=(content,)), (submission,))
+    provenance_result = api.ingest_evidence(replace(context, requirements=(provenance,)), (submission,))
+    assert content_result.condition is api.IntegrityStatus.TAMPERED and "TAMPERED:content_hash" in content_result.reason_codes
+    assert provenance_result.condition is api.IntegrityStatus.TAMPERED and "TAMPERED:provenance_hash" in provenance_result.reason_codes
+
+
+def test_combined_raw_and_claimed_hash_attack_has_no_bundle():
+    api, context, submission, envelope = _fixture()
+    forged = replace(submission, content=b"forged", provenance=replace(envelope, content_hash="sha256:" + hashlib.sha256(b"forged").hexdigest()))
+    result = api.ingest_evidence(context, (forged,))
+    assert result.bundle is None and result.condition is api.IntegrityStatus.TAMPERED
+    assert "TAMPERED:content_hash" in result.reason_codes
 
 
 @pytest.mark.parametrize("field, condition, reason", [("artifact_id", "CROSS_BOUND", "CROSS_BOUND:artifact"), ("target_revision", "STALE", "STALE:subject"), ("producer_id", "CROSS_BOUND", "CROSS_BOUND:producer"), ("source_locator", "MISSING", "MISSING:source_locator"), ("evidence_type", "MALFORMED", "MALFORMED:evidence_type")])
@@ -148,23 +170,13 @@ def test_h7_old_readiness_generation_is_stale():
     assert result.bundle is None
 
 
-@pytest.mark.parametrize("field", ["schema", "evidence_id", "evidence_type", "verifier_id", "artifact_id", "producer_id", "producer_role", "producer_software_hash", "repository_id", "source_revision", "source_tree", "target_revision", "target_tree", "change_set_hash", "diff_hash", "generated_at", "verification_method", "execution_id", "attempt_id", "environment_hash", "generation", "runtime"])
+@pytest.mark.parametrize("field", ["schema", "evidence_id", "evidence_type", "verifier_id", "artifact_id", "producer_id", "producer_role", "producer_software_hash", "repository_id", "source_revision", "source_tree", "target_revision", "target_tree", "change_set_hash", "diff_hash", "generated_at", "source_locator", "content_hash", "verification_method", "execution_id", "attempt_id", "environment_hash", "generation", "runtime"])
 def test_every_provenance_field_mutation_is_rejected(field):
     api, context, submission, envelope = _fixture()
-    value = _hash("mutated") if field.endswith("_hash") else (api.EvidenceGeneration.SOURCE if field == "generation" else None if field == "runtime" else "mutated")
+    value = _hash("mutated") if field.endswith("_hash") or field == "content_hash" else (api.EvidenceGeneration.SOURCE if field == "generation" else _runtime(api, observed_generation=8) if field == "runtime" else api.EvidenceType.CI_CHECK if field == "evidence_type" else api.ProducerRole.CI if field == "producer_role" else "mutated")
     result = api.ingest_evidence(context, (replace(submission, provenance=replace(envelope, **{field: value})),))
-    assert result.condition is not api.IntegrityStatus.VALID
-
-
-@pytest.mark.parametrize("field", ["evidence_id", "source_locator"])
-def test_informational_envelope_mutation_is_never_silent(field):
-    api, context, submission, envelope = _fixture()
-    mutated = replace(submission, provenance=replace(envelope, **{field: "mutated"}))
-    result = api.ingest_evidence(context, (mutated,))
-    if result.condition is api.IntegrityStatus.VALID:
-        assert result.receipt.provenance_hashes != (envelope.hash,)
-        assert result.receipt.raw_content_hashes == (envelope.content_hash,)
-        assert result.bundle.hash != api.ingest_evidence(context, (submission,)).bundle.hash
+    assert result.condition is api.IntegrityStatus.TAMPERED
+    assert "TAMPERED:provenance_hash" in result.reason_codes
 
 
 def test_h12_identical_and_conflicting_duplicates_are_distinct():
@@ -189,7 +201,7 @@ def test_machine_and_human_semantic_review_accounting_are_separate():
     assert machine.receipt.machine_verified_count == 1 and machine.receipt.human_open_count == 0
     assert human.receipt.machine_verified_count == 1 and human.receipt.human_open_count == 1
     assert human.reason_codes == ()
-    assert human.receipt.human_open_reasons
+    assert human.receipt.human_open_reasons == (("artifact-1", "semantic_review_required"),)
 
 
 def test_constructor_type_bounds_sorted_and_duplicate_guards_fail_closed():
@@ -206,3 +218,18 @@ def test_empty_locator_and_string_enum_are_rejected_by_the_envelope_constructor(
         replace(envelope, source_locator="")
     with pytest.raises((TypeError, ValueError)):
         replace(envelope, evidence_type="VERIFIER_RESULT")
+
+
+def test_required_constructor_argument_cannot_be_omitted():
+    api = _api()
+    with pytest.raises(TypeError):
+        api.EvidenceSubmission(b"content", ObservationStatus.PASS)
+
+
+def test_multi_submission_attack_keeps_all_reason_codes_sorted_unique_and_top_condition():
+    api, context, submission, envelope = _fixture()
+    stale = replace(submission, provenance=replace(envelope, target_revision="stale"))
+    forged = replace(submission, content=b"forged")
+    result = api.ingest_evidence(context, (forged, stale, submission, submission))
+    assert result.bundle is None and result.condition is api.IntegrityStatus.TAMPERED
+    assert tuple(sorted(set(result.reason_codes))) == result.reason_codes
