@@ -684,7 +684,12 @@ def _parse_time(value):
         return None
     try:
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return dt if dt.tzinfo is not None and dt.utcoffset().total_seconds() == 0 else None
+        offset = dt.utcoffset()
+        return (
+            dt
+            if dt.tzinfo is not None and offset is not None and offset.total_seconds() == 0
+            else None
+        )
     except (TypeError, ValueError, AttributeError):
         return None
 

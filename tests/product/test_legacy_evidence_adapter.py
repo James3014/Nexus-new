@@ -137,6 +137,17 @@ def test_dict_wire_and_lookalike_values_are_malformed_without_reconstruction(val
     assert outcome.reasons == ("LEGACY_STRUCTURED_MALFORMED",)
 
 
+def test_task6_h10_unparseable_structured_provenance_cannot_downgrade_to_legacy():
+    """H10: malformed structured input is not reclassified as narrative evidence."""
+    _, context, _, _ = _fixture()
+    api = _api()
+    malformed = {"status": "PASS", "provenance": {"generated_at": "not-a-time"}}
+    outcome = api.adapt_legacy_evidence(context, malformed)
+    assert outcome.ingestion is None
+    assert outcome.fallback_integrity is api.IntegrityStatus.MALFORMED
+    assert outcome.reasons == ("LEGACY_STRUCTURED_MALFORMED",)
+
+
 @pytest.mark.parametrize("value", ("PASS", "FAIL", "legacy narrative", "caller:reason"))
 def test_legacy_narratives_are_non_certifiable_without_product_evidence(value):
     api = _api()

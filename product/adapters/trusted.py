@@ -357,6 +357,10 @@ def validate_prerequisites(
         ref, exp = refmap[role], expmap[role]
         raw_hash = _raw_hash(ref.external_verification_receipt)
         raw_hash_mismatch = raw_hash != ref.external_verification_receipt_hash
+        issued_at = _parse_time(ref.issued_at)
+        expires_at = _parse_time(ref.expires_at)
+        revoked_at = _parse_time(ref.revoked_at)
+        observed_at = _parse_time(context.observed_at)
         checks = (
             (ref.subject_hash != subject, "SUBJECT_MISMATCH"),
             (
@@ -389,18 +393,15 @@ def validate_prerequisites(
                 "TIMESTAMP_MALFORMED",
             ),
             (
-                _parse_time(ref.issued_at) is not None
-                and _parse_time(ref.issued_at) > _parse_time(context.observed_at),
+                issued_at is not None and observed_at is not None and issued_at > observed_at,
                 "ISSUED_AFTER_OBSERVED_AT",
             ),
             (
-                _parse_time(ref.expires_at) is not None
-                and _parse_time(ref.expires_at) <= _parse_time(context.observed_at),
+                expires_at is not None and observed_at is not None and expires_at <= observed_at,
                 "EXPIRED_AT_OBSERVED_AT",
             ),
             (
-                _parse_time(ref.revoked_at) is not None
-                and _parse_time(ref.revoked_at) <= _parse_time(context.observed_at),
+                revoked_at is not None and observed_at is not None and revoked_at <= observed_at,
                 "REVOKED_AT_OBSERVED_AT",
             ),
             (raw_hash_mismatch, "EXTERNAL_RECEIPT_HASH_MISMATCH"),
@@ -413,6 +414,9 @@ def validate_prerequisites(
         return PrerequisiteValidationResult(
             PrerequisiteValidationStatus.INVALID, None, tuple(reasons)
         )
+    bundle = ingestion.bundle
+    if bundle is None:
+        return _invalid("INGESTION_RECEIPT_INVALID")
     flags = [refmap[r].decision is TrustDecision.ALLOW for r in _ROLES]
     prereq = _mint(
         ValidatedPrerequisites,
@@ -420,7 +424,7 @@ def validate_prerequisites(
             subject,
             context.hash,
             context.expected_profile_hash,
-            ingestion.bundle.hash,
+            bundle.hash,
             ingestion.receipt.hash,
             context.observed_at,
             *flags,
@@ -454,6 +458,9 @@ def certify_ingested(
         raise ValueError("invalid_trusted_certification_input:UNTRUSTED_INGESTION")
     if state is IngestionTrustStatus.RECEIPT_INVALID:
         raise ValueError("invalid_trusted_certification_input:INGESTION_RECEIPT_INVALID")
+    bundle = ingestion.bundle
+    if bundle is None:
+        raise ValueError("invalid_trusted_certification_input:INGESTION_RECEIPT_INVALID")
     if type(prerequisites) is not ValidatedPrerequisites:
         raise ValueError("invalid_trusted_certification_input:UNTRUSTED_PREREQUISITES")
     if not _registered_prerequisite(prerequisites, context, ingestion):
@@ -472,7 +479,7 @@ def certify_ingested(
             context.contract,
             context.change_set,
             context.plan,
-            ingestion.bundle,
+            bundle,
             prerequisites.policy_accepted,
             prerequisites.authority_present,
             prerequisites.approval_present,
@@ -484,7 +491,7 @@ def certify_ingested(
         (
             context.hash,
             context.expected_profile_hash,
-            ingestion.bundle.hash,
+            bundle.hash,
             ingestion.receipt.hash,
             prerequisites.subject_hash,
             prerequisites.hash,
@@ -521,10 +528,13 @@ def is_trusted_certification_result(
             prerequisites, context, ingestion
         ):
             return False
+        bundle = ingestion.bundle
+        if bundle is None:
+            return False
         if not (
             result.hash == binding[3]
             and result.context_hash == context.hash
-            and result.ingestion_bundle_hash == ingestion.bundle.hash
+            and result.ingestion_bundle_hash == bundle.hash
             and result.ingestion_receipt_hash == ingestion.receipt.hash
             and result.prerequisites_hash == prerequisites.hash
             and result.core_result.receipt.hash == result.core_receipt_hash
@@ -535,7 +545,7 @@ def is_trusted_certification_result(
                 context.contract,
                 context.change_set,
                 context.plan,
-                ingestion.bundle,
+                bundle,
                 prerequisites.policy_accepted,
                 prerequisites.authority_present,
                 prerequisites.approval_present,
