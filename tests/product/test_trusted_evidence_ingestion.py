@@ -761,7 +761,11 @@ def test_receipt_freshness_is_artifact_status_pairs_and_only_admitted_artifacts_
 def test_authoritative_verifier_requirements_reject_subsets_duplicates_and_missing_ids():
     api, context, submission, _ = _fixture()
     contract = replace(context.contract, required_verifier_ids=("unit", "lint"))
-    plan = replace(context.plan, required_verifier_ids=("unit", "lint"))
+    plan = replace(
+        context.plan,
+        acceptance_contract_hash=contract.hash,
+        required_verifier_ids=("unit", "lint"),
+    )
     subset = replace(context, contract=contract, plan=plan)
     missing = api.ingest_evidence(subset, (submission,))
     assert missing.bundle is None and "MISSING:required_verifier" in missing.reason_codes
@@ -1334,7 +1338,11 @@ def test_resealed_future_generated_at_is_stale_observation():
 def test_combined_physical_reasons_are_retained_sorted_with_stale_precedence():
     api, context, submission, envelope = _fixture()
     contract = replace(context.contract, required_verifier_ids=("unit", "lint", "security"))
-    plan = replace(context.plan, required_verifier_ids=("unit", "lint", "security"))
+    plan = replace(
+        context.plan,
+        acceptance_contract_hash=contract.hash,
+        required_verifier_ids=("unit", "lint", "security"),
+    )
     stale = replace(envelope, verifier_id="lint", target_revision="stale")
     stale_req = replace(context.requirements[0], verifier_id="lint", provenance_hash=stale.hash)
     result = api.ingest_evidence(
@@ -1345,7 +1353,6 @@ def test_combined_physical_reasons_are_retained_sorted_with_stale_precedence():
     )
     assert result.bundle is None and result.condition is api.IntegrityStatus.STALE
     assert result.reason_codes == (
-        "CROSS_BOUND:changeset",
         "DUPLICATE:artifact",
         "MISSING:required_verifier",
         "STALE:subject",
@@ -1460,27 +1467,33 @@ def test_plan_binding_mismatch_reports_only_plan_reason():
 def test_plan_change_set_gate_precedes_opaque_submission_inspection():
     api, context, _, _ = _fixture()
     plan = replace(context.plan, change_set_hash=_hash("wrong"))
-    result = api.ingest_evidence(replace(context, plan=plan), (OpaqueSubmission(),))
+    gated_context = replace(context, plan=plan)
+    result = api.ingest_evidence(gated_context, (OpaqueSubmission(),))
     assert result.bundle is None
     assert result.condition is api.IntegrityStatus.CROSS_BOUND
     assert result.reason_codes == ("CROSS_BOUND:changeset",)
-    assert result.receipt.context_hash == context.hash
-    assert result.receipt.profile_hash == context.profile.hash
-    assert api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.UNTRUSTED
-    assert api.is_trusted_ingestion_result(context, result) is False
+    assert result.receipt.context_hash == gated_context.hash
+    assert result.receipt.profile_hash == gated_context.profile.hash
+    assert (
+        api.classify_ingestion_result(gated_context, result) is api.IngestionTrustStatus.UNTRUSTED
+    )
+    assert api.is_trusted_ingestion_result(gated_context, result) is False
 
 
 def test_plan_acceptance_contract_gate_precedes_opaque_submission_inspection():
     api, context, _, _ = _fixture()
     plan = replace(context.plan, acceptance_contract_hash=_hash("wrong"))
-    result = api.ingest_evidence(replace(context, plan=plan), (OpaqueSubmission(),))
+    gated_context = replace(context, plan=plan)
+    result = api.ingest_evidence(gated_context, (OpaqueSubmission(),))
     assert result.bundle is None
     assert result.condition is api.IntegrityStatus.CROSS_BOUND
     assert result.reason_codes == ("CROSS_BOUND:acceptance_contract",)
-    assert result.receipt.context_hash == context.hash
-    assert result.receipt.profile_hash == context.profile.hash
-    assert api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.UNTRUSTED
-    assert api.is_trusted_ingestion_result(context, result) is False
+    assert result.receipt.context_hash == gated_context.hash
+    assert result.receipt.profile_hash == gated_context.profile.hash
+    assert (
+        api.classify_ingestion_result(gated_context, result) is api.IngestionTrustStatus.UNTRUSTED
+    )
+    assert api.is_trusted_ingestion_result(gated_context, result) is False
 
 
 def test_both_plan_subject_gates_precede_opaque_submission_with_sorted_reasons():
@@ -1490,17 +1503,20 @@ def test_both_plan_subject_gates_precede_opaque_submission_with_sorted_reasons()
         acceptance_contract_hash=_hash("wrong-contract"),
         change_set_hash=_hash("wrong-change"),
     )
-    result = api.ingest_evidence(replace(context, plan=plan), (OpaqueSubmission(),))
+    gated_context = replace(context, plan=plan)
+    result = api.ingest_evidence(gated_context, (OpaqueSubmission(),))
     assert result.bundle is None
     assert result.condition is api.IntegrityStatus.CROSS_BOUND
     assert result.reason_codes == (
         "CROSS_BOUND:acceptance_contract",
         "CROSS_BOUND:changeset",
     )
-    assert result.receipt.context_hash == context.hash
-    assert result.receipt.profile_hash == context.profile.hash
-    assert api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.UNTRUSTED
-    assert api.is_trusted_ingestion_result(context, result) is False
+    assert result.receipt.context_hash == gated_context.hash
+    assert result.receipt.profile_hash == gated_context.profile.hash
+    assert (
+        api.classify_ingestion_result(gated_context, result) is api.IngestionTrustStatus.UNTRUSTED
+    )
+    assert api.is_trusted_ingestion_result(gated_context, result) is False
 
 
 def test_submission_tuple_collection_bound_is_checked_before_work():
@@ -1802,21 +1818,23 @@ def test_hostile_normalized_revision_values_are_malformed_provenance(field, valu
 
 @pytest.mark.parametrize(
     "grant_field, value",
-    [("verification_methods", ["pytest"]), ("actions", ["merge"]), ("roles", ["AUTHORITY"])],
+    [("verification_methods", ["pytest"]), ("actions", ["merge"]), ("roles", None)],
 )
 def test_nested_profile_grant_mutation_invalidates_profile_without_hash_drift(grant_field, value):
     api, context, submission, _ = _fixture()
     result = api.ingest_evidence(context, (submission,))
     assert api.is_trusted_ingestion_result(context, result) is True
     profile_hash = context.profile.hash
-    context_hash = context.profile.hash
+    context_hash = context.hash
     grant = (
         context.profile.producers[0]
         if grant_field == "verification_methods"
         else context.profile.issuers[0]
     )
+    if grant_field == "roles":
+        value = [api.TrustRole.AUTHORITY]
     object.__setattr__(grant, grant_field, value)
-    assert context.profile.hash == profile_hash and context.profile.hash == context_hash
+    assert context.profile.hash == profile_hash and context.hash == context_hash
     assert (
         api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.RECEIPT_INVALID
     )
