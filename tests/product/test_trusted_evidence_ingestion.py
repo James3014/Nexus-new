@@ -1337,6 +1337,7 @@ def test_combined_physical_reasons_are_retained_sorted_with_stale_precedence():
     )
     assert result.bundle is None and result.condition is api.IntegrityStatus.STALE
     assert result.reason_codes == (
+        "CROSS_BOUND:changeset",
         "DUPLICATE:artifact",
         "MISSING:required_verifier",
         "STALE:subject",
