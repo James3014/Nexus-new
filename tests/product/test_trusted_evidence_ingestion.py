@@ -1,5 +1,7 @@
+import gc
 import hashlib
 import itertools
+import weakref
 from dataclasses import fields, replace
 from datetime import datetime, timedelta, timezone
 
@@ -1176,6 +1178,37 @@ def test_trusted_result_is_sealed_to_exact_context_and_minted_identity():
         api.IngestionReceipt(
             *[getattr(result.receipt, field.name) for field in fields(result.receipt)]
         )
+
+
+def test_trusted_result_registry_is_weak_object_identity_not_value_or_id_storage():
+    api, context, submission, _ = _fixture()
+    assert isinstance(api._TRUSTED_RESULTS, weakref.WeakSet)
+    result = api.ingest_evidence(context, (submission,))
+    result_ref = weakref.ref(result)
+    assert result in api._TRUSTED_RESULTS
+    lookalike = object.__new__(type(result))
+    for field in fields(result):
+        object.__setattr__(lookalike, field.name, getattr(result, field.name))
+    assert lookalike not in api._TRUSTED_RESULTS
+    assert api.is_trusted_ingestion_result(context, result) is True
+    del result
+    gc.collect()
+    assert result_ref() is None
+
+
+def test_distinct_issuer_objects_must_be_sorted_by_issuer_id():
+    api, _, *_ = _fixture()
+    first = api.IssuerGrant("issuer-b", (api.TrustRole.AUTHORITY,), ("merge",), ("pytest",))
+    second = api.IssuerGrant("issuer-a", (api.TrustRole.AUTHORITY,), ("merge",), ("pytest",))
+    with pytest.raises((TypeError, ValueError)):
+        api.IngestionProfile("profile", (), (first, second), 3600)
+
+
+def test_duplicate_prerequisite_roles_are_rejected_even_with_distinct_hashes():
+    api, context, *_ = _fixture()
+    prerequisites = ((api.TrustRole.AUTHORITY, _hash("a")), (api.TrustRole.AUTHORITY, _hash("b")))
+    with pytest.raises((TypeError, ValueError)):
+        replace(context, prerequisite_payload_hashes=prerequisites)
 
 
 def test_result_consistency_binds_reasons_condition_and_context_profile_bundle():
