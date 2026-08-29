@@ -1701,7 +1701,7 @@ def test_ingest_revalidates_submission_provenance_without_attribute_error(bad_pr
     object.__setattr__(submission, "provenance", bad_provenance)
     result = api.ingest_evidence(context, (submission,))
     assert result.bundle is None and result.condition is api.IntegrityStatus.MALFORMED
-    assert result.reason_codes == ("MALFORMED:provenance",)
+    assert result.reason_codes == ("MALFORMED:provenance", "MISSING:required_verifier")
 
 
 @pytest.mark.parametrize("field, value", [("runtime_ready_required", 1), ("execution_id", "")])
