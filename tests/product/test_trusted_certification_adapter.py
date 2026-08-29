@@ -1834,3 +1834,105 @@ def test_validated_prerequisite_exact_current_field_shape_matrix():
             type(value) is str and value.startswith("sha256:") and len(value) == 71
             for value in roots
         )
+
+
+@pytest.mark.parametrize(
+    "hostile_case",
+    (
+        "H2_stale_subject",
+        "H4_authority_widening",
+        "H5_approval_candidate_payload_replay",
+        "H6_signing_payload_substitution",
+        "H7_runtime_freshness_spoof",
+        "H9_missing_evidence",
+        "H10_unparseable_provenance_downgrade",
+        "H11_type_confusion",
+    ),
+)
+def test_task6_named_hostile_controls_preserve_no_trusted_prerequisites(hostile_case):
+    """Task-6 H2-H7/H9-H11: prerequisite substitutions stay fail-closed."""
+    api, context, ingestion, references, expectations, *_ = _four_role_fixture()
+    expected = None
+    if hostile_case == "H2_stale_subject":
+        references = (replace(references[0], subject_hash=_hash("stale")),) + references[1:]
+        expected = ("POLICY:SUBJECT_MISMATCH",)
+    elif hostile_case == "H4_authority_widening":
+        references = (replace(references[0], action="release"),) + references[1:]
+        expected = ("POLICY:ACTION_MISMATCH",)
+    elif hostile_case == "H5_approval_candidate_payload_replay":
+        context_b, ingestion_b = _trusted_variant(api, context, "payload")
+        roots_a = dict(context.prerequisite_payload_hashes)
+        roots_b = dict(context_b.prerequisite_payload_hashes)
+        roots_b[api.TrustRole.APPROVAL] = _hash("candidate-b-approval-root")
+        context_b = replace(
+            context_b,
+            prerequisite_payload_hashes=tuple(
+                sorted(roots_b.items(), key=lambda pair: (pair[0].value, pair[1]))
+            ),
+        )
+        ingestion_b = api.ingest_evidence(context_b, (_task3_fixture()[2],))
+        subject_b = _subject(context_b, ingestion_b)
+        references_b = tuple(
+            replace(
+                reference,
+                subject_hash=subject_b,
+                payload_hash=roots_a[role] if role is api.TrustRole.APPROVAL else roots_b[role],
+                signed_payload_hash=roots_b[role],
+            )
+            for role, reference in zip(api.TrustRole, references, strict=True)
+        )
+        expectations_b = tuple(
+            api._bootstrap_external_receipt_expectation(
+                context=context_b,
+                ingestion=ingestion_b,
+                role=role,
+                expected_evidence_id=reference.evidence_id,
+                expected_issuer_id=reference.issuer_id,
+                expected_verification_method=reference.verification_method,
+                independently_expected_receipt=reference.external_verification_receipt,
+            )
+            for role, reference in zip(api.TrustRole, references_b, strict=True)
+        )
+        outcome = _validate(context_b, ingestion_b, references_b, expectations_b)
+        _assert_invalid(outcome, ("APPROVAL:PAYLOAD_HASH_MISMATCH",))
+        return
+    elif hostile_case == "H6_signing_payload_substitution":
+        role = api.TrustRole.SIGNING
+        index = tuple(api.TrustRole).index(role)
+        references = (
+            references[:index]
+            + (replace(references[index], signed_payload_hash=_hash("substituted")),)
+            + references[index + 1 :]
+        )
+        expected = ("SIGNING:SIGNED_PAYLOAD_HASH_MISMATCH",)
+    elif hostile_case == "H7_runtime_freshness_spoof":
+        context = replace(context, observed_at=_at(4000))
+        expected = ("UNTRUSTED_INGESTION",)
+    elif hostile_case == "H9_missing_evidence":
+        ingestion = _forge(ingestion, bundle=None)
+        expected = ("UNTRUSTED_INGESTION",)
+    elif hostile_case == "H10_unparseable_provenance_downgrade":
+        references = (replace(references[0], issued_at="not-a-timestamp"),) + references[1:]
+        expected = ("POLICY:TIMESTAMP_MALFORMED",)
+    elif hostile_case == "H11_type_confusion":
+        expectations = list(expectations)
+        expected = ("EXPECTATION_SET_INVALID",)
+    else:  # pragma: no cover - parameter set is the explicit H2-H7/H9-H11 matrix
+        raise AssertionError(f"unhandled hostile control: {hostile_case}")
+    outcome = _validate(context, ingestion, references, expectations)
+    _assert_invalid(outcome, expected)
+
+
+def test_task6_h1_artifact_substitution_and_h8_legacy_escalation_are_explicit():
+    """Task-6 H1/H8: artifact replacement and narrative PASS cannot certify."""
+    _, context, submission, envelope = _task3_fixture()
+    from product.evidence import ingestion as task3
+
+    artifact = replace(envelope, artifact_id="different-artifact")
+    tampered = task3.ingest_evidence(context, (replace(submission, provenance=artifact),))
+    assert tampered.bundle is None
+    from product.adapters import legacy
+
+    narrative = legacy.adapt_legacy_evidence(context, "PASS")
+    assert narrative.ingestion is None
+    assert narrative.fallback_integrity is task3.IntegrityStatus.LEGACY_NON_CERTIFIABLE

@@ -2587,3 +2587,73 @@ def test_multi_submission_attack_keeps_all_reason_codes_sorted_unique_and_top_co
     result = api.ingest_evidence(context, (forged, stale, submission, submission))
     assert result.bundle is None and result.condition is api.IntegrityStatus.TAMPERED
     assert tuple(sorted(set(result.reason_codes))) == result.reason_codes
+
+
+def test_task6_h1_same_artifact_locator_changed_raw_bytes_is_exact_content_tamper():
+    """H1: same artifact/locator cannot carry different raw bytes."""
+    api, context, submission, _ = _fixture()
+    result = api.ingest_evidence(context, (replace(submission, content=b"different-content"),))
+    assert result.bundle is None
+    assert result.condition is api.IntegrityStatus.TAMPERED
+    assert result.reason_codes == ("TAMPERED:content_hash",)
+
+
+def test_task6_h3_resealed_producer_identity_is_exact_cross_bound_producer():
+    """H3: resealing producer identity does not widen the trusted profile."""
+    api, context, submission, envelope = _fixture()
+    hostile = _hostile_envelope(envelope, producer_id="spoofed-producer")
+    requirement = replace(context.requirements[0], provenance_hash=hostile.hash)
+    result = api.ingest_evidence(
+        replace(context, requirements=(requirement,)),
+        (replace(submission, provenance=hostile),),
+    )
+    assert result.bundle is None
+    assert result.reason_codes == ("CROSS_BOUND:producer",)
+
+
+def test_task6_h7_old_runtime_generation_is_exact_stale_generation():
+    """H7: a runtime observation cannot claim a newer desired generation."""
+    api, context, submission, envelope = _fixture()
+    hostile = _hostile_envelope(envelope, runtime=_runtime(api, observed_generation=6))
+    requirement = replace(context.requirements[0], provenance_hash=hostile.hash)
+    result = api.ingest_evidence(
+        replace(context, requirements=(requirement,)),
+        (replace(submission, provenance=hostile),),
+    )
+    assert result.bundle is None
+    assert result.reason_codes == ("MISSING:ready_identity", "STALE:generation")
+
+
+def test_task6_h9_missing_locator_is_exact_missing_without_bundle():
+    """H9: missing physical source locator never defaults to trusted."""
+    api, context, submission, envelope = _fixture()
+    hostile = _hostile_envelope(envelope, source_locator="")
+    requirement = replace(context.requirements[0], provenance_hash=hostile.hash)
+    result = api.ingest_evidence(
+        replace(context, requirements=(requirement,)),
+        (replace(submission, provenance=hostile),),
+    )
+    assert result.bundle is None
+    assert result.reason_codes == ("MISSING:source_locator",)
+
+
+def test_task6_h11_string_producer_role_is_exact_malformed():
+    """H11: string/enum confusion is malformed before trust admission."""
+    api, context, submission, envelope = _fixture()
+    hostile = _hostile_envelope(envelope, producer_role="VERIFIER")
+    requirement = replace(context.requirements[0], provenance_hash=hostile.hash)
+    result = api.ingest_evidence(
+        replace(context, requirements=(requirement,)),
+        (replace(submission, provenance=hostile),),
+    )
+    assert result.bundle is None
+    assert result.reason_codes == ("MALFORMED:producer_role",)
+
+
+def test_task6_h12_duplicate_conflicting_provenance_is_not_a_bundle():
+    """Task-6 H12: duplicate evidence with conflicting provenance stays untrusted."""
+    api, context, submission, envelope = _fixture()
+    conflict = replace(submission, provenance=replace(envelope, execution_id="other-execution"))
+    result = api.ingest_evidence(context, (submission, conflict))
+    assert result.bundle is None
+    assert result.condition is api.IntegrityStatus.TAMPERED

@@ -3,6 +3,13 @@
 | :--- | :--- | :--- | :--- | :--- |
 | product | tests/product/test_changeset_certification_adapter.py, tests/product/test_evidence_receipt_hardening.py, tests/product/test_false_completion_benchmark.py, tests/product/test_github_adapter.py, tests/product/test_kernel.py, tests/product/test_robustness.py, tests/product/test_semantic_matrix.py | active | high | product_contract |
 | product/kernel/__init__.py | tests/product/test_kernel.py | active | high | product_kernel_contract |
+| product/evidence/ingestion.py | tests/product/test_trusted_evidence_ingestion.py, tests/product/test_trusted_certification_adapter.py, tests/product/test_legacy_evidence_adapter.py, tests/product/test_kernel.py | active | high | trusted_ingestion_hash_binding_and_h1_h12_hostile_controls |
+| product/adapters/trusted.py | tests/product/test_trusted_certification_adapter.py, tests/product/test_kernel.py | active | high | trusted_certification_prerequisite_and_authority_boundary |
+| product/adapters/legacy.py | tests/product/test_legacy_evidence_adapter.py, tests/product/test_trusted_certification_adapter.py, tests/product/test_kernel.py | active | high | legacy_non_certifiable_and_no_privilege_escalation |
+| product/protocol/__init__.py | tests/product/test_kernel.py, tests/product/test_trusted_evidence_ingestion.py | active | high | implementation_schema_and_evidence_schema_boundary |
+| Task-6 hostile controls H1-H4 | tests/product/test_trusted_evidence_ingestion.py, tests/product/test_trusted_certification_adapter.py | active | high | artifact_subject_producer_authority_binding |
+| Task-6 hostile controls H5-H8 | tests/product/test_trusted_certification_adapter.py, tests/product/test_trusted_evidence_ingestion.py, tests/product/test_legacy_evidence_adapter.py | active | high | payload_signing_runtime_and_legacy_privilege_boundaries |
+| Task-6 hostile controls H9-H12 | tests/product/test_trusted_evidence_ingestion.py, tests/product/test_trusted_certification_adapter.py, tests/product/test_legacy_evidence_adapter.py | active | high | missing_downgrade_type_confusion_duplicate_fail_closed |
 | product/adapters/github.py | tests/product/test_github_adapter.py | active | high | product_github_adapter_contract |
 | product/benchmark/__init__.py | tests/product/test_false_completion_benchmark.py | active | high | product_benchmark_contract |
 | nexus/contracts/changeset_certification.py | tests/contracts/test_changeset_certification.py, tests/product/test_changeset_certification_adapter.py | active | high | changeset_certification_contract |

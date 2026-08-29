@@ -183,6 +183,81 @@ def test_product_imports_obey_layer_dag_and_external_boundary():
     assert discovered == packages
 
 
+def test_task6_ingestion_and_adapter_ast_boundaries_are_precise():
+    """Task-6 architecture controls: evidence stays below certifier/provider layers."""
+    product_root = Path(__file__).parents[2] / "product"
+    ingestion_tree = ast.parse(
+        (product_root / "evidence/ingestion.py").read_text(),
+        filename="product/evidence/ingestion.py",
+    )
+    forbidden_modules = {
+        "product.verification",
+        "product.certification",
+        "product.kernel",
+        "subprocess",
+        "socket",
+        "urllib",
+        "requests",
+        "pathlib",
+        "os",
+    }
+
+    def called_name(node):
+        while isinstance(node, ast.Attribute):
+            node = node.value
+        return node.id if isinstance(node, ast.Name) else ""
+
+    def imported_targets(tree):
+        targets = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                targets.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                targets.extend(
+                    f"{module}.{alias.name}" if module else alias.name for alias in node.names
+                )
+        return tuple(targets)
+
+    for node in ast.walk(ingestion_tree):
+        if isinstance(node, ast.Import):
+            assert all(alias.name not in forbidden_modules for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            assert node.module not in forbidden_modules
+        elif isinstance(node, ast.Call):
+            called = called_name(node.func)
+            assert called not in {"certify", "reduce_verification", "subprocess", "run"}
+
+    for adapter in ("trusted.py", "legacy.py"):
+        tree = ast.parse((product_root / "adapters" / adapter).read_text())
+        imports = imported_targets(tree)
+        assert not any(
+            token in imported.lower()
+            for imported in imports
+            for token in ("github", "mcp", "provider", "network", "subprocess")
+        )
+    trusted = ast.parse((product_root / "adapters/trusted.py").read_text())
+    assert "product.kernel" in imported_targets(trusted)
+    assert any(
+        isinstance(node, ast.Attribute)
+        and node.attr == "certify"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "kernel"
+        for node in ast.walk(trusted)
+    )
+    legacy = ast.parse((product_root / "adapters/legacy.py").read_text())
+    assert not any(target.startswith("product.kernel") for target in imported_targets(legacy))
+
+    verification = ast.parse((product_root / "verification/__init__.py").read_text())
+    assert not any(
+        target.startswith("product.adapters") for target in imported_targets(verification)
+    )
+    certification = ast.parse((product_root / "certification/__init__.py").read_text())
+    assert not any(
+        target.startswith("product.adapters") for target in imported_targets(certification)
+    )
+
+
 def test_receipt_submodule_imports_only_allowed_inward_layers():
     tree = ast.parse((Path(__file__).parents[2] / "product/certification/receipt.py").read_text())
     for node in ast.walk(tree):
