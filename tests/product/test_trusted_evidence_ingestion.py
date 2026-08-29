@@ -22,6 +22,13 @@ def _api():
     return ingestion
 
 
+class OpaqueSubmission:
+    """Sentinel proving plan gates run before submission inspection."""
+
+    def __getattribute__(self, name):
+        raise AssertionError(f"opaque submission inspected: {name}")
+
+
 def _at(seconds=0):
     return (
         datetime(2026, 8, 29, 12, 0, tzinfo=timezone.utc) + timedelta(seconds=seconds)
@@ -700,6 +707,7 @@ def test_closed_reason_vocabulary_is_exact_and_missing_verifiers_are_not_interpo
         "CROSS_BOUND:repository",
         "CROSS_BOUND:tree",
         "CROSS_BOUND:changeset",
+        "CROSS_BOUND:acceptance_contract",
         "CROSS_BOUND:artifact",
         "CROSS_BOUND:runtime",
         "DUPLICATE:artifact",
@@ -976,6 +984,7 @@ def test_invalid_profile_or_submission_returns_closed_no_bundle_result():
 _CLOSED_REASONS = {
     "TAMPERED:content_hash",
     "TAMPERED:provenance_hash",
+    "CROSS_BOUND:acceptance_contract",
     "STALE:subject",
     "STALE:generation",
     "STALE:observation",
@@ -1440,17 +1449,58 @@ def test_under_submitted_duplicate_requirements_return_exact_duplicate_without_e
     assert result.reason_codes == ("DUPLICATE:verifier",)
 
 
-def test_plan_binding_mismatch_and_missing_verifier_retain_both_reasons():
+def test_plan_binding_mismatch_reports_only_plan_reason():
     api, context, submission, _ = _fixture()
-    contract = replace(context.contract, required_verifier_ids=("unit", "lint"))
+    plan = replace(context.plan, change_set_hash=_hash("wrong"))
+    result = api.ingest_evidence(replace(context, plan=plan), (submission,))
+    assert result.bundle is None and result.condition is api.IntegrityStatus.CROSS_BOUND
+    assert result.reason_codes == ("CROSS_BOUND:changeset",)
+
+
+def test_plan_change_set_gate_precedes_opaque_submission_inspection():
+    api, context, _, _ = _fixture()
+    plan = replace(context.plan, change_set_hash=_hash("wrong"))
+    result = api.ingest_evidence(replace(context, plan=plan), (OpaqueSubmission(),))
+    assert result.bundle is None
+    assert result.condition is api.IntegrityStatus.CROSS_BOUND
+    assert result.reason_codes == ("CROSS_BOUND:changeset",)
+    assert result.receipt.context_hash == context.hash
+    assert result.receipt.profile_hash == context.profile.hash
+    assert api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.UNTRUSTED
+    assert api.is_trusted_ingestion_result(context, result) is False
+
+
+def test_plan_acceptance_contract_gate_precedes_opaque_submission_inspection():
+    api, context, _, _ = _fixture()
+    plan = replace(context.plan, acceptance_contract_hash=_hash("wrong"))
+    result = api.ingest_evidence(replace(context, plan=plan), (OpaqueSubmission(),))
+    assert result.bundle is None
+    assert result.condition is api.IntegrityStatus.CROSS_BOUND
+    assert result.reason_codes == ("CROSS_BOUND:acceptance_contract",)
+    assert result.receipt.context_hash == context.hash
+    assert result.receipt.profile_hash == context.profile.hash
+    assert api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.UNTRUSTED
+    assert api.is_trusted_ingestion_result(context, result) is False
+
+
+def test_both_plan_subject_gates_precede_opaque_submission_with_sorted_reasons():
+    api, context, _, _ = _fixture()
     plan = replace(
         context.plan,
-        acceptance_contract_hash=_hash("wrong"),
-        required_verifier_ids=("unit", "lint"),
+        acceptance_contract_hash=_hash("wrong-contract"),
+        change_set_hash=_hash("wrong-change"),
     )
-    result = api.ingest_evidence(replace(context, contract=contract, plan=plan), (submission,))
-    assert result.bundle is None and result.condition is api.IntegrityStatus.CROSS_BOUND
-    assert result.reason_codes == ("CROSS_BOUND:changeset", "MISSING:required_verifier")
+    result = api.ingest_evidence(replace(context, plan=plan), (OpaqueSubmission(),))
+    assert result.bundle is None
+    assert result.condition is api.IntegrityStatus.CROSS_BOUND
+    assert result.reason_codes == (
+        "CROSS_BOUND:acceptance_contract",
+        "CROSS_BOUND:changeset",
+    )
+    assert result.receipt.context_hash == context.hash
+    assert result.receipt.profile_hash == context.profile.hash
+    assert api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.UNTRUSTED
+    assert api.is_trusted_ingestion_result(context, result) is False
 
 
 def test_submission_tuple_collection_bound_is_checked_before_work():
@@ -1472,7 +1522,7 @@ def test_under_submitted_duplicate_verifier_uses_distinct_resealed_provenance():
     assert result.reason_codes == ("DUPLICATE:verifier",)
 
 
-def test_combined_reasons_retain_plan_mismatch_duplicate_and_stale_exactly():
+def test_combined_reasons_retain_duplicate_and_stale_exactly_with_valid_plan():
     api, context, submission, envelope = _fixture()
     stale = replace(envelope, target_revision="stale")
     other = replace(envelope, verifier_id="other", target_revision="stale")
@@ -1481,7 +1531,7 @@ def test_combined_reasons_retain_plan_mismatch_duplicate_and_stale_exactly():
     contract = replace(context.contract, required_verifier_ids=("unit", "other"))
     plan = replace(
         context.plan,
-        acceptance_contract_hash=_hash("wrong"),
+        acceptance_contract_hash=contract.hash,
         required_verifier_ids=("unit", "other"),
     )
     result = api.ingest_evidence(
@@ -1489,16 +1539,16 @@ def test_combined_reasons_retain_plan_mismatch_duplicate_and_stale_exactly():
         (replace(submission, provenance=stale), replace(submission, provenance=other)),
     )
     assert result.bundle is None and result.condition is api.IntegrityStatus.STALE
-    assert result.reason_codes == ("CROSS_BOUND:changeset", "DUPLICATE:artifact", "STALE:subject")
+    assert result.reason_codes == ("DUPLICATE:artifact", "STALE:subject")
 
 
-def test_contract_plan_binding_has_no_compatibility_helper():
+def test_contract_plan_binding_reports_only_plan_reason():
     api, context, submission, _ = _fixture()
-    contract = replace(context.contract, required_verifier_ids=("unit", "lint"))
-    result = api.ingest_evidence(replace(context, contract=contract), (submission,))
+    plan = replace(context.plan, acceptance_contract_hash=_hash("wrong"))
+    result = api.ingest_evidence(replace(context, plan=plan), (submission,))
     assert result.bundle is None
     assert result.condition is api.IntegrityStatus.CROSS_BOUND
-    assert result.reason_codes == ("CROSS_BOUND:changeset", "MISSING:required_verifier")
+    assert result.reason_codes == ("CROSS_BOUND:acceptance_contract",)
 
 
 def test_under_submitted_duplicate_artifact_reports_duplicate_and_missing_exactly():
@@ -1728,6 +1778,51 @@ def test_opaque_and_tampered_submissions_preserve_tamper_precedence_and_both_rea
     result = api.ingest_evidence(context, (object(), tampered))
     assert result.bundle is None and result.condition is api.IntegrityStatus.TAMPERED
     assert result.reason_codes == ("MALFORMED:submission", "TAMPERED:content_hash")
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("source_revision", " "),
+        ("target_revision", "bad\x00revision"),
+        ("source_revision", "x" * 4097),
+    ],
+)
+def test_hostile_normalized_revision_values_are_malformed_provenance(field, value):
+    api, context, submission, envelope = _fixture()
+    changed = _hostile_envelope(envelope, **{field: value})
+    requirement = replace(context.requirements[0], provenance_hash=changed.hash)
+    result = api.ingest_evidence(
+        replace(context, requirements=(requirement,)),
+        (api.EvidenceSubmission(submission.content, submission.status, changed),),
+    )
+    assert result.bundle is None and result.condition is api.IntegrityStatus.MALFORMED
+    assert result.reason_codes == ("MALFORMED:provenance",)
+
+
+@pytest.mark.parametrize(
+    "grant_field, value",
+    [("verification_methods", ["pytest"]), ("actions", ["merge"]), ("roles", ["AUTHORITY"])],
+)
+def test_nested_profile_grant_mutation_invalidates_profile_without_hash_drift(grant_field, value):
+    api, context, submission, _ = _fixture()
+    result = api.ingest_evidence(context, (submission,))
+    assert api.is_trusted_ingestion_result(context, result) is True
+    profile_hash = context.profile.hash
+    context_hash = context.profile.hash
+    grant = (
+        context.profile.producers[0]
+        if grant_field == "verification_methods"
+        else context.profile.issuers[0]
+    )
+    object.__setattr__(grant, grant_field, value)
+    assert context.profile.hash == profile_hash and context.profile.hash == context_hash
+    assert (
+        api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.RECEIPT_INVALID
+    )
+    assert api.is_trusted_ingestion_result(context, result) is False
+    fresh = api.ingest_evidence(context, (submission,))
+    assert fresh.bundle is None and fresh.reason_codes == ("MALFORMED:profile",)
 
 
 def test_freshness_missing_source_and_generation_mismatch_preserve_both_reasons():
@@ -2035,11 +2130,14 @@ def test_extra_requirement_and_plan_subject_mismatches_fail_closed():
     assert extra_result.reason_codes == ("MALFORMED:requirement",)
     contract_mismatch = replace(context.plan, acceptance_contract_hash=_hash("wrong"))
     change_mismatch = replace(context.plan, change_set_hash=_hash("wrong"))
-    for plan in (contract_mismatch, change_mismatch):
+    for plan, reason in (
+        (contract_mismatch, "CROSS_BOUND:acceptance_contract"),
+        (change_mismatch, "CROSS_BOUND:changeset"),
+    ):
         result = api.ingest_evidence(replace(context, plan=plan), (submission,))
         assert result.bundle is None
         assert result.condition is api.IntegrityStatus.CROSS_BOUND
-        assert result.reason_codes == ("CROSS_BOUND:changeset",)
+        assert result.reason_codes == (reason,)
 
 
 def test_bundle_integrity_cannot_disagree_with_successful_ingestion():
