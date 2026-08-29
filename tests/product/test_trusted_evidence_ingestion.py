@@ -256,6 +256,32 @@ def test_empty_locator_and_string_enum_are_rejected_by_the_envelope_constructor(
         replace(envelope, evidence_type="VERIFIER_RESULT")
 
 
+def _hostile_envelope(envelope, **changes):
+    forged = object.__new__(type(envelope))
+    for field in fields(envelope):
+        object.__setattr__(forged, field.name, changes.get(field.name, getattr(envelope, field.name)))
+    return forged
+
+
+def test_h9_forged_blank_locator_is_missing_at_admission():
+    api, context, submission, envelope = _fixture()
+    forged = _hostile_envelope(envelope, source_locator="")
+    requirement = replace(context.requirements[0], provenance_hash=forged.hash)
+    result = api.ingest_evidence(replace(context, requirements=(requirement,)), (api.EvidenceSubmission(submission.content, submission.status, forged),))
+    assert result.bundle is None
+    assert result.condition is api.IntegrityStatus.MISSING
+    assert "MISSING:source_locator" in result.reason_codes
+
+
+def test_h11_forged_string_enum_is_malformed_before_hash_admission():
+    api, context, submission, envelope = _fixture()
+    forged = _hostile_envelope(envelope, evidence_type="VERIFIER_RESULT")
+    result = api.ingest_evidence(context, (api.EvidenceSubmission(submission.content, submission.status, forged),))
+    assert result.bundle is None
+    assert result.condition is api.IntegrityStatus.MALFORMED
+    assert "MALFORMED:evidence_type" in result.reason_codes
+
+
 def test_required_constructor_argument_cannot_be_omitted():
     api = _api()
     with pytest.raises(TypeError):
