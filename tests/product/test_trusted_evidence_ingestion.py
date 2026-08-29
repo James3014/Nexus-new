@@ -709,6 +709,100 @@ def test_status_mismatch_and_tampered_content_keep_tamper_precedence():
     )
 
 
+@pytest.mark.parametrize("subject", ("contract", "change_set", "plan"))
+def test_outer_subject_subclasses_are_rejected_before_plan_or_submission(subject):
+    api, context, submission, _ = _fixture()
+    result = api.ingest_evidence(context, (submission,))
+    assert api.is_trusted_ingestion_result(context, result) is True
+    originals = {
+        "contract": context.contract,
+        "change_set": context.change_set,
+        "plan": context.plan,
+    }
+    base = originals[subject]
+    subclass = type(
+        f"Derived{type(base).__name__}",
+        (type(base),),
+        {},
+    )
+    derived = subclass(*[getattr(base, field.name) for field in fields(base)])
+    object.__setattr__(context, subject, derived)
+    assert (
+        api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.RECEIPT_INVALID
+    )
+    assert api.is_trusted_ingestion_result(context, result) is False
+    with pytest.raises((TypeError, ValueError)):
+        api.ingest_evidence(context, (OpaqueSubmission(),))
+
+
+def test_outer_subject_lookalike_wrong_type_is_rejected_before_plan_or_submission():
+    api, context, submission, _ = _fixture()
+    result = api.ingest_evidence(context, (submission,))
+    assert api.is_trusted_ingestion_result(context, result) is True
+    original = context.change_set
+    lookalike = type("ChangeSetLookalike", (), {})()
+    for field in fields(original):
+        object.__setattr__(lookalike, field.name, getattr(original, field.name))
+    object.__setattr__(context, "change_set", lookalike)
+    assert (
+        api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.RECEIPT_INVALID
+    )
+    assert api.is_trusted_ingestion_result(context, result) is False
+    with pytest.raises((TypeError, ValueError)):
+        api.ingest_evidence(context, (OpaqueSubmission(),))
+
+
+def test_evidence_requirement_v2_hash_is_flat_and_enum_value_bound():
+    api, context, _, _ = _fixture()
+    requirement = context.requirements[0]
+    expected = _hash(
+        (
+            api.EVIDENCE_REQUIREMENT_SCHEMA,
+            requirement.verifier_id,
+            requirement.artifact_id,
+            requirement.evidence_type.value,
+            requirement.generation.value,
+            requirement.producer_id,
+            requirement.execution_id,
+            requirement.attempt_id,
+            requirement.environment_hash,
+            requirement.content_hash,
+            requirement.provenance_hash,
+            requirement.runtime_ready_required,
+            requirement.human_semantic_review_required,
+            requirement.expected_status.value,
+        )
+    )
+    assert requirement.hash == expected
+    assert str(requirement.evidence_type) != requirement.evidence_type.value
+    assert str(requirement.generation) != requirement.generation.value
+
+
+def test_context_hash_consumes_requirement_hash_and_status_sensitivity():
+    api, context, _, _ = _fixture()
+    requirement = context.requirements[0]
+    changed = replace(requirement, expected_status=ObservationStatus.FAIL)
+    changed_context = replace(context, requirements=(changed,))
+    expected_context = _hash(
+        (
+            changed_context.contract,
+            changed_context.change_set,
+            changed_context.plan,
+            changed_context.repository_id,
+            changed_context.source_tree,
+            changed_context.target_tree,
+            changed_context.observed_at,
+            changed_context.profile.hash,
+            changed_context.expected_profile_hash,
+            (changed.hash,),
+            changed_context.required_action,
+            changed_context.prerequisite_payload_hashes,
+        )
+    )
+    assert changed_context.hash == expected_context
+    assert changed_context.hash != context.hash
+
+
 def test_constructor_type_bounds_sorted_and_duplicate_guards_fail_closed():
     api = _api()
     with pytest.raises((TypeError, ValueError)):
