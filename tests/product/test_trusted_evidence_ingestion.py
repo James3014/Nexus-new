@@ -1211,6 +1211,139 @@ def test_duplicate_prerequisite_roles_are_rejected_even_with_distinct_hashes():
         replace(context, prerequisite_payload_hashes=prerequisites)
 
 
+def test_forged_receipt_post_init_rejects_placeholder_hash_and_arbitrary_fields():
+    api, context, submission, _ = _fixture()
+    result = api.ingest_evidence(context, (submission,))
+    forged = object.__new__(type(result.receipt))
+    for field in fields(result.receipt):
+        object.__setattr__(forged, field.name, getattr(result.receipt, field.name))
+    object.__setattr__(forged, "profile_hash", _hash("wrong"))
+    object.__setattr__(forged, "reason_codes", ("MISSING:prerequisite",))
+    object.__setattr__(forged, "receipt_hash", _hash("receipt-placeholder"))
+    with pytest.raises((TypeError, ValueError)):
+        forged.__post_init__()
+
+
+def test_minted_result_fingerprint_rejects_each_authoritative_mutation():
+    api, context, submission, _ = _fixture()
+    first = api.ingest_evidence(context, (submission,))
+    second = api.ingest_evidence(context, (submission,))
+    assert api.is_trusted_ingestion_result(context, first) is True
+    assert api.is_trusted_ingestion_result(context, second) is True
+    mutations = (
+        (first.receipt, "profile_hash", _hash("wrong")),
+        (first.receipt, "reason_codes", ("MISSING:prerequisite",)),
+        (first.receipt, "observations", ()),
+        (first.receipt, "machine_verified_artifact_ids", ()),
+        (first.receipt, "human_open_reasons", (("artifact-1", "changed"),)),
+        (first, "condition", api.IntegrityStatus.TAMPERED),
+        (first, "reason_codes", ("MISSING:prerequisite",)),
+        (first, "bundle", None),
+    )
+    for target, field, value in mutations:
+        object.__setattr__(target, field, value)
+        assert api.is_trusted_ingestion_result(context, first) is False
+        if target is first:
+            object.__setattr__(target, field, getattr(second, field))
+        else:
+            object.__setattr__(target, field, getattr(second.receipt, field))
+
+
+def test_same_verifier_different_artifacts_and_raw_contents_are_duplicate():
+    api, context, submission, envelope = _fixture()
+    second_envelope = replace(
+        envelope,
+        evidence_id="evidence-2",
+        artifact_id="artifact-2",
+        content_hash="sha256:" + hashlib.sha256(b"second").hexdigest(),
+    )
+    second = api.EvidenceSubmission(b"second", submission.status, second_envelope)
+    req = replace(
+        context.requirements[0],
+        artifact_id="artifact-2",
+        content_hash=second_envelope.content_hash,
+        provenance_hash=second_envelope.hash,
+    )
+    result = api.ingest_evidence(
+        replace(context, requirements=(context.requirements[0], req)), (submission, second)
+    )
+    assert result.bundle is None and result.reason_codes == ("DUPLICATE:verifier",)
+
+
+def test_source_old_loaded_revision_is_source_ahead_before_admission():
+    api, *_ = _fixture()
+    observation = _hostile_runtime(
+        _runtime(
+            api,
+            generation=api.EvidenceGeneration.SOURCE,
+            expected_runtime_identity=None,
+            observed_runtime_identity=None,
+            readiness_status=None,
+        ),
+        loaded_source_revision="old",
+    )
+    assert api.derive_runtime_freshness(observation, _at()).name == "SOURCE_AHEAD_OF_RUNTIME"
+
+
+def test_resealed_future_generated_at_is_stale_observation():
+    api, context, submission, envelope = _fixture()
+    future = replace(envelope, generated_at=_at(1))
+    req = replace(context.requirements[0], provenance_hash=future.hash)
+    result = api.ingest_evidence(
+        replace(context, requirements=(req,)), (replace(submission, provenance=future),)
+    )
+    assert result.bundle is None and result.reason_codes == ("STALE:observation",)
+
+
+def test_combined_physical_reasons_are_retained_sorted_with_stale_precedence():
+    api, context, submission, envelope = _fixture()
+    contract = replace(context.contract, required_verifier_ids=("unit", "lint", "security"))
+    plan = replace(context.plan, required_verifier_ids=("unit", "lint", "security"))
+    stale = replace(envelope, verifier_id="lint", target_revision="stale")
+    stale_req = replace(context.requirements[0], verifier_id="lint", provenance_hash=stale.hash)
+    result = api.ingest_evidence(
+        replace(
+            context, contract=contract, plan=plan, requirements=(context.requirements[0], stale_req)
+        ),
+        (submission, replace(submission, provenance=stale), submission),
+    )
+    assert result.bundle is None and result.condition is api.IntegrityStatus.STALE
+    assert result.reason_codes == (
+        "DUPLICATE:artifact",
+        "MISSING:required_verifier",
+        "STALE:subject",
+    )
+
+
+def test_legacy_narrative_generation_never_enters_typed_pass_path():
+    api, context, submission, envelope = _fixture()
+    legacy = _hostile_envelope(envelope, generation=api.EvidenceGeneration.LEGACY_NARRATIVE)
+    req = replace(
+        context.requirements[0],
+        generation=api.EvidenceGeneration.LEGACY_NARRATIVE,
+        provenance_hash=legacy.hash,
+    )
+    result = api.ingest_evidence(
+        replace(context, requirements=(req,)),
+        (api.EvidenceSubmission(submission.content, ObservationStatus.PASS, legacy),),
+    )
+    assert result.bundle is None
+    assert result.condition is api.IntegrityStatus.MALFORMED
+    assert result.reason_codes == ("MALFORMED:generation",)
+
+
+def test_context_requirements_and_prerequisites_respect_collection_bound():
+    api, context, *_ = _fixture()
+    requirements = tuple(context.requirements[0] for _ in range(api.MAX_COLLECTION_ITEMS + 1))
+    prerequisites = tuple(
+        (api.TrustRole.AUTHORITY, _hash(f"p{i}")) for i in range(api.MAX_COLLECTION_ITEMS + 1)
+    )
+    with pytest.raises((TypeError, ValueError)):
+        replace(context, requirements=requirements)
+    with pytest.raises((TypeError, ValueError)):
+        replace(context, prerequisite_payload_hashes=prerequisites)
+
+
 def test_result_consistency_binds_reasons_condition_and_context_profile_bundle():
     api, context, submission, _ = _fixture()
     result = api.ingest_evidence(context, (submission,))
