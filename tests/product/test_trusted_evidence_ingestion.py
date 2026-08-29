@@ -125,8 +125,9 @@ def test_condition_helper_has_closed_vocabulary_and_exact_precedence():
     ordered = ["TAMPERED:content_hash", "STALE:observation", "CROSS_BOUND:runtime", "DUPLICATE:artifact", "MALFORMED:submission", "MISSING:prerequisite"]
     for index, reason in enumerate(ordered):
         assert api.condition_for_ingestion_reasons(tuple(ordered[index:])) is getattr(api.IntegrityStatus, reason.split(":")[0])
-    with pytest.raises(ValueError):
-        api.condition_for_ingestion_reasons(("UNKNOWN:reason",))
+    for invalid in ("UNKNOWN:reason", "MALFORMED:unknown", "CROSS_BOUND:unknown", "TAMPERED:unknown"):
+        with pytest.raises(ValueError):
+            api.condition_for_ingestion_reasons((invalid,))
     for permutation in itertools.permutations(ordered):
         assert api.condition_for_ingestion_reasons(permutation) is api.IntegrityStatus.TAMPERED
     for index, higher in enumerate(ordered):
