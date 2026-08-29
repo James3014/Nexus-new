@@ -127,6 +127,8 @@ def _make_kernel(
             return False
         expected = certify(value).receipt
         fields = vars(receipt)
+        if set(fields) != set(receipt_type.__dataclass_fields__):
+            return False
         claimed = fields["claimed_receipt_hash"]
         return _SEALED_RECEIPT_CORE_HASH(receipt) == _SEALED_RECEIPT_CORE_HASH(expected) and (
             claimed is None or claimed == _SEALED_RECEIPT_CORE_HASH(receipt)

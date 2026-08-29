@@ -309,6 +309,45 @@ def test_default_impact_map_covers_new_learning_modules_without_shadowing_specif
     assert "tests/learning" not in unknown_details.targets
 
 
+def test_default_impact_map_covers_product_paths_and_changeset_contract(tmp_path):
+    rules = load_impact_rules()
+    expected_product_targets = {
+        "product/kernel/__init__.py": "tests/product/test_kernel.py",
+        "product/adapters/github.py": "tests/product/test_github_adapter.py",
+        "product/benchmark/__init__.py": "tests/product/test_false_completion_benchmark.py",
+    }
+
+    for path, exact_target in expected_product_targets.items():
+        details = select_target_details(
+            [path],
+            rules,
+            index_path=tmp_path / "missing_impact_index.json",
+            stats_path=tmp_path / "missing_impact_stats.json",
+            history_path=tmp_path / "missing_test_history.jsonl",
+        )
+        assert "tests/product" in details.targets
+        assert exact_target in details.targets
+        assert details.unmatched_paths == []
+        assert details.fallback_used is False
+        assert details.risk == "high"
+        assert details.high_risk_escalated is True
+
+    changeset_details = select_target_details(
+        ["nexus/contracts/changeset_certification.py"],
+        rules,
+        index_path=tmp_path / "missing_impact_index.json",
+        stats_path=tmp_path / "missing_impact_stats.json",
+        history_path=tmp_path / "missing_test_history.jsonl",
+    )
+    assert "tests/product" in changeset_details.targets
+    assert "tests/contracts/test_changeset_certification.py" in changeset_details.targets
+    assert "tests/product/test_changeset_certification_adapter.py" in changeset_details.targets
+    assert changeset_details.unmatched_paths == []
+    assert changeset_details.fallback_used is False
+    assert changeset_details.risk == "high"
+    assert changeset_details.high_risk_escalated is True
+
+
 def test_model_workforce_policy_uses_exact_contract_targets_without_fallback(tmp_path):
     rules = load_impact_rules()
     workforce_rule = next(

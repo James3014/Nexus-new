@@ -15,6 +15,13 @@ from product.protocol import CERTIFICATION_RECEIPT_SCHEMA, EVIDENCE_BUNDLE_SCHEM
 from product.verification import reduce_verification
 
 
+def _replace_receipt(receipt, **changes):
+    candidate = object.__new__(type(receipt))
+    for field in receipt.__dataclass_fields__:
+        object.__setattr__(candidate, field, changes.get(field, getattr(receipt, field)))
+    return candidate
+
+
 def _input(observations=None):
     contract = __import__("product.evidence", fromlist=["AcceptanceContract"]).AcceptanceContract(
         "ac", _hash("requirements"), ("unit",), ("src/a.py",), "FORBID"
@@ -169,9 +176,9 @@ def test_receipt_repeat_hash_and_serialized_validation():
 
 def test_receipt_self_claim_is_checked_against_semantic_hash():
     result = certify(_input())
-    receipt = replace(result.receipt, claimed_receipt_hash=result.receipt.hash)
+    receipt = _replace_receipt(result.receipt, claimed_receipt_hash=result.receipt.hash)
     assert receipt.validate()
-    assert not replace(receipt, claimed_receipt_hash=_hash("stale")).validate()
+    assert not _replace_receipt(receipt, claimed_receipt_hash=_hash("stale")).validate()
 
 
 @pytest.mark.parametrize(
@@ -182,7 +189,7 @@ def test_receipt_subject_mutations_are_rejected(field):
     data = _input()
     result = certify(data)
     kwargs = {field: _hash("other")}
-    candidate = replace(result.receipt, **kwargs)
+    candidate = _replace_receipt(result.receipt, **kwargs)
     assert candidate.hash != result.receipt.hash
     from product.kernel import validate_receipt
 
@@ -221,8 +228,47 @@ def test_certification_result_cannot_forge_disposition():
     result = certify(data)
     from product.certification.receipt import CertificationResult
 
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError, match="internal"):
         CertificationResult(result.verification, CertificationDisposition.BLOCKED, result.receipt)
+
+
+def test_public_receipt_constructor_cannot_create_certified_receipt():
+    data = _input()
+    result = certify(data)
+    with pytest.raises(TypeError, match="internal"):
+        Receipt(
+            result.receipt.acceptance_contract_hash,
+            result.receipt.change_set_hash,
+            result.receipt.verification_plan_hash,
+            result.receipt.evidence_hash,
+            result.verification,
+            CertificationDisposition.CERTIFIED,
+            CertificationPolicy(True, True, True, True),
+        )
+
+
+def test_public_certification_result_constructor_cannot_create_result():
+    data = _input()
+    result = certify(data)
+    from product.certification.receipt import CertificationResult
+
+    with pytest.raises(TypeError, match="internal"):
+        CertificationResult(result.verification, result.disposition, result.receipt)
+
+
+def test_extra_physical_receipt_field_fails_closed_everywhere():
+    data = _input()
+    receipt = certify(data).receipt
+    payload = receipt.to_dict()
+    object.__setattr__(receipt, "unexpected", True)
+
+    assert not receipt.validate()
+    with pytest.raises(ValueError, match="fields"):
+        receipt.to_dict()
+    assert not validate_receipt(receipt, data)
+    from product.certification.receipt import _validate_receipt_envelope
+
+    assert _validate_receipt_envelope(payload, receipt)
 
 
 def test_kernel_reexports_receipt_contract():
@@ -261,7 +307,7 @@ def test_claimed_hashes_cannot_be_serialized_or_used_as_trust_roots():
             expected_bundle=forged_evidence,
         )
     receipt = certify(data).receipt
-    forged_receipt = replace(receipt, claimed_receipt_hash=_hash("forged"))
+    forged_receipt = _replace_receipt(receipt, claimed_receipt_hash=_hash("forged"))
     with pytest.raises(ValueError, match="claimed_receipt_hash"):
         forged_receipt.to_dict()
 
@@ -743,7 +789,7 @@ def test_certification_rejects_non_boolean_policy_fields(field, value):
 
 def test_receipt_rejects_contradictory_certified_missing_result():
     result = reduce_verification(IntegrityStatus.MISSING)
-    with pytest.raises(ValueError, match="disposition must match reducer"):
+    with pytest.raises(TypeError, match="internal"):
         Receipt(
             _hash("contract"),
             _hash("change"),
@@ -757,7 +803,7 @@ def test_receipt_rejects_contradictory_certified_missing_result():
 
 def test_receipt_binds_protocol_and_claim_ceiling():
     result = reduce_verification(IntegrityStatus.MISSING)
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError, match="internal"):
         Receipt(
             _hash("contract"),
             _hash("change"),
@@ -768,7 +814,7 @@ def test_receipt_binds_protocol_and_claim_ceiling():
             CertificationPolicy(),
             claim_ceiling=("OTHER",),
         )
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError, match="internal"):
         Receipt(
             _hash("contract"),
             _hash("change"),
@@ -779,7 +825,7 @@ def test_receipt_binds_protocol_and_claim_ceiling():
             CertificationPolicy(),
             protocol_version="old",
         )
-    with pytest.raises(ValueError):
+    with pytest.raises(TypeError, match="internal"):
         Receipt(
             _hash("contract"),
             _hash("change"),

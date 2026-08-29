@@ -43,6 +43,13 @@ def case(**kwargs):
     return CertificationInput(contract, change, plan, evidence=evidence, **kwargs)
 
 
+def _replace_receipt(receipt, **changes):
+    candidate = object.__new__(type(receipt))
+    for field in receipt.__dataclass_fields__:
+        object.__setattr__(candidate, field, changes.get(field, getattr(receipt, field)))
+    return candidate
+
+
 def test_happy_path_is_stable_and_bound():
     result = certify(
         case(
@@ -292,15 +299,17 @@ def test_receipt_round_trip_and_tamper_validation():
         receipt.hash
         == "sha256:" + hashlib.sha256(canonical_json(receipt.canonical_value).encode()).hexdigest()
     )
-    assert validate_receipt(replace(receipt, claimed_receipt_hash=receipt.hash), input_data)
-    with pytest.raises(ValueError):
+    assert validate_receipt(
+        _replace_receipt(receipt, claimed_receipt_hash=receipt.hash), input_data
+    )
+    with pytest.raises(TypeError, match="internal"):
         replace(receipt, claimed_receipt_hash="sha256:bad")
 
     subject_tampered = (
-        replace(receipt, acceptance_contract_hash=_hash("bad")),
-        replace(receipt, change_set_hash=_hash("bad")),
-        replace(receipt, verification_plan_hash=_hash("bad")),
-        replace(receipt, evidence_hash=_hash("bad")),
+        _replace_receipt(receipt, acceptance_contract_hash=_hash("bad")),
+        _replace_receipt(receipt, change_set_hash=_hash("bad")),
+        _replace_receipt(receipt, verification_plan_hash=_hash("bad")),
+        _replace_receipt(receipt, evidence_hash=_hash("bad")),
     )
     assert all(not validate_receipt(candidate, input_data) for candidate in subject_tampered)
     for changes in (

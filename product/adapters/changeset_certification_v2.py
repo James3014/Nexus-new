@@ -98,11 +98,15 @@ class EvidenceRef:
 class ChangeSetCertification:
     change_set: ChangeSetIdentity
     evidence: tuple[EvidenceRef, ...] = ()
-    status: CertificationStatus = dataclass_field(default_factory=_default_certification_status)
-    reason_codes: tuple[str, ...] = ()
+    status: CertificationStatus = dataclass_field(
+        default_factory=_default_certification_status, init=False
+    )
+    reason_codes: tuple[str, ...] = dataclass_field(default=(), init=False)
     envelope: Mapping[str, Any] | None = None
     schema: str = CHANGESET_CERTIFICATION_SCHEMA
-    verification_result: VerificationResult = reduce_verification(EvidenceCondition.MISSING)
+    verification_result: VerificationResult = dataclass_field(
+        default_factory=lambda: reduce_verification(EvidenceCondition.MISSING), init=False
+    )
 
     def to_dict(self) -> dict[str, Any]:
         # Compatibility dataclasses never emit the superseded legacy wire form.
@@ -123,6 +127,25 @@ def canonical_json(value: Any) -> str:
         separators=(",", ":"),
         allow_nan=False,
     )
+
+
+def _create_changeset_certification(
+    change_set: ChangeSetIdentity,
+    *,
+    status: CertificationStatus,
+    reason_codes: tuple[str, ...],
+    envelope: Mapping[str, Any] | None = None,
+    verification_result: VerificationResult,
+) -> ChangeSetCertification:
+    result = object.__new__(ChangeSetCertification)
+    object.__setattr__(result, "change_set", change_set)
+    object.__setattr__(result, "evidence", ())
+    object.__setattr__(result, "status", status)
+    object.__setattr__(result, "reason_codes", reason_codes)
+    object.__setattr__(result, "envelope", envelope)
+    object.__setattr__(result, "schema", CHANGESET_CERTIFICATION_SCHEMA)
+    object.__setattr__(result, "verification_result", verification_result)
+    return result
 
 
 def canonical_hash(value: Any) -> str:
@@ -732,7 +755,7 @@ def _result(
         str(candidate.get("commit", "")),
         str(diff.get("hash", "")),
     )
-    return ChangeSetCertification(
+    return _create_changeset_certification(
         identity,
         status=disposition,
         reason_codes=tuple(sorted(set(reasons))),
@@ -892,7 +915,7 @@ def _blocked(
 ) -> ChangeSetCertification:
     factual = verification_result or _unverifiable((reason,))
     disposition = certify_result(factual, CertificationPolicy())
-    return ChangeSetCertification(
+    return _create_changeset_certification(
         ChangeSetIdentity("", "", "", ""),
         status=disposition,
         reason_codes=(reason,),
@@ -907,7 +930,13 @@ def _unverifiable(
 
 
 def _texts(value: Mapping[str, Any], keys: tuple[str, ...]) -> bool:
-    return all(isinstance(value.get(k), str) and bool(value[k].strip()) for k in keys)
+    return all(
+        isinstance(value.get(k), str)
+        and bool(value[k])
+        and value[k] == value[k].strip()
+        and "\x00" not in value[k]
+        for k in keys
+    )
 
 
 def _exact(value: Mapping[str, Any], expected: set[str]) -> bool:
@@ -919,7 +948,7 @@ def _hash(value: Any) -> bool:
         isinstance(value, str)
         and len(value) == _HASH_LEN
         and value.startswith("sha256:")
-        and all(c in "0123456789abcdef" for c in value[7:].lower())
+        and all(c in "0123456789abcdef" for c in value[7:])
     )
 
 

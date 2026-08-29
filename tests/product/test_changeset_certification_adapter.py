@@ -471,3 +471,86 @@ def test_semantic_outputs_roundtrip_through_validator(mutation):
     _rehash(payload)
     output = adapter.certify_changeset(payload).to_dict()
     assert adapter.validate_changeset_certification(output) == ()
+
+
+@pytest.mark.parametrize("bad", [" leading", "trailing ", "embedded\x00nul"])
+def test_identity_text_fields_reject_whitespace_and_nul(bad):
+    fields = (
+        ("task", "task_id"),
+        ("task", "attempt_id"),
+        ("repository", "repository"),
+        ("repository", "source"),
+        ("base", "commit"),
+        ("base", "tree"),
+        ("candidate", "commit"),
+        ("candidate", "tree"),
+        ("verifier_manifest", "manifest_id"),
+        ("verifier_manifest", "task_id"),
+        ("verifier_manifest", "attempt_id"),
+        ("verifier_manifest", "repository"),
+        ("verifier_manifest", "source"),
+        ("verifier_manifest", "base_commit"),
+        ("verifier_manifest", "base_tree"),
+        ("verifier_manifest", "candidate_commit"),
+        ("verifier_manifest", "candidate_tree"),
+    )
+    for container, key in fields:
+        payload = _envelope()
+        payload[container][key] = bad
+        _rehash(payload)
+        result = adapter.certify_changeset(payload)
+        assert result.status is not CertificationDisposition.CERTIFIED
+        assert adapter.validate_changeset_certification(result) != ()
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ("diff", "hash"),
+        ("candidate", "diff_hash"),
+        ("verifier_manifest", "diff_hash"),
+        ("verifier_manifest.verifiers.0", "artifact_hash"),
+    ],
+)
+def test_sha256_fields_require_exact_lowercase_digest(path):
+    payload = _envelope()
+    target = payload
+    for part in path[0].split("."):
+        target = target[int(part)] if part.isdigit() else target[part]
+    target[path[1]] = "sha256:" + "A" * 64
+    _rehash(payload)
+    result = adapter.certify_changeset(payload)
+    assert result.status is not CertificationDisposition.CERTIFIED
+    assert adapter.validate_changeset_certification(result) != ()
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ("verifier_manifest", "manifest_hash"),
+        (None, "canonical_payload_hash"),
+    ],
+)
+def test_dependent_sha256_fields_reject_uppercase_without_empty_validation(path):
+    payload = _envelope()
+    _rehash(payload)
+    target = payload if path[0] is None else payload[path[0]]
+    target[path[1]] = "sha256:" + "A" * 64
+
+    result = adapter.certify_changeset(payload)
+
+    assert result.status is not CertificationDisposition.CERTIFIED
+    assert adapter.validate_changeset_certification(payload) != ()
+
+
+def test_public_certification_constructor_rejects_reducer_owned_fields():
+    identity = adapter.ChangeSetIdentity("cs", "base", "target", "sha256:" + "a" * 64)
+    factual = reduce_verification(EvidenceCondition.MISSING)
+    assert not hasattr(adapter.ChangeSetCertification, "_from_reducer")
+    with pytest.raises(TypeError):
+        adapter.ChangeSetCertification(
+            identity,
+            status=CertificationDisposition.CERTIFIED,
+            reason_codes=(),
+            verification_result=factual,
+        )

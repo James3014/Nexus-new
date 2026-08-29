@@ -1,6 +1,11 @@
 # 測試影響映射 (Impact Map)
 | 程式碼路徑 | 測試集合 (Directories/Files) | 狀態 | 風險 | 風險原因 |
 | :--- | :--- | :--- | :--- | :--- |
+| product | tests/product | active | high | product_contract |
+| product/kernel/__init__.py | tests/product, tests/product/test_kernel.py | active | high | product_kernel_contract |
+| product/adapters/github.py | tests/product, tests/product/test_github_adapter.py | active | high | product_github_adapter_contract |
+| product/benchmark/__init__.py | tests/product, tests/product/test_false_completion_benchmark.py | active | high | product_benchmark_contract |
+| nexus/contracts/changeset_certification.py | tests/product, tests/contracts/test_changeset_certification.py, tests/product/test_changeset_certification_adapter.py | active | high | changeset_certification_contract |
 | tasks/github-issue-526-host-authority-and-canary-20260823/02-host-effect-authority-receipt.json | tests/contracts/test_gateway_deployment_contract.py, tests/ops/test_mcp_gateway_durable.py | active | high | gateway_host_authority_bundle_contract |
 | tasks/github-issue-526-host-authority-and-canary-20260823/10-durable-recovery-authority-receipt.json | tests/contracts/test_gateway_deployment_contract.py, tests/ops/test_mcp_gateway_durable.py | active | high | issue526_r1_recovery_authority_receipt_contract |
 | tasks/github-issue-526-host-authority-and-canary-20260823/10-r1-source-acceptance-evidence.json | tests/contracts/test_gateway_deployment_contract.py, tests/ops/test_mcp_gateway_durable.py | active | high | issue526_r1_source_acceptance_evidence_contract |

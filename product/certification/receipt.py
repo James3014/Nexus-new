@@ -100,7 +100,7 @@ def _policy_valid(policy):
     )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class Receipt:
     acceptance_contract_hash: str
     change_set_hash: str
@@ -113,6 +113,9 @@ class Receipt:
     protocol_version: str = PUBLIC_PROTOCOL_VERSION
     implementation_schema: str = IMPLEMENTATION_SCHEMA
     claimed_receipt_hash: str | None = None
+
+    def __init__(self, *args, **kwargs):
+        raise TypeError("Receipt construction is internal")
 
     def __post_init__(self):
         for field in (
@@ -173,19 +176,25 @@ class Receipt:
         return _SEALED_RECEIPT_HASH(self.canonical_value)
 
     def to_dict(self):
+        _require_exact_receipt_fields(self)
         if self.claimed_receipt_hash is not None and self.claimed_receipt_hash != self.hash:
             raise ValueError("claimed_receipt_hash does not match computed hash")
         return {**self.canonical_value, "receipt_hash": self.hash}
 
     def validate(self):
+        if not _has_exact_receipt_fields(self):
+            return False
         return self.claimed_receipt_hash is None or self.claimed_receipt_hash == self.hash
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class CertificationResult:
     verification: VerificationResult
     disposition: CertificationDisposition
     receipt: Receipt
+
+    def __init__(self, *args, **kwargs):
+        raise TypeError("CertificationResult construction is internal")
 
     def __post_init__(self):
         if type(self.verification) is not VerificationResult or not is_reduced_result(
@@ -206,8 +215,21 @@ class CertificationResult:
             raise ValueError("disposition must match reducer")
 
 
+_RECEIPT_FIELD_NAMES = frozenset(Receipt.__dataclass_fields__)
+
+
+def _has_exact_receipt_fields(receipt):
+    return set(vars(receipt)) == _RECEIPT_FIELD_NAMES
+
+
+def _require_exact_receipt_fields(receipt):
+    if not _has_exact_receipt_fields(receipt):
+        raise ValueError("receipt fields do not match sealed fields")
+
+
 def _make_sealed_receipt_body():
     def body(receipt):
+        _require_exact_receipt_fields(receipt)
         fields = vars(receipt)
         verification = fields["verification"]
         policy = fields["policy"]
@@ -265,6 +287,7 @@ _SEALED_RECEIPT_CORE_HASH = _make_receipt_core_hash(_SEALED_RECEIPT_BODY, _SEALE
 
 def _make_receipt_invariant(certifier, require_hash):
     def validate(receipt):
+        _require_exact_receipt_fields(receipt)
         fields = vars(receipt)
         for field in (
             "acceptance_contract_hash",
