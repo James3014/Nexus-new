@@ -644,9 +644,14 @@ def test_nonfinite_input_returns_structured_fail_closed_result() -> None:
 @pytest.mark.parametrize(
     ("field", "expected_status", "expected_reason"),
     [
-        ("repository", CertificationStatus.REJECTED, "cross_binding_mismatch"),
-        ("base", CertificationStatus.REJECTED, "cross_binding_mismatch"),
-        ("candidate", CertificationStatus.BLOCKED, "stale_changeset"),
+        pytest.param(
+            "repository",
+            CertificationStatus.REJECTED,
+            "cross_binding_mismatch",
+            id="repository",
+        ),
+        pytest.param("base", CertificationStatus.REJECTED, "cross_binding_mismatch", id="base"),
+        pytest.param("candidate", CertificationStatus.BLOCKED, "stale_changeset", id="candidate"),
     ],
 )
 def test_repository_base_candidate_manifest_bindings_are_not_substitutable(
