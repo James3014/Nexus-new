@@ -34,7 +34,9 @@ The RED tests define these exact provider-neutral values:
 - `IngestionResult(bundle: EvidenceBundle | None, receipt: IngestionReceipt, condition: IntegrityStatus, reason_codes: tuple[str, ...])`.
 - `derive_runtime_freshness(observation, evaluation_at)` and `ingest_evidence(context, submissions)`.
 
-Constructors enforce exact types, normalized values, duplicate-free sorted canonical inputs, RFC3339 UTC timestamps, and bounded lengths. Raw input shape errors raise `TypeError`/`ValueError`; trust/admission failures return an `IngestionResult` with no bundle. Reason codes are unique and sorted. Condition precedence is `TAMPERED > STALE > CROSS_BOUND > DUPLICATE > MALFORMED > MISSING`.
+Constructors enforce exact types, normalized nonblank timestamp strings, duplicate-free sorted canonical inputs, and bounded lengths. `derive_runtime_freshness` performs RFC3339 UTC parsing so malformed/non-UTC timestamp strings deterministically yield `CONVERGENCE_UNKNOWN`; a physically missing constructor field still raises `TypeError`. Other raw input shape errors raise `TypeError`/`ValueError`; trust/admission failures return an `IngestionResult` with no bundle. Successful admission requires `bundle is not None`, `condition is IntegrityStatus.VALID`, and `reason_codes == ()`; `VALID` without a bundle is forbidden. Every non-VALID result has `bundle=None`.
+
+Failure reasons are unique/sorted and use only this closed vocabulary: `TAMPERED:content_hash`, `TAMPERED:provenance_hash`, `STALE:subject`, `STALE:generation`, `STALE:observation`, `CROSS_BOUND:producer`, `CROSS_BOUND:repository`, `CROSS_BOUND:tree`, `CROSS_BOUND:changeset`, `CROSS_BOUND:artifact`, `CROSS_BOUND:runtime`, `DUPLICATE:artifact`, `DUPLICATE:verifier`, `MALFORMED:profile`, `MALFORMED:requirement`, `MALFORMED:submission`, `MALFORMED:provenance`, `MALFORMED:evidence_type`, `MALFORMED:producer_role`, `MALFORMED:generation`, `MALFORMED:timestamp`, `MALFORMED:runtime`, `MALFORMED:trust_reference`, `MISSING:required_verifier`, `MISSING:source_locator`, `MISSING:execution`, `MISSING:runtime_identity`, `MISSING:ready_identity`, and `MISSING:prerequisite`. Missing verifier IDs are recorded in a separate sorted receipt field and never interpolated into reason strings. Condition precedence is `TAMPERED > STALE > CROSS_BOUND > DUPLICATE > MALFORMED > MISSING`.
 
 `Observation.artifact_hash` is always the canonical provenance-envelope hash. The envelope contains the independently recomputed raw `content_hash`; the ingestion receipt exposes both. Tests independently mutate raw bytes, claimed content hash, and every envelope field.
 
@@ -54,6 +56,8 @@ All comparisons use caller-supplied, exact RFC3339 UTC `evaluation_at`; no wall 
 9. Exact source/runtime identities, exact generation, unexpired observation, and `READY` → `READY_IDENTITY_BOUND`.
 
 Process presence/liveness is not an input capable of producing `READY_IDENTITY_BOUND`.
+
+Admission maps freshness deterministically: malformed/non-UTC time → `MALFORMED`/`MALFORMED:timestamp`; generation mismatch → `STALE`/`STALE:generation`; future/expired observation time → `STALE`/`STALE:observation`; `SOURCE_AHEAD_OF_RUNTIME` → `STALE`/`STALE:subject`; `RUNTIME_IDENTITY_MISMATCH` → `CROSS_BOUND`/`CROSS_BOUND:runtime`; missing desired/loaded source → `MISSING`/`MISSING:source_locator`; missing runtime identity → `MISSING`/`MISSING:runtime_identity`; absent or non-`READY` readiness → `MISSING`/`MISSING:ready_identity`. `SOURCE_ALIGNED` is accepted only for a `SOURCE` requirement that does not require runtime readiness. `READY_IDENTITY_BOUND` is accepted only for a `RUNTIME` requirement. If multiple freshness failures are physically observable, the global condition precedence above applies and all reason codes remain sorted.
 
 ### Prerequisite trust boundary
 
