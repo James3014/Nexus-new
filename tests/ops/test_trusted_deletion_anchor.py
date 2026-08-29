@@ -30,6 +30,186 @@ ROOT = Path(__file__).parents[2]
 WORKFLOW = ROOT / ".github/workflows/trusted-deletion-anchor.yml"
 
 
+def _package_contract_pyproject(*, packages: str, suffix: str = "") -> bytes:
+    return (
+        """[project]
+name = "fixture"
+version = "1"
+dependencies = ["trusted==1"]
+optional-dependencies = { test = ["pytest==9"] }
+
+[tool.poetry]
+name = "fixture"
+version = "1"
+packages = [
+"""
+        + packages
+        + """
+]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+
+[tool.poetry.extras]
+test = ["pytest"]
+
+[tool.poetry.scripts]
+fixture = "fixture:main"
+
+[build-system]
+requires = ["poetry-core>=1"]
+build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = ["pytest==9"]
+"""
+        + suffix
+    ).encode()
+
+
+@pytest.mark.parametrize(
+    "packages",
+    [
+        '{include = "product"}, {include = "nexus"}, {include = "scripts"}',
+        '{include = "nexus"}, {include = "product"}, {include = "scripts"}',
+        '{include = "nexus"}, {include = "scripts"}, {include = "product"}',
+    ],
+)
+def test_trusted_package_contract_allows_exact_product_package_only_delta(packages: str) -> None:
+    trusted = _package_contract_pyproject(packages='{include = "nexus"}, {include = "scripts"}')
+    head = _package_contract_pyproject(packages=packages)
+
+    trusted_anchor._validate_trusted_dependency_contract(
+        trusted,
+        head,
+        b"version = 1\n",
+        b"version = 1\n",
+        head_product_init_is_regular=True,
+    )
+
+
+@pytest.mark.parametrize(
+    ("name", "head", "head_lock", "product_init_is_regular"),
+    [
+        (
+            "dependency drift",
+            _package_contract_pyproject(
+                packages='{include = "nexus"}, {include = "scripts"}, {include = "product"}'
+            ).replace(b"trusted==1", b"hostile==2"),
+            b"version = 1\n",
+            True,
+        ),
+        (
+            "dependency groups drift",
+            _package_contract_pyproject(
+                packages='{include = "nexus"}, {include = "scripts"}, {include = "product"}'
+            ).replace(b'dev = ["pytest==9"]', b'dev = ["hostile"]'),
+            b"version = 1\n",
+            True,
+        ),
+        (
+            "build system drift",
+            _package_contract_pyproject(
+                packages='{include = "nexus"}, {include = "scripts"}, {include = "product"}'
+            ).replace(b'requires = ["poetry-core>=1"]', b'requires = ["hostile"]'),
+            b"version = 1\n",
+            True,
+        ),
+        (
+            "scripts and extras drift",
+            _package_contract_pyproject(
+                packages='{include = "nexus"}, {include = "scripts"}, {include = "product"}'
+            ).replace(b'test = ["pytest"]', b'test = ["hostile"]'),
+            b"version = 1\n",
+            True,
+        ),
+        (
+            "lock drift",
+            _package_contract_pyproject(
+                packages='{include = "nexus"}, {include = "scripts"}, {include = "product"}'
+            ),
+            b"version = 2\n",
+            True,
+        ),
+        (
+            "existing package removed",
+            _package_contract_pyproject(packages='{include = "nexus"}, {include = "product"}'),
+            b"version = 1\n",
+            True,
+        ),
+        (
+            "existing package reordered",
+            _package_contract_pyproject(
+                packages='{include = "scripts"}, {include = "nexus"}, {include = "product"}'
+            ),
+            b"version = 1\n",
+            True,
+        ),
+        (
+            "duplicate product package",
+            _package_contract_pyproject(
+                packages='{include = "nexus"}, {include = "scripts"}, {include = "product"}, {include = "product"}'
+            ),
+            b"version = 1\n",
+            True,
+        ),
+        (
+            "product package extra key",
+            _package_contract_pyproject(
+                packages='{include = "nexus"}, {include = "scripts"}, {include = "product", from = "src"}'
+            ),
+            b"version = 1\n",
+            True,
+        ),
+        (
+            "other package added",
+            _package_contract_pyproject(
+                packages='{include = "nexus"}, {include = "scripts"}, {include = "other"}'
+            ),
+            b"version = 1\n",
+            True,
+        ),
+        (
+            "malformed TOML",
+            b"[tool.poetry\n",
+            b"version = 1\n",
+            True,
+        ),
+        (
+            "missing product init",
+            _package_contract_pyproject(
+                packages='{include = "nexus"}, {include = "scripts"}, {include = "product"}'
+            ),
+            b"version = 1\n",
+            False,
+        ),
+        (
+            "arbitrary metadata drift",
+            _package_contract_pyproject(
+                packages='{include = "nexus"}, {include = "scripts"}, {include = "product"}',
+                suffix="\n[tool.hostile]\nvalue = true\n",
+            ),
+            b"version = 1\n",
+            True,
+        ),
+    ],
+)
+def test_trusted_package_contract_rejects_every_non_allowlisted_delta(
+    name: str, head: bytes, head_lock: bytes, product_init_is_regular: bool
+) -> None:
+    del name
+    trusted = _package_contract_pyproject(packages='{include = "nexus"}, {include = "scripts"}')
+
+    with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+        trusted_anchor._validate_trusted_dependency_contract(
+            trusted,
+            head,
+            b"version = 1\n",
+            head_lock,
+            head_product_init_is_regular=product_init_is_regular,
+        )
+
+
 def _workflow() -> dict[str, object]:
     return yaml.safe_load(WORKFLOW.read_text())
 
@@ -1300,10 +1480,12 @@ def test_workflow_is_three_job_isolated_anchor():
     for job in workflow["jobs"].values():
         for step in job["steps"]:
             assert "actions/checkout@" not in step.get("uses", "")
-            if step.get("uses", "").startswith((
-                "actions/upload-artifact@",
-                "actions/download-artifact@",
-            )):
+            if step.get("uses", "").startswith(
+                (
+                    "actions/upload-artifact@",
+                    "actions/download-artifact@",
+                )
+            ):
                 pin = step["uses"].split("@", 1)[1].split()[0]
                 assert re.fullmatch(r"[0-9a-f]{40}", pin)
     assert "--verify-evidence" in next(
