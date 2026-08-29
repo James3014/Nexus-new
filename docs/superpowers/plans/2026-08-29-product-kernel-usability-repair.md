@@ -25,7 +25,7 @@ The RED tests define these exact provider-neutral values:
 - `IssuerGrant(issuer_id: str, roles: tuple[TrustRole, ...], actions: tuple[str, ...], verification_methods: tuple[str, ...])`.
 - `IngestionProfile(profile_id: str, producers: tuple[ProducerGrant, ...], issuers: tuple[IssuerGrant, ...], max_age_seconds: int)` with a canonical `hash`.
 - `EvidenceRequirement(verifier_id: str, evidence_type: EvidenceType, generation: EvidenceGeneration, runtime_ready_required: bool, human_semantic_review_required: bool)`.
-- `RuntimeSourceObservation(desired_source_revision: str, loaded_source_revision: str, expected_runtime_identity: str, observed_runtime_identity: str, desired_generation: int, observed_generation: int, observed_at: str, expires_at: str, readiness_status: str)`.
+- `RuntimeSourceObservation(generation: EvidenceGeneration, desired_source_revision: str, loaded_source_revision: str, expected_runtime_identity: str | None, observed_runtime_identity: str | None, desired_generation: int, observed_generation: int, observed_at: str, expires_at: str, readiness_status: str | None)`; its constructor accepts only `SOURCE` or `RUNTIME` and rejects `EXECUTION`/`LEGACY_NARRATIVE` with `ValueError`.
 - `ProvenanceEnvelope(schema: str, evidence_id: str, evidence_type: EvidenceType, verifier_id: str, artifact_id: str, producer_id: str, producer_role: ProducerRole, producer_software_hash: str, repository_id: str, source_revision: str, source_tree: str, target_revision: str, target_tree: str, change_set_hash: str, diff_hash: str, generated_at: str, source_locator: str, content_hash: str, verification_method: str, execution_id: str, attempt_id: str, environment_hash: str, generation: EvidenceGeneration, runtime: RuntimeSourceObservation | None)` with canonical `hash`.
 - `EvidenceSubmission(content: bytes, status: ObservationStatus, provenance: ProvenanceEnvelope)`.
 - `TrustReference(role: TrustRole, evidence_id: str, issuer_id: str, subject_hash: str, action: str, decision: TrustDecision, issued_at: str, expires_at: str, revoked_at: str | None, payload_hash: str, signed_payload_hash: str, verification_method: str, external_verification_receipt: bytes, external_verification_receipt_hash: str)`.
@@ -42,14 +42,16 @@ Constructors enforce exact types, normalized values, duplicate-free sorted canon
 
 All comparisons use caller-supplied, exact RFC3339 UTC `evaluation_at`; no wall clock is read inside Product code. Precedence:
 
+0. A runtime observation carrying `EXECUTION` or `LEGACY_NARRATIVE` generation is invalid at construction and never reaches classification.
 1. Missing/malformed fields or non-UTC timestamps → `CONVERGENCE_UNKNOWN`.
 2. Observation time after evaluation time, evaluation after `expires_at`, or `observed_generation != desired_generation` → `STALE_OBSERVATION`.
 3. Missing desired/loaded source → `CONVERGENCE_UNKNOWN`.
 4. `loaded_source_revision != desired_source_revision` → `SOURCE_AHEAD_OF_RUNTIME`.
-5. `observed_runtime_identity != expected_runtime_identity` → `RUNTIME_IDENTITY_MISMATCH`.
-6. Source-generation evidence with exact source binding and no runtime-readiness claim → `SOURCE_ALIGNED`.
-7. Runtime evidence whose readiness status is not exact `READY` → `CONVERGENCE_UNKNOWN`.
-8. Exact source/runtime identities, exact generation, unexpired observation, and `READY` → `READY_IDENTITY_BOUND`.
+5. `generation == SOURCE` requires both runtime identities and readiness to be `None`; exact source/generation/time binding then yields `SOURCE_ALIGNED`.
+6. `generation == RUNTIME` requires nonblank expected/observed runtime identities and readiness; missing values → `CONVERGENCE_UNKNOWN`.
+7. For runtime generation, `observed_runtime_identity != expected_runtime_identity` → `RUNTIME_IDENTITY_MISMATCH`.
+8. Runtime evidence whose readiness status is not exact `READY` → `CONVERGENCE_UNKNOWN`.
+9. Exact source/runtime identities, exact generation, unexpired observation, and `READY` → `READY_IDENTITY_BOUND`.
 
 Process presence/liveness is not an input capable of producing `READY_IDENTITY_BOUND`.
 
