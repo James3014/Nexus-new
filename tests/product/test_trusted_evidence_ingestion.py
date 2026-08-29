@@ -63,6 +63,12 @@ def test_exact_dataclass_fields_and_order_are_frozen():
     assert tuple(field.name for field in fields(api.TrustReference)) == ("role", "evidence_id", "issuer_id", "subject_hash", "action", "decision", "issued_at", "expires_at", "revoked_at", "payload_hash", "signed_payload_hash", "verification_method", "external_verification_receipt", "external_verification_receipt_hash")
 
 
+def test_every_frozen_ingestion_contract_is_immutable():
+    api = _api()
+    names = ("ProducerGrant", "IssuerGrant", "IngestionProfile", "EvidenceRequirement", "RuntimeSourceObservation", "ProvenanceEnvelope", "EvidenceSubmission", "TrustReference", "TrustedIngestionContext", "IngestionReceipt", "IngestionResult")
+    assert all(getattr(api, name).__dataclass_params__.frozen for name in names)
+
+
 def test_valid_ingestion_binds_raw_hash_and_provenance_envelope_hash():
     api, context, submission, envelope = _fixture()
     result = api.ingest_evidence(context, (submission,))
