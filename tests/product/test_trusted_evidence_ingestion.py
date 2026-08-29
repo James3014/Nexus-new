@@ -34,7 +34,7 @@ def _fixture():
     runtime = _runtime(api)
     envelope = api.ProvenanceEnvelope("product.evidence.provenance.v1", "evidence-1", api.EvidenceType.VERIFIER_RESULT, "unit", "artifact-1", "producer-1", api.ProducerRole.VERIFIER, producer.software_hash, "repo-1", "source-r1", "tree-source", "target-r2", "tree-target", change.hash, change.diff_hash, _at(-10), "tests/test_a.py", "sha256:" + hashlib.sha256(raw).hexdigest(), "pytest", "exec-1", "attempt-1", _hash("environment"), api.EvidenceGeneration.RUNTIME, runtime)
     submission = api.EvidenceSubmission(raw, ObservationStatus.PASS, envelope)
-    requirement = api.EvidenceRequirement("unit", api.EvidenceType.VERIFIER_RESULT, api.EvidenceGeneration.RUNTIME, True, False)
+    requirement = api.EvidenceRequirement("unit", "artifact-1", api.EvidenceType.VERIFIER_RESULT, api.EvidenceGeneration.RUNTIME, "producer-1", "exec-1", "attempt-1", _hash("environment"), "sha256:" + hashlib.sha256(raw).hexdigest(), envelope.hash, True, False)
     reference = api.TrustReference(api.TrustRole.AUTHORITY, "evidence-1", "issuer-1", _hash("subject"), "merge", api.TrustDecision.ALLOW, _at(-20), _at(3500), None, _hash("payload"), _hash("signed-payload"), "pytest", b"external receipt", "sha256:" + hashlib.sha256(b"external receipt").hexdigest())
     context = api.TrustedIngestionContext(contract, change, plan, "repo-1", "tree-source", "tree-target", _at(), profile, profile.hash, (requirement,), "merge", ((api.TrustRole.AUTHORITY, reference.payload_hash),))
     return api, context, submission, envelope
@@ -52,13 +52,13 @@ def test_public_api_and_exact_enum_members_are_frozen():
 
 def test_exact_dataclass_fields_and_order_are_frozen():
     api = _api()
-    expected = {"ProducerGrant": ("producer_id", "role", "software_hash", "verification_methods"), "IssuerGrant": ("issuer_id", "roles", "actions", "verification_methods"), "IngestionProfile": ("profile_id", "producers", "issuers", "max_age_seconds"), "EvidenceRequirement": ("verifier_id", "evidence_type", "generation", "runtime_ready_required", "human_semantic_review_required"), "EvidenceSubmission": ("content", "status", "provenance"), "IngestionResult": ("bundle", "receipt", "condition", "reason_codes")}
+    expected = {"ProducerGrant": ("producer_id", "role", "software_hash", "verification_methods"), "IssuerGrant": ("issuer_id", "roles", "actions", "verification_methods"), "IngestionProfile": ("profile_id", "producers", "issuers", "max_age_seconds"), "EvidenceRequirement": ("verifier_id", "artifact_id", "evidence_type", "generation", "producer_id", "execution_id", "attempt_id", "environment_hash", "content_hash", "provenance_hash", "runtime_ready_required", "human_semantic_review_required"), "EvidenceSubmission": ("content", "status", "provenance"), "IngestionResult": ("bundle", "receipt", "condition", "reason_codes")}
     for name, names in expected.items():
         assert tuple(field.name for field in fields(getattr(api, name))) == names
     assert tuple(field.name for field in fields(api.RuntimeSourceObservation)) == ("generation", "desired_source_revision", "loaded_source_revision", "desired_generation", "observed_generation", "observed_at", "expires_at", "expected_runtime_identity", "observed_runtime_identity", "readiness_status")
     assert tuple(field.name for field in fields(api.ProvenanceEnvelope)) == ("schema", "evidence_id", "evidence_type", "verifier_id", "artifact_id", "producer_id", "producer_role", "producer_software_hash", "repository_id", "source_revision", "source_tree", "target_revision", "target_tree", "change_set_hash", "diff_hash", "generated_at", "source_locator", "content_hash", "verification_method", "execution_id", "attempt_id", "environment_hash", "generation", "runtime")
     assert tuple(field.name for field in fields(api.TrustedIngestionContext)) == ("contract", "change_set", "plan", "repository_id", "source_tree", "target_tree", "observed_at", "profile", "expected_profile_hash", "requirements", "required_action", "prerequisite_payload_hashes")
-    assert tuple(field.name for field in fields(api.IngestionReceipt)) == ("bundle_hash", "observations", "machine_verified_count", "human_open_count", "reason_codes", "receipt_hash")
+    assert tuple(field.name for field in fields(api.IngestionReceipt)) == ("context_hash", "profile_hash", "bundle_hash", "raw_content_hashes", "provenance_hashes", "observations", "freshness", "machine_verified_artifact_ids", "human_open_artifact_ids", "human_open_reasons", "missing_verifier_ids", "reason_codes", "receipt_hash")
     assert tuple(field.name for field in fields(api.TrustReference)) == ("role", "evidence_id", "issuer_id", "subject_hash", "action", "decision", "issued_at", "expires_at", "revoked_at", "payload_hash", "signed_payload_hash", "verification_method", "external_verification_receipt", "external_verification_receipt_hash")
 
 
@@ -69,6 +69,8 @@ def test_valid_ingestion_binds_raw_hash_and_provenance_envelope_hash():
     assert result.condition is api.IntegrityStatus.VALID and result.reason_codes == ()
     assert result.receipt.observations[0].status is ObservationStatus.PASS
     assert result.receipt.observations[0].artifact_hash == envelope.hash
+    assert result.receipt.raw_content_hashes == (envelope.content_hash,)
+    assert result.receipt.provenance_hashes == (envelope.hash,)
     assert envelope.content_hash == "sha256:" + hashlib.sha256(submission.content).hexdigest()
 
 
@@ -110,11 +112,24 @@ def test_non_runtime_generation_observation_is_rejected(generation):
         _runtime(api, generation=getattr(api.EvidenceGeneration, generation))
 
 
+def test_condition_helper_has_closed_vocabulary_and_exact_precedence():
+    api = _api()
+    assert api.condition_for_ingestion_reasons(()) is api.IntegrityStatus.VALID
+    ordered = ["TAMPERED:content_hash", "STALE:observation", "CROSS_BOUND:runtime", "DUPLICATE:artifact", "MALFORMED:submission", "MISSING:prerequisite"]
+    for index, reason in enumerate(ordered):
+        assert api.condition_for_ingestion_reasons(tuple(ordered[index:])) is getattr(api.IntegrityStatus, reason.split(":")[0])
+    with pytest.raises(ValueError):
+        api.condition_for_ingestion_reasons(("UNKNOWN:reason",))
+    for higher, lower in zip(ordered, ordered[1:]):
+        assert api.condition_for_ingestion_reasons((lower, higher)) is getattr(api.IntegrityStatus, higher.split(":")[0])
+
+
 def test_content_and_envelope_hash_mutations_are_independently_tampered():
     api, context, submission, envelope = _fixture()
-    for mutated in (replace(submission, content=b"changed\n"), replace(submission, provenance=replace(envelope, content_hash=_hash("changed")))):
-        result = api.ingest_evidence(context, (mutated,))
-        assert result.condition is api.IntegrityStatus.TAMPERED and "TAMPERED:content_hash" in result.reason_codes
+    content_result = api.ingest_evidence(context, (replace(submission, content=b"changed\n"),))
+    envelope_result = api.ingest_evidence(context, (replace(submission, provenance=replace(envelope, content_hash=_hash("changed"))),))
+    assert content_result.condition is api.IntegrityStatus.TAMPERED and "TAMPERED:content_hash" in content_result.reason_codes
+    assert envelope_result.condition is api.IntegrityStatus.TAMPERED and "TAMPERED:provenance_hash" in envelope_result.reason_codes
 
 
 @pytest.mark.parametrize("field, condition, reason", [("artifact_id", "CROSS_BOUND", "CROSS_BOUND:artifact"), ("target_revision", "STALE", "STALE:subject"), ("producer_id", "CROSS_BOUND", "CROSS_BOUND:producer"), ("source_locator", "MISSING", "MISSING:source_locator"), ("evidence_type", "MALFORMED", "MALFORMED:evidence_type")])
@@ -133,12 +148,23 @@ def test_h7_old_readiness_generation_is_stale():
     assert result.bundle is None
 
 
-@pytest.mark.parametrize("field", ["producer_software_hash", "repository_id", "source_revision", "source_tree", "target_revision", "target_tree", "change_set_hash", "diff_hash", "generated_at", "source_locator", "verification_method", "execution_id", "attempt_id", "environment_hash", "generation", "runtime"])
+@pytest.mark.parametrize("field", ["schema", "evidence_id", "evidence_type", "verifier_id", "artifact_id", "producer_id", "producer_role", "producer_software_hash", "repository_id", "source_revision", "source_tree", "target_revision", "target_tree", "change_set_hash", "diff_hash", "generated_at", "verification_method", "execution_id", "attempt_id", "environment_hash", "generation", "runtime"])
 def test_every_provenance_field_mutation_is_rejected(field):
     api, context, submission, envelope = _fixture()
     value = _hash("mutated") if field.endswith("_hash") else (api.EvidenceGeneration.SOURCE if field == "generation" else None if field == "runtime" else "mutated")
     result = api.ingest_evidence(context, (replace(submission, provenance=replace(envelope, **{field: value})),))
     assert result.condition is not api.IntegrityStatus.VALID
+
+
+@pytest.mark.parametrize("field", ["evidence_id", "source_locator"])
+def test_informational_envelope_mutation_is_never_silent(field):
+    api, context, submission, envelope = _fixture()
+    mutated = replace(submission, provenance=replace(envelope, **{field: "mutated"}))
+    result = api.ingest_evidence(context, (mutated,))
+    if result.condition is api.IntegrityStatus.VALID:
+        assert result.receipt.provenance_hashes != (envelope.hash,)
+        assert result.receipt.raw_content_hashes == (envelope.content_hash,)
+        assert result.bundle.hash != api.ingest_evidence(context, (submission,)).bundle.hash
 
 
 def test_h12_identical_and_conflicting_duplicates_are_distinct():
@@ -162,7 +188,8 @@ def test_machine_and_human_semantic_review_accounting_are_separate():
     human = api.ingest_evidence(human_context, (submission,))
     assert machine.receipt.machine_verified_count == 1 and machine.receipt.human_open_count == 0
     assert human.receipt.machine_verified_count == 1 and human.receipt.human_open_count == 1
-    assert any("HUMAN" in reason for reason in human.reason_codes)
+    assert human.reason_codes == ()
+    assert human.receipt.human_open_reasons
 
 
 def test_constructor_type_bounds_sorted_and_duplicate_guards_fail_closed():
