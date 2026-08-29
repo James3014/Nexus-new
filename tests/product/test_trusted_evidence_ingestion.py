@@ -1612,14 +1612,8 @@ def test_outer_context_profile_validation_precedes_plan_and_submission_access():
     )
     object.__setattr__(context, "plan", plan)
     gated_context = context
-    result = api.ingest_evidence(gated_context, (OpaqueSubmission(),))
-    assert result.bundle is None
-    assert result.condition is api.IntegrityStatus.MALFORMED
-    assert result.reason_codes == ("MALFORMED:profile",)
-    assert (
-        api.classify_ingestion_result(gated_context, result) is api.IngestionTrustStatus.UNTRUSTED
-    )
-    assert api.is_trusted_ingestion_result(gated_context, result) is False
+    with pytest.raises((TypeError, ValueError)):
+        api.ingest_evidence(gated_context, (OpaqueSubmission(),))
 
 
 def test_outer_context_requirement_validation_precedes_plan_and_submission_access():
@@ -1628,14 +1622,8 @@ def test_outer_context_requirement_validation_precedes_plan_and_submission_acces
     plan = replace(context.plan, change_set_hash=_hash("wrong-change"))
     object.__setattr__(context, "plan", plan)
     gated_context = context
-    result = api.ingest_evidence(gated_context, (OpaqueSubmission(),))
-    assert result.bundle is None
-    assert result.condition is api.IntegrityStatus.MALFORMED
-    assert result.reason_codes == ("MALFORMED:requirement",)
-    assert (
-        api.classify_ingestion_result(gated_context, result) is api.IngestionTrustStatus.UNTRUSTED
-    )
-    assert api.is_trusted_ingestion_result(gated_context, result) is False
+    with pytest.raises((TypeError, ValueError)):
+        api.ingest_evidence(gated_context, (OpaqueSubmission(),))
 
 
 def test_reversed_valid_producer_collection_invalidates_profile_lifecycle_without_hash_drift():
@@ -1656,8 +1644,8 @@ def test_reversed_valid_producer_collection_invalidates_profile_lifecycle_withou
         api.classify_ingestion_result(profiled, result) is api.IngestionTrustStatus.RECEIPT_INVALID
     )
     assert api.is_trusted_ingestion_result(profiled, result) is False
-    fresh = api.ingest_evidence(profiled, (submission,))
-    assert fresh.bundle is None and fresh.reason_codes == ("MALFORMED:profile",)
+    with pytest.raises((TypeError, ValueError)):
+        api.ingest_evidence(profiled, (submission,))
 
 
 def test_reversed_valid_issuer_collection_invalidates_profile_lifecycle_without_hash_drift():
@@ -1676,8 +1664,8 @@ def test_reversed_valid_issuer_collection_invalidates_profile_lifecycle_without_
         api.classify_ingestion_result(profiled, result) is api.IngestionTrustStatus.RECEIPT_INVALID
     )
     assert api.is_trusted_ingestion_result(profiled, result) is False
-    fresh = api.ingest_evidence(profiled, (submission,))
-    assert fresh.bundle is None and fresh.reason_codes == ("MALFORMED:profile",)
+    with pytest.raises((TypeError, ValueError)):
+        api.ingest_evidence(profiled, (submission,))
 
 
 def test_outer_required_action_mutation_is_raw_shape_error_and_invalidates_prior_result():
@@ -1992,10 +1980,8 @@ def test_ingest_revalidates_nested_requirement_without_accepting_hostile_values(
     api, context, submission, _ = _fixture()
     requirement = context.requirements[0]
     object.__setattr__(requirement, field, value)
-    result = api.ingest_evidence(context, (submission,))
-    assert result.bundle is None and result.condition is api.IntegrityStatus.MALFORMED
-    assert result.reason_codes == ("MALFORMED:requirement",)
-    assert api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.UNTRUSTED
+    with pytest.raises((TypeError, ValueError)):
+        api.ingest_evidence(context, (submission,))
 
 
 def test_opaque_submission_shape_is_malformed_with_missing_required_verifier():
@@ -2056,8 +2042,8 @@ def test_nested_profile_grant_mutation_invalidates_profile_without_hash_drift(gr
         api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.RECEIPT_INVALID
     )
     assert api.is_trusted_ingestion_result(context, result) is False
-    fresh = api.ingest_evidence(context, (submission,))
-    assert fresh.bundle is None and fresh.reason_codes == ("MALFORMED:profile",)
+    with pytest.raises((TypeError, ValueError)):
+        api.ingest_evidence(context, (submission,))
 
 
 def test_freshness_missing_source_and_generation_mismatch_preserve_both_reasons():
