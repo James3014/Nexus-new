@@ -1194,20 +1194,34 @@ def test_trusted_result_is_sealed_to_exact_context_and_minted_identity():
         )
 
 
-def test_trusted_result_registry_is_weak_object_identity_not_value_or_id_storage():
+def test_single_trusted_fingerprint_registry_is_the_only_registry():
     api, context, submission, _ = _fixture()
-    assert isinstance(api._TRUSTED_RESULTS, weakref.WeakSet)
+    assert isinstance(api._TRUSTED_FINGERPRINTS, weakref.WeakKeyDictionary)
+    assert not hasattr(api, "_TRUSTED_RESULTS")
     result = api.ingest_evidence(context, (submission,))
     result_ref = weakref.ref(result)
-    assert result in api._TRUSTED_RESULTS
+    assert result in api._TRUSTED_FINGERPRINTS
     lookalike = object.__new__(type(result))
     for field in fields(result):
         object.__setattr__(lookalike, field.name, getattr(result, field.name))
-    assert lookalike not in api._TRUSTED_RESULTS
+    assert lookalike not in api._TRUSTED_FINGERPRINTS
     assert api.is_trusted_ingestion_result(context, result) is True
     del result
     gc.collect()
     assert result_ref() is None
+
+
+def test_fingerprint_value_does_not_retain_context_after_context_is_dropped():
+    api, context, submission, _ = _fixture()
+    result = api.ingest_evidence(context, (submission,))
+    context_ref = weakref.ref(context)
+    assert result in api._TRUSTED_FINGERPRINTS
+    del context
+    gc.collect()
+    assert context_ref() is None
+    assert result in api._TRUSTED_FINGERPRINTS
+    del result
+    gc.collect()
 
 
 def test_distinct_issuer_objects_must_be_sorted_by_issuer_id():
@@ -1443,6 +1457,133 @@ def test_submission_tuple_collection_bound_is_checked_before_work():
     api, context, submission, _ = _fixture()
     with pytest.raises(ValueError):
         api.ingest_evidence(context, (submission,) * (api.MAX_COLLECTION_ITEMS + 1))
+
+
+def test_under_submitted_duplicate_verifier_uses_distinct_resealed_provenance():
+    api, context, submission, envelope = _fixture()
+    second_envelope = replace(envelope, evidence_id="evidence-2", artifact_id="artifact-2")
+    second_requirement = replace(
+        context.requirements[0], artifact_id="artifact-2", provenance_hash=second_envelope.hash
+    )
+    result = api.ingest_evidence(
+        replace(context, requirements=(context.requirements[0], second_requirement)), (submission,)
+    )
+    assert result.bundle is None and result.condition is api.IntegrityStatus.DUPLICATE
+    assert result.reason_codes == ("DUPLICATE:verifier",)
+
+
+def test_combined_reasons_retain_plan_mismatch_duplicate_and_stale_exactly():
+    api, context, submission, envelope = _fixture()
+    stale = replace(envelope, target_revision="stale")
+    other = replace(envelope, verifier_id="other", target_revision="stale")
+    stale_req = replace(context.requirements[0], verifier_id="unit", provenance_hash=stale.hash)
+    other_req = replace(context.requirements[0], verifier_id="other", provenance_hash=other.hash)
+    contract = replace(context.contract, required_verifier_ids=("unit", "other"))
+    plan = replace(
+        context.plan,
+        acceptance_contract_hash=_hash("wrong"),
+        required_verifier_ids=("unit", "other"),
+    )
+    result = api.ingest_evidence(
+        replace(context, contract=contract, plan=plan, requirements=(stale_req, other_req)),
+        (replace(submission, provenance=stale), replace(submission, provenance=other)),
+    )
+    assert result.bundle is None and result.condition is api.IntegrityStatus.STALE
+    assert result.reason_codes == ("CROSS_BOUND:changeset", "DUPLICATE:artifact", "STALE:subject")
+
+
+@pytest.mark.parametrize("value", ["", " ", "bad\x00timestamp", "x" * 4097])
+def test_runtime_timestamp_constructor_rejects_empty_whitespace_nul_and_oversize(value):
+    api, *_ = _fixture()
+    with pytest.raises((TypeError, ValueError)):
+        _runtime(api, observed_at=value)
+
+
+def test_runtime_not_utc_string_remains_constructible_but_unknown():
+    api, *_ = _fixture()
+    observation = _runtime(api, observed_at="not-utc")
+    assert api.derive_runtime_freshness(observation, _at()).name == "CONVERGENCE_UNKNOWN"
+
+
+def test_hostile_runtime_blank_source_revisions_map_to_missing_source_locator():
+    api, context, submission, envelope = _fixture()
+    runtime = _hostile_runtime(_runtime(api), desired_source_revision="", loaded_source_revision="")
+    assert api.derive_runtime_freshness(runtime, _at()).name == "CONVERGENCE_UNKNOWN"
+    changed = replace(envelope, runtime=runtime)
+    requirement = replace(context.requirements[0], provenance_hash=changed.hash)
+    result = api.ingest_evidence(
+        replace(context, requirements=(requirement,)), (replace(submission, provenance=changed),)
+    )
+    assert result.bundle is None and result.reason_codes == ("MISSING:source_locator",)
+
+
+@pytest.mark.parametrize("locator", [" ", "bad\x00locator"])
+def test_hostile_blank_or_nul_source_locator_is_missing_at_admission(locator):
+    api, context, submission, envelope = _fixture()
+    changed = _hostile_envelope(envelope, source_locator=locator)
+    requirement = replace(context.requirements[0], provenance_hash=changed.hash)
+    result = api.ingest_evidence(
+        replace(context, requirements=(requirement,)),
+        (api.EvidenceSubmission(submission.content, submission.status, changed),),
+    )
+    assert result.bundle is None and result.reason_codes == ("MISSING:source_locator",)
+
+
+def test_same_hash_context_clone_is_not_the_minted_context_identity():
+    api, context, submission, _ = _fixture()
+    result = api.ingest_evidence(context, (submission,))
+    clone = replace(context)
+    assert clone == context and clone is not context
+    assert api.classify_ingestion_result(clone, result) is api.IngestionTrustStatus.UNTRUSTED
+    assert api.is_trusted_ingestion_result(clone, result) is False
+
+
+def test_minted_tampered_result_is_untrusted_while_mutated_success_is_receipt_invalid():
+    api, context, submission, _ = _fixture()
+    tampered = api.ingest_evidence(context, (replace(submission, content=b"tampered"),))
+    assert tampered.condition is not api.IntegrityStatus.VALID
+    assert api.classify_ingestion_result(context, tampered) is api.IngestionTrustStatus.UNTRUSTED
+    assert api.is_trusted_ingestion_result(context, tampered) is False
+    valid = api.ingest_evidence(context, (submission,))
+    object.__setattr__(valid.receipt, "profile_hash", _hash("changed"))
+    assert api.classify_ingestion_result(context, valid) is api.IngestionTrustStatus.RECEIPT_INVALID
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        "2026-08-29 12:00:00+00:00",
+        "2026-08-29T12:00:00+00:00:00",
+        "2026-08-29T12:00:00,1+00:00",
+        "2026-08-29T12:00:00+08:00",
+    ],
+)
+def test_strict_rfc3339_utc_controls_reject_noncanonical_or_non_utc_times(timestamp):
+    api, *_ = _fixture()
+    observation = _runtime(api, observed_at=timestamp)
+    assert api.derive_runtime_freshness(observation, _at()).name == "CONVERGENCE_UNKNOWN"
+
+
+def test_rfc3339_z_and_explicit_utc_are_accepted_equivalently():
+    api, *_ = _fixture()
+    explicit = _runtime(
+        api, observed_at="2026-08-29T11:59:50+00:00", expires_at="2026-08-29T13:00:00+00:00"
+    )
+    zulu = _runtime(api, observed_at="2026-08-29T11:59:50Z", expires_at="2026-08-29T13:00:00Z")
+    assert api.derive_runtime_freshness(explicit, _at()).name == "READY_IDENTITY_BOUND"
+    assert api.derive_runtime_freshness(zulu, _at()).name == "READY_IDENTITY_BOUND"
+
+
+def test_trusted_fingerprint_registry_is_weak_keyed_and_releases_results():
+    api, context, submission, _ = _fixture()
+    assert isinstance(api._TRUSTED_FINGERPRINTS, weakref.WeakKeyDictionary)
+    results = [api.ingest_evidence(context, (submission,)) for _ in range(3)]
+    refs = [weakref.ref(result) for result in results]
+    assert all(result in api._TRUSTED_FINGERPRINTS for result in results)
+    results.clear()
+    gc.collect()
+    assert all(ref() is None for ref in refs)
+    assert len(api._TRUSTED_FINGERPRINTS) == 0
 
 
 def test_result_consistency_binds_reasons_condition_and_context_profile_bundle():
