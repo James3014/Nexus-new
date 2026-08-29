@@ -104,6 +104,7 @@ def _fixture():
         envelope.hash,
         True,
         False,
+        ObservationStatus.PASS,
     )
     reference = api.TrustReference(
         api.TrustRole.AUTHORITY,
@@ -192,6 +193,7 @@ def test_exact_dataclass_fields_and_order_are_frozen():
             "provenance_hash",
             "runtime_ready_required",
             "human_semantic_review_required",
+            "expected_status",
         ),
         "EvidenceSubmission": ("content", "status", "provenance"),
         "IngestionResult": ("bundle", "receipt", "condition", "reason_codes"),
@@ -631,6 +633,82 @@ def test_machine_and_human_semantic_review_accounting_are_separate():
     assert human.receipt.human_open_reasons == (("artifact-1", "semantic_review_required"),)
 
 
+def test_evidence_requirement_schema_is_v2_and_status_is_hash_bound():
+    api, context, _, envelope = _fixture()
+    assert api.EVIDENCE_REQUIREMENT_SCHEMA == "nexus.evidence_requirement.v2-experimental"
+    assert envelope.schema == "product.evidence.provenance.v1"
+    assert "expected_status" not in tuple(field.name for field in fields(type(envelope)))
+    requirement = context.requirements[0]
+    failed = replace(requirement, expected_status=ObservationStatus.FAIL)
+    failed_context = replace(context, requirements=(failed,))
+    envelope_hash = envelope.hash
+    assert requirement.hash != failed.hash
+    assert context.hash != failed_context.hash
+    assert envelope.hash == envelope_hash
+
+
+def test_expected_status_is_required_and_not_inferred_from_submission():
+    api, context, submission, _ = _fixture()
+    requirement = context.requirements[0]
+    args = [getattr(requirement, field.name) for field in fields(requirement)][:-1]
+    with pytest.raises(TypeError):
+        api.EvidenceRequirement(*args)
+    passed = api.ingest_evidence(context, (submission,))
+    assert api.is_trusted_ingestion_result(context, passed) is True
+    failed_submission = replace(submission, status=ObservationStatus.FAIL)
+    mismatch = api.ingest_evidence(context, (failed_submission,))
+    assert mismatch.bundle is None
+    assert mismatch.condition is api.IntegrityStatus.CROSS_BOUND
+    assert mismatch.reason_codes == ("CROSS_BOUND:observation_status",)
+    failed_requirement = replace(requirement, expected_status=ObservationStatus.FAIL)
+    failed_context = replace(context, requirements=(failed_requirement,))
+    accepted = api.ingest_evidence(failed_context, (failed_submission,))
+    assert accepted.bundle is not None and accepted.condition is api.IntegrityStatus.VALID
+    passed_mismatch = api.ingest_evidence(failed_context, (submission,))
+    assert passed_mismatch.bundle is None
+    assert passed_mismatch.condition is api.IntegrityStatus.CROSS_BOUND
+    assert passed_mismatch.reason_codes == ("CROSS_BOUND:observation_status",)
+
+
+@pytest.mark.parametrize("invalid", (None, "PASS", ObservationStatus.PASS.value))
+def test_expected_status_rejects_non_exact_status_values(invalid):
+    api, context, _, _ = _fixture()
+    requirement = context.requirements[0]
+    args = [getattr(requirement, field.name) for field in fields(requirement)][:-1]
+    with pytest.raises((TypeError, ValueError)):
+        api.EvidenceRequirement(*args, invalid)
+
+
+def test_pass_and_fail_requirement_variants_have_independent_trusted_identities():
+    api, context, submission, envelope = _fixture()
+    passed = api.ingest_evidence(context, (submission,))
+    failed_requirement = replace(context.requirements[0], expected_status=ObservationStatus.FAIL)
+    failed_context = replace(context, requirements=(failed_requirement,))
+    failed_submission = replace(submission, status=ObservationStatus.FAIL)
+    failed = api.ingest_evidence(failed_context, (failed_submission,))
+    assert passed.bundle is not None and failed.bundle is not None
+    assert api.is_trusted_ingestion_result(context, passed) is True
+    assert api.is_trusted_ingestion_result(failed_context, failed) is True
+    assert context.requirements[0].hash != failed_requirement.hash
+    assert context.hash != failed_context.hash
+    assert passed.bundle.hash != failed.bundle.hash
+    assert passed.receipt.receipt_hash != failed.receipt.receipt_hash
+    assert passed.receipt is not failed.receipt
+    assert envelope.hash == failed_submission.provenance.hash
+
+
+def test_status_mismatch_and_tampered_content_keep_tamper_precedence():
+    api, context, submission, _ = _fixture()
+    forged = replace(submission, content=b"forged", status=ObservationStatus.FAIL)
+    result = api.ingest_evidence(context, (forged,))
+    assert result.bundle is None
+    assert result.condition is api.IntegrityStatus.TAMPERED
+    assert result.reason_codes == (
+        "CROSS_BOUND:observation_status",
+        "TAMPERED:content_hash",
+    )
+
+
 def test_constructor_type_bounds_sorted_and_duplicate_guards_fail_closed():
     api = _api()
     with pytest.raises((TypeError, ValueError)):
@@ -710,6 +788,7 @@ def test_closed_reason_vocabulary_is_exact_and_missing_verifiers_are_not_interpo
         "CROSS_BOUND:acceptance_contract",
         "CROSS_BOUND:artifact",
         "CROSS_BOUND:runtime",
+        "CROSS_BOUND:observation_status",
         "DUPLICATE:artifact",
         "DUPLICATE:verifier",
         "MALFORMED:profile",
@@ -998,6 +1077,7 @@ _CLOSED_REASONS = {
     "CROSS_BOUND:changeset",
     "CROSS_BOUND:artifact",
     "CROSS_BOUND:runtime",
+    "CROSS_BOUND:observation_status",
     "DUPLICATE:artifact",
     "DUPLICATE:verifier",
     "MALFORMED:profile",
@@ -1135,7 +1215,9 @@ def test_canonical_constructors_reject_duplicate_or_unsorted_trust_inputs_and_em
 def test_fail_observation_remains_valid_machine_verified_evidence():
     api, context, submission, _ = _fixture()
     failed = replace(submission, status=ObservationStatus.FAIL)
-    result = api.ingest_evidence(context, (failed,))
+    requirement = replace(context.requirements[0], expected_status=ObservationStatus.FAIL)
+    failed_context = replace(context, requirements=(requirement,))
+    result = api.ingest_evidence(failed_context, (failed,))
     assert result.bundle is not None
     assert result.condition is api.IntegrityStatus.VALID and result.reason_codes == ()
     assert result.receipt.observations[0].status is ObservationStatus.FAIL
@@ -1596,6 +1678,62 @@ def test_reversed_valid_issuer_collection_invalidates_profile_lifecycle_without_
     assert api.is_trusted_ingestion_result(profiled, result) is False
     fresh = api.ingest_evidence(profiled, (submission,))
     assert fresh.bundle is None and fresh.reason_codes == ("MALFORMED:profile",)
+
+
+def test_outer_required_action_mutation_is_raw_shape_error_and_invalidates_prior_result():
+    api, context, submission, _ = _fixture()
+    result = api.ingest_evidence(context, (submission,))
+    assert api.is_trusted_ingestion_result(context, result) is True
+    object.__setattr__(context, "required_action", "")
+    assert (
+        api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.RECEIPT_INVALID
+    )
+    assert api.is_trusted_ingestion_result(context, result) is False
+    with pytest.raises((TypeError, ValueError)):
+        api.ingest_evidence(context, (submission,))
+
+
+def test_reversed_sorted_prerequisites_preserve_hash_but_fail_outer_shape_validation():
+    api, context, submission, _ = _fixture()
+    prerequisites = (
+        (api.TrustRole.AUTHORITY, _hash("authority")),
+        (api.TrustRole.APPROVAL, _hash("approval")),
+    )
+    profiled = replace(context, prerequisite_payload_hashes=prerequisites)
+    result = api.ingest_evidence(profiled, (submission,))
+    assert api.is_trusted_ingestion_result(profiled, result) is True
+    context_hash = profiled.hash
+    object.__setattr__(profiled, "prerequisite_payload_hashes", tuple(reversed(prerequisites)))
+    assert profiled.hash == context_hash
+    assert (
+        api.classify_ingestion_result(profiled, result) is api.IngestionTrustStatus.RECEIPT_INVALID
+    )
+    assert api.is_trusted_ingestion_result(profiled, result) is False
+    with pytest.raises((TypeError, ValueError)):
+        api.ingest_evidence(profiled, (submission,))
+
+
+@pytest.mark.parametrize(
+    "subject, field, value",
+    [
+        ("contract", "contract_id", ""),
+        ("change_set", "source_revision", ""),
+        ("plan", "required_verifier_ids", []),
+    ],
+)
+def test_outer_subject_mutation_is_raw_shape_error_and_invalidates_prior_result(
+    subject, field, value
+):
+    api, context, submission, _ = _fixture()
+    result = api.ingest_evidence(context, (submission,))
+    assert api.is_trusted_ingestion_result(context, result) is True
+    object.__setattr__(getattr(context, subject), field, value)
+    assert (
+        api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.RECEIPT_INVALID
+    )
+    assert api.is_trusted_ingestion_result(context, result) is False
+    with pytest.raises((TypeError, ValueError)):
+        api.ingest_evidence(context, (submission,))
 
 
 def test_submission_tuple_collection_bound_is_checked_before_work():
