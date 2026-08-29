@@ -1483,7 +1483,8 @@ def test_plan_change_set_gate_precedes_opaque_submission_inspection():
 def test_plan_acceptance_contract_gate_precedes_opaque_submission_inspection():
     api, context, _, _ = _fixture()
     plan = replace(context.plan, acceptance_contract_hash=_hash("wrong"))
-    gated_context = replace(context, plan=plan)
+    object.__setattr__(context, "plan", plan)
+    gated_context = context
     result = api.ingest_evidence(gated_context, (OpaqueSubmission(),))
     assert result.bundle is None
     assert result.condition is api.IntegrityStatus.CROSS_BOUND
@@ -1517,6 +1518,84 @@ def test_both_plan_subject_gates_precede_opaque_submission_with_sorted_reasons()
         api.classify_ingestion_result(gated_context, result) is api.IngestionTrustStatus.UNTRUSTED
     )
     assert api.is_trusted_ingestion_result(gated_context, result) is False
+
+
+def test_outer_context_profile_validation_precedes_plan_and_submission_access():
+    api, context, _, _ = _fixture()
+    object.__setattr__(context.profile.producers[0], "verification_methods", ["pytest"])
+    plan = replace(
+        context.plan,
+        acceptance_contract_hash=_hash("wrong-contract"),
+        change_set_hash=_hash("wrong-change"),
+    )
+    object.__setattr__(context, "plan", plan)
+    gated_context = context
+    result = api.ingest_evidence(gated_context, (OpaqueSubmission(),))
+    assert result.bundle is None
+    assert result.condition is api.IntegrityStatus.MALFORMED
+    assert result.reason_codes == ("MALFORMED:profile",)
+    assert (
+        api.classify_ingestion_result(gated_context, result) is api.IngestionTrustStatus.UNTRUSTED
+    )
+    assert api.is_trusted_ingestion_result(gated_context, result) is False
+
+
+def test_outer_context_requirement_validation_precedes_plan_and_submission_access():
+    api, context, _, _ = _fixture()
+    object.__setattr__(context.requirements[0], "runtime_ready_required", 1)
+    plan = replace(context.plan, change_set_hash=_hash("wrong-change"))
+    object.__setattr__(context, "plan", plan)
+    gated_context = context
+    result = api.ingest_evidence(gated_context, (OpaqueSubmission(),))
+    assert result.bundle is None
+    assert result.condition is api.IntegrityStatus.MALFORMED
+    assert result.reason_codes == ("MALFORMED:requirement",)
+    assert (
+        api.classify_ingestion_result(gated_context, result) is api.IngestionTrustStatus.UNTRUSTED
+    )
+    assert api.is_trusted_ingestion_result(gated_context, result) is False
+
+
+def test_reversed_valid_producer_collection_invalidates_profile_lifecycle_without_hash_drift():
+    api, context, submission, _ = _fixture()
+    producer_two = api.ProducerGrant(
+        "producer-2", api.ProducerRole.RUNTIME, _hash("producer-two"), ("runtime",)
+    )
+    profile = replace(context.profile, producers=(context.profile.producers[0], producer_two))
+    profiled = replace(context, profile=profile, expected_profile_hash=profile.hash)
+    result = api.ingest_evidence(profiled, (submission,))
+    assert result.bundle is not None
+    assert api.is_trusted_ingestion_result(profiled, result) is True
+    profile_hash = profiled.profile.hash
+    context_hash = profiled.hash
+    object.__setattr__(profiled.profile, "producers", tuple(reversed(profiled.profile.producers)))
+    assert profiled.profile.hash == profile_hash and profiled.hash == context_hash
+    assert (
+        api.classify_ingestion_result(profiled, result) is api.IngestionTrustStatus.RECEIPT_INVALID
+    )
+    assert api.is_trusted_ingestion_result(profiled, result) is False
+    fresh = api.ingest_evidence(profiled, (submission,))
+    assert fresh.bundle is None and fresh.reason_codes == ("MALFORMED:profile",)
+
+
+def test_reversed_valid_issuer_collection_invalidates_profile_lifecycle_without_hash_drift():
+    api, context, submission, _ = _fixture()
+    issuer_two = api.IssuerGrant("issuer-2", (api.TrustRole.AUTHORITY,), ("merge",), ("pytest",))
+    profile = replace(context.profile, issuers=(context.profile.issuers[0], issuer_two))
+    profiled = replace(context, profile=profile, expected_profile_hash=profile.hash)
+    result = api.ingest_evidence(profiled, (submission,))
+    assert result.bundle is not None
+    assert api.is_trusted_ingestion_result(profiled, result) is True
+    profile_hash = profiled.profile.hash
+    context_hash = profiled.hash
+    object.__setattr__(profiled.profile, "issuers", tuple(reversed(profiled.profile.issuers)))
+    assert profiled.profile.hash == profile_hash and profiled.hash == context_hash
+    assert (
+        api.classify_ingestion_result(profiled, result) is api.IngestionTrustStatus.RECEIPT_INVALID
+    )
+    assert api.is_trusted_ingestion_result(profiled, result) is False
+    fresh = api.ingest_evidence(profiled, (submission,))
+    assert fresh.bundle is None and fresh.reason_codes == ("MALFORMED:profile",)
 
 
 def test_submission_tuple_collection_bound_is_checked_before_work():
