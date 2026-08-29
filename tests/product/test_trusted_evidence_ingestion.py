@@ -1715,6 +1715,21 @@ def test_ingest_revalidates_nested_requirement_without_accepting_hostile_values(
     assert api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.UNTRUSTED
 
 
+def test_opaque_submission_shape_is_malformed_with_missing_required_verifier():
+    api, context, _, _ = _fixture()
+    result = api.ingest_evidence(context, (object(),))
+    assert result.bundle is None and result.condition is api.IntegrityStatus.MALFORMED
+    assert result.reason_codes == ("MALFORMED:submission", "MISSING:required_verifier")
+
+
+def test_opaque_and_tampered_submissions_preserve_tamper_precedence_and_both_reasons():
+    api, context, submission, _ = _fixture()
+    tampered = replace(submission, content=b"tampered")
+    result = api.ingest_evidence(context, (object(), tampered))
+    assert result.bundle is None and result.condition is api.IntegrityStatus.TAMPERED
+    assert result.reason_codes == ("MALFORMED:submission", "TAMPERED:content_hash")
+
+
 def test_freshness_missing_source_and_generation_mismatch_preserve_both_reasons():
     api, context, submission, envelope = _fixture()
     runtime = _hostile_runtime(
