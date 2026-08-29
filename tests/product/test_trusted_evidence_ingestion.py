@@ -1592,6 +1592,86 @@ def test_mint_history_cannot_upgrade_a_tampered_result_to_trusted():
     assert api.is_trusted_ingestion_result(context, tampered) is False
 
 
+def test_successful_mint_mutated_condition_or_reasons_is_receipt_invalid():
+    api, context, submission, _ = _fixture()
+    result = api.ingest_evidence(context, (submission,))
+    assert api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.TRUSTED
+    object.__setattr__(result, "condition", api.IntegrityStatus.TAMPERED)
+    assert (
+        api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.RECEIPT_INVALID
+    )
+    object.__setattr__(result, "condition", api.IntegrityStatus.VALID)
+    object.__setattr__(result, "reason_codes", ("MISSING:prerequisite",))
+    assert (
+        api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.RECEIPT_INVALID
+    )
+
+
+def test_freshness_stale_generation_precedes_missing_source():
+    api, *_ = _fixture()
+    observation = _hostile_runtime(
+        _runtime(api), desired_source_revision="", loaded_source_revision="", observed_generation=6
+    )
+    assert api.derive_runtime_freshness(observation, _at()).name == "STALE_OBSERVATION"
+
+
+def test_source_generation_with_equal_runtime_identity_and_ready_is_unknown_and_malformed():
+    api, context, submission, envelope = _fixture()
+    runtime = _runtime(api, generation=api.EvidenceGeneration.RUNTIME)
+    changed = replace(envelope, generation=api.EvidenceGeneration.SOURCE, runtime=runtime)
+    requirement = replace(
+        context.requirements[0],
+        generation=api.EvidenceGeneration.SOURCE,
+        runtime_ready_required=False,
+        provenance_hash=changed.hash,
+    )
+    result = api.ingest_evidence(
+        replace(context, requirements=(requirement,)), (replace(submission, provenance=changed),)
+    )
+    assert api.derive_runtime_freshness(runtime, _at()).name == "READY_IDENTITY_BOUND"
+    assert result.bundle is None and result.reason_codes == ("MALFORMED:runtime",)
+
+
+def test_runtime_generation_without_observation_is_missing_both_identity_reasons():
+    api, context, submission, envelope = _fixture()
+    changed = replace(envelope, runtime=None)
+    requirement = replace(
+        context.requirements[0], runtime_ready_required=False, provenance_hash=changed.hash
+    )
+    result = api.ingest_evidence(
+        replace(context, requirements=(requirement,)), (replace(submission, provenance=changed),)
+    )
+    assert result.bundle is None and result.condition is api.IntegrityStatus.MISSING
+    assert result.reason_codes == ("MISSING:ready_identity", "MISSING:runtime_identity")
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("verifier_id", ""),
+        ("artifact_id", ""),
+        ("producer_id", ""),
+        ("execution_id", ""),
+        ("attempt_id", ""),
+        ("evidence_type", "VERIFIER_RESULT"),
+        ("generation", "RUNTIME"),
+        ("environment_hash", "bad"),
+        ("content_hash", "bad"),
+        ("provenance_hash", "bad"),
+        ("runtime_ready_required", "yes"),
+        ("human_semantic_review_required", 1),
+    ],
+)
+def test_trusted_context_revalidates_hostile_nested_requirement_fields(field, value):
+    api, context, *_ = _fixture()
+    requirement = object.__new__(type(context.requirements[0]))
+    for item in fields(context.requirements[0]):
+        object.__setattr__(requirement, item.name, getattr(context.requirements[0], item.name))
+    object.__setattr__(requirement, field, value)
+    with pytest.raises((TypeError, ValueError)):
+        replace(context, requirements=(requirement,))
+
+
 def test_freshness_missing_source_and_generation_mismatch_preserve_both_reasons():
     api, context, submission, envelope = _fixture()
     runtime = _hostile_runtime(
