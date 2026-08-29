@@ -10,6 +10,7 @@ job allowed to run the packaged source.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -72,6 +73,97 @@ def _json(value: Any) -> bytes:
 
 def _sha(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+def _type_strict_equal(left: Any, right: Any) -> bool:
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(
+            _type_strict_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list):
+        return len(left) == len(right) and all(
+            _type_strict_equal(left_item, right_item)
+            for left_item, right_item in zip(left, right, strict=True)
+        )
+    return left == right
+
+
+def _validate_trusted_dependency_contract(
+    trusted_pyproject: bytes,
+    head_pyproject: bytes,
+    trusted_uv_lock: bytes,
+    head_uv_lock: bytes,
+    *,
+    head_product_init_is_regular: bool,
+) -> None:
+    """Allow only the exact Product package-discovery metadata delta."""
+
+    error = "PR dependency contract drifts from trusted default"
+    if head_uv_lock != trusted_uv_lock:
+        raise ValueError(error)
+    if head_pyproject == trusted_pyproject:
+        return
+    if not head_product_init_is_regular:
+        raise ValueError(error)
+    try:
+        import tomllib
+
+        trusted = tomllib.loads(trusted_pyproject.decode("utf-8"))
+        head = tomllib.loads(head_pyproject.decode("utf-8"))
+    except (ImportError, UnicodeDecodeError, ValueError) as exc:
+        raise ValueError(error) from exc
+
+    trusted_tool = trusted.get("tool")
+    head_tool = head.get("tool")
+    if not isinstance(trusted_tool, dict) or not isinstance(head_tool, dict):
+        raise ValueError(error)
+    trusted_poetry = trusted_tool.get("poetry")
+    head_poetry = head_tool.get("poetry")
+    if not isinstance(trusted_poetry, dict) or not isinstance(head_poetry, dict):
+        raise ValueError(error)
+    trusted_packages = trusted_poetry.get("packages")
+    head_packages = head_poetry.get("packages")
+    product_package = {"include": "product"}
+    if (
+        not isinstance(trusted_packages, list)
+        or not isinstance(head_packages, list)
+        or any(not isinstance(item, dict) for item in trusted_packages + head_packages)
+        or product_package in trusted_packages
+        or head_packages.count(product_package) != 1
+    ):
+        raise ValueError(error)
+    product_index = head_packages.index(product_package)
+    if not _type_strict_equal(
+        [*head_packages[:product_index], *head_packages[product_index + 1 :]],
+        trusted_packages,
+    ):
+        raise ValueError(error)
+
+    trusted_without_packages = copy.deepcopy(trusted)
+    head_without_packages = copy.deepcopy(head)
+    trusted_without_packages["tool"]["poetry"].pop("packages")
+    head_without_packages["tool"]["poetry"].pop("packages")
+    if not _type_strict_equal(head_without_packages, trusted_without_packages):
+        raise ValueError(error)
+
+
+def _tree_has_regular_file(repo: Path, revision: str, path: str) -> bool:
+    entry = _git(repo, "ls-tree", revision, "--", path)
+    if not isinstance(entry, str):
+        return False
+    metadata, separator, listed_path = entry.partition("\t")
+    fields = metadata.split()
+    return (
+        separator == "\t"
+        and listed_path == path
+        and len(fields) == 3
+        and fields[0] == "100644"
+        and fields[1] == "blob"
+        and len(fields[2]) == SHA_LENGTH
+        and all(character in "0123456789abcdef" for character in fields[2])
+    )
 
 
 def _git_object_id(value: bytes) -> str:
@@ -641,8 +733,13 @@ def _controller(args: argparse.Namespace) -> None:
     assert all(
         isinstance(value, bytes) for value in (pyproject, uv_lock, head_pyproject, head_uv_lock)
     )
-    if head_pyproject != pyproject or head_uv_lock != uv_lock:
-        raise ValueError("PR dependency contract drifts from trusted default")
+    _validate_trusted_dependency_contract(
+        pyproject,
+        head_pyproject,
+        uv_lock,
+        head_uv_lock,
+        head_product_init_is_regular=_tree_has_regular_file(repo, head_sha, "product/__init__.py"),
+    )
     requirements = (runtime_dir / "requirements.txt").read_bytes()
     runtime_archive = (runtime_dir / "runtime.tar").read_bytes()
     runtime_metadata = (runtime_dir / "runtime-metadata.json").read_bytes()
@@ -700,16 +797,14 @@ def _controller(args: argparse.Namespace) -> None:
     (output / "run_golden_behavior_eval.py").write_bytes(golden_evaluator)
     for name in RUNTIME_FILENAMES:
         (output / name).write_bytes((runtime_dir / name).read_bytes())
-    (output / "external-anchor.json").write_bytes(
-        _json({
-            "schema_version": SCHEMA_VERSION,
-            "manifest_sha256": _sha((output / "manifest.json").read_bytes()),
-            "workflow_identity": manifest["workflow_identity"],
-            "base_sha": manifest["base_sha"],
-            "head_sha": manifest["head_sha"],
-        })
-        + b"\n"
-    )
+    external_anchor = {
+        "schema_version": SCHEMA_VERSION,
+        "manifest_sha256": _sha((output / "manifest.json").read_bytes()),
+        "workflow_identity": manifest["workflow_identity"],
+        "base_sha": manifest["base_sha"],
+        "head_sha": manifest["head_sha"],
+    }
+    (output / "external-anchor.json").write_bytes(_json(external_anchor) + b"\n")
     (output / "trusted_deletion_anchor.py").write_bytes(Path(__file__).read_bytes())
 
 
@@ -1036,7 +1131,17 @@ def _verifier(args: argparse.Namespace) -> None:
             git_repo, "show", f"{manifest['head_sha']}:pyproject.toml", binary=True
         )
         head_uv_lock = _git(git_repo, "show", f"{manifest['head_sha']}:uv.lock", binary=True)
-        if head_pyproject != trusted_pyproject or head_uv_lock != trusted_uv_lock:
+        try:
+            _validate_trusted_dependency_contract(
+                trusted_pyproject,
+                head_pyproject,
+                trusted_uv_lock,
+                head_uv_lock,
+                head_product_init_is_regular=_tree_has_regular_file(
+                    git_repo, manifest["head_sha"], "product/__init__.py"
+                ),
+            )
+        except ValueError:
             raise SystemExit(1)
     status = verify_evidence(
         manifest,
