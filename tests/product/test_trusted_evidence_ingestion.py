@@ -14,6 +14,7 @@ from product.evidence import (
     VerificationPlan,
     _hash,
 )
+from product.evidence.ingestion import _canon
 
 
 def _api():
@@ -638,6 +639,11 @@ def test_evidence_requirement_schema_is_v2_and_status_is_hash_bound():
     assert api.EVIDENCE_REQUIREMENT_SCHEMA == "nexus.evidence_requirement.v2-experimental"
     assert envelope.schema == "product.evidence.provenance.v1"
     assert "expected_status" not in tuple(field.name for field in fields(type(envelope)))
+    assert (
+        envelope.hash == "sha256:f3ab2ecf0856dadac9eced3662d21091d9ac0716c6cffa99217624745d496c41"
+    )
+    assert _canon(api.EvidenceType.VERIFIER_RESULT) == str(api.EvidenceType.VERIFIER_RESULT)
+    assert _canon(api.EvidenceGeneration.RUNTIME) == str(api.EvidenceGeneration.RUNTIME)
     requirement = context.requirements[0]
     failed = replace(requirement, expected_status=ObservationStatus.FAIL)
     failed_context = replace(context, requirements=(failed,))
