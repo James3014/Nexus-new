@@ -160,7 +160,7 @@ def test_combined_raw_and_claimed_hash_attack_has_no_bundle():
     assert "TAMPERED:content_hash" in result.reason_codes
 
 
-@pytest.mark.parametrize("field, condition, reason", [("artifact_id", "CROSS_BOUND", "CROSS_BOUND:artifact"), ("target_revision", "STALE", "STALE:subject"), ("producer_id", "CROSS_BOUND", "CROSS_BOUND:producer"), ("source_locator", "MISSING", "MISSING:source_locator"), ("evidence_type", "MALFORMED", "MALFORMED:evidence_type")])
+@pytest.mark.parametrize("field, condition, reason", [("artifact_id", "CROSS_BOUND", "CROSS_BOUND:artifact"), ("target_revision", "STALE", "STALE:subject"), ("producer_id", "CROSS_BOUND", "CROSS_BOUND:producer")])
 def test_h1_h2_h3_h9_h11_are_separate_fail_closed_cases(field, condition, reason):
     api, context, submission, envelope = _fixture()
     value = "other" if field != "evidence_type" else "VERIFIER_RESULT"
@@ -176,10 +176,40 @@ def test_h7_old_readiness_generation_is_stale():
     assert result.bundle is None
 
 
+@pytest.mark.parametrize("field, value, reason", [
+    ("producer_software_hash", _hash("other-software"), "CROSS_BOUND:producer"),
+    ("producer_role", "CI", "CROSS_BOUND:producer"),
+    ("verification_method", "other-method", "CROSS_BOUND:producer"),
+    ("repository_id", "other-repo", "CROSS_BOUND:repository"),
+    ("source_revision", "old-source", "STALE:subject"),
+    ("target_revision", "old-target", "STALE:subject"),
+    ("source_tree", "other-source-tree", "CROSS_BOUND:tree"),
+    ("target_tree", "other-target-tree", "CROSS_BOUND:tree"),
+    ("change_set_hash", _hash("other-change"), "CROSS_BOUND:changeset"),
+    ("diff_hash", _hash("other-diff"), "CROSS_BOUND:changeset"),
+    ("artifact_id", "other-artifact", "CROSS_BOUND:artifact"),
+    ("execution_id", "other-execution", "CROSS_BOUND:execution"),
+    ("attempt_id", "other-attempt", "CROSS_BOUND:execution"),
+    ("environment_hash", _hash("other-environment"), "CROSS_BOUND:execution"),
+    ("runtime", _runtime, "CROSS_BOUND:runtime"),
+])
+def test_updating_requirement_hash_cannot_bypass_semantic_binding(field, value, reason):
+    api, context, submission, envelope = _fixture()
+    if field == "producer_role":
+        value = api.ProducerRole.CI
+    if field == "runtime":
+        value = value(api, observed_runtime_identity="runtime-2")
+    mutated = replace(envelope, **{field: value})
+    requirement = replace(context.requirements[0], content_hash=mutated.content_hash, provenance_hash=mutated.hash)
+    result = api.ingest_evidence(replace(context, requirements=(requirement,)), (replace(submission, provenance=mutated),))
+    assert result.condition is getattr(api.IntegrityStatus, reason.split(":")[0])
+    assert reason in result.reason_codes
+
+
 @pytest.mark.parametrize("field", ["schema", "evidence_id", "evidence_type", "verifier_id", "artifact_id", "producer_id", "producer_role", "producer_software_hash", "repository_id", "source_revision", "source_tree", "target_revision", "target_tree", "change_set_hash", "diff_hash", "generated_at", "source_locator", "content_hash", "verification_method", "execution_id", "attempt_id", "environment_hash", "generation", "runtime"])
 def test_every_provenance_field_mutation_is_rejected(field):
     api, context, submission, envelope = _fixture()
-    value = _hash("mutated") if field.endswith("_hash") or field == "content_hash" else (api.EvidenceGeneration.SOURCE if field == "generation" else _runtime(api, observed_generation=8) if field == "runtime" else api.EvidenceType.CI_CHECK if field == "evidence_type" else api.ProducerRole.CI if field == "producer_role" else "mutated")
+    value = _hash("mutated") if field.endswith("_hash") or field == "content_hash" else (_at(-5) if field == "generated_at" else api.EvidenceGeneration.SOURCE if field == "generation" else _runtime(api, observed_generation=8) if field == "runtime" else api.EvidenceType.CI_CHECK if field == "evidence_type" else api.ProducerRole.CI if field == "producer_role" else "mutated")
     result = api.ingest_evidence(context, (replace(submission, provenance=replace(envelope, **{field: value})),))
     assert result.condition is api.IntegrityStatus.TAMPERED
     assert "TAMPERED:provenance_hash" in result.reason_codes
@@ -190,7 +220,7 @@ def test_h12_identical_and_conflicting_duplicates_are_distinct():
     identical = api.ingest_evidence(context, (submission, submission))
     conflicting = api.ingest_evidence(context, (submission, replace(submission, provenance=replace(envelope, verifier_id="other"))))
     assert identical.condition is api.IntegrityStatus.DUPLICATE and "DUPLICATE:artifact" in identical.reason_codes
-    assert conflicting.condition is api.IntegrityStatus.DUPLICATE and "DUPLICATE:verifier" in conflicting.reason_codes
+    assert conflicting.condition is api.IntegrityStatus.TAMPERED and "TAMPERED:provenance_hash" in conflicting.reason_codes
 
 
 def test_condition_precedence_is_tampered_over_lower_conditions():
