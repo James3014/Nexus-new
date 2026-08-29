@@ -313,6 +313,30 @@ def test_default_impact_map_covers_new_learning_modules_without_shadowing_specif
 
 def test_default_impact_map_covers_product_paths_and_changeset_contract(tmp_path):
     rules = load_impact_rules()
+    expected_product_files = {
+        "tests/product/test_changeset_certification_adapter.py",
+        "tests/product/test_evidence_receipt_hardening.py",
+        "tests/product/test_false_completion_benchmark.py",
+        "tests/product/test_github_adapter.py",
+        "tests/product/test_kernel.py",
+        "tests/product/test_robustness.py",
+        "tests/product/test_semantic_matrix.py",
+    }
+
+    generic_details = select_target_details(
+        ["product/new_component.py"],
+        rules,
+        index_path=tmp_path / "missing_impact_index.json",
+        stats_path=tmp_path / "missing_impact_stats.json",
+        history_path=tmp_path / "missing_test_history.jsonl",
+    )
+    assert expected_product_files.issubset(generic_details.targets)
+    assert "tests/product" not in generic_details.targets
+    assert generic_details.unmatched_paths == []
+    assert generic_details.fallback_used is False
+    assert generic_details.risk == "high"
+    assert generic_details.high_risk_escalated is True
+
     expected_product_targets = {
         "product/kernel/__init__.py": "tests/product/test_kernel.py",
         "product/adapters/github.py": "tests/product/test_github_adapter.py",
@@ -327,7 +351,7 @@ def test_default_impact_map_covers_product_paths_and_changeset_contract(tmp_path
             stats_path=tmp_path / "missing_impact_stats.json",
             history_path=tmp_path / "missing_test_history.jsonl",
         )
-        assert "tests/product" in details.targets
+        assert "tests/product" not in details.targets
         assert exact_target in details.targets
         assert details.unmatched_paths == []
         assert details.fallback_used is False
@@ -341,7 +365,7 @@ def test_default_impact_map_covers_product_paths_and_changeset_contract(tmp_path
         stats_path=tmp_path / "missing_impact_stats.json",
         history_path=tmp_path / "missing_test_history.jsonl",
     )
-    assert "tests/product" in changeset_details.targets
+    assert "tests/product" not in changeset_details.targets
     assert "tests/contracts/test_changeset_certification.py" in changeset_details.targets
     assert "tests/product/test_changeset_certification_adapter.py" in changeset_details.targets
     assert changeset_details.unmatched_paths == []
