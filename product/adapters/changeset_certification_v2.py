@@ -94,7 +94,7 @@ class EvidenceRef:
     source: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class ChangeSetCertification:
     change_set: ChangeSetIdentity
     evidence: tuple[EvidenceRef, ...] = ()
@@ -107,6 +107,9 @@ class ChangeSetCertification:
     verification_result: VerificationResult = dataclass_field(
         default_factory=lambda: reduce_verification(EvidenceCondition.MISSING), init=False
     )
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise TypeError("ChangeSetCertification construction is internal")
 
     def to_dict(self) -> dict[str, Any]:
         # Compatibility dataclasses never emit the superseded legacy wire form.

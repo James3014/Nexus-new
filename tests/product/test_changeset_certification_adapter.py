@@ -554,3 +554,18 @@ def test_public_certification_constructor_rejects_reducer_owned_fields():
             reason_codes=(),
             verification_result=factual,
         )
+
+
+def test_public_constructor_cannot_serialize_caller_selected_envelope_truth():
+    identity = adapter.ChangeSetIdentity("cs", "base", "target", "sha256:" + "a" * 64)
+    with pytest.raises(TypeError):
+        adapter.ChangeSetCertification(
+            identity,
+            envelope={
+                "schema": adapter.CHANGESET_CERTIFICATION_SCHEMA,
+                "version": adapter.CHANGESET_CERTIFICATION_VERSION,
+                "disposition": "CERTIFIED",
+                "reasons": [],
+                "claim_ceiling": "caller-selected",
+            },
+        )
