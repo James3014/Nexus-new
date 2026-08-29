@@ -1493,6 +1493,145 @@ def test_combined_reasons_retain_plan_mismatch_duplicate_and_stale_exactly():
     assert result.reason_codes == ("CROSS_BOUND:changeset", "DUPLICATE:artifact", "STALE:subject")
 
 
+def test_contract_plan_binding_has_no_compatibility_helper():
+    api, context, submission, _ = _fixture()
+    contract = replace(context.contract, required_verifier_ids=("unit", "lint"))
+    result = api.ingest_evidence(replace(context, contract=contract), (submission,))
+    assert result.bundle is None
+    assert result.condition is api.IntegrityStatus.CROSS_BOUND
+    assert result.reason_codes == ("CROSS_BOUND:changeset", "MISSING:required_verifier")
+
+
+def test_under_submitted_duplicate_artifact_reports_duplicate_and_missing_exactly():
+    api, context, submission, envelope = _fixture()
+    second_envelope = replace(envelope, evidence_id="evidence-2", verifier_id="lint")
+    second_requirement = replace(
+        context.requirements[0], verifier_id="lint", provenance_hash=second_envelope.hash
+    )
+    contract = replace(context.contract, required_verifier_ids=("unit", "lint"))
+    plan = replace(
+        context.plan, acceptance_contract_hash=contract.hash, required_verifier_ids=("unit", "lint")
+    )
+    result = api.ingest_evidence(
+        replace(
+            context,
+            contract=contract,
+            plan=plan,
+            requirements=(context.requirements[0], second_requirement),
+        ),
+        (submission,),
+    )
+    assert result.bundle is None and result.condition is api.IntegrityStatus.DUPLICATE
+    assert result.reason_codes == ("DUPLICATE:artifact", "MISSING:required_verifier")
+
+
+@pytest.mark.parametrize("value", [" ", "bad\x00source", "x" * 4097, 1])
+def test_hostile_runtime_source_revision_values_are_unknown(value):
+    api, *_ = _fixture()
+    runtime = _hostile_runtime(
+        _runtime(api), desired_source_revision=value, loaded_source_revision=value
+    )
+    assert api.derive_runtime_freshness(runtime, _at()).name == "CONVERGENCE_UNKNOWN"
+
+
+def test_hostile_source_revision_admission_maps_to_missing_source_locator():
+    api, context, submission, envelope = _fixture()
+    runtime = _hostile_runtime(
+        _runtime(api), desired_source_revision=" ", loaded_source_revision=" "
+    )
+    changed = replace(envelope, runtime=runtime)
+    requirement = replace(context.requirements[0], provenance_hash=changed.hash)
+    result = api.ingest_evidence(
+        replace(context, requirements=(requirement,)), (replace(submission, provenance=changed),)
+    )
+    assert result.bundle is None and result.reason_codes == ("MISSING:source_locator",)
+
+
+def test_hostile_source_locator_str_subclass_is_malformed_provenance():
+    class SourceLocator(str):
+        pass
+
+    api, context, submission, envelope = _fixture()
+    changed = _hostile_envelope(envelope, source_locator=SourceLocator("tests/test_a.py"))
+    requirement = replace(context.requirements[0], provenance_hash=changed.hash)
+    result = api.ingest_evidence(
+        replace(context, requirements=(requirement,)),
+        (api.EvidenceSubmission(submission.content, submission.status, changed),),
+    )
+    assert result.bundle is None and result.reason_codes == ("MALFORMED:provenance",)
+
+
+def test_hostile_revision_types_are_malformed_provenance_after_resealing():
+    class Revision(str):
+        pass
+
+    api, context, submission, envelope = _fixture()
+    for field, value in (
+        ("source_revision", 1),
+        ("target_revision", 1),
+        ("source_revision", Revision("source-r1")),
+        ("target_revision", Revision("target-r2")),
+    ):
+        changed = _hostile_envelope(envelope, **{field: value})
+        requirement = replace(context.requirements[0], provenance_hash=changed.hash)
+        result = api.ingest_evidence(
+            replace(context, requirements=(requirement,)),
+            (api.EvidenceSubmission(submission.content, submission.status, changed),),
+        )
+        assert result.bundle is None and result.condition is api.IntegrityStatus.MALFORMED
+        assert result.reason_codes == ("MALFORMED:provenance",)
+
+
+def test_mint_history_cannot_upgrade_a_tampered_result_to_trusted():
+    api, context, submission, _ = _fixture()
+    tampered = api.ingest_evidence(context, (replace(submission, content=b"tampered"),))
+    object.__setattr__(tampered, "condition", api.IntegrityStatus.VALID)
+    object.__setattr__(tampered, "reason_codes", ())
+    assert api.classify_ingestion_result(context, tampered) is api.IngestionTrustStatus.UNTRUSTED
+    assert api.is_trusted_ingestion_result(context, tampered) is False
+
+
+def test_freshness_missing_source_and_generation_mismatch_preserve_both_reasons():
+    api, context, submission, envelope = _fixture()
+    runtime = _hostile_runtime(
+        _runtime(api), desired_source_revision="", loaded_source_revision="", observed_generation=6
+    )
+    changed = replace(envelope, runtime=runtime)
+    requirement = replace(context.requirements[0], provenance_hash=changed.hash)
+    result = api.ingest_evidence(
+        replace(context, requirements=(requirement,)), (replace(submission, provenance=changed),)
+    )
+    assert result.bundle is None and result.condition is api.IntegrityStatus.STALE
+    assert result.reason_codes == ("MISSING:source_locator", "STALE:generation")
+
+
+def test_source_runtime_identity_contamination_is_unknown_and_malformed_at_admission():
+    api, context, submission, envelope = _fixture()
+    runtime = _runtime(api, generation=api.EvidenceGeneration.RUNTIME)
+    changed = replace(envelope, generation=api.EvidenceGeneration.SOURCE, runtime=runtime)
+    requirement = replace(
+        context.requirements[0],
+        generation=api.EvidenceGeneration.SOURCE,
+        runtime_ready_required=False,
+        provenance_hash=changed.hash,
+    )
+    result = api.ingest_evidence(
+        replace(context, requirements=(requirement,)), (replace(submission, provenance=changed),)
+    )
+    assert result.bundle is None and result.reason_codes == ("MALFORMED:runtime",)
+
+
+def test_runtime_without_observation_is_missing_both_identity_and_readiness():
+    api, context, submission, envelope = _fixture()
+    changed = replace(envelope, runtime=None)
+    requirement = replace(context.requirements[0], provenance_hash=changed.hash)
+    result = api.ingest_evidence(
+        replace(context, requirements=(requirement,)), (replace(submission, provenance=changed),)
+    )
+    assert result.bundle is None and result.condition is api.IntegrityStatus.MISSING
+    assert result.reason_codes == ("MISSING:ready_identity", "MISSING:runtime_identity")
+
+
 @pytest.mark.parametrize("value", ["", " ", "bad\x00timestamp", "x" * 4097])
 def test_runtime_timestamp_constructor_rejects_empty_whitespace_nul_and_oversize(value):
     api, *_ = _fixture()
