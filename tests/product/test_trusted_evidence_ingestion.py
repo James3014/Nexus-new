@@ -1030,11 +1030,18 @@ def test_freshness_unknown_causes_map_to_exact_admission_reasons():
             replace(context, requirements=(req,)), (replace(submission, provenance=changed),)
         )
         assert result.bundle is None and reason in result.reason_codes
+    source_runtime = _runtime(
+        api,
+        generation=api.EvidenceGeneration.SOURCE,
+        loaded_source_revision="source-r1",
+        expected_runtime_identity=None,
+        observed_runtime_identity=None,
+        readiness_status=None,
+    )
     source = replace(
         envelope,
         generation=api.EvidenceGeneration.SOURCE,
-        runtime=None,
-        loaded_source_revision="source-r1",
+        runtime=source_runtime,
     )
     source_req = replace(
         context.requirements[0],
