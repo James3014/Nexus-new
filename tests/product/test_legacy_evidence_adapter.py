@@ -66,23 +66,30 @@ def test_exact_submission_delegates_once_to_task3_and_preserves_exact_result(mon
         returned.append(result)
         return result
 
-    monkeypatch.setattr(ingestion, "ingest_evidence", counted)
-    sys.modules.pop("product.adapters.legacy", None)
-    api = importlib.import_module("product.adapters.legacy")
-    signature = inspect.signature(api.adapt_legacy_evidence)
-    parameters = tuple(signature.parameters.values())
-    assert tuple(parameter.name for parameter in parameters) == ("context", "value")
-    assert all(
-        parameter.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD for parameter in parameters
-    )
-    assert signature.return_annotation in (api.LegacyAdapterResult, "LegacyAdapterResult")
-    outcome = api.adapt_legacy_evidence(context, submission)
-    assert calls == [((context, (submission,)), {})]
-    assert outcome.ingestion is returned[0]
+    try:
+        with monkeypatch.context() as scoped:
+            scoped.setattr(ingestion, "ingest_evidence", counted)
+            sys.modules.pop("product.adapters.legacy", None)
+            api = importlib.import_module("product.adapters.legacy")
+            signature = inspect.signature(api.adapt_legacy_evidence)
+            parameters = tuple(signature.parameters.values())
+            assert tuple(parameter.name for parameter in parameters) == ("context", "value")
+            assert all(
+                parameter.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+                for parameter in parameters
+            )
+            assert signature.return_annotation in (api.LegacyAdapterResult, "LegacyAdapterResult")
+            outcome = api.adapt_legacy_evidence(context, submission)
+            assert calls == [((context, (submission,)), {})]
+            assert outcome.ingestion is returned[0]
+    finally:
+        restored = importlib.reload(importlib.import_module("product.adapters.legacy"))
+        assert restored.ingest_evidence is ingestion.ingest_evidence
 
 
 def test_legacy_accepts_only_exact_evidence_submission_type():
-    api, context, submission, _ = _fixture()
+    api = _api()
+    _, context, submission, _ = _fixture()
     submission_type = type(submission)
     child_type = type("EvidenceSubmissionChild", (submission_type,), {})
     child = child_type(submission.content, submission.status, submission.provenance)
@@ -93,7 +100,8 @@ def test_legacy_accepts_only_exact_evidence_submission_type():
 
 
 def test_legacy_field_identical_wires_and_foreign_lookalikes_never_reconstruct():
-    api, context, submission, _ = _fixture()
+    api = _api()
+    _, context, submission, _ = _fixture()
     values = {field.name: getattr(submission, field.name) for field in fields(submission)}
     foreign = type("ForeignSubmission", (), values)()
     for value in (values, foreign):
@@ -104,13 +112,15 @@ def test_legacy_field_identical_wires_and_foreign_lookalikes_never_reconstruct()
 
 
 def test_legacy_invalid_context_is_a_raw_boundary_error():
-    api, _, submission, _ = _fixture()
+    api = _api()
+    _, _, submission, _ = _fixture()
     with pytest.raises((TypeError, ValueError)):
         api.adapt_legacy_evidence(None, submission)
 
 
 def test_exact_submission_routes_through_ingestion_and_preserves_result_type():
-    api, context, submission, _ = _fixture()
+    api = _api()
+    _, context, submission, _ = _fixture()
     outcome = api.adapt_legacy_evidence(context, submission)
     assert type(outcome.ingestion) is api.IngestionResult
     assert outcome.fallback_integrity is None
@@ -119,7 +129,8 @@ def test_exact_submission_routes_through_ingestion_and_preserves_result_type():
 
 @pytest.mark.parametrize("value", ({"content": b"x"}, {"status": "PASS"}, object()))
 def test_dict_wire_and_lookalike_values_are_malformed_without_reconstruction(value):
-    api, context, _, _ = _fixture()
+    api = _api()
+    _, context, _, _ = _fixture()
     outcome = api.adapt_legacy_evidence(context, value)
     assert outcome.ingestion is None
     assert outcome.fallback_integrity is api.IntegrityStatus.MALFORMED
@@ -128,7 +139,8 @@ def test_dict_wire_and_lookalike_values_are_malformed_without_reconstruction(val
 
 @pytest.mark.parametrize("value", ("PASS", "FAIL", "legacy narrative", "caller:reason"))
 def test_legacy_narratives_are_non_certifiable_without_product_evidence(value):
-    api, context, _, _ = _fixture()
+    api = _api()
+    _, context, _, _ = _fixture()
     outcome = api.adapt_legacy_evidence(context, value)
     assert outcome.ingestion is None
     assert outcome.fallback_integrity is api.IntegrityStatus.LEGACY_NON_CERTIFIABLE
@@ -188,7 +200,8 @@ def test_legacy_source_has_no_direct_product_mint_or_forbidden_import_cycle():
 
 
 def test_legacy_status_authority_remains_v2_expected_status():
-    api, context, submission, _ = _fixture()
+    api = _api()
+    _, context, submission, _ = _fixture()
     from product.evidence import ObservationStatus
 
     assert context.requirements[0].expected_status.value == "PASS"

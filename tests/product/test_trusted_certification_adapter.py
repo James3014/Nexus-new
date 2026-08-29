@@ -14,6 +14,7 @@ from dataclasses import fields, replace
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from pathlib import Path
+from typing import get_type_hints
 
 import pytest
 
@@ -444,6 +445,46 @@ def test_full_expectation_cardinality_and_registry_matrix(role_name, kind):
     )
 
 
+def test_cross_admission_between_reference_and_expectation_sets_is_bounded():
+    """T4-2: valid opposite-set capabilities return set-invalid, never exceptions."""
+    _, context, ingestion, references, expectations, *_ = _four_role_fixture()
+    wrong_references = (expectations[0],) + references[1:]
+    _assert_invalid(
+        _validate(context, ingestion, wrong_references, expectations),
+        ("ROLE_SET_INVALID",),
+    )
+    wrong_expectations = (references[0],) + expectations[1:]
+    _assert_invalid(
+        _validate(context, ingestion, references, wrong_expectations),
+        ("EXPECTATION_SET_INVALID",),
+    )
+
+
+def test_exact_type_objects_missing_role_are_bounded_set_invalid():
+    """T4-2: constructor-bypassed exact objects missing role never leak AttributeError."""
+    api, context, ingestion, references, expectations, *_ = _four_role_fixture()
+    missing_reference_role = object.__new__(api.TrustReference)
+    _assert_invalid(
+        api.validate_prerequisites(
+            context,
+            ingestion,
+            (missing_reference_role,) + references[1:],
+            expectations,
+        ),
+        ("ROLE_SET_INVALID",),
+    )
+    missing_expectation_role = object.__new__(api.ExternalReceiptExpectation)
+    _assert_invalid(
+        api.validate_prerequisites(
+            context,
+            ingestion,
+            references,
+            (missing_expectation_role,) + expectations[1:],
+        ),
+        ("EXPECTATION_SET_INVALID",),
+    )
+
+
 @pytest.mark.parametrize("role_name", ROLE_NAMES)
 @pytest.mark.parametrize(
     "change,expected_suffix",
@@ -835,7 +876,7 @@ def test_registered_expectation_replayed_into_distinct_trusted_subject(variant):
     replayed = (expectations[0],) + c2_expectations[1:]
     _assert_invalid(
         api.validate_prerequisites(context2, ingestion2, references2, replayed),
-        ("POLICY:EXTERNAL_RECEIPT_EXPECTATION_MISMATCH",),
+        ("EXPECTATION_SET_INVALID",),
     )
 
 
@@ -857,7 +898,7 @@ def test_expectation_side_payload_action_method_replay(variant):
     replayed = (c2_expectation,) + expectations[1:]
     _assert_invalid(
         api.validate_prerequisites(context, ingestion, references, replayed),
-        ("POLICY:EXTERNAL_RECEIPT_EXPECTATION_MISMATCH",),
+        ("EXPECTATION_SET_INVALID",),
     )
 
 
@@ -1600,3 +1641,196 @@ def test_registry_bindings_store_no_strong_capabilities_or_dead_identity_lists()
         type(value) is list and ("dead" in name.lower() or "stale" in name.lower())
         for name, value in vars(api).items()
     )
+
+
+@pytest.mark.parametrize("foreign_decision", ("ALLOW", "FOREIGN_ENUM"))
+def test_hostile_exact_reference_cannot_supply_non_task3_decision(foreign_decision):
+    """T4-2, T4-15: string/foreign decision cannot silently become DENY or ALLOW."""
+    api, context, ingestion, references, expectations, *_ = _four_role_fixture()
+
+    class ForeignDecision(str, Enum):
+        ALLOW = "ALLOW"
+
+    value = "ALLOW" if foreign_decision == "ALLOW" else ForeignDecision.ALLOW
+    hostile = _forge(references[0], decision=value)
+    outcome = api.validate_prerequisites(
+        context,
+        ingestion,
+        (hostile,) + references[1:],
+        expectations,
+    )
+    _assert_invalid(outcome, ("ROLE_SET_INVALID",))
+
+
+def test_hostile_exact_reference_raw_shape_is_bounded_level_a_invalid():
+    """T4-2, T4-16: constructor-bypassed raw field never leaks TypeError."""
+    api, context, ingestion, references, expectations, *_ = _four_role_fixture()
+    hostile = _forge(references[0], external_verification_receipt="not-bytes")
+    outcome = api.validate_prerequisites(
+        context,
+        ingestion,
+        (hostile,) + references[1:],
+        expectations,
+    )
+    _assert_invalid(outcome, ("ROLE_SET_INVALID",))
+
+
+def test_same_hash_new_context_ingestion_rejects_old_registered_expectation():
+    """T4-22, T4-29, T4-33: registry mint binds exact context+ingestion identities."""
+    api, context, _, references, expectations, *_ = _four_role_fixture()
+    context2 = replace(context)
+    _, _, submission, _ = _task3_fixture()
+    ingestion2 = api.ingest_evidence(context2, (submission,))
+    assert context2.hash == context.hash and context2 is not context
+    assert api.classify_ingestion_result(context2, ingestion2) is api.IngestionTrustStatus.TRUSTED
+    _assert_invalid(
+        api.validate_prerequisites(context2, ingestion2, references, expectations),
+        ("EXPECTATION_SET_INVALID",),
+    )
+
+
+def test_same_hash_new_context_ingestion_rejects_old_registered_prerequisites():
+    """T4-18, T4-32, T4-33: prerequisite registry binds exact dependencies."""
+    api, context, _, _, _, prerequisites, _ = _four_role_fixture()
+    context2 = replace(context)
+    _, _, submission, _ = _task3_fixture()
+    ingestion2 = api.ingest_evidence(context2, (submission,))
+    assert context2.hash == context.hash
+    with pytest.raises(
+        ValueError,
+        match="^invalid_trusted_certification_input:UNTRUSTED_PREREQUISITES$",
+    ):
+        api.certify_ingested(context2, ingestion2, prerequisites)
+
+
+def test_certify_ingested_exact_error_mapping_and_order():
+    """T4-18, T4-19, T4-28: exact certification input error taxonomy/order."""
+    api, context, ingestion, _, _, prerequisites, _ = _four_role_fixture()
+
+    def assert_code(given_context, given_ingestion, given_prerequisites, code):
+        with pytest.raises(
+            ValueError,
+            match=f"^invalid_trusted_certification_input:{code}$",
+        ):
+            api.certify_ingested(given_context, given_ingestion, given_prerequisites)
+
+    assert_code(object(), ingestion, prerequisites, "UNTRUSTED_CONTEXT")
+    profile_mismatch = replace(context, expected_profile_hash=_hash("wrong-profile"))
+    assert_code(profile_mismatch, ingestion, prerequisites, "PROFILE_MISMATCH")
+    assert_code(context, object(), prerequisites, "UNTRUSTED_INGESTION")
+
+    api2, context2, corrupted, _, _, prerequisite2, _ = _four_role_fixture()
+    _mutate(corrupted, "reason_codes", ("TAMPERED:content_hash",))
+    assert_code(context2, corrupted, prerequisite2, "INGESTION_RECEIPT_INVALID")
+    assert_code(context, ingestion, _forge(prerequisites), "UNTRUSTED_PREREQUISITES")
+
+    for field in ("subject_hash", "context_hash"):
+        _, current_context, current_ingestion, _, _, current_prerequisite, _ = _four_role_fixture()
+        _mutate(current_prerequisite, field, _hash(f"hostile-{field}"))
+        assert_code(
+            current_context,
+            current_ingestion,
+            current_prerequisite,
+            "UNTRUSTED_PREREQUISITES",
+        )
+
+    source = inspect.getsource(api.certify_ingested)
+    assert source.index("UNTRUSTED_PREREQUISITES") < source.index("SUBJECT_MISMATCH")
+
+
+def test_exact_public_capability_annotations_are_not_object_erased():
+    """T4-1, T4-20: public prerequisites and core result annotations are exact."""
+    api = _api()
+    from product.kernel import CertificationResult
+
+    validation_annotations = get_type_hints(api.PrerequisiteValidationResult)
+    wrapper_annotations = get_type_hints(api.TrustedCertificationResult)
+    assert validation_annotations["prerequisites"] == api.ValidatedPrerequisites | None
+    assert wrapper_annotations["core_result"] is CertificationResult
+
+
+@pytest.mark.parametrize("nested_attack", ("profile_producers", "producer_methods"))
+def test_nested_profile_hostile_shape_is_bounded_untrusted_context(nested_attack):
+    """T4-3, T4-16: post-mint nested profile corruption never leaks raw errors."""
+    api, context, ingestion, references, expectations, prerequisites, _ = _four_role_fixture()
+    if nested_attack == "profile_producers":
+        _mutate(context.profile, "producers", object())
+    else:
+        _mutate(context.profile.producers[0], "verification_methods", object())
+    _assert_invalid(
+        api.validate_prerequisites(context, ingestion, references, expectations),
+        ("UNTRUSTED_CONTEXT",),
+    )
+    with pytest.raises(
+        ValueError,
+        match="^invalid_trusted_certification_input:UNTRUSTED_CONTEXT$",
+    ):
+        api.certify_ingested(context, ingestion, prerequisites)
+
+
+def test_registered_prerequisite_hostile_reference_hash_shape_is_bounded():
+    """T4-18, T4-34: malformed registered prerequisite maps to untrusted prerequisite."""
+    api, context, ingestion, _, _, prerequisites, result = _four_role_fixture()
+    _mutate(prerequisites, "reference_hashes", object())
+    with pytest.raises(
+        ValueError,
+        match="^invalid_trusted_certification_input:UNTRUSTED_PREREQUISITES$",
+    ):
+        api.certify_ingested(context, ingestion, prerequisites)
+    assert not api.is_trusted_certification_result(
+        context,
+        ingestion,
+        prerequisites,
+        result,
+    )
+
+
+@pytest.mark.parametrize("field", ("reference_hashes", "expectation_hashes"))
+def test_canonical_equivalent_list_cannot_replace_exact_prerequisite_tuple(field):
+    """T4-18, T4-34: equal canonical hash does not override exact tuple shape."""
+    api, context, ingestion, _, _, prerequisites, result = _four_role_fixture()
+    original_hash = prerequisites.hash
+    _mutate(prerequisites, field, list(getattr(prerequisites, field)))
+    assert prerequisites.hash == original_hash
+    with pytest.raises(
+        ValueError,
+        match="^invalid_trusted_certification_input:UNTRUSTED_PREREQUISITES$",
+    ):
+        api.certify_ingested(context, ingestion, prerequisites)
+    assert not api.is_trusted_certification_result(
+        context,
+        ingestion,
+        prerequisites,
+        result,
+    )
+
+
+def test_validated_prerequisite_exact_current_field_shape_matrix():
+    """T4-18, T4-34: positive capability retains exact scalar/root field shapes."""
+    api, _, _, _, _, prerequisites, _ = _four_role_fixture()
+    for field in (
+        "subject_hash",
+        "context_hash",
+        "profile_hash",
+        "ingestion_bundle_hash",
+        "ingestion_receipt_hash",
+    ):
+        value = getattr(prerequisites, field)
+        assert type(value) is str
+        assert value.startswith("sha256:") and len(value) == 71
+    assert type(prerequisites.observed_at) is str
+    assert api._parse_time(prerequisites.observed_at) is not None
+    for field in (
+        "policy_accepted",
+        "authority_present",
+        "approval_present",
+        "signing_present",
+    ):
+        assert type(getattr(prerequisites, field)) is bool
+    for field in ("reference_hashes", "expectation_hashes"):
+        roots = getattr(prerequisites, field)
+        assert type(roots) is tuple and len(roots) == 4
+        assert all(
+            type(value) is str and value.startswith("sha256:") and len(value) == 71
+            for value in roots
+        )
