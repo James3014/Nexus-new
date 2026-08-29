@@ -1672,6 +1672,49 @@ def test_trusted_context_revalidates_hostile_nested_requirement_fields(field, va
         replace(context, requirements=(requirement,))
 
 
+def test_source_aligned_evidence_cannot_satisfy_runtime_ready_requirement():
+    api, context, submission, envelope = _fixture()
+    source_runtime = _runtime(
+        api,
+        generation=api.EvidenceGeneration.SOURCE,
+        expected_runtime_identity=None,
+        observed_runtime_identity=None,
+        readiness_status=None,
+    )
+    source = replace(envelope, generation=api.EvidenceGeneration.SOURCE, runtime=source_runtime)
+    requirement = replace(
+        context.requirements[0],
+        generation=api.EvidenceGeneration.SOURCE,
+        runtime_ready_required=True,
+        provenance_hash=source.hash,
+    )
+    result = api.ingest_evidence(
+        replace(context, requirements=(requirement,)), (replace(submission, provenance=source),)
+    )
+    assert result.bundle is None and result.condition is api.IntegrityStatus.MISSING
+    assert result.reason_codes == ("MISSING:ready_identity",)
+
+
+@pytest.mark.parametrize("bad_provenance", ["bad", None])
+def test_ingest_revalidates_submission_provenance_without_attribute_error(bad_provenance):
+    api, context, submission, _ = _fixture()
+    object.__setattr__(submission, "provenance", bad_provenance)
+    result = api.ingest_evidence(context, (submission,))
+    assert result.bundle is None and result.condition is api.IntegrityStatus.MALFORMED
+    assert result.reason_codes == ("MALFORMED:provenance",)
+
+
+@pytest.mark.parametrize("field, value", [("runtime_ready_required", 1), ("execution_id", "")])
+def test_ingest_revalidates_nested_requirement_without_accepting_hostile_values(field, value):
+    api, context, submission, _ = _fixture()
+    requirement = context.requirements[0]
+    object.__setattr__(requirement, field, value)
+    result = api.ingest_evidence(context, (submission,))
+    assert result.bundle is None and result.condition is api.IntegrityStatus.MALFORMED
+    assert result.reason_codes == ("MALFORMED:requirement",)
+    assert api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.UNTRUSTED
+
+
 def test_freshness_missing_source_and_generation_mismatch_preserve_both_reasons():
     api, context, submission, envelope = _fixture()
     runtime = _hostile_runtime(
