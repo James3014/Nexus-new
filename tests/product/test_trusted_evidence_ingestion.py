@@ -314,7 +314,7 @@ def test_deterministic_hashes_and_sorted_reasons():
     failed = api.ingest_evidence(context, (replace(submission, content=b"changed"), submission))
     assert tuple(sorted(set(failed.reason_codes))) == failed.reason_codes
     assert failed.bundle is None
-    assert not any("required_verifier=" in reason for reason in failed.reason_codes)
+    assert all("required_verifier=" not in reason for reason in failed.reason_codes)
 
 
 @pytest.mark.parametrize(
@@ -1150,6 +1150,301 @@ def test_reversed_submission_order_has_canonical_receipt_and_bundle_hashes():
         replace(context, requirements=(requirement, context.requirements[0])), (other, submission)
     )
     assert left.receipt.hash == right.receipt.hash and left.bundle.hash == right.bundle.hash
+
+
+def test_public_receipt_rejects_unrecomputed_universal_placeholder_hash():
+    api, context, submission, _ = _fixture()
+    result = api.ingest_evidence(context, (submission,))
+    with pytest.raises((TypeError, ValueError)):
+        replace(result.receipt, receipt_hash=_hash("receipt-placeholder"))
+
+
+def test_trusted_result_is_sealed_to_exact_context_and_minted_identity():
+    api, context, submission, _ = _fixture()
+    result = api.ingest_evidence(context, (submission,))
+    assert api.is_trusted_ingestion_result(context, result) is True
+    assert (
+        api.is_trusted_ingestion_result(replace(context, required_action="other"), result) is False
+    )
+    lookalike = object.__new__(type(result))
+    for field in fields(result):
+        object.__setattr__(lookalike, field.name, getattr(result, field.name))
+    assert api.is_trusted_ingestion_result(context, lookalike) is False
+    with pytest.raises((TypeError, ValueError)):
+        api.IngestionResult(result.bundle, result.receipt, result.condition, result.reason_codes)
+    with pytest.raises((TypeError, ValueError)):
+        api.IngestionReceipt(
+            *[getattr(result.receipt, field.name) for field in fields(result.receipt)]
+        )
+
+
+def test_result_consistency_binds_reasons_condition_and_context_profile_bundle():
+    api, context, submission, _ = _fixture()
+    result = api.ingest_evidence(context, (submission,))
+    for changes in (
+        {"reason_codes": ("MISSING:prerequisite",)},
+        {"condition": api.IntegrityStatus.TAMPERED},
+    ):
+        with pytest.raises((TypeError, ValueError)):
+            api.IngestionResult(
+                result.bundle,
+                changes.get("receipt", result.receipt),
+                changes.get("condition", result.condition),
+                changes.get("reason_codes", result.reason_codes),
+            )
+    for field in ("context_hash", "profile_hash", "bundle_hash"):
+        with pytest.raises((TypeError, ValueError)):
+            api.IngestionResult(
+                result.bundle,
+                replace(result.receipt, **{field: _hash("wrong")}),
+                result.condition,
+                result.reason_codes,
+            )
+    assert api.condition_for_ingestion_reasons(result.reason_codes) is result.condition
+
+
+def test_duplicate_verifier_and_artifact_conflicts_are_distinct_and_unbundled():
+    api, context, submission, envelope = _fixture()
+    second_envelope = replace(envelope, evidence_id="evidence-2", artifact_id="artifact-2")
+    second_requirement = replace(
+        context.requirements[0], artifact_id="artifact-2", provenance_hash=second_envelope.hash
+    )
+    second = api.EvidenceSubmission(submission.content, submission.status, second_envelope)
+    duplicate_context = replace(
+        context,
+        contract=replace(context.contract, required_verifier_ids=("unit",)),
+        plan=replace(context.plan, required_verifier_ids=("unit",)),
+        requirements=(context.requirements[0], second_requirement),
+    )
+    verifier_duplicate = api.ingest_evidence(duplicate_context, (submission, second))
+    artifact_envelope = replace(second_envelope, artifact_id="artifact-1")
+    artifact_submission = api.EvidenceSubmission(
+        submission.content, submission.status, artifact_envelope
+    )
+    artifact_context = replace(
+        context,
+        contract=replace(context.contract, required_verifier_ids=("unit", "other")),
+        plan=replace(context.plan, required_verifier_ids=("unit", "other")),
+        requirements=(
+            context.requirements[0],
+            replace(
+                second_requirement,
+                verifier_id="other",
+                artifact_id="artifact-1",
+                provenance_hash=artifact_envelope.hash,
+            ),
+        ),
+    )
+    artifact_duplicate = api.ingest_evidence(
+        artifact_context,
+        (submission, artifact_submission),
+    )
+    assert verifier_duplicate.bundle is None and verifier_duplicate.reason_codes == (
+        "DUPLICATE:verifier",
+    )
+    assert artifact_duplicate.bundle is None and artifact_duplicate.reason_codes == (
+        "DUPLICATE:artifact",
+    )
+
+
+def test_source_ahead_maps_to_stale_subject_for_source_and_runtime_admission():
+    api, context, submission, envelope = _fixture()
+    source_runtime = _hostile_runtime(
+        _runtime(
+            api,
+            generation=api.EvidenceGeneration.SOURCE,
+            expected_runtime_identity=None,
+            observed_runtime_identity=None,
+            readiness_status=None,
+        ),
+        loaded_source_revision="source-r1",
+    )
+    source = replace(envelope, generation=api.EvidenceGeneration.SOURCE, runtime=source_runtime)
+    req = replace(
+        context.requirements[0],
+        generation=api.EvidenceGeneration.SOURCE,
+        runtime_ready_required=False,
+        provenance_hash=source.hash,
+    )
+    result = api.ingest_evidence(
+        replace(context, requirements=(req,)), (replace(submission, provenance=source),)
+    )
+    assert result.bundle is None and result.reason_codes == ("STALE:subject",)
+
+
+def test_runtime_source_ahead_maps_to_stale_subject_with_resealed_runtime_requirement():
+    api, context, submission, envelope = _fixture()
+    runtime = _runtime(api, loaded_source_revision="source-r1")
+    changed = replace(envelope, runtime=runtime)
+    requirement = replace(context.requirements[0], provenance_hash=changed.hash)
+    result = api.ingest_evidence(
+        replace(context, requirements=(requirement,)), (replace(submission, provenance=changed),)
+    )
+    assert result.bundle is None and result.reason_codes == ("STALE:subject",)
+
+
+def test_ready_with_blank_runtime_identity_is_unknown_and_missing():
+    api, context, submission, envelope = _fixture()
+    runtime = _hostile_runtime(
+        _runtime(api), expected_runtime_identity="", observed_runtime_identity=""
+    )
+    changed = replace(envelope, runtime=runtime)
+    req = replace(context.requirements[0], provenance_hash=changed.hash)
+    result = api.ingest_evidence(
+        replace(context, requirements=(req,)), (replace(submission, provenance=changed),)
+    )
+    assert result.bundle is None and result.reason_codes == ("MISSING:runtime_identity",)
+
+
+def test_constructor_order_and_duplicate_guards_cover_all_canonical_inputs():
+    api, context, *_ = _fixture()
+    with pytest.raises((TypeError, ValueError)):
+        api.ProducerGrant("p", api.ProducerRole.VERIFIER, _hash("p"), ("z", "a"))
+    with pytest.raises((TypeError, ValueError)):
+        api.IssuerGrant(
+            "i", (api.TrustRole.AUTHORITY, api.TrustRole.AUTHORITY), ("merge",), ("pytest",)
+        )
+    issuer = api.IssuerGrant("i", (api.TrustRole.AUTHORITY,), ("merge",), ("pytest",))
+    with pytest.raises((TypeError, ValueError)):
+        api.IngestionProfile(
+            "p",
+            (api.ProducerGrant("p", api.ProducerRole.VERIFIER, _hash("p"), ("pytest",)),),
+            (issuer, issuer),
+            1,
+        )
+    with pytest.raises((TypeError, ValueError)):
+        api.TrustedIngestionContext(
+            context.contract,
+            context.change_set,
+            context.plan,
+            context.repository_id,
+            context.source_tree,
+            context.target_tree,
+            context.observed_at,
+            context.profile,
+            context.expected_profile_hash,
+            context.requirements,
+            context.required_action,
+            (
+                (api.TrustRole.SIGNING, _hash("s")),
+                (api.TrustRole.AUTHORITY, _hash("a")),
+            ),
+        )
+
+
+def test_extra_requirement_and_plan_subject_mismatches_fail_closed():
+    api, context, submission, _ = _fixture()
+    extra = replace(context.requirements[0], verifier_id="extra", artifact_id="extra")
+    extra_result = api.ingest_evidence(
+        replace(context, requirements=(context.requirements[0], extra)), (submission,)
+    )
+    assert extra_result.bundle is None and extra_result.condition is api.IntegrityStatus.MALFORMED
+    assert extra_result.reason_codes == ("MALFORMED:requirement",)
+    contract_mismatch = replace(context.plan, acceptance_contract_hash=_hash("wrong"))
+    change_mismatch = replace(context.plan, change_set_hash=_hash("wrong"))
+    for plan in (contract_mismatch, change_mismatch):
+        result = api.ingest_evidence(replace(context, plan=plan), (submission,))
+        assert result.bundle is None
+        assert result.condition is api.IntegrityStatus.CROSS_BOUND
+        assert result.reason_codes == ("CROSS_BOUND:changeset",)
+
+
+def test_bundle_integrity_cannot_disagree_with_successful_ingestion():
+    api, context, submission, _ = _fixture()
+    result = api.ingest_evidence(context, (submission,))
+    assert result.bundle is not None
+    assert (
+        result.bundle.integrity(context.contract, context.change_set, context.plan)
+        is api.IntegrityStatus.VALID
+    )
+
+
+def test_runtime_generation_and_runtime_observation_combinations_fail_closed():
+    api, context, submission, envelope = _fixture()
+    execution = replace(
+        envelope, generation=api.EvidenceGeneration.EXECUTION, runtime=_runtime(api)
+    )
+    runtime_source = replace(
+        envelope,
+        generation=api.EvidenceGeneration.RUNTIME,
+        runtime=replace(_runtime(api), generation=api.EvidenceGeneration.SOURCE),
+    )
+    execution_req = replace(
+        context.requirements[0],
+        generation=api.EvidenceGeneration.EXECUTION,
+        runtime_ready_required=False,
+        provenance_hash=execution.hash,
+    )
+    runtime_source_req = replace(
+        context.requirements[0],
+        generation=api.EvidenceGeneration.RUNTIME,
+        runtime_ready_required=False,
+        provenance_hash=runtime_source.hash,
+    )
+    for changed, requirement, reason in (
+        (execution, execution_req, "MALFORMED:runtime"),
+        (runtime_source, runtime_source_req, "MALFORMED:generation"),
+    ):
+        result = api.ingest_evidence(
+            replace(context, requirements=(requirement,)),
+            (replace(submission, provenance=changed),),
+        )
+        assert result.bundle is None and result.reason_codes == (reason,)
+    with pytest.raises((TypeError, ValueError)):
+        _runtime(api, expected_runtime_identity=1)
+    hostile_source = _hostile_envelope(envelope, source_locator=None)
+    source_req = replace(context.requirements[0], provenance_hash=hostile_source.hash)
+    result = api.ingest_evidence(
+        replace(context, requirements=(source_req,)),
+        (api.EvidenceSubmission(submission.content, submission.status, hostile_source),),
+    )
+    assert result.bundle is None and result.reason_codes == ("MISSING:source_locator",)
+    hostile_runtime = _hostile_envelope(envelope, runtime="bad")
+    runtime_req = replace(context.requirements[0], provenance_hash=hostile_runtime.hash)
+    result = api.ingest_evidence(
+        replace(context, requirements=(runtime_req,)),
+        (api.EvidenceSubmission(submission.content, submission.status, hostile_runtime),),
+    )
+    assert result.bundle is None and result.reason_codes == ("MALFORMED:runtime",)
+
+
+def test_public_bounded_length_constants_and_representative_limits():
+    api, _, submission, envelope = _fixture()
+    assert api.MAX_TEXT_LENGTH == 4096
+    assert api.MAX_COLLECTION_ITEMS == 256
+    assert api.MAX_CONTENT_BYTES == 1_048_576
+    oversized_content = b"x" * (api.MAX_CONTENT_BYTES + 1)
+    oversized_hash = "sha256:" + hashlib.sha256(oversized_content).hexdigest()
+    with pytest.raises((TypeError, ValueError)):
+        api.ProducerGrant(
+            "p" * (api.MAX_TEXT_LENGTH + 1), api.ProducerRole.VERIFIER, _hash("p"), ("pytest",)
+        )
+    with pytest.raises((TypeError, ValueError)):
+        api.ProducerGrant(
+            "p",
+            api.ProducerRole.VERIFIER,
+            _hash("p"),
+            tuple(f"m{i}" for i in range(api.MAX_COLLECTION_ITEMS + 1)),
+        )
+    with pytest.raises((TypeError, ValueError)):
+        api.EvidenceSubmission(oversized_content, submission.status, envelope)
+    with pytest.raises((TypeError, ValueError)):
+        api.TrustReference(
+            api.TrustRole.AUTHORITY,
+            "e",
+            "i",
+            _hash("s"),
+            "merge",
+            api.TrustDecision.ALLOW,
+            _at(-1),
+            _at(1),
+            None,
+            _hash("p"),
+            _hash("sp"),
+            "pytest",
+            oversized_content,
+            oversized_hash,
+        )
 
 
 def test_multi_submission_attack_keeps_all_reason_codes_sorted_unique_and_top_condition():
