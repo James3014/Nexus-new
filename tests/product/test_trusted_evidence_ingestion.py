@@ -1358,6 +1358,93 @@ def test_context_requirements_and_prerequisites_respect_collection_bound():
         replace(context, prerequisite_payload_hashes=prerequisites)
 
 
+def test_receipt_and_result_are_sealed_init_false_non_equatable_dataclasses():
+    api = _api()
+    for cls in (api.IngestionReceipt, api.IngestionResult):
+        params = cls.__dataclass_params__
+        assert params.frozen is True and params.init is False and params.eq is False
+
+
+def test_diagnostic_trust_classification_is_exact_and_matches_boolean_helper():
+    api, context, submission, _ = _fixture()
+    result = api.ingest_evidence(context, (submission,))
+    assert api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.TRUSTED
+    assert api.is_trusted_ingestion_result(context, result) is True
+    assert (
+        api.classify_ingestion_result(replace(context, required_action="other"), result)
+        is api.IngestionTrustStatus.UNTRUSTED
+    )
+    lookalike = object.__new__(type(result))
+    for field in fields(result):
+        object.__setattr__(lookalike, field.name, getattr(result, field.name))
+    assert api.classify_ingestion_result(context, lookalike) is api.IngestionTrustStatus.UNTRUSTED
+    object.__setattr__(result.receipt, "profile_hash", _hash("changed"))
+    assert (
+        api.classify_ingestion_result(context, result) is api.IngestionTrustStatus.RECEIPT_INVALID
+    )
+    assert api.is_trusted_ingestion_result(context, result) is False
+    assert set(api.IngestionTrustStatus.__members__) == {"UNTRUSTED", "RECEIPT_INVALID", "TRUSTED"}
+
+
+def test_runtime_timestamp_types_are_rejected_but_malformed_strings_classify_unknown():
+    api, *_ = _fixture()
+    with pytest.raises(TypeError):
+        _runtime(api, observed_at=1)
+    with pytest.raises(TypeError):
+        _runtime(api, expires_at=1)
+    malformed = _runtime(api, observed_at="not-rfc3339")
+    assert api.derive_runtime_freshness(malformed, _at()).name == "CONVERGENCE_UNKNOWN"
+
+
+def test_hostile_source_blank_revisions_are_unknown():
+    api, *_ = _fixture()
+    source = _hostile_runtime(
+        _runtime(
+            api,
+            generation=api.EvidenceGeneration.SOURCE,
+            expected_runtime_identity=None,
+            observed_runtime_identity=None,
+            readiness_status=None,
+        ),
+        desired_source_revision="",
+        loaded_source_revision="",
+    )
+    assert api.derive_runtime_freshness(source, _at()).name == "CONVERGENCE_UNKNOWN"
+
+
+def test_under_submitted_duplicate_requirements_return_exact_duplicate_without_exception():
+    api, context, submission, _ = _fixture()
+    second = replace(
+        context.requirements[0],
+        artifact_id="artifact-2",
+        provenance_hash=context.requirements[0].provenance_hash,
+    )
+    result = api.ingest_evidence(
+        replace(context, requirements=(context.requirements[0], second)), (submission,)
+    )
+    assert result.bundle is None and result.condition is api.IntegrityStatus.DUPLICATE
+    assert result.reason_codes == ("DUPLICATE:verifier",)
+
+
+def test_plan_binding_mismatch_and_missing_verifier_retain_both_reasons():
+    api, context, submission, _ = _fixture()
+    contract = replace(context.contract, required_verifier_ids=("unit", "lint"))
+    plan = replace(
+        context.plan,
+        acceptance_contract_hash=_hash("wrong"),
+        required_verifier_ids=("unit", "lint"),
+    )
+    result = api.ingest_evidence(replace(context, contract=contract, plan=plan), (submission,))
+    assert result.bundle is None and result.condition is api.IntegrityStatus.CROSS_BOUND
+    assert result.reason_codes == ("CROSS_BOUND:changeset", "MISSING:required_verifier")
+
+
+def test_submission_tuple_collection_bound_is_checked_before_work():
+    api, context, submission, _ = _fixture()
+    with pytest.raises(ValueError):
+        api.ingest_evidence(context, (submission,) * (api.MAX_COLLECTION_ITEMS + 1))
+
+
 def test_result_consistency_binds_reasons_condition_and_context_profile_bundle():
     api, context, submission, _ = _fixture()
     result = api.ingest_evidence(context, (submission,))
