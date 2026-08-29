@@ -1696,8 +1696,8 @@ def test_outer_required_action_mutation_is_raw_shape_error_and_invalidates_prior
 def test_reversed_sorted_prerequisites_preserve_hash_but_fail_outer_shape_validation():
     api, context, submission, _ = _fixture()
     prerequisites = (
-        (api.TrustRole.AUTHORITY, _hash("authority")),
         (api.TrustRole.APPROVAL, _hash("approval")),
+        (api.TrustRole.AUTHORITY, _hash("authority")),
     )
     profiled = replace(context, prerequisite_payload_hashes=prerequisites)
     result = api.ingest_evidence(profiled, (submission,))
