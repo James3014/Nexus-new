@@ -934,10 +934,9 @@ def test_resealed_evidence_type_and_generation_mismatch_fail_closed():
         replace(context, requirements=(source_requirement,)),
         (replace(submission, provenance=source),),
     )
-    assert (
-        generation_result.bundle is None
-        and "MALFORMED:generation" in generation_result.reason_codes
-    )
+    assert generation_result.bundle is None
+    assert generation_result.condition is api.IntegrityStatus.MALFORMED
+    assert generation_result.reason_codes == ("MALFORMED:runtime",)
 
 
 def test_receipt_and_result_integrity_contracts_reject_forged_hashes_and_mismatches():
@@ -1544,7 +1543,9 @@ def test_hostile_source_revision_admission_maps_to_missing_source_locator():
     result = api.ingest_evidence(
         replace(context, requirements=(requirement,)), (replace(submission, provenance=changed),)
     )
-    assert result.bundle is None and result.reason_codes == ("MISSING:source_locator",)
+    assert result.bundle is None
+    assert result.condition is api.IntegrityStatus.MISSING
+    assert result.reason_codes == ("MISSING:source_locator",)
 
 
 def test_hostile_source_locator_str_subclass_is_malformed_provenance():
@@ -1952,7 +1953,9 @@ def test_runtime_generation_and_runtime_observation_combinations_fail_closed():
         replace(context, requirements=(source_req,)),
         (api.EvidenceSubmission(submission.content, submission.status, hostile_source),),
     )
-    assert result.bundle is None and result.reason_codes == ("MISSING:source_locator",)
+    assert result.bundle is None
+    assert result.condition is api.IntegrityStatus.MALFORMED
+    assert result.reason_codes == ("MALFORMED:provenance",)
     hostile_runtime = _hostile_envelope(envelope, runtime="bad")
     runtime_req = replace(context.requirements[0], provenance_hash=hostile_runtime.hash)
     result = api.ingest_evidence(
