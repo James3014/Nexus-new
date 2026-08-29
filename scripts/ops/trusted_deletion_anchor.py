@@ -75,6 +75,21 @@ def _sha(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _type_strict_equal(left: Any, right: Any) -> bool:
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(
+            _type_strict_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, list):
+        return len(left) == len(right) and all(
+            _type_strict_equal(left_item, right_item)
+            for left_item, right_item in zip(left, right, strict=True)
+        )
+    return left == right
+
+
 def _validate_trusted_dependency_contract(
     trusted_pyproject: bytes,
     head_pyproject: bytes,
@@ -120,14 +135,17 @@ def _validate_trusted_dependency_contract(
     ):
         raise ValueError(error)
     product_index = head_packages.index(product_package)
-    if [*head_packages[:product_index], *head_packages[product_index + 1 :]] != trusted_packages:
+    if not _type_strict_equal(
+        [*head_packages[:product_index], *head_packages[product_index + 1 :]],
+        trusted_packages,
+    ):
         raise ValueError(error)
 
     trusted_without_packages = copy.deepcopy(trusted)
     head_without_packages = copy.deepcopy(head)
     trusted_without_packages["tool"]["poetry"].pop("packages")
     head_without_packages["tool"]["poetry"].pop("packages")
-    if head_without_packages != trusted_without_packages:
+    if not _type_strict_equal(head_without_packages, trusted_without_packages):
         raise ValueError(error)
 
 

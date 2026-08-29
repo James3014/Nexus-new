@@ -56,6 +56,10 @@ test = ["pytest"]
 [tool.poetry.scripts]
 fixture = "fixture:main"
 
+[tool.example]
+enabled = true
+count = 100
+
 [build-system]
 requires = ["poetry-core>=1"]
 build-backend = "poetry.core.masonry.api"
@@ -189,6 +193,22 @@ def test_trusted_package_contract_allows_exact_product_package_only_delta(packag
                 packages='{include = "nexus"}, {include = "scripts"}, {include = "product"}',
                 suffix="\n[tool.hostile]\nvalue = true\n",
             ),
+            b"version = 1\n",
+            True,
+        ),
+        (
+            "boolean to integer type drift",
+            _package_contract_pyproject(
+                packages='{include = "nexus"}, {include = "scripts"}, {include = "product"}'
+            ).replace(b"enabled = true", b"enabled = 1"),
+            b"version = 1\n",
+            True,
+        ),
+        (
+            "integer to float type drift",
+            _package_contract_pyproject(
+                packages='{include = "nexus"}, {include = "scripts"}, {include = "product"}'
+            ).replace(b"count = 100", b"count = 100.0"),
             b"version = 1\n",
             True,
         ),
