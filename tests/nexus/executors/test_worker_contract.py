@@ -99,7 +99,7 @@ def test_agy_adapter_discovers_binary_from_path_and_uses_policy_model(monkeypatc
     adapter = AgyWorkerAdapter()
 
     assert adapter._configured_executable() == "/opt/agy/bin/agy"
-    assert adapter._model() == "gemini-3.6-flash-high"
+    assert adapter._model() == "gemini-3.7-flash-medium"
 
 
 def test_agy_adapter_requires_executable(monkeypatch):
@@ -179,7 +179,7 @@ def test_agy_adapter_invokes_headless_project_scoped_cli_and_records_evidence(mo
         "--mode",
         "accept-edits",
         "--model",
-        "gemini-3.6-flash-high",
+        "gemini-3.7-flash-medium",
         "--print-timeout",
         "42s",
         "--print",
