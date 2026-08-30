@@ -1,7 +1,7 @@
 # TASK-EPB-002-R1 — Scoped Core External Candidate Adoption Successor
 
 - **Campaign:** `CAMPAIGN-EVIDENCE-PRODUCER-BRIDGE-01`
-- **Status:** `ACTIVE`
+- **Status:** `SUPERSEDED`
 - **Source spec:** `SPEC-EPB-EXTERNAL-CANDIDATE-ADOPTION-EXEC-001`
 - **Source spec SHA-256:** `9e841f43d63ffc10704f00b4d21b88f9fbf78f3a473839a1409f278a951251a1`
 - **Source groups:** Core external Candidate adoption service

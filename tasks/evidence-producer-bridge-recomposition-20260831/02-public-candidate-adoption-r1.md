@@ -1,7 +1,7 @@
 # TASK-EPB-003-R1 — Public Typed External Candidate Adoption Successor
 
 - **Campaign:** `CAMPAIGN-EVIDENCE-PRODUCER-BRIDGE-01`
-- **Status:** `PLANNED`
+- **Status:** `ACTIVE`
 - **Source spec:** `SPEC-EPB-EXTERNAL-CANDIDATE-ADOPTION-EXEC-001`
 - **Source spec SHA-256:** `9e841f43d63ffc10704f00b4d21b88f9fbf78f3a473839a1409f278a951251a1`
 - **Source groups:** Public typed adoption action
@@ -9,8 +9,8 @@
 - **Acceptance:** `AC-001; AC-004`
 - **Auto-chain:** `false`
 - **Maximum claim:** Adoption capability independently verified; no EPB approval, integration, remote merge, release, production, Task4, or public-stability claim.
-- **Depends on:** `TASK-EPB-002-R1`
-- **Dependency unlock evidence:** `Exact accepted core successor SHA, tree, service API, validation receipt, independent acceptance receipt, and fresh base HEAD`
+- **Depends on:** none
+- **Dependency unlock evidence:** none
 - **Task type:** `IMPLEMENTATION`
 - **Slicing strategy:** `TRACER_BULLET`
 - **Scope class:** `medium`
@@ -44,14 +44,14 @@ No duplicate verifier/state authority, approval, integration, push, merge, reloa
 
 ## Owner decisions
 
-Owner mission authority permits this successor only after exact independent core acceptance. It creates no downstream authority.
+Owner mission authority permits this successor after exact independent core acceptance. Core Candidate `913a90900b906f31d18e35efdd853863aad92400`, tree `96fb94032757f492ca49336a31d90d3ae700d6f7`, validation receipt SHA-256 `e7be5fb04a645309730cdd5d1e14b13298e3d2a7f87c0e38fc24e6a054a172a6`, and acceptance receipt SHA-256 `4dc212cd349f3f38954dc5849849c6ff31ee5cc8b0f7af24fea03bf03fda659e` satisfy the dependency. This card creates no downstream authority.
 
 ## Source and start state
 
-- **Workspace/root:** `REVERIFY_AFTER_DEPENDENCY`
-- **Branch:** `REVERIFY_AFTER_DEPENDENCY`
-- **Starting HEAD:** `REVERIFY_AFTER_DEPENDENCY`
-- **Dirty baseline:** `REVERIFY_AFTER_DEPENDENCY`
+- **Workspace/root:** `/private/tmp/nexus-epb-core-r1`
+- **Branch:** `codex/epb-core-adoption-r1`
+- **Starting HEAD:** `913a90900b906f31d18e35efdd853863aad92400`
+- **Dirty baseline:** clean before this controller-authored frontier rebind
 - **Required initial verification:** bind exact accepted core SHA/tree/receipt/API and current Task Card hash
 - **Freshness rule:** re-read after dependency, HEAD/status/tool/runtime movement
 
@@ -95,7 +95,7 @@ Rebind exact core API; inspect action enum, Gateway manifest/schema/handler, sta
 
 ## Start-state classification
 
-`REVERIFY_AFTER_DEPENDENCY`
+`DEFECT_REPRODUCED`
 
 ## RED or existing-guard proof
 
