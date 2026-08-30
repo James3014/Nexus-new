@@ -1,22 +1,55 @@
-# Campaign Index: evidence-producer-bridge-20260830
+# Evidence Producer Bridge Mission Closure
 
-Status: `ACTIVE`
+- **Campaign ID:** `CAMPAIGN-EVIDENCE-PRODUCER-BRIDGE-01`
+- **Status:** `READY_FOR_EXECUTION`
+- **Source mode:** `VALIDATED_SPEC`
+- **Source spec ID:** `SPEC-EPB-EXTERNAL-CANDIDATE-ADOPTION-EXEC-001`
+- **Source spec SHA-256:** `17e70e7a92cc2f4f0ed68756570f704af1625f19b0f8c6864a17015212eac8e9`
+- **Source basis snapshot:** `James3014/Nexus-new`; contract base `a33fbd65b21ddf67085be9fa4ea245f59626ddd8`; accepted EPB Candidate `b3343c95479f03857af7761381a1b839ac049e24`; Owner master authorization SHA-256 `1adad9c3cc0356c6bd7d7babf41bf980664c3ed38253909642b78e4992572133`
+- **Auto-chain:** `false`
+- **Parallel execution:** `false`
+- **Current frontier:** `TASK-EPB-002`
+- **Maximum campaign claim:** Adoption capability independently verified; no EPB approval, integration, remote merge, release, production, Task4, or public-stability claim.
 
-Campaign: `CAMPAIGN-EVIDENCE-PRODUCER-BRIDGE-01`
+The source specification's textual `READY_FOR_OWNER_REVIEW` state is superseded for execution by the exact Owner master authorization above, which explicitly changes it to `OWNER_APPROVED_FOR_EXECUTION` without changing the approved specification bytes or digest.
 
-Goal: `EVIDENCE_PRODUCER_BRIDGE_CONTRACT`
+## 1. Source handoff import
 
-Owner authority: explicit current-thread authorization issued 2026-08-30 to the Primary Controller.
+| Source group | Requirements | Acceptance | Observable outcome | Dependency seam | Verification seam | Maximum claim | Scope class | Minimum MCP profile | Known blocker | Compiled tasks |
+|---|---|---|---|---|---|---|---|---|---|---|
+| External Candidate adoption repair | `REQ-001`; `REQ-002`; `REQ-003`; `REQ-004`; `REQ-005`; `REQ-006`; `REQ-007` | `AC-001`; `AC-002`; `AC-003`; `AC-004`; `AC-005`; `AC-006`; `AC-007` | Typed fail-closed external Candidate adoption reaches pending approval only | Existing CandidateVerifier and durable lifecycle | Real immutable precommitted Candidate plus Gateway/service hostile tests | Adoption capability independently verified; no EPB approval, integration, remote merge, release, production, Task4, or public-stability claim. | medium | CANDIDATE | none | `TASK-EPB-002` |
 
-Source Candidate: `58a2af2d86cd92aad1d98b6bc708f9ea564fe226` / tree `ff7526bb78ae639607673ee7ae9ada944a85082d`
+## 2. Requirement coverage
 
-Preflight receipt: `/private/tmp/nexus-product-kernel-usability.LR9utT/evidence-supply-chain-gap-preflight-receipt.json` / file SHA-256 `03f3d1e3943a83c2b0b0785480bbcdbf50e610894554b77dc832fbe74adcd126`
+| Requirement | Acceptance | Implementing task | Witness task | Coverage status |
+|---|---|---|---|---|
+| `REQ-001` | `AC-001` | `TASK-EPB-002` | `TASK-EPB-002` | FULL |
+| `REQ-002` | `AC-005` | `TASK-EPB-002` | `TASK-EPB-002` | FULL |
+| `REQ-003` | `AC-002` | `TASK-EPB-002` | `TASK-EPB-002` | FULL |
+| `REQ-004` | `AC-006` | `TASK-EPB-002` | `TASK-EPB-002` | FULL |
+| `REQ-005` | `AC-007` | `TASK-EPB-002` | `TASK-EPB-002` | FULL |
+| `REQ-006` | `AC-003` | `TASK-EPB-002` | `TASK-EPB-002` | FULL |
+| `REQ-007` | `AC-004` | `TASK-EPB-002` | `TASK-EPB-002` | FULL |
 
-| Order | Card | File | State |
-|---:|---|---|---|
-| 0 | `TASK-EPB-001` | `00-evidence-producer-bridge.md` | `RETAINED_FOR_REVIEW` |
-| 1 | `TASK-EPB-001-R1` | `01-evidence-producer-bridge-r1.md` | `ACTIVE` |
+## 3. Dependency graph
 
-Current frontier: `01-evidence-producer-bridge-r1.md`
+| Task ID | Status | Type | Slicing strategy | Blocked by | Edge type | Unlock evidence | Observable outcome | Verification seam | Maximum claim | Scope class | MCP profile | Transport status |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `TASK-EPB-002` | ACTIVE | IMPLEMENTATION | TRACER_BULLET | none | none | none | Typed fail-closed external Candidate adoption reaches pending approval only | Real immutable precommitted Candidate plus Gateway/service hostile tests | Adoption capability independently verified; no EPB approval, integration, remote merge, release, production, Task4, or public-stability claim. | medium | CANDIDATE | READY |
 
-`AUTO_CHAIN=false`
+## 4. Ready candidates and frontier selection
+
+- **Dependency-ready candidates:** `TASK-EPB-002`
+- **Selected frontier:** `TASK-EPB-002`
+- **Selection rationale:** It closes the only physical lifecycle gap preventing the already accepted immutable EPB Candidate from entering unchanged approval and integration gates.
+- **Exact unblock condition:** none
+
+## 5. Campaign authority and non-goals
+
+Owner master authorization permits same-mission Task Card creation, implementation, bounded repair attempts, independent acceptance, governed approval, local integration, exact-head remote publication/default merge, Gateway reload, and post-merge verification. Workers may implement and commit only their scoped Candidate. They may not self-approve, integrate, merge, push protected/default refs, release, deploy, begin Task4, create a trust root, or make production/public-stability claims. `AUTO_CHAIN=false` prohibits only materially different missions; the explicitly authorized EPB closure sequence remains controller-managed.
+
+## 6. Supersession and change history
+
+- `TASK-EPB-001` remains retained negative evidence.
+- `TASK-EPB-001-R1` produced exact accepted Candidate `b3343c95479f03857af7761381a1b839ac049e24` and is not rewritten.
+- `TASK-EPB-002` is the Owner-authorized same-campaign lifecycle closure repair compiled from the approved specification.
