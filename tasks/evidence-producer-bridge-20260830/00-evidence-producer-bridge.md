@@ -1,5 +1,7 @@
 # Task Card: TASK-EPB-001
 
+task_id: `TASK-EPB-001`
+
 Status: `ACTIVE`
 
 Campaign: `CAMPAIGN-EVIDENCE-PRODUCER-BRIDGE-01`
