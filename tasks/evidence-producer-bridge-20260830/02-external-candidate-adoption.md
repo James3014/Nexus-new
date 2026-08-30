@@ -1,5 +1,7 @@
 # TASK-EPB-002 — Core External Candidate Adoption Service
 
+task_id: `TASK-EPB-002`
+
 - **Campaign:** `CAMPAIGN-EVIDENCE-PRODUCER-BRIDGE-01`
 - **Status:** `ACTIVE`
 - **Source spec:** `SPEC-EPB-EXTERNAL-CANDIDATE-ADOPTION-EXEC-001`

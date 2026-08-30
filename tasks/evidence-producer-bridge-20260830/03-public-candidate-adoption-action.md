@@ -1,5 +1,7 @@
 # TASK-EPB-003 — Public Typed External Candidate Adoption Action
 
+task_id: `TASK-EPB-003`
+
 - **Campaign:** `CAMPAIGN-EVIDENCE-PRODUCER-BRIDGE-01`
 - **Status:** `PLANNED`
 - **Source spec:** `SPEC-EPB-EXTERNAL-CANDIDATE-ADOPTION-EXEC-001`
