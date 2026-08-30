@@ -37,10 +37,12 @@ Goal: repair the Planner/Workforce seam so elevated trust/evidence mutation is n
 - `docs/arch/MODEL_WORKFORCE_POLICY.md`
 - `tests/engine/test_capability_planner.py`
 - `tests/contracts/test_model_workforce_policy.py`
+- `tests/services/test_mainchain_family_canary_matrix.py`
+- `tests/nexus/orchestrator/test_unified_mcp_gateway.py`
 - `tasks/planner-workforce-selection-repair-20260830/INDEX.md`
 - `tasks/planner-workforce-selection-repair-20260830/00-planner-workforce-selection-repair.md`
 
-Maximum changed paths: `8`.
+Maximum changed paths: `10`.
 
 ## Forbidden scope
 
