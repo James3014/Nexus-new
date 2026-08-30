@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import fcntl
 import hashlib
 import inspect
@@ -27,9 +28,11 @@ from nexus.contracts.autonomy_goal import AutonomyGoalGrant
 from nexus.contracts.collaboration_realm import CollaborationExecutionRealm
 from nexus.contracts.lifecycle_action import (
     ContractKind,
+    ExternalCandidateAdoptionRequest,
     LifecycleActionEnvelope,
     LifecycleActionType,
     canonical_request_hash,
+    parse_historical_epb_task_card,
     validate_owner_inline_contract,
 )
 from nexus.contracts.operator_outcome_receipt import (
@@ -67,7 +70,7 @@ from nexus.orchestrator.autonomy_policy import (
     AutonomySubmissionBinding,
     project_autonomy_submission,
 )
-from nexus.orchestrator.candidate_commit import CandidateCommitter, PromotionApprovalPacket
+from nexus.orchestrator.candidate_commit import CandidateCommitter
 from nexus.orchestrator.candidate_verifier import CandidateVerifier, VerifiedCandidateReceipt
 from nexus.orchestrator.canonical_source_root import CANONICAL_SOURCE_ROOT
 from nexus.orchestrator.collaboration_realm import CollaborationRealmVerifier
@@ -111,6 +114,16 @@ TERMINAL_STATUSES = frozenset({
 PENDING_CANDIDATE_STATUSES = frozenset({
     "PENDING_HUMAN_APPROVAL", "APPROVED", "APPROVAL_INVALIDATED", "INTEGRATING",
 })
+_LEGACY_V1_NEGATIVE_OMISSION_SET = frozenset({
+    "candidate_status",
+    "promotion_packet",
+    "integration_authorization",
+    "integration_receipt",
+    "promotion_receipt",
+    "candidate_created",
+    "candidate_commit_created",
+    "authority_change_required",
+})
 RESUMABLE_STATUSES = frozenset({
     "WORKER_COMPLETED",
     "WORKER_ESCALATING",
@@ -118,6 +131,7 @@ RESUMABLE_STATUSES = frozenset({
     "VERIFIED",
 })
 ACTIVE_EXECUTION_STATUSES = frozenset({
+    "ADOPTING",
     "SUBMITTED",
     "TARGET_LEASED",
     "WORKER_RUNNING",
@@ -125,6 +139,9 @@ ACTIVE_EXECUTION_STATUSES = frozenset({
     "CANDIDATE_REF_PROTECTED",
     "TARGET_CLEANED",
 })
+_EXTERNAL_ADOPTION_CLAIM_CEILING = (
+    "CANDIDATE_ADOPTED_PENDING_HUMAN_APPROVAL_ONLY",
+)
 INTEGRATION_INTERMEDIATE_STATUSES = frozenset({
     "INTEGRATION_FAILED_PRE_APPLY",
     "INTEGRATION_VERIFY_FAILED_AFTER_APPLY",
@@ -3929,12 +3946,220 @@ class SelfHostedTaskService:
             raise KeyError(f"unknown task_id: {task_id}")
         return persisted
 
+    def _resume_external_adoption(
+        self,
+        task_id: str,
+        state: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Replay a crash-interrupted external adoption from durable evidence.
+
+        The original request deliberately omits receipt payloads from the
+        task state.  Only the service-owned artifact locators are accepted on
+        restart, and both paths and content hashes are checked before the
+        normal adoption verifier is called.  This keeps restart idempotent
+        without granting a partially written ADOPTING state any authority.
+        """
+        request = state.get("request")
+        if not isinstance(request, Mapping) or request.get("task_id") != task_id:
+            raise RuntimeError("external adoption restart request is missing or mismatched")
+
+        def load_artifact(field: str, digest_field: str) -> bytes:
+            raw_locator = state.get(field)
+            digest = str(request.get(digest_field) or "")
+            if not isinstance(raw_locator, str) or not raw_locator or not re.fullmatch(r"[0-9a-f]{64}", digest):
+                raise RuntimeError("external adoption restart evidence locator is missing")
+            kind = {"validation_receipt_locator": "validation", "acceptance_receipt_locator": "acceptance"}.get(field)
+            if kind is None:
+                raise RuntimeError("external adoption restart evidence locator is unsupported")
+            content = self._read_adoption_artifact(task_id, raw_locator, digest, kind)
+            if hashlib.sha256(content).hexdigest() != digest:
+                raise RuntimeError("external adoption restart evidence hash mismatch")
+            return content
+
+        replay = dict(request)
+        replay["validation_receipt_b64"] = base64.b64encode(
+            load_artifact("validation_receipt_locator", "validation_receipt_sha256")
+        ).decode("ascii")
+        replay["acceptance_receipt_b64"] = base64.b64encode(
+            load_artifact("acceptance_receipt_locator", "acceptance_receipt_sha256")
+        ).decode("ascii")
+        return self.adopt_external_candidate(replay)
+
+    def _read_adoption_artifact(
+        self, task_id: str, raw_locator: str, digest: str, kind: str,
+    ) -> bytes:
+        """Read a service-owned adoption artifact without following symlinks."""
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", task_id):
+            raise RuntimeError("adoption artifact task id is unsafe")
+        if not re.fullmatch(r"[a-z][a-z0-9_-]*", kind) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+            raise RuntimeError("adoption artifact locator is malformed")
+        expected = self.state_dir / "adoption-artifacts" / task_id / f"{kind}-{digest}.json"
+        try:
+            if Path(raw_locator) != expected:
+                raise RuntimeError("external adoption evidence locator is not canonical")
+            nofollow = getattr(os, "O_NOFOLLOW", 0)
+            root_fd = os.open(self.state_dir, os.O_RDONLY | os.O_DIRECTORY | nofollow)
+            try:
+                artifact_fd = os.open("adoption-artifacts", os.O_RDONLY | os.O_DIRECTORY | nofollow, dir_fd=root_fd)
+                try:
+                    task_fd = os.open(task_id, os.O_RDONLY | os.O_DIRECTORY | nofollow, dir_fd=artifact_fd)
+                    try:
+                        fd = os.open(expected.name, os.O_RDONLY | nofollow, dir_fd=task_fd)
+                    finally:
+                        os.close(task_fd)
+                finally:
+                    os.close(artifact_fd)
+            finally:
+                os.close(root_fd)
+            try:
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    raise RuntimeError("external adoption restart evidence is not a regular file")
+                content = os.read(fd, 1024 * 1024 + 1)
+            finally:
+                os.close(fd)
+            if hashlib.sha256(content).hexdigest() != digest:
+                raise RuntimeError("external adoption restart evidence hash mismatch")
+            return content
+        except RuntimeError:
+            raise
+        except OSError as exc:
+            raise RuntimeError("external adoption restart evidence is unreadable or escaped service state") from exc
+
+    def _validate_persisted_external_adoption(
+        self, state: Mapping[str, Any], request: ExternalCandidateAdoptionRequest,
+        semantic_hash: str, acceptance: Mapping[str, Any],
+    ) -> None:
+        """Validate every durable binding before returning an adoption replay."""
+        receipt = state.get("adoption_receipt")
+        packet = state.get("promotion_packet")
+        verified = state.get("verified_receipt")
+        if not isinstance(receipt, Mapping) or not isinstance(packet, Mapping) or not isinstance(verified, Mapping):
+            raise RuntimeError("external adoption replay evidence is incomplete")
+        def canonical(value: Any) -> str:
+            return hashlib.sha256(json.dumps(
+                _jsonable(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            ).encode("utf-8")).hexdigest()
+        if state.get("status") != "PENDING_HUMAN_APPROVAL" or state.get("promotion_status") != "PENDING_HUMAN_APPROVAL":
+            raise RuntimeError("external adoption replay status is invalid")
+        if state.get("adoption_request_hash") != semantic_hash or state.get("action") != request.action.model_dump(mode="json"):
+            raise RuntimeError("external adoption replay request binding mismatch")
+        if (
+            state.get("task_card_path") != request.task_card_path
+            or state.get("task_card_hash") != request.task_card_hash
+            or state.get("controller_revision") != request.controller_revision
+            or state.get("target_initial_revision") != request.target_base_revision
+            or state.get("candidate_commit_sha") != request.candidate_commit_sha
+            or state.get("candidate_tree_sha") != request.candidate_tree_sha
+        ):
+            raise RuntimeError("external adoption replay state binding mismatch")
+        candidate_identity = state.get("candidate")
+        expected_candidate_identity = {
+            "candidate_commit_sha": request.candidate_commit_sha,
+            "candidate_tree_sha": request.candidate_tree_sha,
+            "candidate_state_hash": state.get("candidate_state_hash"),
+            "verified_receipt_hash": state.get("verified_receipt_hash"),
+        }
+        if (
+            not isinstance(candidate_identity, Mapping)
+            or dict(candidate_identity) != expected_candidate_identity
+            or state.get("candidate_state_hash") != packet.get("candidate_state_hash")
+            or state.get("candidate_state_hash") != receipt.get("candidate_state_hash")
+        ):
+            raise RuntimeError("external adoption replay candidate identity mismatch")
+        contract_payload = state.get("contract")
+        if not isinstance(contract_payload, Mapping) or state.get("contract_hash") != canonical({
+            key: value for key, value in contract_payload.items() if key != "contract_hash"
+        }):
+            raise RuntimeError("external adoption replay contract binding mismatch")
+        expected_receipt = {
+            "schema": "nexus.external_candidate_adoption_receipt.v1", "task_id": request.task_id,
+            "attempt_id": request.attempt_id, "action_id": request.action_id,
+            "idempotency_key": request.idempotency_key, "adoption_request_hash": semantic_hash,
+            "task_card_path": request.task_card_path, "task_card_hash": request.task_card_hash,
+            "contract_hash": state.get("contract_hash"), "controller_revision": request.controller_revision,
+            "target_base_revision": request.target_base_revision, "candidate_commit_sha": request.candidate_commit_sha,
+            "candidate_tree_sha": request.candidate_tree_sha, "candidate_diff_sha256": request.candidate_diff_sha256,
+            "candidate_state_hash": packet.get("candidate_state_hash"), "verified_receipt_hash": packet.get("verified_receipt_hash"),
+            "validation_receipt_sha256": request.validation_receipt_sha256,
+            "acceptance_receipt_sha256": request.acceptance_receipt_sha256, "reviewer_id": receipt.get("reviewer_id"),
+            "repository_contract_policy_revision_hash": verified.get("repository_contract_policy_revision_hash"),
+            "derived_contract_projection": state.get("derived_contract_projection"),
+            "forbidden_repository_patterns": list((state.get("derived_contract_projection") or {}).get("forbidden_repository_patterns") or ()),
+            "candidate_ref": state.get("candidate_ref"), "promotion_packet_hash": canonical(packet),
+            "worker_invocations": 0, "candidate_rewritten": False, "approval_performed": False,
+            "integration_performed": False, "merge_performed": False, "push_performed": False,
+            "public_claim_allowed": False, "production_ready": False,
+            "claim_ceiling": list(_EXTERNAL_ADOPTION_CLAIM_CEILING),
+            "issued_at": state.get("submitted_at"),
+        }
+        if any(receipt.get(key) != value for key, value in expected_receipt.items()):
+            raise RuntimeError("external adoption replay receipt binding mismatch")
+        if canonical(receipt) != canonical(expected_receipt):
+            raise RuntimeError("external adoption replay receipt contains unexpected fields")
+        if state.get("adoption_receipt_hash") != canonical(receipt):
+            raise RuntimeError("external adoption replay receipt hash mismatch")
+        if state.get("verified_receipt_hash") != packet.get("verified_receipt_hash") or canonical(verified) != packet.get("verified_receipt_hash"):
+            raise RuntimeError("external adoption replay verified receipt binding mismatch")
+        derived_projection = state.get("derived_contract_projection")
+        if (
+            not isinstance(derived_projection, Mapping)
+            or derived_projection.get("repository_contract_policy_revision_hash")
+            != verified.get("repository_contract_policy_revision_hash")
+        ):
+            raise RuntimeError("external adoption replay policy evidence binding mismatch")
+        packet_fields = {
+            "task_id": request.task_id, "contract_hash": state.get("contract_hash"),
+            "controller_revision": request.controller_revision, "target_base_revision": request.target_base_revision,
+            "candidate_state_hash": state.get("candidate_state_hash"), "candidate_commit_sha": request.candidate_commit_sha,
+            "candidate_tree_sha": request.candidate_tree_sha, "verified_receipt_hash": state.get("verified_receipt_hash"),
+            "candidate_commit_created": True, "promotion_status": "PENDING_HUMAN_APPROVAL",
+            "public_claim_allowed": False, "production_ready": False, "merge_performed": False,
+            "push_performed": False,
+        }
+        if any(packet.get(key) != value for key, value in packet_fields.items()):
+            raise RuntimeError("external adoption replay promotion packet binding mismatch")
+        for field in ("public_claim_allowed", "production_ready", "merge_performed", "push_performed", "candidate_commit_created"):
+            if field == "candidate_commit_created":
+                if verified.get(field) not in (None, False):
+                    raise RuntimeError("external adoption replay verified receipt contains promotion authority")
+            elif verified.get(field) not in (None, False):
+                raise RuntimeError("external adoption replay verified receipt contains downstream authority")
+        if verified.get("authority_change_required") not in (None, False):
+            raise RuntimeError("external adoption replay verified receipt contains authority findings")
+        expected_acceptance = {
+            "schema": "nexus.external_candidate_acceptance.v1",
+            "task_id": request.task_id,
+            "candidate_commit_sha": request.candidate_commit_sha,
+            "candidate_tree_sha": request.candidate_tree_sha,
+            "candidate_diff_sha256": request.candidate_diff_sha256,
+            "validation_receipt_sha256": request.validation_receipt_sha256,
+            "disposition": "ACCEPT_CANDIDATE",
+            "reviewer_id": acceptance.get("reviewer_id"),
+        }
+        if (
+            dict(state.get("external_acceptance") or {}) != dict(acceptance)
+            or any(acceptance.get(key) != value for key, value in expected_acceptance.items())
+            or receipt.get("reviewer_id") != acceptance.get("reviewer_id")
+        ):
+            raise RuntimeError("external adoption replay acceptance binding mismatch")
+        if any(state.get(key) not in (None, False) for key in ("approved_binding", "integration_authorization", "integration_receipt", "merge_performed", "push_performed", "public_claim_allowed", "production_ready")):
+            raise RuntimeError("external adoption replay contains downstream authority")
+
     def reconcile_task(self, task_id: str) -> Optional[dict[str, Any]]:
         state = self._read_state(task_id)
         if state is None:
             return state
         if state.get("state_valid") is False:
             return state
+        # External adoption reserves its durable state before touching the
+        # Target.  A crash can therefore leave an ADOPTING record which is
+        # safe to replay, but must not be treated as a lost worker execution
+        # (the generic tail below would otherwise FINAL_BLOCK it).  Rebuild
+        # the request from the immutable evidence artifacts and let the
+        # adoption path re-check every physical binding.  Missing or corrupt
+        # artifacts fail closed rather than guessing a lifecycle outcome.
+        if state.get("status") == "ADOPTING":
+            return self._resume_external_adoption(task_id, state)
         if state.get("status") == "DIRECT_RECONCILE_REQUIRED":
             return self._reconcile_direct_failure(task_id)
         if state.get("status") in {"DIRECT_STARTED", "DIRECT_APPLIED", "DIRECT_VERIFIED", "DIRECT_COMMITTED"}:
@@ -4140,6 +4365,7 @@ class SelfHostedTaskService:
         state = self._read_state(task_id)
         if state is None:
             raise KeyError(f"unknown task_id: {task_id}")
+
         if state.get("status") != "RETAINED_FOR_REVIEW":
             raise RuntimeError("only a retained candidate can enter recovery")
         packet = state.get("promotion_packet") or {}
@@ -5898,6 +6124,1027 @@ class SelfHostedTaskService:
             "state_retention_status": "TERMINAL",
             "archive_eligible": True,
         }, attempt_id=state.get("attempt_id")) or state
+
+    def freeze_retained_forensic_target(
+        self,
+        task_id: str,
+        *,
+        authority_confirmation: bool = False,
+    ) -> dict[str, Any]:
+        """Release one retained Target only after preserving its exact negative evidence."""
+        def canonical_hash(value: Any) -> str:
+            return hashlib.sha256(json.dumps(
+                _jsonable(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            ).encode("utf-8")).hexdigest()
+
+        if authority_confirmation is not True:
+            raise RuntimeError("forensic Target release requires explicit Owner authority")
+        state = self._read_state(task_id)
+        if state is None:
+            raise KeyError(f"unknown task_id: {task_id}")
+        if state.get("status") not in {"RETAINED_FOR_REVIEW", "FINAL_BLOCK"}:
+            raise RuntimeError("forensic Target release requires terminal retained state")
+        if (
+            state.get("promotion_status") != "NOT_CREATED"
+            or state.get("state_retention_status") != "TERMINAL"
+        ):
+            raise RuntimeError("forensic Target is not terminal evidence-only state")
+        if self._retained_state_has_candidate_authority(state):
+            raise RuntimeError("forensic Target has Candidate authority")
+        for field in ("worker_pid", "worker_pgid", "worker_child_pgid"):
+            raw_pid = state.get(field)
+            if raw_pid and self._pid_alive(int(raw_pid)):
+                raise RuntimeError("forensic Target still has an active process")
+        if (
+            state.get("forensic_target_released") is True
+            and state.get("cleanup_decision") in {"REMOVED", "ALREADY_REMOVED"}
+            and state.get("salvage_commit_sha")
+            and state.get("salvage_ref")
+        ):
+            proof = state.get("forensic_negative_proof")
+            if (
+                not isinstance(proof, Mapping)
+                or state.get("forensic_negative_proof_hash") != canonical_hash(proof)
+            ):
+                raise RuntimeError("forensic negative proof integrity mismatch")
+            return state
+
+        stored_contract = state.get("contract")
+        if not isinstance(stored_contract, Mapping):
+            raise RuntimeError("forensic Target contract is unavailable")
+        contract_payload = dict(stored_contract)
+        contract_payload.pop("contract_hash", None)
+        contract = ArchitectTaskContract.model_validate(contract_payload)
+        if state.get("contract_hash") != contract.contract_hash:
+            raise RuntimeError("forensic Target contract hash mismatch")
+        lease = self._lease_from_state(state)
+        manager = WorktreeManager(root_dir=contract.target_worktree_root)
+        if self._retained_state_has_complete_negative_evidence(state):
+            negative_proof = {
+                "schema": "nexus.legacy_forensic_compatibility_receipt.v1",
+                "negative_proof_mode": "STRICT_CURRENT_COMPLETE_NEGATIVE",
+                "synthetic_fields_created": False,
+            }
+        else:
+            negative_proof = self._build_legacy_v1_negative_compatibility_proof(
+                task_id, state, contract, lease, manager,
+            )
+            if negative_proof is None:
+                raise RuntimeError("forensic Target negative evidence is incomplete or ambiguous")
+        negative_proof_hash = canonical_hash(negative_proof)
+        state = self._checkpoint(
+            task_id,
+            str(state.get("status")),
+            {
+                "forensic_negative_proof": negative_proof,
+                "forensic_negative_proof_hash": negative_proof_hash,
+                "forensic_negative_proof_checkpointed": True,
+            },
+            attempt_id=state.get("attempt_id"),
+        ) or state
+        if (
+            state.get("forensic_negative_proof") != negative_proof
+            or state.get("forensic_negative_proof_hash") != negative_proof_hash
+        ):
+            raise RuntimeError("forensic negative proof checkpoint mismatch")
+        salvage = {
+            "salvage_commit_sha": state.get("salvage_commit_sha"),
+            "salvage_ref": state.get("salvage_ref"),
+            "salvage_only": state.get("salvage_only"),
+            "promotion_eligible": state.get("promotion_eligible"),
+        }
+        if not salvage["salvage_commit_sha"] or not salvage["salvage_ref"]:
+            salvage = manager.protect_salvage_head(
+                contract,
+                lease,
+                str(state.get("attempt_id") or lease.attempt_id or ""),
+            )
+            state = self._checkpoint(
+                task_id,
+                str(state.get("status")),
+                {
+                    **salvage,
+                    "forensic_negative_proof": negative_proof,
+                    "forensic_negative_proof_hash": negative_proof_hash,
+                    "promotion_status": "NOT_CREATED",
+                    "cleanup_decision": "SALVAGED",
+                    "cleanup_blocker": None,
+                    "cleanup_performed": False,
+                    "cleanup_eligible": False,
+                    "forensic_target_released": False,
+                    "state_retention_status": "TERMINAL",
+                    "archive_eligible": False,
+                },
+                attempt_id=state.get("attempt_id"),
+            ) or state
+        elif salvage["salvage_only"] is not True or salvage["promotion_eligible"] is not False:
+            raise RuntimeError("forensic salvage metadata is invalid")
+
+        cleanup = manager.cleanup_terminal_target(
+            contract,
+            lease,
+            salvage_commit=str(salvage["salvage_commit_sha"]),
+            salvage_ref=str(salvage["salvage_ref"]),
+        )
+        if cleanup.decision not in {"REMOVED", "ALREADY_REMOVED"}:
+            self._checkpoint(
+                task_id,
+                str(state.get("status")),
+                {
+                    **salvage,
+                    "forensic_negative_proof": negative_proof,
+                    "forensic_negative_proof_hash": negative_proof_hash,
+                    "cleanup_decision": cleanup.decision,
+                    "cleanup_blocker": cleanup.blocker,
+                    "cleanup_performed": cleanup.performed,
+                    "cleanup_eligible": cleanup.eligible,
+                    "forensic_target_released": False,
+                },
+                attempt_id=state.get("attempt_id"),
+            )
+            raise RuntimeError(cleanup.blocker or cleanup.decision)
+        return self._checkpoint(
+            task_id,
+            str(state.get("status")),
+            {
+                **salvage,
+                "forensic_negative_proof": negative_proof,
+                "forensic_negative_proof_hash": negative_proof_hash,
+                "promotion_status": "NOT_CREATED",
+                "cleanup_decision": cleanup.decision,
+                "cleanup_blocker": None,
+                "cleanup_performed": cleanup.performed,
+                "cleanup_performed_at": _utc_now() if cleanup.performed else state.get("cleanup_performed_at"),
+                "cleanup_eligible": cleanup.eligible,
+                "forensic_target_released": True,
+                "state_retention_status": "TERMINAL",
+                "archive_eligible": False,
+                "merge_performed": False,
+                "push_performed": False,
+            },
+            attempt_id=state.get("attempt_id"),
+        ) or state
+
+    @staticmethod
+    def _retained_state_has_candidate_authority(state: Mapping[str, Any]) -> bool:
+        """Return whether retained state contains any positive authority evidence.
+
+        Retained forensic state may preserve explicit negative observations (for
+        example ``candidate_created=False`` and ``candidate_commit_allowed=False``),
+        but no Candidate, verification, approval, promotion, or integration
+        authority may be carried into the salvage path.  Keep this semantic
+        check centralized so newly persisted authority fields cannot silently
+        bypass a finite denylist.
+        """
+        negative_boolean_fields = {"candidate_created", "candidate_commit_allowed"}
+        authority_prefixes = ("candidate_", "approval_", "integration_")
+        authority_fields = {
+            "candidate",
+            "promotion_packet",
+            "verified_receipt",
+            "verified_receipt_hash",
+            "durable_candidate_receipt",
+            "approved_binding",
+            "integration_authorization",
+            "integration_receipt",
+            "promotion_receipt",
+            "candidate_receipt",
+        }
+        for key, value in state.items():
+            if key == "candidate" and SelfHostedTaskService._is_negative_candidate_record(value):
+                continue
+            if key == "verified_receipt" and SelfHostedTaskService._is_negative_verified_record(value):
+                continue
+            if key in negative_boolean_fields:
+                if value not in (None, False):
+                    return True
+                continue
+            if key == "candidate_status":
+                # A status is a Candidate lifecycle claim even when it is a
+                # terminal-looking value; the forensic path must not infer it.
+                if value not in (None, ""):
+                    return True
+                continue
+            if key in authority_fields:
+                if value not in (None, {}, [], "", False):
+                    return True
+                continue
+            if key.startswith(authority_prefixes):
+                if value not in (None, {}, [], "", False):
+                    return True
+        return False
+
+    @staticmethod
+    def _is_negative_candidate_record(value: Any) -> bool:
+        return (
+            isinstance(value, Mapping)
+            and value.get("allowed_scope_passed") is False
+            and value.get("commit_created") is False
+            and value.get("approval_status") == "PENDING"
+            and value.get("public_claim_allowed") is False
+            and value.get("production_ready") is False
+            and value.get("merge_performed") is False
+            and isinstance(value.get("out_of_scope_paths"), (list, tuple))
+            and bool(value.get("out_of_scope_paths"))
+            and all(isinstance(item, str) and item.strip() for item in value["out_of_scope_paths"])
+        )
+
+    @staticmethod
+    def _is_negative_verified_record(value: Any) -> bool:
+        return (
+            isinstance(value, Mapping)
+            and value.get("verified") is False
+            and value.get("candidate_commit_allowed") is False
+            and value.get("candidate_commit_created") is False
+            and value.get("public_claim_allowed") is False
+            and value.get("production_ready") is False
+            and value.get("merge_performed") is False
+            and value.get("authority_change_required") is False
+            and isinstance(value.get("failure_reasons"), (list, tuple))
+            and bool(value.get("failure_reasons"))
+            and all(isinstance(item, str) and item.strip() for item in value["failure_reasons"])
+            and (
+                value.get("scope_gate") is False
+                or value.get("scope_gate_passed") is False
+                or value.get("verifier_gate") is False
+                or value.get("verifier_gate_passed") is False
+            )
+        )
+
+    @staticmethod
+    def _retained_state_has_complete_negative_evidence(state: Mapping[str, Any]) -> bool:
+        """Require the exact negative evidence shape before forensic release.
+
+        A retained Target is releasable only when both producer-side records
+        explicitly prove that no Candidate authority was created.  Missing,
+        malformed, or ambiguous values are deliberately rejected rather than
+        interpreted as negative evidence.
+        """
+        candidate = state.get("candidate")
+        verified = state.get("verified_receipt")
+        if not isinstance(candidate, Mapping) or not isinstance(verified, Mapping):
+            return False
+
+        required_candidate = (
+            "allowed_scope_passed",
+            "commit_created",
+            "approval_status",
+            "public_claim_allowed",
+            "production_ready",
+            "merge_performed",
+            "out_of_scope_paths",
+        )
+        if any(field not in candidate for field in required_candidate):
+            return False
+        if not SelfHostedTaskService._is_negative_candidate_record(candidate):
+            return False
+
+        required_verified = (
+            "verified",
+            "candidate_commit_allowed",
+            "candidate_commit_created",
+            "failure_reasons",
+            "public_claim_allowed",
+            "production_ready",
+            "merge_performed",
+            "authority_change_required",
+        )
+        if any(field not in verified for field in required_verified):
+            return False
+        if not SelfHostedTaskService._is_negative_verified_record(verified):
+            return False
+
+        top_level_null_fields = (
+            "candidate_commit_sha",
+            "candidate_tree_sha",
+            "candidate_state_hash",
+            "verified_receipt_hash",
+            "candidate_ref",
+            "approved_binding",
+            "promotion_packet",
+            "integration_authorization",
+            "integration_receipt",
+            "promotion_receipt",
+        )
+        if any(state.get(field) not in (None, {}, [], "") for field in top_level_null_fields):
+            return False
+        top_level_false_fields = (
+            "candidate_created",
+            "candidate_commit_created",
+            "public_claim_allowed",
+            "production_ready",
+            "merge_performed",
+            "push_performed",
+            "authority_change_required",
+        )
+        required_top_level_fields = (
+            "promotion_status",
+            "candidate_status",
+            *top_level_null_fields,
+            *top_level_false_fields,
+        )
+        if any(field not in state for field in required_top_level_fields):
+            return False
+        if any(state.get(field) not in (None, False) for field in top_level_false_fields):
+            return False
+        if state.get("candidate_status") not in (None, ""):
+            return False
+        return state.get("promotion_status") == "NOT_CREATED"
+
+    def _build_legacy_v1_negative_compatibility_proof(
+        self,
+        task_id: str,
+        state: Mapping[str, Any],
+        contract: ArchitectTaskContract,
+        lease: TargetWorktreeLease,
+        manager: WorktreeManager,
+    ) -> dict[str, Any] | None:
+        """Re-prove one exact legacy-v1 negative state without synthesizing fields."""
+        required_current_fields = {
+            "promotion_status", "candidate_status", "candidate_commit_sha",
+            "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash",
+            "candidate_ref", "approved_binding", "promotion_packet",
+            "integration_authorization", "integration_receipt", "promotion_receipt",
+            "candidate_created", "candidate_commit_created", "public_claim_allowed",
+            "production_ready", "merge_performed", "push_performed",
+            "authority_change_required",
+        }
+        if (
+            state.get("schema") != "nexus.self_hosted_task_state.v1"
+            or state.get("task_id") != task_id
+            or state.get("status") not in {"RETAINED_FOR_REVIEW", "FINAL_BLOCK"}
+            or state.get("state_retention_status") != "TERMINAL"
+            or not self._legacy_v1_omission_set_matches(state, required_current_fields)
+            or not self._is_negative_candidate_record(state.get("candidate"))
+            or not self._is_negative_verified_record(state.get("verified_receipt"))
+        ):
+            return None
+        for field in (
+            "candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash",
+            "verified_receipt_hash", "candidate_ref", "approved_binding",
+        ):
+            if field not in state or state.get(field) is not None:
+                return None
+        for field in (
+            "public_claim_allowed", "production_ready", "merge_performed", "push_performed",
+        ):
+            if field not in state or state.get(field) is not False:
+                return None
+        if state.get("promotion_status") != "NOT_CREATED":
+            return None
+
+        state_path = self._state_path(task_id)
+        try:
+            before = os.lstat(state_path)
+            if not stat.S_ISREG(before.st_mode) or stat.S_ISLNK(before.st_mode):
+                return None
+            fd = os.open(state_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+            try:
+                opened = os.fstat(fd)
+                if (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino):
+                    return None
+                state_bytes = b""
+                while True:
+                    chunk = os.read(fd, 65536)
+                    if not chunk:
+                        break
+                    state_bytes += chunk
+            finally:
+                os.close(fd)
+        except OSError:
+            return None
+        try:
+            persisted_state = json.loads(state_bytes)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        if not isinstance(persisted_state, Mapping) or dict(persisted_state) != dict(state):
+            return None
+
+        manager.validate_lease_identity(contract, lease)
+        controller_root = Path(contract.controller_repo_root).resolve()
+        target = Path(lease.target_worktree).resolve()
+        if (
+            target != Path(contract.target_repo_root).resolve()
+            or str(state.get("target_worktree") or "") != str(target)
+            or state.get("attempt_id") != lease.attempt_id
+        ):
+            return None
+        entry = manager._worktree_entry(controller_root, target)
+        if entry is None:
+            return None
+        ownership = manager._read_target_ownership(
+            controller_root, entry, task_id, task_state=state,
+        )
+        if not isinstance(ownership, Mapping):
+            return None
+        status_bytes = manager._status_bytes(target)
+        if status_bytes:
+            return None
+        target_head = manager._run_git(["rev-parse", "HEAD"], cwd=target)
+        target_tree = manager._run_git(["rev-parse", "HEAD^{tree}"], cwd=target)
+        candidate = state.get("candidate") or {}
+        if (
+            entry.get("HEAD") != target_head
+            or entry.get("branch") != f"refs/heads/{lease.target_branch}"
+            or candidate.get("target_head") != target_head
+            or ownership.get("task_id") != task_id
+            or ownership.get("attempt_id") != state.get("attempt_id")
+            or ownership.get("lease_id") != lease.lease_id
+        ):
+            return None
+        candidate_refs = manager._run_git(
+            ["for-each-ref", "--format=%(refname)", f"refs/nexus-candidates/{task_id}/"],
+            cwd=controller_root,
+        ).splitlines()
+        candidate_commit_refs = manager._run_git(
+            ["for-each-ref", "--format=%(refname)", f"refs/nexus-candidate-commits/{task_id}/"],
+            cwd=controller_root,
+        ).splitlines()
+        try:
+            manager._run_git(
+                ["rev-parse", f"refs/nexus-candidates/{task_id}^{{commit}}"],
+                cwd=controller_root,
+            )
+            legacy_candidate_ref = True
+        except RuntimeError:
+            legacy_candidate_ref = False
+        if candidate_refs or candidate_commit_refs or legacy_candidate_ref:
+            return None
+
+        def canonical(value: Any) -> str:
+            return hashlib.sha256(json.dumps(
+                _jsonable(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+            ).encode("utf-8")).hexdigest()
+        pre_checkpoint_state_hash = hashlib.sha256(state_bytes).hexdigest()
+        legacy_state_origin_hash = pre_checkpoint_state_hash
+        existing_proof = state.get("forensic_negative_proof")
+        if (
+            isinstance(existing_proof, Mapping)
+            and state.get("forensic_negative_proof_hash") == canonical(existing_proof)
+            and existing_proof.get("task_id") == task_id
+            and existing_proof.get("negative_proof_mode")
+            == "LEGACY_V1_EXPLICIT_NEGATIVE_COMPATIBILITY"
+            and re.fullmatch(
+                r"[0-9a-f]{64}", str(existing_proof.get("legacy_state_origin_sha256") or ""),
+            )
+        ):
+            legacy_state_origin_hash = str(existing_proof["legacy_state_origin_sha256"])
+        return {
+            "schema": "nexus.legacy_forensic_compatibility_receipt.v1",
+            "negative_proof_mode": "LEGACY_V1_EXPLICIT_NEGATIVE_COMPATIBILITY",
+            "task_id": task_id,
+            "attempt_id": state.get("attempt_id"),
+            "lease_id": lease.lease_id,
+            "state_schema": state.get("schema"),
+            "legacy_state_origin_sha256": legacy_state_origin_hash,
+            "pre_checkpoint_state_file_sha256": pre_checkpoint_state_hash,
+            "state_hash_semantics": "HASH_OF_EXACT_INPUT_BYTES_BEFORE_PROOF_CHECKPOINT",
+            "legacy_omitted_fields": sorted(_LEGACY_V1_NEGATIVE_OMISSION_SET),
+            "synthetic_fields_created": False,
+            "serialized_negative_evidence": {
+                "candidate_receipt_sha256": canonical(state.get("candidate")),
+                "verified_receipt_sha256": canonical(state.get("verified_receipt")),
+                "promotion_status": state.get("promotion_status"),
+                "approved_binding": state.get("approved_binding"),
+            },
+            "physical_negative_evidence": {
+                "controller_root": str(controller_root),
+                "target_root": str(target),
+                "target_head": target_head,
+                "target_tree": target_tree,
+                "target_status_sha256": hashlib.sha256(status_bytes).hexdigest(),
+                "ownership_record_sha256": canonical(ownership),
+                "candidate_refs": [],
+                "worker_processes_alive": False,
+            },
+        }
+
+    @staticmethod
+    def _legacy_v1_omission_set_matches(
+        state: Mapping[str, Any],
+        required_current_fields: set[str] | None = None,
+    ) -> bool:
+        required = required_current_fields or {
+            "promotion_status", "candidate_status", "candidate_commit_sha",
+            "candidate_tree_sha", "candidate_state_hash", "verified_receipt_hash",
+            "candidate_ref", "approved_binding", "promotion_packet",
+            "integration_authorization", "integration_receipt", "promotion_receipt",
+            "candidate_created", "candidate_commit_created", "public_claim_allowed",
+            "production_ready", "merge_performed", "push_performed",
+            "authority_change_required",
+        }
+        return required.difference(state.keys()) == _LEGACY_V1_NEGATIVE_OMISSION_SET
+
+    def _store_adoption_artifact(
+        self,
+        task_id: str,
+        digest: str,
+        content: bytes,
+        kind: str,
+    ) -> str:
+        if not re.fullmatch(r"[0-9a-f]{64}", digest) or hashlib.sha256(content).hexdigest() != digest:
+            raise RuntimeError(f"{kind} receipt hash mismatch")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", task_id):
+            raise RuntimeError("adoption artifact task id is unsafe")
+        if not re.fullmatch(r"[a-z][a-z0-9_-]*", kind):
+            raise RuntimeError("adoption artifact kind is unsafe")
+
+        self.state_dir.mkdir(parents=True, exist_ok=True)
+        directory_flags = os.O_RDONLY | os.O_DIRECTORY
+        nofollow = getattr(os, "O_NOFOLLOW", 0)
+        directory_flags |= nofollow
+        state_fd = os.open(self.state_dir, directory_flags)
+        try:
+            try:
+                os.mkdir("adoption-artifacts", 0o700, dir_fd=state_fd)
+            except FileExistsError:
+                pass
+            try:
+                artifact_fd = os.open(
+                    "adoption-artifacts", directory_flags, dir_fd=state_fd,
+                )
+            except OSError as exc:
+                raise RuntimeError(
+                    "adoption artifact root is not a service-owned directory"
+                ) from exc
+            try:
+                try:
+                    os.mkdir(task_id, 0o700, dir_fd=artifact_fd)
+                except FileExistsError:
+                    pass
+                try:
+                    task_fd = os.open(task_id, directory_flags, dir_fd=artifact_fd)
+                except OSError as exc:
+                    raise RuntimeError(
+                        "adoption artifact task directory is a symlink or not service-owned"
+                    ) from exc
+                try:
+                    filename = f"{kind}-{digest}.json"
+                    write_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow
+                    try:
+                        fd = os.open(filename, write_flags, 0o600, dir_fd=task_fd)
+                    except FileExistsError:
+                        pass
+                    else:
+                        try:
+                            with os.fdopen(fd, "wb") as handle:
+                                handle.write(content)
+                                handle.flush()
+                                os.fsync(handle.fileno())
+                            os.fsync(task_fd)
+                        except Exception:
+                            try:
+                                os.unlink(filename, dir_fd=task_fd)
+                            except FileNotFoundError:
+                                pass
+                            raise
+
+                    read_flags = os.O_RDONLY | nofollow
+                    try:
+                        read_fd = os.open(filename, read_flags, dir_fd=task_fd)
+                    except OSError as exc:
+                        raise RuntimeError(
+                            "adoption artifact is a symlink or unreadable"
+                        ) from exc
+                    try:
+                        if not stat.S_ISREG(os.fstat(read_fd).st_mode):
+                            raise RuntimeError("adoption artifact is not a regular file")
+                        chunks: list[bytes] = []
+                        while True:
+                            chunk = os.read(read_fd, 65536)
+                            if not chunk:
+                                break
+                            chunks.append(chunk)
+                    finally:
+                        os.close(read_fd)
+                    if b"".join(chunks) != content:
+                        raise RuntimeError("adoption artifact overwrite conflict")
+                finally:
+                    os.close(task_fd)
+            finally:
+                os.close(artifact_fd)
+        finally:
+            os.close(state_fd)
+        return str(self.state_dir / "adoption-artifacts" / task_id / filename)
+
+    def adopt_external_candidate(
+        self,
+        raw_request: ExternalCandidateAdoptionRequest | Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Physically verify one immutable Candidate and stop at pending approval."""
+        if isinstance(raw_request, ExternalCandidateAdoptionRequest):
+            request = ExternalCandidateAdoptionRequest.model_validate(
+                raw_request.model_dump(mode="json")
+            )
+        else:
+            request = ExternalCandidateAdoptionRequest.model_validate(dict(raw_request))
+        semantic_hash = request.semantic_hash()
+        controller_root = Path(CANONICAL_SOURCE_ROOT).resolve()
+        manager_probe = WorktreeManager(root_dir=str(controller_root.parent / "nexus-runtime-targets"), create_root=False)
+        controller_head = manager_probe._run_git(["rev-parse", "HEAD"], cwd=controller_root)
+        if controller_head != request.controller_revision or manager_probe._status_bytes(controller_root):
+            raise RuntimeError("external adoption controller revision or clean state mismatch")
+        if not self.ephemeral:
+            if request.repository != "James3014/Nexus-new":
+                raise RuntimeError("external adoption repository identity mismatch")
+            try:
+                remote = manager_probe._run_git(["remote", "get-url", "origin"], cwd=controller_root)
+            except RuntimeError as exc:
+                raise RuntimeError("external adoption canonical remote is unavailable") from exc
+            normalized_remote = remote.removesuffix(".git").replace("git@github.com:", "https://github.com/")
+            if normalized_remote != "https://github.com/James3014/Nexus-new":
+                raise RuntimeError("external adoption canonical remote mismatch")
+        elif request.repository not in {"LOCAL_TEST", "James3014/Nexus-new"}:
+            raise RuntimeError("external adoption repository identity mismatch")
+
+        card_lexical = controller_root / request.task_card_path
+        try:
+            card_parts = card_lexical.relative_to(controller_root).parts
+        except ValueError as exc:
+            raise RuntimeError("external adoption Task Card escaped controller root") from exc
+        current_card_part = controller_root
+        for part in card_parts:
+            current_card_part /= part
+            if current_card_part.is_symlink():
+                raise RuntimeError("external adoption Task Card is unavailable")
+        card = card_lexical.resolve()
+        try:
+            card.relative_to(controller_root)
+        except ValueError as exc:
+            raise RuntimeError("external adoption Task Card escaped controller root") from exc
+        if card.is_symlink() or not card.is_file():
+            raise RuntimeError("external adoption Task Card is unavailable")
+        card_bytes = card.read_bytes()
+        if hashlib.sha256(card_bytes).hexdigest() != request.task_card_hash:
+            raise RuntimeError("external adoption Task Card hash mismatch")
+        card_text = card_bytes.decode("utf-8")
+        if f"task_id: `{request.task_id}`" not in card_text or "AUTO_CHAIN" not in card_text:
+            raise RuntimeError("external adoption Task Card identity mismatch")
+
+        validation_bytes = base64.b64decode(request.validation_receipt_b64, validate=True)
+        acceptance_bytes = base64.b64decode(request.acceptance_receipt_b64, validate=True)
+        if hashlib.sha256(validation_bytes).hexdigest() != request.validation_receipt_sha256:
+            raise RuntimeError("validation receipt hash mismatch")
+        if hashlib.sha256(acceptance_bytes).hexdigest() != request.acceptance_receipt_sha256:
+            raise RuntimeError("acceptance receipt hash mismatch")
+        try:
+            validation = json.loads(validation_bytes)
+            acceptance = json.loads(acceptance_bytes)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise RuntimeError("external adoption evidence must be JSON") from exc
+        if not isinstance(validation, Mapping) or not isinstance(acceptance, Mapping):
+            raise RuntimeError("external adoption evidence must be JSON objects")
+
+        try:
+            projection = parse_historical_epb_task_card(card_bytes)
+        except ValueError as exc:
+            raise RuntimeError("external adoption Task Card contract is unresolvable") from exc
+        raw_derived_candidate = validation.get("candidate")
+        if not isinstance(raw_derived_candidate, Mapping):
+            raise RuntimeError("external validation receipt candidate binding mismatch")
+        validation_candidate: Mapping[str, Any] = dict(raw_derived_candidate)
+        derived = {
+            "target_base_revision": str(validation_candidate.get("base_commit") or ""),
+            "allowed_files": tuple(projection.allowed_repository_paths),
+            "forbidden_files": tuple(projection.forbidden_repository_paths),
+            "authorized_deletions": (),
+            "verifier_commands": tuple(projection.exact_verification_commands),
+            "protected_contracts": (),
+        }
+        derived_projection = {
+            "allowed_repository_paths": list(projection.allowed_repository_paths),
+            "forbidden_repository_paths": list(projection.forbidden_repository_paths),
+            "forbidden_repository_patterns": list(projection.forbidden_repository_patterns),
+            "forbidden_scope": list(projection.forbidden_scope),
+            "exact_verification_commands": list(projection.exact_verification_commands),
+            "authorized_deletions": [],
+            "protected_contracts": [],
+            "repository_contract_policy_revision_hash": "",
+        }
+        for field, expected in derived.items():
+            actual = getattr(request, field)
+            value = actual if field == "target_base_revision" else tuple(actual)
+            if value != expected:
+                raise RuntimeError(f"ADOPTION_REQUEST_BINDING_MISMATCH:{field}")
+        if tuple(request.action.allowed_paths) != derived["allowed_files"]:
+            raise RuntimeError("ADOPTION_REQUEST_BINDING_MISMATCH:action.allowed_paths")
+
+        resolved_base = manager_probe._run_git(
+            ["rev-parse", f"{request.target_base_revision}^{{commit}}"], cwd=controller_root,
+        )
+        resolved_candidate = manager_probe._run_git(
+            ["rev-parse", f"{request.candidate_commit_sha}^{{commit}}"], cwd=controller_root,
+        )
+        if resolved_base != request.target_base_revision or resolved_candidate != request.candidate_commit_sha:
+            raise RuntimeError("external adoption base or Candidate identity mismatch")
+        try:
+            manager_probe._run_git(
+                ["merge-base", "--is-ancestor", request.target_base_revision, request.candidate_commit_sha],
+                cwd=controller_root,
+            )
+        except RuntimeError as exc:
+            raise RuntimeError("external adoption Candidate ancestry mismatch") from exc
+        physical_tree = manager_probe._run_git(
+            ["rev-parse", f"{request.candidate_commit_sha}^{{tree}}"], cwd=controller_root,
+        )
+        if physical_tree != request.candidate_tree_sha:
+            raise RuntimeError("external adoption Candidate tree mismatch")
+        diff_bytes = manager_probe._run_git_bytes(
+            ["diff", "--binary", f"{request.target_base_revision}..{request.candidate_commit_sha}", "--"],
+            cwd=controller_root,
+        )
+        if hashlib.sha256(diff_bytes).hexdigest() != request.candidate_diff_sha256:
+            raise RuntimeError("external adoption Candidate diff mismatch")
+        changed_paths = sorted(manager_probe._run_git(
+            ["diff", "--name-only", request.target_base_revision, request.candidate_commit_sha],
+            cwd=controller_root,
+        ).splitlines())
+        deleted_paths = sorted(manager_probe._run_git(
+            ["diff", "--name-only", "--diff-filter=D", request.target_base_revision, request.candidate_commit_sha],
+            cwd=controller_root,
+        ).splitlines())
+        if changed_paths != sorted(request.allowed_files):
+            raise RuntimeError("external adoption changed paths differ from contract")
+        if sorted(set(deleted_paths) - set(request.authorized_deletions)):
+            raise RuntimeError("external adoption contains unauthorized deletions")
+
+        def forbidden_pattern_matches(pattern: str, path: str) -> bool:
+            if pattern.endswith("/**"):
+                return path.startswith(pattern[:-3] + "/")
+            if pattern.endswith("/*"):
+                suffix = path.removeprefix(pattern[:-2] + "/")
+                return bool(suffix) and "/" not in suffix
+            return path == pattern
+
+        if any(
+            forbidden_pattern_matches(pattern, path)
+            for pattern in projection.forbidden_repository_patterns
+            for path in (*changed_paths, *deleted_paths)
+        ):
+            raise RuntimeError("external adoption changed path is forbidden by Task Card")
+
+        raw_validation_card = validation.get("task_card")
+        raw_validation_candidate = validation.get("candidate")
+        validation_card: Mapping[str, Any] = raw_validation_card if isinstance(raw_validation_card, Mapping) else {}
+        validation_candidate: Mapping[str, Any] = raw_validation_candidate if isinstance(raw_validation_candidate, Mapping) else {}
+        if (
+            validation.get("schema") != "nexus.evidence_producer_bridge.validation_receipt.v1"
+            or validation.get("status") != "EVIDENCE_PRODUCER_BRIDGE_VALIDATED"
+            or validation.get("repository") != request.repository
+            or validation.get("task") != request.task_id
+            or validation_card.get("path") != request.task_card_path
+            or validation_card.get("card_file_sha256") != request.task_card_hash
+            or validation_candidate.get("base_commit") != request.target_base_revision
+            or validation_candidate.get("commit") != request.candidate_commit_sha
+            or validation_candidate.get("tree") != request.candidate_tree_sha
+            or sorted(validation_candidate.get("changed_paths") or []) != changed_paths
+            or sorted(validation_candidate.get("deleted_paths") or []) != deleted_paths
+        ):
+            raise RuntimeError("external validation receipt binding mismatch")
+        if (
+            acceptance.get("schema") != "nexus.external_candidate_acceptance.v1"
+            or acceptance.get("task_id") != request.task_id
+            or acceptance.get("candidate_commit_sha") != request.candidate_commit_sha
+            or acceptance.get("candidate_tree_sha") != request.candidate_tree_sha
+            or acceptance.get("candidate_diff_sha256") != request.candidate_diff_sha256
+            or acceptance.get("validation_receipt_sha256") != request.validation_receipt_sha256
+            or acceptance.get("disposition") != "ACCEPT_CANDIDATE"
+            or not str(acceptance.get("reviewer_id") or "").strip()
+        ):
+            raise RuntimeError("external acceptance receipt binding mismatch")
+
+        validation_locator = self._store_adoption_artifact(
+            request.task_id, request.validation_receipt_sha256, validation_bytes, "validation",
+        )
+        acceptance_locator = self._store_adoption_artifact(
+            request.task_id, request.acceptance_receipt_sha256, acceptance_bytes, "acceptance",
+        )
+        target_root, target_path = resolve_canonical_target_roots(
+            request.task_id,
+            campaign_id="CAMPAIGN-EVIDENCE-PRODUCER-BRIDGE-01",
+        )
+        contract_request = {
+            "task_id": request.task_id,
+            "what": "Physically adopt one immutable externally accepted Candidate",
+            "why": "Re-enter normal lifecycle without worker execution or Candidate rewrite",
+            "controller_revision": request.controller_revision,
+            "target_base_revision": derived["target_base_revision"],
+            "controller_repo_root": str(controller_root),
+            "target_repo_root": str(target_path),
+            "target_worktree_root": str(target_root),
+            "allowed_files": list(derived["allowed_files"]),
+            "forbidden_files": list(derived["forbidden_files"]),
+            "authorized_deletions": list(derived["authorized_deletions"]),
+            "verifier_commands": list(derived["verifier_commands"]),
+            "protected_contracts": list(derived["protected_contracts"]),
+            "worker": "codex",
+            "execution_lane": "ISOLATED_TARGET",
+        }
+        contract = self.build_contract(contract_request)
+        sanitized_request = request.model_dump(mode="json", exclude={
+            "validation_receipt_b64", "acceptance_receipt_b64",
+        })
+        reservation = {
+            "schema": "nexus.self_hosted_task_state.v1",
+            "task_id": request.task_id,
+            "status": "ADOPTING",
+            "promotion_status": "NOT_CREATED",
+            "submitted_at": _utc_now(),
+            "updated_at": _utc_now(),
+            "status_history": [{"status": "ADOPTING", "at": _utc_now()}],
+            "attempt_id": request.attempt_id,
+            "action_id": request.action_id,
+            "idempotency_key": request.idempotency_key,
+            "action": request.action.model_dump(mode="json"),
+            "adoption_request_hash": semantic_hash,
+            "request": sanitized_request,
+            "contract_kind": ContractKind.TRACKED_TASK_CARD.value,
+            "contract_hash": contract.contract_hash,
+            "task_card_path": request.task_card_path,
+            "task_card_hash": request.task_card_hash,
+            "controller_worktree": str(controller_root),
+            "controller_revision": request.controller_revision,
+            "contract": contract.model_dump(mode="json"),
+            "target_worktree": str(target_path),
+            "target_initial_revision": request.target_base_revision,
+            "target_branch": f"nexus/task/{request.task_id}",
+            "validation_receipt_locator": validation_locator,
+            "acceptance_receipt_locator": acceptance_locator,
+            "derived_contract_projection": derived_projection,
+            "worker_invocations": 0,
+            "candidate_created": False,
+            "merge_performed": False,
+            "push_performed": False,
+            "public_claim_allowed": False,
+            "production_ready": False,
+            "approved_binding": None,
+            "state_retention_status": "ACTIVE",
+        }
+        persisted, created = self._create_state(request.task_id, reservation)
+        if not created:
+            if persisted.get("adoption_request_hash") != semantic_hash:
+                raise RuntimeError("external adoption task identity or request drift")
+            if (
+                persisted.get("status") == "PENDING_HUMAN_APPROVAL"
+                and persisted.get("adoption_receipt_hash")
+            ):
+                self._read_adoption_artifact(
+                    request.task_id, str(persisted.get("validation_receipt_locator") or ""),
+                    request.validation_receipt_sha256, "validation",
+                )
+                self._read_adoption_artifact(
+                    request.task_id, str(persisted.get("acceptance_receipt_locator") or ""),
+                    request.acceptance_receipt_sha256, "acceptance",
+                )
+                try:
+                    acceptance = json.loads(
+                        self._read_adoption_artifact(
+                            request.task_id, str(persisted.get("acceptance_receipt_locator") or ""),
+                            request.acceptance_receipt_sha256, "acceptance",
+                        ).decode("utf-8")
+                    )
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise RuntimeError("external adoption replay acceptance artifact is invalid") from exc
+                if not isinstance(acceptance, Mapping):
+                    raise RuntimeError("external adoption replay acceptance artifact is invalid")
+                self._validate_persisted_external_adoption(
+                    persisted, request, semantic_hash, acceptance,
+                )
+                return persisted
+            if persisted.get("status") != "ADOPTING":
+                raise RuntimeError("external adoption task already exists in an incompatible state")
+
+        manager = WorktreeManager(root_dir=contract.target_worktree_root)
+        lease = manager.create_precommitted_lease(
+            contract,
+            request.candidate_commit_sha,
+            request.candidate_tree_sha,
+            task_states=self._submission_task_states(),
+            attempt_id=request.attempt_id,
+        )
+        candidate = manager.capture_candidate(contract, lease)
+        verified = CandidateVerifier(manager).verify(contract, lease, candidate)
+        if not verified.verified or not verified.candidate_commit_allowed:
+            raise RuntimeError("external Candidate failed lifecycle-native verification")
+        packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+        if (
+            packet.candidate_commit_sha != request.candidate_commit_sha
+            or packet.candidate_tree_sha != request.candidate_tree_sha
+        ):
+            raise RuntimeError("external Candidate was rewritten during adoption")
+        candidate_ref = manager.protect_candidate(
+            contract, lease, request.candidate_commit_sha,
+        )
+        packet_payload = _jsonable(asdict(packet))
+        verified_payload = _jsonable(asdict(verified))
+        derived_projection["repository_contract_policy_revision_hash"] = verified_payload.get(
+            "repository_contract_policy_revision_hash", ""
+        )
+        adoption_receipt = {
+            "schema": "nexus.external_candidate_adoption_receipt.v1",
+            "task_id": request.task_id,
+            "attempt_id": request.attempt_id,
+            "action_id": request.action_id,
+            "idempotency_key": request.idempotency_key,
+            "adoption_request_hash": semantic_hash,
+            "task_card_path": request.task_card_path,
+            "task_card_hash": request.task_card_hash,
+            "contract_hash": contract.contract_hash,
+            "controller_revision": request.controller_revision,
+            "target_base_revision": request.target_base_revision,
+            "candidate_commit_sha": request.candidate_commit_sha,
+            "candidate_tree_sha": request.candidate_tree_sha,
+            "candidate_diff_sha256": request.candidate_diff_sha256,
+            "candidate_state_hash": packet.candidate_state_hash,
+            "verified_receipt_hash": packet.verified_receipt_hash,
+            "validation_receipt_sha256": request.validation_receipt_sha256,
+            "acceptance_receipt_sha256": request.acceptance_receipt_sha256,
+            "repository_contract_policy_revision_hash": verified_payload.get(
+                "repository_contract_policy_revision_hash", ""
+            ),
+            "derived_contract_projection": derived_projection,
+            "forbidden_repository_patterns": list(projection.forbidden_repository_patterns),
+            "reviewer_id": str(acceptance.get("reviewer_id")),
+            "candidate_ref": candidate_ref,
+            "promotion_packet_hash": hashlib.sha256(json.dumps(
+                packet_payload, sort_keys=True, separators=(",", ":"),
+            ).encode()).hexdigest(),
+            "worker_invocations": 0,
+            "candidate_rewritten": False,
+            "approval_performed": False,
+            "integration_performed": False,
+            "merge_performed": False,
+            "push_performed": False,
+            "public_claim_allowed": False,
+            "production_ready": False,
+            "claim_ceiling": list(_EXTERNAL_ADOPTION_CLAIM_CEILING),
+            "issued_at": persisted.get("submitted_at"),
+        }
+        adoption_receipt_hash = hashlib.sha256(json.dumps(
+            adoption_receipt, sort_keys=True, separators=(",", ":"),
+        ).encode()).hexdigest()
+
+        def finalize(current: dict[str, Any]) -> None:
+            if (
+                current.get("status") == "PENDING_HUMAN_APPROVAL"
+                and current.get("adoption_request_hash") == semantic_hash
+                and current.get("adoption_receipt_hash")
+            ):
+                return
+            if (
+                current.get("status") != "ADOPTING"
+                or current.get("attempt_id") != request.attempt_id
+                or current.get("action_id") != request.action_id
+                or current.get("idempotency_key") != request.idempotency_key
+                or current.get("adoption_request_hash") != semantic_hash
+                or current.get("contract_hash") != contract.contract_hash
+            ):
+                raise RuntimeError("external adoption state changed before finalization")
+            now = _utc_now()
+            current.update({
+                "status": "PENDING_HUMAN_APPROVAL",
+                "promotion_status": "PENDING_HUMAN_APPROVAL",
+                "candidate_status": "PENDING_HUMAN_APPROVAL",
+                "candidate_commit_sha": packet.candidate_commit_sha,
+                "candidate_tree_sha": packet.candidate_tree_sha,
+                "candidate_state_hash": packet.candidate_state_hash,
+                "verified_receipt_hash": packet.verified_receipt_hash,
+                "verified_receipt": verified_payload,
+                "promotion_packet": packet_payload,
+                "derived_contract_projection": derived_projection,
+                "candidate_ref": candidate_ref,
+                "candidate": {
+                    "candidate_commit_sha": packet.candidate_commit_sha,
+                    "candidate_tree_sha": packet.candidate_tree_sha,
+                    "candidate_state_hash": packet.candidate_state_hash,
+                    "verified_receipt_hash": packet.verified_receipt_hash,
+                },
+                "lease": _jsonable(asdict(lease)),
+                "adoption_receipt": adoption_receipt,
+                "adoption_receipt_hash": adoption_receipt_hash,
+                "external_acceptance": dict(acceptance),
+                "candidate_created": True,
+                "promotion_eligible": True,
+                "execution_authority": "EXTERNAL_CANDIDATE_ADOPTION",
+                "worker_invocations": 0,
+                "approved_binding": None,
+                "integration_authorization": None,
+                "integration_receipt": None,
+                "merge_performed": False,
+                "push_performed": False,
+                "public_claim_allowed": False,
+                "production_ready": False,
+                "updated_at": now,
+                "heartbeat_at": now,
+            })
+            current.setdefault("status_history", []).append({
+                "status": "PENDING_HUMAN_APPROVAL", "at": now,
+            })
+
+        finalized = self._mutate_state(request.task_id, finalize)
+        if finalized is None:
+            raise RuntimeError("external adoption state disappeared before finalization")
+        return finalized
 
     def close_task_without_candidate(
         self,
