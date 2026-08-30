@@ -18,6 +18,8 @@ Source mode: `APPROVED_NON_SPEC`
 - Current accepted controller source is `e9b0ec16f6ef72052a4374f24687f6de86a635ff`; its Planner/Workforce-only delta has no Product or EPB production overlap.
 - Supersedes failed lifecycle task `TASK-EPB-001`, attempt `attempt-f8800f9da0fc4150b9f8f0b132347403`, retained target commit `4a6a30897894df4c262f78d5d2d2dd1e87ea9b76`. That commit is negative evidence only and must not be accepted or copied wholesale.
 - Previous failure classes: `scope_gate_failed`, broad legacy-directory Ruff failure, unauthorized `nexus/evidence/receipt_base.py`, caller-supplied bridge truth, symbol-only tests.
+- Execution lane: bounded `EXTERNAL_BOOTSTRAP_RECOVERY` under `docs/governance/rollback_runbook.md`. Independent evidence proved the normal lifecycle scope matcher treats `**` literally, the retained clean Target with a failed commit cannot be closed without a pre-existing salvage snapshot, and the durable request cannot be corrected in place. Bootstrap creates no second authority and ends after a clean repair Candidate plus independent verification.
+- The failed lifecycle Target/ref/state remain preserved as negative evidence; R1 performs no cleanup, deletion, state rewrite, approval, integration, reload, or activation.
 - Authority includes only Task3 producer-side bridge implementation, tests, scoped commit/Candidate, and independent physical verification.
 - Excludes Task4 prerequisite/authority/signing, approval, integration, merge, push, PR, release, production, public protocol, Cloud/OIDC/RBAC, or commercial claims.
 - `AUTO_CHAIN=false`.
