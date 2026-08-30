@@ -45,8 +45,9 @@ Every candidate is governed across three distinct architectural layers:
 `HybridRouteDecision` is a Planner-derived decision contract/projection, not a
 second selector, router, or planner. This policy is a workforce eligibility
 constraint consumed after route authorization, not another router or selector.
-Neither Gemini 3.7 Flash Medium nor DeepSeek V4 Flash is a default route.
-Neither worker is granted L4 autonomy; L4 remains experimental and non-admitted.
+Gemini 3.7 Flash Medium is the current default for fast bounded implementation;
+DeepSeek V4 Flash remains non-default. Neither worker is granted L4 autonomy;
+L4 remains experimental and non-admitted.
 
 ## 2. Uniform three-arm benchmark status
 
@@ -74,9 +75,9 @@ The 2026-07-29 matrix is a historical baseline and comparative diagnostic instru
 | Worker | Current role | Ceiling | Preferred context | Current status |
 |---|---|---:|---|---|
 | Codex Luna — `gpt-5.6-luna` | Main engineering, milestone closure, integration | Historical L3 | Governed mainchain | Available; Codex CLI 0.146.0 with `gpt-5.6-luna` returned exactly `OK` in a read-only smoke on 2026-07-29 |
-| Agy Flash — `gemini-3.6-flash-high` | Fast bounded implementation and focused verification | L2 | **Nexus-bounded** | Available; benchmark 10/11 → 11/11 → 10/11 |
+| Agy Flash — `gemini-3.6-flash-high` | Previous-generation fallback | L2 | **Nexus-bounded** | Available; explicit fallback, not the current default |
 | Agy Flash Medium — `gemini-3.6-flash-medium` | Bounded candidate/implementation and focused verification only | L1 | **Nexus-bounded** | Existing registered conditional identity preserved for backward compatibility; exact Task Card, parser/verifier, and independent verification required; non-default route |
-| Agy Flash 3.7 Medium — `gemini-3.7-flash-medium` | Bounded candidate/implementation and focused verification | L3 | **Nexus-bounded** | Distinct registered conditional identity; admitted autonomy ceiling L3; exact Task Card, parser/verifier, and independent verification required; non-default route; experimental L4 non-admitted |
+| Agy Flash 3.7 Medium — `gemini-3.7-flash-medium` | Current fast bounded implementation and focused verification | L3 | **Nexus-bounded** | Distinct exact identity; current/default route with explicit disposition; exact Task Card, parser/verifier, and independent verification required; experimental L4 non-admitted |
 | Grok 4.5 | Independent review, hidden-defect search, evidence audit; bounded candidate generation | L2+ | Bounded or Full semantic context | Available; benchmark 11/11 on all arms |
 | OpenCode MiMo — `opencode/mimo-v2.5-free` | Bounded code candidate | L1 | Bounded isolated prompt | Available; admitted ceiling stays L1; 2026-08-17 cumulative calibration records semantic stable floor L1.5 and semantic frontier L3 separately; NOT_PROMOTED; tool-discipline requalification pending; high fixed input-token overhead |
 | OpenCode Ling — `opencode/ling-3.0-flash-free` | Bounded code candidate | Current L1 | Bounded isolated prompt | Available; 11/11 all arms; high fixed input-token overhead. The unapproved v2 proposal would lower it to read-only L0 |
@@ -245,7 +246,8 @@ The Owner-approved Model Workforce Lineage Writeback amendment is active:
    - Existing `agy_flash_medium` remains bound to provider `agy`, exact model `gemini-3.6-flash-medium`, autonomy ceiling **L1**. It is not repurposed by this amendment.
    - New `agy_flash_37_medium` is bound to provider `agy`, exact model `gemini-3.7-flash-medium`.
    - `agy_flash_37_medium` admitted autonomy ceiling: **L3**.
-   - Both Medium identities keep `default_route`: **`false`**.
+   - `agy_flash_37_medium` is the explicit current default for `fast_bounded_implementation`; the 3.6 identities remain explicit fallbacks with `default_route: false`.
+   - Every direct online route must resolve to an available worker advertising the role with `route_disposition: CURRENT_DEFAULT`; stale, conditional-only, or undisposed successors fail policy validation.
    - L4 autonomy is **NOT GRANTED**; L4 remains experimental and non-admitted.
    - Exact model matching is fail-closed: 3.6 and 3.7 Medium cannot substitute for one another.
    - Requires exact Task Card, allowed files, mandatory commands, parser, verifier, and independent verification.

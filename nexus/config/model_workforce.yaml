@@ -254,6 +254,8 @@ workers:
     capability_grade: L3_HISTORICAL
     current_assignment: available_for_governed_mainchain_assignment
     roles: [main_engineering, milestone_closure, integration]
+    default_route: true
+    route_disposition: CURRENT_DEFAULT
     benchmark_ref: codex_luna
     requires: [governed_adapter, independent_verification, receipt]
     forbidden_claims: [product_authority, protected_main_merge, remote_push]
@@ -271,6 +273,7 @@ workers:
     autonomy: L2
     roles: [fast_bounded_implementation, focused_verification]
     preferred_context: nexus_bounded
+    route_disposition: FALLBACK
     benchmark_ref: agy_flash
     account_pool: enabled
     max_failover_retries: 1
@@ -285,6 +288,7 @@ workers:
     roles: [bounded_candidate_generation, fast_bounded_implementation, focused_verification]
     preferred_context: nexus_bounded
     default_route: false
+    route_disposition: FALLBACK
     requires: [task_card, allowed_files, mandatory_commands, parser, verifier, independent_verification]
     forbidden_actions: [route_authority, approval, integration, push, release, production_claim, public_claim]
     calibration_evidence:
@@ -299,7 +303,9 @@ workers:
     autonomy: L3
     roles: [bounded_candidate_generation, fast_bounded_implementation, focused_verification]
     preferred_context: nexus_bounded
-    default_route: false
+    default_route: true
+    successor_of: agy_flash
+    route_disposition: CURRENT_DEFAULT
     requires: [task_card, allowed_files, mandatory_commands, parser, verifier, independent_verification]
     forbidden_actions: [route_authority, approval, integration, push, release, production_claim, public_claim]
     calibration_evidence:
@@ -317,6 +323,8 @@ workers:
     availability: AVAILABLE
     autonomy: L2+
     roles: [independent_review, hidden_defect_hunting, evidence_audit, bounded_engineering_candidate]
+    default_route: true
+    route_disposition: CURRENT_DEFAULT
     benchmark_ref: grok_45
     account_pool: enabled
     max_failover_retries: 1
@@ -657,7 +665,7 @@ routing:
     bounded_code_candidate: local_coder_7b
     bounded_reasoning_shadow: local_qwen3_8b
   online:
-    fast_bounded_implementation: agy_flash
+    fast_bounded_implementation: agy_flash_37_medium
     main_engineering: codex_luna
     independent_review: grok_review
     complex_milestone: codex_luna_when_available

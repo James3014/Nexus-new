@@ -5,6 +5,11 @@ from pathlib import Path
 import pytest
 import yaml
 
+from nexus.services.model_workforce_policy import (
+    WorkforcePolicyLoader,
+    WorkforcePolicyValidationError,
+)
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 POLICY_PATH = REPO_ROOT / "docs/arch/MODEL_WORKFORCE_POLICY.md"
 MANIFEST_PATH = REPO_ROOT / "nexus/config/model_workforce.yaml"
@@ -22,6 +27,31 @@ def _yaml(path: Path) -> dict:
 
 def _manifest() -> dict:
     return _yaml(MANIFEST_PATH)
+
+
+def test_direct_online_routes_bind_current_default_workers() -> None:
+    snapshot = WorkforcePolicyLoader(MANIFEST_PATH).load()
+    assert snapshot.routing["online"]["fast_bounded_implementation"] == "agy_flash_37_medium"
+
+
+def test_loader_rejects_stale_direct_online_route(tmp_path: Path) -> None:
+    data = _manifest()
+    data["routing"]["online"]["fast_bounded_implementation"] = "agy_flash"
+    path = tmp_path / "stale-route.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(WorkforcePolicyValidationError, match="current/default"):
+        WorkforcePolicyLoader(path).load()
+
+
+def test_loader_rejects_successor_without_explicit_route_disposition(tmp_path: Path) -> None:
+    data = _manifest()
+    data["workers"]["agy_flash_37_medium"].pop("route_disposition", None)
+    path = tmp_path / "undisposed-successor.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(WorkforcePolicyValidationError, match="route disposition"):
+        WorkforcePolicyLoader(path).load()
 
 
 def test_model_workforce_authority_files_exist_and_are_current() -> None:
@@ -104,7 +134,8 @@ def test_mainchain_capability_and_current_availability_are_separate() -> None:
     assert medium_37["state"] == "REGISTERED_CONDITIONAL"
     assert medium_37["availability"] == "AVAILABLE"
     assert medium_37["autonomy"] == "L3"
-    assert medium_37["default_route"] is False
+    assert medium_37["default_route"] is True
+    assert medium_37["route_disposition"] == "CURRENT_DEFAULT"
     assert medium_37["calibration_evidence"] == {
         "status": "OWNER_APPROVED_CEILING",
         "lineage": "gemini-3.7-flash-medium",
@@ -272,7 +303,7 @@ def test_routing_is_deterministic_first_bounded_first_and_fail_closed() -> None:
         "bounded_code_candidate": "local_coder_7b",
         "bounded_reasoning_shadow": "local_qwen3_8b",
     }
-    assert routing["online"]["fast_bounded_implementation"] == "agy_flash"
+    assert routing["online"]["fast_bounded_implementation"] == "agy_flash_37_medium"
     assert routing["online"]["independent_review"] == "grok_review"
     assert routing["online"]["complex_milestone"] == "codex_luna_when_available"
 
@@ -469,11 +500,11 @@ def test_three_layers_lineage_and_ceiling_constraints() -> None:
     assert gemini_36_medium["autonomy"] == "L1"
     assert gemini_36_medium["default_route"] is False
 
-    # Gemini 3.7 Flash Medium: ceiling L3, non-default, no L4.
+    # Gemini 3.7 Flash Medium: ceiling L3, current default, no L4.
     gemini_medium = workers["agy_flash_37_medium"]
     assert gemini_medium["model"] == "gemini-3.7-flash-medium"
     assert gemini_medium["autonomy"] == "L3"
-    assert gemini_medium["default_route"] is False
+    assert gemini_medium["default_route"] is True
     assert gemini_medium["calibration_evidence"]["experimental_l4_admitted"] is False
 
     # DeepSeek V4 Flash: ceiling L2, non-default, no L4

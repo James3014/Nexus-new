@@ -242,7 +242,7 @@ def _valid_online_agy_dispatch():
     }
     admission = evaluate_runtime_workforce_admission(
         demands,
-        {"online": {"worker_id": "agy_flash", "provider": "agy", "model": "gemini-3.6-flash-high", "controls": ["task_card", "allowed_files", "mandatory_commands", "independent_verification"]}},
+        {"online": {"worker_id": "agy_flash_37_medium", "provider": "agy", "model": "gemini-3.7-flash-medium", "controls": ["task_card", "allowed_files", "mandatory_commands", "parser", "verifier", "independent_verification"]}},
         WorkforcePolicyLoader(Path(repo_root) / "nexus/config/model_workforce.yaml"),
     ).to_dict()
     return demands, admission
@@ -306,11 +306,11 @@ def test_canonical_planner_admission_uses_policy_routing_not_worker_iteration(
         ),
     )
 
-    assert reordered.routing["online"]["fast_bounded_implementation"] == "agy_flash"
-    assert result["binding"]["worker_id"] == "agy_flash"
+    assert reordered.routing["online"]["fast_bounded_implementation"] == "agy_flash_37_medium"
+    assert result["binding"]["worker_id"] == "agy_flash_37_medium"
     assert result["workforce_admission"]["records"][0]["request"][
         "requested_worker_id"
-    ] == "agy_flash"
+    ] == "agy_flash_37_medium"
 
 
 def _worker_args(

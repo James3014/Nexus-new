@@ -1749,10 +1749,32 @@ class CapabilityPlanner:
                 "cross_module",
             )
 
+            # These contracts can mutate trust/provenance/evidence semantics.
+            # They require the main engineering lane even when the change is
+            # otherwise small; worker selection remains downstream of this
+            # Planner-owned demand classification.
+            integrity_keywords = (
+                "trust",
+                "provenance",
+                "evidence-integrity",
+                "evidence_integrity",
+                "verification",
+                "certification",
+                "signing",
+                "receipt-binding",
+                "receipt_binding",
+                "replay",
+                "immutable-cas",
+                "immutable_cas",
+            )
+
             is_complex = (
                 any(kw in task_type_str for kw in complex_keywords)
                 or any(kw in task_desc_str for kw in complex_keywords)
                 or is_cross_module
+            )
+            is_integrity_sensitive = mutation_intent and any(
+                kw in task_type_str or kw in task_desc_str for kw in integrity_keywords
             )
 
             is_explicit_type_review_audit = any(kw in task_type_str for kw in ("review", "audit"))
@@ -1772,11 +1794,15 @@ class CapabilityPlanner:
                 autonomy = "L2+"
                 ctx = "nexus_bounded"
                 reason = "review_audit_task_independent_review"
-            elif is_complex:
+            elif is_complex or is_integrity_sensitive:
                 role = "main_engineering"
                 autonomy = "L3_HISTORICAL"
                 ctx = "nexus_full"
-                reason = "complex_high_impact_task_main_engineering"
+                reason = (
+                    "integrity_sensitive_mutation_main_engineering"
+                    if is_integrity_sensitive
+                    else "complex_high_impact_task_main_engineering"
+                )
             elif is_review_audit:
                 role = "independent_review"
                 autonomy = "L2+"

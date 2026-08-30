@@ -4,7 +4,7 @@ import datetime
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import yaml
 
@@ -216,6 +216,53 @@ class WorkforcePolicyLoader:
             raise WorkforcePolicyValidationError(
                 "routing.experiment_only_models_require_explicit_authorization must be true"
             )
+
+        # Direct online role routes are executable defaults, not hints.  Bind
+        # each one to an enrolled, available worker with the role and an
+        # explicit current-default disposition.  This prevents a successor
+        # registration from silently leaving a previous-generation route live.
+        online_routes = routing.get("online", {})
+        if online_routes is not None and not isinstance(online_routes, dict):
+            raise WorkforcePolicyValidationError("routing.online must be a mapping")
+        for worker_id, worker_data in workers_raw.items():
+            if not isinstance(worker_data, dict):
+                continue
+            if worker_data.get("successor_of") and not worker_data.get("route_disposition"):
+                raise WorkforcePolicyValidationError(
+                    f"Worker '{worker_id}' successor requires explicit route disposition"
+                )
+        direct_roles = {
+            "fast_bounded_implementation",
+            "main_engineering",
+            "independent_review",
+        }
+        for role, worker_id in (online_routes or {}).items():
+            if role not in direct_roles:
+                continue
+            # Symbolic routes such as codex_luna_when_available are resolved
+            # by the runtime and are not direct worker bindings.
+            if not isinstance(worker_id, str) or worker_id.endswith("_when_available"):
+                continue
+            worker_data = workers_raw.get(worker_id)
+            if not isinstance(worker_data, dict):
+                raise WorkforcePolicyValidationError(
+                    f"Online route '{role}' references unknown worker '{worker_id}'"
+                )
+            if worker_data.get("availability") != "AVAILABLE":
+                raise WorkforcePolicyValidationError(
+                    f"Online route '{role}' references unavailable worker '{worker_id}'"
+                )
+            if role not in (worker_data.get("roles") or []):
+                raise WorkforcePolicyValidationError(
+                    f"Online route '{role}' is not advertised by worker '{worker_id}'"
+                )
+            if (
+                worker_data.get("default_route") is not True
+                or worker_data.get("route_disposition") != "CURRENT_DEFAULT"
+            ):
+                raise WorkforcePolicyValidationError(
+                    f"Online route '{role}' must bind a current/default worker"
+                )
 
         # 8. Context policy validation
         context_policy = data.get("context_policy")

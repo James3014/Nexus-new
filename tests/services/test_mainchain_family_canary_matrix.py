@@ -88,15 +88,17 @@ _ONLINE_ROLE_KEYWORDS: dict[str, tuple[str, ...]] = {
     ),
 }
 _ONLINE_WORKER_BY_ROLE: dict[str, str] = {
-    "fast_bounded_implementation": "agy_flash",
+    "fast_bounded_implementation": "agy_flash_37_medium",
     "independent_review": "grok_review",
     "main_engineering": "codex_luna",
 }
 _ONLINE_WORKER_CONTROLS: dict[str, list[str]] = {
-    "agy_flash": [
+    "agy_flash_37_medium": [
         "task_card",
         "allowed_files",
         "mandatory_commands",
+        "parser",
+        "verifier",
         "independent_verification",
     ],
     "grok_review": [

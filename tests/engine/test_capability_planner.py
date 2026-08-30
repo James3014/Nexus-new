@@ -7,7 +7,6 @@ import pytest
 from nexus.engine.capability_contracts import (
     CapabilityPlan,
     ExecutionReplanAuthorization,
-    apply_execution_depth_floor,
 )
 from nexus.engine.capability_planner import CapabilityPlanner, default_capability_nodes
 from nexus.engine.learning_policy_loader import (
@@ -18,8 +17,8 @@ from nexus.engine.learning_policy_loader import (
     load_route_cost_policy_budget_from_env,
     load_s2t_policy_draft_budget,
     merge_runtime_s2t_policy_draft,
-    route_cost_controls_from_env,
     route_cost_controls_for_task,
+    route_cost_controls_from_env,
 )
 from nexus.engine.planner.skill_mount_evidence import runtime_policy_overlay_skill_requests
 
@@ -3381,6 +3380,64 @@ def test_workforce_demand_online_ordinary():
     assert d["mutation_intent"] is True
     assert d["external_verification_required"] is True
     assert d["route_authority"] == "CapabilityPlanner"
+
+
+@pytest.mark.parametrize(
+    "task_desc",
+    [
+        "Implement producer evidence integrity and provenance binding",
+        "Repair receipt binding and immutable CAS replay protection",
+        "Implement verification certification signing authority contract",
+    ],
+)
+def test_workforce_demand_evidence_mutation_requires_main_engineering(task_desc):
+    plan = CapabilityPlanner().plan(
+        task_desc=task_desc,
+        task_type="feature",
+        route={"workforce_admission_enabled": True, "online_enabled": True},
+    ).to_dict()
+
+    demand = plan["signal_snapshot"]["workforce_demands"]["demands"][0]
+    assert demand["requested_role"] == "main_engineering"
+    assert demand["minimum_autonomy"] == "L3_HISTORICAL"
+    assert demand["context_class"] == "nexus_full"
+
+
+def test_workforce_demand_plain_bounded_bugfix_remains_fast():
+    plan = CapabilityPlanner().plan(
+        task_desc="Fix an off-by-one bug in a string utility",
+        task_type="bug",
+        route={"workforce_admission_enabled": True, "online_enabled": True},
+    ).to_dict()
+
+    demand = plan["signal_snapshot"]["workforce_demands"]["demands"][0]
+    assert demand["requested_role"] == "fast_bounded_implementation"
+
+
+def test_workforce_demand_read_only_evidence_documentation_remains_fast():
+    plan = CapabilityPlanner().plan(
+        task_desc="Document evidence provenance and verification requirements",
+        task_type="docs_fix",
+        route={
+            "workforce_admission_enabled": True,
+            "online_enabled": True,
+            "mutation_requested": False,
+        },
+    ).to_dict()
+
+    demand = plan["signal_snapshot"]["workforce_demands"]["demands"][0]
+    assert demand["requested_role"] == "fast_bounded_implementation"
+
+
+def test_workforce_demand_review_precedence_is_preserved_for_sensitive_terms():
+    plan = CapabilityPlanner().plan(
+        task_desc="Review evidence verification and provenance binding",
+        task_type="review",
+        route={"workforce_admission_enabled": True, "online_enabled": True},
+    ).to_dict()
+
+    demand = plan["signal_snapshot"]["workforce_demands"]["demands"][0]
+    assert demand["requested_role"] == "independent_review"
 
 
 def test_candidate_generation_only_projects_bounded_non_mutating_demand():
