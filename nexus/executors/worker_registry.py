@@ -231,7 +231,7 @@ class AgyWorkerAdapter:
         executable_env: str = "NEXUS_AGY_EXECUTABLE",
         project_id_env: str = "NEXUS_AGY_PROJECT_ID",
         model_env: str = "NEXUS_AGY_WORKER_MODEL",
-        default_model: str = "gemini-3.6-flash-high",
+        default_model: str = "gemini-3.7-flash-medium",
         account_pool: Optional[Any] = None,
     ):
         self.executable_env = executable_env

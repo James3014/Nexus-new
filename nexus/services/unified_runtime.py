@@ -202,7 +202,7 @@ ONLINE_CLI_SPEC_REGISTRY: dict[str, dict[str, str]] = {
         "command_env": "NEXUS_AGY_COMMAND",
         "binary_name": "agy",
         "print_flag": "-p",
-        "default_model": "gemini-3.6-flash-high",
+        "default_model": "gemini-3.7-flash-medium",
     },
     "grok": {
         "transport": "subprocess",

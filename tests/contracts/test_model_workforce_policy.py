@@ -54,6 +54,36 @@ def test_loader_rejects_successor_without_explicit_route_disposition(tmp_path: P
         WorkforcePolicyLoader(path).load()
 
 
+@pytest.mark.parametrize("state", ["REGISTERED_BLOCKED", "EXPERIMENT_ONLY", "QUARANTINED"])
+def test_loader_rejects_non_admissible_current_default_worker(tmp_path: Path, state: str) -> None:
+    data = _manifest()
+    worker = data["workers"]["agy_flash_37_medium"]
+    worker["state"] = state
+    worker["availability"] = "AVAILABLE"
+    worker["default_route"] = True
+    worker["route_disposition"] = "CURRENT_DEFAULT"
+    path = tmp_path / f"bad-state-{state}.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(WorkforcePolicyValidationError, match="non-admissible|experiment-only"):
+        WorkforcePolicyLoader(path).load()
+
+
+def test_loader_rejects_multiple_current_defaults_for_one_role(tmp_path: Path) -> None:
+    data = _manifest()
+    data["workers"]["agy_flash_38_medium"] = {
+        **data["workers"]["agy_flash_37_medium"],
+        "model": "gemini-3.8-flash-medium",
+        "successor_of": "agy_flash_37_medium",
+        "route_disposition": "CURRENT_DEFAULT",
+    }
+    path = tmp_path / "multiple-current-defaults.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(WorkforcePolicyValidationError, match="exactly one current default|route must equal"):
+        WorkforcePolicyLoader(path).load()
+
+
 def test_model_workforce_authority_files_exist_and_are_current() -> None:
     assert POLICY_PATH.is_file()
     assert MANIFEST_PATH.is_file()

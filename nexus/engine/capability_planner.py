@@ -1789,20 +1789,21 @@ class CapabilityPlanner:
                 autonomy = "L1"
                 ctx = "nexus_bounded"
                 reason = "candidate_generation_only_bounded_candidate_generation"
+            elif is_integrity_sensitive:
+                role = "main_engineering"
+                autonomy = "L3_HISTORICAL"
+                ctx = "nexus_full"
+                reason = "integrity_sensitive_mutation_main_engineering"
             elif is_explicit_type_review_audit:
                 role = "independent_review"
                 autonomy = "L2+"
                 ctx = "nexus_bounded"
                 reason = "review_audit_task_independent_review"
-            elif is_complex or is_integrity_sensitive:
+            elif is_complex:
                 role = "main_engineering"
                 autonomy = "L3_HISTORICAL"
                 ctx = "nexus_full"
-                reason = (
-                    "integrity_sensitive_mutation_main_engineering"
-                    if is_integrity_sensitive
-                    else "complex_high_impact_task_main_engineering"
-                )
+                reason = "complex_high_impact_task_main_engineering"
             elif is_review_audit:
                 role = "independent_review"
                 autonomy = "L2+"

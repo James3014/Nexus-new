@@ -3440,6 +3440,21 @@ def test_workforce_demand_review_precedence_is_preserved_for_sensitive_terms():
     assert demand["requested_role"] == "independent_review"
 
 
+def test_workforce_demand_mutating_sensitive_review_escalates():
+    plan = CapabilityPlanner().plan(
+        task_desc="Review evidence verification and provenance binding implementation",
+        task_type="review",
+        route={
+            "workforce_admission_enabled": True,
+            "online_enabled": True,
+            "mutation_requested": True,
+        },
+    ).to_dict()
+
+    demand = plan["signal_snapshot"]["workforce_demands"]["demands"][0]
+    assert demand["requested_role"] == "main_engineering"
+
+
 def test_candidate_generation_only_projects_bounded_non_mutating_demand():
     plan = (
         CapabilityPlanner()

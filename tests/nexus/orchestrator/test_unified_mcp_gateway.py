@@ -313,6 +313,14 @@ def test_canonical_planner_admission_uses_policy_routing_not_worker_iteration(
     ] == "agy_flash_37_medium"
 
 
+def test_agy_default_runtime_identity_is_gemini_37():
+    from nexus.executors.worker_registry import AgyWorkerAdapter
+    from nexus.services.unified_runtime import ONLINE_CLI_SPEC_REGISTRY
+
+    assert ONLINE_CLI_SPEC_REGISTRY["agy"]["default_model"] == "gemini-3.7-flash-medium"
+    assert AgyWorkerAdapter().default_model == "gemini-3.7-flash-medium"
+
+
 def _worker_args(
     task_id: str,
     *,

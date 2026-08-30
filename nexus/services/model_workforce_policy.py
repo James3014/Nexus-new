@@ -252,6 +252,15 @@ class WorkforcePolicyLoader:
                 raise WorkforcePolicyValidationError(
                     f"Online route '{role}' references unavailable worker '{worker_id}'"
                 )
+            worker_state = str(worker_data.get("state") or "")
+            if worker_state in NON_ADMISSIBLE_STATES:
+                raise WorkforcePolicyValidationError(
+                    f"Online route '{role}' references non-admissible worker '{worker_id}'"
+                )
+            if worker_state == "EXPERIMENT_ONLY":
+                raise WorkforcePolicyValidationError(
+                    f"Online route '{role}' references experiment-only worker '{worker_id}'"
+                )
             if role not in (worker_data.get("roles") or []):
                 raise WorkforcePolicyValidationError(
                     f"Online route '{role}' is not advertised by worker '{worker_id}'"
@@ -262,6 +271,26 @@ class WorkforcePolicyLoader:
             ):
                 raise WorkforcePolicyValidationError(
                     f"Online route '{role}' must bind a current/default worker"
+                )
+            current_defaults = [
+                candidate_id
+                for candidate_id, candidate in workers_raw.items()
+                if isinstance(candidate, dict)
+                and role in (candidate.get("roles") or [])
+                and candidate.get("availability") == "AVAILABLE"
+                and candidate.get("state") not in NON_ADMISSIBLE_STATES
+                and candidate.get("state") != "EXPERIMENT_ONLY"
+                and candidate.get("default_route") is True
+                and candidate.get("route_disposition") == "CURRENT_DEFAULT"
+            ]
+            if len(current_defaults) != 1:
+                raise WorkforcePolicyValidationError(
+                    f"Online role '{role}' requires exactly one current default; "
+                    f"found {current_defaults}"
+                )
+            if current_defaults[0] != worker_id:
+                raise WorkforcePolicyValidationError(
+                    f"Online route '{role}' must equal its current default '{current_defaults[0]}'"
                 )
 
         # 8. Context policy validation
