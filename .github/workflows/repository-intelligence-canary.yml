@@ -1,0 +1,68 @@
+name: Repository Intelligence v0.1.0 Canary
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - .github/workflows/repository-intelligence-canary.yml
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+
+jobs:
+  repository-intelligence:
+    runs-on: ubuntu-latest
+    steps:
+      - id: ri
+        uses: James3014/repository-intelligence-engine@v0.1.0
+        with:
+          report-path: repository-intelligence-canary.json
+
+      - name: Verify cross-repository evidence
+        shell: bash
+        env:
+          REPORT_PATH: ${{ steps.ri.outputs.report-path }}
+          REPORT_SHA256: ${{ steps.ri.outputs.content-sha256 }}
+          REPORT_CEILING: ${{ steps.ri.outputs.claim-ceiling }}
+          EXPECTED_REPOSITORY: ${{ github.repository }}
+          EXPECTED_PR: ${{ github.event.pull_request.number }}
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path(os.environ["REPORT_PATH"])
+          payload = json.loads(path.read_text(encoding="utf-8"))
+          supplied = payload["content_sha256"]
+          unsigned = dict(payload)
+          unsigned.pop("content_sha256")
+          computed = hashlib.sha256(
+              json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode("utf-8")
+          ).hexdigest()
+
+          assert payload["schema"] == "reviewer.repository_intelligence_cloud.v1"
+          assert payload["claim_ceiling"] == "ADVISORY_EVIDENCE_ONLY"
+          assert os.environ["REPORT_CEILING"] == "ADVISORY_EVIDENCE_ONLY"
+          assert supplied == computed == os.environ["REPORT_SHA256"]
+          assert payload["review_identity"][0] == os.environ["EXPECTED_REPOSITORY"]
+          assert int(payload["review_identity"][1]) == int(os.environ["EXPECTED_PR"])
+          assert set(payload["reports"]) == {"revision", "readiness", "cfi", "eia"}
+          print(json.dumps({
+              "repository": payload["review_identity"][0],
+              "pr_number": payload["review_identity"][1],
+              "content_sha256": supplied,
+              "claim_ceiling": payload["claim_ceiling"],
+              "readiness": payload["reports"]["readiness"]["result"]["disposition"],
+              "cfi": payload["reports"]["cfi"]["result"]["status"],
+              "eia": payload["reports"]["eia"]["result"]["decision"],
+          }, sort_keys=True))
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: repository-intelligence-v0.1.0-canary
+          path: ${{ steps.ri.outputs.report-path }}
