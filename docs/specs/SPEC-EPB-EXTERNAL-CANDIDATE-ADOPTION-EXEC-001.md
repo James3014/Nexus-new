@@ -277,7 +277,8 @@ none
 
 | Task group | Requirements | Acceptance | Observable outcome | Dependency seam | Verification seam | Maximum claim | Scope class | Minimum MCP profile | Known blocker |
 |---|---|---|---|---|---|---|---|---|---|
-| External Candidate adoption repair | `REQ-001`; `REQ-002`; `REQ-003`; `REQ-004`; `REQ-005`; `REQ-006`; `REQ-007` | `AC-001`; `AC-002`; `AC-003`; `AC-004`; `AC-005`; `AC-006`; `AC-007` | Typed fail-closed external Candidate adoption reaches pending approval only | Existing CandidateVerifier and durable lifecycle | Real immutable precommitted Candidate plus Gateway/service hostile tests | Adoption capability independently verified; no EPB approval, integration, remote merge, release, production, Task4, or public-stability claim. | medium | CANDIDATE | none |
+| Core external Candidate adoption service | `REQ-002`; `REQ-003`; `REQ-004`; `REQ-005`; `REQ-006` | `AC-002`; `AC-003`; `AC-005`; `AC-006`; `AC-007` | Core service physically verifies an immutable precommitted Candidate and atomically forms pending-approval state | Existing CandidateVerifier, CandidateCommitter, and durable lifecycle | Real immutable precommitted Candidate plus service hostile tests | Core lifecycle adoption service independently verified; no public Gateway action, EPB adoption, approval, integration, or remote claim. | medium | CANDIDATE | none |
+| Public typed adoption action | `REQ-001`; `REQ-007` | `AC-001`; `AC-004` | Typed fail-closed public external Candidate adoption reaches pending approval only | Accepted and integrated core adoption service contract | Real Gateway/CLI action plus downstream-effect hostile tests | Adoption capability independently verified; no EPB approval, integration, remote merge, release, production, Task4, or public-stability claim. | medium | CANDIDATE | none |
 
 ## 24. Out of scope
 

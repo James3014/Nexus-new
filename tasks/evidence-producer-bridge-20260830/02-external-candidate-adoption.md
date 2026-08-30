@@ -1,14 +1,14 @@
-# TASK-EPB-002 — External Verified Candidate Adoption
+# TASK-EPB-002 — Core External Candidate Adoption Service
 
 - **Campaign:** `CAMPAIGN-EVIDENCE-PRODUCER-BRIDGE-01`
 - **Status:** `ACTIVE`
 - **Source spec:** `SPEC-EPB-EXTERNAL-CANDIDATE-ADOPTION-EXEC-001`
-- **Source spec SHA-256:** `17e70e7a92cc2f4f0ed68756570f704af1625f19b0f8c6864a17015212eac8e9`
-- **Source groups:** External Candidate adoption repair
-- **Requirements:** `REQ-001; REQ-002; REQ-003; REQ-004; REQ-005; REQ-006; REQ-007`
-- **Acceptance:** `AC-001; AC-002; AC-003; AC-004; AC-005; AC-006; AC-007`
+- **Source spec SHA-256:** `9e841f43d63ffc10704f00b4d21b88f9fbf78f3a473839a1409f278a951251a1`
+- **Source groups:** Core external Candidate adoption service
+- **Requirements:** `REQ-002; REQ-003; REQ-004; REQ-005; REQ-006`
+- **Acceptance:** `AC-002; AC-003; AC-005; AC-006; AC-007`
 - **Auto-chain:** `false`
-- **Maximum claim:** Adoption capability independently verified; no EPB approval, integration, remote merge, release, production, Task4, or public-stability claim.
+- **Maximum claim:** Core lifecycle adoption service independently verified; no public Gateway action, EPB adoption, approval, integration, or remote claim.
 - **Depends on:** none
 - **Dependency unlock evidence:** none
 - **Task type:** `IMPLEMENTATION`
@@ -23,11 +23,11 @@
 
 ## Goal
 
-Add one typed, one-shot, host-bound `CANDIDATE_ADOPT_EXTERNAL` lifecycle action that physically re-verifies an exact immutable precommitted external-bootstrap Candidate and atomically creates the ordinary pending-approval Candidate state required by unchanged approval and integration gates.
+Add the core lifecycle service and distinct action contract needed to physically re-verify an exact immutable precommitted external-bootstrap Candidate and atomically create ordinary pending-approval Candidate state, without adding the public Gateway/CLI action yet.
 
 ## Observable outcome
 
-Typed fail-closed external Candidate adoption reaches pending approval only
+Core service physically verifies an immutable precommitted Candidate and atomically forms pending-approval state
 
 Against a clean exact-base/exact-Candidate snapshot, the real Gateway/service action validates every physical and authority binding, runs the existing lifecycle-native CandidateVerifier without invoking an implementation worker, and persists exactly one `PENDING_HUMAN_APPROVAL` Candidate packet; hostile substitutions and replay drift leave no promotable state.
 
@@ -53,17 +53,13 @@ Against a clean exact-base/exact-Candidate snapshot, the real Gateway/service ac
 | `CON-001` | canonical lifecycle contract | Exact commit/tree/state/receipt binding |
 | `CON-002` | canonical lifecycle contract | No state hand editing; approval/integration remain separate |
 | `REJ-001` | prohibited shortcut | Do not reuse failed task state or caller-mint lifecycle truth |
-| `REQ-001` | implementation requirement | Distinct typed adoption authority |
 | `REQ-002` | implementation requirement | Exact immutable subject validation |
 | `REQ-003` | implementation requirement | No worker and no Candidate mutation |
 | `REQ-004` | implementation requirement | Lifecycle-native verification |
 | `REQ-005` | implementation requirement | Atomic durable adoption |
 | `REQ-006` | implementation requirement | Idempotency and reconciliation |
-| `REQ-007` | implementation requirement | Unchanged downstream gates |
-| `AC-001` | acceptance witness | Typed authority binding |
 | `AC-002` | acceptance witness | No worker or rewrite |
 | `AC-003` | acceptance witness | Replay and concurrency |
-| `AC-004` | acceptance witness | Downstream separation |
 | `AC-005` | acceptance witness | Physical subject binding |
 | `AC-006` | acceptance witness | Lifecycle-native verifier receipt |
 | `AC-007` | acceptance witness | Atomic pending state |
@@ -103,11 +99,11 @@ Against a clean exact-base/exact-Candidate snapshot, the real Gateway/service ac
 ## Allowed scope
 
 - **Read:** `AGENTS.md; tasks/evidence-producer-bridge-20260830/INDEX.md; tasks/evidence-producer-bridge-20260830/02-external-candidate-adoption.md; docs/specs/SPEC-EPB-EXTERNAL-CANDIDATE-ADOPTION-EXEC-001.md; docs/agents/TASK_EXECUTION_CONTRACT.md; docs/governance/rollback_runbook.md; nexus/contracts/lifecycle_action.py; nexus/orchestrator/candidate_verifier.py; nexus/orchestrator/candidate_commit.py; nexus/orchestrator/self_hosted_task_service.py; nexus/orchestrator/unified_mcp_gateway.py; scripts/engine/nexus_cli.py`
-- **Edit:** `nexus/contracts/lifecycle_action.py`; `nexus/orchestrator/self_hosted_task_service.py`; `nexus/orchestrator/unified_mcp_gateway.py`; `scripts/engine/nexus_cli.py`; `docs/governance/rollback_runbook.md`; `tests/contracts/test_lifecycle_action.py`; `tests/nexus/orchestrator/test_self_hosted_task_service.py`; `tests/nexus/orchestrator/test_unified_mcp_gateway.py`; `tests/engine/test_self_hosted_cli.py`
+- **Edit:** `nexus/contracts/lifecycle_action.py`; `nexus/orchestrator/self_hosted_task_service.py`; `tests/contracts/test_lifecycle_action.py`; `tests/nexus/orchestrator/test_self_hosted_task_service.py`
 - **Create:** `none`
 - **Delete:** `none`
-- **Maximum touched production files:** 5
-- **Maximum touched test files:** 4
+- **Maximum touched production files:** 2
+- **Maximum touched test files:** 2
 
 Governance files `tasks/evidence-producer-bridge-20260830/INDEX.md` and `tasks/evidence-producer-bridge-20260830/02-external-candidate-adoption.md` are compiled and committed by the Primary Controller before worker dispatch; the worker must not modify them.
 
@@ -161,19 +157,20 @@ RED must fail because the required public behavior is absent, not because of imp
 
 ## GREEN and regression gates
 
-- `AC-001`: exact immutable Candidate becomes one fully bound pending-approval lifecycle Candidate.
 - `AC-002`: Git SHA/tree are unchanged and implementation worker/provider invocation count for adoption is zero.
 - `AC-003`: exact replay is idempotent; mismatched replay/concurrency fails closed without duplicate state.
-- `AC-004`: no approval/integration/push/release effect occurs and downstream fields in adoption input are schema-rejected.
+- `AC-005`: every immutable Git/artifact binding is independently recomputed.
+- `AC-006`: the existing CandidateVerifier produces lifecycle-native state and receipt evidence.
+- `AC-007`: exactly one complete pending-approval state is atomically committed.
 - Existing approval, integration, recovery, cancellation, status/action, Gateway freshness, and CLI tests remain green.
 
 ## Mandatory command manifest
 
 | ID | cwd | Exact command/argv | Purpose | Required result |
 |---|---|---|---|---|
-| `CMD-001` | Task worktree root | `uv run pytest -q tests/contracts/test_lifecycle_action.py tests/nexus/orchestrator/test_self_hosted_task_service.py tests/nexus/orchestrator/test_unified_mcp_gateway.py tests/engine/test_self_hosted_cli.py` | Focused behavior and regression verification | PASS |
-| `CMD-002` | Task worktree root | `uv run ruff check nexus/contracts/lifecycle_action.py nexus/orchestrator/self_hosted_task_service.py nexus/orchestrator/unified_mcp_gateway.py scripts/engine/nexus_cli.py tests/contracts/test_lifecycle_action.py tests/nexus/orchestrator/test_self_hosted_task_service.py tests/nexus/orchestrator/test_unified_mcp_gateway.py tests/engine/test_self_hosted_cli.py` | Static lint | PASS |
-| `CMD-003` | Task worktree root | `uv run pyright nexus/contracts/lifecycle_action.py nexus/orchestrator/self_hosted_task_service.py nexus/orchestrator/unified_mcp_gateway.py scripts/engine/nexus_cli.py` | Type verification | 0 errors |
+| `CMD-001` | TARGET_ROOT | `uv run pytest -q tests/contracts/test_lifecycle_action.py tests/nexus/orchestrator/test_self_hosted_task_service.py` | Focused behavior and regression verification | PASS |
+| `CMD-002` | TARGET_ROOT | `uv run ruff check nexus/contracts/lifecycle_action.py nexus/orchestrator/self_hosted_task_service.py tests/contracts/test_lifecycle_action.py tests/nexus/orchestrator/test_self_hosted_task_service.py` | Static lint | PASS |
+| `CMD-003` | TARGET_ROOT | `uv run pyright nexus/contracts/lifecycle_action.py nexus/orchestrator/self_hosted_task_service.py` | Type verification | 0 errors |
 | `CMD-004` | Task worktree root | `git diff --check` | Patch integrity | PASS |
 
 ## Physical evidence
@@ -193,4 +190,4 @@ A fresh reviewer distinct from the implementer must inspect the approved spec/ca
 - **PASS:** Exact repair Candidate is committed, all mandatory commands and hostile controls pass, no forbidden path/effect occurs, independent reviewer returns `ACCEPT_CANDIDATE`, and the active canonical integration/activation gate is freshly identified.
 - **BLOCK:** Any authority ambiguity, Candidate rewrite, arbitrary trust import, caller-minted lifecycle truth, worker execution during adoption, partial state, receipt mismatch, unbounded path, weakened gate, or unresolved independent rejection.
 - **Residual debt:** Original EPB Candidate still requires actual lifecycle adoption, approval, governed integration, remote/default merge, and post-merge verification after this repair is accepted and activated.
-- **Next gate:** Primary Controller independently integrates/activates the accepted repair Candidate, then uses it on exact original EPB Candidate `b3343c95479f03857af7761381a1b839ac049e24`.
+- **Next gate:** After independent acceptance/integration of this core service Candidate, rebind and activate `TASK-EPB-003` for the public Gateway/CLI action and final adoption witness.
