@@ -14,8 +14,9 @@ Preflight receipt: `/private/tmp/nexus-product-kernel-usability.LR9utT/evidence-
 
 | Order | Card | File | State |
 |---:|---|---|---|
-| 0 | `TASK-EPB-001` | `00-evidence-producer-bridge.md` | `ACTIVE` |
+| 0 | `TASK-EPB-001` | `00-evidence-producer-bridge.md` | `RETAINED_FOR_REVIEW` |
+| 1 | `TASK-EPB-001-R1` | `01-evidence-producer-bridge-r1.md` | `ACTIVE` |
 
-Current frontier: `00-evidence-producer-bridge.md`
+Current frontier: `01-evidence-producer-bridge-r1.md`
 
 `AUTO_CHAIN=false`
