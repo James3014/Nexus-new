@@ -26,23 +26,29 @@ Goal: repair the Planner/Workforce seam so elevated trust/evidence mutation is n
 4. The online `fast_bounded_implementation` route must point to `agy_flash_37_medium / gemini-3.7-flash-medium` after exact policy admission.
 5. `agy_flash_37_medium` becomes the current default for that role; `agy_flash / gemini-3.6-flash-high` remains an explicit previous-generation fallback and is not the default route.
 6. Add a machine-verifiable coherence invariant: every direct online role route must resolve to an existing eligible worker that advertises the role and is marked current/default; a route to a conditional-only, previous, superseded, blocked, disabled, experiment-only, or quarantined worker fails tests.
-7. Registering a successor generation without an explicit route disposition must fail policy verification rather than silently preserving a stale default.
+7. Every direct online role has exactly one `CURRENT_DEFAULT`, and its route must point to that exact worker. Registering a successor without an explicit disposition, or registering a second/new `CURRENT_DEFAULT` without moving the route, must fail policy verification rather than silently preserving a stale default.
 8. Preserve exact identity separation; 3.6 and 3.7 must never be treated as interchangeable aliases.
+9. Active Agy adapter/CLI defaults outside the tracked canonical envelope must also resolve to exact `gemini-3.7-flash-medium`; 3.6 remains available only through an explicit fallback identity/model request.
+10. Integrity-sensitive mutation takes precedence over review/audit labeling. A genuinely read-only review/audit remains `independent_review`, but `mutation_requested=true` plus an integrity-sensitive contract must resolve `main_engineering`.
 
 ## Allowed paths
 
 - `nexus/engine/capability_planner.py`
 - `nexus/services/model_workforce_policy.py`
+- `nexus/services/unified_runtime.py`
+- `nexus/executors/worker_registry.py`
 - `nexus/config/model_workforce.yaml`
 - `docs/arch/MODEL_WORKFORCE_POLICY.md`
 - `tests/engine/test_capability_planner.py`
 - `tests/contracts/test_model_workforce_policy.py`
 - `tests/services/test_mainchain_family_canary_matrix.py`
 - `tests/nexus/orchestrator/test_unified_mcp_gateway.py`
+- `tests/nexus/executors/test_worker_contract.py`
+- `tests/services/test_unified_runtime.py`
 - `tasks/planner-workforce-selection-repair-20260830/INDEX.md`
 - `tasks/planner-workforce-selection-repair-20260830/00-planner-workforce-selection-repair.md`
 
-Maximum changed paths: `10`.
+Maximum changed paths: `14`.
 
 ## Forbidden scope
 
@@ -66,6 +72,7 @@ Maximum changed paths: `10`.
 - `uv run pyright nexus/engine/capability_planner.py`
 - `git diff --check`
 - Re-run the exact EPB Planner/Admission probe and prove it resolves `codex_luna / gpt-5.6-luna` while an ordinary bounded task resolves the 3.7 Agy worker.
+- Any nonzero broad verifier or Pyright result must be rerun at the exact Candidate parent. Only node-identical, message-identical pre-existing failures may be classified as baseline debt; new or changed failures block acceptance.
 
 ## Exit
 
