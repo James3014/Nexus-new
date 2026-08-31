@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
 import subprocess
@@ -140,6 +141,125 @@ def test_load_config_is_strict_and_profile_is_configurable(tmp_path):
     cfg.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(ServiceError):
         load_config(cfg)
+
+
+def test_semantic_backend_defaults_to_opencli(tmp_path):
+    loaded = load_config(_config_file(tmp_path))
+
+    assert getattr(loaded, "semantic_backend", None) == "opencli"
+
+
+def test_unknown_semantic_backend_is_rejected_explicitly(tmp_path):
+    config_path = _config_file(tmp_path)
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    raw["semantic_backend"] = "unknown"
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ServiceError, match="CONFIG_SEMANTIC_BACKEND_INVALID"):
+        load_config(config_path)
+
+    with pytest.raises(ServiceError, match="CONFIG_SEMANTIC_BACKEND_INVALID"):
+        build_automation(_config(tmp_path, semantic_backend="unknown"), "o/r")
+
+
+def test_open_swe_backend_requires_explicit_model_binding(tmp_path):
+    config = _config(tmp_path, semantic_backend="open_swe")
+
+    with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_MODEL_BINDING_REQUIRED"):
+        build_automation(config, "o/r")
+
+
+def test_load_config_binds_open_swe_provider_and_model(tmp_path):
+    config_path = _config_file(tmp_path)
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    raw.update(
+        semantic_backend="open_swe",
+        open_swe_model_provider="google_genai",
+        open_swe_model="gemini-test",
+    )
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    loaded = load_config(config_path)
+
+    assert loaded.semantic_backend == "open_swe"
+    assert loaded.open_swe_model_provider == "google_genai"
+    assert loaded.open_swe_model == "gemini-test"
+
+
+def test_load_config_rejects_open_swe_without_complete_model_binding(tmp_path):
+    config_path = _config_file(tmp_path)
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    raw["semantic_backend"] = "open_swe"
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_MODEL_BINDING_REQUIRED"):
+        load_config(config_path)
+
+
+def test_build_automation_keeps_opencli_as_default(tmp_path):
+    automation = build_automation(_config(tmp_path), "o/r")
+
+    assert isinstance(automation.sidecar.transport, service_module.OpenCLIExternalIntelligenceTransport)
+
+
+def test_build_automation_selects_open_swe_only_when_explicit(tmp_path, monkeypatch):
+    calls = []
+
+    class FakeOpenSWETransport:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setattr(
+        service_module,
+        "OpenSWEExternalIntelligenceTransport",
+        FakeOpenSWETransport,
+        raising=False,
+    )
+    config = _config(
+        tmp_path,
+        semantic_backend="open_swe",
+        open_swe_model_provider="google_genai",
+        open_swe_model="gemini-test",
+    )
+
+    automation = build_automation(config, "o/r")
+
+    assert isinstance(automation.sidecar.transport, FakeOpenSWETransport)
+    assert calls == [
+        {
+            "repository_root": (tmp_path / "repo").resolve(),
+            "model_provider": "google_genai",
+            "model_id": "gemini-test",
+        }
+    ]
+
+
+def test_build_automation_fails_closed_when_open_swe_optional_runtime_is_missing(
+    tmp_path, monkeypatch
+):
+    module = importlib.import_module("nexus.services.open_swe_external_intelligence")
+
+    class MissingOpenSWETransport:
+        def __init__(self, **_kwargs):
+            raise module.OpenSWEExternalIntelligenceError(
+                "OPEN_SWE_OPTIONAL_DEPENDENCY_MISSING"
+            )
+
+    monkeypatch.setattr(
+        service_module,
+        "OpenSWEExternalIntelligenceTransport",
+        MissingOpenSWETransport,
+        raising=False,
+    )
+    config = _config(
+        tmp_path,
+        semantic_backend="open_swe",
+        open_swe_model_provider="google_genai",
+        open_swe_model="gemini-test",
+    )
+
+    with pytest.raises(ServiceError, match="OPEN_SWE_OPTIONAL_DEPENDENCY_MISSING"):
+        build_automation(config, "o/r")
 
 
 def test_run_once_processes_at_most_one_issue_and_publishes_compact_result(tmp_path):
