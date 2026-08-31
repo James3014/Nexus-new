@@ -1,6 +1,0 @@
-{
-  "semantic_backend": "open_swe",
-  "worker_backend": "open_swe",
-  "open_swe_model_provider": "google_genai",
-  "open_swe_model": "gemini-3.7-flash"
-}
