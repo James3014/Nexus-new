@@ -189,6 +189,7 @@ def _advance_receipt(
         "stdout_sha256": "2" * 64,
         "export_sha256": "3" * 64,
         "opencode_version": "1.18.18",
+        "worker_backend": "opencode",
         "parent_receipt_id": parent["receipt_id"] if parent else "",
         "repair_id": "d001" if parent else "",
         "claim_ceiling": "CANDIDATE_READY_FOR_VERIFICATION",

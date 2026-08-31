@@ -169,6 +169,54 @@ def test_open_swe_backend_requires_explicit_model_binding(tmp_path):
         build_automation(config, "o/r")
 
 
+def test_worker_backend_defaults_to_opencode(tmp_path):
+    loaded = load_config(_config_file(tmp_path))
+
+    assert loaded.worker_backend == "opencode"
+
+
+def test_unknown_worker_backend_is_rejected(tmp_path):
+    config_path = _config_file(tmp_path)
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    raw["worker_backend"] = "unknown"
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ServiceError, match="CONFIG_WORKER_BACKEND_INVALID"):
+        load_config(config_path)
+
+
+def test_build_automation_selects_open_swe_worker_only_when_explicit(tmp_path, monkeypatch):
+    calls = []
+
+    class FakeOpenSWEWorkerTransport:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setattr(
+        service_module,
+        "OpenSWEWorkerTransport",
+        FakeOpenSWEWorkerTransport,
+        raising=False,
+    )
+    config = _config(
+        tmp_path,
+        worker_backend="open_swe",
+        open_swe_model_provider="google_genai",
+        open_swe_model="gemini-test",
+    )
+
+    automation = build_automation(config, "o/r")
+
+    assert isinstance(automation.c_runtime.transport, FakeOpenSWEWorkerTransport)
+    assert calls == [
+        {
+            "model_provider": "google_genai",
+            "model_id": "gemini-test",
+            "require_worker_binding": True,
+        }
+    ]
+
+
 def test_load_config_binds_open_swe_provider_and_model(tmp_path):
     config_path = _config_file(tmp_path)
     raw = json.loads(config_path.read_text(encoding="utf-8"))
@@ -199,7 +247,9 @@ def test_load_config_rejects_open_swe_without_complete_model_binding(tmp_path):
 def test_build_automation_keeps_opencli_as_default(tmp_path):
     automation = build_automation(_config(tmp_path), "o/r")
 
-    assert isinstance(automation.sidecar.transport, service_module.OpenCLIExternalIntelligenceTransport)
+    assert isinstance(
+        automation.sidecar.transport, service_module.OpenCLIExternalIntelligenceTransport
+    )
 
 
 def test_build_automation_selects_open_swe_only_when_explicit(tmp_path, monkeypatch):
@@ -241,9 +291,7 @@ def test_build_automation_fails_closed_when_open_swe_optional_runtime_is_missing
 
     class MissingOpenSWETransport:
         def __init__(self, **_kwargs):
-            raise module.OpenSWEExternalIntelligenceError(
-                "OPEN_SWE_OPTIONAL_DEPENDENCY_MISSING"
-            )
+            raise module.OpenSWEExternalIntelligenceError("OPEN_SWE_OPTIONAL_DEPENDENCY_MISSING")
 
     monkeypatch.setattr(
         service_module,
