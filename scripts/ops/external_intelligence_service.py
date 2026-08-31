@@ -43,6 +43,10 @@ from nexus.services.external_intelligence_fanout import (
     GitWorktreeAllocator,
     OpenCodeWorkerTransport,
 )
+from nexus.services.open_swe_external_intelligence import (
+    OpenSWEExternalIntelligenceError,
+    OpenSWEExternalIntelligenceTransport,
+)
 
 SERVICE_LABEL = "com.nexus.external-intelligence"
 DEFAULT_CONFIG = Path.home() / ".config" / "nexus-external-intelligence" / "config.json"
@@ -77,6 +81,9 @@ class ServiceConfig:
     poll_interval_seconds: int = 60
     opencli_executable: str = "opencli"
     opencli_profile: str = ""
+    semantic_backend: str = "opencli"
+    open_swe_model_provider: str = ""
+    open_swe_model: str = ""
     opencode_executable: str = "opencode"
     publication_enabled: bool = True
     requested_concurrency: int = 2
@@ -427,6 +434,9 @@ def load_config(path: str | os.PathLike[str]) -> ServiceConfig:
         "poll_interval_seconds",
         "opencli_executable",
         "opencli_profile",
+        "semantic_backend",
+        "open_swe_model_provider",
+        "open_swe_model",
         "opencode_executable",
         "publication_enabled",
         "requested_concurrency",
@@ -437,6 +447,20 @@ def load_config(path: str | os.PathLike[str]) -> ServiceConfig:
     }
     if not isinstance(raw, dict) or set(raw) - allowed:
         raise ServiceError("CONFIG_KEYS_INVALID")
+    semantic_backend = raw.get("semantic_backend", "opencli")
+    if semantic_backend not in {"opencli", "open_swe"}:
+        raise ServiceError("CONFIG_SEMANTIC_BACKEND_INVALID")
+    open_swe_provider = raw.get("open_swe_model_provider", "")
+    open_swe_model = raw.get("open_swe_model", "")
+    if (
+        not isinstance(open_swe_provider, str)
+        or not isinstance(open_swe_model, str)
+        or (
+            semantic_backend == "open_swe"
+            and (not open_swe_provider.strip() or not open_swe_model.strip())
+        )
+    ):
+        raise ServiceError("CONFIG_OPEN_SWE_MODEL_BINDING_REQUIRED")
     repos = raw.get("repositories")
     roots = raw.get("repository_roots")
     if (
@@ -540,14 +564,31 @@ def _safe_repo(repo: str) -> str:
 
 
 def build_automation(config: ServiceConfig, repository: str) -> ExternalIntelligenceAutomation:
+    if config.semantic_backend not in {"opencli", "open_swe"}:
+        raise ServiceError("CONFIG_SEMANTIC_BACKEND_INVALID")
     repo_root = Path(config.repository_roots[repository]).expanduser().resolve()
     repo_state = config.state_root / _safe_repo(repository)
     intel_store = ExternalIntelligenceStore(repo_state / "intelligence")
-    sidecar = ExternalIntelligenceSidecar(
-        transport=OpenCLIExternalIntelligenceTransport(
+    if config.semantic_backend == "open_swe" and (
+        not config.open_swe_model_provider.strip() or not config.open_swe_model.strip()
+    ):
+        raise ServiceError("CONFIG_OPEN_SWE_MODEL_BINDING_REQUIRED")
+    if config.semantic_backend == "opencli":
+        semantic_transport: Any = OpenCLIExternalIntelligenceTransport(
             executable=config.opencli_executable,
             profile=config.opencli_profile,
-        ),
+        )
+    else:
+        try:
+            semantic_transport = OpenSWEExternalIntelligenceTransport(
+                repository_root=repo_root,
+                model_provider=config.open_swe_model_provider,
+                model_id=config.open_swe_model,
+            )
+        except OpenSWEExternalIntelligenceError as exc:
+            raise ServiceError(str(exc)) from exc
+    sidecar = ExternalIntelligenceSidecar(
+        transport=semantic_transport,
         store=intel_store,
     )
     c_runtime = AdaptiveWorkerFanoutRuntime(
