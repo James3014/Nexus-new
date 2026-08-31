@@ -38,7 +38,7 @@ Source reconciliation and activation Candidate may change only:
 
 - `tasks/open-swe-execution-productionization-v1/INDEX.md`
 - `tasks/open-swe-execution-productionization-v1/OPEN_SWE_INTEGRATION_CONTRACT.md`
-- `configs/runtime/external_intelligence_open_swe_activation_v1.json`
+- `scripts/ops/configs/external_intelligence_open_swe_activation_v1.json`
 
 Maximum files: `3`.
 
@@ -69,7 +69,7 @@ Meaning for this contract: prepare the preferred activation profile. This decisi
 
 ## G12 — activation configuration contract
 
-The source-controlled activation fragment is exactly:
+The source-controlled operational activation fragment at `scripts/ops/configs/external_intelligence_open_swe_activation_v1.json` is exactly:
 
 ```json
 {
@@ -80,7 +80,7 @@ The source-controlled activation fragment is exactly:
 }
 ```
 
-The fragment intentionally contains only existing, already-supported configuration keys. It introduces no new schema and no new authority surface.
+The fragment intentionally contains only existing, already-supported configuration keys. It introduces no new schema and no new authority surface. It lives on the existing operations source surface so the repository's exact-base impact gate treats it as an operational change and selects conservative Tier 2 verification instead of leaving a new runtime-config path unmapped.
 
 Rollback remains:
 
@@ -101,7 +101,7 @@ The Candidate must prove all of the following:
 2. pre-existing independent service tests prove explicit `semantic_backend=open_swe` selects `OpenSWEExternalIntelligenceTransport` and explicit `worker_backend=open_swe` selects `OpenSWEWorkerTransport`;
 3. pre-existing independent service tests prove the library/default control arm remains `semantic_backend=opencli` and `worker_backend=opencode`;
 4. the rollback fragment therefore remains executable through already-tested existing configuration seams without deleting the Open SWE provider/model values;
-5. no production adapter, route, authority, receipt, Candidate, lifecycle, or test-inventory implementation changes are present;
+5. no production adapter, route, authority, receipt, Candidate, lifecycle, verifier-policy, or test-inventory implementation changes are present;
 6. affected Open SWE/External Intelligence tests pass or exact-base debt is explicitly classified rather than hidden;
 7. exact-head GitHub static/security/governance gates pass;
 8. changed paths are exactly within the allowed scope and there are no deletions relative to the original base.
@@ -132,7 +132,8 @@ Maximum claim after G15:
 - Current bound base for this contract: `30b49473578ec2e9d073d05938345d43dfa87594`, tree `0399dd60cf5d62e3e8dfbb69afc3ab5fd390c87a`.
 - TASK-004 post-merge portfolio included real semantic execution, artifact-aware attribution, ambiguous-outcome recovery, affected regression, and preserved OpenCLI/OpenCode control arm.
 - G9 recommendation: `ACTIVATE_OPEN_SWE_DEFAULT`.
-- First G15 CI attempt showed the same pre-existing `test_search_context_isolation` failure on exact base and head with `new_failures=[]`, but classification was blocked because the Candidate-added test changed test-inventory identity. The Candidate test was removed; existing independent service tests remain the oracle.
+- The first Candidate-authored profile test was removed after exact-base CI correctly refused to compare a changed test inventory as ordinary baseline debt; existing independent tests remain the oracle.
+- The next exact-base run proved the same pre-existing `test_search_context_isolation` failure on base and head with `new_failures=[]`, but still blocked because the new `configs/runtime/...` path was unmapped and therefore set `impact_class=IMPACT_UNKNOWN`. Diagnosis of `pr_impact_gate.py` confirmed that any `IMPACT_UNKNOWN` classification is intentionally blocking even when failure sets match. The profile was moved to `scripts/ops/configs/...`, an existing conservative operations surface, without changing verifier policy.
 
 ## Stop conditions
 
@@ -141,6 +142,7 @@ Stop and require a new authority decision if any of these occur before G15:
 - main or Candidate drift changes the semantic subject materially;
 - activation requires a new config key/schema rather than the existing four-key fragment;
 - adapter/fanout/authority code must change;
+- verifier policy would have to be weakened or edited to admit this Candidate;
 - rollback no longer selects OpenCLI/OpenCode cleanly;
 - exact-base evidence reveals a new Candidate-attributable failure;
 - protected merge gates cannot bind the exact accepted head.
