@@ -432,6 +432,127 @@ def validate_workforce_dispatch_binding(
     return result
 
 
+def _recover_pre_provider_cli_envelope_drift(
+    state: Mapping[str, Any],
+    request: Mapping[str, Any],
+    failure: RuntimeError,
+) -> Optional[dict[str, Any]]:
+    """Recover one fail-closed CLI bootstrap mismatch before any side effect.
+
+    The request/envelope pair remains the admitted authority.  This recovery is
+    intentionally unavailable once a Target, provider call, execution receipt,
+    or Candidate may exist; it accepts only the historical service-generated
+    attempt substitution that failed before worker dispatch.
+    """
+    if str(failure) != "WORKFORCE_DISPATCH_ENVELOPE_MISMATCH":
+        return None
+    if (
+        state.get("status") != "FINAL_BLOCK"
+        or state.get("error") != "WORKFORCE_DISPATCH_ENVELOPE_IDENTITY_DRIFT"
+        or state.get("action") is not None
+        or state.get("action_id") is not None
+        or state.get("target_created_at") is not None
+        or state.get("lease") is not None
+        or state.get("worker_preflight") is not None
+        or state.get("active_provider") not in (None, "")
+        or state.get("worker_child_pgid") is not None
+        or state.get("execution") is not None
+        or state.get("candidate") is not None
+        or state.get("candidate_commit_sha") is not None
+        or state.get("candidate_ref") is not None
+        or state.get("candidate_state_hash") is not None
+        or state.get("verified_receipt") is not None
+        or state.get("verified_receipt_hash") is not None
+        or state.get("executions") not in (None, [])
+        or str(state.get("cleanup_decision") or "") != "ALREADY_REMOVED"
+        or state.get("cleanup_performed") not in (None, False)
+        or state.get("cleanup_blocker") not in (None, "")
+        or state.get("promotion_status") not in (None, "NOT_CREATED")
+        or state.get("merge_performed") not in (None, False)
+        or state.get("push_performed") not in (None, False)
+    ):
+        return None
+    telemetry = state.get("telemetry")
+    if (
+        not isinstance(telemetry, Mapping)
+        or int(telemetry.get("provider_calls") or 0) != 0
+        or int(telemetry.get("provider_attempts") or 0) != 0
+        or int(telemetry.get("provider_time_ms") or 0) != 0
+        or int(telemetry.get("worktree_time_ms") or 0) != 0
+        or int(telemetry.get("verifier_time_ms") or 0) != 0
+    ):
+        return None
+    stored_envelope = state.get("canonical_dispatch_envelope")
+    request_envelope = request.get("canonical_dispatch_envelope")
+    if (
+        not isinstance(stored_envelope, Mapping)
+        or not isinstance(request_envelope, Mapping)
+        or dict(stored_envelope) != dict(request_envelope)
+    ):
+        return None
+    actual_attempt_id = str(state.get("attempt_id") or "")
+    stale_attempt_id = str(stored_envelope.get("attempt_id") or "")
+    attempts = state.get("attempts")
+    if (
+        not actual_attempt_id
+        or not stale_attempt_id
+        or actual_attempt_id == stale_attempt_id
+        or str(request.get("attempt_id") or "") != stale_attempt_id
+        or not isinstance(attempts, list)
+        or len(attempts) != 1
+        or not isinstance(attempts[0], Mapping)
+        or str(attempts[0].get("attempt_id") or "") != actual_attempt_id
+    ):
+        return None
+    try:
+        dispatch = validate_workforce_dispatch_binding(request, require_binding=True)
+        if dispatch is None:
+            return None
+        expected = build_canonical_dispatch_envelope(
+            request["planner_output"],
+            {**dispatch, "demand_id": dispatch.get("demand_id")},
+            task_id=str(state.get("task_id") or ""),
+            attempt_id=actual_attempt_id,
+            task_card_path=str(state.get("task_card_path") or ""),
+            task_card_hash=str(state.get("task_card_hash") or ""),
+        ).to_dict()
+    except (KeyError, RuntimeError, TypeError, ValueError):
+        return None
+    observed_without_attempt = dict(stored_envelope)
+    expected_without_attempt = dict(expected)
+    observed_without_attempt.pop("attempt_id", None)
+    expected_without_attempt.pop("attempt_id", None)
+    if observed_without_attempt != expected_without_attempt:
+        return None
+    reconciled_request = dict(request)
+    reconciled_request.update(
+        attempt_id=actual_attempt_id,
+        canonical_dispatch_envelope=expected,
+    )
+    try:
+        reconciled_dispatch = validate_workforce_dispatch_binding(
+            reconciled_request, require_binding=True
+        )
+        if reconciled_dispatch is None:
+            return None
+        reconciled_state = dict(state)
+        reconciled_state.update(
+            canonical_dispatch_envelope=expected,
+            workforce_dispatch={
+                **reconciled_dispatch,
+                "canonical_dispatch_envelope": expected,
+            },
+        )
+        SelfHostedTaskService._assert_persisted_workforce_dispatch(
+            reconciled_state,
+            reconciled_request,
+            reconciled_dispatch,
+        )
+    except (KeyError, RuntimeError, TypeError, ValueError):
+        return None
+    return reconciled_dispatch
+
+
 def _parse_time(value: Optional[str]) -> Optional[float]:
     if not value:
         return None
@@ -5191,7 +5312,20 @@ class SelfHostedTaskService:
             manager = WorktreeManager(root_dir=contract.target_worktree_root, create_root=False)
             if manager.target_conflict(contract, task_states=self._submission_task_states()):
                 raise RuntimeError("serial Target budget exceeded: another task owns the overlapping Target")
-        attempt_id = attempt_id_hint if action else uuid4().hex
+        dispatch_envelope = (
+            dispatch_binding.get("canonical_dispatch_envelope")
+            if isinstance(dispatch_binding, Mapping)
+            else None
+        )
+        if action:
+            attempt_id = attempt_id_hint
+        elif isinstance(dispatch_envelope, Mapping):
+            bound_attempt_id = str(dispatch_envelope.get("attempt_id") or "")
+            if not bound_attempt_id or attempt_id_hint != bound_attempt_id:
+                raise RuntimeError("WORKFORCE_DISPATCH_ENVELOPE_IDENTITY_DRIFT")
+            attempt_id = bound_attempt_id
+        else:
+            attempt_id = uuid4().hex
         now = _utc_now()
         state: dict[str, Any] = {
             "schema": "nexus.self_hosted_task_state.v1",
@@ -5649,10 +5783,14 @@ class SelfHostedTaskService:
                     predecessor_request, require_binding=True
                 )
             except RuntimeError as exc:
-                return {
-                    **state,
-                    "retry": {**retry_meta, "decision": "BLOCK", "blocker": str(exc)},
-                }
+                predecessor_dispatch = _recover_pre_provider_cli_envelope_drift(
+                    state, request, exc
+                )
+                if predecessor_dispatch is None:
+                    return {
+                        **state,
+                        "retry": {**retry_meta, "decision": "BLOCK", "blocker": str(exc)},
+                    }
             if not isinstance(predecessor_dispatch.get("canonical_dispatch_envelope"), Mapping):
                 return {
                     **state,
