@@ -7398,6 +7398,180 @@ def _m3c_repairable_workforce_state(
     return service, request, old_envelope, old_receipt, old_verified_receipt
 
 
+def test_tracked_cli_submit_preserves_canonical_envelope_attempt_identity(
+    tmp_path, monkeypatch
+):
+    task_id = "tracked-cli-envelope-submit"
+    _, request, old_envelope, _, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=task_id,
+        acceptance_decision="NOT_REPAIRABLE",
+    )
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "fresh-state",
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    monkeypatch.setattr(
+        service,
+        "_launch_worker",
+        lambda owned_task_id, _attempt_id: service._read_state(owned_task_id),
+    )
+
+    result = service.submit_task(request)
+
+    assert result["attempt_id"] == old_envelope["attempt_id"]
+    assert result["canonical_dispatch_envelope"]["attempt_id"] == result["attempt_id"]
+
+
+def _persist_pre_provider_cli_envelope_drift(
+    service, task_id, *, provider_calls=0, state_updates=None
+):
+    state = service._read_state(task_id)
+    stale_attempt_id = state["canonical_dispatch_envelope"]["attempt_id"]
+    actual_attempt_id = "actual-first-attempt"
+    assert stale_attempt_id != actual_attempt_id
+    state.update(
+        status="FINAL_BLOCK",
+        terminal_status="FINAL_BLOCK",
+        final_disposition="FINAL_BLOCK",
+        cleanup_decision="ALREADY_REMOVED",
+        error="WORKFORCE_DISPATCH_ENVELOPE_IDENTITY_DRIFT",
+        attempt_id=actual_attempt_id,
+        action=None,
+        action_id=None,
+        target_created_at=None,
+        executions=[],
+        lease=None,
+        worker_preflight=None,
+        active_provider=None,
+        worker_child_pgid=None,
+        execution=None,
+        telemetry={
+            "provider_calls": provider_calls,
+            "provider_attempts": provider_calls,
+            "provider_time_ms": 0,
+            "worktree_time_ms": 0,
+            "verifier_time_ms": 0,
+        },
+        candidate=None,
+        candidate_commit_sha=None,
+        candidate_ref=None,
+        candidate_state_hash=None,
+        verified_receipt=None,
+        verified_receipt_hash=None,
+        attempts=[{"attempt_id": actual_attempt_id}],
+    )
+    state.update(state_updates or {})
+    service._write_state(task_id, state)
+    return stale_attempt_id, actual_attempt_id
+
+
+def test_tracked_cli_retry_recovers_only_pre_provider_attempt_identity_drift(
+    tmp_path, monkeypatch
+):
+    task_id = "tracked-cli-envelope-retry"
+    service, _, _, _, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=task_id,
+        acceptance_decision="NOT_REPAIRABLE",
+    )
+    stale_attempt_id, actual_attempt_id = _persist_pre_provider_cli_envelope_drift(
+        service, task_id
+    )
+    monkeypatch.setattr(
+        service,
+        "_launch_worker",
+        lambda owned_task_id, _attempt_id: service._read_state(owned_task_id),
+    )
+
+    result = service.retry_task(task_id)
+    durable = service._read_state(task_id)
+
+    assert result["retry"]["decision"] == "REUSED_TASK_ID"
+    assert durable["attempt_id"] not in {stale_attempt_id, actual_attempt_id}
+    assert durable["canonical_dispatch_envelope"]["attempt_id"] == durable["attempt_id"]
+    assert durable["attempts"][0]["attempt_id"] == actual_attempt_id
+
+
+def test_tracked_cli_retry_does_not_recover_identity_drift_after_provider_effect(
+    tmp_path, monkeypatch
+):
+    task_id = "tracked-cli-envelope-provider-effect"
+    service, _, _, _, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=task_id,
+        acceptance_decision="NOT_REPAIRABLE",
+    )
+    _persist_pre_provider_cli_envelope_drift(service, task_id, provider_calls=1)
+    monkeypatch.setattr(
+        service,
+        "_launch_worker",
+        lambda *_: pytest.fail("provider-effect drift must fail closed"),
+    )
+
+    result = service.retry_task(task_id)
+
+    assert result["retry"]["decision"] == "BLOCK"
+    assert result["retry"]["blocker"] == "WORKFORCE_DISPATCH_ENVELOPE_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    "state_updates",
+    [
+        {"cleanup_decision": "TARGET_CLEANED"},
+        {"target_created_at": "2026-08-31T00:00:00+00:00"},
+        {"lease": {"lease_id": "unexpected-target"}},
+        {"execution": {"outcome": "unknown"}},
+        {"candidate_commit_sha": "c" * 40},
+    ],
+)
+def test_tracked_cli_retry_rejects_any_target_execution_or_candidate_effect(
+    tmp_path, monkeypatch, state_updates
+):
+    task_id = "tracked-cli-envelope-effect-fence"
+    service, _, _, _, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=task_id,
+        acceptance_decision="NOT_REPAIRABLE",
+    )
+    _persist_pre_provider_cli_envelope_drift(
+        service, task_id, state_updates=state_updates
+    )
+    monkeypatch.setattr(service, "_launch_worker", lambda *_: pytest.fail("must block"))
+
+    result = service.retry_task(task_id)
+
+    assert result["retry"]["decision"] == "BLOCK"
+    assert result["retry"]["blocker"] == "WORKFORCE_DISPATCH_ENVELOPE_MISMATCH"
+
+
+def test_tracked_cli_retry_preserves_attempt_budget_gate_before_recovery(
+    tmp_path, monkeypatch
+):
+    task_id = "tracked-cli-envelope-attempt-budget"
+    service, _, _, _, _ = _m3c_repairable_workforce_state(
+        tmp_path,
+        monkeypatch,
+        task_id=task_id,
+        acceptance_decision="NOT_REPAIRABLE",
+    )
+    _persist_pre_provider_cli_envelope_drift(service, task_id)
+    state = service._read_state(task_id)
+    state["request"]["maximum_attempts_per_task"] = 1
+    service._write_state(task_id, state)
+    monkeypatch.setattr(service, "_launch_worker", lambda *_: pytest.fail("must block"))
+
+    result = service.retry_task(task_id)
+
+    assert result["retry"]["decision"] == "BLOCK"
+    assert result["retry"]["blocker"] == "ATTEMPT_BUDGET_EXHAUSTED"
+
+
 @pytest.mark.parametrize("binding_fault", ["missing", "tampered"])
 def test_m3c_repair_retry_invalid_persisted_workforce_binding_blocks_zero_launch(
     tmp_path,
