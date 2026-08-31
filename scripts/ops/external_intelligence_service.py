@@ -46,6 +46,7 @@ from nexus.services.external_intelligence_fanout import (
 from nexus.services.open_swe_external_intelligence import (
     OpenSWEExternalIntelligenceError,
     OpenSWEExternalIntelligenceTransport,
+    OpenSWEWorkerTransport,
 )
 
 SERVICE_LABEL = "com.nexus.external-intelligence"
@@ -84,6 +85,7 @@ class ServiceConfig:
     semantic_backend: str = "opencli"
     open_swe_model_provider: str = ""
     open_swe_model: str = ""
+    worker_backend: str = "opencode"
     opencode_executable: str = "opencode"
     publication_enabled: bool = True
     requested_concurrency: int = 2
@@ -437,6 +439,7 @@ def load_config(path: str | os.PathLike[str]) -> ServiceConfig:
         "semantic_backend",
         "open_swe_model_provider",
         "open_swe_model",
+        "worker_backend",
         "opencode_executable",
         "publication_enabled",
         "requested_concurrency",
@@ -450,13 +453,16 @@ def load_config(path: str | os.PathLike[str]) -> ServiceConfig:
     semantic_backend = raw.get("semantic_backend", "opencli")
     if semantic_backend not in {"opencli", "open_swe"}:
         raise ServiceError("CONFIG_SEMANTIC_BACKEND_INVALID")
+    worker_backend = raw.get("worker_backend", "opencode")
+    if worker_backend not in {"opencode", "open_swe"}:
+        raise ServiceError("CONFIG_WORKER_BACKEND_INVALID")
     open_swe_provider = raw.get("open_swe_model_provider", "")
     open_swe_model = raw.get("open_swe_model", "")
     if (
         not isinstance(open_swe_provider, str)
         or not isinstance(open_swe_model, str)
         or (
-            semantic_backend == "open_swe"
+            (semantic_backend == "open_swe" or worker_backend == "open_swe")
             and (not open_swe_provider.strip() or not open_swe_model.strip())
         )
     ):
@@ -591,12 +597,25 @@ def build_automation(config: ServiceConfig, repository: str) -> ExternalIntellig
         transport=semantic_transport,
         store=intel_store,
     )
+    if config.worker_backend == "opencode":
+        worker_transport: Any = OpenCodeWorkerTransport(executable=config.opencode_executable)
+    elif config.worker_backend == "open_swe":
+        try:
+            worker_transport = OpenSWEWorkerTransport(
+                model_provider=config.open_swe_model_provider,
+                model_id=config.open_swe_model,
+                require_worker_binding=True,
+            )
+        except OpenSWEExternalIntelligenceError as exc:
+            raise ServiceError(str(exc)) from exc
+    else:
+        raise ServiceError("CONFIG_WORKER_BACKEND_INVALID")
     c_runtime = AdaptiveWorkerFanoutRuntime(
         allocator=GitWorktreeAllocator(
             repo_root, config.workspace_root / "fanout" / _safe_repo(repository)
         ),
         store=FanoutStore(repo_state / "fanout"),
-        transport=OpenCodeWorkerTransport(executable=config.opencode_executable),
+        transport=worker_transport,
     )
     d_runtime = ExternalIntelligenceClosureRuntime(
         repository_root=repo_root,

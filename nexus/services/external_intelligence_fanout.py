@@ -262,6 +262,7 @@ class WorkspaceLease:
 @dataclass(frozen=True)
 class OpenCodeRunResult:
     status: str
+    worker_backend: str = "opencode"
     session_id: str = ""
     response_text: str = ""
     provider_id: str = ""
@@ -276,6 +277,12 @@ class OpenCodeRunResult:
     outcome_unknown: bool = False
     retry_safe: bool = False
     error: str = ""
+    diagnosis_status: str = ""
+    diagnosis_sha256: str = ""
+    diagnosis_evidence_paths: tuple[str, ...] = ()
+    repair_admitted: bool = False
+    repair_phase_count: int = 0
+    worker_identity_sha256: str = ""
 
 
 def plan_fanout(
@@ -1746,6 +1753,13 @@ class AdaptiveWorkerFanoutRuntime:
             "stdout_sha256": result.stdout_sha256,
             "export_sha256": result.export_sha256,
             "opencode_version": result.version,
+            "worker_backend": result.worker_backend,
+            "diagnosis_status": result.diagnosis_status,
+            "diagnosis_sha256": result.diagnosis_sha256,
+            "diagnosis_evidence_paths": list(result.diagnosis_evidence_paths),
+            "repair_admitted": result.repair_admitted,
+            "repair_phase_count": result.repair_phase_count,
+            "worker_identity_sha256": result.worker_identity_sha256,
             "parent_receipt_id": parent_receipt_id,
             "repair_id": repair_id,
             "claim_ceiling": CLAIM_CEILING,

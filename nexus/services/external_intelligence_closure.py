@@ -508,6 +508,37 @@ def validate_worker_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
     receipt_model_id = str(receipt.get("model_id") or "").strip()
     if receipt_provider_id != expected_provider_id or receipt_model_id != expected_model_id:
         raise ClosureError("WORKER_ATTESTATION_MISMATCH")
+    worker_backend = str(receipt.get("worker_backend") or "")
+    if not worker_backend:
+        legacy_provider = str(receipt.get("provider") or "")
+        if legacy_provider not in {"deepseek", "opencode", "opencode-go"}:
+            raise ClosureError("WORKER_BACKEND_REQUIRED")
+        worker_backend = "opencode_legacy"
+    elif worker_backend not in {"open_swe", "opencode"}:
+        raise ClosureError("WORKER_BACKEND_INVALID")
+    diagnosis_status = str(receipt.get("diagnosis_status") or "")
+    if worker_backend == "open_swe":
+        diagnosis_sha256 = str(receipt.get("diagnosis_sha256") or "")
+        evidence_paths = receipt.get("diagnosis_evidence_paths")
+        repair_phase_count = receipt.get("repair_phase_count")
+        worker_identity_sha256 = str(receipt.get("worker_identity_sha256") or "")
+        if (
+            diagnosis_status != "ROOT_CAUSE_SUPPORTED"
+            or not _is_hex(diagnosis_sha256, 64)
+            or not isinstance(evidence_paths, list)
+            or not evidence_paths
+            or any(not isinstance(path, str) or not path for path in evidence_paths)
+            or receipt.get("repair_admitted") is not True
+            or type(repair_phase_count) is not int
+            or repair_phase_count < 1
+            or not _is_hex(worker_identity_sha256, 64)
+        ):
+            raise ClosureError("OPEN_SWE_DIAGNOSIS_RECEIPT_INVALID")
+        if selected_worker is None:
+            raise ClosureError("OPEN_SWE_WORKER_BINDING_REQUIRED")
+        expected_worker_sha = _sha256(_canonical_json(selected_worker))
+        if worker_identity_sha256 != expected_worker_sha:
+            raise ClosureError("OPEN_SWE_WORKER_IDENTITY_MISMATCH")
     session_id = str(receipt.get("session_id") or "")
     if not session_id.startswith(_SESSION_PREFIX) or len(session_id) < 12:
         raise ClosureError("INVALID_SESSION_ID")
@@ -577,6 +608,7 @@ def validate_worker_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
         "selected_worker": dict(receipt["selected_worker"])
         if receipt.get("selected_worker")
         else None,
+        "worker_backend": worker_backend,
     }
 
 
