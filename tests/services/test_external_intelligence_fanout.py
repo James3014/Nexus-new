@@ -848,6 +848,71 @@ def test_second_outcome_unknown_run_reconciles_without_new_provider_start(tmp_pa
     assert transport.reconcile_calls == 1
 
 
+def test_restart_unknown_reconcile_result_preserves_outcome_unknown_without_redispatch(tmp_path):
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py"])
+    args = [unit(base, envelope, envelope_sha, "ua", ["a.py"])]
+    allocator = GitWorktreeAllocator(repo, tmp_path / "workspaces")
+    store = FanoutStore(tmp_path / "state")
+
+    class InitialUnknownTransport:
+        run_new_calls = 0
+
+        def run_new(self, **kwargs):
+            self.run_new_calls += 1
+            return OpenCodeRunResult(
+                status="OPEN_SWE_OUTCOME_UNKNOWN",
+                process_started=True,
+                outcome_unknown=True,
+                retry_safe=False,
+            )
+
+    initial_transport = InitialUnknownTransport()
+    initial_runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=allocator,
+        store=store,
+        transport=initial_transport,
+    )
+    first = initial_runtime.run(args, CapacityLease(1, 1, 1, 1))
+    assert first["errors"]["ua"] == "FANOUT_RECONCILIATION_REQUIRED"
+    assert initial_transport.run_new_calls == 1
+
+    class RestartUnknownTransport:
+        run_new_calls = 0
+        reconcile_calls = 0
+
+        def run_new(self, **kwargs):
+            self.run_new_calls += 1
+            raise AssertionError("restart reconciliation must not redispatch")
+
+        def reconcile_workspace(self, *, workspace_path):
+            self.reconcile_calls += 1
+            return OpenCodeRunResult(
+                status="OPEN_SWE_OUTCOME_UNKNOWN",
+                directory=workspace_path,
+                process_started=False,
+                outcome_unknown=True,
+                retry_safe=False,
+            )
+
+    restart_transport = RestartUnknownTransport()
+    restart_runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=allocator,
+        store=store,
+        transport=restart_transport,
+    )
+    second = restart_runtime.run(args, CapacityLease(1, 1, 1, 1))
+    assert second["errors"]["ua"] == "FANOUT_RECONCILIATION_REQUIRED"
+    durable_attempt = json.loads(
+        next((tmp_path / "state" / "attempts").glob("*.json")).read_text()
+    )
+    assert durable_attempt["state"] == "OUTCOME_UNKNOWN"
+    assert durable_attempt["retry_safe"] is False
+    assert restart_transport.run_new_calls == 0
+    assert restart_transport.reconcile_calls == 1
+
+
 def test_runtime_recovers_dispatching_attempt_from_durable_session_without_second_start(tmp_path):
     repo, base = make_repo(tmp_path)
     envelope = tmp_path / "envelope.json"
