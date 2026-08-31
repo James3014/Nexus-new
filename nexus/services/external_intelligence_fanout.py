@@ -1474,12 +1474,14 @@ class AdaptiveWorkerFanoutRuntime:
     ) -> dict[str, Any]:
         active_transport = transport or self._transport_for_unit(unit)
         if result.status != "COMPLETED":
-            if not result.process_started and result.retry_safe:
+            if result.outcome_unknown or result.process_started:
+                state = "OUTCOME_UNKNOWN"
+            elif result.retry_safe:
                 state = "RETRY_SAFE"
             else:
-                state = "OUTCOME_UNKNOWN" if result.process_started else "FAILED"
+                state = "FAILED"
             self.store.finish_attempt(attempt, state=state, transport_status=result.status)
-            if result.process_started:
+            if state == "OUTCOME_UNKNOWN":
                 raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
             raise FanoutError(result.status)
         expected_provider_id = getattr(active_transport, "provider_id", PROVIDER_ID)
