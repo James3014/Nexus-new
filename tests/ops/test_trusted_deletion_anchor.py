@@ -88,7 +88,105 @@ def test_trusted_package_contract_allows_exact_product_package_only_delta(packag
         head,
         b"version = 1\n",
         b"version = 1\n",
+        pull_request_number=1,
         head_product_init_is_regular=True,
+    )
+
+
+def test_trusted_dependency_snapshot_transition_is_four_hash_bound(monkeypatch) -> None:
+    trusted_pyproject = b"trusted pyproject\n"
+    trusted_lock = b"trusted lock\n"
+    head_pyproject = b"open swe pyproject\n"
+    head_lock = b"open swe lock\n"
+    transition = (
+        trusted_anchor._sha(trusted_pyproject),
+        trusted_anchor._sha(trusted_lock),
+        trusted_anchor._sha(head_pyproject),
+        trusted_anchor._sha(head_lock),
+    )
+    monkeypatch.setattr(trusted_anchor, "TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION", (669, transition))
+
+    trusted_anchor._validate_trusted_dependency_contract(
+        trusted_pyproject,
+        head_pyproject,
+        trusted_lock,
+        head_lock,
+        pull_request_number=669,
+        head_product_init_is_regular=True,
+    )
+
+    for index, value in enumerate((trusted_pyproject, trusted_lock, head_pyproject, head_lock)):
+        values = [trusted_pyproject, trusted_lock, head_pyproject, head_lock]
+        values[index] = value + b"tampered"
+        with pytest.raises(
+            ValueError,
+            match="PR dependency contract drifts from trusted default",
+        ):
+            trusted_anchor._validate_trusted_dependency_contract(
+                values[0],
+                values[2],
+                values[1],
+                values[3],
+                pull_request_number=669,
+                head_product_init_is_regular=True,
+            )
+
+
+@pytest.mark.parametrize("pull_request_number", [1, 668, 670])
+def test_trusted_dependency_snapshot_transition_rejects_other_prs(
+    monkeypatch, pull_request_number: int
+) -> None:
+    trusted_pyproject = b"trusted pyproject\n"
+    trusted_lock = b"trusted lock\n"
+    head_pyproject = b"open swe pyproject\n"
+    head_lock = b"open swe lock\n"
+    transition = tuple(
+        trusted_anchor._sha(value)
+        for value in (trusted_pyproject, trusted_lock, head_pyproject, head_lock)
+    )
+    monkeypatch.setattr(trusted_anchor, "TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION", (669, transition))
+
+    with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+        trusted_anchor._validate_trusted_dependency_contract(
+            trusted_pyproject,
+            head_pyproject,
+            trusted_lock,
+            head_lock,
+            pull_request_number=pull_request_number,
+            head_product_init_is_regular=True,
+        )
+
+
+def test_trusted_dependency_snapshot_transition_preserves_product_file_guard(monkeypatch) -> None:
+    values = (
+        b"trusted pyproject\n",
+        b"trusted lock\n",
+        b"open swe pyproject\n",
+        b"open swe lock\n",
+    )
+    transition = tuple(trusted_anchor._sha(value) for value in values)
+    monkeypatch.setattr(trusted_anchor, "TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION", (669, transition))
+
+    with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+        trusted_anchor._validate_trusted_dependency_contract(
+            values[0],
+            values[2],
+            values[1],
+            values[3],
+            pull_request_number=669,
+            head_product_init_is_regular=False,
+        )
+
+
+def test_open_swe_dependency_snapshot_transition_hashes_are_exact() -> None:
+    assert trusted_anchor.TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        669,
+        (
+            "c7d84dd5cbc4e533db65445ebb5691296f732d49f2fb39c6028745b18ca1d412",
+            "3e753af334885a2f434a94d40fc8860abd151516950e7f1e3647971f2e0dfc51",
+            "e52fc5fe9e76fca42299370641169e5ec3d6a59a765774deb1a77f38cd8eb246",
+            "cb5ecbb7fcce287f9bcdbb17f65a3b931f13613b6fd1608b428e1c19c5f6965a",
+        ),
     )
 
 
@@ -226,6 +324,7 @@ def test_trusted_package_contract_rejects_every_non_allowlisted_delta(
             head,
             b"version = 1\n",
             head_lock,
+            pull_request_number=1,
             head_product_init_is_regular=product_init_is_regular,
         )
 
