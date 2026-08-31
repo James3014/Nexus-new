@@ -35,6 +35,18 @@ RUNTIME_FILENAMES = ("runtime.tar", "runtime-metadata.json", "requirements.txt")
 GOLDEN_EVALUATOR_PATH = "scripts/ops/run_golden_behavior_eval.py"
 PYTEST_PLUGINS = ["pytest", "pytest_asyncio", "pytest_timeout"]
 UV_VERSION = "uv 0.9.2"
+# One-use, four-way binding for the Owner-approved TASK-001 Open SWE
+# optional-dependency transition. It authorizes neither endpoint with any
+# other baseline/head bytes and provides no package-name or version wildcard.
+TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION = (
+    669,
+    (
+        "c7d84dd5cbc4e533db65445ebb5691296f732d49f2fb39c6028745b18ca1d412",
+        "3e753af334885a2f434a94d40fc8860abd151516950e7f1e3647971f2e0dfc51",
+        "e52fc5fe9e76fca42299370641169e5ec3d6a59a765774deb1a77f38cd8eb246",
+        "cb5ecbb7fcce287f9bcdbb17f65a3b931f13613b6fd1608b428e1c19c5f6965a",
+    ),
+)
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
     "status",
@@ -96,11 +108,25 @@ def _validate_trusted_dependency_contract(
     trusted_uv_lock: bytes,
     head_uv_lock: bytes,
     *,
+    pull_request_number: int,
     head_product_init_is_regular: bool,
 ) -> None:
-    """Allow only the exact Product package-discovery metadata delta."""
+    """Allow an exact trusted snapshot transition or the Product metadata delta."""
 
     error = "PR dependency contract drifts from trusted default"
+    transition = (
+        _sha(trusted_pyproject),
+        _sha(trusted_uv_lock),
+        _sha(head_pyproject),
+        _sha(head_uv_lock),
+    )
+    authorized_pr, authorized_transition = TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION
+    if (
+        pull_request_number == authorized_pr
+        and transition == authorized_transition
+        and head_product_init_is_regular
+    ):
+        return
     if head_uv_lock != trusted_uv_lock:
         raise ValueError(error)
     if head_pyproject == trusted_pyproject:
@@ -738,6 +764,7 @@ def _controller(args: argparse.Namespace) -> None:
         head_pyproject,
         uv_lock,
         head_uv_lock,
+        pull_request_number=_event_value(event, "pull_request", "number"),
         head_product_init_is_regular=_tree_has_regular_file(repo, head_sha, "product/__init__.py"),
     )
     requirements = (runtime_dir / "requirements.txt").read_bytes()
@@ -1137,6 +1164,7 @@ def _verifier(args: argparse.Namespace) -> None:
                 head_pyproject,
                 trusted_uv_lock,
                 head_uv_lock,
+                pull_request_number=manifest["workflow_identity"]["pull_request_number"],
                 head_product_init_is_regular=_tree_has_regular_file(
                     git_repo, manifest["head_sha"], "product/__init__.py"
                 ),
