@@ -1,5 +1,7 @@
 # TASK-002 — Portable credential-isolated sandbox qualification
 
+task_id: `TASK-002`
+
 - **Campaign:** `CAMPAIGN-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1`
 - **Status:** `BLOCKED`
 - **Source spec:** `SPEC-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1`

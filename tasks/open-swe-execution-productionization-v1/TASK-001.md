@@ -1,5 +1,7 @@
 # TASK-001 — Feature-flagged Open SWE semantic adapter
 
+task_id: `TASK-001`
+
 - **Campaign:** `CAMPAIGN-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1`
 - **Status:** `ACTIVE`
 - **Source spec:** `SPEC-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1`

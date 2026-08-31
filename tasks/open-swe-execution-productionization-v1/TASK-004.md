@@ -1,5 +1,7 @@
 # TASK-004 — Activation evidence portfolio and artifact-aware attribution
 
+task_id: `TASK-004`
+
 - **Campaign:** `CAMPAIGN-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1`
 - **Status:** `BLOCKED`
 - **Source spec:** `SPEC-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1`

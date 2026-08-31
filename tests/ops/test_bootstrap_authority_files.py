@@ -172,6 +172,14 @@ def test_bootstrap_file_set_is_complete_and_tracked():
         assert (ROOT / path).is_file(), path
 
 
+def test_open_swe_task_cards_have_exact_bindings_and_disable_auto_chain():
+    campaign_root = ROOT / "tasks/open-swe-execution-productionization-v1"
+    for task_id in ("TASK-001", "TASK-002", "TASK-003", "TASK-004"):
+        card = (campaign_root / f"{task_id}.md").read_text(encoding="utf-8")
+        assert card.count(f"task_id: `{task_id}`") == 1
+        assert "- **Auto-chain:** `false`" in card
+
+
 def test_external_bootstrap_recovery_boundary_is_fail_closed():
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     runbook = (ROOT / "docs/governance/rollback_runbook.md").read_text(encoding="utf-8")
