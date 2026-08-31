@@ -1,5 +1,7 @@
 # TASK-003 — Governed Open SWE diagnosis and repair adapter
 
+task_id: `TASK-003`
+
 - **Campaign:** `CAMPAIGN-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1`
 - **Status:** `BLOCKED`
 - **Source spec:** `SPEC-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1`
