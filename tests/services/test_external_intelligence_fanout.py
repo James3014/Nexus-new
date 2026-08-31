@@ -904,9 +904,7 @@ def test_restart_unknown_reconcile_result_preserves_outcome_unknown_without_redi
     )
     second = restart_runtime.run(args, CapacityLease(1, 1, 1, 1))
     assert second["errors"]["ua"] == "FANOUT_RECONCILIATION_REQUIRED"
-    durable_attempt = json.loads(
-        next((tmp_path / "state" / "attempts").glob("*.json")).read_text()
-    )
+    durable_attempt = json.loads(next((tmp_path / "state" / "attempts").glob("*.json")).read_text())
     assert durable_attempt["state"] == "OUTCOME_UNKNOWN"
     assert durable_attempt["retry_safe"] is False
     assert restart_transport.run_new_calls == 0
