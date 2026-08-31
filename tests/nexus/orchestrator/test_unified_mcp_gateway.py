@@ -39,6 +39,7 @@ from nexus.services.runtime_workforce_admission import (  # noqa: E402
     evaluate_runtime_workforce_admission,
 )
 
+
 _TEST_CARD_ROOT: Path | None = None
 
 
@@ -187,6 +188,192 @@ def _allow_owner_effect_authority(monkeypatch):
         "_require_owner_effect_authority",
         staticmethod(allow),
     )
+
+
+def test_candidate_adopt_external_public_schema_is_closed_and_registered():
+    names = {spec["name"] for spec in UnifiedMCPGateway.tool_specs()}
+    spec = next(spec for spec in UnifiedMCPGateway.tool_specs() if spec["name"] == "nexus_candidate_adopt_external")
+    assert "nexus_candidate_adopt_external" in names
+    assert spec["inputSchema"]["additionalProperties"] is False
+    assert "action" in spec["inputSchema"]["required"]
+
+
+def test_candidate_adopt_external_rejects_unknown_field_without_service_call(monkeypatch):
+    service = FakeService()
+    calls = []
+    service.adopt_external_candidate = lambda request: calls.append(request)  # type: ignore[attr-defined]
+    gateway = UnifiedMCPGateway(service=service)
+    response = gateway.handle({
+        "jsonrpc": "2.0", "id": 4601, "method": "tools/call",
+        "params": {"name": "nexus_candidate_adopt_external", "arguments": {
+            "campaign_id": "campaign", "spec_id": "spec", "unexpected_downstream": True,
+        }},
+    })
+    assert response["result"]["isError"] is True
+    assert "CANDIDATE_ADOPTION_SCHEMA_CLOSED" in response["result"]["structuredContent"]["error"]
+    assert calls == []
+
+
+def test_candidate_adopt_external_rejects_runtime_server_mismatch_without_service_call():
+    service = FakeService()
+    calls = []
+    service.adopt_external_candidate = lambda request: calls.append(request)  # type: ignore[attr-defined]
+    gateway = UnifiedMCPGateway(service=service)
+    response = gateway.handle({
+        "jsonrpc": "2.0", "id": 4602, "method": "tools/call",
+        "params": {"name": "nexus_candidate_adopt_external", "arguments": {
+            "campaign_id": "campaign", "spec_id": "spec", "spec_sha256": "0" * 64, "server_instance_id": "wrong",
+            "lifecycle_revision": LIFECYCLE_REVISION, "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH,
+            "permission_policy_hash": PERMISSION_POLICY_HASH, "controller_repo_root": str(Path.cwd()),
+            "controller_branch": "main", "controller_head": "a" * 40,
+        }},
+    })
+    assert response["result"]["isError"] is True
+    assert "CANDIDATE_ADOPTION_SERVER_INSTANCE_MISMATCH" in response["result"]["structuredContent"]["error"]
+    assert calls == []
+
+
+def test_candidate_adopt_external_positive_binds_runtime_and_calls_service_once(monkeypatch):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+    from nexus.contracts.lifecycle_action import (
+        ApprovalScope,
+        ContractKind,
+        ExternalCandidateAdoptionRequest,
+        LifecycleActionType,
+        MutationDomain,
+        PermissionProfile,
+        build_action_envelope,
+    )
+
+    service = FakeService()
+    calls = []
+
+    def adopt(request):
+        calls.append(request)
+        receipt = {
+            "schema": "nexus.external_candidate_adoption_receipt.v1",
+            "task_id": request.task_id, "attempt_id": request.attempt_id,
+            "action_id": request.action_id, "idempotency_key": request.idempotency_key,
+            "adoption_request_hash": request.semantic_hash(),
+            "task_card_path": request.task_card_path, "task_card_hash": request.task_card_hash,
+            "contract_hash": "2" * 64, "controller_revision": request.controller_revision,
+            "target_base_revision": request.target_base_revision,
+            "candidate_commit_sha": request.candidate_commit_sha,
+            "candidate_tree_sha": request.candidate_tree_sha,
+            "candidate_diff_sha256": request.candidate_diff_sha256,
+            "candidate_state_hash": "3" * 64, "verified_receipt_hash": "4" * 64,
+            "validation_receipt_sha256": request.validation_receipt_sha256,
+            "acceptance_receipt_sha256": request.acceptance_receipt_sha256,
+            "repository_contract_policy_revision_hash": "5" * 64,
+            "derived_contract_projection": {}, "forbidden_repository_patterns": [],
+            "reviewer_id": "independent-reviewer",
+            "candidate_ref": f"refs/nexus-candidates/{request.task_id}/{request.candidate_commit_sha}",
+            "promotion_packet_hash": "6" * 64, "worker_invocations": 0,
+            "candidate_rewritten": False, "approval_performed": False,
+            "integration_performed": False, "merge_performed": False,
+            "push_performed": False, "public_claim_allowed": False,
+            "production_ready": False,
+            "claim_ceiling": ["CANDIDATE_ADOPTED_PENDING_HUMAN_APPROVAL_ONLY"],
+            "issued_at": "2026-08-30T00:00:00+00:00",
+        }
+        receipt_hash = hashlib.sha256(json.dumps(
+            receipt, sort_keys=True, separators=(",", ":"),
+        ).encode()).hexdigest()
+        return {
+            "task_id": request.task_id, "status": "PENDING_HUMAN_APPROVAL",
+            "promotion_status": "PENDING_HUMAN_APPROVAL",
+            "candidate_commit_sha": request.candidate_commit_sha,
+            "candidate_tree_sha": request.candidate_tree_sha,
+            "candidate_state_hash": receipt["candidate_state_hash"],
+            "verified_receipt_hash": receipt["verified_receipt_hash"],
+            "candidate_ref": receipt["candidate_ref"],
+            "approved_binding": None, "integration_authorization": None,
+            "integration_receipt": None, "merge_performed": False,
+            "push_performed": False, "public_claim_allowed": False,
+            "production_ready": False, "adoption_receipt": receipt,
+            "adoption_receipt_hash": receipt_hash,
+        }
+
+    service.adopt_external_candidate = adopt  # type: ignore[attr-defined]
+    gateway = UnifiedMCPGateway(service=service)
+    head = "a" * 40
+    monkeypatch.setattr(gateway_module, "_git", lambda *args, **kwargs: "main" if args[:2] == ("branch", "--show-current") else head)
+    owner_effects = []
+
+    def allow(action, effect):
+        owner_effects.append((action, dict(effect)))
+        return {"action": action.value, "mutation_authorized": True, "authorization_hash": "f" * 64}
+
+    monkeypatch.setattr(UnifiedMCPGateway, "_require_owner_effect_authority", staticmethod(allow))
+    validation = json.dumps({"schema": "validation"}).encode()
+    acceptance = json.dumps({"schema": "acceptance"}).encode()
+    base = {
+        "schema": "nexus.external_candidate_adoption_request.v1", "repository": gateway_module.GITHUB_REPOSITORY.repository_id,
+        "task_id": "adopt-positive", "attempt_id": "attempt-1", "action_id": "action-1",
+        "idempotency_key": "idem-1", "task_card_path": "tasks/test/adopt-positive.md", "task_card_hash": "c" * 64,
+        "controller_revision": head, "tool_manifest_hash": TOOL_MANIFEST_REVISION,
+        "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH, "permission_policy_hash": PERMISSION_POLICY_HASH,
+        "lifecycle_revision": LIFECYCLE_REVISION, "server_instance_id": SERVER_INSTANCE_ID,
+        "target_base_revision": "b" * 40, "candidate_commit_sha": "d" * 40, "candidate_tree_sha": "e" * 40,
+        "candidate_diff_sha256": "1" * 64, "validation_receipt_sha256": hashlib.sha256(validation).hexdigest(),
+        "acceptance_receipt_sha256": hashlib.sha256(acceptance).hexdigest(),
+        "validation_receipt_b64": __import__("base64").b64encode(validation).decode(),
+        "acceptance_receipt_b64": __import__("base64").b64encode(acceptance).decode(),
+        "allowed_files": ("README.md",), "verifier_commands": ("git diff --check",),
+        "forbidden_files": (), "authorized_deletions": (), "protected_contracts": (),
+    }
+    semantic_hash = ExternalCandidateAdoptionRequest.model_construct(**base, action=None).semantic_hash()
+    action = build_action_envelope(
+        task_id=base["task_id"], action_type=LifecycleActionType.CANDIDATE_ADOPT_EXTERNAL,
+        request={"adoption_request_hash": semantic_hash}, tool_manifest_hash=TOOL_MANIFEST_REVISION,
+        expected_head=head, allowed_paths=["README.md"], mutation=True,
+        task_card_path=base["task_card_path"], task_card_hash=base["task_card_hash"],
+        contract_kind=ContractKind.TRACKED_TASK_CARD, permission_profile=PermissionProfile.CANDIDATE,
+        approval_scope=ApprovalScope.ALLOW_ACTION_ONCE, mutation_domain=MutationDomain.CANDIDATE_REF,
+        attempt_id=base["attempt_id"], action_id=base["action_id"], idempotency_key=base["idempotency_key"],
+    ).model_dump(mode="json")
+    arguments = {
+        **base, "action": action, "campaign_id": gateway_module.EPB_CAMPAIGN_ID,
+        "spec_id": gateway_module.EPB_SPEC_ID, "spec_sha256": gateway_module.EPB_SPEC_SHA256,
+        "controller_repo_root": str(gateway_module.CANONICAL_SOURCE_ROOT), "controller_branch": "main",
+        "controller_head": head,
+    }
+    response = gateway.handle({"jsonrpc": "2.0", "id": 4603, "method": "tools/call", "params": {"name": "nexus_candidate_adopt_external", "arguments": arguments}})
+    assert response["result"]["isError"] is False, response
+    assert response["result"]["structuredContent"]["status"] == "PENDING_HUMAN_APPROVAL"
+    assert len(calls) == 1 and isinstance(calls[0], ExternalCandidateAdoptionRequest)
+    assert len(owner_effects) == 1
+    assert owner_effects[0][0] is gateway_module.AutonomyActionClass.CANDIDATE_ADOPT_EXTERNAL
+    assert owner_effects[0][1]["spec_sha256"] == gateway_module.EPB_SPEC_SHA256
+    assert owner_effects[0][1]["full_tool_schema_hash"] == FULL_TOOL_SCHEMA_HASH
+    assert "NO_MERGE" in response["result"]["structuredContent"]["claim_ceiling"]
+
+
+@pytest.mark.parametrize("bad_result", [
+    {"status": "APPROVED", "promotion_status": "APPROVED"},
+    {"status": "PENDING_HUMAN_APPROVAL", "promotion_status": "PENDING_HUMAN_APPROVAL", "merge_performed": True},
+    {"status": "PENDING_HUMAN_APPROVAL", "promotion_status": "PENDING_HUMAN_APPROVAL", "approved_binding": {"approval": True}},
+    {
+        "status": "PENDING_HUMAN_APPROVAL", "promotion_status": "PENDING_HUMAN_APPROVAL",
+        "approved_binding": None, "integration_authorization": None,
+        "integration_receipt": None, "merge_performed": False,
+        "push_performed": False, "public_claim_allowed": False,
+        "production_ready": False, "approval_performed": True,
+        "integration_performed": True, "release_performed": True,
+        "activation_performed": True,
+    },
+    {
+        "status": "PENDING_HUMAN_APPROVAL", "promotion_status": "PENDING_HUMAN_APPROVAL",
+        "approved_binding": None, "integration_authorization": None,
+        "integration_receipt": None, "merge_performed": False,
+        "push_performed": False, "public_claim_allowed": False,
+        "production_ready": False, "approval": {"approved": True},
+        "integrated": True, "released": True, "activated": True,
+    },
+])
+def test_candidate_adopt_external_rejects_downstream_service_result(monkeypatch, bad_result):
+    with pytest.raises(GatewayInputError, match="SERVICE_RESULT"):
+        UnifiedMCPGateway._validate_external_adoption_result(bad_result)
 
 
 def _ready_preflight(**overrides):
