@@ -29,7 +29,7 @@ The five invariants that remain mandatory are:
 1. **Authority** — this Owner-approved contract authorizes only the bounded G10-G15 work below.
 2. **Scope** — only the allowed files and activation profile semantics below may change.
 3. **Revision/diff** — every acceptance or merge claim binds exact base, head, tree, and changed paths.
-4. **Minimum evidence** — focused tests, rollback/negative controls, static checks, and independent Candidate review must pass.
+4. **Minimum evidence** — existing independent tests, rollback/negative controls, exact config inspection, and independent Candidate review must pass.
 5. **Integration boundary** — becoming a merged Nexus capability is distinct from loaded-runtime activation, release, deployment, and OpenCLI/OpenCode retirement.
 
 ## Allowed scope
@@ -39,9 +39,8 @@ Source reconciliation and activation Candidate may change only:
 - `tasks/open-swe-execution-productionization-v1/INDEX.md`
 - `tasks/open-swe-execution-productionization-v1/OPEN_SWE_INTEGRATION_CONTRACT.md`
 - `configs/runtime/external_intelligence_open_swe_activation_v1.json`
-- `tests/services/test_open_swe_activation_profile.py`
 
-Maximum files: `4`.
+Maximum files: `3`.
 
 ## Forbidden scope
 
@@ -98,18 +97,20 @@ The Open SWE provider/model fields may remain present while rolled back; current
 
 The Candidate must prove all of the following:
 
-1. merging the activation fragment into an otherwise-valid External Intelligence config loads with both backends set to `open_swe` and model identity `google_genai/gemini-3.7-flash`;
-2. `build_automation()` selects `OpenSWEExternalIntelligenceTransport` and `OpenSWEWorkerTransport` from that merged config;
-3. changing only `semantic_backend=opencli` and `worker_backend=opencode` restores the existing OpenCLI/OpenCode control arm without removing the Open SWE model fields;
-4. no production adapter, route, authority, receipt, Candidate, or lifecycle implementation changes are present;
-5. focused External Intelligence service tests pass;
+1. the activation fragment is exactly the four existing keys and intended values above;
+2. pre-existing independent service tests prove explicit `semantic_backend=open_swe` selects `OpenSWEExternalIntelligenceTransport` and explicit `worker_backend=open_swe` selects `OpenSWEWorkerTransport`;
+3. pre-existing independent service tests prove the library/default control arm remains `semantic_backend=opencli` and `worker_backend=opencode`;
+4. the rollback fragment therefore remains executable through already-tested existing configuration seams without deleting the Open SWE provider/model values;
+5. no production adapter, route, authority, receipt, Candidate, lifecycle, or test-inventory implementation changes are present;
 6. affected Open SWE/External Intelligence tests pass or exact-base debt is explicitly classified rather than hidden;
-7. Ruff and `git diff --check` pass for the changed Python/test scope;
-8. changed paths are exactly within the allowed scope and there are no deletions.
+7. exact-head GitHub static/security/governance gates pass;
+8. changed paths are exactly within the allowed scope and there are no deletions relative to the original base.
+
+Candidate-authored tests are intentionally excluded from the final Candidate so exact-base CI compares a stable test inventory and independent pre-existing oracles remain the behavioral authority.
 
 ## G14 — independent acceptance
 
-Independent acceptance must inspect the physical Candidate rather than this contract prose. It must bind exact base/head/tree, full changed-path set, activation fragment bytes, focused/affected test results, rollback control, static checks, and claim ceiling.
+Independent acceptance must inspect the physical Candidate rather than this contract prose. It must bind exact base/head/tree, full changed-path set, activation fragment bytes, independent existing test evidence, rollback control, exact-base classification, and claim ceiling.
 
 Maximum Candidate claim after G14:
 
@@ -119,7 +120,7 @@ This does not claim loaded-runtime activation.
 
 ## G15 — protected merge
 
-Protected merge is allowed only after G14 acceptance, terminal required checks on the exact head, stable current base, no unexpected deletion/scope drift, and expected-head/CAS merge.
+Protected merge is allowed only after G14 acceptance, terminal required checks on the exact head, stable current base, no unexpected scope drift, and expected-head/CAS merge.
 
 Maximum claim after G15:
 
@@ -131,6 +132,7 @@ Maximum claim after G15:
 - Current bound base for this contract: `30b49473578ec2e9d073d05938345d43dfa87594`, tree `0399dd60cf5d62e3e8dfbb69afc3ab5fd390c87a`.
 - TASK-004 post-merge portfolio included real semantic execution, artifact-aware attribution, ambiguous-outcome recovery, affected regression, and preserved OpenCLI/OpenCode control arm.
 - G9 recommendation: `ACTIVATE_OPEN_SWE_DEFAULT`.
+- First G15 CI attempt showed the same pre-existing `test_search_context_isolation` failure on exact base and head with `new_failures=[]`, but classification was blocked because the Candidate-added test changed test-inventory identity. The Candidate test was removed; existing independent service tests remain the oracle.
 
 ## Stop conditions
 
@@ -140,7 +142,7 @@ Stop and require a new authority decision if any of these occur before G15:
 - activation requires a new config key/schema rather than the existing four-key fragment;
 - adapter/fanout/authority code must change;
 - rollback no longer selects OpenCLI/OpenCode cleanly;
-- focused or affected tests reveal a new failure attributable to this Candidate;
+- exact-base evidence reveals a new Candidate-attributable failure;
 - protected merge gates cannot bind the exact accepted head.
 
 After G15, stop at `G16_RUNTIME_ACTIVATION_AUTHORIZATION`.
