@@ -882,9 +882,7 @@ def test_start_waits_for_launchd_bootout_to_converge_before_bootstrap(tmp_path, 
         if args[0] == "print":
             print_count += 1
             if print_count < 3:
-                return subprocess.CompletedProcess(
-                    ["launchctl", *args], 0, "state = running\n", ""
-                )
+                return subprocess.CompletedProcess(["launchctl", *args], 0, "state = running\n", "")
             return subprocess.CompletedProcess(
                 ["launchctl", *args], 113, "", "Could not find service"
             )
