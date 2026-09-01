@@ -25,16 +25,14 @@ def _fake_process(monkeypatch: pytest.MonkeyPatch, response: str):
         if args[1:3] == ["chatgpt", "ask"]:
             return SimpleNamespace(
                 returncode=0,
-                stdout=json.dumps(
-                    [
-                        {
-                            "conversationId": "web-conversation-1",
-                            "conversationUrl": "https://chatgpt.com/c/web-conversation-1",
-                            "tool": "chatgpt",
-                            "response": response,
-                        }
-                    ]
-                ),
+                stdout=json.dumps([
+                    {
+                        "conversationId": "web-conversation-1",
+                        "conversationUrl": "https://chatgpt.com/c/web-conversation-1",
+                        "tool": "chatgpt",
+                        "response": response,
+                    }
+                ]),
                 stderr="",
             )
         raise AssertionError(args)

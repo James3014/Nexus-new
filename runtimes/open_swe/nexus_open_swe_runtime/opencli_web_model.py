@@ -159,18 +159,16 @@ class OpenCLIWebChatModel(BaseChatModel):
     def _select_intelligence_level(self) -> None:
         if self.intelligence_level not in _ALLOWED_LEVELS:
             raise OpenCLIWebModelError("OPENCLI_WEB_MODEL_LEVEL_INVALID")
-        self._run(
-            [
-                self.executable,
-                "chatgpt",
-                "model",
-                self.intelligence_level,
-                "--site-session",
-                self.site_session,
-                "-f",
-                "json",
-            ]
-        )
+        self._run([
+            self.executable,
+            "chatgpt",
+            "model",
+            self.intelligence_level,
+            "--site-session",
+            self.site_session,
+            "-f",
+            "json",
+        ])
 
     def _render_prompt(
         self,
@@ -257,21 +255,19 @@ class OpenCLIWebChatModel(BaseChatModel):
 
         self._select_intelligence_level()
         prompt = self._render_prompt(messages, normalized_tools, tool_choice)
-        stdout = self._run(
-            [
-                self.executable,
-                "chatgpt",
-                "ask",
-                prompt,
-                "--new",
-                "--timeout",
-                str(self.timeout_seconds),
-                "--site-session",
-                self.site_session,
-                "-f",
-                "json",
-            ]
-        )
+        stdout = self._run([
+            self.executable,
+            "chatgpt",
+            "ask",
+            prompt,
+            "--new",
+            "--timeout",
+            str(self.timeout_seconds),
+            "--site-session",
+            self.site_session,
+            "-f",
+            "json",
+        ])
         response = self._extract_ask_response(stdout)
         message = self._response_message(response, normalized_tools)
         return ChatResult(generations=[ChatGeneration(message=message)])
