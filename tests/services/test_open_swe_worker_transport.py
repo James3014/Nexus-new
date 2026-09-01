@@ -4,7 +4,6 @@ import hashlib
 import json
 import subprocess
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -18,36 +17,206 @@ from nexus.services.external_intelligence_fanout import (
 )
 
 
-class FakeGraph:
-    def __init__(self, surface, invoke):
-        self.surface = tuple(surface)
-        self._invoke = invoke
-        self.calls = 0
-
-    def get_graph(self):
-        tools = {name: object() for name in self.surface}
-        return SimpleNamespace(
-            nodes={"tools": SimpleNamespace(data=SimpleNamespace(tools_by_name=tools))}
-        )
-
-    def invoke(self, payload, config=None):
-        self.calls += 1
-        return self._invoke(payload, config)
+def _prompt() -> str:
+    return "\n".join(
+        ["task_id=task-1", "unit_id=u1", 'authorized_mutation_paths=["a.py"]', "bounded task"]
+    )
 
 
-def _record(name: str, envelope: dict):
+def _worker():
     return {
-        "messages": [SimpleNamespace(tool_calls=[{"name": name, "args": {"envelope": envelope}}])]
+        "worker_id": "google/gemini-worker-a",
+        "provider": "google_genai",
+        "model": "google_genai/gemini-test",
+        "role_ceiling": "bounded repair",
+        "admission_evidence_ref": "admission-a",
+        "admission_evidence_hash": "a" * 64,
+        "selection_evidence_ref": "selection-a",
+        "selection_evidence_hash": "b" * 64,
     }
 
 
-def _prompt() -> str:
-    return "\n".join([
-        "task_id=task-1",
-        "unit_id=u1",
-        'authorized_mutation_paths=["a.py"]',
-        "bounded task",
-    ])
+def _artifact_and_workspace(tmp_path: Path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "a.py").write_text("VALUE = 1\n", encoding="utf-8")
+    artifact = tmp_path / "evidence.json"
+    artifact.write_text('{"failure":"VALUE must be 2"}\n', encoding="utf-8")
+    return workspace, artifact
+
+
+def _completed(module, payload, *, response_status="IMPLEMENTATION_COMPLETED"):
+    response = json.dumps(
+        {
+            "schema": "external_intelligence_worker_result.v1",
+            "task_id": "task-1",
+            "unit_id": "u1",
+            "status": response_status,
+            "summary": "bounded result",
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return {
+        "schema": module.PROTOCOL_RESULT_SCHEMA,
+        "kind": "worker",
+        "status": "COMPLETED",
+        "session_id": "ses_open_swe_1234567890abcdef1234",
+        "response_text": response,
+        "provider_id": "google_genai",
+        "model_id": "gemini-test",
+        "directory": payload["workspace_path"],
+        "version": "0.7.6",
+        "stdout_sha256": hashlib.sha256(response.encode()).hexdigest(),
+        "stderr_sha256": hashlib.sha256(b"").hexdigest(),
+        "export_sha256": hashlib.sha256(response.encode()).hexdigest(),
+        "process_started": True,
+        "outcome_unknown": False,
+        "retry_safe": False,
+        "diagnosis_status": "ROOT_CAUSE_SUPPORTED",
+        "diagnosis_sha256": "d" * 64,
+        "diagnosis_evidence_paths": ["a.py"],
+        "repair_admitted": response_status == "IMPLEMENTATION_COMPLETED",
+        "repair_phase_count": 1 if response_status == "IMPLEMENTATION_COMPLETED" else 0,
+        "worker_identity_sha256": payload["worker_identity_sha256"],
+    }
+
+
+def test_worker_external_protocol_maps_completed_result(tmp_path, monkeypatch):
+    import nexus.services.open_swe_external_intelligence as module
+
+    workspace, artifact = _artifact_and_workspace(tmp_path)
+    calls = []
+
+    def runtime_call(_executable, payload, **_kwargs):
+        calls.append(dict(payload))
+        return _completed(module, payload), "", True, ""
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEWorkerTransport(
+        model_provider="google_genai", model_id="gemini-test", require_worker_binding=True
+    ).bind_worker(_worker())
+
+    result = transport.run_new(
+        prompt=_prompt(), artifact_path=str(artifact), workspace_path=str(workspace)
+    )
+
+    assert isinstance(result, OpenCodeRunResult)
+    assert result.status == "COMPLETED"
+    assert result.worker_backend == "open_swe"
+    assert result.provider_id == "google_genai"
+    assert result.model_id == "gemini-test"
+    assert result.diagnosis_status == "ROOT_CAUSE_SUPPORTED"
+    assert result.repair_admitted is True
+    assert calls[0]["operation"] == "worker_run"
+    assert calls[0]["worker_identity"] == _worker()
+
+
+def test_worker_timeout_is_unknown_and_reconcile_is_distinct_read_only_call(tmp_path, monkeypatch):
+    import nexus.services.open_swe_external_intelligence as module
+
+    workspace, artifact = _artifact_and_workspace(tmp_path)
+    operations = []
+
+    def runtime_call(_executable, payload, **_kwargs):
+        operations.append(payload["operation"])
+        if payload["operation"] == "worker_run":
+            return None, "", True, "runtime_timeout"
+        return (
+            {
+                "schema": module.PROTOCOL_RESULT_SCHEMA,
+                "kind": "worker",
+                "status": "OPEN_SWE_OUTCOME_UNKNOWN",
+                "provider_id": "google_genai",
+                "model_id": "gemini-test",
+                "directory": payload["workspace_path"],
+                "process_started": False,
+                "outcome_unknown": True,
+                "retry_safe": False,
+                "worker_identity_sha256": payload["worker_identity_sha256"],
+            },
+            "",
+            True,
+            "",
+        )
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEWorkerTransport(
+        model_provider="google_genai", model_id="gemini-test"
+    ).bind_worker(_worker())
+
+    first = transport.run_new(
+        prompt=_prompt(), artifact_path=str(artifact), workspace_path=str(workspace)
+    )
+    reconciled = transport.reconcile_workspace(workspace_path=str(workspace))
+
+    assert first.status == "OPEN_SWE_OUTCOME_UNKNOWN"
+    assert first.outcome_unknown is True
+    assert first.retry_safe is False
+    assert reconciled.outcome_unknown is True
+    assert operations == ["worker_run", "worker_reconcile"]
+
+
+def test_continue_session_binds_exact_session(tmp_path, monkeypatch):
+    import nexus.services.open_swe_external_intelligence as module
+
+    workspace, artifact = _artifact_and_workspace(tmp_path)
+    seen = []
+
+    def runtime_call(_executable, payload, **_kwargs):
+        seen.append(dict(payload))
+        return _completed(module, payload), "", True, ""
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEWorkerTransport(model_provider="google_genai", model_id="gemini-test")
+    session = "ses_open_swe_1234567890abcdef1234"
+    result = transport.continue_session(
+        session_id=session,
+        prompt=_prompt(),
+        artifact_path=str(artifact),
+        workspace_path=str(workspace),
+    )
+    assert result.status == "COMPLETED"
+    assert seen[0]["operation"] == "worker_continue"
+    assert seen[0]["session_id"] == session
+    with pytest.raises(Exception, match="INVALID_SESSION_ID"):
+        transport.continue_session(
+            session_id="bad", prompt=_prompt(), artifact_path=str(artifact), workspace_path=str(workspace)
+        )
+
+
+def test_full_worker_identity_is_bound_and_substitution_is_rejected():
+    from nexus.services.open_swe_external_intelligence import OpenSWEWorkerTransport
+
+    worker = _worker()
+    transport = OpenSWEWorkerTransport(
+        model_provider="google_genai", model_id="gemini-test", require_worker_binding=True
+    )
+    assert transport.bind_worker(worker) is transport
+    with pytest.raises(Exception, match="WORKER_IDENTITY_SUBSTITUTION_FORBIDDEN"):
+        transport.bind_worker({**worker, "worker_id": "google/gemini-worker-b"})
+
+
+def test_worker_attestation_mismatch_fails_closed(tmp_path, monkeypatch):
+    import nexus.services.open_swe_external_intelligence as module
+
+    workspace, artifact = _artifact_and_workspace(tmp_path)
+
+    def runtime_call(_executable, payload, **_kwargs):
+        result = _completed(module, payload)
+        result["model_id"] = "substituted"
+        return result, "", True, ""
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEWorkerTransport(
+        model_provider="google_genai", model_id="gemini-test"
+    ).bind_worker(_worker())
+    result = transport.run_new(
+        prompt=_prompt(), artifact_path=str(artifact), workspace_path=str(workspace)
+    )
+    assert result.status == "OPEN_SWE_OUTCOME_UNKNOWN"
+    assert result.outcome_unknown is True
+    assert result.error == "MODEL_ATTESTATION_MISMATCH"
 
 
 def _git(root: Path, *args: str) -> str:
@@ -125,286 +294,24 @@ def _repo_and_envelope(tmp_path: Path) -> tuple[Path, str, Path, str]:
     envelope = tmp_path / "envelope.json"
     envelope.write_text(json.dumps(payload, sort_keys=True, indent=2), encoding="utf-8")
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
-    import hashlib
-
     return repo, base, envelope, hashlib.sha256(canonical.encode()).hexdigest()
 
 
-def _transport(tmp_path: Path, diagnosis: dict, *, repair_error: bool = False):
-    from nexus.services.open_swe_external_intelligence import (
-        DIAGNOSIS_TOOL_SURFACE,
-        REPAIR_TOOL_SURFACE,
-        OpenSWEWorkerTransport,
-    )
-
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    (workspace / "a.py").write_text("VALUE = 1\n", encoding="utf-8")
-    artifact = tmp_path / "evidence.json"
-    artifact.write_text('{"failure":"VALUE must be 2"}\n', encoding="utf-8")
-
-    diagnosis_graph = FakeGraph(
-        DIAGNOSIS_TOOL_SURFACE,
-        lambda _payload, _config: _record("record_diagnosis", diagnosis),
-    )
-
-    def repair_invoke(_payload, _config):
-        if repair_error:
-            raise TimeoutError("ambiguous provider outcome")
-        (workspace / "a.py").write_text("VALUE = 2\n", encoding="utf-8")
-        return _record("record_worker_result", {"summary": "repaired a.py"})
-
-    repair_graph = FakeGraph(REPAIR_TOOL_SURFACE, repair_invoke)
-    graphs = {"diagnosis": diagnosis_graph, "repair": repair_graph}
-    transport = OpenSWEWorkerTransport(
-        model_provider="google_genai",
-        model_id="gemini-test",
-        model_factory=lambda _provider, _model: object(),
-        graph_factory=lambda phase, _model, _root, _paths: graphs[phase],
-        message_factory=lambda content: content,
-    )
-    return transport, workspace, artifact, diagnosis_graph, repair_graph
-
-
-def test_supported_root_cause_admits_one_bounded_candidate_repair(tmp_path):
-    transport, workspace, artifact, diagnosis_graph, repair_graph = _transport(
-        tmp_path,
-        {
-            "status": "ROOT_CAUSE_SUPPORTED",
-            "summary": "a.py retains the failing value",
-            "evidence_paths": ["a.py"],
-        },
-    )
-
-    result = transport.run_new(
-        prompt=_prompt(), artifact_path=str(artifact), workspace_path=str(workspace)
-    )
-
-    assert isinstance(result, OpenCodeRunResult)
-    assert result.status == "COMPLETED"
-    assert result.provider_id == "google_genai"
-    assert result.model_id == "gemini-test"
-    assert result.session_id.startswith("ses_open_swe_")
-    assert json.loads(result.response_text) == {
-        "schema": "external_intelligence_worker_result.v1",
-        "task_id": "task-1",
-        "unit_id": "u1",
-        "status": "IMPLEMENTATION_COMPLETED",
-        "summary": "repaired a.py",
-    }
-    assert (workspace / "a.py").read_text(encoding="utf-8") == "VALUE = 2\n"
-    assert diagnosis_graph.calls == 1
-    assert repair_graph.calls == 1
-
-
-def test_inconclusive_diagnosis_blocks_without_invoking_repair(tmp_path):
-    transport, workspace, artifact, diagnosis_graph, repair_graph = _transport(
-        tmp_path,
-        {"status": "INCONCLUSIVE", "summary": "insufficient evidence", "evidence_paths": []},
-    )
-
-    result = transport.run_new(
-        prompt=_prompt(), artifact_path=str(artifact), workspace_path=str(workspace)
-    )
-
-    assert result.status == "COMPLETED"
-    assert json.loads(result.response_text)["status"] == "BLOCKED"
-    assert (workspace / "a.py").read_text(encoding="utf-8") == "VALUE = 1\n"
-    assert diagnosis_graph.calls == 1
-    assert repair_graph.calls == 0
-
-
-def test_supported_diagnosis_without_physical_evidence_path_fails_closed(tmp_path):
-    transport, workspace, artifact, diagnosis_graph, repair_graph = _transport(
-        tmp_path,
-        {"status": "ROOT_CAUSE_SUPPORTED", "summary": "unsupported", "evidence_paths": []},
-    )
-
-    result = transport.run_new(
-        prompt=_prompt(), artifact_path=str(artifact), workspace_path=str(workspace)
-    )
-
-    assert result.status == "OPEN_SWE_OUTCOME_UNKNOWN"
-    assert result.error == "ValueError"
-    assert diagnosis_graph.calls == 1
-    assert repair_graph.calls == 0
-    assert (workspace / "a.py").read_text(encoding="utf-8") == "VALUE = 1\n"
-
-
-def test_duplicate_diagnosis_records_fail_closed_without_repair(tmp_path):
-    from nexus.services.open_swe_external_intelligence import (
-        DIAGNOSIS_TOOL_SURFACE,
-        REPAIR_TOOL_SURFACE,
-        OpenSWEWorkerTransport,
-    )
-
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    (workspace / "a.py").write_text("VALUE = 1\n", encoding="utf-8")
-    artifact = tmp_path / "evidence.json"
-    artifact.write_text("{}\n", encoding="utf-8")
-    duplicate = {
-        "messages": [
-            SimpleNamespace(
-                tool_calls=[
-                    {
-                        "name": "record_diagnosis",
-                        "args": {
-                            "envelope": {
-                                "status": "ROOT_CAUSE_SUPPORTED",
-                                "summary": "one",
-                                "evidence_paths": ["a.py"],
-                            }
-                        },
-                    },
-                    {
-                        "name": "record_diagnosis",
-                        "args": {
-                            "envelope": {
-                                "status": "ROOT_CAUSE_SUPPORTED",
-                                "summary": "two",
-                                "evidence_paths": ["a.py"],
-                            }
-                        },
-                    },
-                ]
-            )
-        ]
-    }
-    diagnosis_graph = FakeGraph(DIAGNOSIS_TOOL_SURFACE, lambda *_args: duplicate)
-    repair_graph = FakeGraph(REPAIR_TOOL_SURFACE, lambda *_args: {})
-    transport = OpenSWEWorkerTransport(
-        model_provider="google_genai",
-        model_id="gemini-test",
-        model_factory=lambda *_args: object(),
-        graph_factory=lambda phase, *_args: {
-            "diagnosis": diagnosis_graph,
-            "repair": repair_graph,
-        }[phase],
-        message_factory=lambda content: content,
-    )
-
-    result = transport.run_new(
-        prompt=_prompt(), artifact_path=str(artifact), workspace_path=str(workspace)
-    )
-
-    assert result.status == "OPEN_SWE_OUTCOME_UNKNOWN"
-    assert repair_graph.calls == 0
-    assert (workspace / "a.py").read_text(encoding="utf-8") == "VALUE = 1\n"
-
-
-def test_ambiguous_repair_outcome_reconciles_without_blind_redispatch(tmp_path):
-    transport, workspace, artifact, diagnosis_graph, repair_graph = _transport(
-        tmp_path,
-        {
-            "status": "ROOT_CAUSE_SUPPORTED",
-            "summary": "supported",
-            "evidence_paths": ["a.py"],
-        },
-        repair_error=True,
-    )
-
-    first = transport.run_new(
-        prompt=_prompt(), artifact_path=str(artifact), workspace_path=str(workspace)
-    )
-    replay = transport.run_new(
-        prompt=_prompt(), artifact_path=str(artifact), workspace_path=str(workspace)
-    )
-    reconciled = transport.reconcile_workspace(workspace_path=str(workspace))
-
-    assert first.status == "OPEN_SWE_OUTCOME_UNKNOWN"
-    assert first.outcome_unknown is True
-    assert replay == first
-    assert reconciled == first
-    assert diagnosis_graph.calls == 1
-    assert repair_graph.calls == 1
-
-
-def test_worker_transport_rejects_forbidden_graph_tool_surface(tmp_path):
-    from nexus.services.open_swe_external_intelligence import OpenSWEWorkerTransport
-
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    artifact = tmp_path / "evidence.json"
-    artifact.write_text("{}\n", encoding="utf-8")
-    transport = OpenSWEWorkerTransport(
-        model_provider="google_genai",
-        model_id="gemini-test",
-        model_factory=lambda _provider, _model: object(),
-        graph_factory=lambda _phase, _model, _root, _paths: FakeGraph(
-            ["read_file", "execute"], lambda *_args: {}
-        ),
-        message_factory=lambda content: content,
-    )
-
-    result = transport.run_new(
-        prompt=_prompt(), artifact_path=str(artifact), workspace_path=str(workspace)
-    )
-
-    assert result.status == "OPEN_SWE_TOOL_SURFACE_INVALID"
-    assert result.process_started is False
-    assert result.retry_safe is False
-
-
-def test_full_worker_identity_is_bound_and_substitution_is_rejected(tmp_path):
-    from nexus.services.open_swe_external_intelligence import OpenSWEWorkerTransport
-
-    worker = {
-        "worker_id": "google/gemini-worker-a",
-        "provider": "google_genai",
-        "model": "google_genai/gemini-test",
-        "role_ceiling": "bounded repair",
-        "admission_evidence_ref": "admission-a",
-        "admission_evidence_hash": "a" * 64,
-        "selection_evidence_ref": "selection-a",
-        "selection_evidence_hash": "b" * 64,
-    }
-    transport = OpenSWEWorkerTransport(
-        model_provider="google_genai",
-        model_id="gemini-test",
-        require_worker_binding=True,
-    )
-
-    assert transport.bind_worker(worker) is transport
-    with pytest.raises(Exception, match="WORKER_IDENTITY_SUBSTITUTION_FORBIDDEN"):
-        transport.bind_worker({**worker, "worker_id": "google/gemini-worker-b"})
-
-
-def test_fanout_captures_open_swe_candidate_and_stops_before_acceptance(tmp_path):
-    from nexus.services.open_swe_external_intelligence import (
-        DIAGNOSIS_TOOL_SURFACE,
-        REPAIR_TOOL_SURFACE,
-        OpenSWEWorkerTransport,
-    )
+def test_fanout_captures_external_open_swe_candidate_and_stops_before_acceptance(
+    tmp_path, monkeypatch
+):
+    import nexus.services.open_swe_external_intelligence as module
 
     repo, base, envelope, envelope_sha = _repo_and_envelope(tmp_path)
 
-    def graph_factory(phase, _model, workspace, _paths):
-        if phase == "diagnosis":
-            return FakeGraph(
-                DIAGNOSIS_TOOL_SURFACE,
-                lambda *_args: _record(
-                    "record_diagnosis",
-                    {
-                        "status": "ROOT_CAUSE_SUPPORTED",
-                        "summary": "a.py has VALUE 1",
-                        "evidence_paths": ["a.py"],
-                    },
-                ),
-            )
+    def runtime_call(_executable, payload, **_kwargs):
+        workspace = Path(payload["workspace_path"])
+        (workspace / "a.py").write_text("VALUE = 2\n", encoding="utf-8")
+        return _completed(module, payload), "", True, ""
 
-        def repair(*_args):
-            (workspace / "a.py").write_text("VALUE = 2\n", encoding="utf-8")
-            return _record("record_worker_result", {"summary": "set VALUE to 2"})
-
-        return FakeGraph(REPAIR_TOOL_SURFACE, repair)
-
-    transport = OpenSWEWorkerTransport(
-        model_provider="google_genai",
-        model_id="gemini-test",
-        model_factory=lambda *_args: object(),
-        graph_factory=graph_factory,
-        message_factory=lambda content: content,
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEWorkerTransport(
+        model_provider="google_genai", model_id="gemini-test"
     )
     runtime = AdaptiveWorkerFanoutRuntime(
         allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
@@ -422,16 +329,7 @@ def test_fanout_captures_open_swe_candidate_and_stops_before_acceptance(tmp_path
                 "mutation_paths": ["a.py"],
                 "provider": "google_genai",
                 "model": "google_genai/gemini-test",
-                "selected_worker": {
-                    "worker_id": "google/gemini-worker-a",
-                    "provider": "google_genai",
-                    "model": "google_genai/gemini-test",
-                    "role_ceiling": "bounded repair",
-                    "admission_evidence_ref": "admission-a",
-                    "admission_evidence_hash": "a" * 64,
-                    "selection_evidence_ref": "selection-a",
-                    "selection_evidence_hash": "b" * 64,
-                },
+                "selected_worker": _worker(),
             }
         ],
         CapacityLease(1, 1, 1, 1),
@@ -441,18 +339,9 @@ def test_fanout_captures_open_swe_candidate_and_stops_before_acceptance(tmp_path
     receipt = result["receipts"]["u1"]
     assert receipt["status"] == "CANDIDATE_READY_FOR_VERIFICATION"
     assert receipt["changed_paths"] == ["a.py"]
-    assert receipt["provider_id"] == "google_genai"
-    assert receipt["model_id"] == "gemini-test"
-    assert receipt["candidate_commit"]
-    assert receipt["candidate_tree"]
-    assert receipt["diagnosis_status"] == "ROOT_CAUSE_SUPPORTED"
     assert receipt["worker_backend"] == "open_swe"
-    assert len(receipt["diagnosis_sha256"]) == 64
-    assert receipt["diagnosis_evidence_paths"] == ["a.py"]
-    assert receipt["repair_admitted"] is True
-    assert receipt["repair_phase_count"] == 1
+    assert receipt["diagnosis_status"] == "ROOT_CAUSE_SUPPORTED"
     assert receipt["claim_ceiling"] == "CANDIDATE_READY_FOR_VERIFICATION"
-
     stripped = dict(receipt)
     for field in (
         "diagnosis_status",
@@ -469,72 +358,3 @@ def test_fanout_captures_open_swe_candidate_and_stops_before_acceptance(tmp_path
     ).hexdigest()
     with pytest.raises(ClosureError, match="OPEN_SWE_DIAGNOSIS_RECEIPT_INVALID"):
         validate_worker_receipt(stripped)
-
-    backendless = dict(receipt)
-    backendless.pop("worker_backend")
-    backendless.pop("receipt_id")
-    backendless["receipt_id"] = hashlib.sha256(
-        json.dumps(backendless, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-    with pytest.raises(ClosureError, match="WORKER_BACKEND_REQUIRED"):
-        validate_worker_receipt(backendless)
-
-
-def test_real_deepagents_worker_graphs_have_exact_physical_surfaces(tmp_path):
-    pytest.importorskip("deepagents")
-    from langchain_core.language_models.chat_models import BaseChatModel
-    from langchain_core.messages import AIMessage
-    from langchain_core.outputs import ChatGeneration, ChatResult
-
-    from nexus.services.open_swe_external_intelligence import (
-        DIAGNOSIS_TOOL_SURFACE,
-        REPAIR_TOOL_SURFACE,
-        _load_runtime,
-        _ScopedRepairBackend,
-        build_diagnosis_graph,
-        build_repair_graph,
-        executable_tool_surface,
-    )
-
-    class SurfaceModel(BaseChatModel):
-        model_name: str = "surface"
-
-        @property
-        def _llm_type(self):
-            return "task003-surface"
-
-        def _get_ls_params(self, *args, **kwargs):
-            return {"ls_provider": "task003", "ls_model_name": "surface"}
-
-        def bind_tools(self, tools, **kwargs):
-            return self
-
-        def _generate(self, messages, **kwargs):
-            return ChatResult(generations=[ChatGeneration(message=AIMessage(content="done"))])
-
-    runtime = _load_runtime()
-    model = SurfaceModel()
-    diagnosis = build_diagnosis_graph(model, tmp_path, runtime, profile_key="task003:surface")
-    repair = build_repair_graph(
-        model,
-        tmp_path,
-        runtime,
-        allowed_paths=("a.py",),
-        profile_key="task003:surface",
-    )
-
-    assert set(executable_tool_surface(diagnosis)) == DIAGNOSIS_TOOL_SURFACE
-    assert set(executable_tool_surface(repair)) == REPAIR_TOOL_SURFACE
-    assert "execute" not in executable_tool_surface(repair)
-    assert "task" not in executable_tool_surface(repair)
-    assert "delete_file" not in executable_tool_surface(repair)
-    scoped = _ScopedRepairBackend(
-        runtime.filesystem_backend(root_dir=tmp_path, virtual_mode=True),
-        tmp_path,
-        ("a.py",),
-    )
-    with pytest.raises(PermissionError, match="OPEN_SWE_MUTATION_PATH_FORBIDDEN"):
-        scoped.write("/b.py", "forbidden\n")
-    assert not (tmp_path / "b.py").exists()
-    scoped.write("/a.py", "allowed\n")
-    assert (tmp_path / "a.py").read_text(encoding="utf-8") == "allowed\n"

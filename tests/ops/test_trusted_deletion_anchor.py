@@ -178,16 +178,37 @@ def test_trusted_dependency_snapshot_transition_preserves_product_file_guard(mon
         )
 
 
-def test_open_swe_dependency_snapshot_transition_hashes_are_exact() -> None:
-    assert trusted_anchor.TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION == (
-        679,
+def test_open_swe_dependency_snapshot_transition_is_retired_but_preserved_as_history() -> None:
+    assert trusted_anchor.TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION is None
+    assert trusted_anchor.RETIRED_TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        669,
         (
-            "e52fc5fe9e76fca42299370641169e5ec3d6a59a765774deb1a77f38cd8eb246",
-            "cb5ecbb7fcce287f9bcdbb17f65a3b931f13613b6fd1608b428e1c19c5f6965a",
             "c7d84dd5cbc4e533db65445ebb5691296f732d49f2fb39c6028745b18ca1d412",
             "3e753af334885a2f434a94d40fc8860abd151516950e7f1e3647971f2e0dfc51",
+            "e52fc5fe9e76fca42299370641169e5ec3d6a59a765774deb1a77f38cd8eb246",
+            "cb5ecbb7fcce287f9bcdbb17f65a3b931f13613b6fd1608b428e1c19c5f6965a",
         ),
     )
+
+    _, hashes = trusted_anchor.RETIRED_TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION
+    trusted_pyproject = b"trusted pyproject\n"
+    trusted_lock = b"trusted lock\n"
+    head_pyproject = b"open swe pyproject\n"
+    head_lock = b"open swe lock\n"
+    assert tuple(
+        trusted_anchor._sha(value)
+        for value in (trusted_pyproject, trusted_lock, head_pyproject, head_lock)
+    ) != hashes
+
+    with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
+        trusted_anchor._validate_trusted_dependency_contract(
+            trusted_pyproject,
+            head_pyproject,
+            trusted_lock,
+            head_lock,
+            pull_request_number=669,
+            head_product_init_is_regular=True,
+        )
 
 
 @pytest.mark.parametrize(

@@ -23,6 +23,8 @@ task_id: `TASK-001`
 - **Parallel safe:** `false`
 - **Supersedes:** `none`
 
+> **Corrective topology notice — 2026-09-01:** This Task Card is preserved as a historical implementation snapshot. Its instruction to add Open SWE / Deep Agents as Nexus root optional dependencies and to host graph construction inside the Nexus process is superseded by the Owner corrective handoff and `OPEN_SWE_EXTERNAL_RUNTIME_CORRECTIVE_CONTRACT.md`. Reusable transport/result/replay/security semantics remain evidence; dependency/runtime topology does not. Do not execute this card's in-process packaging instructions as current authority.
+
 ## Goal
 
 Add an optional Open SWE / Deep Agents semantic execution adapter at the existing External Intelligence transport seam, while preserving OpenCLI as the unchanged default and preserving all existing Nexus request/attempt/replay/reconciliation authority.
