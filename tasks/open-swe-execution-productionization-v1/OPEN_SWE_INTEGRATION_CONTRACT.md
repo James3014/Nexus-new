@@ -14,6 +14,8 @@ contract_id: `OPEN_SWE_INTEGRATION_CONTRACT_V1`
 - **Auto-chain:** `false` after G15
 - **Next authority boundary after merge:** `G16_RUNTIME_ACTIVATION_AUTHORIZATION`
 
+> **Historical/superseded topology notice — 2026-09-01:** This activation contract was completed against the earlier in-process Open SWE dependency/runtime assumption. A later Owner corrective handoff supersedes that topology and any activation/default-switch authority derived from it. Current work is governed by `OPEN_SWE_EXTERNAL_RUNTIME_CORRECTIVE_CONTRACT.md`; the live service has been returned to the OpenCLI/OpenCode control arm. Keep this file as historical evidence for the prior G10-G15 sequence, not as authority to reactivate or to make Nexus Core own Deep Agents dependencies.
+
 ## Mission
 
 Prepare and integrate the source-controlled activation profile that makes Open SWE / Deep Agents the preferred External Intelligence execution runtime for both semantic review and bounded diagnosis/repair, while preserving Nexus as the control/governance plane and preserving OpenCLI/OpenCode as immediate rollback controls.

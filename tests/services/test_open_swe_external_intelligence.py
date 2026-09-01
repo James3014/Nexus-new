@@ -1,217 +1,162 @@
 from __future__ import annotations
 
 import importlib
-import importlib.util
 import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
 
-def _adapter_module():
-    assert importlib.util.find_spec("nexus.services.open_swe_external_intelligence") is not None
+def _module():
     return importlib.import_module("nexus.services.open_swe_external_intelligence")
 
 
-class FakeGraph:
-    def __init__(self, *, surface, envelope=None, error=None, hidden_tool=None):
-        self.surface = tuple(surface)
-        self.envelope = envelope
-        self.error = error
-        self.hidden_tool = hidden_tool
-        self.calls = 0
-
-    def get_graph(self):
-        data = SimpleNamespace(tools_by_name={name: object() for name in self.surface})
-        return SimpleNamespace(nodes={"tools": SimpleNamespace(data=data)})
-
-    def invoke(self, payload, config=None):
-        self.calls += 1
-        assert set(payload) == {"messages"}
-        assert config == {"recursion_limit": 40}
-        if self.error is not None:
-            raise self.error
-        name = self.hidden_tool or "record_finding"
-        args = {"envelope": self.envelope} if name == "record_finding" else {}
-        return {
-            "messages": [
-                SimpleNamespace(
-                    tool_calls=[
-                        {"name": name, "args": args, "id": "call-1", "type": "tool_call"}
-                    ]
-                )
-            ]
-        }
+def test_nexus_adapter_is_thin_and_has_no_deepagents_or_langchain_imports():
+    source = Path("nexus/services/open_swe_external_intelligence.py").read_text(encoding="utf-8")
+    assert "import deepagents" not in source
+    assert "from deepagents" not in source
+    assert "import langchain" not in source
+    assert "from langchain" not in source
 
 
-def _transport(tmp_path, graph):
-    module = _adapter_module()
-    return module.OpenSWEExternalIntelligenceTransport(
-        repository_root=tmp_path,
-        model_provider="test-provider",
-        model_id="test-model",
-        model_factory=lambda _provider, _model: object(),
-        graph_factory=lambda _model, _root: graph,
-    )
-
-
-def test_transport_returns_recorded_envelope_and_reconciles_without_redispatch(tmp_path):
+def test_semantic_transport_maps_external_protocol_and_reconcile_is_separate(tmp_path, monkeypatch):
+    module = _module()
+    calls = []
     envelope = {"schema": "external_execution_envelope.v1", "binding": {"task": "t1"}}
-    graph = FakeGraph(
-        surface=("glob", "grep", "ls", "read_file", "record_finding"),
-        envelope=envelope,
+
+    def runtime_call(executable, payload, *, provider_id, timeout):
+        calls.append((executable, dict(payload), provider_id, timeout))
+        return (
+            {
+                "schema": module.PROTOCOL_RESULT_SCHEMA,
+                "kind": "semantic",
+                "status": "INTELLIGENCE_COMPLETED",
+                "provider_id": "google_genai",
+                "model_id": "gemini-test",
+                "raw": json.dumps(envelope),
+                "process_started": payload["operation"] == "semantic_run",
+                "outcome_unknown": False,
+                "retry_safe": False,
+                "started_at": "2026-09-01T00:00:00Z",
+                "finished_at": "2026-09-01T00:00:01Z",
+            },
+            "",
+            True,
+            "",
+        )
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEExternalIntelligenceTransport(
+        repository_root=tmp_path,
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable="runtime-bin",
+        runtime_state_root=tmp_path / "runtime-state",
     )
-    transport = _transport(tmp_path, graph)
 
     first = transport.invoke("prompt")
     reconciled = transport.reconcile("prompt")
 
     assert first.status == "INTELLIGENCE_COMPLETED"
     assert json.loads(first.raw) == envelope
-    assert reconciled == first
-    assert graph.calls == 1
-    assert first.safe_argv == ("open_swe", "semantic", "<prompt>")
+    assert reconciled.status == "INTELLIGENCE_COMPLETED"
+    assert [call[1]["operation"] for call in calls] == ["semantic_run", "semantic_reconcile"]
+    assert calls[0][1]["operation_id"] == calls[1][1]["operation_id"]
+    assert first.safe_argv == ("runtime-bin", "<json-stdin>")
 
 
-def test_transport_rejects_compiled_mutation_surface(tmp_path):
-    module = _adapter_module()
-    graph = FakeGraph(
-        surface=("glob", "grep", "ls", "read_file", "record_finding", "write_file"),
-        envelope={},
+def test_semantic_timeout_is_unknown_and_never_retry_safe(tmp_path, monkeypatch):
+    module = _module()
+    monkeypatch.setattr(
+        module,
+        "_runtime_call",
+        lambda *_args, **_kwargs: (None, "", True, "runtime_timeout"),
     )
-
-    with pytest.raises(module.OpenSWEExternalIntelligenceError, match="OPEN_SWE_TOOL_SURFACE_INVALID"):
-        _transport(tmp_path, graph)
-
-
-def test_hidden_mutation_call_is_not_accepted_as_semantic_result(tmp_path):
-    graph = FakeGraph(
-        surface=("glob", "grep", "ls", "read_file", "record_finding"),
-        hidden_tool="write_file",
+    transport = module.OpenSWEExternalIntelligenceTransport(
+        repository_root=tmp_path,
+        model_provider="google_genai",
+        model_id="gemini-test",
     )
-    transport = _transport(tmp_path, graph)
 
     result = transport.invoke("prompt")
 
-    assert result.status == "OPEN_SWE_RESULT_INVALID"
+    assert result.status == "OPEN_SWE_OUTCOME_UNKNOWN"
+    assert result.outcome_unknown is True
     assert result.retry_safe is False
-    assert graph.calls == 1
 
 
-def test_ambiguous_graph_outcome_reconciles_without_second_invoke(tmp_path):
-    graph = FakeGraph(
-        surface=("glob", "grep", "ls", "read_file", "record_finding"),
-        error=TimeoutError("unknown provider outcome"),
+def test_semantic_runtime_missing_before_start_is_retry_safe(tmp_path, monkeypatch):
+    module = _module()
+    monkeypatch.setattr(
+        module,
+        "_runtime_call",
+        lambda *_args, **_kwargs: (None, "", False, "runtime_not_found"),
     )
-    transport = _transport(tmp_path, graph)
+    transport = module.OpenSWEExternalIntelligenceTransport(
+        repository_root=tmp_path,
+        model_provider="google_genai",
+        model_id="gemini-test",
+    )
 
-    first = transport.invoke("prompt")
-    second = transport.reconcile("prompt")
+    result = transport.invoke("prompt")
 
-    assert first.status == second.status == "OPEN_SWE_OUTCOME_UNKNOWN"
-    assert first.outcome_unknown is second.outcome_unknown is True
-    assert graph.calls == 1
+    assert result.status == "OPEN_SWE_RUNTIME_NOT_FOUND"
+    assert result.outcome_unknown is False
+    assert result.retry_safe is True
 
 
-def test_missing_optional_runtime_fails_closed_at_transport_construction(tmp_path, monkeypatch):
-    module = _adapter_module()
+def test_semantic_model_attestation_mismatch_fails_closed(tmp_path, monkeypatch):
+    module = _module()
+    monkeypatch.setattr(
+        module,
+        "_runtime_call",
+        lambda *_args, **_kwargs: (
+            {
+                "schema": module.PROTOCOL_RESULT_SCHEMA,
+                "kind": "semantic",
+                "status": "INTELLIGENCE_COMPLETED",
+                "provider_id": "other",
+                "model_id": "wrong",
+                "raw": "{}",
+            },
+            "",
+            True,
+            "",
+        ),
+    )
+    transport = module.OpenSWEExternalIntelligenceTransport(
+        repository_root=tmp_path,
+        model_provider="google_genai",
+        model_id="gemini-test",
+    )
 
-    def missing_runtime():
-        raise ImportError("deepagents unavailable")
+    result = transport.invoke("prompt")
 
-    monkeypatch.setattr(module, "_load_runtime", missing_runtime)
-    with pytest.raises(
-        module.OpenSWEExternalIntelligenceError,
-        match="OPEN_SWE_OPTIONAL_DEPENDENCY_MISSING",
-    ):
+    assert result.status == "OPEN_SWE_MODEL_ATTESTATION_MISMATCH"
+    assert result.outcome_unknown is True
+
+
+def test_runtime_environment_passes_selected_provider_key_but_not_github_credentials(monkeypatch):
+    module = _module()
+    monkeypatch.setenv("GEMINI_API_KEY", "provider-sentinel")
+    monkeypatch.setenv("GITHUB_TOKEN", "github-sentinel")
+    monkeypatch.setenv("GH_TOKEN", "gh-sentinel")
+    monkeypatch.setenv("UNRELATED_SECRET", "unrelated-sentinel")
+
+    env = module._runtime_env("google_genai")
+
+    assert "GEMINI_API_KEY" in env
+    assert "GITHUB_TOKEN" not in env
+    assert "GH_TOKEN" not in env
+    assert "UNRELATED_SECRET" not in env
+
+
+def test_empty_external_runtime_executable_is_rejected(tmp_path):
+    module = _module()
+    with pytest.raises(module.OpenSWEExternalIntelligenceError, match="OPEN_SWE_EXECUTABLE_REQUIRED"):
         module.OpenSWEExternalIntelligenceTransport(
             repository_root=tmp_path,
             model_provider="google_genai",
             model_id="gemini-test",
-            model_factory=lambda _provider, _model: object(),
+            executable="",
         )
-
-
-def test_open_swe_optional_dependency_contract_is_exactly_pinned():
-    text = Path("pyproject.toml").read_text(encoding="utf-8")
-    block = text.split("open-swe = [", 1)[1].split("]", 1)[0]
-
-    assert block.splitlines() == [
-        "",
-        '    "deepagents==0.7.6; python_version >= \'3.11\'",',
-        '    "google-genai==1.74.0; python_version >= \'3.11\'",',
-        '    "langchain-core==1.5.2; python_version >= \'3.11\'",',
-        '    "langchain-google-genai==4.3.2; python_version >= \'3.11\'",',
-    ]
-
-
-def test_real_deepagents_toolnode_is_physically_read_only_when_optional_extra_installed(
-    tmp_path,
-):
-    pytest.importorskip("deepagents")
-    from langchain_core.language_models.chat_models import BaseChatModel
-    from langchain_core.messages import AIMessage, ToolMessage
-    from langchain_core.outputs import ChatGeneration, ChatResult
-
-    module = _adapter_module()
-    runtime = module._load_runtime()
-    sentinel = tmp_path / "must-not-exist.txt"
-
-    class HostileModel(BaseChatModel):
-        model_name: str = "physical-test"
-        index: int = 0
-
-        @property
-        def _llm_type(self):
-            return "task001"
-
-        def _get_ls_params(self, *args, **kwargs):
-            return {"ls_provider": "task001", "ls_model_name": self.model_name}
-
-        def bind_tools(self, tools, **kwargs):
-            return self
-
-        def _generate(self, messages, **kwargs):
-            if self.index == 0:
-                object.__setattr__(self, "index", 1)
-                message = AIMessage(
-                    content="",
-                    tool_calls=[
-                        {
-                            "name": "write_file",
-                            "args": {"file_path": str(sentinel), "content": "forbidden"},
-                            "id": "hostile-write",
-                            "type": "tool_call",
-                        }
-                    ],
-                )
-            else:
-                message = AIMessage(content="done")
-            return ChatResult(generations=[ChatGeneration(message=message)])
-
-    graph = module.build_read_only_semantic_graph(
-        HostileModel(),
-        tmp_path,
-        runtime,
-        profile_key="task001:physical-test",
-    )
-    output = graph.invoke(
-        {"messages": [runtime.human_message(content="hostile")]},
-        config={"recursion_limit": 40},
-    )
-
-    assert module.executable_tool_surface(graph) == (
-        "glob",
-        "grep",
-        "ls",
-        "read_file",
-        "record_finding",
-    )
-    assert not sentinel.exists()
-    assert any(
-        isinstance(message, ToolMessage)
-        and message.name == "write_file"
-        and "is not a valid tool" in str(message.content)
-        for message in output["messages"]
-    )

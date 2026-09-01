@@ -1,15 +1,15 @@
 # Open SWE Execution Productionization V1
 
 - **Campaign ID:** `CAMPAIGN-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1`
-- **Status:** `ACTIVATION_INTEGRATION_ACTIVE`
+- **Status:** `EXTERNAL_RUNTIME_CORRECTIVE_ACTIVE`
 - **Source mode:** `VALIDATED_SPEC`
 - **Source spec ID:** `SPEC-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1`
 - **Source spec SHA-256:** `17e2b27e2ad57d02cd33fd37d0c7d97a29a1ff14e182d7661b141baf9f925d74`
 - **Source basis snapshot:** `James3014/Nexus-new@c00c299152599a87efd831c3e146ecadd8f8b21f`; pilot evidence `764333bcbed67e5b83870d5ceeb8e9d70f7e749f`; Open SWE `4bed1112362d4ce74db86e704329fda0f3412b69`; Deep Agents `0.7.6`.
 - **Auto-chain:** `false`
 - **Parallel execution:** `false`
-- **Current frontier:** `OPEN_SWE_INTEGRATION_CONTRACT_V1`
-- **Maximum campaign claim:** Open SWE execution can be productionized incrementally behind Nexus authority; this campaign does not authorize default activation, OpenCLI retirement, merge/release authority, or production-readiness claims.
+- **Current frontier:** `OPEN_SWE_EXTERNAL_RUNTIME_CORRECTIVE_CONTRACT_V1`
+- **Maximum campaign claim:** `EXTERNAL_RUNTIME_CONFIRMED`; corrective source work is in progress to move Deep Agents/Open SWE runtime internals and dependency ownership outside Nexus Core. No activation, OpenCLI retirement, merge/release authority, or production-readiness claim is authorized by this corrective state.
 
 ## 1. Source handoff import
 
@@ -52,15 +52,15 @@
 
 ## 4. Ready candidates and frontier selection
 
-- **Dependency-ready candidates:** `OPEN_SWE_INTEGRATION_CONTRACT_V1`
-- **Selected frontier:** `OPEN_SWE_INTEGRATION_CONTRACT_V1`
-- **Selection rationale:** G1-G9 completed the productionization evidence chain. Owner selected `ACTIVATE_OPEN_SWE_DEFAULT`; the remaining source work is one bounded activation-profile integration contract rather than another Task Card chain.
-- **Exact unblock condition:** G10 source reconciliation and G11 Owner activation decision are satisfied. G12-G15 follow `OPEN_SWE_INTEGRATION_CONTRACT.md`; loaded-runtime mutation remains blocked until G16.
+- **Dependency-ready candidates:** `OPEN_SWE_EXTERNAL_RUNTIME_CORRECTIVE_CONTRACT_V1`
+- **Selected frontier:** `OPEN_SWE_EXTERNAL_RUNTIME_CORRECTIVE_CONTRACT_V1`
+- **Selection rationale:** the 2026-09-01 Owner corrective handoff supersedes the in-process dependency/runtime topology introduced by the historical TASK-001/spec. Current source evidence supports `EXTERNAL_RUNTIME_CONFIRMED`: Nexus transport/result/reconciliation contracts can remain canonical across a subprocess boundary without making Nexus Core host Deep Agents.
+- **Exact unblock condition:** complete the corrective external-runtime Candidate, dependency-domain isolation/root cleanup, independent acceptance, corrective PR/merge, post-merge verification, and production-shaped external-runtime canaries. A fresh activation decision is required after that evidence; historical activation work is not authority for the corrected topology.
 
 ## 5. Campaign authority and non-goals
 
-TASK-001 through TASK-004 are completed. The active bounded frontier is `OPEN_SWE_INTEGRATION_CONTRACT_V1` under Bootstrap Governance. Open SWE receives no route-selection, Workforce Admission, GitHub mutation, approval, release, deploy, or production-claim authority. The source-controlled activation profile may be merged under G15, but loaded-runtime activation remains a separate G16 Owner boundary. OpenCLI/OpenCode remain rollback controls and are not retired under this contract.
+TASK-001 through TASK-004 remain historical completed snapshots of the original productionization campaign, but their in-process dependency/runtime topology is superseded by the Owner corrective handoff. The active bounded frontier is `OPEN_SWE_EXTERNAL_RUNTIME_CORRECTIVE_CONTRACT_V1` under Bootstrap Governance. Open SWE receives no route-selection, Workforce Admission, GitHub mutation, approval, release, deploy, or production-claim authority. The live runtime has been returned to the OpenCLI/OpenCode control arm while the corrective external-runtime topology is rebuilt and independently accepted.
 
 ## 6. Supersession and change history
 
-Compiled on 2026-08-31 from `SPEC-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1` SHA-256 `17e2b27e2ad57d02cd33fd37d0c7d97a29a1ff14e182d7661b141baf9f925d74`. Pilot Candidate `764333bc...` is evidence only and is not imported as production code authority. Current completion/frontier projection was reconciled on 2026-09-01 from G1-G9 terminal evidence without rewriting the individual historical Task Card snapshots.
+Compiled on 2026-08-31 from `SPEC-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1` SHA-256 `17e2b27e2ad57d02cd33fd37d0c7d97a29a1ff14e182d7661b141baf9f925d74`. Pilot Candidate `764333bc...` is evidence only and is not imported as production code authority. On 2026-09-01, a corrective Owner handoff established that Pilot import mechanics did not prove production deployment topology; `OPEN_SWE_EXTERNAL_RUNTIME_CORRECTIVE_CONTRACT.md` supersedes in-process dependency/runtime instructions while preserving the historical Task Card records and settled Nexus authority boundaries.
