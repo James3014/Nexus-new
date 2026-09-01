@@ -212,6 +212,8 @@ def test_build_automation_selects_open_swe_worker_only_when_explicit(tmp_path, m
         {
             "model_provider": "google_genai",
             "model_id": "gemini-test",
+            "executable": "nexus-open-swe-runtime",
+            "runtime_state_root": tmp_path / "state" / "open_swe_runtime",
             "require_worker_binding": True,
         }
     ]
@@ -232,6 +234,7 @@ def test_load_config_binds_open_swe_provider_and_model(tmp_path):
     assert loaded.semantic_backend == "open_swe"
     assert loaded.open_swe_model_provider == "google_genai"
     assert loaded.open_swe_model == "gemini-test"
+    assert loaded.open_swe_executable == "nexus-open-swe-runtime"
 
 
 def test_load_config_rejects_open_swe_without_complete_model_binding(tmp_path):
@@ -280,10 +283,29 @@ def test_build_automation_selects_open_swe_only_when_explicit(tmp_path, monkeypa
             "repository_root": (tmp_path / "repo").resolve(),
             "model_provider": "google_genai",
             "model_id": "gemini-test",
+            "executable": "nexus-open-swe-runtime",
+            "runtime_state_root": tmp_path / "state" / "open_swe_runtime",
         }
     ]
 
 
+def test_load_config_rejects_empty_open_swe_external_executable(tmp_path):
+    config_path = _config_file(tmp_path)
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    raw.update(
+        semantic_backend="open_swe",
+        open_swe_model_provider="google_genai",
+        open_swe_model="gemini-test",
+        open_swe_executable="",
+    )
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_EXECUTABLE_REQUIRED"):
+        load_config(config_path)
+
+
+# Historical exact-base node retained across the in-process -> external-runtime
+# ownership move. A missing external runtime remains fail-closed at construction.
 def test_build_automation_fails_closed_when_open_swe_optional_runtime_is_missing(
     tmp_path, monkeypatch
 ):
@@ -291,7 +313,7 @@ def test_build_automation_fails_closed_when_open_swe_optional_runtime_is_missing
 
     class MissingOpenSWETransport:
         def __init__(self, **_kwargs):
-            raise module.OpenSWEExternalIntelligenceError("OPEN_SWE_OPTIONAL_DEPENDENCY_MISSING")
+            raise module.OpenSWEExternalIntelligenceError("OPEN_SWE_RUNTIME_NOT_FOUND")
 
     monkeypatch.setattr(
         service_module,
@@ -306,7 +328,7 @@ def test_build_automation_fails_closed_when_open_swe_optional_runtime_is_missing
         open_swe_model="gemini-test",
     )
 
-    with pytest.raises(ServiceError, match="OPEN_SWE_OPTIONAL_DEPENDENCY_MISSING"):
+    with pytest.raises(ServiceError, match="OPEN_SWE_RUNTIME_NOT_FOUND"):
         build_automation(config, "o/r")
 
 
