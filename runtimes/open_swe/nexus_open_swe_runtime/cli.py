@@ -167,6 +167,15 @@ def _load_runtime() -> dict[str, Any]:
 
 
 def _build_model(runtime: Mapping[str, Any], provider: str, model_id: str) -> Any:
+    if provider == "opencli_chatgpt":
+        from .opencli_web_model import OpenCLIWebChatModel
+
+        return OpenCLIWebChatModel(
+            executable=os.environ.get("NEXUS_OPENCLI_EXECUTABLE", "opencli"),
+            intelligence_level=model_id,
+            profile=os.environ.get("NEXUS_OPENCLI_PROFILE", ""),
+            site_session=os.environ.get("NEXUS_OPENCLI_SITE_SESSION", "ephemeral"),
+        )
     return runtime["init_chat_model"](model=model_id, model_provider=provider)
 
 
