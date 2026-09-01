@@ -106,7 +106,7 @@ Semantic and diagnosis graph tool surfaces physically exclude write/edit/delete,
 - **G13 — Credential isolation:** **COMPLETE.** The Nexus process environment builder passes only system essentials plus the selected provider credential and excludes GitHub/GH/unrelated secrets; runtime durable state tests prove environment/secret values are not persisted.
 - **G14 — Failure / recovery:** **COMPLETE.** Semantic STARTED-without-terminal and worker ambiguous repair both become `OPEN_SWE_OUTCOME_UNKNOWN` with `retry_safe=false`; reconciliation returns durable/read-only state and does not redispatch or reexecute the repair.
 - **G15 — Identity / attestation:** **COMPLETE.** Nexus client rejects provider/model/worker attestation substitution and invalid session IDs; external runtime retained sessions now rebind workspace, provider, model, and worker identity and reject all four substitution classes with `SESSION_BINDING_MISMATCH`.
-- **G16 — Immutable Candidate freeze:** pending exact scoped commit after the G9-G15 evidence above is bound to the final physical diff.
+- **G16 — Immutable Candidate freeze:** **COMPLETE.** The corrective implementation, tests, dependency boundaries, retired trusted transition, and this contract are frozen as an exact scoped committed Candidate. The physical Candidate receipt binds the final base/head/tree/diff; independent acceptance remains a separate G17 authority.
 
 ## Remaining gates after G16
 
