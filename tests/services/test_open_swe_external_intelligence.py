@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+import tomllib
 
 
 def _module():
@@ -160,3 +163,190 @@ def test_empty_external_runtime_executable_is_rejected(tmp_path):
             model_id="gemini-test",
             executable="",
         )
+
+
+# Exact-base lineage witnesses. The historical node IDs remain collected while
+# the asserted behavior has moved from the Nexus process into the external
+# runtime owner. The locked runtime suite supplies the real Deep Agents proof.
+def _external_runtime_module():
+    path = Path("runtimes/open_swe/nexus_open_swe_runtime/cli.py").resolve()
+    spec = importlib.util.spec_from_file_location("nexus_open_swe_runtime_compat_semantic", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class _RuntimeGraph:
+    def __init__(self, surface, *, output=None, error=None):
+        self.surface = tuple(surface)
+        self.output = output
+        self.error = error
+        self.calls = 0
+
+    def get_graph(self):
+        tools = {name: object() for name in self.surface}
+        data = SimpleNamespace(tools_by_name=tools)
+        return SimpleNamespace(nodes={"tools": SimpleNamespace(data=data)})
+
+    def invoke(self, _payload, config=None):
+        self.calls += 1
+        assert config == {"recursion_limit": 40}
+        if self.error is not None:
+            raise self.error
+        return self.output
+
+
+def _runtime_record(name: str, envelope: dict):
+    return {
+        "messages": [SimpleNamespace(tool_calls=[{"name": name, "args": {"envelope": envelope}}])]
+    }
+
+
+def _semantic_runtime_request(tmp_path: Path) -> dict:
+    repository = tmp_path / "repo"
+    repository.mkdir()
+    return {
+        "operation_id": "a" * 64,
+        "provider_id": "google_genai",
+        "model_id": "gemini-test",
+        "repository_root": str(repository),
+        "runtime_state_root": str(tmp_path / "state"),
+        "prompt": "bounded semantic prompt",
+    }
+
+
+def _runtime_loader():
+    return {"human_message": lambda content: content}
+
+
+def test_transport_returns_recorded_envelope_and_reconciles_without_redispatch(tmp_path):
+    runtime = _external_runtime_module()
+    request = _semantic_runtime_request(tmp_path)
+    envelope = {"schema": "external_execution_envelope.v1", "binding": {"task": "t1"}}
+    graph = _RuntimeGraph(
+        runtime.SEMANTIC_TOOLS,
+        output=_runtime_record("record_finding", envelope),
+    )
+
+    first = runtime._semantic_run(
+        request,
+        runtime_loader=_runtime_loader,
+        model_factory=lambda *_args: object(),
+        graph_factory=lambda *_args: graph,
+    )
+    reconciled = runtime._semantic_run(
+        request,
+        runtime_loader=_runtime_loader,
+        model_factory=lambda *_args: object(),
+        graph_factory=lambda *_args: graph,
+    )
+
+    assert first["status"] == "INTELLIGENCE_COMPLETED"
+    assert json.loads(first["raw"]) == envelope
+    assert reconciled == first
+    assert graph.calls == 1
+
+
+def test_transport_rejects_compiled_mutation_surface(tmp_path):
+    runtime = _external_runtime_module()
+    request = _semantic_runtime_request(tmp_path)
+    graph = _RuntimeGraph(
+        set(runtime.SEMANTIC_TOOLS) | {"write_file"},
+        output=_runtime_record("record_finding", {}),
+    )
+
+    result = runtime._semantic_run(
+        request,
+        runtime_loader=_runtime_loader,
+        model_factory=lambda *_args: object(),
+        graph_factory=lambda *_args: graph,
+    )
+
+    assert result["status"] == "OPEN_SWE_OUTCOME_UNKNOWN"
+    assert result["error"] == "RuntimeErrorBounded"
+    assert graph.calls == 0
+
+
+def test_hidden_mutation_call_is_not_accepted_as_semantic_result(tmp_path):
+    runtime = _external_runtime_module()
+    request = _semantic_runtime_request(tmp_path)
+    graph = _RuntimeGraph(
+        runtime.SEMANTIC_TOOLS,
+        output=_runtime_record("write_file", {"path": "forbidden"}),
+    )
+
+    result = runtime._semantic_run(
+        request,
+        runtime_loader=_runtime_loader,
+        model_factory=lambda *_args: object(),
+        graph_factory=lambda *_args: graph,
+    )
+
+    assert result["status"] == "OPEN_SWE_OUTCOME_UNKNOWN"
+    assert result["error"] == "RuntimeErrorBounded"
+    assert graph.calls == 1
+
+
+def test_ambiguous_graph_outcome_reconciles_without_second_invoke(tmp_path):
+    runtime = _external_runtime_module()
+    request = _semantic_runtime_request(tmp_path)
+    graph = _RuntimeGraph(runtime.SEMANTIC_TOOLS, error=TimeoutError("ambiguous"))
+
+    first = runtime._semantic_run(
+        request,
+        runtime_loader=_runtime_loader,
+        model_factory=lambda *_args: object(),
+        graph_factory=lambda *_args: graph,
+    )
+    reconciled = runtime._semantic_run(
+        request,
+        runtime_loader=_runtime_loader,
+        model_factory=lambda *_args: object(),
+        graph_factory=lambda *_args: graph,
+    )
+
+    assert first["status"] == "OPEN_SWE_OUTCOME_UNKNOWN"
+    assert first["outcome_unknown"] is True
+    assert reconciled == first
+    assert graph.calls == 1
+
+
+def test_missing_optional_runtime_fails_closed_at_transport_construction(tmp_path):
+    runtime = _external_runtime_module()
+    request = _semantic_runtime_request(tmp_path)
+
+    def missing_runtime():
+        raise ImportError("deepagents unavailable")
+
+    result = runtime._semantic_run(
+        request,
+        runtime_loader=missing_runtime,
+        model_factory=lambda *_args: object(),
+        graph_factory=lambda *_args: pytest.fail("graph must not be built without runtime"),
+    )
+
+    assert result["status"] == "OPEN_SWE_OUTCOME_UNKNOWN"
+    assert result["outcome_unknown"] is True
+    assert result["error"] == "ImportError"
+
+
+def test_open_swe_optional_dependency_contract_is_exactly_pinned():
+    nested = tomllib.loads(Path("runtimes/open_swe/pyproject.toml").read_text(encoding="utf-8"))
+    root = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+
+    assert nested["project"]["dependencies"] == [
+        "deepagents==0.7.6",
+        "google-genai==1.74.0",
+        "langchain-core==1.5.2",
+        "langchain-google-genai==4.3.2",
+    ]
+    assert "open-swe" not in root["project"].get("optional-dependencies", {})
+
+
+def test_real_deepagents_toolnode_is_physically_read_only_when_optional_extra_installed(tmp_path):
+    pytest.importorskip("deepagents")
+    runtime = _external_runtime_module()
+    assert runtime.SEMANTIC_TOOLS == frozenset(
+        {"glob", "grep", "ls", "read_file", "record_finding"}
+    )

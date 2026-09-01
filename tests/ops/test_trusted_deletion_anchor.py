@@ -211,6 +211,20 @@ def test_open_swe_dependency_snapshot_transition_is_retired_but_preserved_as_his
         )
 
 
+# Historical #683 exact-base node: retain the exact reverse-transition hashes as
+# evidence while proving that no active one-use transition remains authoritative.
+def test_open_swe_dependency_snapshot_transition_hashes_are_exact() -> None:
+    assert trusted_anchor.TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION is None
+    retired_pr, retired_hashes = trusted_anchor.RETIRED_TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION
+    assert retired_pr == 669
+    assert (*retired_hashes[2:], *retired_hashes[:2]) == (
+        "e52fc5fe9e76fca42299370641169e5ec3d6a59a765774deb1a77f38cd8eb246",
+        "cb5ecbb7fcce287f9bcdbb17f65a3b931f13613b6fd1608b428e1c19c5f6965a",
+        "c7d84dd5cbc4e533db65445ebb5691296f732d49f2fb39c6028745b18ca1d412",
+        "3e753af334885a2f434a94d40fc8860abd151516950e7f1e3647971f2e0dfc51",
+    )
+
+
 @pytest.mark.parametrize(
     ("name", "head", "head_lock", "product_init_is_regular"),
     [

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -358,3 +360,297 @@ def test_fanout_captures_external_open_swe_candidate_and_stops_before_acceptance
     ).hexdigest()
     with pytest.raises(ClosureError, match="OPEN_SWE_DIAGNOSIS_RECEIPT_INVALID"):
         validate_worker_receipt(stripped)
+
+
+# Exact-base lineage witnesses for worker behavior that moved into the external
+# runtime. These execute the runtime owner directly with injected fake graphs,
+# so the historical node IDs keep real behavioral oracles rather than aliases.
+def _external_runtime_module():
+    path = Path("runtimes/open_swe/nexus_open_swe_runtime/cli.py").resolve()
+    spec = importlib.util.spec_from_file_location("nexus_open_swe_runtime_compat_worker", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class _RuntimeGraph:
+    def __init__(self, surface, *, output=None, effect=None, error=None):
+        self.surface = tuple(surface)
+        self.output = output
+        self.effect = effect
+        self.error = error
+        self.calls = 0
+
+    def get_graph(self):
+        tools = {name: object() for name in self.surface}
+        data = SimpleNamespace(tools_by_name=tools)
+        return SimpleNamespace(nodes={"tools": SimpleNamespace(data=data)})
+
+    def invoke(self, _payload, config=None):
+        self.calls += 1
+        assert config in ({"recursion_limit": 40}, {"recursion_limit": 60})
+        if self.error is not None:
+            raise self.error
+        if self.effect is not None:
+            self.effect()
+        return self.output
+
+
+def _runtime_record(name: str, envelope: dict):
+    return {
+        "messages": [SimpleNamespace(tool_calls=[{"name": name, "args": {"envelope": envelope}}])]
+    }
+
+
+def _runtime_loader():
+    return {"human_message": lambda content: content}
+
+
+def _runtime_worker_request(tmp_path: Path) -> dict:
+    workspace, artifact = _artifact_and_workspace(tmp_path)
+    return {
+        "operation_id": "b" * 64,
+        "provider_id": "google_genai",
+        "model_id": "gemini-test",
+        "runtime_state_root": str(tmp_path / "runtime-state"),
+        "workspace_path": str(workspace),
+        "artifact_path": str(artifact),
+        "prompt": _prompt(),
+        "session_id": "",
+        "worker_identity_sha256": "c" * 64,
+    }
+
+
+def test_supported_root_cause_admits_one_bounded_candidate_repair(tmp_path):
+    runtime = _external_runtime_module()
+    request = _runtime_worker_request(tmp_path)
+    workspace = Path(request["workspace_path"])
+    diagnosis = _RuntimeGraph(
+        runtime.DIAGNOSIS_TOOLS,
+        output=_runtime_record(
+            "record_diagnosis",
+            {
+                "status": "ROOT_CAUSE_SUPPORTED",
+                "summary": "a.py contains the failing value",
+                "evidence_paths": ["a.py"],
+            },
+        ),
+    )
+    repair = _RuntimeGraph(
+        runtime.REPAIR_TOOLS,
+        output=_runtime_record("record_worker_result", {"summary": "repaired a.py"}),
+        effect=lambda: (workspace / "a.py").write_text("VALUE = 2\n", encoding="utf-8"),
+    )
+
+    result = runtime._worker_run(
+        request,
+        runtime_loader=_runtime_loader,
+        model_factory=lambda *_args: object(),
+        diagnosis_factory=lambda *_args: diagnosis,
+        repair_factory=lambda *_args: repair,
+    )
+
+    assert result["status"] == "COMPLETED"
+    assert result["diagnosis_status"] == "ROOT_CAUSE_SUPPORTED"
+    assert result["repair_admitted"] is True
+    assert result["repair_phase_count"] == 1
+    assert (workspace / "a.py").read_text(encoding="utf-8") == "VALUE = 2\n"
+    assert diagnosis.calls == 1
+    assert repair.calls == 1
+
+
+def test_inconclusive_diagnosis_blocks_without_invoking_repair(tmp_path):
+    runtime = _external_runtime_module()
+    request = _runtime_worker_request(tmp_path)
+    workspace = Path(request["workspace_path"])
+    diagnosis = _RuntimeGraph(
+        runtime.DIAGNOSIS_TOOLS,
+        output=_runtime_record(
+            "record_diagnosis",
+            {"status": "INCONCLUSIVE", "summary": "insufficient evidence", "evidence_paths": []},
+        ),
+    )
+    repair = _RuntimeGraph(
+        runtime.REPAIR_TOOLS,
+        output=_runtime_record("record_worker_result", {"summary": "must not run"}),
+    )
+
+    result = runtime._worker_run(
+        request,
+        runtime_loader=_runtime_loader,
+        model_factory=lambda *_args: object(),
+        diagnosis_factory=lambda *_args: diagnosis,
+        repair_factory=lambda *_args: repair,
+    )
+
+    assert result["status"] == "COMPLETED"
+    assert result["diagnosis_status"] == "INCONCLUSIVE"
+    assert result["repair_admitted"] is False
+    assert result["repair_phase_count"] == 0
+    assert json.loads(result["response_text"])["status"] == "BLOCKED"
+    assert (workspace / "a.py").read_text(encoding="utf-8") == "VALUE = 1\n"
+    assert diagnosis.calls == 1
+    assert repair.calls == 0
+
+
+def test_supported_diagnosis_without_physical_evidence_path_fails_closed(tmp_path):
+    runtime = _external_runtime_module()
+    request = _runtime_worker_request(tmp_path)
+    workspace = Path(request["workspace_path"])
+    diagnosis = _RuntimeGraph(
+        runtime.DIAGNOSIS_TOOLS,
+        output=_runtime_record(
+            "record_diagnosis",
+            {"status": "ROOT_CAUSE_SUPPORTED", "summary": "unsupported", "evidence_paths": []},
+        ),
+    )
+    repair = _RuntimeGraph(runtime.REPAIR_TOOLS, output={})
+
+    result = runtime._worker_run(
+        request,
+        runtime_loader=_runtime_loader,
+        model_factory=lambda *_args: object(),
+        diagnosis_factory=lambda *_args: diagnosis,
+        repair_factory=lambda *_args: repair,
+    )
+
+    assert result["status"] == "OPEN_SWE_OUTCOME_UNKNOWN"
+    assert result["outcome_unknown"] is True
+    assert result["error"] == "RuntimeErrorBounded"
+    assert (workspace / "a.py").read_text(encoding="utf-8") == "VALUE = 1\n"
+    assert diagnosis.calls == 1
+    assert repair.calls == 0
+
+
+def test_duplicate_diagnosis_records_fail_closed_without_repair(tmp_path):
+    runtime = _external_runtime_module()
+    request = _runtime_worker_request(tmp_path)
+    workspace = Path(request["workspace_path"])
+    duplicate = {
+        "messages": [
+            SimpleNamespace(
+                tool_calls=[
+                    {
+                        "name": "record_diagnosis",
+                        "args": {
+                            "envelope": {
+                                "status": "ROOT_CAUSE_SUPPORTED",
+                                "summary": "one",
+                                "evidence_paths": ["a.py"],
+                            }
+                        },
+                    },
+                    {
+                        "name": "record_diagnosis",
+                        "args": {
+                            "envelope": {
+                                "status": "ROOT_CAUSE_SUPPORTED",
+                                "summary": "two",
+                                "evidence_paths": ["a.py"],
+                            }
+                        },
+                    },
+                ]
+            )
+        ]
+    }
+    diagnosis = _RuntimeGraph(runtime.DIAGNOSIS_TOOLS, output=duplicate)
+    repair = _RuntimeGraph(runtime.REPAIR_TOOLS, output={})
+
+    result = runtime._worker_run(
+        request,
+        runtime_loader=_runtime_loader,
+        model_factory=lambda *_args: object(),
+        diagnosis_factory=lambda *_args: diagnosis,
+        repair_factory=lambda *_args: repair,
+    )
+
+    assert result["status"] == "OPEN_SWE_OUTCOME_UNKNOWN"
+    assert result["outcome_unknown"] is True
+    assert result["error"] == "RuntimeErrorBounded"
+    assert (workspace / "a.py").read_text(encoding="utf-8") == "VALUE = 1\n"
+    assert diagnosis.calls == 1
+    assert repair.calls == 0
+
+
+def test_ambiguous_repair_outcome_reconciles_without_blind_redispatch(tmp_path):
+    runtime = _external_runtime_module()
+    request = _runtime_worker_request(tmp_path)
+    diagnosis = _RuntimeGraph(
+        runtime.DIAGNOSIS_TOOLS,
+        output=_runtime_record(
+            "record_diagnosis",
+            {
+                "status": "ROOT_CAUSE_SUPPORTED",
+                "summary": "supported",
+                "evidence_paths": ["a.py"],
+            },
+        ),
+    )
+    repair = _RuntimeGraph(runtime.REPAIR_TOOLS, error=TimeoutError("ambiguous"))
+
+    first = runtime._worker_run(
+        request,
+        runtime_loader=_runtime_loader,
+        model_factory=lambda *_args: object(),
+        diagnosis_factory=lambda *_args: diagnosis,
+        repair_factory=lambda *_args: repair,
+    )
+    replay = runtime._worker_run(
+        request,
+        runtime_loader=_runtime_loader,
+        model_factory=lambda *_args: object(),
+        diagnosis_factory=lambda *_args: diagnosis,
+        repair_factory=lambda *_args: repair,
+    )
+
+    assert first["status"] == "OPEN_SWE_OUTCOME_UNKNOWN"
+    assert first["outcome_unknown"] is True
+    assert replay == first
+    assert diagnosis.calls == 1
+    assert repair.calls == 1
+
+
+def test_worker_transport_rejects_forbidden_graph_tool_surface(tmp_path):
+    runtime = _external_runtime_module()
+    request = _runtime_worker_request(tmp_path)
+    diagnosis = _RuntimeGraph(
+        set(runtime.DIAGNOSIS_TOOLS) | {"execute"},
+        output=_runtime_record(
+            "record_diagnosis",
+            {"status": "INCONCLUSIVE", "summary": "blocked", "evidence_paths": []},
+        ),
+    )
+    repair = _RuntimeGraph(runtime.REPAIR_TOOLS, output={})
+
+    result = runtime._worker_run(
+        request,
+        runtime_loader=_runtime_loader,
+        model_factory=lambda *_args: object(),
+        diagnosis_factory=lambda *_args: diagnosis,
+        repair_factory=lambda *_args: repair,
+    )
+
+    assert result["status"] == "OPEN_SWE_OUTCOME_UNKNOWN"
+    assert result["outcome_unknown"] is True
+    assert result["error"] == "RuntimeErrorBounded"
+    assert diagnosis.calls == 0
+    assert repair.calls == 0
+
+
+def test_fanout_captures_open_swe_candidate_and_stops_before_acceptance(tmp_path, monkeypatch):
+    test_fanout_captures_external_open_swe_candidate_and_stops_before_acceptance(
+        tmp_path, monkeypatch
+    )
+
+
+def test_real_deepagents_worker_graphs_have_exact_physical_surfaces(tmp_path):
+    pytest.importorskip("deepagents")
+    runtime = _external_runtime_module()
+    assert runtime.DIAGNOSIS_TOOLS == frozenset(
+        {"glob", "grep", "ls", "read_file", "record_diagnosis"}
+    )
+    assert runtime.REPAIR_TOOLS == frozenset(
+        {"edit_file", "glob", "grep", "ls", "read_file", "record_worker_result", "write_file"}
+    )

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
 import json
 import os
 import subprocess
@@ -301,6 +302,34 @@ def test_load_config_rejects_empty_open_swe_external_executable(tmp_path):
 
     with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_EXECUTABLE_REQUIRED"):
         load_config(config_path)
+
+
+# Historical exact-base node retained across the in-process -> external-runtime
+# ownership move. A missing external runtime remains fail-closed at construction.
+def test_build_automation_fails_closed_when_open_swe_optional_runtime_is_missing(
+    tmp_path, monkeypatch
+):
+    module = importlib.import_module("nexus.services.open_swe_external_intelligence")
+
+    class MissingOpenSWETransport:
+        def __init__(self, **_kwargs):
+            raise module.OpenSWEExternalIntelligenceError("OPEN_SWE_RUNTIME_NOT_FOUND")
+
+    monkeypatch.setattr(
+        service_module,
+        "OpenSWEExternalIntelligenceTransport",
+        MissingOpenSWETransport,
+        raising=False,
+    )
+    config = _config(
+        tmp_path,
+        semantic_backend="open_swe",
+        open_swe_model_provider="google_genai",
+        open_swe_model="gemini-test",
+    )
+
+    with pytest.raises(ServiceError, match="OPEN_SWE_RUNTIME_NOT_FOUND"):
+        build_automation(config, "o/r")
 
 
 def test_run_once_processes_at_most_one_issue_and_publishes_compact_result(tmp_path):
