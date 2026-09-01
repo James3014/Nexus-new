@@ -410,7 +410,8 @@ def test_complete_identity_reuses_without_external_calls(tmp_path):
     assert len(sidecar.calls) == len(c.calls) == len(d.calls) == 1
 
 
-def test_recoverable_fanout_dispatching_state_resumes_pipeline(tmp_path):
+@pytest.mark.parametrize("state", ["INTELLIGENCE_DISPATCHING", "FANOUT_DISPATCHING"])
+def test_recoverable_dispatching_state_resumes_pipeline(tmp_path, state):
     repo, card, contract, body, store = _setup(tmp_path)
     sidecar = FakeSidecar(store)
     c = FakeC()
@@ -418,7 +419,7 @@ def test_recoverable_fanout_dispatching_state_resumes_pipeline(tmp_path):
     automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
     item = IssueWorkItem("o/r", 7, "title", body, contract)
     effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
-    automation.state_store.save(item, "FANOUT_DISPATCHING", intelligence_effect_id=effect_id)
+    automation.state_store.save(item, state, intelligence_effect_id=effect_id)
 
     result = automation.run_issue("o/r", 7, "title", body)
 
