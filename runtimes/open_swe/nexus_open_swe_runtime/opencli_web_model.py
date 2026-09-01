@@ -97,6 +97,7 @@ class OpenCLIWebChatModel(BaseChatModel):
     site_session: str = "ephemeral"
     disable_streaming: bool = True
     _conversation_id: str | None = PrivateAttr(default=None)
+    _intelligence_level_selected: bool = PrivateAttr(default=False)
 
     @property
     def model_name(self) -> str:
@@ -162,6 +163,8 @@ class OpenCLIWebChatModel(BaseChatModel):
         return result.stdout or ""
 
     def _select_intelligence_level(self) -> None:
+        if self._intelligence_level_selected:
+            return
         if self.intelligence_level not in _ALLOWED_LEVELS:
             raise OpenCLIWebModelError("OPENCLI_WEB_MODEL_LEVEL_INVALID")
         self._run([
@@ -174,6 +177,7 @@ class OpenCLIWebChatModel(BaseChatModel):
             "-f",
             "json",
         ])
+        self._intelligence_level_selected = True
 
     def _render_prompt(
         self,
