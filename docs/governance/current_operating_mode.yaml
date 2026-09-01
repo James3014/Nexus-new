@@ -1,0 +1,39 @@
+schema: nexus.operating_mode.v1
+mode: BOOTSTRAP
+
+# This file supplies the default engineering execution lane for new work only.
+# It does not select a CapabilityPlanner route, worker, model, verifier, approval,
+# integration, release, or production authority.
+effective_scope:
+  - nexus-core
+  - open-swe
+  - learning-wiring
+
+default_execution:
+  primary_bounded_work: DIRECT_CANONICAL
+  delegated_bounded_work: DIRECT_DELEGATED
+
+task_card_required_by_default: false
+auto_chain: false
+
+transition:
+  existing_active_work: PRESERVE_CURRENT_EXECUTION_CONTRACT_UNTIL_COMPLETION
+  new_work: READ_CURRENT_OPERATING_MODE
+  successor_work: READ_CURRENT_OPERATING_MODE
+
+escalate_to_governed_when:
+  - nexus_lifecycle_or_candidate_authority_required
+  - route_or_capability_authority_change
+  - workforce_authority_change
+  - security_boundary_weakening
+  - migration_or_schema_authority_change
+  - production_data_mutation_authority
+  - protected_integration_or_ref_operation
+  - release_or_public_production_claim
+
+fail_closed:
+  missing_invalid_or_ambiguous_mode: REQUIRE_EXPLICIT_CURRENT_OWNER_LANE
+
+principles:
+  - GOVERNANCE_INTENSITY_SCALES_WITH_CLAIM_AND_CONSEQUENCE
+  - OPERATING_MODE_SELECTS_ENGINEERING_EXECUTION_LANE_NOT_CAPABILITYPLANNER_ROUTE

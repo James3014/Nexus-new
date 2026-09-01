@@ -15,9 +15,19 @@ Scope: all coding agents.
   `tasks/<campaign-id>/`.
 - `MUSE_PROTO.md` is response/domain overlay, never mutation authority.
 
-The Owner chooses the execution lane; defaults/skills cannot relabel it, and
-`auto` is not direct authority. Lane governs authorization, not correctness:
-source behavior, tests, and required verifiers remain authoritative.
+For new work, read `docs/governance/current_operating_mode.yaml` before
+choosing an execution lane. Within the file's declared scope, its default lane
+selection applies unless the work crosses a listed governed-escalation boundary
+or the Owner explicitly selects a different lane. Existing active work keeps its
+current execution contract until completion; it does not switch lanes mid-task.
+If the operating-mode file is missing, invalid, or ambiguous, fail closed to an
+explicit current Owner lane decision rather than guessing.
+
+The operating mode selects only the engineering execution lane. It cannot select
+or override a `CapabilityPlanner` route/capability, worker/model eligibility,
+verification, approval, integration, release, or production authority. Lane
+governs authorization, not correctness: source behavior, tests, and required
+verifiers remain authoritative.
 
 ## Repository collaboration authority (GitHub)
 
