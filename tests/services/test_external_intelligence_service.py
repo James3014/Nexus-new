@@ -866,6 +866,46 @@ def test_plist_derives_logs_from_state_root(tmp_path):
     assert "/dev/null" not in xml
 
 
+def test_start_waits_for_launchd_bootout_to_converge_before_bootstrap(tmp_path, monkeypatch):
+    plist = tmp_path / "service.plist"
+    plist.write_text("plist", encoding="utf-8")
+    monkeypatch.setattr(service_module, "install", lambda _config: plist)
+
+    calls = []
+    print_count = 0
+
+    def launchctl(*args):
+        nonlocal print_count
+        calls.append(args)
+        if args[0] == "bootout":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+        if args[0] == "print":
+            print_count += 1
+            if print_count < 3:
+                return subprocess.CompletedProcess(
+                    ["launchctl", *args], 0, "state = running\n", ""
+                )
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 113, "", "Could not find service"
+            )
+        if args[0] == "bootstrap":
+            return subprocess.CompletedProcess(
+                ["launchctl", *args],
+                0 if print_count >= 3 else 5,
+                "",
+                "" if print_count >= 3 else "Bootstrap failed: 5: Input/output error",
+            )
+        raise AssertionError(args)
+
+    monkeypatch.setattr(service_module, "_launchctl", launchctl)
+    monkeypatch.setattr(service_module.time, "sleep", lambda _seconds: None)
+
+    result = service_module.start(tmp_path / "config.json")
+
+    assert result.returncode == 0
+    assert [call[0] for call in calls] == ["bootout", "print", "print", "print", "bootstrap"]
+
+
 def test_service_receipt_is_atomic_restrictive_and_identity_bound(tmp_path):
     path = tmp_path / "state" / "service" / "daemon.json"
     write_service_receipt(
