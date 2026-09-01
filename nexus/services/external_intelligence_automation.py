@@ -14,6 +14,9 @@ from nexus.services.external_intelligence import (
     ExternalIntelligenceError,
     ExternalIntelligenceSidecar,
     ExternalIntelligenceStore,
+    build_context_pack,
+    build_request,
+    normalize_intake,
     validate_selected_worker,
 )
 from nexus.services.external_intelligence_closure import (
@@ -662,6 +665,16 @@ class ExternalIntelligenceAutomation:
 
         return sources
 
+    def _intelligence_effect_id(self, item: IssueWorkItem, task_card_text: str) -> str:
+        intake = normalize_intake(self._record(item))
+        context_pack = build_context_pack(self._sources(item, task_card_text))
+        request = build_request(
+            intake,
+            context_pack,
+            selected_worker=item.contract.get("selected_worker"),
+        )
+        return str(request["request_sha256"])
+
     def _c_units(
         self, item: IssueWorkItem, intelligence: Mapping[str, Any]
     ) -> list[dict[str, Any]]:
@@ -728,8 +741,6 @@ class ExternalIntelligenceAutomation:
             if previous_state == "BLOCKED" and bool(previous.get("semantic_dispatched")):
                 return {**previous, "reuse": True, "semantic_dispatched": True}
             if previous_state == "RECONCILIATION_REQUIRED":
-                if previous.get("reconcile_only"):
-                    return {**previous, "reuse": True, "semantic_dispatched": True}
                 prior_state = str(previous.get("prior_state") or "")
                 if prior_state not in {"INTELLIGENCE_DISPATCHING", "FANOUT_DISPATCHING"}:
                     return {**previous, "semantic_dispatched": True}
@@ -762,7 +773,47 @@ class ExternalIntelligenceAutomation:
             _, task_card_text = self._task_card(contract)
             self._validate_task_card_authority(contract, task_card_text)
             record = self._record(item)
-            self.state_store.save(item, "INTELLIGENCE_DISPATCHING")
+            intake = normalize_intake(record)
+            intelligence_effect_id = (
+                self._intelligence_effect_id(item, task_card_text)
+                if intake["disposition"] == "EXECUTABLE"
+                else None
+            )
+            prior_intelligence_state = resume_from in {
+                "INTELLIGENCE_DISPATCHING",
+                "FANOUT_DISPATCHING",
+            } or (
+                previous is not None
+                and str(previous.get("state") or "") == "RECONCILIATION_REQUIRED"
+                and str(previous.get("prior_state") or "") in {
+                    "INTELLIGENCE_DISPATCHING",
+                    "FANOUT_DISPATCHING",
+                }
+            )
+            if prior_intelligence_state:
+                persisted_effect_id = previous.get("intelligence_effect_id") if previous else None
+                if not persisted_effect_id:
+                    return self.state_store.save(
+                        item,
+                        "RECONCILIATION_REQUIRED",
+                        prior_state=resume_from,
+                        error="INTELLIGENCE_DISPATCH_BINDING_MISSING",
+                        reconcile_only=True,
+                        semantic_dispatched=True,
+                    )
+                if persisted_effect_id != intelligence_effect_id:
+                    return self.state_store.save(
+                        item,
+                        "RECONCILIATION_REQUIRED",
+                        prior_state=resume_from,
+                        error="INTELLIGENCE_DISPATCH_BINDING_MISMATCH",
+                        reconcile_only=True,
+                        semantic_dispatched=True,
+                    )
+            dispatch_state = {}
+            if intelligence_effect_id is not None:
+                dispatch_state["intelligence_effect_id"] = intelligence_effect_id
+            self.state_store.save(item, "INTELLIGENCE_DISPATCHING", **dispatch_state)
             sidecar_kwargs = {}
             if contract.get("selected_worker") is not None:
                 sidecar_kwargs["selected_worker"] = contract["selected_worker"]
@@ -780,19 +831,31 @@ class ExternalIntelligenceAutomation:
                     semantic_dispatched=False,
                 )
             dispatched = True
-            self.state_store.save(
-                item,
-                "INTELLIGENCE_COMPLETED",
-                intelligence_receipt_id=intelligence.get("receipt_id"),
-            )
+            completed_state = {"intelligence_receipt_id": intelligence.get("receipt_id")}
+            if intelligence_effect_id is not None:
+                completed_state["intelligence_effect_id"] = intelligence_effect_id
+            self.state_store.save(item, "INTELLIGENCE_COMPLETED", **completed_state)
 
             units = self._c_units(item, intelligence)
-            self.state_store.save(item, "FANOUT_DISPATCHING")
+            self.state_store.save(
+                item,
+                "FANOUT_DISPATCHING",
+                intelligence_effect_id=intelligence_effect_id,
+            )
             fanout = self.c_runtime.run(units, self.capacity_factory(contract))
             receipts = self._valid_receipts(fanout, {unit["unit_id"] for unit in units})
-            self.state_store.save(item, "FANOUT_COMPLETED", run_sha256=fanout.get("run_sha256"))
+            self.state_store.save(
+                item,
+                "FANOUT_COMPLETED",
+                intelligence_effect_id=intelligence_effect_id,
+                run_sha256=fanout.get("run_sha256"),
+            )
 
-            self.state_store.save(item, "CLOSURE_DISPATCHING")
+            self.state_store.save(
+                item,
+                "CLOSURE_DISPATCHING",
+                intelligence_effect_id=intelligence_effect_id,
+            )
             closure = self.d_runtime.close_task(
                 main_sha=str(contract["main_sha"]),
                 unit_receipts=receipts,
@@ -836,6 +899,7 @@ class ExternalIntelligenceAutomation:
             return self.state_store.save(
                 item,
                 "COMPLETE",
+                intelligence_effect_id=intelligence_effect_id,
                 intelligence_receipt_id=intelligence.get("receipt_id"),
                 fanout_run_sha256=fanout.get("run_sha256"),
                 closure_run_id=closure.get("run_id"),
@@ -854,6 +918,7 @@ class ExternalIntelligenceAutomation:
                     item,
                     "RECONCILIATION_REQUIRED",
                     prior_state=current.get("state"),
+                    intelligence_effect_id=current.get("intelligence_effect_id"),
                     error=type(exc).__name__,
                     reconcile_only=True,
                     semantic_dispatched=dispatched,

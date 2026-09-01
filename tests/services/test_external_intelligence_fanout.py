@@ -429,6 +429,117 @@ def test_store_journals_before_dispatch_and_blocks_blind_replay(tmp_path):
         store.prepare_initial(parsed, workspace)
 
 
+def test_fanout_dispatching_fence_rejects_changed_unit_binding_without_provider_call(tmp_path):
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py"])
+    parsed = ExecutionUnit.from_mapping(unit(base, envelope, envelope_sha, "ua", ["a.py"]))
+    allocator = GitWorktreeAllocator(repo, tmp_path / "workspaces")
+    workspace = allocator.allocate(parsed)
+    store = FanoutStore(tmp_path / "state")
+    store.mark_dispatching(store.prepare_initial(parsed, workspace))
+    changed_envelope = tmp_path / "changed-envelope.json"
+    changed_sha = make_envelope(changed_envelope, base, allowed=["a.py"], marker="changed")
+    changed = ExecutionUnit.from_mapping(
+        unit(base, changed_envelope, changed_sha, "ua", ["a.py"])
+    )
+
+    class NoInvokeTransport:
+        def run_new(self, **kwargs):
+            raise AssertionError("changed binding must not invoke provider")
+
+        def reconcile_workspace(self, **kwargs):
+            raise AssertionError("changed binding must not reconcile stale unit")
+
+    runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=allocator, store=store, transport=NoInvokeTransport()
+    )
+    with pytest.raises(FanoutError, match="FANOUT_ATTEMPT_IDENTITY_MISMATCH"):
+        runtime.run([changed], CapacityLease(1, 1, 1, 1))
+
+
+def test_same_fanout_binding_resumes_lower_per_unit_reconcile(tmp_path):
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py"])
+    parsed = ExecutionUnit.from_mapping(unit(base, envelope, envelope_sha, "ua", ["a.py"]))
+    allocator = GitWorktreeAllocator(repo, tmp_path / "workspaces")
+    store = FanoutStore(tmp_path / "state")
+    workspace = allocator.allocate(parsed)
+    store.mark_dispatching(store.prepare_initial(parsed, workspace))
+
+    class ReconcileOnlyTransport:
+        run_new_calls = 0
+        reconcile_calls = 0
+
+        def run_new(self, **kwargs):
+            self.run_new_calls += 1
+            raise AssertionError("persisted dispatching unit must not start again")
+
+        def reconcile_workspace(self, *, workspace_path):
+            self.reconcile_calls += 1
+            return completed_result("task-1", "ua", "ses_reconciled_00000000", workspace_path)
+
+    transport = ReconcileOnlyTransport()
+    runtime = AdaptiveDeepSeekFanoutRuntime(allocator=allocator, store=store, transport=transport)
+    result = runtime.run([parsed], CapacityLease(1, 1, 1, 1))
+
+    assert result["errors"] == {}
+    assert transport.run_new_calls == 0
+    assert transport.reconcile_calls == 1
+
+
+def test_unknown_fanout_unit_does_not_block_independent_new_sibling(tmp_path):
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py", "b.py"])
+    args = [
+        unit(base, envelope, envelope_sha, "ua", ["a.py"]),
+        unit(base, envelope, envelope_sha, "ub", ["b.py"]),
+    ]
+
+    class MixedTransport(EditingTransport):
+        def run_new(self, **kwargs):
+            unit_id = self._field(kwargs["prompt"], "unit_id")
+            if unit_id == "ua":
+                self.prompts[unit_id] = kwargs["prompt"]
+                self.sessions[unit_id] = "ses_unknown_ua_00000000"
+                return OpenCodeRunResult(
+                    status="OPENCODE_OUTCOME_UNKNOWN",
+                    process_started=True,
+                    outcome_unknown=True,
+                    retry_safe=False,
+                )
+            return super().run_new(**kwargs)
+
+    transport = MixedTransport()
+    allocator = GitWorktreeAllocator(repo, tmp_path / "workspaces")
+    store = FanoutStore(tmp_path / "state")
+    first = AdaptiveDeepSeekFanoutRuntime(allocator=allocator, store=store, transport=transport).run(
+        args, CapacityLease(2, 2, 2, 2)
+    )
+    assert first["errors"]["ua"] == "FANOUT_RECONCILIATION_REQUIRED"
+    assert first["receipts"]["ub"]["status"] == "CANDIDATE_READY_FOR_VERIFICATION"
+
+    class ResumeTransport(EditingTransport):
+        reconcile_calls = 0
+
+        def run_new(self, **kwargs):
+            raise AssertionError("only the unknown unit may reconcile")
+
+        def reconcile_workspace(self, *, workspace_path):
+            self.reconcile_calls += 1
+            return completed_result("task-1", "ua", "ses_unknown_ua_00000000", workspace_path)
+
+    resumed = ResumeTransport()
+    second = AdaptiveDeepSeekFanoutRuntime(
+        allocator=allocator, store=store, transport=resumed
+    ).run(args, CapacityLease(2, 2, 2, 2))
+    assert second["errors"] == {}
+    assert set(second["receipts"]) == {"ua", "ub"}
+    assert resumed.reconcile_calls == 1
+
+
 def test_session_binding_forbids_cross_unit_reuse(tmp_path):
     store = FanoutStore(tmp_path / "state")
     session = "ses_test_owner_00000000"
