@@ -35,10 +35,12 @@ RUNTIME_FILENAMES = ("runtime.tar", "runtime-metadata.json", "requirements.txt")
 GOLDEN_EVALUATOR_PATH = "scripts/ops/run_golden_behavior_eval.py"
 PYTEST_PLUGINS = ["pytest", "pytest_asyncio", "pytest_timeout"]
 UV_VERSION = "uv 0.9.2"
-# One-use, four-way binding for the Owner-approved TASK-001 Open SWE
-# optional-dependency transition. It authorizes neither endpoint with any
-# other baseline/head bytes and provides no package-name or version wildcard.
-TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION = (
+# Historical one-use, four-way binding for the Owner-approved TASK-001 Open SWE
+# optional-dependency transition. The corrective external-runtime architecture
+# restored the root dependency contract to the trusted baseline, so this
+# transition is retained only as immutable historical evidence and is no longer
+# admitted by the active validator.
+RETIRED_TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION = (
     669,
     (
         "c7d84dd5cbc4e533db65445ebb5691296f732d49f2fb39c6028745b18ca1d412",
@@ -47,6 +49,7 @@ TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION = (
         "cb5ecbb7fcce287f9bcdbb17f65a3b931f13613b6fd1608b428e1c19c5f6965a",
     ),
 )
+TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] | None = None
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
     "status",
@@ -120,13 +123,15 @@ def _validate_trusted_dependency_contract(
         _sha(head_pyproject),
         _sha(head_uv_lock),
     )
-    authorized_pr, authorized_transition = TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION
-    if (
-        pull_request_number == authorized_pr
-        and transition == authorized_transition
-        and head_product_init_is_regular
-    ):
-        return
+    authorized_transition_record = TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION
+    if authorized_transition_record is not None:
+        authorized_pr, authorized_transition = authorized_transition_record
+        if (
+            pull_request_number == authorized_pr
+            and transition == authorized_transition
+            and head_product_init_is_regular
+        ):
+            return
     if head_uv_lock != trusted_uv_lock:
         raise ValueError(error)
     if head_pyproject == trusted_pyproject:

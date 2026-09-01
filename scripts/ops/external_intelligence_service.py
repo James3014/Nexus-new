@@ -85,6 +85,7 @@ class ServiceConfig:
     semantic_backend: str = "opencli"
     open_swe_model_provider: str = ""
     open_swe_model: str = ""
+    open_swe_executable: str = "nexus-open-swe-runtime"
     worker_backend: str = "opencode"
     opencode_executable: str = "opencode"
     publication_enabled: bool = True
@@ -439,6 +440,7 @@ def load_config(path: str | os.PathLike[str]) -> ServiceConfig:
         "semantic_backend",
         "open_swe_model_provider",
         "open_swe_model",
+        "open_swe_executable",
         "worker_backend",
         "opencode_executable",
         "publication_enabled",
@@ -458,6 +460,7 @@ def load_config(path: str | os.PathLike[str]) -> ServiceConfig:
         raise ServiceError("CONFIG_WORKER_BACKEND_INVALID")
     open_swe_provider = raw.get("open_swe_model_provider", "")
     open_swe_model = raw.get("open_swe_model", "")
+    open_swe_executable = raw.get("open_swe_executable", "nexus-open-swe-runtime")
     if (
         not isinstance(open_swe_provider, str)
         or not isinstance(open_swe_model, str)
@@ -467,6 +470,8 @@ def load_config(path: str | os.PathLike[str]) -> ServiceConfig:
         )
     ):
         raise ServiceError("CONFIG_OPEN_SWE_MODEL_BINDING_REQUIRED")
+    if not isinstance(open_swe_executable, str) or not open_swe_executable.strip():
+        raise ServiceError("CONFIG_OPEN_SWE_EXECUTABLE_REQUIRED")
     repos = raw.get("repositories")
     roots = raw.get("repository_roots")
     if (
@@ -590,6 +595,8 @@ def build_automation(config: ServiceConfig, repository: str) -> ExternalIntellig
                 repository_root=repo_root,
                 model_provider=config.open_swe_model_provider,
                 model_id=config.open_swe_model,
+                executable=config.open_swe_executable,
+                runtime_state_root=config.state_root / "open_swe_runtime",
             )
         except OpenSWEExternalIntelligenceError as exc:
             raise ServiceError(str(exc)) from exc
@@ -604,6 +611,8 @@ def build_automation(config: ServiceConfig, repository: str) -> ExternalIntellig
             worker_transport = OpenSWEWorkerTransport(
                 model_provider=config.open_swe_model_provider,
                 model_id=config.open_swe_model,
+                executable=config.open_swe_executable,
+                runtime_state_root=config.state_root / "open_swe_runtime",
                 require_worker_binding=True,
             )
         except OpenSWEExternalIntelligenceError as exc:
