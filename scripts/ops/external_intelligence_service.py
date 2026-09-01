@@ -1065,10 +1065,33 @@ def _launchctl(*args: str):
     )
 
 
+def _wait_for_launchd_absent(
+    domain: str,
+    *,
+    timeout_seconds: float = 5.0,
+    poll_seconds: float = 0.05,
+) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    target = f"{domain}/{SERVICE_LABEL}"
+    while True:
+        if _launchctl("print", target).returncode != 0:
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(poll_seconds)
+
+
 def start(config_path: str | os.PathLike[str]):
     plist = install(config_path)
     domain = f"gui/{os.getuid()}"
     _launchctl("bootout", f"{domain}/{SERVICE_LABEL}")
+    if not _wait_for_launchd_absent(domain):
+        return subprocess.CompletedProcess(
+            ["launchctl", "bootstrap", domain, str(plist)],
+            75,
+            "",
+            "LaunchAgent bootout did not converge before bootstrap",
+        )
     return _launchctl("bootstrap", domain, str(plist))
 
 
