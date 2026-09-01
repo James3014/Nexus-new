@@ -49,13 +49,59 @@ def test_bootstrap_files_use_current_worktree_authority():
     assert "../GEMINI.md" in contents[".gemini/GEMINI.md"]
 
 
+def test_current_operating_mode_bootstrap_is_direct_first_and_fail_closed():
+    import yaml
+
+    agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    mode_path = ROOT / "docs/governance/current_operating_mode.yaml"
+    mode = yaml.safe_load(mode_path.read_text(encoding="utf-8"))
+
+    assert mode["schema"] == "nexus.operating_mode.v1"
+    assert mode["mode"] == "BOOTSTRAP"
+    assert mode["effective_scope"] == ["nexus-core", "open-swe", "learning-wiring"]
+    assert mode["default_execution"]["primary_bounded_work"] == "DIRECT_CANONICAL"
+    assert mode["default_execution"]["delegated_bounded_work"] == "DIRECT_DELEGATED"
+    assert mode["task_card_required_by_default"] is False
+    assert mode["auto_chain"] is False
+    assert (
+        mode["transition"]["existing_active_work"]
+        == "PRESERVE_CURRENT_EXECUTION_CONTRACT_UNTIL_COMPLETION"
+    )
+    assert mode["transition"]["new_work"] == "READ_CURRENT_OPERATING_MODE"
+    assert mode["transition"]["successor_work"] == "READ_CURRENT_OPERATING_MODE"
+    assert (
+        mode["fail_closed"]["missing_invalid_or_ambiguous_mode"]
+        == "REQUIRE_EXPLICIT_CURRENT_OWNER_LANE"
+    )
+
+    escalation = set(mode["escalate_to_governed_when"])
+    for required in (
+        "nexus_lifecycle_or_candidate_authority_required",
+        "route_or_capability_authority_change",
+        "workforce_authority_change",
+        "security_boundary_weakening",
+        "migration_or_schema_authority_change",
+        "production_data_mutation_authority",
+        "protected_integration_or_ref_operation",
+        "release_or_public_production_claim",
+    ):
+        assert required in escalation
+
+    assert "read `docs/governance/current_operating_mode.yaml`" in agents.lower()
+    assert "Existing active work keeps its\ncurrent execution contract until completion" in agents
+    assert "does not switch lanes mid-task" in agents
+    assert "fail closed to an\nexplicit current Owner lane decision" in agents
+    assert "cannot select\nor override a `CapabilityPlanner` route/capability" in agents
+
+
 def test_execution_domains_and_candidate_namespaces_are_unambiguous():
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(encoding="utf-8")
     launch = (ROOT / ".agents/skills/nexus-task-launch/SKILL.md").read_text(encoding="utf-8")
     merge = (ROOT / ".agents/skills/nexus-merge-gate/SKILL.md").read_text(encoding="utf-8")
 
-    assert "The Owner chooses the execution lane" in agents
+    assert "current_operating_mode.yaml" in agents
+    assert "the Owner explicitly selects a different lane" in agents
     assert "does not select local lifecycle" in agents
     assert "A GitHub PR Candidate" in agents
     assert "a local lifecycle Candidate" in agents
