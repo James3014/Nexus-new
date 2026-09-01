@@ -6,6 +6,8 @@
 - **Supersedes:** the proposed custom semantic/diagnosis/repair LLM graph portion of `RI Agent Automation V1`; no existing Nexus governance authority is superseded.
 - **Claim ceiling:** this specification may authorize bounded productionization Candidates only; it does not prove activation, production readiness, OpenCLI retirement, merge/release authority, or portable sandbox readiness.
 
+> **Corrective topology overlay — 2026-09-01:** A later Owner corrective handoff supersedes any interpretation in this historical specification that requires Nexus Core to host Deep Agents/Open SWE in-process or to own their dependency graph. The current binding topology is `Nexus thin typed client -> external nexus-open-swe-runtime process -> structured result/Candidate`, governed by `tasks/open-swe-execution-productionization-v1/OPEN_SWE_EXTERNAL_RUNTIME_CORRECTIVE_CONTRACT.md`. Historical Pilot/import mechanics and the one-time trusted dependency transition remain evidence/history, not production-topology authority. Open SWE remains non-default until a fresh activation decision after the corrective architecture is independently accepted.
+
 ## 1. Problem statement
 
 Nexus already has durable External Intelligence orchestration, Task Card authority validation, queue/replay/reconciliation state, worker fanout, Candidate verification/closure, and GitHub controller boundaries. The remaining automation plan would otherwise duplicate semantic-review, diagnosis, and repair LLM graph runtime that Open SWE / Deep Agents can execute.
@@ -14,7 +16,7 @@ The replacement pilot proved a bounded real semantic -> diagnosis -> repair chai
 
 ## 2. Desired outcome
 
-Nexus SHALL use Open SWE / Deep Agents as an optional execution runtime behind existing Nexus control-plane authority. The initial productionized path SHALL be non-default, feature/config gated, preserve the OpenCLI control arm, and fail closed. Nexus SHALL continue to own RI, CapabilityPlanner routing, Workforce Admission, queue/replay/reconciliation, credential brokering, GitHub mutation, independent Candidate verification/acceptance, and merge/release authority.
+Nexus SHALL use Open SWE / Deep Agents as an **external** optional execution runtime behind existing Nexus control-plane authority. Nexus SHALL communicate through a thin typed process/protocol client; Deep Agents/Open SWE graph/runtime internals and their provider dependencies SHALL remain outside the Nexus Core Python dependency/process domain. The initial productionized path SHALL be non-default, feature/config gated, preserve the OpenCLI control arm, and fail closed. Nexus SHALL continue to own RI, CapabilityPlanner routing, Workforce Admission, queue/replay/reconciliation, credential brokering, GitHub mutation, independent Candidate verification/acceptance, and merge/release authority.
 
 ## 3. Basis, coverage, and freshness
 
@@ -23,7 +25,7 @@ Nexus SHALL use Open SWE / Deep Agents as an optional execution runtime behind e
 - Current `build_automation()` constructs `ExternalIntelligenceSidecar` with `OpenCLIExternalIntelligenceTransport`; `ExternalIntelligenceAutomation` already owns durable automation state and separates semantic intelligence, fanout, closure, and publication preparation.
 - Pilot Candidate `764333bcbed67e5b83870d5ceeb8e9d70f7e749f` has tree `77b10be6c19b89d3ffdcabbf46e7a6fd102a77eb` and final report SHA-256 `a5974e19995ba87aad6982e48fa9dd845a95ee842869f67e8e5d2012fd034b7b`.
 - Independent re-verification on the exact Candidate, using Nexus verifier Python plus the pinned Open SWE environment site-packages, produced `45 passed, 1 skipped`, Ruff PASS, Pyright 0 errors/0 warnings, Bandit PASS, and `git diff --check` PASS.
-- The first independent run also proved a packaging gap: the canonical Nexus `.venv` does not contain `deepagents`; productionization must install/pin dependencies rather than depend on `/private/tmp` or ad-hoc `PYTHONPATH`.
+- The first independent run proved a deployment-boundary signal: the canonical Nexus `.venv` does not contain `deepagents`; corrective architecture keeps that property and installs/pins Deep Agents/Open SWE dependencies in the dedicated external runtime dependency domain rather than in Nexus Core or via `/private/tmp`/ad-hoc `PYTHONPATH`.
 - Pilot package identities: `deepagents 0.7.6`, `langchain-google-genai 4.3.2`, `langchain-core 1.5.2`, `google-genai 1.74.0`; Open SWE package `0.1.0`, MIT.
 - GitHub PR #664 was independently re-read as closed, unmerged, with final head `06d4f27f8fc8b6ec2403d5c805105665698569c4`.
 - Portable remote sandbox, crash recovery under Open SWE execution, and statistically meaningful reviewer-quality comparison remain unproven.
@@ -67,7 +69,7 @@ The Open SWE pilot is not production code. It is evidence that a Nexus-side adap
 
 ## 7. Canonical terminology
 
-- **Open SWE execution adapter:** Nexus-owned adapter using Open SWE / Deep Agents public execution seams; not upstream default reviewer configuration and not a fork.
+- **Open SWE execution adapter:** Nexus-owned **thin external-runtime client** that speaks a versioned request/result protocol to the Open SWE / Deep Agents runtime; it does not host Deep Agents graphs in the Nexus process, import upstream runtime internals into Core, or act as a fork/controller.
 - **Control arm:** existing OpenCLI semantic path kept operational during adoption.
 - **Activation:** changing production default routing/config to prefer Open SWE. Activation is outside the first implementation card.
 - **Portable sandbox:** credential-isolated execution environment not dependent on macOS Seatbelt.
@@ -104,9 +106,9 @@ None.
 
 Included:
 
-- optional Open SWE semantic transport/graph adapter;
+- optional Open SWE semantic external-runtime transport/client;
 - explicit default-off configuration with OpenCLI default preserved;
-- pinned optional dependencies and reproducible environment checks;
+- dedicated `runtimes/open_swe` dependency domain with pinned/reproducible runtime dependencies;
 - physically read-only semantic tool surface;
 - existing request/attempt/reconcile semantics preserved;
 - later bounded diagnosis/repair adapter integration;
@@ -151,8 +153,11 @@ ExternalIntelligenceAutomation
           `---- semantic_backend=open_swe (DEFAULT-OFF)
                     |
                     v
-             Deep Agents graph
-          read-only semantic tools
+          thin typed process client
+                    |
+                    v
+       external nexus-open-swe-runtime
+          Deep Agents bounded graphs
 
 Later phase:
 ExternalIntelligenceAutomation
@@ -211,17 +216,17 @@ Open SWE describes/executes bounded model work. It never selects the Nexus route
 - **Behavior:** Semantic and diagnosis graphs SHALL physically omit code mutation, arbitrary execution, `task`/subagent escape, generic network/HTTP, Git mutation, GitHub mutation, merge, release, and deploy tools.
 - **Failure behavior:** Dependency or upstream drift that changes the executable ToolNode SHALL block Open SWE admission until the tool-surface qualification is rerun and passes.
 - **Rationale:** Model-visible filtering is insufficient.
-- **Authority/interface:** Deep Agents graph factory.
+- **Authority/interface:** external runtime graph factory + Nexus tool-surface qualification contract.
 - **Non-goal linkage:** none.
 
 ### REQ-005 — Reproducible dependency and credential isolation
 
 - **Status:** `SETTLED`
 - **Source:** `CUR-003, CUR-005, CUR-006, DEC-003`
-- **Behavior:** Open SWE dependencies SHALL be installed through an explicit optional Nexus dependency/runtime contract; production code SHALL NOT depend on `/private/tmp`, ad-hoc `PYTHONPATH`, or agent-readable reusable provider/GitHub credentials.
-- **Failure behavior:** Missing dependencies or a backend that cannot preserve credential isolation SHALL block the Open SWE path and SHALL NOT weaken isolation or copy credentials into the agent workspace.
-- **Rationale:** The Pilot environment split is evidence, not a deployable dependency model.
-- **Authority/interface:** packaging/runtime/backend construction.
+- **Behavior:** Open SWE / Deep Agents runtime dependencies SHALL be installed through a dedicated external runtime dependency contract under `runtimes/open_swe`; Nexus Core SHALL NOT require those packages merely to import/start. Production code SHALL NOT depend on `/private/tmp`, ad-hoc `PYTHONPATH`, or agent-readable reusable GitHub credentials. The thin Nexus client may pass only the explicitly allowed provider credential needed by the external runtime process.
+- **Failure behavior:** Missing external-runtime dependencies/executable, protocol mismatch, or a backend that cannot preserve credential isolation SHALL block the Open SWE path and SHALL NOT weaken isolation, fall back silently, or copy reusable controller/GitHub credentials into the agent workspace.
+- **Rationale:** The Pilot environment split demonstrates that execution dependencies can be isolated; deployment topology must preserve that separation rather than making Nexus Core own the model runtime graph.
+- **Authority/interface:** external runtime packaging/process boundary and Nexus thin client.
 - **Non-goal linkage:** portable sandbox activation remains later.
 
 ### REQ-006 — Existing replay/reconciliation semantics are preserved
@@ -259,7 +264,7 @@ Open SWE describes/executes bounded model work. It never selects the Nexus route
 - Initial backend enum/selection SHALL have two values: `opencli` and `open_swe`; `opencli` is the default.
 - Explicit `open_swe` selection SHALL never silently fall back to OpenCLI.
 - The Open SWE adapter SHALL return/bind the same semantic result contract consumed by `ExternalIntelligenceSidecar`, or introduce a versioned adapter result that is converted at one boundary with deterministic validation.
-- Open SWE graph construction SHALL be Nexus-owned and use public Deep Agents seams; upstream default reviewer graph SHALL not be imported as trusted capability policy.
+- Open SWE graph construction SHALL live inside the dedicated external runtime and use pinned public Deep Agents seams; Nexus owns the capability/protocol contract and physical qualification tests, not the in-process graph runtime. Upstream default reviewer graphs SHALL not be imported as trusted capability policy.
 - Model/provider selection remains downstream of Nexus authority; the adapter SHALL not hard-code a new global routing authority.
 - `task`/subagents remain disabled for semantic/diagnosis until separately qualified.
 
@@ -271,7 +276,7 @@ Negative controls:
 
 - default config still constructs OpenCLI path;
 - unknown backend fails closed;
-- selected Open SWE with missing optional dependency fails closed without fallback;
+- selected Open SWE with missing external runtime executable/dependency fails closed without fallback;
 - hidden `write_file`, `execute`, `task`, HTTP, GitHub-write tools are absent/invalid;
 - ambiguous transport outcome is reconciled, not redispatched;
 - no provider/GitHub credential is copied into sandbox/workspace state;
@@ -293,7 +298,7 @@ Negative controls:
 
 - **Requirement:** `REQ-001, REQ-004`
 - **Evidence level:** `FIXTURE`
-- **Verification seam:** compiled Deep Agents graph under the production adapter.
+- **Verification seam:** compiled Deep Agents graph inside the dedicated external runtime, exercised through its pinned runtime environment and audited against the Nexus client contract.
 - **Pass:** executable semantic ToolNode contains only the bounded read/evidence surface required by the adapter.
 - **Negative control:** hidden mutation/execute/task/network invocation returns invalid/absent and produces no side effect.
 - **Fail:** any forbidden capability is executable.
@@ -303,10 +308,10 @@ Negative controls:
 
 - **Requirement:** `REQ-005`
 - **Evidence level:** `STATIC`
-- **Verification seam:** `pyproject.toml` optional dependency/runtime contract and clean-environment import test.
-- **Pass:** a declared optional install can import the adapter without `/private/tmp` or manual `PYTHONPATH` stitching.
-- **Negative control:** base install without the optional dependency continues to import/run the default OpenCLI path.
-- **Fail:** default Nexus now requires Deep Agents, or Open SWE depends on an external experimental checkout.
+- **Verification seam:** dedicated `runtimes/open_swe/pyproject.toml` + nested lock, root `pyproject.toml`/lock audit, and clean-environment thin-client import test.
+- **Pass:** the external runtime is reproducibly installable from its own dependency domain; Nexus root imports/runs the control plane without Deep Agents/LangChain runtime packages.
+- **Negative control:** base Nexus environment without the external runtime dependencies continues to import/run the default OpenCLI path.
+- **Fail:** default Nexus requires Deep Agents/LangChain runtime packages, the external runtime depends on an experimental checkout, or runtime upgrades require root dependency churn without a protocol change.
 - **Receipt binding:** Candidate SHA + dependency lock/version evidence.
 
 ### AC-004 — Credential boundary
