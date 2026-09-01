@@ -412,13 +412,14 @@ def test_complete_identity_reuses_without_external_calls(tmp_path):
 
 @pytest.mark.parametrize("state", ["INTELLIGENCE_DISPATCHING", "FANOUT_DISPATCHING"])
 def test_recoverable_dispatching_state_resumes_pipeline(tmp_path, state):
-    repo, _, contract, body, store = _setup(tmp_path)
+    repo, card, contract, body, store = _setup(tmp_path)
     sidecar = FakeSidecar(store)
     c = FakeC()
     d = FakeD()
     automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
     item = IssueWorkItem("o/r", 7, "title", body, contract)
-    automation.state_store.save(item, state)
+    effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
+    automation.state_store.save(item, state, intelligence_effect_id=effect_id)
 
     result = automation.run_issue("o/r", 7, "title", body)
 
@@ -429,17 +430,54 @@ def test_recoverable_dispatching_state_resumes_pipeline(tmp_path, state):
     assert automation.state_store.load(item)["state"] == "COMPLETE"
 
 
-def test_recoverable_reconciliation_required_resumes_from_fanout(tmp_path):
+def test_fanout_dispatching_fence_rejects_changed_issue_context_before_any_stage_call(tmp_path):
+    repo, card, contract, body, store = _setup(tmp_path)
+    sidecar = FakeSidecar(store)
+    c = FakeC()
+    d = FakeD()
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
+    item = IssueWorkItem("o/r", 805, "title", body, contract)
+    old_effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
+    automation.state_store.save(item, "FANOUT_DISPATCHING", intelligence_effect_id=old_effect_id)
+
+    changed_body = _body(contract).replace("issue prose", "changed issue prose and context")
+    result = automation.run_issue("o/r", 805, "title", changed_body)
+
+    assert result["state"] == "RECONCILIATION_REQUIRED"
+    assert result["reconcile_only"] is True
+    assert result["error"] == "INTELLIGENCE_DISPATCH_BINDING_MISMATCH"
+    assert sidecar.calls == [] and c.calls == [] and d.calls == []
+
+
+def test_missing_legacy_fanout_effect_id_is_reconcile_only_without_stage_calls(tmp_path):
     repo, _, contract, body, store = _setup(tmp_path)
     sidecar = FakeSidecar(store)
     c = FakeC()
     d = FakeD()
     automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
+    item = IssueWorkItem("o/r", 806, "title", body, contract)
+    automation.state_store.save(item, "FANOUT_DISPATCHING")
+
+    result = automation.run_issue("o/r", 806, "title", body)
+
+    assert result["state"] == "RECONCILIATION_REQUIRED"
+    assert result["reconcile_only"] is True
+    assert sidecar.calls == [] and c.calls == [] and d.calls == []
+
+
+def test_recoverable_reconciliation_required_resumes_from_fanout(tmp_path):
+    repo, card, contract, body, store = _setup(tmp_path)
+    sidecar = FakeSidecar(store)
+    c = FakeC()
+    d = FakeD()
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
     item = IssueWorkItem("o/r", 8, "title", body, contract)
+    effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
     automation.state_store.save(
         item,
         "RECONCILIATION_REQUIRED",
         prior_state="FANOUT_DISPATCHING",
+        intelligence_effect_id=effect_id,
         semantic_dispatched=True,
     )
 
@@ -449,6 +487,81 @@ def test_recoverable_reconciliation_required_resumes_from_fanout(tmp_path):
     assert len(sidecar.calls) == 1
     assert len(c.calls) == 1
     assert len(d.calls) == 1
+
+
+def test_dispatching_fence_rejects_changed_issue_context_before_new_sidecar_invoke(tmp_path):
+    repo, card, contract, body, store = _setup(tmp_path)
+    sidecar = FakeSidecar(store)
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar)
+    item = IssueWorkItem("o/r", 801, "title", body, contract)
+    old_effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
+    automation.state_store.save(
+        item,
+        "INTELLIGENCE_DISPATCHING",
+        intelligence_effect_id=old_effect_id,
+    )
+
+    changed_body = _body(contract).replace("issue prose", "changed issue prose and context")
+    result = automation.run_issue("o/r", 801, "title", changed_body)
+
+    assert result["state"] == "RECONCILIATION_REQUIRED"
+    assert result["reconcile_only"] is True
+    assert result["error"] == "INTELLIGENCE_DISPATCH_BINDING_MISMATCH"
+    assert sidecar.calls == []
+
+
+def test_missing_legacy_effect_id_is_reconcile_only_without_provider_call(tmp_path):
+    repo, _, contract, body, store = _setup(tmp_path)
+    sidecar = FakeSidecar(store)
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar)
+    item = IssueWorkItem("o/r", 802, "title", body, contract)
+    automation.state_store.save(
+        item,
+        "INTELLIGENCE_DISPATCHING",
+    )
+
+    result = automation.run_issue("o/r", 802, "title", body)
+
+    assert result["state"] == "RECONCILIATION_REQUIRED"
+    assert result["reconcile_only"] is True
+    assert sidecar.calls == []
+
+
+def test_same_persisted_effect_id_without_lower_attempt_allows_one_first_invoke(tmp_path):
+    repo, card, contract, body, store = _setup(tmp_path)
+    sidecar = FakeSidecar(store)
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar)
+    item = IssueWorkItem("o/r", 803, "title", body, contract)
+    effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
+    automation.state_store.save(
+        item,
+        "INTELLIGENCE_DISPATCHING",
+        intelligence_effect_id=effect_id,
+    )
+
+    result = automation.run_issue("o/r", 803, "title", body)
+
+    assert result["state"] == "COMPLETE"
+    assert len(sidecar.calls) == 1
+
+
+def test_reconciliation_required_resumes_lower_intelligence_reconcile_without_invoke(tmp_path):
+    repo, card, contract, body, store = _setup(tmp_path)
+    sidecar = FakeSidecar(store)
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar)
+    item = IssueWorkItem("o/r", 804, "title", body, contract)
+    effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
+    automation.state_store.save(
+        item,
+        "RECONCILIATION_REQUIRED",
+        prior_state="INTELLIGENCE_DISPATCHING",
+        intelligence_effect_id=effect_id,
+    )
+
+    result = automation.run_issue("o/r", 804, "title", body)
+
+    assert result["state"] == "COMPLETE"
+    assert len(sidecar.calls) == 1
 
 
 def test_closure_dispatching_remains_fail_closed_and_d_is_not_replayed(tmp_path):
@@ -474,12 +587,19 @@ def test_closure_dispatching_remains_fail_closed_and_d_is_not_replayed(tmp_path)
 def test_process_started_uncertainty_remains_reconcile_only_on_repoll(tmp_path):
     repo, _, contract, body, store = _setup(tmp_path)
 
-    class UncertainSidecar(FakeSidecar):
-        def analyze(self, record, sources):
-            self.calls.append((record, list(sources)))
-            raise RuntimeError("process exited after start")
+    class UncertainThenReconciledSidecar(FakeSidecar):
+        def __init__(self, store):
+            super().__init__(store)
+            self.attempts = 0
 
-    sidecar = UncertainSidecar(store)
+        def analyze(self, record, sources):
+            self.attempts += 1
+            if self.attempts == 1:
+                self.calls.append((record, list(sources)))
+                raise RuntimeError("process exited after start")
+            return super().analyze(record, sources)
+
+    sidecar = UncertainThenReconciledSidecar(store)
     c = FakeC()
     d = FakeD()
     automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
@@ -488,10 +608,9 @@ def test_process_started_uncertainty_remains_reconcile_only_on_repoll(tmp_path):
     second = automation.run_issue("o/r", 10, "title", body)
 
     assert first["state"] == "RECONCILIATION_REQUIRED"
-    assert second["state"] == "RECONCILIATION_REQUIRED"
-    assert second["reconcile_only"] is True
-    assert len(sidecar.calls) == 1
-    assert c.calls == [] and d.calls == []
+    assert second["state"] == "COMPLETE"
+    assert len(sidecar.calls) == 2
+    assert len(c.calls) == len(d.calls) == 1
 
 
 def test_verifier_specs_use_d_compatible_id_key(tmp_path):
