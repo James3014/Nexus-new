@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import subprocess
 import threading
@@ -1227,6 +1228,123 @@ def sample_worker(**overrides):
     }
     val.update(overrides)
     return val
+
+
+def test_new_session_persists_explicit_worker_selection_generation(tmp_path):
+    store = FanoutStore(tmp_path / "state")
+    session = "ses_generation_00000000"
+    store.claim_session(session, task_id="task-1", unit_id="u1", workspace_id="ws-1")
+    binding = json.loads(store._session_path(session).read_text(encoding="utf-8"))
+    assert isinstance(binding.get("worker_selection_sha256"), str)
+    assert len(binding["worker_selection_sha256"]) == 64
+    assert all(char in "0123456789abcdef" for char in binding["worker_selection_sha256"])
+
+
+def test_session_worker_selection_binding_hostile_cases(tmp_path):
+    worker = sample_worker()
+    root = tmp_path / "state"
+    session = "ses_hostile_00000000"
+    store = FanoutStore(root)
+    store.claim_session(
+        session,
+        task_id="task-1",
+        unit_id="u1",
+        workspace_id="ws-1",
+        selected_worker=worker,
+        provider=worker["provider"],
+        model=worker["model"],
+    )
+    restarted = FanoutStore(root)
+    restarted.assert_session_owner(
+        session,
+        task_id="task-1",
+        unit_id="u1",
+        workspace_id="ws-1",
+        selected_worker=worker,
+        provider=worker["provider"],
+        model=worker["model"],
+    )
+    changed = sample_worker(admission_evidence_hash="e" * 64, selection_evidence_hash="f" * 64)
+    with pytest.raises(FanoutError, match="SESSION_WORKER_SELECTION_CONFLICT"):
+        restarted.assert_session_owner(
+            session,
+            task_id="task-1",
+            unit_id="u1",
+            workspace_id="ws-1",
+            selected_worker=changed,
+            provider=changed["provider"],
+            model=changed["model"],
+        )
+    assert "worker_selection_sha256" not in inspect.signature(store.claim_session).parameters
+    with pytest.raises(TypeError):
+        store.claim_session(
+            session,
+            task_id="task-1",
+            unit_id="u1",
+            workspace_id="ws-1",
+            worker_selection_sha256="x",
+        )
+
+
+def test_legacy_session_and_none_worker_binding_fail_closed_or_restart(tmp_path):
+    store = FanoutStore(tmp_path / "state")
+    session = "ses_legacy_00000000"
+    store.sessions.mkdir(parents=True)
+    (store._session_path(session)).write_text(
+        json.dumps({
+            "session_id": session,
+            "task_id": "task-1",
+            "unit_id": "u1",
+            "workspace_id": "ws-1",
+            "provider": "opencode",
+            "model": MODEL,
+        }),
+        encoding="utf-8",
+    )
+    with pytest.raises(FanoutError, match="SESSION_WORKER_SELECTION_CONFLICT"):
+        store.assert_session_owner(session, task_id="task-1", unit_id="u1", workspace_id="ws-1")
+    none_session = "ses_none_00000000"
+    store.claim_session(
+        none_session, task_id="task-1", unit_id="u1", workspace_id="ws-1", selected_worker=None
+    )
+    binding = json.loads(store._session_path(none_session).read_text(encoding="utf-8"))
+    assert len(binding["worker_selection_sha256"]) == 64
+    FanoutStore(tmp_path / "state").assert_session_owner(
+        none_session, task_id="task-1", unit_id="u1", workspace_id="ws-1", selected_worker=None
+    )
+
+
+def test_non_default_prepare_repair_uses_receipt_worker_binding_and_ignores_receipt_metadata(
+    tmp_path,
+):
+    worker = sample_worker()
+    store = FanoutStore(tmp_path / "state")
+    session = "ses_nondefault_00000000"
+    store.claim_session(
+        session,
+        task_id="task-1",
+        unit_id="u1",
+        workspace_id="ws-1",
+        selected_worker=worker,
+        provider=worker["provider"],
+        model=worker["model"],
+    )
+    receipt = {
+        "task_id": "task-1",
+        "unit_id": "u1",
+        "session_id": session,
+        "workspace_id": "ws-1",
+        "selected_worker": worker,
+        "provider": worker["provider"],
+        "model": worker["model"],
+        "candidate_commit": "a" * 40,
+        "receipt_id": "irrelevant",
+        "argv_sha256": "z" * 64,
+    }
+    attempt = store.prepare_repair(
+        receipt, repair_id="r1", repair_ref="repair.json", repair_sha256="b" * 64
+    )
+    assert attempt["session_id"] == session
 
 
 def make_v2_envelope(path: Path, base: str, worker: dict, allowed: list[str] = None) -> str:
