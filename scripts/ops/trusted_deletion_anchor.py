@@ -39,12 +39,12 @@ UV_VERSION = "uv 0.9.2"
 # optional-dependency transition. It authorizes neither endpoint with any
 # other baseline/head bytes and provides no package-name or version wildcard.
 TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION = (
-    669,
+    679,
     (
-        "c7d84dd5cbc4e533db65445ebb5691296f732d49f2fb39c6028745b18ca1d412",
-        "3e753af334885a2f434a94d40fc8860abd151516950e7f1e3647971f2e0dfc51",
         "e52fc5fe9e76fca42299370641169e5ec3d6a59a765774deb1a77f38cd8eb246",
         "cb5ecbb7fcce287f9bcdbb17f65a3b931f13613b6fd1608b428e1c19c5f6965a",
+        "c7d84dd5cbc4e533db65445ebb5691296f732d49f2fb39c6028745b18ca1d412",
+        "3e753af334885a2f434a94d40fc8860abd151516950e7f1e3647971f2e0dfc51",
     ),
 )
 REQUIRED_EVIDENCE_KEYS = {
