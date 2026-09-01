@@ -69,7 +69,10 @@ def test_current_operating_mode_bootstrap_is_direct_first_and_fail_closed():
     )
     assert mode["transition"]["new_work"] == "READ_CURRENT_OPERATING_MODE"
     assert mode["transition"]["successor_work"] == "READ_CURRENT_OPERATING_MODE"
-    assert mode["fail_closed"]["missing_invalid_or_ambiguous_mode"] == "REQUIRE_EXPLICIT_CURRENT_OWNER_LANE"
+    assert (
+        mode["fail_closed"]["missing_invalid_or_ambiguous_mode"]
+        == "REQUIRE_EXPLICIT_CURRENT_OWNER_LANE"
+    )
 
     escalation = set(mode["escalate_to_governed_when"])
     for required in (
