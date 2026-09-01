@@ -288,14 +288,16 @@ class IssueWorkItem:
 
     @property
     def identity_hash(self) -> str:
-        return _sha256_json({
-            "repository": self.repository,
-            "issue_number": self.issue_number,
-            "revision": self.contract["revision"],
-            "main_sha": self.contract["main_sha"],
-            "task_card_hash": self.contract["task_card_hash"],
-            "contract_hash": _sha256_json(self.contract),
-        })
+        return _sha256_json(
+            {
+                "repository": self.repository,
+                "issue_number": self.issue_number,
+                "revision": self.contract["revision"],
+                "main_sha": self.contract["main_sha"],
+                "task_card_hash": self.contract["task_card_hash"],
+                "contract_hash": _sha256_json(self.contract),
+            }
+        )
 
 
 PUBLICATION_STATES = {
@@ -642,26 +644,30 @@ class ExternalIntelligenceAutomation:
 
         for path in sorted(seen_paths):
             exists, content = self._read_git_blob(main_sha, path)
-            sources.append({
-                "kind": "source_file" if exists else "source_absence",
-                "ref": path,
-                "revision": main_sha,
-                "provenance": f"git:{main_sha}",
-                "content": content,
-            })
+            sources.append(
+                {
+                    "kind": "source_file" if exists else "source_absence",
+                    "ref": path,
+                    "revision": main_sha,
+                    "provenance": f"git:{main_sha}",
+                    "content": content,
+                }
+            )
 
         verifier_paths = self._extract_verifier_paths(item.contract)
         for path in sorted(verifier_paths):
             if path in seen_paths:
                 continue
             exists, content = self._read_git_blob(main_sha, path)
-            sources.append({
-                "kind": "verifier_source" if exists else "source_absence",
-                "ref": path,
-                "revision": main_sha,
-                "provenance": f"git:{main_sha}",
-                "content": content,
-            })
+            sources.append(
+                {
+                    "kind": "verifier_source" if exists else "source_absence",
+                    "ref": path,
+                    "revision": main_sha,
+                    "provenance": f"git:{main_sha}",
+                    "content": content,
+                }
+            )
 
         return sources
 
@@ -785,7 +791,8 @@ class ExternalIntelligenceAutomation:
             } or (
                 previous is not None
                 and str(previous.get("state") or "") == "RECONCILIATION_REQUIRED"
-                and str(previous.get("prior_state") or "") in {
+                and str(previous.get("prior_state") or "")
+                in {
                     "INTELLIGENCE_DISPATCHING",
                     "FANOUT_DISPATCHING",
                 }
