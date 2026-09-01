@@ -339,6 +339,18 @@ def test_unknown_impact_fails_closed_to_broader_verification():
     assert "tests/ops/test_pr_impact_gate.py" in plan.pytest_targets
 
 
+def test_external_open_swe_runtime_maps_to_existing_boundary_tests():
+    plan = build_impact_plan(["runtimes/open_swe/nexus_open_swe_runtime/cli.py"])
+
+    assert plan.tier == 2
+    assert plan.impact_class == "HIGH_RISK_INTEGRATION"
+    assert plan.unmatched_paths == []
+    assert "tests/services/test_external_intelligence_service.py" in plan.pytest_targets
+    assert "tests/services/test_open_swe_external_intelligence.py" in plan.pytest_targets
+    assert "tests/services/test_open_swe_worker_transport.py" in plan.pytest_targets
+    assert set(MANDATORY_TIER2_TARGETS).issubset(plan.pytest_targets)
+
+
 def test_issue526_exact_authority_bundle_json_selects_high_risk_tier2_contracts():
     exact_path = (
         "tasks/github-issue-526-host-authority-and-canary-20260823/"
