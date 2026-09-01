@@ -146,15 +146,13 @@ def completed_result(
     return OpenCodeRunResult(
         status="COMPLETED",
         session_id=session_id,
-        response_text=json.dumps(
-            {
-                "schema": "external_intelligence_worker_result.v1",
-                "task_id": task_id,
-                "unit_id": unit_id,
-                "status": "IMPLEMENTATION_COMPLETED",
-                "summary": "bounded implementation complete",
-            }
-        ),
+        response_text=json.dumps({
+            "schema": "external_intelligence_worker_result.v1",
+            "task_id": task_id,
+            "unit_id": unit_id,
+            "status": "IMPLEMENTATION_COMPLETED",
+            "summary": "bounded implementation complete",
+        }),
         provider_id=PROVIDER_ID,
         model_id=MODEL_ID,
         directory=str(Path(workspace_path).resolve()),
@@ -574,40 +572,32 @@ def test_opencode_transport_parses_1_18_domain_event_stream(monkeypatch, tmp_pat
 
         def communicate(self, timeout=None):
             def part_event(part):
-                return json.dumps(
-                    {
-                        "type": "message.part.updated",
-                        "id": "e",
-                        "data": {
-                            "sessionID": session,
-                            "part": part,
-                            "time": 0,
-                        },
-                    }
-                )
+                return json.dumps({
+                    "type": "message.part.updated",
+                    "id": "e",
+                    "data": {
+                        "sessionID": session,
+                        "part": part,
+                        "time": 0,
+                    },
+                })
 
-            events = "\n".join(
-                [
-                    part_event({"type": "step-start", "id": "p1"}),
-                    part_event({"type": "reasoning", "text": "thinking", "id": "p2"}),
-                    part_event(
-                        {
-                            "type": "text",
-                            "text": json.dumps(
-                                {
-                                    "schema": "external_intelligence_worker_result.v1",
-                                    "task_id": "task-1",
-                                    "unit_id": "ua",
-                                    "status": "BLOCKED",
-                                    "summary": "no mutation",
-                                }
-                            ),
-                            "id": "p3",
-                        }
-                    ),
-                    part_event({"type": "step-finish", "id": "p4", "reason": "completed"}),
-                ]
-            )
+            events = "\n".join([
+                part_event({"type": "step-start", "id": "p1"}),
+                part_event({"type": "reasoning", "text": "thinking", "id": "p2"}),
+                part_event({
+                    "type": "text",
+                    "text": json.dumps({
+                        "schema": "external_intelligence_worker_result.v1",
+                        "task_id": "task-1",
+                        "unit_id": "ua",
+                        "status": "BLOCKED",
+                        "summary": "no mutation",
+                    }),
+                    "id": "p3",
+                }),
+                part_event({"type": "step-finish", "id": "p4", "reason": "completed"}),
+            ])
             return events, ""
 
     def fake_run(argv, **kwargs):
@@ -650,29 +640,23 @@ def test_opencode_new_and_continue_bind_exact_model_session_and_directory(monkey
             calls.append(argv)
 
         def communicate(self, timeout=None):
-            events = "\n".join(
-                [
-                    json.dumps({"type": "step_start", "sessionID": session, "part": {}}),
-                    json.dumps(
-                        {
-                            "type": "text",
-                            "sessionID": session,
-                            "part": {
-                                "text": json.dumps(
-                                    {
-                                        "schema": "external_intelligence_worker_result.v1",
-                                        "task_id": "task-1",
-                                        "unit_id": "ua",
-                                        "status": "BLOCKED",
-                                        "summary": "no mutation",
-                                    }
-                                )
-                            },
-                        }
-                    ),
-                    json.dumps({"type": "step_finish", "sessionID": session, "part": {}}),
-                ]
-            )
+            events = "\n".join([
+                json.dumps({"type": "step_start", "sessionID": session, "part": {}}),
+                json.dumps({
+                    "type": "text",
+                    "sessionID": session,
+                    "part": {
+                        "text": json.dumps({
+                            "schema": "external_intelligence_worker_result.v1",
+                            "task_id": "task-1",
+                            "unit_id": "ua",
+                            "status": "BLOCKED",
+                            "summary": "no mutation",
+                        })
+                    },
+                }),
+                json.dumps({"type": "step_finish", "sessionID": session, "part": {}}),
+            ])
             return events, ""
 
     def fake_run(argv, **kwargs):
@@ -721,26 +705,22 @@ def test_opencode_model_attestation_mismatch_is_outcome_unknown(monkeypatch, tmp
             pass
 
         def communicate(self, timeout=None):
-            return "\n".join(
-                [
-                    json.dumps({"type": "text", "sessionID": session, "part": {"text": "{}"}}),
-                    json.dumps({"type": "step_finish", "sessionID": session, "part": {}}),
-                ]
-            ), ""
+            return "\n".join([
+                json.dumps({"type": "text", "sessionID": session, "part": {"text": "{}"}}),
+                json.dumps({"type": "step_finish", "sessionID": session, "part": {}}),
+            ]), ""
 
     def fake_run(argv, **kwargs):
         return SimpleNamespace(
             returncode=0,
-            stdout=json.dumps(
-                {
-                    "info": {
-                        "id": session,
-                        "directory": workspace,
-                        "version": "1.18.18",
-                        "model": {"providerID": PROVIDER_ID, "id": "wrong-model"},
-                    }
+            stdout=json.dumps({
+                "info": {
+                    "id": session,
+                    "directory": workspace,
+                    "version": "1.18.18",
+                    "model": {"providerID": PROVIDER_ID, "id": "wrong-model"},
                 }
-            ),
+            }),
             stderr="",
         )
 
@@ -1316,12 +1296,10 @@ def test_execution_unit_validates_selected_worker_strictly(tmp_path):
 
     # Extra key in worker
     with pytest.raises(FanoutError, match="INVALID_SELECTED_WORKER"):
-        ExecutionUnit.from_mapping(
-            {
-                **valid_unit_mapping,
-                "selected_worker": {**valid_worker, "extra": "forbidden"},
-            }
-        )
+        ExecutionUnit.from_mapping({
+            **valid_unit_mapping,
+            "selected_worker": {**valid_worker, "extra": "forbidden"},
+        })
 
     # Missing key in worker
     bad_worker = dict(valid_worker)
@@ -1331,25 +1309,21 @@ def test_execution_unit_validates_selected_worker_strictly(tmp_path):
 
     # Bad hash format
     with pytest.raises(FanoutError, match="INVALID_SELECTED_WORKER"):
-        ExecutionUnit.from_mapping(
-            {
-                **valid_unit_mapping,
-                "selected_worker": {**valid_worker, "admission_evidence_hash": "not-64-hex"},
-            }
-        )
+        ExecutionUnit.from_mapping({
+            **valid_unit_mapping,
+            "selected_worker": {**valid_worker, "admission_evidence_hash": "not-64-hex"},
+        })
 
     # Provider / model-prefix cross-consistency
     with pytest.raises(FanoutError, match="INVALID_SELECTED_WORKER"):
-        ExecutionUnit.from_mapping(
-            {
-                **valid_unit_mapping,
-                "selected_worker": {
-                    **valid_worker,
-                    "provider": "anthropic",
-                    "model": "google/gemini-3.7-flash-medium",
-                },
-            }
-        )
+        ExecutionUnit.from_mapping({
+            **valid_unit_mapping,
+            "selected_worker": {
+                **valid_worker,
+                "provider": "anthropic",
+                "model": "google/gemini-3.7-flash-medium",
+            },
+        })
 
 
 def test_verify_envelope_scope_v2_bilateral_fail_closed(tmp_path):
@@ -1367,45 +1341,39 @@ def test_verify_envelope_scope_v2_bilateral_fail_closed(tmp_path):
     env_sha = make_v2_envelope(env_path, base, worker1, allowed=["a.py"])
 
     # Matching selected_worker succeeds
-    unit_matching = ExecutionUnit.from_mapping(
-        {
-            "task_id": "task-1",
-            "unit_id": "u1",
-            "envelope_ref": str(env_path),
-            "envelope_sha256": env_sha,
-            "expected_base_sha": base,
-            "mutation_paths": ["a.py"],
-            "selected_worker": worker1,
-        }
-    )
+    unit_matching = ExecutionUnit.from_mapping({
+        "task_id": "task-1",
+        "unit_id": "u1",
+        "envelope_ref": str(env_path),
+        "envelope_sha256": env_sha,
+        "expected_base_sha": base,
+        "mutation_paths": ["a.py"],
+        "selected_worker": worker1,
+    })
     assert _verify_envelope_scope(unit_matching) == env_path.resolve()
 
     # Unit missing selected_worker on V2 envelope fails closed
-    unit_missing_worker = ExecutionUnit.from_mapping(
-        {
-            "task_id": "task-1",
-            "unit_id": "u1",
-            "envelope_ref": str(env_path),
-            "envelope_sha256": env_sha,
-            "expected_base_sha": base,
-            "mutation_paths": ["a.py"],
-        }
-    )
+    unit_missing_worker = ExecutionUnit.from_mapping({
+        "task_id": "task-1",
+        "unit_id": "u1",
+        "envelope_ref": str(env_path),
+        "envelope_sha256": env_sha,
+        "expected_base_sha": base,
+        "mutation_paths": ["a.py"],
+    })
     with pytest.raises(FanoutError, match="ENVELOPE_WORKER_BINDING_MISSING"):
         _verify_envelope_scope(unit_missing_worker)
 
     # Unit with divergent selected_worker fails closed
-    unit_mismatched_worker = ExecutionUnit.from_mapping(
-        {
-            "task_id": "task-1",
-            "unit_id": "u1",
-            "envelope_ref": str(env_path),
-            "envelope_sha256": env_sha,
-            "expected_base_sha": base,
-            "mutation_paths": ["a.py"],
-            "selected_worker": worker2,
-        }
-    )
+    unit_mismatched_worker = ExecutionUnit.from_mapping({
+        "task_id": "task-1",
+        "unit_id": "u1",
+        "envelope_ref": str(env_path),
+        "envelope_sha256": env_sha,
+        "expected_base_sha": base,
+        "mutation_paths": ["a.py"],
+        "selected_worker": worker2,
+    })
     with pytest.raises(FanoutError, match="ENVELOPE_WORKER_BINDING_MISMATCH"):
         _verify_envelope_scope(unit_mismatched_worker)
 
@@ -1434,15 +1402,13 @@ def test_v2_transport_dispatch_exact_identity_and_unsupported_fails_closed(tmp_p
             return OpenCodeRunResult(
                 status="COMPLETED",
                 session_id="ses_test_v2_00000000",
-                response_text=json.dumps(
-                    {
-                        "schema": "external_intelligence_worker_result.v1",
-                        "task_id": "task-1",
-                        "unit_id": "u1",
-                        "status": "IMPLEMENTATION_COMPLETED",
-                        "summary": "v2 complete",
-                    }
-                ),
+                response_text=json.dumps({
+                    "schema": "external_intelligence_worker_result.v1",
+                    "task_id": "task-1",
+                    "unit_id": "u1",
+                    "status": "IMPLEMENTATION_COMPLETED",
+                    "summary": "v2 complete",
+                }),
                 provider_id=self.provider_id,
                 model_id=self.model_id,
                 directory=str(Path(workspace_path).resolve()),

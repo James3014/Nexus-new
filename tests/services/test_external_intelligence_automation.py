@@ -632,19 +632,17 @@ def test_e1_accepted_contract_feeds_real_c_execution_units(tmp_path):
     repo, _, contract, body, store = _setup(tmp_path)
     parsed = parse_issue_contract(body)
     for unit in parsed["execution_units"]:
-        built = ExecutionUnit.from_mapping(
-            {
-                "task_id": parsed["task_id"],
-                "unit_id": unit["unit_id"],
-                "envelope_ref": "state/envelopes/dummy.json",
-                "envelope_sha256": "b" * 64,
-                "expected_base_sha": parsed["main_sha"],
-                "mutation_paths": unit["mutation_paths"],
-                "dependencies_ready": unit.get("dependencies_ready", True),
-                "priority": unit.get("priority", 0),
-                "allow_deletions": unit.get("allow_deletions", False),
-            }
-        )
+        built = ExecutionUnit.from_mapping({
+            "task_id": parsed["task_id"],
+            "unit_id": unit["unit_id"],
+            "envelope_ref": "state/envelopes/dummy.json",
+            "envelope_sha256": "b" * 64,
+            "expected_base_sha": parsed["main_sha"],
+            "mutation_paths": unit["mutation_paths"],
+            "dependencies_ready": unit.get("dependencies_ready", True),
+            "priority": unit.get("priority", 0),
+            "allow_deletions": unit.get("allow_deletions", False),
+        })
         assert built.task_id == parsed["task_id"]
         assert built.unit_id == unit["unit_id"]
         assert built.mutation_paths == tuple(unit["mutation_paths"])
@@ -669,27 +667,27 @@ def test_e1_accepted_contract_feeds_real_c_execution_units(tmp_path):
             "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID",
         ),
         (
-            lambda c: c["unit_verifiers"].update(
-                {"u1": [{"id": "u1", "argv": ["true"], "timeout": True}]}
-            ),
+            lambda c: c["unit_verifiers"].update({
+                "u1": [{"id": "u1", "argv": ["true"], "timeout": True}]
+            }),
             "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID",
         ),
         (
-            lambda c: c["unit_verifiers"].update(
-                {"u1": [{"id": "u1", "argv": ["true"], "timeout": 0}]}
-            ),
+            lambda c: c["unit_verifiers"].update({
+                "u1": [{"id": "u1", "argv": ["true"], "timeout": 0}]
+            }),
             "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID",
         ),
         (
-            lambda c: c["unit_verifiers"].update(
-                {"u1": [{"id": "u1", "argv": ["true"], "timeout": 1801}]}
-            ),
+            lambda c: c["unit_verifiers"].update({
+                "u1": [{"id": "u1", "argv": ["true"], "timeout": 1801}]
+            }),
             "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID",
         ),
         (
-            lambda c: c["unit_verifiers"].update(
-                {"u1": [{"id": "u1", "argv": ["true"], "owner_unit": 5}]}
-            ),
+            lambda c: c["unit_verifiers"].update({
+                "u1": [{"id": "u1", "argv": ["true"], "owner_unit": 5}]
+            }),
             "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID",
         ),
         (
@@ -721,9 +719,9 @@ def test_e1_accepted_contract_feeds_real_c_execution_units(tmp_path):
             "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID",
         ),
         (
-            lambda c: c["unit_verifiers"].update(
-                {"u1": [{"id": "u1", "argv": ["true"], "owner_unit": "bad owner"}]}
-            ),
+            lambda c: c["unit_verifiers"].update({
+                "u1": [{"id": "u1", "argv": ["true"], "owner_unit": "bad owner"}]
+            }),
             "ISSUE_CONTRACT_UNIT_VERIFIERS_INVALID",
         ),
     ],
@@ -818,13 +816,11 @@ def test_execution_unit_optional_fields_reject_coercion(tmp_path, field, value):
 
 def test_valid_optional_unit_fields_parse_without_coercion(tmp_path):
     repo, _, contract, _, _ = _setup(tmp_path)
-    contract["execution_units"][0].update(
-        {
-            "dependencies_ready": False,
-            "allow_deletions": True,
-            "priority": 0,
-        }
-    )
+    contract["execution_units"][0].update({
+        "dependencies_ready": False,
+        "allow_deletions": True,
+        "priority": 0,
+    })
     parsed = parse_issue_contract(_body(contract))
     unit = parsed["execution_units"][0]
     assert unit["dependencies_ready"] is False
@@ -834,24 +830,22 @@ def test_valid_optional_unit_fields_parse_without_coercion(tmp_path):
 
 
 def test_publication_payload_only_reads_capsule():
-    payload = compact_publication_payload(
-        {
-            "status": "PASS",
-            "control_capsule": {
-                "task_id": "t",
-                "candidate_commit": "a",
-                "candidate_tree": "b",
-                "current_gate": "g",
-                "acceptance_packet_ref": "r",
-                "acceptance_packet_sha256": "s",
-                "next_action": "n",
-                "stop_if": ["x"],
-                "claim_ceiling": "c",
-                "envelope": "secret",
-            },
-            "raw_prompt": "secret",
-        }
-    )
+    payload = compact_publication_payload({
+        "status": "PASS",
+        "control_capsule": {
+            "task_id": "t",
+            "candidate_commit": "a",
+            "candidate_tree": "b",
+            "current_gate": "g",
+            "acceptance_packet_ref": "r",
+            "acceptance_packet_sha256": "s",
+            "next_action": "n",
+            "stop_if": ["x"],
+            "claim_ceiling": "c",
+            "envelope": "secret",
+        },
+        "raw_prompt": "secret",
+    })
     rendered = json.dumps(payload)
     assert "secret" not in rendered
     assert "envelope" not in rendered
