@@ -49,6 +49,26 @@ def _sha256(value: bytes | str) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _worker_selection_sha256(
+    selected_worker: Mapping[str, Any] | None, *, provider: str, model: str
+) -> str:
+    if selected_worker is None:
+        material: Mapping[str, Any] = {
+            "selected_worker": None,
+            "provider": provider,
+            "model": model,
+        }
+    else:
+        try:
+            worker = validate_selected_worker(selected_worker)
+        except ExternalIntelligenceError as exc:
+            raise FanoutError("INVALID_SELECTED_WORKER") from exc
+        if worker["provider"] != provider or worker["model"] != model:
+            raise FanoutError("SESSION_WORKER_PROVIDER_MODEL_CONFLICT")
+        material = {"selected_worker": worker, "provider": provider, "model": model}
+    return _sha256(_canonical_json(material))
+
+
 def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = (json.dumps(dict(value), sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode(
@@ -507,6 +527,9 @@ class FanoutStore:
             task_id=task_id,
             unit_id=unit_id,
             workspace_id=str(previous_receipt.get("workspace_id") or ""),
+            selected_worker=previous_receipt.get("selected_worker"),
+            provider=str(previous_receipt.get("provider") or PROVIDER),
+            model=str(previous_receipt.get("model") or MODEL),
         )
         attempt = {
             "schema": DISPATCH_ATTEMPT_SCHEMA,
@@ -568,6 +591,7 @@ class FanoutStore:
         task_id: str,
         unit_id: str,
         workspace_id: str,
+        selected_worker: Mapping[str, Any] | None = None,
         provider: str = PROVIDER,
         model: str = MODEL,
     ) -> None:
@@ -581,6 +605,9 @@ class FanoutStore:
             "workspace_id": workspace_id,
             "provider": provider,
             "model": model,
+            "worker_selection_sha256": _worker_selection_sha256(
+                selected_worker, provider=provider, model=model
+            ),
         }
         if path.exists():
             existing = json.loads(path.read_text(encoding="utf-8"))
@@ -596,6 +623,7 @@ class FanoutStore:
         task_id: str,
         unit_id: str,
         workspace_id: str,
+        selected_worker: Mapping[str, Any] | None = None,
         provider: str = PROVIDER,
         model: str = MODEL,
     ) -> None:
@@ -603,14 +631,20 @@ class FanoutStore:
         if not path.exists():
             raise FanoutError("SESSION_BINDING_MISSING")
         binding = json.loads(path.read_text(encoding="utf-8"))
-        if binding != {
+        expected = {
             "session_id": session_id,
             "task_id": task_id,
             "unit_id": unit_id,
             "workspace_id": workspace_id,
             "provider": provider,
             "model": model,
-        }:
+            "worker_selection_sha256": _worker_selection_sha256(
+                selected_worker, provider=provider, model=model
+            ),
+        }
+        if binding.get("worker_selection_sha256") != expected["worker_selection_sha256"]:
+            raise FanoutError("SESSION_WORKER_SELECTION_CONFLICT")
+        if binding != expected:
             raise FanoutError("SESSION_BINDING_CONFLICT")
 
     def write_receipt(self, receipt: Mapping[str, Any], *, suffix: str = "initial") -> Path:
@@ -1516,6 +1550,7 @@ class AdaptiveWorkerFanoutRuntime:
             task_id=unit.task_id,
             unit_id=unit.unit_id,
             workspace_id=workspace.workspace_id,
+            selected_worker=unit.selected_worker,
             provider=unit.provider,
             model=unit.model,
         )
@@ -1617,6 +1652,7 @@ class AdaptiveWorkerFanoutRuntime:
             task_id=task_id,
             unit_id=unit_id,
             workspace_id=workspace.workspace_id,
+            selected_worker=previous_receipt.get("selected_worker"),
             provider=str(previous_receipt.get("provider") or PROVIDER),
             model=str(previous_receipt.get("model") or MODEL),
         )
