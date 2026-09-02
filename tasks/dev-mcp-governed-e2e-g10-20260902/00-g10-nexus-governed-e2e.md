@@ -29,7 +29,8 @@ Run one minimal live `NEXUS_GOVERNED` Dev MCP execution that proves canonical Ne
 - target base HEAD: `5212252bacfe8ae37747282211aff66594452426`
 - required worker profile: `agy-medium-implement`
 - required attempt_id: `g10-live-e2e-attempt-01`
-- dispatch_intent_hash: `c5a01dc74595cb8051cf0c2e73c940ea83a36e2c52068d4d3978bcba15cb0946`
+- dispatch_intent_artifact: `tasks/dev-mcp-governed-e2e-g10-20260902/g10-dispatch-intent.json`
+- dispatch_intent_hash: `e57bd97487cafd04d58c59462d931e2edf4d1f3f01bde003f00d48fb291bdcb7`
 
 ## Authorized execution
 
@@ -46,7 +47,7 @@ The worker may read `AGENTS.md` only as needed for repository instructions. It m
 ## Required authority properties
 
 1. Dev MCP must run with `authorityMode=NEXUS_GOVERNED` and an immutable pointer to the canonical tracked grant plus this Task Card.
-2. The grant must bind this task id, exact attempt id, DevSpace base revision, dispatch-intent hash, `agy-medium-implement`, write scope `g10-governed-canary.txt`, effect ceiling `WORKSPACE_MUTATION`, and claim ceiling `IMPLEMENTED`.
+2. The exact controller `DispatchIntent` is tracked at the artifact path above; the grant must bind its canonical hash, this task id, exact attempt id, DevSpace base revision, `agy-medium-implement`, write scope `g10-governed-canary.txt`, effect ceiling `WORKSPACE_MUTATION`, and claim ceiling `IMPLEMENTED`.
 3. Missing, stale, tampered, expired, revoked, or mismatched authority must fail closed before worker launch and must never fall back to `OWNER_DIRECT`.
 4. Continuation must revalidate the same canonical grant.
 5. Worker result is execution evidence only. Acceptance remains outside Dev MCP.
