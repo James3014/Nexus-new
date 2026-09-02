@@ -577,6 +577,7 @@ def test_candidate_ref_is_immutable_per_candidate_commit(sh2_repo):
 
     assert candidate_ref.endswith(candidate)
     assert _git(sh2_repo["controller"], "rev-parse", candidate_ref) == candidate
+    assert manager.protect_candidate(contract, lease, candidate) == candidate_ref
 
 
 def test_candidate_ref_uses_immutable_fallback_when_legacy_parent_exists(sh2_repo):
@@ -594,6 +595,161 @@ def test_candidate_ref_uses_immutable_fallback_when_legacy_parent_exists(sh2_rep
 
     assert candidate_ref == f"refs/nexus-candidate-commits/{contract.task_id}/{candidate}"
     assert _git(sh2_repo["controller"], "rev-parse", candidate_ref) == candidate
+
+
+def test_create_precommitted_lease_adopts_exact_candidate_without_moving_task_branch(sh2_repo):
+    contract, manager, base_lease, target = _prepare_candidate(sh2_repo)
+    (target / "src" / "allowed.txt").write_text("candidate\n", encoding="utf-8")
+    _git(target, "add", "src/allowed.txt")
+    _git(target, "commit", "-m", "external candidate")
+    candidate = _git(target, "rev-parse", "HEAD")
+    candidate_tree = _git(target, "rev-parse", "HEAD^{tree}")
+    _git(sh2_repo["controller"], "worktree", "remove", "--force", str(target))
+    _git(sh2_repo["controller"], "update-ref", f"refs/heads/{base_lease.target_branch}", contract.target_base_revision)
+
+    lease = manager.create_precommitted_lease(contract, candidate, candidate_tree)
+
+    assert lease.initial_head == contract.target_base_revision
+    assert lease.target_detached is True
+    assert _git(Path(lease.target_worktree), "rev-parse", "HEAD") == candidate
+    assert _git(Path(lease.target_worktree), "branch", "--show-current") == ""
+    assert _git(Path(lease.target_worktree), "status", "--porcelain") == ""
+    assert _git(sh2_repo["controller"], "rev-parse", f"refs/heads/{lease.target_branch}") == contract.target_base_revision
+
+
+def test_create_precommitted_lease_rejects_non_descendant_and_tree_mismatch(sh2_repo):
+    contract = _contract(sh2_repo)
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    unrelated = "1" * 40
+    with pytest.raises(RuntimeError, match="missing"):
+        manager.create_precommitted_lease(contract, unrelated)
+
+    _git(sh2_repo["controller"], "commit", "--allow-empty", "-m", "candidate")
+    candidate = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    contract = contract.model_copy(update={"controller_revision": candidate})
+    with pytest.raises(RuntimeError, match="tree"):
+        manager.create_precommitted_lease(contract, candidate, "0" * 40)
+
+
+def test_protect_candidate_rejects_concurrent_different_ref_without_overwrite(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo)
+    (target / "src" / "allowed.txt").write_text("candidate\n", encoding="utf-8")
+    _git(target, "add", "src/allowed.txt")
+    _git(target, "commit", "-m", "candidate")
+    candidate = _git(target, "rev-parse", "HEAD")
+    candidate_ref = f"refs/nexus-candidates/{contract.task_id}/{candidate}"
+    _git(sh2_repo["controller"], "commit", "--allow-empty", "-m", "other")
+    other = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    _git(sh2_repo["controller"], "update-ref", candidate_ref, other)
+
+    with pytest.raises(RuntimeError, match="different commit"):
+        manager.protect_candidate(contract, lease, candidate)
+    assert _git(sh2_repo["controller"], "rev-parse", candidate_ref) == other
+
+
+def test_create_precommitted_lease_rolls_back_when_detach_fails(sh2_repo, monkeypatch):
+    contract = _contract(sh2_repo, task_id="rollback-adoption")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    _git(sh2_repo["controller"], "commit", "--allow-empty", "-m", "candidate")
+    candidate = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    contract = contract.model_copy(update={"controller_revision": candidate})
+    original_run_git = manager._run_git
+
+    def fail_detach(args, **kwargs):
+        if args[:3] == ["checkout", "--detach", candidate]:
+            raise RuntimeError("injected detach failure")
+        return original_run_git(args, **kwargs)
+
+    monkeypatch.setattr(manager, "_run_git", fail_detach)
+    with pytest.raises(RuntimeError, match="injected detach failure"):
+        manager.create_precommitted_lease(contract, candidate)
+    assert not (sh2_repo["target_root"] / contract.task_id).exists()
+    with pytest.raises(subprocess.CalledProcessError):
+        subprocess.run(
+            ["git", "show-ref", "--verify", f"refs/heads/nexus/task/{contract.task_id}"],
+            cwd=sh2_repo["controller"], check=True, capture_output=True, text=True,
+        )
+    assert not manager._ownership_record_path(sh2_repo["controller"], contract.task_id).exists()
+
+
+def test_create_precommitted_lease_rolls_back_when_ownership_write_fails(sh2_repo, monkeypatch):
+    contract = _contract(sh2_repo, task_id="rollback-ownership")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    _git(sh2_repo["controller"], "commit", "--allow-empty", "-m", "candidate")
+    candidate = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    contract = contract.model_copy(update={"controller_revision": candidate})
+    original_write = manager._write_target_ownership
+
+    def fail_write(*args, **kwargs):
+        if args[1].target_detached:
+            raise RuntimeError("injected ownership failure")
+        return original_write(*args, **kwargs)
+
+    monkeypatch.setattr(manager, "_write_target_ownership", fail_write)
+    with pytest.raises(RuntimeError, match="injected ownership failure"):
+        manager.create_precommitted_lease(contract, candidate)
+    assert not (sh2_repo["target_root"] / contract.task_id).exists()
+    assert not manager._ownership_record_path(sh2_repo["controller"], contract.task_id).exists()
+
+
+def test_create_precommitted_lease_is_byte_equivalent_on_exact_retry(sh2_repo):
+    contract = _contract(sh2_repo, task_id="retry-adoption")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    _git(sh2_repo["controller"], "commit", "--allow-empty", "-m", "candidate")
+    candidate = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    tree = _git(sh2_repo["controller"], "rev-parse", "HEAD^{tree}")
+    contract = contract.model_copy(update={"controller_revision": candidate})
+    first = manager.create_precommitted_lease(contract, candidate, tree, attempt_id="attempt-1")
+    second = manager.create_precommitted_lease(contract, candidate, tree, attempt_id="attempt-1")
+    assert second == first
+    with pytest.raises(RuntimeError, match="attempt"):
+        manager.create_precommitted_lease(contract, candidate, tree, attempt_id="attempt-2")
+
+
+def test_precommitted_retry_rejects_controller_drift_or_dirty_contract_domain(sh2_repo):
+    contract = _contract(sh2_repo, task_id="retry-identity")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    _git(sh2_repo["controller"], "commit", "--allow-empty", "-m", "candidate")
+    candidate = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    contract = contract.model_copy(update={"controller_revision": candidate})
+    lease = manager.create_precommitted_lease(contract, candidate)
+    (sh2_repo["controller"] / "controller.txt").write_text("dirty\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="clean"):
+        manager.create_precommitted_lease(contract, candidate)
+    (sh2_repo["controller"] / "controller.txt").unlink()
+    _git(sh2_repo["controller"], "commit", "--allow-empty", "-m", "drift")
+    with pytest.raises(RuntimeError, match="revision"):
+        manager.create_precommitted_lease(contract, candidate)
+
+    # Restore the controller revision only to exercise caller-domain binding.
+    _git(sh2_repo["controller"], "update-ref", "HEAD", candidate)
+    (sh2_repo["controller"] / "controller.txt").write_text("controller\n", encoding="utf-8")
+    altered = contract.model_copy(update={"allowed_files": ["outside/"]})
+    with pytest.raises(RuntimeError, match="contract"):
+        manager.create_precommitted_lease(altered, candidate)
+    assert lease.target_detached is True
+
+
+def test_detached_precommitted_lease_is_an_active_owned_target_for_disjoint_conflict_checks(sh2_repo):
+    contract = _contract(sh2_repo, task_id="detached-owner")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]), process_checker=lambda _path: False)
+    _git(sh2_repo["controller"], "commit", "--allow-empty", "-m", "candidate")
+    candidate = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    contract = contract.model_copy(update={"controller_revision": candidate})
+    manager.create_precommitted_lease(contract, candidate)
+    ownership = json.loads(
+        manager._ownership_record_path(sh2_repo["controller"], contract.task_id).read_text()
+    )
+    other = _contract(sh2_repo, task_id="other", allowed_files=["outside/"]).model_copy(
+        update={"controller_revision": candidate}
+    )
+    assert manager.target_conflict(other, task_states={contract.task_id: ownership}) is False
+    assert manager.target_conflict(
+        _contract(sh2_repo, task_id="other", allowed_files=["src/"]).model_copy(
+            update={"controller_revision": candidate}
+        ),
+        task_states={contract.task_id: ownership},
+    ) is True
 
 
 def test_ten_clean_attempts_do_not_grow_worktrees(sh2_repo):

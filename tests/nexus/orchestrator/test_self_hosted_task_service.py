@@ -1,5 +1,6 @@
 # ruff: noqa: E402
 
+import base64
 import copy
 import hashlib
 import json
@@ -22,7 +23,10 @@ import pytest
 
 from nexus.contracts.lifecycle_action import (
     ContractKind,
+    ExternalCandidateAdoptionRequest,
     LifecycleActionType,
+    MutationDomain,
+    PermissionProfile,
     build_action_envelope,
     build_owner_inline_contract,
     canonical_request_hash,
@@ -51,6 +55,7 @@ from nexus.orchestrator.repository_contract_gate import (
     RepositoryContractGateReceipt,
 )
 from nexus.orchestrator.self_hosted_task_service import (
+    _LEGACY_V1_NEGATIVE_OMISSION_SET,
     SelfHostedTaskService,
     resolve_canonical_target_roots,
     resolve_execution_lane,
@@ -5419,6 +5424,7 @@ def test_close_retained_dirty_salvage_requires_integrated_replacement(tmp_path):
         "promotion_status": "NOT_CREATED",
         "request": request,
         "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash,
         "lease": lease.__dict__,
         "target_worktree": str(target),
         "attempt_id": "attempt-salvage-gated",
@@ -5580,6 +5586,680 @@ def test_close_retained_dirty_salvage_protects_ref_and_never_becomes_candidate(t
         "Nexus Salvage Bot: salvage-only snapshot retained-salvage-success/attempt-salvage-success"
     )
     assert _git(controller, "show", f"{salvage_commit}:untracked.txt") == "complete salvage"
+
+
+@pytest.mark.parametrize("legacy_v1", [False, True], ids=("strict", "legacy-v1"))
+def test_freeze_retained_forensic_target_preserves_negative_commit_and_releases_slot(
+    tmp_path, legacy_v1,
+):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="forensic-negative")
+    contract = service.build_contract(request)
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    attempt_id = "attempt-forensic-negative"
+    lease = manager.create_lease(contract, attempt_id=attempt_id)
+    target = Path(lease.target_worktree)
+    target.joinpath("README").write_text("negative evidence\n", encoding="utf-8")
+    _git(target, "add", "README")
+    _git(target, "commit", "-m", "negative evidence")
+    negative_head = _git(target, "rev-parse", "HEAD")
+    retained_state = {
+        "schema": "nexus.self_hosted_task_state.v1",
+        "task_id": request["task_id"],
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "state_retention_status": "TERMINAL",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash,
+        "lease": lease.__dict__,
+        "target_worktree": str(target),
+        "controller_worktree": contract.controller_repo_root,
+        "attempt_id": attempt_id,
+        "worker_pid": None,
+        "worker_pgid": None,
+        "worker_child_pgid": None,
+        **_complete_negative_forensic_state(),
+        "candidate_commit_sha": None,
+        "candidate_ref": None,
+        "promotion_packet": None,
+        "candidate": {
+            "allowed_scope_passed": False,
+            "commit_created": False,
+            "approval_status": "PENDING",
+            "public_claim_allowed": False,
+            "production_ready": False,
+            "merge_performed": False,
+            "out_of_scope_paths": ["worker_crashed_before_candidate"],
+            "target_head": negative_head,
+        },
+        "verified_receipt": {
+            "verified": False,
+            "candidate_commit_allowed": False,
+            "candidate_commit_created": False,
+            "scope_gate": False,
+            "verifier_gate": False,
+            "failure_reasons": ["worker_execution_failed"],
+            "public_claim_allowed": False,
+            "production_ready": False,
+            "merge_performed": False,
+            "authority_change_required": False,
+        },
+    }
+    if legacy_v1:
+        for field in _LEGACY_V1_NEGATIVE_OMISSION_SET:
+            retained_state.pop(field)
+    service._write_state(request["task_id"], retained_state)
+
+    with pytest.raises(RuntimeError, match="authority"):
+        service.freeze_retained_forensic_target(request["task_id"])
+    frozen = service.freeze_retained_forensic_target(
+        request["task_id"], authority_confirmation=True,
+    )
+
+    assert frozen["status"] == "RETAINED_FOR_REVIEW"
+    assert frozen["promotion_status"] == "NOT_CREATED"
+    assert frozen["salvage_only"] is True
+    assert frozen["promotion_eligible"] is False
+    assert frozen["salvage_commit_sha"] == negative_head
+    assert frozen["cleanup_decision"] == "REMOVED"
+    assert frozen["forensic_target_released"] is True
+    assert frozen["forensic_negative_proof"]["negative_proof_mode"] == (
+        "LEGACY_V1_EXPLICIT_NEGATIVE_COMPATIBILITY"
+        if legacy_v1 else "STRICT_CURRENT_COMPLETE_NEGATIVE"
+    )
+    assert frozen["forensic_negative_proof"]["synthetic_fields_created"] is False
+    if legacy_v1:
+        assert set(frozen["forensic_negative_proof"]["legacy_omitted_fields"]) == set(
+            _LEGACY_V1_NEGATIVE_OMISSION_SET
+        )
+    assert not target.exists()
+    assert _git(Path(contract.controller_repo_root), "rev-parse", frozen["salvage_ref"]) == negative_head
+    assert frozen.get("candidate_commit_sha") is None
+    assert frozen.get("candidate_ref") is None
+    assert frozen.get("promotion_packet") is None
+
+    replay = service.freeze_retained_forensic_target(
+        request["task_id"], authority_confirmation=True,
+    )
+    assert replay["salvage_commit_sha"] == frozen["salvage_commit_sha"]
+    assert replay["salvage_ref"] == frozen["salvage_ref"]
+
+
+def test_freeze_retained_forensic_target_rejects_dirty_or_candidate_authority(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _real_request(tmp_path, task_id="forensic-hostile")
+    contract = service.build_contract(request)
+    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+    lease = manager.create_lease(contract)
+    target = Path(lease.target_worktree)
+    service._write_state(request["task_id"], {
+        "task_id": request["task_id"],
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "state_retention_status": "TERMINAL",
+        "request": request,
+        "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash,
+        "lease": lease.__dict__,
+        "target_worktree": str(target),
+        "controller_worktree": contract.controller_repo_root,
+        "attempt_id": "attempt-forensic-hostile",
+        "worker_pid": None,
+        "worker_pgid": None,
+        "worker_child_pgid": None,
+        **_complete_negative_forensic_state(),
+    })
+    target.joinpath("dirty.txt").write_text("dirty\n", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="dirty Target"):
+        service.freeze_retained_forensic_target(
+            request["task_id"], authority_confirmation=True,
+        )
+    target.joinpath("dirty.txt").unlink()
+    state = service._read_state(request["task_id"])
+    state["verified_receipt"] = {"verified": True}
+    state["candidate_state_hash"] = "b" * 64
+    state["verified_receipt_hash"] = "c" * 64
+    service._write_state(request["task_id"], state)
+    with pytest.raises(RuntimeError, match="Candidate authority"):
+        service.freeze_retained_forensic_target(
+            request["task_id"], authority_confirmation=True,
+        )
+    state.pop("verified_receipt")
+    state.pop("candidate_state_hash")
+    state.pop("verified_receipt_hash")
+    state["candidate_commit_sha"] = "a" * 40
+    service._write_state(request["task_id"], state)
+    with pytest.raises(RuntimeError, match="Candidate authority"):
+        service.freeze_retained_forensic_target(
+            request["task_id"], authority_confirmation=True,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("candidate_created", True),
+        ("candidate_tree_sha", "a" * 40),
+        ("candidate_status", "PENDING_HUMAN_APPROVAL"),
+        ("candidate_commit_allowed", True),
+        ("durable_candidate_receipt", {"candidate_commit_sha": "a" * 40}),
+    ],
+)
+def test_retained_forensic_guard_rejects_unlisted_candidate_authority_fields(field, value):
+    state = {
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "state_retention_status": "TERMINAL",
+        field: value,
+    }
+
+    assert SelfHostedTaskService._retained_state_has_candidate_authority(state) is True
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("candidate_created", False), ("candidate_commit_allowed", False)],
+)
+def test_retained_forensic_guard_allows_explicit_negative_candidate_observations(field, value):
+    state = {
+        "status": "RETAINED_FOR_REVIEW",
+        "promotion_status": "NOT_CREATED",
+        "state_retention_status": "TERMINAL",
+        field: value,
+    }
+
+    assert SelfHostedTaskService._retained_state_has_candidate_authority(state) is False
+
+
+def _complete_negative_forensic_state():
+    return {
+        "promotion_status": "NOT_CREATED",
+        "candidate_commit_sha": None,
+        "candidate_tree_sha": None,
+        "candidate_state_hash": None,
+        "verified_receipt_hash": None,
+        "candidate_ref": None,
+        "candidate_created": False,
+        "candidate_commit_created": False,
+        "public_claim_allowed": False,
+        "production_ready": False,
+        "merge_performed": False,
+        "push_performed": False,
+        "authority_change_required": False,
+        "candidate_status": None,
+        "approved_binding": None,
+        "promotion_packet": None,
+        "integration_authorization": None,
+        "integration_receipt": None,
+        "promotion_receipt": None,
+        "candidate": {
+            "allowed_scope_passed": False,
+            "commit_created": False,
+            "approval_status": "PENDING",
+            "public_claim_allowed": False,
+            "production_ready": False,
+            "merge_performed": False,
+            "out_of_scope_paths": ["tasks/**"],
+        },
+        "verified_receipt": {
+            "verified": False,
+            "candidate_commit_allowed": False,
+            "candidate_commit_created": False,
+            "scope_gate": False,
+            "failure_reasons": ["scope_gate_failed"],
+            "public_claim_allowed": False,
+            "production_ready": False,
+            "merge_performed": False,
+            "authority_change_required": False,
+        },
+    }
+
+
+def test_retained_forensic_guard_accepts_complete_negative_evidence():
+    assert SelfHostedTaskService._retained_state_has_complete_negative_evidence(
+        _complete_negative_forensic_state()
+    ) is True
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    [
+        "promotion_status",
+        "candidate_status",
+        "candidate_commit_sha",
+        "candidate_tree_sha",
+        "candidate_state_hash",
+        "verified_receipt_hash",
+        "candidate_ref",
+        "approved_binding",
+        "promotion_packet",
+        "integration_authorization",
+        "integration_receipt",
+        "promotion_receipt",
+        "candidate_created",
+        "candidate_commit_created",
+        "public_claim_allowed",
+        "production_ready",
+        "merge_performed",
+        "push_performed",
+        "authority_change_required",
+    ],
+)
+def test_retained_forensic_guard_rejects_missing_required_top_level_field(missing_field):
+    state = _complete_negative_forensic_state()
+    state.pop(missing_field)
+    assert SelfHostedTaskService._retained_state_has_complete_negative_evidence(state) is False
+
+
+def test_legacy_v1_negative_omission_fingerprint_is_exact():
+    state = _complete_negative_forensic_state()
+    for field in _LEGACY_V1_NEGATIVE_OMISSION_SET:
+        state.pop(field)
+
+    assert SelfHostedTaskService._legacy_v1_omission_set_matches(state) is True
+
+    with_one_new_field = {**state, "candidate_created": False}
+    assert SelfHostedTaskService._legacy_v1_omission_set_matches(with_one_new_field) is False
+
+    with_ninth_omission = dict(state)
+    with_ninth_omission.pop("candidate_ref")
+    assert SelfHostedTaskService._legacy_v1_omission_set_matches(with_ninth_omission) is False
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("candidate", "allowed_scope_passed"), True),
+        (("candidate", "commit_created"), True),
+        (("candidate", "approval_status"), "APPROVED"),
+        (("candidate", "public_claim_allowed"), True),
+        (("candidate", "production_ready"), True),
+        (("candidate", "merge_performed"), True),
+        (("candidate", "out_of_scope_paths"), []),
+        (("verified_receipt", "verified"), True),
+        (("verified_receipt", "candidate_commit_allowed"), True),
+        (("verified_receipt", "candidate_commit_created"), True),
+        (("verified_receipt", "failure_reasons"), []),
+        (("verified_receipt", "scope_gate"), True),
+        (("verified_receipt", "public_claim_allowed"), True),
+        (("verified_receipt", "production_ready"), True),
+        (("verified_receipt", "merge_performed"), True),
+        (("verified_receipt", "authority_change_required"), True),
+        (("candidate_commit_sha",), "a" * 40),
+        (("promotion_status",), "PENDING_HUMAN_APPROVAL"),
+    ],
+)
+def test_retained_forensic_guard_rejects_flipped_or_ambiguous_negative_field(path, value):
+    state = _complete_negative_forensic_state()
+    if len(path) == 2:
+        state[path[0]][path[1]] = value
+    else:
+        state[path[0]] = value
+    assert SelfHostedTaskService._retained_state_has_complete_negative_evidence(state) is False
+
+
+def _external_adoption_fixture(tmp_path, monkeypatch, **overrides):
+    import nexus.orchestrator.self_hosted_task_service as service_module
+
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    controller = tmp_path / "controller"
+    controller.mkdir()
+    _init_repo(controller)
+    _git(controller, "config", "user.name", "Adoption Test")
+    _git(controller, "config", "user.email", "adoption@example.test")
+    (controller / "src").mkdir()
+    (controller / "src" / "one.py").write_text("base = 1\n", encoding="utf-8")
+    _git(controller, "add", "src/one.py")
+    _git(controller, "commit", "-m", "base")
+    base = _git(controller, "rev-parse", "HEAD")
+
+    card_path = "tasks/adoption/01-external.md"
+    physical_card = controller / card_path
+    physical_card.parent.mkdir(parents=True)
+    physical_card.write_text(
+        "# TASK-EXT — External\n\n"
+        "task_id: `TASK-EXT`\n\n"
+        "`AUTO_CHAIN=false`\n\n"
+        "## Allowed repository paths\n\n"
+        "- `src/one.py`\n"
+        "- `src/two.py`\n\n"
+        "## Forbidden scope\n\n"
+        "- `tasks/**`\n\n"
+        "## Exact verification commands\n\n"
+        "- `git diff --check`\n",
+        encoding="utf-8",
+    )
+    _git(controller, "add", card_path)
+    _git(controller, "commit", "-m", "bind card")
+    controller_revision = _git(controller, "rev-parse", "HEAD")
+
+    candidate_target = tmp_path / "external-candidate"
+    _git(controller, "worktree", "add", "--detach", str(candidate_target), base)
+    (candidate_target / "src" / "one.py").write_text("base = 2\n", encoding="utf-8")
+    _git(candidate_target, "add", "src/one.py")
+    _git(candidate_target, "commit", "-m", "candidate one")
+    (candidate_target / "src" / "two.py").write_text("two = 2\n", encoding="utf-8")
+    _git(candidate_target, "add", "src/two.py")
+    _git(candidate_target, "commit", "-m", "candidate two")
+    candidate = _git(candidate_target, "rev-parse", "HEAD")
+    candidate_tree = _git(candidate_target, "rev-parse", "HEAD^{tree}")
+    diff = subprocess.run(
+        ["git", "diff", "--binary", f"{base}..{candidate}"],
+        cwd=controller, check=True, stdout=subprocess.PIPE,
+    ).stdout
+    diff_hash = hashlib.sha256(diff).hexdigest()
+    card_hash = hashlib.sha256(physical_card.read_bytes()).hexdigest()
+    validation = {
+        "schema": "nexus.evidence_producer_bridge.validation_receipt.v1",
+        "status": "EVIDENCE_PRODUCER_BRIDGE_VALIDATED",
+        "repository": "LOCAL_TEST",
+        "task": "TASK-EXT",
+        "task_card": {"path": card_path, "card_file_sha256": card_hash},
+        "candidate": {
+            "base_commit": base,
+            "commit": candidate,
+            "tree": candidate_tree,
+            "changed_paths": ["src/one.py", "src/two.py"],
+            "deleted_paths": [],
+        },
+    }
+    validation_bytes = json.dumps(validation, sort_keys=True, separators=(",", ":")).encode()
+    validation_hash = hashlib.sha256(validation_bytes).hexdigest()
+    acceptance = {
+        "schema": "nexus.external_candidate_acceptance.v1",
+        "task_id": "TASK-EXT",
+        "candidate_commit_sha": candidate,
+        "candidate_tree_sha": candidate_tree,
+        "candidate_diff_sha256": diff_hash,
+        "validation_receipt_sha256": validation_hash,
+        "reviewer_id": "independent-reviewer",
+        "disposition": "ACCEPT_CANDIDATE",
+    }
+    acceptance_bytes = json.dumps(acceptance, sort_keys=True, separators=(",", ":")).encode()
+    values = {
+        "schema": "nexus.external_candidate_adoption_request.v1",
+        "repository": "LOCAL_TEST",
+        "task_id": "TASK-EXT",
+        "attempt_id": "attempt-adopt-ext",
+        "action_id": "action-adopt-ext",
+        "idempotency_key": "TASK-EXT:adopt",
+        "task_card_path": card_path,
+        "task_card_hash": card_hash,
+        "controller_revision": controller_revision,
+        "target_base_revision": base,
+        "candidate_commit_sha": candidate,
+        "candidate_tree_sha": candidate_tree,
+        "candidate_diff_sha256": diff_hash,
+        "validation_receipt_sha256": validation_hash,
+        "acceptance_receipt_sha256": hashlib.sha256(acceptance_bytes).hexdigest(),
+        "validation_receipt_b64": base64.b64encode(validation_bytes).decode(),
+        "acceptance_receipt_b64": base64.b64encode(acceptance_bytes).decode(),
+        "allowed_files": ("src/one.py", "src/two.py"),
+        "forbidden_files": (),
+        "authorized_deletions": (),
+        "verifier_commands": ("git diff --check",),
+        "protected_contracts": (),
+    }
+    values.update(overrides)
+    semantic_hash = ExternalCandidateAdoptionRequest.semantic_hash_for(values)
+    values["action"] = build_action_envelope(
+        task_id=values["task_id"],
+        action_type=LifecycleActionType.CANDIDATE_ADOPT_EXTERNAL,
+        request={"adoption_request_hash": semantic_hash},
+        tool_manifest_hash="a" * 64,
+        expected_head=values["controller_revision"],
+        allowed_paths=values["allowed_files"],
+        mutation=True,
+        mutation_domain=MutationDomain.CANDIDATE_REF,
+        permission_profile=PermissionProfile.CANDIDATE,
+        task_card_path=values["task_card_path"],
+        task_card_hash=values["task_card_hash"],
+        contract_kind=ContractKind.TRACKED_TASK_CARD,
+        attempt_id=values["attempt_id"],
+        action_id=values["action_id"],
+        idempotency_key=values["idempotency_key"],
+    )
+    monkeypatch.setattr(service_module, "CANONICAL_SOURCE_ROOT", controller)
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(tmp_path / "targets"))
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True,
+        worker_registry=SimpleNamespace(invoke=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("worker invoked"))),
+    )
+    return service, ExternalCandidateAdoptionRequest(**values), candidate, candidate_tree
+
+
+def test_adopt_external_candidate_physically_verifies_exact_chain_and_stops_pending(tmp_path, monkeypatch):
+    service, request, candidate, tree = _external_adoption_fixture(tmp_path, monkeypatch)
+
+    adopted = service.adopt_external_candidate(request)
+
+    assert adopted["status"] == "PENDING_HUMAN_APPROVAL"
+    assert adopted["promotion_status"] == "PENDING_HUMAN_APPROVAL"
+    assert adopted["candidate_commit_sha"] == candidate
+    assert adopted["candidate_tree_sha"] == tree
+    assert adopted["promotion_packet"]["candidate_commit_sha"] == candidate
+    assert adopted["verified_receipt"]["verified"] is True
+    assert adopted["adoption_receipt"]["worker_invocations"] == 0
+    assert adopted["adoption_receipt"]["candidate_rewritten"] is False
+    assert adopted["adoption_receipt"]["approval_performed"] is False
+    assert adopted["adoption_receipt"]["integration_performed"] is False
+    assert adopted["adoption_receipt"]["claim_ceiling"] == [
+        "CANDIDATE_ADOPTED_PENDING_HUMAN_APPROVAL_ONLY",
+    ]
+    assert adopted["approved_binding"] is None
+    assert adopted["merge_performed"] is False
+    assert adopted["push_performed"] is False
+    replay = service.adopt_external_candidate(request)
+    assert replay["adoption_receipt_hash"] == adopted["adoption_receipt_hash"]
+
+
+def test_adopt_external_candidate_restarts_from_durable_adopting_state(tmp_path, monkeypatch):
+    service, request, candidate, tree = _external_adoption_fixture(tmp_path, monkeypatch)
+    original_mutate = service._mutate_state
+
+    def crash_before_finalize(task_id, mutator):
+        if task_id == request.task_id:
+            raise OSError("simulated crash before adoption finalization")
+        return original_mutate(task_id, mutator)
+
+    monkeypatch.setattr(service, "_mutate_state", crash_before_finalize)
+    with pytest.raises(OSError, match="simulated crash"):
+        service.adopt_external_candidate(request)
+
+    interrupted = service._read_state(request.task_id)
+    assert interrupted is not None
+    assert interrupted["status"] == "ADOPTING"
+    assert interrupted["candidate_created"] is False
+
+    monkeypatch.setattr(service, "_mutate_state", original_mutate)
+    resumed = SelfHostedTaskService(
+        state_dir=tmp_path / "state", ephemeral=True,
+        worker_registry=SimpleNamespace(invoke=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("worker invoked"))),
+    )
+    state = resumed._read_state(request.task_id)
+    assert state is not None
+    assert state["status"] == "PENDING_HUMAN_APPROVAL"
+    assert state["candidate_commit_sha"] == candidate
+    assert state["candidate_tree_sha"] == tree
+    assert state["adoption_receipt"]["worker_invocations"] == 0
+
+
+def test_adopt_external_candidate_restart_fails_closed_on_missing_evidence(tmp_path, monkeypatch):
+    service, request, _, _ = _external_adoption_fixture(tmp_path, monkeypatch)
+    service._create_state(request.task_id, {
+        "task_id": request.task_id,
+        "status": "ADOPTING",
+        "request": request.model_dump(mode="json", exclude={"validation_receipt_b64", "acceptance_receipt_b64"}),
+        "validation_receipt_locator": str(tmp_path / "state" / "missing-validation.json"),
+        "acceptance_receipt_locator": str(tmp_path / "state" / "missing-acceptance.json"),
+    })
+    with pytest.raises(RuntimeError, match="evidence"):
+        service.reconcile_task(request.task_id)
+
+
+def test_adopt_external_candidate_rejects_physical_or_evidence_substitution(tmp_path, monkeypatch):
+    service, tampered, _, _ = _external_adoption_fixture(
+        tmp_path, monkeypatch, candidate_tree_sha="0" * 40,
+    )
+    with pytest.raises(RuntimeError, match="tree"):
+        service.adopt_external_candidate(tampered)
+
+    with pytest.raises(ValueError, match="validation receipt content hash"):
+        _external_adoption_fixture(
+            tmp_path / "other", monkeypatch, validation_receipt_sha256="0" * 64,
+        )
+
+
+def test_adoption_artifact_store_rejects_symlinked_task_directory(tmp_path):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True,
+    )
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    artifact_root = service.state_dir / "adoption-artifacts"
+    artifact_root.mkdir(parents=True)
+    artifact_root.joinpath("TASK-LINK").symlink_to(outside, target_is_directory=True)
+    content = b'{"evidence":true}'
+    digest = hashlib.sha256(content).hexdigest()
+
+    with pytest.raises(RuntimeError, match="symlink|service-owned"):
+        service._store_adoption_artifact("TASK-LINK", digest, content, "validation")
+
+    assert not outside.joinpath(f"validation-{digest}.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("target_base_revision", "0" * 40),
+        ("allowed_files", ("src/one.py",)),
+        ("forbidden_files", ("src/forbidden.py",)),
+        ("authorized_deletions", ("src/one.py",)),
+        ("verifier_commands", ("false verifier",)),
+        ("protected_contracts", ("caller-protection",)),
+    ],
+)
+def test_adopt_external_candidate_derives_contract_from_historical_card_before_mutation(
+    tmp_path, monkeypatch, field, value,
+):
+    service, request, _, _ = _external_adoption_fixture(tmp_path, monkeypatch, **{field: value})
+
+    with pytest.raises(RuntimeError, match=f"ADOPTION_REQUEST_BINDING_MISMATCH:{field}"):
+        service.adopt_external_candidate(request)
+
+    assert service._read_state(request.task_id) is None
+    assert not (service.state_dir / "adoption-artifacts" / request.task_id).exists()
+    target_root, target_path = resolve_canonical_target_roots(
+        request.task_id, campaign_id="CAMPAIGN-EVIDENCE-PRODUCER-BRIDGE-01",
+    )
+    assert not Path(target_root).exists()
+    assert not Path(target_path).exists()
+
+
+@pytest.mark.parametrize("tamper", ["receipt", "packet", "authority"])
+def test_adopt_external_candidate_replay_rejects_durable_tampering(tmp_path, monkeypatch, tamper):
+    service, request, _, _ = _external_adoption_fixture(tmp_path, monkeypatch)
+    service.adopt_external_candidate(request)
+
+    def mutate(state):
+        if tamper == "receipt":
+            state["adoption_receipt"]["reviewer_id"] = "forged-reviewer"
+        elif tamper == "packet":
+            state["promotion_packet"]["candidate_tree_sha"] = "0" * 40
+        else:
+            state["approved_binding"] = {"forged": True}
+
+    service._mutate_state(request.task_id, mutate)
+    with pytest.raises(RuntimeError, match="replay|authority|binding|hash"):
+        service.adopt_external_candidate(request)
+    assert service._read_state(request.task_id)["status"] == "PENDING_HUMAN_APPROVAL"
+
+
+def test_adopt_external_candidate_replay_rejects_replaced_artifact(tmp_path, monkeypatch):
+    service, request, _, _ = _external_adoption_fixture(tmp_path, monkeypatch)
+    service.adopt_external_candidate(request)
+    state = service._read_state(request.task_id)
+    assert state is not None
+    locator = Path(state["validation_receipt_locator"])
+    outside = tmp_path / "outside-replay.json"
+    outside.write_bytes(locator.read_bytes())
+    locator.unlink()
+    locator.symlink_to(outside)
+
+    with pytest.raises(RuntimeError, match="evidence|symlink|unreadable|escaped"):
+        service.adopt_external_candidate(request)
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        "state_candidate_state_hash",
+        "packet_candidate_state_hash",
+        "receipt_candidate_state_hash",
+        "candidate_identity",
+        "external_acceptance",
+        "policy_projection",
+    ],
+)
+def test_adopt_external_candidate_replay_rejects_single_binding_tamper(
+    tmp_path, monkeypatch, tamper,
+):
+    service, request, _, _ = _external_adoption_fixture(tmp_path, monkeypatch)
+    service.adopt_external_candidate(request)
+
+    def mutate(state):
+        if tamper == "state_candidate_state_hash":
+            state["candidate_state_hash"] = "0" * 64
+        elif tamper == "packet_candidate_state_hash":
+            state["promotion_packet"]["candidate_state_hash"] = "0" * 64
+        elif tamper == "receipt_candidate_state_hash":
+            state["adoption_receipt"]["candidate_state_hash"] = "0" * 64
+        elif tamper == "candidate_identity":
+            state["candidate"]["candidate_commit_sha"] = "0" * 40
+        elif tamper == "external_acceptance":
+            state["external_acceptance"]["reviewer_id"] = "forged-reviewer"
+        else:
+            state["derived_contract_projection"][
+                "repository_contract_policy_revision_hash"
+            ] = "0" * 64
+
+    service._mutate_state(request.task_id, mutate)
+    with pytest.raises(RuntimeError, match="replay|binding|hash|policy"):
+        service.adopt_external_candidate(request)
+
+
+def test_adopt_external_candidate_rejects_in_root_symlinked_card(tmp_path, monkeypatch):
+    import nexus.orchestrator.self_hosted_task_service as service_module
+
+    service, request, _, _ = _external_adoption_fixture(tmp_path, monkeypatch)
+    controller = Path(service_module.CANONICAL_SOURCE_ROOT)
+    card = controller / request.task_card_path
+    real_card = card.read_bytes()
+    card.unlink()
+    card.symlink_to(controller / "outside-card.md")
+    (controller / "outside-card.md").write_bytes(real_card)
+    monkeypatch.setattr(WorktreeManager, "_status_bytes", lambda *_args: b"")
+
+    with pytest.raises(RuntimeError, match="Task Card"):
+        service.adopt_external_candidate(request)
+
+
+def test_adopt_external_candidate_rejects_symlinked_card_parent(tmp_path, monkeypatch):
+    import nexus.orchestrator.self_hosted_task_service as service_module
+
+    service, request, _, _ = _external_adoption_fixture(tmp_path, monkeypatch)
+    controller = Path(service_module.CANONICAL_SOURCE_ROOT)
+    parent = controller / "tasks" / "adoption"
+    outside = tmp_path / "outside-tasks"
+    outside.mkdir()
+    (outside / "01-external.md").write_bytes((parent / "01-external.md").read_bytes())
+    shutil.rmtree(parent)
+    parent.symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(WorktreeManager, "_status_bytes", lambda *_args: b"")
+
+    with pytest.raises(RuntimeError, match="Task Card"):
+        service.adopt_external_candidate(request)
 
 
 def test_close_retained_dirty_salvage_ref_mismatch_keeps_target_and_task_retained(tmp_path, monkeypatch):

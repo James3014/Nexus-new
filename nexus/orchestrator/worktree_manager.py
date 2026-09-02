@@ -685,6 +685,168 @@ class WorktreeManager:
                 return self._create_lease_locked(contract, task_states=task_states, attempt_id=attempt_id)
             return self._create_lease_locked(contract, task_states=task_states)
 
+    def create_precommitted_lease(
+        self,
+        contract: SelfHostedTaskContract,
+        candidate_commit: Optional[str] = None,
+        candidate_tree: Optional[str] = None,
+        *,
+        candidate_commit_sha: Optional[str] = None,
+        candidate_tree_sha: Optional[str] = None,
+        task_states: Optional[Mapping[str, dict]] = None,
+        attempt_id: Optional[str] = None,
+    ) -> TargetWorktreeLease:
+        """Lease an exact-base Target and detach it at an existing Candidate."""
+        if candidate_commit is not None and candidate_commit_sha is not None and candidate_commit != candidate_commit_sha:
+            raise RuntimeError("precommitted candidate commit assertions disagree")
+        if candidate_tree is not None and candidate_tree_sha is not None and candidate_tree != candidate_tree_sha:
+            raise RuntimeError("precommitted candidate tree assertions disagree")
+        candidate_commit = candidate_commit or candidate_commit_sha
+        candidate_tree = candidate_tree or candidate_tree_sha
+        controller_root = Path(contract.controller_repo_root).resolve()
+        target_path = Path(contract.target_repo_root).resolve()
+        self._verify_target_boundary(controller_root, target_path, Path(contract.target_worktree_root).resolve())
+        _normalized_mutation_paths(contract)
+        CollaborationRealmVerifier.verify_submission(contract)
+        self._verify_controller(contract)
+        with self._reservation_lock(controller_root):
+            return self._create_precommitted_lease_locked(
+                contract,
+                candidate_commit,
+                candidate_tree,
+                task_states=task_states,
+                attempt_id=attempt_id,
+            )
+
+    def _create_precommitted_lease_locked(
+        self,
+        contract: SelfHostedTaskContract,
+        candidate_commit: Optional[str],
+        candidate_tree: Optional[str],
+        *,
+        task_states: Optional[Mapping[str, dict]],
+        attempt_id: Optional[str],
+    ) -> TargetWorktreeLease:
+        controller_root = Path(contract.controller_repo_root).resolve()
+        target_path = Path(contract.target_repo_root).resolve()
+        if not isinstance(candidate_commit, str) or not re.fullmatch(r"[0-9a-f]{40}", candidate_commit):
+            raise RuntimeError("precommitted candidate must be an exact commit SHA")
+        try:
+            resolved_candidate = self._run_git(
+                ["rev-parse", f"{candidate_commit}^{{commit}}"], cwd=controller_root,
+            )
+        except RuntimeError as exc:
+            raise RuntimeError("precommitted candidate is missing or not a commit") from exc
+        if resolved_candidate != candidate_commit:
+            raise RuntimeError("precommitted candidate must resolve to the exact commit SHA")
+        candidate_tree_sha = self._run_git(
+            ["rev-parse", f"{candidate_commit}^{{tree}}"], cwd=controller_root,
+        )
+        if candidate_tree is not None and candidate_tree_sha != candidate_tree:
+            raise RuntimeError("precommitted candidate tree does not match the asserted tree")
+        try:
+            self._run_git(
+                ["merge-base", "--is-ancestor", contract.target_base_revision, candidate_commit],
+                cwd=controller_root,
+            )
+        except RuntimeError as exc:
+            raise RuntimeError("precommitted candidate must descend from the exact Target base") from exc
+        merge_commits = self._run_git(
+            ["rev-list", "--merges", f"{contract.target_base_revision}..{candidate_commit}"],
+            cwd=controller_root,
+        ).splitlines()
+        if merge_commits:
+            raise RuntimeError("precommitted candidate chain must not contain merge commits")
+
+        ownership_path = self._ownership_record_path(controller_root, contract.task_id)
+        existing_entry = self._worktree_entry(controller_root, target_path)
+        if existing_entry is not None:
+            if existing_entry.get("branch"):
+                raise RuntimeError("existing precommitted Target is not detached")
+            try:
+                record = self._read_target_ownership(
+                    controller_root, existing_entry, contract.task_id,
+                )
+            except ValueError as exc:
+                raise RuntimeError("existing detached Target ownership is invalid") from exc
+            if not isinstance(record, Mapping):
+                raise RuntimeError("existing detached Target ownership is missing")
+            existing_lease = record.get("lease")
+            if not isinstance(existing_lease, Mapping):
+                raise RuntimeError("existing detached Target lease is invalid")
+            if record.get("contract_hash") != _contract_digest(contract):
+                raise RuntimeError("existing detached Target contract does not match")
+            if record.get("controller_worktree") != str(controller_root):
+                raise RuntimeError("existing detached Target controller does not match")
+            if existing_lease.get("target_worktree") != str(target_path):
+                raise RuntimeError("existing detached Target path does not match")
+            if existing_lease.get("target_branch") != f"nexus/task/{contract.task_id}":
+                raise RuntimeError("existing detached Target branch does not match")
+            expected_attempt = attempt_id or existing_lease.get("attempt_id")
+            if attempt_id is not None and existing_lease.get("attempt_id") != expected_attempt:
+                raise RuntimeError("precommitted lease attempt identity does not match")
+            if existing_lease.get("target_base_revision") != contract.target_base_revision:
+                raise RuntimeError("existing detached Target base does not match")
+            if self._run_git(["rev-parse", "HEAD"], cwd=target_path) != candidate_commit:
+                raise RuntimeError("existing detached Target Candidate does not match")
+            if self._status_bytes(target_path):
+                raise RuntimeError("existing precommitted Target must be clean")
+            if self._run_git(
+                ["rev-parse", f"refs/heads/nexus/task/{contract.task_id}"], cwd=controller_root,
+            ) != contract.target_base_revision:
+                raise RuntimeError("existing precommitted lease moved the task branch")
+            return TargetWorktreeLease(**dict(existing_lease))
+
+        branch_ref = f"refs/heads/nexus/task/{contract.task_id}"
+        try:
+            prior_branch = self._run_git(["rev-parse", branch_ref], cwd=controller_root)
+        except RuntimeError:
+            prior_branch = None
+        prior_ownership = ownership_path.read_bytes() if ownership_path.exists() else None
+
+        lease = self._create_lease_locked(
+            contract, task_states=task_states, attempt_id=attempt_id,
+        )
+        target = Path(lease.target_worktree)
+        try:
+            self._run_git(["checkout", "--detach", candidate_commit], cwd=target)
+            if self._status_bytes(target):
+                raise RuntimeError("precommitted Target must be clean")
+            actual = self._run_git(["rev-parse", "HEAD"], cwd=target)
+            if actual != candidate_commit:
+                raise RuntimeError("precommitted Target was not detached at the exact Candidate")
+            branch_head = self._run_git(["rev-parse", branch_ref], cwd=controller_root)
+            if branch_head != contract.target_base_revision:
+                raise RuntimeError("precommitted lease moved the task branch")
+            adopted = TargetWorktreeLease(
+                **{
+                    **lease.__dict__,
+                    "target_detached": True,
+                }
+            )
+            self._write_target_ownership(
+                contract, adopted, attempt_id=attempt_id, task_states=task_states,
+            )
+            return adopted
+        except Exception:
+            try:
+                self._run_git(["worktree", "remove", "--force", str(target)], cwd=controller_root)
+            except RuntimeError:
+                pass
+            if prior_branch is None:
+                try:
+                    self._run_git(["branch", "-D", lease.target_branch], cwd=controller_root)
+                except RuntimeError:
+                    pass
+            if prior_ownership is None:
+                try:
+                    ownership_path.unlink()
+                except FileNotFoundError:
+                    pass
+            else:
+                ownership_path.write_bytes(prior_ownership)
+            raise
+
     @staticmethod
     def _ownership_record_path(controller_root: Path, task_id: str) -> Path:
         raw_common = Path(
@@ -826,14 +988,15 @@ class WorktreeManager:
             controller_root=controller_root,
         )
 
-        branch = entry.get("branch", "")
+        branch = entry.get("branch", "detached" if "detached" in entry else "")
         expected_branch = f"refs/heads/nexus/task/{task_id}"
         lease = record.get("lease")
+        detached_lease = isinstance(lease, Mapping) and lease.get("target_detached") is True
         if (
             record.get("task_id") != task_id
             or record.get("controller_worktree") != str(controller_root)
             or record.get("expected_controller_worktree") != str(controller_root)
-            or branch != expected_branch
+            or (branch != expected_branch and not (detached_lease and branch in {"", "detached"}))
             or not isinstance(lease, Mapping)
             or Path(str(lease.get("target_worktree", ""))).resolve() != Path(str(entry.get("worktree", ""))).resolve()
         ):
@@ -1188,12 +1351,23 @@ class WorktreeManager:
             controller_root, target_path, task_states=task_states,
         )
         for entry in active:
-            branch = entry.get("branch", "")
+            branch = entry.get("branch", "detached" if "detached" in entry else "")
             task_id = ""
             if branch.startswith("refs/heads/nexus/task/"):
                 task_id = branch.removeprefix("refs/heads/nexus/task/")
             elif branch.startswith("nexus/task/"):
                 task_id = branch.removeprefix("nexus/task/")
+            if not task_id and branch in {"", "detached"}:
+                target_entry_path = Path(str(entry.get("worktree", ""))).resolve()
+                for record in self._all_ownership_records(controller_root):
+                    record_lease = record.get("lease")
+                    if (
+                        isinstance(record_lease, Mapping)
+                        and record_lease.get("target_detached") is True
+                        and Path(str(record_lease.get("target_worktree", ""))).resolve() == target_entry_path
+                    ):
+                        task_id = str(record.get("task_id") or "")
+                        break
             snapshot = (task_states or {}).get(task_id)
             if not isinstance(snapshot, Mapping):
                 # An active registered Target without authoritative task state must fail closed.
@@ -1267,7 +1441,30 @@ class WorktreeManager:
             candidate_ref = f"refs/nexus-candidate-commits/{contract.task_id}/{candidate_commit}"
         except RuntimeError:
             candidate_ref = f"refs/nexus-candidates/{contract.task_id}/{candidate_commit}"
-        self._run_git(["update-ref", candidate_ref, candidate_commit], cwd=contract.controller_repo_root)
+        try:
+            existing = self._run_git(
+                ["rev-parse", f"{candidate_ref}^{{commit}}"], cwd=contract.controller_repo_root,
+            )
+        except RuntimeError:
+            existing = None
+        if existing is not None and existing != candidate_commit:
+            raise RuntimeError("candidate durable ref already exists with a different commit")
+        if existing is None:
+            try:
+                self._run_git(
+                    ["update-ref", candidate_ref, candidate_commit, "0" * 40],
+                    cwd=contract.controller_repo_root,
+                )
+            except RuntimeError as exc:
+                try:
+                    raced = self._run_git(
+                        ["rev-parse", f"{candidate_ref}^{{commit}}"],
+                        cwd=contract.controller_repo_root,
+                    )
+                except RuntimeError:
+                    raced = None
+                if raced != candidate_commit:
+                    raise RuntimeError("candidate durable ref create-only CAS failed") from exc
         if self._run_git(["rev-parse", candidate_ref], cwd=contract.controller_repo_root) != candidate_commit:
             raise RuntimeError("candidate durable ref verification failed")
         expected_tree = self._run_git(["rev-parse", f"{candidate_commit}^{{tree}}"], cwd=contract.controller_repo_root)
@@ -2018,6 +2215,16 @@ class WorktreeManager:
                 task_id = branch.removeprefix("refs/heads/nexus/task/")
             elif branch.startswith("nexus/task/"):
                 task_id = branch.removeprefix("nexus/task/")
+            if task_id is None and branch in {"", "detached"}:
+                for record in self._all_ownership_records(controller):
+                    lease = record.get("lease") if isinstance(record, Mapping) else None
+                    if (
+                        isinstance(lease, Mapping)
+                        and lease.get("target_detached") is True
+                        and Path(str(lease.get("target_worktree", ""))).resolve() == path
+                    ):
+                        task_id = str(record.get("task_id") or "") or None
+                        break
             if task_id:
                 # Lifecycle status is descriptive only.  A registered Target
                 # remains owned until the verified cleanup transition releases
