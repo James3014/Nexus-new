@@ -30,6 +30,7 @@ from uuid import uuid4
 from nexus.contracts.autonomy_goal import AutonomyActionClass, RepositoryIdentity
 from nexus.contracts.lifecycle_action import (
     ContractKind,
+    ExternalCandidateAdoptionRequest,
     LifecycleActionEnvelope,
     LifecycleActionType,
     MutationDomain,
@@ -96,6 +97,9 @@ PERMISSION_POLICY = {
 PERMISSION_POLICY_HASH = hashlib.sha256(
     json.dumps(PERMISSION_POLICY, sort_keys=True, separators=(",", ":")).encode("utf-8")
 ).hexdigest()
+EPB_CAMPAIGN_ID = "CAMPAIGN-EVIDENCE-PRODUCER-BRIDGE-01"
+EPB_SPEC_ID = "SPEC-EPB-EXTERNAL-CANDIDATE-ADOPTION-EXEC-001"
+EPB_SPEC_SHA256 = "9e841f43d63ffc10704f00b4d21b88f9fbf78f3a473839a1409f278a951251a1"
 MAX_READ_BYTES = 1024 * 1024
 MAX_RESULT_BYTES = 1024 * 1024
 MAX_SEARCH_RESULTS = 200
@@ -3461,6 +3465,69 @@ class UnifiedMCPGateway:
                 },
             },
             {
+                "name": "nexus_candidate_adopt_external",
+                "description": "Adopt one immutable externally accepted Candidate and stop at pending human approval.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": [
+                        "campaign_id", "spec_id", "spec_sha256", "server_instance_id", "lifecycle_revision",
+                        "tool_manifest_hash", "full_tool_schema_hash", "permission_policy_hash", "controller_repo_root",
+                        "controller_branch", "controller_head", "schema", "repository", "task_id",
+                        "attempt_id", "action_id", "idempotency_key", "task_card_path", "task_card_hash",
+                        "controller_revision", "target_base_revision", "candidate_commit_sha",
+                        "candidate_tree_sha", "candidate_diff_sha256", "validation_receipt_sha256",
+                        "acceptance_receipt_sha256", "validation_receipt_b64", "acceptance_receipt_b64",
+                        "allowed_files", "forbidden_files", "authorized_deletions",
+                        "verifier_commands", "protected_contracts", "action",
+                    ],
+                    "additionalProperties": False,
+                    "properties": {
+                        "campaign_id": {"type": "string", "const": EPB_CAMPAIGN_ID},
+                        "spec_id": {"type": "string", "const": EPB_SPEC_ID},
+                        "server_instance_id": {"type": "string"}, "lifecycle_revision": {"type": "string"},
+                        "spec_sha256": {"type": "string", "const": EPB_SPEC_SHA256},
+                        "tool_manifest_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "full_tool_schema_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "permission_policy_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "controller_repo_root": {"type": "string"}, "controller_branch": {"type": "string"},
+                        "controller_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "schema": {"type": "string", "const": "nexus.external_candidate_adoption_request.v1"},
+                        "repository": {"type": "string", "const": GITHUB_REPOSITORY.repository_id},
+                        "task_id": {"type": "string"}, "attempt_id": {"type": "string"},
+                        "action_id": {"type": "string"}, "idempotency_key": {"type": "string"},
+                        "task_card_path": {"type": "string"}, "task_card_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "controller_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "target_base_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "candidate_commit_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "candidate_tree_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "candidate_diff_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "validation_receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "acceptance_receipt_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "validation_receipt_b64": {"type": "string"}, "acceptance_receipt_b64": {"type": "string"},
+                        "allowed_files": {"type": "array", "items": {"type": "string"}},
+                        "forbidden_files": {"type": "array", "items": {"type": "string"}},
+                        "authorized_deletions": {"type": "array", "items": {"type": "string"}},
+                        "verifier_commands": {"type": "array", "items": {"type": "string"}},
+                        "protected_contracts": {"type": "array", "items": {"type": "string"}},
+                        "action": {
+                            "type": "object", "additionalProperties": False,
+                            "required": ["schema", "task_id", "attempt_id", "action_id", "idempotency_key", "action_type", "task_card_path", "task_card_hash", "contract_kind", "expected_head", "allowed_paths", "permission_profile", "approval_scope", "mutation_domain", "tool_manifest_hash", "request_hash", "mutation"],
+                            "properties": {
+                                "schema": {"type": "string", "const": "nexus.lifecycle_action.v1"},
+                                "task_id": {"type": "string"}, "attempt_id": {"type": "string"}, "action_id": {"type": "string"}, "idempotency_key": {"type": "string"},
+                                "action_type": {"type": "string", "const": "CANDIDATE_ADOPT_EXTERNAL"},
+                                "task_card_path": {"type": "string"}, "task_card_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                                "contract_kind": {"type": "string", "const": "TRACKED_TASK_CARD"}, "contract_hash": {"type": ["string", "null"]},
+                                "expected_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"}, "allowed_paths": {"type": "array", "items": {"type": "string"}},
+                                "permission_profile": {"type": "string", "const": "CANDIDATE"}, "approval_scope": {"type": "string", "const": "ALLOW_ACTION_ONCE"},
+                                "mutation_domain": {"type": "string", "const": "CANDIDATE_REF"}, "tool_manifest_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                                "request_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "mutation": {"type": "boolean", "const": True},
+                            },
+                        },
+                    },
+                },
+            },
+            {
                 "name": "nexus_candidate_approve",
                 "description": "Approve an exact Candidate binding; approval does not integrate or push.",
                 "inputSchema": {
@@ -3886,6 +3953,256 @@ class UnifiedMCPGateway:
         payload["guard_receipt"] = guard_receipt
         payload["approval_receipt"] = approval_receipt
         return payload
+
+    def _candidate_adopt_external(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        """Adopt one externally accepted Candidate, stopping at approval pending.
+
+        The gateway owns only the public/runtime and Owner-authority boundary;
+        physical Candidate verification remains exclusively in the lifecycle
+        service.  Keep the transport envelope closed so callers cannot smuggle
+        internal state or downstream approval/integration fields.
+        """
+        runtime_fields = {
+            "server_instance_id", "lifecycle_revision", "full_tool_schema_hash",
+            "permission_policy_hash", "controller_repo_root", "controller_branch",
+            "controller_head", "campaign_id", "spec_id", "spec_sha256",
+        }
+        request_fields = set(ExternalCandidateAdoptionRequest.model_fields)
+        unknown = set(arguments) - request_fields - runtime_fields
+        if unknown:
+            raise GatewayInputError("CANDIDATE_ADOPTION_SCHEMA_CLOSED")
+        missing_runtime = runtime_fields - set(arguments)
+        if missing_runtime:
+            raise GatewayInputError(
+                "CANDIDATE_ADOPTION_RUNTIME_BINDING_REQUIRED:" + ",".join(sorted(missing_runtime))
+            )
+        if str(arguments["server_instance_id"]) != SERVER_INSTANCE_ID:
+            raise GatewayInputError("CANDIDATE_ADOPTION_SERVER_INSTANCE_MISMATCH")
+        if str(arguments["lifecycle_revision"]) != LIFECYCLE_REVISION:
+            raise GatewayInputError("CANDIDATE_ADOPTION_LIFECYCLE_REVISION_MISMATCH")
+        if str(arguments["full_tool_schema_hash"]) != FULL_TOOL_SCHEMA_HASH:
+            raise GatewayInputError("CANDIDATE_ADOPTION_TOOL_SCHEMA_MISMATCH")
+        if str(arguments["permission_policy_hash"]) != PERMISSION_POLICY_HASH:
+            raise GatewayInputError("CANDIDATE_ADOPTION_PERMISSION_POLICY_MISMATCH")
+        if str(arguments["campaign_id"]) != EPB_CAMPAIGN_ID:
+            raise GatewayInputError("CANDIDATE_ADOPTION_CAMPAIGN_MISMATCH")
+        if str(arguments["spec_id"]) != EPB_SPEC_ID or str(arguments.get("spec_sha256")) != EPB_SPEC_SHA256:
+            raise GatewayInputError("CANDIDATE_ADOPTION_SPEC_MISMATCH")
+        if str(arguments.get("repository")) != GITHUB_REPOSITORY.repository_id:
+            raise GatewayInputError("CANDIDATE_ADOPTION_REPOSITORY_MISMATCH")
+
+        controller_root = Path(str(arguments["controller_repo_root"])).expanduser().resolve()
+        if controller_root != CANONICAL_SOURCE_ROOT.resolve():
+            raise GatewayInputError("CANDIDATE_ADOPTION_CONTROLLER_ROOT_MISMATCH")
+        current_branch = _git("branch", "--show-current").strip()
+        if str(arguments["controller_branch"]) != current_branch:
+            raise GatewayInputError("CANDIDATE_ADOPTION_CONTROLLER_BRANCH_MISMATCH")
+        current_head = _git("rev-parse", "HEAD").strip()
+        if str(arguments["controller_head"]) != current_head:
+            raise GatewayInputError("CANDIDATE_ADOPTION_CONTROLLER_HEAD_MISMATCH")
+        if str(arguments.get("controller_head")) != str(arguments.get("controller_revision")):
+            raise GatewayInputError("CANDIDATE_ADOPTION_CONTROLLER_REVISION_MISMATCH")
+
+        request_data = {key: arguments[key] for key in request_fields if key in arguments}
+        try:
+            request = ExternalCandidateAdoptionRequest.model_validate(request_data)
+        except Exception as exc:
+            raise GatewayInputError(f"CANDIDATE_ADOPTION_REQUEST_INVALID:{exc}") from exc
+        if request.action.tool_manifest_hash != TOOL_MANIFEST_REVISION:
+            raise GatewayInputError("CANDIDATE_ADOPTION_ACTION_MANIFEST_MISMATCH")
+        if request.tool_manifest_hash != TOOL_MANIFEST_REVISION:
+            raise GatewayInputError("CANDIDATE_ADOPTION_REQUEST_MANIFEST_MISMATCH")
+        if request.action.expected_head != request.controller_revision:
+            raise GatewayInputError("CANDIDATE_ADOPTION_ACTION_HEAD_MISMATCH")
+        effect = {
+            "campaign_id": str(arguments["campaign_id"]),
+            "spec_id": str(arguments["spec_id"]),
+            "spec_sha256": EPB_SPEC_SHA256,
+            "repository": request.repository,
+            "task_id": request.task_id,
+            "attempt_id": request.attempt_id,
+            "action_id": request.action_id,
+            "idempotency_key": request.idempotency_key,
+            "task_card_path": request.task_card_path,
+            "task_card_hash": request.task_card_hash,
+            "target_base_revision": request.target_base_revision,
+            "controller_revision": request.controller_revision,
+            "candidate_commit_sha": request.candidate_commit_sha,
+            "candidate_tree_sha": request.candidate_tree_sha,
+            "candidate_diff_sha256": request.candidate_diff_sha256,
+            "validation_receipt_sha256": request.validation_receipt_sha256,
+            "acceptance_receipt_sha256": request.acceptance_receipt_sha256,
+            "adoption_request_hash": request.semantic_hash(),
+            "server_instance_id": SERVER_INSTANCE_ID,
+            "lifecycle_revision": LIFECYCLE_REVISION,
+            "tool_manifest_hash": TOOL_MANIFEST_REVISION,
+            "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH,
+            "permission_policy_hash": PERMISSION_POLICY_HASH,
+            "controller_repo_root": str(controller_root),
+            "controller_branch": current_branch,
+            "controller_head": current_head,
+            "action": request.action.model_dump(mode="json"),
+        }
+        owner_authority = self._require_owner_effect_authority(
+            AutonomyActionClass.CANDIDATE_ADOPT_EXTERNAL, effect,
+        )
+        rebound_root = Path(str(arguments["controller_repo_root"])).expanduser().resolve()
+        rebound_branch = _git("branch", "--show-current").strip()
+        rebound_head = _git("rev-parse", "HEAD").strip()
+        if rebound_root != controller_root or rebound_branch != current_branch or rebound_head != current_head:
+            raise GatewayInputError("CANDIDATE_ADOPTION_CONTROLLER_DRIFT_AFTER_AUTHORITY")
+        if rebound_head != request.controller_revision:
+            raise GatewayInputError("CANDIDATE_ADOPTION_CONTROLLER_REVISION_DRIFT_AFTER_AUTHORITY")
+        result = self.service.adopt_external_candidate(request)
+        self._validate_external_adoption_result(result, request)
+        return {
+            "schema": "nexus.candidate_adoption_gateway_result.v1",
+            "operation": "candidate_adopt_external",
+            "task_id": result.get("task_id"),
+            "status": result.get("status"),
+            "promotion_status": result.get("promotion_status"),
+            "candidate_commit_sha": result.get("candidate_commit_sha"),
+            "candidate_tree_sha": result.get("candidate_tree_sha"),
+            "candidate_state_hash": result.get("candidate_state_hash"),
+            "verified_receipt_hash": result.get("verified_receipt_hash"),
+            "candidate_ref": result.get("candidate_ref"),
+            "adoption_receipt": result.get("adoption_receipt"),
+            "adoption_receipt_hash": result.get("adoption_receipt_hash"),
+            "owner_authority": owner_authority,
+            "claim_ceiling": [
+                "CANDIDATE_ADOPTED_PENDING_HUMAN_APPROVAL_ONLY",
+                "NO_APPROVAL", "NO_INTEGRATION", "NO_MERGE", "NO_PUSH",
+                "NO_RELEASE", "NO_PRODUCTION",
+            ],
+        }
+
+    @staticmethod
+    def _validate_external_adoption_result(
+        result: Any,
+        request: ExternalCandidateAdoptionRequest | None = None,
+    ) -> None:
+        if not isinstance(result, Mapping):
+            raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_INVALID")
+        if result.get("status") != "PENDING_HUMAN_APPROVAL" or result.get("promotion_status") != "PENDING_HUMAN_APPROVAL":
+            raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_NOT_PENDING")
+        authority_tokens = (
+            "approval", "approved", "integrat", "merge", "push",
+            "release", "activat", "deploy", "production",
+        )
+
+        def is_negative(value: Any) -> bool:
+            return value in (
+                None, False, "", "PENDING", "NOT_CREATED",
+                "PENDING_HUMAN_APPROVAL", [], {},
+            )
+
+        for key, value in result.items():
+            if any(token in key.lower() for token in authority_tokens) and not is_negative(value):
+                raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_UNEXPECTED_DOWNSTREAM_FIELD")
+        adoption_receipt = result.get("adoption_receipt")
+        adoption_receipt_hash = str(result.get("adoption_receipt_hash") or "")
+        if not isinstance(adoption_receipt, Mapping) or not re.fullmatch(r"[0-9a-f]{64}", adoption_receipt_hash):
+            raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_RECEIPT_REQUIRED")
+        computed_receipt_hash = hashlib.sha256(json.dumps(
+            dict(adoption_receipt), sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+        ).encode("utf-8")).hexdigest()
+        if computed_receipt_hash != adoption_receipt_hash:
+            raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_RECEIPT_HASH_MISMATCH")
+        receipt_fields = {
+            "schema", "task_id", "attempt_id", "action_id", "idempotency_key",
+            "adoption_request_hash", "task_card_path", "task_card_hash", "contract_hash",
+            "controller_revision", "target_base_revision", "candidate_commit_sha",
+            "candidate_tree_sha", "candidate_diff_sha256", "candidate_state_hash",
+            "verified_receipt_hash", "validation_receipt_sha256",
+            "acceptance_receipt_sha256", "repository_contract_policy_revision_hash",
+            "derived_contract_projection", "forbidden_repository_patterns", "reviewer_id",
+            "candidate_ref", "promotion_packet_hash", "worker_invocations",
+            "candidate_rewritten", "approval_performed", "integration_performed",
+            "merge_performed", "push_performed", "public_claim_allowed",
+            "production_ready", "claim_ceiling", "issued_at",
+        }
+        if set(adoption_receipt) != receipt_fields:
+            raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_RECEIPT_FIELDS_INVALID")
+        if (
+            adoption_receipt.get("schema") != "nexus.external_candidate_adoption_receipt.v1"
+            or adoption_receipt.get("worker_invocations") != 0
+            or adoption_receipt.get("candidate_rewritten") is not False
+            or adoption_receipt.get("approval_performed") is not False
+            or adoption_receipt.get("integration_performed") is not False
+            or adoption_receipt.get("merge_performed") is not False
+            or adoption_receipt.get("push_performed") is not False
+            or adoption_receipt.get("public_claim_allowed") is not False
+            or adoption_receipt.get("production_ready") is not False
+            or adoption_receipt.get("claim_ceiling")
+            != ["CANDIDATE_ADOPTED_PENDING_HUMAN_APPROVAL_ONLY"]
+        ):
+            raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_RECEIPT_SEMANTICS_INVALID")
+        if request is not None:
+            expected_subject = {
+                "task_id": request.task_id,
+                "attempt_id": request.attempt_id,
+                "action_id": request.action_id,
+                "idempotency_key": request.idempotency_key,
+                "adoption_request_hash": request.semantic_hash(),
+                "task_card_path": request.task_card_path,
+                "task_card_hash": request.task_card_hash,
+                "controller_revision": request.controller_revision,
+                "target_base_revision": request.target_base_revision,
+                "candidate_commit_sha": request.candidate_commit_sha,
+                "candidate_tree_sha": request.candidate_tree_sha,
+                "candidate_diff_sha256": request.candidate_diff_sha256,
+                "validation_receipt_sha256": request.validation_receipt_sha256,
+                "acceptance_receipt_sha256": request.acceptance_receipt_sha256,
+            }
+            if any(adoption_receipt.get(key) != value for key, value in expected_subject.items()):
+                raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_RECEIPT_SUBJECT_MISMATCH")
+        for field in (
+            "contract_hash", "candidate_state_hash", "verified_receipt_hash",
+            "repository_contract_policy_revision_hash", "promotion_packet_hash",
+        ):
+            if not re.fullmatch(r"[0-9a-f]{64}", str(adoption_receipt.get(field) or "")):
+                raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_RECEIPT_HASH_FIELD_INVALID")
+        if (
+            result.get("candidate_commit_sha") != adoption_receipt.get("candidate_commit_sha")
+            or result.get("candidate_tree_sha") != adoption_receipt.get("candidate_tree_sha")
+            or result.get("candidate_state_hash") != adoption_receipt.get("candidate_state_hash")
+            or result.get("verified_receipt_hash") != adoption_receipt.get("verified_receipt_hash")
+            or result.get("candidate_ref") != adoption_receipt.get("candidate_ref")
+        ):
+            raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_RECEIPT_STATE_MISMATCH")
+        for key, value in adoption_receipt.items():
+            if any(token in key.lower() for token in authority_tokens) and not is_negative(value):
+                raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_RECEIPT_DOWNSTREAM_EFFECT")
+        allowed_downstream_fields = {
+            "approved_binding", "integration_authorization", "integration_receipt",
+            "merge_performed", "push_performed", "production_ready",
+        }
+        downstream_prefixes = (
+            "approval_", "approved_", "integration_", "merge_", "push_",
+            "release_", "activation_", "deployment_", "production_",
+        )
+        unexpected_downstream = sorted(
+            key for key in result
+            if key.startswith(downstream_prefixes) and key not in allowed_downstream_fields
+        )
+        if unexpected_downstream or any(
+            key in result for key in ("final_disposition", "terminal_status", "release_receipt")
+        ):
+            raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_UNEXPECTED_DOWNSTREAM_FIELD")
+        for field in ("approved_binding", "integration_authorization", "integration_receipt"):
+            if result.get(field) not in (None, {}):
+                raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_DOWNSTREAM_AUTHORITY")
+        for field in ("merge_performed", "push_performed", "public_claim_allowed", "production_ready"):
+            if result.get(field) is not False:
+                raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_DOWNSTREAM_EFFECT")
+        ceiling = result.get("claim_ceiling")
+        if ceiling is not None and (
+            not isinstance(ceiling, (list, tuple)) or any(
+                any(token in str(item).upper() for token in ("APPROVED", "INTEGRATED", "MERGE", "PUSH", "PRODUCTION"))
+                for item in ceiling
+            )
+        ):
+            raise GatewayInputError("CANDIDATE_ADOPTION_SERVICE_RESULT_CLAIM_CEILING")
 
     def _candidate_bind_integration(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         forbidden = {"integration_authorization", "action_set", "approval_context", "shell"}
@@ -4563,6 +4880,8 @@ class UnifiedMCPGateway:
             return self._model_calibration_plan(arguments)
         if name == "nexus_candidate_approve":
             return self._candidate_approve(arguments)
+        if name == "nexus_candidate_adopt_external":
+            return self._candidate_adopt_external(arguments)
         if name == "nexus_candidate_bind_integration":
             return self._candidate_bind_integration(arguments)
         if name == "nexus_candidate_integrate":

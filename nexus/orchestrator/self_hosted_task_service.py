@@ -7001,7 +7001,15 @@ class SelfHostedTaskService:
             ["diff", "--name-only", "--diff-filter=D", request.target_base_revision, request.candidate_commit_sha],
             cwd=controller_root,
         ).splitlines())
-        if changed_paths != sorted(request.allowed_files):
+        allowed_boundaries = tuple(str(path) for path in request.allowed_files if str(path).strip())
+        if not changed_paths or any(
+            not any(
+                path == boundary
+                or (boundary.endswith("/") and path.startswith(boundary))
+                for boundary in allowed_boundaries
+            )
+            for path in (*changed_paths, *deleted_paths)
+        ):
             raise RuntimeError("external adoption changed paths differ from contract")
         if sorted(set(deleted_paths) - set(request.authorized_deletions)):
             raise RuntimeError("external adoption contains unauthorized deletions")

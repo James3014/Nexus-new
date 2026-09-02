@@ -458,6 +458,25 @@ def test_effect_authorization_fails_closed_when_action_is_out_of_scope(tmp_path)
         )
 
 
+def test_effect_authorization_allows_external_candidate_adoption(tmp_path):
+    _receipt, path = _make_receipt(
+        tmp_path,
+        grant_id="effect-adopt-external",
+        allowed_actions=(AutonomyActionClass.CANDIDATE_ADOPT_EXTERNAL,),
+    )
+
+    authority = _authorize_durable_standing_grant_effect_at(
+        path,
+        repository=_repository(),
+        action=AutonomyActionClass.CANDIDATE_ADOPT_EXTERNAL,
+        effect={"task_id": "TASK-EPB-001-R1", "candidate_commit_sha": "a" * 40},
+        requested_at=NOW,
+    )
+
+    assert authority["mutation_authorized"] is True
+    assert authority["action"] == "CANDIDATE_ADOPT_EXTERNAL"
+
+
 def test_effect_authorization_rejects_repository_substitution(tmp_path):
     _receipt, path = _make_receipt(
         tmp_path,
