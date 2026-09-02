@@ -29,6 +29,39 @@ verification, approval, integration, release, or production authority. Lane
 governs authorization, not correctness: source behavior, tests, and required
 verifiers remain authoritative.
 
+### Current self-hosting stabilization semantics
+
+`mode: BOOTSTRAP` in `docs/governance/current_operating_mode.yaml` means Nexus is
+still in self-hosting stabilization. G10 or any later governed canary proves a
+governed path can work; it does not by itself change the repository default
+execution lane. While this mode remains active, eligible bounded Nexus work may
+continue to use `DIRECT_CANONICAL` or `DIRECT_DELEGATED` under their existing
+scope, safety, verification, and governed-escalation boundaries. Governed work
+and representative `NEXUS_GOVERNED` pilots remain valid, but are not mandatory
+for every bounded Nexus change solely because G10 completed.
+
+Nexus execution lanes and DevSpace authority modes remain distinct concepts.
+A direct Nexus lane may use DevSpace `OWNER_DIRECT` as execution transport;
+a governed external execution may use `NEXUS_GOVERNED` when canonical Nexus
+authority is bound. Once one attempt has entered governed / `NEXUS_GOVERNED`
+authority, missing, stale, expired, unavailable, or transport-failed authority
+must never silently downgrade that attempt to direct / `OWNER_DIRECT`. It must
+block, rebind, reconcile, or start a separately Owner-authorized recovery/direct
+attempt with a new authority identity.
+
+`NEXUS_GOVERNANCE_DEFAULT_READY` is an Owner-only transition decision. It is not
+inferred from G10, tests, an agent, a Task Card, CI, or runtime state. Before the
+Owner declares it, evidence should cover representative real governed tasks;
+continuation, timeout, reconcile, and restart paths; Nexus self-modification
+without routine authority recursion; sufficiently stable Task Card, grant,
+admission, and execution contracts; common work no longer requiring routine
+direct bypass; and a proven direct recovery path for restoring the governance
+plane. After that declaration, a separate policy change may make governed
+execution the default and narrow direct authority. Until then, narrowly typed
+DevSpace `OWNER_DIRECT` bootstrap capabilities such as `workspace_clone` and
+`dependency_sync` are compatible with the current stabilization policy and are
+not defects merely because they are not yet `NEXUS_GOVERNED`.
+
 ## Repository collaboration authority (GitHub)
 
 - The collaboration repository is `James3014/Nexus-new`; default and

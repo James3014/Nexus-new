@@ -53,6 +53,7 @@ def test_current_operating_mode_bootstrap_is_direct_first_and_fail_closed():
     import yaml
 
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
+    contract = (ROOT / "docs/agents/TASK_EXECUTION_CONTRACT.md").read_text(encoding="utf-8")
     mode_path = ROOT / "docs/governance/current_operating_mode.yaml"
     mode = yaml.safe_load(mode_path.read_text(encoding="utf-8"))
 
@@ -69,6 +70,21 @@ def test_current_operating_mode_bootstrap_is_direct_first_and_fail_closed():
     )
     assert mode["transition"]["new_work"] == "READ_CURRENT_OPERATING_MODE"
     assert mode["transition"]["successor_work"] == "READ_CURRENT_OPERATING_MODE"
+    assert mode["transition"]["g10_completion"] == "DOES_NOT_CHANGE_DEFAULT_EXECUTION"
+    assert mode["transition"]["governance_default_ready"] == "REQUIRES_EXPLICIT_OWNER_DECISION"
+    assert mode["transition"]["governed_attempt_authority_failure"] == "BLOCK_REBIND_OR_RECONCILE"
+    assert mode["transition"]["silent_governed_to_direct_downgrade"] == "FORBIDDEN"
+    readiness = mode["readiness_for_nexus_governance_default"]
+    assert readiness["decision_authority"] == "OWNER_ONLY"
+    assert readiness["post_decision_effect"] == "SEPARATE_POLICY_CHANGE_REQUIRED"
+    assert set(readiness["required_evidence"]) == {
+        "representative_real_tasks_end_to_end_under_governed_authority",
+        "continuation_timeout_reconcile_and_restart_exercised",
+        "nexus_self_modification_without_routine_authority_recursion",
+        "task_card_grant_admission_and_execution_contracts_stable_for_normal_work",
+        "common_engineering_no_longer_requires_routine_direct_bypass",
+        "direct_recovery_path_restores_failed_governance_plane",
+    }
     assert (
         mode["fail_closed"]["missing_invalid_or_ambiguous_mode"]
         == "REQUIRE_EXPLICIT_CURRENT_OWNER_LANE"
@@ -92,6 +108,14 @@ def test_current_operating_mode_bootstrap_is_direct_first_and_fail_closed():
     assert "does not switch lanes mid-task" in agents
     assert "fail closed to an\nexplicit current Owner lane decision" in agents
     assert "cannot select\nor override a `CapabilityPlanner` route/capability" in agents
+    assert "Current self-hosting stabilization semantics" in agents
+    assert "does not by itself change the repository default\nexecution lane" in agents
+    assert "must never silently downgrade that attempt" in agents
+    assert "`NEXUS_GOVERNANCE_DEFAULT_READY` is an Owner-only transition decision" in agents
+    assert "Self-hosting stabilization and future default transition" in contract
+    assert "not an automatic repository-wide switch to governed-by-default work" in contract
+    assert "must never fall back\nto a direct / `OWNER_DIRECT` attempt" in contract
+    assert "may be declared only by the Owner" in contract
 
 
 def test_execution_domains_and_candidate_namespaces_are_unambiguous():

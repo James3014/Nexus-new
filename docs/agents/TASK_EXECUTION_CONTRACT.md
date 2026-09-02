@@ -26,6 +26,45 @@ must not relabel that explicit choice. The lane governs authorization, not
 correctness: source behavior, tests, and required verifiers decide whether the
 program works.
 
+### Self-hosting stabilization and future default transition
+
+The current repository operating mode remains `BOOTSTRAP`, which is the
+self-hosting stabilization phase for execution-lane selection. G10 proves that a
+canonical Nexus grant can drive a live `NEXUS_GOVERNED` DevSpace execution; it
+is not an automatic repository-wide switch to governed-by-default work.
+Eligible bounded Nexus development may therefore continue through
+`DIRECT_CANONICAL` or `DIRECT_DELEGATED` while this operating mode remains in
+force, subject to every existing direct-lane scope, verification, escalation,
+and authority boundary in this contract.
+
+Nexus execution lanes (`DIRECT_CANONICAL`, `DIRECT_DELEGATED`, `GOVERNED`) and
+DevSpace authority modes (`OWNER_DIRECT`, `NEXUS_GOVERNED`) are related but not
+identical. DevSpace is execution plumbing and does not choose the Nexus lane.
+An attempt already admitted as governed / `NEXUS_GOVERNED` must never fall back
+to a direct / `OWNER_DIRECT` attempt merely because authority is missing, stale,
+expired, unreachable, or a transport fails. The same attempt must fail closed to
+block, rebind, or reconciliation; any direct recovery is a separately
+Owner-authorized attempt with a distinct authority identity.
+
+`NEXUS_GOVERNANCE_DEFAULT_READY` may be declared only by the Owner after a fresh
+readiness review. At minimum, that review should bind evidence that:
+
+- representative real tasks complete end to end under governed authority;
+- continuation, timeout, reconciliation, and restart behavior has been exercised;
+- Nexus can modify itself without routine authority-recursion deadlocks;
+- Task Card, grant, admission, and execution contracts are stable enough for
+  normal work rather than repeated bootstrap exceptions;
+- common Nexus engineering no longer requires routine direct bypass; and
+- the direct recovery path can restore a failed governance plane.
+
+G10, CI, tests, Task Cards, agents, or runtime state cannot self-declare this
+milestone. After the Owner declares it, a separate policy revision may make
+governed execution the default and narrow direct authority. Until then,
+narrowly typed DevSpace `OWNER_DIRECT` bootstrap/environment capabilities such
+as `workspace_clone` and `dependency_sync` remain valid stabilization tools and
+are not considered governance defects solely because they are not yet
+`NEXUS_GOVERNED`.
+
 Direct work becomes governed before mutation when it changes
 route/lifecycle/workforce authority, weakens security, changes migration or
 schema authority, requires protected branch/ref operations, or makes
