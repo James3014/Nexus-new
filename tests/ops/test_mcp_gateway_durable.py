@@ -441,9 +441,9 @@ def _r1b1_fixture(tmp_path, monkeypatch, *, identity_seed=None):
         "issuer_id": "owner-james",
         "coordinator_id": "coordinator-codex",
         "authorized_actor_id": "coordinator-codex",
-        "owner_activation_id": "OWNER_ISSUE526_CONTINUE_20260823",
-        "owner_activation_sha256": "f0ed77ffe3872b083ef0b6d66526524a7091a8e3125322c84ba632f3c64ba322",
-        "source_thread": "01a02a17-691c-7a20-ad0f-9166456416dc",
+        "owner_activation_id": "OWNER_ISSUE526_FUTURE_TRACKED_20260902",
+        "owner_activation_sha256": "9" * 64,
+        "source_thread": "ops-r1-fixture-future-thread",
         "standing_grant_id": "OWNER_STANDING_COORDINATOR_20260818_DURABLE_GITHUB_WORKFLOW",
         "standing_grant_receipt_sha256": "3b8895f093692257d6225fbb8150b34f520e667d250c7817ad120cefd42751d5",
         "repository": "James3014/Nexus-new",
@@ -545,6 +545,89 @@ def test_r1b1_local_typed_receipt_mismatch_fails_before_bundle(tmp_path, monkeyp
     altered_request = request.__class__(**request_values)
     with pytest.raises(g.GatewayContractError, match="differs from fixed local"):
         g.stage_verified_git_store(altered_request, altered)
+    assert not g.GATEWAY_SOURCE_BUNDLES_ROOT.exists()
+
+
+def test_r1_historical_activation_cannot_authorize_new_target_at_manager(tmp_path, monkeypatch):
+    """Hostile: a fully rehashed receipt reusing the historical 2026-08-23
+    activation lineage against a new target fails closed at the manager with
+    zero bundle/staging effect (legacy activations stay exact-target-bound)."""
+    from nexus.contracts.gateway_deployment import canonical_hash
+
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    receipt = fixture["receipt"]
+    values = {
+        **receipt.__dict__,
+        "owner_activation_id": "OWNER_ISSUE526_CONTINUE_20260823",
+        "owner_activation_sha256": (
+            "f0ed77ffe3872b083ef0b6d66526524a7091a8e3125322c84ba632f3c64ba322"
+        ),
+        "source_thread": "01a02a17-691c-7a20-ad0f-9166456416dc",
+    }
+    values["receipt_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key != "receipt_hash"
+    })
+    historical_receipt = receipt.__class__(**values)
+    request_values = {
+        **fixture["request"].__dict__,
+        "recovery_authority_id": historical_receipt.receipt_id,
+        "recovery_authority_hash": historical_receipt.receipt_hash,
+    }
+    request_values["request_hash"] = canonical_hash({
+        key: value for key, value in request_values.items()
+        if key not in {"request_hash", "schema"}
+    })
+    historical_request = fixture["request"].__class__(**request_values)
+    # Even if the attacker fully controls the fixed local store, the manager
+    # rejects the historical lineage before any bundle or physical effect.
+    g.GATEWAY_RECOVERY_AUTHORITY_STORE.write_bytes(
+        json.dumps(historical_receipt.model_dump(), sort_keys=True, separators=(",", ":")).encode()
+    )
+    g.GATEWAY_RECOVERY_AUTHORITY_STORE.chmod(0o600)
+    with pytest.raises(g.GatewayContractError, match="source authority rejected") as excinfo:
+        g.stage_verified_git_store(historical_request, historical_receipt)
+    assert excinfo.value.__cause__ is not None
+    assert "historical activation" in str(excinfo.value.__cause__)
+    assert not g.GATEWAY_SOURCE_BUNDLES_ROOT.exists()
+
+
+def test_r1_local_receipt_not_tracked_on_fresh_main_has_zero_effect(tmp_path, monkeypatch):
+    """Hostile: a locally self-issued receipt with valid schema/hash that is NOT
+    byte-identical to the fixed tracked receipt on fresh main has zero effect."""
+    from nexus.contracts.gateway_deployment import canonical_hash
+
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    receipt = fixture["receipt"]
+    values = {
+        **receipt.__dict__,
+        "independent_acceptance_receipt_hash": "b" * 64,
+    }
+    values["receipt_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key != "receipt_hash"
+    })
+    forged = receipt.__class__(**values)
+    request_values = {
+        **fixture["request"].__dict__,
+        "recovery_authority_id": forged.receipt_id,
+        "recovery_authority_hash": forged.receipt_hash,
+    }
+    request_values["request_hash"] = canonical_hash({
+        key: value for key, value in request_values.items()
+        if key not in {"request_hash", "schema"}
+    })
+    forged_request = fixture["request"].__class__(**request_values)
+    # The forged receipt replaces the fixed local store, but the tracked bytes
+    # on fresh main still hold the original receipt: the manager must fail
+    # closed on byte identity before any bundle or Gateway effect.
+    g.GATEWAY_RECOVERY_AUTHORITY_STORE.write_bytes(
+        json.dumps(forged.model_dump(), sort_keys=True, separators=(",", ":")).encode()
+    )
+    g.GATEWAY_RECOVERY_AUTHORITY_STORE.chmod(0o600)
+    with pytest.raises(
+        g.GatewayContractError,
+        match="remote/local byte mismatch|differs from fixed local",
+    ):
+        g.stage_verified_git_store(forged_request, forged)
     assert not g.GATEWAY_SOURCE_BUNDLES_ROOT.exists()
 
 
