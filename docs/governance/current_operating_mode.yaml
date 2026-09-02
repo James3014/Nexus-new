@@ -20,6 +20,21 @@ transition:
   existing_active_work: PRESERVE_CURRENT_EXECUTION_CONTRACT_UNTIL_COMPLETION
   new_work: READ_CURRENT_OPERATING_MODE
   successor_work: READ_CURRENT_OPERATING_MODE
+  g10_completion: DOES_NOT_CHANGE_DEFAULT_EXECUTION
+  governance_default_ready: REQUIRES_EXPLICIT_OWNER_DECISION
+  governed_attempt_authority_failure: BLOCK_REBIND_OR_RECONCILE
+  silent_governed_to_direct_downgrade: FORBIDDEN
+
+readiness_for_nexus_governance_default:
+  decision_authority: OWNER_ONLY
+  required_evidence:
+    - representative_real_tasks_end_to_end_under_governed_authority
+    - continuation_timeout_reconcile_and_restart_exercised
+    - nexus_self_modification_without_routine_authority_recursion
+    - task_card_grant_admission_and_execution_contracts_stable_for_normal_work
+    - common_engineering_no_longer_requires_routine_direct_bypass
+    - direct_recovery_path_restores_failed_governance_plane
+  post_decision_effect: SEPARATE_POLICY_CHANGE_REQUIRED
 
 escalate_to_governed_when:
   - nexus_lifecycle_or_candidate_authority_required
@@ -37,3 +52,6 @@ fail_closed:
 principles:
   - GOVERNANCE_INTENSITY_SCALES_WITH_CLAIM_AND_CONSEQUENCE
   - OPERATING_MODE_SELECTS_ENGINEERING_EXECUTION_LANE_NOT_CAPABILITYPLANNER_ROUTE
+  - G10_PROVES_GOVERNED_PATH_NOT_DEFAULT_CUTOVER
+  - GOVERNED_ATTEMPT_NEVER_SILENTLY_DOWNGRADES
+  - OWNER_DECLARATION_REQUIRED_FOR_DEFAULT_AUTHORITY_TRANSITION

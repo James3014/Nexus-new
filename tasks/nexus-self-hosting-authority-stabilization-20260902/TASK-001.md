@@ -33,6 +33,7 @@ After the Owner explicitly declares `NEXUS_GOVERNANCE_DEFAULT_READY`, a separate
 - `AGENTS.md`
 - `docs/agents/TASK_EXECUTION_CONTRACT.md`
 - `docs/governance/current_operating_mode.yaml`
+- `tests/ops/test_bootstrap_authority_files.py`
 - `tasks/nexus-self-hosting-authority-stabilization-20260902/INDEX.md`
 - `tasks/nexus-self-hosting-authority-stabilization-20260902/TASK-001.md`
 
@@ -60,6 +61,7 @@ After the Owner explicitly declares `NEXUS_GOVERNANCE_DEFAULT_READY`, a separate
 - Review the exact diff for semantic consistency and scope.
 - Verify all three authority surfaces contain no contradictory default-lane rule.
 - Verify existing statements that route/lifecycle/workforce/security authority changes require governed handling remain intact.
+- `tests/ops/test_bootstrap_authority_files.py` must assert the new transition and fail-closed semantics.
 - `git diff --check` equivalent through repository CI / exact-head checks.
 - All protected-branch required checks must be terminal success on the exact PR head before merge.
 
