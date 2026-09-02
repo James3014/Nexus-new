@@ -68,10 +68,13 @@ def _fake_process(monkeypatch: pytest.MonkeyPatch, response: str):
     return calls
 
 
-def test_build_model_selects_opencli_web_bridge_without_langchain_provider():
+def test_build_model_selects_opencli_web_bridge_without_langchain_provider(
+    monkeypatch: pytest.MonkeyPatch,
+):
     def fail_init(**_kwargs):
         raise AssertionError("init_chat_model must not be used for ChatGPT Web")
 
+    monkeypatch.setenv("NEXUS_OPENCLI_TIMEOUT_SECONDS", "240")
     model = cli._build_model(
         {"init_chat_model": fail_init},
         "opencli_chatgpt",
@@ -80,6 +83,14 @@ def test_build_model_selects_opencli_web_bridge_without_langchain_provider():
 
     assert isinstance(model, OpenCLIWebChatModel)
     assert model.intelligence_level == "very-high"
+    assert model.timeout_seconds == 240
+
+
+def test_build_model_rejects_invalid_opencli_timeout(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("NEXUS_OPENCLI_TIMEOUT_SECONDS", "15")
+
+    with pytest.raises(cli.RuntimeErrorBounded, match="OPENCLI_WEB_TIMEOUT_CONFIG_INVALID"):
+        cli._build_model({}, "opencli_chatgpt", "very-high")
 
 
 def test_opencli_web_model_uses_chatgpt_web_and_no_shell(monkeypatch: pytest.MonkeyPatch):
