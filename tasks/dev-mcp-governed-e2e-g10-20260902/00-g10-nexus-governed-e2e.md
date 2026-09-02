@@ -5,7 +5,7 @@
 - task_id: `g10-nexus-governed-e2e-20260902`
 - campaign_id: `dev-mcp-governed-e2e-g10-20260902`
 - artifact_authority: current
-- status: ACTIVE
+- status: COMPLETE
 - owner: James Chen
 - authorization: owner explicitly instructed the controller on 2026-09-02 to continue until G10 is complete and resolve intermediate blockers without stopping
 - contract_kind: TRACKED_TASK_CARD
@@ -64,10 +64,21 @@ After the positive run, independently prove:
 
 Run negative controls with no mutation proving at least one tampered/mismatched grant is rejected before worker launch. If the positive session is continued after grant revocation in canonical Nexus source, continuation must be rejected before re-execution.
 
+## Closure evidence
+
+- Canonical Nexus authority revision used for the live attempt: `6ee715d6bf969c58ed0ceb840deaa70ba5434243`, merge of PR #698 at `2026-09-02T06:58:45Z`.
+- Durable DevSpace agent: `agt_f1db9981`; provider session: `538e0616-8cc8-4e4d-97df-5de27b136066`; profile/model: `agy-medium-implement` / `gemini-3.7-flash-medium`.
+- Durable execution contract records `authorityMode=NEXUS_GOVERNED`, Nexus repository `James3014/Nexus-new`, revision `6ee715d6bf969c58ed0ceb840deaa70ba5434243`, grant SHA-256 `cb79f373e23888e795a32b70a28f5b9bbc60a7a13cadc2b904dafd0a31b1f4b0`, authority SHA-256 `27eb1e91fef71362f7bce618139795d9e3ef71dcc81689db5f235b09ebf0c454`, and intent hash `c5a01dc74595cb8051cf0c2e73c940ea83a36e2c52068d4d3978bcba15cb0946`.
+- Positive execution started at `2026-09-02T07:00:39.341Z` and completed with claim ceiling `IMPLEMENTED`; provider completion was not treated as Nexus verification or acceptance.
+- Independent physical verification: target HEAD remained `5212252bacfe8ae37747282211aff66594452426`; the only changed path was `g10-governed-canary.txt`; reconcile reported `unexpectedPaths=[]` and `scopeState=WITHIN_SCOPE`.
+- Exact canary bytes were independently observed as 26 bytes ending in `0a`: `G10_NEXUS_GOVERNED_E2E_OK\n`.
+- Negative authority control used a fresh clean worktree at the same DevSpace base and intentionally changed only the grant byte hash from `cb79...` to `db79...`. Dev MCP rejected the request before worker launch with `Tracked Nexus execution grant bytes do not match grantSha256.` The negative workspace had no durable agent, no canary file, and no Git changes.
+- Post-hoc rebind PRs #700 and #701 were closed without merge after recovery of the already-completed durable attempt; canonical authority used by the execution was left unchanged.
+
 ## Claim ceiling
 
-`G10_NEXUS_GOVERNED_E2E_COMPLETE` only after the positive live run, physical reconciliation, and required negative authority control succeed. This Task Card does not grant release or production authority.
+`G10_NEXUS_GOVERNED_E2E_COMPLETE`. This closure proves the bounded live G10 pilot only. It does not grant release, production, merge, approval, or general Nexus governance correctness claims.
 
 ## Exit criteria
 
-G10 is complete when the live Dev MCP at the bound G9 runtime successfully executes the exact governed canary under this canonical grant, physical evidence is within scope, at least one tamper/mismatch control fails closed before launch, and no governance authority is silently transferred to Dev MCP.
+COMPLETE. The live Dev MCP at the bound G9 runtime executed the exact governed canary under canonical Nexus authority, physical evidence stayed within the one-file scope, a tampered grant hash failed closed before worker launch, and no governance authority was silently transferred to Dev MCP.
