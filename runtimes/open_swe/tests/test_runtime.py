@@ -181,6 +181,56 @@ def test_retained_worker_session_rejects_identity_substitution(tmp_path, field, 
         cli._worker_context(resumed, resumed["prompt"])
 
 
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("profile", "other-profile"),
+        ("site_session", "other-site-session"),
+    ],
+)
+def test_retained_opencli_worker_session_rejects_execution_namespace_drift(
+    tmp_path, field, replacement
+):
+    request = _worker_request(tmp_path)
+    request["provider_id"] = "opencli_chatgpt"
+    request["model_id"] = "very-high"
+    request["transport_config"] = {
+        "executable": "opencli",
+        "profile": "bound-profile",
+        "site_session": "bound-site-session",
+        "timeout_seconds": 120,
+    }
+    _task_id, _unit_id, _allowed_paths, session_id = cli._worker_context(
+        request, request["prompt"]
+    )
+
+    resumed = dict(request)
+    resumed["session_id"] = session_id
+    resumed["transport_config"] = {**request["transport_config"], field: replacement}
+
+    with pytest.raises(cli.RuntimeErrorBounded, match="SESSION_BINDING_MISMATCH"):
+        cli._worker_context(resumed, resumed["prompt"])
+
+
+def test_retained_opencli_worker_session_allows_timeout_only_change(tmp_path):
+    request = _worker_request(tmp_path)
+    request["provider_id"] = "opencli_chatgpt"
+    request["model_id"] = "very-high"
+    request["transport_config"] = {
+        "executable": "opencli",
+        "profile": "bound-profile",
+        "site_session": "bound-site-session",
+        "timeout_seconds": 120,
+    }
+    expected = cli._worker_context(request, request["prompt"])
+
+    resumed = dict(request)
+    resumed["session_id"] = expected[3]
+    resumed["transport_config"] = {**request["transport_config"], "timeout_seconds": 300}
+
+    assert cli._worker_context(resumed, resumed["prompt"]) == expected
+
+
 def test_worker_ambiguous_repair_is_durable_unknown_and_not_reexecuted(tmp_path):
     request = _worker_request(tmp_path)
     diagnosis = FakeGraph(
