@@ -86,6 +86,10 @@ class ServiceConfig:
     open_swe_model_provider: str = ""
     open_swe_model: str = ""
     open_swe_executable: str = "nexus-open-swe-runtime"
+    open_swe_opencli_executable: str = "opencli"
+    open_swe_opencli_profile: str = ""
+    open_swe_opencli_site_session: str = "ephemeral"
+    open_swe_opencli_timeout_seconds: int = 120
     worker_backend: str = "opencode"
     opencode_executable: str = "opencode"
     publication_enabled: bool = True
@@ -441,6 +445,10 @@ def load_config(path: str | os.PathLike[str]) -> ServiceConfig:
         "open_swe_model_provider",
         "open_swe_model",
         "open_swe_executable",
+        "open_swe_opencli_executable",
+        "open_swe_opencli_profile",
+        "open_swe_opencli_site_session",
+        "open_swe_opencli_timeout_seconds",
         "worker_backend",
         "opencode_executable",
         "publication_enabled",
@@ -472,6 +480,33 @@ def load_config(path: str | os.PathLike[str]) -> ServiceConfig:
         raise ServiceError("CONFIG_OPEN_SWE_MODEL_BINDING_REQUIRED")
     if not isinstance(open_swe_executable, str) or not open_swe_executable.strip():
         raise ServiceError("CONFIG_OPEN_SWE_EXECUTABLE_REQUIRED")
+    opencli_transport_keys = {
+        "open_swe_opencli_executable",
+        "open_swe_opencli_profile",
+        "open_swe_opencli_site_session",
+        "open_swe_opencli_timeout_seconds",
+    }
+    if open_swe_provider != "opencli_chatgpt" and set(raw).intersection(opencli_transport_keys):
+        raise ServiceError("CONFIG_OPEN_SWE_TRANSPORT_PROVIDER_MISMATCH")
+    if open_swe_provider == "opencli_chatgpt":
+        opencli_executable = raw.get("open_swe_opencli_executable", "opencli")
+        opencli_profile = raw.get("open_swe_opencli_profile", "")
+        opencli_site_session = raw.get("open_swe_opencli_site_session", "ephemeral")
+        opencli_timeout_seconds = raw.get("open_swe_opencli_timeout_seconds", 120)
+        if (
+            not isinstance(opencli_executable, str)
+            or not opencli_executable.strip()
+            or "\x00" in opencli_executable
+            or not isinstance(opencli_profile, str)
+            or "\x00" in opencli_profile
+            or not isinstance(opencli_site_session, str)
+            or not opencli_site_session.strip()
+            or "\x00" in opencli_site_session
+            or not isinstance(opencli_timeout_seconds, int)
+            or isinstance(opencli_timeout_seconds, bool)
+            or not 30 <= opencli_timeout_seconds <= 900
+        ):
+            raise ServiceError("CONFIG_OPEN_SWE_TRANSPORT_INVALID")
     repos = raw.get("repositories")
     roots = raw.get("repository_roots")
     if (
@@ -574,6 +609,17 @@ def _safe_repo(repo: str) -> str:
     return repo.replace("/", "_")
 
 
+def _open_swe_transport_config(config: ServiceConfig) -> dict[str, Any]:
+    if config.open_swe_model_provider != "opencli_chatgpt":
+        return {}
+    return {
+        "executable": config.open_swe_opencli_executable,
+        "profile": config.open_swe_opencli_profile,
+        "site_session": config.open_swe_opencli_site_session,
+        "timeout_seconds": config.open_swe_opencli_timeout_seconds,
+    }
+
+
 def build_automation(config: ServiceConfig, repository: str) -> ExternalIntelligenceAutomation:
     if config.semantic_backend not in {"opencli", "open_swe"}:
         raise ServiceError("CONFIG_SEMANTIC_BACKEND_INVALID")
@@ -597,6 +643,7 @@ def build_automation(config: ServiceConfig, repository: str) -> ExternalIntellig
                 model_id=config.open_swe_model,
                 executable=config.open_swe_executable,
                 runtime_state_root=config.state_root / "open_swe_runtime",
+                transport_config=_open_swe_transport_config(config),
             )
         except OpenSWEExternalIntelligenceError as exc:
             raise ServiceError(str(exc)) from exc
@@ -614,6 +661,7 @@ def build_automation(config: ServiceConfig, repository: str) -> ExternalIntellig
                 executable=config.open_swe_executable,
                 runtime_state_root=config.state_root / "open_swe_runtime",
                 require_worker_binding=True,
+                transport_config=_open_swe_transport_config(config),
             )
         except OpenSWEExternalIntelligenceError as exc:
             raise ServiceError(str(exc)) from exc

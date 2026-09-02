@@ -154,9 +154,149 @@ def test_runtime_environment_passes_selected_provider_key_but_not_github_credent
     assert "UNRELATED_SECRET" not in env
 
 
+def test_runtime_environment_never_passes_opencli_binding_env(monkeypatch):
+    module = _module()
+    monkeypatch.setenv("NEXUS_OPENCLI_EXECUTABLE", "/tmp/wrong-opencli")
+    monkeypatch.setenv("NEXUS_OPENCLI_PROFILE", "wrong-profile")
+    monkeypatch.setenv("NEXUS_OPENCLI_SITE_SESSION", "wrong-session")
+    monkeypatch.setenv("NEXUS_OPENCLI_TIMEOUT_SECONDS", "999")
+
+    env = module._runtime_env("opencli_chatgpt")
+
+    assert not any(name.startswith("NEXUS_OPENCLI_") for name in env)
+
+
+def test_opencli_semantic_transport_sends_explicit_binding(tmp_path, monkeypatch):
+    module = _module()
+    calls = []
+
+    def runtime_call(executable, payload, *, provider_id, timeout):
+        calls.append(dict(payload))
+        return (
+            {
+                "schema": module.PROTOCOL_RESULT_SCHEMA,
+                "kind": "semantic",
+                "status": "INTELLIGENCE_COMPLETED",
+                "provider_id": "opencli_chatgpt",
+                "model_id": "very-high",
+                "raw": "{}",
+                "process_started": True,
+                "outcome_unknown": False,
+                "retry_safe": False,
+            },
+            "",
+            True,
+            "",
+        )
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    binding = {
+        "executable": "/opt/opencli",
+        "profile": "profile-a",
+        "site_session": "session-a",
+        "timeout_seconds": 240,
+    }
+    transport = module.OpenSWEExternalIntelligenceTransport(
+        repository_root=tmp_path,
+        model_provider="opencli_chatgpt",
+        model_id="very-high",
+        transport_config=binding,
+    )
+
+    transport.invoke("prompt")
+
+    assert calls[0]["transport_config"] == binding
+
+
+def test_opencli_worker_transport_sends_explicit_binding(tmp_path, monkeypatch):
+    module = _module()
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    artifact = tmp_path / "evidence.json"
+    artifact.write_text("{}\n", encoding="utf-8")
+    calls = []
+
+    def runtime_call(_executable, payload, **_kwargs):
+        calls.append(dict(payload))
+        return None, "", True, "runtime_timeout"
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    binding = {
+        "executable": "/opt/opencli",
+        "profile": "profile-a",
+        "site_session": "session-a",
+        "timeout_seconds": 240,
+    }
+    transport = module.OpenSWEWorkerTransport(
+        model_provider="opencli_chatgpt",
+        model_id="very-high",
+        transport_config=binding,
+    )
+
+    result = transport.run_new(
+        prompt='task_id=t1\nunit_id=u1\nauthorized_mutation_paths=["a.py"]',
+        artifact_path=str(artifact),
+        workspace_path=str(workspace),
+    )
+
+    assert result.status == "OPEN_SWE_OUTCOME_UNKNOWN"
+    assert result.retry_safe is False
+    assert calls[0]["transport_config"] == binding
+
+
+def test_opencli_transport_binding_validation_is_fail_closed(tmp_path):
+    module = _module()
+    valid = {
+        "executable": "opencli",
+        "profile": "",
+        "site_session": "ephemeral",
+        "timeout_seconds": 30,
+    }
+    module.OpenSWEExternalIntelligenceTransport(
+        repository_root=tmp_path,
+        model_provider="opencli_chatgpt",
+        model_id="very-high",
+        transport_config=valid,
+    )
+    module.OpenSWEExternalIntelligenceTransport(
+        repository_root=tmp_path,
+        model_provider="opencli_chatgpt",
+        model_id="very-high",
+        transport_config={**valid, "timeout_seconds": 900},
+    )
+    for invalid in (
+        None,
+        {**valid, "timeout_seconds": 29},
+        {**valid, "timeout_seconds": 901},
+        {**valid, "extra": "unexpected"},
+    ):
+        with pytest.raises(
+            module.OpenSWEExternalIntelligenceError,
+            match="OPEN_SWE_TRANSPORT_CONFIG_(REQUIRED|INVALID)",
+        ):
+            module.OpenSWEExternalIntelligenceTransport(
+                repository_root=tmp_path,
+                model_provider="opencli_chatgpt",
+                model_id="very-high",
+                transport_config=invalid,
+            )
+    with pytest.raises(
+        module.OpenSWEExternalIntelligenceError,
+        match="OPEN_SWE_TRANSPORT_CONFIG_PROVIDER_MISMATCH",
+    ):
+        module.OpenSWEExternalIntelligenceTransport(
+            repository_root=tmp_path,
+            model_provider="google_genai",
+            model_id="gemini-test",
+            transport_config=valid,
+        )
+
+
 def test_empty_external_runtime_executable_is_rejected(tmp_path):
     module = _module()
-    with pytest.raises(module.OpenSWEExternalIntelligenceError, match="OPEN_SWE_EXECUTABLE_REQUIRED"):
+    with pytest.raises(
+        module.OpenSWEExternalIntelligenceError, match="OPEN_SWE_EXECUTABLE_REQUIRED"
+    ):
         module.OpenSWEExternalIntelligenceTransport(
             repository_root=tmp_path,
             model_provider="google_genai",
@@ -347,6 +487,10 @@ def test_open_swe_optional_dependency_contract_is_exactly_pinned():
 def test_real_deepagents_toolnode_is_physically_read_only_when_optional_extra_installed(tmp_path):
     pytest.importorskip("deepagents")
     runtime = _external_runtime_module()
-    assert runtime.SEMANTIC_TOOLS == frozenset(
-        {"glob", "grep", "ls", "read_file", "record_finding"}
-    )
+    assert runtime.SEMANTIC_TOOLS == frozenset({
+        "glob",
+        "grep",
+        "ls",
+        "read_file",
+        "record_finding",
+    })
