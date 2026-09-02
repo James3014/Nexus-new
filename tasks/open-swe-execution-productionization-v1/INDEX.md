@@ -1,15 +1,15 @@
 # Open SWE Execution Productionization V1
 
 - **Campaign ID:** `CAMPAIGN-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1`
-- **Status:** `EXTERNAL_RUNTIME_CORRECTIVE_ACTIVE`
+- **Status:** `EXTERNAL_RUNTIME_CONFIRMED_WEB_BINDING_HARDENING`
 - **Source mode:** `VALIDATED_SPEC`
 - **Source spec ID:** `SPEC-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1`
 - **Source spec SHA-256:** `17e2b27e2ad57d02cd33fd37d0c7d97a29a1ff14e182d7661b141baf9f925d74`
 - **Source basis snapshot:** `James3014/Nexus-new@c00c299152599a87efd831c3e146ecadd8f8b21f`; pilot evidence `764333bcbed67e5b83870d5ceeb8e9d70f7e749f`; Open SWE `4bed1112362d4ce74db86e704329fda0f3412b69`; Deep Agents `0.7.6`.
 - **Auto-chain:** `false`
 - **Parallel execution:** `false`
-- **Current frontier:** `OPEN_SWE_EXTERNAL_RUNTIME_CORRECTIVE_CONTRACT_V1`
-- **Maximum campaign claim:** `EXTERNAL_RUNTIME_CONFIRMED`; corrective source work is in progress to move Deep Agents/Open SWE runtime internals and dependency ownership outside Nexus Core. No activation, OpenCLI retirement, merge/release authority, or production-readiness claim is authorized by this corrective state.
+- **Current frontier:** `OPENCLI_EXPLICIT_TRANSPORT_BINDING_AND_WEB_QUALIFICATION`
+- **Maximum campaign claim:** `EXTERNAL_RUNTIME_CONFIRMED`; the corrective external-runtime architecture and dormant ChatGPT Web model bridge are integrated. Current work hardens explicit OpenCLI transport binding and post-integration Web qualification. No GPT Web default activation, OpenCLI retirement, release, deployment, or production-readiness claim is authorized by this state.
 
 ## 1. Source handoff import
 
@@ -52,14 +52,14 @@
 
 ## 4. Ready candidates and frontier selection
 
-- **Dependency-ready candidates:** `OPEN_SWE_EXTERNAL_RUNTIME_CORRECTIVE_CONTRACT_V1`
-- **Selected frontier:** `OPEN_SWE_EXTERNAL_RUNTIME_CORRECTIVE_CONTRACT_V1`
-- **Selection rationale:** the 2026-09-01 Owner corrective handoff supersedes the in-process dependency/runtime topology introduced by the historical TASK-001/spec. Current source evidence supports `EXTERNAL_RUNTIME_CONFIRMED`: Nexus transport/result/reconciliation contracts can remain canonical across a subprocess boundary without making Nexus Core host Deep Agents.
-- **Exact unblock condition:** complete the corrective external-runtime Candidate, dependency-domain isolation/root cleanup, independent acceptance, corrective PR/merge, post-merge verification, and production-shaped external-runtime canaries. A fresh activation decision is required after that evidence; historical activation work is not authority for the corrected topology.
+- **Dependency-ready candidates:** explicit OpenCLI transport binding hardening followed by Web semantic/diagnosis/repair qualification.
+- **Selected frontier:** `OPENCLI_EXPLICIT_TRANSPORT_BINDING_AND_WEB_QUALIFICATION`.
+- **Selection rationale:** the external-runtime corrective architecture is already integrated, and PR #688 integrated the dormant ChatGPT Web model bridge without changing Nexus authority. Current evidence shows the next correctness boundary is explicit controller-to-runtime binding for OpenCLI executable/profile/site-session/timeout plus post-integration runtime qualification.
+- **Exact unblock condition:** bind OpenCLI transport identity explicitly through the external runtime request contract, independently accept and integrate that bounded change, then complete process-death/reconciliation and real Web semantic/diagnosis/repair witnesses before any default-activation decision.
 
 ## 5. Campaign authority and non-goals
 
-TASK-001 through TASK-004 remain historical completed snapshots of the original productionization campaign, but their in-process dependency/runtime topology is superseded by the Owner corrective handoff. The active bounded frontier is `OPEN_SWE_EXTERNAL_RUNTIME_CORRECTIVE_CONTRACT_V1` under Bootstrap Governance. Open SWE receives no route-selection, Workforce Admission, GitHub mutation, approval, release, deploy, or production-claim authority. The live runtime has been returned to the OpenCLI/OpenCode control arm while the corrective external-runtime topology is rebuilt and independently accepted.
+TASK-001 through TASK-004 remain historical completed snapshots of the original productionization campaign, and their in-process dependency/runtime topology remains superseded. The corrective external-runtime architecture and dormant ChatGPT Web bridge are now integrated; the active bounded frontier is explicit OpenCLI transport binding plus post-integration Web qualification under Bootstrap Governance. Open SWE receives no route-selection, Workforce Admission, GitHub mutation, approval, release, deploy, or production-claim authority. Runtime/default activation remains a separate later gate.
 
 ## 6. Supersession and change history
 

@@ -215,6 +215,7 @@ def test_build_automation_selects_open_swe_worker_only_when_explicit(tmp_path, m
             "executable": "nexus-open-swe-runtime",
             "runtime_state_root": tmp_path / "state" / "open_swe_runtime",
             "require_worker_binding": True,
+            "transport_config": {},
         }
     ]
 
@@ -285,8 +286,79 @@ def test_build_automation_selects_open_swe_only_when_explicit(tmp_path, monkeypa
             "model_id": "gemini-test",
             "executable": "nexus-open-swe-runtime",
             "runtime_state_root": tmp_path / "state" / "open_swe_runtime",
+            "transport_config": {},
         }
     ]
+
+
+def test_open_swe_opencli_binding_is_explicit_and_bounded(tmp_path, monkeypatch):
+    semantic_calls = []
+    worker_calls = []
+
+    class FakeSemanticTransport:
+        def __init__(self, **kwargs):
+            semantic_calls.append(kwargs)
+
+    class FakeWorkerTransport:
+        def __init__(self, **kwargs):
+            worker_calls.append(kwargs)
+
+    monkeypatch.setattr(
+        service_module, "OpenSWEExternalIntelligenceTransport", FakeSemanticTransport
+    )
+    monkeypatch.setattr(service_module, "OpenSWEWorkerTransport", FakeWorkerTransport)
+    config = _config(
+        tmp_path,
+        semantic_backend="open_swe",
+        worker_backend="open_swe",
+        open_swe_model_provider="opencli_chatgpt",
+        open_swe_model="very-high",
+        open_swe_opencli_executable="/opt/opencli",
+        open_swe_opencli_profile="profile-a",
+        open_swe_opencli_site_session="session-a",
+        open_swe_opencli_timeout_seconds=240,
+    )
+
+    build_automation(config, "o/r")
+
+    expected = {
+        "executable": "/opt/opencli",
+        "profile": "profile-a",
+        "site_session": "session-a",
+        "timeout_seconds": 240,
+    }
+    assert semantic_calls[0]["transport_config"] == expected
+    assert worker_calls[0]["transport_config"] == expected
+
+
+def test_load_config_rejects_invalid_opencli_transport_binding(tmp_path):
+    for timeout in (29, 901):
+        config_path = _config_file(tmp_path)
+        raw = json.loads(config_path.read_text(encoding="utf-8"))
+        raw.update(
+            semantic_backend="open_swe",
+            open_swe_model_provider="opencli_chatgpt",
+            open_swe_model="very-high",
+            open_swe_opencli_timeout_seconds=timeout,
+        )
+        config_path.write_text(json.dumps(raw), encoding="utf-8")
+        with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_TRANSPORT_INVALID"):
+            load_config(config_path)
+
+
+def test_load_config_rejects_opencli_transport_fields_for_other_provider(tmp_path):
+    config_path = _config_file(tmp_path)
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    raw.update(
+        semantic_backend="open_swe",
+        open_swe_model_provider="google_genai",
+        open_swe_model="gemini-test",
+        open_swe_opencli_timeout_seconds=120,
+    )
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_TRANSPORT_PROVIDER_MISMATCH"):
+        load_config(config_path)
 
 
 def test_load_config_rejects_empty_open_swe_external_executable(tmp_path):

@@ -23,37 +23,33 @@ from nexus.services.external_intelligence_fanout import FanoutError, OpenCodeRun
 PROTOCOL_REQUEST_SCHEMA = "nexus.open_swe_runtime.request.v1"
 PROTOCOL_RESULT_SCHEMA = "nexus.open_swe_runtime.result.v1"
 READ_ONLY_SEMANTIC_TOOLS = frozenset({"glob", "grep", "ls", "read_file", "record_finding"})
-FORBIDDEN_SEMANTIC_TOOLS = frozenset(
-    {
-        "delete",
-        "delete_file",
-        "deploy",
-        "edit_file",
-        "execute",
-        "fetch_url",
-        "git_commit",
-        "git_push",
-        "http_request",
-        "merge",
-        "release",
-        "shell",
-        "task",
-        "web_search",
-        "write_file",
-    }
-)
+FORBIDDEN_SEMANTIC_TOOLS = frozenset({
+    "delete",
+    "delete_file",
+    "deploy",
+    "edit_file",
+    "execute",
+    "fetch_url",
+    "git_commit",
+    "git_push",
+    "http_request",
+    "merge",
+    "release",
+    "shell",
+    "task",
+    "web_search",
+    "write_file",
+})
 DIAGNOSIS_TOOL_SURFACE = frozenset({"glob", "grep", "ls", "read_file", "record_diagnosis"})
-REPAIR_TOOL_SURFACE = frozenset(
-    {
-        "edit_file",
-        "glob",
-        "grep",
-        "ls",
-        "read_file",
-        "record_worker_result",
-        "write_file",
-    }
-)
+REPAIR_TOOL_SURFACE = frozenset({
+    "edit_file",
+    "glob",
+    "grep",
+    "ls",
+    "read_file",
+    "record_worker_result",
+    "write_file",
+})
 _SESSION_RE = re.compile(r"^ses_open_swe_[0-9a-f]{20}$")
 _SYSTEM_ENV_ALLOWLIST = (
     "HOME",
@@ -103,6 +99,42 @@ def _runtime_env(provider_id: str) -> dict[str, str]:
     return {name: os.environ[name] for name in allowed if name in os.environ}
 
 
+def _normalize_transport_config(
+    provider_id: str, transport_config: Mapping[str, Any] | None
+) -> dict[str, Any]:
+    if provider_id != "opencli_chatgpt":
+        if transport_config:
+            raise OpenSWEExternalIntelligenceError("OPEN_SWE_TRANSPORT_CONFIG_PROVIDER_MISMATCH")
+        return {}
+    if not isinstance(transport_config, Mapping):
+        raise OpenSWEExternalIntelligenceError("OPEN_SWE_TRANSPORT_CONFIG_REQUIRED")
+    expected = {"executable", "profile", "site_session", "timeout_seconds"}
+    if set(transport_config) != expected:
+        raise OpenSWEExternalIntelligenceError("OPEN_SWE_TRANSPORT_CONFIG_INVALID")
+    executable = transport_config.get("executable")
+    profile = transport_config.get("profile")
+    site_session = transport_config.get("site_session")
+    timeout_seconds = transport_config.get("timeout_seconds")
+    if not isinstance(executable, str) or not executable.strip() or "\x00" in executable:
+        raise OpenSWEExternalIntelligenceError("OPEN_SWE_TRANSPORT_CONFIG_INVALID")
+    if not isinstance(profile, str) or "\x00" in profile:
+        raise OpenSWEExternalIntelligenceError("OPEN_SWE_TRANSPORT_CONFIG_INVALID")
+    if not isinstance(site_session, str) or not site_session.strip() or "\x00" in site_session:
+        raise OpenSWEExternalIntelligenceError("OPEN_SWE_TRANSPORT_CONFIG_INVALID")
+    if (
+        not isinstance(timeout_seconds, int)
+        or isinstance(timeout_seconds, bool)
+        or not 30 <= timeout_seconds <= 900
+    ):
+        raise OpenSWEExternalIntelligenceError("OPEN_SWE_TRANSPORT_CONFIG_INVALID")
+    return {
+        "executable": executable.strip(),
+        "profile": profile,
+        "site_session": site_session.strip(),
+        "timeout_seconds": timeout_seconds,
+    }
+
+
 def _safe_request_hash(payload: Mapping[str, Any]) -> str:
     safe = {
         "schema": payload.get("schema"),
@@ -148,7 +180,9 @@ def _runtime_call(
         return None, "", False, "runtime_not_found"
     try:
         try:
-            stdout, stderr = process.communicate(_canonical_json(dict(payload)) + "\n", timeout=timeout)
+            stdout, stderr = process.communicate(
+                _canonical_json(dict(payload)) + "\n", timeout=timeout
+            )
         except subprocess.TimeoutExpired:
             try:
                 os.killpg(process.pid, signal.SIGTERM)
@@ -208,6 +242,7 @@ class OpenSWEExternalIntelligenceTransport:
         executable: str = "nexus-open-swe-runtime",
         runtime_state_root: str | Path | None = None,
         timeout: float = 180.0,
+        transport_config: Mapping[str, Any] | None = None,
     ) -> None:
         root = Path(repository_root).expanduser().resolve()
         if not root.is_dir():
@@ -223,10 +258,17 @@ class OpenSWEExternalIntelligenceTransport:
         self.model_provider = provider
         self.model_id = selected_model
         self.executable = selected_executable
-        self.runtime_state_root = Path(
-            runtime_state_root if runtime_state_root is not None else _default_runtime_state_root()
-        ).expanduser().resolve()
+        self.runtime_state_root = (
+            Path(
+                runtime_state_root
+                if runtime_state_root is not None
+                else _default_runtime_state_root()
+            )
+            .expanduser()
+            .resolve()
+        )
         self.timeout = float(timeout)
+        self.transport_config = _normalize_transport_config(provider, transport_config)
 
     def safe_argv(self) -> tuple[str, ...]:
         return (self.executable, "<json-stdin>")
@@ -245,6 +287,7 @@ class OpenSWEExternalIntelligenceTransport:
             "model_id": self.model_id,
             "repository_root": str(self.repository_root),
             "runtime_state_root": str(self.runtime_state_root),
+            "transport_config": dict(self.transport_config),
             "prompt": prompt if operation == "semantic_run" else "",
         }
         value, _stderr, process_started, failure = _runtime_call(
@@ -319,6 +362,7 @@ class OpenSWEWorkerTransport:
         runtime_state_root: str | Path | None = None,
         timeout: float = 300.0,
         require_worker_binding: bool = False,
+        transport_config: Mapping[str, Any] | None = None,
     ) -> None:
         provider = str(model_provider or "").strip()
         selected_model = str(model_id or "").strip()
@@ -331,10 +375,17 @@ class OpenSWEWorkerTransport:
         self.model_id = selected_model
         self.model = f"{provider}/{selected_model}"
         self.executable = selected_executable
-        self.runtime_state_root = Path(
-            runtime_state_root if runtime_state_root is not None else _default_runtime_state_root()
-        ).expanduser().resolve()
+        self.runtime_state_root = (
+            Path(
+                runtime_state_root
+                if runtime_state_root is not None
+                else _default_runtime_state_root()
+            )
+            .expanduser()
+            .resolve()
+        )
         self.timeout = float(timeout)
+        self.transport_config = _normalize_transport_config(provider, transport_config)
         self._require_worker_binding = bool(require_worker_binding)
         self._bound_worker: dict[str, Any] | None = None
         self._bound_worker_sha256 = ""
@@ -363,18 +414,18 @@ class OpenSWEWorkerTransport:
         session_id: str,
     ) -> str:
         artifact = Path(artifact_path).expanduser().resolve() if artifact_path else None
-        artifact_sha = _sha256(artifact.read_bytes()) if artifact is not None and artifact.is_file() else ""
+        artifact_sha = (
+            _sha256(artifact.read_bytes()) if artifact is not None and artifact.is_file() else ""
+        )
         return _sha256(
-            _canonical_json(
-                {
-                    "operation": operation,
-                    "workspace": str(Path(workspace_path).expanduser().resolve()),
-                    "prompt_sha256": _sha256(prompt),
-                    "artifact_sha256": artifact_sha,
-                    "session_id": session_id,
-                    "worker_identity_sha256": self._bound_worker_sha256,
-                }
-            )
+            _canonical_json({
+                "operation": operation,
+                "workspace": str(Path(workspace_path).expanduser().resolve()),
+                "prompt_sha256": _sha256(prompt),
+                "artifact_sha256": artifact_sha,
+                "session_id": session_id,
+                "worker_identity_sha256": self._bound_worker_sha256,
+            })
         )
 
     def _local_failure(
@@ -438,8 +489,11 @@ class OpenSWEWorkerTransport:
             "provider_id": self.provider_id,
             "model_id": self.model_id,
             "runtime_state_root": str(self.runtime_state_root),
+            "transport_config": dict(self.transport_config),
             "workspace_path": str(workspace),
-            "artifact_path": str(Path(artifact_path).expanduser().resolve()) if artifact_path else "",
+            "artifact_path": str(Path(artifact_path).expanduser().resolve())
+            if artifact_path
+            else "",
             "prompt": prompt,
             "session_id": session_id,
             "worker_identity": self._bound_worker or {},
