@@ -9,8 +9,8 @@ task_id: `TASK-EPB-003-R1`
 - Source spec SHA-256: `9e841f43d63ffc10704f00b4d21b88f9fbf78f3a473839a1409f278a951251a1`
 - Requirements: `REQ-001; REQ-007`
 - Acceptance: `AC-001; AC-004`
-- Exact current base commit: `e5c811b29248fb9195bc7fd90b4aad62a3af8fa0`
-- Exact current base tree: `a340f47d7bb83d415d742f2bfa0bc0e45f98e184`
+- Exact current base commit: `de8da498b184392711d61c812dc566322430d49d`
+- Exact current base tree: `f52798e739739fa5012663f367096179ef579cea`
 - Core dependency merge: `1c4f9384a67c61f80d1f11215e9c1ab225b21809`
 - Core dependency tree: `ea8cbcfb051e58f202e825bb29e32d25773b8318`
 - Core predecessor: `CORE_EXTERNAL_CANDIDATE_ADOPTION_INTEGRATED_SOURCE_VERIFIED`
