@@ -716,13 +716,13 @@ def _r1_authority_fixture():
         "accepted_entrypoint": RecoveryEntrypointIdentity(
             path=ENTRYPOINT, blob_oid="0" * 40, sha256="1" * 64
         ),
-        "desired_commit": "3" * 40,
-        "desired_tree": "4" * 40,
+        "desired_commit": contract.OWNER_ACTIVATION_DESIRED_COMMIT,
+        "desired_tree": contract.OWNER_ACTIVATION_DESIRED_TREE,
         "desired_entrypoint": RecoveryEntrypointIdentity(
             path=ENTRYPOINT, blob_oid="5" * 40, sha256="6" * 64
         ),
-        "predecessor_commit": "7" * 40,
-        "predecessor_tree": "8" * 40,
+        "predecessor_commit": contract.OWNER_ACTIVATION_PREDECESSOR_COMMIT,
+        "predecessor_tree": contract.OWNER_ACTIVATION_PREDECESSOR_TREE,
         "predecessor_entrypoint": RecoveryEntrypointIdentity(
             path=ENTRYPOINT, blob_oid="9" * 40, sha256="a" * 64
         ),
@@ -894,6 +894,187 @@ def test_r1_task002_activation_accepts_only_exact_authorized_target():
 
     receipt = _r1_task002_authority_fixture()
     assert validate_recovery_authority(receipt) == receipt
+
+
+def test_r1_historical_activation_accepts_only_exact_historical_target():
+    from nexus.contracts.gateway_deployment import (
+        recovery_activation_authority_class,
+        validate_recovery_authority,
+    )
+
+    receipt = _r1_authority_fixture()
+    assert receipt.owner_activation_id == contract.OWNER_ACTIVATION_ID
+    assert receipt.desired_commit == contract.OWNER_ACTIVATION_DESIRED_COMMIT
+    assert receipt.predecessor_tree == contract.OWNER_ACTIVATION_PREDECESSOR_TREE
+    assert validate_recovery_authority(receipt) == receipt
+    assert recovery_activation_authority_class(receipt) == (
+        contract.RECOVERY_AUTHORITY_LEGACY_EXACT_TARGET_BOUND
+    )
+
+
+def test_r1_historical_activation_rejects_new_main_target_after_full_rehash():
+    from nexus.contracts.gateway_deployment import validate_recovery_authority
+
+    # 9dffad79... is only a dispatch-time source baseline; the historical
+    # activation must never authorize it (or any other new main target).
+    receipt = _r1_rebind_authority_fixture(
+        _r1_authority_fixture(),
+        activation_id=contract.OWNER_ACTIVATION_ID,
+        activation_sha256=contract.OWNER_ACTIVATION_SHA256,
+        source_thread=contract.OWNER_SOURCE_THREAD,
+        desired_commit="9dffad79ea30d6f2a1b8bee64ac1048e1ae59f35"[:40],
+        desired_tree="f" * 40,
+        predecessor_commit="e" * 40,
+        predecessor_tree="d" * 40,
+    )
+    with pytest.raises(ContractError, match="historical activation"):
+        validate_recovery_authority(receipt)
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("desired_commit", "a" * 40),
+        ("desired_tree", "b" * 40),
+        ("predecessor_commit", "c" * 40),
+        ("predecessor_tree", "d" * 40),
+    ],
+)
+def test_r1_historical_activation_rejects_single_target_substitution(field, replacement):
+    from nexus.contracts.gateway_deployment import validate_recovery_authority
+
+    receipt = _r1_authority_fixture()
+    target = {
+        "desired_commit": receipt.desired_commit,
+        "desired_tree": receipt.desired_tree,
+        "predecessor_commit": receipt.predecessor_commit,
+        "predecessor_tree": receipt.predecessor_tree,
+    }
+    target[field] = replacement
+    altered = _r1_rebind_authority_fixture(
+        receipt,
+        activation_id=contract.OWNER_ACTIVATION_ID,
+        activation_sha256=contract.OWNER_ACTIVATION_SHA256,
+        source_thread=contract.OWNER_SOURCE_THREAD,
+        **target,
+    )
+    with pytest.raises(ContractError, match="historical activation"):
+        validate_recovery_authority(altered)
+
+
+FUTURE_ACTIVATION_ID = "OWNER_ISSUE526_FUTURE_TRACKED_20260902"
+FUTURE_ACTIVATION_SHA256 = "9" * 64
+FUTURE_ACTIVATION_SOURCE_THREAD = "future-thread-20260902"
+
+
+def _r1_future_authority_fixture():
+    receipt = _r1_authority_fixture()
+    return _r1_rebind_authority_fixture(
+        receipt,
+        activation_id=FUTURE_ACTIVATION_ID,
+        activation_sha256=FUTURE_ACTIVATION_SHA256,
+        source_thread=FUTURE_ACTIVATION_SOURCE_THREAD,
+        desired_commit="5" * 40,
+        desired_tree="6" * 40,
+        predecessor_commit="7" * 40,
+        predecessor_tree="8" * 40,
+    )
+
+
+def test_r1_future_activation_is_structurally_valid_without_code_constants():
+    from nexus.contracts.gateway_deployment import validate_recovery_authority
+
+    # A future Owner activation is representable with NO new Python constant:
+    # the receipt passes full structural contract validation as-is.
+    receipt = _r1_future_authority_fixture()
+    assert validate_recovery_authority(receipt) == receipt
+
+
+def test_r1_future_activation_is_not_authority_without_tracked_provenance():
+    from nexus.contracts.gateway_deployment import recovery_activation_authority_class
+
+    # STRUCTURAL RECEIPT VALIDITY != RECOVERY AUTHORITY.  A future activation
+    # is classified as requiring fixed tracked-main provenance; the manager
+    # must prove byte-identity with the fixed tracked receipt on a freshly
+    # verified authority mirror before any Gateway effect (proven at the
+    # manager level in tests/ops/test_mcp_gateway_durable.py).
+    receipt = _r1_future_authority_fixture()
+    assert recovery_activation_authority_class(receipt) == (
+        contract.RECOVERY_AUTHORITY_FUTURE_TRACKED_PROVENANCE_REQUIRED
+    )
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"activation_id": contract.OWNER_ACTIVATION_ID},
+        {"activation_sha256": contract.OWNER_ACTIVATION_SHA256},
+        {"source_thread": contract.OWNER_SOURCE_THREAD},
+        {"activation_id": contract.TASK002_RECOVERY_ACTIVATION_ID},
+        {"activation_sha256": contract.TASK002_RECOVERY_ACTIVATION_SHA256},
+        {"source_thread": contract.TASK002_RECOVERY_SOURCE_COMMENT},
+    ],
+)
+def test_r1_legacy_activation_components_never_grant_future_generality(changes):
+    from nexus.contracts.gateway_deployment import (
+        recovery_activation_authority_class,
+        validate_recovery_authority,
+    )
+
+    # A caller cannot take a legacy identity component (or a legacy lineage)
+    # and reuse it as a generic future activation against a new target.
+    receipt = _r1_rebind_authority_fixture(
+        _r1_future_authority_fixture(),
+        activation_id=changes.get("activation_id", FUTURE_ACTIVATION_ID),
+        activation_sha256=changes.get("activation_sha256", FUTURE_ACTIVATION_SHA256),
+        source_thread=changes.get("source_thread", FUTURE_ACTIVATION_SOURCE_THREAD),
+        desired_commit="a" * 40,
+        desired_tree="b" * 40,
+        predecessor_commit="c" * 40,
+        predecessor_tree="d" * 40,
+    )
+    assert recovery_activation_authority_class(receipt) == (
+        contract.RECOVERY_AUTHORITY_LEGACY_EXACT_TARGET_BOUND
+    )
+    with pytest.raises(
+        ContractError, match="historical activation|activation lineage|TASK-002"
+    ):
+        validate_recovery_authority(receipt)
+
+
+def test_r1_expired_receipt_fails_freshness():
+    from nexus.contracts.gateway_deployment import validate_recovery_authority
+
+    receipt = _r1_authority_fixture()
+    with pytest.raises(ContractError, match="stale"):
+        validate_recovery_authority(receipt, now="2099-01-01T00:00:00Z")
+
+
+def test_r1_receipt_hash_substitution_fails_closed():
+    from nexus.contracts.gateway_deployment import (
+        RecoveryAuthorityReceipt,
+        validate_recovery_authority,
+    )
+
+    receipt = _r1_authority_fixture()
+    forged = RecoveryAuthorityReceipt(**{**receipt.__dict__, "receipt_hash": "f" * 64})
+    with pytest.raises(ContractError, match="hash mismatch"):
+        validate_recovery_authority(forged)
+
+
+def test_r1_stale_manager_binding_fails_closed():
+    from nexus.contracts.gateway_deployment import (
+        RecoveryAuthorityReceipt,
+        validate_recovery_authority,
+    )
+
+    receipt = _r1_authority_fixture()
+    forged = RecoveryAuthorityReceipt(**{
+        **receipt.__dict__,
+        "final_manager_sha256": "not-a-hash",
+    })
+    with pytest.raises(ContractError, match="invalid final manager"):
+        validate_recovery_authority(forged)
 
 
 @pytest.mark.parametrize(

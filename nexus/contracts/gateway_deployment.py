@@ -104,6 +104,16 @@ RECOVERY_RECEIPT_PATH = (
 OWNER_ACTIVATION_ID = "OWNER_ISSUE526_CONTINUE_20260823"
 OWNER_ACTIVATION_SHA256 = "f0ed77ffe3872b083ef0b6d66526524a7091a8e3125322c84ba632f3c64ba322"
 OWNER_SOURCE_THREAD = "01a02a17-691c-7a20-ad0f-9166456416dc"
+# The historical 2026-08-23 activation is NOT generic.  Its original Host Card
+# authorization (tasks/github-issue-526-host-authority-and-canary-20260823/
+# 01-gateway-host-local-canary.md) binds it to exactly one desired/predecessor
+# commit+tree tuple; the same tuple appears in the originally issued tracked
+# receipt (issue526-r1-recovery-authority-v1).  Reusing this lineage against any
+# other target must fail closed.
+OWNER_ACTIVATION_DESIRED_COMMIT = "7ad264e1c12a2b4d3896b4cdeec68688acf034f7"
+OWNER_ACTIVATION_DESIRED_TREE = "b9057f8ef736fb6d3cd30da983f33f5f61fb86e9"
+OWNER_ACTIVATION_PREDECESSOR_COMMIT = "67521fe91e990f4e140642984c743dd50a408e84"
+OWNER_ACTIVATION_PREDECESSOR_TREE = "f6d6c2bf0912ff4a63d3c10a089910f95eab3c12"
 TASK002_RECOVERY_ACTIVATION_ID = "OWNER_ISSUE526_TASK002_GATEWAY_REBIND_20260826"
 TASK002_RECOVERY_ACTIVATION_SHA256 = (
     "61ebd493c8a405213043382dc1bb0d225185c5528126573311de2cba9cff4eb9"
@@ -1976,45 +1986,113 @@ parse_host_effect_authority_bundle = validate_host_effect_authority_bundle
 select_host_authority_receipt = select_host_effect_authority_receipt
 
 
+LEGACY_RECOVERY_ACTIVATION_BINDINGS: tuple[tuple[tuple[str, str, str], tuple[str, str, str, str]], ...] = (
+    (
+        (OWNER_ACTIVATION_ID, OWNER_ACTIVATION_SHA256, OWNER_SOURCE_THREAD),
+        (
+            OWNER_ACTIVATION_DESIRED_COMMIT,
+            OWNER_ACTIVATION_DESIRED_TREE,
+            OWNER_ACTIVATION_PREDECESSOR_COMMIT,
+            OWNER_ACTIVATION_PREDECESSOR_TREE,
+        ),
+    ),
+    (
+        (
+            TASK002_RECOVERY_ACTIVATION_ID,
+            TASK002_RECOVERY_ACTIVATION_SHA256,
+            TASK002_RECOVERY_SOURCE_COMMENT,
+        ),
+        (
+            TASK002_RECOVERY_DESIRED_COMMIT,
+            TASK002_RECOVERY_DESIRED_TREE,
+            TASK002_RECOVERY_PREDECESSOR_COMMIT,
+            TASK002_RECOVERY_PREDECESSOR_TREE,
+        ),
+    ),
+)
+# Provenance classes returned by :func:`recovery_activation_authority_class`.
+RECOVERY_AUTHORITY_LEGACY_EXACT_TARGET_BOUND = "LEGACY_EXACT_TARGET_BOUND"
+RECOVERY_AUTHORITY_FUTURE_TRACKED_PROVENANCE_REQUIRED = "FUTURE_TRACKED_PROVENANCE_REQUIRED"
+
+
+def _activation_target(receipt: RecoveryAuthorityReceipt) -> tuple[str, str, str, str]:
+    return (
+        receipt.desired_commit,
+        receipt.desired_tree,
+        receipt.predecessor_commit,
+        receipt.predecessor_tree,
+    )
+
+
+def recovery_activation_authority_class(receipt: RecoveryAuthorityReceipt) -> str:
+    """Classify the activation lineage of an R1 recovery receipt.
+
+    ``LEGACY_EXACT_TARGET_BOUND``: the lineage is one of the known legacy Owner
+    activations.  Such receipts are valid only for their exact historical
+    target tuple; the binding is enforced by
+    :func:`validate_recovery_authority`.
+
+    ``FUTURE_TRACKED_PROVENANCE_REQUIRED``: the lineage is a future Owner
+    activation that requires no Python constant.  Structural validity of such a
+    receipt is NOT recovery authority: full recovery authority exists only when
+    the manager proves that the exact receipt bytes are byte-identical to the
+    fixed tracked receipt path on a freshly verified authority mirror of the
+    fixed GitHub repository (Owner/coordinator-approved tracked receipt ->
+    fixed repository -> fixed path -> fresh verified mirror -> byte-identical
+    local receipt -> exact request binding -> stable manager -> fixed Gateway
+    recovery effect).  A locally fabricated receipt with structurally valid
+    fields never satisfies this chain by itself.
+    """
+    if not isinstance(receipt, RecoveryAuthorityReceipt):
+        raise ContractError("recovery authority class receipt must be typed")
+    lineage = (
+        receipt.owner_activation_id,
+        receipt.owner_activation_sha256,
+        receipt.source_thread,
+    )
+    for bound_lineage, _ in LEGACY_RECOVERY_ACTIVATION_BINDINGS:
+        if any(component in lineage for component in bound_lineage):
+            return RECOVERY_AUTHORITY_LEGACY_EXACT_TARGET_BOUND
+    return RECOVERY_AUTHORITY_FUTURE_TRACKED_PROVENANCE_REQUIRED
+
+
 def _validate_recovery_activation_lineage(receipt: RecoveryAuthorityReceipt) -> None:
     lineage = (
         receipt.owner_activation_id,
         receipt.owner_activation_sha256,
         receipt.source_thread,
     )
-    target = (
-        receipt.desired_commit,
-        receipt.desired_tree,
-        receipt.predecessor_commit,
-        receipt.predecessor_tree,
-    )
-    historical_lineage = (
-        OWNER_ACTIVATION_ID,
-        OWNER_ACTIVATION_SHA256,
-        OWNER_SOURCE_THREAD,
-    )
-    task002_lineage = (
-        TASK002_RECOVERY_ACTIVATION_ID,
-        TASK002_RECOVERY_ACTIVATION_SHA256,
-        TASK002_RECOVERY_SOURCE_COMMENT,
-    )
-    task002_target = (
-        TASK002_RECOVERY_DESIRED_COMMIT,
-        TASK002_RECOVERY_DESIRED_TREE,
-        TASK002_RECOVERY_PREDECESSOR_COMMIT,
-        TASK002_RECOVERY_PREDECESSOR_TREE,
-    )
-    if lineage == historical_lineage:
-        if target == task002_target:
-            raise ContractError(
-                "R1 historical activation cannot authorize TASK-002 recovery target"
-            )
-        return
-    if lineage == task002_lineage:
-        if target != task002_target:
-            raise ContractError("R1 TASK-002 recovery activation target mismatch")
-        return
-    raise ContractError("R1 recovery authority activation lineage mismatch")
+    target = _activation_target(receipt)
+    for bound_lineage, bound_target in LEGACY_RECOVERY_ACTIVATION_BINDINGS:
+        # Legacy collision protection: if a receipt claims any component of a
+        # known legacy activation identity (id, hash, or source thread), it
+        # must present the complete legacy lineage AND its exact historical
+        # target.  A caller cannot take an old activation identity (whole or
+        # mixed with a future identity) and reuse it as a generic activation.
+        if any(component in lineage for component in bound_lineage):
+            if lineage != bound_lineage:
+                raise ContractError(
+                    "R1 recovery authority activation lineage mismatch"
+                )
+            if target != bound_target:
+                if bound_lineage[0] == OWNER_ACTIVATION_ID:
+                    if target == (
+                        TASK002_RECOVERY_DESIRED_COMMIT,
+                        TASK002_RECOVERY_DESIRED_TREE,
+                        TASK002_RECOVERY_PREDECESSOR_COMMIT,
+                        TASK002_RECOVERY_PREDECESSOR_TREE,
+                    ):
+                        raise ContractError(
+                            "R1 historical activation cannot authorize"
+                            " TASK-002 recovery target"
+                        )
+                    raise ContractError("R1 historical activation target mismatch")
+                raise ContractError("R1 TASK-002 recovery activation target mismatch")
+            return
+    # Future activation: structurally valid without adding a Python constant.
+    # Structural validity is not recovery authority; the manager must prove the
+    # full fixed tracked-main receipt provenance chain before any effect.
+    return
 
 
 def validate_recovery_authority(
