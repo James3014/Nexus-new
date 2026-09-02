@@ -48,21 +48,19 @@ class ExternalReceiptExpectation:
 
     @property
     def hash(self):
-        return _hash(
-            (
-                EXTERNAL_RECEIPT_EXPECTATION_SCHEMA,
-                self.context_hash,
-                self.subject_hash,
-                self.profile_hash,
-                self.role.value,
-                self.evidence_id,
-                self.issuer_id,
-                self.expected_payload_hash,
-                self.required_action,
-                self.verification_method,
-                self.external_verification_receipt_hash,
-            )
-        )
+        return _hash((
+            EXTERNAL_RECEIPT_EXPECTATION_SCHEMA,
+            self.context_hash,
+            self.subject_hash,
+            self.profile_hash,
+            self.role.value,
+            self.evidence_id,
+            self.issuer_id,
+            self.expected_payload_hash,
+            self.required_action,
+            self.verification_method,
+            self.external_verification_receipt_hash,
+        ))
 
 
 class PrerequisiteValidationStatus(str, Enum):
@@ -119,24 +117,24 @@ class TrustedCertificationResult:
 
     @property
     def hash(self):
-        return _hash(
-            (
-                "nexus.trusted_certification_wrapper.v1-experimental",
-                self.context_hash,
-                self.profile_hash,
-                self.ingestion_bundle_hash,
-                self.ingestion_receipt_hash,
-                self.prerequisite_subject_hash,
-                self.prerequisites_hash,
-                self.core_receipt_hash,
-            )
-        )
+        return _hash((
+            "nexus.trusted_certification_wrapper.v1-experimental",
+            self.context_hash,
+            self.profile_hash,
+            self.ingestion_bundle_hash,
+            self.ingestion_receipt_hash,
+            self.prerequisite_subject_hash,
+            self.prerequisites_hash,
+            self.core_receipt_hash,
+        ))
 
 
 def _subject(context, ingestion):
-    return _hash(
-        ("nexus.trusted_prerequisite_subject.v1-experimental", context.hash, ingestion.bundle.hash)
-    )
+    return _hash((
+        "nexus.trusted_prerequisite_subject.v1-experimental",
+        context.hash,
+        ingestion.bundle.hash,
+    ))
 
 
 def _raw_hash(value):

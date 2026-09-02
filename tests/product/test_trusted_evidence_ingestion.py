@@ -794,24 +794,22 @@ def test_outer_subject_lookalike_wrong_type_is_rejected_before_plan_or_submissio
 def test_evidence_requirement_v2_hash_is_flat_and_enum_value_bound():
     api, context, _, _ = _fixture()
     requirement = context.requirements[0]
-    expected = _hash(
-        (
-            api.EVIDENCE_REQUIREMENT_SCHEMA,
-            requirement.verifier_id,
-            requirement.artifact_id,
-            requirement.evidence_type.value,
-            requirement.generation.value,
-            requirement.producer_id,
-            requirement.execution_id,
-            requirement.attempt_id,
-            requirement.environment_hash,
-            requirement.content_hash,
-            requirement.provenance_hash,
-            requirement.runtime_ready_required,
-            requirement.human_semantic_review_required,
-            requirement.expected_status.value,
-        )
-    )
+    expected = _hash((
+        api.EVIDENCE_REQUIREMENT_SCHEMA,
+        requirement.verifier_id,
+        requirement.artifact_id,
+        requirement.evidence_type.value,
+        requirement.generation.value,
+        requirement.producer_id,
+        requirement.execution_id,
+        requirement.attempt_id,
+        requirement.environment_hash,
+        requirement.content_hash,
+        requirement.provenance_hash,
+        requirement.runtime_ready_required,
+        requirement.human_semantic_review_required,
+        requirement.expected_status.value,
+    ))
     assert requirement.hash == expected
     assert str(requirement.evidence_type) != requirement.evidence_type.value
     assert str(requirement.generation) != requirement.generation.value
@@ -1402,9 +1400,9 @@ def test_trusted_result_is_sealed_to_exact_context_and_minted_identity():
     with pytest.raises((TypeError, ValueError)):
         api.IngestionResult(result.bundle, result.receipt, result.condition, result.reason_codes)
     with pytest.raises((TypeError, ValueError)):
-        api.IngestionReceipt(
-            *[getattr(result.receipt, field.name) for field in fields(result.receipt)]
-        )
+        api.IngestionReceipt(*[
+            getattr(result.receipt, field.name) for field in fields(result.receipt)
+        ])
 
 
 def test_single_trusted_fingerprint_registry_is_the_only_registry():

@@ -212,14 +212,12 @@ class IngestionProfile:
     @property
     def hash(self):
         return _hash(
-            _canon(
-                (
-                    self.profile_id,
-                    tuple(sorted((_canon(v) for v in self.producers))),
-                    tuple(sorted((_canon(v) for v in self.issuers))),
-                    self.max_age_seconds,
-                )
-            )
+            _canon((
+                self.profile_id,
+                tuple(sorted((_canon(v) for v in self.producers))),
+                tuple(sorted((_canon(v) for v in self.issuers))),
+                self.max_age_seconds,
+            ))
         )
 
 
@@ -260,24 +258,22 @@ class EvidenceRequirement:
     @property
     def hash(self):
         return _hash(
-            _canon(
-                (
-                    EVIDENCE_REQUIREMENT_SCHEMA,
-                    self.verifier_id,
-                    self.artifact_id,
-                    self.evidence_type.value,
-                    self.generation.value,
-                    self.producer_id,
-                    self.execution_id,
-                    self.attempt_id,
-                    self.environment_hash,
-                    self.content_hash,
-                    self.provenance_hash,
-                    self.runtime_ready_required,
-                    self.human_semantic_review_required,
-                    self.expected_status.value,
-                )
-            )
+            _canon((
+                EVIDENCE_REQUIREMENT_SCHEMA,
+                self.verifier_id,
+                self.artifact_id,
+                self.evidence_type.value,
+                self.generation.value,
+                self.producer_id,
+                self.execution_id,
+                self.attempt_id,
+                self.environment_hash,
+                self.content_hash,
+                self.provenance_hash,
+                self.runtime_ready_required,
+                self.human_semantic_review_required,
+                self.expected_status.value,
+            ))
         )
 
 
@@ -507,24 +503,20 @@ class TrustedIngestionContext:
     @property
     def hash(self):
         return _hash(
-            _canon(
-                (
-                    self.contract,
-                    self.change_set,
-                    self.plan,
-                    self.repository_id,
-                    self.source_tree,
-                    self.target_tree,
-                    self.observed_at,
-                    self.profile.hash,
-                    self.expected_profile_hash,
-                    tuple(sorted((requirement.hash for requirement in self.requirements))),
-                    self.required_action,
-                    tuple(
-                        sorted(self.prerequisite_payload_hashes, key=lambda v: (v[0].value, v[1]))
-                    ),
-                )
-            )
+            _canon((
+                self.contract,
+                self.change_set,
+                self.plan,
+                self.repository_id,
+                self.source_tree,
+                self.target_tree,
+                self.observed_at,
+                self.profile.hash,
+                self.expected_profile_hash,
+                tuple(sorted((requirement.hash for requirement in self.requirements))),
+                self.required_action,
+                tuple(sorted(self.prerequisite_payload_hashes, key=lambda v: (v[0].value, v[1]))),
+            ))
         )
 
 
@@ -768,12 +760,10 @@ def _mint_result(bundle, receipt, condition, reason_codes):
 
 
 def _result_fingerprint(context, result):
-    return _canon(
-        (
-            context.hash,
-            tuple(getattr(result, field) for field in IngestionResult.__dataclass_fields__),
-        )
-    )
+    return _canon((
+        context.hash,
+        tuple(getattr(result, field) for field in IngestionResult.__dataclass_fields__),
+    ))
 
 
 def _validate_context_nested(context):
@@ -854,22 +844,20 @@ def _revalidate_context_or_raise(context):
 
 
 def _mint_failure(context, reasons):
-    receipt = _mint_receipt(
-        (
-            context.hash,
-            context.profile.hash,
-            None,
-            (),
-            (),
-            (),
-            (),
-            (),
-            (),
-            (),
-            (),
-            tuple(sorted(set(reasons))),
-        )
-    )
+    receipt = _mint_receipt((
+        context.hash,
+        context.profile.hash,
+        None,
+        (),
+        (),
+        (),
+        (),
+        (),
+        (),
+        (),
+        (),
+        tuple(sorted(set(reasons))),
+    ))
     result = _mint_result(None, receipt, condition_for_ingestion_reasons(reasons), reasons)
     _TRUSTED_FINGERPRINTS[result] = (
         weakref.ref(context),

@@ -59,13 +59,11 @@ def _mutate(value, name, item):
 
 
 def _subject(context, ingestion):
-    return _hash(
-        (
-            "nexus.trusted_prerequisite_subject.v1-experimental",
-            context.hash,
-            ingestion.bundle.hash,
-        )
-    )
+    return _hash((
+        "nexus.trusted_prerequisite_subject.v1-experimental",
+        context.hash,
+        ingestion.bundle.hash,
+    ))
 
 
 def _four_role_fixture(*, decisions=None):
@@ -334,37 +332,33 @@ def test_exact_shapes_hashes_and_constructor_boundaries():
             with pytest.raises(TypeError):
                 cls()
     expectation = expectations[0]
-    assert expectation.hash == _hash(
-        (
-            "nexus.external_receipt_expectation.v1-experimental",
-            expectation.context_hash,
-            expectation.subject_hash,
-            expectation.profile_hash,
-            expectation.role.value,
-            expectation.evidence_id,
-            expectation.issuer_id,
-            expectation.expected_payload_hash,
-            expectation.required_action,
-            expectation.verification_method,
-            expectation.external_verification_receipt_hash,
-        )
-    )
+    assert expectation.hash == _hash((
+        "nexus.external_receipt_expectation.v1-experimental",
+        expectation.context_hash,
+        expectation.subject_hash,
+        expectation.profile_hash,
+        expectation.role.value,
+        expectation.evidence_id,
+        expectation.issuer_id,
+        expectation.expected_payload_hash,
+        expectation.required_action,
+        expectation.verification_method,
+        expectation.external_verification_receipt_hash,
+    ))
     assert prerequisites.hash == _hash(
         ("nexus.validated_prerequisites.v1-experimental",)
         + tuple(getattr(prerequisites, field.name) for field in fields(prerequisites))
     )
-    assert result.hash == _hash(
-        (
-            "nexus.trusted_certification_wrapper.v1-experimental",
-            result.context_hash,
-            result.profile_hash,
-            result.ingestion_bundle_hash,
-            result.ingestion_receipt_hash,
-            result.prerequisite_subject_hash,
-            result.prerequisites_hash,
-            result.core_receipt_hash,
-        )
-    )
+    assert result.hash == _hash((
+        "nexus.trusted_certification_wrapper.v1-experimental",
+        result.context_hash,
+        result.profile_hash,
+        result.ingestion_bundle_hash,
+        result.ingestion_receipt_hash,
+        result.prerequisite_subject_hash,
+        result.prerequisites_hash,
+        result.core_receipt_hash,
+    ))
     assert expectation.subject_hash == _subject(context, ingestion)
     assert set(api.PrerequisiteValidationStatus.__members__) == {"VALIDATED", "INVALID"}
     assert "ExternalReceiptExpectation" in api.__all__
