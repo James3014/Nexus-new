@@ -32,6 +32,7 @@ After the Owner explicitly declares `NEXUS_GOVERNANCE_DEFAULT_READY`, a separate
 
 - `AGENTS.md`
 - `docs/agents/TASK_EXECUTION_CONTRACT.md`
+- `docs/governance/current_operating_mode.yaml`
 - `tasks/nexus-self-hosting-authority-stabilization-20260902/INDEX.md`
 - `tasks/nexus-self-hosting-authority-stabilization-20260902/TASK-001.md`
 
@@ -49,6 +50,7 @@ After the Owner explicitly declares `NEXUS_GOVERNANCE_DEFAULT_READY`, a separate
 
 - Root repository authority must explicitly state the current self-hosting stabilization status and transition semantics.
 - The detailed Task Execution Contract must match the root authority without creating a second authority model.
+- The machine-readable current operating mode must preserve direct defaults during stabilization and explicitly require an Owner-gated future transition rather than treating G10 as automatic cutover.
 - Preserve the distinction between Nexus execution lanes (`DIRECT_CANONICAL`, `DIRECT_DELEGATED`, `GOVERNED`) and DevSpace execution authority modes (`OWNER_DIRECT`, `NEXUS_GOVERNED`).
 - Existing direct-lane safety/verification/scope constraints remain in force.
 - Future default-authority transition remains an explicit Owner decision backed by evidence, not an automatic gate closure.
@@ -56,11 +58,11 @@ After the Owner explicitly declares `NEXUS_GOVERNANCE_DEFAULT_READY`, a separate
 ## Verification
 
 - Review the exact diff for semantic consistency and scope.
-- Verify both authority documents contain no contradictory default-lane rule.
+- Verify all three authority surfaces contain no contradictory default-lane rule.
 - Verify existing statements that route/lifecycle/workforce/security authority changes require governed handling remain intact.
 - `git diff --check` equivalent through repository CI / exact-head checks.
 - All protected-branch required checks must be terminal success on the exact PR head before merge.
 
 ## Exit criteria
 
-Complete when the two authority documents durably encode the Owner-approved stabilization policy, only allowed files changed, protected-main checks pass, and the exact reviewed PR head is merged to `main`.
+Complete when the three authority surfaces durably encode the Owner-approved stabilization policy, only allowed files changed, protected-main checks pass, and the exact reviewed PR head is merged to `main`.
