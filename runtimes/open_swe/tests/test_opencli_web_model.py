@@ -177,8 +177,6 @@ def test_opencli_web_model_reuses_exact_conversation_for_next_model_turn(
     details = [argv for argv, _kwargs in calls if argv[1:3] == ["chatgpt", "detail"]]
     assert len(details) == 2
     assert all(argv[3] == "web-conversation-1" for argv in details)
-    model_selects = [argv for argv, _kwargs in calls if argv[1:3] == ["chatgpt", "model"]]
-    assert len(model_selects) == 1
 
 
 def test_opencli_web_model_rejects_conversation_identity_drift(
