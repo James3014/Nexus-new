@@ -1145,10 +1145,8 @@ def run(
 ):
     """🚀 [Nexus Master Loop] Execute task with full P-X-D-R-A-C unification."""
     from nexus.services.canonical_local_assist_policy import (
-        build_canonical_policy_receipt,
         build_execution_context_fields,
         normalize_local_assist_policy,
-        write_canonical_policy_receipt,
     )
     from nexus.services.online_execution_policy import normalize_online_policy
     from nexus.orchestrator.canonical_mcp_ingress import build_cli_execution_context
