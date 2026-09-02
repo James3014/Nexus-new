@@ -589,7 +589,7 @@ def test_receipt_bytes_and_submitted_hash_are_independently_recomputed(field, re
 
 @pytest.mark.parametrize(
     "field,value,passes,reason",
-    (
+    [
         ("issued_at", _at(), True, None),
         ("issued_at", _at(1), False, "ISSUED_AFTER_OBSERVED_AT"),
         ("issued_at", "2026-08-29 12:00:00+00:00", False, "TIMESTAMP_MALFORMED"),
@@ -602,7 +602,21 @@ def test_receipt_bytes_and_submitted_hash_are_independently_recomputed(field, re
         ("revoked_at", _at(), False, "REVOKED_AT_OBSERVED_AT"),
         ("revoked_at", _at(-1), False, "REVOKED_AT_OBSERVED_AT"),
         ("revoked_at", "2026-08-29T12:00:00,1Z", False, "TIMESTAMP_MALFORMED"),
-    ),
+    ],
+    ids=[
+        "issued_at-equal-utc-ok",
+        "issued_at-after-observed-fail",
+        "issued_at-space-separator-malformed",
+        "issued_at-non-utc-offset-malformed",
+        "expires_at-after-observed-ok",
+        "expires_at-equal-observed-fail",
+        "expires_at-before-observed-fail",
+        "expires_at-extra-colon-malformed",
+        "revoked_at-after-observed-ok",
+        "revoked_at-equal-observed-fail",
+        "revoked_at-before-observed-fail",
+        "revoked_at-comma-separator-malformed",
+    ],
 )
 def test_rfc3339_issuance_expiry_revocation_cutoffs(field, value, passes, reason):
     """T4-12, T4-13, T4-14: exact equality and malformed/non-UTC boundaries."""
