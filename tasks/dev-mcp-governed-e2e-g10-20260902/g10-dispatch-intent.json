@@ -1,0 +1,34 @@
+{
+  "taskId": "g10-nexus-governed-e2e-20260902",
+  "attemptId": "g10-live-e2e-attempt-01",
+  "objective": "Create g10-governed-canary.txt with exactly G10_NEXUS_GOVERNED_E2E_OK followed by one newline and make no other workspace change.",
+  "roleIntent": "MECHANICAL_EXECUTOR",
+  "context": [
+    "This is the live G10 Nexus-governed end-to-end canary. Nexus remains the governance authority; Dev MCP only transports and mechanically enforces the execution envelope."
+  ],
+  "readScope": [
+    "AGENTS.md"
+  ],
+  "writeScope": [
+    "g10-governed-canary.txt"
+  ],
+  "exclusiveOwnership": true,
+  "forbiddenChanges": [
+    "Do not modify any path except g10-governed-canary.txt.",
+    "Do not commit, push, merge, install packages, alter configuration, invoke child agents, or access external directories."
+  ],
+  "acceptanceCriteria": [
+    "g10-governed-canary.txt exists with exact bytes G10_NEXUS_GOVERNED_E2E_OK\\n.",
+    "No other workspace path changes and HEAD remains 5212252bacfe8ae37747282211aff66594452426."
+  ],
+  "verificationRequired": true,
+  "expectedArtifacts": [
+    "g10-governed-canary.txt"
+  ],
+  "expectedEvidence": [
+    "Exact canary file bytes.",
+    "Physical reconcile reports only g10-governed-canary.txt changed.",
+    "Workspace HEAD remains 5212252bacfe8ae37747282211aff66594452426."
+  ],
+  "claimCeiling": "IMPLEMENTED"
+}
