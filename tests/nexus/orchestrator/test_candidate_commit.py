@@ -1,9 +1,8 @@
-from dataclasses import asdict, replace
-import json
 import os
 import subprocess
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -126,6 +125,60 @@ def test_precommitted_worker_candidate_is_reused_without_wrapper_commit(tmp_path
     assert packet.candidate_commit_created is True
     assert packet.candidate_commit_sha == worker_head
     assert _git(target, "rev-list", "--count", f"{lease.initial_head}..HEAD") == "1"
+
+
+def test_precommitted_multi_commit_candidate_reuses_exact_tip_and_full_range_paths(tmp_path):
+    contract, lease, _, manager = _scenario(tmp_path)
+    contract = contract.model_copy(update={"allowed_files": ["bounded.txt", "second.txt"]})
+    target = Path(lease.target_worktree)
+    target.joinpath("bounded.txt").write_text("worker commit one\n", encoding="utf-8")
+    _git(target, "add", "bounded.txt")
+    _git(target, "commit", "-m", "worker candidate one")
+    target.joinpath("second.txt").write_text("worker commit two\n", encoding="utf-8")
+    _git(target, "add", "second.txt")
+    _git(target, "commit", "-m", "worker candidate two")
+    worker_head = _git(target, "rev-parse", "HEAD")
+    candidate = manager.capture_candidate(contract, lease)
+    verified = CandidateVerifier(manager).verify(contract, lease, candidate)
+    assert verified.verified is True
+    packet = CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
+    assert packet.candidate_commit_created is True
+    assert packet.candidate_commit_sha == worker_head
+    assert _git(target, "rev-list", "--count", f"{lease.initial_head}..HEAD") == "2"
+    assert _git(target, "diff", "--name-only", lease.initial_head, worker_head).splitlines() == ["bounded.txt", "second.txt"]
+
+
+def test_precommitted_clean_head_advancement_after_capture_is_rejected(tmp_path, monkeypatch):
+    contract, lease, _, manager = _scenario(tmp_path)
+    target = Path(lease.target_worktree)
+    target.joinpath("bounded.txt").write_text("worker committed\n", encoding="utf-8")
+    _git(target, "add", "bounded.txt")
+    _git(target, "commit", "-m", "worker candidate")
+    candidate = manager.capture_candidate(contract, lease)
+    verified = CandidateVerifier(manager).verify(contract, lease, candidate)
+
+    original_run_git = manager._run_git
+    original_capture = manager.capture_candidate
+    capture_finished = False
+    advanced = False
+
+    def advance_after_capture(args, *, cwd, env=None):
+        nonlocal advanced
+        if capture_finished and not advanced and args == ["rev-parse", "HEAD"]:
+            _git(target, "commit", "--allow-empty", "-m", "unverified advancement")
+            advanced = True
+        return original_run_git(args, cwd=cwd, env=env)
+
+    def capture_then_arm(contract_arg, lease_arg):
+        nonlocal capture_finished
+        result = original_capture(contract_arg, lease_arg)
+        capture_finished = True
+        return result
+
+    monkeypatch.setattr(manager, "_run_git", advance_after_capture)
+    monkeypatch.setattr(manager, "capture_candidate", capture_then_arm)
+    with pytest.raises(RuntimeError, match="candidate tip changed after verification"):
+        CandidateCommitter(manager).create_candidate_commit(contract, lease, verified)
 
 
 def test_candidate_commit_rejects_unverified_receipt(tmp_path):

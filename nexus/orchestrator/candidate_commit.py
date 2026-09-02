@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import hashlib
 import json
 import os
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
 
 from nexus.orchestrator.candidate_verifier import VerifiedCandidateReceipt
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
-from nexus.orchestrator.worktree_manager import TargetWorktreeLease, WorktreeManager, get_canonical_git_hooks_dir
+from nexus.orchestrator.worktree_manager import (
+    TargetWorktreeLease,
+    WorktreeManager,
+    get_canonical_git_hooks_dir,
+)
 
 
 @dataclass(frozen=True)
@@ -133,17 +137,29 @@ class CandidateCommitter:
         if not paths:
             raise RuntimeError("candidate commit requires a non-empty candidate diff")
         target_head = self.worktree_manager._run_git(["rev-parse", "HEAD"], cwd=target)
+        if target_head != current.target_head:
+            raise RuntimeError("candidate tip changed after verification")
         if target_head != lease.initial_head:
             # Workers are allowed to create scoped commits in the isolated
             # Target.  Reuse that exact commit chain; never create a second
             # wrapper commit or rewrite worker history.
             if self.worktree_manager._run_git(["status", "--short"], cwd=target):
                 raise RuntimeError("precommitted Target must be clean before capture")
-            parents = self.worktree_manager._run_git(
-                ["rev-list", "--parents", "-n", "1", target_head], cwd=target,
-            ).split()
-            if len(parents) != 2:
-                raise RuntimeError("precommitted candidate must not be a merge commit")
+            try:
+                self.worktree_manager._run_git(
+                    ["merge-base", "--is-ancestor", lease.initial_head, target_head],
+                    cwd=target,
+                )
+            except RuntimeError as exc:
+                raise RuntimeError(
+                    "precommitted candidate tip must descend from leased initial_head"
+                ) from exc
+            merge_commits = self.worktree_manager._run_git(
+                ["rev-list", "--merges", f"{lease.initial_head}..{target_head}"],
+                cwd=target,
+            ).splitlines()
+            if merge_commits:
+                raise RuntimeError("precommitted candidate chain must not contain merge commits")
             committed_paths = self.worktree_manager._run_git(
                 ["diff", "--name-only", lease.initial_head, target_head], cwd=target,
             ).splitlines()
@@ -180,13 +196,17 @@ class CandidateCommitter:
                 env=commit_env,
             )
             commit_sha = self.worktree_manager._run_git(["rev-parse", "HEAD"], cwd=target)
-        tree_sha = self.worktree_manager._run_git(["rev-parse", "HEAD^{tree}"], cwd=target)
+        final_head = self.worktree_manager._run_git(["rev-parse", "HEAD"], cwd=target)
+        if final_head != commit_sha:
+            raise RuntimeError("candidate tip changed during commit")
+        tree_sha = self.worktree_manager._run_git(
+            ["rev-parse", f"{commit_sha}^{{tree}}"], cwd=target,
+        )
         committed_paths = self.worktree_manager._run_git(
-            ["diff-tree", "--no-commit-id", "--name-only", "-r", commit_sha],
-            cwd=target,
+            ["diff", "--name-only", lease.initial_head, commit_sha], cwd=target,
         ).splitlines()
-        if committed_paths != paths:
-            raise RuntimeError("candidate commit tree differs from verified paths")
+        if sorted(committed_paths) != paths:
+            raise RuntimeError("candidate commit range differs from verified paths")
         if self.worktree_manager._run_git(["status", "--short"], cwd=target):
             raise RuntimeError("candidate worktree is not clean after commit")
         self.worktree_manager.verify_controller_unchanged(contract)

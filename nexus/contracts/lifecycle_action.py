@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from hashlib import sha256
 from pathlib import PurePosixPath
-from typing import Any, Mapping, Optional
+from typing import Any, Literal, Mapping, Optional
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 _SHA40 = re.compile(r"^[0-9a-f]{40}$")
 _SHA64 = re.compile(r"^[0-9a-f]{64}$")
@@ -25,6 +27,7 @@ class LifecycleActionType(str, Enum):
     TASK_RETRY = "TASK_RETRY"
     TASK_RESUME = "TASK_RESUME"
     CANDIDATE_APPROVE = "CANDIDATE_APPROVE"
+    CANDIDATE_ADOPT_EXTERNAL = "CANDIDATE_ADOPT_EXTERNAL"
     CANDIDATE_INTEGRATE = "CANDIDATE_INTEGRATE"
     CANDIDATE_DISPOSE = "CANDIDATE_DISPOSE"
 
@@ -61,6 +64,140 @@ class ContractKind(str, Enum):
     NONE = "NONE"
     TRACKED_TASK_CARD = "TRACKED_TASK_CARD"
     OWNER_INLINE = "OWNER_INLINE"
+
+
+@dataclass(frozen=True)
+class HistoricalEpbTaskCardProjection:
+    """The bounded, non-authoritative projection of the immutable EPB card."""
+
+    allowed_repository_paths: tuple[str, ...]
+    forbidden_scope: tuple[str, ...]
+    exact_verification_commands: tuple[str, ...]
+    auto_chain: Literal[False] = False
+    forbidden_repository_paths: tuple[str, ...] = ()
+    forbidden_repository_patterns: tuple[str, ...] = ()
+
+
+_HISTORICAL_CARD_SECTIONS = (
+    "Allowed repository paths",
+    "Forbidden scope",
+    "Exact verification commands",
+)
+
+
+def _unresolvable_card() -> ValueError:
+    return ValueError("ADOPTION_CARD_CONTRACT_UNRESOLVABLE")
+
+
+def _historical_card_section(lines: list[str], title: str) -> list[str]:
+    heading = f"## {title}"
+    starts = [index for index, line in enumerate(lines) if line == heading]
+    if len(starts) != 1:
+        raise _unresolvable_card()
+    start = starts[0] + 1
+    end = len(lines)
+    for index in range(start, len(lines)):
+        if lines[index].startswith("## "):
+            end = index
+            break
+    section = lines[start:end]
+    if any(line.startswith("#") for line in section):
+        raise _unresolvable_card()
+    return section
+
+
+def parse_historical_epb_task_card(card_bytes: bytes) -> HistoricalEpbTaskCardProjection:
+    """Parse only the frozen EPB card contract fields, without inference."""
+    if not isinstance(card_bytes, bytes) or not card_bytes:
+        raise _unresolvable_card()
+    try:
+        text = card_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _unresolvable_card() from exc
+    if "\r" in text:
+        raise _unresolvable_card()
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+    if sum(line == "`AUTO_CHAIN=false`" for line in lines) != 1:
+        raise _unresolvable_card()
+    if any(line == "`AUTO_CHAIN=true`" for line in lines):
+        raise _unresolvable_card()
+    sections = {title: _historical_card_section(lines, title) for title in _HISTORICAL_CARD_SECTIONS}
+
+    def code_bullets(section: list[str]) -> tuple[str, ...]:
+        values = tuple(
+            match.group(1)
+            for line in section
+            if (match := re.fullmatch(r"- `([^`]+)`", line))
+        )
+        nonempty_bullets = tuple(line for line in section if line.startswith("- "))
+        if not values or len(values) != len(nonempty_bullets):
+            raise _unresolvable_card()
+        return values
+
+    def exact_bullets(section: list[str]) -> tuple[str, ...]:
+        values: list[str] = []
+        for line in section:
+            if not line.strip():
+                continue
+            match = re.fullmatch(r"- (.+\S)", line)
+            if not match:
+                raise _unresolvable_card()
+            value = match.group(1)
+            if value.startswith("`") or value.endswith("`"):
+                if not (value.startswith("`") and value.endswith("`") and len(value) > 2):
+                    raise _unresolvable_card()
+                value = value[1:-1]
+            values.append(value)
+        if not values:
+            raise _unresolvable_card()
+        return tuple(values)
+
+    allowed = code_bullets(sections["Allowed repository paths"])
+    try:
+        for path in allowed:
+            _repo_path(path, "allowed_repository_paths")
+    except ValueError as exc:
+        raise _unresolvable_card() from exc
+
+    forbidden_lines = tuple(line[2:].replace("`", "") for line in sections["Forbidden scope"] if line.startswith("- "))
+    if not forbidden_lines or len(forbidden_lines) != sum(bool(line.strip()) for line in sections["Forbidden scope"]):
+        raise _unresolvable_card()
+    forbidden_paths: list[str] = []
+    forbidden_patterns: list[str] = []
+    for line in sections["Forbidden scope"]:
+        for token in re.findall(r"`([^`]+)`", line):
+            if "/" not in token:
+                continue
+            if token.endswith("/**") or token.endswith("/*"):
+                prefix = token[:-3] if token.endswith("/**") else token[:-2]
+                try:
+                    _repo_path(prefix, "forbidden_repository_patterns")
+                except ValueError as exc:
+                    raise _unresolvable_card() from exc
+                if "*" in prefix or token in forbidden_patterns:
+                    raise _unresolvable_card()
+                forbidden_patterns.append(token)
+                continue
+            if "*" in token:
+                raise _unresolvable_card()
+            try:
+                _repo_path(token, "forbidden_repository_paths")
+            except ValueError as exc:
+                raise _unresolvable_card() from exc
+            if token in forbidden_paths:
+                raise _unresolvable_card()
+            forbidden_paths.append(token)
+    commands = exact_bullets(sections["Exact verification commands"])
+    return HistoricalEpbTaskCardProjection(
+        allowed,
+        forbidden_lines,
+        commands,
+        False,
+        tuple(forbidden_paths),
+        tuple(forbidden_patterns),
+    )
 
 
 def canonical_request_hash(payload: Mapping[str, Any]) -> str:
@@ -264,6 +401,163 @@ class LifecycleActionEnvelope(BaseModel):
 
     def verify_request(self, payload: Mapping[str, Any]) -> bool:
         return canonical_request_hash(payload) == self.request_hash
+
+
+class ExternalCandidateAdoptionRequest(BaseModel):
+    """Closed, one-shot assertion envelope for physical Candidate adoption."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema: Literal["nexus.external_candidate_adoption_request.v1"] = "nexus.external_candidate_adoption_request.v1"  # pyright: ignore[reportIncompatibleMethodOverride]
+    repository: str
+    task_id: str
+    attempt_id: str
+    action_id: str
+    idempotency_key: str
+    task_card_path: str
+    task_card_hash: str
+    controller_revision: str
+    target_base_revision: str
+    candidate_commit_sha: str
+    candidate_tree_sha: str
+    candidate_diff_sha256: str
+    validation_receipt_sha256: str
+    acceptance_receipt_sha256: str
+    validation_receipt_b64: str
+    acceptance_receipt_b64: str
+    allowed_files: tuple[str, ...]
+    forbidden_files: tuple[str, ...] = ()
+    authorized_deletions: tuple[str, ...] = ()
+    verifier_commands: tuple[str, ...]
+    protected_contracts: tuple[str, ...] = ()
+    action: LifecycleActionEnvelope
+
+    @staticmethod
+    def semantic_hash_for(value: Mapping[str, Any]) -> str:
+        payload = dict(value)
+        payload.pop("action", None)
+        return canonical_request_hash(payload)
+
+    def semantic_hash(self) -> str:
+        return self.semantic_hash_for(self.model_dump(mode="json", exclude={"action"}))
+
+    @field_validator("task_id", "attempt_id", "action_id")
+    @classmethod
+    def validate_adoption_ids(cls, value: str, info) -> str:
+        return _safe_id(value, info.field_name)
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def validate_adoption_idempotency_key(cls, value: str) -> str:
+        if not isinstance(value, str) or not value.strip() or len(value) > 256:
+            raise ValueError("idempotency_key must be non-empty and <=256 characters")
+        return value.strip()
+
+    @field_validator("task_card_path")
+    @classmethod
+    def validate_adoption_card_path(cls, value: str) -> str:
+        return _repo_path(value, "task_card_path")
+
+    @field_validator("repository")
+    @classmethod
+    def validate_adoption_repository(cls, value: str) -> str:
+        if value == "LOCAL_TEST":
+            return value
+        if not isinstance(value, str) or not re.fullmatch(
+            r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", value,
+        ):
+            raise ValueError("repository must be a canonical owner/name identity")
+        return value
+
+    @field_validator(
+        "controller_revision",
+        "target_base_revision",
+        "candidate_commit_sha",
+        "candidate_tree_sha",
+    )
+    @classmethod
+    def validate_adoption_git_sha(cls, value: str, info) -> str:
+        if not _SHA40.fullmatch(value):
+            raise ValueError(f"{info.field_name} must be a lowercase 40-character Git SHA")
+        return value
+
+    @field_validator(
+        "task_card_hash",
+        "candidate_diff_sha256",
+        "validation_receipt_sha256",
+        "acceptance_receipt_sha256",
+    )
+    @classmethod
+    def validate_adoption_sha256(cls, value: str, info) -> str:
+        if not _SHA64.fullmatch(value):
+            raise ValueError(f"{info.field_name} must be a lowercase SHA-256 digest")
+        return value
+
+    @field_validator("validation_receipt_b64", "acceptance_receipt_b64")
+    @classmethod
+    def validate_adoption_artifact(cls, value: str, info) -> str:
+        if not isinstance(value, str) or not value or len(value) > 2 * 1024 * 1024:
+            raise ValueError(f"{info.field_name} must be bounded non-empty base64")
+        try:
+            decoded = base64.b64decode(value, validate=True)
+        except (ValueError, TypeError) as exc:
+            raise ValueError(f"{info.field_name} must be valid base64") from exc
+        if not decoded or len(decoded) > 1024 * 1024:
+            raise ValueError(f"{info.field_name} decoded artifact must be 1..1048576 bytes")
+        return value
+
+    @field_validator("allowed_files", "forbidden_files", "authorized_deletions")
+    @classmethod
+    def validate_adoption_paths(cls, values: tuple[str, ...], info) -> tuple[str, ...]:
+        normalized = tuple(_repo_path(value, info.field_name) for value in values)
+        if info.field_name == "allowed_files" and not normalized:
+            raise ValueError("allowed_files must be non-empty")
+        if len(normalized) != len(set(normalized)):
+            raise ValueError(f"{info.field_name} must not contain duplicates")
+        return normalized
+
+    @field_validator("verifier_commands")
+    @classmethod
+    def validate_adoption_verifiers(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if not values or any(not isinstance(value, str) or not value.strip() for value in values):
+            raise ValueError("verifier_commands must be non-empty")
+        return tuple(value.strip() for value in values)
+
+    @model_validator(mode="after")
+    def validate_adoption_action(self) -> "ExternalCandidateAdoptionRequest":
+        validation_bytes = base64.b64decode(self.validation_receipt_b64, validate=True)
+        acceptance_bytes = base64.b64decode(self.acceptance_receipt_b64, validate=True)
+        if sha256(validation_bytes).hexdigest() != self.validation_receipt_sha256:
+            raise ValueError("validation receipt content hash mismatch")
+        if sha256(acceptance_bytes).hexdigest() != self.acceptance_receipt_sha256:
+            raise ValueError("acceptance receipt content hash mismatch")
+        def overlaps(left: str, right: str) -> bool:
+            return left == right or left.startswith(right + "/") or right.startswith(left + "/")
+        if any(overlaps(allowed, forbidden) for allowed in self.allowed_files for forbidden in self.forbidden_files):
+            raise ValueError("allowed_files and forbidden_files must not overlap")
+        if not set(self.authorized_deletions).issubset(set(self.allowed_files)):
+            raise ValueError("authorized_deletions must be a subset of allowed_files")
+        action = self.action
+        if (
+            action.action_type is not LifecycleActionType.CANDIDATE_ADOPT_EXTERNAL
+            or action.task_id != self.task_id
+            or action.attempt_id != self.attempt_id
+            or action.action_id != self.action_id
+            or action.idempotency_key != self.idempotency_key
+            or action.task_card_path != self.task_card_path
+            or action.task_card_hash != self.task_card_hash
+            or action.contract_kind is not ContractKind.TRACKED_TASK_CARD
+            or action.expected_head != self.controller_revision
+            or action.permission_profile is not PermissionProfile.CANDIDATE
+            or action.approval_scope is not ApprovalScope.ALLOW_ACTION_ONCE
+            or action.mutation_domain is not MutationDomain.CANDIDATE_REF
+            or action.mutation is not True
+            or action.allowed_paths != self.allowed_files
+        ):
+            raise ValueError("external adoption action identity mismatch")
+        if not action.verify_request({"adoption_request_hash": self.semantic_hash()}):
+            raise ValueError("external adoption request hash mismatch")
+        return self
 
 
 def build_action_envelope(
