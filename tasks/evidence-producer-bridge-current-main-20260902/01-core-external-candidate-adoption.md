@@ -9,8 +9,8 @@ task_id: `TASK-EPB-002-R1`
 - Source spec SHA-256: `9e841f43d63ffc10704f00b4d21b88f9fbf78f3a473839a1409f278a951251a1`
 - Requirements: `REQ-002; REQ-003; REQ-004; REQ-005; REQ-006`
 - Acceptance: `AC-002; AC-003; AC-005; AC-006; AC-007`
-- Exact base commit: `9dffad79ea30d6f2a1b8bee64ac1048e1ae59f35`
-- Exact base tree: `74eb1e962fe09bfe5f862d8d06f33928bf0cd385`
+- Exact base commit: `6ee715d6bf969c58ed0ceb840deaa70ba5434243`
+- Exact base tree: `a92a4c56a3ba58c8cb238f0870dace209d66be00`
 - Evidence Trust predecessor: `EVIDENCE_TRUST_FOUNDATION_INTEGRATED_SOURCE_VERIFIED`
 - Historical core donor: commit `913a90900b906f31d18e35efdd853863aad92400`; pattern/reference only.
 - Execution lane: `GOVERNED`

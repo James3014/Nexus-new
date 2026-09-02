@@ -5,8 +5,8 @@
 - Status: `ACTIVE`
 - Source spec: `SPEC-EPB-EXTERNAL-CANDIDATE-ADOPTION-EXEC-001`
 - Source spec SHA-256: `9e841f43d63ffc10704f00b4d21b88f9fbf78f3a473839a1409f278a951251a1`
-- Current-main base commit: `9dffad79ea30d6f2a1b8bee64ac1048e1ae59f35`
-- Current-main base tree: `74eb1e962fe09bfe5f862d8d06f33928bf0cd385`
+- Current-main base commit: `6ee715d6bf969c58ed0ceb840deaa70ba5434243`
+- Current-main base tree: `a92a4c56a3ba58c8cb238f0870dace209d66be00`
 - Evidence Trust predecessor: PR #691 merge `00be1e31ab939275611d711b2468cfc63b0baa20`; source verified on current main.
 - Historical donor: PR #668 head `2f150e53387e4e5277c56fde2ce4f793f4a89922` is reference only.
 
