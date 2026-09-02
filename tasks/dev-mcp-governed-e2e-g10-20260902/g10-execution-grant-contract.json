@@ -5,7 +5,7 @@
   "taskId": "g10-nexus-governed-e2e-20260902",
   "attemptId": "g10-live-e2e-attempt-01",
   "devspaceBaseRevision": "5212252bacfe8ae37747282211aff66594452426",
-  "dispatchIntentHash": "c5a01dc74595cb8051cf0c2e73c940ea83a36e2c52068d4d3978bcba15cb0946",
+  "dispatchIntentHash": "e57bd97487cafd04d58c59462d931e2edf4d1f3f01bde003f00d48fb291bdcb7",
   "profile": "agy-medium-implement",
   "writeScope": [
     "g10-governed-canary.txt"
@@ -13,11 +13,11 @@
   "effectCeiling": "WORKSPACE_MUTATION",
   "claimCeiling": "IMPLEMENTED",
   "authorityPath": "tasks/dev-mcp-governed-e2e-g10-20260902/00-g10-nexus-governed-e2e.md",
-  "authoritySha256": "27eb1e91fef71362f7bce618139795d9e3ef71dcc81689db5f235b09ebf0c454",
-  "issuedAt": "2026-09-02T06:50:00Z",
-  "expiresAt": "2026-09-02T08:50:00Z",
+  "authoritySha256": "a91ba96ea43853dd54289d43304850c1c2e49359f6e378f43649f9fbd2dd8d72",
+  "issuedAt": "2026-09-02T07:37:00Z",
+  "expiresAt": "2026-09-02T09:37:00Z",
   "revocationState": "NOT_REVOKED",
   "revokedAt": null,
   "revocationReason": null,
-  "grantHash": "85e38ba8fb3530fd2e6e12a47b750700a8f396847f54bec831aab9b675ffb5c5"
+  "grantHash": "20a97d179b4b3a4c4698e1de63531a0e1bce4e1b355ea9ea3d1c232e2048c056"
 }
