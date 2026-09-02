@@ -5514,7 +5514,11 @@ class SelfHostedTaskService:
                 if current.get("cleanup_decision") in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}:
                     continue
             current_controller = (current.get("contract") or {}).get("controller_repo_root")
-            if current_controller and Path(current_controller).resolve() != Path(contract.controller_repo_root).resolve():
+            if (
+                current_controller
+                and current.get("status") != "PENDING_HUMAN_APPROVAL"
+                and Path(current_controller).resolve() != Path(contract.controller_repo_root).resolve()
+            ):
                 raise RuntimeError("active Controller lease belongs to a different controller worktree")
             if (
                 current.get("task_id") != contract.task_id
