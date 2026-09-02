@@ -417,6 +417,11 @@ class ExternalCandidateAdoptionRequest(BaseModel):
     task_card_path: str
     task_card_hash: str
     controller_revision: str
+    tool_manifest_hash: str
+    full_tool_schema_hash: str
+    permission_policy_hash: str
+    lifecycle_revision: str
+    server_instance_id: str
     target_base_revision: str
     candidate_commit_sha: str
     candidate_tree_sha: str
@@ -480,6 +485,18 @@ class ExternalCandidateAdoptionRequest(BaseModel):
         if not _SHA40.fullmatch(value):
             raise ValueError(f"{info.field_name} must be a lowercase 40-character Git SHA")
         return value
+
+    @field_validator("tool_manifest_hash", "full_tool_schema_hash", "permission_policy_hash")
+    @classmethod
+    def validate_runtime_sha256(cls, value: str, info) -> str:
+        if not _SHA64.fullmatch(value):
+            raise ValueError(f"{info.field_name} must be a lowercase SHA-256 digest")
+        return value
+
+    @field_validator("lifecycle_revision", "server_instance_id")
+    @classmethod
+    def validate_runtime_identity(cls, value: str, info) -> str:
+        return _safe_id(value, info.field_name)
 
     @field_validator(
         "task_card_hash",
@@ -553,6 +570,7 @@ class ExternalCandidateAdoptionRequest(BaseModel):
             or action.mutation_domain is not MutationDomain.CANDIDATE_REF
             or action.mutation is not True
             or action.allowed_paths != self.allowed_files
+            or action.tool_manifest_hash != self.tool_manifest_hash
         ):
             raise ValueError("external adoption action identity mismatch")
         if not action.verify_request({"adoption_request_hash": self.semantic_hash()}):

@@ -31,6 +31,11 @@ def _adoption_request(**overrides):
         "task_card_path": "tasks/evidence-producer-bridge-20260830/01-evidence-producer-bridge-r1.md",
         "task_card_hash": "c" * 64,
         "controller_revision": "d" * 40,
+        "tool_manifest_hash": MANIFEST,
+        "full_tool_schema_hash": "3" * 64,
+        "permission_policy_hash": "4" * 64,
+        "lifecycle_revision": "nexus.lifecycle.gateway.v2",
+        "server_instance_id": "server-test-1",
         "target_base_revision": "e" * 40,
         "candidate_commit_sha": "f" * 40,
         "candidate_tree_sha": "1" * 40,
@@ -51,7 +56,7 @@ def _adoption_request(**overrides):
         task_id=payload["task_id"],
         action_type=LifecycleActionType.CANDIDATE_ADOPT_EXTERNAL,
         request={"adoption_request_hash": semantic_hash},
-        tool_manifest_hash=MANIFEST,
+        tool_manifest_hash=payload["tool_manifest_hash"],
         expected_head=payload["controller_revision"],
         allowed_paths=payload["allowed_files"],
         mutation=True,
@@ -117,6 +122,22 @@ def test_external_candidate_adoption_request_rejects_cross_field_authority_widen
 def test_external_candidate_adoption_request_rejects_action_scope_drift():
     payload = _adoption_request()
     payload["action"] = payload["action"].model_copy(update={"allowed_paths": ("outside.py",)})
+    with pytest.raises(ValueError, match="identity mismatch"):
+        ExternalCandidateAdoptionRequest(**payload)
+
+
+@pytest.mark.parametrize(
+    "field",
+    ["tool_manifest_hash", "full_tool_schema_hash", "permission_policy_hash"],
+)
+def test_external_candidate_adoption_request_rejects_runtime_hash_drift(field):
+    with pytest.raises(ValueError):
+        ExternalCandidateAdoptionRequest(**_adoption_request(**{field: "not-a-sha"}))
+
+
+def test_external_candidate_adoption_request_binds_action_tool_manifest():
+    payload = _adoption_request()
+    payload["action"] = payload["action"].model_copy(update={"tool_manifest_hash": "9" * 64})
     with pytest.raises(ValueError, match="identity mismatch"):
         ExternalCandidateAdoptionRequest(**payload)
 

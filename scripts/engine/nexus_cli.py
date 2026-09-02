@@ -145,6 +145,7 @@ from scripts.engine.commands.code_actions import (
     run_code_scan,
 )
 from scripts.engine.commands.exception_translation import translate_action_exceptions
+from scripts.engine.commands.exception_translation import NexusCliActionError  # noqa: E402
 from scripts.engine.commands.learn_actions import (
     enforce_learn_ingest_semantic_contract,
     enforce_learn_report_semantic_contract,
@@ -207,6 +208,7 @@ from scripts.engine.commands.multi_agent_actions import (
     verify_multi_agent_task,
 )
 from scripts.engine.commands.self_hosted_actions import (
+    run_self_hosted_adopt_external,
     run_self_hosted_approve,
     run_self_hosted_cancel,
     run_self_hosted_close_without_candidate,
@@ -1143,10 +1145,8 @@ def run(
 ):
     """🚀 [Nexus Master Loop] Execute task with full P-X-D-R-A-C unification."""
     from nexus.services.canonical_local_assist_policy import (
-        build_canonical_policy_receipt,
         build_execution_context_fields,
         normalize_local_assist_policy,
-        write_canonical_policy_receipt,
     )
     from nexus.services.online_execution_policy import normalize_online_policy
     from nexus.orchestrator.canonical_mcp_ingress import build_cli_execution_context
@@ -3590,6 +3590,29 @@ def self_hosted_direct_complete(
         expected_commit_sha=expected_commit_sha,
         state_dir=state_dir,
     )
+    click.echo(json.dumps(res, indent=2, ensure_ascii=False))
+
+
+@self_hosted_group.command(name="adopt-external")
+@click.option(
+    "--request-file",
+    "request_file",
+    type=click.Path(exists=True, dir_okay=False),
+    required=True,
+    help="Closed JSON external-candidate adoption request.",
+)
+@click.option("--state-dir", type=click.Path(), default=None, help="Custom state directory.")
+@translate_action_exceptions
+def self_hosted_adopt_external(request_file: str, state_dir: str | None) -> None:
+    """Adopt one immutable external Candidate through the lifecycle service."""
+    try:
+        with open(request_file, "r", encoding="utf-8") as handle:
+            request_data = json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise NexusCliActionError(f"invalid adoption request JSON: {exc}", exit_code=1) from exc
+    if not isinstance(request_data, dict):
+        raise NexusCliActionError("adoption request must be a JSON object", exit_code=1)
+    res = run_self_hosted_adopt_external(request_data, state_dir=state_dir)
     click.echo(json.dumps(res, indent=2, ensure_ascii=False))
 
 

@@ -5902,6 +5902,7 @@ def test_retained_forensic_guard_rejects_flipped_or_ambiguous_negative_field(pat
 def _external_adoption_fixture(tmp_path, monkeypatch, **overrides):
     import nexus.orchestrator.self_hosted_task_service as service_module
 
+    card_allowed_paths = overrides.pop("card_allowed_paths", ("src/one.py", "src/two.py"))
     tmp_path.mkdir(parents=True, exist_ok=True)
     controller = tmp_path / "controller"
     controller.mkdir()
@@ -5922,8 +5923,8 @@ def _external_adoption_fixture(tmp_path, monkeypatch, **overrides):
         "task_id: `TASK-EXT`\n\n"
         "`AUTO_CHAIN=false`\n\n"
         "## Allowed repository paths\n\n"
-        "- `src/one.py`\n"
-        "- `src/two.py`\n\n"
+        + "".join(f"- `{path}`\n" for path in card_allowed_paths)
+        + "\n"
         "## Forbidden scope\n\n"
         "- `tasks/**`\n\n"
         "## Exact verification commands\n\n"
@@ -5987,6 +5988,11 @@ def _external_adoption_fixture(tmp_path, monkeypatch, **overrides):
         "task_card_path": card_path,
         "task_card_hash": card_hash,
         "controller_revision": controller_revision,
+        "tool_manifest_hash": "a" * 64,
+        "full_tool_schema_hash": "b" * 64,
+        "permission_policy_hash": "c" * 64,
+        "lifecycle_revision": "nexus.lifecycle.gateway.v2",
+        "server_instance_id": "server-test-1",
         "target_base_revision": base,
         "candidate_commit_sha": candidate,
         "candidate_tree_sha": candidate_tree,
@@ -5995,7 +6001,7 @@ def _external_adoption_fixture(tmp_path, monkeypatch, **overrides):
         "acceptance_receipt_sha256": hashlib.sha256(acceptance_bytes).hexdigest(),
         "validation_receipt_b64": base64.b64encode(validation_bytes).decode(),
         "acceptance_receipt_b64": base64.b64encode(acceptance_bytes).decode(),
-        "allowed_files": ("src/one.py", "src/two.py"),
+        "allowed_files": tuple(card_allowed_paths),
         "forbidden_files": (),
         "authorized_deletions": (),
         "verifier_commands": ("git diff --check",),
@@ -6007,7 +6013,7 @@ def _external_adoption_fixture(tmp_path, monkeypatch, **overrides):
         task_id=values["task_id"],
         action_type=LifecycleActionType.CANDIDATE_ADOPT_EXTERNAL,
         request={"adoption_request_hash": semantic_hash},
-        tool_manifest_hash="a" * 64,
+        tool_manifest_hash=values["tool_manifest_hash"],
         expected_head=values["controller_revision"],
         allowed_paths=values["allowed_files"],
         mutation=True,
@@ -6052,6 +6058,36 @@ def test_adopt_external_candidate_physically_verifies_exact_chain_and_stops_pend
     assert adopted["push_performed"] is False
     replay = service.adopt_external_candidate(request)
     assert replay["adoption_receipt_hash"] == adopted["adoption_receipt_hash"]
+
+
+def test_adopt_external_candidate_allows_unchanged_card_scope_path(tmp_path, monkeypatch):
+    service, request, candidate, _ = _external_adoption_fixture(
+        tmp_path, monkeypatch, card_allowed_paths=("src/one.py", "src/two.py", "src/unchanged.py"),
+    )
+
+    adopted = service.adopt_external_candidate(request)
+
+    assert adopted["status"] == "PENDING_HUMAN_APPROVAL"
+    assert adopted["candidate_commit_sha"] == candidate
+
+
+@pytest.mark.parametrize("injected_path", ["secrets.txt", "src/one.py/child.txt"])
+def test_adopt_external_candidate_rejects_out_of_scope_changed_path(
+    tmp_path, monkeypatch, injected_path,
+):
+    service, request, _, _ = _external_adoption_fixture(
+        tmp_path, monkeypatch, card_allowed_paths=("src/one.py", "src/two.py", "src/unchanged.py"),
+    )
+    original_run_git = WorktreeManager._run_git
+
+    def inject_out_of_scope(manager, args, **kwargs):
+        if list(args)[:2] == ["diff", "--name-only"]:
+            return f"src/one.py\nsrc/two.py\n{injected_path}"
+        return original_run_git(manager, args, **kwargs)
+
+    monkeypatch.setattr(WorktreeManager, "_run_git", inject_out_of_scope)
+    with pytest.raises(RuntimeError, match="changed paths differ from contract"):
+        service.adopt_external_candidate(request)
 
 
 def test_adopt_external_candidate_restarts_from_durable_adopting_state(tmp_path, monkeypatch):
