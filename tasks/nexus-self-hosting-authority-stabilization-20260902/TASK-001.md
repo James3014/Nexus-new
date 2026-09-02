@@ -4,7 +4,7 @@
 
 - task_id: `nexus-self-hosting-authority-stabilization-20260902-001`
 - campaign_id: `nexus-self-hosting-authority-stabilization-20260902`
-- status: ACTIVE
+- status: COMPLETE
 - owner: James Chen
 - contract_kind: TRACKED_TASK_CARD
 - AUTO_CHAIN: false
@@ -65,6 +65,15 @@ After the Owner explicitly declares `NEXUS_GOVERNANCE_DEFAULT_READY`, a separate
 - `git diff --check` equivalent through repository CI / exact-head checks.
 - All protected-branch required checks must be terminal success on the exact PR head before merge.
 
+## Closure evidence
+
+- Policy Candidate head: `eed4af89084a7d0cfe8f3320f26f7481550ee948`.
+- Policy PR: #706, exact-head merged to `main` as `a770e60ac11ef950aba4042cc1631906e36f5576`.
+- Focused bootstrap-authority regression: `tests/ops/test_bootstrap_authority_files.py` — 13/13 passed on the Candidate; `git diff --check` passed.
+- Protected-main required checks on the exact Candidate head all completed successfully: `Exact-base impact gate`, `Trusted verifier (default branch)`, and `Full published Git history secret audit`.
+- Policy diff changed only the six authorized repository artifacts: root authority, Task Execution Contract, current operating mode, focused regression test, campaign INDEX, and this Task Card. No runtime/executable code, DevSpace code, standing grant, Planner, Workforce, lifecycle, migration, deployment, release, or production authority was changed.
+- Post-merge readback bound GitHub `main` to `a770e60ac11ef950aba4042cc1631906e36f5576` before this closure writeback.
+
 ## Exit criteria
 
-Complete when the three authority surfaces durably encode the Owner-approved stabilization policy, only allowed files changed, protected-main checks pass, and the exact reviewed PR head is merged to `main`.
+COMPLETE. The three authority surfaces durably encode the Owner-approved stabilization policy; protected-main verification passed on the exact reviewed Candidate; the policy was merged to `main`; G10 remains proof of the governed path rather than an automatic default-lane cutover; and the future `NEXUS_GOVERNANCE_DEFAULT_READY` transition remains an explicit Owner decision.

@@ -2,10 +2,10 @@
 
 - campaign_id: `nexus-self-hosting-authority-stabilization-20260902`
 - owner: James Chen
-- status: ACTIVE
+- status: COMPLETE
 - AUTO_CHAIN: false
-- source_decision: Owner explicitly approved the transitional authority policy in the current 2026-09-02 controller conversation after G10 completion.
-- frontier: `TASK-001.md`
+- source_decision: Owner explicitly approved the transitional authority policy in the 2026-09-02 controller conversation after G10 completion.
+- frontier: none
 
 ## Mission
 
@@ -13,4 +13,4 @@ Persist the post-G10 transitional authority policy while Nexus remains in self-h
 
 ## Completion
 
-Complete when `TASK-001.md` is implemented, required repository checks pass on the exact PR head, and the accepted policy is merged to `main` without runtime/code changes.
+COMPLETE. `TASK-001.md` was implemented through policy PR #706, required protected-main checks passed on exact Candidate `eed4af89084a7d0cfe8f3320f26f7481550ee948`, and the accepted policy merged to `main` as `a770e60ac11ef950aba4042cc1631906e36f5576` without runtime or executable-code changes. Any future transition to governed-by-default work requires the separate Owner-only `NEXUS_GOVERNANCE_DEFAULT_READY` decision and a new policy change.
