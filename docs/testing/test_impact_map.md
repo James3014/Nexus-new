@@ -64,6 +64,7 @@
 | nexus_dag_workflow.py | tests/test_async_dag_workflow.py | active | medium | workflow_contract |
 | scripts/engine/nexus_cli.py | tests/test_cli_learn_mode.py, tests/test_cli_commands.py, tests/engine/test_cli_semantic_contract_audit.py, tests/engine/test_cli_artifact_gate_audit.py, tests/engine/test_bench_actions.py, tests/engine/test_code_actions.py, tests/engine/test_multi_agent_actions.py, tests/engine/test_learn_actions.py, tests/engine/test_research_actions.py, tests/engine/test_sandbox_actions.py, tests/engine/test_registry_actions.py | active | high | governance |
 | scripts/engine/commands/bench_actions.py | tests/engine/test_bench_actions.py | active | medium | bench_cli_action_contract |
+| scripts/engine/commands/self_hosted_actions.py | tests/engine/test_self_hosted_cli.py | active | medium | self_hosted_cli_action_contract |
 | scripts/engine/commands/code_actions.py | tests/engine/test_code_actions.py | active | medium | code_cli_action_contract |
 | scripts/engine/commands/learn_actions.py | tests/engine/test_learn_actions.py | active | medium | learn_cli_action_contract |
 | scripts/engine/commands/multi_agent_actions.py | tests/engine/test_multi_agent_actions.py | active | medium | multi_agent_cli_action_contract |
