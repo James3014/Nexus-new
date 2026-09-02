@@ -3695,6 +3695,43 @@ def test_different_active_controller_is_rejected(tmp_path):
         service.submit_task(second)
 
 
+@pytest.mark.parametrize(
+    "cleanup_fields",
+    [{}, {"cleanup_decision": None}, {"cleanup_decision": "PROTECTED_BY_CANDIDATE_REF"}],
+    ids=["cleanup-absent", "cleanup-none", "candidate-ref-protected"],
+)
+def test_pending_human_approval_foreign_controller_is_quiescent(tmp_path, cleanup_fields):
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state",
+        runner=lambda *_: {"promotion_status": "PENDING_HUMAN_APPROVAL"},
+        auto_reconcile=False,
+        ephemeral=True,
+    )
+    first = _request(
+        tmp_path,
+        task_id="first-pending",
+        controller_repo_root=str(tmp_path / "foreign-controller"),
+    )
+    first_contract = service.build_contract(first)
+    service._write_state("first-pending", {
+        "task_id": "first-pending",
+        "status": "PENDING_HUMAN_APPROVAL",
+        "promotion_status": "PENDING_HUMAN_APPROVAL",
+        **cleanup_fields,
+        "contract": first_contract.model_dump(mode="json"),
+        "contract_hash": first_contract.contract_hash,
+    })
+    second = _request(
+        tmp_path,
+        task_id="second-pending",
+        target_repo_root=str(tmp_path / "targets" / "second-pending"),
+    )
+
+    submitted = service.submit_task(second)
+
+    assert submitted["task_id"] == "second-pending"
+
+
 def test_wait_task_polls_until_action_required(tmp_path):
     release = __import__("threading").Event()
 
