@@ -560,6 +560,9 @@ def build_canonical_planner_admission(
     if not isinstance(decision, Mapping) or decision.get("decision") != "ALLOW":
         raise ValueError("canonical_workforce_admission_not_single_allow")
     demand = demands["demands"][0]
+    policy_identity = admission.get("policy_identity")
+    if not isinstance(policy_identity, Mapping):
+        policy_identity = {}
     return {
         "planner_output": planner_output,
         "workforce_demands": demands,
@@ -569,7 +572,7 @@ def build_canonical_planner_admission(
             "worker_id": str(decision.get("resolved_worker_id") or ""),
             "provider": str(decision.get("resolved_provider") or ""),
             "model": str(decision.get("resolved_model") or ""),
-            "policy_hash": str((admission.get("policy_identity") or {}).get("policy_hash") or ""),
+            "policy_hash": str(policy_identity.get("policy_hash") or ""),
             "binding_hash": str(record.get("binding_hash") or ""),
             "aggregate_binding_hash": str(admission.get("aggregate_binding_hash") or ""),
         },
