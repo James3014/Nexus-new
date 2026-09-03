@@ -115,11 +115,19 @@ def _normalize_transport_config(
     profile = transport_config.get("profile")
     site_session = transport_config.get("site_session")
     timeout_seconds = transport_config.get("timeout_seconds")
-    if not isinstance(executable, str) or not executable.strip() or "\x00" in executable:
+    if (
+        not isinstance(executable, str)
+        or not executable.strip()
+        or "\x00" in executable
+        or not Path(executable.strip()).is_absolute()
+    ):
         raise OpenSWEExternalIntelligenceError("OPEN_SWE_TRANSPORT_CONFIG_INVALID")
-    if not isinstance(profile, str) or "\x00" in profile:
+    if not isinstance(profile, str) or not profile.strip() or "\x00" in profile:
         raise OpenSWEExternalIntelligenceError("OPEN_SWE_TRANSPORT_CONFIG_INVALID")
-    if not isinstance(site_session, str) or not site_session.strip() or "\x00" in site_session:
+    if (
+        not isinstance(site_session, str)
+        or site_session.strip() not in {"ephemeral", "persistent"}
+    ):
         raise OpenSWEExternalIntelligenceError("OPEN_SWE_TRANSPORT_CONFIG_INVALID")
     if (
         not isinstance(timeout_seconds, int)
@@ -129,7 +137,7 @@ def _normalize_transport_config(
         raise OpenSWEExternalIntelligenceError("OPEN_SWE_TRANSPORT_CONFIG_INVALID")
     return {
         "executable": executable.strip(),
-        "profile": profile,
+        "profile": profile.strip(),
         "site_session": site_session.strip(),
         "timeout_seconds": timeout_seconds,
     }
