@@ -271,6 +271,7 @@ workers:
     autonomy: L2
     roles: [fast_bounded_implementation, focused_verification]
     preferred_context: nexus_bounded
+    default_route: false
     benchmark_ref: agy_flash
     account_pool: enabled
     max_failover_retries: 1
@@ -299,7 +300,7 @@ workers:
     autonomy: L3
     roles: [bounded_candidate_generation, fast_bounded_implementation, focused_verification]
     preferred_context: nexus_bounded
-    default_route: false
+    default_route: true
     requires: [task_card, allowed_files, mandatory_commands, parser, verifier, independent_verification]
     forbidden_actions: [route_authority, approval, integration, push, release, production_claim, public_claim]
     calibration_evidence:
@@ -657,7 +658,15 @@ routing:
     bounded_code_candidate: local_coder_7b
     bounded_reasoning_shadow: local_qwen3_8b
   online:
-    fast_bounded_implementation: agy_flash
+    fast_bounded_implementation: agy_flash_37_medium
+    fast_bounded_implementation_fallback: agy_flash
+    route_defaults:
+      fast_bounded_implementation:
+        current_default: agy_flash_37_medium
+        fallback: agy_flash
+    campaign_routing:
+      CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01:
+        fast_bounded_implementation: agy_flash_37_medium
     main_engineering: codex_luna
     independent_review: grok_review
     complex_milestone: codex_luna_when_available

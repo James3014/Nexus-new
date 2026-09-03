@@ -245,7 +245,9 @@ The Owner-approved Model Workforce Lineage Writeback amendment is active:
    - Existing `agy_flash_medium` remains bound to provider `agy`, exact model `gemini-3.6-flash-medium`, autonomy ceiling **L1**. It is not repurposed by this amendment.
    - New `agy_flash_37_medium` is bound to provider `agy`, exact model `gemini-3.7-flash-medium`.
    - `agy_flash_37_medium` admitted autonomy ceiling: **L3**.
-   - Both Medium identities keep `default_route`: **`false`**.
+   - `agy_flash_37_medium` is the sole `default_route: true` worker for the
+     direct `fast_bounded_implementation` role; `agy_flash_medium` remains
+     `default_route: false`.
    - L4 autonomy is **NOT GRANTED**; L4 remains experimental and non-admitted.
    - Exact model matching is fail-closed: 3.6 and 3.7 Medium cannot substitute for one another.
    - Requires exact Task Card, allowed files, mandatory commands, parser, verifier, and independent verification.

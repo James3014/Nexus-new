@@ -594,3 +594,155 @@ def test_admission_blocks_invalid_request_schema_without_resolving_worker() -> N
     assert dec.decision == AdmissionDecision.BLOCK
     assert dec.resolved_worker_id is None
     assert any("Invalid request schema" in r for r in dec.decision_reasons)
+
+
+# --- Combined Learning/Core Workforce route repair tests ---
+
+
+def test_resolve_route_global_returns_37_medium() -> None:
+    """resolve_route returns agy_flash_37_medium for global fast_bounded_implementation."""
+    loader = WorkforcePolicyLoader(POLICY_PATH)
+    loader.load()
+    worker_id = loader.resolve_route("fast_bounded_implementation")
+    assert worker_id == "agy_flash_37_medium"
+
+
+def test_resolve_route_exact_campaign_match() -> None:
+    """Exact campaign match resolves to agy_flash_37_medium."""
+    loader = WorkforcePolicyLoader(POLICY_PATH)
+    loader.load()
+    worker_id = loader.resolve_route(
+        "fast_bounded_implementation",
+        campaign_id="CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01",
+    )
+    assert worker_id == "agy_flash_37_medium"
+
+
+def test_resolve_route_blank_campaign_uses_global() -> None:
+    """Blank campaign ID falls back to global route."""
+    loader = WorkforcePolicyLoader(POLICY_PATH)
+    loader.load()
+    worker_id = loader.resolve_route("fast_bounded_implementation", campaign_id="")
+    assert worker_id == "agy_flash_37_medium"
+
+
+def test_resolve_route_missing_campaign_uses_global() -> None:
+    """Missing/unknown campaign ID falls back to global route."""
+    loader = WorkforcePolicyLoader(POLICY_PATH)
+    loader.load()
+    worker_id = loader.resolve_route(
+        "fast_bounded_implementation",
+        campaign_id="CAMPAIGN-UNRELATED-THING",
+    )
+    assert worker_id == "agy_flash_37_medium"
+
+
+def test_resolve_route_prefixed_campaign_uses_global() -> None:
+    """Prefixed campaign ID (not exact match) falls back to global route."""
+    loader = WorkforcePolicyLoader(POLICY_PATH)
+    loader.load()
+    worker_id = loader.resolve_route(
+        "fast_bounded_implementation",
+        campaign_id="prefix_CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01",
+    )
+    assert worker_id == "agy_flash_37_medium"
+
+
+def test_resolve_route_whitespace_campaign_is_literal_and_uses_global(tmp_path) -> None:
+    loader = _mutated_policy(
+        tmp_path,
+        lambda data: data["routing"]["online"]["campaign_routing"].update({
+            "CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01": {
+                "fast_bounded_implementation": "agy_flash_medium"
+            }
+        }),
+    )
+    assert (
+        loader.resolve_route(
+            "fast_bounded_implementation",
+            campaign_id="CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01",
+        )
+        == "agy_flash_medium"
+    )
+    assert (
+        loader.resolve_route(
+            "fast_bounded_implementation",
+            campaign_id=" CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01",
+        )
+        == "agy_flash_37_medium"
+    )
+
+
+def test_loader_reject_does_not_cache_invalid_snapshot(tmp_path) -> None:
+    data = yaml.safe_load(POLICY_PATH.read_text(encoding="utf-8"))
+    path = tmp_path / "policy.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    loader = WorkforcePolicyLoader(path)
+    assert loader.load().routing["online"]["fast_bounded_implementation"] == "agy_flash_37_medium"
+    data["routing"]["online"]["fast_bounded_implementation"] = "missing_worker"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    with pytest.raises(WorkforcePolicyValidationError):
+        loader.load()
+    data["routing"]["online"]["fast_bounded_implementation"] = "agy_flash_37_medium"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    assert loader.resolve_route("fast_bounded_implementation") == "agy_flash_37_medium"
+
+
+def test_get_route_defaults_returns_current_default_and_fallback() -> None:
+    """get_route_defaults exposes current_default and fallback metadata."""
+    loader = WorkforcePolicyLoader(POLICY_PATH)
+    loader.load()
+    defaults = loader.get_route_defaults()
+    assert "fast_bounded_implementation" in defaults
+    fbi = defaults["fast_bounded_implementation"]
+    assert fbi["current_default"] == "agy_flash_37_medium"
+    assert fbi["fallback"] == "agy_flash"
+
+
+def _mutated_policy(tmp_path, mutate):
+    data = yaml.safe_load(POLICY_PATH.read_text(encoding="utf-8"))
+    mutate(data)
+    path = tmp_path / "policy.yaml"
+    path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    return WorkforcePolicyLoader(path)
+
+
+@pytest.mark.parametrize(
+    "mutation, expected",
+    [
+        (
+            lambda d: d["routing"]["online"].update(fast_bounded_implementation="missing_worker"),
+            "unknown worker",
+        ),
+        (
+            lambda d: d["routing"]["online"]["route_defaults"][
+                "fast_bounded_implementation"
+            ].update(fallback="agy_flash_medium"),
+            "stale",
+        ),
+        (
+            lambda d: d["workers"].update(
+                extra_default={
+                    **d["workers"]["agy_flash_37_medium"],
+                    "model": "gemini-extra",
+                    "default_route": True,
+                }
+            ),
+            "exactly one current default",
+        ),
+        (
+            lambda d: d["workers"].update(
+                successor={
+                    **d["workers"]["agy_flash_37_medium"],
+                    "model": "gemini-successor",
+                    "successor_of": "agy_flash_37_medium",
+                    "default_route": False,
+                }
+            ),
+            "successor without explicit disposition",
+        ),
+    ],
+)
+def test_loader_rejects_invalid_combined_route_metadata(tmp_path, mutation, expected) -> None:
+    with pytest.raises(Exception, match=expected):
+        _mutated_policy(tmp_path, mutation).load()
