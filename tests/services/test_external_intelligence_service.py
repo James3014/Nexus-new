@@ -2352,7 +2352,13 @@ def test_restart_waits_for_unload_before_bootstrap(tmp_path, monkeypatch):
 def test_restart_unload_timeout_fails_closed(tmp_path, monkeypatch):
     """Label never unloads → BOOTOUT_UNLOAD_TIMEOUT, no bootstrap."""
     config_path = _make_config(tmp_path)
-    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+    installs = []
+
+    def recording_install(_config_path):
+        installs.append(_config_path)
+        return tmp_path / "dummy.plist"
+
+    monkeypatch.setattr(service_module, "install", recording_install)
     rl = _RecordingLaunchctl(print_returncode=0, print_stdout=LAUNCHCTL_PRINT_REGISTERED)
 
     result = service_module.restart(
@@ -2365,6 +2371,7 @@ def test_restart_unload_timeout_fails_closed(tmp_path, monkeypatch):
     assert result.returncode != 0
     assert "BOOTOUT_UNLOAD_TIMEOUT" in result.stderr
     assert result.stdout.strip() == "BOOTOUT_UNLOAD_TIMEOUT"
+    assert installs == []
     # No bootstrap attempted
     assert not any(c[0] == "bootstrap" for c in rl.calls)
 
@@ -2472,23 +2479,28 @@ def test_restart_bootout_failure_does_not_install_or_bootstrap(tmp_path, monkeyp
 
 
 def test_cli_restart_uses_restart_function(tmp_path, monkeypatch):
-    """CLI 'restart' command uses restart(), not stop()+start()."""
+    """CLI 'restart' dispatches to restart(), never ordinary start/stop."""
     config_path = _make_config(tmp_path)
-    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
-    rl = _RecordingLaunchctl(print_returncode=1, print_stdout=LAUNCHCTL_PRINT_UNLOADED)
+    calls = []
 
-    result = service_module.restart(
-        config_path,
-        launchctl_runner=rl,
-        deadline=10.0,
-        poll_interval=0.01,
-    )
-    assert result.returncode == 0
-    # Exactly one stop (bootout) then polls then one bootstrap
-    bootout_count = sum(1 for c in rl.calls if c[0] == "bootout")
-    bootstrap_count = sum(1 for c in rl.calls if c[0] == "bootstrap")
-    assert bootout_count == 1
-    assert bootstrap_count == 1
+    def fake_restart(path):
+        calls.append(("restart", path))
+        return subprocess.CompletedProcess(["restart"], 0, "", "")
+
+    def forbidden_start(_path):
+        raise AssertionError("CLI restart must not dispatch start")
+
+    def forbidden_stop():
+        raise AssertionError("CLI restart must not dispatch stop")
+
+    monkeypatch.setattr(service_module, "restart", fake_restart)
+    monkeypatch.setattr(service_module, "start", forbidden_start)
+    monkeypatch.setattr(service_module, "stop", forbidden_stop)
+
+    exit_code = service_module.main(["restart", "--config", config_path])
+
+    assert exit_code == NexusExitCode.SUCCESS
+    assert calls == [("restart", config_path)]
 
 
 def test_main_restart_success(tmp_path, monkeypatch):
