@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
 from typing import Any
 
@@ -141,6 +142,8 @@ def test_governed_adoption_projects_through_existing_runtime_store(tmp_path: Pat
     assert policy["episodic_memory_injection"] == {"enabled": True, "scope": "record_serialization"}
     assert policy["adoption_lineage"]["adoption_id"] == adoption["adoption_id"]
     assert policy["adoption_lineage"]["status"] == "ACTIVE_CANDIDATE"
+    assert "scope" not in policy["adoption_lineage"]
+    assert "model_name" not in json.dumps(policy["adoption_lineage"], sort_keys=True)
     assert policy["promoted_capabilities"] == ["hyper"]
     assert policy["source_experiences"] == ["legacy-evidence"]
     assert any(path.endswith("governed_learning_policy_adoption.json") for path in store.read_paths)
@@ -180,6 +183,10 @@ def test_governed_adoption_scope_mismatch_stays_inactive(tmp_path: Path) -> None
     policy = budget["learning_policy"]
     assert policy["episodic_memory_injection"]["enabled"] is False
     assert policy["adoption_lineage"]["status"] == "OUT_OF_SCOPE"
+    assert policy["adoption_lineage"]["task_scope_match"] is False
+    assert policy["adoption_lineage"]["subject_scope_match"] is True
+    assert policy["adoption_lineage"]["runtime_scope_match"] is True
+    assert "in_scope_model" not in policy["adoption_lineage"]
 
 
 def test_governed_rollback_reconstructs_inactive_policy(tmp_path: Path) -> None:

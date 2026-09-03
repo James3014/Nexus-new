@@ -146,6 +146,32 @@ def load_governed_learning_adoption_budget(
     )
 
 
+def _canonical_safe_adoption_lineage(lineage: dict[str, Any]) -> dict[str, Any]:
+    """Keep adoption evidence in Planner input without reintroducing route knobs.
+
+    Canonical task context rejects model/provider/route-shaped keys recursively.
+    The governed projection already applies exact task/model/runtime scope before
+    this point, so Planner only needs immutable lineage plus scope-match evidence.
+    """
+    safe_keys = (
+        "adoption_id",
+        "adoption_hash",
+        "recommendation_id",
+        "validation_id",
+        "policy_hash",
+        "status",
+        "rollback_id",
+        "adoption_source_revision",
+        "current_source_revision",
+    )
+    safe = {key: lineage[key] for key in safe_keys if key in lineage}
+    if lineage.get("status") == "OUT_OF_SCOPE":
+        safe["task_scope_match"] = bool(lineage.get("in_scope_task"))
+        safe["subject_scope_match"] = bool(lineage.get("in_scope_model"))
+        safe["runtime_scope_match"] = bool(lineage.get("in_scope_runtime"))
+    return safe
+
+
 def _merge_learning_policy_payload(
     base: dict[str, Any],
     overlay: dict[str, Any],
@@ -204,6 +230,10 @@ def merge_runtime_learning_policy(
         )
         governed_policy = governed_budget.get("learning_policy", {})
         if isinstance(governed_policy, dict):
+            governed_policy = dict(governed_policy)
+            lineage = governed_policy.get("adoption_lineage")
+            if isinstance(lineage, dict):
+                governed_policy["adoption_lineage"] = _canonical_safe_adoption_lineage(lineage)
             combined_policy = _merge_learning_policy_payload(combined_policy, governed_policy)
 
     if combined_policy:
