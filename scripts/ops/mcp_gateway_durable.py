@@ -2236,11 +2236,11 @@ def _recovery_wrapper_command(root: str) -> str:
     ):
         raise _gateway_error("R1 recovery wrapper path contains shell metacharacter")
     return (
-        f'cd {root_path} ; source "{ENV_PATH}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
-        f"export NEXUS_CANONICAL_SOURCE_ROOT={root_path} ; "
+        f'cd "{root_path}" ; source "{ENV_PATH}" ; export PYTHONDONTWRITEBYTECODE=1 ; '
+        f'export NEXUS_CANONICAL_SOURCE_ROOT="{root_path}" ; '
         "export NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR="
-        "/Users/jameschen/Workspace/Nexus-new-self-hosted-state ; "
-        f"exec {INTERPRETER} {entrypoint}"
+        '"/Users/jameschen/Workspace/Nexus-new-self-hosted-state" ; '
+        f'exec {INTERPRETER} "{entrypoint}"'
     )
 
 

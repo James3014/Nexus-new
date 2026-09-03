@@ -3389,6 +3389,7 @@ def test_r1_live_production_wrapper_and_plist_are_fixed_and_secret_free(
     tmp_path, monkeypatch
 ):
     fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(g, "INTERPRETER", "/Users/jameschen/Workspace/Nexus-new/.venv/bin/python")
     plan = g._recovery_plan(fixture["request"], fixture["receipt"])
 
     payload = plistlib.loads(g._recovery_expected_plist_bytes(plan.desired_root))
