@@ -665,7 +665,7 @@ def test_legacy_host_authority_cannot_authorize_durable_recovery():
 def test_r1_recovery_authority_is_a_distinct_hash_domain():
     from nexus.contracts.gateway_deployment import RecoveryAuthorityReceipt
 
-    assert RecoveryAuthorityReceipt.SCHEMA == "nexus.gateway.durable_recovery_authority.v1"
+    assert RecoveryAuthorityReceipt.SCHEMA == "nexus.gateway.durable_recovery_authority.v2"
     # B1 binds the eventual host receipt to the accepted source bytes.  This
     # is only schema coverage: no receipt is issued by a source test.
     required = set(RecoveryAuthorityReceipt.__dataclass_fields__)
@@ -681,6 +681,9 @@ def test_r1_recovery_authority_is_a_distinct_hash_domain():
         "predecessor_commit",
         "predecessor_tree",
         "predecessor_manifest_sha256",
+        "predecessor_artifact_format",
+        "predecessor_artifact_sha256",
+        "predecessor_artifact_size",
     } <= required
 
 
@@ -733,7 +736,7 @@ def _r1_authority_fixture():
     predecessor = derive_deployment_manifest(source_set, role="predecessor")
     values = {
         "schema": RecoveryAuthorityReceipt.SCHEMA,
-        "receipt_version": 1,
+        "receipt_version": 2,
         "receipt_id": "receipt-r1",
         "card_sha256": RECOVERY_CARD_SHA256,
         "source_base_merge": SOURCE_BASE_MERGE,
@@ -775,6 +778,9 @@ def _r1_authority_fixture():
         "desired_tree": source_set.desired_tree,
         "predecessor_commit": source_set.predecessor_commit,
         "predecessor_tree": source_set.predecessor_tree,
+        "predecessor_artifact_format": "git-bundle-self-contained-v1",
+        "predecessor_artifact_sha256": "d" * 64,
+        "predecessor_artifact_size": 4096,
         "source_set": source_set,
         "desired_manifest": desired,
         "predecessor_manifest": predecessor,
@@ -879,6 +885,35 @@ def test_r1_recovery_authority_accepts_current_card_and_rejects_rehashed_stale_c
     })
     with pytest.raises(ContractError, match="Card mismatch"):
         validate_recovery_authority(RecoveryAuthorityReceipt(**values))
+
+
+def test_g20_old_r2_authority_and_request_are_not_executable_under_successor_contract():
+    from nexus.contracts.gateway_deployment import (
+        GatewayRecoveryRequest,
+        RecoveryAuthorityReceipt,
+        validate_recovery_authority,
+        validate_recovery_request,
+    )
+
+    receipt = _r1_authority_fixture()
+    old_receipt = {
+        **receipt.model_dump(),
+        "schema": "nexus.gateway.durable_recovery_authority.v1",
+        "receipt_version": 1,
+    }
+    old_receipt["receipt_hash"] = canonical_hash({
+        key: value for key, value in old_receipt.items() if key != "receipt_hash"
+    })
+    with pytest.raises(ContractError, match="schema|operation"):
+        validate_recovery_authority(RecoveryAuthorityReceipt.model_validate(old_receipt))
+
+    request = _r1_request_fixture(receipt)
+    old_request = GatewayRecoveryRequest(**{
+        **request.__dict__,
+        "schema": "nexus.gateway.durable_recovery_request.v1",
+    })
+    with pytest.raises(ContractError, match="schema"):
+        validate_recovery_request(old_request)
 
 
 def test_r1_historical_activation_cannot_authorize_task002_recovery_target():

@@ -93,13 +93,13 @@ HOST_CARD_PATH = (
 )
 HOST_CARD_SHA256 = "f4c581f0062c6b3d65c9ca8f7029a96caa76b2e35d95cc6bccae874c0945f514"
 RECOVERY_CARD_PATH = (
-    "tasks/github-issue-526-host-authority-and-canary-20260823/"
-    "09-durable-deployment-reconciliation.md"
+    "tasks/github-issue-526-g20-r1-source-contract-delta-20260903/"
+    "01-r1-complete-deployment-source-contract.md"
 )
-RECOVERY_CARD_SHA256 = "b316a07965b070d1b76fa11fa20105d40bd2be1de325576e719a127bdc1d8609"
+RECOVERY_CARD_SHA256 = "010e641d79515cecf28a5a40c718e73b7b79b4185cfffa177864d5a65c5fff84"
 RECOVERY_RECEIPT_PATH = (
-    "tasks/github-issue-526-host-authority-and-canary-20260823/"
-    "10-durable-recovery-authority-receipt.json"
+    "tasks/github-issue-526-g20-r1-source-contract-delta-20260903/"
+    "02-r1-complete-deployment-recovery-authority-receipt.json"
 )
 OWNER_ACTIVATION_ID = "OWNER_ISSUE526_CONTINUE_20260823"
 OWNER_ACTIVATION_SHA256 = "f0ed77ffe3872b083ef0b6d66526524a7091a8e3125322c84ba632f3c64ba322"
@@ -250,6 +250,7 @@ def _strict_types(value: Any) -> None:
             "owner_uid",
             "owner_gid",
             "bundle_size",
+            "predecessor_artifact_size",
         } | (
             {"mode"}
             if type(value).__name__
@@ -632,7 +633,7 @@ class HostEffectAuthorityReceipt(StrictRecord):
 class RecoveryAuthorityReceipt(StrictRecord):
     """Separate R1 source authority; never parsed as the legacy host bundle."""
 
-    SCHEMA: ClassVar[str] = "nexus.gateway.durable_recovery_authority.v1"
+    SCHEMA: ClassVar[str] = "nexus.gateway.durable_recovery_authority.v2"
     schema: str
     receipt_version: int
     receipt_id: str
@@ -677,6 +678,9 @@ class RecoveryAuthorityReceipt(StrictRecord):
     desired_tree: str
     predecessor_commit: str
     predecessor_tree: str
+    predecessor_artifact_format: str
+    predecessor_artifact_sha256: str
+    predecessor_artifact_size: int
     source_set: RecoverySourceSet
     desired_manifest: DeploymentManifest
     predecessor_manifest: DeploymentManifest
@@ -890,7 +894,7 @@ class GatewayRecoveryRequest(StrictRecord):
     predecessor_manifest_id: str
     predecessor_manifest_hash: str
     request_hash: str = ""
-    schema: str = "nexus.gateway.durable_recovery_request.v1"
+    schema: str = "nexus.gateway.durable_recovery_request.v2"
 
     _converters: ClassVar[Mapping[str, Any]] = {"effect_class": EffectClass}
 
@@ -2107,7 +2111,7 @@ def validate_recovery_authority(
         raise ContractError("R1 recovery authority schema mismatch")
     if (
         type(receipt.receipt_version) is not int
-        or receipt.receipt_version != 1
+        or receipt.receipt_version != 2
         or receipt.operation != "gateway-recover"
     ):
         raise ContractError("R1 recovery operation mismatch")
@@ -2152,6 +2156,7 @@ def validate_recovery_authority(
         (receipt.predecessor_tree, "predecessor tree", 40),
         (receipt.desired_manifest_sha256, "desired manifest", 64),
         (receipt.predecessor_manifest_sha256, "predecessor manifest", 64),
+        (receipt.predecessor_artifact_sha256, "predecessor artifact", 64),
         (receipt.final_manager_sha256, "final manager", 64),
         (receipt.independent_acceptance_receipt_hash, "acceptance receipt", 64),
     ):
@@ -2159,6 +2164,12 @@ def validate_recovery_authority(
     _id(receipt.receipt_id, "recovery receipt id")
     _id(receipt.request_id, "recovery request id")
     _id(receipt.idempotency_fence, "recovery fence")
+    if (
+        receipt.predecessor_artifact_format != "git-bundle-self-contained-v1"
+        or type(receipt.predecessor_artifact_size) is not int
+        or receipt.predecessor_artifact_size <= 0
+    ):
+        raise ContractError("R1 predecessor artifact binding invalid")
     expected_hash = canonical_hash({
         key: value for key, value in receipt.model_dump().items() if key != "receipt_hash"
     })
