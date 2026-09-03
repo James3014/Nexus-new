@@ -10599,8 +10599,10 @@ class SelfHostedTaskService:
             expected_source_branch = str(
                 lease.get("target_branch") or state.get("source_branch") or ""
             )
+            receipt_schema = raw_receipt.get("schema")
+            legacy_receipt_schema = "nexus.integration_receipt/v1"
             if (
-                raw_receipt.get("schema") != "nexus.integration_receipt.v1"
+                receipt_schema not in {"nexus.integration_receipt.v1", legacy_receipt_schema}
                 or not expected_source_branch
                 or raw_receipt.get("source_branch") != expected_source_branch
                 or raw_receipt.get("worktree_removed") is not False
@@ -10726,7 +10728,18 @@ class SelfHostedTaskService:
             corrected = dict(raw_receipt)
             corrected["integration_base_sha"] = corrected_base_sha
             corrected["branch_head_before"] = corrected_base_sha
-            if any(corrected[key] != raw_receipt[key] for key in corrected if key not in {"integration_base_sha", "branch_head_before"}):
+            schema_delta = receipt_schema == legacy_receipt_schema
+            if schema_delta:
+                # A durable recovery receipt was emitted by the historical
+                # slash-schema writer.  Accept that exact legacy identity only
+                # for this recovery correction and canonicalize the effective
+                # receipt; it is never silently treated as a v1-equivalent
+                # receipt by other lifecycle paths.
+                corrected["schema"] = "nexus.integration_receipt.v1"
+            allowed_mutations = {"integration_base_sha", "branch_head_before"}
+            if schema_delta:
+                allowed_mutations.add("schema")
+            if any(corrected[key] != raw_receipt[key] for key in corrected if key not in allowed_mutations):
                 reject("RECEIPT_CORRECTION_MUTATION_SCOPE")
             entry = {
                 "schema": "nexus.integration_receipt_correction.v1",
@@ -10739,6 +10752,20 @@ class SelfHostedTaskService:
                 "corrected_base_sha": corrected_base_sha,
                 "candidate_commit_sha": candidate_commit_sha,
                 "candidate_tree_sha": candidate_tree_sha,
+                "correction_deltas": {
+                    "schema": {
+                        "from": raw_receipt.get("schema"),
+                        "to": corrected.get("schema"),
+                    },
+                    "integration_base_sha": {
+                        "from": raw_receipt.get("integration_base_sha"),
+                        "to": corrected_base_sha,
+                    },
+                    "branch_head_before": {
+                        "from": raw_receipt.get("branch_head_before"),
+                        "to": corrected_base_sha,
+                    },
+                },
             }
             state["integration_receipt"] = corrected
             state["integration_base_sha"] = corrected_base_sha
