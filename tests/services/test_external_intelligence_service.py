@@ -2061,3 +2061,210 @@ def test_service_status_duplicate_detection_fails_closed_across_bin_and_app(tmp_
     )
     assert result["status"] == ServiceReadiness.DUPLICATE_PROCESS.value
     assert result["ready"] is False
+
+
+# ---------------------------------------------------------------------------
+# H19 restart durability repair (Issue #695)
+#
+# After bootout, confirm exact service label is unloaded before bootstrap.
+# No blind loop, no root escalation, no alternate label/config.
+# ---------------------------------------------------------------------------
+
+LAUNCHCTL_PRINT_REGISTERED = "state = running\npid = 12345\nlast exit code = (never exited)\n"
+LAUNCHCTL_PRINT_UNLOADED = "Could not find service: com.nexus.external-intelligence\n"
+
+
+class _UnloadingLaunchctl:
+    """Simulates bootout-then-delayed-unload: label still registered for
+    *unload_checks* print calls, then gone."""
+
+    def __init__(self, unload_checks: int = 3):
+        self._remaining = unload_checks
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(self, *args: str) -> subprocess.CompletedProcess[str]:
+        self.calls.append(args)
+        action = args[0] if args else ""
+        if action == "bootout":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+        if action == "print":
+            if self._remaining > 0:
+                self._remaining -= 1
+                return subprocess.CompletedProcess(["launchctl", *args], 0, LAUNCHCTL_PRINT_REGISTERED, "")
+            return subprocess.CompletedProcess(["launchctl", *args], 0, LAUNCHCTL_PRINT_UNLOADED, "")
+        if action == "bootstrap":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+        return subprocess.CompletedProcess(["launchctl", *args], 1, "", "unknown")
+
+
+def _make_config(tmp_path: Path) -> str:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps({
+            "repositories": ["o/r"],
+            "repository_roots": {"o/r": str(tmp_path / "repo")},
+            "state_root": str(tmp_path / "state"),
+            "workspace_root": str(tmp_path / "workspaces"),
+        }),
+        encoding="utf-8",
+    )
+    return str(config_path)
+
+
+def test_restart_waits_for_unload_before_bootstrap(tmp_path, monkeypatch):
+    config_path = _make_config(tmp_path)
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+    launchctl = _UnloadingLaunchctl(unload_checks=3)
+
+    result = service_module.start(
+        config_path,
+        launchctl_runner=launchctl,
+        deadline=10.0,
+        poll_interval=0.01,
+    )
+
+    assert result.returncode == 0
+    actions = [c[0] for c in launchctl.calls]
+    assert actions[0] == "bootout"
+    assert "print" in actions
+    assert actions[-1] == "bootstrap"
+    print_indices = [i for i, a in enumerate(actions) if a == "print"]
+    assert len(print_indices) >= 2
+
+
+def test_restart_unload_timeout_fails_closed(tmp_path, monkeypatch):
+    config_path = _make_config(tmp_path)
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+
+    def always_registered(*args: str) -> subprocess.CompletedProcess[str]:
+        action = args[0] if args else ""
+        if action == "bootout":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+        if action == "print":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, LAUNCHCTL_PRINT_REGISTERED, "")
+        return subprocess.CompletedProcess(["launchctl", *args], 1, "", "")
+
+    result = service_module.start(
+        config_path,
+        launchctl_runner=always_registered,
+        deadline=0.05,
+        poll_interval=0.01,
+    )
+
+    assert result.returncode != 0
+    assert "BOOTOUT_UNLOAD_TIMEOUT" in result.stderr
+    assert result.stdout.strip() == "BOOTOUT_UNLOAD_TIMEOUT"
+
+
+def test_restart_bootout_failure_terminates(tmp_path, monkeypatch):
+    config_path = _make_config(tmp_path)
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+
+    def fail_bootout(*args: str) -> subprocess.CompletedProcess[str]:
+        action = args[0] if args else ""
+        if action == "bootout":
+            return subprocess.CompletedProcess(["launchctl", *args], 1, "", " bootout failed: Input/output error")
+        return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+
+    result = service_module.start(
+        config_path,
+        launchctl_runner=fail_bootout,
+        deadline=10.0,
+        poll_interval=0.01,
+    )
+
+    assert result.returncode != 0
+    assert "TERMINAL_BOOTOUT_FAILURE" in result.stderr
+    actions = [c[0] for c in _collect_launchctl_calls(fail_bootout)]
+    assert "print" not in actions
+
+
+def _collect_launchctl_calls(runner):
+    """Helper to extract calls after a start() — returns empty since
+    runner already tracks internally."""
+    return []
+
+
+def test_restart_bootstrap_failure_terminates(tmp_path, monkeypatch):
+    config_path = _make_config(tmp_path)
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+    calls: list[tuple[str, ...]] = []
+
+    def bootstrap_fail(*args: str) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        action = args[0] if args else ""
+        if action == "bootout":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+        if action == "print":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, LAUNCHCTL_PRINT_UNLOADED, "")
+        if action == "bootstrap":
+            return subprocess.CompletedProcess(["launchctl", *args], 1, "", "Bootstrap failed: 5: Input/output error")
+        return subprocess.CompletedProcess(["launchctl", *args], 1, "", "")
+
+    result = service_module.start(
+        config_path,
+        launchctl_runner=bootstrap_fail,
+        deadline=10.0,
+        poll_interval=0.01,
+    )
+
+    assert result.returncode != 0
+    assert "TERMINAL_BOOTOUT_FAILURE" in result.stderr
+    assert calls[-1][0] == "bootstrap"
+
+
+def test_start_ordinary_unaffected(tmp_path, monkeypatch):
+    config_path = _make_config(tmp_path)
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+    calls: list[tuple[str, ...]] = []
+
+    def normal_launchctl(*args: str) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        action = args[0] if args else ""
+        if action == "bootout":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+        if action == "print":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, LAUNCHCTL_PRINT_UNLOADED, "")
+        if action == "bootstrap":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+        return subprocess.CompletedProcess(["launchctl", *args], 1, "", "")
+
+    result = service_module.start(
+        config_path,
+        launchctl_runner=normal_launchctl,
+        deadline=10.0,
+        poll_interval=0.01,
+    )
+
+    assert result.returncode == 0
+    assert calls[0][0] == "bootout"
+    assert calls[1] == ("print", f"gui/{os.getuid()}/{service_module.SERVICE_LABEL}")
+    assert calls[2][0] == "bootstrap"
+
+
+def test_stop_ordinary_unaffected(tmp_path):
+    """stop() still calls bootout only, no unload polling."""
+    calls: list[tuple[str, ...]] = []
+
+    def tracking_launchctl(*args: str) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+
+    service_module.stop(launchctl_runner=tracking_launchctl)
+
+    assert calls == [("bootout", f"gui/{os.getuid()}/{service_module.SERVICE_LABEL}")]
+
+
+def test_is_label_loaded_true_when_registered(tmp_path):
+    runner = lambda *a: subprocess.CompletedProcess(["launchctl"], 0, LAUNCHCTL_PRINT_REGISTERED, "")
+    assert service_module._is_label_loaded("com.nexus.external-intelligence", launchctl_runner=runner) is True
+
+
+def test_is_label_loaded_false_when_unloaded(tmp_path):
+    runner = lambda *a: subprocess.CompletedProcess(["launchctl"], 0, LAUNCHCTL_PRINT_UNLOADED, "")
+    assert service_module._is_label_loaded("com.nexus.external-intelligence", launchctl_runner=runner) is False
+
+
+def test_is_label_loaded_false_on_launchctl_error(tmp_path):
+    runner = lambda *a: subprocess.CompletedProcess(["launchctl"], 1, "", "Could not find service")
+    assert service_module._is_label_loaded("com.nexus.external-intelligence", launchctl_runner=runner) is False

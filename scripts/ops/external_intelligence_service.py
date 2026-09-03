@@ -1122,15 +1122,90 @@ def _launchctl(*args: str):
     )
 
 
-def start(config_path: str | os.PathLike[str]):
+_BOOTOUT_UNLOAD_TIMEOUT = "BOOTOUT_UNLOAD_TIMEOUT"
+_TERMINAL_BOOTOUT_FAILURE = "TERMINAL_BOOTOUT_FAILURE"
+_DEFAULT_UNLOAD_DEADLINE = 30.0
+_DEFAULT_UNLOAD_POLL_INTERVAL = 0.5
+
+
+def _is_label_loaded(
+    label: str,
+    *,
+    launchctl_runner: Callable[..., Any] | None = None,
+    uid: int | None = None,
+) -> bool:
+    """Return True if launchctl still reports the given label registered."""
+    runner = launchctl_runner or _launchctl
+    domain_uid = uid if uid is not None else os.getuid()
+    result = runner("print", f"gui/{domain_uid}/{label}")
+    if getattr(result, "returncode", 1) != 0:
+        return False
+    stdout = str(getattr(result, "stdout", "") or "")
+    if "Could not find service" in stdout:
+        return False
+    state_match = re.search(r"^\s*state\s*=\s*(\S+)", stdout, re.MULTILINE)
+    if state_match:
+        return True
+    return bool(stdout.strip())
+
+
+def _wait_until_unloaded(
+    label: str,
+    *,
+    launchctl_runner: Callable[..., Any] | None = None,
+    deadline: float = _DEFAULT_UNLOAD_DEADLINE,
+    poll_interval: float = _DEFAULT_UNLOAD_POLL_INTERVAL,
+) -> None:
+    """Poll until exact label is confirmed unloaded or deadline expires.
+
+    Raises ServiceError on timeout.
+    """
+    start_time = time.monotonic()
+    while True:
+        if not _is_label_loaded(label, launchctl_runner=launchctl_runner):
+            return
+        elapsed = time.monotonic() - start_time
+        if elapsed >= deadline:
+            raise ServiceError(_BOOTOUT_UNLOAD_TIMEOUT)
+        time.sleep(min(poll_interval, deadline - elapsed))
+
+
+def start(config_path: str | os.PathLike[str], *, launchctl_runner: Callable[..., Any] | None = None, deadline: float = _DEFAULT_UNLOAD_DEADLINE, poll_interval: float = _DEFAULT_UNLOAD_POLL_INTERVAL) -> subprocess.CompletedProcess[str]:
     plist = install(config_path)
     domain = f"gui/{os.getuid()}"
-    _launchctl("bootout", f"{domain}/{SERVICE_LABEL}")
-    return _launchctl("bootstrap", domain, str(plist))
+    bootout = (launchctl_runner or _launchctl)("bootout", f"{domain}/{SERVICE_LABEL}")
+    if bootout.returncode != 0:
+        msg = str(getattr(bootout, "stderr", "") or "").strip()
+        return subprocess.CompletedProcess(
+            ["launchctl", "bootstrap", domain, str(plist)],
+            returncode=1,
+            stdout=_TERMINAL_BOOTOUT_FAILURE,
+            stderr=f"{_TERMINAL_BOOTOUT_FAILURE}: {msg}" if msg else _TERMINAL_BOOTOUT_FAILURE,
+        )
+    try:
+        _wait_until_unloaded(SERVICE_LABEL, launchctl_runner=launchctl_runner, deadline=deadline, poll_interval=poll_interval)
+    except ServiceError as exc:
+        msg = str(exc)
+        return subprocess.CompletedProcess(
+            ["launchctl", "bootstrap", domain, str(plist)],
+            returncode=1,
+            stdout=msg,
+            stderr=msg,
+        )
+    bootstrap = (launchctl_runner or _launchctl)("bootstrap", domain, str(plist))
+    if bootstrap.returncode != 0:
+        msg = str(getattr(bootstrap, "stderr", "") or "").strip()
+        return subprocess.CompletedProcess(
+            ["launchctl", "bootstrap", domain, str(plist)],
+            returncode=1,
+            stdout=_TERMINAL_BOOTOUT_FAILURE,
+            stderr=f"{_TERMINAL_BOOTOUT_FAILURE}: {msg}" if msg else _TERMINAL_BOOTOUT_FAILURE,
+        )
+    return bootstrap
 
 
-def stop():
-    return _launchctl("bootout", f"gui/{os.getuid()}/{SERVICE_LABEL}")
+def stop(launchctl_runner: Callable[..., Any] | None = None):
+    return (launchctl_runner or _launchctl)("bootout", f"gui/{os.getuid()}/{SERVICE_LABEL}")
 
 
 def daemon(config: ServiceConfig, config_path: Path | None = None) -> None:
