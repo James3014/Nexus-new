@@ -1295,13 +1295,24 @@ class LocalModelExecutor:
                 )
                 from nexus.services.local_heal.memory_trace import build_memory_trace_from_adapter
                 adapter = MemoryRetrievalAdapter(enabled=True)
+                source_rev = str(request.route_context.get("source_revision") or request.route_context.get("workspace_revision") or "").strip()
+                contract_rev = str(request.route_context.get("contract_revision") or "").strip()
+                current_state = {
+                    "runtime_identity": "local_model_executor",
+                }
+                if source_rev:
+                    current_state["source_revision"] = source_rev
+                if contract_rev:
+                    current_state["contract_revision"] = contract_rev
+
                 lessons = adapter.retrieve_reranked(
                     query_text=request.problem_statement,
                     anchor_symbol=request.route_context.get("target_symbol") or "",
                     anchor_file=request.target_file,
                     limit=3,
                     max_chars=800,
-                    task_id=request.task_id
+                    task_id=request.task_id,
+                    current_state=current_state,
                 )
                 adapter.last_metadata["prompt_included"] = bool(lessons)
                 memory_adapter_metadata = dict(adapter.last_metadata)

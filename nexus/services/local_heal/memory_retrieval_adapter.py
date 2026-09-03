@@ -1011,6 +1011,7 @@ class MemoryRetrievalAdapter:
         limit: int = 5,
         max_chars: int = 800,
         task_id: str = "",
+        current_state: dict[str, Any] | None = None,
     ) -> list[RetrievedLesson]:
         """BG: Memory Reranking — symbol-weighted relevance re-scoring.
 
@@ -1030,6 +1031,7 @@ class MemoryRetrievalAdapter:
             query_text=query_text,
             limit=limit * 3,
             exclude_task_id=task_id,
+            current_state=current_state,
         )
         self.last_metadata["rerank_mode"] = True
         self.last_metadata["anchor_symbol"] = anchor_symbol
