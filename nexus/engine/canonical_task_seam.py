@@ -370,21 +370,66 @@ def _actual_runtime_controls(
     return controls
 
 
+def _derive_campaign_id_from_task_card(task_card_identity: 'VerifiedTaskCardIdentity') -> str:
+    """Derive campaign identity from verified Task Card path or content.
+
+    Campaign identity is exact-match only; blank, missing, or unrelated
+    paths use the global route. Task-ID prose/prefix alone cannot mint
+    campaign identity.
+    """
+    import re as _re
+    path_str = str(task_card_identity.task_card_path or "")
+    # Extract campaign directory name from path like tasks/<campaign-id>/...
+    match = _re.match(r"tasks/([a-zA-Z0-9_-]+)/", path_str)
+    if not match:
+        return ""
+    campaign_dir = match.group(1)
+    # Only return known campaign IDs
+    known_campaigns = {
+        "CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01",
+        "CAMPAIGN-PLANNER-WORKFORCE-SELECTION-REPAIR-01",
+    }
+    # Try exact match on campaign dir
+    if campaign_dir in known_campaigns:
+        return campaign_dir
+    # Try reading the Card file for Campaign: field
+    try:
+        from pathlib import Path
+        repo_root = Path(__file__).resolve().parents[2]
+        card_path = repo_root / path_str
+        if card_path.is_file():
+            content = card_path.read_text(encoding="utf-8")
+            for line in content.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("Campaign:"):
+                    value = stripped.split(":", 1)[1].strip().strip("`")
+                    if value in known_campaigns:
+                        return value
+    except Exception:
+        pass
+    return ""
+
+
 def _resolve_policy_workforce_bindings(
     plan_payload: Mapping[str, Any],
     *,
     allowed_files: tuple[str, ...],
     verifier_command: tuple[str, ...],
+    campaign_id: str = "",
 ) -> tuple[dict[str, Any], dict[str, str]]:
     """Resolve Planner demands through the tracked Workforce policy.
 
     Callers cannot supply worker, provider, or model identities.  This function
     projects each Planner demand through the policy's canonical routing map;
     only Workforce Admission evaluates that mapped identity's eligibility.
+
+    Campaign resolution is exact-match only; blank, missing, prefixed,
+    or unrelated campaign IDs use the global route.
     """
     from nexus.services.model_workforce_policy import WorkforcePolicyLoader
 
-    snapshot = WorkforcePolicyLoader().load()
+    policy = WorkforcePolicyLoader()
+    snapshot = policy.load()
     signal_snapshot = plan_payload.get("signal_snapshot")
     demands_payload = (
         signal_snapshot.get("workforce_demands")
@@ -406,9 +451,13 @@ def _resolve_policy_workforce_bindings(
             raise ValueError("canonical_workforce_demand_malformed")
         channel = str(demand.get("execution_channel") or "")
         role = str(demand.get("requested_role") or "")
-        route_group_name = "local_first" if channel == "local" else channel
-        route_group = snapshot.routing.get(route_group_name)
-        worker_id = route_group.get(role) if isinstance(route_group, Mapping) else None
+        if channel == "online":
+            # Use campaign-aware resolution for online channel
+            worker_id = policy.resolve_route(role, campaign_id=campaign_id)
+        else:
+            route_group_name = "local_first" if channel == "local" else channel
+            route_group = snapshot.routing.get(route_group_name)
+            worker_id = route_group.get(role) if isinstance(route_group, Mapping) else None
         if not isinstance(worker_id, str) or not worker_id.strip():
             raise ValueError(f"canonical_workforce_route_missing:{channel}:{role}")
         worker = snapshot.workers.get(worker_id)
@@ -478,10 +527,12 @@ def build_canonical_planner_admission(
         raise ValueError("canonical_workforce_demands_missing")
     policy = WorkforcePolicyLoader()
     snapshot = policy.load()
+    campaign_id = _derive_campaign_id_from_task_card(task_card_identity)
     policy_bindings, _ = _resolve_policy_workforce_bindings(
         plan_payload,
         allowed_files=allowed_files,
         verifier_command=verifier_command,
+        campaign_id=campaign_id,
     )
     runtime_bindings: dict[str, Any] = {}
     for channel, policy_binding in policy_bindings.items():
@@ -582,6 +633,8 @@ def execute_canonical_product_task(
         "recommended_flow",
         "route",
         "runtime_selector",
+        "worker",
+        "worker_id",
     }
     supplied_forbidden = sorted(forbidden.intersection(context))
     if supplied_forbidden:
