@@ -1,9 +1,9 @@
 from nexus.contracts.learning_experience import (
     CAPABILITY_TAXONOMY,
     apply_autodata_quality_gate,
+    build_escalation_recommendations,
     build_learning_experience,
     build_promoted_learning_policy,
-    build_escalation_recommendations,
     load_promoted_learning_policy,
     project_model_training,
     project_nexus_policy,
@@ -305,12 +305,10 @@ def test_promoted_learning_policy_accumulates_recent_high_cost_roi_penalties(tmp
 # ==============================================================================
 
 def test_g5_recommendation_is_content_addressed_and_evidence_bound():
-    import copy
     from nexus.contracts.learning_experience import (
         LEARNING_POLICY_RECOMMENDATION_SCHEMA,
-        build_nexus_learning_episode,
         build_learning_policy_recommendation,
-        validate_learning_policy_recommendation,
+        build_nexus_learning_episode,
         canonical_recommendation_identity,
     )
 
@@ -351,14 +349,13 @@ def test_g5_recommendation_is_content_addressed_and_evidence_bound():
 
 
 def test_g5_negative_controls_fail_closed():
-    import copy
     import pytest
+
     from nexus.contracts.learning_experience import (
         HISTORICAL_UNKNOWN,
         NEXUS_LEARNING_EPISODE_SCHEMA,
-        build_nexus_learning_episode,
         build_learning_policy_recommendation,
-        validate_learning_policy_recommendation,
+        build_nexus_learning_episode,
     )
 
     epA = build_nexus_learning_episode(
@@ -488,12 +485,13 @@ def test_g5_negative_controls_fail_closed():
 
 def test_g6_independent_validation_and_hostile_probes():
     import copy
+
     from nexus.contracts.learning_experience import (
         LEARNING_POLICY_VALIDATION_SCHEMA,
-        build_nexus_learning_episode,
         build_learning_policy_recommendation,
-        evaluate_learning_policy_recommendation,
+        build_nexus_learning_episode,
         canonical_recommendation_identity,
+        evaluate_learning_policy_recommendation,
     )
 
     epA = build_nexus_learning_episode(
@@ -589,15 +587,16 @@ def test_g6_independent_validation_and_hostile_probes():
 
 def test_g7_adoption_and_hostile_controls():
     import copy
+
     import pytest
+
     from nexus.contracts.learning_experience import (
         LEARNING_POLICY_ADOPTION_SCHEMA,
-        build_nexus_learning_episode,
-        build_learning_policy_recommendation,
-        evaluate_learning_policy_recommendation,
         build_learning_policy_adoption,
-        validate_learning_policy_adoption,
+        build_learning_policy_recommendation,
+        build_nexus_learning_episode,
         canonical_adoption_identity,
+        evaluate_learning_policy_recommendation,
     )
 
     epA = build_nexus_learning_episode(
@@ -747,10 +746,10 @@ def test_g7_adoption_and_hostile_controls():
 
 def test_g8_planner_consumption_and_negative_controls():
     from nexus.contracts.learning_experience import (
-        build_nexus_learning_episode,
-        build_learning_policy_recommendation,
-        evaluate_learning_policy_recommendation,
         build_learning_policy_adoption,
+        build_learning_policy_recommendation,
+        build_nexus_learning_episode,
+        evaluate_learning_policy_recommendation,
         project_adoption_into_planner_budget,
     )
     from nexus.engine.capability_planner import CapabilityPlanner

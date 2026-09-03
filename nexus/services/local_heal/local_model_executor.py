@@ -1294,6 +1294,7 @@ class LocalModelExecutor:
                     format_retrieved_lesson_context,
                 )
                 from nexus.services.local_heal.memory_trace import build_memory_trace_from_adapter
+                adapter = MemoryRetrievalAdapter(enabled=True)
                 source_rev = str(request.route_context.get("source_revision") or request.route_context.get("workspace_revision") or "").strip()
                 contract_rev = str(request.route_context.get("contract_revision") or "").strip()
                 current_state = {
