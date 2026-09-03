@@ -1016,7 +1016,7 @@ def _approved_closure_service(tmp_path: Path):
         "controller_revision": base, "promotion_packet": packet,
         "verified_receipt": verified_receipt,
         "approved_binding": {**packet, "approval_grant": {"approval_scope": "ALLOW_ACTION_ONCE", "consumed_at": "2026-08-08T00:00:00+00:00"}},
-        "lease": {"lease_id": "lease-closure-bind", "target_worktree": str(tmp_path / "target")},
+        "lease": {"lease_id": "lease-closure-bind", "target_worktree": str(tmp_path / "target"), "target_branch": "candidate"},
     })
     acceptance = _acceptance(candidate)
     artifact_dir = tmp_path / "state" / "acceptance-artifacts" / "closure-bind"
@@ -1215,6 +1215,59 @@ def test_receipt_correction_rejects_persisted_receipt_mutation_after_capture(tmp
         service._state_path("closure-bind").read_bytes()
     ).hexdigest()
     with pytest.raises(RuntimeError, match="RECEIPT_CORRECTION_RECEIPT_BINDING_MISMATCH"):
+        service.correct_applied_integration_receipt("closure-bind", **kwargs)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("schema", "nexus.integration_receipt.v0"),
+        ("source_branch", "other"),
+        ("worktree_removed", True),
+        ("failure_reason", "unexpected"),
+        ("post_apply_error", "unexpected"),
+        ("candidate_commit_sha", "f" * 40),
+        ("candidate_tree_sha", "f" * 40),
+        ("candidate_state_hash", "f" * 64),
+        ("verified_receipt_hash", "f" * 64),
+        ("acceptance_receipt_hash", "f" * 64),
+        ("authorization_hash", "f" * 64),
+        ("integration_commit_sha", "f" * 40),
+        ("staging_commit_sha", "f" * 40),
+        ("branch_head_after", "f" * 40),
+        ("candidate_is_ancestor", False),
+        ("staging_verified", False),
+        ("verifier_passed", False),
+        ("post_apply_verified", False),
+        ("merge_performed", False),
+        ("push_performed", True),
+    ],
+)
+def test_receipt_correction_rejects_each_persisted_immutable_receipt_field(
+    tmp_path: Path, field: str, value: object
+):
+    fixture = _applied_receipt_correction_fixture(tmp_path)
+    service, root, state, receipt, preapply, applied, candidate, acceptance, approval, runtime = fixture
+    kwargs = _correction_kwargs(service, state, receipt, preapply, applied, candidate, acceptance, approval, runtime)
+    state["integration_receipt"][field] = value
+    service._write_state("closure-bind", state)
+    kwargs["expected_state_hash"] = hashlib.sha256(
+        service._state_path("closure-bind").read_bytes()
+    ).hexdigest()
+    with pytest.raises(RuntimeError):
+        service.correct_applied_integration_receipt("closure-bind", **kwargs)
+
+
+def test_receipt_correction_rejects_persisted_top_level_merge_mutation(tmp_path: Path):
+    fixture = _applied_receipt_correction_fixture(tmp_path)
+    service, root, state, receipt, preapply, applied, candidate, acceptance, approval, runtime = fixture
+    kwargs = _correction_kwargs(service, state, receipt, preapply, applied, candidate, acceptance, approval, runtime)
+    state["merge_performed"] = False
+    service._write_state("closure-bind", state)
+    kwargs["expected_state_hash"] = hashlib.sha256(
+        service._state_path("closure-bind").read_bytes()
+    ).hexdigest()
+    with pytest.raises(RuntimeError, match="EFFECT_BINDING_MISMATCH"):
         service.correct_applied_integration_receipt("closure-bind", **kwargs)
 
 

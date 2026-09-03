@@ -10588,11 +10588,26 @@ class SelfHostedTaskService:
             packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
             if state.get("task_id") != task_id or str(state.get("attempt_id") or "") != str(attempt_id):
                 reject("RECEIPT_CORRECTION_ATTEMPT_BINDING_MISMATCH")
+            if state.get("merge_performed") is not True or state.get("integration_result_sha") != expected_applied_head:
+                reject("RECEIPT_CORRECTION_EFFECT_BINDING_MISMATCH")
             replay = bool(history and history[-1].get("original_receipt_hash") == original_receipt_hash)
             if str(original_receipt_hash) != persisted_hash and not replay:
                 reject("RECEIPT_CORRECTION_RECEIPT_BINDING_MISMATCH")
             if str(raw_receipt.get("task_id") or "") != task_id:
                 reject("RECEIPT_CORRECTION_RECEIPT_BINDING_MISMATCH")
+            lease = state.get("lease") if isinstance(state.get("lease"), Mapping) else {}
+            expected_source_branch = str(
+                lease.get("target_branch") or state.get("source_branch") or ""
+            )
+            if (
+                raw_receipt.get("schema") != "nexus.integration_receipt.v1"
+                or not expected_source_branch
+                or raw_receipt.get("source_branch") != expected_source_branch
+                or raw_receipt.get("worktree_removed") is not False
+                or raw_receipt.get("failure_reason") is not None
+                or raw_receipt.get("post_apply_error") is not None
+            ):
+                reject("RECEIPT_CORRECTION_RECEIPT_SHAPE_INVALID")
             expected_fields = {
                 "candidate_commit_sha": candidate_commit_sha,
                 "candidate_tree_sha": candidate_tree_sha,
