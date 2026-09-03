@@ -7642,6 +7642,69 @@ class SelfHostedTaskService:
             return "cleanup target path binding mismatch"
         return None
 
+    def _persisted_cleanup_contract(
+        self, state: Mapping[str, Any]
+    ) -> tuple[Optional[ArchitectTaskContract], Optional[str]]:
+        """Rehydrate an integrated task from its immutable persisted contract.
+
+        Cleanup must not re-run admission or rebuild a contract: those inputs
+        may legitimately be stale by the time an integrated Target is removed.
+        The persisted contract and every contract identity that is present in
+        the terminal binding are still required to agree before any cleanup
+        manager is constructed.
+        """
+        raw_contract = state.get("contract")
+        if not isinstance(raw_contract, Mapping):
+            return None, "persisted contract is missing or malformed"
+        if raw_contract.get("schema") != "nexus.self_hosted_task_contract.v2":
+            return None, "persisted contract schema is missing or invalid"
+        expected_task_id = str(state.get("task_id") or "")
+        if raw_contract.get("task_id") != expected_task_id:
+            return None, "persisted contract task_id mismatch"
+
+        persisted_hash = state.get("contract_hash")
+        if not isinstance(persisted_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", persisted_hash):
+            return None, "persisted contract state hash is missing or malformed"
+        nested_hash = raw_contract.get("contract_hash")
+        if nested_hash is not None and (
+            not isinstance(nested_hash, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", nested_hash)
+        ):
+            return None, "persisted contract nested hash is malformed"
+
+        try:
+            contract = ArchitectTaskContract.model_validate(
+                {key: value for key, value in raw_contract.items() if key != "contract_hash"}
+            )
+        except (TypeError, ValueError) as exc:
+            return None, f"persisted contract is invalid: {exc}"
+        computed_hash = contract.contract_hash
+        if persisted_hash != computed_hash:
+            return None, "persisted contract state hash mismatch"
+        if nested_hash is not None and nested_hash != computed_hash:
+            return None, "persisted contract nested hash mismatch"
+
+        packet = state.get("promotion_packet")
+        if isinstance(packet, Mapping) and packet.get("contract_hash") is not None:
+            packet_hash = packet.get("contract_hash")
+            if not isinstance(packet_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", packet_hash):
+                return None, "promotion packet contract hash is malformed"
+            if packet_hash != computed_hash:
+                return None, "promotion packet contract hash mismatch"
+
+        binding = state.get("approved_binding")
+        binding_grant = binding.get("approval_grant") if isinstance(binding, Mapping) else None
+        grants = [state.get("integration_approval_grant"), binding_grant]
+        for grant in grants:
+            if not isinstance(grant, Mapping) or not grant.get("consumed_at"):
+                continue
+            approval_hash = grant.get("contract_hash")
+            if not isinstance(approval_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", approval_hash):
+                return None, "consumed approval contract hash is malformed"
+            if approval_hash != computed_hash:
+                return None, "consumed approval contract hash mismatch"
+        return contract, None
+
     def cleanup_tasks(self, *, task_id: Optional[str] = None, dry_run: bool = True) -> dict[str, Any]:
         ids = [task_id] if task_id else [path.stem for path in sorted(self.state_dir.glob("*.json"))]
         decisions = []
@@ -7843,7 +7906,21 @@ class SelfHostedTaskService:
                 if not dry_run:
                     self._checkpoint(item, str(state.get("status")), decision, attempt_id=state.get("attempt_id"))
                 continue
-            contract = self.build_contract(state["request"])
+            if state.get("status") == "INTEGRATED":
+                contract, persisted_contract_blocker = self._persisted_cleanup_contract(state)
+                if persisted_contract_blocker:
+                    decisions.append({
+                        "task_id": item,
+                        "status": state.get("status"),
+                        "cleanup_decision": "BLOCKED_BY_AUTHORITY",
+                        "cleanup_blocker": persisted_contract_blocker,
+                        "cleanup_performed": False,
+                        "cleanup_eligible": False,
+                    })
+                    continue
+                assert contract is not None
+            else:
+                contract = self.build_contract(state["request"])
             lease = TargetWorktreeLease(**state["lease"])
             packet = state.get("promotion_packet") or {}
             binding = state.get("approved_binding") or {}

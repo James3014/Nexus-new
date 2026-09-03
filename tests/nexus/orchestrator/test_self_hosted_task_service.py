@@ -63,6 +63,7 @@ from nexus.orchestrator.self_hosted_task_service import (
     validate_workforce_dispatch_binding,
 )
 from nexus.orchestrator.worktree_manager import (
+    TargetCleanupReceipt,
     TargetWorktreeLease,
     WorktreeManager,
     get_canonical_git_hooks_dir,
@@ -3138,7 +3139,89 @@ def test_cleanup_rejects_approved_binding_mismatch(tmp_path, monkeypatch):
     decision = service.cleanup_tasks(task_id="binding-cleanup", dry_run=False)["decisions"][0]
 
     assert decision["cleanup_decision"] == "BLOCKED_BY_AUTHORITY"
-    assert "external acceptance receipt" in decision["cleanup_blocker"]
+    assert "persisted contract state hash" in decision["cleanup_blocker"]
+
+
+def test_integrated_cleanup_uses_persisted_contract_when_admission_is_stale(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _request(tmp_path, task_id="integrated-persisted-contract")
+    contract = service.build_contract(request)
+    lease = TargetWorktreeLease(
+        schema="nexus.target_worktree_lease.v1", lease_id="lease", task_id=contract.task_id,
+        controller_revision=contract.controller_revision, target_base_revision=contract.target_base_revision,
+        target_worktree=request["target_repo_root"], target_branch="nexus/task/integrated-persisted-contract",
+        initial_head=contract.target_base_revision, initial_status_sha256="0" * 64,
+        controller_status_sha256="0" * 64, created_from_exact_revision=True,
+        commit_created=False, merge_performed=False,
+    )
+    service._write_state(contract.task_id, {
+        "task_id": contract.task_id, "status": "INTEGRATED", "promotion_status": "INTEGRATED",
+        "request": {"stale": "admission"}, "contract": contract.model_dump(mode="json"),
+        "contract_hash": contract.contract_hash, "lease": lease.__dict__,
+    })
+    monkeypatch.setattr(service, "build_contract", lambda *_: (_ for _ in ()).throw(
+        AssertionError("integrated cleanup must not rebuild the contract")
+    ))
+    monkeypatch.setattr(service, "_cleanup_authority_blocker", lambda *_: None)
+    calls = []
+
+    class FakeManager:
+        def __init__(self, root_dir):
+            calls.append(root_dir)
+
+        def cleanup_terminal_target(self, contract, lease, **kwargs):
+            return TargetCleanupReceipt(
+                schema="nexus.target_cleanup_receipt.v1", task_id=contract.task_id,
+                target_worktree=lease.target_worktree, decision="ALREADY_REMOVED",
+                blocker=None, performed=False, eligible=True,
+            )
+
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.WorktreeManager", FakeManager)
+    result = service.cleanup_tasks(task_id=contract.task_id, dry_run=True)
+    assert result["decisions"][0]["cleanup_decision"] == "ALREADY_REMOVED"
+    assert calls == [contract.target_worktree_root]
+
+
+@pytest.mark.parametrize("mutator", [
+    lambda payload: payload.pop("schema"),
+    lambda payload: payload.__setitem__("task_id", "other-task"),
+    lambda payload: payload.__setitem__("contract_hash", "f" * 64),
+    lambda payload: payload.__setitem__("contract_hash", "not-a-hash"),
+])
+def test_integrated_cleanup_blocks_persisted_contract_drift_without_write_or_manager(
+    tmp_path, monkeypatch, mutator
+):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    request = _request(tmp_path, task_id="integrated-contract-drift")
+    contract = service.build_contract(request)
+    persisted = contract.model_dump(mode="json")
+    mutator(persisted)
+    lease = TargetWorktreeLease(
+        schema="nexus.target_worktree_lease.v1", lease_id="lease", task_id=contract.task_id,
+        controller_revision=contract.controller_revision, target_base_revision=contract.target_base_revision,
+        target_worktree=request["target_repo_root"], target_branch="nexus/task/integrated-contract-drift",
+        initial_head=contract.target_base_revision, initial_status_sha256="0" * 64,
+        controller_status_sha256="0" * 64, created_from_exact_revision=True,
+        commit_created=False, merge_performed=False,
+    )
+    state = {
+        "task_id": contract.task_id, "status": "INTEGRATED", "promotion_status": "INTEGRATED",
+        "request": request, "contract": persisted, "contract_hash": contract.contract_hash,
+        "lease": lease.__dict__,
+    }
+    service._write_state(contract.task_id, state)
+    before = service._state_path(contract.task_id).read_bytes()
+    monkeypatch.setattr(service, "build_contract", lambda *_: (_ for _ in ()).throw(
+        AssertionError("integrated cleanup must not rebuild the contract")
+    ))
+    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.WorktreeManager", lambda *_: (
+        (_ for _ in ()).throw(AssertionError("blocked contract must not construct manager"))
+    ))
+    result = service.cleanup_tasks(task_id=contract.task_id, dry_run=False)
+    decision = result["decisions"][0]
+    assert decision["cleanup_decision"] == "BLOCKED_BY_AUTHORITY"
+    assert "persisted contract" in decision["cleanup_blocker"]
+    assert service._state_path(contract.task_id).read_bytes() == before
 
 
 def test_integration_failure_is_persisted(tmp_path, monkeypatch):
