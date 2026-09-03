@@ -1,8 +1,8 @@
 """Corrective RED probes for the rejected Target integration Candidate."""
 
-import subprocess
 import hashlib
 import json
+import subprocess
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -10,20 +10,20 @@ from types import SimpleNamespace
 
 import pytest
 
-from nexus.executors.cli_worker import bounded_environment_receipt
+from nexus.contracts.lifecycle_action import build_owner_inline_contract
 from nexus.contracts.target_integration_lifecycle import (
     CleanupDecision,
     ExternalAcceptanceReceipt,
     IntegrationAuthorizationEnvelope,
     TargetResolutionMode,
 )
-from nexus.orchestrator.target_integration_lifecycle import TargetIntegrationLifecycle
-from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
-from nexus.contracts.lifecycle_action import build_owner_inline_contract
-from nexus.orchestrator.worktree_manager import WorktreeManager
+from nexus.contracts.workforce_admission import WorkforceDemand
+from nexus.executors.cli_worker import bounded_environment_receipt
 from nexus.orchestrator.governed_integration import ControlledIntegrationManager
 from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
-from nexus.contracts.workforce_admission import WorkforceDemand
+from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+from nexus.orchestrator.target_integration_lifecycle import TargetIntegrationLifecycle
+from nexus.orchestrator.worktree_manager import WorktreeManager
 from nexus.services.runtime_workforce_admission import _binding_payload, _sha256_json
 
 
@@ -1130,7 +1130,6 @@ def test_recovery_authority_normalizes_only_historical_mixed_pair(tmp_path: Path
                  integration_receipt=None, integration_result_sha=None, integration_execution=None,
                  status_history=[])
     service._write_state("closure-bind", state)
-    before = service._state_path("closure-bind").read_bytes()
     recovery_approval = {**approval, "approval_id": "integrate-recovery",
                          "expected_canonical_head": candidate}
     rebound = service.normalize_integration_recovery_authority(
