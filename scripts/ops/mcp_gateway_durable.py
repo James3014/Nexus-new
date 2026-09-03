@@ -312,6 +312,7 @@ GATEWAY_ENTRYPOINT = "scripts/ops/nexus_mcp_gateway_http.py"
 GATEWAY_STATE_ROOT = Path("/Users/jameschen/Library/Application Support/Nexus/gateway-direct")
 GATEWAY_DEPLOYMENTS_ROOT = GATEWAY_STATE_ROOT / "deployments"
 GATEWAY_SOURCE_BUNDLES_ROOT = GATEWAY_STATE_ROOT / "source-bundles"
+GATEWAY_PREDECESSOR_ARTIFACT_ROOT = GATEWAY_STATE_ROOT / "predecessor-artifacts"
 GATEWAY_REPOSITORY = GATEWAY_STATE_ROOT / "repository.git"
 GATEWAY_RECOVERY_AUTHORITY_STORE = GATEWAY_STATE_ROOT / "recovery-authority.json"
 RECOVERY_AUTHORITY_SOURCE_PATH = RECOVERY_RECEIPT_PATH
@@ -780,9 +781,23 @@ def _r1_mirror_fresh_main() -> tuple[str, str]:
     return fresh_main, fresh_tree
 
 
-def _r1_entrypoint_identity(commit: str) -> RecoveryEntrypointIdentity:
-    root = str(HOST_AUTHORITY_SOURCE_ROOT)
-    entry = str(_r1_run("git", "-C", root, "ls-tree", commit, "--", GATEWAY_ENTRYPOINT))
+def _r1_source_command(source: Path, *, bare: bool) -> tuple[str, ...]:
+    return (
+        ("git", "--git-dir", str(source))
+        if bare
+        else ("git", "-C", str(source))
+    )
+
+
+def _r1_entrypoint_identity(
+    commit: str,
+    *,
+    source: Path | None = None,
+    bare: bool = False,
+) -> RecoveryEntrypointIdentity:
+    source = Path(HOST_AUTHORITY_SOURCE_ROOT) if source is None else Path(source)
+    command = _r1_source_command(source, bare=bare)
+    entry = str(_r1_run(*command, "ls-tree", commit, "--", GATEWAY_ENTRYPOINT))
     metadata, separator, tracked = entry.partition("\t")
     fields = metadata.split()
     if (
@@ -795,7 +810,7 @@ def _r1_entrypoint_identity(commit: str) -> RecoveryEntrypointIdentity:
     ):
         raise _gateway_error("R1 tracked entrypoint identity invalid")
     payload = _r1_run(
-        "git", "-C", root, "cat-file", "blob", fields[2], bytes_output=True
+        *command, "cat-file", "blob", fields[2], bytes_output=True
     )
     return RecoveryEntrypointIdentity(
         path=GATEWAY_ENTRYPOINT,
@@ -805,16 +820,51 @@ def _r1_entrypoint_identity(commit: str) -> RecoveryEntrypointIdentity:
     )
 
 
-def _r1_reject_gitlinks(commit: str) -> None:
-    tree = str(
-        _r1_run(
-            "git", "-C", str(HOST_AUTHORITY_SOURCE_ROOT),
-            "ls-tree", "-r", commit,
-        )
-    )
-    for row in tree.splitlines():
-        if row.split(maxsplit=1)[:1] == ["160000"]:
-            raise _gateway_error("R1 Gitlink is forbidden")
+def _r1_gitlink_paths(commit: str) -> tuple[Path, ...]:
+    raw = bytes(_r1_run(
+        "git", "--git-dir", str(GATEWAY_REPOSITORY),
+        "ls-tree", "-rz", commit,
+        bytes_output=True,
+    ))
+    paths: list[Path] = []
+    for row in raw.split(b"\0"):
+        if not row:
+            continue
+        try:
+            metadata, encoded_path = row.split(b"\t", 1)
+            mode, kind, oid = metadata.decode("ascii").split()
+            path = Path(encoded_path.decode("utf-8", errors="strict"))
+        except (UnicodeError, ValueError) as exc:
+            raise _gateway_error("R1 Gitlink tree entry malformed", exc) from exc
+        if mode != "160000":
+            continue
+        if kind != "commit" or not re.fullmatch(r"[0-9a-f]{40}", oid):
+            raise _gateway_error("R1 Gitlink tree identity invalid")
+        if path.is_absolute() or not path.parts or any(part in {"", ".", ".."} for part in path.parts):
+            raise _gateway_error("R1 Gitlink path invalid")
+        paths.append(path)
+    return tuple(paths)
+
+
+def _r1_verify_inert_gitlinks(worktree: Path, commit: str) -> None:
+    for relative in _r1_gitlink_paths(commit):
+        current = worktree
+        for part in relative.parts:
+            current = current / part
+            try:
+                info = os.lstat(current)
+            except FileNotFoundError:
+                break
+            except OSError as exc:
+                raise _gateway_error("R1 Gitlink path unreadable", exc) from exc
+            if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                raise _gateway_error("R1 Gitlink path substituted")
+        else:
+            try:
+                if any(current.iterdir()):
+                    raise _gateway_error("R1 Gitlink path populated")
+            except OSError as exc:
+                raise _gateway_error("R1 Gitlink path unreadable", exc) from exc
 
 
 def _r1_interpreter_identity() -> Any:
@@ -836,21 +886,20 @@ def _r1_interpreter_identity() -> Any:
     )
 
 
-def _r1_derive_source_set(receipt: RecoveryAuthorityReceipt) -> RecoverySourceSet:
-    root = str(HOST_AUTHORITY_SOURCE_ROOT)
-    commits = (
-        receipt.accepted_source_merge,
-        receipt.desired_commit,
-        receipt.predecessor_commit,
-    )
-    for commit in commits:
+def _r1_derive_source_set(
+    receipt: RecoveryAuthorityReceipt,
+    predecessor_store: Path,
+) -> RecoverySourceSet:
+    mirror = Path(HOST_AUTHORITY_SOURCE_ROOT)
+    commits = (receipt.accepted_source_merge, receipt.desired_commit, receipt.predecessor_commit)
+    sources = ((mirror, False), (mirror, False), (predecessor_store, True))
+    for commit, (source, bare) in zip(commits, sources, strict=True):
         if not re.fullmatch(r"[0-9a-f]{40}", commit):
             raise _gateway_error("R1 semantic commit malformed")
-        _r1_run("git", "-C", root, "cat-file", "-e", f"{commit}^{{commit}}")
-        _r1_reject_gitlinks(commit)
+        _r1_run(*_r1_source_command(source, bare=bare), "cat-file", "-e", f"{commit}^{{commit}}")
     trees = tuple(
-        str(_r1_run("git", "-C", root, "rev-parse", f"{commit}^{{tree}}"))
-        for commit in commits
+        str(_r1_run(*_r1_source_command(source, bare=bare), "rev-parse", f"{commit}^{{tree}}"))
+        for commit, (source, bare) in zip(commits, sources, strict=True)
     )
     if trees != (
         receipt.accepted_source_tree,
@@ -862,13 +911,15 @@ def _r1_derive_source_set(receipt: RecoveryAuthorityReceipt) -> RecoverySourceSe
         "repository": REPOSITORY,
         "accepted_commit": commits[0],
         "accepted_tree": trees[0],
-        "accepted_entrypoint": _r1_entrypoint_identity(commits[0]),
+        "accepted_entrypoint": _r1_entrypoint_identity(commits[0], source=mirror),
         "desired_commit": commits[1],
         "desired_tree": trees[1],
-        "desired_entrypoint": _r1_entrypoint_identity(commits[1]),
+        "desired_entrypoint": _r1_entrypoint_identity(commits[1], source=mirror),
         "predecessor_commit": commits[2],
         "predecessor_tree": trees[2],
-        "predecessor_entrypoint": _r1_entrypoint_identity(commits[2]),
+        "predecessor_entrypoint": _r1_entrypoint_identity(
+            commits[2], source=predecessor_store, bare=True
+        ),
         "interpreter": _r1_interpreter_identity(),
     }
     source_set = RecoverySourceSet(
@@ -919,6 +970,68 @@ _R1_ROLE_REFS = (
     ("desired", "refs/nexus-r1/desired"),
     ("predecessor", "refs/nexus-r1/predecessor"),
 )
+_R1_PREDECESSOR_ARTIFACT_REF = "refs/nexus-r1/predecessor-artifact"
+
+
+def _r1_predecessor_artifact_path(receipt: RecoveryAuthorityReceipt) -> Path:
+    return Path(GATEWAY_PREDECESSOR_ARTIFACT_ROOT) / (
+        f"{receipt.predecessor_artifact_sha256}.bundle"
+    )
+
+
+def _r1_verify_predecessor_artifact(
+    receipt: RecoveryAuthorityReceipt,
+) -> tuple[Path, Path]:
+    root = _r1_safe_directory(GATEWAY_PREDECESSOR_ARTIFACT_ROOT)
+    artifact = _r1_predecessor_artifact_path(receipt)
+    try:
+        info = os.lstat(artifact)
+    except OSError as exc:
+        raise _gateway_error("R1 predecessor artifact unavailable", exc) from exc
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or not stat.S_ISREG(info.st_mode)
+        or info.st_uid != HOST_UID
+        or info.st_gid != HOST_GID
+        or stat.S_IMODE(info.st_mode) != 0o600
+        or info.st_size != receipt.predecessor_artifact_size
+    ):
+        raise _gateway_error("R1 predecessor artifact identity invalid")
+    try:
+        payload = artifact.read_bytes()
+    except OSError as exc:
+        raise _gateway_error("R1 predecessor artifact unreadable", exc) from exc
+    if hashlib.sha256(payload).hexdigest() != receipt.predecessor_artifact_sha256:
+        raise _gateway_error("R1 predecessor artifact hash mismatch")
+
+    scratch = Path(tempfile.mkdtemp(prefix=".predecessor-artifact.", dir=root))
+    try:
+        os.chmod(scratch, 0o700)
+        source = scratch / "source.git"
+        _r1_run("git", "init", "--bare", str(source))
+        # Verification against an empty object database proves the bundle has
+        # no prerequisite dependency on a caller checkout or authority mirror.
+        _r1_run("git", "--git-dir", str(source), "bundle", "verify", str(artifact))
+        lines = str(_r1_run("git", "bundle", "list-heads", str(artifact))).splitlines()
+        if len(lines) != 1:
+            raise _gateway_error("R1 predecessor artifact role count mismatch")
+        commit, ref = lines[0].split(maxsplit=1)
+        if ref != _R1_PREDECESSOR_ARTIFACT_REF or commit != receipt.predecessor_commit:
+            raise _gateway_error("R1 predecessor artifact role/head mismatch")
+        _r1_run(
+            "git", "--git-dir", str(source), "fetch", "--no-tags", str(artifact),
+            f"+{ref}:{ref}",
+        )
+        _r1_run("git", "--git-dir", str(source), "fsck", "--full", "--strict")
+        if _r1_run("git", "--git-dir", str(source), "rev-parse", f"{commit}^{{tree}}") != receipt.predecessor_tree:
+            raise _gateway_error("R1 predecessor artifact tree mismatch")
+        entrypoint = _r1_entrypoint_identity(commit, source=source, bare=True)
+        if entrypoint != receipt.source_set.predecessor_entrypoint:
+            raise _gateway_error("R1 predecessor artifact entrypoint mismatch")
+        return scratch, source
+    except Exception:
+        shutil.rmtree(scratch, ignore_errors=True)
+        raise
 
 
 def _r1_bundle_heads(bundle: Path) -> tuple[BundleRoleHead, ...]:
@@ -940,6 +1053,7 @@ def _r1_bundle_heads(bundle: Path) -> tuple[BundleRoleHead, ...]:
 def _r1_create_or_verify_bundle(
     receipt: RecoveryAuthorityReceipt,
     fresh_main: str,
+    predecessor_store: Path,
 ) -> tuple[Path, tuple[BundleRoleHead, ...]]:
     bundles = _r1_safe_directory(GATEWAY_SOURCE_BUNDLES_ROOT)
     bundle = bundles / f"{receipt.receipt_hash}.bundle"
@@ -966,10 +1080,15 @@ def _r1_create_or_verify_bundle(
         source = scratch / "source.git"
         candidate = scratch / "candidate.bundle"
         _r1_run("git", "init", "--bare", str(source))
-        for (_, ref), commit in zip(_R1_ROLE_REFS, expected, strict=True):
+        for (role, ref), commit in zip(_R1_ROLE_REFS, expected, strict=True):
+            source_root = (
+                predecessor_store
+                if role == "predecessor"
+                else Path(HOST_AUTHORITY_SOURCE_ROOT)
+            )
             _r1_run(
                 "git", "--git-dir", str(source), "fetch", "--no-tags",
-                str(HOST_AUTHORITY_SOURCE_ROOT), f"+{commit}:{ref}",
+                str(source_root), f"+{commit}:{ref}",
             )
         _r1_run(
             "git", "--git-dir", str(source), "bundle", "create",
@@ -993,10 +1112,13 @@ def _r1_create_or_verify_bundle(
             or stat.S_IMODE(info.st_mode) != 0o600
         ):
             raise _gateway_error("R1 persisted bundle identity invalid")
-    _r1_run(
-        "git", "-C", str(HOST_AUTHORITY_SOURCE_ROOT),
-        "bundle", "verify", str(bundle),
-    )
+    verify_scratch = Path(tempfile.mkdtemp(prefix=".bundle-verify.", dir=bundles))
+    try:
+        verify_store = verify_scratch / "verify.git"
+        _r1_run("git", "init", "--bare", str(verify_store))
+        _r1_run("git", "--git-dir", str(verify_store), "bundle", "verify", str(bundle))
+    finally:
+        shutil.rmtree(verify_scratch, ignore_errors=True)
     heads = _r1_bundle_heads(bundle)
     if tuple(head.commit for head in heads) != expected:
         raise _gateway_error("R1 named bundle role/commit mismatch")
@@ -1119,6 +1241,7 @@ def _r1_verify_worktree(path: Path, manifest: DeploymentManifest) -> Path:
         raise _gateway_error("R1 worktree common-dir escaped")
     if _r1_run("git", "-C", str(path), "remote", "get-url", "origin") != HOST_AUTHORITY_REMOTE:
         raise _gateway_error("R1 worktree origin mismatch")
+    _r1_verify_inert_gitlinks(path, manifest.commit)
     if (
         _r1_run("git", "-C", str(path), "status", "--porcelain")
         or _r1_run("git", "-C", str(path), "rev-parse", "HEAD") != manifest.commit
@@ -1286,41 +1409,45 @@ def _prepare_recovery_source(
     except ContractError as exc:
         raise _gateway_error("R1 source authority rejected", exc) from exc
     _, fresh_main, fresh_tree = _r1_local_receipt(receipt)
-    _r1_reject_gitlinks(fresh_main)
     root = str(HOST_AUTHORITY_SOURCE_ROOT)
     for commit in (
         receipt.accepted_source_merge,
         receipt.desired_commit,
-        receipt.predecessor_commit,
     ):
         if _r1_run(
             "git", "-C", root, "merge-base", "--is-ancestor", commit, fresh_main
         ) != "":
             raise _gateway_error("R1 semantic commit outside fresh main")
-    source_set = _r1_derive_source_set(receipt)
-    desired_manifest = derive_deployment_manifest(source_set, role="desired")
-    predecessor_manifest = derive_deployment_manifest(source_set, role="predecessor")
-    if (
-        source_set != receipt.source_set
-        or desired_manifest != receipt.desired_manifest
-        or predecessor_manifest != receipt.predecessor_manifest
-        or request.desired_manifest_id != desired_manifest.deployment_id
-        or request.desired_manifest_hash != desired_manifest.manifest_sha256
-        or request.predecessor_manifest_id != predecessor_manifest.deployment_id
-        or request.predecessor_manifest_hash != predecessor_manifest.manifest_sha256
-    ):
-        raise _gateway_error("R1 manager-derived identity mismatch")
-    bundle, heads = _r1_create_or_verify_bundle(receipt, fresh_main)
-    bare_store = _r1_import_bundle(bundle, heads)
-    evidence = _r1_bundle_evidence(
-        request, receipt, fresh_main, fresh_tree, bundle, heads, bare_store
-    )
-    evidence = _persist_or_load_recovery_evidence(request, receipt, evidence)
-    return _R1PreparedSource(
-        desired_manifest=desired_manifest,
-        predecessor_manifest=predecessor_manifest,
-        bundle_evidence=evidence,
-    )
+    artifact_scratch, predecessor_store = _r1_verify_predecessor_artifact(receipt)
+    try:
+        source_set = _r1_derive_source_set(receipt, predecessor_store)
+        desired_manifest = derive_deployment_manifest(source_set, role="desired")
+        predecessor_manifest = derive_deployment_manifest(source_set, role="predecessor")
+        if (
+            source_set != receipt.source_set
+            or desired_manifest != receipt.desired_manifest
+            or predecessor_manifest != receipt.predecessor_manifest
+            or request.desired_manifest_id != desired_manifest.deployment_id
+            or request.desired_manifest_hash != desired_manifest.manifest_sha256
+            or request.predecessor_manifest_id != predecessor_manifest.deployment_id
+            or request.predecessor_manifest_hash != predecessor_manifest.manifest_sha256
+        ):
+            raise _gateway_error("R1 manager-derived identity mismatch")
+        bundle, heads = _r1_create_or_verify_bundle(
+            receipt, fresh_main, predecessor_store
+        )
+        bare_store = _r1_import_bundle(bundle, heads)
+        evidence = _r1_bundle_evidence(
+            request, receipt, fresh_main, fresh_tree, bundle, heads, bare_store
+        )
+        evidence = _persist_or_load_recovery_evidence(request, receipt, evidence)
+        return _R1PreparedSource(
+            desired_manifest=desired_manifest,
+            predecessor_manifest=predecessor_manifest,
+            bundle_evidence=evidence,
+        )
+    finally:
+        shutil.rmtree(artifact_scratch, ignore_errors=True)
 
 
 def _promote_recovery_source(prepared: _R1PreparedSource) -> _R1StageResult:

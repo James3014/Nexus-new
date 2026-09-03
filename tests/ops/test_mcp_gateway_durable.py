@@ -288,7 +288,10 @@ def test_r1b1_staging_does_not_accept_caller_selected_git_refs():
     assert tuple(parameters) == ("request", "receipt")
 
 
-def _r1b1_fixture(tmp_path, monkeypatch, *, identity_seed=None):
+def _r1b1_fixture(
+    tmp_path, monkeypatch, *, identity_seed=None, gitlink=False,
+    gitlink_path="nested-repository",
+):
     from nexus.contracts.gateway_deployment import (
         RECOVERY_CARD_PATH,
         RECOVERY_CARD_SHA256,
@@ -325,7 +328,7 @@ def _r1b1_fixture(tmp_path, monkeypatch, *, identity_seed=None):
     subprocess.run(["git", "-C", str(mirror), "remote", "add", "origin", str(mirror)], check=True)
     entrypoint = mirror / "scripts/ops/nexus_mcp_gateway_http.py"
     entrypoint.parent.mkdir(parents=True)
-    entrypoint.write_text(f"ROLE = 'predecessor'\nSEED = '{seed}'\n")
+    entrypoint.write_text(f"ROLE = 'base'\nSEED = '{seed}'\n")
     entrypoint.chmod(0o644)
     package = mirror / "nexus/orchestrator"
     package.mkdir(parents=True)
@@ -345,10 +348,33 @@ def _r1b1_fixture(tmp_path, monkeypatch, *, identity_seed=None):
         + "LIFECYCLE_REVISION = 'nexus.lifecycle.gateway.v2'\n"
     )
     subprocess.run(["git", "-C", str(mirror), "add", "-A"], check=True)
-    subprocess.run(["git", "-C", str(mirror), "commit", "-q", "-m", "b1"], check=True)
-    predecessor = subprocess.check_output(["git", "-C", str(mirror), "rev-parse", "HEAD"], text=True).strip()
+    subprocess.run(["git", "-C", str(mirror), "commit", "-q", "-m", "b1-base"], check=True)
+    base = subprocess.check_output(
+        ["git", "-C", str(mirror), "rev-parse", "HEAD"], text=True
+    ).strip()
+    subprocess.run(["git", "-C", str(mirror), "switch", "-q", "-c", "predecessor-side"], check=True)
+    entrypoint.write_text(f"ROLE = 'predecessor'\nSEED = '{seed}'\n")
+    subprocess.run(["git", "-C", str(mirror), "add", "-A"], check=True)
+    subprocess.run(["git", "-C", str(mirror), "commit", "-q", "-m", "b1-predecessor"], check=True)
+    predecessor = subprocess.check_output(
+        ["git", "-C", str(mirror), "rev-parse", "HEAD"], text=True
+    ).strip()
+    subprocess.run(
+        ["git", "-C", str(mirror), "update-ref", "refs/nexus-r1/predecessor-artifact", predecessor],
+        check=True,
+    )
+    subprocess.run(["git", "-C", str(mirror), "switch", "-q", "main"], check=True)
+    subprocess.run(["git", "-C", str(mirror), "reset", "--hard", "-q", base], check=True)
     entrypoint.write_text(f"ROLE = 'desired'\nSEED = '{seed}'\n")
     subprocess.run(["git", "-C", str(mirror), "add", "-A"], check=True)
+    if gitlink:
+        subprocess.run(
+            [
+                "git", "-C", str(mirror), "update-index", "--add", "--cacheinfo",
+                f"160000,{predecessor},{gitlink_path}",
+            ],
+            check=True,
+        )
     subprocess.run(["git", "-C", str(mirror), "commit", "-q", "-m", "b1-desired"], check=True)
     desired = subprocess.check_output(["git", "-C", str(mirror), "rev-parse", "HEAD"], text=True).strip()
     entrypoint.write_text(f"ROLE = 'accepted'\nSEED = '{seed}'\n")
@@ -368,6 +394,7 @@ def _r1b1_fixture(tmp_path, monkeypatch, *, identity_seed=None):
     state.chmod(0o700)
     monkeypatch.setattr(g, "GATEWAY_STATE_ROOT", state)
     monkeypatch.setattr(g, "GATEWAY_SOURCE_BUNDLES_ROOT", state / "source-bundles")
+    monkeypatch.setattr(g, "GATEWAY_PREDECESSOR_ARTIFACT_ROOT", state / "predecessor-artifacts")
     monkeypatch.setattr(g, "GATEWAY_REPOSITORY", state / "repository.git")
     monkeypatch.setattr(g, "GATEWAY_DEPLOYMENTS_ROOT", state / "deployments")
     monkeypatch.setattr(g, "GATEWAY_RECOVERY_AUTHORITY_STORE", state / "recovery-authority.json")
@@ -414,9 +441,24 @@ def _r1b1_fixture(tmp_path, monkeypatch, *, identity_seed=None):
     )
     desired_manifest = derive_deployment_manifest(source_set, role="desired")
     predecessor_manifest = derive_deployment_manifest(source_set, role="predecessor")
+    artifact_root = g.GATEWAY_PREDECESSOR_ARTIFACT_ROOT
+    artifact_root.mkdir(mode=0o700)
+    artifact_candidate = artifact_root / "candidate.bundle"
+    subprocess.run(
+        [
+            "git", "-C", str(mirror), "bundle", "create", str(artifact_candidate),
+            "refs/nexus-r1/predecessor-artifact",
+        ],
+        check=True,
+    )
+    artifact_candidate.chmod(0o600)
+    artifact_bytes = artifact_candidate.read_bytes()
+    artifact_sha256 = hashlib.sha256(artifact_bytes).hexdigest()
+    artifact = artifact_root / f"{artifact_sha256}.bundle"
+    artifact_candidate.rename(artifact)
     receipt_values = {
         "schema": RecoveryAuthorityReceipt.SCHEMA,
-        "receipt_version": 1,
+        "receipt_version": 2,
         "receipt_id": "receipt-1",
         "card_sha256": RECOVERY_CARD_SHA256,
         "source_base_merge": SOURCE_BASE_MERGE,
@@ -458,6 +500,9 @@ def _r1b1_fixture(tmp_path, monkeypatch, *, identity_seed=None):
         "desired_tree": tree(desired),
         "predecessor_commit": predecessor,
         "predecessor_tree": tree(predecessor),
+        "predecessor_artifact_format": "git-bundle-self-contained-v1",
+        "predecessor_artifact_sha256": artifact_sha256,
+        "predecessor_artifact_size": len(artifact_bytes),
         "source_set": source_set,
         "desired_manifest": desired_manifest,
         "predecessor_manifest": predecessor_manifest,
@@ -497,6 +542,7 @@ def _r1b1_fixture(tmp_path, monkeypatch, *, identity_seed=None):
         "predecessor": predecessor,
         "desired_manifest": desired_manifest,
         "predecessor_manifest": predecessor_manifest,
+        "predecessor_artifact": artifact,
     }
 
 
@@ -516,6 +562,13 @@ def test_r1b1_real_git_bundle_bare_store_and_two_detached_worktrees(tmp_path, mo
     predecessor_path = Path(outcome.physical_observation["predecessor_path"])
     assert desired_path.is_dir() and predecessor_path.is_dir()
     assert g.GATEWAY_REPOSITORY.is_dir()
+    assert subprocess.run(
+        [
+            "git", "-C", str(fixture["mirror"]), "merge-base", "--is-ancestor",
+            fixture["predecessor"], "main",
+        ],
+        check=False,
+    ).returncode == 1
     shutil.rmtree(fixture["mirror"])
     for worktree, commit, manifest in (
         (desired_path, fixture["desired"], fixture["desired_manifest"]),
@@ -726,8 +779,12 @@ def test_r1b1_wrong_owner_and_accepted_tree_mismatch_fail_closed(tmp_path, monke
         ),
     }
     altered = receipt.__class__(**altered_values)
-    with pytest.raises(g.GatewayContractError, match="commit/tree"):
-        g._r1_derive_source_set(altered)
+    artifact_scratch, predecessor_store = g._r1_verify_predecessor_artifact(receipt)
+    try:
+        with pytest.raises(g.GatewayContractError, match="commit/tree"):
+            g._r1_derive_source_set(altered, predecessor_store)
+    finally:
+        shutil.rmtree(artifact_scratch, ignore_errors=True)
 
 
 def test_r1b1_reuse_tamper_common_dir_and_bundle_tamper_block(tmp_path, monkeypatch):
@@ -904,27 +961,234 @@ def test_r1b1_bounded_subprocess_import_failure_is_rejected(tmp_path, monkeypatc
         g._r1_import_witness(root)
 
 
-def test_r1b1_fresh_main_gitlink_is_rejected(tmp_path, monkeypatch):
-    fixture = _r1b1_fixture(tmp_path, monkeypatch)
-    subprocess.run(
-        [
-            "git", "-C", str(fixture["mirror"]), "update-index", "--add",
-            "--cacheinfo", f"160000,{fixture['desired']},nested-repository",
-        ],
-        check=True,
+def test_g20_exact_tree_gitlink_stages_inert_without_recursive_git_commands(tmp_path, monkeypatch):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch, gitlink=True)
+    commands = []
+    real_run = g._r1_run
+
+    def recording_run(*command, **kwargs):
+        commands.append(command)
+        return real_run(*command, **kwargs)
+
+    monkeypatch.setattr(g, "_r1_run", recording_run)
+    staged = g.stage_verified_git_store(fixture["request"], fixture["receipt"])
+    for deployment in (staged.desired_path,):
+        gitlink = deployment / "nested-repository"
+        assert not gitlink.exists() or (gitlink.is_dir() and not any(gitlink.iterdir()))
+        assert g._r1_verify_worktree(deployment, fixture["desired_manifest"]) == deployment
+    flattened = [part for command in commands for part in command]
+    assert "submodule" not in flattened
+    assert not any("recurse-submodules" in part for part in flattened)
+
+
+def test_g20_nested_gitlink_path_is_recursively_enumerated_and_fails_closed(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b1_fixture(
+        tmp_path, monkeypatch, gitlink=True, gitlink_path="packages/core"
     )
-    subprocess.run(
-        ["git", "-C", str(fixture["mirror"]), "commit", "-q", "-m", "gitlink"],
-        check=True,
-    )
-    head = subprocess.check_output(
-        ["git", "-C", str(fixture["mirror"]), "rev-parse", "HEAD"], text=True
-    ).strip()
+    staged = g.stage_verified_git_store(fixture["request"], fixture["receipt"])
+    assert Path("packages/core") in g._r1_gitlink_paths(fixture["desired"])
+    gitlink = staged.desired_path / "packages/core"
+    if gitlink.exists():
+        shutil.rmtree(gitlink)
+    gitlink.mkdir(parents=True)
+    (gitlink / "payload").write_text("substituted")
     with pytest.raises(g.GatewayContractError, match="Gitlink"):
-        g._r1_reject_gitlinks(head)
-    with pytest.raises(g.GatewayContractError, match="dirty|Gitlink"):
+        g._r1_verify_worktree(staged.desired_path, fixture["desired_manifest"])
+
+
+@pytest.mark.parametrize("substitution", ["file", "symlink", "populated", "nested-git"])
+def test_g20_populated_or_substituted_gitlink_path_fails_closed(
+    tmp_path, monkeypatch, substitution
+):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch, gitlink=True)
+    staged = g.stage_verified_git_store(fixture["request"], fixture["receipt"])
+    gitlink = staged.desired_path / "nested-repository"
+    if gitlink.exists():
+        shutil.rmtree(gitlink)
+    if substitution == "file":
+        gitlink.write_text("substituted")
+    elif substitution == "symlink":
+        gitlink.symlink_to(staged.desired_path / g.GATEWAY_ENTRYPOINT)
+    else:
+        gitlink.mkdir()
+        (gitlink / (".git" if substitution == "nested-git" else "payload")).write_text("x")
+    with pytest.raises(g.GatewayContractError, match="Gitlink"):
+        g._r1_verify_worktree(staged.desired_path, fixture["desired_manifest"])
+
+
+@pytest.mark.parametrize("tamper", ["missing", "mode"])
+def test_g20_predecessor_artifact_tamper_blocks_before_promotion(
+    tmp_path, monkeypatch, tamper
+):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    artifact = fixture["predecessor_artifact"]
+    if tamper == "missing":
+        artifact.unlink()
+    else:
+        artifact.chmod(0o644)
+    with pytest.raises(g.GatewayContractError, match="artifact"):
         g.stage_verified_git_store(fixture["request"], fixture["receipt"])
-    assert not g.GATEWAY_SOURCE_BUNDLES_ROOT.exists()
+    assert not g.GATEWAY_DEPLOYMENTS_ROOT.exists()
+
+
+@pytest.mark.parametrize("identity_field", ["st_uid", "st_gid"])
+def test_g20_predecessor_artifact_wrong_owner_identity_fails_before_promotion(
+    tmp_path, monkeypatch, identity_field
+):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    artifact = fixture["predecessor_artifact"]
+    actual_lstat = g.os.lstat
+
+    def wrong_identity(path):
+        info = actual_lstat(path)
+        if Path(path) != artifact:
+            return info
+        values = {
+            name: getattr(info, name)
+            for name in dir(info)
+            if name.startswith("st_")
+        }
+        values[identity_field] = getattr(info, identity_field) + 1
+        return SimpleNamespace(**values)
+
+    monkeypatch.setattr(g.os, "lstat", wrong_identity)
+    with pytest.raises(
+        g.GatewayContractError,
+        match="R1 predecessor artifact identity invalid",
+    ):
+        g._r1_verify_predecessor_artifact(fixture["receipt"])
+    assert not g.GATEWAY_DEPLOYMENTS_ROOT.exists()
+
+
+def test_g20_predecessor_artifact_wrong_size_fails_before_promotion(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    artifact = fixture["predecessor_artifact"]
+    artifact.write_bytes(artifact.read_bytes() + b"tamper")
+    with pytest.raises(
+        g.GatewayContractError,
+        match="R1 predecessor artifact identity invalid",
+    ):
+        g._r1_verify_predecessor_artifact(fixture["receipt"])
+    assert not g.GATEWAY_DEPLOYMENTS_ROOT.exists()
+
+
+def test_g20_predecessor_artifact_same_size_wrong_sha_fails_before_promotion(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    artifact = fixture["predecessor_artifact"]
+    payload = artifact.read_bytes()
+    artifact.write_bytes(bytes([payload[0] ^ 1]) + payload[1:])
+    with pytest.raises(
+        g.GatewayContractError,
+        match="R1 predecessor artifact hash mismatch",
+    ):
+        g._r1_verify_predecessor_artifact(fixture["receipt"])
+    assert artifact.stat().st_size == fixture["receipt"].predecessor_artifact_size
+    assert not g.GATEWAY_DEPLOYMENTS_ROOT.exists()
+
+
+def test_g20_predecessor_artifact_tree_mismatch_fails_before_promotion(
+    tmp_path, monkeypatch
+):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    receipt = fixture["receipt"]
+    altered = receipt.__class__(**{**receipt.__dict__, "predecessor_tree": "f" * 40})
+    with pytest.raises(
+        g.GatewayContractError,
+        match="R1 predecessor artifact tree mismatch",
+    ):
+        g._r1_verify_predecessor_artifact(altered)
+    assert not g.GATEWAY_DEPLOYMENTS_ROOT.exists()
+
+
+@pytest.mark.parametrize(
+    ("identity_field", "wrong_value"),
+    [
+        ("blob_oid", "f" * 40),
+        ("sha256", "f" * 64),
+        ("tracked_mode", "100755"),
+    ],
+)
+def test_g20_predecessor_artifact_entrypoint_identity_mismatch_fails_before_promotion(
+    tmp_path, monkeypatch, identity_field, wrong_value
+):
+    from nexus.contracts.gateway_deployment import (
+        RecoveryEntrypointIdentity,
+        RecoverySourceSet,
+    )
+
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    receipt = fixture["receipt"]
+    entrypoint = receipt.source_set.predecessor_entrypoint
+    altered_entrypoint = RecoveryEntrypointIdentity(
+        **{**entrypoint.__dict__, identity_field: wrong_value}
+    )
+    source_set = RecoverySourceSet(
+        **{
+            **receipt.source_set.__dict__,
+            "predecessor_entrypoint": altered_entrypoint,
+        }
+    )
+    altered = receipt.__class__(**{**receipt.__dict__, "source_set": source_set})
+    with pytest.raises(
+        g.GatewayContractError,
+        match="R1 predecessor artifact entrypoint mismatch",
+    ):
+        g._r1_verify_predecessor_artifact(altered)
+    assert not g.GATEWAY_DEPLOYMENTS_ROOT.exists()
+
+
+@pytest.mark.parametrize("variant", ["wrong-ref", "prerequisite-dependent"])
+def test_g20_predecessor_artifact_transport_substitution_fails_closed(
+    tmp_path, monkeypatch, variant
+):
+    from nexus.contracts.gateway_deployment import canonical_hash
+
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    mirror = fixture["mirror"]
+    predecessor = fixture["predecessor"]
+    artifact_root = g.GATEWAY_PREDECESSOR_ARTIFACT_ROOT
+    candidate = artifact_root / f"{variant}.bundle"
+    if variant == "wrong-ref":
+        wrong_ref = "refs/nexus-r1/wrong-predecessor"
+        subprocess.run(
+            ["git", "-C", str(mirror), "update-ref", wrong_ref, predecessor],
+            check=True,
+        )
+        revs = [wrong_ref]
+    else:
+        base = subprocess.check_output(
+            ["git", "-C", str(mirror), "rev-parse", f"{predecessor}^"],
+            text=True,
+        ).strip()
+        revs = ["refs/nexus-r1/predecessor-artifact", f"^{base}"]
+    subprocess.run(
+        ["git", "-C", str(mirror), "bundle", "create", str(candidate), *revs],
+        check=True,
+    )
+    candidate.chmod(0o600)
+    payload = candidate.read_bytes()
+    artifact_sha256 = hashlib.sha256(payload).hexdigest()
+    bound = artifact_root / f"{artifact_sha256}.bundle"
+    candidate.rename(bound)
+    receipt = fixture["receipt"]
+    values = {
+        **receipt.__dict__,
+        "predecessor_artifact_sha256": artifact_sha256,
+        "predecessor_artifact_size": len(payload),
+    }
+    values["receipt_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key != "receipt_hash"
+    })
+    substituted = receipt.__class__(**values)
+    with pytest.raises(g.GatewayContractError, match="artifact|fixed subprocess"):
+        g._r1_verify_predecessor_artifact(substituted)
+    assert not g.GATEWAY_DEPLOYMENTS_ROOT.exists()
 
 
 def test_status_classifies_real_absent_launchctl_service(monkeypatch, tmp_path):
@@ -4393,6 +4657,9 @@ def _r1b2_runtime_payload(fixture):
         "GATEWAY_SOURCE_BUNDLES_ROOT": str(
             fixture["state"] / "source-bundles"
         ),
+        "GATEWAY_PREDECESSOR_ARTIFACT_ROOT": str(
+            fixture["state"] / "predecessor-artifacts"
+        ),
         "GATEWAY_REPOSITORY": str(fixture["state"] / "repository.git"),
         "GATEWAY_DEPLOYMENTS_ROOT": str(fixture["state"] / "deployments"),
         "GATEWAY_RECOVERY_AUTHORITY_STORE": str(
@@ -4409,6 +4676,7 @@ def _r1b2_apply_runtime_payload(payload):
         "HOST_AUTHORITY_SOURCE_ROOT",
         "GATEWAY_STATE_ROOT",
         "GATEWAY_SOURCE_BUNDLES_ROOT",
+        "GATEWAY_PREDECESSOR_ARTIFACT_ROOT",
         "GATEWAY_REPOSITORY",
         "GATEWAY_DEPLOYMENTS_ROOT",
         "GATEWAY_RECOVERY_AUTHORITY_STORE",
@@ -4643,7 +4911,7 @@ def test_r1b2_recovery_concurrent_real_multiprocessing_exactly_one_effect_repeat
             process.join(timeout=30)
             assert process.exitcode == 0
         results = [result_queue.get(timeout=2) for _ in processes]
-        assert {item[0] for item in results} == {"ok"}
+        assert {item[0] for item in results} == {"ok"}, results
         assert {item[1] for item in results} == {"VERIFIED"}
         assert len({item[2] for item in results}) == 1
         assert effect_count.read_text() == "1"
