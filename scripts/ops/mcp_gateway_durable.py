@@ -706,14 +706,14 @@ class _RecoveryAdapters:
     crash_hook: Callable[[str], None]
 
 
-def _r1_run(*command: str, bytes_output: bool = False) -> str | bytes:
+def _r1_run(*command: str, bytes_output: bool = False, timeout: int = 60) -> str | bytes:
     try:
         result = subprocess.run(
             command,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=not bytes_output,
-            timeout=10,
+            timeout=timeout,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
