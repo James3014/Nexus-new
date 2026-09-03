@@ -177,6 +177,7 @@ def _build_model(
     provider: str,
     model_id: str,
     transport_config: Mapping[str, Any] | None = None,
+    runtime_state_root: str | None = None,
 ) -> Any:
     config = dict(transport_config or {})
     if provider == "opencli_chatgpt":
@@ -189,11 +190,19 @@ def _build_model(
         profile = config.get("profile")
         site_session = config.get("site_session")
         timeout_seconds = config.get("timeout_seconds")
-        if not isinstance(executable, str) or not executable.strip() or "\x00" in executable:
+        if (
+            not isinstance(executable, str)
+            or not executable.strip()
+            or "\x00" in executable
+            or not Path(executable.strip()).is_absolute()
+        ):
             raise RuntimeErrorBounded("OPENCLI_WEB_TRANSPORT_CONFIG_INVALID")
-        if not isinstance(profile, str) or "\x00" in profile:
+        if not isinstance(profile, str) or not profile.strip() or "\x00" in profile:
             raise RuntimeErrorBounded("OPENCLI_WEB_TRANSPORT_CONFIG_INVALID")
-        if not isinstance(site_session, str) or not site_session.strip() or "\x00" in site_session:
+        if not isinstance(site_session, str) or site_session.strip() not in {
+            "ephemeral",
+            "persistent",
+        }:
             raise RuntimeErrorBounded("OPENCLI_WEB_TRANSPORT_CONFIG_INVALID")
         if (
             not isinstance(timeout_seconds, int)
@@ -204,9 +213,10 @@ def _build_model(
         return OpenCLIWebChatModel(
             executable=executable.strip(),
             intelligence_level=model_id,
-            profile=profile,
+            profile=profile.strip(),
             timeout_seconds=timeout_seconds,
             site_session=site_session.strip(),
+            runtime_state_root=str(runtime_state_root) if runtime_state_root else None,
         )
     if config:
         raise RuntimeErrorBounded("OPEN_SWE_TRANSPORT_CONFIG_PROVIDER_MISMATCH")
@@ -463,7 +473,7 @@ def _semantic_run(
     *,
     runtime_loader: Callable[[], Mapping[str, Any]] = _load_runtime,
     model_factory: Callable[
-        [Mapping[str, Any], str, str, Mapping[str, Any] | None], Any
+        [Mapping[str, Any], str, str, Mapping[str, Any] | None, str | None], Any
     ] = _build_model,
     graph_factory: Callable[[Any, Path, Mapping[str, Any], str], Any] = build_semantic_graph,
 ) -> dict[str, Any]:
@@ -481,7 +491,13 @@ def _semantic_run(
     started = _write_started(request, "semantic")
     try:
         runtime = runtime_loader()
-        model = model_factory(runtime, provider, model_id, request.get("transport_config"))
+        model = model_factory(
+            runtime,
+            provider,
+            model_id,
+            request.get("transport_config"),
+            request.get("runtime_state_root"),
+        )
         graph = graph_factory(model, root, runtime, f"{provider}:{model_id}")
         if set(executable_tool_surface(graph)) != SEMANTIC_TOOLS:
             raise RuntimeErrorBounded("OPEN_SWE_TOOL_SURFACE_INVALID")
@@ -593,7 +609,7 @@ def _worker_run(
     *,
     runtime_loader: Callable[[], Mapping[str, Any]] = _load_runtime,
     model_factory: Callable[
-        [Mapping[str, Any], str, str, Mapping[str, Any] | None], Any
+        [Mapping[str, Any], str, str, Mapping[str, Any] | None, str | None], Any
     ] = _build_model,
     diagnosis_factory: Callable[[Any, Path, Mapping[str, Any], str], Any] = build_diagnosis_graph,
     repair_factory: Callable[
@@ -628,7 +644,13 @@ def _worker_run(
     try:
         task_id, unit_id, allowed_paths, session_id = _worker_context(request, prompt)
         runtime = runtime_loader()
-        model = model_factory(runtime, provider, model_id, request.get("transport_config"))
+        model = model_factory(
+            runtime,
+            provider,
+            model_id,
+            request.get("transport_config"),
+            request.get("runtime_state_root"),
+        )
         profile_key = f"{provider}:{model_id}"
         diagnosis_graph = diagnosis_factory(model, workspace, runtime, profile_key)
         repair_graph = repair_factory(model, workspace, runtime, allowed_paths, profile_key)

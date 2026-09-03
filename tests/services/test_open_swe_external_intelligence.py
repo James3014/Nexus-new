@@ -193,7 +193,7 @@ def test_opencli_semantic_transport_sends_explicit_binding(tmp_path, monkeypatch
     binding = {
         "executable": "/opt/opencli",
         "profile": "profile-a",
-        "site_session": "session-a",
+        "site_session": "persistent",
         "timeout_seconds": 240,
     }
     transport = module.OpenSWEExternalIntelligenceTransport(
@@ -224,7 +224,7 @@ def test_opencli_worker_transport_sends_explicit_binding(tmp_path, monkeypatch):
     binding = {
         "executable": "/opt/opencli",
         "profile": "profile-a",
-        "site_session": "session-a",
+        "site_session": "persistent",
         "timeout_seconds": 240,
     }
     transport = module.OpenSWEWorkerTransport(
@@ -247,8 +247,8 @@ def test_opencli_worker_transport_sends_explicit_binding(tmp_path, monkeypatch):
 def test_opencli_transport_binding_validation_is_fail_closed(tmp_path):
     module = _module()
     valid = {
-        "executable": "opencli",
-        "profile": "",
+        "executable": "/opt/opencli",
+        "profile": "profile-a",
         "site_session": "ephemeral",
         "timeout_seconds": 30,
     }
@@ -266,8 +266,11 @@ def test_opencli_transport_binding_validation_is_fail_closed(tmp_path):
     )
     for invalid in (
         None,
+        {**valid, "executable": "opencli"},
+        {**valid, "profile": ""},
         {**valid, "timeout_seconds": 29},
         {**valid, "timeout_seconds": 901},
+        {**valid, "site_session": "session-a"},
         {**valid, "extra": "unexpected"},
     ):
         with pytest.raises(
