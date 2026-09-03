@@ -1067,7 +1067,7 @@ def test_integrating_rebind_sets_recovery_fence_and_blocks_normal_paths(tmp_path
     _git(root, "merge", "--ff-only", "candidate")
     state = service._read_state("closure-bind") or {}
     _git(root, "update-ref", state["candidate_ref"], candidate)
-    state.update(status="INTEGRATING", promotion_status="INTEGRATING", merge_performed=False, integration_receipt=None, integration_result_sha=None, integration_execution=None, integration_authorization={"expected_canonical_head": base})
+    state.update(status="INTEGRATING", promotion_status="INTEGRATING", merge_performed=False, integration_receipt=None, integration_result_sha=None, integration_execution=None)
     service._write_state("closure-bind", state)
     recovery_approval = {
         **approval,
@@ -1122,13 +1122,15 @@ def test_integrating_rebind_rejects_mixed_status_pair(tmp_path: Path, status: st
 
 def test_recovery_authority_normalizes_only_historical_mixed_pair(tmp_path: Path, monkeypatch):
     service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
     state = service._read_state("closure-bind") or {}
     _git(root, "merge", "--ff-only", "candidate")
     _git(root, "update-ref", state["candidate_ref"], candidate)
     state.update(status="INTEGRATING", promotion_status="APPROVED", merge_performed=False,
                  integration_receipt=None, integration_result_sha=None, integration_execution=None,
-                 status_history=[], integration_authorization={"expected_canonical_head": base})
+                 status_history=[])
     service._write_state("closure-bind", state)
+    before = service._state_path("closure-bind").read_bytes()
     recovery_approval = {**approval, "approval_id": "integrate-recovery",
                          "expected_canonical_head": candidate}
     rebound = service.normalize_integration_recovery_authority(
@@ -1149,6 +1151,7 @@ def test_recovery_authority_normalizes_only_historical_mixed_pair(tmp_path: Path
 
 def test_recovery_authority_accepts_no_ff_applied_head_and_bound_candidate_tree(tmp_path: Path):
     service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
     state = service._read_state("closure-bind") or {}
     _git(root, "merge", "--no-ff", "candidate", "-m", "applied")
     applied = _git(root, "rev-parse", "HEAD")
@@ -1156,7 +1159,7 @@ def test_recovery_authority_accepts_no_ff_applied_head_and_bound_candidate_tree(
     _git(root, "update-ref", state["candidate_ref"], candidate)
     state.update(status="INTEGRATING", promotion_status="APPROVED", merge_performed=False,
                  integration_receipt=None, integration_result_sha=None, integration_execution=None,
-                 status_history=[], integration_authorization={"expected_canonical_head": base})
+                 status_history=[])
     service._write_state("closure-bind", state)
     rebound = service.normalize_integration_recovery_authority(
         "closure-bind", external_acceptance=acceptance,
@@ -1169,8 +1172,9 @@ def test_recovery_authority_accepts_no_ff_applied_head_and_bound_candidate_tree(
 
 def test_recovery_authority_rejects_effects_and_other_mixed_pair(tmp_path: Path):
     service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
     state = service._read_state("closure-bind") or {}
-    state.update(status="INTEGRATING", promotion_status="APPROVED", merge_performed=True, integration_authorization={"expected_canonical_head": base})
+    state.update(status="INTEGRATING", promotion_status="APPROVED", merge_performed=True)
     service._write_state("closure-bind", state)
     with pytest.raises(RuntimeError, match="RECOVERY_AUTHORITY_EFFECT_ALREADY_RECORDED"):
         service.normalize_integration_recovery_authority(
@@ -1190,18 +1194,22 @@ def test_recovery_authority_rejects_effects_and_other_mixed_pair(tmp_path: Path)
 @pytest.mark.parametrize("effect", ["merge_performed", "integration_result_sha", "integration_receipt", "integration_execution"])
 def test_recovery_authority_locked_cas_rejects_concurrent_effect_insertion(tmp_path: Path, monkeypatch, effect: str):
     service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
     state = service._read_state("closure-bind") or {}
     _git(root, "merge", "--ff-only", "candidate")
     _git(root, "update-ref", state["candidate_ref"], candidate)
     state.update(status="INTEGRATING", promotion_status="APPROVED", merge_performed=False,
                  integration_receipt=None, integration_result_sha=None, integration_execution=None,
-                 status_history=[], integration_authorization={"expected_canonical_head": base})
+                 status_history=[])
     service._write_state("closure-bind", state)
     original_mutate = service._mutate_state
+    raced_bytes = None
     def inject(task_id, mutator):
+        nonlocal raced_bytes
         current = service._read_state(task_id) or {}
         current[effect] = True if effect == "merge_performed" else {}
         service._write_state(task_id, current)
+        raced_bytes = service._state_path(task_id).read_bytes()
         return original_mutate(task_id, mutator)
     monkeypatch.setattr(service, "_mutate_state", inject)
     with pytest.raises(RuntimeError, match="RECOVERY_AUTHORITY_CONCURRENCY_EFFECT_DRIFT"):
@@ -1210,18 +1218,18 @@ def test_recovery_authority_locked_cas_rejects_concurrent_effect_insertion(tmp_p
             approval={**approval, "approval_id": "recover-cas", "expected_canonical_head": candidate},
             runtime_identity=runtime, expected_canonical_head=candidate,
             integration_branch="nexus/integration/canary")
-    after = service._read_state("closure-bind") or {}
-    assert "integration_closure_binding" not in after
+    assert service._state_path("closure-bind").read_bytes() == raced_bytes
 
 
 def test_recovery_authority_exact_replay_only(tmp_path: Path):
     service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
     state = service._read_state("closure-bind") or {}
     _git(root, "merge", "--ff-only", "candidate")
     _git(root, "update-ref", state["candidate_ref"], candidate)
     state.update(status="INTEGRATING", promotion_status="APPROVED", merge_performed=False,
                  integration_receipt=None, integration_result_sha=None, integration_execution=None,
-                 status_history=[], integration_authorization={"expected_canonical_head": base})
+                 status_history=[])
     service._write_state("closure-bind", state)
     recovery = {**approval, "approval_id": "recover-replay", "expected_canonical_head": candidate}
     first = service.normalize_integration_recovery_authority(
@@ -1242,8 +1250,9 @@ def test_recovery_authority_exact_replay_only(tmp_path: Path):
             integration_branch="nexus/integration/canary")
 def test_integrating_rebind_requires_applied_head_and_candidate_ref(tmp_path: Path):
     service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
     state = service._read_state("closure-bind") or {}
-    state.update(status="INTEGRATING", promotion_status="INTEGRATING", merge_performed=False, integration_receipt=None, integration_result_sha=None, integration_execution=None, integration_authorization={"expected_canonical_head": base})
+    state.update(status="INTEGRATING", promotion_status="INTEGRATING", merge_performed=False, integration_receipt=None, integration_result_sha=None, integration_execution=None)
     service._write_state("closure-bind", state)
     with pytest.raises(RuntimeError, match="CLOSURE_INTEGRATING_APPLIED_TREE_REQUIRED"):
         service.bind_candidate_integration_closure(
