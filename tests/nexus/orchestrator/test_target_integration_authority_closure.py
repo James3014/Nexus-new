@@ -1120,6 +1120,53 @@ def test_integrating_rebind_rejects_mixed_status_pair(tmp_path: Path, status: st
         )
 
 
+def test_recovery_authority_normalizes_only_historical_mixed_pair(tmp_path: Path, monkeypatch):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    state = service._read_state("closure-bind") or {}
+    _git(root, "merge", "--ff-only", "candidate")
+    _git(root, "update-ref", state["candidate_ref"], candidate)
+    state.update(status="INTEGRATING", promotion_status="APPROVED", merge_performed=False,
+                 integration_receipt=None, integration_result_sha=None, integration_execution=None,
+                 status_history=[])
+    service._write_state("closure-bind", state)
+    recovery_approval = {**approval, "approval_id": "integrate-recovery",
+                         "expected_canonical_head": candidate}
+    rebound = service.normalize_integration_recovery_authority(
+        "closure-bind", external_acceptance=acceptance, approval=recovery_approval,
+        runtime_identity=runtime, expected_canonical_head=candidate,
+        integration_branch="nexus/integration/canary")
+    assert rebound["status"] == "INTEGRATING"
+    assert rebound["promotion_status"] == "INTEGRATING"
+    assert rebound["integration_recovery_only"] is True
+    assert rebound["integration_closure_binding"]["recovery_only"] is True
+    assert rebound["integration_closure_binding"]["approval_id"] == "integrate-recovery"
+    assert rebound["integration_execution"] is None
+    with pytest.raises(RuntimeError, match="INTEGRATION_RECOVERY_ONLY"):
+        service.integrate_approved("closure-bind")
+    with pytest.raises(RuntimeError, match="INTEGRATION_RECOVERY_ONLY"):
+        service.retry_integration("closure-bind")
+
+
+def test_recovery_authority_rejects_effects_and_other_mixed_pair(tmp_path: Path):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    state = service._read_state("closure-bind") or {}
+    state.update(status="INTEGRATING", promotion_status="APPROVED", merge_performed=True)
+    service._write_state("closure-bind", state)
+    with pytest.raises(RuntimeError, match="RECOVERY_AUTHORITY_EFFECT_ALREADY_RECORDED"):
+        service.normalize_integration_recovery_authority(
+            "closure-bind", external_acceptance=acceptance, approval=approval,
+            runtime_identity=runtime, expected_canonical_head=base,
+            integration_branch="nexus/integration/canary")
+    state["merge_performed"] = False
+    state["promotion_status"] = "INTEGRATING"
+    service._write_state("closure-bind", state)
+    with pytest.raises(RuntimeError, match="RECOVERY_AUTHORITY_MIXED_STATE_REQUIRED"):
+        service.normalize_integration_recovery_authority(
+            "closure-bind", external_acceptance=acceptance, approval=approval,
+            runtime_identity=runtime, expected_canonical_head=base,
+            integration_branch="nexus/integration/canary")
+
+
 def test_integrating_rebind_requires_applied_head_and_candidate_ref(tmp_path: Path):
     service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
     state = service._read_state("closure-bind") or {}
