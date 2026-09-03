@@ -6,11 +6,25 @@ import re
 from pathlib import Path
 from typing import Any
 
-from nexus.engine.learning_policy_store import DEFAULT_LEARNING_POLICY_STORE, LearningPolicyStore
+from nexus.contracts.learning_experience import (
+    LEARNING_POLICY_ADOPTION_SCHEMA,
+    LEARNING_POLICY_ROLLBACK_SCHEMA,
+    project_adoption_into_planner_budget,
+    validate_learning_policy_adoption,
+    validate_learning_policy_rollback,
+)
 from nexus.core.lane_policy_defaults import LANE_POLICY_DEFAULTS
+from nexus.core.lite_route_oracle import (
+    DETERMINISTIC_ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES,
+    GATE_ONLY_RECEIPT_LITE_LANES,
+    ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES,
+)
+from nexus.engine.learning_policy_store import DEFAULT_LEARNING_POLICY_STORE, LearningPolicyStore
 
 DEFAULT_PROMOTED_POLICY_PATH = Path(".nexus") / "policy" / "promoted_learning_policy.json"
 DEFAULT_DYNAMIC_LEARNING_POLICY_PATH = Path(".nexus") / "memory" / "dynamic_learning_policy.json"
+DEFAULT_GOVERNED_ADOPTION_PATH = Path(".nexus") / "policy" / "governed_learning_policy_adoption.json"
+DEFAULT_GOVERNED_ROLLBACK_PATH = Path(".nexus") / "policy" / "governed_learning_policy_rollback.json"
 DEFAULT_ROUTE_COST_POLICY_PATH = Path(".nexus") / "policy" / "promoted_route_cost_policy.json"
 DEFAULT_S2T_POLICY_DRAFT_PATH = Path(".nexus") / "policy" / "promoted_s2t_policy_draft.json"
 _TRUE_VALUES = {"1", "true", "yes", "on"}
@@ -35,11 +49,6 @@ GATE_ONLY_SUPERVISED_CAPABILITIES = frozenset(
     }
 )
 PREFLIGHT_SUPERVISED_CAPABILITIES = frozenset({"codeintel", "memory"})
-from nexus.core.lite_route_oracle import (
-    GATE_ONLY_RECEIPT_LITE_LANES,
-    ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES,
-    DETERMINISTIC_ROUTE_ORACLE_RECEIPT_LITE_CAPABILITIES,
-)
 
 
 def load_learning_policy_budget(path: Path, store: LearningPolicyStore | None = None) -> dict[str, Any]:
@@ -86,39 +95,120 @@ def load_dynamic_learning_policy_budget(path: Path, store: LearningPolicyStore |
     }
 
 
+def load_governed_learning_adoption_budget(
+    project_root: Path,
+    *,
+    task_desc: str,
+    target_model: str,
+    runtime_identity: str,
+    source_revision: str,
+    store: LearningPolicyStore | None = None,
+) -> dict[str, Any]:
+    """Load one durable governed adoption/rollback and project it for this task.
+
+    The store remains a persistence boundary only.  CapabilityPlanner remains the
+    sole capability/route selector because this function produces Planner input
+    data and never mutates a route or executor directly.
+    """
+    policy_store = store or DEFAULT_LEARNING_POLICY_STORE
+    adoption = policy_store.read_json_policy(project_root / DEFAULT_GOVERNED_ADOPTION_PATH)
+    if not adoption:
+        return {}
+    if adoption.get("schema") != LEARNING_POLICY_ADOPTION_SCHEMA:
+        raise ValueError("GOVERNED_ADOPTION_SCHEMA_INVALID")
+    validate_learning_policy_adoption(adoption)
+
+    if str(adoption.get("source_revision") or "") != str(source_revision or ""):
+        return {
+            "learning_policy": {
+                "episodic_memory_injection": {"enabled": False},
+                "adoption_lineage": {
+                    "adoption_id": adoption.get("adoption_id"),
+                    "status": "STALE_SOURCE",
+                    "adoption_source_revision": adoption.get("source_revision"),
+                    "current_source_revision": str(source_revision or ""),
+                },
+            }
+        }
+
+    rollback = policy_store.read_json_policy(project_root / DEFAULT_GOVERNED_ROLLBACK_PATH)
+    if rollback:
+        if rollback.get("schema") != LEARNING_POLICY_ROLLBACK_SCHEMA:
+            raise ValueError("GOVERNED_ROLLBACK_SCHEMA_INVALID")
+        validate_learning_policy_rollback(rollback)
+
+    return project_adoption_into_planner_budget(
+        adoption,
+        task_desc=task_desc,
+        target_model=target_model,
+        runtime_identity=runtime_identity,
+        rollback=rollback or None,
+    )
+
+
+def _merge_learning_policy_payload(
+    base: dict[str, Any],
+    overlay: dict[str, Any],
+) -> dict[str, Any]:
+    if not overlay:
+        return dict(base)
+    merged = dict(base)
+    for key, value in overlay.items():
+        if key in {"source_experiences", "promoted_capabilities", "penalized_capabilities"}:
+            merged[key] = sorted(
+                set((merged.get(key, []) or []) + (value or []))
+            )
+        else:
+            merged[key] = value
+    return merged
+
+
 def merge_runtime_learning_policy(
     project_root: Path,
     budget: dict[str, Any] | None = None,
     store: LearningPolicyStore | None = None,
+    *,
+    task_desc: str = "",
+    target_model: str = "",
+    runtime_identity: str = "",
+    source_revision: str = "",
 ) -> dict[str, Any]:
     merged = dict(budget or {})
-    if isinstance(merged.get("learning_policy"), dict):
-        route_budget = merge_runtime_route_cost_policy(project_root, merged, store=store)
-        return merge_runtime_s2t_policy_draft(project_root, route_budget, store=store)
-    runtime_budget = load_learning_policy_budget(project_root / DEFAULT_PROMOTED_POLICY_PATH, store=store)
-    dynamic_budget = load_dynamic_learning_policy_budget(project_root / DEFAULT_DYNAMIC_LEARNING_POLICY_PATH, store=store)
-    if runtime_budget and dynamic_budget:
-        runtime_policy = runtime_budget["learning_policy"]
-        dynamic_policy = dynamic_budget["learning_policy"]
-        runtime_budget["learning_policy"] = {
-            **runtime_policy,
-            "source_experiences": sorted(
-                set((runtime_policy.get("source_experiences", []) or []) + (dynamic_policy.get("source_experiences", []) or []))
-            ),
-            "promoted_capabilities": sorted(
-                set((runtime_policy.get("promoted_capabilities", []) or []) + (dynamic_policy.get("promoted_capabilities", []) or []))
-            ),
-            "penalized_capabilities": sorted(
-                set((runtime_policy.get("penalized_capabilities", []) or []) + (dynamic_policy.get("penalized_capabilities", []) or []))
-            ),
-            "dynamic_policy_source": dynamic_policy.get("source"),
-        }
-    elif dynamic_budget:
-        runtime_budget = dynamic_budget
-    if not runtime_budget:
-        route_budget = merge_runtime_route_cost_policy(project_root, merged, store=store)
-        return merge_runtime_s2t_policy_draft(project_root, route_budget, store=store)
-    merged.update(runtime_budget)
+    caller_policy = merged.get("learning_policy")
+    caller_policy = dict(caller_policy) if isinstance(caller_policy, dict) else {}
+
+    runtime_policy: dict[str, Any] = {}
+    if caller_policy:
+        # Preserve the existing caller-supplied learning-policy precedence. The
+        # governed adoption is a separate, validated overlay below.
+        runtime_policy = caller_policy
+    else:
+        runtime_budget = load_learning_policy_budget(project_root / DEFAULT_PROMOTED_POLICY_PATH, store=store)
+        dynamic_budget = load_dynamic_learning_policy_budget(project_root / DEFAULT_DYNAMIC_LEARNING_POLICY_PATH, store=store)
+        if runtime_budget:
+            runtime_policy = dict(runtime_budget["learning_policy"])
+        if dynamic_budget:
+            dynamic_policy = dict(dynamic_budget["learning_policy"])
+            runtime_policy = _merge_learning_policy_payload(runtime_policy, dynamic_policy)
+            runtime_policy["dynamic_policy_source"] = dynamic_policy.get("source")
+
+    combined_policy = dict(runtime_policy)
+    if task_desc and target_model and runtime_identity and source_revision:
+        governed_budget = load_governed_learning_adoption_budget(
+            project_root,
+            task_desc=task_desc,
+            target_model=target_model,
+            runtime_identity=runtime_identity,
+            source_revision=source_revision,
+            store=store,
+        )
+        governed_policy = governed_budget.get("learning_policy", {})
+        if isinstance(governed_policy, dict):
+            combined_policy = _merge_learning_policy_payload(combined_policy, governed_policy)
+
+    if combined_policy:
+        merged["learning_policy"] = combined_policy
+
     route_budget = merge_runtime_route_cost_policy(project_root, merged, store=store)
     return merge_runtime_s2t_policy_draft(project_root, route_budget, store=store)
 

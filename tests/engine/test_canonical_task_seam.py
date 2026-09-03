@@ -251,6 +251,75 @@ def test_canonical_product_task_enters_gateway_once_without_legacy_fallback(
     assert result.production_runtime_entry_count == 1
 
 
+def test_canonical_product_loads_governed_learning_policy_before_planner(
+    monkeypatch,
+    tmp_path,
+):
+    from nexus.engine.canonical_task_seam import execute_canonical_product_task
+
+    captured = {}
+
+    def _runtime_budget(project_root, budget, **scope):
+        captured["policy_root"] = project_root
+        captured["policy_budget"] = budget
+        captured["policy_scope"] = scope
+        return {
+            "learning_policy": {
+                "episodic_memory_injection": {"enabled": True, "scope": "record_serialization"},
+                "adoption_lineage": {"adoption_id": "ladopt:test", "status": "ACTIVE_CANDIDATE"},
+            }
+        }
+
+    class _Gateway:
+        def __init__(self, project_root):
+            pass
+
+        def ask_unified(self, request, **kwargs):
+            captured["request"] = request
+            receipt = {
+                "terminal_status": "SUCCEEDED",
+                "receipt_complete": True,
+                "canonical_execution": {"execution_decision_authority": "CapabilityPlanner"},
+                "root_receipt": {"schema": "nexus.root_receipt.v1"},
+            }
+            _write_runtime_receipt(kwargs["receipt_path"], receipt)
+            return receipt
+
+    monkeypatch.setattr(
+        "nexus.engine.learning_policy_loader.merge_runtime_learning_policy",
+        _runtime_budget,
+    )
+    monkeypatch.setattr("nexus.services.gateway.BattlesuitGateway", _Gateway)
+    monkeypatch.setattr(
+        "nexus.contracts.root_receipt.validate_root_receipt",
+        lambda _root: (True, []),
+    )
+    monkeypatch.setenv("NEXUS_LOCAL_MODEL_EXECUTOR_MODEL", "qwen2.5-coder:7b")
+
+    execute_canonical_product_task(
+        "repair record_serialization for user profile",
+        tmp_path,
+        execution_context={
+            "task_id": "canonical-learning-policy-1",
+            "workspace_revision": "rev-current",
+            "local_assist_mode": "disabled",
+            "online_policy": "auto",
+        },
+    )
+
+    assert captured["policy_root"] == tmp_path.resolve()
+    assert captured["policy_scope"] == {
+        "task_desc": "repair record_serialization for user profile",
+        "target_model": "qwen2.5-coder:7b",
+        "runtime_identity": "local_model_executor",
+        "source_revision": "rev-current",
+    }
+    plan = captured["request"].canonical_planning_bundle.plan
+    assert "memory" in plan.selected_capabilities
+    assert plan.signal_snapshot["learning_policy"]["adoption_lineage"]["adoption_id"] == "ladopt:test"
+    assert plan.signal_snapshot["route_truth_source"] == "CapabilityPlanner"
+
+
 def test_canonical_product_verified_repair_topology_is_planner_owned(
     monkeypatch,
     tmp_path,
