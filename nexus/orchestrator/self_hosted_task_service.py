@@ -10514,6 +10514,241 @@ class SelfHostedTaskService:
         )
         return self.integrate_approved(task_id, integration_branch=str(branch))
 
+    def correct_applied_integration_receipt(
+        self,
+        task_id: str,
+        *,
+        expected_state_hash: str,
+        original_receipt_hash: str,
+        attempt_id: str,
+        candidate_commit_sha: str,
+        candidate_tree_sha: str,
+        acceptance_receipt_hash: str,
+        approval: Mapping[str, Any],
+        authorization: Mapping[str, Any],
+        runtime_identity: Mapping[str, Any],
+        closure_binding: Mapping[str, Any],
+        integration_branch: str,
+        expected_applied_head: str,
+        corrected_base_sha: str,
+        reason: str = "RECOVERY_BASE_MISBOUND_TO_APPLIED_HEAD",
+    ) -> dict[str, Any]:
+        """CAS-correct only the base fields of an already-applied receipt.
+
+        This is an append-only evidence repair.  It never invokes a provider,
+        admission, integration manager, or ref update; all physical facts are
+        re-read while holding the lifecycle state lock.
+        """
+        if reason != "RECOVERY_BASE_MISBOUND_TO_APPLIED_HEAD":
+            raise RuntimeError("RECEIPT_CORRECTION_REASON_UNSUPPORTED")
+        if not isinstance(approval, Mapping) or not isinstance(authorization, Mapping):
+            raise TypeError("approval and authorization must be mappings")
+        if not isinstance(runtime_identity, Mapping) or not isinstance(closure_binding, Mapping):
+            raise TypeError("runtime_identity and closure_binding must be mappings")
+
+        def canonical_hash(value: Any) -> str:
+            return hashlib.sha256(json.dumps(
+                _jsonable(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode()).hexdigest()
+
+        def reject(code: str) -> None:
+            raise RuntimeError(code)
+
+        state_path = self._state_path(task_id)
+        try:
+            prelock_state_hash = hashlib.sha256(state_path.read_bytes()).hexdigest()
+        except OSError as exc:
+            raise RuntimeError("RECEIPT_CORRECTION_STATE_REQUIRED") from exc
+        if str(expected_state_hash) != prelock_state_hash:
+            reject("RECEIPT_CORRECTION_STATE_BINDING_MISMATCH")
+        with self._state_lock():
+            try:
+                locked_state_bytes = state_path.read_bytes()
+            except OSError as exc:
+                raise RuntimeError("RECEIPT_CORRECTION_STATE_REQUIRED") from exc
+            if hashlib.sha256(locked_state_bytes).hexdigest() != str(expected_state_hash):
+                reject("RECEIPT_CORRECTION_STATE_CAS_DRIFT")
+            state = self._load_state_path(state_path, task_id)
+            if state is None:
+                raise KeyError(f"unknown task_id: {task_id}")
+            if (
+                state.get("status") != "INTEGRATED"
+                or state.get("promotion_status") != "INTEGRATED"
+                or state.get("integration_recovery_only") is not True
+            ):
+                reject("RECEIPT_CORRECTION_RECOVERY_STATE_REQUIRED")
+            raw_receipt = state.get("integration_receipt")
+            if not isinstance(raw_receipt, Mapping):
+                reject("RECEIPT_CORRECTION_RECEIPT_REQUIRED")
+            persisted_hash = canonical_hash(raw_receipt)
+            history = state.get("integration_receipt_correction_history")
+            if history is not None and not isinstance(history, list):
+                reject("RECEIPT_CORRECTION_HISTORY_INVALID")
+            history = list(history or [])
+            packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
+            if state.get("task_id") != task_id or str(state.get("attempt_id") or "") != str(attempt_id):
+                reject("RECEIPT_CORRECTION_ATTEMPT_BINDING_MISMATCH")
+            if state.get("merge_performed") is not True or state.get("integration_result_sha") != expected_applied_head:
+                reject("RECEIPT_CORRECTION_EFFECT_BINDING_MISMATCH")
+            replay = bool(history and history[-1].get("original_receipt_hash") == original_receipt_hash)
+            if str(original_receipt_hash) != persisted_hash and not replay:
+                reject("RECEIPT_CORRECTION_RECEIPT_BINDING_MISMATCH")
+            if str(raw_receipt.get("task_id") or "") != task_id:
+                reject("RECEIPT_CORRECTION_RECEIPT_BINDING_MISMATCH")
+            lease = state.get("lease") if isinstance(state.get("lease"), Mapping) else {}
+            expected_source_branch = str(
+                lease.get("target_branch") or state.get("source_branch") or ""
+            )
+            if (
+                raw_receipt.get("schema") != "nexus.integration_receipt.v1"
+                or not expected_source_branch
+                or raw_receipt.get("source_branch") != expected_source_branch
+                or raw_receipt.get("worktree_removed") is not False
+                or raw_receipt.get("failure_reason") is not None
+                or raw_receipt.get("post_apply_error") is not None
+            ):
+                reject("RECEIPT_CORRECTION_RECEIPT_SHAPE_INVALID")
+            expected_fields = {
+                "candidate_commit_sha": candidate_commit_sha,
+                "candidate_tree_sha": candidate_tree_sha,
+                "candidate_state_hash": packet.get("candidate_state_hash"),
+                "verified_receipt_hash": packet.get("verified_receipt_hash"),
+                "acceptance_receipt_hash": acceptance_receipt_hash,
+                "authorization_hash": authorization.get("authorization_hash"),
+                "task_card_hash": state.get("task_card_hash"),
+                "integration_branch": integration_branch,
+                "integration_commit_sha": expected_applied_head,
+                "staging_commit_sha": expected_applied_head,
+                "branch_head_after": expected_applied_head,
+            }
+            receipt_fields = {
+                key: raw_receipt.get(key) for key in expected_fields
+            }
+            if any(receipt_fields[key] != value for key, value in expected_fields.items()):
+                reject("RECEIPT_CORRECTION_RECEIPT_BINDING_MISMATCH")
+            if raw_receipt.get("merge_performed") is not True or raw_receipt.get("push_performed") is not False:
+                reject("RECEIPT_CORRECTION_EFFECT_BINDING_MISMATCH")
+            if (
+                raw_receipt.get("verifier_passed") is not True
+                or raw_receipt.get("post_apply_verified") is not True
+                or raw_receipt.get("candidate_is_ancestor") is not True
+                or raw_receipt.get("staging_verified") is not True
+                or state.get("integration_result_sha") != expected_applied_head
+            ):
+                reject("RECEIPT_CORRECTION_EFFECT_BINDING_MISMATCH")
+
+            persisted_approval = state.get("integration_approval_grant")
+            persisted_authorization = state.get("integration_authorization")
+            persisted_closure = state.get("integration_closure_binding")
+            if not isinstance(persisted_approval, Mapping) or dict(approval) != dict(persisted_approval):
+                reject("RECEIPT_CORRECTION_APPROVAL_BINDING_MISMATCH")
+            if not isinstance(persisted_authorization, Mapping) or dict(authorization) != dict(persisted_authorization):
+                reject("RECEIPT_CORRECTION_AUTHORIZATION_BINDING_MISMATCH")
+            try:
+                authorization_obj = IntegrationAuthorizationEnvelope(**{
+                    key: value for key, value in persisted_authorization.items()
+                    if key != "authorization_hash"
+                })
+            except Exception as exc:
+                raise RuntimeError("RECEIPT_CORRECTION_AUTHORIZATION_INVALID") from exc
+            if persisted_authorization.get("authorization_hash") != authorization_obj.authorization_hash:
+                reject("RECEIPT_CORRECTION_AUTHORIZATION_HASH_MISMATCH")
+            if not isinstance(persisted_closure, Mapping) or dict(closure_binding) != dict(persisted_closure):
+                reject("RECEIPT_CORRECTION_CLOSURE_BINDING_MISMATCH")
+            closure_payload = {
+                key: value for key, value in persisted_closure.items()
+                if key != "binding_hash"
+            }
+            if persisted_closure.get("binding_hash") != canonical_hash(closure_payload):
+                reject("RECEIPT_CORRECTION_CLOSURE_HASH_MISMATCH")
+            if persisted_closure.get("authorization_hash") != persisted_authorization.get("authorization_hash"):
+                reject("RECEIPT_CORRECTION_AUTHORIZATION_CLOSURE_MISMATCH")
+            if dict(runtime_identity) != dict(persisted_closure.get("runtime_identity") or {}):
+                reject("RECEIPT_CORRECTION_RUNTIME_BINDING_MISMATCH")
+            if persisted_closure.get("candidate_commit_sha") not in (None, candidate_commit_sha):
+                reject("RECEIPT_CORRECTION_CLOSURE_BINDING_MISMATCH")
+            for key, expected in {
+                "candidate_tree_sha": candidate_tree_sha,
+                "candidate_state_hash": packet.get("candidate_state_hash"),
+                "verified_receipt_hash": packet.get("verified_receipt_hash"),
+                "acceptance_receipt_hash": acceptance_receipt_hash,
+                "task_card_hash": state.get("task_card_hash"),
+                "canonical_branch": integration_branch,
+            }.items():
+                if persisted_closure.get(key) != expected:
+                    raise RuntimeError(
+                        "RECEIPT_CORRECTION_CLOSURE_BINDING_MISMATCH: "
+                        f"{key} expected={expected!r} actual={persisted_closure.get(key)!r}"
+                    )
+            for key, expected in {
+                "task_id": task_id,
+                "candidate_commit": candidate_commit_sha,
+                "candidate_tree_sha": candidate_tree_sha,
+                "candidate_state_hash": packet.get("candidate_state_hash"),
+                "candidate_receipt_hash": packet.get("verified_receipt_hash"),
+                "acceptance_receipt_hash": acceptance_receipt_hash,
+                "task_card_hash": state.get("task_card_hash"),
+                "canonical_branch": integration_branch,
+            }.items():
+                if getattr(authorization_obj, key, None) != expected:
+                    raise RuntimeError(
+                        "RECEIPT_CORRECTION_AUTHORIZATION_BINDING_MISMATCH: "
+                        f"{key} expected={expected!r} actual={getattr(authorization_obj, key, None)!r}"
+                    )
+            if str(persisted_closure.get("recovery_pre_apply_head") or "") != str(corrected_base_sha):
+                reject("RECEIPT_CORRECTION_CLOSURE_BINDING_MISMATCH")
+
+            manager = WorktreeManager(root_dir=str((state.get("contract") or {}).get("controller_repo_root") or ""))
+            controller_root = Path((state.get("contract") or {}).get("controller_repo_root") or "").resolve()
+            if not controller_root.is_dir():
+                reject("RECEIPT_CORRECTION_CONTROLLER_ROOT_REQUIRED")
+            actual_branch = manager._run_git(["branch", "--show-current"], cwd=controller_root)
+            actual_head = manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
+            dirty = manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root)
+            if actual_branch != integration_branch or actual_head != expected_applied_head or dirty:
+                reject("RECEIPT_CORRECTION_PHYSICAL_BINDING_MISMATCH")
+            candidate_tree = manager._run_git(["rev-parse", f"{candidate_commit_sha}^{{tree}}"], cwd=controller_root)
+            if candidate_tree != candidate_tree_sha:
+                reject("RECEIPT_CORRECTION_CANDIDATE_TREE_MISMATCH")
+            parents = manager._run_git(["rev-list", "--parents", "-n", "1", expected_applied_head], cwd=controller_root).split()[1:]
+            if set(parents) != {candidate_commit_sha, corrected_base_sha} or len(parents) != 2:
+                reject("CORRECTION_APPLIED_TOPOLOGY_REQUIRED")
+
+            if replay:
+                last = history[-1]
+                effective = last.get("effective_receipt_hash")
+                if effective == canonical_hash(raw_receipt):
+                    return {**state, "duplicate": True}
+                reject("RECEIPT_CORRECTION_REPLAY_DRIFT")
+            if history:
+                reject("RECEIPT_CORRECTION_REPLAY_DRIFT")
+
+            corrected = dict(raw_receipt)
+            corrected["integration_base_sha"] = corrected_base_sha
+            corrected["branch_head_before"] = corrected_base_sha
+            if any(corrected[key] != raw_receipt[key] for key in corrected if key not in {"integration_base_sha", "branch_head_before"}):
+                reject("RECEIPT_CORRECTION_MUTATION_SCOPE")
+            entry = {
+                "schema": "nexus.integration_receipt_correction.v1",
+                "reason": reason,
+                "task_id": task_id,
+                "attempt_id": attempt_id,
+                "original_receipt_hash": original_receipt_hash,
+                "original_receipt": dict(raw_receipt),
+                "effective_receipt_hash": canonical_hash(corrected),
+                "corrected_base_sha": corrected_base_sha,
+                "candidate_commit_sha": candidate_commit_sha,
+                "candidate_tree_sha": candidate_tree_sha,
+            }
+            state["integration_receipt"] = corrected
+            state["integration_base_sha"] = corrected_base_sha
+            state["integration_receipt_correction_history"] = [*history, entry]
+            self._write_state_locked(task_id, state)
+            return {**state, "duplicate": False}
+
+    # Compatibility spelling for callers that use the shorter public name.
+    correct_integration_receipt = correct_applied_integration_receipt
+
     def _record_integration(
         self,
         receipt: Any,
