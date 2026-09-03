@@ -1124,8 +1124,11 @@ def _launchctl(*args: str):
 
 _BOOTOUT_UNLOAD_TIMEOUT = "BOOTOUT_UNLOAD_TIMEOUT"
 _TERMINAL_BOOTOUT_FAILURE = "TERMINAL_BOOTOUT_FAILURE"
+_TERMINAL_BOOTSTRAP_FAILURE = "TERMINAL_BOOTSTRAP_FAILURE"
+_TERMINAL_PRINT_FAILURE = "TERMINAL_PRINT_FAILURE"
 _DEFAULT_UNLOAD_DEADLINE = 30.0
 _DEFAULT_UNLOAD_POLL_INTERVAL = 0.5
+_LAUNCHCTL_NOT_FOUND = "Could not find service"
 
 
 def _is_label_loaded(
@@ -1134,15 +1137,23 @@ def _is_label_loaded(
     launchctl_runner: Callable[..., Any] | None = None,
     uid: int | None = None,
 ) -> bool:
-    """Return True if launchctl still reports the given label registered."""
+    """Return True if launchctl still reports the given label registered.
+
+    Only the exact known not-found/unregistered output means unloaded (False).
+    Permission, I/O, or other unexpected errors fail closed by raising
+    ServiceError(_TERMINAL_PRINT_FAILURE) — the caller must never bootstrap
+    when we cannot confirm label state.
+    """
     runner = launchctl_runner or _launchctl
     domain_uid = uid if uid is not None else os.getuid()
     result = runner("print", f"gui/{domain_uid}/{label}")
-    if getattr(result, "returncode", 1) != 0:
-        return False
     stdout = str(getattr(result, "stdout", "") or "")
-    if "Could not find service" in stdout:
+    stderr = str(getattr(result, "stderr", "") or "")
+    combined = stdout + stderr
+    if _LAUNCHCTL_NOT_FOUND in combined:
         return False
+    if getattr(result, "returncode", 1) != 0:
+        raise ServiceError(_TERMINAL_PRINT_FAILURE)
     state_match = re.search(r"^\s*state\s*=\s*(\S+)", stdout, re.MULTILINE)
     if state_match:
         return True
@@ -1158,7 +1169,7 @@ def _wait_until_unloaded(
 ) -> None:
     """Poll until exact label is confirmed unloaded or deadline expires.
 
-    Raises ServiceError on timeout.
+    Raises ServiceError on timeout or unexpected launchctl error.
     """
     start_time = time.monotonic()
     while True:
@@ -1170,20 +1181,51 @@ def _wait_until_unloaded(
         time.sleep(min(poll_interval, deadline - elapsed))
 
 
-def start(config_path: str | os.PathLike[str], *, launchctl_runner: Callable[..., Any] | None = None, deadline: float = _DEFAULT_UNLOAD_DEADLINE, poll_interval: float = _DEFAULT_UNLOAD_POLL_INTERVAL) -> subprocess.CompletedProcess[str]:
+def _bootstrap(domain: str, plist_path: str, *, runner: Callable[..., Any] | None = None) -> subprocess.CompletedProcess[str]:
+    """Bootstrap the plist and return a result with distinct error codes."""
+    bootstrap = (runner or _launchctl)("bootstrap", domain, plist_path)
+    if bootstrap.returncode != 0:
+        msg = str(getattr(bootstrap, "stderr", "") or "").strip()
+        return subprocess.CompletedProcess(
+            ["launchctl", "bootstrap", domain, plist_path],
+            returncode=1,
+            stdout=_TERMINAL_BOOTSTRAP_FAILURE,
+            stderr=f"{_TERMINAL_BOOTSTRAP_FAILURE}: {msg}" if msg else _TERMINAL_BOOTSTRAP_FAILURE,
+        )
+    return bootstrap
+
+
+def start(config_path: str | os.PathLike[str]):
+    """Install the plist and bootstrap.  Best-effort bootout of any prior
+    instance; the caller is not required to wait for unload.  For the
+    durability-aware stop-wait-bootstrap sequence, use ``restart()``."""
     plist = install(config_path)
     domain = f"gui/{os.getuid()}"
-    bootout = (launchctl_runner or _launchctl)("bootout", f"{domain}/{SERVICE_LABEL}")
-    if bootout.returncode != 0:
-        msg = str(getattr(bootout, "stderr", "") or "").strip()
-        return subprocess.CompletedProcess(
-            ["launchctl", "bootstrap", domain, str(plist)],
-            returncode=1,
-            stdout=_TERMINAL_BOOTOUT_FAILURE,
-            stderr=f"{_TERMINAL_BOOTOUT_FAILURE}: {msg}" if msg else _TERMINAL_BOOTOUT_FAILURE,
-        )
+    _launchctl("bootout", f"{domain}/{SERVICE_LABEL}")
+    return _launchctl("bootstrap", domain, str(plist))
+
+
+def restart(
+    config_path: str | os.PathLike[str],
+    *,
+    launchctl_runner: Callable[..., Any] | None = None,
+    deadline: float = _DEFAULT_UNLOAD_DEADLINE,
+    poll_interval: float = _DEFAULT_UNLOAD_POLL_INTERVAL,
+) -> subprocess.CompletedProcess[str]:
+    """Durability-aware restart: stop once, wait for exact label unload, then
+    bootstrap once.  This is the single coordination point for restart;
+    no duplicate bootout race, no blind loop, no root escalation."""
+    plist = install(config_path)
+    runner = launchctl_runner or _launchctl
+    domain = f"gui/{os.getuid()}"
+    stop(launchctl_runner=runner)
     try:
-        _wait_until_unloaded(SERVICE_LABEL, launchctl_runner=launchctl_runner, deadline=deadline, poll_interval=poll_interval)
+        _wait_until_unloaded(
+            SERVICE_LABEL,
+            launchctl_runner=runner,
+            deadline=deadline,
+            poll_interval=poll_interval,
+        )
     except ServiceError as exc:
         msg = str(exc)
         return subprocess.CompletedProcess(
@@ -1192,16 +1234,7 @@ def start(config_path: str | os.PathLike[str], *, launchctl_runner: Callable[...
             stdout=msg,
             stderr=msg,
         )
-    bootstrap = (launchctl_runner or _launchctl)("bootstrap", domain, str(plist))
-    if bootstrap.returncode != 0:
-        msg = str(getattr(bootstrap, "stderr", "") or "").strip()
-        return subprocess.CompletedProcess(
-            ["launchctl", "bootstrap", domain, str(plist)],
-            returncode=1,
-            stdout=_TERMINAL_BOOTOUT_FAILURE,
-            stderr=f"{_TERMINAL_BOOTOUT_FAILURE}: {msg}" if msg else _TERMINAL_BOOTOUT_FAILURE,
-        )
-    return bootstrap
+    return _bootstrap(domain, str(plist), runner=runner)
 
 
 def stop(launchctl_runner: Callable[..., Any] | None = None):
@@ -1290,8 +1323,7 @@ def main(argv: list[str] | None = None) -> int:
             "detail": r.stderr.strip(),
         }
     elif args.command == "restart":
-        stop()
-        r = start(args.config)
+        r = restart(args.config)
         value = {
             "status": "RESTARTED" if r.returncode == 0 else "RESTART_FAILED",
             "detail": r.stderr.strip(),

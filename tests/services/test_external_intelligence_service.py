@@ -1450,6 +1450,7 @@ def test_main_maps_service_control_outcomes_to_canonical_exit_codes(
     result = subprocess.CompletedProcess(["launchctl"], returncode, "", "bounded-detail")
     monkeypatch.setattr(service_module, "start", lambda _path: result)
     monkeypatch.setattr(service_module, "stop", lambda: result)
+    monkeypatch.setattr(service_module, "restart", lambda _path: result)
 
     exit_code = service_module.main([command, "--config", "/tmp/config.json"])
 
@@ -2061,8 +2062,6 @@ def test_service_status_duplicate_detection_fails_closed_across_bin_and_app(tmp_
     )
     assert result["status"] == ServiceReadiness.DUPLICATE_PROCESS.value
     assert result["ready"] is False
-
-
 # ---------------------------------------------------------------------------
 # H19 restart durability repair (Issue #695)
 #
@@ -2070,31 +2069,16 @@ def test_service_status_duplicate_detection_fails_closed_across_bin_and_app(tmp_
 # No blind loop, no root escalation, no alternate label/config.
 # ---------------------------------------------------------------------------
 
-LAUNCHCTL_PRINT_REGISTERED = "state = running\npid = 12345\nlast exit code = (never exited)\n"
-LAUNCHCTL_PRINT_UNLOADED = "Could not find service: com.nexus.external-intelligence\n"
-
-
-class _UnloadingLaunchctl:
-    """Simulates bootout-then-delayed-unload: label still registered for
-    *unload_checks* print calls, then gone."""
-
-    def __init__(self, unload_checks: int = 3):
-        self._remaining = unload_checks
-        self.calls: list[tuple[str, ...]] = []
-
-    def __call__(self, *args: str) -> subprocess.CompletedProcess[str]:
-        self.calls.append(args)
-        action = args[0] if args else ""
-        if action == "bootout":
-            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
-        if action == "print":
-            if self._remaining > 0:
-                self._remaining -= 1
-                return subprocess.CompletedProcess(["launchctl", *args], 0, LAUNCHCTL_PRINT_REGISTERED, "")
-            return subprocess.CompletedProcess(["launchctl", *args], 0, LAUNCHCTL_PRINT_UNLOADED, "")
-        if action == "bootstrap":
-            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
-        return subprocess.CompletedProcess(["launchctl", *args], 1, "", "unknown")
+LAUNCHCTL_PRINT_REGISTERED = (
+    "state = running\npid = 12345\nlast exit code = (never exited)\n"
+)
+# Real macOS shape: launchctl print returns nonzero when label not found
+LAUNCHCTL_PRINT_UNLOADED = (
+    "Could not find service: com.nexus.external-intelligence\n"
+)
+LAUNCHCTL_PRINT_IO_ERROR = (
+    "Could not read domain: 5: Input/output error\n"
+)
 
 
 def _make_config(tmp_path: Path) -> str:
@@ -2111,12 +2095,236 @@ def _make_config(tmp_path: Path) -> str:
     return str(config_path)
 
 
-def test_restart_waits_for_unload_before_bootstrap(tmp_path, monkeypatch):
+class _RecordingLaunchctl:
+    """Records all calls.  Call ``set_print_response`` to control the
+    next print-returncode, stdout, and stderr."""
+
+    def __init__(self, *, print_returncode: int = 0, print_stdout: str = "", print_stderr: str = ""):
+        self.calls: list[tuple[str, ...]] = []
+        self._print_returncode = print_returncode
+        self._print_stdout = print_stdout
+        self._print_stderr = print_stderr
+
+    def set_print_response(self, *, returncode: int = 0, stdout: str = "", stderr: str = ""):
+        self._print_returncode = returncode
+        self._print_stdout = stdout
+        self._print_stderr = stderr
+
+    def __call__(self, *args: str) -> subprocess.CompletedProcess[str]:
+        self.calls.append(args)
+        action = args[0] if args else ""
+        if action == "bootout":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+        if action == "print":
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], self._print_returncode, self._print_stdout, self._print_stderr
+            )
+        if action == "bootstrap":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+        return subprocess.CompletedProcess(["launchctl", *args], 1, "", "unknown")
+
+
+class _UnloadingLaunchctl:
+    """Simulates delayed unload: label still registered for *checks*
+    print calls, then gone (real macOS nonzero + not-found)."""
+
+    def __init__(self, checks: int = 3):
+        self._remaining = checks
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(self, *args: str) -> subprocess.CompletedProcess[str]:
+        self.calls.append(args)
+        action = args[0] if args else ""
+        if action == "bootout":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+        if action == "print":
+            if self._remaining > 0:
+                self._remaining -= 1
+                return subprocess.CompletedProcess(
+                    ["launchctl", *args], 0, LAUNCHCTL_PRINT_REGISTERED, ""
+                )
+            # Real macOS shape: nonzero returncode with not-found text
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 1, LAUNCHCTL_PRINT_UNLOADED, ""
+            )
+        if action == "bootstrap":
+            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+        return subprocess.CompletedProcess(["launchctl", *args], 1, "", "unknown")
+
+
+class _FailBootoutLaunchctl:
+    """bootout returns nonzero with I/O error text."""
+
+    def __init__(self):
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(self, *args: str) -> subprocess.CompletedProcess[str]:
+        self.calls.append(args)
+        action = args[0] if args else ""
+        if action == "bootout":
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 1, "", " bootout failed: Input/output error"
+            )
+        if action == "print":
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 0, LAUNCHCTL_PRINT_REGISTERED, ""
+            )
+        return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+
+
+# ---- _is_label_loaded unit tests ----
+
+def test_is_label_loaded_true_when_registered():
+    runner = lambda *a: subprocess.CompletedProcess(
+        ["launchctl", *a], 0, LAUNCHCTL_PRINT_REGISTERED, ""
+    )
+    assert service_module._is_label_loaded(
+        service_module.SERVICE_LABEL, launchctl_runner=runner
+    ) is True
+
+
+def test_is_label_loaded_false_on_nonzero_not_found():
+    """Real macOS: returncode != 0 + 'Could not find service' → unloaded."""
+    runner = lambda *a: subprocess.CompletedProcess(
+        ["launchctl", *a], 1, LAUNCHCTL_PRINT_UNLOADED, ""
+    )
+    assert service_module._is_label_loaded(
+        service_module.SERVICE_LABEL, launchctl_runner=runner
+    ) is False
+
+
+def test_is_label_loaded_false_on_zero_empty_stdout():
+    runner = lambda *a: subprocess.CompletedProcess(
+        ["launchctl", *a], 0, "", ""
+    )
+    assert service_module._is_label_loaded(
+        service_module.SERVICE_LABEL, launchctl_runner=runner
+    ) is False
+
+
+def test_is_label_loaded_fail_closed_on_io_error():
+    """returncode != 0 + unknown error text → terminal error, not 'loaded'."""
+    runner = lambda *a: subprocess.CompletedProcess(
+        ["launchctl", *a], 1, LAUNCHCTL_PRINT_IO_ERROR, ""
+    )
+    with pytest.raises(ServiceError, match="TERMINAL_PRINT_FAILURE"):
+        service_module._is_label_loaded(
+            service_module.SERVICE_LABEL, launchctl_runner=runner
+        )
+
+
+def test_is_label_loaded_fail_closed_on_permission_error():
+    runner = lambda *a: subprocess.CompletedProcess(
+        ["launchctl", *a], 1, "", "Operation not permitted"
+    )
+    with pytest.raises(ServiceError, match="TERMINAL_PRINT_FAILURE"):
+        service_module._is_label_loaded(
+            service_module.SERVICE_LABEL, launchctl_runner=runner
+        )
+
+
+# ---- start() tests ----
+
+def test_start_ordinary_unaffected(tmp_path, monkeypatch):
+    """Normal start (best-effort bootout then bootstrap) still works."""
     config_path = _make_config(tmp_path)
     monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
-    launchctl = _UnloadingLaunchctl(unload_checks=3)
+    rl = _RecordingLaunchctl()
+    monkeypatch.setattr(service_module, "_launchctl", rl)
 
-    result = service_module.start(
+    result = service_module.start(config_path)
+
+    assert result.returncode == 0
+    assert rl.calls[0][0] == "bootout"
+    assert rl.calls[1][0] == "bootstrap"
+
+
+def test_start_from_stopped_succeeds(tmp_path, monkeypatch):
+    """start() from STOPPED (bootout returns nonzero not-found) should
+    succeed because bootout is best-effort."""
+    config_path = _make_config(tmp_path)
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+
+    def bootout_not_found(*args):
+        return subprocess.CompletedProcess(
+            ["launchctl", *args], 1, LAUNCHCTL_PRINT_UNLOADED, ""
+        )
+
+    calls = []
+    def tracking(*args):
+        calls.append(args)
+        if args[0] == "bootout":
+            return bootout_not_found(*args)
+        return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+
+    # start() uses _launchctl, not our runner — monkeypatch _launchctl
+    monkeypatch.setattr(service_module, "_launchctl", tracking)
+
+    result = service_module.start(config_path)
+
+    assert result.returncode == 0
+    actions = [c[0] for c in calls]
+    assert "bootout" in actions
+    assert "bootstrap" in actions
+
+
+def test_start_preserves_old_behavior_no_wait(tmp_path, monkeypatch):
+    """start() does NOT wait for unload — it just bootout + bootstrap."""
+    config_path = _make_config(tmp_path)
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+    rl = _RecordingLaunchctl()
+
+    # Monkeypatch _launchctl so start() uses our recorder
+    monkeypatch.setattr(service_module, "_launchctl", rl)
+
+    result = service_module.start(config_path)
+
+    # Should have exactly bootout + bootstrap, NO print calls
+    actions = [c[0] for c in rl.calls]
+    assert actions == ["bootout", "bootstrap"]
+
+
+# ---- stop() tests ----
+
+def test_stop_ordinary_unaffected():
+    calls = []
+
+    def tracking(*args):
+        calls.append(args)
+        return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+
+    service_module.stop(launchctl_runner=tracking)
+
+    assert calls == [("bootout", f"gui/{os.getuid()}/{service_module.SERVICE_LABEL}")]
+
+
+# ---- _bootstrap tests ----
+
+def test_bootstrap_distinct_failure_code(tmp_path, monkeypatch):
+    """bootstrap failure produces TERMINAL_BOOTSTRAP_FAILURE, not TERMINAL_BOOTOUT_FAILURE."""
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+
+    def fail_bootstrap(*args):
+        return subprocess.CompletedProcess(
+            ["launchctl", *args], 1, "", "Bootstrap failed: 5: Input/output error"
+        )
+
+    monkeypatch.setattr(service_module, "_launchctl", fail_bootstrap)
+
+    result = service_module._bootstrap("gui/0/test", "/tmp/test.plist", runner=fail_bootstrap)
+    assert result.returncode == 1
+    assert "TERMINAL_BOOTSTRAP_FAILURE" in result.stderr
+
+
+# ---- restart() tests (durability-aware) ----
+
+def test_restart_waits_for_unload_before_bootstrap(tmp_path, monkeypatch):
+    """restart() calls stop, waits for unload, then bootstraps once."""
+    config_path = _make_config(tmp_path)
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+    launchctl = _UnloadingLaunchctl(checks=3)
+
+    result = service_module.restart(
         config_path,
         launchctl_runner=launchctl,
         deadline=10.0,
@@ -2125,28 +2333,22 @@ def test_restart_waits_for_unload_before_bootstrap(tmp_path, monkeypatch):
 
     assert result.returncode == 0
     actions = [c[0] for c in launchctl.calls]
+    # stop (bootout) + polls (print) + bootstrap = no duplicate bootout
     assert actions[0] == "bootout"
-    assert "print" in actions
-    assert actions[-1] == "bootstrap"
     print_indices = [i for i, a in enumerate(actions) if a == "print"]
-    assert len(print_indices) >= 2
+    assert len(print_indices) >= 2  # waited at least 2 polls
+    assert actions[-1] == "bootstrap"
 
 
 def test_restart_unload_timeout_fails_closed(tmp_path, monkeypatch):
+    """Label never unloads → BOOTOUT_UNLOAD_TIMEOUT, no bootstrap."""
     config_path = _make_config(tmp_path)
     monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+    rl = _RecordingLaunchctl(print_returncode=0, print_stdout=LAUNCHCTL_PRINT_REGISTERED)
 
-    def always_registered(*args: str) -> subprocess.CompletedProcess[str]:
-        action = args[0] if args else ""
-        if action == "bootout":
-            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
-        if action == "print":
-            return subprocess.CompletedProcess(["launchctl", *args], 0, LAUNCHCTL_PRINT_REGISTERED, "")
-        return subprocess.CompletedProcess(["launchctl", *args], 1, "", "")
-
-    result = service_module.start(
+    result = service_module.restart(
         config_path,
-        launchctl_runner=always_registered,
+        launchctl_runner=rl,
         deadline=0.05,
         poll_interval=0.01,
     )
@@ -2154,54 +2356,54 @@ def test_restart_unload_timeout_fails_closed(tmp_path, monkeypatch):
     assert result.returncode != 0
     assert "BOOTOUT_UNLOAD_TIMEOUT" in result.stderr
     assert result.stdout.strip() == "BOOTOUT_UNLOAD_TIMEOUT"
+    # No bootstrap attempted
+    assert not any(c[0] == "bootstrap" for c in rl.calls)
 
 
-def test_restart_bootout_failure_terminates(tmp_path, monkeypatch):
+def test_restart_print_io_error_fails_closed(tmp_path, monkeypatch):
+    """print returns I/O error (nonzero, no not-found) → TERMINAL_PRINT_FAILURE."""
     config_path = _make_config(tmp_path)
     monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+    rl = _RecordingLaunchctl(
+        print_returncode=1, print_stdout=LAUNCHCTL_PRINT_IO_ERROR, print_stderr=""
+    )
 
-    def fail_bootout(*args: str) -> subprocess.CompletedProcess[str]:
-        action = args[0] if args else ""
-        if action == "bootout":
-            return subprocess.CompletedProcess(["launchctl", *args], 1, "", " bootout failed: Input/output error")
-        return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
-
-    result = service_module.start(
+    result = service_module.restart(
         config_path,
-        launchctl_runner=fail_bootout,
+        launchctl_runner=rl,
         deadline=10.0,
         poll_interval=0.01,
     )
 
     assert result.returncode != 0
-    assert "TERMINAL_BOOTOUT_FAILURE" in result.stderr
-    actions = [c[0] for c in _collect_launchctl_calls(fail_bootout)]
-    assert "print" not in actions
-
-
-def _collect_launchctl_calls(runner):
-    """Helper to extract calls after a start() — returns empty since
-    runner already tracks internally."""
-    return []
+    assert "TERMINAL_PRINT_FAILURE" in result.stderr
+    assert not any(c[0] == "bootstrap" for c in rl.calls)
 
 
 def test_restart_bootstrap_failure_terminates(tmp_path, monkeypatch):
+    """bootstrap returns nonzero → TERMINAL_BOOTSTRAP_FAILURE."""
     config_path = _make_config(tmp_path)
     monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
-    calls: list[tuple[str, ...]] = []
 
-    def bootstrap_fail(*args: str) -> subprocess.CompletedProcess[str]:
+    calls = []
+
+    def bootstrap_fail(*args):
         calls.append(args)
         action = args[0] if args else ""
         if action == "bootout":
             return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
         if action == "print":
-            return subprocess.CompletedProcess(["launchctl", *args], 0, LAUNCHCTL_PRINT_UNLOADED, "")
+            # Immediately unloaded (real shape)
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 1, LAUNCHCTL_PRINT_UNLOADED, ""
+            )
         if action == "bootstrap":
-            return subprocess.CompletedProcess(["launchctl", *args], 1, "", "Bootstrap failed: 5: Input/output error")
+            return subprocess.CompletedProcess(
+                ["launchctl", *args], 1, "", "Bootstrap failed: 5: Input/output error"
+            )
         return subprocess.CompletedProcess(["launchctl", *args], 1, "", "")
 
-    result = service_module.start(
+    result = service_module.restart(
         config_path,
         launchctl_runner=bootstrap_fail,
         deadline=10.0,
@@ -2209,62 +2411,71 @@ def test_restart_bootstrap_failure_terminates(tmp_path, monkeypatch):
     )
 
     assert result.returncode != 0
-    assert "TERMINAL_BOOTOUT_FAILURE" in result.stderr
+    assert "TERMINAL_BOOTSTRAP_FAILURE" in result.stderr
     assert calls[-1][0] == "bootstrap"
 
 
-def test_start_ordinary_unaffected(tmp_path, monkeypatch):
+def test_restart_from_stopped_succeeds(tmp_path, monkeypatch):
+    """restart() from STOPPED (stop returns not-found) → unload confirmed → bootstrap."""
     config_path = _make_config(tmp_path)
     monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
-    calls: list[tuple[str, ...]] = []
+    rl = _RecordingLaunchctl(
+        print_returncode=1, print_stdout=LAUNCHCTL_PRINT_UNLOADED, print_stderr=""
+    )
 
-    def normal_launchctl(*args: str) -> subprocess.CompletedProcess[str]:
-        calls.append(args)
-        action = args[0] if args else ""
-        if action == "bootout":
-            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
-        if action == "print":
-            return subprocess.CompletedProcess(["launchctl", *args], 0, LAUNCHCTL_PRINT_UNLOADED, "")
-        if action == "bootstrap":
-            return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
-        return subprocess.CompletedProcess(["launchctl", *args], 1, "", "")
-
-    result = service_module.start(
+    result = service_module.restart(
         config_path,
-        launchctl_runner=normal_launchctl,
+        launchctl_runner=rl,
         deadline=10.0,
         poll_interval=0.01,
     )
 
     assert result.returncode == 0
-    assert calls[0][0] == "bootout"
-    assert calls[1] == ("print", f"gui/{os.getuid()}/{service_module.SERVICE_LABEL}")
-    assert calls[2][0] == "bootstrap"
+    actions = [c[0] for c in rl.calls]
+    assert actions[0] == "bootout"
+    # print confirms unloaded, then bootstrap
+    assert actions[-1] == "bootstrap"
 
 
-def test_stop_ordinary_unaffected(tmp_path):
-    """stop() still calls bootout only, no unload polling."""
-    calls: list[tuple[str, ...]] = []
+# ---- CLI command-level restart tests ----
 
-    def tracking_launchctl(*args: str) -> subprocess.CompletedProcess[str]:
-        calls.append(args)
-        return subprocess.CompletedProcess(["launchctl", *args], 0, "", "")
+def test_cli_restart_uses_restart_function(tmp_path, monkeypatch):
+    """CLI 'restart' command uses restart(), not stop()+start()."""
+    config_path = _make_config(tmp_path)
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+    rl = _RecordingLaunchctl(print_returncode=1, print_stdout=LAUNCHCTL_PRINT_UNLOADED)
 
-    service_module.stop(launchctl_runner=tracking_launchctl)
+    result = service_module.restart(
+        config_path,
+        launchctl_runner=rl,
+        deadline=10.0,
+        poll_interval=0.01,
+    )
+    assert result.returncode == 0
+    # Exactly one stop (bootout) then polls then one bootstrap
+    bootout_count = sum(1 for c in rl.calls if c[0] == "bootout")
+    bootstrap_count = sum(1 for c in rl.calls if c[0] == "bootstrap")
+    assert bootout_count == 1
+    assert bootstrap_count == 1
 
-    assert calls == [("bootout", f"gui/{os.getuid()}/{service_module.SERVICE_LABEL}")]
+
+def test_main_restart_success(tmp_path, monkeypatch):
+    """main() with command='restart' calls restart() and returns SUCCESS."""
+    config_path = _make_config(tmp_path)
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+    rl = _RecordingLaunchctl(print_returncode=1, print_stdout=LAUNCHCTL_PRINT_UNLOADED)
+    monkeypatch.setattr(service_module, "_launchctl", rl)
+
+    exit_code = service_module.main(["restart", "--config", str(config_path)])
+    assert exit_code == NexusExitCode.SUCCESS
 
 
-def test_is_label_loaded_true_when_registered(tmp_path):
-    runner = lambda *a: subprocess.CompletedProcess(["launchctl"], 0, LAUNCHCTL_PRINT_REGISTERED, "")
-    assert service_module._is_label_loaded("com.nexus.external-intelligence", launchctl_runner=runner) is True
+def test_main_restart_failure(tmp_path, monkeypatch):
+    """main() with command='restart' returns FAILED when restart() fails."""
+    config_path = _make_config(tmp_path)
+    monkeypatch.setattr(service_module, "install", lambda _cp: tmp_path / "dummy.plist")
+    rl = _RecordingLaunchctl(print_returncode=0, print_stdout=LAUNCHCTL_PRINT_REGISTERED)
+    monkeypatch.setattr(service_module, "_launchctl", rl)
 
-
-def test_is_label_loaded_false_when_unloaded(tmp_path):
-    runner = lambda *a: subprocess.CompletedProcess(["launchctl"], 0, LAUNCHCTL_PRINT_UNLOADED, "")
-    assert service_module._is_label_loaded("com.nexus.external-intelligence", launchctl_runner=runner) is False
-
-
-def test_is_label_loaded_false_on_launchctl_error(tmp_path):
-    runner = lambda *a: subprocess.CompletedProcess(["launchctl"], 1, "", "Could not find service")
-    assert service_module._is_label_loaded("com.nexus.external-intelligence", launchctl_runner=runner) is False
+    exit_code = service_module.main(["restart", "--config", str(config_path)])
+    assert exit_code == NexusExitCode.FAILED
