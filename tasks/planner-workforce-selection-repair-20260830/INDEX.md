@@ -10,8 +10,8 @@ Goal: `PLANNER_WORKFORCE_COMBINED_CURRENT_MAIN_REPAIR`
 
 Current-main authority base:
 
-- commit: `83353b5ff0c44b2611a45dc7ba9853b6dfe93d44`
-- tree: `b6092bab54f745971146cf97ac67a699c10492b9`
+- commit: `8f46b3d265a561af05d61d97708c3b107242f29b`
+- tree: `6092c60f523697d2d25be6279761264934b8b190`
 
 This successor combines the settled Core global-default requirements with the
 separately accepted Learning campaign-route lineage. Historical Candidates and

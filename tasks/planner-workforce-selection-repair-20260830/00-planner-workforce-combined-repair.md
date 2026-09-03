@@ -12,8 +12,8 @@ Mission: `CORE-EVIDENCE-TRUST-CANONICALIZATION-20260902`
 
 - Owner resolution: `RESOLVE WORKFORCE OVERLAP AND CONTINUE`.
 - Repository: `James3014/Nexus-new`.
-- Exact base commit: `83353b5ff0c44b2611a45dc7ba9853b6dfe93d44`.
-- Exact base tree: `b6092bab54f745971146cf97ac67a699c10492b9`.
+- Exact base commit: `8f46b3d265a561af05d61d97708c3b107242f29b`.
+- Exact base tree: `6092c60f523697d2d25be6279761264934b8b190`.
 - Core predecessor: `TASK-PWS-001`, RED-only historical branch.
 - Learning lineage: accepted Candidate
   `a9a560400501811ef9018179a8e62fa8a6ab984f`, local integration evidence only.
@@ -44,6 +44,7 @@ workers and resolves only Planner-derived Workforce demands.
    supported. Task-ID prose/prefix alone cannot mint campaign identity.
 9. Reject caller-supplied `worker` and `worker_id` identity overrides.
 10. Preserve PR #727 `normalize_online_policy` and Planner `budget` data flow.
+    Preserve G20 Learning runtime adoption wiring present on this exact base.
 11. Preserve integrity-sensitive `main_engineering` precedence with regression
     witnesses only; do not modify `capability_planner.py` production.
 
