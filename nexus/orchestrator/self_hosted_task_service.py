@@ -10554,8 +10554,21 @@ class SelfHostedTaskService:
         def reject(code: str) -> None:
             raise RuntimeError(code)
 
+        state_path = self._state_path(task_id)
+        try:
+            prelock_state_hash = hashlib.sha256(state_path.read_bytes()).hexdigest()
+        except OSError as exc:
+            raise RuntimeError("RECEIPT_CORRECTION_STATE_REQUIRED") from exc
+        if str(expected_state_hash) != prelock_state_hash:
+            reject("RECEIPT_CORRECTION_STATE_BINDING_MISMATCH")
         with self._state_lock():
-            state = self._load_state_path(self._state_path(task_id), task_id)
+            try:
+                locked_state_bytes = state_path.read_bytes()
+            except OSError as exc:
+                raise RuntimeError("RECEIPT_CORRECTION_STATE_REQUIRED") from exc
+            if hashlib.sha256(locked_state_bytes).hexdigest() != str(expected_state_hash):
+                reject("RECEIPT_CORRECTION_STATE_CAS_DRIFT")
+            state = self._load_state_path(state_path, task_id)
             if state is None:
                 raise KeyError(f"unknown task_id: {task_id}")
             if (
@@ -10573,9 +10586,6 @@ class SelfHostedTaskService:
                 reject("RECEIPT_CORRECTION_HISTORY_INVALID")
             history = list(history or [])
             packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
-            persisted_state_hash = str(state.get("state_hash") or packet.get("candidate_state_hash") or "")
-            if str(expected_state_hash) != persisted_state_hash:
-                reject("RECEIPT_CORRECTION_STATE_BINDING_MISMATCH")
             if state.get("task_id") != task_id or str(state.get("attempt_id") or "") != str(attempt_id):
                 reject("RECEIPT_CORRECTION_ATTEMPT_BINDING_MISMATCH")
             replay = bool(history and history[-1].get("original_receipt_hash") == original_receipt_hash)
@@ -10587,10 +10597,14 @@ class SelfHostedTaskService:
                 "candidate_commit_sha": candidate_commit_sha,
                 "candidate_tree_sha": candidate_tree_sha,
                 "candidate_state_hash": packet.get("candidate_state_hash"),
+                "verified_receipt_hash": packet.get("verified_receipt_hash"),
                 "acceptance_receipt_hash": acceptance_receipt_hash,
+                "authorization_hash": authorization.get("authorization_hash"),
                 "task_card_hash": state.get("task_card_hash"),
                 "integration_branch": integration_branch,
                 "integration_commit_sha": expected_applied_head,
+                "staging_commit_sha": expected_applied_head,
+                "branch_head_after": expected_applied_head,
             }
             receipt_fields = {
                 key: raw_receipt.get(key) for key in expected_fields
@@ -10598,6 +10612,14 @@ class SelfHostedTaskService:
             if any(receipt_fields[key] != value for key, value in expected_fields.items()):
                 reject("RECEIPT_CORRECTION_RECEIPT_BINDING_MISMATCH")
             if raw_receipt.get("merge_performed") is not True or raw_receipt.get("push_performed") is not False:
+                reject("RECEIPT_CORRECTION_EFFECT_BINDING_MISMATCH")
+            if (
+                raw_receipt.get("verifier_passed") is not True
+                or raw_receipt.get("post_apply_verified") is not True
+                or raw_receipt.get("candidate_is_ancestor") is not True
+                or raw_receipt.get("staging_verified") is not True
+                or state.get("integration_result_sha") != expected_applied_head
+            ):
                 reject("RECEIPT_CORRECTION_EFFECT_BINDING_MISMATCH")
 
             persisted_approval = state.get("integration_approval_grant")
@@ -10607,12 +10629,57 @@ class SelfHostedTaskService:
                 reject("RECEIPT_CORRECTION_APPROVAL_BINDING_MISMATCH")
             if not isinstance(persisted_authorization, Mapping) or dict(authorization) != dict(persisted_authorization):
                 reject("RECEIPT_CORRECTION_AUTHORIZATION_BINDING_MISMATCH")
+            try:
+                authorization_obj = IntegrationAuthorizationEnvelope(**{
+                    key: value for key, value in persisted_authorization.items()
+                    if key != "authorization_hash"
+                })
+            except Exception as exc:
+                raise RuntimeError("RECEIPT_CORRECTION_AUTHORIZATION_INVALID") from exc
+            if persisted_authorization.get("authorization_hash") != authorization_obj.authorization_hash:
+                reject("RECEIPT_CORRECTION_AUTHORIZATION_HASH_MISMATCH")
             if not isinstance(persisted_closure, Mapping) or dict(closure_binding) != dict(persisted_closure):
                 reject("RECEIPT_CORRECTION_CLOSURE_BINDING_MISMATCH")
+            closure_payload = {
+                key: value for key, value in persisted_closure.items()
+                if key != "binding_hash"
+            }
+            if persisted_closure.get("binding_hash") != canonical_hash(closure_payload):
+                reject("RECEIPT_CORRECTION_CLOSURE_HASH_MISMATCH")
+            if persisted_closure.get("authorization_hash") != persisted_authorization.get("authorization_hash"):
+                reject("RECEIPT_CORRECTION_AUTHORIZATION_CLOSURE_MISMATCH")
             if dict(runtime_identity) != dict(persisted_closure.get("runtime_identity") or {}):
                 reject("RECEIPT_CORRECTION_RUNTIME_BINDING_MISMATCH")
             if persisted_closure.get("candidate_commit_sha") not in (None, candidate_commit_sha):
                 reject("RECEIPT_CORRECTION_CLOSURE_BINDING_MISMATCH")
+            for key, expected in {
+                "candidate_tree_sha": candidate_tree_sha,
+                "candidate_state_hash": packet.get("candidate_state_hash"),
+                "verified_receipt_hash": packet.get("verified_receipt_hash"),
+                "acceptance_receipt_hash": acceptance_receipt_hash,
+                "task_card_hash": state.get("task_card_hash"),
+                "canonical_branch": integration_branch,
+            }.items():
+                if persisted_closure.get(key) != expected:
+                    raise RuntimeError(
+                        "RECEIPT_CORRECTION_CLOSURE_BINDING_MISMATCH: "
+                        f"{key} expected={expected!r} actual={persisted_closure.get(key)!r}"
+                    )
+            for key, expected in {
+                "task_id": task_id,
+                "candidate_commit": candidate_commit_sha,
+                "candidate_tree_sha": candidate_tree_sha,
+                "candidate_state_hash": packet.get("candidate_state_hash"),
+                "candidate_receipt_hash": packet.get("verified_receipt_hash"),
+                "acceptance_receipt_hash": acceptance_receipt_hash,
+                "task_card_hash": state.get("task_card_hash"),
+                "canonical_branch": integration_branch,
+            }.items():
+                if getattr(authorization_obj, key, None) != expected:
+                    raise RuntimeError(
+                        "RECEIPT_CORRECTION_AUTHORIZATION_BINDING_MISMATCH: "
+                        f"{key} expected={expected!r} actual={getattr(authorization_obj, key, None)!r}"
+                    )
             if str(persisted_closure.get("recovery_pre_apply_head") or "") != str(corrected_base_sha):
                 reject("RECEIPT_CORRECTION_CLOSURE_BINDING_MISMATCH")
 

@@ -1091,24 +1091,32 @@ def _applied_receipt_correction_fixture(tmp_path: Path):
         branch_head_before="d" * 40, branch_head_after=applied,
         candidate_is_ancestor=True, staging_verified=True,
     )
+    closure = {
+        **state["integration_closure_binding"], "recovery_only": True,
+        "recovery_pre_apply_head": preapply,
+    }
+    closure_payload = {key: value for key, value in closure.items() if key != "binding_hash"}
+    closure["binding_hash"] = hashlib.sha256(
+        json.dumps(closure_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
     state.update(
         status="INTEGRATED", promotion_status="INTEGRATED", merge_performed=True,
         integration_branch="nexus/integration/canary", integration_base_sha="d" * 40,
         integration_result_sha=applied, integration_receipt=asdict(receipt),
         integration_recovery_only=True,
-        integration_closure_binding={
-            **state["integration_closure_binding"], "recovery_only": True,
-            "recovery_pre_apply_head": preapply,
-        },
+        integration_closure_binding=closure,
     )
     service._write_state("closure-bind", state)
+    state = service._read_state("closure-bind") or state
     return service, root, state, receipt, preapply, applied, candidate, acceptance, approval, runtime
 
 
-def _correction_kwargs(state, receipt, preapply, applied, candidate, acceptance, approval, runtime):
+def _correction_kwargs(service, state, receipt, preapply, applied, candidate, acceptance, approval, runtime):
     closure = state["integration_closure_binding"]
     return dict(
-        expected_state_hash=state["promotion_packet"]["candidate_state_hash"],
+        expected_state_hash=hashlib.sha256(
+            service._state_path("closure-bind").read_bytes()
+        ).hexdigest(),
         original_receipt_hash=hashlib.sha256(
             json.dumps(asdict(receipt), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
         ).hexdigest(),
@@ -1127,7 +1135,7 @@ def _correction_kwargs(state, receipt, preapply, applied, candidate, acceptance,
 def test_receipt_correction_is_append_only_exact_cas_and_idempotent(tmp_path: Path):
     fixture = _applied_receipt_correction_fixture(tmp_path)
     service, root, state, receipt, preapply, applied, candidate, acceptance, approval, runtime = fixture
-    kwargs = _correction_kwargs(state, receipt, preapply, applied, candidate, acceptance, approval, runtime)
+    kwargs = _correction_kwargs(service, state, receipt, preapply, applied, candidate, acceptance, approval, runtime)
     corrected = service.correct_applied_integration_receipt("closure-bind", **kwargs)
     assert corrected["integration_base_sha"] == preapply
     assert corrected["integration_receipt"]["integration_base_sha"] == preapply
@@ -1140,7 +1148,10 @@ def test_receipt_correction_is_append_only_exact_cas_and_idempotent(tmp_path: Pa
     assert len(history) == 1
     assert history[0]["original_receipt_hash"] == kwargs["original_receipt_hash"]
     assert history[0]["original_receipt"] == asdict(receipt)
-    replay = service.correct_applied_integration_receipt("closure-bind", **kwargs)
+    replay_kwargs = {**kwargs, "expected_state_hash": hashlib.sha256(
+        service._state_path("closure-bind").read_bytes()
+    ).hexdigest()}
+    replay = service.correct_applied_integration_receipt("closure-bind", **replay_kwargs)
     assert replay["duplicate"] is True
     assert len(replay["integration_receipt_correction_history"]) == 1
 
@@ -1149,7 +1160,7 @@ def test_receipt_correction_is_append_only_exact_cas_and_idempotent(tmp_path: Pa
 def test_receipt_correction_rejects_any_exact_binding_tamper(tmp_path: Path, tamper: str):
     fixture = _applied_receipt_correction_fixture(tmp_path)
     service, root, state, receipt, preapply, applied, candidate, acceptance, approval, runtime = fixture
-    kwargs = _correction_kwargs(state, receipt, preapply, applied, candidate, acceptance, approval, runtime)
+    kwargs = _correction_kwargs(service, state, receipt, preapply, applied, candidate, acceptance, approval, runtime)
     if tamper == "state":
         kwargs["expected_state_hash"] = "f" * 40
     elif tamper == "receipt":
@@ -1179,8 +1190,31 @@ def test_receipt_correction_rejects_non_direct_parent_topology(tmp_path: Path):
     service, root, state, receipt, preapply, applied, candidate, acceptance, approval, runtime = fixture
     _git(root, "commit", "--allow-empty", "-m", "extra")
     state = service._read_state("closure-bind") or state
-    kwargs = _correction_kwargs(state, receipt, preapply, applied, candidate, acceptance, approval, runtime)
+    kwargs = _correction_kwargs(service, state, receipt, preapply, applied, candidate, acceptance, approval, runtime)
     with pytest.raises(RuntimeError, match="RECEIPT_CORRECTION_PHYSICAL_BINDING_MISMATCH"):
+        service.correct_applied_integration_receipt("closure-bind", **kwargs)
+
+
+def test_receipt_correction_rejects_persisted_state_mutation_after_capture(tmp_path: Path):
+    fixture = _applied_receipt_correction_fixture(tmp_path)
+    service, root, state, receipt, preapply, applied, candidate, acceptance, approval, runtime = fixture
+    kwargs = _correction_kwargs(service, state, receipt, preapply, applied, candidate, acceptance, approval, runtime)
+    state["unexpected_persisted_mutation"] = True
+    service._write_state("closure-bind", state)
+    with pytest.raises(RuntimeError, match="STATE_(BINDING_MISMATCH|CAS_DRIFT)"):
+        service.correct_applied_integration_receipt("closure-bind", **kwargs)
+
+
+def test_receipt_correction_rejects_persisted_receipt_mutation_after_capture(tmp_path: Path):
+    fixture = _applied_receipt_correction_fixture(tmp_path)
+    service, root, state, receipt, preapply, applied, candidate, acceptance, approval, runtime = fixture
+    kwargs = _correction_kwargs(service, state, receipt, preapply, applied, candidate, acceptance, approval, runtime)
+    state["integration_receipt"]["verified_receipt_hash"] = "f" * 64
+    service._write_state("closure-bind", state)
+    kwargs["expected_state_hash"] = hashlib.sha256(
+        service._state_path("closure-bind").read_bytes()
+    ).hexdigest()
+    with pytest.raises(RuntimeError, match="RECEIPT_CORRECTION_RECEIPT_BINDING_MISMATCH"):
         service.correct_applied_integration_receipt("closure-bind", **kwargs)
 
 
