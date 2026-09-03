@@ -9036,10 +9036,21 @@ class SelfHostedTaskService:
             and state.get("promotion_status") == "INTEGRATION_FAILED_PRE_APPLY"
         )
         if not failed_pre_apply and (
-            state.get("status") != "APPROVED"
-            or state.get("promotion_status") != "APPROVED"
+            state.get("status") not in {"APPROVED", "INTEGRATING"}
+            or state.get("promotion_status") not in {"APPROVED", "INTEGRATING"}
         ):
             raise RuntimeError("CLOSURE_APPROVED_CANDIDATE_REQUIRED")
+        if (
+            not failed_pre_apply
+            and state.get("status") == "INTEGRATING"
+            and (
+                state.get("merge_performed")
+                or state.get("integration_result_sha")
+                or state.get("integration_receipt")
+                or state.get("integration_execution")
+            )
+        ):
+            raise RuntimeError("CLOSURE_INTEGRATING_REBIND_REQUIRES_UNRECORDED_APPLY")
         if failed_pre_apply:
             failed_execution = state.get("integration_execution")
             if (
@@ -9288,7 +9299,9 @@ class SelfHostedTaskService:
         def mutate(current: dict[str, Any]) -> None:
             nonlocal duplicate
             expected_status = (
-                "INTEGRATION_FAILED_PRE_APPLY" if failed_pre_apply else "APPROVED"
+                "INTEGRATION_FAILED_PRE_APPLY"
+                if failed_pre_apply
+                else current.get("status")
             )
             if (
                 str(current.get("task_id") or "") != task_id
@@ -10024,7 +10037,7 @@ class SelfHostedTaskService:
             if not isinstance(persisted_receipt, Mapping) or dict(persisted_receipt) != asdict(receipt):
                 raise RuntimeError("receipt recovery idempotency receipt mismatch")
             return state
-        if state.get("status") != "INTEGRATING" or state.get("promotion_status") != "INTEGRATING":
+        if state.get("status") != "INTEGRATING" or state.get("promotion_status") not in {"APPROVED", "INTEGRATING"}:
             raise RuntimeError("receipt recovery requires INTEGRATING state")
         if state.get("merge_performed") or state.get("integration_receipt") or state.get("integration_result_sha"):
             raise RuntimeError("receipt recovery requires an unrecorded applied state")
@@ -10258,7 +10271,12 @@ class SelfHostedTaskService:
         if actual_head != receipt.integration_commit_sha:
             raise RuntimeError("receipt recovery applied HEAD mismatch")
         if receipt.integration_commit_sha != candidate:
-            raise RuntimeError("receipt recovery refuses post-candidate extra commit")
+            parents = manager._run_git(
+                ["rev-list", "--parents", "-n", "1", receipt.integration_commit_sha],
+                cwd=controller_root,
+            ).split()
+            if len(parents) != 3 or candidate not in parents[1:]:
+                raise RuntimeError("receipt recovery refuses post-candidate extra commit")
         if manager._run_git(["branch", "--show-current"], cwd=controller_root) != branch:
             raise RuntimeError("receipt recovery branch mismatch")
         if manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root):
