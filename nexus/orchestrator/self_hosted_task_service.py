@@ -9002,6 +9002,7 @@ class SelfHostedTaskService:
         runtime_identity: Mapping[str, Any],
         expected_canonical_head: str,
         integration_branch: str = "nexus/integration/main",
+        _recovery_authority_normalization: bool = False,
     ) -> dict[str, Any]:
         """Bind external acceptance and a fresh integrate approval, without applying.
 
@@ -9037,20 +9038,25 @@ class SelfHostedTaskService:
         )
         approved_pair = state.get("status") == "APPROVED" and state.get("promotion_status") == "APPROVED"
         integrating_pair = state.get("status") == "INTEGRATING" and state.get("promotion_status") == "INTEGRATING"
-        if not failed_pre_apply and not (approved_pair or integrating_pair):
+        mixed_recovery_pair = (
+            _recovery_authority_normalization
+            and state.get("status") == "INTEGRATING"
+            and state.get("promotion_status") == "APPROVED"
+        )
+        if not failed_pre_apply and not (approved_pair or integrating_pair or mixed_recovery_pair):
             raise RuntimeError("CLOSURE_APPROVED_CANDIDATE_REQUIRED")
         if (
             not failed_pre_apply
             and integrating_pair
             and (
                 state.get("merge_performed")
-                or state.get("integration_result_sha")
-                or state.get("integration_receipt")
-                or state.get("integration_execution")
+                or state.get("integration_result_sha") is not None
+                or state.get("integration_receipt") is not None
+                or state.get("integration_execution") is not None
             )
         ):
             raise RuntimeError("CLOSURE_INTEGRATING_REBIND_REQUIRES_UNRECORDED_APPLY")
-        if integrating_pair:
+        if integrating_pair or mixed_recovery_pair:
             persisted_contract = state.get("contract")
             packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
             candidate_sha = str(packet.get("candidate_commit_sha") or state.get("candidate_commit_sha") or "")
@@ -9089,7 +9095,7 @@ class SelfHostedTaskService:
         expected_status = (
             "INTEGRATION_FAILED_PRE_APPLY"
             if failed_pre_apply
-            else ("INTEGRATING" if integrating_pair else "APPROVED")
+            else ("INTEGRATING" if integrating_pair or mixed_recovery_pair else "APPROVED")
         )
         if "integration_closure_binding" in state and (not isinstance(state.get("integration_closure_binding"), Mapping) or not state.get("integration_closure_binding")):
             raise RuntimeError("CLOSURE_BINDING_MALFORMED")
@@ -9299,7 +9305,7 @@ class SelfHostedTaskService:
             "approval_issued_at": str(approval.get("issued_at") or ""),
             "approval_expires_at": str(approval.get("expires_at") or ""),
             "approval_projection": {key: approval.get(key) for key in approval_keys},
-            "recovery_only": integrating_pair,
+            "recovery_only": integrating_pair or mixed_recovery_pair,
             "approval_scope": str(approval.get("approval_scope") or ""),
             "bound_action_type": LifecycleActionType.CANDIDATE_INTEGRATE.value,
             "contract_kind": contract_kind,
@@ -9323,15 +9329,26 @@ class SelfHostedTaskService:
             ensure_ascii=False,
         )
         service_contract_hash = str(state.get("contract_hash") or "")
+        expected_prior_pair = (
+            ("INTEGRATING", "APPROVED")
+            if mixed_recovery_pair
+            else (expected_status, expected_status)
+        )
 
         def mutate(current: dict[str, Any]) -> None:
             nonlocal duplicate
             if (
                 str(current.get("task_id") or "") != task_id
-                or current.get("status") != expected_status
-                or current.get("promotion_status") != expected_status
+                or (current.get("status"), current.get("promotion_status")) != expected_prior_pair
             ):
                 raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
+            if mixed_recovery_pair and (
+                current.get("merge_performed") not in (False, None)
+                or current.get("integration_result_sha") is not None
+                or current.get("integration_receipt") is not None
+                or current.get("integration_execution") is not None
+            ):
+                raise RuntimeError("RECOVERY_AUTHORITY_CONCURRENCY_EFFECT_DRIFT")
             if current.get("attempt_id") != attempt_id:
                 raise RuntimeError("CLOSURE_ATTEMPT_DRIFT")
             current_packet = current.get("promotion_packet") if isinstance(current.get("promotion_packet"), Mapping) else {}
@@ -9415,7 +9432,7 @@ class SelfHostedTaskService:
             current["integration_approval_grant"] = consumed
             current["integration_closure_binding"] = closure
             current["integration_closure_binding_hash"] = closure_hash
-            current["integration_recovery_only"] = bool(integrating_pair)
+            current["integration_recovery_only"] = bool(integrating_pair or mixed_recovery_pair)
             current["integration_verifier_manifest"] = verifier_manifest_payload
             if failed_pre_apply:
                 failure_history = current.get("integration_failure_history")
@@ -9452,11 +9469,105 @@ class SelfHostedTaskService:
                     "status": "APPROVED",
                     "reason": "pre_apply_closure_rebind",
                 })
+            elif mixed_recovery_pair:
+                # Normalize the historical mixed pair only after every exact
+                # binding and live-tree CAS check above has passed.  Keep all
+                # prior pre-apply evidence untouched; this fence only permits
+                # the dedicated recovery reconciliation path.
+                current["status"] = "INTEGRATING"
+                current["promotion_status"] = "INTEGRATING"
+                current["terminal_status"] = "INTEGRATING"
+                current["final_disposition"] = "RECOVERY_AUTHORITY_BOUND"
+                current["integration_status"] = "RECOVERY_ONLY"
+                current["state_retention_status"] = "ACTIVE"
+                current["archive_eligible"] = False
+                current["cleanup_eligible"] = False
+                status_history = current.get("status_history")
+                if not isinstance(status_history, list):
+                    raise RuntimeError("CLOSURE_STATUS_HISTORY_MALFORMED")
+                status_history.append({
+                    "at": now,
+                    "status": "INTEGRATING",
+                    "reason": "recovery_authority_normalized",
+                })
 
         persisted = self._mutate_state(task_id, mutate)
         if persisted is None:
             raise KeyError(f"unknown task_id: {task_id}")
         return {**persisted, "closure_binding": closure, "duplicate": duplicate, "integration_performed": False}
+
+    def normalize_integration_recovery_authority(
+        self,
+        task_id: str,
+        *,
+        external_acceptance: ExternalAcceptanceReceipt,
+        approval: Mapping[str, Any],
+        runtime_identity: Mapping[str, Any],
+        expected_canonical_head: str,
+        integration_branch: str = "nexus/integration/main",
+    ) -> dict[str, Any]:
+        """Bind a fresh recovery fence to one historical mixed state.
+
+        This is intentionally separate from ordinary closure binding: only
+        ``INTEGRATING/APPROVED`` is eligible, and the closed integration
+        approval is treated as a one-shot recovery authority.  No integration
+        manager, retry, or receipt recording is performed here.
+        """
+        state = self._read_state(task_id)
+        if state is None:
+            raise KeyError(f"unknown task_id: {task_id}")
+        if state.get("status") != "INTEGRATING" or state.get("promotion_status") != "APPROVED":
+            normalized = (
+                state.get("status") == "INTEGRATING"
+                and state.get("promotion_status") == "INTEGRATING"
+                and state.get("integration_recovery_only") is True
+                and isinstance(state.get("integration_closure_binding"), Mapping)
+                and state["integration_closure_binding"].get("recovery_only") is True
+            )
+            if not normalized:
+                raise RuntimeError("RECOVERY_AUTHORITY_MIXED_STATE_REQUIRED")
+            closure = state["integration_closure_binding"]
+            identity = resolve_contract_identity(
+                state, expected_task_id=task_id,
+                expected_head=str(state.get("controller_revision") or ""),
+            )
+            supplied_runtime = dict(runtime_identity)
+            supplied_runtime.update(identity)
+            projection = closure.get("approval_projection")
+            if (
+                dict(closure.get("runtime_identity") or {}) != supplied_runtime
+                or dict(state.get("external_acceptance") or {}) != external_acceptance.to_dict()
+                or not isinstance(projection, Mapping)
+                or dict(projection) != {key: approval.get(key) for key in projection}
+                or str(closure.get("expected_canonical_head") or closure.get("canonical_head") or "") != str(expected_canonical_head)
+                or str(closure.get("canonical_branch") or "") != str(integration_branch)
+            ):
+                raise RuntimeError("RECOVERY_AUTHORITY_REPLAY_DRIFT")
+            return self.bind_candidate_integration_closure(
+                task_id,
+                external_acceptance=external_acceptance,
+                approval=approval,
+                runtime_identity=runtime_identity,
+                expected_canonical_head=expected_canonical_head,
+                integration_branch=integration_branch,
+                _recovery_authority_normalization=True,
+            )
+        if (
+            state.get("merge_performed")
+            or state.get("integration_receipt") is not None
+            or state.get("integration_result_sha") is not None
+            or state.get("integration_execution") is not None
+        ):
+            raise RuntimeError("RECOVERY_AUTHORITY_EFFECT_ALREADY_RECORDED")
+        return self.bind_candidate_integration_closure(
+            task_id,
+            external_acceptance=external_acceptance,
+            approval=approval,
+            runtime_identity=runtime_identity,
+            expected_canonical_head=expected_canonical_head,
+            integration_branch=integration_branch,
+            _recovery_authority_normalization=True,
+        )
 
     def integrate_approved(
         self,
