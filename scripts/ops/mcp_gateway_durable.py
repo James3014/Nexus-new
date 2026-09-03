@@ -805,16 +805,67 @@ def _r1_entrypoint_identity(commit: str) -> RecoveryEntrypointIdentity:
     )
 
 
-def _r1_reject_gitlinks(commit: str) -> None:
-    tree = str(
+def _r1_inert_gitlink_paths(
+    commit: str,
+    *,
+    repository_root: Path | None = None,
+) -> tuple[str, ...]:
+    """Return Gitlink paths only when they are inert superproject pointers.
+
+    Nexus historically contains tracked Gitlink entries without a tracked
+    ``.gitmodules`` file.  The R1 recovery store never initializes or fetches
+    submodules, so those entries can remain inert while the full superproject
+    commit/tree stays content-addressed.  Any tracked submodule metadata still
+    fails closed.
+    """
+    root = str(repository_root or HOST_AUTHORITY_SOURCE_ROOT)
+    tree = bytes(
         _r1_run(
-            "git", "-C", str(HOST_AUTHORITY_SOURCE_ROOT),
-            "ls-tree", "-r", commit,
+            "git", "-C", root, "ls-tree", "-rz", commit,
+            bytes_output=True,
         )
     )
-    for row in tree.splitlines():
-        if row.split(maxsplit=1)[:1] == ["160000"]:
-            raise _gateway_error("R1 Gitlink is forbidden")
+    paths: list[str] = []
+    try:
+        rows = tree.split(b"\0")
+        for row in rows:
+            if not row:
+                continue
+            metadata, separator, raw_path = row.partition(b"\t")
+            fields = metadata.split()
+            if not separator or len(fields) != 3:
+                raise _gateway_error("R1 Git tree entry malformed")
+            if fields[0] != b"160000":
+                continue
+            if fields[1] != b"commit" or not re.fullmatch(rb"[0-9a-f]{40}", fields[2]):
+                raise _gateway_error("R1 Gitlink identity malformed")
+            path = raw_path.decode("utf-8")
+            if (
+                not path
+                or path.startswith("/")
+                or ".." in Path(path).parts
+                or "\x00" in path
+            ):
+                raise _gateway_error("R1 Gitlink path invalid")
+            paths.append(path)
+    except UnicodeError as exc:
+        raise _gateway_error("R1 Gitlink path encoding invalid", exc) from exc
+    if paths and str(_r1_run("git", "-C", root, "ls-tree", commit, "--", ".gitmodules")).strip():
+        raise _gateway_error("R1 active Gitlink metadata is forbidden")
+    return tuple(paths)
+
+
+def _r1_verify_inert_gitlink_worktree(path: Path, commit: str) -> None:
+    for relative in _r1_inert_gitlink_paths(commit, repository_root=path):
+        target = path / relative
+        if target.is_symlink() or not target.is_dir():
+            raise _gateway_error("R1 inert Gitlink directory unavailable")
+        try:
+            children = tuple(target.iterdir())
+        except OSError as exc:
+            raise _gateway_error("R1 inert Gitlink directory unreadable", exc) from exc
+        if children:
+            raise _gateway_error("R1 inert Gitlink materialized content is forbidden")
 
 
 def _r1_interpreter_identity() -> Any:
@@ -847,7 +898,7 @@ def _r1_derive_source_set(receipt: RecoveryAuthorityReceipt) -> RecoverySourceSe
         if not re.fullmatch(r"[0-9a-f]{40}", commit):
             raise _gateway_error("R1 semantic commit malformed")
         _r1_run("git", "-C", root, "cat-file", "-e", f"{commit}^{{commit}}")
-        _r1_reject_gitlinks(commit)
+        _r1_inert_gitlink_paths(commit)
     trees = tuple(
         str(_r1_run("git", "-C", root, "rev-parse", f"{commit}^{{tree}}"))
         for commit in commits
@@ -1125,6 +1176,7 @@ def _r1_verify_worktree(path: Path, manifest: DeploymentManifest) -> Path:
         or _r1_run("git", "-C", str(path), "rev-parse", "HEAD^{tree}") != manifest.tree
     ):
         raise _gateway_error("R1 worktree commit/tree/clean mismatch")
+    _r1_verify_inert_gitlink_worktree(path, manifest.commit)
     entry = _r1_entrypoint_from_store(manifest.commit)
     if entry != (
         manifest.entrypoint_blob_oid,
@@ -1286,7 +1338,7 @@ def _prepare_recovery_source(
     except ContractError as exc:
         raise _gateway_error("R1 source authority rejected", exc) from exc
     _, fresh_main, fresh_tree = _r1_local_receipt(receipt)
-    _r1_reject_gitlinks(fresh_main)
+    _r1_inert_gitlink_paths(fresh_main)
     root = str(HOST_AUTHORITY_SOURCE_ROOT)
     for commit in (
         receipt.accepted_source_merge,

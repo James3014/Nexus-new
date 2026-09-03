@@ -288,7 +288,14 @@ def test_r1b1_staging_does_not_accept_caller_selected_git_refs():
     assert tuple(parameters) == ("request", "receipt")
 
 
-def _r1b1_fixture(tmp_path, monkeypatch, *, identity_seed=None):
+def _r1b1_fixture(
+    tmp_path,
+    monkeypatch,
+    *,
+    identity_seed=None,
+    inert_gitlink=False,
+    active_gitlink=False,
+):
     from nexus.contracts.gateway_deployment import (
         RECOVERY_CARD_PATH,
         RECOVERY_CARD_SHA256,
@@ -347,12 +354,35 @@ def _r1b1_fixture(tmp_path, monkeypatch, *, identity_seed=None):
     subprocess.run(["git", "-C", str(mirror), "add", "-A"], check=True)
     subprocess.run(["git", "-C", str(mirror), "commit", "-q", "-m", "b1"], check=True)
     predecessor = subprocess.check_output(["git", "-C", str(mirror), "rev-parse", "HEAD"], text=True).strip()
+
+    if active_gitlink:
+        inert_gitlink = True
+        (mirror / ".gitmodules").write_text(
+            '[submodule "nested-repository"]\n'
+            "\tpath = nested-repository\n"
+            "\turl = https://example.invalid/nested.git\n"
+        )
+
+    def stage_gitlink():
+        if not inert_gitlink:
+            return
+        (mirror / "nested-repository").mkdir(exist_ok=True)
+        subprocess.run(
+            [
+                "git", "-C", str(mirror), "update-index", "--add",
+                "--cacheinfo", f"160000,{predecessor},nested-repository",
+            ],
+            check=True,
+        )
+
     entrypoint.write_text(f"ROLE = 'desired'\nSEED = '{seed}'\n")
     subprocess.run(["git", "-C", str(mirror), "add", "-A"], check=True)
+    stage_gitlink()
     subprocess.run(["git", "-C", str(mirror), "commit", "-q", "-m", "b1-desired"], check=True)
     desired = subprocess.check_output(["git", "-C", str(mirror), "rev-parse", "HEAD"], text=True).strip()
     entrypoint.write_text(f"ROLE = 'accepted'\nSEED = '{seed}'\n")
     subprocess.run(["git", "-C", str(mirror), "add", "-A"], check=True)
+    stage_gitlink()
     subprocess.run(["git", "-C", str(mirror), "commit", "-q", "-m", "b1-accepted"], check=True)
     accepted = subprocess.check_output(
         ["git", "-C", str(mirror), "rev-parse", "HEAD"], text=True
@@ -485,6 +515,7 @@ def _r1b1_fixture(tmp_path, monkeypatch, *, identity_seed=None):
     tracked.parent.mkdir(parents=True)
     tracked.write_bytes(raw)
     subprocess.run(["git", "-C", str(mirror), "add", "-A"], check=True)
+    stage_gitlink()
     subprocess.run(["git", "-C", str(mirror), "commit", "-q", "-m", "receipt"], check=True)
     g.GATEWAY_RECOVERY_AUTHORITY_STORE.write_bytes(raw)
     g.GATEWAY_RECOVERY_AUTHORITY_STORE.chmod(0o600)
@@ -904,27 +935,47 @@ def test_r1b1_bounded_subprocess_import_failure_is_rejected(tmp_path, monkeypatc
         g._r1_import_witness(root)
 
 
-def test_r1b1_fresh_main_gitlink_is_rejected(tmp_path, monkeypatch):
-    fixture = _r1b1_fixture(tmp_path, monkeypatch)
-    subprocess.run(
-        [
-            "git", "-C", str(fixture["mirror"]), "update-index", "--add",
-            "--cacheinfo", f"160000,{fixture['desired']},nested-repository",
-        ],
-        check=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(fixture["mirror"]), "commit", "-q", "-m", "gitlink"],
-        check=True,
-    )
+def test_r1b1_inert_gitlink_stages_as_empty_untrusted_pointer(tmp_path, monkeypatch):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch, inert_gitlink=True)
+    original_run = g._r1_run
+    calls = []
+
+    def observed_run(*args, **kwargs):
+        calls.append(args)
+        return original_run(*args, **kwargs)
+
+    monkeypatch.setattr(g, "_r1_run", observed_run)
+    outcome = g.gateway_recover(fixture["request"])
+    desired_path = Path(outcome.physical_observation["desired_path"])
+    gitlink = desired_path / "nested-repository"
+    assert outcome.effect_started is False
+    assert gitlink.is_dir()
+    assert list(gitlink.iterdir()) == []
+    assert not (desired_path / ".gitmodules").exists()
+    assert all("submodule" not in call for call in calls)
+    assert g._r1_verify_worktree(desired_path, fixture["desired_manifest"]) == desired_path
+
+
+def test_r1b1_tracked_gitmodules_with_gitlink_is_rejected(tmp_path, monkeypatch):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch, active_gitlink=True)
     head = subprocess.check_output(
         ["git", "-C", str(fixture["mirror"]), "rev-parse", "HEAD"], text=True
     ).strip()
-    with pytest.raises(g.GatewayContractError, match="Gitlink"):
-        g._r1_reject_gitlinks(head)
-    with pytest.raises(g.GatewayContractError, match="dirty|Gitlink"):
+    with pytest.raises(g.GatewayContractError, match="active Gitlink metadata"):
+        g._r1_inert_gitlink_paths(head)
+    with pytest.raises(g.GatewayContractError, match="active Gitlink metadata"):
         g.stage_verified_git_store(fixture["request"], fixture["receipt"])
     assert not g.GATEWAY_SOURCE_BUNDLES_ROOT.exists()
+
+
+def test_r1b1_materialized_gitlink_content_is_rejected(tmp_path, monkeypatch):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch, inert_gitlink=True)
+    outcome = g.gateway_recover(fixture["request"])
+    desired_path = Path(outcome.physical_observation["desired_path"])
+    gitlink = desired_path / "nested-repository"
+    (gitlink / "unexpected.txt").write_text("must remain inert")
+    with pytest.raises(g.GatewayContractError, match="materialized content"):
+        g._r1_verify_inert_gitlink_worktree(desired_path, fixture["desired"])
 
 
 def test_status_classifies_real_absent_launchctl_service(monkeypatch, tmp_path):
