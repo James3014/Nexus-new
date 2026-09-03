@@ -5,8 +5,8 @@ task_id: G20-LEARNING-ADOPTION-RUNTIME-WIRING
 status: ACTIVE
 authority: OWNER_CURRENT_INSTRUCTION
 owner_instruction: "目標完成g20，沒完成不要回報"
-base_commit: 4cebc4d5a59260ded0240bef7a2c5f7c7bf9286e
-base_tree: 4b5ed0765cead74414e6d587293ec6bb2f6ca993
+base_commit: 83353b5ff0c44b2611a45dc7ba9853b6dfe93d44
+base_tree: b6092bab54f745971146cf97ac67a699c10492b9
 execution_lane: GOVERNED
 auto_chain: false
 ```
