@@ -2200,18 +2200,37 @@ def test_receipt_only_recovery_records_applied_integrating_state_without_merge(
     )
 
     recovery_runtime = state["integration_closure_binding"]["runtime_identity"]
-    original_state = dict(state)
+    original_state = json.loads(json.dumps(state))
     state["execution_authority"] = "WORKER_REGISTRY"
     state["request"].pop("workforce_demands", None)
     state["request"].pop("workforce_admission", None)
     state["request"].pop("canonical_dispatch_envelope", None)
     state.pop("workforce_dispatch", None)
     state.pop("canonical_dispatch_envelope", None)
+    state["integration_recovery_only"] = True
+    state["integration_closure_binding"]["recovery_only"] = True
+    closure_payload = {
+        key: value for key, value in state["integration_closure_binding"].items()
+        if key != "binding_hash"
+    }
+    state["integration_closure_binding"]["binding_hash"] = hashlib.sha256(
+        json.dumps(closure_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
     service._write_state("closure-bind", state)
     with pytest.raises(RuntimeError, match="INTEGRATION_WORKFORCE_DISPATCH_DRIFT"):
         service.recover_applied_integration_receipt(
             "closure-bind", receipt, runtime_identity=recovery_runtime
         )
+    service._write_state("closure-bind", original_state)
+    original_state["integration_recovery_only"] = True
+    original_state["integration_closure_binding"]["recovery_only"] = True
+    restored_closure = {
+        key: value for key, value in original_state["integration_closure_binding"].items()
+        if key != "binding_hash"
+    }
+    original_state["integration_closure_binding"]["binding_hash"] = hashlib.sha256(
+        json.dumps(restored_closure, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
     service._write_state("closure-bind", original_state)
     first = service.recover_applied_integration_receipt(
         "closure-bind", receipt, runtime_identity=recovery_runtime

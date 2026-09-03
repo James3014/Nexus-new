@@ -9035,14 +9035,13 @@ class SelfHostedTaskService:
             state.get("status") == "INTEGRATION_FAILED_PRE_APPLY"
             and state.get("promotion_status") == "INTEGRATION_FAILED_PRE_APPLY"
         )
-        if not failed_pre_apply and (
-            state.get("status") not in {"APPROVED", "INTEGRATING"}
-            or state.get("promotion_status") not in {"APPROVED", "INTEGRATING"}
-        ):
+        approved_pair = state.get("status") == "APPROVED" and state.get("promotion_status") == "APPROVED"
+        integrating_pair = state.get("status") == "INTEGRATING" and state.get("promotion_status") == "INTEGRATING"
+        if not failed_pre_apply and not (approved_pair or integrating_pair):
             raise RuntimeError("CLOSURE_APPROVED_CANDIDATE_REQUIRED")
         if (
             not failed_pre_apply
-            and state.get("status") == "INTEGRATING"
+            and integrating_pair
             and (
                 state.get("merge_performed")
                 or state.get("integration_result_sha")
@@ -9051,6 +9050,25 @@ class SelfHostedTaskService:
             )
         ):
             raise RuntimeError("CLOSURE_INTEGRATING_REBIND_REQUIRES_UNRECORDED_APPLY")
+        if integrating_pair:
+            persisted_contract = state.get("contract")
+            packet = state.get("promotion_packet") if isinstance(state.get("promotion_packet"), Mapping) else {}
+            candidate_sha = str(packet.get("candidate_commit_sha") or state.get("candidate_commit_sha") or "")
+            if not isinstance(persisted_contract, Mapping) or not candidate_sha:
+                raise RuntimeError("CLOSURE_INTEGRATING_BINDING_MISSING")
+            contract_for_rebind = ArchitectTaskContract.model_validate({key: value for key, value in persisted_contract.items() if key != "contract_hash"})
+            physical_manager = WorktreeManager(root_dir=contract_for_rebind.target_worktree_root)
+            controller_root = Path(contract_for_rebind.controller_repo_root).resolve()
+            current_head = physical_manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
+            current_tree = physical_manager._run_git(["rev-parse", "HEAD^{tree}"], cwd=controller_root)
+            candidate_tree = physical_manager._run_git(["rev-parse", f"{candidate_sha}^{{tree}}"], cwd=controller_root)
+            if current_tree != candidate_tree or physical_manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root):
+                raise RuntimeError("CLOSURE_INTEGRATING_APPLIED_TREE_REQUIRED")
+            if physical_manager._run_git(["rev-parse", state.get("candidate_ref") or ""], cwd=controller_root) != candidate_sha:
+                raise RuntimeError("CLOSURE_INTEGRATING_CANDIDATE_REF_DRIFT")
+            ancestry = subprocess.run(["git", "merge-base", "--is-ancestor", candidate_sha, current_head], cwd=controller_root, capture_output=True, text=True)
+            if ancestry.returncode != 0:
+                raise RuntimeError("CLOSURE_INTEGRATING_CANDIDATE_ANCESTRY_REQUIRED")
         if failed_pre_apply:
             failed_execution = state.get("integration_execution")
             if (
@@ -9272,6 +9290,7 @@ class SelfHostedTaskService:
             "approval_issued_at": str(approval.get("issued_at") or ""),
             "approval_expires_at": str(approval.get("expires_at") or ""),
             "approval_projection": {key: approval.get(key) for key in approval_keys},
+            "recovery_only": integrating_pair,
             "approval_scope": str(approval.get("approval_scope") or ""),
             "bound_action_type": LifecycleActionType.CANDIDATE_INTEGRATE.value,
             "contract_kind": contract_kind,
@@ -9392,6 +9411,7 @@ class SelfHostedTaskService:
             current["integration_approval_grant"] = consumed
             current["integration_closure_binding"] = closure
             current["integration_closure_binding_hash"] = closure_hash
+            current["integration_recovery_only"] = bool(integrating_pair)
             current["integration_verifier_manifest"] = verifier_manifest_payload
             if failed_pre_apply:
                 failure_history = current.get("integration_failure_history")
@@ -9444,6 +9464,11 @@ class SelfHostedTaskService:
         state = self._read_state(task_id)
         if state is None:
             raise KeyError(f"unknown task_id: {task_id}")
+        if state.get("integration_recovery_only") or (
+            isinstance(state.get("integration_closure_binding"), Mapping)
+            and state["integration_closure_binding"].get("recovery_only")
+        ):
+            raise RuntimeError("INTEGRATION_RECOVERY_ONLY")
         request = state.get("request") or {}
         if self.ephemeral and (
             request.get("task_card_required") or request.get("lifecycle_identity_required")
@@ -10043,6 +10068,11 @@ class SelfHostedTaskService:
             raise RuntimeError("receipt recovery requires an unrecorded applied state")
         if state.get("integration_execution"):
             raise RuntimeError("receipt recovery requires no persisted execution record")
+        if not state.get("integration_recovery_only") and not (
+            isinstance(state.get("integration_closure_binding"), Mapping)
+            and state["integration_closure_binding"].get("recovery_only")
+        ):
+            raise RuntimeError("receipt recovery fence missing")
         closure = state.get("integration_closure_binding")
         if not isinstance(closure, Mapping):
             raise RuntimeError("receipt recovery closure binding missing")
@@ -10303,6 +10333,11 @@ class SelfHostedTaskService:
         state = self._read_state(task_id)
         if state is None:
             raise KeyError(f"unknown task_id: {task_id}")
+        if state.get("integration_recovery_only") or (
+            isinstance(state.get("integration_closure_binding"), Mapping)
+            and state["integration_closure_binding"].get("recovery_only")
+        ):
+            raise RuntimeError("INTEGRATION_RECOVERY_ONLY")
         if state.get("merge_performed") or state.get("status") == "INTEGRATION_VERIFY_FAILED_AFTER_APPLY":
             raise RuntimeError("INTEGRATION_ALREADY_APPLIED_RETRY_FORBIDDEN")
         if state.get("status") not in {"INTEGRATION_FAILED", "INTEGRATION_FAILED_PRE_APPLY"} or not state.get("approved_binding"):
