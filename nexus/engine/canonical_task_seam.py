@@ -595,12 +595,7 @@ def execute_canonical_product_task(
     mode = str(context.get("local_assist_mode") or "disabled").strip().lower()
     if mode not in {"disabled", "shadow", "advisor"}:
         raise ValueError("canonical_product_local_policy_invalid")
-    raw_online_policy = context.get("online_policy")
-    online_policy = (
-        normalize_online_policy(str(raw_online_policy))
-        if raw_online_policy is not None
-        else ""
-    )
+    online_policy = normalize_online_policy(context.get("online_policy"))
 
     raw_allowed = context.get("target_files") or ()
     if isinstance(raw_allowed, str):
@@ -697,6 +692,7 @@ def execute_canonical_product_task(
         },
         route_features=route_features,
         codeintel=codeintel,
+        budget=context.get("budget") or {},
     )
     bundle = plan_canonical_task_bundle(canonical_context)
     plan_payload = bundle.to_dict()["plan_payload"]
