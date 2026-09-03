@@ -9062,9 +9062,13 @@ class SelfHostedTaskService:
             current_head = physical_manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
             current_tree = physical_manager._run_git(["rev-parse", "HEAD^{tree}"], cwd=controller_root)
             candidate_tree = physical_manager._run_git(["rev-parse", f"{candidate_sha}^{{tree}}"], cwd=controller_root)
-            if current_tree != candidate_tree or physical_manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root):
+            if current_head != candidate_sha or current_tree != candidate_tree or physical_manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root):
                 raise RuntimeError("CLOSURE_INTEGRATING_APPLIED_TREE_REQUIRED")
-            if physical_manager._run_git(["rev-parse", state.get("candidate_ref") or ""], cwd=controller_root) != candidate_sha:
+            try:
+                candidate_ref_head = physical_manager._run_git(["rev-parse", state.get("candidate_ref") or ""], cwd=controller_root)
+            except RuntimeError as exc:
+                raise RuntimeError("CLOSURE_INTEGRATING_CANDIDATE_REF_DRIFT") from exc
+            if candidate_ref_head != candidate_sha:
                 raise RuntimeError("CLOSURE_INTEGRATING_CANDIDATE_REF_DRIFT")
             ancestry = subprocess.run(["git", "merge-base", "--is-ancestor", candidate_sha, current_head], cwd=controller_root, capture_output=True, text=True)
             if ancestry.returncode != 0:
@@ -9082,6 +9086,11 @@ class SelfHostedTaskService:
                 != failed_execution.get("branch_head_after")
             ):
                 raise RuntimeError("CLOSURE_PRE_APPLY_FAILURE_REQUIRED")
+        expected_status = (
+            "INTEGRATION_FAILED_PRE_APPLY"
+            if failed_pre_apply
+            else ("INTEGRATING" if integrating_pair else "APPROVED")
+        )
         if "integration_closure_binding" in state and (not isinstance(state.get("integration_closure_binding"), Mapping) or not state.get("integration_closure_binding")):
             raise RuntimeError("CLOSURE_BINDING_MALFORMED")
         existing = state.get("integration_closure_binding") if isinstance(state.get("integration_closure_binding"), Mapping) else None
@@ -9317,11 +9326,6 @@ class SelfHostedTaskService:
 
         def mutate(current: dict[str, Any]) -> None:
             nonlocal duplicate
-            expected_status = (
-                "INTEGRATION_FAILED_PRE_APPLY"
-                if failed_pre_apply
-                else current.get("status")
-            )
             if (
                 str(current.get("task_id") or "") != task_id
                 or current.get("status") != expected_status
@@ -10062,7 +10066,7 @@ class SelfHostedTaskService:
             if not isinstance(persisted_receipt, Mapping) or dict(persisted_receipt) != asdict(receipt):
                 raise RuntimeError("receipt recovery idempotency receipt mismatch")
             return state
-        if state.get("status") != "INTEGRATING" or state.get("promotion_status") not in {"APPROVED", "INTEGRATING"}:
+        if state.get("status") != "INTEGRATING" or state.get("promotion_status") != "INTEGRATING":
             raise RuntimeError("receipt recovery requires INTEGRATING state")
         if state.get("merge_performed") or state.get("integration_receipt") or state.get("integration_result_sha"):
             raise RuntimeError("receipt recovery requires an unrecorded applied state")
