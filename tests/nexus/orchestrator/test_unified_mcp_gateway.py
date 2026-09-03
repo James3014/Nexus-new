@@ -18,6 +18,7 @@ sys.path.insert(0, repo_root)
 
 from nexus.engine.canonical_task_seam import (  # noqa: E402
     VerifiedTaskCardIdentity,
+    _derive_campaign_id_from_task_card,
     build_canonical_planner_admission,
 )
 from nexus.orchestrator.lifecycle_guards import LifecycleGuardError  # noqa: E402
@@ -454,7 +455,7 @@ def _actual_dispatch(task_id, what, why):
 
 
 def test_canonical_planner_admission_uses_policy_routing_not_worker_iteration(
-    monkeypatch,
+    monkeypatch, tmp_path,
 ):
     loader = WorkforcePolicyLoader()
     snapshot = loader.load()
@@ -479,6 +480,9 @@ def test_canonical_planner_admission_uses_policy_routing_not_worker_iteration(
     )
     monkeypatch.setattr(WorkforcePolicyLoader, "load", lambda _self: reordered)
 
+    card_path = tmp_path / "canonical-policy-routing.md"
+    card_bytes = b"task_id: `canonical-policy-routing`\nAUTO_CHAIN: false\n"
+    card_path.write_bytes(card_bytes)
     result = build_canonical_planner_admission(
         task_id="canonical-policy-routing",
         task_text="implement one bounded change",
@@ -487,8 +491,8 @@ def test_canonical_planner_admission_uses_policy_routing_not_worker_iteration(
         task_card_identity=VerifiedTaskCardIdentity(
             task_id="canonical-policy-routing",
             task_card_path="tasks/test/canonical-policy-routing.md",
-            canonical_task_card_path="/tmp/canonical-policy-routing.md",
-            task_card_hash="a" * 64,
+            canonical_task_card_path=str(card_path),
+            task_card_hash=hashlib.sha256(card_bytes).hexdigest(),
         ),
     )
 
@@ -497,6 +501,21 @@ def test_canonical_planner_admission_uses_policy_routing_not_worker_iteration(
     assert result["workforce_admission"]["records"][0]["request"][
         "requested_worker_id"
     ] == "agy_flash_37_medium"
+
+
+def test_campaign_identity_requires_canonical_bytes_and_hash(tmp_path):
+    card = tmp_path / "card.md"
+    card.write_text("Campaign: `CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01`\n", encoding="utf-8")
+    identity = VerifiedTaskCardIdentity(
+        task_id="campaign-proof",
+        task_card_path="tasks/test/card.md",
+        canonical_task_card_path=str(card),
+        task_card_hash=hashlib.sha256(card.read_bytes()).hexdigest(),
+    )
+    assert _derive_campaign_id_from_task_card(identity) == "CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01"
+    tampered = replace(identity, task_card_hash="0" * 64)
+    with pytest.raises(ValueError, match="hash_mismatch"):
+        _derive_campaign_id_from_task_card(tampered)
 
 
 def _worker_args(

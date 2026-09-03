@@ -244,10 +244,13 @@ class WorkforcePolicyLoader:
             policy_hash=policy_hash,
         )
 
-        self._cached_snapshot = snapshot
-
         # 9. Route target validation
         self._validate_route_targets(snapshot, workers_raw=workers_raw)
+
+        # Cache only a snapshot that passed every semantic validation.  A
+        # rejected reload must never leave this loader able to resolve routes
+        # from the invalid snapshot on a later call.
+        self._cached_snapshot = snapshot
 
         return snapshot
 
@@ -392,7 +395,7 @@ class WorkforcePolicyLoader:
         snapshot = self._cached_snapshot or self.load()
         online = snapshot.routing.get("online", {})
         # Exact campaign match first
-        campaign_id_str = str(campaign_id or "").strip()
+        campaign_id_str = campaign_id if isinstance(campaign_id, str) else ""
         if campaign_id_str:
             campaign_routing = online.get("campaign_routing", {})
             if isinstance(campaign_routing, dict):

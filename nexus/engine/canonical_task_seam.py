@@ -377,36 +377,24 @@ def _derive_campaign_id_from_task_card(task_card_identity: 'VerifiedTaskCardIden
     paths use the global route. Task-ID prose/prefix alone cannot mint
     campaign identity.
     """
-    import re as _re
-    path_str = str(task_card_identity.task_card_path or "")
-    # Extract campaign directory name from path like tasks/<campaign-id>/...
-    match = _re.match(r"tasks/([a-zA-Z0-9_-]+)/", path_str)
-    if not match:
-        return ""
-    campaign_dir = match.group(1)
-    # Only return known campaign IDs
     known_campaigns = {
         "CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01",
         "CAMPAIGN-PLANNER-WORKFORCE-SELECTION-REPAIR-01",
     }
-    # Try exact match on campaign dir
-    if campaign_dir in known_campaigns:
-        return campaign_dir
-    # Try reading the Card file for Campaign: field
+    canonical_path = Path(task_card_identity.canonical_task_card_path)
     try:
-        from pathlib import Path
-        repo_root = Path(__file__).resolve().parents[2]
-        card_path = repo_root / path_str
-        if card_path.is_file():
-            content = card_path.read_text(encoding="utf-8")
-            for line in content.splitlines():
-                stripped = line.strip()
-                if stripped.startswith("Campaign:"):
-                    value = stripped.split(":", 1)[1].strip().strip("`")
-                    if value in known_campaigns:
-                        return value
-    except Exception:
-        pass
+        card_bytes = canonical_path.read_bytes()
+    except OSError as exc:
+        raise ValueError("verified_task_card_canonical_bytes_missing") from exc
+    actual_hash = hashlib.sha256(card_bytes).hexdigest()
+    if actual_hash != task_card_identity.task_card_hash:
+        raise ValueError("verified_task_card_hash_mismatch")
+    content = card_bytes.decode("utf-8")
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Campaign:"):
+            value = stripped.split(":", 1)[1].strip().strip("`")
+            return value if value in known_campaigns else ""
     return ""
 
 
