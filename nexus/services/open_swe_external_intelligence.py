@@ -124,10 +124,7 @@ def _normalize_transport_config(
         raise OpenSWEExternalIntelligenceError("OPEN_SWE_TRANSPORT_CONFIG_INVALID")
     if not isinstance(profile, str) or not profile.strip() or "\x00" in profile:
         raise OpenSWEExternalIntelligenceError("OPEN_SWE_TRANSPORT_CONFIG_INVALID")
-    if (
-        not isinstance(site_session, str)
-        or site_session.strip() not in {"ephemeral", "persistent"}
-    ):
+    if not isinstance(site_session, str) or site_session.strip() not in {"ephemeral", "persistent"}:
         raise OpenSWEExternalIntelligenceError("OPEN_SWE_TRANSPORT_CONFIG_INVALID")
     if (
         not isinstance(timeout_seconds, int)
