@@ -1157,7 +1157,10 @@ def _is_label_loaded(
     state_match = re.search(r"^\s*state\s*=\s*(\S+)", stdout, re.MULTILINE)
     if state_match:
         return True
-    return bool(stdout.strip())
+    # A successful command without the documented state shape is not proof
+    # that the service is unloaded.  Fail closed rather than bootstrapping
+    # over an unknown launchd response.
+    raise ServiceError(_TERMINAL_PRINT_FAILURE)
 
 
 def _wait_until_unloaded(
@@ -1181,7 +1184,9 @@ def _wait_until_unloaded(
         time.sleep(min(poll_interval, deadline - elapsed))
 
 
-def _bootstrap(domain: str, plist_path: str, *, runner: Callable[..., Any] | None = None) -> subprocess.CompletedProcess[str]:
+def _bootstrap(
+    domain: str, plist_path: str, *, runner: Callable[..., Any] | None = None
+) -> subprocess.CompletedProcess[str]:
     """Bootstrap the plist and return a result with distinct error codes."""
     bootstrap = (runner or _launchctl)("bootstrap", domain, plist_path)
     if bootstrap.returncode != 0:
@@ -1215,10 +1220,30 @@ def restart(
     """Durability-aware restart: stop once, wait for exact label unload, then
     bootstrap once.  This is the single coordination point for restart;
     no duplicate bootout race, no blind loop, no root escalation."""
-    plist = install(config_path)
     runner = launchctl_runner or _launchctl
     domain = f"gui/{os.getuid()}"
-    stop(launchctl_runner=runner)
+    try:
+        bootout = stop(launchctl_runner=runner)
+    except (OSError, subprocess.SubprocessError) as exc:
+        msg = f"{_TERMINAL_BOOTOUT_FAILURE}: {exc}"
+        return subprocess.CompletedProcess(
+            ["launchctl", "bootout", f"{domain}/{SERVICE_LABEL}"],
+            returncode=1,
+            stdout=_TERMINAL_BOOTOUT_FAILURE,
+            stderr=msg,
+        )
+    if bootout.returncode != 0:
+        bootout_output = "".join(
+            str(getattr(bootout, field, "") or "") for field in ("stdout", "stderr")
+        )
+        if _LAUNCHCTL_NOT_FOUND not in bootout_output:
+            msg = f"{_TERMINAL_BOOTOUT_FAILURE}: {bootout_output.strip()}".rstrip()
+            return subprocess.CompletedProcess(
+                ["launchctl", "bootout", f"{domain}/{SERVICE_LABEL}"],
+                returncode=1,
+                stdout=_TERMINAL_BOOTOUT_FAILURE,
+                stderr=msg,
+            )
     try:
         _wait_until_unloaded(
             SERVICE_LABEL,
@@ -1229,11 +1254,15 @@ def restart(
     except ServiceError as exc:
         msg = str(exc)
         return subprocess.CompletedProcess(
-            ["launchctl", "bootstrap", domain, str(plist)],
+            ["launchctl", "bootstrap", domain, str(config_path)],
             returncode=1,
             stdout=msg,
             stderr=msg,
         )
+    # Do not write/overwrite the installed plist until bootout has succeeded
+    # (or the exact already-unloaded response was observed) and launchd has
+    # confirmed the label is gone.
+    plist = install(config_path)
     return _bootstrap(domain, str(plist), runner=runner)
 
 
