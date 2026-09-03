@@ -1170,6 +1170,52 @@ def test_recovery_authority_accepts_no_ff_applied_head_and_bound_candidate_tree(
     assert rebound["integration_closure_binding"]["expected_canonical_head"] == applied
 
 
+@pytest.mark.parametrize("tamper", ["missing", "binding_hash", "authorization_hash"])
+def test_recovery_authority_authenticates_prior_closure_before_head(tmp_path: Path, tamper: str):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    state = service._read_state("closure-bind") or {}
+    _git(root, "merge", "--no-ff", "candidate", "-m", "applied")
+    applied = _git(root, "rev-parse", "HEAD")
+    _git(root, "update-ref", state["candidate_ref"], candidate)
+    state.update(status="INTEGRATING", promotion_status="APPROVED", merge_performed=False,
+                 integration_receipt=None, integration_result_sha=None, integration_execution=None,
+                 status_history=[])
+    if tamper == "missing":
+        state.pop("integration_closure_binding")
+    elif tamper == "binding_hash":
+        state["integration_closure_binding"]["binding_hash"] = "f" * 64
+    else:
+        state["integration_closure_binding"]["authorization_hash"] = "f" * 64
+    service._write_state("closure-bind", state)
+    with pytest.raises(RuntimeError, match="CLOSURE_INTEGRATING_PRIOR_(CLOSURE_REQUIRED|CLOSURE_HASH_DRIFT)"):
+        service.normalize_integration_recovery_authority(
+            "closure-bind", external_acceptance=acceptance,
+            approval={**approval, "approval_id": "recover-auth", "expected_canonical_head": applied},
+            runtime_identity=runtime, expected_canonical_head=applied,
+            integration_branch="nexus/integration/canary")
+
+
+def test_recovery_authority_rejects_extra_same_tree_commit(tmp_path: Path):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    state = service._read_state("closure-bind") or {}
+    _git(root, "merge", "--no-ff", "candidate", "-m", "applied")
+    _git(root, "commit", "--allow-empty", "-m", "extra")
+    applied = _git(root, "rev-parse", "HEAD")
+    _git(root, "update-ref", state["candidate_ref"], candidate)
+    state.update(status="INTEGRATING", promotion_status="APPROVED", merge_performed=False,
+                 integration_receipt=None, integration_result_sha=None, integration_execution=None,
+                 status_history=[])
+    service._write_state("closure-bind", state)
+    with pytest.raises(RuntimeError, match="CLOSURE_INTEGRATING_APPLIED_TOPOLOGY_REQUIRED"):
+        service.normalize_integration_recovery_authority(
+            "closure-bind", external_acceptance=acceptance,
+            approval={**approval, "approval_id": "recover-extra", "expected_canonical_head": applied},
+            runtime_identity=runtime, expected_canonical_head=applied,
+            integration_branch="nexus/integration/canary")
+
+
 def test_recovery_authority_rejects_effects_and_other_mixed_pair(tmp_path: Path):
     service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
     service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")

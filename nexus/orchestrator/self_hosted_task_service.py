@@ -9070,8 +9070,8 @@ class SelfHostedTaskService:
             candidate_tree = physical_manager._run_git(["rev-parse", f"{candidate_sha}^{{tree}}"], cwd=controller_root)
             old_authorization = state.get("integration_authorization") if isinstance(state.get("integration_authorization"), Mapping) else {}
             prior_closure = state.get("integration_closure_binding") if isinstance(state.get("integration_closure_binding"), Mapping) else {}
-            if not old_authorization:
-                raise RuntimeError("CLOSURE_INTEGRATING_PRIOR_AUTH_REQUIRED")
+            if not old_authorization or not prior_closure:
+                raise RuntimeError("CLOSURE_INTEGRATING_PRIOR_CLOSURE_REQUIRED")
             try:
                 prior_authorization = IntegrationAuthorizationEnvelope(**{
                     key: value for key, value in old_authorization.items()
@@ -9081,16 +9081,15 @@ class SelfHostedTaskService:
                 raise RuntimeError("CLOSURE_INTEGRATING_PRIOR_AUTH_INVALID") from exc
             if old_authorization.get("authorization_hash") != prior_authorization.authorization_hash:
                 raise RuntimeError("CLOSURE_INTEGRATING_PRIOR_AUTH_HASH_DRIFT")
-            if prior_closure:
-                closure_payload = {key: value for key, value in prior_closure.items() if key != "binding_hash"}
-                expected_closure_hash = hashlib.sha256(json.dumps(
-                    closure_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-                ).encode()).hexdigest()
-                if (
-                    prior_closure.get("binding_hash") != expected_closure_hash
-                    or prior_closure.get("authorization_hash") != old_authorization.get("authorization_hash")
-                ):
-                    raise RuntimeError("CLOSURE_INTEGRATING_PRIOR_CLOSURE_HASH_DRIFT")
+            closure_payload = {key: value for key, value in prior_closure.items() if key != "binding_hash"}
+            expected_closure_hash = hashlib.sha256(json.dumps(
+                closure_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+            ).encode()).hexdigest()
+            if (
+                prior_closure.get("binding_hash") != expected_closure_hash
+                or prior_closure.get("authorization_hash") != old_authorization.get("authorization_hash")
+            ):
+                raise RuntimeError("CLOSURE_INTEGRATING_PRIOR_CLOSURE_HASH_DRIFT")
             old_pre_apply_head = str(
                 prior_closure.get("recovery_pre_apply_head")
                 or old_authorization.get("expected_canonical_head")
