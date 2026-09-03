@@ -5,7 +5,7 @@
 - task_id: `g9-dev-mcp-governance-bridge-20260902`
 - campaign_id: `dev-mcp-governance-bridge-g9-20260902`
 - artifact_authority: current
-- status: ACTIVE
+- status: COMPLETE
 - owner: James Chen
 - authorization: owner explicitly instructed the controller on 2026-09-02 to continue until G10 is complete and to resolve intermediate blockers without stopping
 - commit_required: true
@@ -72,10 +72,21 @@ Also run negative controls proving at least: missing grant rejected; bad hash re
 
 A reviewer distinct from the implementer must inspect the exact Candidate diff, changed paths, tests, typed errors, authority boundaries, and the absence of changes to unrelated dirty recovery files. Worker success is not acceptance.
 
+## Closure evidence
+
+- Exact G9 DevSpace Candidate: `24cfc855ac907c68e32390160b87cd1b96880824`, tree `d21cc09c4ad4d2d321099c019753d24e0ae8837c`, from implementation base `db7d063681364c06e0ac3425451f53af887ca490`.
+- Candidate verification recorded on DevSpace PR #26: execution protocol `7/7 PASS`; local-agent lifecycle/execution-contract `88/88 PASS`; MCP server seam `29/29 PASS`; TypeScript typecheck PASS; `git diff --check` PASS.
+- Independent read-only Agy review on the exact Candidate reported `NO_BLOCKING_FINDINGS`; physical reviewer reconciliation recorded `changedPaths=[]`.
+- DevSpace PR #26 merged the reviewed G1-G8 lineage plus the G9 bridge as `5212252bacfe8ae37747282211aff66594452426` on 2026-09-02. The promoted authority properties include pre-launch `NEXUS_GOVERNED` validation, canonical Nexus revision and tracked grant/Task-Card byte binding, task/attempt/base/profile/DispatchIntent/write-scope/claim/time/revocation checks, continuation revalidation, and no governed-to-direct fallback.
+- Subsequent G10 durable closure independently bound the live Dev MCP to source `5212252bacfe8ae37747282211aff66594452426` / build `devspace-1.0.7-5212252b` and completed a live `NEXUS_GOVERNED` execution through that G9 runtime.
+- The G10 positive run preserved the authorized target HEAD and changed only `g10-governed-canary.txt`; reconciliation reported `unexpectedPaths=[]` and `scopeState=WITHIN_SCOPE`.
+- The G10 negative authority control intentionally supplied a bad tracked grant SHA-256. Dev MCP rejected it before worker launch with `Tracked Nexus execution grant bytes do not match grantSha256.` The negative workspace had no durable agent and no Git mutation. This supplies the live fail-closed witness required by the G9 exit criteria.
+- G9 closure is a bookkeeping reconciliation only. It changes no DevSpace source/runtime, Nexus standing grant, Planner, Workforce Admission, lifecycle implementation, approval, merge, release, or production authority.
+
 ## Claim ceiling
 
-`G9_GOVERNANCE_BRIDGE_CANDIDATE_VERIFIED` only until independent acceptance and controlled live cutover. This card alone does not prove G10, production readiness, release, or general Nexus governance correctness.
+`G9_GOVERNANCE_BRIDGE_COMPLETE`. This closure proves the bounded G9 governance bridge and its live cutover. It does not by itself claim G10, release, production readiness, or general Nexus governance correctness; those remain separately evidenced.
 
 ## Exit criteria
 
-G9 is complete only when the exact accepted DevSpace Candidate is promoted/cut over to the live Dev MCP, fresh tool/runtime identity is rebound, and a negative governed call proves unvalidated evidence remains fail closed. G10 remains a separate live end-to-end pilot gate.
+COMPLETE. The independently reviewed G9 Candidate was promoted and cut over to the live Dev MCP as source `5212252bacfe8ae37747282211aff66594452426`; fresh live runtime evidence subsequently bound that source/build; and a governed negative authority control proved invalid canonical evidence fails closed before worker launch with no fallback to `OWNER_DIRECT`. G10 remains a separately tracked and completed live end-to-end pilot gate.
