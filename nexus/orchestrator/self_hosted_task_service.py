@@ -9068,7 +9068,20 @@ class SelfHostedTaskService:
             current_head = physical_manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
             current_tree = physical_manager._run_git(["rev-parse", "HEAD^{tree}"], cwd=controller_root)
             candidate_tree = physical_manager._run_git(["rev-parse", f"{candidate_sha}^{{tree}}"], cwd=controller_root)
-            if current_head != candidate_sha or current_tree != candidate_tree or physical_manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root):
+            old_authorization = state.get("integration_authorization") if isinstance(state.get("integration_authorization"), Mapping) else {}
+            prior_closure = state.get("integration_closure_binding") if isinstance(state.get("integration_closure_binding"), Mapping) else {}
+            old_pre_apply_head = str(
+                prior_closure.get("recovery_pre_apply_head")
+                or old_authorization.get("expected_canonical_head")
+                or ""
+            )
+            if (
+                current_head != expected_canonical_head
+                or current_tree != candidate_tree
+                or physical_manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root)
+                or not re.fullmatch(r"[0-9a-f]{40}", old_pre_apply_head)
+                or old_pre_apply_head == current_head
+            ):
                 raise RuntimeError("CLOSURE_INTEGRATING_APPLIED_TREE_REQUIRED")
             try:
                 candidate_ref_head = physical_manager._run_git(["rev-parse", state.get("candidate_ref") or ""], cwd=controller_root)
@@ -9079,6 +9092,9 @@ class SelfHostedTaskService:
             ancestry = subprocess.run(["git", "merge-base", "--is-ancestor", candidate_sha, current_head], cwd=controller_root, capture_output=True, text=True)
             if ancestry.returncode != 0:
                 raise RuntimeError("CLOSURE_INTEGRATING_CANDIDATE_ANCESTRY_REQUIRED")
+            old_ancestry = subprocess.run(["git", "merge-base", "--is-ancestor", old_pre_apply_head, current_head], cwd=controller_root, capture_output=True, text=True)
+            if old_ancestry.returncode != 0:
+                raise RuntimeError("CLOSURE_INTEGRATING_PRE_APPLY_HEAD_REQUIRED")
         if failed_pre_apply:
             failed_execution = state.get("integration_execution")
             if (
@@ -9306,6 +9322,7 @@ class SelfHostedTaskService:
             "approval_expires_at": str(approval.get("expires_at") or ""),
             "approval_projection": {key: approval.get(key) for key in approval_keys},
             "recovery_only": integrating_pair or mixed_recovery_pair,
+            "recovery_pre_apply_head": old_pre_apply_head if integrating_pair or mixed_recovery_pair else None,
             "approval_scope": str(approval.get("approval_scope") or ""),
             "bound_action_type": LifecycleActionType.CANDIDATE_INTEGRATE.value,
             "contract_kind": contract_kind,
