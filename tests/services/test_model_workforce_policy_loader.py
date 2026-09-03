@@ -45,27 +45,29 @@ def test_loader_fails_closed_when_policy_file_missing(tmp_path: Path) -> None:
 def test_loader_fails_closed_on_invalid_schema(tmp_path: Path) -> None:
     bad_policy = tmp_path / "bad_policy.yaml"
     bad_policy.write_text(
-        yaml.dump({
-            "schema": "invalid.schema.v9",
-            "status": "current",
-            "route_authority": "CapabilityPlanner",
-            "last_verified": "2026-07-29",
-            "states": ["PROVEN_MAINCHAIN"],
-            "workers": {
-                "w1": {
-                    "provider": "p",
-                    "model": "m",
-                    "state": "PROVEN_MAINCHAIN",
-                    "availability": "AVAILABLE",
-                    "roles": ["r"],
-                }
-            },
-            "routing": {
-                "blocked_or_disabled_models_must_not_be_selected": True,
-                "experiment_only_models_require_explicit_authorization": True,
-            },
-            "context_policy": {},
-        }),
+        yaml.dump(
+            {
+                "schema": "invalid.schema.v9",
+                "status": "current",
+                "route_authority": "CapabilityPlanner",
+                "last_verified": "2026-07-29",
+                "states": ["PROVEN_MAINCHAIN"],
+                "workers": {
+                    "w1": {
+                        "provider": "p",
+                        "model": "m",
+                        "state": "PROVEN_MAINCHAIN",
+                        "availability": "AVAILABLE",
+                        "roles": ["r"],
+                    }
+                },
+                "routing": {
+                    "blocked_or_disabled_models_must_not_be_selected": True,
+                    "experiment_only_models_require_explicit_authorization": True,
+                },
+                "context_policy": {},
+            }
+        ),
         encoding="utf-8",
     )
     loader = WorkforcePolicyLoader(bad_policy)
@@ -77,27 +79,29 @@ def test_loader_fails_closed_when_last_verified_is_in_future(tmp_path: Path) -> 
     future_date = (datetime.date.today() + datetime.timedelta(days=10)).isoformat()
     bad_policy = tmp_path / "future_policy.yaml"
     bad_policy.write_text(
-        yaml.dump({
-            "schema": "nexus.model_workforce.v1",
-            "status": "current",
-            "route_authority": "CapabilityPlanner",
-            "last_verified": future_date,
-            "states": ["PROVEN_MAINCHAIN"],
-            "workers": {
-                "w1": {
-                    "provider": "p",
-                    "model": "m",
-                    "state": "PROVEN_MAINCHAIN",
-                    "availability": "AVAILABLE",
-                    "roles": ["r"],
-                }
-            },
-            "routing": {
-                "blocked_or_disabled_models_must_not_be_selected": True,
-                "experiment_only_models_require_explicit_authorization": True,
-            },
-            "context_policy": {},
-        }),
+        yaml.dump(
+            {
+                "schema": "nexus.model_workforce.v1",
+                "status": "current",
+                "route_authority": "CapabilityPlanner",
+                "last_verified": future_date,
+                "states": ["PROVEN_MAINCHAIN"],
+                "workers": {
+                    "w1": {
+                        "provider": "p",
+                        "model": "m",
+                        "state": "PROVEN_MAINCHAIN",
+                        "availability": "AVAILABLE",
+                        "roles": ["r"],
+                    }
+                },
+                "routing": {
+                    "blocked_or_disabled_models_must_not_be_selected": True,
+                    "experiment_only_models_require_explicit_authorization": True,
+                },
+                "context_policy": {},
+            }
+        ),
         encoding="utf-8",
     )
     loader = WorkforcePolicyLoader(bad_policy)
@@ -108,34 +112,36 @@ def test_loader_fails_closed_when_last_verified_is_in_future(tmp_path: Path) -> 
 def test_loader_fails_closed_on_duplicate_provider_model_identity(tmp_path: Path) -> None:
     bad_policy = tmp_path / "dup_policy.yaml"
     bad_policy.write_text(
-        yaml.dump({
-            "schema": "nexus.model_workforce.v1",
-            "status": "current",
-            "route_authority": "CapabilityPlanner",
-            "last_verified": "2026-07-29",
-            "states": ["PROVEN_MAINCHAIN"],
-            "workers": {
-                "w1": {
-                    "provider": "p1",
-                    "model": "m1",
-                    "state": "PROVEN_MAINCHAIN",
-                    "availability": "AVAILABLE",
-                    "roles": ["r"],
+        yaml.dump(
+            {
+                "schema": "nexus.model_workforce.v1",
+                "status": "current",
+                "route_authority": "CapabilityPlanner",
+                "last_verified": "2026-07-29",
+                "states": ["PROVEN_MAINCHAIN"],
+                "workers": {
+                    "w1": {
+                        "provider": "p1",
+                        "model": "m1",
+                        "state": "PROVEN_MAINCHAIN",
+                        "availability": "AVAILABLE",
+                        "roles": ["r"],
+                    },
+                    "w2": {
+                        "provider": "p1",
+                        "model": "m1",
+                        "state": "PROVEN_MAINCHAIN",
+                        "availability": "AVAILABLE",
+                        "roles": ["r"],
+                    },
                 },
-                "w2": {
-                    "provider": "p1",
-                    "model": "m1",
-                    "state": "PROVEN_MAINCHAIN",
-                    "availability": "AVAILABLE",
-                    "roles": ["r"],
+                "routing": {
+                    "blocked_or_disabled_models_must_not_be_selected": True,
+                    "experiment_only_models_require_explicit_authorization": True,
                 },
-            },
-            "routing": {
-                "blocked_or_disabled_models_must_not_be_selected": True,
-                "experiment_only_models_require_explicit_authorization": True,
-            },
-            "context_policy": {},
-        }),
+                "context_policy": {},
+            }
+        ),
         encoding="utf-8",
     )
     loader = WorkforcePolicyLoader(bad_policy)
@@ -652,17 +658,27 @@ def test_resolve_route_whitespace_campaign_is_literal_and_uses_global(tmp_path) 
     loader = _mutated_policy(
         tmp_path,
         lambda data: data["routing"]["online"]["campaign_routing"].update(
-            {"CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01": {"fast_bounded_implementation": "agy_flash_medium"}}
+            {
+                "CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01": {
+                    "fast_bounded_implementation": "agy_flash_medium"
+                }
+            }
         ),
     )
-    assert loader.resolve_route(
-        "fast_bounded_implementation",
-        campaign_id="CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01",
-    ) == "agy_flash_medium"
-    assert loader.resolve_route(
-        "fast_bounded_implementation",
-        campaign_id=" CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01",
-    ) == "agy_flash_37_medium"
+    assert (
+        loader.resolve_route(
+            "fast_bounded_implementation",
+            campaign_id="CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01",
+        )
+        == "agy_flash_medium"
+    )
+    assert (
+        loader.resolve_route(
+            "fast_bounded_implementation",
+            campaign_id=" CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01",
+        )
+        == "agy_flash_37_medium"
+    )
 
 
 def test_loader_reject_does_not_cache_invalid_snapshot(tmp_path) -> None:
@@ -670,10 +686,7 @@ def test_loader_reject_does_not_cache_invalid_snapshot(tmp_path) -> None:
     path = tmp_path / "policy.yaml"
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     loader = WorkforcePolicyLoader(path)
-    assert (
-        loader.load().routing["online"]["fast_bounded_implementation"]
-        == "agy_flash_37_medium"
-    )
+    assert loader.load().routing["online"]["fast_bounded_implementation"] == "agy_flash_37_medium"
     data["routing"]["online"]["fast_bounded_implementation"] = "missing_worker"
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     with pytest.raises(WorkforcePolicyValidationError):
@@ -706,9 +719,7 @@ def _mutated_policy(tmp_path, mutate):
     "mutation, expected",
     [
         (
-            lambda d: d["routing"]["online"].update(
-                fast_bounded_implementation="missing_worker"
-            ),
+            lambda d: d["routing"]["online"].update(fast_bounded_implementation="missing_worker"),
             "unknown worker",
         ),
         (
