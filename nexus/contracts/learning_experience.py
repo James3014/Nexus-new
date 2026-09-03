@@ -10,6 +10,12 @@ from typing import Any
 LEARNING_EXPERIENCE_SCHEMA_VERSION = "nexus_learning_experience.v1"
 RUNTIME_LEARNING_CLOSURE_SCHEMA = "nexus.runtime_learning_closure.v1"
 NEXUS_LEARNING_EPISODE_SCHEMA = "nexus.learning_episode.v1"
+LEARNING_PROVENANCE_CONTRACT_SCHEMA = "nexus.learning_provenance_contract.v1"
+LEARNING_POLICY_RECOMMENDATION_SCHEMA = "nexus.learning_policy_recommendation.v1"
+LEARNING_POLICY_VALIDATION_SCHEMA = "nexus.learning_policy_validation.v1"
+LEARNING_POLICY_ADOPTION_SCHEMA = "nexus.learning_policy_adoption.v1"
+LEARNING_POLICY_ROLLBACK_SCHEMA = "nexus.learning_policy_rollback.v1"
+HISTORICAL_UNKNOWN = "HISTORICAL_UNKNOWN"
 RUNTIME_LEARNING_PHASE_CHAIN = ("S", "P", "D", "X", "R", "A", "C")
 PHASE_CHAIN = ("S", "P", "X", "D", "R", "A", "C")
 HIGH_COST_CAPABILITIES = {
@@ -357,6 +363,553 @@ def paired_memory_uplift_observed(evidence: dict[str, Any]) -> bool:
         (off.get("artifact") or off.get("artifact_ref") or off.get("receipt"))
         and (on.get("artifact") or on.get("artifact_ref") or on.get("receipt"))
     )
+
+
+def canonical_recommendation_identity(payload: dict[str, Any]) -> tuple[str, str]:
+    """Compute content-addressed idempotency key and recommendation_id."""
+    clean_payload = {k: v for k, v in payload.items() if k not in {"recommendation_id", "recommendation_hash"}}
+    canonical_repr = json.dumps(clean_payload, sort_keys=True, separators=(",", ":"))
+    rec_hash = hashlib.sha256(canonical_repr.encode("utf-8")).hexdigest()
+    rec_id = f"lrec:{rec_hash[:24]}"
+    return rec_hash, rec_id
+
+
+def build_learning_policy_recommendation(
+    *,
+    source_episodes: list[dict[str, Any]] | tuple[dict[str, Any], ...],
+    source_evidence_refs: list[str] | tuple[str, ...],
+    source_revision: str,
+    runtime_identity: str,
+    task_fingerprint: str,
+    off_arm: dict[str, Any],
+    on_arm: dict[str, Any],
+    applicable_scope: dict[str, Any],
+    recommended_policy_delta: dict[str, Any],
+    current_policy: dict[str, Any],
+    expected_effect: str,
+    rollback_target: dict[str, Any],
+    known_risks: list[str] | tuple[str, ...] = (),
+    experiment_identity: str = "",
+    contract_revision: str = NEXUS_LEARNING_EPISODE_SCHEMA,
+    confidence: str = "high",
+    claim_ceiling: str = "SUPPORTED_POLICY_RECOMMENDATION",
+) -> dict[str, Any]:
+    """Construct an exact content-addressed, evidence-bound learning policy recommendation."""
+    if not source_episodes:
+        raise ValueError("RECOMMENDATION_MISSING_SOURCE_EPISODES")
+    for ep in source_episodes:
+        validate_nexus_learning_episode(ep)
+        if ep.get("lineage_status") == HISTORICAL_UNKNOWN or ep.get("episode_id") == HISTORICAL_UNKNOWN:
+            raise ValueError("RECOMMENDATION_HISTORICAL_UNKNOWN_PROVENANCE_FORBIDDEN")
+
+    episode_ids = [str(ep["episode_id"]) for ep in source_episodes]
+
+    paired_payload = {
+        "task_fingerprint": task_fingerprint,
+        "memory_off": off_arm,
+        "memory_on": on_arm,
+    }
+    if not paired_memory_uplift_observed(paired_payload):
+        raise ValueError("RECOMMENDATION_PAIRED_UPLIFT_NOT_OBSERVED")
+
+    # Scope validation: Scope must follow evidence and not claim global authority
+    if applicable_scope.get("universal_learning_claim") or applicable_scope.get("all_models") or applicable_scope.get("all_tasks"):
+        raise ValueError("RECOMMENDATION_OVERBROAD_SCOPE_FORBIDDEN")
+
+    payload: dict[str, Any] = {
+        "schema": LEARNING_POLICY_RECOMMENDATION_SCHEMA,
+        "source_episode_ids": episode_ids,
+        "source_evidence_refs": list(source_evidence_refs),
+        "source_revision": str(source_revision).strip(),
+        "runtime_identity": str(runtime_identity).strip(),
+        "contract_revision": str(contract_revision).strip(),
+        "experiment_identity": str(experiment_identity or f"exp:{task_fingerprint}"),
+        "task_fingerprint": str(task_fingerprint).strip(),
+        "off_arm": dict(off_arm),
+        "on_arm": dict(on_arm),
+        "observed_effect": "paired_memory_uplift_observed",
+        "effect_measurement": "verifier_pass_uplift",
+        "confidence": str(confidence),
+        "applicable_scope": dict(applicable_scope),
+        "recommended_policy_delta": dict(recommended_policy_delta),
+        "current_policy": dict(current_policy),
+        "expected_effect": str(expected_effect),
+        "known_risks": list(known_risks),
+        "rollback_target": dict(rollback_target),
+        "claim_ceiling": str(claim_ceiling),
+        "status": "PROPOSED",
+        "direct_mutation_allowed": False,
+        "route_mutation_allowed": False,
+        "planner_mutation_allowed": False,
+    }
+    rec_hash, rec_id = canonical_recommendation_identity(payload)
+    payload["recommendation_hash"] = rec_hash
+    payload["recommendation_id"] = rec_id
+    validate_learning_policy_recommendation(payload)
+    return payload
+
+
+def validate_learning_policy_recommendation(recommendation: dict[str, Any]) -> None:
+    """Validate content address, authority boundaries, and evidence contracts."""
+    if not isinstance(recommendation, dict):
+        raise ValueError("RECOMMENDATION_NOT_A_MAPPING")
+    if recommendation.get("schema") != LEARNING_POLICY_RECOMMENDATION_SCHEMA:
+        raise ValueError("RECOMMENDATION_SCHEMA_INVALID")
+
+    required = (
+        "schema", "recommendation_id", "recommendation_hash", "source_episode_ids",
+        "source_evidence_refs", "source_revision", "runtime_identity", "contract_revision",
+        "task_fingerprint", "off_arm", "on_arm", "observed_effect", "applicable_scope",
+        "recommended_policy_delta", "current_policy", "rollback_target", "claim_ceiling",
+        "status",
+    )
+    missing = [k for k in required if k not in recommendation]
+    if missing:
+        raise ValueError(f"RECOMMENDATION_INCOMPLETE:{','.join(missing)}")
+
+    # Content-address check
+    stored_hash = recommendation.get("recommendation_hash")
+    stored_id = recommendation.get("recommendation_id")
+    expected_hash, expected_id = canonical_recommendation_identity(recommendation)
+    if stored_hash != expected_hash or stored_id != expected_id:
+        raise ValueError("RECOMMENDATION_CONTENT_ADDRESS_MISMATCH")
+
+    # Authority and scope invariants
+    if recommendation.get("direct_mutation_allowed") or recommendation.get("route_mutation_allowed") or recommendation.get("planner_mutation_allowed"):
+        raise ValueError("RECOMMENDATION_CANNOT_AUTHORIZE_MUTATION")
+
+    delta = recommendation.get("recommended_policy_delta", {})
+    if any(k in delta for k in ("CapabilityPlanner", "route_authority", "workforce_admission", "active_route_override")):
+        raise ValueError("RECOMMENDATION_DIRECT_PLANNER_MUTATION_FORBIDDEN")
+
+    scope = recommendation.get("applicable_scope", {})
+    if not scope or scope.get("all_tasks") or scope.get("all_models") or scope.get("universal_learning_claim"):
+        raise ValueError("RECOMMENDATION_SCOPE_OVERBROAD")
+
+    if not recommendation.get("rollback_target"):
+        raise ValueError("RECOMMENDATION_MISSING_ROLLBACK_TARGET")
+
+    # Paired verifier check
+    paired = {
+        "task_fingerprint": recommendation.get("task_fingerprint"),
+        "memory_off": recommendation.get("off_arm"),
+        "memory_on": recommendation.get("on_arm"),
+    }
+    if not paired_memory_uplift_observed(paired):
+        raise ValueError("RECOMMENDATION_EVIDENCE_INVALID")
+
+
+def canonical_validation_identity(payload: dict[str, Any]) -> tuple[str, str]:
+    """Compute content-addressed idempotency key and validation_id."""
+    clean_payload = {k: v for k, v in payload.items() if k not in {"validation_id", "validation_hash"}}
+    canonical_repr = json.dumps(clean_payload, sort_keys=True, separators=(",", ":"))
+    val_hash = hashlib.sha256(canonical_repr.encode("utf-8")).hexdigest()
+    val_id = f"lval:{val_hash[:24]}"
+    return val_hash, val_id
+
+
+def evaluate_learning_policy_recommendation(
+    recommendation: dict[str, Any],
+    *,
+    validator_identity: str,
+    current_workspace_revision: str,
+    current_runtime_identity: str,
+) -> dict[str, Any]:
+    """Independent G6 validator adjudicating recommendation admissibility."""
+    hostile_probes: dict[str, str] = {}
+    blockers: list[str] = []
+
+    # 1. Structural & Content Address Verification
+    try:
+        validate_learning_policy_recommendation(recommendation)
+        hostile_probes["tamper_check"] = "PASS"
+    except Exception as exc:
+        hostile_probes["tamper_check"] = f"FAIL:{exc.__class__.__name__}"
+        blockers.append(f"recommendation_invalid:{str(exc)}")
+
+    # 2. Freshness Check
+    source_rev = str(recommendation.get("source_revision") or "").strip()
+    runtime_id = str(recommendation.get("runtime_identity") or "").strip()
+    fresh = True
+    if source_rev != current_workspace_revision.strip():
+        fresh = False
+        hostile_probes["source_freshness"] = f"STALE:{source_rev}!={current_workspace_revision}"
+        blockers.append("source_revision_stale")
+    else:
+        hostile_probes["source_freshness"] = "PASS"
+
+    if runtime_id != current_runtime_identity.strip():
+        fresh = False
+        hostile_probes["runtime_identity_freshness"] = f"MISMATCH:{runtime_id}!={current_runtime_identity}"
+        blockers.append("runtime_identity_mismatch")
+    else:
+        hostile_probes["runtime_identity_freshness"] = "PASS"
+
+    # 3. Causal & Evidence Sufficiency Check
+    evidence_refs = recommendation.get("source_evidence_refs") or []
+    has_retrieval = any("retrieval_receipt" in str(r) or "receipt" in str(r) for r in evidence_refs)
+    has_consumption = any("consumption" in str(r) or "ollama" in str(r) or "metrics" in str(r) for r in evidence_refs)
+    if not evidence_refs or not has_retrieval:
+        blockers.append("missing_retrieval_receipt")
+        hostile_probes["retrieval_receipt"] = "FAIL:missing_retrieval_receipt"
+    else:
+        hostile_probes["retrieval_receipt"] = "PASS"
+
+    if not has_consumption:
+        blockers.append("missing_physical_consumption")
+        hostile_probes["physical_consumption"] = "FAIL:missing_physical_consumption"
+    else:
+        hostile_probes["physical_consumption"] = "PASS"
+
+    # 4. Authority Boundary Enforcement
+    if (
+        recommendation.get("direct_mutation_allowed")
+        or recommendation.get("route_mutation_allowed")
+        or recommendation.get("planner_mutation_allowed")
+    ):
+        blockers.append("violates_authority_boundary")
+        hostile_probes["authority_boundary"] = "FAIL"
+    else:
+        hostile_probes["authority_boundary"] = "PASS"
+
+    # 5. Rollback Readiness
+    rollback = recommendation.get("rollback_target")
+    if not rollback or not isinstance(rollback, dict) or not rollback.get("target_state"):
+        blockers.append("rollback_not_defined")
+        hostile_probes["rollback_readiness"] = "FAIL"
+    else:
+        hostile_probes["rollback_readiness"] = "PASS"
+
+    # 6. Scope Boundaries
+    scope = recommendation.get("applicable_scope") or {}
+    if not scope or scope.get("all_models") or scope.get("all_tasks"):
+        blockers.append("scope_overbroad")
+        hostile_probes["scope_conformance"] = "FAIL"
+    else:
+        hostile_probes["scope_conformance"] = "PASS"
+
+    # Disposition Determination
+    if blockers:
+        disposition = "REJECTED_RECOMMENDATION" if any("violates" in b or "tamper" in b or "invalid" in b for b in blockers) else "INSUFFICIENT_EVIDENCE"
+    else:
+        disposition = "VALIDATED_FOR_ADOPTION_CONSIDERATION"
+
+    validation_payload: dict[str, Any] = {
+        "schema": LEARNING_POLICY_VALIDATION_SCHEMA,
+        "recommendation_id": recommendation.get("recommendation_id", ""),
+        "recommendation_hash": recommendation.get("recommendation_hash", ""),
+        "validator_identity": validator_identity,
+        "validation_source_revision": current_workspace_revision,
+        "validated_evidence_refs": list(evidence_refs),
+        "scope": dict(scope),
+        "freshness_result": "FRESH" if fresh else "STALE",
+        "tamper_check_result": hostile_probes.get("tamper_check", "FAIL"),
+        "authority_boundary_result": hostile_probes.get("authority_boundary", "FAIL"),
+        "rollback_readiness_result": hostile_probes.get("rollback_readiness", "FAIL"),
+        "hostile_probes": hostile_probes,
+        "validation_disposition": disposition,
+        "blockers": blockers,
+        "claim_ceiling": "SUPPORTED_POLICY_RECOMMENDATION",
+    }
+    val_hash, val_id = canonical_validation_identity(validation_payload)
+    validation_payload["validation_hash"] = val_hash
+    validation_payload["validation_id"] = val_id
+    return validation_payload
+
+
+def canonical_adoption_identity(payload: dict[str, Any]) -> tuple[str, str]:
+    """Compute content-addressed idempotency key and adoption_id."""
+    clean_payload = {k: v for k, v in payload.items() if k not in {"adoption_id", "adoption_hash"}}
+    canonical_repr = json.dumps(clean_payload, sort_keys=True, separators=(",", ":"))
+    ad_hash = hashlib.sha256(canonical_repr.encode("utf-8")).hexdigest()
+    ad_id = f"ladopt:{ad_hash[:24]}"
+    return ad_hash, ad_id
+
+
+def build_learning_policy_adoption(
+    *,
+    owner_authority_reference: str,
+    recommendation: dict[str, Any],
+    validation: dict[str, Any],
+    source_revision: str,
+    adopted_scope: dict[str, Any],
+    target_policy_delta: dict[str, Any],
+    previous_policy: dict[str, Any],
+    rollback_target: dict[str, Any],
+    effective_candidate_generation: str = "candidate_r7_g7",
+) -> dict[str, Any]:
+    """Construct an exact Owner-bound governed policy adoption artifact."""
+    if not owner_authority_reference or not str(owner_authority_reference).strip():
+        raise ValueError("ADOPTION_OWNER_AUTHORITY_MISSING")
+
+    # Validate incoming recommendation and validation
+    validate_learning_policy_recommendation(recommendation)
+    if validation.get("schema") != LEARNING_POLICY_VALIDATION_SCHEMA:
+        raise ValueError("ADOPTION_VALIDATION_SCHEMA_INVALID")
+    if validation.get("validation_disposition") != "VALIDATED_FOR_ADOPTION_CONSIDERATION":
+        raise ValueError("ADOPTION_VALIDATION_DISPOSITION_INVALID")
+
+    rec_id = recommendation.get("recommendation_id")
+    rec_hash = recommendation.get("recommendation_hash")
+    if validation.get("recommendation_id") != rec_id or validation.get("recommendation_hash") != rec_hash:
+        raise ValueError("ADOPTION_RECOMMENDATION_VALIDATION_MISMATCH")
+
+    # Recheck validation hash
+    val_clean = {k: v for k, v in validation.items() if k not in {"validation_id", "validation_hash"}}
+    val_canonical = json.dumps(val_clean, sort_keys=True, separators=(",", ":"))
+    computed_val_hash = hashlib.sha256(val_canonical.encode("utf-8")).hexdigest()
+    if validation.get("validation_hash") != computed_val_hash:
+        raise ValueError("ADOPTION_VALIDATION_HASH_TAMPERED")
+
+    # Scope confinement: Must not exceed recommendation scope
+    rec_scope = recommendation.get("applicable_scope", {})
+    if adopted_scope.get("universal_learning_claim") or adopted_scope.get("all_models") or adopted_scope.get("all_tasks"):
+        raise ValueError("ADOPTION_SCOPE_OVERBROAD")
+    if str(adopted_scope.get("task_family") or "") != str(rec_scope.get("task_family") or ""):
+        raise ValueError("ADOPTION_SCOPE_TASK_FAMILY_MISMATCH")
+    if str(adopted_scope.get("model_name") or "") != str(rec_scope.get("model_name") or ""):
+        raise ValueError("ADOPTION_SCOPE_MODEL_MISMATCH")
+    if str(adopted_scope.get("runtime_identity") or "") != str(rec_scope.get("runtime_identity") or ""):
+        raise ValueError("ADOPTION_SCOPE_RUNTIME_MISMATCH")
+
+    # Recheck source revision freshness
+    if str(source_revision).strip() != str(recommendation.get("source_revision") or "").strip():
+        raise ValueError("ADOPTION_SOURCE_REVISION_STALE")
+
+    # Rollback readiness
+    if not rollback_target or not isinstance(rollback_target, dict) or not rollback_target.get("target_state"):
+        raise ValueError("ADOPTION_MISSING_ROLLBACK_TARGET")
+
+    # Authority invariant: No direct planner route override allowed
+    if any(k in target_policy_delta for k in ("CapabilityPlanner", "route_authority", "workforce_admission", "active_route_override")):
+        raise ValueError("ADOPTION_DIRECT_PLANNER_MUTATION_FORBIDDEN")
+
+    prev_canonical = json.dumps(previous_policy, sort_keys=True, separators=(",", ":"))
+    prev_hash = hashlib.sha256(prev_canonical.encode("utf-8")).hexdigest()
+
+    delta_canonical = json.dumps(target_policy_delta, sort_keys=True, separators=(",", ":"))
+    delta_hash = hashlib.sha256(delta_canonical.encode("utf-8")).hexdigest()
+
+    payload: dict[str, Any] = {
+        "schema": LEARNING_POLICY_ADOPTION_SCHEMA,
+        "owner_authority_reference": str(owner_authority_reference).strip(),
+        "recommendation_id": rec_id,
+        "recommendation_hash": rec_hash,
+        "validation_id": validation.get("validation_id"),
+        "validation_hash": validation.get("validation_hash"),
+        "source_revision": str(source_revision).strip(),
+        "adopted_scope": dict(adopted_scope),
+        "target_policy_delta": dict(target_policy_delta),
+        "target_policy_hash": delta_hash,
+        "previous_policy": dict(previous_policy),
+        "previous_policy_hash": prev_hash,
+        "effective_candidate_generation": str(effective_candidate_generation),
+        "rollback_target": dict(rollback_target),
+        "adoption_status": "ACTIVE_CANDIDATE",
+        "claim_ceiling": "SUPPORTED_POLICY_RECOMMENDATION",
+        "route_truth_source": "CapabilityPlanner",
+        "direct_route_mutation_allowed": False,
+    }
+    ad_hash, ad_id = canonical_adoption_identity(payload)
+    payload["adoption_hash"] = ad_hash
+    payload["adoption_id"] = ad_id
+    validate_learning_policy_adoption(payload)
+    return payload
+
+
+def validate_learning_policy_adoption(adoption: dict[str, Any]) -> None:
+    """Validate adoption identity, content address, and fail-closed bounds."""
+    if not isinstance(adoption, dict):
+        raise ValueError("ADOPTION_NOT_A_MAPPING")
+    if adoption.get("schema") != LEARNING_POLICY_ADOPTION_SCHEMA:
+        raise ValueError("ADOPTION_SCHEMA_INVALID")
+
+    required = (
+        "schema", "adoption_id", "adoption_hash", "owner_authority_reference",
+        "recommendation_id", "recommendation_hash", "validation_id", "validation_hash",
+        "source_revision", "adopted_scope", "target_policy_delta", "target_policy_hash",
+        "previous_policy", "previous_policy_hash", "rollback_target", "adoption_status",
+        "claim_ceiling", "route_truth_source",
+    )
+    missing = [k for k in required if k not in adoption]
+    if missing:
+        raise ValueError(f"ADOPTION_INCOMPLETE:{','.join(missing)}")
+
+    # Content-address check
+    stored_hash = adoption.get("adoption_hash")
+    stored_id = adoption.get("adoption_id")
+    expected_hash, expected_id = canonical_adoption_identity(adoption)
+    if stored_hash != expected_hash or stored_id != expected_id:
+        raise ValueError("ADOPTION_CONTENT_ADDRESS_MISMATCH")
+
+    # Owner authority check
+    if not adoption.get("owner_authority_reference"):
+        raise ValueError("ADOPTION_OWNER_AUTHORITY_MISSING")
+
+    # Authority invariants
+    if adoption.get("direct_route_mutation_allowed") is not False:
+        raise ValueError("ADOPTION_DIRECT_ROUTE_MUTATION_FORBIDDEN")
+    if adoption.get("route_truth_source") != "CapabilityPlanner":
+        raise ValueError("ADOPTION_ROUTE_TRUTH_SOURCE_INVALID")
+
+    # Scope check
+    scope = adoption.get("adopted_scope", {})
+    if not scope or scope.get("all_tasks") or scope.get("all_models") or scope.get("universal_learning_claim"):
+        raise ValueError("ADOPTION_SCOPE_OVERBROAD")
+
+    # Rollback check
+    if not adoption.get("rollback_target"):
+        raise ValueError("ADOPTION_MISSING_ROLLBACK_TARGET")
+
+
+def canonical_rollback_identity(payload: dict[str, Any]) -> tuple[str, str]:
+    """Compute content-addressed idempotency key and rollback_id."""
+    clean_payload = {k: v for k, v in payload.items() if k not in {"rollback_id", "rollback_hash"}}
+    canonical_repr = json.dumps(clean_payload, sort_keys=True, separators=(",", ":"))
+    rb_hash = hashlib.sha256(canonical_repr.encode("utf-8")).hexdigest()
+    rb_id = f"lroll:{rb_hash[:24]}"
+    return rb_hash, rb_id
+
+
+def build_learning_policy_rollback(
+    *,
+    adoption: dict[str, Any],
+    reason: str,
+    triggered_by: str = "governed_rollback_test",
+) -> dict[str, Any]:
+    """Execute a governed reversal of an active adoption artifact."""
+    validate_learning_policy_adoption(adoption)
+    if adoption.get("adoption_status") != "ACTIVE_CANDIDATE":
+        raise ValueError("ROLLBACK_ADOPTION_NOT_ACTIVE")
+
+    rollback_target = adoption.get("rollback_target", {})
+    target_state = rollback_target.get("target_state", {})
+    if not target_state:
+        raise ValueError("ROLLBACK_TARGET_STATE_MISSING")
+
+    payload: dict[str, Any] = {
+        "schema": LEARNING_POLICY_ROLLBACK_SCHEMA,
+        "adoption_id": adoption.get("adoption_id"),
+        "adoption_hash": adoption.get("adoption_hash"),
+        "recommendation_id": adoption.get("recommendation_id"),
+        "recommendation_hash": adoption.get("recommendation_hash"),
+        "previous_policy_hash": adoption.get("target_policy_hash"),
+        "rolled_back_policy": dict(target_state),
+        "rolled_back_policy_hash": hashlib.sha256(json.dumps(target_state, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest(),
+        "rollback_reason": str(reason),
+        "triggered_by": str(triggered_by),
+        "rollback_status": "ROLLED_BACK",
+        "route_truth_source": "CapabilityPlanner",
+    }
+    rb_hash, rb_id = canonical_rollback_identity(payload)
+    payload["rollback_hash"] = rb_hash
+    payload["rollback_id"] = rb_id
+    validate_learning_policy_rollback(payload)
+    return payload
+
+
+def validate_learning_policy_rollback(rollback: dict[str, Any]) -> None:
+    """Validate rollback artifact integrity and hash."""
+    if not isinstance(rollback, dict):
+        raise ValueError("ROLLBACK_NOT_A_MAPPING")
+    if rollback.get("schema") != LEARNING_POLICY_ROLLBACK_SCHEMA:
+        raise ValueError("ROLLBACK_SCHEMA_INVALID")
+
+    required = (
+        "schema", "rollback_id", "rollback_hash", "adoption_id", "adoption_hash",
+        "recommendation_id", "recommendation_hash", "previous_policy_hash",
+        "rolled_back_policy", "rolled_back_policy_hash", "rollback_reason",
+        "rollback_status", "route_truth_source",
+    )
+    missing = [k for k in required if k not in rollback]
+    if missing:
+        raise ValueError(f"ROLLBACK_INCOMPLETE:{','.join(missing)}")
+
+    stored_hash = rollback.get("rollback_hash")
+    stored_id = rollback.get("rollback_id")
+    expected_hash, expected_id = canonical_rollback_identity(rollback)
+    if stored_hash != expected_hash or stored_id != expected_id:
+        raise ValueError("ROLLBACK_CONTENT_ADDRESS_MISMATCH")
+
+
+def project_adoption_into_planner_budget(
+    adoption: dict[str, Any],
+    *,
+    task_desc: str,
+    target_model: str = "qwen2.5-coder:7b",
+    runtime_identity: str = "local_model_executor",
+    rollback: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Pure, deterministic projection of an adoption artifact into CapabilityPlanner budget."""
+    validate_learning_policy_adoption(adoption)
+    if rollback is not None:
+        validate_learning_policy_rollback(rollback)
+        if rollback.get("adoption_id") != adoption.get("adoption_id"):
+            raise ValueError("PROJECTION_ROLLBACK_ADOPTION_MISMATCH")
+        # Rollback active: return clean inactive budget
+        return {
+            "learning_policy": {
+                "episodic_memory_injection": {"enabled": False},
+                "adoption_lineage": {
+                    "adoption_id": adoption.get("adoption_id"),
+                    "status": "ROLLED_BACK",
+                    "rollback_id": rollback.get("rollback_id"),
+                },
+            }
+        }
+
+    if adoption.get("adoption_status") != "ACTIVE_CANDIDATE":
+        return {
+            "learning_policy": {
+                "episodic_memory_injection": {"enabled": False},
+                "adoption_lineage": {"status": "INACTIVE"},
+            }
+        }
+
+    scope = adoption.get("adopted_scope", {})
+    # Scope checking: task_family, model, runtime
+    scope_family = str(scope.get("task_family") or "")
+    scope_model = str(scope.get("model_name") or "")
+    scope_runtime = str(scope.get("runtime_identity") or "")
+
+    in_scope_task = bool(scope_family and scope_family in task_desc.lower())
+    in_scope_model = bool(not scope_model or scope_model == target_model)
+    in_scope_runtime = bool(not scope_runtime or scope_runtime == runtime_identity)
+
+    if in_scope_task and in_scope_model and in_scope_runtime:
+        delta = adoption.get("target_policy_delta", {})
+        injection_spec = delta.get("episodic_memory_injection", {})
+        enabled = bool(injection_spec.get("enabled", True))
+        return {
+            "learning_policy": {
+                "episodic_memory_injection": {
+                    "enabled": enabled,
+                    "scope": scope_family,
+                },
+                "adoption_lineage": {
+                    "adoption_id": adoption.get("adoption_id"),
+                    "adoption_hash": adoption.get("adoption_hash"),
+                    "recommendation_id": adoption.get("recommendation_id"),
+                    "validation_id": adoption.get("validation_id"),
+                    "policy_hash": adoption.get("target_policy_hash"),
+                    "scope": dict(scope),
+                    "status": "ACTIVE_CANDIDATE",
+                },
+            }
+        }
+
+    return {
+        "learning_policy": {
+            "episodic_memory_injection": {"enabled": False},
+            "adoption_lineage": {
+                "adoption_id": adoption.get("adoption_id"),
+                "status": "OUT_OF_SCOPE",
+                "in_scope_task": in_scope_task,
+                "in_scope_model": in_scope_model,
+                "in_scope_runtime": in_scope_runtime,
+            },
+        }
+    }
 
 
 def validate_runtime_learning_closure(episode: dict[str, Any]) -> None:
