@@ -598,6 +598,7 @@ def test_admission_blocks_invalid_request_schema_without_resolving_worker() -> N
 
 # --- Combined Learning/Core Workforce route repair tests ---
 
+
 def test_resolve_route_global_returns_37_medium() -> None:
     """resolve_route returns agy_flash_37_medium for global fast_bounded_implementation."""
     loader = WorkforcePolicyLoader(POLICY_PATH)
@@ -669,7 +670,10 @@ def test_loader_reject_does_not_cache_invalid_snapshot(tmp_path) -> None:
     path = tmp_path / "policy.yaml"
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     loader = WorkforcePolicyLoader(path)
-    assert loader.load().routing["online"]["fast_bounded_implementation"] == "agy_flash_37_medium"
+    assert (
+        loader.load().routing["online"]["fast_bounded_implementation"]
+        == "agy_flash_37_medium"
+    )
     data["routing"]["online"]["fast_bounded_implementation"] = "missing_worker"
     path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
     with pytest.raises(WorkforcePolicyValidationError):
@@ -698,12 +702,44 @@ def _mutated_policy(tmp_path, mutate):
     return WorkforcePolicyLoader(path)
 
 
-@pytest.mark.parametrize("mutation, expected", [
-    (lambda d: d["routing"]["online"].update(fast_bounded_implementation="missing_worker"), "unknown worker"),
-    (lambda d: d["routing"]["online"]["route_defaults"]["fast_bounded_implementation"].update(fallback="agy_flash_medium"), "stale"),
-    (lambda d: d["workers"].update(extra_default={**d["workers"]["agy_flash_37_medium"], "model": "gemini-extra", "default_route": True}), "exactly one current default"),
-    (lambda d: d["workers"].update(successor={**d["workers"]["agy_flash_37_medium"], "model": "gemini-successor", "successor_of": "agy_flash_37_medium", "default_route": False}), "successor without explicit disposition"),
-])
+@pytest.mark.parametrize(
+    "mutation, expected",
+    [
+        (
+            lambda d: d["routing"]["online"].update(
+                fast_bounded_implementation="missing_worker"
+            ),
+            "unknown worker",
+        ),
+        (
+            lambda d: d["routing"]["online"]["route_defaults"][
+                "fast_bounded_implementation"
+            ].update(fallback="agy_flash_medium"),
+            "stale",
+        ),
+        (
+            lambda d: d["workers"].update(
+                extra_default={
+                    **d["workers"]["agy_flash_37_medium"],
+                    "model": "gemini-extra",
+                    "default_route": True,
+                }
+            ),
+            "exactly one current default",
+        ),
+        (
+            lambda d: d["workers"].update(
+                successor={
+                    **d["workers"]["agy_flash_37_medium"],
+                    "model": "gemini-successor",
+                    "successor_of": "agy_flash_37_medium",
+                    "default_route": False,
+                }
+            ),
+            "successor without explicit disposition",
+        ),
+    ],
+)
 def test_loader_rejects_invalid_combined_route_metadata(tmp_path, mutation, expected) -> None:
     with pytest.raises(Exception, match=expected):
         _mutated_policy(tmp_path, mutation).load()

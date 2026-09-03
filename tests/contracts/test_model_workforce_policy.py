@@ -507,6 +507,7 @@ def test_three_layers_lineage_and_ceiling_constraints() -> None:
 
 # --- Combined Learning/Core Workforce route repair tests (Card: TASK-PWS-COMBINED-R2) ---
 
+
 def test_combined_global_route_binds_to_37_medium() -> None:
     """GLOBAL: fast_bounded_implementation routes to agy_flash_37_medium (CURRENT_DEFAULT)."""
     manifest = _manifest()
