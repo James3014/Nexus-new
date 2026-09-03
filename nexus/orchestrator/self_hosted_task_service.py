@@ -9342,6 +9342,13 @@ class SelfHostedTaskService:
                 or (current.get("status"), current.get("promotion_status")) != expected_prior_pair
             ):
                 raise RuntimeError("CLOSURE_BINDING_CONCURRENCY_DRIFT")
+            if mixed_recovery_pair and (
+                current.get("merge_performed") not in (False, None)
+                or current.get("integration_result_sha") is not None
+                or current.get("integration_receipt") is not None
+                or current.get("integration_execution") is not None
+            ):
+                raise RuntimeError("RECOVERY_AUTHORITY_CONCURRENCY_EFFECT_DRIFT")
             if current.get("attempt_id") != attempt_id:
                 raise RuntimeError("CLOSURE_ATTEMPT_DRIFT")
             current_packet = current.get("promotion_packet") if isinstance(current.get("promotion_packet"), Mapping) else {}
@@ -9510,7 +9517,41 @@ class SelfHostedTaskService:
         if state is None:
             raise KeyError(f"unknown task_id: {task_id}")
         if state.get("status") != "INTEGRATING" or state.get("promotion_status") != "APPROVED":
-            raise RuntimeError("RECOVERY_AUTHORITY_MIXED_STATE_REQUIRED")
+            normalized = (
+                state.get("status") == "INTEGRATING"
+                and state.get("promotion_status") == "INTEGRATING"
+                and state.get("integration_recovery_only") is True
+                and isinstance(state.get("integration_closure_binding"), Mapping)
+                and state["integration_closure_binding"].get("recovery_only") is True
+            )
+            if not normalized:
+                raise RuntimeError("RECOVERY_AUTHORITY_MIXED_STATE_REQUIRED")
+            closure = state["integration_closure_binding"]
+            identity = resolve_contract_identity(
+                state, expected_task_id=task_id,
+                expected_head=str(state.get("controller_revision") or ""),
+            )
+            supplied_runtime = dict(runtime_identity)
+            supplied_runtime.update(identity)
+            projection = closure.get("approval_projection")
+            if (
+                dict(closure.get("runtime_identity") or {}) != supplied_runtime
+                or dict(state.get("external_acceptance") or {}) != external_acceptance.to_dict()
+                or not isinstance(projection, Mapping)
+                or dict(projection) != {key: approval.get(key) for key in projection}
+                or str(closure.get("expected_canonical_head") or closure.get("canonical_head") or "") != str(expected_canonical_head)
+                or str(closure.get("canonical_branch") or "") != str(integration_branch)
+            ):
+                raise RuntimeError("RECOVERY_AUTHORITY_REPLAY_DRIFT")
+            return self.bind_candidate_integration_closure(
+                task_id,
+                external_acceptance=external_acceptance,
+                approval=approval,
+                runtime_identity=runtime_identity,
+                expected_canonical_head=expected_canonical_head,
+                integration_branch=integration_branch,
+                _recovery_authority_normalization=True,
+            )
         if (
             state.get("merge_performed")
             or state.get("integration_receipt") is not None
