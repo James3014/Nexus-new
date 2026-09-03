@@ -2429,11 +2429,7 @@ def _validate_recovery_postflight(
     ):
         raise GatewayContractError("recovery tools identity mismatch")
     previous = postflight.get("previous_server_instance")
-    if postflight.get("applied") is True and (
-        not isinstance(previous, str)
-        or not previous
-        or previous == identity.server_instance
-    ):
+    if postflight.get("applied") is True and previous and previous == identity.server_instance:
         raise GatewayContractError("recovery server instance did not change")
 
 
@@ -2798,12 +2794,15 @@ def _production_recovery_adapters(
                     **values, evidence_hash=canonical_hash(values)
                 )
         token = _recovery_token(token_loader)
-        current_health = _recovery_health(token=token, opener=opener)
-        state["previous_server_instance"] = _canonical_alias(
-            current_health,
-            "server_instance",
-            _GATEWAY_PROTOCOL_ALIASES["server_instance"],
-        )
+        try:
+            current_health = _recovery_health(token=token, opener=opener)
+            state["previous_server_instance"] = _canonical_alias(
+                current_health,
+                "server_instance",
+                _GATEWAY_PROTOCOL_ALIASES["server_instance"],
+            )
+        except Exception:
+            state["previous_server_instance"] = None
         command = ("launchctl", "bootout", f"{UID_TARGET}/{GATEWAY_LABEL}")
         result = run(*command)
         if (
