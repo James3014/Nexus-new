@@ -4,7 +4,7 @@ import datetime
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping
 
 import yaml
 
@@ -244,8 +244,176 @@ class WorkforcePolicyLoader:
             policy_hash=policy_hash,
         )
 
+        # 9. Route target validation
+        self._validate_route_targets(snapshot, workers_raw=workers_raw)
+
+        # Cache only a snapshot that passed every semantic validation.  A
+        # rejected reload must never leave this loader able to resolve routes
+        # from the invalid snapshot on a later call.
         self._cached_snapshot = snapshot
+
         return snapshot
+
+    @staticmethod
+    def _validate_route_targets(
+        snapshot: WorkforcePolicySnapshot,
+        *,
+        workers_raw: Mapping[str, Any] | None = None,
+    ) -> None:
+        """Validate direct routes and their default/fallback metadata."""
+        online = snapshot.routing.get("online", {})
+        if not isinstance(online, dict):
+            return
+        # Policy metadata and candidate pools are not single direct routes.
+        meta_keys = {
+            "route_defaults", "campaign_routing",
+            "fast_bounded_implementation_fallback",
+            "blocked_or_disabled_models_must_not_be_selected",
+            "experiment_only_models_require_explicit_authorization",
+            "free_remote_candidate_pool", "mandatory_escalation_conditions",
+        }
+        for role, worker_id in online.items():
+            if role in meta_keys:
+                continue
+            if isinstance(worker_id, list):
+                for candidate in worker_id:
+                    if not isinstance(candidate, str) or candidate not in snapshot.workers:
+                        raise WorkforcePolicyValidationError(
+                            f"routing.online.{role} references unknown worker '{candidate}'"
+                        )
+                continue
+            if not isinstance(worker_id, str) or not worker_id.strip():
+                raise WorkforcePolicyValidationError(f"routing.online.{role} must reference a worker")
+            base_id = worker_id.split("_when_", 1)[0] if "_when_" in worker_id else worker_id
+            if base_id not in snapshot.workers:
+                raise WorkforcePolicyValidationError(
+                    f"routing.online.{role} references unknown worker '{base_id}'"
+                )
+            worker = snapshot.workers[base_id]
+            if worker.state in NON_ADMISSIBLE_STATES:
+                raise WorkforcePolicyValidationError(
+                    f"routing.online.{role} worker '{base_id}' is non-admissible: '{worker.state}'"
+                )
+            if worker.availability != "AVAILABLE":
+                raise WorkforcePolicyValidationError(
+                    f"routing.online.{role} worker '{base_id}' is not available: '{worker.availability}'"
+                )
+            # The combined repair's strict role contract applies to the
+            # canonical defaulted direct role.  Older routing keys such as
+            # ``complex_milestone`` are policy aliases and intentionally do
+            # not have to equal a worker's advertised role name.
+            strict_roles = set((online.get("route_defaults") or {}).keys())
+            if role in strict_roles and role not in worker.roles:
+                raise WorkforcePolicyValidationError(
+                    f"routing.online.{role} worker '{base_id}' does not advertise role '{role}'"
+                )
+
+        defaults = online.get("route_defaults", {})
+        if defaults is not None and not isinstance(defaults, dict):
+            raise WorkforcePolicyValidationError("routing.online.route_defaults must be an object")
+        for role, entry in (defaults or {}).items():
+            if not isinstance(entry, dict):
+                raise WorkforcePolicyValidationError(f"route_defaults.{role} must be an object")
+            current, fallback = entry.get("current_default"), entry.get("fallback")
+            if current != online.get(role):
+                raise WorkforcePolicyValidationError(
+                    f"route_defaults.{role}.current_default must match routing.online.{role}"
+                )
+            if not isinstance(fallback, str) or online.get(f"{role}_fallback") != fallback:
+                raise WorkforcePolicyValidationError(f"route_defaults.{role}.fallback is stale or missing")
+            if current == fallback:
+                raise WorkforcePolicyValidationError(f"route_defaults.{role} has identical default and fallback")
+            for disposition, target in (("current_default", current), ("fallback", fallback)):
+                if target not in snapshot.workers:
+                    raise WorkforcePolicyValidationError(
+                        f"route_defaults.{role}.{disposition} references unknown worker '{target}'"
+                    )
+                target_worker = snapshot.workers[target]
+                if target_worker.state in NON_ADMISSIBLE_STATES or target_worker.availability != "AVAILABLE":
+                    raise WorkforcePolicyValidationError(
+                        f"route_defaults.{role}.{disposition} worker '{target}' is non-admissible or unavailable"
+                    )
+                if role not in target_worker.roles:
+                    raise WorkforcePolicyValidationError(
+                        f"route_defaults.{role}.{disposition} worker '{target}' does not advertise role '{role}'"
+                    )
+            advertised_defaults = [
+                worker_id for worker_id, worker in snapshot.workers.items()
+                if role in worker.roles
+                and isinstance((workers_raw or {}).get(worker_id), dict)
+                and (workers_raw or {})[worker_id].get("default_route") is True
+            ]
+            if advertised_defaults != [current]:
+                raise WorkforcePolicyValidationError(
+                    f"route_defaults.{role} requires exactly one current default, got {advertised_defaults}"
+                )
+
+        for worker_id, raw in (workers_raw or {}).items():
+            if not isinstance(raw, dict) or not raw.get("successor_of"):
+                continue
+            disposition = raw.get("successor_disposition") or raw.get("disposition")
+            if not isinstance(disposition, str) or not disposition.strip():
+                raise WorkforcePolicyValidationError(
+                    f"worker '{worker_id}' is a registered successor without explicit disposition"
+                )
+        # Validate campaign routing targets
+        campaign_routing = online.get("campaign_routing", {})
+        if isinstance(campaign_routing, dict):
+            for campaign_id, overrides in campaign_routing.items():
+                if not isinstance(overrides, dict):
+                    continue
+                for role, worker_id in overrides.items():
+                    if not isinstance(worker_id, str) or worker_id not in snapshot.workers:
+                        raise WorkforcePolicyValidationError(
+                            f"routing.online.campaign_routing.{campaign_id}.{role} references unknown worker '{worker_id}'"
+                        )
+                    worker = snapshot.workers[worker_id]
+                    if worker.state in NON_ADMISSIBLE_STATES:
+                        raise WorkforcePolicyValidationError(
+                            f"routing.online.campaign_routing.{campaign_id}.{role} worker '{worker_id}' is non-admissible"
+                        )
+                    if worker.availability != "AVAILABLE":
+                        raise WorkforcePolicyValidationError(
+                            f"routing.online.campaign_routing.{campaign_id}.{role} worker '{worker_id}' is unavailable"
+                        )
+                    if role not in worker.roles:
+                        raise WorkforcePolicyValidationError(
+                            f"routing.online.campaign_routing.{campaign_id}.{role} worker '{worker_id}' does not advertise role '{role}'"
+                        )
+
+    def resolve_route(
+        self,
+        role: str,
+        *,
+        campaign_id: str = "",
+    ) -> str:
+        """Resolve a routing target for a role, with optional exact campaign match.
+
+        Campaign resolution is exact-match only; blank, missing, prefixed,
+        or unrelated campaign IDs use the global route.
+        """
+        snapshot = self._cached_snapshot or self.load()
+        online = snapshot.routing.get("online", {})
+        # Exact campaign match first
+        campaign_id_str = campaign_id if isinstance(campaign_id, str) else ""
+        if campaign_id_str:
+            campaign_routing = online.get("campaign_routing", {})
+            if isinstance(campaign_routing, dict):
+                campaign_overrides = campaign_routing.get(campaign_id_str)
+                if isinstance(campaign_overrides, dict) and role in campaign_overrides:
+                    return str(campaign_overrides[role])
+        # Fall back to global route
+        worker_id = online.get(role)
+        if isinstance(worker_id, str) and worker_id:
+            return worker_id
+        raise WorkforcePolicyError(f"No route found for role '{role}'")
+
+    def get_route_defaults(self) -> dict[str, dict[str, str]]:
+        """Return the route_defaults metadata for all roles."""
+        snapshot = self._cached_snapshot or self.load()
+        online = snapshot.routing.get("online", {})
+        defaults = online.get("route_defaults", {})
+        return dict(defaults) if isinstance(defaults, dict) else {}
 
     def admit(
         self,
