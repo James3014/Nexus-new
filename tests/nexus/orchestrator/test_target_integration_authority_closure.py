@@ -2087,6 +2087,149 @@ def test_integration_replays_persisted_contract_when_request_workforce_receipt_i
     assert calls == ["integration_manager"]
 
 
+def test_record_integration_replays_persisted_contract_after_apply_and_is_idempotent(
+    tmp_path: Path, monkeypatch
+):
+    """Recording an applied receipt must not rebuild a mutable request contract."""
+    from nexus.orchestrator.governed_integration import IntegrationReceipt
+
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure(
+        "closure-bind",
+        external_acceptance=acceptance,
+        approval=approval,
+        runtime_identity=runtime,
+        expected_canonical_head=base,
+        integration_branch="nexus/integration/canary",
+    )
+    state = service._read_state("closure-bind") or {}
+    authorization_hash = str(state["integration_authorization"]["authorization_hash"])
+    receipt = IntegrationReceipt(
+        schema="nexus.integration_receipt/v1",
+        task_id="closure-bind",
+        integration_branch="nexus/integration/canary",
+        source_branch="nexus/task/closure-bind",
+        candidate_commit_sha=candidate,
+        integration_base_sha=base,
+        integration_commit_sha=candidate,
+        verifier_passed=True,
+        merge_performed=True,
+        push_performed=False,
+        worktree_removed=False,
+        staging_commit_sha=candidate,
+        post_apply_verified=True,
+        acceptance_receipt_hash=acceptance.receipt_hash,
+        authorization_hash=authorization_hash,
+    )
+
+    monkeypatch.setattr(
+        service,
+        "build_contract",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("recording must replay persisted contract")
+        ),
+    )
+    first = service._record_integration(receipt, task_id="closure-bind")
+    second = service.integrate_approved("closure-bind")
+
+    assert first["status"] == "INTEGRATED"
+    assert second["status"] == "INTEGRATED"
+    assert second["integration_result_sha"] == candidate
+
+
+def test_receipt_only_recovery_records_applied_integrating_state_without_merge(
+    tmp_path: Path, monkeypatch
+):
+    """Recovery records a witnessed applied HEAD and never reruns integration."""
+    from nexus.orchestrator.governed_integration import IntegrationReceipt
+
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure(
+        "closure-bind",
+        external_acceptance=acceptance,
+        approval=approval,
+        runtime_identity=runtime,
+        expected_canonical_head=base,
+        integration_branch="nexus/integration/canary",
+    )
+    _git(root, "merge", "--ff-only", "candidate")
+    state = service._read_state("closure-bind") or {}
+    state.update(
+        status="INTEGRATING",
+        promotion_status="INTEGRATING",
+        integration_branch="nexus/integration/canary",
+        merge_performed=False,
+        integration_receipt=None,
+        integration_result_sha=None,
+        integration_execution=None,
+    )
+    service._write_state("closure-bind", state)
+    receipt = IntegrationReceipt(
+        schema="nexus.integration_receipt/v1",
+        task_id="closure-bind",
+        integration_branch="nexus/integration/canary",
+        source_branch="nexus/task/closure-bind",
+        candidate_commit_sha=candidate,
+        integration_base_sha=base,
+        integration_commit_sha=candidate,
+        verifier_passed=True,
+        merge_performed=True,
+        push_performed=False,
+        worktree_removed=False,
+        staging_commit_sha=candidate,
+        post_apply_verified=True,
+        acceptance_receipt_hash=acceptance.receipt_hash,
+        authorization_hash=state["integration_authorization"]["authorization_hash"],
+        task_card_hash=state["task_card_hash"],
+        candidate_tree_sha=state["promotion_packet"]["candidate_tree_sha"],
+        candidate_state_hash=state["promotion_packet"]["candidate_state_hash"],
+        verified_receipt_hash=state["promotion_packet"]["verified_receipt_hash"],
+    )
+    monkeypatch.setattr(
+        service,
+        "build_contract",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("recovery must not rebuild request contract")
+        ),
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.ControlledIntegrationManager",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("recovery must not invoke integration manager")
+        ),
+    )
+
+    recovery_runtime = state["integration_closure_binding"]["runtime_identity"]
+    original_state = dict(state)
+    state["execution_authority"] = "WORKER_REGISTRY"
+    state["request"].pop("workforce_demands", None)
+    state["request"].pop("workforce_admission", None)
+    state["request"].pop("canonical_dispatch_envelope", None)
+    state.pop("workforce_dispatch", None)
+    state.pop("canonical_dispatch_envelope", None)
+    service._write_state("closure-bind", state)
+    with pytest.raises(RuntimeError, match="INTEGRATION_WORKFORCE_DISPATCH_DRIFT"):
+        service.recover_applied_integration_receipt(
+            "closure-bind", receipt, runtime_identity=recovery_runtime
+        )
+    service._write_state("closure-bind", original_state)
+    first = service.recover_applied_integration_receipt(
+        "closure-bind", receipt, runtime_identity=recovery_runtime
+    )
+    second = service.recover_applied_integration_receipt(
+        "closure-bind", receipt, runtime_identity=recovery_runtime
+    )
+
+    assert first["status"] == "INTEGRATED"
+    assert second["status"] == "INTEGRATED"
+    assert second["integration_result_sha"] == candidate
+    with pytest.raises(RuntimeError, match="idempotency receipt mismatch"):
+        service.recover_applied_integration_receipt(
+            "closure-bind", replace(receipt, task_id="unrelated-task"),
+            runtime_identity=recovery_runtime,
+        )
+
+
 @pytest.mark.parametrize("tamper", ["request", "dispatch", "hash", "coordinated"])
 def test_integration_blocks_persisted_workforce_projection_tamper(
     tmp_path: Path, tamper: str
