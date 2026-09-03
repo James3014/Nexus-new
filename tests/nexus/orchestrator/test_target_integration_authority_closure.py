@@ -1061,6 +1061,88 @@ def test_service_closure_binding_rejects_tamper_and_head_drift(tmp_path: Path):
         service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
 
 
+def test_integrating_rebind_sets_recovery_fence_and_blocks_normal_paths(tmp_path: Path, monkeypatch):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    _git(root, "merge", "--ff-only", "candidate")
+    state = service._read_state("closure-bind") or {}
+    _git(root, "update-ref", state["candidate_ref"], candidate)
+    state.update(status="INTEGRATING", promotion_status="INTEGRATING", merge_performed=False, integration_receipt=None, integration_result_sha=None, integration_execution=None)
+    service._write_state("closure-bind", state)
+    recovery_approval = {
+        **approval,
+        "approval_id": approval["approval_id"] + "-recovery",
+        "issued_at": "2026-08-09T00:00:00+00:00",
+        "expected_canonical_head": candidate,
+    }
+    rebound = service.bind_candidate_integration_closure(
+        "closure-bind", external_acceptance=acceptance,
+        approval=recovery_approval,
+        runtime_identity=runtime, expected_canonical_head=candidate,
+        integration_branch="nexus/integration/canary",
+    )
+    assert rebound["integration_closure_binding"]["recovery_only"] is True
+    assert rebound["integration_recovery_only"] is True
+    with pytest.raises(RuntimeError, match="INTEGRATION_RECOVERY_ONLY"):
+        service.integrate_approved("closure-bind")
+    with pytest.raises(RuntimeError, match="INTEGRATION_RECOVERY_ONLY"):
+        service.retry_integration("closure-bind")
+
+
+def test_closure_binding_concurrent_status_drift_is_zero_write(tmp_path: Path, monkeypatch):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    original_mutate = service._mutate_state
+
+    def drift_before_locked_mutation(task_id, mutate):
+        current = service._read_state(task_id) or {}
+        current["status"] = "INTEGRATING"
+        current["promotion_status"] = "INTEGRATING"
+        service._write_state(task_id, current)
+        return original_mutate(task_id, mutate)
+
+    monkeypatch.setattr(service, "_mutate_state", drift_before_locked_mutation)
+    with pytest.raises(RuntimeError, match="CLOSURE_BINDING_CONCURRENCY_DRIFT"):
+        service.bind_candidate_integration_closure("closure-bind", external_acceptance=acceptance, approval=approval, runtime_identity=runtime, expected_canonical_head=base, integration_branch="nexus/integration/canary")
+    assert "integration_closure_binding" not in (service._read_state("closure-bind") or {})
+
+
+@pytest.mark.parametrize("status, promotion_status", [("INTEGRATING", "APPROVED"), ("APPROVED", "INTEGRATING")])
+def test_integrating_rebind_rejects_mixed_status_pair(tmp_path: Path, status: str, promotion_status: str):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    state = service._read_state("closure-bind") or {}
+    state.update(status=status, promotion_status=promotion_status)
+    service._write_state("closure-bind", state)
+    with pytest.raises(RuntimeError, match="CLOSURE_APPROVED_CANDIDATE_REQUIRED"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", external_acceptance=acceptance, approval=approval,
+            runtime_identity=runtime, expected_canonical_head=base,
+            integration_branch="nexus/integration/canary",
+        )
+
+
+def test_integrating_rebind_requires_applied_head_and_candidate_ref(tmp_path: Path):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    state = service._read_state("closure-bind") or {}
+    state.update(status="INTEGRATING", promotion_status="INTEGRATING", merge_performed=False, integration_receipt=None, integration_result_sha=None, integration_execution=None)
+    service._write_state("closure-bind", state)
+    with pytest.raises(RuntimeError, match="CLOSURE_INTEGRATING_APPLIED_TREE_REQUIRED"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", external_acceptance=acceptance, approval=approval,
+            runtime_identity=runtime, expected_canonical_head=base,
+            integration_branch="nexus/integration/canary",
+        )
+    _git(root, "merge", "--ff-only", "candidate")
+    _git(root, "update-ref", state["candidate_ref"], candidate)
+    recovery_approval = {**approval, "approval_id": approval["approval_id"] + "-recovery", "issued_at": "2026-08-09T00:00:00+00:00", "expected_canonical_head": candidate}
+    _git(root, "update-ref", "-d", state["candidate_ref"])
+    with pytest.raises(RuntimeError, match="CLOSURE_INTEGRATING_CANDIDATE_REF_DRIFT"):
+        service.bind_candidate_integration_closure(
+            "closure-bind", external_acceptance=acceptance, approval=recovery_approval,
+            runtime_identity=runtime, expected_canonical_head=candidate,
+            integration_branch="nexus/integration/canary",
+        )
+
+
 @pytest.mark.parametrize(
     ("tamper", "message"),
     [
@@ -2200,18 +2282,37 @@ def test_receipt_only_recovery_records_applied_integrating_state_without_merge(
     )
 
     recovery_runtime = state["integration_closure_binding"]["runtime_identity"]
-    original_state = dict(state)
+    original_state = json.loads(json.dumps(state))
     state["execution_authority"] = "WORKER_REGISTRY"
     state["request"].pop("workforce_demands", None)
     state["request"].pop("workforce_admission", None)
     state["request"].pop("canonical_dispatch_envelope", None)
     state.pop("workforce_dispatch", None)
     state.pop("canonical_dispatch_envelope", None)
+    state["integration_recovery_only"] = True
+    state["integration_closure_binding"]["recovery_only"] = True
+    closure_payload = {
+        key: value for key, value in state["integration_closure_binding"].items()
+        if key != "binding_hash"
+    }
+    state["integration_closure_binding"]["binding_hash"] = hashlib.sha256(
+        json.dumps(closure_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
     service._write_state("closure-bind", state)
     with pytest.raises(RuntimeError, match="INTEGRATION_WORKFORCE_DISPATCH_DRIFT"):
         service.recover_applied_integration_receipt(
             "closure-bind", receipt, runtime_identity=recovery_runtime
         )
+    service._write_state("closure-bind", original_state)
+    original_state["integration_recovery_only"] = True
+    original_state["integration_closure_binding"]["recovery_only"] = True
+    restored_closure = {
+        key: value for key, value in original_state["integration_closure_binding"].items()
+        if key != "binding_hash"
+    }
+    original_state["integration_closure_binding"]["binding_hash"] = hashlib.sha256(
+        json.dumps(restored_closure, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
     service._write_state("closure-bind", original_state)
     first = service.recover_applied_integration_receipt(
         "closure-bind", receipt, runtime_identity=recovery_runtime
