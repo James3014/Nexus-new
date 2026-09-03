@@ -88,12 +88,12 @@ uv run --project runtimes/open_swe pytest -p no:cacheprovider runtimes/open_swe/
 uv run pytest -p no:cacheprovider tests/services/test_open_swe_external_intelligence.py tests/services/test_open_swe_process_death.py
 uv run --project runtimes/open_swe ruff check runtimes/open_swe/nexus_open_swe_runtime runtimes/open_swe/tests
 uv run pyright nexus/services/open_swe_external_intelligence.py
-uv run --project runtimes/open_swe pyright runtimes/open_swe/nexus_open_swe_runtime
+uv run pyright --pythonpath runtimes/open_swe/.venv/bin/python runtimes/open_swe/nexus_open_swe_runtime nexus/services/open_swe_external_intelligence.py
 uv run bandit -q -r nexus/services/open_swe_external_intelligence.py runtimes/open_swe/nexus_open_swe_runtime
 git diff --check
 ```
 
-Exact-base comparison, full diff/scope/deletion inspection, and independent H13 review are separate from Implementer PASS.
+The combined Pyright and Bandit commands are exact-base classifiers: Candidate PASS requires `new_errors=0` and `new_findings=0`, not a false claim that pre-existing baseline findings are absent. Exact-base comparison, full diff/scope/deletion inspection, and independent H13 review are separate from Implementer PASS.
 
 ## Exit
 
