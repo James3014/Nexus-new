@@ -10007,6 +10007,8 @@ class SelfHostedTaskService:
         """Record an externally witnessed apply without replaying integration."""
         from nexus.orchestrator.governed_integration import IntegrationReceipt
 
+        if not isinstance(receipt, IntegrationReceipt):
+            raise TypeError("receipt must be an IntegrationReceipt instance")
         state = self._read_state(task_id)
         if state is None:
             raise KeyError(f"unknown task_id: {task_id}")
@@ -10015,6 +10017,9 @@ class SelfHostedTaskService:
             "INTEGRATED_AND_CLEANED",
             "INTEGRATED_TARGET_RETAINED",
         } and state.get("promotion_status") == "INTEGRATED":
+            persisted_receipt = state.get("integration_receipt")
+            if not isinstance(persisted_receipt, Mapping) or dict(persisted_receipt) != asdict(receipt):
+                raise RuntimeError("receipt recovery idempotency receipt mismatch")
             return state
         if state.get("status") != "INTEGRATING" or state.get("promotion_status") != "INTEGRATING":
             raise RuntimeError("receipt recovery requires INTEGRATING state")
@@ -10022,8 +10027,6 @@ class SelfHostedTaskService:
             raise RuntimeError("receipt recovery requires an unrecorded applied state")
         if state.get("integration_execution"):
             raise RuntimeError("receipt recovery requires no persisted execution record")
-        if not isinstance(receipt, IntegrationReceipt):
-            raise TypeError("receipt must be an IntegrationReceipt instance")
         if receipt.task_id != task_id or not receipt.merge_performed or receipt.push_performed:
             raise RuntimeError("receipt recovery physical binding mismatch")
         if not receipt.verifier_passed or not receipt.post_apply_verified:
@@ -10039,7 +10042,9 @@ class SelfHostedTaskService:
             contract = ArchitectTaskContract.model_validate(contract_payload)
         except Exception as exc:
             raise RuntimeError("INTEGRATION_CONTRACT_INVALID") from exc
-        if state.get("contract_hash") and contract.contract_hash != state.get("contract_hash"):
+        if not re.fullmatch(r"[0-9a-f]{64}", str(state.get("contract_hash") or "")):
+            raise RuntimeError("INTEGRATION_CONTRACT_BINDING_MISMATCH")
+        if contract.contract_hash != state.get("contract_hash"):
             raise RuntimeError("INTEGRATION_CONTRACT_BINDING_MISMATCH")
 
         request = state.get("request")
@@ -10048,6 +10053,12 @@ class SelfHostedTaskService:
             key in state or (isinstance(request, Mapping) and key in request)
             for key in ("workforce_demands", "workforce_admission", "canonical_dispatch_envelope", "workforce_dispatch")
         )
+        if (
+            isinstance(request, Mapping)
+            and request.get("execution_authority") == "WORKER_REGISTRY"
+            and not projection_present
+        ):
+            raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
         if projection_present:
             if not isinstance(request, Mapping) or not isinstance(dispatch, Mapping):
                 raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
@@ -10112,6 +10123,52 @@ class SelfHostedTaskService:
         grant = state.get("integration_approval_grant")
         if not isinstance(grant, Mapping) or not grant.get("consumed_at"):
             raise RuntimeError("receipt recovery consumed integration approval missing")
+        closure_payload = {key: value for key, value in closure.items() if key != "binding_hash"}
+        closure_hash = hashlib.sha256(json.dumps(
+            closure_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+        ).encode()).hexdigest()
+        if closure.get("binding_hash") != closure_hash:
+            raise RuntimeError("receipt recovery closure binding drift")
+        try:
+            authorization_obj = IntegrationAuthorizationEnvelope(**{
+                key: value for key, value in authorization.items() if key != "authorization_hash"
+            })
+        except Exception as exc:
+            raise RuntimeError("receipt recovery authorization invalid") from exc
+        if authorization.get("authorization_hash") != authorization_obj.authorization_hash:
+            raise RuntimeError("receipt recovery authorization drift")
+        expected_fields = {
+            "task_id": task_id,
+            "attempt_id": state.get("attempt_id"),
+            "candidate_commit": closure.get("candidate_commit_sha"),
+            "candidate_tree_sha": closure.get("candidate_tree_sha"),
+            "candidate_state_hash": closure.get("candidate_state_hash"),
+            "candidate_receipt_hash": closure.get("verified_receipt_hash"),
+            "acceptance_receipt_hash": acceptance.get("receipt_hash"),
+            "task_card_hash": state.get("task_card_hash"),
+            "canonical_branch": closure.get("canonical_branch"),
+            "expected_canonical_head": closure.get("expected_canonical_head"),
+        }
+        if any(getattr(authorization_obj, key) != value for key, value in expected_fields.items()):
+            raise RuntimeError("receipt recovery authorization binding mismatch")
+        if grant.get("contract_hash") != state.get("contract_hash") or grant.get("task_card_hash") != state.get("task_card_hash"):
+            raise RuntimeError("receipt recovery approval binding mismatch")
+        if grant.get("bound_task_id") != task_id or grant.get("bound_attempt_id") != state.get("attempt_id"):
+            raise RuntimeError("receipt recovery approval binding mismatch")
+        if grant.get("bound_action_type") != LifecycleActionType.CANDIDATE_INTEGRATE.value or grant.get("approval_scope") != "ALLOW_ACTION_ONCE":
+            raise RuntimeError("receipt recovery approval binding mismatch")
+        for grant_key, persisted_key in (
+            ("candidate_commit_sha", "candidate_commit_sha"),
+            ("candidate_tree_sha", "candidate_tree_sha"),
+            ("candidate_state_hash", "candidate_state_hash"),
+            ("verified_receipt_hash", "verified_receipt_hash"),
+            ("acceptance_receipt_hash", "receipt_hash"),
+        ):
+            if grant.get(grant_key) != (closure.get(persisted_key) if persisted_key != "receipt_hash" else acceptance.get(persisted_key)):
+                raise RuntimeError("receipt recovery approval binding mismatch")
+        expires_at = _parse_time(str(grant.get("expires_at") or ""))
+        if expires_at is None or expires_at <= datetime.now(timezone.utc).timestamp():
+            raise RuntimeError("receipt recovery approval expired or malformed")
         artifact_path = acceptance.get("verifier_artifact")
         if not isinstance(artifact_path, str) or not artifact_path:
             raise RuntimeError("receipt recovery acceptance artifact missing")
@@ -10127,9 +10184,22 @@ class SelfHostedTaskService:
             raise RuntimeError("integration receipt authorization binding mismatch")
         if receipt.candidate_commit_sha != closure.get("candidate_commit_sha"):
             raise RuntimeError("receipt candidate_commit_sha does not match persisted closure")
+        for receipt_key, persisted_key in (
+            ("candidate_tree_sha", "candidate_tree_sha"),
+            ("candidate_state_hash", "candidate_state_hash"),
+            ("verified_receipt_hash", "verified_receipt_hash"),
+            ("task_card_hash", "task_card_hash"),
+        ):
+            if getattr(receipt, receipt_key) != closure.get(persisted_key):
+                raise RuntimeError("receipt recovery candidate binding mismatch")
         branch = integration_branch or state.get("integration_branch") or closure.get("canonical_branch")
         if receipt.integration_branch != branch:
             raise RuntimeError("receipt integration branch mismatch")
+        runtime_identity = closure.get("runtime_identity")
+        if isinstance(runtime_identity, Mapping):
+            for key in ("tool_manifest_hash", "full_tool_schema_hash", "permission_policy_hash", "lifecycle_revision", "server_instance_id"):
+                if runtime_identity.get(key) != grant.get(key):
+                    raise RuntimeError("receipt recovery runtime identity mismatch")
         controller_root = Path(contract.controller_repo_root).resolve()
         manager = WorktreeManager(root_dir=contract.target_worktree_root)
         actual_head = manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
@@ -10141,6 +10211,9 @@ class SelfHostedTaskService:
             raise RuntimeError("receipt recovery canonical tree is dirty")
         candidate = closure.get("candidate_commit_sha")
         if candidate:
+            candidate_tree = manager._run_git(["rev-parse", f"{candidate}^{{tree}}"], cwd=controller_root)
+            if candidate_tree != receipt.candidate_tree_sha:
+                raise RuntimeError("receipt recovery candidate tree mismatch")
             result = subprocess.run(
                 ["git", "merge-base", "--is-ancestor", str(candidate), receipt.integration_commit_sha],
                 cwd=controller_root,

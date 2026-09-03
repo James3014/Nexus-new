@@ -2180,6 +2180,10 @@ def test_receipt_only_recovery_records_applied_integrating_state_without_merge(
         post_apply_verified=True,
         acceptance_receipt_hash=acceptance.receipt_hash,
         authorization_hash=state["integration_authorization"]["authorization_hash"],
+        task_card_hash=state["task_card_hash"],
+        candidate_tree_sha=state["promotion_packet"]["candidate_tree_sha"],
+        candidate_state_hash=state["promotion_packet"]["candidate_state_hash"],
+        verified_receipt_hash=state["promotion_packet"]["verified_receipt_hash"],
     )
     monkeypatch.setattr(
         service,
@@ -2201,6 +2205,10 @@ def test_receipt_only_recovery_records_applied_integrating_state_without_merge(
     assert first["status"] == "INTEGRATED"
     assert second["status"] == "INTEGRATED"
     assert second["integration_result_sha"] == candidate
+    with pytest.raises(RuntimeError, match="idempotency receipt mismatch"):
+        service.recover_applied_integration_receipt(
+            "closure-bind", replace(receipt, task_id="unrelated-task")
+        )
 
 
 @pytest.mark.parametrize("tamper", ["request", "dispatch", "hash", "coordinated"])
