@@ -11,7 +11,8 @@ auto_chain: false
 
 | Order | Task | Status | Dependency |
 |---|---|---|---|
-| 1 | `G20-LEARNING-ADOPTION-RUNTIME-WIRING` | ACTIVE | G19 source closure + current main |
+| 1 | `G20-LEARNING-ADOPTION-RUNTIME-WIRING` | MERGED (PR #739) | main `f45c6566521c65da38a8f46a987c54bc468e2dbb` |
+| 2 | `G20-GATEWAY-INERT-GITLINK-RECOVERY` | ACTIVE | recovery authority r2 + current main `8f46b3d265a561af05d61d97708c3b107242f29b` |
 
 ## Scope
 
