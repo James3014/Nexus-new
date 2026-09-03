@@ -2668,7 +2668,7 @@ def _recovery_live_postflight(
         )
     ):
         raise _gateway_error("R1 Gateway tools/list malformed")
-    names = tuple(sorted(str(item["name"]) for item in tools))
+    names = tuple(str(item["name"]) for item in tools)
     manifest_hash = hashlib.sha256(
         json.dumps(names, separators=(",", ":"), ensure_ascii=True).encode()
     ).hexdigest()
