@@ -17,6 +17,7 @@ if repo_root in sys.path:
 sys.path.insert(0, repo_root)
 
 from nexus.engine.canonical_task_seam import (  # noqa: E402
+    VerifiedCampaignIdentity,
     VerifiedTaskCardIdentity,
     _derive_campaign_id_from_task_card,
     build_canonical_planner_admission,
@@ -516,6 +517,42 @@ def test_campaign_identity_requires_canonical_bytes_and_hash(tmp_path):
     tampered = replace(identity, task_card_hash="0" * 64)
     with pytest.raises(ValueError, match="hash_mismatch"):
         _derive_campaign_id_from_task_card(tampered)
+
+
+def test_authenticated_campaign_identity_is_bound_and_conflicts_fail(tmp_path):
+    card = tmp_path / "card.md"
+    card_bytes = b"Campaign: `CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01`\n"
+    card.write_bytes(card_bytes)
+    task_card = VerifiedTaskCardIdentity(
+        task_id="campaign-bound",
+        task_card_path="tasks/test/card.md",
+        canonical_task_card_path=str(card),
+        task_card_hash=hashlib.sha256(card_bytes).hexdigest(),
+    )
+    exact = VerifiedCampaignIdentity(
+        campaign_id="CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01",
+        task_id=task_card.task_id,
+        task_card_hash=task_card.task_card_hash,
+    )
+    result = build_canonical_planner_admission(
+        task_id=task_card.task_id, task_text="bounded change",
+        allowed_files=("bounded.py",), verifier_command=("git diff --check",),
+        task_card_identity=task_card, campaign_identity=exact,
+    )
+    assert result["binding"]["worker_id"] == "agy_flash_37_medium"
+    conflict = replace(exact, campaign_id="CAMPAIGN-PLANNER-WORKFORCE-SELECTION-REPAIR-01")
+    with pytest.raises(ValueError, match="campaign_identity_conflict"):
+        build_canonical_planner_admission(
+            task_id=task_card.task_id, task_text="bounded change",
+            allowed_files=("bounded.py",), verifier_command=("git diff --check",),
+            task_card_identity=task_card, campaign_identity=conflict,
+        )
+    with pytest.raises(ValueError, match="canonical_campaign_identity_unverified"):
+        build_canonical_planner_admission(
+            task_id=task_card.task_id, task_text="bounded change",
+            allowed_files=("bounded.py",), verifier_command=("git diff --check",),
+            task_card_identity=task_card, campaign_identity="CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01",  # type: ignore[arg-type]
+        )
 
 
 def _worker_args(

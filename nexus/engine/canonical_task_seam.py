@@ -152,6 +152,24 @@ class VerifiedTaskCardIdentity:
 
 
 @dataclass(frozen=True)
+class VerifiedCampaignIdentity:
+    """Authenticated campaign source bound to one verified Task Card."""
+
+    campaign_id: str
+    task_id: str
+    task_card_hash: str
+    contract_kind: str = "TRACKED_TASK_CARD"
+
+    def __post_init__(self) -> None:
+        if not self.campaign_id or self.campaign_id != self.campaign_id.strip():
+            raise ValueError("verified_campaign_id_invalid")
+        if not self.task_id.strip() or len(self.task_card_hash) != 64:
+            raise ValueError("verified_campaign_binding_invalid")
+        if self.contract_kind != "TRACKED_TASK_CARD":
+            raise ValueError("verified_campaign_contract_kind_invalid")
+
+
+@dataclass(frozen=True)
 class CanonicalDispatchEnvelope:
     """The immutable identity passed from planning through registry dispatch."""
 
@@ -468,6 +486,7 @@ def build_canonical_planner_admission(
     allowed_files: tuple[str, ...],
     verifier_command: tuple[str, ...],
     task_card_identity: VerifiedTaskCardIdentity,
+    campaign_identity: VerifiedCampaignIdentity | None = None,
 ) -> dict[str, Any]:
     """Run the sole planner and current Workforce Admission for one gateway task."""
     from nexus.contracts.canonical_execution import CanonicalTaskContext
@@ -516,6 +535,18 @@ def build_canonical_planner_admission(
     policy = WorkforcePolicyLoader()
     snapshot = policy.load()
     campaign_id = _derive_campaign_id_from_task_card(task_card_identity)
+    if campaign_identity is not None:
+        if not isinstance(campaign_identity, VerifiedCampaignIdentity):
+            raise ValueError("canonical_campaign_identity_unverified")
+        if (
+            campaign_identity.task_id != task_card_identity.task_id
+            or campaign_identity.task_card_hash != task_card_identity.task_card_hash
+            or campaign_identity.contract_kind != task_card_identity.contract_kind
+        ):
+            raise ValueError("canonical_campaign_identity_binding_mismatch")
+        if campaign_id and campaign_identity.campaign_id != campaign_id:
+            raise ValueError("canonical_campaign_identity_conflict")
+        campaign_id = campaign_identity.campaign_id
     policy_bindings, _ = _resolve_policy_workforce_bindings(
         plan_payload,
         allowed_files=allowed_files,
