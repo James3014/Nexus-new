@@ -1156,6 +1156,30 @@ def test_receipt_correction_is_append_only_exact_cas_and_idempotent(tmp_path: Pa
     assert len(replay["integration_receipt_correction_history"]) == 1
 
 
+def test_receipt_correction_canonicalizes_legacy_slash_schema(tmp_path: Path):
+    fixture = _applied_receipt_correction_fixture(tmp_path)
+    service, root, state, receipt, preapply, applied, candidate, acceptance, approval, runtime = fixture
+    state["integration_receipt"]["schema"] = "nexus.integration_receipt/v1"
+    service._write_state("closure-bind", state)
+    state = service._read_state("closure-bind") or state
+    kwargs = _correction_kwargs(service, state, receipt, preapply, applied, candidate, acceptance, approval, runtime)
+    kwargs["original_receipt_hash"] = hashlib.sha256(
+        json.dumps(state["integration_receipt"], sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
+
+    corrected = service.correct_applied_integration_receipt("closure-bind", **kwargs)
+
+    assert corrected["integration_receipt"]["schema"] == "nexus.integration_receipt.v1"
+    assert corrected["integration_receipt"]["integration_base_sha"] == preapply
+    assert corrected["integration_receipt"]["branch_head_before"] == preapply
+    history = corrected["integration_receipt_correction_history"]
+    assert history[0]["original_receipt"]["schema"] == "nexus.integration_receipt/v1"
+    assert history[0]["correction_deltas"]["schema"] == {
+        "from": "nexus.integration_receipt/v1",
+        "to": "nexus.integration_receipt.v1",
+    }
+
+
 @pytest.mark.parametrize("tamper", ["state", "receipt", "attempt", "candidate", "acceptance", "approval", "authorization", "runtime", "closure", "head"])
 def test_receipt_correction_rejects_any_exact_binding_tamper(tmp_path: Path, tamper: str):
     fixture = _applied_receipt_correction_fixture(tmp_path)
