@@ -1,6 +1,7 @@
 import hashlib
 import importlib
 import json
+import os
 import re
 import shlex
 from dataclasses import dataclass
@@ -601,8 +602,10 @@ def build_canonical_planner_admission(
 def _execution_learning_observer(context: Mapping[str, Any]) -> dict[str, Any]:
     """Bind observed runtime evidence without promoting a reusable lesson."""
     task_id = str(context.get("task_id") or "")
-    local = context.get("local") if isinstance(context.get("local"), Mapping) else {}
-    online = context.get("online") if isinstance(context.get("online"), Mapping) else {}
+    local_raw = context.get("local")
+    online_raw = context.get("online")
+    local = local_raw if isinstance(local_raw, Mapping) else {}
+    online = online_raw if isinstance(online_raw, Mapping) else {}
     evidence = bool(local.get("evidence_present") or online.get("evidence_present"))
     gate = bool(local.get("gate_passed") or online.get("gate_passed"))
     passed = bool(task_id and evidence and gate)
@@ -748,6 +751,17 @@ def execute_canonical_product_task(
         execution_channels = (
             ("local",) if online_policy == "deny" else ("online", "local")
         )
+    from nexus.engine.learning_policy_loader import merge_runtime_learning_policy
+
+    runtime_budget = merge_runtime_learning_policy(
+        root,
+        context.get("budget") or {},
+        task_desc=str(task_text),
+        target_model=os.environ.get("NEXUS_LOCAL_MODEL_EXECUTOR_MODEL", "qwen2.5-coder:7b"),
+        runtime_identity="local_model_executor",
+        source_revision=revision,
+    )
+
     canonical_context = CanonicalTaskContext(
         task_id=task_id,
         task_type=task_type,
@@ -767,7 +781,7 @@ def execute_canonical_product_task(
         },
         route_features=route_features,
         codeintel=codeintel,
-        budget=context.get("budget") or {},
+        budget=runtime_budget,
     )
     bundle = plan_canonical_task_bundle(canonical_context)
     plan_payload = bundle.to_dict()["plan_payload"]
