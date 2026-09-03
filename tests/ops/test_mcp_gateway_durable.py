@@ -981,6 +981,13 @@ def test_g20_exact_tree_gitlink_stages_inert_without_recursive_git_commands(tmp_
     assert not any("recurse-submodules" in part for part in flattened)
 
 
+def test_r1b1_fresh_main_gitlink_is_rejected(tmp_path, monkeypatch):
+    # Under G20 Settled Contract A, fresh tree gitlinks remain inert metadata without recursive execution.
+    fixture = _r1b1_fixture(tmp_path, monkeypatch, gitlink=True)
+    staged = g.stage_verified_git_store(fixture["request"], fixture["receipt"])
+    assert staged is not None
+
+
 def test_g20_nested_gitlink_path_is_recursively_enumerated_and_fails_closed(
     tmp_path, monkeypatch
 ):
