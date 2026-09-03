@@ -10002,6 +10002,7 @@ class SelfHostedTaskService:
         task_id: str,
         receipt: Any,
         *,
+        runtime_identity: Mapping[str, Any],
         integration_branch: Optional[str] = None,
     ) -> dict[str, Any]:
         """Record an externally witnessed apply without replaying integration."""
@@ -10009,6 +10010,8 @@ class SelfHostedTaskService:
 
         if not isinstance(receipt, IntegrationReceipt):
             raise TypeError("receipt must be an IntegrationReceipt instance")
+        if not isinstance(runtime_identity, Mapping):
+            raise TypeError("runtime_identity must be a mapping")
         state = self._read_state(task_id)
         if state is None:
             raise KeyError(f"unknown task_id: {task_id}")
@@ -10027,6 +10030,21 @@ class SelfHostedTaskService:
             raise RuntimeError("receipt recovery requires an unrecorded applied state")
         if state.get("integration_execution"):
             raise RuntimeError("receipt recovery requires no persisted execution record")
+        closure = state.get("integration_closure_binding")
+        if not isinstance(closure, Mapping):
+            raise RuntimeError("receipt recovery closure binding missing")
+        runtime_keys = (
+            "tool_manifest_hash", "full_tool_schema_hash", "permission_policy_hash",
+            "lifecycle_revision", "server_instance_id", "contract_kind",
+            "contract_hash", "task_card_hash", "owner_inline_contract",
+        )
+        trusted_runtime = closure.get("runtime_identity")
+        if (
+            not isinstance(trusted_runtime, Mapping)
+            or any(key not in runtime_identity for key in runtime_keys)
+            or dict(runtime_identity) != dict(trusted_runtime)
+        ):
+            raise RuntimeError("receipt recovery runtime identity mismatch")
         if receipt.task_id != task_id or not receipt.merge_performed or receipt.push_performed:
             raise RuntimeError("receipt recovery physical binding mismatch")
         if not receipt.verifier_passed or not receipt.post_apply_verified:
@@ -10054,8 +10072,7 @@ class SelfHostedTaskService:
             for key in ("workforce_demands", "workforce_admission", "canonical_dispatch_envelope", "workforce_dispatch")
         )
         if (
-            isinstance(request, Mapping)
-            and request.get("execution_authority") == "WORKER_REGISTRY"
+            state.get("execution_authority") == "WORKER_REGISTRY"
             and not projection_present
         ):
             raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
@@ -10115,7 +10132,6 @@ class SelfHostedTaskService:
             ):
                 raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
 
-        closure = state.get("integration_closure_binding")
         authorization = state.get("integration_authorization")
         acceptance = state.get("external_acceptance")
         if not isinstance(closure, Mapping) or not isinstance(authorization, Mapping) or not isinstance(acceptance, Mapping):
@@ -10137,6 +10153,14 @@ class SelfHostedTaskService:
             raise RuntimeError("receipt recovery authorization invalid") from exc
         if authorization.get("authorization_hash") != authorization_obj.authorization_hash:
             raise RuntimeError("receipt recovery authorization drift")
+        current_identity = resolve_contract_identity(
+            state, expected_task_id=task_id,
+            expected_head=str(state.get("controller_revision") or ""),
+        )
+        if any(runtime_identity.get(key) != current_identity.get(key) for key in (
+            "contract_kind", "contract_hash", "task_card_hash", "owner_inline_contract"
+        )):
+            raise RuntimeError("receipt recovery runtime identity mismatch")
         expected_fields = {
             "task_id": task_id,
             "attempt_id": state.get("attempt_id"),
@@ -10195,25 +10219,57 @@ class SelfHostedTaskService:
         branch = integration_branch or state.get("integration_branch") or closure.get("canonical_branch")
         if receipt.integration_branch != branch:
             raise RuntimeError("receipt integration branch mismatch")
-        runtime_identity = closure.get("runtime_identity")
-        if isinstance(runtime_identity, Mapping):
-            for key in ("tool_manifest_hash", "full_tool_schema_hash", "permission_policy_hash", "lifecycle_revision", "server_instance_id"):
-                if runtime_identity.get(key) != grant.get(key):
-                    raise RuntimeError("receipt recovery runtime identity mismatch")
+        acceptance_obj = ExternalAcceptanceReceipt(**acceptance)
+        current_universe = {
+            "task_id": task_id,
+            "campaign_id": str((request or {}).get("campaign_id") or authorization_obj.campaign_id) if isinstance(request, Mapping) else authorization_obj.campaign_id,
+            "task_card_hash": str(state.get("task_card_hash") or ""),
+            "candidate_commit": str((state.get("promotion_packet") or {}).get("candidate_commit_sha") or ""),
+            "candidate_receipt_hash": str((state.get("promotion_packet") or {}).get("verified_receipt_hash") or ""),
+            "acceptance_receipt_hash": acceptance_obj.receipt_hash,
+            "canonical_root": str(authorization_obj.canonical_root),
+            "canonical_branch": branch,
+            "expected_canonical_head": authorization_obj.expected_canonical_head,
+            "canonical_dirty_baseline": str(authorization_obj.canonical_dirty_baseline),
+            "integration_plan_hash": str(authorization_obj.integration_plan_hash),
+            "cleanup_target_id": str(authorization_obj.cleanup_target_id),
+            "cleanup_target_path": str(authorization_obj.cleanup_target_path),
+            "durable_ref": str(state.get("candidate_ref") or ""),
+            "attempt_id": str(state.get("attempt_id") or ""),
+            "candidate_tree_sha": str((state.get("promotion_packet") or {}).get("candidate_tree_sha") or ""),
+            "candidate_state_hash": str((state.get("promotion_packet") or {}).get("candidate_state_hash") or ""),
+            "reviewer_id": acceptance_obj.reviewer_id,
+            "verifier_artifact_hash": str(authorization_obj.verifier_artifact_hash),
+            "require_clean": authorization_obj.require_clean,
+            "strategy": authorization_obj.strategy,
+            "verification_commands_hash": authorization_obj.verification_commands_hash,
+            "post_apply_commands_hash": authorization_obj.post_apply_commands_hash,
+            "cleanup_requested": authorization_obj.cleanup_requested,
+            "approval_scope": authorization_obj.approval_scope,
+        }
+        try:
+            authorization_obj.validate_current(current_universe)
+        except ValueError as exc:
+            raise RuntimeError("receipt recovery authorization is not current") from exc
         controller_root = Path(contract.controller_repo_root).resolve()
         manager = WorktreeManager(root_dir=contract.target_worktree_root)
+        candidate = closure.get("candidate_commit_sha")
         actual_head = manager._run_git(["rev-parse", "HEAD"], cwd=controller_root)
         if actual_head != receipt.integration_commit_sha:
             raise RuntimeError("receipt recovery applied HEAD mismatch")
+        if receipt.integration_commit_sha != candidate:
+            raise RuntimeError("receipt recovery refuses post-candidate extra commit")
         if manager._run_git(["branch", "--show-current"], cwd=controller_root) != branch:
             raise RuntimeError("receipt recovery branch mismatch")
         if manager._run_git(["status", "--porcelain=v1", "--untracked-files=all"], cwd=controller_root):
             raise RuntimeError("receipt recovery canonical tree is dirty")
-        candidate = closure.get("candidate_commit_sha")
         if candidate:
             candidate_tree = manager._run_git(["rev-parse", f"{candidate}^{{tree}}"], cwd=controller_root)
             if candidate_tree != receipt.candidate_tree_sha:
                 raise RuntimeError("receipt recovery candidate tree mismatch")
+            actual_tree = manager._run_git(["rev-parse", "HEAD^{tree}"], cwd=controller_root)
+            if actual_tree != receipt.candidate_tree_sha:
+                raise RuntimeError("receipt recovery applied tree mismatch")
             result = subprocess.run(
                 ["git", "merge-base", "--is-ancestor", str(candidate), receipt.integration_commit_sha],
                 cwd=controller_root,

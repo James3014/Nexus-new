@@ -2199,15 +2199,34 @@ def test_receipt_only_recovery_records_applied_integrating_state_without_merge(
         ),
     )
 
-    first = service.recover_applied_integration_receipt("closure-bind", receipt)
-    second = service.recover_applied_integration_receipt("closure-bind", receipt)
+    recovery_runtime = state["integration_closure_binding"]["runtime_identity"]
+    original_state = dict(state)
+    state["execution_authority"] = "WORKER_REGISTRY"
+    state["request"].pop("workforce_demands", None)
+    state["request"].pop("workforce_admission", None)
+    state["request"].pop("canonical_dispatch_envelope", None)
+    state.pop("workforce_dispatch", None)
+    state.pop("canonical_dispatch_envelope", None)
+    service._write_state("closure-bind", state)
+    with pytest.raises(RuntimeError, match="INTEGRATION_WORKFORCE_DISPATCH_DRIFT"):
+        service.recover_applied_integration_receipt(
+            "closure-bind", receipt, runtime_identity=recovery_runtime
+        )
+    service._write_state("closure-bind", original_state)
+    first = service.recover_applied_integration_receipt(
+        "closure-bind", receipt, runtime_identity=recovery_runtime
+    )
+    second = service.recover_applied_integration_receipt(
+        "closure-bind", receipt, runtime_identity=recovery_runtime
+    )
 
     assert first["status"] == "INTEGRATED"
     assert second["status"] == "INTEGRATED"
     assert second["integration_result_sha"] == candidate
     with pytest.raises(RuntimeError, match="idempotency receipt mismatch"):
         service.recover_applied_integration_receipt(
-            "closure-bind", replace(receipt, task_id="unrelated-task")
+            "closure-bind", replace(receipt, task_id="unrelated-task"),
+            runtime_identity=recovery_runtime,
         )
 
 
