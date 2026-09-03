@@ -44,12 +44,16 @@ from nexus.contracts.target_integration_lifecycle import (
     IntegrationAuthorizationEnvelope,
 )
 from nexus.contracts.unified_runtime_receipt import build_runtime_development_mapping
+from nexus.contracts.workforce_admission import WorkforceDemand
 from nexus.core.task_continuity import (
     build_rehydration_projection,
     events_from_attempt_records,
     project,
 )
-from nexus.engine.canonical_task_seam import build_canonical_dispatch_envelope
+from nexus.engine.canonical_task_seam import (
+    CanonicalDispatchEnvelope,
+    build_canonical_dispatch_envelope,
+)
 from nexus.events.contracts import build_attempt_transition_event
 from nexus.events.transport import NexusEventBus
 from nexus.executors.worker_contract import (
@@ -103,7 +107,11 @@ from nexus.orchestrator.worktree_manager import (
     mutation_domains_conflict,
 )
 from nexus.services.model_workforce_policy import WorkforcePolicyLoader
-from nexus.services.runtime_workforce_admission import evaluate_runtime_workforce_admission
+from nexus.services.runtime_workforce_admission import (
+    _binding_payload,
+    _sha256_json,
+    evaluate_runtime_workforce_admission,
+)
 
 Runner = Callable[[ArchitectTaskContract, Mapping[str, Any], Callable[[str, dict[str, Any]], None]], dict[str, Any]]
 TERMINAL_STATUSES = frozenset({
@@ -9535,18 +9543,239 @@ class SelfHostedTaskService:
             expected_head=str(state.get("controller_revision") or ""),
         )
 
-        c_dict = state.get("contract") or {}
-        request_dict = state.get("request") or {
-            "what": c_dict.get("objective", "integration task"),
-            "why": c_dict.get("objective", "integration task"),
-            "allowed_files": c_dict.get("allowed_files", ["bounded.txt"]),
-            "controller_repo_root": c_dict.get("controller_repo_root", str(Path.cwd())),
-            "target_repo_root": c_dict.get("target_repo_root", str(Path.cwd() / "target")),
-            "target_worktree_root": c_dict.get("target_worktree_root", str(Path.cwd())),
-            "controller_revision": c_dict.get("controller_revision", "a" * 40),
-            "target_base_revision": c_dict.get("target_base_revision", "a" * 40),
-        }
-        contract = self.build_contract(request_dict)
+        def persisted_contract(bound_state: Mapping[str, Any]) -> ArchitectTaskContract:
+            raw_contract = bound_state.get("contract")
+            if not isinstance(raw_contract, Mapping) or not raw_contract:
+                raise RuntimeError("INTEGRATION_CONTRACT_REQUIRED")
+            contract_payload = {
+                key: value for key, value in raw_contract.items() if key != "contract_hash"
+            }
+            try:
+                replayed = ArchitectTaskContract.model_validate(contract_payload)
+            except Exception as exc:
+                raise RuntimeError("INTEGRATION_CONTRACT_INVALID") from exc
+            computed_hash = replayed.contract_hash
+            state_hash = str(bound_state.get("contract_hash") or "")
+            identity_hash = str(boundary_identity.get("contract_hash") or "")
+            bound_request = bound_state.get("request")
+            workforce_projection_present = any(
+                key in bound_state
+                or (isinstance(bound_request, Mapping) and key in bound_request)
+                for key in (
+                    "workforce_demands",
+                    "workforce_admission",
+                    "canonical_dispatch_envelope",
+                    "workforce_dispatch",
+                )
+            )
+            if boundary_identity["contract_kind"] == ContractKind.TRACKED_TASK_CARD.value:
+                # Legacy synthetic states without Workforce projections may
+                # omit this identity.  Any real persisted dispatch requires a
+                # complete, exact contract identity.
+                if state_hash or identity_hash or workforce_projection_present:
+                    if (
+                        not re.fullmatch(r"[0-9a-f]{64}", state_hash)
+                        or computed_hash != state_hash
+                        or computed_hash != identity_hash
+                    ):
+                        raise RuntimeError("INTEGRATION_CONTRACT_BINDING_MISMATCH")
+            else:
+                # OWNER_INLINE uses the nested Owner Inline envelope as its
+                # approval identity; still authenticate the persisted
+                # operational contract against its own durable hash before
+                # handing it to repository/integration gates.
+                persisted_contract_hash = str(
+                    bound_state.get("contract", {}).get("contract_hash") or ""
+                )
+                if (
+                    not re.fullmatch(r"[0-9a-f]{64}", persisted_contract_hash)
+                    or computed_hash != persisted_contract_hash
+                ):
+                    raise RuntimeError("INTEGRATION_CONTRACT_BINDING_MISMATCH")
+            expected_binding_hash = (
+                computed_hash
+                if boundary_identity["contract_kind"] == ContractKind.TRACKED_TASK_CARD.value
+                else identity_hash
+            )
+            if state_hash or identity_hash:
+                for approval_binding in (
+                    bound_state.get("integration_approval_grant"),
+                    bound_state.get("integration_closure_binding"),
+                ):
+                    if isinstance(approval_binding, Mapping) and approval_binding.get("contract_hash"):
+                        if str(approval_binding.get("contract_hash")) != expected_binding_hash:
+                            raise RuntimeError("INTEGRATION_CONTRACT_BINDING_MISMATCH")
+            if replayed.task_id != task_id:
+                raise RuntimeError("INTEGRATION_CONTRACT_TASK_ID_MISMATCH")
+            return replayed
+
+        def persisted_workforce_coherence(
+            bound_state: Mapping[str, Any],
+            bound_contract: ArchitectTaskContract,
+        ) -> None:
+            """Check the recorded dispatch without re-evaluating admission."""
+            bound_request = bound_state.get("request")
+            if not isinstance(bound_request, Mapping):
+                raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
+            request_fields = {
+                "demands": bound_request.get("workforce_demands"),
+                "admission": bound_request.get("workforce_admission"),
+                "canonical_dispatch_envelope": bound_request.get(
+                    "canonical_dispatch_envelope"
+                ),
+            }
+            request_projection_present = any(
+                key in bound_request for key in (
+                    "workforce_demands",
+                    "workforce_admission",
+                    "canonical_dispatch_envelope",
+                )
+            )
+            state_projection_present = any(
+                key in bound_state for key in (
+                    "workforce_dispatch",
+                    "canonical_dispatch_envelope",
+                    "selected_worker_id",
+                    "selected_provider",
+                    "selected_model",
+                    "workforce_policy_hash",
+                    "workforce_binding_hash",
+                    "workforce_aggregate_binding_hash",
+                )
+            )
+            if not request_projection_present and not state_projection_present:
+                if bound_state.get("execution_authority") == "WORKER_REGISTRY":
+                    raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
+                return
+            if (
+                not request_projection_present
+                or any(value is None or not isinstance(value, Mapping) for value in request_fields.values())
+            ):
+                raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
+            persisted = bound_state.get("workforce_dispatch")
+            state_envelope = bound_state.get("canonical_dispatch_envelope")
+            if not isinstance(persisted, Mapping) or not isinstance(state_envelope, Mapping):
+                raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
+            for key, expected in request_fields.items():
+                if persisted.get(key) != expected:
+                    raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
+            if state_envelope != request_fields["canonical_dispatch_envelope"]:
+                raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
+            try:
+                envelope = CanonicalDispatchEnvelope(**dict(state_envelope))
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT") from exc
+            raw_demands = request_fields["demands"].get("demands")
+            if not isinstance(raw_demands, list) or len(raw_demands) != 1:
+                raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
+            demand = raw_demands[0]
+            if not isinstance(demand, Mapping):
+                raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
+            envelope_identity = {
+                "task_id": bound_state.get("task_id"),
+                "attempt_id": bound_state.get("attempt_id"),
+                "task_card_path": bound_state.get("task_card_path"),
+                "task_card_hash": bound_state.get("task_card_hash"),
+                "demand_id": demand.get("demand_id"),
+            }
+            if any(
+                getattr(envelope, key) != value
+                for key, value in envelope_identity.items()
+            ):
+                raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
+            if str(persisted.get("demand_id") or "") != envelope.demand_id:
+                raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
+            admission = request_fields["admission"]
+            records = admission.get("records")
+            policy_identity = admission.get("policy_identity")
+            if (
+                admission.get("overall_decision") != "ALLOW"
+                or not isinstance(records, list)
+                or len(records) != 1
+                or not isinstance(records[0], Mapping)
+                or not isinstance(policy_identity, Mapping)
+            ):
+                raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
+            record = records[0]
+            decision = record.get("decision")
+            record_request = record.get("request")
+            if not isinstance(decision, Mapping) or not isinstance(record_request, Mapping):
+                raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
+            if (
+                record.get("demand") != demand
+                or str(record.get("binding_hash") or "") != str(persisted.get("binding_hash") or "")
+                or str(admission.get("aggregate_binding_hash") or "")
+                != str(persisted.get("aggregate_binding_hash") or "")
+                or str(policy_identity.get("policy_hash") or "")
+                != str(persisted.get("policy_hash") or "")
+                or decision.get("decision") != "ALLOW"
+                or str(decision.get("resolved_worker_id") or "")
+                != str(persisted.get("worker_id") or "")
+                or str(decision.get("resolved_provider") or "")
+                != str(persisted.get("provider") or "")
+                or str(decision.get("resolved_model") or "")
+                != str(persisted.get("model") or "")
+            ):
+                raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
+            try:
+                recorded_binding_hash = _sha256_json(
+                    _binding_payload(
+                        WorkforceDemand.from_dict(dict(demand)),
+                        record_request,
+                        decision,
+                        policy_identity,
+                    )
+                )
+                recorded_aggregate_hash = _sha256_json(
+                    {
+                        "policy_hash": str(policy_identity.get("policy_hash") or ""),
+                        "record_hashes": [recorded_binding_hash],
+                    }
+                )
+            except (TypeError, ValueError):
+                raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
+            if (
+                recorded_binding_hash != str(record.get("binding_hash") or "")
+                or recorded_aggregate_hash != str(admission.get("aggregate_binding_hash") or "")
+            ):
+                raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
+            allowed_providers = {
+                str(provider)
+                for provider in bound_contract.provider_order
+                if str(provider).strip()
+            }
+            if bound_contract.preferred_provider:
+                allowed_providers.add(str(bound_contract.preferred_provider))
+            if bound_contract.fallback_provider:
+                allowed_providers.add(str(bound_contract.fallback_provider))
+            if str(persisted.get("provider") or "") not in allowed_providers:
+                raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
+            dispatch_fields = (
+                ("worker_id", "selected_worker_id"),
+                ("provider", "selected_provider"),
+                ("model", "selected_model"),
+                ("policy_hash", "workforce_policy_hash"),
+                ("binding_hash", "workforce_binding_hash"),
+                ("aggregate_binding_hash", "workforce_aggregate_binding_hash"),
+            )
+            for dispatch_key, state_key in dispatch_fields:
+                dispatch_value = str(persisted.get(dispatch_key) or "")
+                state_value = str(bound_state.get(state_key) or "")
+                if not dispatch_value or dispatch_value != state_value:
+                    raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
+            for key in (
+                "worker_id", "provider", "model", "policy_hash", "binding_hash",
+                "aggregate_binding_hash",
+            ):
+                if getattr(envelope, key) != str(persisted.get(key) or ""):
+                    raise RuntimeError("INTEGRATION_WORKFORCE_DISPATCH_DRIFT")
+
+        # Integration replays the exact contract that was persisted and
+        # independently verified at Candidate time.  Rebuilding from request
+        # would re-run date-sensitive Workforce admission and invalidate an
+        # otherwise valid historical ALLOW receipt.
+        contract = persisted_contract(state)
+        persisted_workforce_coherence(state, contract)
         current_universe = {
             "task_id": task_id,
             "campaign_id": str(state.get("campaign_id") or (state.get("contract") or {}).get("campaign_id") or authorization_obj.campaign_id),
@@ -9682,8 +9911,8 @@ class SelfHostedTaskService:
                 )
                 if final_identity != boundary_identity:
                     raise RuntimeError("INTEGRATION_BINDING_DRIFT_AT_APPLY_BOUNDARY")
-                final_request = integrating.get("request") or request_dict
-                final_contract = self.build_contract(final_request)
+                final_contract = persisted_contract(integrating)
+                persisted_workforce_coherence(integrating, final_contract)
                 final_recheck = repository_recheck(integrating, final_contract)
                 integrating["repository_contract_integration_recheck"] = _jsonable(
                     final_recheck

@@ -23,6 +23,8 @@ from nexus.contracts.lifecycle_action import build_owner_inline_contract
 from nexus.orchestrator.worktree_manager import WorktreeManager
 from nexus.orchestrator.governed_integration import ControlledIntegrationManager
 from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
+from nexus.contracts.workforce_admission import WorkforceDemand
+from nexus.services.runtime_workforce_admission import _binding_payload, _sha256_json
 
 
 def _git(root: Path, *args: str) -> str:
@@ -1915,3 +1917,269 @@ def test_h8_transactional_integration_rejects_expired_authorization_before_stagi
     # Mutation Sentinel: HEAD is untouched, no staging directory created
     assert _git(root, "rev-parse", "HEAD") == base
     assert not (tmp_path / "stage" / "task-1").exists()
+
+
+def _persist_replay_workforce(state: dict[str, object]) -> None:
+    workforce_demands = {
+        "schema": "nexus.workforce_demands.v1",
+        "route_authority": "CapabilityPlanner",
+        "demands": [{
+            "schema": "nexus.workforce_demand.v1",
+            "demand_id": "replay",
+            "execution_channel": "local",
+            "requested_role": "implementation",
+            "minimum_autonomy": "L1",
+            "context_class": "repository",
+            "mutation_intent": True,
+            "external_verification_required": True,
+            "route_authority": "CapabilityPlanner",
+            "reasons": [],
+        }],
+    }
+    workforce_admission = {
+        "schema": "nexus.runtime_workforce_admission.v1",
+        "policy_identity": {"policy_hash": "1" * 64},
+        "overall_decision": "ALLOW",
+        "overall_reasons": [],
+        "records": [{
+            "schema": "nexus.runtime_workforce_admission_record.v1",
+            "demand": workforce_demands["demands"][0],
+            "request": {
+                "requested_worker_id": "worker-replay",
+                "provider": "codex",
+                "model": "codex-test",
+            },
+            "decision": {
+                "decision": "ALLOW",
+                "resolved_worker_id": "worker-replay",
+                "resolved_provider": "codex",
+                "resolved_model": "codex-test",
+            },
+            "binding_hash": "2" * 64,
+        }],
+        "aggregate_binding_hash": "3" * 64,
+    }
+    record = workforce_admission["records"][0]
+    demand_object = WorkforceDemand.from_dict(record["demand"])
+    record["binding_hash"] = _sha256_json(
+        _binding_payload(
+            demand_object, record["request"], record["decision"],
+            workforce_admission["policy_identity"],
+        )
+    )
+    workforce_admission["aggregate_binding_hash"] = _sha256_json({
+        "policy_hash": "1" * 64,
+        "record_hashes": [record["binding_hash"]],
+    })
+    dispatch_envelope = {
+        "schema": "nexus.canonical_dispatch_envelope.v1",
+        "task_id": "closure-bind",
+        "attempt_id": "attempt-1",
+        "task_card_path": "tasks/campaign/task.md",
+        "task_card_hash": "c" * 64,
+        "demand_id": "replay",
+        "planner_decision_hash": "4" * 64,
+        "planner_plan_hash": "5" * 64,
+        "worker_id": "worker-replay",
+        "provider": "codex",
+        "model": "codex-test",
+        "policy_hash": "1" * 64,
+        "binding_hash": record["binding_hash"],
+        "aggregate_binding_hash": workforce_admission["aggregate_binding_hash"],
+    }
+    workforce_dispatch = {
+        "demands": workforce_demands,
+        "admission": workforce_admission,
+        "canonical_dispatch_envelope": dispatch_envelope,
+        "demand_id": "replay",
+        "worker_id": "worker-replay",
+        "provider": "codex",
+        "model": "codex-test",
+        "policy_hash": "1" * 64,
+        "binding_hash": record["binding_hash"],
+        "aggregate_binding_hash": workforce_admission["aggregate_binding_hash"],
+    }
+    request = state["request"]
+    assert isinstance(request, dict)
+    request.update(
+        workforce_demands=workforce_demands,
+        workforce_admission=workforce_admission,
+        canonical_dispatch_envelope=dispatch_envelope,
+    )
+    state.update(
+        workforce_dispatch=workforce_dispatch,
+        canonical_dispatch_envelope=dispatch_envelope,
+        task_card_path="tasks/campaign/task.md",
+        task_card_hash="c" * 64,
+        selected_worker_id="worker-replay",
+        selected_provider="codex",
+        selected_model="codex-test",
+        workforce_policy_hash="1" * 64,
+        workforce_binding_hash=record["binding_hash"],
+        workforce_aggregate_binding_hash=workforce_admission["aggregate_binding_hash"],
+    )
+
+
+def test_integration_replays_persisted_contract_when_request_workforce_receipt_is_stale(
+    tmp_path: Path, monkeypatch
+):
+    """An approved Candidate replays immutable Workforce data without re-admission."""
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure(
+        "closure-bind",
+        external_acceptance=acceptance,
+        approval=approval,
+        runtime_identity=runtime,
+        expected_canonical_head=base,
+        integration_branch="nexus/integration/canary",
+    )
+    state = service._read_state("closure-bind") or {}
+    _persist_replay_workforce(state)
+    service._write_state("closure-bind", state)
+
+    def no_recompute(*args, **kwargs):
+        raise AssertionError("integration replay must not re-evaluate Workforce admission")
+
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.evaluate_runtime_workforce_admission",
+        no_recompute,
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.validate_workforce_dispatch_binding",
+        no_recompute,
+    )
+    monkeypatch.setattr(
+        RepositoryContractGate,
+        "evaluate_committed_candidate",
+        lambda *args, **kwargs: SimpleNamespace(passed=True, blocking_reasons=()),
+    )
+    calls: list[str] = []
+
+    class FakeIntegrationManager:
+        def __init__(self, **kwargs):
+            pass
+
+        def integrate_authorized_task_state(self, *args, **kwargs):
+            calls.append("integration_manager")
+            return SimpleNamespace()
+
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.ControlledIntegrationManager",
+        FakeIntegrationManager,
+    )
+    monkeypatch.setattr(
+        service,
+        "_record_integration",
+        lambda receipt, *, task_id=None: {
+            "status": "INTEGRATED",
+            "promotion_status": "INTEGRATED",
+            "task_id": task_id,
+        },
+    )
+
+    result = service.integrate_approved(
+        "closure-bind",
+        integration_branch="nexus/integration/canary",
+        runtime_identity=runtime,
+    )
+
+    assert result["status"] == "INTEGRATED"
+    assert calls == ["integration_manager"]
+
+
+@pytest.mark.parametrize("tamper", ["request", "dispatch", "hash", "coordinated"])
+def test_integration_blocks_persisted_workforce_projection_tamper(
+    tmp_path: Path, tamper: str
+):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure(
+        "closure-bind",
+        external_acceptance=acceptance,
+        approval=approval,
+        runtime_identity=runtime,
+        expected_canonical_head=base,
+        integration_branch="nexus/integration/canary",
+    )
+    state = service._read_state("closure-bind") or {}
+    _persist_replay_workforce(state)
+    if tamper == "request":
+        state["request"]["workforce_admission"] = {}
+    elif tamper == "dispatch":
+        state["workforce_dispatch"]["canonical_dispatch_envelope"] = {}
+    elif tamper == "coordinated":
+        state["request"]["workforce_admission"]["records"][0]["request"]["provider"] = "agy"
+        state["request"]["workforce_admission"]["records"][0]["decision"]["resolved_provider"] = "agy"
+        state["request"]["canonical_dispatch_envelope"]["provider"] = "agy"
+        state["canonical_dispatch_envelope"]["provider"] = "agy"
+        state["workforce_dispatch"]["provider"] = "agy"
+        state["selected_provider"] = "agy"
+        record = state["request"]["workforce_admission"]["records"][0]
+        record["binding_hash"] = _sha256_json(
+            _binding_payload(
+                WorkforceDemand.from_dict(record["demand"]),
+                record["request"], record["decision"],
+                state["request"]["workforce_admission"]["policy_identity"],
+            )
+        )
+        aggregate_hash = _sha256_json({
+            "policy_hash": state["request"]["workforce_admission"]["policy_identity"]["policy_hash"],
+            "record_hashes": [record["binding_hash"]],
+        })
+        state["request"]["workforce_admission"]["aggregate_binding_hash"] = aggregate_hash
+        state["workforce_dispatch"]["binding_hash"] = record["binding_hash"]
+        state["workforce_dispatch"]["aggregate_binding_hash"] = aggregate_hash
+        state["workforce_binding_hash"] = record["binding_hash"]
+        state["workforce_aggregate_binding_hash"] = aggregate_hash
+        state["request"]["canonical_dispatch_envelope"]["binding_hash"] = record["binding_hash"]
+        state["canonical_dispatch_envelope"]["binding_hash"] = record["binding_hash"]
+        state["workforce_dispatch"]["canonical_dispatch_envelope"]["binding_hash"] = record["binding_hash"]
+        state["request"]["canonical_dispatch_envelope"]["aggregate_binding_hash"] = aggregate_hash
+        state["canonical_dispatch_envelope"]["aggregate_binding_hash"] = aggregate_hash
+        state["workforce_dispatch"]["canonical_dispatch_envelope"]["aggregate_binding_hash"] = aggregate_hash
+    else:
+        state["workforce_binding_hash"] = "f" * 64
+    service._write_state("closure-bind", state)
+
+    with pytest.raises(RuntimeError, match="INTEGRATION_WORKFORCE_DISPATCH_DRIFT"):
+        service.integrate_approved(
+            "closure-bind",
+            integration_branch="nexus/integration/canary",
+            runtime_identity=runtime,
+        )
+
+
+def test_integration_blocks_malformed_persisted_dispatch_envelope(tmp_path: Path):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure(
+        "closure-bind", external_acceptance=acceptance, approval=approval,
+        runtime_identity=runtime, expected_canonical_head=base,
+        integration_branch="nexus/integration/canary",
+    )
+    state = service._read_state("closure-bind") or {}
+    _persist_replay_workforce(state)
+    state["request"]["canonical_dispatch_envelope"] = {"schema": "wrong"}
+    state["canonical_dispatch_envelope"] = state["request"]["canonical_dispatch_envelope"]
+    state["workforce_dispatch"]["canonical_dispatch_envelope"] = state["canonical_dispatch_envelope"]
+    service._write_state("closure-bind", state)
+    with pytest.raises(RuntimeError, match="INTEGRATION_WORKFORCE_DISPATCH_DRIFT"):
+        service.integrate_approved(
+            "closure-bind", integration_branch="nexus/integration/canary",
+            runtime_identity=runtime,
+        )
+
+
+def test_integration_blocks_worker_registry_without_persisted_dispatch(tmp_path: Path):
+    service, root, base, candidate, acceptance, approval, runtime = _approved_closure_service(tmp_path)
+    service.bind_candidate_integration_closure(
+        "closure-bind", external_acceptance=acceptance, approval=approval,
+        runtime_identity=runtime, expected_canonical_head=base,
+        integration_branch="nexus/integration/canary",
+    )
+    state = service._read_state("closure-bind") or {}
+    state["execution_authority"] = "WORKER_REGISTRY"
+    service._write_state("closure-bind", state)
+    with pytest.raises(RuntimeError, match="INTEGRATION_WORKFORCE_DISPATCH_DRIFT"):
+        service.integrate_approved(
+            "closure-bind", integration_branch="nexus/integration/canary",
+            runtime_identity=runtime,
+        )
