@@ -11,11 +11,13 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Mapping, Protocol, runtime_checkable
 
 _SHA40 = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256 = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,99})?\Z")
+_UTC_RFC3339 = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\Z")
 _REQUIRED = frozenset(
     {
         "repository_owner", "repository_name", "pr_number", "base_sha",
@@ -152,8 +154,8 @@ class GitHubAcquisitionSnapshot:
             _sha(getattr(self, field), field)
         if self.base_sha == self.head_sha:
             raise AcquisitionError("base_sha and head_sha must differ")
-        if type(self.merge_base_policy) is not str or not self.merge_base_policy.strip():
-            raise AcquisitionError("merge_base_policy must be normalized")
+        if self.merge_base_policy != "base_sha_exact":
+            raise AcquisitionError("merge_base_policy must be base_sha_exact")
         if type(self.diff_bytes) is not bytes:
             raise AcquisitionError("diff_bytes must be immutable bytes")
         expected = "sha256:" + hashlib.sha256(self.diff_bytes).hexdigest()
@@ -178,8 +180,14 @@ class GitHubAcquisitionSnapshot:
             _hash(digest, "check digest")
         if type(self.pagination_complete) is not bool or not self.pagination_complete:
             raise AcquisitionError("pagination_complete must be true")
-        if type(self.observed_at) is not str or not self.observed_at.strip() or "\x00" in self.observed_at:
-            raise AcquisitionError("observed_at must be normalized")
+        if type(self.observed_at) is not str or _UTC_RFC3339.fullmatch(self.observed_at) is None:
+            raise AcquisitionError("observed_at must be canonical UTC RFC3339 ending in Z")
+        try:
+            parsed = datetime.fromisoformat(self.observed_at[:-1])
+        except ValueError as exc:
+            raise AcquisitionError("observed_at must be a valid UTC RFC3339 timestamp") from exc
+        if parsed.tzinfo is not None:
+            raise AcquisitionError("observed_at must use canonical Z timezone")
         expected_cas = _freshness_cas_for(
             self.repository_owner, self.repository_name, self.pr_number,
             self.base_sha, self.head_sha, self.base_tree_sha, self.head_tree_sha,

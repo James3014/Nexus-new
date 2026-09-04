@@ -115,6 +115,25 @@ def test_forged_freshness_cas_is_rejected():
         acquire_github_pull_request(Port(first, second), locator)
 
 
+@pytest.mark.parametrize("field, value", [
+    ("merge_base_policy", "merge_base_sha"),
+    ("merge_base_policy", " base_sha_exact"),
+    ("observed_at", "2026-09-04T00:00:00+00:00"),
+    ("observed_at", "2026-09-04T00:00:00"),
+    ("observed_at", " 2026-09-04T00:00:00Z"),
+    ("observed_at", "2026-13-04T00:00:00Z"),
+])
+def test_frozen_policy_and_utc_timestamp_are_canonical(field, value):
+    locator = GitHubPullRequestLocator("James3014", "Nexus-new", 635)
+    first = _with_cas(_response(locator))
+    second = dict(first)
+    second[field] = value
+    if field == "merge_base_policy":
+        _with_cas(second)
+    with pytest.raises(AcquisitionError):
+        acquire_github_pull_request(Port(first, second), locator)
+
+
 @pytest.mark.parametrize("field", ["checks", "changed_paths"])
 def test_unsorted_or_duplicate_identity_is_rejected(field):
     locator = GitHubPullRequestLocator("James3014", "Nexus-new", 635)
