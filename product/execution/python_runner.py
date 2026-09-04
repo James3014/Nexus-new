@@ -171,6 +171,8 @@ class RunnerResult:
         attempts = []
         profile = PythonOCIRunner().profile
         for item in data.get("attempts", ()):
+            if type(item.get("exit_code")) is not int:
+                raise ValueError("receipt exit code must be int")
             stdout, stderr, junit = (bytes.fromhex(item[k]) for k in ("stdout", "stderr", "junit"))
             if tuple(item["argv"]) != profile.command or any(len(x) > MAX_OUTPUT_BYTES for x in (stdout, stderr, junit)):
                 raise ValueError("receipt command or output limit mismatch")

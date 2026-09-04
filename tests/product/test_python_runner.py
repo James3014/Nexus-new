@@ -173,3 +173,12 @@ def test_receipt_loader_rejects_malformed_execution_fields(field):
     tampered["attempts"][0][field] = values[field]
     with pytest.raises((ValueError, TypeError)):
         RunnerResult.from_dict(tampered)
+
+
+@pytest.mark.parametrize("exit_code", [0.0, True, "0"])
+def test_receipt_loader_rejects_non_integer_exit_code(exit_code):
+    result = PythonOCIRunner().run(request(), executor)
+    tampered = result.to_dict()
+    tampered["attempts"][0]["exit_code"] = exit_code
+    with pytest.raises(ValueError):
+        RunnerResult.from_dict(tampered)
