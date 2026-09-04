@@ -1,0 +1,40 @@
+name: "nexus-certify"
+description: "Nexus Core V1 Certification Action (self-hosted only). Caller prerequisite: permissions: contents: read, pull-requests: read."
+author: "Nexus Engineers <eng@nexus-singularity.os>"
+
+inputs:
+  request-file:
+    description: "Path to certification request JSON file"
+    required: true
+  service-url:
+    description: "Loopback service URL"
+    required: false
+    default: "http://127.0.0.1:8767"
+  token-file:
+    description: "Path to protected bearer token file"
+    required: true
+
+outputs:
+  request-id:
+    description: "Certification request ID"
+    value: ${{ steps.certify.outputs.request-id }}
+  state:
+    description: "Certification terminal state"
+    value: ${{ steps.certify.outputs.state }}
+  receipt-file:
+    description: "Path to saved certification receipt JSON file"
+    value: ${{ steps.certify.outputs.receipt-file }}
+  claim-ceiling:
+    description: "Claim ceiling array as JSON string"
+    value: ${{ steps.certify.outputs.claim-ceiling }}
+
+runs:
+  using: "composite"
+  steps:
+    - id: certify
+      shell: bash
+      run: |
+        python3 -m product.clients.github_action \
+          --request-file "${{ inputs.request-file }}" \
+          --service-url "${{ inputs.service-url }}" \
+          --token-file "${{ inputs.token-file }}"

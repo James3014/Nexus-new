@@ -1,39 +1,64 @@
-# Nexus v28.3.0 Autonomic Governance
+# Nexus Core v28.3.0 — Continuous Pull Request Certification
 
-Nexus is a high-performance orchestration layer for autonomous AI development. It wraps Large Language Models in a verifiable audit trail and self-healing execution pipelines to ensure engineering reliability.
+Nexus Core is a hardened local-first certification runtime for pull requests. It evaluates code changes against explicit Acceptance Contracts, verifies execution in hermetic environments, generates cryptographically verifiable receipts, and maintains an append-only ledger.
 
-## 🏟️ Overview
+## 🚀 Quick Start (Certification-First)
 
-Nexus manages the full **P-X-D-R-A-C** lifecycle (Plan, Execute, Diagnose, Research, Audit, Crystallize) to transform raw model outputs into auditable software artifacts.
+Nexus Core provides a lightweight CLI `nexus-certify` for submitting, querying, and verifying PR certification receipts against the local Core HTTP runtime.
 
-### 🛡️ Current Verified Gates
-- **Pytest Collect (P0)**: Automated discovery of 4246 test items.
-- **Enterprise Audit (P1)**: Machine-verifiable isolation and hallucination checks (`nexus status`).
-- **PR-Safe Lint (P1)**: Quality enforcement on changed files via Ruff.
-
-## 🏆 Core Capabilities (Beta)
-
-- **Verifiable Audit Trails**: Decisions and tool calls are recorded in structured JSONL receipts.
-- **Self-Healing Pipelines**: Automated diagnosis of execution failures with policy-based retry.
-- **Governance Gates**: Multiple layers of validation to prevent regressions (governance gates; some are conceptual or beta).
-
-## 🚀 Quick Start
+### 1. Install Nexus Core
 
 ```bash
-# 1. Align environment
-bash scripts/ops/_nexus_preflight.sh
-
-# 2. Verify system status and run baseline audit
-uv run nexus status
-
-# 3. Execute an autonomous task
-uv run nexus run --task "your task description"
+# Minimal Core installation (pure runtime & thin clients, zero heavy ML/orchestration dependencies)
+pip install nexus-core
 ```
+
+### 2. Submit a Certification Request
+
+```bash
+# Submit a canonical certification request to the local HTTP runtime
+nexus-certify submit --request request.json --url http://127.0.0.1:8767
+```
+
+### 3. Query Status and Retrieve Receipts
+
+```bash
+# Query status of a running or completed request
+nexus-certify status <REQUEST_ID>
+
+# Retrieve the tamper-evident certification receipt
+nexus-certify receipt <REQUEST_ID>
+```
+
+### 4. Verify a Receipt
+
+```bash
+# Verify receipt integrity and cryptographic provenance
+nexus-certify verify --receipt receipt.json
+```
+
+## 🔌 Client Interfaces
+
+- **CLI (`nexus-certify`)**: Scriptable command-line interface for local operators and shell pipelines.
+- **MCP Adapter (`product.clients.mcp`)**: Host-projected Model Context Protocol library adapter (`nexus_certify`).
+- **GitHub Action (`.github/actions/nexus-certify`)**: Thin action wrapper designed for self-hosted GitHub runners.
+
+## 🧪 Legacy Orchestration & Lab Surfaces
+
+The historical agent orchestration and sensory swarm capabilities of Nexus Singularity have been sequestered under the `legacy` optional extra to ensure a clean, dependency-light Core installation:
+
+```bash
+# Install with legacy orchestration extras
+pip install "nexus-core[legacy]"
+
+# Invoke legacy CLI (marked as legacy/experimental lab)
+nexus --help
+```
+
+Legacy commands executed without the `legacy` extra will return `LEGACY_EXTRA_REQUIRED` (exit code 78).
 
 ## 🗺️ Navigation
 
-- **[Project Index (docs/INDEX.md)](docs/INDEX.md)**: Architecture and roadmap.
+- **[Project Index (docs/INDEX.md)](docs/INDEX.md)**: Architecture and specification roadmap.
 - **[Testing Runbook (docs/testing/test_runbook.md)](docs/testing/test_runbook.md)**: CI gates and local verification.
 - **[Module Inventory (docs/arch/module-inventory.md)](docs/arch/module-inventory.md)**: Generated audit of 85+ packages.
-
-Current Maturity: **Beta**. Suitable for verification-oriented R&D teams.
