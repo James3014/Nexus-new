@@ -135,6 +135,7 @@ Card or switching to Nexus -- when the work materially requires:
 
 ## Governed discovery and authority
 
+0. For GitHub Issue work, before implementation source/test body reads run `python -B scripts/ops/fast_start_consumer.py --issue <number>`; #549 is `ADVISORY_CACHE_ONLY`, and any miss/invalid/stale result falls back to fresh authoritative discovery/rebind.
 1. Anchor at the canonical root and verify root, branch, status, and worktrees.
 2. Read `AGENTS.md`, the campaign `INDEX.md`, and only the current frontier card.
 3. Verify the lifecycle task id, card path, and card hash before editing.
@@ -158,7 +159,7 @@ and claim ceiling. The canonical active machine-local receipt is read from the
 single durable path `.local/state/nexus/authority/standing-grant.json` (the
 `nexus.orchestrator.standing_grant_store` loader); there is no
 environment-selected second authority root. A missing, malformed, tampered,
-unsafe-permission, expired, or revoked receipt fails closed. Delegated workers cannot create or widen their own
+unsafe-permission, expired, or revoked receipt fails closed. Delegated workers cannot create or widen their
 authority; they begin only after the card is physically committed and its hash
 is read back. The grant does not authorize local runtime/lifecycle actions,
 direct protected-main push, force-push, ref deletion, successor work outside
