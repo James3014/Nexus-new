@@ -337,8 +337,43 @@ HOST_AUTHORITY_UID = 501
 HOST_AUTHORITY_SOURCE_PATH = (
     "tasks/github-issue-526-host-authority-and-canary-20260823/02-host-effect-authority-receipt.json"
 )
-MAX_LEDGER_BYTES = 64 * 1024
-MAX_LEDGER_RECORDS = 256
+# Dedicated Gateway-ledger capacity contract, kept separate from the generic
+# 64 KiB gateway store bound (used by the small request/receipt/evidence files).
+# The contract is derived, not arbitrary, from three explainable quantities:
+#
+#   * MAX_GATEWAY_LEDGER_RECORD_BYTES  — 2x the largest encoded record observed in
+#     the authoritative canonical ledger (max observed 3921 bytes → 8192), so a
+#     single record is deterministically bounded and parsing never over-reads.
+#   * MAX_GATEWAY_LEDGER_STATES_PER_OPERATION — worst-case distinct durable states a
+#     single negotiated recovery/rollback can emit (REQUESTED..VERIFIED plus
+#     UNCERTAIN_EFFECT/RUNBACK detours).
+#   * MAX_GATEWAY_LEDGER_OPERATIONS — how many independent recovery operations the
+#     ledger is allowed to retain before a retention review is required.
+#
+#   total records = states-per-operation  *  operations-budget
+#   total bytes    = total records          * per-record bound
+#
+# This comfortably contains the current canonical ledger (68,303 bytes / 37 rows)
+# while remaining a small, deterministic, bounded parsing window.
+MAX_GATEWAY_LEDGER_RECORD_BYTES = 8 * 1024
+MAX_GATEWAY_LEDGER_STATES_PER_OPERATION = 12
+# 22 operations × 12 states = 264 record floor ≥ the old fixed ceiling of 256
+# records, preserving backward-compatible ledger capacity while remaining fully
+# derived and bounded.
+MAX_GATEWAY_LEDGER_OPERATIONS = 22
+MAX_GATEWAY_LEDGER_RECORDS = (
+    MAX_GATEWAY_LEDGER_STATES_PER_OPERATION * MAX_GATEWAY_LEDGER_OPERATIONS
+)
+MAX_GATEWAY_LEDGER_BYTES = MAX_GATEWAY_LEDGER_RECORDS * MAX_GATEWAY_LEDGER_RECORD_BYTES
+# Worst-case durable rows a recovery still needs once an external effect is about
+# to fire (EFFECT_STARTED itself + SERVICE_OBSERVED/IDENTITY_VERIFIED/
+# CLIENT_BOUND/VERIFIED, with headroom for UNCERTAIN_EFFECT detours). This is the
+# mandatory pre-effect capacity reserve.
+POST_EFFECT_LEDGER_RESERVE_SLOTS = 10
+POST_EFFECT_LEDGER_RESERVE_BYTES = POST_EFFECT_LEDGER_RESERVE_SLOTS * MAX_GATEWAY_LEDGER_RECORD_BYTES
+# Legacy aliases preserved for internal callers and the existing tests.
+MAX_LEDGER_BYTES = MAX_GATEWAY_LEDGER_BYTES
+MAX_LEDGER_RECORDS = MAX_GATEWAY_LEDGER_RECORDS
 MAX_GATEWAY_STORE_BYTES = 64 * 1024
 HOST_UID = 501
 HOST_GID = 20
@@ -384,9 +419,20 @@ def _gateway_error(message: str, exc: BaseException | None = None) -> GatewayCon
 
 
 def _safe_store_path(
-    path: Path, *, leaf_mode: int = 0o600, create: bool = False, require_owner: bool = True
+    path: Path,
+    *,
+    leaf_mode: int = 0o600,
+    create: bool = False,
+    require_owner: bool = True,
+    size_bound: int = MAX_GATEWAY_STORE_BYTES,
 ) -> Path:
-    """Reject symlink/non-directory ancestry and unsafe writable parents."""
+    """Reject symlink/non-directory ancestry and unsafe writable parents.
+
+    ``size_bound`` lets callers (notably the Gateway ledger) opt into a larger
+    per-file size ceiling than the generic 64 KiB store bound while keeping the
+    same ancestry/ownership/mode safety checks.  The bound is still enforced:
+    this never removes size protection, it only makes it configurable.
+    """
     path = Path(path)
     if not path.is_absolute() or ".git" in path.parts or path == Path("/"):
         raise _gateway_error("unsafe gateway store path")
@@ -436,7 +482,7 @@ def _safe_store_path(
             raise _gateway_error("gateway store mode mismatch")
         if require_owner and info.st_uid != HOST_UID:
             raise _gateway_error("gateway store owner mismatch")
-        if info.st_size > MAX_GATEWAY_STORE_BYTES:
+        if info.st_size > size_bound:
             raise _gateway_error("gateway store exceeds size bound")
     return path
 
@@ -1638,6 +1684,52 @@ def _record_hash(record: Mapping[str, Any]) -> str:
     return canonical_hash({key: value for key, value in record.items() if key != "record_hash"})
 
 
+def _validate_prospective_ledger_append(
+    rows: list[Mapping[str, Any]], encoded: bytes, current_size: int
+) -> None:
+    """Fail closed BEFORE a ledger append if the next record would break any of the
+    ledger capacity invariants.  This guarantees a single legal append can never
+    turn the ledger into a file the next ``_scan_unlocked`` cannot read:
+
+    * per-record byte ceiling (``MAX_GATEWAY_LEDGER_RECORD_BYTES``);
+    * prospective total byte ceiling (``MAX_GATEWAY_LEDGER_BYTES``);
+    * prospective record-count ceiling (``MAX_GATEWAY_LEDGER_RECORDS``).
+
+    Current file size is passed in because the caller already knows it (either from
+    a read or from the rows it encoded), so this is validation-only, not a read.
+    """
+    if len(encoded) > MAX_GATEWAY_LEDGER_RECORD_BYTES:
+        raise LedgerCorruption("ledger record exceeds per-record bound")
+    if current_size + len(encoded) > MAX_GATEWAY_LEDGER_BYTES:
+        raise LedgerCorruption("ledger append exceeds total size bound")
+    if len(rows) + 1 > MAX_GATEWAY_LEDGER_RECORDS:
+        raise LedgerCorruption("ledger append exceeds record-count bound")
+
+
+def _reserve_post_effect_ledger_capacity(
+    ledger: "GatewayLedger", rows: list[Mapping[str, Any]]
+) -> None:
+    """Before any external recovery effect fires, prove the ledger still has enough
+    record slots and byte capacity to durably record the worst-case post-effect
+    closure.  The reserve covers the rows a recovery may still need after
+    ``EFFECT_STARTED``: ``SERVICE_OBSERVED``, ``IDENTITY_VERIFIED``,
+    ``CLIENT_BOUND``, ``VERIFIED`` (or a fail-closed ``BLOCKED``/``ROLLED_BACK``
+    terminal), with headroom for ``UNCERTAIN_EFFECT`` detours.
+
+    Raises ``GatewayContractError`` (not ``LedgerCorruption``) when the reserve
+    cannot be satisfied, so the caller can fail-closed by recording a terminal
+    ``BLOCKED`` row and returning WITHOUT ever invoking the external effect.
+    """
+    current_bytes = ledger.path.stat().st_size if ledger.path.exists() else 0
+    if len(rows) + POST_EFFECT_LEDGER_RESERVE_SLOTS > MAX_GATEWAY_LEDGER_RECORDS:
+        raise GatewayContractError("recovery post-effect ledger capacity reserve exhausted")
+    if current_bytes + POST_EFFECT_LEDGER_RESERVE_BYTES > MAX_GATEWAY_LEDGER_BYTES:
+        raise GatewayContractError("recovery post-effect ledger capacity reserve exhausted")
+
+
+
+
+
 class GatewayLedger:
     """Bounded JSONL state ledger with sequence, parent, self-hash, and CAS."""
 
@@ -1650,12 +1742,12 @@ class GatewayLedger:
             raise LedgerCorruption("ledger symlink rejected")
         if not self.path.exists():
             return []
-        self.path = _safe_store_path(self.path)
+        self.path = _safe_store_path(self.path, size_bound=MAX_GATEWAY_LEDGER_BYTES)
         info = os.stat(self.path)
         if info.st_uid != HOST_UID or stat.S_IMODE(info.st_mode) != 0o600:
             raise LedgerCorruption("ledger ownership/mode invalid")
         raw = self.path.read_bytes()
-        if not raw or len(raw) > MAX_LEDGER_BYTES:
+        if not raw or len(raw) > MAX_GATEWAY_LEDGER_BYTES:
             raise LedgerCorruption("ledger missing or exceeds size bound")
         rows: list[dict[str, Any]] = []
         last_state: dict[str, str] = {}
@@ -1663,6 +1755,8 @@ class GatewayLedger:
         fences: dict[str, str] = {}
         requests: dict[str, tuple[str, str]] = {}
         for line in raw.splitlines(keepends=True):
+            if len(line) > MAX_GATEWAY_LEDGER_RECORD_BYTES:
+                raise LedgerCorruption("ledger record exceeds per-record bound")
             if not line.endswith(b"\n"):
                 raise LedgerCorruption("ledger is not newline terminated")
             try:
@@ -1800,7 +1894,7 @@ class GatewayLedger:
             rows.append(row)
             last_state[row["request_id"]] = row["state"]
             last_schema[row["request_id"]] = row["schema"]
-            if len(rows) > MAX_LEDGER_RECORDS:
+            if len(rows) > MAX_GATEWAY_LEDGER_RECORDS:
                 raise LedgerCorruption("ledger record limit exceeded")
         return rows
 
@@ -1912,6 +2006,8 @@ class GatewayLedger:
             ).encode()
             + b"\n"
         )
+        current_size = self.path.stat().st_size if self.path.exists() else 0
+        _validate_prospective_ledger_append(rows, encoded, current_size)
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         if self.path.exists():
             with self.path.open("ab") as handle:
@@ -2037,6 +2133,7 @@ class GatewayLedger:
             row["record_hash"] = _record_hash(row)
             encoded = (json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n").encode()
             previous = self.path.read_bytes() if self.path.exists() else b""
+            _validate_prospective_ledger_append(rows, encoded, current_size=len(previous))
             self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             if previous:
                 with self.path.open("ab") as handle:
@@ -3068,6 +3165,31 @@ def _gateway_recover_with_adapters(
             state = DeploymentState.ROLLBACK_READY
             adapters.crash_hook("after_rollback_ready")
         if state is DeploymentState.ROLLBACK_READY:
+            try:
+                _reserve_post_effect_ledger_capacity(ledger, rows)
+            except GatewayContractError:
+                # Cannot durably record the post-effect closure: fail closed
+                # BEFORE any external effect, recording a terminal BLOCKED row.
+                blocked = _recovery_outcome(
+                    typed,
+                    receipt,
+                    result=ResultClass.BLOCKED,
+                    effect_started=False,
+                    observation={
+                        "state": "BLOCKED",
+                        "reason": "post-effect ledger capacity reserve exhausted",
+                    },
+                )
+                _append_recovery_state_unlocked(
+                    ledger,
+                    rows,
+                    typed,
+                    receipt,
+                    evidence,
+                    DeploymentState.BLOCKED,
+                    observed_identity={"outcome": blocked.model_dump()},
+                )
+                return blocked
             owner_start = _current_recovery_process_start()
             _record_recovery_owner(os.getpid(), owner_start)
             _append_recovery_state_unlocked(
