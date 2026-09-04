@@ -53,7 +53,7 @@ DEC-007; DEC-009. SQLite WAL/full-sync and external private-key custody are bind
 - **Branch:** `REVERIFY_AFTER_DEPENDENCY`
 - **Starting HEAD:** `REVERIFY_AFTER_DEPENDENCY`
 - **Dirty baseline:** `REVERIFY_AFTER_DEPENDENCY`
-- **Required initial verification:** verify TG-3 accepted identity contract and a clean controller-bound integration HEAD/tree containing the exact accepted TG-3 Candidate and its TG-1/TG-2 ancestry
+- **Required initial verification:** verify Issue #549 only as `ADVISORY_CACHE_ONLY`; then verify the exact TG-3 accepted identity-envelope schema/hash/loader and a clean controller-bound integration HEAD/tree containing the accepted TG-3 Candidate and its TG-1/TG-2 ancestry
 - **Freshness rule:** re-read TG-3 receipt and ledger schema before retry or acceptance
 
 ## MCP execution profile
@@ -105,6 +105,23 @@ Crash at every durable boundary, duplicate key, request drift, stale generation,
 ## Implementation constraints
 
 Default path is `~/.local/state/nexus-core/ledger.sqlite3` (explicit XDG state override permitted). Configure SQLite `journal_mode=WAL`, `synchronous=FULL`, foreign keys, and `BEGIN IMMEDIATE` for append/CAS. Persist unique idempotency key, canonical request hash, attempt/generation, source snapshot hash, result/receipt hash, sequence, previous-entry hash, entry hash, signer key ID/algorithm/signature, and durable head metadata. Add failpoints before write, after write/before commit, and after commit/before response. External signer receives only canonical digest and returns public key metadata plus signature; private keys never enter Nexus. Signatures attest identity only and never elevate the claim ceiling.
+
+### Durable payload and public API contract
+
+- `product/ledger.py` SHALL expose typed `LedgerAppendRequest`, `LedgerAppendResult`, `LedgerReadResult`, `LedgerVerificationResult`, `ExternalSignerPort`, and `ExternalAnchorVerifierPort`, plus `append_or_replay`, `get_by_request_id`, `verify_chain`, and `verify_external_anchor`. TG-5 consumes only these accepted surfaces and SHALL NOT create another idempotency/CAS store.
+- Every committed row persists schema/version, ledger ID, request ID, idempotency key, canonical request hash, expected and committed generation, attempt, exact TG-3 serialized identity-envelope bytes/hash, exact serialized Completion receipt bytes/hash, factual disposition and claim ceiling as carried values, source snapshot hash, sequence, previous-entry hash, entry hash, and optional signer public metadata/signature. Unknown/missing fields or loader/hash mismatch fail closed; hashes alone are insufficient for replay.
+- Same key plus identical canonical request returns the byte-identical stored envelope/receipt and original generation. Same key plus different request returns `IDEMPOTENCY_CONFLICT` and writes nothing. Expected generation unequal to current durable generation returns `STALE_GENERATION` and writes nothing. A successful commit increments generation exactly once; all refused/rolled-back attempts consume no generation.
+- Failpoint outcomes are exact: before write -> no row; after insert before commit -> rollback/no row after restart; after commit before response -> retry reconciles and returns the existing row without rerun or duplicate. `UNKNOWN_EFFECT_RECONCILIATION_REQUIRED` forbids another execution until durable lookup resolves it.
+- Entry hash domain is canonical JSON of `(schema, ledger_id, sequence, committed_generation, request_id, idempotency_key, request_hash, envelope_hash, receipt_hash, factual_disposition, claim_ceiling, source_snapshot_hash, previous_entry_hash, signer_public_metadata)`. Verification requires contiguous sequence, generation monotonicity, exact previous/current hashes, exact canonical payload recomputation, and durable head equality. It never truncates, repairs, or silently accepts a torn/ambiguous tail.
+- Database-level `BEFORE UPDATE` and `BEFORE DELETE` triggers (or an equivalently testable SQLite enforcement) reject mutation. Tests attempt update/delete, duplicate/reorder/replacement/torn-tail and verify fail-closed inspection.
+
+### Concurrency, filesystem, signer, and anchor contract
+
+- Set `busy_timeout=5000`; use at most three bounded contention attempts with deterministic backoff and return `LEDGER_BUSY_RECONCILIATION_REQUIRED` after exhaustion. A two-process barrier test must prove one sequence/idempotency truth and no duplicate row.
+- Resolve `$XDG_STATE_HOME/nexus-core/ledger.sqlite3`, falling back only to `~/.local/state/nexus-core/ledger.sqlite3`; never use cwd. Securely create the state directory mode `0700`, database/WAL/SHM mode `0600`, require current UID ownership, reject symlink/non-regular/hard-linked database substitution, and recheck identity/permissions around open. Capture sidecar permissions after WAL activity.
+- External signing domain is canonical `(nexus.ledger-entry-signature.v1, ledger_id, sequence, generation, entry_hash, claim_ceiling)`. The signer receives only that digest and returns algorithm/key ID/public metadata/signature; private-key bytes are forbidden from arguments, process state, database, logs, receipts, and worker payloads. Verification mismatch/rotation is explicit and never changes factual disposition or claim ceiling.
+- External head-anchor domain is canonical `(nexus.ledger-head-anchor.v1, ledger_id, schema_version, generation, sequence, head_hash)`. Only the injected verifier may return `VERIFIED`. Missing/unavailable/malformed/wrong-key/stale anchors return `ANCHOR_UNAVAILABLE` or `UNVERIFIABLE`. Without a valid external anchor, an internally valid rollback to an older complete ledger is explicitly not claimed detectable.
+- Tests prove a carried `FAILED_VERIFICATION` or `UNVERIFIABLE` Completion receipt remains byte-identical and retains its factual disposition/claim ceiling through append, replay, signature, restart, and inspection.
 
 ## GREEN and regression gates
 

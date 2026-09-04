@@ -65,7 +65,7 @@ DEC-002; DEC-004; DEC-007; DEC-009.
 - **Branch:** `REVERIFY_AFTER_DEPENDENCY`
 - **Starting HEAD:** `REVERIFY_AFTER_DEPENDENCY`
 - **Dirty baseline:** `REVERIFY_AFTER_DEPENDENCY`
-- **Required initial verification:** verify TG-1 through TG-4 accepted receipts and a clean controller-bound integration HEAD/tree containing exactly their accepted Candidate commits with recorded conflict-free composition, then verify loopback port availability, token-file permissions, Docker/runner availability, and controlled PR #635 read access
+- **Required initial verification:** verify Issue #549 only as `ADVISORY_CACHE_ONLY`; then verify TG-1 through TG-4 accepted receipts and a clean controller-bound integration HEAD/tree containing exactly their accepted Candidate commits with recorded conflict-free composition, the accepted TG-4 API below, loopback port availability, token-file permissions, Docker/runner availability, and controlled PR #635 read access
 - **Freshness rule:** re-read all upstream contracts, source revision, and local HTTP permission/auth state before each E2E run
 
 ## MCP execution profile
@@ -105,12 +105,49 @@ DEC-002; DEC-004; DEC-007; DEC-009.
 ## Canonical HTTP contract
 
 - **Bind:** `127.0.0.1:8767` by default; wildcard, `0.0.0.0`, IPv6-any, and non-loopback binds are rejected before listening.
-- **Authentication:** per-install bearer token is read only from `$XDG_CONFIG_HOME/nexus-core/token`, falling back to `~/.config/nexus-core/token`; the file must be regular, mode `0600`, non-empty, and never enters a receipt. Missing, overlong, malformed, or mismatched tokens return the same unauthorised error without invoking a core.
+- **Runtime library:** use the already locked `aiohttp` server surface; no dependency, lock, package, or workflow changes are allowed. `httpx` may be used only by tests/clients, never as a second server or semantic owner.
+- **Authentication:** per-install bearer token is read only from `$XDG_CONFIG_HOME/nexus-core/token`, falling back to `~/.config/nexus-core/token`. It is ASCII base64url without padding or whitespace/newline, 43 characters, and compared in constant time. Secure open uses `O_NOFOLLOW` where available plus `lstat/fstat` identity checks; require current UID, regular file, link count one, exact mode `0600`, config directory mode `0700`, and reject symlink/replacement/permission drift before listening. Token bytes never enter responses, logs, exceptions, receipts, hashes, or worker input. Every missing/malformed/mismatched case returns the identical 401 envelope without invoking route/core/ledger logic.
 - **Endpoints:** `POST /v1/certifications`, `GET /v1/certifications/{request_id}`, `GET /v1/certifications/{request_id}/receipt`, and `POST /v1/receipts/verify`.
-- **Request/response:** schemas must explicitly carry protocol version and implementation schema as separate axes, repository/PR/base/head/tree/diff identities, Acceptance Contract and Verification Plan hashes, `python-oci-pytest-v1`, idempotency key, and the separated acquisition/execution/evidence/verification/disposition/receipt/claim-ceiling sections. Unknown fields, oversized bodies, invalid IDs, unsupported methods, and malformed JSON fail with a documented error envelope and never create durable state.
-- **Limits/timeouts:** request-body and path limits, connect/read/worker timeouts, and bounded result size are fixed in the schema module and asserted by tests; timeout/unknown-effect is `UNVERIFIABLE` and reconciles before retry.
+- **Request schema:** `POST /v1/certifications` accepts only `application/json` and exact keys `protocol_version`, `implementation_schema`, `repository`, `acceptance_contract`, `verification_plan`, `profile_id`, `idempotency_key`, and `expected_generation`. `repository` has exact keys `owner`, `name`, `pr_number`, `expected_base_sha`, `expected_head_sha`; contract/plan use their canonical Product serializers with unknown fields rejected. IDs are normalized non-empty strings, SHA/hash fields retain their canonical validators, profile is exactly `python-oci-pytest-v1`, and canonical request hash is UTF-8 JSON with sorted keys and compact separators. Nulls and unknown/duplicate JSON keys are rejected.
+- **Response schema:** every success is `nexus.core.http-response.v1` with exact keys `request_id`, `state`, `generation`, `acquisition`, `execution`, `evidence`, `verification`, `disposition`, `receipt`, `claim_ceiling`; unavailable sections are explicit `null`, never omitted. `state` is one of `PENDING`, `RUNNING`, `COMPLETED`, `FAILED`, `UNVERIFIABLE`. Error envelope is exactly `nexus.core.http-error.v1` with `code`, `request_id`, and generic `message`; it contains no internal exception or credential detail.
+- **Limits/timeouts:** request body `1,048,576` bytes, request-target/path `512` bytes, request/idempotency IDs `128` bytes, result body `8,388,608` bytes, header/read-parse timeout `10s`, graceful in-flight shutdown `30s`, and verifier worker timeout `330s` (covering the TG-2 300s profile). Boundary+1 inputs fail before durable state. Timeout/unknown effect becomes `UNVERIFIABLE` plus reconciliation before retry.
 - **Durability:** exact `(idempotency_key, canonical_request_hash)` replay returns the original run/receipt; same key with changed request, stale generation/source, or changed subject fails closed through SQLite generation CAS and reconciliation.
 - **Receipt verification:** `/verify` returns `ENVELOPE_ONLY` unless stored original inputs allow full recomputation; it cannot elevate the claim ceiling.
+
+### Status and error matrix
+
+| Operation | Condition | HTTP | Machine code/state | Durable effect |
+|---|---|---:|---|---|
+| POST certification | new valid request accepted | 202 | `PENDING` or `RUNNING` | one reserved/reconcilable request identity |
+| POST certification | exact replay | 200 if terminal, otherwise 202 | original state/request ID | none |
+| POST certification | same key, changed request | 409 | `IDEMPOTENCY_CONFLICT` | none |
+| POST certification | stale generation/source/subject | 409 | `STALE_GENERATION` / `STALE_SOURCE` | none |
+| POST certification | malformed/unknown/null/oversized/unsupported version/profile | 400/413/415/422 as applicable | `MALFORMED_REQUEST`, `REQUEST_TOO_LARGE`, `UNSUPPORTED_MEDIA_TYPE`, `UNSUPPORTED_CONTRACT` | none |
+| GET status | known request | 200 | exact current state | none |
+| GET status/receipt | unknown normalized ID | 404 | `REQUEST_NOT_FOUND` | none |
+| GET receipt | known nonterminal request | 409 | `RESULT_NOT_READY` | none |
+| GET receipt | terminal request | 200 | stored exact receipt | none |
+| POST receipt verify | valid stored full inputs | 200 | `FULL_RECOMPUTED` | none |
+| POST receipt verify | structurally valid envelope only | 200 | `ENVELOPE_ONLY` | none |
+| POST receipt verify | malformed/tampered/unknown receipt | 422 | `RECEIPT_INVALID` | none |
+| any endpoint | missing/malformed/wrong bearer token | 401 | `UNAUTHORIZED` | no route/core/ledger call |
+| unsupported method on known route | authenticated | 405 | `METHOD_NOT_ALLOWED` | none |
+| unknown/malformed path | authenticated | 404 | `ROUTE_NOT_FOUND` | none |
+| worker timeout/ambiguous effect | accepted request | 202/409 on reconciliation query | `UNKNOWN_EFFECT_RECONCILIATION_REQUIRED` then exact durable result or `UNVERIFIABLE` | never duplicate |
+
+Authentication runs before route-specific disclosure, so unauthenticated unknown paths/methods receive the identical 401 envelope. Malformed request IDs never reach core or ledger.
+
+### Runtime lifecycle and TG-4 ownership
+
+- `product/runtime/http.py` exposes `create_app` without listening; `start_runtime` performs token and TG-4 ledger preflight before binding, binds only the configured loopback address, reports readiness only after socket acquisition, and fails atomically on auth/ledger/bind error. `stop_runtime` stops admission, waits at most 30 seconds for in-flight work, durably reconciles committed effects, marks unresolved work `UNVERIFIABLE`, releases the socket, and supports repeated start/stop without stale process/port state.
+- One aiohttp event loop owns server tasks; background verifier work is bounded and every task is joined/cancelled at shutdown. Starting twice or binding an occupied/non-loopback port fails without a second listener. Tests exercise startup failure, graceful/forced shutdown, in-flight retry, repeated lifecycle, port reuse, and no orphan task/thread.
+- TG-5 calls only accepted TG-4 `append_or_replay`, `get_by_request_id`, `verify_chain`, and `verify_external_anchor`. It may keep ephemeral in-flight futures but SHALL NOT create a second durable idempotency, generation, reconciliation, receipt, or CAS owner.
+- Upstream mapping is exact: TG-1 owns `repository_owner/name`, PR number, base/head commits and trees, diff hash, changed/deleted paths, checks and freshness CAS; Acceptance Contract/Plan own their hashes; TG-2 owns source revision/tree, environment/profile and physical attempts; TG-3 envelope owns producer/issuer, acquisition/runner/verification receipt hashes and generation; TG-4 owns request/idempotency/current committed generation, stored payload and ledger entry/head hashes. Duplicated copies must be byte-equal or the request fails `CROSS_BOUND_UPSTREAM_IDENTITY` before append.
+
+### Worker/controller test split
+
+- Luna runs deterministic fake-port HTTP tests only: `uv run pytest -qq tests/product/test_http_runtime.py tests/product/test_http_e2e.py -m "not live"`. Tests register `live` and `--run-live` in the local module/plugin surface without editing global pytest configuration; absent `--run-live` is an explicit skip, never a pass claim.
+- The controller alone supplies GitHub credentials and runs the authenticated #635 probe after Candidate commit. The controller command is `NEXUS_CORE_HTTP_PORT=8767 uv run pytest -qq tests/product/test_http_e2e.py -m live --run-live`; its fixture calls the credential-free TG-1 port, redacts all auth material, verifies the test actually executed (not skipped), and persists only the exact PR/acquisition/runtime/receipt hashes.
 
 ## Exact upstream identity tuple
 
@@ -144,8 +181,8 @@ AC-002 and AC-004 through AC-009 pass only on a live local E2E from authenticate
 
 | ID | cwd | Exact command/argv | Purpose | Required result |
 |---|---|---|---|---|
-| TG5-01 | TARGET_ROOT | `uv run pytest -qq tests/product/test_http_runtime.py tests/product/test_http_e2e.py` | runtime, auth, schema, replay, and tracer regression | all tests pass |
-| TG5-02 | TARGET_ROOT | `NEXUS_CORE_HTTP_PORT=8767 uv run pytest -qq tests/product/test_http_e2e.py -m live --run-live` | authenticated `James3014/Nexus-new#635` acquisition-to-receipt E2E and negative controls | live E2E and all hostile cases pass |
+| TG5-01 | TARGET_ROOT | `uv run pytest -qq tests/product/test_http_runtime.py tests/product/test_http_e2e.py -m "not live"` | Luna-owned runtime, auth, schema, replay, lifecycle, and injected-port tracer regression | all deterministic tests pass; live tests deselected |
+| TG5-02 | TARGET_ROOT | `NEXUS_CORE_HTTP_PORT=8767 uv run pytest -qq tests/product/test_http_e2e.py -m live --run-live` | controller-only authenticated `James3014/Nexus-new#635` acquisition-to-receipt E2E and negative controls | live tests execute with zero skips and all hostile cases pass |
 | TG5-03 | TARGET_ROOT | `git diff --check` | patch integrity | exit 0 |
 
 ## Physical evidence
