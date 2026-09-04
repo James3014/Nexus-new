@@ -6,14 +6,12 @@ module validates its result, binds it to the exact request/profile, and runs
 the same request twice before returning a certifiable result.
 """
 
-from dataclasses import dataclass
-from enum import Enum
 import hashlib
 import json
-from pathlib import Path
 import xml.etree.ElementTree as ET
+from dataclasses import dataclass
+from enum import Enum
 from typing import Callable, Mapping, Optional
-
 
 IMAGE = "python:3.12-alpine"
 IMAGE_DIGEST = "sha256:d09d15e60962ca365d1cd544a48773bac9d33f2fb1b00f2aa0deec78ade7dc31"
