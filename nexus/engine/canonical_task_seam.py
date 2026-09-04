@@ -846,6 +846,7 @@ def execute_canonical_product_task(
         task_statement=str(task_text),
         task_type=task_type,
         route=route,
+        budget=runtime_budget,
         online_enabled=online_decision.online_execution_requested,
         local_enabled=local_enabled,
         online_prompt=str(task_text),

@@ -318,6 +318,10 @@ def test_canonical_product_loads_governed_learning_policy_before_planner(
     assert "memory" in plan.selected_capabilities
     assert plan.signal_snapshot["learning_policy"]["adoption_lineage"]["adoption_id"] == "ladopt:test"
     assert plan.signal_snapshot["route_truth_source"] == "CapabilityPlanner"
+    assert (
+        captured["request"].budget["learning_policy"]["adoption_lineage"]["adoption_id"]
+        == "ladopt:test"
+    )
 
 
 def test_canonical_product_verified_repair_topology_is_planner_owned(
