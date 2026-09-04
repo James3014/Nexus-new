@@ -84,6 +84,24 @@ def test_manifest_lock_reload_binds_actual_uv_lock():
     assert profile.profile_id == "python-oci-pytest-v1"
 
 
+@pytest.mark.parametrize("mutation", ["missing", "extra", "reordered", "wrong-hash"])
+def test_dependency_artifact_lock_attacks_are_rejected(tmp_path, mutation):
+    root = Path(__file__).parents[2]
+    lock = json.loads((root / "product/execution/profiles/python-oci-pytest-v1.lock").read_text())
+    if mutation == "missing":
+        lock["dependency_artifacts"] = lock["dependency_artifacts"][1:]
+    if mutation == "extra":
+        lock["dependency_artifacts"].append(["x.whl", "https://x", "0" * 64])
+    if mutation == "reordered":
+        lock["dependency_artifacts"].reverse()
+    if mutation == "wrong-hash":
+        lock["dependency_artifacts"][0][2] = "0" * 64
+    lock_path = tmp_path / "lock.json"
+    lock_path.write_text(json.dumps(lock))
+    with pytest.raises(ValueError):
+        PythonOCIProfile.load(root / "product/execution/profiles/python-oci-pytest-v1.json", lock_path, root / "uv.lock")
+
+
 def test_receipt_reload_recomputes_and_rejects_tamper():
     result = PythonOCIRunner().run(request(), executor)
     assert RunnerResult.from_dict(result.to_dict()) == result
