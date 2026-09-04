@@ -169,8 +169,18 @@ class RunnerResult:
         if type(data) is not dict or type(data.get("reason_codes")) is not list:
             raise ValueError("malformed receipt")
         attempts = []
+        profile = PythonOCIRunner().profile
         for item in data.get("attempts", ()):
             stdout, stderr, junit = (bytes.fromhex(item[k]) for k in ("stdout", "stderr", "junit"))
+            if tuple(item["argv"]) != profile.command or any(len(x) > MAX_OUTPUT_BYTES for x in (stdout, stderr, junit)):
+                raise ValueError("receipt command or output limit mismatch")
+            for field in ("source_revision", "source_tree"):
+                if type(item[field]) is not str or len(item[field]) != 40 or any(c not in "0123456789abcdef" for c in item[field]):
+                    raise ValueError("receipt git identity mismatch")
+            for field in ("contract_hash", "plan_hash", "environment_hash"):
+                _hash(item[field], field)
+            _text(item["attempt_id"], "attempt_id")
+            _text(item["execution_id"], "execution_id")
             tests, failures, errors = PythonOCIRunner._check_junit(junit, item["exit_code"])
             raw = dict(item)
             raw.update({"profile_id": PROFILE_ID, "image": IMAGE, "image_digest": IMAGE_DIGEST, "lock_digest": LOCK_DIGEST})

@@ -163,3 +163,13 @@ def test_tampered_outcome_hash_is_rejected():
     tampered["attempts"][0]["outcome_hash"] = "sha256:" + "0" * 64
     with pytest.raises(ValueError):
         RunnerResult.from_dict(tampered)
+
+
+@pytest.mark.parametrize("field", ["argv", "source_revision", "contract_hash", "attempt_id", "execution_id", "stdout"])
+def test_receipt_loader_rejects_malformed_execution_fields(field):
+    result = PythonOCIRunner().run(request(), executor)
+    tampered = result.to_dict()
+    values = {"argv": ["python", "-m", "pytest"], "source_revision": "bad", "contract_hash": "bad", "attempt_id": "", "execution_id": "", "stdout": "not-hex"}
+    tampered["attempts"][0][field] = values[field]
+    with pytest.raises((ValueError, TypeError)):
+        RunnerResult.from_dict(tampered)
