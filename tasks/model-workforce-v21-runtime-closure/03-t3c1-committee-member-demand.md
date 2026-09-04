@@ -2,7 +2,7 @@
 
 **artifact_authority:** current  
 **owner:** James Chen  
-**status:** CANDIDATE_READY  
+**status:** COMPLETED / TERMINAL_RECONCILIATION
 **task_id:** `model-workforce-v21-runtime-closure-t3c1`
 
 ## Scope
@@ -19,6 +19,7 @@ admission and physical calls remain T3C2/T3C3.
 
 ## Evidence
 
+- campaign INDEX completed-cards records T3C1 integrated at `061286b8c5f7a40caf68e0c4f951ba83364bb8f8` (candidate commit `084a90315372e0ae363c98ed7e6520d89a214f77`; runtime integration history only, not an ancestor of GitHub `main`; metadata reconciliation only, no runtime/production claim)
 - `COMMITTEE_MEMBER_DEMAND_WIRING_COMPLETE`
 - malformed or missing selected members fail closed without replacement
 - every emitted demand has `member_id`, `parent_demand_id`, `phase`, `role`,
