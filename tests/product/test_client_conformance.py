@@ -419,8 +419,7 @@ def test_client_exit_code_matrix(test_env, capsys):
 
 
 # ==============================================================================
-# ==============================================================================
-# Controller Acceptance Prerequisites & Gated Definitions
+# Controller Physical Acceptance Mode
 # ==============================================================================
 
 CONTROLLER_PREDECESSOR = Path(
@@ -429,224 +428,234 @@ CONTROLLER_PREDECESSOR = Path(
 CONTROLLER_WHEELHOUSE = Path("/private/tmp/nexus-core-v1-wheelhouse")
 CONTROLLER_TG5_RECEIPT = Path("/private/tmp/nexus-core-v1-evidence/tg7/tg5-receipt.json")
 
+_PHYSICAL_ACCEPTANCE_SELECTORS = frozenset(
+    {
+        "predecessor_artifact",
+        "wheelhouse_manifest",
+        "install_upgrade_rollback",
+    }
+)
+_NON_ACCEPTANCE_REASON = "NON_ACCEPTANCE_PHYSICAL_DEPENDENCY_REQUIRED"
 
-def _has_controller_acceptance_prerequisites() -> bool:
-    return (
-        CONTROLLER_PREDECESSOR.is_file()
-        and (CONTROLLER_WHEELHOUSE / "wheelhouse-manifest.json").is_file()
-        and CONTROLLER_TG5_RECEIPT.is_file()
-    )
+
+def _require_physical_acceptance(
+    request: pytest.FixtureRequest,
+    selector: str,
+    required_paths: tuple[Path, ...],
+) -> None:
+    """Separate ordinary regression CI from the Task Card's physical canary invocations."""
+    keyword = str(request.config.getoption("keyword") or "").strip()
+    assert selector in _PHYSICAL_ACCEPTANCE_SELECTORS
+
+    if keyword != selector:
+        pytest.skip(f"{_NON_ACCEPTANCE_REASON}:{selector}")
+
+    missing = [str(path) for path in required_paths if not path.is_file()]
+    assert not missing, "PHYSICAL_ACCEPTANCE_DEPENDENCY_MISSING:" + ",".join(missing)
 
 
-if _has_controller_acceptance_prerequisites():
-    # ==============================================================================
-    # TG6-02: Predecessor Artifact Verification
-    # ==============================================================================
+# ==============================================================================
+# TG6-02: Predecessor Artifact Verification
+# ==============================================================================
 
-    def test_predecessor_artifact():
-        """Verify controller-prebuilt exact accepted TG5 predecessor wheel/source receipt."""
-        pred_path = Path(
-            "/private/tmp/nexus-core-v1-predecessor/nexus_singularity-28.3.0-py3-none-any.whl"
-        )
-        assert pred_path.is_file(), f"acceptance predecessor wheel missing at {pred_path}"
 
-        # Verify exact SHA-256
+def test_predecessor_artifact(request: pytest.FixtureRequest):
+    """Verify controller-prebuilt exact accepted TG5 predecessor wheel/source receipt."""
+    pred_path = CONTROLLER_PREDECESSOR
+    _require_physical_acceptance(request, "predecessor_artifact", (pred_path,))
+
+    # Verify exact SHA-256
+    h = hashlib.sha256()
+    with open(pred_path, "rb") as f:
+        while chunk := f.read(65536):
+            h.update(chunk)
+    assert h.hexdigest() == "162c2e79b9df15255be59f42968dab4ef9374fc470cc17be19caa8d2c3b153d7"
+
+    # Inspect METADATA inside predecessor wheel
+    with zipfile.ZipFile(pred_path) as z:
+        namelist = z.namelist()
+        assert "nexus_singularity-28.3.0.dist-info/METADATA" in namelist
+        assert "nexus_singularity-28.3.0.dist-info/entry_points.txt" in namelist
+
+        metadata = z.read("nexus_singularity-28.3.0.dist-info/METADATA").decode("utf-8")
+        assert "Name: nexus-singularity" in metadata
+        assert "Version: 28.3.0" in metadata
+        assert "Provides-Extra: ml" in metadata
+        assert "Provides-Extra: legacy" not in metadata  # Predecessor had no legacy extra
+
+        entry_points = z.read("nexus_singularity-28.3.0.dist-info/entry_points.txt").decode("utf-8")
+        assert "nexus=scripts.engine.nexus_cli:nexus" in entry_points
+
+
+# ==============================================================================
+# TG6-05: Wheelhouse Manifest Verification
+# ==============================================================================
+
+
+def test_wheelhouse_manifest(request: pytest.FixtureRequest):
+    """Verify controller-staged wheelhouse manifest and closure integrity."""
+    wh_dir = CONTROLLER_WHEELHOUSE
+    manifest_file = wh_dir / "wheelhouse-manifest.json"
+    _require_physical_acceptance(request, "wheelhouse_manifest", (manifest_file,))
+
+    with open(manifest_file, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    assert manifest["schema"] == "nexus.core-v1.tg6-wheelhouse.v1"
+    assert manifest["build_a_hash"] == manifest["build_b_hash"]
+    assert manifest["build_a_hash"] == manifest["selected_successor_hash"]
+    assert manifest["build_a_files"] == manifest["build_b_files"]
+
+    # Verify closure rows
+    closure = manifest["closure"]
+    assert len(closure) >= 2  # nexus-core plus aiohttp closure
+
+    found_whls = set(p.name for p in wh_dir.glob("*.whl"))
+    closure_whls = set(r["filename"] for r in closure)
+    assert found_whls == closure_whls, "wheelhouse file list does not match closure"
+
+    # Verify every wheel hash
+    for row in closure:
+        p = wh_dir / row["filename"]
+        assert p.is_file(), f"wheel missing from wheelhouse: {p}"
         h = hashlib.sha256()
-        with open(pred_path, "rb") as f:
+        with open(p, "rb") as f:
             while chunk := f.read(65536):
                 h.update(chunk)
-        assert h.hexdigest() == "162c2e79b9df15255be59f42968dab4ef9374fc470cc17be19caa8d2c3b153d7"
+        assert f"sha256:{h.hexdigest()}" == row["sha256"]
 
-        # Inspect METADATA inside predecessor wheel
-        with zipfile.ZipFile(pred_path) as z:
-            namelist = z.namelist()
-            assert "nexus_singularity-28.3.0.dist-info/METADATA" in namelist
-            assert "nexus_singularity-28.3.0.dist-info/entry_points.txt" in namelist
+    # Verify source lock hash
+    uv_lock = Path("uv.lock")
+    assert uv_lock.is_file(), "uv.lock missing"
+    h_lock = hashlib.sha256(uv_lock.read_bytes()).hexdigest()
+    assert manifest["source_lock_hash"] == f"sha256:{h_lock}"
 
-            metadata = z.read("nexus_singularity-28.3.0.dist-info/METADATA").decode("utf-8")
-            assert "Name: nexus-singularity" in metadata
-            assert "Version: 28.3.0" in metadata
-            assert "Provides-Extra: ml" in metadata
-            assert "Provides-Extra: legacy" not in metadata  # Predecessor had no legacy extra
 
-            entry_points = z.read("nexus_singularity-28.3.0.dist-info/entry_points.txt").decode(
-                "utf-8"
-            )
-            assert "nexus=scripts.engine.nexus_cli:nexus" in entry_points
+# ==============================================================================
+# TG6-10: Physical Install, Upgrade, and Rollback Matrix Tests
+# ==============================================================================
 
-    # ==============================================================================
-    # TG6-05: Wheelhouse Manifest Verification
-    # ==============================================================================
 
-    def test_wheelhouse_manifest():
-        """Verify controller-staged wheelhouse manifest and closure integrity."""
-        wh_dir = Path("/private/tmp/nexus-core-v1-wheelhouse")
-        manifest_file = wh_dir / "wheelhouse-manifest.json"
-        assert manifest_file.is_file(), f"acceptance wheelhouse manifest missing at {manifest_file}"
+def test_install_upgrade_rollback(tmp_path: Path, request: pytest.FixtureRequest):
+    """Test physical migration matrix: install -> upgrade -> refusal -> failed upgrade -> rollback."""
+    pred_path = CONTROLLER_PREDECESSOR
+    wh_dir = CONTROLLER_WHEELHOUSE
+    succ_whl = wh_dir / "nexus_core-28.3.0-py3-none-any.whl"
+    receipt_source = CONTROLLER_TG5_RECEIPT
+    _require_physical_acceptance(
+        request,
+        "install_upgrade_rollback",
+        (pred_path, succ_whl, receipt_source),
+    )
 
-        with open(manifest_file, "r", encoding="utf-8") as f:
-            manifest = json.load(f)
+    receipt_bytes = receipt_source.read_bytes()
+    receipt_data = json.loads(receipt_bytes.decode("utf-8"))
 
-        assert manifest["schema"] == "nexus.core-v1.tg6-wheelhouse.v1"
-        assert manifest["build_a_hash"] == manifest["build_b_hash"]
-        assert manifest["build_a_hash"] == manifest["selected_successor_hash"]
-        assert manifest["build_a_files"] == manifest["build_b_files"]
+    # Validate receipt against canonical schema
+    errs = validate_receipt_verify_request(
+        {
+            "receipt": receipt_data,
+            "requested_scope": "ENVELOPE_ONLY",
+            "original_inputs": None,
+        }
+    )
+    assert not errs, f"pre-upgrade receipt failed schema validation: {errs}"
 
-        # Verify closure rows
-        closure = manifest["closure"]
-        assert len(closure) >= 2  # nexus-core plus aiohttp closure
+    claimed_hash = receipt_data.get("receipt_hash")
+    body = {k: v for k, v in receipt_data.items() if k != "receipt_hash"}
+    assert claimed_hash == _hash(body), "pre-upgrade receipt hash mismatch"
 
-        found_whls = set(p.name for p in wh_dir.glob("*.whl"))
-        closure_whls = set(r["filename"] for r in closure)
-        assert found_whls == closure_whls, "wheelhouse file list does not match closure"
+    # 1. Create isolated physical test environment
+    matrix_venv = tmp_path / "matrix_venv"
+    subprocess.run([sys.executable, "-m", "venv", str(matrix_venv)], check=True)
+    venv_pip = matrix_venv / "bin" / "pip"
+    pred_bin = matrix_venv / "bin" / "nexus"
+    succ_bin = matrix_venv / "bin" / "nexus-certify"
 
-        # Verify every wheel hash
-        for row in closure:
-            p = wh_dir / row["filename"]
-            assert p.is_file(), f"wheel missing from wheelhouse: {p}"
-            h = hashlib.sha256()
-            with open(p, "rb") as f:
-                while chunk := f.read(65536):
-                    h.update(chunk)
-            assert f"sha256:{h.hexdigest()}" == row["sha256"]
+    # 2. Physical install exact predecessor artifact
+    subprocess.run([str(venv_pip), "install", "--no-deps", str(pred_path)], check=True)
+    assert pred_bin.is_file(), "predecessor CLI binary missing"
+    res_pkg = subprocess.run(
+        [str(venv_pip), "show", "nexus-singularity"], capture_output=True, text=True, check=True
+    )
+    assert "Name: nexus-singularity" in res_pkg.stdout
+    assert "Version: 28.3.0" in res_pkg.stdout
 
-        # Verify source lock hash
-        uv_lock = Path("uv.lock")
-        assert uv_lock.is_file(), "uv.lock missing"
-        h_lock = hashlib.sha256(uv_lock.read_bytes()).hexdigest()
-        assert manifest["source_lock_hash"] == f"sha256:{h_lock}"
+    # 3. Stop service cleanly (simulate clean unmount) & uninstall predecessor
+    subprocess.run([str(venv_pip), "uninstall", "-y", "nexus-singularity"], check=True)
+    assert not pred_bin.exists(), "predecessor binary remained after uninstall"
 
-    # ==============================================================================
-    # TG6-10: Physical Install, Upgrade, and Rollback Matrix Tests
-    # ==============================================================================
+    # 4. Install exact successor wheel from bound wheelhouse
+    subprocess.run(
+        [
+            str(venv_pip),
+            "install",
+            "--no-index",
+            f"--find-links={wh_dir}",
+            "nexus-core==28.3.0",
+        ],
+        check=True,
+    )
+    assert succ_bin.is_file(), "successor nexus-certify binary missing"
+    res_succ = subprocess.run([str(succ_bin), "--help"], capture_output=True, text=True, check=True)
+    assert "nexus-certify" in res_succ.stdout
 
-    def test_install_upgrade_rollback(tmp_path: Path):
-        """Test physical migration matrix: install -> upgrade -> refusal -> failed upgrade -> rollback."""
-        # 0. Fail-closed on missing acceptance prerequisites
-        pred_path = Path(
-            "/private/tmp/nexus-core-v1-predecessor/nexus_singularity-28.3.0-py3-none-any.whl"
-        )
-        assert pred_path.is_file(), f"acceptance predecessor wheel missing at {pred_path}"
+    # 5. Confirm exact pre-upgrade accepted receipt remains readable and hash-valid under Successor
+    current_receipt_bytes = receipt_source.read_bytes()
+    assert current_receipt_bytes == receipt_bytes, "receipt mutated during upgrade"
+    current_receipt = json.loads(current_receipt_bytes.decode("utf-8"))
+    assert current_receipt["receipt_hash"] == claimed_hash
 
-        wh_dir = Path("/private/tmp/nexus-core-v1-wheelhouse")
-        succ_whl = wh_dir / "nexus_core-28.3.0-py3-none-any.whl"
-        assert succ_whl.is_file(), f"acceptance successor wheel missing at {succ_whl}"
+    # 6. Exercise incompatible protocol/schema refusal
+    incompatible_proto = dict(receipt_data)
+    incompatible_proto["protocol_version"] = "99.0.0-unsupported"
+    errs_proto = validate_receipt_verify_request(
+        {
+            "receipt": incompatible_proto,
+            "requested_scope": "ENVELOPE_ONLY",
+            "original_inputs": None,
+        }
+    )
+    assert errs_proto or incompatible_proto["protocol_version"] != PUBLIC_PROTOCOL_VERSION
 
-        receipt_source = Path("/private/tmp/nexus-core-v1-evidence/tg7/tg5-receipt.json")
-        assert receipt_source.is_file(), (
-            f"acceptance pre-upgrade receipt missing at {receipt_source}"
-        )
+    incompatible_schema = dict(receipt_data)
+    incompatible_schema["receipt_schema"] = "nexus.unknown_schema.v9"
+    errs_schema = validate_receipt_verify_request(
+        {
+            "receipt": incompatible_schema,
+            "requested_scope": "ENVELOPE_ONLY",
+            "original_inputs": None,
+        }
+    )
+    assert errs_schema or incompatible_schema["receipt_schema"] != CERTIFICATION_RECEIPT_SCHEMA
 
-        receipt_bytes = receipt_source.read_bytes()
-        receipt_data = json.loads(receipt_bytes.decode("utf-8"))
+    # 7. Exercise a failed/aborted upgrade path: attempt to install non-existent package
+    res_fail = subprocess.run(
+        [
+            str(venv_pip),
+            "install",
+            "--no-index",
+            f"--find-links={wh_dir}",
+            "nexus-core==99.99.99",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert res_fail.returncode != 0, "pip unexpectedly succeeded on non-existent package"
+    # Ensure current environment remains functional
+    res_succ_post_abort = subprocess.run(
+        [str(succ_bin), "--help"], capture_output=True, text=True, check=True
+    )
+    assert "nexus-certify" in res_succ_post_abort.stdout
 
-        # Validate receipt against canonical schema
-        errs = validate_receipt_verify_request(
-            {
-                "receipt": receipt_data,
-                "requested_scope": "ENVELOPE_ONLY",
-                "original_inputs": None,
-            }
-        )
-        assert not errs, f"pre-upgrade receipt failed schema validation: {errs}"
+    # 8. Rollback to exact predecessor artifact
+    subprocess.run([str(venv_pip), "uninstall", "-y", "nexus-core"], check=True)
+    assert not succ_bin.exists(), "successor binary remained after rollback uninstall"
+    subprocess.run([str(venv_pip), "install", "--no-deps", str(pred_path)], check=True)
+    assert pred_bin.is_file(), "predecessor binary not restored after rollback"
 
-        claimed_hash = receipt_data.get("receipt_hash")
-        body = {k: v for k, v in receipt_data.items() if k != "receipt_hash"}
-        assert claimed_hash == _hash(body), "pre-upgrade receipt hash mismatch"
-
-        # 1. Create isolated physical test environment
-        matrix_venv = tmp_path / "matrix_venv"
-        subprocess.run([sys.executable, "-m", "venv", str(matrix_venv)], check=True)
-        venv_pip = matrix_venv / "bin" / "pip"
-        pred_bin = matrix_venv / "bin" / "nexus"
-        succ_bin = matrix_venv / "bin" / "nexus-certify"
-
-        # 2. Physical install exact predecessor artifact
-        subprocess.run([str(venv_pip), "install", "--no-deps", str(pred_path)], check=True)
-        assert pred_bin.is_file(), "predecessor CLI binary missing"
-        res_pkg = subprocess.run(
-            [str(venv_pip), "show", "nexus-singularity"], capture_output=True, text=True, check=True
-        )
-        assert "Name: nexus-singularity" in res_pkg.stdout
-        assert "Version: 28.3.0" in res_pkg.stdout
-
-        # 3. Stop service cleanly (simulate clean unmount) & uninstall predecessor
-        subprocess.run([str(venv_pip), "uninstall", "-y", "nexus-singularity"], check=True)
-        assert not pred_bin.exists(), "predecessor binary remained after uninstall"
-
-        # 4. Install exact successor wheel from bound wheelhouse
-        subprocess.run(
-            [
-                str(venv_pip),
-                "install",
-                "--no-index",
-                f"--find-links={wh_dir}",
-                "nexus-core==28.3.0",
-            ],
-            check=True,
-        )
-        assert succ_bin.is_file(), "successor nexus-certify binary missing"
-        res_succ = subprocess.run(
-            [str(succ_bin), "--help"], capture_output=True, text=True, check=True
-        )
-        assert "nexus-certify" in res_succ.stdout
-
-        # 5. Confirm exact pre-upgrade accepted receipt remains readable and hash-valid under Successor
-        current_receipt_bytes = receipt_source.read_bytes()
-        assert current_receipt_bytes == receipt_bytes, "receipt mutated during upgrade"
-        current_receipt = json.loads(current_receipt_bytes.decode("utf-8"))
-        assert current_receipt["receipt_hash"] == claimed_hash
-
-        # 6. Exercise incompatible protocol/schema refusal
-        incompatible_proto = dict(receipt_data)
-        incompatible_proto["protocol_version"] = "99.0.0-unsupported"
-        errs_proto = validate_receipt_verify_request(
-            {
-                "receipt": incompatible_proto,
-                "requested_scope": "ENVELOPE_ONLY",
-                "original_inputs": None,
-            }
-        )
-        assert errs_proto or incompatible_proto["protocol_version"] != PUBLIC_PROTOCOL_VERSION
-
-        incompatible_schema = dict(receipt_data)
-        incompatible_schema["receipt_schema"] = "nexus.unknown_schema.v9"
-        errs_schema = validate_receipt_verify_request(
-            {
-                "receipt": incompatible_schema,
-                "requested_scope": "ENVELOPE_ONLY",
-                "original_inputs": None,
-            }
-        )
-        assert errs_schema or incompatible_schema["receipt_schema"] != CERTIFICATION_RECEIPT_SCHEMA
-
-        # 7. Exercise a failed/aborted upgrade path: attempt to install non-existent package
-        res_fail = subprocess.run(
-            [
-                str(venv_pip),
-                "install",
-                "--no-index",
-                f"--find-links={wh_dir}",
-                "nexus-core==99.99.99",
-            ],
-            capture_output=True,
-            text=True,
-        )
-        assert res_fail.returncode != 0, "pip unexpectedly succeeded on non-existent package"
-        # Ensure current environment remains functional
-        res_succ_post_abort = subprocess.run(
-            [str(succ_bin), "--help"], capture_output=True, text=True, check=True
-        )
-        assert "nexus-certify" in res_succ_post_abort.stdout
-
-        # 8. Rollback to exact predecessor artifact
-        subprocess.run([str(venv_pip), "uninstall", "-y", "nexus-core"], check=True)
-        assert not succ_bin.exists(), "successor binary remained after rollback uninstall"
-        subprocess.run([str(venv_pip), "install", "--no-deps", str(pred_path)], check=True)
-        assert pred_bin.is_file(), "predecessor binary not restored after rollback"
-
-        # 9. Prove pre-upgrade receipt remains byte-identical and hash-valid after rollback
-        restored_bytes = receipt_source.read_bytes()
-        assert restored_bytes == receipt_bytes, "receipt changed after rollback"
-        restored_data = json.loads(restored_bytes.decode("utf-8"))
-        assert restored_data["receipt_hash"] == claimed_hash
+    # 9. Prove pre-upgrade receipt remains byte-identical and hash-valid after rollback
+    restored_bytes = receipt_source.read_bytes()
+    assert restored_bytes == receipt_bytes, "receipt changed after rollback"
+    restored_data = json.loads(restored_bytes.decode("utf-8"))
+    assert restored_data["receipt_hash"] == claimed_hash
