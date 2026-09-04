@@ -109,3 +109,19 @@ def test_receipt_reload_recomputes_and_rejects_tamper():
     tampered["attempts"][0]["stdout"] = "00"
     with pytest.raises(ValueError):
         RunnerResult.from_dict(tampered)
+
+
+@pytest.mark.parametrize("request_value", [None, {"source_revision": 1}])
+def test_fail_closed_zero_attempt_receipts_round_trip(request_value):
+    result = PythonOCIRunner().run(request_value or {}, executor)
+    assert result.status is RunnerStatus.UNVERIFIABLE
+    assert RunnerResult.from_dict(result.to_dict()) == result
+
+
+def test_tampered_receipt_summary_is_rejected():
+    result = PythonOCIRunner().run(request(), executor)
+    for field, value in (("status", "FAILED_VERIFICATION"), ("reason_codes", ["TEST_FAILURE"]), ("profile_hash", "sha256:" + "0" * 64), ("attempt_ids", ["bad", "bad2"])):
+        tampered = result.to_dict()
+        tampered[field] = value
+        with pytest.raises(ValueError):
+            RunnerResult.from_dict(tampered)

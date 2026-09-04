@@ -176,12 +176,21 @@ class RunnerResult:
             if artifact != item["artifact_hash"]:
                 raise ValueError("artifact hash mismatch")
             attempts.append(ExecutionAttempt(item["attempt_id"], item["execution_id"], item["source_revision"], item["source_tree"], item["contract_hash"], item["plan_hash"], item["environment_hash"], argv, stdout, stderr, item["exit_code"], junit, artifact, tests, failures, errors))
-        if len(attempts) != 2 or attempts[0].execution_id == attempts[1].execution_id:
+        if len(attempts) == 0:
+            if data.get("status") != RunnerStatus.UNVERIFIABLE.value or tuple(data["reason_codes"]) not in (("MISSING_BINDING",), ("MALFORMED_REQUEST",), ("MALFORMED_OR_UNAVAILABLE",)):
+                raise ValueError("invalid zero-attempt receipt")
+            if data.get("profile_hash") != PythonOCIProfile().hash or data.get("attempt_ids") != [] or data.get("artifact_hashes") != []:
+                raise ValueError("invalid zero-attempt summary")
+            return cls(RunnerStatus.UNVERIFIABLE, tuple(data["reason_codes"]), data["profile_hash"], (), (), ())
+        if len(attempts) != 2:
             raise ValueError("receipt requires two distinct executions")
+        duplicate = attempts[0].execution_id == attempts[1].execution_id
         status = RunnerStatus.VERIFIED if attempts[0].exit_code == 0 and attempts[0].junit_failures + attempts[0].junit_errors == 0 else RunnerStatus.FAILED_VERIFICATION if attempts[0].exit_code == 1 and attempts[0].junit_failures + attempts[0].junit_errors > 0 else RunnerStatus.UNVERIFIABLE
         same = PythonOCIRunner._same_outcome(attempts[0], attempts[1])
         if not same:
-            status, reasons = RunnerStatus.UNVERIFIABLE, ("NONDETERMINISTIC",)
+            status, reasons = (RunnerStatus.UNVERIFIABLE, ("DUPLICATE_EXECUTION_ID",)) if duplicate else (RunnerStatus.UNVERIFIABLE, ("NONDETERMINISTIC",))
+        elif duplicate:
+            status, reasons = RunnerStatus.UNVERIFIABLE, ("DUPLICATE_EXECUTION_ID",)
         else:
             reasons = () if status is RunnerStatus.VERIFIED else ("TEST_FAILURE",) if status is RunnerStatus.FAILED_VERIFICATION else ("UNKNOWN_EXECUTION_OUTCOME",)
         if tuple(data["reason_codes"]) != reasons or data["status"] != status.value:
