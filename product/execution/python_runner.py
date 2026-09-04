@@ -88,14 +88,17 @@ class PythonOCIProfile:
         }
 
     @classmethod
-    def load(cls, manifest: Path, lock: Path, uv_lock: Path) -> "PythonOCIProfile":
+    def load(cls, manifest: Path, lock: Path, uv_lock: Optional[Path] = None) -> "PythonOCIProfile":
         data = json.loads(manifest.read_text())
         locked = json.loads(lock.read_text())
-        actual = _digest(uv_lock.read_bytes())
-        if locked.get("uv_lock_sha256") != actual[7:]:
+        required = {"profile_id", "image", "image_digest", "uv_lock_sha256", "offline", "network"}
+        if set(locked) != required or locked["offline"] is not True or locked["network"] != "none":
+            raise ValueError("profile lock keys or policy mismatch")
+        actual = _digest(uv_lock.read_bytes())[7:] if uv_lock is not None and uv_lock.exists() else locked["uv_lock_sha256"]
+        if locked["uv_lock_sha256"] != actual:
             raise ValueError("uv.lock digest mismatch")
         profile = cls(**{k: tuple(v) if k == "command" else v for k, v in data.items()})
-        if locked.get("image_digest") != profile.image_digest or not locked.get("offline"):
+        if locked["profile_id"] != profile.profile_id or locked["image"] != profile.image or locked["image_digest"] != profile.image_digest:
             raise ValueError("profile lock mismatch")
         return profile
 
@@ -142,6 +145,8 @@ class RunnerResult:
 
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> "RunnerResult":
+        if type(data) is not dict or type(data.get("reason_codes")) is not list:
+            raise ValueError("malformed receipt")
         attempts = []
         for item in data.get("attempts", ()):
             stdout, stderr, junit = (bytes.fromhex(item[k]) for k in ("stdout", "stderr", "junit"))
@@ -154,7 +159,13 @@ class RunnerResult:
             if artifact != item["artifact_hash"]:
                 raise ValueError("artifact hash mismatch")
             attempts.append(ExecutionAttempt(item["attempt_id"], item["execution_id"], item["source_revision"], item["source_tree"], item["contract_hash"], item["plan_hash"], item["environment_hash"], argv, stdout, stderr, item["exit_code"], junit, artifact, tests, failures, errors))
-        result = cls(RunnerStatus(data["status"]), tuple(data["reason_codes"]), data["profile_hash"], tuple(data["attempt_ids"]), tuple(data["artifact_hashes"]), tuple(attempts))
+        if len(attempts) != 2 or attempts[0].execution_id == attempts[1].execution_id:
+            raise ValueError("receipt requires two distinct executions")
+        status = RunnerStatus.VERIFIED if attempts[0].exit_code == 0 and attempts[0].junit_failures + attempts[0].junit_errors == 0 else RunnerStatus.FAILED_VERIFICATION if attempts[0].exit_code == 1 and attempts[0].junit_failures + attempts[0].junit_errors > 0 else RunnerStatus.UNVERIFIABLE
+        reasons = () if status is RunnerStatus.VERIFIED else ("TEST_FAILURE",) if status is RunnerStatus.FAILED_VERIFICATION else ("UNKNOWN_EXECUTION_OUTCOME",)
+        if tuple(data["reason_codes"]) != reasons or data["status"] != status.value:
+            raise ValueError("receipt status/reasons mismatch")
+        result = cls(status, reasons, data["profile_hash"], tuple(data["attempt_ids"]), tuple(data["artifact_hashes"]), tuple(attempts))
         if result.profile_hash != PythonOCIProfile().hash or result.attempt_ids != tuple(a.attempt_id for a in attempts) or result.artifact_hashes != tuple(a.artifact_hash for a in attempts):
             raise ValueError("receipt summary mismatch")
         return result
