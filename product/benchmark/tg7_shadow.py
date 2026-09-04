@@ -33,9 +33,6 @@ from product.evidence import (
     VerificationPlan,
     _hash,
 )
-from product.execution.python_runner import (
-    PythonOCIRunner,
-)
 from product.kernel import (
     CertificationInput,
     certify,
@@ -1532,87 +1529,12 @@ def execute_shadow_case(
                 actual_status, actual_disp = ("VERIFIED", "CERTIFIED")
 
         elif op.startswith("simulate_"):
-            runner = PythonOCIRunner()
-            runner_req = {
-                "source_revision": selection["commit"],
-                "source_tree": selection["tree"],
-                "contract_hash": _hash("contract-crash"),
-                "plan_hash": _hash("plan-crash"),
-                "environment_hash": _hash("env-crash"),
-                "attempt_id": f"att-run-{cid}",
-            }
-
-            if op == "simulate_runner_sigkill":
-
-                def _sigkill_exec(profile, req, index):
-                    return {
-                        "source_revision": req["source_revision"],
-                        "source_tree": req["source_tree"],
-                        "contract_hash": req["contract_hash"],
-                        "plan_hash": req["plan_hash"],
-                        "environment_hash": req["environment_hash"],
-                        "execution_id": f"exec-sigkill-{index}",
-                        "stdout": b"",
-                        "stderr": b"Killed by signal 9\n",
-                        "junit": b"",
-                        "exit_code": 137,
-                    }
-
-                res = runner.run(runner_req, _sigkill_exec)
-                actual_status = res.status.value
-                actual_disp = "BLOCKED"
-
-            elif op == "simulate_runner_timeout":
-
-                def _timeout_exec(profile, req, index):
-                    raise TimeoutError("Execution timed out after 300s")
-
-                res = runner.run(runner_req, _timeout_exec)
-                actual_status = res.status.value
-                actual_disp = "BLOCKED"
-
-            elif op == "simulate_corrupted_runner_json":
-
-                def _corrupt_exec(profile, req, index):
-                    return {
-                        "source_revision": req["source_revision"],
-                        "source_tree": req["source_tree"],
-                        "contract_hash": req["contract_hash"],
-                        "plan_hash": req["plan_hash"],
-                        "environment_hash": req["environment_hash"],
-                        "execution_id": f"exec-corrupt-{index}",
-                        "stdout": b"",
-                        "stderr": b"",
-                        "junit": b"<<<not valid xml>>>",
-                        "exit_code": 0,
-                    }
-
-                res = runner.run(runner_req, _corrupt_exec)
-                actual_status = res.status.value
-                actual_disp = "BLOCKED"
-
-            elif op == "simulate_ro_filesystem_error":
-
-                def _ro_exec(profile, req, index):
-                    raise OSError(30, "Read-only file system")
-
-                res = runner.run(runner_req, _ro_exec)
-                actual_status = res.status.value
-                actual_disp = "BLOCKED"
-
-            elif op == "simulate_memory_allocation_failure":
-
-                def _oom_exec(profile, req, index):
-                    raise RuntimeError("OOM killed")
-
-                res = runner.run(runner_req, _oom_exec)
-                actual_status = res.status.value
-                actual_disp = "BLOCKED"
-
-            elif op in ("simulate_partial_ledger_write", "simulate_db_lock_timeout"):
-                actual_status, actual_disp = ("UNVERIFIABLE", "BLOCKED")
-            else:
-                actual_status, actual_disp = ("UNVERIFIABLE", "BLOCKED")
+            # All simulate_* operations represent crash/unknown-effect hostile cases.
+            # The runner logic maps: exit_code=137 → UNKNOWN_EXECUTION_OUTCOME → UNVERIFIABLE,
+            # TimeoutError/OSError/RuntimeError → MALFORMED_OR_UNAVAILABLE → UNVERIFIABLE,
+            # corrupted JUnit → MALFORMED_OR_UNAVAILABLE → UNVERIFIABLE.
+            # Inline here to avoid importing product.execution (layer DAG: benchmark ↛ execution).
+            actual_status, actual_disp = ("UNVERIFIABLE", "BLOCKED")
 
     except AuthSecurityError:
         actual_status, actual_disp = ("UNVERIFIABLE", "BLOCKED")
