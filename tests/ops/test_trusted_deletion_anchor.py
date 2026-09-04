@@ -179,7 +179,6 @@ def test_trusted_dependency_snapshot_transition_preserves_product_file_guard(mon
 
 
 def test_open_swe_dependency_snapshot_transition_is_retired_but_preserved_as_history() -> None:
-    assert trusted_anchor.TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION is None
     assert trusted_anchor.RETIRED_TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION == (
         669,
         (
@@ -195,10 +194,13 @@ def test_open_swe_dependency_snapshot_transition_is_retired_but_preserved_as_his
     trusted_lock = b"trusted lock\n"
     head_pyproject = b"open swe pyproject\n"
     head_lock = b"open swe lock\n"
-    assert tuple(
-        trusted_anchor._sha(value)
-        for value in (trusted_pyproject, trusted_lock, head_pyproject, head_lock)
-    ) != hashes
+    assert (
+        tuple(
+            trusted_anchor._sha(value)
+            for value in (trusted_pyproject, trusted_lock, head_pyproject, head_lock)
+        )
+        != hashes
+    )
 
     with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
         trusted_anchor._validate_trusted_dependency_contract(
@@ -214,7 +216,6 @@ def test_open_swe_dependency_snapshot_transition_is_retired_but_preserved_as_his
 # Historical #683 exact-base node: retain the exact reverse-transition hashes as
 # evidence while proving that no active one-use transition remains authoritative.
 def test_open_swe_dependency_snapshot_transition_hashes_are_exact() -> None:
-    assert trusted_anchor.TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION is None
     retired_pr, retired_hashes = trusted_anchor.RETIRED_TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION
     assert retired_pr == 669
     assert (*retired_hashes[2:], *retired_hashes[:2]) == (
@@ -222,6 +223,18 @@ def test_open_swe_dependency_snapshot_transition_hashes_are_exact() -> None:
         "cb5ecbb7fcce287f9bcdbb17f65a3b931f13613b6fd1608b428e1c19c5f6965a",
         "c7d84dd5cbc4e533db65445ebb5691296f732d49f2fb39c6028745b18ca1d412",
         "3e753af334885a2f434a94d40fc8860abd151516950e7f1e3647971f2e0dfc51",
+    )
+
+
+def test_core_v1_tg6_dependency_snapshot_transition_hashes_are_exact() -> None:
+    assert trusted_anchor.TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        780,
+        (
+            "c7d84dd5cbc4e533db65445ebb5691296f732d49f2fb39c6028745b18ca1d412",
+            "3e753af334885a2f434a94d40fc8860abd151516950e7f1e3647971f2e0dfc51",
+            "8cbbe36ab4487b0827e27f51d937a58a9e8815ccd47720a7a9e0cb4c7a19991a",
+            "4dc5d7bf464eda5cf75889021891ca7df730a4fba90b24ec3f06dc4c2c58bf93",
+        ),
     )
 
 
