@@ -18,26 +18,24 @@ _SHA40 = re.compile(r"[0-9a-f]{40}\Z")
 _SHA256 = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,99})?\Z")
 _UTC_RFC3339 = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\Z")
-_REQUIRED = frozenset(
-    {
-        "repository_owner",
-        "repository_name",
-        "pr_number",
-        "base_sha",
-        "head_sha",
-        "base_tree_sha",
-        "head_tree_sha",
-        "merge_base_policy",
-        "diff_bytes",
-        "diff_hash",
-        "changed_paths",
-        "deleted_paths",
-        "checks",
-        "pagination_complete",
-        "observed_at",
-        "freshness_cas",
-    }
-)
+_REQUIRED = frozenset({
+    "repository_owner",
+    "repository_name",
+    "pr_number",
+    "base_sha",
+    "head_sha",
+    "base_tree_sha",
+    "head_tree_sha",
+    "merge_base_policy",
+    "diff_bytes",
+    "diff_hash",
+    "changed_paths",
+    "deleted_paths",
+    "checks",
+    "pagination_complete",
+    "observed_at",
+    "freshness_cas",
+})
 
 
 class AcquisitionError(ValueError):
