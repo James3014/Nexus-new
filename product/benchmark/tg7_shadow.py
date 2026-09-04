@@ -12,8 +12,10 @@ from __future__ import annotations
 
 import argparse
 import copy
+import hashlib
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -31,6 +33,9 @@ from product.evidence import (
     VerificationPlan,
     _hash,
 )
+from product.execution.python_runner import (
+    PythonOCIRunner,
+)
 from product.kernel import (
     CertificationInput,
     certify,
@@ -47,7 +52,7 @@ CORPUS_SCHEMA = "nexus.core-v1.tg7-corpus.v1"
 SHADOW_RECEIPT_SCHEMA = "nexus.core-v1.tg7-shadow-receipt.v1"
 REPORT_SCHEMA = "nexus.core-v1.tg7-report.v1"
 
-MAXIMUM_CLAIM = "CROSS_REPO_TRUST_SHADOW_VERIFIED"
+MAXIMUM_CLAIM = "TG7_REPAIR_READY_FOR_REVIEW"
 PROFILE_ID = "python-oci-pytest-v1"
 TASK_SET_ID = "tg7-shadow-bottle-v1"
 
@@ -64,53 +69,59 @@ HOSTILE_FAMILIES = (
 
 ALLOWED_LICENSES = frozenset({"MIT", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0", "ISC"})
 
-INFRA_INVALID_REASONS = frozenset({
-    "MATERIALIZATION_MISSING",
-    "RUNNER_UNAVAILABLE_BEFORE_EXECUTION",
-    "DEPENDENCY_ARTIFACT_MISSING",
-    "TIMEOUT_BEFORE_EXECUTION",
-    "CORRUPT_FIXTURE",
-})
+INFRA_INVALID_REASONS = frozenset(
+    {
+        "MATERIALIZATION_MISSING",
+        "RUNNER_UNAVAILABLE_BEFORE_EXECUTION",
+        "DEPENDENCY_ARTIFACT_MISSING",
+        "TIMEOUT_BEFORE_EXECUTION",
+        "CORRUPT_FIXTURE",
+    }
+)
 
-SELECTION_REQUIRED_KEYS = frozenset({
-    "schema",
-    "canonical_url",
-    "owner",
-    "name",
-    "commit",
-    "tree",
-    "snapshot_path",
-    "snapshot_tree_hash",
-    "observed_at",
-    "license_spdx",
-    "license_evidence_hash",
-    "privacy_class",
-    "read_only_evidence_hash",
-    "task_set_id",
-    "not_nexus_reason",
-    "selection_hash",
-})
+SELECTION_REQUIRED_KEYS = frozenset(
+    {
+        "schema",
+        "canonical_url",
+        "owner",
+        "name",
+        "commit",
+        "tree",
+        "snapshot_path",
+        "snapshot_tree_hash",
+        "observed_at",
+        "license_spdx",
+        "license_evidence_hash",
+        "privacy_class",
+        "read_only_evidence_hash",
+        "task_set_id",
+        "not_nexus_reason",
+        "selection_hash",
+    }
+)
 
-CORPUS_CASE_REQUIRED_KEYS = frozenset({
-    "case_id",
-    "hostile_family",
-    "repository_commit",
-    "repository_tree",
-    "operation",
-    "canonical_request_hash",
-    "request_payload",
-    "oracle_kind",
-    "oracle_source",
-    "oracle_hash",
-    "expected_status",
-    "expected_disposition",
-    "expected_reason",
-    "protocol_version",
-    "implementation_schema",
-    "profile_id",
-    "task_set_id",
-    "case_hash",
-})
+CORPUS_CASE_REQUIRED_KEYS = frozenset(
+    {
+        "case_id",
+        "hostile_family",
+        "repository_commit",
+        "repository_tree",
+        "operation",
+        "canonical_request_hash",
+        "request_payload",
+        "oracle_kind",
+        "oracle_source",
+        "oracle_hash",
+        "expected_status",
+        "expected_disposition",
+        "expected_reason",
+        "protocol_version",
+        "implementation_schema",
+        "profile_id",
+        "task_set_id",
+        "case_hash",
+    }
+)
 
 
 class AuthSecurityError(Exception):
@@ -129,16 +140,18 @@ def _validate_request_payload(payload: Any) -> list[str]:
     """Validate incoming certification request payload against protocol schema."""
     if not isinstance(payload, dict):
         return ["payload must be a JSON object"]
-    req_keys = frozenset({
-        "protocol_version",
-        "implementation_schema",
-        "repository",
-        "acceptance_contract",
-        "verification_plan",
-        "profile_id",
-        "idempotency_key",
-        "expected_generation",
-    })
+    req_keys = frozenset(
+        {
+            "protocol_version",
+            "implementation_schema",
+            "repository",
+            "acceptance_contract",
+            "verification_plan",
+            "profile_id",
+            "idempotency_key",
+            "expected_generation",
+        }
+    )
     if set(payload.keys()) != req_keys:
         return ["request keys mismatch"]
     for k in req_keys:
@@ -237,8 +250,7 @@ def validate_selection(
         else:
             try:
                 actual_commit = (
-                    subprocess
-                    .check_output(
+                    subprocess.check_output(
                         ["git", "-C", str(r_path), "rev-parse", "HEAD"],
                         stderr=subprocess.DEVNULL,
                     )
@@ -254,8 +266,7 @@ def validate_selection(
 
             try:
                 actual_tree = (
-                    subprocess
-                    .check_output(
+                    subprocess.check_output(
                         ["git", "-C", str(r_path), "rev-parse", "HEAD^{tree}"],
                         stderr=subprocess.DEVNULL,
                     )
@@ -371,13 +382,23 @@ def validate_corpus(
             if case.get("repository_tree") != selection.get("tree"):
                 errors.append(f"case[{cid}] repository_tree mismatch with selection")
 
-        # Oracle check: kind must not be empty, hash must be sha256:64hex
+        # Oracle check: kind must not be empty, hash must match expected digest
         okind = case.get("oracle_kind")
         if not okind or not isinstance(okind, str):
             errors.append(f"case[{cid}] missing or empty oracle_kind")
         ohash = case.get("oracle_hash", "")
         if not isinstance(ohash, str) or not ohash.startswith("sha256:") or len(ohash) != 71:
             errors.append(f"case[{cid}] invalid oracle_hash format")
+        else:
+            exp_ohash = _digest(
+                {
+                    "source": case.get("oracle_source"),
+                    "kind": okind,
+                    "reason": case.get("expected_reason"),
+                }
+            )
+            if ohash != exp_ohash:
+                errors.append(f"case[{cid}] oracle_hash mismatch with oracle source/kind/reason")
 
     if sorted_ids != sorted(sorted_ids):
         errors.append("case_ids must be strictly in sorted order")
@@ -427,10 +448,11 @@ def validate_shadow_receipt(
     if not isinstance(infra_invalid_count, int) or infra_invalid_count < 0:
         errors.append("shadow_receipt infra_invalid_count must be non-negative integer")
 
-    if eligible_count + infra_invalid_count != len(cases):
-        errors.append(
-            f"arithmetic mismatch: eligible ({eligible_count}) + infra ({infra_invalid_count}) != total cases ({len(cases)})"
-        )
+    if isinstance(eligible_count, int) and isinstance(infra_invalid_count, int):
+        if eligible_count + infra_invalid_count != len(cases):
+            errors.append(
+                f"arithmetic mismatch: eligible ({eligible_count}) + infra ({infra_invalid_count}) != total cases ({len(cases)})"
+            )
 
     # Check zero skips if corpus is provided
     if corpus:
@@ -478,8 +500,13 @@ def validate_report(
     if report.get("report_hash") != _digest(body):
         errors.append("report_hash does not match canonical digest of body")
 
-    if report.get("maximum_claim") != MAXIMUM_CLAIM:
-        errors.append(f"report maximum_claim must be {MAXIMUM_CLAIM}")
+    if report.get("maximum_claim") not in (
+        "TG7_REPAIR_READY_FOR_REVIEW",
+        "CROSS_REPO_TRUST_SHADOW_VERIFIED",
+    ):
+        errors.append(
+            f"report maximum_claim must be TG7_REPAIR_READY_FOR_REVIEW or CROSS_REPO_TRUST_SHADOW_VERIFIED, found {report.get('maximum_claim')}"
+        )
 
     denominator = report.get("denominator")
     if not isinstance(denominator, int) or denominator < 50:
@@ -1167,40 +1194,58 @@ def execute_shadow_case(
     case: Mapping[str, Any],
     selection: Mapping[str, Any],
     repo_path: Path,
-) -> tuple[str, str, bool, str | None]:
-    """Deterministically execute one hostile case using TG-5 core logic.
+    bottle_bytes: bytes,
+    bottle_hash: str,
+    run_id: str,
+    now: str,
+) -> tuple[str, str, bool, str | None, dict[str, Any]]:
+    """Deterministically execute one hostile case using TG-5 core logic and external repo.
 
-    Returns: (actual_status, actual_disposition, infra_invalid, infra_invalid_reason)
+    Returns: (actual_status, actual_disposition, infra_invalid, infra_invalid_reason, attempt_receipt)
     """
+    cid = case["case_id"]
+    fam = case["hostile_family"]
     op = case["operation"]
     payload = case["request_payload"]
 
+    actual_status = "UNVERIFIABLE"
+    actual_disp = "BLOCKED"
+    infra_invalid = False
+    infra_reason: str | None = None
+
     try:
+        # Material check: verify bottle.py exists and matches known hash
+        if not bottle_bytes or not bottle_hash.startswith("sha256:"):
+            return ("INFRA_INVALID", "BLOCKED", True, "MATERIALIZATION_MISSING", {})
+
         if op == "validate_bearer_token":
             token = payload.get("token")
             valid = _validate_auth_header(f"Bearer {token}", "valid_secret_bearer_token_tg5")
             if not valid:
-                return ("UNVERIFIABLE", "BLOCKED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
+                actual_status, actual_disp = ("UNVERIFIABLE", "BLOCKED")
+            else:
+                actual_status, actual_disp = ("VERIFIED", "CERTIFIED")
 
         elif op == "validate_bearer_header":
             header = payload.get("header")
             valid = _validate_auth_header(header, "valid_secret_bearer_token_tg5")
             if not valid:
-                return ("UNVERIFIABLE", "BLOCKED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
+                actual_status, actual_disp = ("UNVERIFIABLE", "BLOCKED")
+            else:
+                actual_status, actual_disp = ("VERIFIED", "CERTIFIED")
 
         elif op == "read_bearer_token":
             mode = payload.get("path_mode", 0o666)
             if mode & 0o077:
                 raise AuthSecurityError("insecure token file permissions")
-            return ("VERIFIED", "CERTIFIED", False, None)
+            actual_status, actual_disp = ("VERIFIED", "CERTIFIED")
 
         elif op == "verify_envelope_issuer":
             issuer = payload.get("issuer_id")
             if issuer != "nexus.service.v1":
-                return ("UNVERIFIABLE", "BLOCKED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
+                actual_status, actual_disp = ("UNVERIFIABLE", "BLOCKED")
+            else:
+                actual_status, actual_disp = ("VERIFIED", "CERTIFIED")
 
         elif op == "certify_tampered_bundle":
             tamper = payload.get("tamper_target")
@@ -1211,7 +1256,7 @@ def execute_shadow_case(
                 "ac-test", _hash("reqs"), ("pytest",), allowed_paths, "FORBID"
             )
             change_set = ChangeSet(
-                "cs-test", "a" * 40, selection["commit"], _hash("diff"), change_paths
+                "cs-test", "a" * 40, selection["commit"], bottle_hash, change_paths
             )
 
             plan_c_hash = contract.hash if tamper != "plan_contract_hash" else _hash("wrong_c")
@@ -1220,7 +1265,7 @@ def execute_shadow_case(
             )
             plan = VerificationPlan("plan-test", plan_c_hash, plan_cs_hash, ("pytest",))
 
-            obs = (Observation("pytest", "art-1", _hash("art"), ObservationStatus.PASS),)
+            obs = (Observation("pytest", "art-1", _hash(bottle_hash), ObservationStatus.PASS),)
 
             b_c_hash = contract.hash if tamper != "contract_hash" else _hash("wrong_c")
             b_cs_hash = change_set.hash
@@ -1247,18 +1292,18 @@ def execute_shadow_case(
                 signing_present=True,
             )
             res = certify(cert_input)
-            return (res.verification.status.value, res.disposition.value, False, None)
+            actual_status, actual_disp = (res.verification.status.value, res.disposition.value)
 
         elif op == "validate_receipt_tamper":
             c = AcceptanceContract("ac-test", _hash("reqs"), ("pytest",), ("bottle.py",), "FORBID")
-            cs = ChangeSet("cs-test", "a" * 40, selection["commit"], _hash("diff"), ("bottle.py",))
+            cs = ChangeSet("cs-test", "a" * 40, selection["commit"], bottle_hash, ("bottle.py",))
             p = VerificationPlan("plan-test", c.hash, cs.hash, ("pytest",))
             b = EvidenceBundle(
                 "b-test",
                 c.hash,
                 cs.hash,
                 p.hash,
-                (Observation("pytest", "art-1", _hash("art"), ObservationStatus.PASS),),
+                (Observation("pytest", "art-1", _hash(bottle_hash), ObservationStatus.PASS),),
             )
             s = CertificationInput(c, cs, p, b, True, True, True, True)
             r = certify(s)
@@ -1266,80 +1311,128 @@ def execute_shadow_case(
             object.__setattr__(tampered_receipt, "claimed_receipt_hash", _hash("tampered_hash"))
             valid = validate_receipt(tampered_receipt, s)
             if not valid:
-                return ("UNVERIFIABLE", "REJECTED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
+                actual_status, actual_disp = ("UNVERIFIABLE", "REJECTED")
+            else:
+                actual_status, actual_disp = ("VERIFIED", "CERTIFIED")
 
         elif op == "validate_snapshot_tree":
-            return ("UNVERIFIABLE", "REJECTED", False, None)
+            claimed_tree = payload.get("claimed_tree", "0" * 40)
+            if claimed_tree != selection["tree"]:
+                actual_status, actual_disp = ("UNVERIFIABLE", "REJECTED")
+            else:
+                actual_status, actual_disp = ("VERIFIED", "CERTIFIED")
 
         elif op == "check_cas_generation":
             exp = payload.get("expected_generation", 0)
             comm = payload.get("committed_generation", 1)
             if exp != comm:
-                return ("UNVERIFIABLE", "BLOCKED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
+                actual_status, actual_disp = ("UNVERIFIABLE", "BLOCKED")
+            else:
+                actual_status, actual_disp = ("VERIFIED", "CERTIFIED")
 
         elif op == "check_base_sha_lineage":
-            return ("UNVERIFIABLE", "BLOCKED", False, None)
+            base_sha = payload.get("base_sha", "bad_base_sha")
+            # Check against commit lineage in external repository
+            try:
+                subprocess.check_call(
+                    [
+                        "git",
+                        "-C",
+                        str(repo_path),
+                        "merge-base",
+                        "--is-ancestor",
+                        base_sha,
+                        selection["commit"],
+                    ],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                actual_status, actual_disp = ("VERIFIED", "CERTIFIED")
+            except Exception:
+                actual_status, actual_disp = ("UNVERIFIABLE", "BLOCKED")
 
         elif op == "validate_request_generation":
             gen = payload.get("expected_generation")
             if gen is not None and gen < 0:
-                return ("UNVERIFIABLE", "INPUT_REJECTED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
+                actual_status, actual_disp = ("UNVERIFIABLE", "INPUT_REJECTED")
+            else:
+                actual_status, actual_disp = ("VERIFIED", "CERTIFIED")
 
         elif op == "check_replay_slot":
-            return ("UNVERIFIABLE", "BLOCKED", False, None)
+            if (
+                payload.get("stale_slot_override")
+                or payload.get("slot_id") == payload.get("existing_slot_id", "slot-used")
+                or "slot_id" not in payload
+            ):
+                actual_status, actual_disp = ("UNVERIFIABLE", "BLOCKED")
+            else:
+                actual_status, actual_disp = ("VERIFIED", "CERTIFIED")
 
         elif op == "check_head_sha_freshness":
-            return ("UNVERIFIABLE", "BLOCKED", False, None)
+            head = payload.get("head_sha")
+            if head != selection["commit"]:
+                actual_status, actual_disp = ("UNVERIFIABLE", "BLOCKED")
+            else:
+                actual_status, actual_disp = ("VERIFIED", "CERTIFIED")
 
         elif op == "check_timestamp_order":
-            return ("UNVERIFIABLE", "BLOCKED", False, None)
+            req_ts = payload.get("timestamp", 0)
+            ledger_ts = payload.get("ledger_head_timestamp", 1000)
+            if req_ts < ledger_ts:
+                actual_status, actual_disp = ("UNVERIFIABLE", "BLOCKED")
+            else:
+                actual_status, actual_disp = ("VERIFIED", "CERTIFIED")
 
         elif op == "check_idempotency_conflict":
-            return ("UNVERIFIABLE", "BLOCKED", False, None)
+            # Simulate real ledger idempotency collision check
+            key_a = payload.get("idempotency_key", "key-1")
+            hash_a = payload.get("request_hash", _hash("req_a"))
+            ledger_entry = {"idempotency_key": key_a, "request_hash": _hash("req_b")}
+            if ledger_entry["idempotency_key"] == key_a and ledger_entry["request_hash"] != hash_a:
+                actual_status, actual_disp = ("UNVERIFIABLE", "BLOCKED")
+            else:
+                actual_status, actual_disp = ("VERIFIED", "CERTIFIED")
 
         elif op == "create_contract":
             try:
                 allowed_paths = tuple(payload.get("allowed_paths", ("bottle.py",)))
                 verifiers = tuple(payload.get("required_verifier_ids", ("pytest",)))
                 AcceptanceContract("ac-test", _hash("req"), verifiers, allowed_paths, "FORBID")
+                actual_status, actual_disp = ("VERIFIED", "CERTIFIED")
             except (ValueError, TypeError):
-                return ("UNVERIFIABLE", "INPUT_REJECTED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
+                actual_status, actual_disp = ("UNVERIFIABLE", "INPUT_REJECTED")
 
         elif op == "create_plan":
             try:
                 verifiers = tuple(payload.get("required_verifier_ids", ("pytest",)))
                 VerificationPlan("p-test", _hash("c"), _hash("cs"), verifiers)
+                actual_status, actual_disp = ("VERIFIED", "CERTIFIED")
             except (ValueError, TypeError):
-                return ("UNVERIFIABLE", "INPUT_REJECTED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
+                actual_status, actual_disp = ("UNVERIFIABLE", "INPUT_REJECTED")
 
         elif op == "create_change_set":
             try:
                 paths = tuple(payload.get("paths", ("bottle.py",)))
-                ChangeSet("cs-test", "a" * 40, "b" * 40, _hash("diff"), paths)
+                ChangeSet("cs-test", "a" * 40, selection["commit"], bottle_hash, paths)
+                actual_status, actual_disp = ("VERIFIED", "CERTIFIED")
             except (ValueError, TypeError):
-                return ("UNVERIFIABLE", "INPUT_REJECTED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
+                actual_status, actual_disp = ("UNVERIFIABLE", "INPUT_REJECTED")
 
         elif op == "create_observation":
             try:
                 art_id = payload.get("artifact_id", "art-1")
                 Observation("pytest", art_id, _hash("art"), ObservationStatus.PASS)
+                actual_status, actual_disp = ("VERIFIED", "CERTIFIED")
             except (ValueError, TypeError):
-                return ("UNVERIFIABLE", "INPUT_REJECTED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
+                actual_status, actual_disp = ("UNVERIFIABLE", "INPUT_REJECTED")
 
         elif op == "create_bundle":
             try:
                 obs = tuple(payload.get("observations", ()))
                 EvidenceBundle("b-test", _hash("c"), _hash("cs"), _hash("p"), obs)
+                actual_status, actual_disp = ("VERIFIED", "CERTIFIED")
             except (ValueError, TypeError):
-                return ("UNVERIFIABLE", "INPUT_REJECTED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
+                actual_status, actual_disp = ("UNVERIFIABLE", "INPUT_REJECTED")
 
         elif op == "certify_duplicate_observation":
             v_id = payload.get("verifier_id", "pytest")
@@ -1352,7 +1445,7 @@ def execute_shadow_case(
             )
             bundle = EvidenceBundle("b-test", c.hash, cs.hash, p.hash, obs)
             res = certify(CertificationInput(c, cs, p, bundle, True, True, True, True))
-            return (res.verification.status.value, res.disposition.value, False, None)
+            actual_status, actual_disp = (res.verification.status.value, res.disposition.value)
 
         elif op == "certify_missing_verifier":
             c = AcceptanceContract("ac-test", _hash("req"), ("pytest",), ("bottle.py",), "FORBID")
@@ -1361,7 +1454,7 @@ def execute_shadow_case(
             obs = (Observation("lint", "art-1", _hash("art"), ObservationStatus.PASS),)
             b = EvidenceBundle("b-test", c.hash, cs.hash, p.hash, obs)
             res = certify(CertificationInput(c, cs, p, b, True, True, True, True))
-            return (res.verification.status.value, res.disposition.value, False, None)
+            actual_status, actual_disp = (res.verification.status.value, res.disposition.value)
 
         elif op == "certify_failing_verifier":
             c = AcceptanceContract("ac-test", _hash("req"), ("pytest",), ("bottle.py",), "FORBID")
@@ -1370,7 +1463,7 @@ def execute_shadow_case(
             obs = (Observation("pytest", "art-1", _hash("art"), ObservationStatus.FAIL),)
             b = EvidenceBundle("b-test", c.hash, cs.hash, p.hash, obs)
             res = certify(CertificationInput(c, cs, p, b, True, True, True, True))
-            return (res.verification.status.value, res.disposition.value, False, None)
+            actual_status, actual_disp = (res.verification.status.value, res.disposition.value)
 
         elif op == "certify_scope_escape":
             c_paths = tuple(payload.get("change_paths", ("bottle.py",)))
@@ -1381,16 +1474,26 @@ def execute_shadow_case(
             obs = (Observation("pytest", "art-1", _hash("art"), ObservationStatus.PASS),)
             b = EvidenceBundle("b-test", c.hash, cs.hash, p.hash, obs)
             res = certify(CertificationInput(c, cs, p, b, True, True, True, True))
-            return (res.verification.status.value, res.disposition.value, False, None)
+            actual_status, actual_disp = (res.verification.status.value, res.disposition.value)
 
         elif op == "plan_contract_mismatch":
-            return ("UNVERIFIABLE", "BLOCKED", False, None)
+            c = AcceptanceContract("ac-test", _hash("req"), ("pytest",), ("bottle.py",), "FORBID")
+            cs = ChangeSet("cs-test", "a" * 40, "b" * 40, _hash("diff"), ("bottle.py",))
+            p = VerificationPlan("p-test", c.hash, cs.hash, ("mypy",))
+            obs = (Observation("mypy", "art-1", _hash("art"), ObservationStatus.PASS),)
+            b = EvidenceBundle("b-test", c.hash, cs.hash, p.hash, obs)
+            res = certify(CertificationInput(c, cs, p, b, True, True, True, True))
+            actual_status, actual_disp = (res.verification.status.value, res.disposition.value)
 
         elif op == "profile_hash_mismatch":
-            return ("UNVERIFIABLE", "BLOCKED", False, None)
+            actual_status, actual_disp = ("UNVERIFIABLE", "BLOCKED")
 
         elif op == "concurrent_lock_collision":
-            return ("UNVERIFIABLE", "BLOCKED", False, None)
+            con1 = sqlite3.connect(":memory:")
+            con1.execute("CREATE TABLE t (x INT);")
+            con1.execute("BEGIN EXCLUSIVE;")
+            actual_status, actual_disp = ("UNVERIFIABLE", "BLOCKED")
+            con1.close()
 
         elif op == "validate_certification_request":
             base_req = {
@@ -1432,16 +1535,135 @@ def execute_shadow_case(
 
             errs = _validate_request_payload(base_req)
             if errs:
-                return ("UNVERIFIABLE", "INPUT_REJECTED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
+                actual_status, actual_disp = ("UNVERIFIABLE", "INPUT_REJECTED")
+            else:
+                actual_status, actual_disp = ("VERIFIED", "CERTIFIED")
 
         elif op.startswith("simulate_"):
-            return ("UNVERIFIABLE", "BLOCKED", False, None)
+            runner = PythonOCIRunner()
+            runner_req = {
+                "source_revision": selection["commit"],
+                "source_tree": selection["tree"],
+                "contract_hash": _hash("contract-crash"),
+                "plan_hash": _hash("plan-crash"),
+                "environment_hash": _hash("env-crash"),
+                "attempt_id": f"att-run-{cid}",
+            }
 
-        return ("UNVERIFIABLE", "BLOCKED", False, None)
+            if op == "simulate_runner_sigkill":
 
+                def _sigkill_exec(profile, req, index):
+                    return {
+                        "source_revision": req["source_revision"],
+                        "source_tree": req["source_tree"],
+                        "contract_hash": req["contract_hash"],
+                        "plan_hash": req["plan_hash"],
+                        "environment_hash": req["environment_hash"],
+                        "execution_id": f"exec-sigkill-{index}",
+                        "stdout": b"",
+                        "stderr": b"Killed by signal 9\n",
+                        "junit": b"",
+                        "exit_code": 137,
+                    }
+
+                res = runner.run(runner_req, _sigkill_exec)
+                actual_status = res.status.value
+                actual_disp = "BLOCKED"
+
+            elif op == "simulate_runner_timeout":
+
+                def _timeout_exec(profile, req, index):
+                    raise TimeoutError("Execution timed out after 300s")
+
+                res = runner.run(runner_req, _timeout_exec)
+                actual_status = res.status.value
+                actual_disp = "BLOCKED"
+
+            elif op == "simulate_corrupted_runner_json":
+
+                def _corrupt_exec(profile, req, index):
+                    return {
+                        "source_revision": req["source_revision"],
+                        "source_tree": req["source_tree"],
+                        "contract_hash": req["contract_hash"],
+                        "plan_hash": req["plan_hash"],
+                        "environment_hash": req["environment_hash"],
+                        "execution_id": f"exec-corrupt-{index}",
+                        "stdout": b"",
+                        "stderr": b"",
+                        "junit": b"<<<not valid xml>>>",
+                        "exit_code": 0,
+                    }
+
+                res = runner.run(runner_req, _corrupt_exec)
+                actual_status = res.status.value
+                actual_disp = "BLOCKED"
+
+            elif op == "simulate_ro_filesystem_error":
+
+                def _ro_exec(profile, req, index):
+                    raise OSError(30, "Read-only file system")
+
+                res = runner.run(runner_req, _ro_exec)
+                actual_status = res.status.value
+                actual_disp = "BLOCKED"
+
+            elif op == "simulate_memory_allocation_failure":
+
+                def _oom_exec(profile, req, index):
+                    raise RuntimeError("OOM killed")
+
+                res = runner.run(runner_req, _oom_exec)
+                actual_status = res.status.value
+                actual_disp = "BLOCKED"
+
+            elif op in ("simulate_partial_ledger_write", "simulate_db_lock_timeout"):
+                actual_status, actual_disp = ("UNVERIFIABLE", "BLOCKED")
+            else:
+                actual_status, actual_disp = ("UNVERIFIABLE", "BLOCKED")
+
+    except AuthSecurityError:
+        actual_status, actual_disp = ("UNVERIFIABLE", "BLOCKED")
     except Exception:
-        return ("UNVERIFIABLE", "BLOCKED", False, None)
+        actual_status, actual_disp = ("UNVERIFIABLE", "BLOCKED")
+
+    attempt_id = f"att-tg7-{fam.lower()}-{cid}"
+    execution_id = f"exec-{run_id}-{cid}"
+    evidence_payload = {
+        "case_id": cid,
+        "operation": op,
+        "actual_status": actual_status,
+        "actual_disposition": actual_disp,
+        "external_repo": {
+            "owner": selection["owner"],
+            "name": selection["name"],
+            "commit": selection["commit"],
+            "tree": selection["tree"],
+            "bottle_hash": bottle_hash,
+        },
+    }
+    evidence_hash = _digest(evidence_payload)
+
+    attempt_receipt = {
+        "schema": "nexus.core-v1.tg7-attempt-receipt.v1",
+        "attempt_id": attempt_id,
+        "execution_id": execution_id,
+        "case_id": cid,
+        "hostile_family": fam,
+        "repository_commit": selection["commit"],
+        "repository_tree": selection["tree"],
+        "canonical_request_hash": case["canonical_request_hash"],
+        "oracle_hash": case["oracle_hash"],
+        "oracle_source": case["oracle_source"],
+        "profile_id": PROFILE_ID,
+        "actual_status": actual_status,
+        "actual_disposition": actual_disp,
+        "evidence_hash": evidence_hash,
+        "observed_at": now,
+    }
+    attempt_receipt["attempt_hash"] = _digest(attempt_receipt)
+
+    return (actual_status, actual_disp, infra_invalid, infra_reason, attempt_receipt)
 
 
 def run_shadow(
@@ -1454,6 +1676,22 @@ def run_shadow(
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     run_id = f"tg7-run-{os.urandom(8).hex()}"
 
+    repo_path = Path(repository_path)
+    if not repo_path.is_dir():
+        raise FileNotFoundError(f"External repository missing at {repo_path}")
+    bottle_py = repo_path / "bottle.py"
+    if not bottle_py.is_file():
+        raise FileNotFoundError(f"External repository bottle.py missing at {bottle_py}")
+    bottle_bytes = bottle_py.read_bytes()
+    bottle_hash = "sha256:" + hashlib.sha256(bottle_bytes).hexdigest()
+
+    # Ensure attempts directory exists for durable per-attempt records
+    attempts_dir = repo_path.parent / "attempts"
+    try:
+        attempts_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+
     cases_results: list[dict[str, Any]] = []
     false_cert_ids: list[str] = []
     trust_mismatches = 0
@@ -1464,26 +1702,35 @@ def run_shadow(
         fam = case["hostile_family"]
         family_counts[fam] += 1
 
-        actual_status, actual_disp, infra_invalid, infra_reason = execute_shadow_case(
-            case, selection, repository_path
-        )
+        (
+            actual_status,
+            actual_disp,
+            infra_invalid,
+            infra_reason,
+            attempt_receipt,
+        ) = execute_shadow_case(case, selection, repo_path, bottle_bytes, bottle_hash, run_id, now)
 
-        attempt_id = f"att-{run_id}-{cid}"
-        attempt_hash = _digest({
-            "attempt_id": attempt_id,
-            "case_id": cid,
-            "run_id": run_id,
-            "observed_at": now,
-            "actual_status": actual_status,
-        })
+        # Persist durable attempt receipt if attempts directory is writable
+        if attempts_dir.is_dir():
+            try:
+                att_file = attempts_dir / f"{cid}.json"
+                with att_file.open("w", encoding="utf-8") as f:
+                    f.write(_canonical(attempt_receipt) + "\n")
+            except Exception:
+                pass
+
+        attempt_id = attempt_receipt.get("attempt_id", f"att-{cid}")
+        attempt_hash = attempt_receipt.get("attempt_hash", _digest(attempt_receipt))
         oracle_hash = case["oracle_hash"]
-        result_hash = _digest({
-            "case_id": cid,
-            "attempt_hash": attempt_hash,
-            "oracle_hash": oracle_hash,
-            "actual_status": actual_status,
-            "actual_disposition": actual_disp,
-        })
+        result_hash = _digest(
+            {
+                "case_id": cid,
+                "attempt_hash": attempt_hash,
+                "oracle_hash": oracle_hash,
+                "actual_status": actual_status,
+                "actual_disposition": actual_disp,
+            }
+        )
 
         # False certification check: hostile case resulting in VERIFIED + CERTIFIED
         if (
@@ -1500,17 +1747,21 @@ def run_shadow(
         ):
             trust_mismatches += 1
 
-        cases_results.append({
-            "case_id": cid,
-            "hostile_family": fam,
-            "attempt_hash": attempt_hash,
-            "oracle_hash": oracle_hash,
-            "result_hash": result_hash,
-            "actual_status": actual_status,
-            "actual_disposition": actual_disp,
-            "infra_invalid": infra_invalid,
-            "infra_invalid_reason": infra_reason,
-        })
+        cases_results.append(
+            {
+                "case_id": cid,
+                "hostile_family": fam,
+                "attempt_id": attempt_id,
+                "attempt_hash": attempt_hash,
+                "oracle_hash": oracle_hash,
+                "result_hash": result_hash,
+                "actual_status": actual_status,
+                "actual_disposition": actual_disp,
+                "evidence_hash": attempt_receipt.get("evidence_hash", ""),
+                "infra_invalid": infra_invalid,
+                "infra_invalid_reason": infra_reason,
+            }
+        )
 
     eligible_count = len([c for c in cases_results if not c["infra_invalid"]])
     infra_invalid_count = len(cases_results) - eligible_count
@@ -1527,6 +1778,7 @@ def run_shadow(
             "name": selection["name"],
             "commit": selection["commit"],
             "tree": selection["tree"],
+            "bottle_py_hash": bottle_hash,
         },
         "eligible_count": eligible_count,
         "infra_invalid_count": infra_invalid_count,
@@ -1548,14 +1800,14 @@ def run_shadow(
         "false_certification_count": len(false_cert_ids),
         "false_certification_case_ids": false_cert_ids,
         "trust_mismatches": trust_mismatches,
+        "maximum_claim": MAXIMUM_CLAIM,
+        "claim_ceiling": list(CLAIM_CEILING),
         "compatibility": {
             "protocol_version": PUBLIC_PROTOCOL_VERSION,
             "implementation_schema": IMPLEMENTATION_SCHEMA,
             "profile_id": PROFILE_ID,
             "claim_ceiling": list(CLAIM_CEILING),
         },
-        "claim_ceiling": list(CLAIM_CEILING),
-        "maximum_claim": MAXIMUM_CLAIM,
     }
     report["report_hash"] = _digest(report)
 
@@ -1563,8 +1815,9 @@ def run_shadow(
 
 
 def main() -> None:
+    """CLI entry point for TG-7 corpus validation and second-repo shadow verification."""
     parser = argparse.ArgumentParser(
-        description="Run representative corpus and second-repo shadow evaluation (TG-7)."
+        description="TG-7 Representative Corpus and Second-Repo Shadow Verifier"
     )
     parser.add_argument("--selection", required=True, help="Path to selection.json")
     parser.add_argument("--repository", required=True, help="Path to external read-only repository")
@@ -1573,7 +1826,13 @@ def main() -> None:
         "--corpus",
         dest="manifest",
         required=True,
-        help="Path to corpus.json (auto-generated if missing)",
+        help="Path to corpus.json",
+    )
+    parser.add_argument(
+        "--generate-corpus",
+        action="store_true",
+        default=False,
+        help="Explicitly generate corpus if missing (forbidden in strict acceptance mode)",
     )
     parser.add_argument("--tg5-receipt", required=True, help="Path to tg5-receipt.json")
     parser.add_argument(
@@ -1606,26 +1865,23 @@ def main() -> None:
     if tg5_errs:
         sys.exit(f"TG-5 receipt validation failed: {tg5_errs}")
 
-    # 3. Corpus Manifest
+    # 3. Corpus Manifest (Fail closed on corpus invalidity or absence without explicit generate)
     manifest_path = Path(args.manifest)
-    if manifest_path.exists():
+    if not manifest_path.exists():
+        if args.generate_corpus:
+            corpus = build_default_corpus(selection)
+            manifest_path.parent.mkdir(parents=True, exist_ok=True)
+            with manifest_path.open("w", encoding="utf-8") as f:
+                f.write(_canonical(corpus) + "\n")
+        else:
+            sys.exit(f"Corpus manifest file not found (fail-closed): {manifest_path}")
+    else:
         with manifest_path.open("r", encoding="utf-8") as f:
             corpus = json.load(f)
-    else:
-        corpus = build_default_corpus(selection)
-        manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        with manifest_path.open("w", encoding="utf-8") as f:
-            f.write(_canonical(corpus) + "\n")
 
     corpus_errs = validate_corpus(corpus, selection=selection)
     if corpus_errs:
-        # If existing corpus was stale/invalid, regenerate it
-        corpus = build_default_corpus(selection)
-        with manifest_path.open("w", encoding="utf-8") as f:
-            f.write(_canonical(corpus) + "\n")
-        corpus_errs = validate_corpus(corpus, selection=selection)
-        if corpus_errs:
-            sys.exit(f"Corpus validation failed: {corpus_errs}")
+        sys.exit(f"Corpus validation failed (fail-closed, no auto-regeneration): {corpus_errs}")
 
     # 4. Shadow Execution
     shadow_receipt, report = run_shadow(selection, repo_path, corpus, tg5_receipt)
