@@ -20,10 +20,22 @@ _NAME = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9_.-]{0,99})?\Z")
 _UTC_RFC3339 = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\Z")
 _REQUIRED = frozenset(
     {
-        "repository_owner", "repository_name", "pr_number", "base_sha",
-        "head_sha", "base_tree_sha", "head_tree_sha", "merge_base_policy",
-        "diff_bytes", "diff_hash", "changed_paths", "deleted_paths", "checks",
-        "pagination_complete", "observed_at", "freshness_cas",
+        "repository_owner",
+        "repository_name",
+        "pr_number",
+        "base_sha",
+        "head_sha",
+        "base_tree_sha",
+        "head_tree_sha",
+        "merge_base_policy",
+        "diff_bytes",
+        "diff_hash",
+        "changed_paths",
+        "deleted_paths",
+        "checks",
+        "pagination_complete",
+        "observed_at",
+        "freshness_cas",
     }
 )
 
@@ -49,7 +61,12 @@ class GitHubPullRequestLocator:
     def __post_init__(self) -> None:
         for field in ("repository_owner", "repository_name"):
             value = getattr(self, field)
-            if type(value) is not str or not value or value != value.strip() or _NAME.fullmatch(value) is None:
+            if (
+                type(value) is not str
+                or not value
+                or value != value.strip()
+                or _NAME.fullmatch(value) is None
+            ):
                 raise AcquisitionError(f"{field} is not a normalized GitHub name")
         if type(self.pr_number) is not int or self.pr_number <= 0:
             raise AcquisitionError("pr_number must be a positive exact int")
@@ -57,7 +74,10 @@ class GitHubPullRequestLocator:
     @property
     def locator_hash(self) -> str:
         value = [self.repository_owner.lower(), self.repository_name.lower(), self.pr_number]
-        return "sha256:" + hashlib.sha256(json.dumps(value, separators=(",", ":")).encode()).hexdigest()
+        return (
+            "sha256:"
+            + hashlib.sha256(json.dumps(value, separators=(",", ":")).encode()).hexdigest()
+        )
 
 
 @runtime_checkable
@@ -88,7 +108,14 @@ def _paths(value: object, field: str, *, allow_empty: bool = True) -> tuple[str,
     if len(result) != len(set(result)):
         raise AcquisitionError(f"{field} contains duplicate paths")
     for path in result:
-        if type(path) is not str or not path or path != path.strip() or path.startswith("/") or "\\" in path or any(part in {"", ".", ".."} for part in path.split("/")):
+        if (
+            type(path) is not str
+            or not path
+            or path != path.strip()
+            or path.startswith("/")
+            or "\\" in path
+            or any(part in {"", ".", ".."} for part in path.split("/"))
+        ):
             raise AcquisitionError(f"{field} contains an invalid relative path")
     return tuple(sorted(result))
 
@@ -149,7 +176,9 @@ class GitHubAcquisitionSnapshot:
     locator_hash: str
 
     def __post_init__(self) -> None:
-        locator = GitHubPullRequestLocator(self.repository_owner, self.repository_name, self.pr_number)
+        locator = GitHubPullRequestLocator(
+            self.repository_owner, self.repository_name, self.pr_number
+        )
         for field in ("base_sha", "head_sha", "base_tree_sha", "head_tree_sha"):
             _sha(getattr(self, field), field)
         if self.base_sha == self.head_sha:
@@ -170,12 +199,21 @@ class GitHubAcquisitionSnapshot:
         _paths(self.deleted_paths, "deleted_paths")
         if not set(self.deleted_paths).issubset(set(self.changed_paths)):
             raise AcquisitionError("deleted_paths must be a subset of changed_paths")
-        if type(self.checks) is not tuple or any(type(x) is not tuple or len(x) != 2 for x in self.checks):
+        if type(self.checks) is not tuple or any(
+            type(x) is not tuple or len(x) != 2 for x in self.checks
+        ):
             raise AcquisitionError("checks must be (identity, digest) pairs")
-        if self.checks != tuple(sorted(self.checks)) or len({x[0] for x in self.checks}) != len(self.checks):
+        if self.checks != tuple(sorted(self.checks)) or len({x[0] for x in self.checks}) != len(
+            self.checks
+        ):
             raise AcquisitionError("checks must be sorted and have unique identities")
         for identity, digest in self.checks:
-            if type(identity) is not str or not identity or identity != identity.strip() or "\x00" in identity:
+            if (
+                type(identity) is not str
+                or not identity
+                or identity != identity.strip()
+                or "\x00" in identity
+            ):
                 raise AcquisitionError("check identities must be normalized")
             _hash(digest, "check digest")
         if type(self.pagination_complete) is not bool or not self.pagination_complete:
@@ -189,10 +227,18 @@ class GitHubAcquisitionSnapshot:
         if parsed.tzinfo is not None:
             raise AcquisitionError("observed_at must use canonical Z timezone")
         expected_cas = _freshness_cas_for(
-            self.repository_owner, self.repository_name, self.pr_number,
-            self.base_sha, self.head_sha, self.base_tree_sha, self.head_tree_sha,
-            self.merge_base_policy, self.diff_hash, self.changed_paths,
-            self.deleted_paths, self.checks,
+            self.repository_owner,
+            self.repository_name,
+            self.pr_number,
+            self.base_sha,
+            self.head_sha,
+            self.base_tree_sha,
+            self.head_tree_sha,
+            self.merge_base_policy,
+            self.diff_hash,
+            self.changed_paths,
+            self.deleted_paths,
+            self.checks,
         )
         if self.freshness_cas != expected_cas:
             raise AcquisitionError("freshness_cas does not match snapshot subject")
@@ -200,14 +246,38 @@ class GitHubAcquisitionSnapshot:
             raise AcquisitionError("locator_hash does not match locator")
 
     def to_dict(self) -> dict[str, object]:
-        return {"repository_owner": self.repository_owner, "repository_name": self.repository_name, "pr_number": self.pr_number, "base_sha": self.base_sha, "head_sha": self.head_sha, "base_tree_sha": self.base_tree_sha, "head_tree_sha": self.head_tree_sha, "merge_base_policy": self.merge_base_policy, "diff_bytes": self.diff_bytes.hex(), "diff_hash": self.diff_hash, "changed_paths": list(self.changed_paths), "deleted_paths": list(self.deleted_paths), "checks": [list(x) for x in self.checks], "pagination_complete": self.pagination_complete, "observed_at": self.observed_at, "freshness_cas": self.freshness_cas, "locator_hash": self.locator_hash}
+        return {
+            "repository_owner": self.repository_owner,
+            "repository_name": self.repository_name,
+            "pr_number": self.pr_number,
+            "base_sha": self.base_sha,
+            "head_sha": self.head_sha,
+            "base_tree_sha": self.base_tree_sha,
+            "head_tree_sha": self.head_tree_sha,
+            "merge_base_policy": self.merge_base_policy,
+            "diff_bytes": self.diff_bytes.hex(),
+            "diff_hash": self.diff_hash,
+            "changed_paths": list(self.changed_paths),
+            "deleted_paths": list(self.deleted_paths),
+            "checks": [list(x) for x in self.checks],
+            "pagination_complete": self.pagination_complete,
+            "observed_at": self.observed_at,
+            "freshness_cas": self.freshness_cas,
+            "locator_hash": self.locator_hash,
+        }
 
 
-def _parse(raw: Mapping[str, object], locator: GitHubPullRequestLocator) -> GitHubAcquisitionSnapshot:
+def _parse(
+    raw: Mapping[str, object], locator: GitHubPullRequestLocator
+) -> GitHubAcquisitionSnapshot:
     if not isinstance(raw, Mapping) or set(raw) != _REQUIRED:
         raise AcquisitionError("response has an incomplete or substituted schema")
     values = dict(raw)
-    if values["repository_owner"] != locator.repository_owner or values["repository_name"] != locator.repository_name or values["pr_number"] != locator.pr_number:
+    if (
+        values["repository_owner"] != locator.repository_owner
+        or values["repository_name"] != locator.repository_name
+        or values["pr_number"] != locator.pr_number
+    ):
         raise AcquisitionDriftError("response locator differs from requested locator")
     if type(values["diff_bytes"]) is not bytes:
         raise AcquisitionError("diff_bytes must be bytes from the read port")
@@ -215,13 +285,23 @@ def _parse(raw: Mapping[str, object], locator: GitHubPullRequestLocator) -> GitH
     if type(checks) not in (list, tuple):
         raise AcquisitionError("checks must be a list")
     values["checks"] = tuple(tuple(x) for x in checks)
-    values["changed_paths"] = tuple(values["changed_paths"]) if type(values["changed_paths"]) in (list, tuple) else values["changed_paths"]
-    values["deleted_paths"] = tuple(values["deleted_paths"]) if type(values["deleted_paths"]) in (list, tuple) else values["deleted_paths"]
+    values["changed_paths"] = (
+        tuple(values["changed_paths"])
+        if type(values["changed_paths"]) in (list, tuple)
+        else values["changed_paths"]
+    )
+    values["deleted_paths"] = (
+        tuple(values["deleted_paths"])
+        if type(values["deleted_paths"]) in (list, tuple)
+        else values["deleted_paths"]
+    )
     values["locator_hash"] = locator.locator_hash
     return GitHubAcquisitionSnapshot(**values)
 
 
-def acquire_github_pull_request(port: GitHubReadPort, locator: GitHubPullRequestLocator) -> GitHubAcquisitionSnapshot:
+def acquire_github_pull_request(
+    port: GitHubReadPort, locator: GitHubPullRequestLocator
+) -> GitHubAcquisitionSnapshot:
     """Read twice and admit only convergent, complete, immutable identity."""
     if not isinstance(locator, GitHubPullRequestLocator):
         raise TypeError("locator must be GitHubPullRequestLocator")
@@ -261,4 +341,16 @@ GitHubPullRequestAcquisition = GitHubAcquisitionSnapshot
 acquire_pull_request = acquire_github_pull_request
 
 
-__all__ = ["AcquisitionError", "AcquisitionDriftError", "GitHubAcquisitionSnapshot", "GitHubPullRequestAcquisition", "GitHubPullRequestLocator", "GitHubReadPort", "PermissionDenied", "acquire_github_pull_request", "acquire_pull_request", "load_github_acquisition_snapshot", "serialize_github_acquisition_snapshot"]
+__all__ = [
+    "AcquisitionError",
+    "AcquisitionDriftError",
+    "GitHubAcquisitionSnapshot",
+    "GitHubPullRequestAcquisition",
+    "GitHubPullRequestLocator",
+    "GitHubReadPort",
+    "PermissionDenied",
+    "acquire_github_pull_request",
+    "acquire_pull_request",
+    "load_github_acquisition_snapshot",
+    "serialize_github_acquisition_snapshot",
+]

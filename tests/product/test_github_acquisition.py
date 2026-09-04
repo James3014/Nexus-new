@@ -41,10 +41,17 @@ def _response(locator=None):
 
 def _with_cas(response):
     response["freshness_cas"] = _freshness_cas_for(
-        response["repository_owner"], response["repository_name"], response["pr_number"],
-        response["base_sha"], response["head_sha"], response["base_tree_sha"],
-        response["head_tree_sha"], response["merge_base_policy"], response["diff_hash"],
-        tuple(sorted(response["changed_paths"])), tuple(sorted(response["deleted_paths"])),
+        response["repository_owner"],
+        response["repository_name"],
+        response["pr_number"],
+        response["base_sha"],
+        response["head_sha"],
+        response["base_tree_sha"],
+        response["head_tree_sha"],
+        response["merge_base_policy"],
+        response["diff_hash"],
+        tuple(sorted(response["changed_paths"])),
+        tuple(sorted(response["deleted_paths"])),
         tuple(sorted(tuple(x) for x in response["checks"])),
     )
     return response
@@ -70,7 +77,10 @@ def test_two_reads_produce_immutable_credential_free_snapshot_and_replay():
     assert len(port.calls) == 2
     assert snapshot.diff_hash == "sha256:" + hashlib.sha256(snapshot.diff_bytes).hexdigest()
     assert snapshot.locator_hash == locator.locator_hash
-    assert load_github_acquisition_snapshot(serialize_github_acquisition_snapshot(snapshot)) == snapshot
+    assert (
+        load_github_acquisition_snapshot(serialize_github_acquisition_snapshot(snapshot))
+        == snapshot
+    )
 
 
 @pytest.mark.parametrize(
@@ -115,14 +125,17 @@ def test_forged_freshness_cas_is_rejected():
         acquire_github_pull_request(Port(first, second), locator)
 
 
-@pytest.mark.parametrize("field, value", [
-    ("merge_base_policy", "merge_base_sha"),
-    ("merge_base_policy", " base_sha_exact"),
-    ("observed_at", "2026-09-04T00:00:00+00:00"),
-    ("observed_at", "2026-09-04T00:00:00"),
-    ("observed_at", " 2026-09-04T00:00:00Z"),
-    ("observed_at", "2026-13-04T00:00:00Z"),
-])
+@pytest.mark.parametrize(
+    "field, value",
+    [
+        ("merge_base_policy", "merge_base_sha"),
+        ("merge_base_policy", " base_sha_exact"),
+        ("observed_at", "2026-09-04T00:00:00+00:00"),
+        ("observed_at", "2026-09-04T00:00:00"),
+        ("observed_at", " 2026-09-04T00:00:00Z"),
+        ("observed_at", "2026-13-04T00:00:00Z"),
+    ],
+)
 def test_frozen_policy_and_utc_timestamp_are_canonical(field, value):
     locator = GitHubPullRequestLocator("James3014", "Nexus-new", 635)
     first = _with_cas(_response(locator))
@@ -155,8 +168,25 @@ def test_acquisition_module_has_no_credential_or_mutation_surface():
     module_path = Path(__import__("product.acquisition.github", fromlist=["__file__"]).__file__)
     tree = ast.parse(module_path.read_text())
     source = module_path.read_text().lower()
-    forbidden = {"requests", "urllib", "socket", "token", "password", "secret", "merge", "mutation", "write"}
+    forbidden = {
+        "requests",
+        "urllib",
+        "socket",
+        "token",
+        "password",
+        "secret",
+        "merge",
+        "mutation",
+        "write",
+    }
     imports = {node.module or "" for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
-    imports.update(alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names)
+    imports.update(
+        alias.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Import)
+        for alias in node.names
+    )
     assert not any(any(word in item.lower() for word in forbidden) for item in imports)
-    assert not any(word in source for word in ("requests", "urllib", "socket", "password", "secret"))
+    assert not any(
+        word in source for word in ("requests", "urllib", "socket", "password", "secret")
+    )
