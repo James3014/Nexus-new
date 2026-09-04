@@ -95,6 +95,37 @@ def _canonical(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
 
+def _freshness_cas_for(
+    owner: str,
+    repository: str,
+    pr_number: int,
+    base_sha: str,
+    head_sha: str,
+    base_tree_sha: str,
+    head_tree_sha: str,
+    merge_base_policy: str,
+    diff_hash: str,
+    changed_paths: tuple[str, ...],
+    deleted_paths: tuple[str, ...],
+    checks: tuple[tuple[str, str], ...],
+) -> str:
+    subject = {
+        "repository_owner": owner.lower(),
+        "repository_name": repository.lower(),
+        "pr_number": pr_number,
+        "base_sha": base_sha,
+        "head_sha": head_sha,
+        "base_tree_sha": base_tree_sha,
+        "head_tree_sha": head_tree_sha,
+        "merge_base_policy": merge_base_policy,
+        "diff_hash": diff_hash,
+        "changed_paths": list(changed_paths),
+        "deleted_paths": list(deleted_paths),
+        "checks": [list(item) for item in checks],
+    }
+    return "sha256:" + hashlib.sha256(_canonical(subject).encode()).hexdigest()
+
+
 @dataclass(frozen=True)
 class GitHubAcquisitionSnapshot:
     repository_owner: str
@@ -129,20 +160,34 @@ class GitHubAcquisitionSnapshot:
         if self.diff_hash != expected:
             raise AcquisitionError("diff_hash does not match diff_bytes")
         _hash(self.diff_hash, "diff_hash")
+        if self.changed_paths != tuple(sorted(self.changed_paths)):
+            raise AcquisitionError("changed_paths must be sorted")
+        if self.deleted_paths != tuple(sorted(self.deleted_paths)):
+            raise AcquisitionError("deleted_paths must be sorted")
         _paths(self.changed_paths, "changed_paths", allow_empty=False)
         _paths(self.deleted_paths, "deleted_paths")
         if not set(self.deleted_paths).issubset(set(self.changed_paths)):
             raise AcquisitionError("deleted_paths must be a subset of changed_paths")
         if type(self.checks) is not tuple or any(type(x) is not tuple or len(x) != 2 for x in self.checks):
             raise AcquisitionError("checks must be (identity, digest) pairs")
+        if self.checks != tuple(sorted(self.checks)) or len({x[0] for x in self.checks}) != len(self.checks):
+            raise AcquisitionError("checks must be sorted and have unique identities")
         for identity, digest in self.checks:
-            if type(identity) is not str or not identity.strip() or type(digest) is not str or not digest.strip():
+            if type(identity) is not str or not identity or identity != identity.strip() or "\x00" in identity:
                 raise AcquisitionError("check identities must be normalized")
+            _hash(digest, "check digest")
         if type(self.pagination_complete) is not bool or not self.pagination_complete:
             raise AcquisitionError("pagination_complete must be true")
         if type(self.observed_at) is not str or not self.observed_at.strip() or "\x00" in self.observed_at:
             raise AcquisitionError("observed_at must be normalized")
-        _hash(self.freshness_cas, "freshness_cas")
+        expected_cas = _freshness_cas_for(
+            self.repository_owner, self.repository_name, self.pr_number,
+            self.base_sha, self.head_sha, self.base_tree_sha, self.head_tree_sha,
+            self.merge_base_policy, self.diff_hash, self.changed_paths,
+            self.deleted_paths, self.checks,
+        )
+        if self.freshness_cas != expected_cas:
+            raise AcquisitionError("freshness_cas does not match snapshot subject")
         if self.locator_hash != locator.locator_hash:
             raise AcquisitionError("locator_hash does not match locator")
 
