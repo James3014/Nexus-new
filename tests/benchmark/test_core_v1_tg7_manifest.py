@@ -114,29 +114,32 @@ def genuine_corpus(genuine_selection: dict[str, Any]) -> dict[str, Any]:
 
 
 @pytest.fixture(scope="module")
-def genuine_shadow_receipt(
+def genuine_shadow_and_report(
     genuine_selection: dict[str, Any],
     genuine_corpus: dict[str, Any],
     genuine_tg5: dict[str, Any],
-) -> dict[str, Any]:
-    if SHADOW_RECEIPT_PATH.exists():
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if SHADOW_RECEIPT_PATH.exists() and REPORT_PATH.exists():
         with SHADOW_RECEIPT_PATH.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    receipt, _ = run_shadow(genuine_selection, REPO_PATH, genuine_corpus, genuine_tg5)
-    return receipt
+            receipt = json.load(f)
+        with REPORT_PATH.open("r", encoding="utf-8") as f:
+            report = json.load(f)
+        return receipt, report
+    return run_shadow(genuine_selection, REPO_PATH, genuine_corpus, genuine_tg5)
+
+
+@pytest.fixture(scope="module")
+def genuine_shadow_receipt(
+    genuine_shadow_and_report: tuple[dict[str, Any], dict[str, Any]],
+) -> dict[str, Any]:
+    return genuine_shadow_and_report[0]
 
 
 @pytest.fixture(scope="module")
 def genuine_report(
-    genuine_selection: dict[str, Any],
-    genuine_corpus: dict[str, Any],
-    genuine_tg5: dict[str, Any],
+    genuine_shadow_and_report: tuple[dict[str, Any], dict[str, Any]],
 ) -> dict[str, Any]:
-    if REPORT_PATH.exists():
-        with REPORT_PATH.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    _, report = run_shadow(genuine_selection, REPO_PATH, genuine_corpus, genuine_tg5)
-    return report
+    return genuine_shadow_and_report[1]
 
 
 # --- Positive Conformance Tests ---
