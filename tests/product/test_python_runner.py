@@ -1,6 +1,9 @@
 import json
+from pathlib import Path
 
-from product.execution.python_runner import PythonOCIRunner, RunnerStatus
+import pytest
+
+from product.execution.python_runner import PythonOCIProfile, PythonOCIRunner, RunnerStatus
 
 
 def request():
@@ -8,7 +11,7 @@ def request():
 
 
 def executor(profile, request, index):
-    return {"argv": profile.command, "stdout": b"ok", "stderr": b"", "exit_code": 0, "junit": b'<testsuite tests="1" failures="0" errors="0" />'}
+    return {"source_revision": request["source_revision"], "source_tree": request["source_tree"], "contract_hash": request["contract_hash"], "plan_hash": request["plan_hash"], "environment_hash": request["environment_hash"], "profile_id": profile.profile_id, "image": profile.image, "image_digest": profile.image_digest, "lock_digest": profile.lock_digest, "execution_id": f"exec-{index}", "argv": profile.command, "stdout": b"ok", "stderr": b"", "exit_code": 0, "junit": b'<testsuite tests="1" failures="0" errors="0" />'}
 
 
 def test_two_fresh_runs_bind_profile_and_artifacts():
@@ -20,14 +23,16 @@ def test_two_fresh_runs_bind_profile_and_artifacts():
 
 def test_failure_and_inadequate_oracle_are_fail_closed():
     def failed(profile, request, index):
-        return {"argv": profile.command, "stdout": b"fail", "stderr": b"", "exit_code": 1, "junit": b'<testsuite tests="1" failures="1" errors="0" />'}
+        result = executor(profile, request, index)
+        return {**result, "stdout": b"fail", "exit_code": 1, "junit": b'<testsuite tests="1" failures="1" errors="0" />'}
     assert PythonOCIRunner().run(request(), failed).status is RunnerStatus.FAILED_VERIFICATION
     assert PythonOCIRunner().run(request(), lambda *_: {}).status is RunnerStatus.UNVERIFIABLE
 
 
 def test_nondeterminism_and_exact_replay_are_safe():
     def varying(profile, request, index):
-        return {"argv": profile.command, "stdout": str(index).encode(), "stderr": b"", "exit_code": 0, "junit": b'<testsuite tests="1" failures="0" errors="0" />'}
+        result = executor(profile, request, index)
+        return {**result, "stdout": str(index).encode()}
     runner = PythonOCIRunner()
     result = runner.run(request(), varying)
     assert result.status is RunnerStatus.UNVERIFIABLE
@@ -37,7 +42,38 @@ def test_nondeterminism_and_exact_replay_are_safe():
 
 
 def test_profile_file_and_shell_free_contract():
-    from pathlib import Path
     data = json.loads((Path(__file__).parents[2] / "product/execution/profiles/python-oci-pytest-v1.json").read_text())
     assert data["network"] == "none" and data["rootfs"] == "read-only"
     assert "sh" not in data["command"]
+
+
+@pytest.mark.parametrize("field", ["source_revision", "source_tree", "environment_hash", "profile_id", "image", "image_digest", "lock_digest", "argv"])
+def test_wrong_observed_binding_is_unverifiable(field):
+    def hostile(profile, req, index):
+        value = executor(profile, req, index)
+        value[field] = (profile.command + ("wrong",)) if field == "argv" else "wrong"
+        return value
+    assert PythonOCIRunner().run(request(), hostile).status is RunnerStatus.UNVERIFIABLE
+
+
+@pytest.mark.parametrize("exit_code", [2, 3, 4, 5])
+def test_pytest_non_test_exit_codes_are_unknown(exit_code):
+    def unavailable(profile, req, index):
+        return {**executor(profile, req, index), "exit_code": exit_code}
+    assert PythonOCIRunner().run(request(), unavailable).status is RunnerStatus.UNVERIFIABLE
+
+
+def test_duplicate_physical_execution_id_and_exit_mismatch_are_unknown():
+    def duplicate(profile, req, index):
+        return {**executor(profile, req, index), "execution_id": "same"}
+    assert "DUPLICATE_EXECUTION_ID" in PythonOCIRunner().run(request(), duplicate).reason_codes
+
+    def mismatch(profile, req, index):
+        return {**executor(profile, req, index), "exit_code": 0, "junit": b'<testsuite tests="1" failures="1" errors="0" />'}
+    assert PythonOCIRunner().run(request(), mismatch).status is RunnerStatus.UNVERIFIABLE
+
+
+def test_manifest_lock_reload_binds_actual_uv_lock():
+    root = Path(__file__).parents[2]
+    profile = PythonOCIProfile.load(root / "product/execution/profiles/python-oci-pytest-v1.json", root / "product/execution/profiles/python-oci-pytest-v1.lock", root / "uv.lock")
+    assert profile.profile_id == "python-oci-pytest-v1"
