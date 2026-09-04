@@ -45,7 +45,7 @@ No client-local trust/completion logic, legacy deletion, release, deployment, pr
 
 ## Owner decisions
 
-DEC-004; DEC-007; DEC-010.
+DEC-004; DEC-007; DEC-010; DEC-011. Distribution identity is `nexus-core` at existing version `28.3.0`; CLI is `nexus-certify`; legacy `nexus` remains compatibility-only.
 
 ## Source and start state
 
@@ -84,7 +84,7 @@ DEC-004; DEC-007; DEC-010.
 
 ## Unknown scan
 
-- **Known facts:** README/package remain orchestration-first and no client conformance path is verified.
+- **Known facts:** README/package remain orchestration-first; current distribution is `nexus-singularity` version `28.3.0`; no client conformance path is verified.
 - **Assumptions requiring verification:** exact `nexus-certify` entry point, MCP/Action surfaces, wheel identity, dependency lock, protocol/schema compatibility, upgrade format, prior receipt reader, and rollback command.
 - **Architecture risks:** client logic may become parallel semantic owner.
 - **Evidence risks:** local unit parity is not install/rollback canary evidence.
@@ -92,6 +92,7 @@ DEC-004; DEC-007; DEC-010.
 
 ## Canonical client/package contract
 
+- `pyproject.toml` changes the distribution name from `nexus-singularity` to the Owner-adopted `nexus-core` while retaining version `28.3.0`; the exact wheel filename is therefore `nexus_core-28.3.0-py3-none-any.whl` for this card.
 - `nexus-certify` is the new certification-first entry point and is transport-only: it calls the canonical HTTP endpoints and cannot construct a trust decision, disposition, or receipt locally.
 - `product/clients/cli.py`, `product/clients/mcp.py`, and `product/clients/github_action.py` must submit the same canonical request and return canonically equivalent response/receipt data. `.github/actions/nexus-certify/action.yml` is the exact Action surface.
 - `pyproject.toml` must expose `nexus-certify` while preserving the legacy `nexus` entry point as an explicitly legacy/lab compatibility surface; no hidden legacy semantics may be required by the certification journey.

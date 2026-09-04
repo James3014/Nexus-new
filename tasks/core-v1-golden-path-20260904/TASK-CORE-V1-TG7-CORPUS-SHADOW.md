@@ -38,12 +38,12 @@ No Stable, commercial, production, release, external outreach, or repository mut
 
 | Source ID | Role in this card | Preserved constraint |
 |---|---|---|
-| REQ-014 | benchmark requirement | representative corpus and second-repo shadow precede maturity/value |
-| AC-010 | benchmark witness | revision-bound gates, zero high-risk false certification, and Nexus-overhead denominator |
+| REQ-014 | benchmark requirement | representative corpus and second-repo shadow precede protocol maturity |
+| AC-010 | benchmark witness | revision-bound gates, zero high-risk false certification, and exact eligible-case denominator |
 
 ## Owner decisions
 
-DEC-005; DER-003. Owner selects repository and pilot; worker does not.
+DEC-005; DEC-013; DER-003. The controller selects and binds the second repository before dispatch; the worker does not select or change it. Human pilot/value work belongs only to TG-9.
 
 ## Source and start state
 
@@ -65,7 +65,7 @@ DEC-005; DER-003. Owner selects repository and pilot; worker does not.
 
 ## Authority map
 
-- **Selection authority:** Owner for repo/pilot; CapabilityPlanner for route
+- **Selection authority:** Owner/Campaign controller for the second repository; CapabilityPlanner remains route authority
 - **Execution authority:** approved Luna worker through the non-Nexus `DIRECT_DELEGATED` control plane
 - **Verification authority:** independent controller benchmark/shadow review; worker PASS is not acceptance
 - **Receipt authority:** benchmark and Core receipts without maturity elevation
@@ -85,7 +85,7 @@ DEC-005; DER-003. Owner selects repository and pilot; worker does not.
 - **Known facts:** current fixed corpus is not representative external proof.
 - **Assumptions requiring verification:** public repository license/privacy eligibility, immutable external identity, corpus representativeness, comparability, adequate oracle, and exact denominator.
 - **Architecture risks:** internal tests overclaimed as Stable.
-- **Evidence risks:** missing oracle, denominator, paired subject, or gate artifact.
+- **Evidence risks:** missing oracle, eligible-case denominator, external subject/revision, hostile-family coverage, or gate artifact.
 - **Missing owner decision:** none
 
 ## Selection, corpus, and report contract
@@ -106,7 +106,7 @@ Audit TG-5 receipt, corpus manifest, selected external repo/revision, read-only 
 
 ## RED or existing-guard proof
 
-Remove oracle, denominator, paired subject, or gate artifact; incomplete benchmark must remain non-claimable.
+Remove the oracle, eligible-case denominator, external subject/revision, hostile-family coverage, or gate artifact; the incomplete benchmark must remain non-claimable.
 
 ## Implementation constraints
 
