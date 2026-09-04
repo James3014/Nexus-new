@@ -3,11 +3,16 @@ from pathlib import Path
 
 import pytest
 
-from product.execution.python_runner import PythonOCIProfile, PythonOCIRunner, RunnerStatus
+from product.execution.python_runner import (
+    PythonOCIProfile,
+    PythonOCIRunner,
+    RunnerResult,
+    RunnerStatus,
+)
 
 
 def request():
-    return {"source_revision": "rev-a", "source_tree": "tree-a", "contract_hash": "sha256:" + "a" * 64, "plan_hash": "sha256:" + "b" * 64, "environment_hash": "sha256:" + "c" * 64, "attempt_id": "attempt-a"}
+    return {"source_revision": "a" * 40, "source_tree": "b" * 40, "contract_hash": "sha256:" + "a" * 64, "plan_hash": "sha256:" + "b" * 64, "environment_hash": "sha256:" + "c" * 64, "attempt_id": "attempt-a"}
 
 
 def executor(profile, request, index):
@@ -77,3 +82,12 @@ def test_manifest_lock_reload_binds_actual_uv_lock():
     root = Path(__file__).parents[2]
     profile = PythonOCIProfile.load(root / "product/execution/profiles/python-oci-pytest-v1.json", root / "product/execution/profiles/python-oci-pytest-v1.lock", root / "uv.lock")
     assert profile.profile_id == "python-oci-pytest-v1"
+
+
+def test_receipt_reload_recomputes_and_rejects_tamper():
+    result = PythonOCIRunner().run(request(), executor)
+    assert RunnerResult.from_dict(result.to_dict()) == result
+    tampered = result.to_dict()
+    tampered["attempts"][0]["stdout"] = "00"
+    with pytest.raises(ValueError):
+        RunnerResult.from_dict(tampered)

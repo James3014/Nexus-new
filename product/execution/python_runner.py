@@ -18,6 +18,7 @@ IMAGE = "python:3.12-alpine"
 IMAGE_DIGEST = "sha256:d09d15e60962ca365d1cd544a48773bac9d33f2fb1b00f2aa0deec78ade7dc31"
 LOCK_DIGEST = "sha256:3e753af334885a2f434a94d40fc8860abd151516950e7f1e3647971f2e0dfc51"
 PROFILE_ID = "python-oci-pytest-v1"
+MAX_OUTPUT_BYTES = 1_048_576
 
 
 def _digest(data: bytes) -> str:
@@ -139,12 +140,34 @@ class RunnerResult:
                 "stdout": a.stdout.hex(), "stderr": a.stderr.hex(), "exit_code": a.exit_code,
                 "junit": a.junit.hex(), "artifact_hash": a.artifact_hash} for a in self.attempts]}
 
+    @classmethod
+    def from_dict(cls, data: Mapping[str, object]) -> "RunnerResult":
+        attempts = []
+        for item in data.get("attempts", ()):
+            stdout, stderr, junit = (bytes.fromhex(item[k]) for k in ("stdout", "stderr", "junit"))
+            tests, failures, errors = PythonOCIRunner._check_junit(junit, item["exit_code"])
+            raw = dict(item)
+            raw.update({"profile_id": PROFILE_ID, "image": IMAGE, "image_digest": IMAGE_DIGEST, "lock_digest": LOCK_DIGEST})
+            argv = tuple(item["argv"])
+            identity = json.dumps({"source_revision": raw["source_revision"], "source_tree": raw["source_tree"], "contract_hash": raw["contract_hash"], "plan_hash": raw["plan_hash"], "environment_hash": raw["environment_hash"], "profile_id": PROFILE_ID, "image": IMAGE, "image_digest": IMAGE_DIGEST, "lock_digest": LOCK_DIGEST, "argv": list(argv), "junit": [tests, failures, errors], "exit_code": item["exit_code"]}, sort_keys=True, separators=(",", ":")).encode()
+            artifact = _digest(b"\0".join((identity, stdout, stderr, junit)))
+            if artifact != item["artifact_hash"]:
+                raise ValueError("artifact hash mismatch")
+            attempts.append(ExecutionAttempt(item["attempt_id"], item["execution_id"], item["source_revision"], item["source_tree"], item["contract_hash"], item["plan_hash"], item["environment_hash"], argv, stdout, stderr, item["exit_code"], junit, artifact, tests, failures, errors))
+        result = cls(RunnerStatus(data["status"]), tuple(data["reason_codes"]), data["profile_hash"], tuple(data["attempt_ids"]), tuple(data["artifact_hashes"]), tuple(attempts))
+        if result.profile_hash != PythonOCIProfile().hash or result.attempt_ids != tuple(a.attempt_id for a in attempts) or result.artifact_hashes != tuple(a.artifact_hash for a in attempts):
+            raise ValueError("receipt summary mismatch")
+        return result
+
 
 class PythonOCIRunner:
     """Validate two fresh injected OCI executions and protect exact replay."""
 
     def __init__(self, profile: Optional[PythonOCIProfile] = None):
-        self.profile = profile or PythonOCIProfile()
+        if profile is None:
+            root = Path(__file__).parents[2]
+            profile = PythonOCIProfile.load(root / "product/execution/profiles/python-oci-pytest-v1.json", root / "product/execution/profiles/python-oci-pytest-v1.lock", root / "uv.lock")
+        self.profile = profile
         self._replay: dict[str, RunnerResult] = {}
 
     def run(self, request: Mapping[str, object], executor: Callable[..., Mapping[str, object]]) -> RunnerResult:
@@ -152,11 +175,15 @@ class PythonOCIRunner:
         if any(key not in request for key in required):
             return self._unknown(("MISSING_BINDING",))
         try:
-            for key in required[:-1]:
-                _text(str(request[key]), key)
+            for key in required:
+                if type(request[key]) is not str:
+                    raise ValueError(f"{key} must be string")
+                _text(request[key], key)
+            for key in ("source_revision", "source_tree"):
+                if len(request[key]) != 40 or any(c not in "0123456789abcdef" for c in request[key]):
+                    raise ValueError(f"{key} must be lowercase git identity")
             for key in ("contract_hash", "plan_hash", "environment_hash"):
-                _hash(str(request[key]), key)
-            _text(str(request["attempt_id"]), "attempt_id")
+                _hash(request[key], key)
             key = self._request_key(request)
         except (TypeError, ValueError):
             return self._unknown(("MALFORMED_REQUEST",))
@@ -174,7 +201,7 @@ class PythonOCIRunner:
             attempts.append(attempt)
         if attempts[0].execution_id == attempts[1].execution_id:
             result = self._result(RunnerStatus.UNVERIFIABLE, ("DUPLICATE_EXECUTION_ID",), attempts)
-        elif attempts[0].artifact_hash != attempts[1].artifact_hash:
+        elif not self._same_outcome(attempts[0], attempts[1]):
             result = self._result(RunnerStatus.UNVERIFIABLE, ("NONDETERMINISTIC",), attempts)
         elif attempts[0].exit_code == 0:
             result = self._result(RunnerStatus.VERIFIED, (), attempts)
@@ -199,6 +226,8 @@ class PythonOCIRunner:
         junit = raw.get("junit", b"")
         if not all(isinstance(value, bytes) for value in (stdout, stderr, junit)):
             raise ValueError("execution streams must be bytes")
+        if any(len(value) > MAX_OUTPUT_BYTES for value in (stdout, stderr, junit)):
+            raise ValueError("execution evidence exceeds size limit")
         argv = tuple(raw.get("argv", self.profile.command))
         if argv != self.profile.command:
             raise ValueError("unexpected argv")
@@ -210,7 +239,7 @@ class PythonOCIRunner:
         # Physical execution_id proves freshness and is recorded separately;
         # content identity intentionally excludes it so two fresh identical
         # executions can converge on one artifact hash.
-        identity = json.dumps({"source_revision": raw["source_revision"], "source_tree": raw["source_tree"], "contract_hash": raw["contract_hash"], "plan_hash": raw["plan_hash"], "environment_hash": raw["environment_hash"], "profile_id": raw["profile_id"], "image": raw["image"], "image_digest": raw["image_digest"], "lock_digest": raw["lock_digest"], "argv": list(argv), "junit": [junit_tests, junit_failures, junit_errors]}, sort_keys=True, separators=(",", ":")).encode()
+        identity = json.dumps({"source_revision": raw["source_revision"], "source_tree": raw["source_tree"], "contract_hash": raw["contract_hash"], "plan_hash": raw["plan_hash"], "environment_hash": raw["environment_hash"], "profile_id": raw["profile_id"], "image": raw["image"], "image_digest": raw["image_digest"], "lock_digest": raw["lock_digest"], "argv": list(argv), "junit": [junit_tests, junit_failures, junit_errors], "exit_code": exit_code}, sort_keys=True, separators=(",", ":")).encode()
         artifact = _digest(b"\0".join((identity, stdout, stderr, junit)))
         attempt = ExecutionAttempt(attempt_id, execution_id, str(raw["source_revision"]), str(raw["source_tree"]), str(raw["contract_hash"]), str(raw["plan_hash"]), str(raw["environment_hash"]), argv, stdout, stderr, exit_code, junit, artifact)
         return ExecutionAttempt(attempt.attempt_id, attempt.execution_id, attempt.source_revision, attempt.source_tree, attempt.contract_hash, attempt.plan_hash, attempt.environment_hash, attempt.argv, attempt.stdout, attempt.stderr, attempt.exit_code, attempt.junit, attempt.artifact_hash, junit_tests, junit_failures, junit_errors)
@@ -219,17 +248,23 @@ class PythonOCIRunner:
     def _check_junit(data: bytes, exit_code: int) -> tuple[int, int, int]:
         if not data:
             raise ValueError("missing junit oracle")
+        if b"<!DOCTYPE" in data or b"<!ENTITY" in data:
+            raise ValueError("DTD/entity input forbidden")
         root = ET.fromstring(data)
-        suites = [root] + [node for node in root.iter("testsuite") if node is not root]
+        suites = list(root) if root.tag == "testsuites" else [root]
         try:
             tests = sum(int(s.attrib.get("tests", "0")) for s in suites)
             failures = sum(int(s.attrib.get("failures", "0")) for s in suites)
             errors = sum(int(s.attrib.get("errors", "0")) for s in suites)
         except (TypeError, ValueError):
             raise ValueError("malformed junit counts")
-        if tests <= 0 or (exit_code == 0 and failures + errors):
+        if tests <= 0 or failures < 0 or errors < 0 or failures + errors > tests or (exit_code == 0 and failures + errors):
             raise ValueError("inadequate junit oracle")
         return tests, failures, errors
+
+    @staticmethod
+    def _same_outcome(a, b):
+        return a.artifact_hash == b.artifact_hash and a.exit_code == b.exit_code and a.junit == b.junit and a.stdout == b.stdout and a.stderr == b.stderr
 
     def _request_key(self, request: Mapping[str, object]) -> str:
         body = {key: str(request[key]) for key in ("source_revision", "source_tree", "contract_hash", "plan_hash", "environment_hash", "attempt_id")}
