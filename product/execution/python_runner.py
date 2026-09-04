@@ -19,6 +19,14 @@ IMAGE_DIGEST = "sha256:d09d15e60962ca365d1cd544a48773bac9d33f2fb1b00f2aa0deec78a
 LOCK_DIGEST = "sha256:3e753af334885a2f434a94d40fc8860abd151516950e7f1e3647971f2e0dfc51"
 PROFILE_ID = "python-oci-pytest-v1"
 MAX_OUTPUT_BYTES = 1_048_576
+DEPENDENCY_ARTIFACTS = (
+    ("iniconfig-2.3.0-py3-none-any.whl", "https://files.pythonhosted.org/packages/cb/b1/3846dd7f199d53cb17f49cba7e651e9ce294d8497c8c150530ed11865bb8/iniconfig-2.3.0-py3-none-any.whl", "f631c04d2c48c52b84d0d0549c99ff3859c98df65b3101406327ecc7d53fbf12"),
+    ("packaging-26.0-py3-none-any.whl", "https://files.pythonhosted.org/packages/b7/b9/c538f279a4e237a006a2c98387d081e9eb060d203d8ed34467cc0f0b9b53/packaging-26.0-py3-none-any.whl", "b36f1fef9334a5588b4166f8bcd26a14e521f2b55e6b9de3aaa80d3ff7a37529"),
+    ("pluggy-1.6.0-py3-none-any.whl", "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", "e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746"),
+    ("pygments-2.20.0-py3-none-any.whl", "https://files.pythonhosted.org/packages/f4/7e/a72dd26f3b0f4f2bf1dd8923c85f7ceb43172af56d63c7383eb62b332364/pygments-2.20.0-py3-none-any.whl", "81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176"),
+    ("pytest-9.0.3-py3-none-any.whl", "https://files.pythonhosted.org/packages/d4/24/a372aaf5c9b7208e7112038812994107bc65a84cd00e0354a88c2c77a617/pytest-9.0.3-py3-none-any.whl", "2c5efc453d45394fdd706ade797c0a81091eccd1d6e4bccfcd476e2b8e0ab5d9"),
+)
+DEPENDENCY_ARTIFACTS_HASH = "sha256:" + hashlib.sha256(json.dumps(DEPENDENCY_ARTIFACTS, separators=(",", ":")).encode()).hexdigest()
 
 
 def _digest(data: bytes) -> str:
@@ -56,12 +64,15 @@ class PythonOCIProfile:
     timeout_seconds: int = 300
     memory_bytes: int = 1_073_741_824
     cpu_seconds: int = 60
+    dependency_artifacts_hash: str = DEPENDENCY_ARTIFACTS_HASH
 
     def __post_init__(self):
         _text(self.profile_id, "profile_id")
         _text(self.image, "image")
         _hash(self.image_digest, "image_digest")
         _hash(self.lock_digest, "lock_digest")
+        if self.dependency_artifacts_hash != DEPENDENCY_ARTIFACTS_HASH:
+            raise ValueError("dependency artifact manifest mismatch")
         if self.network != "none" or self.rootfs != "read-only":
             raise ValueError("profile must disable network and use a read-only rootfs")
         if type(self.command) is not tuple or not self.command or any(
@@ -85,14 +96,15 @@ class PythonOCIProfile:
             "network": self.network, "rootfs": self.rootfs,
             "command": list(self.command), "timeout_seconds": self.timeout_seconds,
             "memory_bytes": self.memory_bytes, "cpu_seconds": self.cpu_seconds,
+            "dependency_artifacts_hash": self.dependency_artifacts_hash,
         }
 
     @classmethod
     def load(cls, manifest: Path, lock: Path, uv_lock: Optional[Path] = None) -> "PythonOCIProfile":
         data = json.loads(manifest.read_text())
         locked = json.loads(lock.read_text())
-        required = {"profile_id", "image", "image_digest", "uv_lock_sha256", "offline", "network"}
-        if set(locked) != required or locked["offline"] is not True or locked["network"] != "none":
+        required = {"profile_id", "image", "image_digest", "uv_lock_sha256", "offline", "network", "dependency_artifacts"}
+        if set(locked) != required or locked["offline"] is not True or locked["network"] != "none" or tuple(tuple(x) for x in locked["dependency_artifacts"]) != DEPENDENCY_ARTIFACTS:
             raise ValueError("profile lock keys or policy mismatch")
         actual = _digest(uv_lock.read_bytes())[7:] if uv_lock is not None and uv_lock.exists() else locked["uv_lock_sha256"]
         if locked["uv_lock_sha256"] != actual:
@@ -155,6 +167,7 @@ class RunnerResult:
             raw.update({"profile_id": PROFILE_ID, "image": IMAGE, "image_digest": IMAGE_DIGEST, "lock_digest": LOCK_DIGEST})
             argv = tuple(item["argv"])
             identity = json.dumps({"source_revision": raw["source_revision"], "source_tree": raw["source_tree"], "contract_hash": raw["contract_hash"], "plan_hash": raw["plan_hash"], "environment_hash": raw["environment_hash"], "profile_id": PROFILE_ID, "image": IMAGE, "image_digest": IMAGE_DIGEST, "lock_digest": LOCK_DIGEST, "network": "none", "rootfs": "read-only", "timeout_seconds": 300, "memory_bytes": 1073741824, "cpu_seconds": 60, "argv": list(argv), "junit": [tests, failures, errors], "exit_code": item["exit_code"]}, sort_keys=True, separators=(",", ":")).encode()
+            identity += DEPENDENCY_ARTIFACTS_HASH.encode()
             artifact = _digest(b"\0".join((identity, stdout, stderr, junit)))
             if artifact != item["artifact_hash"]:
                 raise ValueError("artifact hash mismatch")
@@ -224,10 +237,10 @@ class PythonOCIRunner:
         return result
 
     def _attempt(self, raw: Mapping[str, object], request: Mapping[str, object], index: int) -> ExecutionAttempt:
-        observed = ("source_revision", "source_tree", "contract_hash", "plan_hash", "environment_hash", "profile_id", "image", "image_digest", "lock_digest", "network", "rootfs", "timeout_seconds", "memory_bytes", "cpu_seconds", "execution_id")
+        observed = ("source_revision", "source_tree", "contract_hash", "plan_hash", "environment_hash", "profile_id", "image", "image_digest", "lock_digest", "dependency_artifacts_hash", "network", "rootfs", "timeout_seconds", "memory_bytes", "cpu_seconds", "execution_id")
         if any(key not in raw for key in observed):
             raise ValueError("missing observed execution identity")
-        expected = {"source_revision": request["source_revision"], "source_tree": request["source_tree"], "contract_hash": request["contract_hash"], "plan_hash": request["plan_hash"], "environment_hash": request["environment_hash"], "profile_id": self.profile.profile_id, "image": self.profile.image, "image_digest": self.profile.image_digest, "lock_digest": self.profile.lock_digest, "network": self.profile.network, "rootfs": self.profile.rootfs, "timeout_seconds": self.profile.timeout_seconds, "memory_bytes": self.profile.memory_bytes, "cpu_seconds": self.profile.cpu_seconds}
+        expected = {"source_revision": request["source_revision"], "source_tree": request["source_tree"], "contract_hash": request["contract_hash"], "plan_hash": request["plan_hash"], "environment_hash": request["environment_hash"], "profile_id": self.profile.profile_id, "image": self.profile.image, "image_digest": self.profile.image_digest, "lock_digest": self.profile.lock_digest, "dependency_artifacts_hash": self.profile.dependency_artifacts_hash, "network": self.profile.network, "rootfs": self.profile.rootfs, "timeout_seconds": self.profile.timeout_seconds, "memory_bytes": self.profile.memory_bytes, "cpu_seconds": self.profile.cpu_seconds}
         if any(raw[key] != value for key, value in expected.items()):
             raise ValueError("observed execution identity mismatch")
         execution_id = raw["execution_id"]
@@ -251,6 +264,7 @@ class PythonOCIRunner:
         # content identity intentionally excludes it so two fresh identical
         # executions can converge on one artifact hash.
         identity = json.dumps({"source_revision": raw["source_revision"], "source_tree": raw["source_tree"], "contract_hash": raw["contract_hash"], "plan_hash": raw["plan_hash"], "environment_hash": raw["environment_hash"], "profile_id": raw["profile_id"], "image": raw["image"], "image_digest": raw["image_digest"], "lock_digest": raw["lock_digest"], "network": raw["network"], "rootfs": raw["rootfs"], "timeout_seconds": raw["timeout_seconds"], "memory_bytes": raw["memory_bytes"], "cpu_seconds": raw["cpu_seconds"], "argv": list(argv), "junit": [junit_tests, junit_failures, junit_errors], "exit_code": exit_code}, sort_keys=True, separators=(",", ":")).encode()
+        identity += self.profile.dependency_artifacts_hash.encode()
         artifact = _digest(b"\0".join((identity, stdout, stderr, junit)))
         attempt = ExecutionAttempt(attempt_id, execution_id, str(raw["source_revision"]), str(raw["source_tree"]), str(raw["contract_hash"]), str(raw["plan_hash"]), str(raw["environment_hash"]), argv, stdout, stderr, exit_code, junit, artifact)
         return ExecutionAttempt(attempt.attempt_id, attempt.execution_id, attempt.source_revision, attempt.source_tree, attempt.contract_hash, attempt.plan_hash, attempt.environment_hash, attempt.argv, attempt.stdout, attempt.stderr, attempt.exit_code, attempt.junit, attempt.artifact_hash, junit_tests, junit_failures, junit_errors)
