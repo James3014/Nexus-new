@@ -69,59 +69,53 @@ HOSTILE_FAMILIES = (
 
 ALLOWED_LICENSES = frozenset({"MIT", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0", "ISC"})
 
-INFRA_INVALID_REASONS = frozenset(
-    {
-        "MATERIALIZATION_MISSING",
-        "RUNNER_UNAVAILABLE_BEFORE_EXECUTION",
-        "DEPENDENCY_ARTIFACT_MISSING",
-        "TIMEOUT_BEFORE_EXECUTION",
-        "CORRUPT_FIXTURE",
-    }
-)
+INFRA_INVALID_REASONS = frozenset({
+    "MATERIALIZATION_MISSING",
+    "RUNNER_UNAVAILABLE_BEFORE_EXECUTION",
+    "DEPENDENCY_ARTIFACT_MISSING",
+    "TIMEOUT_BEFORE_EXECUTION",
+    "CORRUPT_FIXTURE",
+})
 
-SELECTION_REQUIRED_KEYS = frozenset(
-    {
-        "schema",
-        "canonical_url",
-        "owner",
-        "name",
-        "commit",
-        "tree",
-        "snapshot_path",
-        "snapshot_tree_hash",
-        "observed_at",
-        "license_spdx",
-        "license_evidence_hash",
-        "privacy_class",
-        "read_only_evidence_hash",
-        "task_set_id",
-        "not_nexus_reason",
-        "selection_hash",
-    }
-)
+SELECTION_REQUIRED_KEYS = frozenset({
+    "schema",
+    "canonical_url",
+    "owner",
+    "name",
+    "commit",
+    "tree",
+    "snapshot_path",
+    "snapshot_tree_hash",
+    "observed_at",
+    "license_spdx",
+    "license_evidence_hash",
+    "privacy_class",
+    "read_only_evidence_hash",
+    "task_set_id",
+    "not_nexus_reason",
+    "selection_hash",
+})
 
-CORPUS_CASE_REQUIRED_KEYS = frozenset(
-    {
-        "case_id",
-        "hostile_family",
-        "repository_commit",
-        "repository_tree",
-        "operation",
-        "canonical_request_hash",
-        "request_payload",
-        "oracle_kind",
-        "oracle_source",
-        "oracle_hash",
-        "expected_status",
-        "expected_disposition",
-        "expected_reason",
-        "protocol_version",
-        "implementation_schema",
-        "profile_id",
-        "task_set_id",
-        "case_hash",
-    }
-)
+CORPUS_CASE_REQUIRED_KEYS = frozenset({
+    "case_id",
+    "hostile_family",
+    "repository_commit",
+    "repository_tree",
+    "operation",
+    "canonical_request_hash",
+    "request_payload",
+    "oracle_kind",
+    "oracle_source",
+    "oracle_hash",
+    "expected_status",
+    "expected_disposition",
+    "expected_reason",
+    "protocol_version",
+    "implementation_schema",
+    "profile_id",
+    "task_set_id",
+    "case_hash",
+})
 
 
 class AuthSecurityError(Exception):
@@ -140,18 +134,16 @@ def _validate_request_payload(payload: Any) -> list[str]:
     """Validate incoming certification request payload against protocol schema."""
     if not isinstance(payload, dict):
         return ["payload must be a JSON object"]
-    req_keys = frozenset(
-        {
-            "protocol_version",
-            "implementation_schema",
-            "repository",
-            "acceptance_contract",
-            "verification_plan",
-            "profile_id",
-            "idempotency_key",
-            "expected_generation",
-        }
-    )
+    req_keys = frozenset({
+        "protocol_version",
+        "implementation_schema",
+        "repository",
+        "acceptance_contract",
+        "verification_plan",
+        "profile_id",
+        "idempotency_key",
+        "expected_generation",
+    })
     if set(payload.keys()) != req_keys:
         return ["request keys mismatch"]
     for k in req_keys:
@@ -250,7 +242,8 @@ def validate_selection(
         else:
             try:
                 actual_commit = (
-                    subprocess.check_output(
+                    subprocess
+                    .check_output(
                         ["git", "-C", str(r_path), "rev-parse", "HEAD"],
                         stderr=subprocess.DEVNULL,
                     )
@@ -266,7 +259,8 @@ def validate_selection(
 
             try:
                 actual_tree = (
-                    subprocess.check_output(
+                    subprocess
+                    .check_output(
                         ["git", "-C", str(r_path), "rev-parse", "HEAD^{tree}"],
                         stderr=subprocess.DEVNULL,
                     )
@@ -390,13 +384,11 @@ def validate_corpus(
         if not isinstance(ohash, str) or not ohash.startswith("sha256:") or len(ohash) != 71:
             errors.append(f"case[{cid}] invalid oracle_hash format")
         else:
-            exp_ohash = _digest(
-                {
-                    "source": case.get("oracle_source"),
-                    "kind": okind,
-                    "reason": case.get("expected_reason"),
-                }
-            )
+            exp_ohash = _digest({
+                "source": case.get("oracle_source"),
+                "kind": okind,
+                "reason": case.get("expected_reason"),
+            })
             if ohash != exp_ohash:
                 errors.append(f"case[{cid}] oracle_hash mismatch with oracle source/kind/reason")
 
@@ -1722,15 +1714,13 @@ def run_shadow(
         attempt_id = attempt_receipt.get("attempt_id", f"att-{cid}")
         attempt_hash = attempt_receipt.get("attempt_hash", _digest(attempt_receipt))
         oracle_hash = case["oracle_hash"]
-        result_hash = _digest(
-            {
-                "case_id": cid,
-                "attempt_hash": attempt_hash,
-                "oracle_hash": oracle_hash,
-                "actual_status": actual_status,
-                "actual_disposition": actual_disp,
-            }
-        )
+        result_hash = _digest({
+            "case_id": cid,
+            "attempt_hash": attempt_hash,
+            "oracle_hash": oracle_hash,
+            "actual_status": actual_status,
+            "actual_disposition": actual_disp,
+        })
 
         # False certification check: hostile case resulting in VERIFIED + CERTIFIED
         if (
@@ -1747,21 +1737,19 @@ def run_shadow(
         ):
             trust_mismatches += 1
 
-        cases_results.append(
-            {
-                "case_id": cid,
-                "hostile_family": fam,
-                "attempt_id": attempt_id,
-                "attempt_hash": attempt_hash,
-                "oracle_hash": oracle_hash,
-                "result_hash": result_hash,
-                "actual_status": actual_status,
-                "actual_disposition": actual_disp,
-                "evidence_hash": attempt_receipt.get("evidence_hash", ""),
-                "infra_invalid": infra_invalid,
-                "infra_invalid_reason": infra_reason,
-            }
-        )
+        cases_results.append({
+            "case_id": cid,
+            "hostile_family": fam,
+            "attempt_id": attempt_id,
+            "attempt_hash": attempt_hash,
+            "oracle_hash": oracle_hash,
+            "result_hash": result_hash,
+            "actual_status": actual_status,
+            "actual_disposition": actual_disp,
+            "evidence_hash": attempt_receipt.get("evidence_hash", ""),
+            "infra_invalid": infra_invalid,
+            "infra_invalid_reason": infra_reason,
+        })
 
     eligible_count = len([c for c in cases_results if not c["infra_invalid"]])
     infra_invalid_count = len(cases_results) - eligible_count
