@@ -1,10 +1,16 @@
+---
 artifact_authority: current
 task_id: github-issue-65-gate-c-semantic-consumer-tamper-witnesses
 campaign_id: github-issue-65-golden-witness-gate-c-20260814
 source_issue: "#65"
 owner: James Chen
-status: IMPLEMENTATION_ACTIVE
+status: ACTIVE
+terminal_state: CANDIDATE_PENDING_OWNER_RECONCILIATION
 baseline_revision: eb668fb76f0c30d8f025db42cdb8e320d556c037
+reconciled_main: 8c2584d6053dd1f04dc87333f807fbea1726545e
+current_main: 8c2584d6053dd1f04dc87333f807fbea1726545e
+readiness_marker: GOLDEN_WITNESS_SEMANTIC_HARDENING_CANDIDATE_PENDING_OWNER_RECONCILIATION
+claim_ceiling: GOLDEN_WITNESS_SEMANTIC_HARDENING_CANDIDATE_ONLY
 commit_required: true
 candidate_required: true
 worker_may_commit: false
@@ -12,6 +18,7 @@ worker_may_push: false
 worker_may_approve: false
 worker_may_integrate: false
 AUTO_CHAIN: false
+authorized_deletions: []
 ---
 
 # Gate C semantic consumer/tamper witnesses
@@ -89,3 +96,28 @@ report a separate bounded issue. This card grants no self-acceptance authority.
 - Exit only as a scoped Gate C Candidate PR pending independent acceptance.
   Maximum later implementation claim:
   `GOLDEN_WITNESS_GATE_C_SEMANTIC_TESTS_CANDIDATE_ONLY`.
+
+## Candidate reconciliation (2026-08-16)
+
+This card is a reconciliation candidate pending Owner terminal disposition.
+The historical contract above is preserved as the implementation baseline.
+
+- Physical merge: PR #236 merged as
+  `cdf2570ede5ae218f36f886b696c8da45458043a`, an ancestor of current main
+  `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`; PR #231 (Gate B) merged as
+  `a74d838cc6bb14af47ce79207181c12a1aed1d35`; PR #226 (shared
+  self-hosted-service test serialization) merged as
+  `a787e8e703cc9f0df6a5bb96024db1f10157b04d`; PR #290 (GB-042 corpus binding)
+  merged as `63becf8462eb1f28bf8e143139157ce82318a07d`.
+- Closure evidence asserted only (ASSERTED_UNBOUND_PENDING_RECEIPT): 17/17
+  golden cases, 20/20 semantic witnesses, `findings_included_in_eval=false`,
+  report SHA256
+  `f3a65fadcc6f88449d99c3ef333e599225099874039783162a51fbaa0deb50fd`. No
+  repository/GitHub immutable report artifact was located, so this is not
+  presented as completion evidence.
+- Marker: `GOLDEN_WITNESS_SEMANTIC_HARDENING_CANDIDATE_PENDING_OWNER_RECONCILIATION`; ceiling
+  `GOLDEN_WITNESS_SEMANTIC_HARDENING_CANDIDATE_ONLY` (repository-contained
+  candidate evidence only; no terminal proof). `AUTO_CHAIN=false`.
+- No runtime, route, Workforce, provider, approval, integration, merge,
+  release, or production authority is granted by this reconciliation; no
+  #143 or #191 work.

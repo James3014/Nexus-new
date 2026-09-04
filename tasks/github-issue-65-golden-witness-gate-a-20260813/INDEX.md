@@ -1,14 +1,51 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: active
+status: ACTIVE
+terminal_state: CANDIDATE_PENDING_OWNER_RECONCILIATION
 source_issue: "#65"
 baseline_main: 727efaac9a354748a50946b7012c8847afea6ded
-current_frontier: 00-gate-a-false-witnesses.md
+reconciled_main: 8c2584d6053dd1f04dc87333f807fbea1726545e
+current_main: 8c2584d6053dd1f04dc87333f807fbea1726545e
+historical_scope_current_frontier: 00-gate-a-false-witnesses.md
+readiness_marker: GOLDEN_WITNESS_SEMANTIC_HARDENING_CANDIDATE_PENDING_OWNER_RECONCILIATION
+claim_ceiling: GOLDEN_WITNESS_SEMANTIC_HARDENING_CANDIDATE_ONLY
+live_authority: false
+historical_scope: true
 AUTO_CHAIN: false
+authorized_deletions: []
 ---
 
 # Issue #65 Golden witness hardening — Gate A
 
 #7 is physically closed. Gate A is rebound to the exact current witness blobs
-before test-only mutation.
+before test-only mutation and is recorded as a reconciliation candidate
+pending Owner terminal disposition.
+
+## Candidate reconciliation (2026-08-16)
+
+This record is a reconciliation candidate; it does not claim Issue #65
+terminal. The historical contract above is preserved as the implementation
+baseline.
+
+- Current main: `8c2584d6053dd1f04dc87333f807fbea1726545e` (fresh rebind
+  target for this reconciliation).
+- Physical implementation receipts, each verified ancestor of current main:
+  - PR #227 (Gate A GB-019/GB-042 semantic witnesses): merge
+    `80370ab3c5e3c3714cf378de1dba90412d1a2a7f`.
+  - PR #231 (Gate B), PR #236 (Gate C), PR #290 (GB-042 corpus binding), and
+    PR #297 (bound-node consolidation) merged in sequence; PR #226
+    (`a787e8e703cc9f0df6a5bb96024db1f10157b04d`) is the #31 task-continuity
+    serialization receipt for the shared self-hosted service test.
+- Closure evidence asserted only (ASSERTED_UNBOUND_PENDING_RECEIPT): 17/17
+  golden cases, 20/20 semantic witnesses, `findings_included_in_eval=false`,
+  report SHA256
+  `f3a65fadcc6f88449d99c3ef333e599225099874039783162a51fbaa0deb50fd`. No
+  repository/GitHub immutable report artifact was located, so this is not
+  presented as completion evidence.
+- Marker: `GOLDEN_WITNESS_SEMANTIC_HARDENING_CANDIDATE_PENDING_OWNER_RECONCILIATION`.
+- Claim ceiling: `GOLDEN_WITNESS_SEMANTIC_HARDENING_CANDIDATE_ONLY`
+  (repository-contained candidate evidence only; no terminal proof).
+- `AUTO_CHAIN=false`. No runtime, route, Workforce, provider, approval,
+  integration, merge, release, or production authority is granted by this
+  reconciliation; no #143 or #191 work.
