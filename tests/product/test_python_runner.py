@@ -146,3 +146,20 @@ def test_volatile_junit_pair_is_semantically_deterministic_and_reloadable():
             value["junit"] = value["junit"].replace(b'name="ok"', b'name="changed"')
         return value
     assert PythonOCIRunner().run(request(), changed).status is RunnerStatus.UNVERIFIABLE
+
+
+@pytest.mark.parametrize("error", [TimeoutError(), OSError(), RuntimeError()])
+def test_executor_unavailability_is_fail_closed(error):
+    def unavailable(*_):
+        raise error
+    result = PythonOCIRunner().run(request(), unavailable)
+    assert result.status is RunnerStatus.UNVERIFIABLE
+    assert result.reason_codes == ("MALFORMED_OR_UNAVAILABLE",)
+
+
+def test_tampered_outcome_hash_is_rejected():
+    result = PythonOCIRunner().run(request(), executor)
+    tampered = result.to_dict()
+    tampered["attempts"][0]["outcome_hash"] = "sha256:" + "0" * 64
+    with pytest.raises(ValueError):
+        RunnerResult.from_dict(tampered)

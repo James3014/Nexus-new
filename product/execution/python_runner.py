@@ -52,6 +52,10 @@ class RunnerStatus(str, Enum):
     UNVERIFIABLE = "UNVERIFIABLE"
 
 
+class ExecutionUnavailableError(RuntimeError):
+    """Injected executor could not produce a physical witness."""
+
+
 @dataclass(frozen=True)
 class PythonOCIProfile:
     profile_id: str = PROFILE_ID
@@ -177,6 +181,8 @@ class RunnerResult:
             if artifact != item["artifact_hash"]:
                 raise ValueError("artifact hash mismatch")
             outcome = _digest(json.dumps([item["source_revision"], item["source_tree"], item["contract_hash"], item["plan_hash"], item["environment_hash"], list(argv), item["exit_code"], PythonOCIRunner._normalized_junit(junit)], separators=(",", ":")).encode())
+            if item.get("outcome_hash") != outcome:
+                raise ValueError("outcome hash mismatch")
             attempts.append(ExecutionAttempt(item["attempt_id"], item["execution_id"], item["source_revision"], item["source_tree"], item["contract_hash"], item["plan_hash"], item["environment_hash"], argv, stdout, stderr, item["exit_code"], junit, artifact, tests, failures, errors, outcome))
         if len(attempts) == 0:
             if data.get("status") != RunnerStatus.UNVERIFIABLE.value or tuple(data["reason_codes"]) not in (("MISSING_BINDING",), ("MALFORMED_REQUEST",), ("MALFORMED_OR_UNAVAILABLE",)):
@@ -237,7 +243,7 @@ class PythonOCIRunner:
             try:
                 raw = executor(self.profile, request, index)
                 attempt = self._attempt(raw, request, index)
-            except (TypeError, ValueError, KeyError, ET.ParseError):
+            except (TypeError, ValueError, KeyError, ET.ParseError, TimeoutError, OSError, RuntimeError):
                 result = self._unknown(("MALFORMED_OR_UNAVAILABLE",))
                 self._replay[key] = result
                 return result
