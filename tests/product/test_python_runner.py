@@ -37,7 +37,7 @@ def test_failure_and_inadequate_oracle_are_fail_closed():
 def test_nondeterminism_and_exact_replay_are_safe():
     def varying(profile, request, index):
         result = executor(profile, request, index)
-        return {**result, "stdout": str(index).encode()}
+        return {**result, "junit": f'<testsuite tests="1" failures="0" errors="0"><testcase name="case-{index}" /></testsuite>'.encode()}
     runner = PythonOCIRunner()
     result = runner.run(request(), varying)
     assert result.status is RunnerStatus.UNVERIFIABLE

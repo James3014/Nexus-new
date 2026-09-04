@@ -137,6 +137,7 @@ class ExecutionAttempt:
     junit_tests: int = 0
     junit_failures: int = 0
     junit_errors: int = 0
+    outcome_hash: str = ""
 
 
 @dataclass(frozen=True)
@@ -157,7 +158,7 @@ class RunnerResult:
                 "contract_hash": a.contract_hash, "plan_hash": a.plan_hash,
                 "environment_hash": a.environment_hash, "argv": list(a.argv),
                 "stdout": a.stdout.hex(), "stderr": a.stderr.hex(), "exit_code": a.exit_code,
-                "junit": a.junit.hex(), "artifact_hash": a.artifact_hash} for a in self.attempts]}
+                "junit": a.junit.hex(), "artifact_hash": a.artifact_hash, "outcome_hash": a.outcome_hash} for a in self.attempts]}
 
     @classmethod
     def from_dict(cls, data: Mapping[str, object]) -> "RunnerResult":
@@ -175,7 +176,8 @@ class RunnerResult:
             artifact = _digest(b"\0".join((identity, stdout, stderr, junit)))
             if artifact != item["artifact_hash"]:
                 raise ValueError("artifact hash mismatch")
-            attempts.append(ExecutionAttempt(item["attempt_id"], item["execution_id"], item["source_revision"], item["source_tree"], item["contract_hash"], item["plan_hash"], item["environment_hash"], argv, stdout, stderr, item["exit_code"], junit, artifact, tests, failures, errors))
+            outcome = _digest(json.dumps([item["source_revision"], item["source_tree"], item["contract_hash"], item["plan_hash"], item["environment_hash"], list(argv), item["exit_code"], PythonOCIRunner._normalized_junit(junit)], separators=(",", ":")).encode())
+            attempts.append(ExecutionAttempt(item["attempt_id"], item["execution_id"], item["source_revision"], item["source_tree"], item["contract_hash"], item["plan_hash"], item["environment_hash"], argv, stdout, stderr, item["exit_code"], junit, artifact, tests, failures, errors, outcome))
         if len(attempts) == 0:
             if data.get("status") != RunnerStatus.UNVERIFIABLE.value or tuple(data["reason_codes"]) not in (("MISSING_BINDING",), ("MALFORMED_REQUEST",), ("MALFORMED_OR_UNAVAILABLE",)):
                 raise ValueError("invalid zero-attempt receipt")
@@ -284,7 +286,8 @@ class PythonOCIRunner:
         identity += self.profile.dependency_artifacts_hash.encode()
         artifact = _digest(b"\0".join((identity, stdout, stderr, junit)))
         attempt = ExecutionAttempt(attempt_id, execution_id, str(raw["source_revision"]), str(raw["source_tree"]), str(raw["contract_hash"]), str(raw["plan_hash"]), str(raw["environment_hash"]), argv, stdout, stderr, exit_code, junit, artifact)
-        return ExecutionAttempt(attempt.attempt_id, attempt.execution_id, attempt.source_revision, attempt.source_tree, attempt.contract_hash, attempt.plan_hash, attempt.environment_hash, attempt.argv, attempt.stdout, attempt.stderr, attempt.exit_code, attempt.junit, attempt.artifact_hash, junit_tests, junit_failures, junit_errors)
+        outcome = _digest(json.dumps([attempt.source_revision, attempt.source_tree, attempt.contract_hash, attempt.plan_hash, attempt.environment_hash, list(attempt.argv), attempt.exit_code, self._normalized_junit(junit)], separators=(",", ":")).encode())
+        return ExecutionAttempt(attempt.attempt_id, attempt.execution_id, attempt.source_revision, attempt.source_tree, attempt.contract_hash, attempt.plan_hash, attempt.environment_hash, attempt.argv, attempt.stdout, attempt.stderr, attempt.exit_code, attempt.junit, attempt.artifact_hash, junit_tests, junit_failures, junit_errors, outcome)
 
     @staticmethod
     def _check_junit(data: bytes, exit_code: int) -> tuple[int, int, int]:
@@ -306,7 +309,16 @@ class PythonOCIRunner:
 
     @staticmethod
     def _same_outcome(a, b):
-        return a.artifact_hash == b.artifact_hash and a.exit_code == b.exit_code and a.junit == b.junit and a.stdout == b.stdout and a.stderr == b.stderr
+        return a.outcome_hash == b.outcome_hash
+
+    @staticmethod
+    def _normalized_junit(data):
+        root = ET.fromstring(data)
+        def normalize(item):
+            attrs = {k: v for k, v in sorted(item.attrib.items()) if k not in {"timestamp", "hostname", "time"}}
+            text = (item.text or "").replace("/private/tmp/", "<tmp>/").replace("/tmp/", "<tmp>/")
+            return [item.tag, attrs, text.strip(), [normalize(child) for child in item]]
+        return normalize(root)
 
     def _request_key(self, request: Mapping[str, object]) -> str:
         body = {key: str(request[key]) for key in ("source_revision", "source_tree", "contract_hash", "plan_hash", "environment_hash", "attempt_id")}
