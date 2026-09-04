@@ -637,7 +637,12 @@ def test_tg2_hostile_receipts_fail_closed(variant):
 
 
 @pytest.mark.parametrize(
-    "observed", ("2026-08-29T11:00:00+00:00", "2026-08-29T14:00:00+00:00", None)
+    "observed",
+    [
+        pytest.param("2026-08-29T11:00:00+00:00", id="expired"),
+        pytest.param("2026-08-29T14:00:00+00:00", id="future"),
+        pytest.param(None, id="missing"),
+    ],
 )
 def test_reference_expired_future_or_missing_observed_at_fails(observed):
     from product.evidence.ingestion import (
