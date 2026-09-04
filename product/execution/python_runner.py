@@ -149,7 +149,7 @@ class RunnerResult:
             raw = dict(item)
             raw.update({"profile_id": PROFILE_ID, "image": IMAGE, "image_digest": IMAGE_DIGEST, "lock_digest": LOCK_DIGEST})
             argv = tuple(item["argv"])
-            identity = json.dumps({"source_revision": raw["source_revision"], "source_tree": raw["source_tree"], "contract_hash": raw["contract_hash"], "plan_hash": raw["plan_hash"], "environment_hash": raw["environment_hash"], "profile_id": PROFILE_ID, "image": IMAGE, "image_digest": IMAGE_DIGEST, "lock_digest": LOCK_DIGEST, "argv": list(argv), "junit": [tests, failures, errors], "exit_code": item["exit_code"]}, sort_keys=True, separators=(",", ":")).encode()
+            identity = json.dumps({"source_revision": raw["source_revision"], "source_tree": raw["source_tree"], "contract_hash": raw["contract_hash"], "plan_hash": raw["plan_hash"], "environment_hash": raw["environment_hash"], "profile_id": PROFILE_ID, "image": IMAGE, "image_digest": IMAGE_DIGEST, "lock_digest": LOCK_DIGEST, "network": "none", "rootfs": "read-only", "timeout_seconds": 300, "memory_bytes": 1073741824, "cpu_seconds": 60, "argv": list(argv), "junit": [tests, failures, errors], "exit_code": item["exit_code"]}, sort_keys=True, separators=(",", ":")).encode()
             artifact = _digest(b"\0".join((identity, stdout, stderr, junit)))
             if artifact != item["artifact_hash"]:
                 raise ValueError("artifact hash mismatch")
@@ -205,7 +205,7 @@ class PythonOCIRunner:
             result = self._result(RunnerStatus.UNVERIFIABLE, ("NONDETERMINISTIC",), attempts)
         elif attempts[0].exit_code == 0:
             result = self._result(RunnerStatus.VERIFIED, (), attempts)
-        elif attempts[0].exit_code == 1 and attempts[0].junit_failures > 0:
+        elif attempts[0].exit_code == 1 and attempts[0].junit_failures + attempts[0].junit_errors > 0:
             result = self._result(RunnerStatus.FAILED_VERIFICATION, ("TEST_FAILURE",), attempts)
         else:
             result = self._result(RunnerStatus.UNVERIFIABLE, ("UNKNOWN_EXECUTION_OUTCOME",), attempts)
@@ -213,10 +213,10 @@ class PythonOCIRunner:
         return result
 
     def _attempt(self, raw: Mapping[str, object], request: Mapping[str, object], index: int) -> ExecutionAttempt:
-        observed = ("source_revision", "source_tree", "contract_hash", "plan_hash", "environment_hash", "profile_id", "image", "image_digest", "lock_digest", "execution_id")
+        observed = ("source_revision", "source_tree", "contract_hash", "plan_hash", "environment_hash", "profile_id", "image", "image_digest", "lock_digest", "network", "rootfs", "timeout_seconds", "memory_bytes", "cpu_seconds", "execution_id")
         if any(key not in raw for key in observed):
             raise ValueError("missing observed execution identity")
-        expected = {"source_revision": request["source_revision"], "source_tree": request["source_tree"], "contract_hash": request["contract_hash"], "plan_hash": request["plan_hash"], "environment_hash": request["environment_hash"], "profile_id": self.profile.profile_id, "image": self.profile.image, "image_digest": self.profile.image_digest, "lock_digest": self.profile.lock_digest}
+        expected = {"source_revision": request["source_revision"], "source_tree": request["source_tree"], "contract_hash": request["contract_hash"], "plan_hash": request["plan_hash"], "environment_hash": request["environment_hash"], "profile_id": self.profile.profile_id, "image": self.profile.image, "image_digest": self.profile.image_digest, "lock_digest": self.profile.lock_digest, "network": self.profile.network, "rootfs": self.profile.rootfs, "timeout_seconds": self.profile.timeout_seconds, "memory_bytes": self.profile.memory_bytes, "cpu_seconds": self.profile.cpu_seconds}
         if any(raw[key] != value for key, value in expected.items()):
             raise ValueError("observed execution identity mismatch")
         execution_id = raw["execution_id"]
@@ -239,7 +239,7 @@ class PythonOCIRunner:
         # Physical execution_id proves freshness and is recorded separately;
         # content identity intentionally excludes it so two fresh identical
         # executions can converge on one artifact hash.
-        identity = json.dumps({"source_revision": raw["source_revision"], "source_tree": raw["source_tree"], "contract_hash": raw["contract_hash"], "plan_hash": raw["plan_hash"], "environment_hash": raw["environment_hash"], "profile_id": raw["profile_id"], "image": raw["image"], "image_digest": raw["image_digest"], "lock_digest": raw["lock_digest"], "argv": list(argv), "junit": [junit_tests, junit_failures, junit_errors], "exit_code": exit_code}, sort_keys=True, separators=(",", ":")).encode()
+        identity = json.dumps({"source_revision": raw["source_revision"], "source_tree": raw["source_tree"], "contract_hash": raw["contract_hash"], "plan_hash": raw["plan_hash"], "environment_hash": raw["environment_hash"], "profile_id": raw["profile_id"], "image": raw["image"], "image_digest": raw["image_digest"], "lock_digest": raw["lock_digest"], "network": raw["network"], "rootfs": raw["rootfs"], "timeout_seconds": raw["timeout_seconds"], "memory_bytes": raw["memory_bytes"], "cpu_seconds": raw["cpu_seconds"], "argv": list(argv), "junit": [junit_tests, junit_failures, junit_errors], "exit_code": exit_code}, sort_keys=True, separators=(",", ":")).encode()
         artifact = _digest(b"\0".join((identity, stdout, stderr, junit)))
         attempt = ExecutionAttempt(attempt_id, execution_id, str(raw["source_revision"]), str(raw["source_tree"]), str(raw["contract_hash"]), str(raw["plan_hash"]), str(raw["environment_hash"]), argv, stdout, stderr, exit_code, junit, artifact)
         return ExecutionAttempt(attempt.attempt_id, attempt.execution_id, attempt.source_revision, attempt.source_tree, attempt.contract_hash, attempt.plan_hash, attempt.environment_hash, attempt.argv, attempt.stdout, attempt.stderr, attempt.exit_code, attempt.junit, attempt.artifact_hash, junit_tests, junit_failures, junit_errors)

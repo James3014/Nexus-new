@@ -16,7 +16,7 @@ def request():
 
 
 def executor(profile, request, index):
-    return {"source_revision": request["source_revision"], "source_tree": request["source_tree"], "contract_hash": request["contract_hash"], "plan_hash": request["plan_hash"], "environment_hash": request["environment_hash"], "profile_id": profile.profile_id, "image": profile.image, "image_digest": profile.image_digest, "lock_digest": profile.lock_digest, "execution_id": f"exec-{index}", "argv": profile.command, "stdout": b"ok", "stderr": b"", "exit_code": 0, "junit": b'<testsuite tests="1" failures="0" errors="0" />'}
+    return {"source_revision": request["source_revision"], "source_tree": request["source_tree"], "contract_hash": request["contract_hash"], "plan_hash": request["plan_hash"], "environment_hash": request["environment_hash"], "profile_id": profile.profile_id, "image": profile.image, "image_digest": profile.image_digest, "lock_digest": profile.lock_digest, "network": profile.network, "rootfs": profile.rootfs, "timeout_seconds": profile.timeout_seconds, "memory_bytes": profile.memory_bytes, "cpu_seconds": profile.cpu_seconds, "execution_id": f"exec-{index}", "argv": profile.command, "stdout": b"ok", "stderr": b"", "exit_code": 0, "junit": b'<testsuite tests="1" failures="0" errors="0" />'}
 
 
 def test_two_fresh_runs_bind_profile_and_artifacts():
