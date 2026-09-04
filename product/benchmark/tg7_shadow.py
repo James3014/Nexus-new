@@ -64,59 +64,53 @@ HOSTILE_FAMILIES = (
 
 ALLOWED_LICENSES = frozenset({"MIT", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0", "ISC"})
 
-INFRA_INVALID_REASONS = frozenset(
-    {
-        "MATERIALIZATION_MISSING",
-        "RUNNER_UNAVAILABLE_BEFORE_EXECUTION",
-        "DEPENDENCY_ARTIFACT_MISSING",
-        "TIMEOUT_BEFORE_EXECUTION",
-        "CORRUPT_FIXTURE",
-    }
-)
+INFRA_INVALID_REASONS = frozenset({
+    "MATERIALIZATION_MISSING",
+    "RUNNER_UNAVAILABLE_BEFORE_EXECUTION",
+    "DEPENDENCY_ARTIFACT_MISSING",
+    "TIMEOUT_BEFORE_EXECUTION",
+    "CORRUPT_FIXTURE",
+})
 
-SELECTION_REQUIRED_KEYS = frozenset(
-    {
-        "schema",
-        "canonical_url",
-        "owner",
-        "name",
-        "commit",
-        "tree",
-        "snapshot_path",
-        "snapshot_tree_hash",
-        "observed_at",
-        "license_spdx",
-        "license_evidence_hash",
-        "privacy_class",
-        "read_only_evidence_hash",
-        "task_set_id",
-        "not_nexus_reason",
-        "selection_hash",
-    }
-)
+SELECTION_REQUIRED_KEYS = frozenset({
+    "schema",
+    "canonical_url",
+    "owner",
+    "name",
+    "commit",
+    "tree",
+    "snapshot_path",
+    "snapshot_tree_hash",
+    "observed_at",
+    "license_spdx",
+    "license_evidence_hash",
+    "privacy_class",
+    "read_only_evidence_hash",
+    "task_set_id",
+    "not_nexus_reason",
+    "selection_hash",
+})
 
-CORPUS_CASE_REQUIRED_KEYS = frozenset(
-    {
-        "case_id",
-        "hostile_family",
-        "repository_commit",
-        "repository_tree",
-        "operation",
-        "canonical_request_hash",
-        "request_payload",
-        "oracle_kind",
-        "oracle_source",
-        "oracle_hash",
-        "expected_status",
-        "expected_disposition",
-        "expected_reason",
-        "protocol_version",
-        "implementation_schema",
-        "profile_id",
-        "task_set_id",
-        "case_hash",
-    }
-)
+CORPUS_CASE_REQUIRED_KEYS = frozenset({
+    "case_id",
+    "hostile_family",
+    "repository_commit",
+    "repository_tree",
+    "operation",
+    "canonical_request_hash",
+    "request_payload",
+    "oracle_kind",
+    "oracle_source",
+    "oracle_hash",
+    "expected_status",
+    "expected_disposition",
+    "expected_reason",
+    "protocol_version",
+    "implementation_schema",
+    "profile_id",
+    "task_set_id",
+    "case_hash",
+})
 
 
 class AuthSecurityError(Exception):
@@ -135,18 +129,16 @@ def _validate_request_payload(payload: Any) -> list[str]:
     """Validate incoming certification request payload against protocol schema."""
     if not isinstance(payload, dict):
         return ["payload must be a JSON object"]
-    req_keys = frozenset(
-        {
-            "protocol_version",
-            "implementation_schema",
-            "repository",
-            "acceptance_contract",
-            "verification_plan",
-            "profile_id",
-            "idempotency_key",
-            "expected_generation",
-        }
-    )
+    req_keys = frozenset({
+        "protocol_version",
+        "implementation_schema",
+        "repository",
+        "acceptance_contract",
+        "verification_plan",
+        "profile_id",
+        "idempotency_key",
+        "expected_generation",
+    })
     if set(payload.keys()) != req_keys:
         return ["request keys mismatch"]
     for k in req_keys:
@@ -162,9 +154,7 @@ def _validate_request_payload(payload: Any) -> list[str]:
     repo = payload.get("repository")
     if not isinstance(repo, dict):
         return ["repository must be dict"]
-    repo_keys = frozenset(
-        {"owner", "name", "pr_number", "expected_base_sha", "expected_head_sha"}
-    )
+    repo_keys = frozenset({"owner", "name", "pr_number", "expected_base_sha", "expected_head_sha"})
     if set(repo.keys()) != repo_keys:
         return ["repo keys mismatch"]
     if (
@@ -226,9 +216,17 @@ def validate_selection(
 
     commit = selection.get("commit")
     tree = selection.get("tree")
-    if not isinstance(commit, str) or len(commit) != 40:
+    if (
+        not isinstance(commit, str)
+        or len(commit) != 40
+        or not all(c in "0123456789abcdefABCDEF" for c in commit)
+    ):
         errors.append("selection commit must be 40-character hex string")
-    if not isinstance(tree, str) or len(tree) != 40:
+    if (
+        not isinstance(tree, str)
+        or len(tree) != 40
+        or not all(c in "0123456789abcdefABCDEF" for c in tree)
+    ):
         errors.append("selection tree must be 40-character hex string")
 
     # If repo_path is provided, verify git identity and permissions
@@ -239,7 +237,8 @@ def validate_selection(
         else:
             try:
                 actual_commit = (
-                    subprocess.check_output(
+                    subprocess
+                    .check_output(
                         ["git", "-C", str(r_path), "rev-parse", "HEAD"],
                         stderr=subprocess.DEVNULL,
                     )
@@ -255,7 +254,8 @@ def validate_selection(
 
             try:
                 actual_tree = (
-                    subprocess.check_output(
+                    subprocess
+                    .check_output(
                         ["git", "-C", str(r_path), "rev-parse", "HEAD^{tree}"],
                         stderr=subprocess.DEVNULL,
                     )
@@ -272,9 +272,7 @@ def validate_selection(
             # Check read-only permission: repo directory must not be writable
             st = r_path.stat()
             if (st.st_mode & 0o222) != 0:
-                errors.append(
-                    f"repository directory is not read-only (mode: {oct(st.st_mode)})"
-                )
+                errors.append(f"repository directory is not read-only (mode: {oct(st.st_mode)})")
 
     return errors
 
@@ -301,10 +299,7 @@ def validate_tg5_receipt(receipt: Mapping[str, Any]) -> list[str]:
         errors.append("tg5-receipt verification.status must be VERIFIED")
 
     certification = receipt.get("certification", {})
-    if (
-        not isinstance(certification, dict)
-        or certification.get("disposition") != "CERTIFIED"
-    ):
+    if not isinstance(certification, dict) or certification.get("disposition") != "CERTIFIED":
         errors.append("tg5-receipt certification.disposition must be CERTIFIED")
 
     return errors
@@ -330,9 +325,7 @@ def validate_corpus(
         return ["corpus cases must be a list"]
 
     if len(cases) < 50:
-        errors.append(
-            f"corpus eligible case denominator must be >= 50, found {len(cases)}"
-        )
+        errors.append(f"corpus eligible case denominator must be >= 50, found {len(cases)}")
 
     seen_ids: set[str] = set()
     sorted_ids: list[str] = []
@@ -383,11 +376,7 @@ def validate_corpus(
         if not okind or not isinstance(okind, str):
             errors.append(f"case[{cid}] missing or empty oracle_kind")
         ohash = case.get("oracle_hash", "")
-        if (
-            not isinstance(ohash, str)
-            or not ohash.startswith("sha256:")
-            or len(ohash) != 71
-        ):
+        if not isinstance(ohash, str) or not ohash.startswith("sha256:") or len(ohash) != 71:
             errors.append(f"case[{cid}] invalid oracle_hash format")
 
     if sorted_ids != sorted(sorted_ids):
@@ -416,20 +405,12 @@ def validate_shadow_receipt(
 
     body = {k: v for k, v in shadow_receipt.items() if k != "receipt_hash"}
     if shadow_receipt.get("receipt_hash") != _digest(body):
-        errors.append(
-            "shadow_receipt receipt_hash does not match canonical digest of body"
-        )
+        errors.append("shadow_receipt receipt_hash does not match canonical digest of body")
 
-    if (
-        selection
-        and shadow_receipt.get("selection_hash") != selection.get("selection_hash")
-    ):
+    if selection and shadow_receipt.get("selection_hash") != selection.get("selection_hash"):
         errors.append("shadow_receipt selection_hash mismatch with selection.json")
 
-    if (
-        tg5_receipt
-        and shadow_receipt.get("tg5_receipt_hash") != tg5_receipt.get("receipt_hash")
-    ):
+    if tg5_receipt and shadow_receipt.get("tg5_receipt_hash") != tg5_receipt.get("receipt_hash"):
         errors.append("shadow_receipt tg5_receipt_hash mismatch with tg5-receipt.json")
 
     if corpus and shadow_receipt.get("corpus_hash") != corpus.get("corpus_hash"):
@@ -442,9 +423,7 @@ def validate_shadow_receipt(
     eligible_count = shadow_receipt.get("eligible_count")
     infra_invalid_count = shadow_receipt.get("infra_invalid_count")
     if not isinstance(eligible_count, int) or eligible_count < 50:
-        errors.append(
-            f"shadow_receipt eligible_count must be >= 50, found {eligible_count}"
-        )
+        errors.append(f"shadow_receipt eligible_count must be >= 50, found {eligible_count}")
     if not isinstance(infra_invalid_count, int) or infra_invalid_count < 0:
         errors.append("shadow_receipt infra_invalid_count must be non-negative integer")
 
@@ -510,9 +489,7 @@ def validate_report(
     fc_count = report.get("false_certification_count")
     fc_cases = report.get("false_certification_case_ids")
     if fc_count != 0 or fc_cases != []:
-        errors.append(
-            f"HIGH RISK FALSE CERTIFICATION: count={fc_count}, cases={fc_cases}"
-        )
+        errors.append(f"HIGH RISK FALSE CERTIFICATION: count={fc_count}, cases={fc_cases}")
 
     # Family counts check
     family_counts = report.get("family_counts", {})
@@ -548,9 +525,7 @@ def validate_report(
                 ):
                     recomputed_fc.append(rc["case_id"])
         if recomputed_fc:
-            errors.append(
-                f"independent audit found false certifications: {recomputed_fc}"
-            )
+            errors.append(f"independent audit found false certifications: {recomputed_fc}")
 
     return errors
 
@@ -560,9 +535,7 @@ def build_default_corpus(selection: Mapping[str, Any]) -> dict[str, Any]:
     commit = selection["commit"]
     tree = selection["tree"]
 
-    spec_templates: list[
-        tuple[str, str, str, dict[str, Any], str, str, str, str]
-    ] = [
+    spec_templates: list[tuple[str, str, str, dict[str, Any], str, str, str, str]] = [
         # Family 1: AUTH_ISSUER_TAMPER
         (
             "AUTH_ISSUER_TAMPER",
@@ -1149,9 +1122,7 @@ def build_default_corpus(selection: Mapping[str, Any]) -> dict[str, Any]:
     ) in spec_templates:
         req_hash = _digest(payload)
         oracle_kind = "DETERMINISTIC_PROTOCOL_GUARD"
-        oracle_hash = _digest(
-            {"source": oracle_source, "kind": oracle_kind, "reason": exp_reason}
-        )
+        oracle_hash = _digest({"source": oracle_source, "kind": oracle_kind, "reason": exp_reason})
 
         case_data = {
             "case_id": cid,
@@ -1207,9 +1178,7 @@ def execute_shadow_case(
     try:
         if op == "validate_bearer_token":
             token = payload.get("token")
-            valid = _validate_auth_header(
-                f"Bearer {token}", "valid_secret_bearer_token_tg5"
-            )
+            valid = _validate_auth_header(f"Bearer {token}", "valid_secret_bearer_token_tg5")
             if not valid:
                 return ("UNVERIFIABLE", "BLOCKED", False, None)
             return ("VERIFIED", "CERTIFIED", False, None)
@@ -1245,13 +1214,9 @@ def execute_shadow_case(
                 "cs-test", "a" * 40, selection["commit"], _hash("diff"), change_paths
             )
 
-            plan_c_hash = (
-                contract.hash if tamper != "plan_contract_hash" else _hash("wrong_c")
-            )
+            plan_c_hash = contract.hash if tamper != "plan_contract_hash" else _hash("wrong_c")
             plan_cs_hash = (
-                change_set.hash
-                if tamper != "plan_change_set_hash"
-                else _hash("wrong_cs")
+                change_set.hash if tamper != "plan_change_set_hash" else _hash("wrong_cs")
             )
             plan = VerificationPlan("plan-test", plan_c_hash, plan_cs_hash, ("pytest",))
 
@@ -1260,9 +1225,7 @@ def execute_shadow_case(
             b_c_hash = contract.hash if tamper != "contract_hash" else _hash("wrong_c")
             b_cs_hash = change_set.hash
             b_p_hash = plan.hash if tamper != "bundle_plan_hash" else _hash("wrong_p")
-            claimed_b_hash = (
-                None if tamper != "claimed_bundle_hash" else _hash("wrong_claimed_b")
-            )
+            claimed_b_hash = None if tamper != "claimed_bundle_hash" else _hash("wrong_claimed_b")
 
             bundle = EvidenceBundle(
                 "b-test",
@@ -1287,12 +1250,8 @@ def execute_shadow_case(
             return (res.verification.status.value, res.disposition.value, False, None)
 
         elif op == "validate_receipt_tamper":
-            c = AcceptanceContract(
-                "ac-test", _hash("reqs"), ("pytest",), ("bottle.py",), "FORBID"
-            )
-            cs = ChangeSet(
-                "cs-test", "a" * 40, selection["commit"], _hash("diff"), ("bottle.py",)
-            )
+            c = AcceptanceContract("ac-test", _hash("reqs"), ("pytest",), ("bottle.py",), "FORBID")
+            cs = ChangeSet("cs-test", "a" * 40, selection["commit"], _hash("diff"), ("bottle.py",))
             p = VerificationPlan("plan-test", c.hash, cs.hash, ("pytest",))
             b = EvidenceBundle(
                 "b-test",
@@ -1304,9 +1263,7 @@ def execute_shadow_case(
             s = CertificationInput(c, cs, p, b, True, True, True, True)
             r = certify(s)
             tampered_receipt = copy.copy(r.receipt)
-            object.__setattr__(
-                tampered_receipt, "claimed_receipt_hash", _hash("tampered_hash")
-            )
+            object.__setattr__(tampered_receipt, "claimed_receipt_hash", _hash("tampered_hash"))
             valid = validate_receipt(tampered_receipt, s)
             if not valid:
                 return ("UNVERIFIABLE", "REJECTED", False, None)
@@ -1347,9 +1304,7 @@ def execute_shadow_case(
             try:
                 allowed_paths = tuple(payload.get("allowed_paths", ("bottle.py",)))
                 verifiers = tuple(payload.get("required_verifier_ids", ("pytest",)))
-                AcceptanceContract(
-                    "ac-test", _hash("req"), verifiers, allowed_paths, "FORBID"
-                )
+                AcceptanceContract("ac-test", _hash("req"), verifiers, allowed_paths, "FORBID")
             except (ValueError, TypeError):
                 return ("UNVERIFIABLE", "INPUT_REJECTED", False, None)
             return ("VERIFIED", "CERTIFIED", False, None)
@@ -1388,12 +1343,8 @@ def execute_shadow_case(
 
         elif op == "certify_duplicate_observation":
             v_id = payload.get("verifier_id", "pytest")
-            c = AcceptanceContract(
-                "ac-test", _hash("req"), (v_id,), ("bottle.py",), "FORBID"
-            )
-            cs = ChangeSet(
-                "cs-test", "a" * 40, "b" * 40, _hash("diff"), ("bottle.py",)
-            )
+            c = AcceptanceContract("ac-test", _hash("req"), (v_id,), ("bottle.py",), "FORBID")
+            cs = ChangeSet("cs-test", "a" * 40, "b" * 40, _hash("diff"), ("bottle.py",))
             p = VerificationPlan("p-test", c.hash, cs.hash, (v_id,))
             obs = (
                 Observation(v_id, "art-1", _hash("art-1"), ObservationStatus.PASS),
@@ -1404,12 +1355,8 @@ def execute_shadow_case(
             return (res.verification.status.value, res.disposition.value, False, None)
 
         elif op == "certify_missing_verifier":
-            c = AcceptanceContract(
-                "ac-test", _hash("req"), ("pytest",), ("bottle.py",), "FORBID"
-            )
-            cs = ChangeSet(
-                "cs-test", "a" * 40, "b" * 40, _hash("diff"), ("bottle.py",)
-            )
+            c = AcceptanceContract("ac-test", _hash("req"), ("pytest",), ("bottle.py",), "FORBID")
+            cs = ChangeSet("cs-test", "a" * 40, "b" * 40, _hash("diff"), ("bottle.py",))
             p = VerificationPlan("p-test", c.hash, cs.hash, ("pytest",))
             obs = (Observation("lint", "art-1", _hash("art"), ObservationStatus.PASS),)
             b = EvidenceBundle("b-test", c.hash, cs.hash, p.hash, obs)
@@ -1417,12 +1364,8 @@ def execute_shadow_case(
             return (res.verification.status.value, res.disposition.value, False, None)
 
         elif op == "certify_failing_verifier":
-            c = AcceptanceContract(
-                "ac-test", _hash("req"), ("pytest",), ("bottle.py",), "FORBID"
-            )
-            cs = ChangeSet(
-                "cs-test", "a" * 40, "b" * 40, _hash("diff"), ("bottle.py",)
-            )
+            c = AcceptanceContract("ac-test", _hash("req"), ("pytest",), ("bottle.py",), "FORBID")
+            cs = ChangeSet("cs-test", "a" * 40, "b" * 40, _hash("diff"), ("bottle.py",))
             p = VerificationPlan("p-test", c.hash, cs.hash, ("pytest",))
             obs = (Observation("pytest", "art-1", _hash("art"), ObservationStatus.FAIL),)
             b = EvidenceBundle("b-test", c.hash, cs.hash, p.hash, obs)
@@ -1432,9 +1375,7 @@ def execute_shadow_case(
         elif op == "certify_scope_escape":
             c_paths = tuple(payload.get("change_paths", ("bottle.py",)))
             a_paths = tuple(payload.get("allowed_paths", ("test/test_router.py",)))
-            c = AcceptanceContract(
-                "ac-test", _hash("req"), ("pytest",), a_paths, "FORBID"
-            )
+            c = AcceptanceContract("ac-test", _hash("req"), ("pytest",), a_paths, "FORBID")
             cs = ChangeSet("cs-test", "a" * 40, "b" * 40, _hash("diff"), c_paths)
             p = VerificationPlan("p-test", c.hash, cs.hash, ("pytest",))
             obs = (Observation("pytest", "art-1", _hash("art"), ObservationStatus.PASS),)
@@ -1528,25 +1469,21 @@ def run_shadow(
         )
 
         attempt_id = f"att-{run_id}-{cid}"
-        attempt_hash = _digest(
-            {
-                "attempt_id": attempt_id,
-                "case_id": cid,
-                "run_id": run_id,
-                "observed_at": now,
-                "actual_status": actual_status,
-            }
-        )
+        attempt_hash = _digest({
+            "attempt_id": attempt_id,
+            "case_id": cid,
+            "run_id": run_id,
+            "observed_at": now,
+            "actual_status": actual_status,
+        })
         oracle_hash = case["oracle_hash"]
-        result_hash = _digest(
-            {
-                "case_id": cid,
-                "attempt_hash": attempt_hash,
-                "oracle_hash": oracle_hash,
-                "actual_status": actual_status,
-                "actual_disposition": actual_disp,
-            }
-        )
+        result_hash = _digest({
+            "case_id": cid,
+            "attempt_hash": attempt_hash,
+            "oracle_hash": oracle_hash,
+            "actual_status": actual_status,
+            "actual_disposition": actual_disp,
+        })
 
         # False certification check: hostile case resulting in VERIFIED + CERTIFIED
         if (
@@ -1559,24 +1496,21 @@ def run_shadow(
 
         # Trust mismatch check
         if not infra_invalid and (
-            actual_status != case["expected_status"]
-            or actual_disp != case["expected_disposition"]
+            actual_status != case["expected_status"] or actual_disp != case["expected_disposition"]
         ):
             trust_mismatches += 1
 
-        cases_results.append(
-            {
-                "case_id": cid,
-                "hostile_family": fam,
-                "attempt_hash": attempt_hash,
-                "oracle_hash": oracle_hash,
-                "result_hash": result_hash,
-                "actual_status": actual_status,
-                "actual_disposition": actual_disp,
-                "infra_invalid": infra_invalid,
-                "infra_invalid_reason": infra_reason,
-            }
-        )
+        cases_results.append({
+            "case_id": cid,
+            "hostile_family": fam,
+            "attempt_hash": attempt_hash,
+            "oracle_hash": oracle_hash,
+            "result_hash": result_hash,
+            "actual_status": actual_status,
+            "actual_disposition": actual_disp,
+            "infra_invalid": infra_invalid,
+            "infra_invalid_reason": infra_reason,
+        })
 
     eligible_count = len([c for c in cases_results if not c["infra_invalid"]])
     infra_invalid_count = len(cases_results) - eligible_count
@@ -1633,9 +1567,7 @@ def main() -> None:
         description="Run representative corpus and second-repo shadow evaluation (TG-7)."
     )
     parser.add_argument("--selection", required=True, help="Path to selection.json")
-    parser.add_argument(
-        "--repository", required=True, help="Path to external read-only repository"
-    )
+    parser.add_argument("--repository", required=True, help="Path to external read-only repository")
     parser.add_argument(
         "--manifest",
         "--corpus",
