@@ -73,7 +73,7 @@ DEC-005; DEC-013; DER-003. The controller selects and binds the second repositor
 
 ## Allowed scope
 
-- **Read:** product/benchmark;tests/product/test_false_completion_benchmark.py;README.md;TG5 receipt;selected public repository at its bound revision
+- **Read:** product/benchmark;product/protocol;product/runtime;product/execution;product/evidence;tests/product/test_false_completion_benchmark.py;README.md;TG5 receipt;selected public repository at its bound revision
 - **Edit:** none
 - **Create:** product/benchmark/tg7_shadow.py;tests/benchmark/test_core_v1_tg7_manifest.py
 - **Delete:** none
@@ -90,11 +90,14 @@ DEC-005; DEC-013; DER-003. The controller selects and binds the second repositor
 
 ## Selection, corpus, and report contract
 
-- Evidence paths are fixed outside the source diff: `/private/tmp/nexus-core-v1-evidence/tg7/selection.json`, `/private/tmp/nexus-core-v1-evidence/tg7/corpus.json`, `/private/tmp/nexus-core-v1-evidence/tg7/shadow-receipt.json`, and `/private/tmp/nexus-core-v1-evidence/tg7/report.json`.
-- Before worker dispatch, the controller selects and binds one public Python repository in `selection.json`; the worker may validate but may not choose or change the subject. The file records canonical URL, owner/name, immutable commit/tree, observation time, license, privacy boundary, read-only permission, task-set identity, and why the repository is not Nexus-new. No repository mutation or external outreach is allowed.
-- `corpus.json` contains at least 50 revision-bound cases spanning at least these eight hostile families: authentication/issuer, provenance/hash tamper, stale revision/generation, duplicate/replay, malformed protocol/schema, missing/inadequate oracle, path/scope escape, and crash/unknown effect. Each case has an adequate oracle and expected disposition.
-- `report.json` records eligible/infra-invalid counts, family coverage, high-risk false-certification count, trust mismatches, task-set/repository/TG5 receipt hashes, and denominator. The observed high-risk false-certification count must be exactly `0`; missing oracle, denominator, subject, or gate artifact is non-claimable.
-- The denominator is `eligible cases after infra exclusions`; infra-invalid cases are reported separately and never silently removed. No human-time/value claim is made in TG7.
+- Evidence paths are fixed outside source: `/private/tmp/nexus-core-v1-evidence/tg7/tg5-receipt.json`, `selection.json`, `corpus.json`, `shadow-receipt.json`, and `report.json`. Before dispatch the controller copies the independently accepted TG-5 receipt to that exact path, verifies its canonical schema/receipt hash against Issue #769 acceptance, records the file SHA-256, and makes it read-only; missing/mismatched/stale receipt blocks execution.
+- Before worker dispatch, the controller selects and materializes one public Python repository read-only at `/private/tmp/nexus-core-v1-evidence/tg7/repository`; the worker has no network and may validate but not choose/change/fetch it. `selection.json` schema `nexus.core-v1.tg7-selection.v1` has exact keys `canonical_url`, `owner`, `name`, `commit`, `tree`, `snapshot_path`, `snapshot_tree_hash`, `observed_at`, `license_spdx`, `license_evidence_hash`, `privacy_class`, `read_only_evidence_hash`, `task_set_id`, `not_nexus_reason`, `selection_hash`. Allowed licenses: `MIT`, `BSD-2-Clause`, `BSD-3-Clause`, `Apache-2.0`, `ISC`; private/protected data, credentials, secrets, personal data, generated state, or Nexus-new are ineligible. Controller verifies commit/tree twice and permissions before dispatch.
+- `corpus.json` schema `nexus.core-v1.tg7-corpus.v1` uses canonical SHA-256, unique sorted case IDs, and at least 50 **eligible** revision-bound cases. Each case binds repository commit/tree, hostile family, canonical request/input hash, operation, oracle kind/source/hash, expected factual status/disposition/reason, TG-5 protocol/schema/profile/task-set identities, and case hash. Each of eight families—authentication/issuer, provenance/hash tamper, stale revision/generation, duplicate/replay, malformed protocol/schema, missing/inadequate oracle, path/scope escape, crash/unknown effect—has at least five eligible cases. Oracle kinds are closed to accepted TG-2 JUnit receipts or deterministic protocol-guard expectations and require controller review; worker prose is never an oracle.
+- Shadow execution uses exact TG-5 protocol, implementation schema, `python-oci-pytest-v1`, request canonicalization, outcome mapping, and claim ceiling. Every eligible case produces a real read-only attempt receipt; zero silent skips. Changed external commit/tree, TG-5 receipt, task set, profile, or oracle makes the run `UNVERIFIABLE`.
+- `shadow-receipt.json` schema `nexus.core-v1.tg7-shadow-receipt.v1` binds run ID, TG-5 receipt, selection/corpus/task-set hashes, external repository/commit/tree, ordered per-case attempt/oracle/result hashes, eligible/infra-invalid counts and receipt hash. `report.json` schema `nexus.core-v1.tg7-report.v1` binds it plus family counts, denominator, false-certification case IDs/count, trust mismatches, compatibility, claim ceiling, generated-at and report hash.
+- High-risk false certification means an eligible case whose trusted expected outcome is rejection, `FAILED_VERIFICATION`, or `UNVERIFIABLE`, but observed Completion is `VERIFIED` with certifiable disposition. Report recomputes this from case/attempt/oracle receipts; caller counts are untrusted. Pass: count `0`, denominator >=50, each family >=5, exact arithmetic accounting.
+- Infra-invalid reasons are closed to `MATERIALIZATION_MISSING`, `RUNNER_UNAVAILABLE_BEFORE_EXECUTION`, `DEPENDENCY_ARTIFACT_MISSING`, `TIMEOUT_BEFORE_EXECUTION`, `CORRUPT_FIXTURE`. Every exclusion retains case/attempt/reason hashes and is separate; semantic failures, trust mismatches, post-execution timeouts, or hostile outcomes cannot be excluded. Eligible denominator after exclusions remains >=50. No human-time/value claim is made.
+- `Parallel safe: false` prevents auto-start under `AUTO_CHAIN=false`; the separate Owner/controller contract still permits concurrent TG-6/TG-7 distinct Ready Issues after TG-5 in disjoint isolated worktrees.
 
 ## Mandatory source audit
 
@@ -120,9 +123,10 @@ AC-010 passes only with selected representative corpus, second-repo receipt, and
 
 | ID | cwd | Exact command/argv | Purpose | Required result |
 |---|---|---|---|---|
-| TG7-01 | TARGET_ROOT | `uv run pytest -qq tests/product/test_false_completion_benchmark.py tests/benchmark/test_core_v1_tg7_manifest.py` | fixed benchmark and manifest guard | all tests pass |
-| TG7-02 | TARGET_ROOT | `uv run python -m product.benchmark.tg7_shadow --manifest /private/tmp/nexus-core-v1-evidence/tg7/corpus.json --shadow-repo /private/tmp/nexus-core-v1-evidence/tg7/selection.json --tg5-receipt /private/tmp/nexus-core-v1-evidence/tg7/tg5-receipt.json --report /private/tmp/nexus-core-v1-evidence/tg7/report.json` | representative corpus and read-only second-repo shadow | report is hash-valid, has >=50 cases across >=8 families, and high-risk false certification is 0 |
-| TG7-03 | TARGET_ROOT | `git diff --check` | integrity | exit 0 |
+| TG7-01 | TARGET_ROOT | `uv run pytest -qq tests/product/test_false_completion_benchmark.py tests/benchmark/test_core_v1_tg7_manifest.py` | schemas and hostile guard | all tests pass, including forged selection/license/tree/oracle/denominator/infra/report/TG5 negatives |
+| TG7-02 | TARGET_ROOT | `uv run pytest --collect-only -q tests/benchmark/test_core_v1_tg7_manifest.py` | prove TG7 negative tests discovered | intended cases listed |
+| TG7-03 | TARGET_ROOT | `uv run python -m product.benchmark.tg7_shadow --selection /private/tmp/nexus-core-v1-evidence/tg7/selection.json --repository /private/tmp/nexus-core-v1-evidence/tg7/repository --manifest /private/tmp/nexus-core-v1-evidence/tg7/corpus.json --tg5-receipt /private/tmp/nexus-core-v1-evidence/tg7/tg5-receipt.json --shadow-receipt /private/tmp/nexus-core-v1-evidence/tg7/shadow-receipt.json --report /private/tmp/nexus-core-v1-evidence/tg7/report.json` | read-only second-repo shadow | zero skips; >=50 eligible, >=5 per family, exact accounting, false certification 0, hash-valid receipt/report |
+| TG7-04 | TARGET_ROOT | `git diff --check` | integrity | exit 0 |
 
 ## Physical evidence
 

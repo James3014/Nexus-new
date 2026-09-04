@@ -74,7 +74,7 @@ DEC-005; DEC-013; DER-003. Protocol evidence readiness is adjudicated by the con
 
 ## Allowed scope
 
-- **Read:** README.md;pyproject.toml;product/protocol;product/benchmark;tests/product/test_false_completion_benchmark.py;TG5/TG6/TG7 receipts and reports
+- **Read:** README.md;pyproject.toml;product/protocol;product/benchmark;product/ledger.py;product/clients;tests/product/test_false_completion_benchmark.py;TG4/TG5/TG6/TG7 receipts and reports
 - **Edit:** none
 - **Create:** product/protocol/compatibility_gate.py;tests/benchmark/test_core_v1_tg8_protocol_gate.py
 - **Delete:** none
@@ -91,10 +91,15 @@ DEC-005; DEC-013; DER-003. Protocol evidence readiness is adjudicated by the con
 
 ## RC/Stable evidence contract
 
-- Evidence paths are fixed outside the source diff: `/private/tmp/nexus-core-v1-evidence/tg8/protocol-compatibility.json`, `/private/tmp/nexus-core-v1-evidence/tg8/upgrade-rollback.json`, and `/private/tmp/nexus-core-v1-evidence/tg8/gate-report.json`.
-- Protocol and implementation-schema axes remain distinct. Compatibility covers supported/unsupported protocol versions, implementation schemas, receipt schemas, and ledger generations; incompatible upgrades are refused.
-- `RC evidence-ready` requires accepted TG5/TG6/TG7 receipts, complete client conformance, protocol compatibility matrix, successful compatible upgrade and tested rollback with readable receipts, zero observed high-risk false certifications in the TG7 report, and no unresolved gate artifact.
-- `Stable evidence-ready` additionally requires the explicitly defined Stable threshold in the protocol compatibility report and an external Owner decision. This card can report readiness evidence only; it cannot promote, release, publish, or claim production.
+- Evidence paths are fixed outside source: `/private/tmp/nexus-core-v1-evidence/tg8/thresholds.json`, `thresholds.sha256`, `tg4-receipt.json`, `tg5-receipt.json`, `tg6-receipt.json`, `client-conformance.json`, `protocol-compatibility.json`, `upgrade-rollback.json`, `open-issues.json`, exact `stable-run-1.json` through `stable-run-3.json`, TG7 `selection.json`, `corpus.json`, `shadow-receipt.json`, `report.json`, and `gate-report.json`. Controller stages each accepted artifact read-only and records exact SHA-256 before worker reads it; `thresholds.sha256` contains only the 64-hex digest plus newline.
+- `thresholds.json` schema `nexus.core-v1.tg8-thresholds.v1` freezes candidates `1.0.0-rc.1` and `1.0.0`, input artifact hashes, classifications below, forbidden output states, and threshold hash. The worker cannot alter thresholds.
+- `protocol-compatibility.json` schema `nexus.core-v1.protocol-compatibility.v1` has one row per cross-product transition of public protocol, implementation schema, evidence/envelope/Completion receipt schemas, ledger schema/generation, HTTP schema, CLI/MCP/Action client version and reader version. Each row binds source/target, expected `SUPPORTED` or `REFUSED`, observed outcome, stable reason code, receipt preservation hash and row hash. Unknown axes, axis conflation, missing rows, stale hashes or unexpected coercion are `UNVERIFIABLE`.
+- `client-conformance.json` schema `nexus.core-v1.client-conformance.v1` binds the exact TG-6 CLI/MCP/Action artifacts, canonical request/response, endpoint sequence, redaction set, per-client output hashes and parity result. Static YAML or a TG-6 prose receipt alone is insufficient.
+- `upgrade-rollback.json` schema `nexus.core-v1.upgrade-rollback.v1` covers exact current public protocol `0.1.0-experimental` -> `1.0.0-rc.1`, RC patch upgrade, RC -> `1.0.0`, incompatible public/schema/ledger transitions, failed-upgrade rollback, and rollback to the exact predecessor reader. Every row binds old/new wheel/runtime/ledger/receipt hashes, expected/observed result, old-receipt byte equality and rollback state; compatible paths preserve receipts and incompatible paths refuse without rewrite.
+- `PROTOCOL_RC_EVIDENCE_READY` requires accepted TG4/TG5/TG6/TG7 artifacts, exact complete compatibility/conformance/upgrade matrix, one successful live TG5 tracer, TG7 denominator >=50 with >=5 cases in each of 8 families and zero high-risk false certifications, all required compatible rows supported, all incompatible rows refused, successful failed-upgrade rollback, zero missing/stale/tampered artifacts, and no forbidden claim field.
+- `PROTOCOL_STABLE_EVIDENCE_READY` requires every RC condition plus three fresh consecutive controller runs at the exact Stable Candidate commit/tree and distinct run IDs: each reruns live TG5 and full TG7 eligible corpus with zero skips, zero high-risk false certifications and identical factual outcome hashes; aggregated eligible attempts >=150; CLI/MCP/Action parity 100%; every compatible/upgrade/rollback row passes; `open-issues.json` schema `nexus.core-v1.tg8-open-issues.v1` is an Owner/controller snapshot binding repository, observed-at, query/hash and all open trust/runtime severity-high Issue IDs, and its count must be zero. External Owner promotion/release remains separate.
+- Machine states are exactly `PROTOCOL_RC_EVIDENCE_READY`, `PROTOCOL_STABLE_EVIDENCE_READY`, `LOWER_MATURITY`, `UNVERIFIABLE`. Output containing combined `PROTOCOL_RC_OR_STABLE_EVIDENCE_READY`, `PROMOTED`, `RELEASED`, `PRODUCTION_READY`, `VALUE_READY`, revenue/market-fit, or higher claim fields is rejected.
+- `gate-report.json` schema `nexus.core-v1.tg8-gate-report.v1` binds threshold and every input hash, matrix counts, run identities, denominators, false-certification count/case IDs, compatibility/conformance/rollback summaries, classification, reasons, claim ceiling, generated-at and report hash. It is deterministically recomputed; caller classification/counts are never trusted.
 - Human-time measurement, pilot cohort selection, commercial/value claims, and Nexus-overhead experiments are explicitly excluded and require a separately authorized future card.
 
 ## Mandatory source audit
@@ -121,9 +126,10 @@ AC-016 passes only when the accepted TG-7 cross-repository gate and every protoc
 
 | ID | cwd | Exact command/argv | Purpose | Required result |
 |---|---|---|---|---|
-| TG8-01 | TARGET_ROOT | `uv run pytest -qq tests/benchmark/test_core_v1_tg8_protocol_gate.py` | compatibility/conformance/upgrade/rollback RC-Stable gate guard | all tests pass |
-| TG8-02 | TARGET_ROOT | `uv run python -m product.protocol.compatibility_gate --compatibility /private/tmp/nexus-core-v1-evidence/tg8/protocol-compatibility.json --upgrade-rollback /private/tmp/nexus-core-v1-evidence/tg8/upgrade-rollback.json --tg5-receipt /private/tmp/nexus-core-v1-evidence/tg8/tg5-receipt.json --tg6-receipt /private/tmp/nexus-core-v1-evidence/tg8/tg6-receipt.json --tg7-report /private/tmp/nexus-core-v1-evidence/tg7/report.json --report /private/tmp/nexus-core-v1-evidence/tg8/gate-report.json` | protocol compatibility and bounded RC/Stable evidence adjudication | hash-valid report classifies only evidence readiness and never promotes |
-| TG8-03 | TARGET_ROOT | `git diff --check` | integrity | exit 0 |
+| TG8-01 | TARGET_ROOT | `uv run pytest -qq tests/benchmark/test_core_v1_tg8_protocol_gate.py` | strict schemas, thresholds and hostile RC/Stable guard | all tests pass, including missing/tampered/stale/axis-confused/incompatible/rollback/promotion negatives |
+| TG8-02 | TARGET_ROOT | `uv run pytest --collect-only -q tests/benchmark/test_core_v1_tg8_protocol_gate.py` | prove negative matrix discovery | intended cases listed |
+| TG8-03 | TARGET_ROOT | `uv run python -m product.protocol.compatibility_gate --thresholds /private/tmp/nexus-core-v1-evidence/tg8/thresholds.json --expected-thresholds-sha256-file /private/tmp/nexus-core-v1-evidence/tg8/thresholds.sha256 --compatibility /private/tmp/nexus-core-v1-evidence/tg8/protocol-compatibility.json --conformance /private/tmp/nexus-core-v1-evidence/tg8/client-conformance.json --upgrade-rollback /private/tmp/nexus-core-v1-evidence/tg8/upgrade-rollback.json --open-issues /private/tmp/nexus-core-v1-evidence/tg8/open-issues.json --tg4-receipt /private/tmp/nexus-core-v1-evidence/tg8/tg4-receipt.json --tg5-receipt /private/tmp/nexus-core-v1-evidence/tg8/tg5-receipt.json --tg6-receipt /private/tmp/nexus-core-v1-evidence/tg8/tg6-receipt.json --tg7-selection /private/tmp/nexus-core-v1-evidence/tg7/selection.json --tg7-corpus /private/tmp/nexus-core-v1-evidence/tg7/corpus.json --tg7-shadow /private/tmp/nexus-core-v1-evidence/tg7/shadow-receipt.json --tg7-report /private/tmp/nexus-core-v1-evidence/tg7/report.json --stable-run-1 /private/tmp/nexus-core-v1-evidence/tg8/stable-run-1.json --stable-run-2 /private/tmp/nexus-core-v1-evidence/tg8/stable-run-2.json --stable-run-3 /private/tmp/nexus-core-v1-evidence/tg8/stable-run-3.json --report /private/tmp/nexus-core-v1-evidence/tg8/gate-report.json` | bounded RC/Stable adjudication | exact immutable inputs and allowed state only; never promotes |
+| TG8-04 | TARGET_ROOT | `git diff --check` | integrity | exit 0 |
 
 ## Physical evidence
 
@@ -135,7 +141,7 @@ Fresh reviewer verifies the accepted AC-010 dependency plus AC-016 gates, denomi
 
 ## Exit conditions
 
-- **PASS:** evidence supports only `PROTOCOL_RC_OR_STABLE_EVIDENCE_READY` at the explicitly reported readiness level; no promotion is performed.
+- **PASS:** evidence supports exactly `PROTOCOL_RC_EVIDENCE_READY` or `PROTOCOL_STABLE_EVIDENCE_READY`; no promotion is performed.
 - **BLOCK:** any compatibility, rollback, TG5/TG6/TG7 receipt, zero-false-certification, or gate artifact is missing; any threshold is ambiguous; or a value/pilot claim is attempted.
 - **Residual debt:** public/release/production authority remains external.
 - **Next gate:** TG-9 may begin only after this bounded maturity evidence is independently accepted; protocol promotion/release/public actions remain separate.
