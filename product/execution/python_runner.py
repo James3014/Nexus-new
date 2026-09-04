@@ -277,14 +277,12 @@ class RunnerResult:
             _text(item["execution_id"], "execution_id")
             tests, failures, errors = PythonOCIRunner._check_junit(junit, item["exit_code"])
             raw = dict(item)
-            raw.update(
-                {
-                    "profile_id": PROFILE_ID,
-                    "image": IMAGE,
-                    "image_digest": IMAGE_DIGEST,
-                    "lock_digest": LOCK_DIGEST,
-                }
-            )
+            raw.update({
+                "profile_id": PROFILE_ID,
+                "image": IMAGE,
+                "image_digest": IMAGE_DIGEST,
+                "lock_digest": LOCK_DIGEST,
+            })
             argv = tuple(item["argv"])
             identity = json.dumps(
                 {
