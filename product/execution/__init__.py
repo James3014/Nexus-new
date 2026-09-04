@@ -1,4 +1,4 @@
-"""Pure execution ports; implementations belong outside the product core."""
+"""Execution request/response ports and the deterministic Python profile."""
 
 from dataclasses import dataclass
 
@@ -15,3 +15,25 @@ class ExecutionRequest:
 @dataclass(frozen=True)
 class ExecutionResponse:
     observations: tuple[object, ...]
+
+
+# Keep the small port types available from the package root while the concrete
+# profile remains in its own module.  The import is deliberately last: the
+# runner only depends on stdlib and these two immutable port types.
+from product.execution.python_runner import (  # noqa: E402
+    ExecutionAttempt,
+    PythonOCIProfile,
+    PythonOCIRunner,
+    RunnerResult,
+    RunnerStatus,
+)
+
+__all__ = [
+    "ExecutionRequest",
+    "ExecutionResponse",
+    "ExecutionAttempt",
+    "PythonOCIProfile",
+    "PythonOCIRunner",
+    "RunnerResult",
+    "RunnerStatus",
+]
