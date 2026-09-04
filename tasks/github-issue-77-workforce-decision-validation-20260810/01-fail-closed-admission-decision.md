@@ -2,6 +2,7 @@
 artifact_authority: current
 owner: James Chen
 status: COMPLETED
+terminal_state: TERMINAL_RECONCILIATION
 task_id: github-issue-77-workforce-decision-validation
 campaign_id: github-issue-77-workforce-decision-validation-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/77
@@ -11,6 +12,8 @@ worker_may_approve: false
 worker_may_integrate: false
 worker_may_push: false
 ---
+
+Historical source-PR current-main binding: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`; retained as historical evidence after the Issue #428 active rebind.
 
 # Task Card: Fail-Closed WorkforceAdmissionDecision Values
 
@@ -113,6 +116,39 @@ raw-mapping boundaries. No route/policy/workforce authority change.
   runtime test 1 = base 1 (pre-existing line 243)
 - `git diff --check`: clean
 - reached `CANDIDATE_PR_READY` (PR opened to `main`; no self-approve/merge)
+
+## Terminal reconciliation
+
+Issue #77 is CLOSED (state_reason: completed). PR #85 was merged on
+2026-08-10; its merge commit is an ancestor of the reconciled current main.
+
+- PR: https://github.com/James3014/Nexus-new/pull/85
+- PR base: `84eaa6886e0388a4e15f5b837c89e37768b14307`
+- PR head: `3801adaa3516fd87793144129e0c9484f4e56d61`
+- PR merge: `8f7c75ca08a6c88fad9b791f254d38d79ad8bf29`
+- PR diff: 6 files changed, +293/-1 (production contract, service, two test
+  files, and the exact Issue Task Card files)
+- head CI terminal success: Nexus Pytest CI, Exact-Base Pyright, Exact-Base
+  Bandit, Exact-Base Ruff, Wiki Exact-Base Governance, Policy Lane Gate
+- ancestry: `git merge-base --is-ancestor 8f7c75ca main` PASS
+- reconciled main: `71ae533ec9f795477131645f96cea1c93b4f4d40` (previous
+  reconciled snapshot `cdf2570ede5ae218f36f886b696c8da45458043a` retained
+  as historical)
+- Owner post-merge receipt `5253054718`
+  (POST_MERGE_CONSUMER_VERIFICATION_20260811): clean exact-main target
+  `70fd467ab0d29f4373616a5e98d85b014efcd4de`, 293 passed, 6 warnings,
+  exit 0, covering Workforce contract/runtime and named consumers
+- current-main readback: strict constructor and `_decision_dict` fail-closed
+  guards present with focused forged-negative tests
+
+Terminal marker: `WORKFORCE_ADMISSION_DECISION_VALIDATION_PROVEN`.
+Claim ceiling: `WORKFORCE_ADMISSION_DECISION_VALIDATION_PROVEN_ONLY`,
+`AUTO_CHAIN: false`.
+
+This reconciliation preserves the historical implementation baseline and
+pre-merge receipt above. It does not claim Workforce policy/route/provider
+mutation, runtime activation, approval, integration, merge authority,
+release, or production readiness.
 
 ## Block classification
 

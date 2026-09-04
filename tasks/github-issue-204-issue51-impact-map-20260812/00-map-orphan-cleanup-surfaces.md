@@ -1,3 +1,29 @@
+---
+artifact_authority: current
+owner: James Chen
+status: COMPLETE
+task_id: github-issue-204-issue51-impact-map
+campaign_id: github-issue-204-issue51-impact-map-20260812
+source_issue: https://github.com/James3014/Nexus-new/issues/204
+baseline_main: bdcc427f6249406079c85f9725b3af6cd62ab1f1
+historical_baseline: bdcc427f6249406079c85f9725b3af6cd62ab1f1
+reconciled_main: 71ae533ec9f795477131645f96cea1c93b4f4d40
+current_main: 71ae533ec9f795477131645f96cea1c93b4f4d40
+AUTO_CHAIN: false
+block_class: NONE
+completion_marker: ISSUE_51_IMPACT_MAP_PREREQUISITE_PROVEN
+claim_ceiling: ISSUE_51_IMPACT_MAP_PREREQUISITE_PROVEN_ONLY
+physical_receipt:
+  pull_request: 205
+  candidate_head: 69bf750f811164a71871e5f6635e82e25b8139bd
+  merge_commit: 8620b72e5688dc41551afb8ed5454b49d21dc5e3
+  changed_files: 4
+  focused_tests: 4
+  required_checks: NOT_REPORTED
+---
+
+Historical source-PR current-main binding: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`; retained as historical evidence after the Issue #428 active rebind.
+
 # Task Card: Issue 204 Map Issue-51 Orphan Cleanup Surfaces
 
 ## Objective
@@ -11,6 +37,14 @@ PR #71 fail closed as `IMPACT_UNKNOWN`, without broadening cleanup or product au
 - Issue: `#204`
 - Exact baseline: `bdcc427f6249406079c85f9725b3af6cd62ab1f1`
 - AUTO_CHAIN: `false`
+
+## Terminal reconciliation
+
+PR #205 merged candidate `69bf750f811164a71871e5f6635e82e25b8139bd` as
+`8620b72e5688dc41551afb8ed5454b49d21dc5e3` into the historical baseline. The
+current and reconciled `nexus-new/main` are
+`71ae533ec9f795477131645f96cea1c93b4f4d40`. The exact four-file scope and four
+focused tests are bound above; live CI status is not asserted here.
 
 ## Allowed files
 
@@ -44,4 +78,5 @@ No PR #71 deletion mutation, selector algorithm change, runtime/API change,
 ruleset/bypass change, merge/approval authority, Workforce/lifecycle/route change,
 or release/production claim.
 
-Maximum pre-merge claim: `ISSUE_51_IMPACT_MAP_PREREQUISITE_CANDIDATE`.
+Terminal claim: `ISSUE_51_IMPACT_MAP_PREREQUISITE_PROVEN_ONLY`, limited to the
+four exact high-risk mappings and the selector's existing high-risk projection.

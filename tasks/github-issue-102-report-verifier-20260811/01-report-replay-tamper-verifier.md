@@ -1,9 +1,18 @@
 # Task Card: Issue #102 R2B3 Report Replay and Tamper Verification
 
+Historical source-PR current-main binding: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`; retained as historical evidence after the Issue #428 active rebind.
+
 - task_id: github-issue-102
 - issue: #102
-- status: ACTIVE
+- status: COMPLETE
 - base_sha: 3c4f9065739e7a718bc27e1bf0d0113150946c60
+- historical_baseline: 3c4f9065739e7a718bc27e1bf0d0113150946c60
+- reconciled_main: 71ae533ec9f795477131645f96cea1c93b4f4d40
+- current_main: 71ae533ec9f795477131645f96cea1c93b4f4d40
+- historical_reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
+- frontier_status: TERMINAL_RECONCILIATION
+- terminal_marker: R2B3_REPORT_REPLAY_TAMPER_PROVEN
+- claim_ceiling: repository-contained report replay/tamper verifier source/tests only
 - worker_role: luna_worker
 - autonomy: bounded implementation
 - target: /private/tmp/nexus-issue102-luna-019fee
@@ -78,3 +87,27 @@ git diff --name-only 3c4f9065739e7a718bc27e1bf0d0113150946c60...HEAD
 - `RECOVERABLE_BLOCK`: bounded verifier/test defect.
 - `HARD_BLOCK`: need to mutate #101 schema or another forbidden authority,
   or inability to remain deterministic/read-only/fail-closed.
+
+## Physical evidence and terminal boundary
+
+- Historical card baseline: `3c4f9065739e7a718bc27e1bf0d0113150946c60`.
+- PR #123 head: `f523a772edc4dc721a9b6e7dbd73ff9e75c3f9ae`.
+- PR #123 merge: `73d7437bfc64b0afd453ef56e46e3467304eb99e` (parents exactly
+  `4232478da8061caba1be82b5a213974e840099fa` and `f523a772...`).
+- Exact scope: `nexus/research/epistemic_benchmark/report.py`,
+  `tests/research/test_epistemic_benchmark_report.py`, and this campaign pair.
+- All required exact-head checks SUCCESS; Tier3 expected SKIPPED.
+- Owner receipt: `TERMINAL_REVERIFY_RECEIPT_20260813` on Issue #102; post-#101
+  fresh current-main reverify ran report + metrics + e2e suites together,
+  65 passed, zero provider/model calls.
+- Reconciled current main: `71ae533ec9f795477131645f96cea1c93b4f4d40`
+  (PR #333 merge); previous reconciled snapshot
+  `cdf2570ede5ae218f36f886b696c8da45458043a` retained as historical;
+  PR #123 merge `73d7437b` verified ancestor via
+  `git merge-base --is-ancestor`.
+
+`R2B3_REPORT_REPLAY_TAMPER_PROVEN` proves only the exact GitHub collaboration
+report replay/tamper verifier source and tests. It grants no benchmark result,
+superiority, causality, provider readiness, execution, release, runtime,
+approval, integration, or production authority. #100/#101/#103 boundaries are
+preserved and `AUTO_CHAIN=false`.

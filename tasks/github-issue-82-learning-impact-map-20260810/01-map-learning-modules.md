@@ -1,7 +1,7 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: ACTIVE
+status: COMPLETE / TERMINAL_RECONCILIATION
 task_id: github-issue-82-map-learning-modules
 campaign_id: github-issue-82-learning-impact-map-20260810
 source_issue: https://github.com/James3014/Nexus-new/issues/82
@@ -11,6 +11,8 @@ worker_may_approve: false
 worker_may_integrate: false
 worker_may_push: true
 ---
+
+Historical source-PR current-main binding: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`; retained as historical evidence after the Issue #428 active rebind.
 
 # Map New Learning Modules to Conservative Exact-Base Tests
 
@@ -73,6 +75,21 @@ branch pushed, and a PR opened to `main` on `James3014/Nexus-new`.
   reason `learning_contract`, no unmatched path
 - unknown path outside `nexus/learning` remains fallback/unmatched
 - `git diff --check`: clean
+
+## Terminal reconciliation (2026-08-14)
+
+Owner receipt `5253011891` (POST_MERGE_RECONCILIATION_20260811) binds Issue
+#82 CLOSED, PR #83 implementation `713273bb3f8899abdaf65d5aaf4f41041529d1fb`
+merged by `b19c80709cadb6f334487f94384930c4d1f09133`, disposition
+PRODUCT_COMPLETE / STALE_CARD_ONLY. Current `main`
+`71ae533ec9f795477131645f96cea1c93b4f4d40` readback confirms the delivered
+impact-map row and learning default-map test (prior readback at
+`cdf2570ede5ae218f36f886b696c8da45458043a` historical). Terminal marker:
+`LEARNING_IMPACT_MAPPING_PROVEN`; claim ceiling:
+`LEARNING_IMPACT_MAPPING_PROVEN_ONLY`. This card status update is
+governance-metadata-only and grants no product correctness, causal uplift,
+runtime, route, Workforce, approval, integration, merge, release, or
+production authority.
 
 ## Forbidden scope
 
