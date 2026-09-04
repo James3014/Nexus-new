@@ -4,7 +4,7 @@
 - **Bounded authority:** Ready Issue `#763`
 - **Status:** `PLANNED`
 - **Source spec:** `SPEC-NEXUS-CORE-V1-FREEZE-001`
-- **Source spec SHA-256:** `1afae6f51f91563d8476a25c220446eab8b06391b8edd99fb95ea0881828d7ed`
+- **Source spec SHA-256:** `9ef4b46838251ce86d20d6469901e1f8f02f66ed468655bb446e170ebe90f170`
 - **Source groups:** TG-0 Boundary/version/crosswalk freeze;TG-1 Live GitHub acquisition;TG-2 Python profile;TG-3 Evidence Trust extraction;TG-4 Durable ledger/reconciliation;TG-5 HTTP tracer bullet
 - **Requirements:** REQ-003;REQ-004;REQ-007;REQ-008;REQ-009;REQ-010;REQ-011;REQ-012
 - **Acceptance:** AC-002;AC-004;AC-005;AC-006;AC-007;AC-008;AC-009;AC-014
@@ -15,8 +15,8 @@
 - **Task type:** `IMPLEMENTATION`
 - **Slicing strategy:** `EXPAND_CONTRACT`
 - **Scope class:** `medium`
-- **Execution lane:** `NEXUS_LIFECYCLE_V2`
-- **Minimum MCP profile:** `CANDIDATE`
+- **Execution lane:** `NON_MCP`
+- **Minimum MCP profile:** `not applicable`
 - **Commit required:** `true`
 - **Candidate required:** `true`
 - **Parallel safe:** `false`
@@ -24,7 +24,7 @@
 
 ## Goal
 
-Expose the four-endpoint loopback bearer-authenticated HTTP contract and complete one real PR through acquisition, runner, trust, completion, ledger, and inspectable receipt.
+Expose the four-endpoint loopback bearer-authenticated HTTP contract and complete the controlled `James3014/Nexus-new#635` PR through acquisition, runner, trust, completion, ledger, and inspectable receipt.
 
 ## Observable outcome
 
@@ -70,9 +70,9 @@ DEC-002; DEC-004; DEC-007; DEC-009.
 
 ## MCP execution profile
 
-- **App/server and action snapshot:** Nexus lifecycle MCP snapshot required at execution
-- **Exact required actions:** nexus_task_run;nexus_task_status;nexus_task_wait;nexus_task_reconcile;nexus_task_finish
-- **Confirmation-required actions:** nexus_task_run;nexus_task_finish
+- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna execution under Ready Issue #763
+- **Exact required actions:** not applicable
+- **Confirmation-required actions:** none
 - **Idempotency and attempt rule:** canonical request hash plus idempotency key; exact replay returns same run/receipt, drift reconciles and fails closed
 - **Reconnect reconciliation:** status/reconcile same request attempt before retry
 - **Transport blocker:** none
@@ -80,8 +80,8 @@ DEC-002; DEC-004; DEC-007; DEC-009.
 ## Authority map
 
 - **Selection authority:** Owner/Campaign controller and CapabilityPlanner
-- **Execution authority:** approved Luna worker
-- **Verification authority:** independent controller live local E2E
+- **Execution authority:** approved Luna worker through the non-Nexus `DIRECT_DELEGATED` control plane
+- **Verification authority:** independent controller live local E2E; worker PASS is not acceptance
 - **Receipt authority:** Evidence Trust, Completion Core, and carrying ledger
 - **Approval/integration authority:** external Owner-designated authority only
 
@@ -89,18 +89,36 @@ DEC-002; DEC-004; DEC-007; DEC-009.
 
 - **Read:** product/adapters/github.py;product/execution/__init__.py;product/evidence/ingestion.py;product/certification/receipt.py;tests/product
 - **Edit:** product/adapters/github.py;product/execution/__init__.py;product/evidence/ingestion.py;product/certification/receipt.py
-- **Create:** product/runtime.py
+- **Create:** product/runtime/__init__.py;product/runtime/schemas.py;product/runtime/auth.py;product/runtime/http.py;product/runtime/service.py;tests/product/test_http_runtime.py;tests/product/test_http_e2e.py
 - **Delete:** none
-- **Maximum touched production files:** 5
-- **Maximum touched test files:** 0
+- **Maximum touched production files:** 9
+- **Maximum touched test files:** 2
 
 ## Unknown scan
 
 - **Known facts:** current execution exports pure ports and no canonical HTTP runtime.
-- **Assumptions requiring verification:** loopback binding, bearer token source, endpoint schemas, lifecycle behavior, and live GitHub credentials.
+- **Assumptions requiring verification:** endpoint schemas/statuses, loopback binding, bearer token source, request limits/timeouts, lifecycle behavior, durable CAS/reconciliation, and live GitHub credentials.
 - **Architecture risks:** runtime could duplicate trust/completion logic.
 - **Evidence risks:** simulated HTTP or caller-supplied snapshots are insufficient.
 - **Missing owner decision:** none
+
+## Canonical HTTP contract
+
+- **Bind:** `127.0.0.1:8767` by default; wildcard, `0.0.0.0`, IPv6-any, and non-loopback binds are rejected before listening.
+- **Authentication:** per-install bearer token is read only from `$XDG_CONFIG_HOME/nexus-core/token`, falling back to `~/.config/nexus-core/token`; the file must be regular, mode `0600`, non-empty, and never enters a receipt. Missing, overlong, malformed, or mismatched tokens return the same unauthorised error without invoking a core.
+- **Endpoints:** `POST /v1/certifications`, `GET /v1/certifications/{request_id}`, `GET /v1/certifications/{request_id}/receipt`, and `POST /v1/receipts/verify`.
+- **Request/response:** schemas must explicitly carry protocol version and implementation schema as separate axes, repository/PR/base/head/tree/diff identities, Acceptance Contract and Verification Plan hashes, `python-oci-pytest-v1`, idempotency key, and the separated acquisition/execution/evidence/verification/disposition/receipt/claim-ceiling sections. Unknown fields, oversized bodies, invalid IDs, unsupported methods, and malformed JSON fail with a documented error envelope and never create durable state.
+- **Limits/timeouts:** request-body and path limits, connect/read/worker timeouts, and bounded result size are fixed in the schema module and asserted by tests; timeout/unknown-effect is `UNVERIFIABLE` and reconciles before retry.
+- **Durability:** exact `(idempotency_key, canonical_request_hash)` replay returns the original run/receipt; same key with changed request, stale generation/source, or changed subject fails closed through SQLite generation CAS and reconciliation.
+- **Receipt verification:** `/verify` returns `ENVELOPE_ONLY` unless stored original inputs allow full recomputation; it cannot elevate the claim ceiling.
+
+## Exact upstream identity tuple
+
+TG5 may run only after accepted TG1–TG4 receipts bind this exact tuple: `(repository_owner, repository_name, pr_number, base_sha, head_sha, tree_sha, diff_hash, changed_paths, contract_hash, plan_hash, environment_hash, source_revision, source_tree, attempt_id, generation)`. Missing, duplicate, or cross-bound tuple members are a hard fail.
+
+## Controlled real-PR fixture
+
+Use the pre-existing read-only fixture `James3014/Nexus-new#635`; immediately before the run, record and independently re-read its full base/head/tree/diff/check identities. The Candidate PR under implementation must not be used as its own fixture unless the controller records a separate Owner-approved fixture decision.
 
 ## Mandatory source audit
 
@@ -126,12 +144,13 @@ AC-002 and AC-004 through AC-009 pass only on a live local E2E from authenticate
 
 | ID | cwd | Exact command/argv | Purpose | Required result |
 |---|---|---|---|---|
-| TG5-01 | TARGET_ROOT | `uv run pytest -qq tests/product` | product and tracer regression | all tests pass |
-| TG5-02 | TARGET_ROOT | `git diff --check` | patch integrity | exit 0 |
+| TG5-01 | TARGET_ROOT | `uv run pytest -qq tests/product/test_http_runtime.py tests/product/test_http_e2e.py` | runtime, auth, schema, replay, and tracer regression | all tests pass |
+| TG5-02 | TARGET_ROOT | `NEXUS_CORE_HTTP_PORT=8767 uv run pytest -qq tests/product/test_http_e2e.py -m live --run-live` | authenticated `James3014/Nexus-new#635` acquisition-to-receipt E2E and negative controls | live E2E and all hostile cases pass |
+| TG5-03 | TARGET_ROOT | `git diff --check` | patch integrity | exit 0 |
 
 ## Physical evidence
 
-Capture loopback/auth configuration, canonical request, idempotency/run/acquisition/evidence/result/response/receipt hashes, live E2E, interruption/replay outcomes, Candidate commit, and final state.
+Capture loopback/auth configuration (including token path/mode without token contents), canonical request, exact TG1–TG4 tuple and receipt hashes, idempotency/run/acquisition/evidence/result/response/receipt hashes, live #635 E2E, interruption/replay outcomes, Candidate commit, and final state.
 
 ## Independent review
 
@@ -139,7 +158,7 @@ Fresh reviewer validates endpoint contract, auth/loopback, core delegation, exac
 
 ## Exit conditions
 
-- **PASS:** live local E2E supports `REAL_PR_TRACER_BULLET_VERIFIED`.
-- **BLOCK:** missing live acquisition, bypassed core, duplicate truth, auth drift, or unknown effect.
+- **PASS:** live local E2E for the bound #635 fixture supports `REAL_PR_TRACER_BULLET_VERIFIED`.
+- **BLOCK:** missing live acquisition, missing TG1–TG4 tuple member, bypassed core, duplicate truth, auth/loopback drift, schema/limit ambiguity, or unknown effect.
 - **Residual debt:** clients/package and cross-repo value remain.
-- **Next gate:** TG-6 and TG-7 may become parallel-ready; neither auto-activates.
+- **Next gate:** after controller acceptance, TG-6 and TG-7 are parallel-ready; neither auto-activates.

@@ -4,7 +4,7 @@
 - **Bounded authority:** Ready Issue `#763`
 - **Status:** `ACTIVE`
 - **Source spec:** `SPEC-NEXUS-CORE-V1-FREEZE-001`
-- **Source spec SHA-256:** `1afae6f51f91563d8476a25c220446eab8b06391b8edd99fb95ea0881828d7ed`
+- **Source spec SHA-256:** `9ef4b46838251ce86d20d6469901e1f8f02f66ed468655bb446e170ebe90f170`
 - **Source groups:** TG-0 Boundary/version/crosswalk freeze
 - **Requirements:** REQ-001;REQ-002;REQ-005;REQ-006;REQ-009
 - **Acceptance:** AC-001;AC-003;AC-006;AC-013;AC-015
@@ -51,7 +51,7 @@ No Luna implementation worker, product/kernel/test/runtime implementation, live 
 
 ## Owner decisions
 
-DEC-001; DEC-006; DEC-007; DEC-008; DEC-009; DEC-010. Ready Issue #763 is the bounded authority. TG-0 must preserve old card/history and use formal additive supersession only.
+DEC-001; DEC-006; DEC-007; DEC-008; DEC-009; DEC-010; DEC-011; DEC-012; DEC-013. Ready Issue #763 is the bounded authority. TG-0 must preserve old card/history and use formal additive supersession only.
 
 ## Source and start state
 
@@ -83,14 +83,14 @@ DEC-001; DEC-006; DEC-007; DEC-008; DEC-009; DEC-010. Ready Issue #763 is the bo
 
 - **Read:** AGENTS.md;docs/specs/NEXUS_CORE_V1_FINAL_BOUNDARY_AND_GOLDEN_PATH_FREEZE.md;tasks/core-v1-golden-path-20260904/INDEX.md;tasks/productization-local-changeset-certification-v1-20260817/00-contract-freeze.md;tests/product
 - **Edit:** none
-- **Create:** docs/specs/NEXUS_CORE_V1_FINAL_BOUNDARY_AND_GOLDEN_PATH_FREEZE.md;tasks/core-v1-golden-path-20260904/INDEX.md;tasks/core-v1-golden-path-20260904/TASK-CORE-V1-TG0-FREEZE-RECONCILE.md;tasks/core-v1-golden-path-20260904/TASK-CORE-V1-TG1-GITHUB-ACQUISITION.md;tasks/core-v1-golden-path-20260904/TASK-CORE-V1-TG2-PYTHON-PROFILE.md;tasks/core-v1-golden-path-20260904/TASK-CORE-V1-TG3-EVIDENCE-TRUST.md;tasks/core-v1-golden-path-20260904/TASK-CORE-V1-TG4-LEDGER-RECONCILIATION.md;tasks/core-v1-golden-path-20260904/TASK-CORE-V1-TG5-HTTP-TRACER.md;tasks/core-v1-golden-path-20260904/TASK-CORE-V1-TG6-CLIENTS-PACKAGE.md;tasks/core-v1-golden-path-20260904/TASK-CORE-V1-TG7-CORPUS-SHADOW.md;tasks/core-v1-golden-path-20260904/TASK-CORE-V1-TG8-VALUE-GATE.md
+- **Create:** docs/specs/NEXUS_CORE_V1_FINAL_BOUNDARY_AND_GOLDEN_PATH_FREEZE.md;tasks/core-v1-golden-path-20260904/INDEX.md;tasks/core-v1-golden-path-20260904/TASK-CORE-V1-TG0-FREEZE-RECONCILE.md;tasks/core-v1-golden-path-20260904/TASK-CORE-V1-TG1-GITHUB-ACQUISITION.md;tasks/core-v1-golden-path-20260904/TASK-CORE-V1-TG2-PYTHON-PROFILE.md;tasks/core-v1-golden-path-20260904/TASK-CORE-V1-TG3-EVIDENCE-TRUST.md;tasks/core-v1-golden-path-20260904/TASK-CORE-V1-TG4-LEDGER-RECONCILIATION.md;tasks/core-v1-golden-path-20260904/TASK-CORE-V1-TG5-HTTP-TRACER.md;tasks/core-v1-golden-path-20260904/TASK-CORE-V1-TG6-CLIENTS-PACKAGE.md;tasks/core-v1-golden-path-20260904/TASK-CORE-V1-TG7-CORPUS-SHADOW.md;tasks/core-v1-golden-path-20260904/TASK-CORE-V1-TG8-VALUE-GATE.md;tasks/core-v1-golden-path-20260904/TASK-CORE-V1-TG9-VALUE-PILOT.md
 - **Delete:** none
-- **Maximum touched production files:** 11
+- **Maximum touched production files:** 12
 - **Maximum touched test files:** 0
 
 ## Unknown scan
 
-- **Known facts:** source spec binds DEC-007 through DEC-010; existing old card is physically preserved and current core has reducer/receipt seams.
+- **Known facts:** source spec binds DEC-007 through DEC-013; existing old card is physically preserved and current core has reducer/receipt seams.
 - **Assumptions requiring verification:** formal supported terminal compatibility state for old card; exact additive reconciliation API; no second truth owner introduced.
 - **Architecture risks:** adapter or legacy lifecycle could become an accidental third owner.
 - **Evidence risks:** static crosswalk or reducer tests alone cannot prove live runtime behavior.

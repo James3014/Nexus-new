@@ -37,6 +37,9 @@ A local operator submits one real GitHub PR and a versioned Acceptance Contract 
 | DEC-008 | DEC | Adopt `python-oci-pytest-v1` as the sole highest-certification Python profile: digest-pinned OCI, offline locked dependencies, shell-free argv, isolation/limits, adequate JUnit oracle, two matching fresh executions, durable attempt evidence. | same Owner adoption | 2026-09-04 | BINDING | host runner may produce lower diagnostic evidence only |
 | DEC-009 | DEC | Adopt append-only SQLite WAL/full-sync ledger with transactional idempotency/generation CAS, hash-linked entries, corruption fail-closed inspection, and optional external Ed25519 signing with external private-key custody and no claim elevation. | same Owner adoption | 2026-09-04 | BINDING | exact implementation remains Task Card work |
 | DEC-010 | DEC | Preserve the old Local ChangeSet card/history unchanged; after adoption, reconcile/supersede additively through formal governance, using a supported terminal compatibility state when available and never inheriting its authority. | same Owner adoption | 2026-09-04 | BINDING | TG-0 must verify formal supported state |
+| DEC-011 | DEC | Adopt operational defaults: HTTP `127.0.0.1:8767`; mode-0600 bearer token at `$XDG_CONFIG_HOME/nexus-core/token` or `~/.config/nexus-core/token`; GitHub credentials injected through a secret-free provider boundary; SQLite at `$XDG_STATE_HOME/nexus-core/ledger.sqlite3` or `~/.local/state/nexus-core/ledger.sqlite3`; distribution `nexus-core`; CLI `nexus-certify`; controlled live fixture PR #635. | Owner statement “其他我看過了，都同意” | 2026-09-04 | BINDING | secrets never enter receipts/logs/workers |
+| DEC-012 | DEC | SQLite/hash-chain evidence covers atomicity and detectable corruption, torn-tail, and reorder; arbitrary rollback to an older valid ledger is `ANCHOR_UNAVAILABLE`/`UNVERIFIABLE` unless verified against an external signed head anchor. | same Owner statement + controller reconciliation | 2026-09-04 | BINDING | no false arbitrary-rollback claim |
+| DEC-013 | DEC | Separate cross-repo trust, public protocol maturity, and commercial value into distinct gates; value requires at least 30% paired human-verification-time improvement including Nexus overhead, no trust regression, 3–5 design partners, 4–8 weeks, and continuation or paid signal. | Owner planning basis Gate 6 + same Owner statement | 2026-09-04 | BINDING | no automatic release or production claim |
 | CON-001 | CON | Root `AGENTS.md` separates implementation, verification, acceptance, merge, release, and production authority. | `AGENTS.md` | current snapshot | BINDING | this spec creates no execution authority |
 | CUR-001 | CUR | Public protocol is `0.1.0-experimental`; implementation schema is `nexus.changeset_certification.v2`. | `product/protocol/__init__.py:1-7` | current snapshot | EVIDENCE | separate version axes |
 | CUR-002 | CUR | GitHub adapter accepts a pre-materialized structural snapshot and owns no network or mutation surface. | `product/adapters/github.py:1-7,31-69,103-116,228-258`; `tests/product/test_github_adapter.py:276-311` | current snapshot | EVIDENCE | not live/authenticated acquisition |
@@ -49,7 +52,7 @@ A local operator submits one real GitHub PR and a versioned Acceptance Contract 
 | CUR-009 | CUR | Existing Local ChangeSet card is ACTIVE/candidate-pending and explicitly excludes GitHub/runtime operations. | `tasks/productization-local-changeset-certification-v1-20260817/00-contract-freeze.md:1-49` | current snapshot | EVIDENCE | cannot authorize new Golden Path |
 | DER-001 | DER | `product/adapters/trusted.py` is a donor/Core Candidate for Evidence Trust prerequisite semantics, not a final third owner. | DEC-001 + CUR-005 + review ledger | current synthesis | EVIDENCE | physical destination unresolved |
 | DER-002 | DER | Invariants 8-10 require product-runtime enforcement beyond current library/ingestion evidence. | DEC-002 + A4/C5 findings | current synthesis | EVIDENCE | implementation not authorized |
-| DER-003 | DER | Selection of the second repository and pilot cohort is work owned by TG-7/TG-8 after their real dependencies unlock; it is not an unresolved current-owner decision. | DEC-005 | 2026-09-04 | EVIDENCE | no Stable/value claim until selected and verified |
+| DER-003 | DER | Selection of the second repository and design-partner cohort is work owned by TG-7 and TG-9 after their real dependencies unlock; it is not an unresolved current-owner decision. | DEC-005,DEC-013 | 2026-09-04 | EVIDENCE | no cross-repo/Stable/value claim until selected and verified |
 | REJ-001 | REJ | Public protocol v1 and internal implementation schema v2 must not be treated as one version axis. | CUR-001 + controller adjudication | current synthesis | REJECTED | avoids false conflict |
 
 ## 5. Current verified state
@@ -73,7 +76,7 @@ The current Product namespace has deterministic evidence, verification, certific
 
 ## 6. Owner decisions
 
-`DEC-001` through `DEC-010` are binding. The former HTTP, runner, ledger, and supersession unknowns are resolved by `DEC-007` through `DEC-010`. Second-repository/pilot selection is deliberately deferred by `DER-003` and does not block TG-0 through TG-6.
+`DEC-001` through `DEC-013` are binding. The former HTTP, runner, ledger, supersession, operational-default, rollback-claim, protocol-maturity, and value-gate unknowns are resolved. Second-repository and design-partner selection are execution work owned by TG-7 and TG-9; they are not unresolved Owner decisions and do not block earlier dependency groups.
 
 ## 7. Canonical terminology
 
@@ -114,7 +117,7 @@ Core ownership, ten-invariant crosswalk, real-PR acquisition, Acceptance Contrac
 
 ## 10. Non-goals
 
-Code remediation, patch application, model execution, Planner/Workforce routing, lifecycle orchestration, Learning, Open SWE, cloud/multi-tenant control, approval, merge, deploy, release, production readiness, outcome truth, commercial validation, or automatic successor activation.
+Code remediation, patch application, model execution, Planner/Workforce routing, lifecycle orchestration, Learning, Open SWE, cloud/multi-tenant control, approval, merge, deploy, release, production readiness, outcome truth, automatic commercial claims, or automatic successor activation.
 
 ## 11. User and operator stories
 
@@ -162,7 +165,7 @@ Evidence Trust and Completion are the only truth owners. Runtime and clients tra
 
 ### REQ-004 — Authenticated live acquisition
 - **Status:** `SETTLED`
-- **Source:** `DEC-002, CUR-002`
+- **Source:** `DEC-002, DEC-011, CUR-002`
 - **Behavior:** Acquisition SHALL authenticate to GitHub when required, but SHALL persist and receipt-bind only a credential-free repository locator identity plus PR number, base/head commits and trees, merge-base policy, immutable diff hash/bytes, changed/deleted paths, checks, pagination completeness, observation time, and freshness/CAS preconditions.
 - **Failure behavior:** Caller-supplied structure alone, permission failure, moving head, incomplete data, or identity drift SHALL remain non-certifiable.
 
@@ -198,13 +201,13 @@ Evidence Trust and Completion are the only truth owners. Runtime and clients tra
 
 ### REQ-010 — Durable reconciliation, replay, generation, and CAS
 - **Status:** `SETTLED`
-- **Source:** `DEC-002, DEC-007, DEC-009, DER-002`
+- **Source:** `DEC-002, DEC-007, DEC-009, DEC-011, DEC-012, DER-002`
 - **Behavior:** Product Runtime SHALL bind idempotency key, canonical request hash, attempt/generation, source snapshot, result/receipt, and ledger generation; ambiguous effects SHALL reconcile before retry and integration subjects SHALL requalify after relevant drift.
 - **Failure behavior:** Same key with different request, stale generation, unknown effect, or changed subject SHALL create no duplicate truth and SHALL fail closed.
 
 ### REQ-011 — Ledger and signing boundary
 - **Status:** `SETTLED`
-- **Source:** `DEC-001, DEC-009`
+- **Source:** `DEC-001, DEC-009, DEC-011, DEC-012`
 - **Behavior:** The carrying layer SHALL append, inspect, replay-verify, recover, and optionally sign exact receipts; signatures attest identity only and SHALL NOT raise the claim ceiling.
 - **Failure behavior:** Corruption, truncation, reorder, crash ambiguity, or key mismatch SHALL block signed/durable claims without altering factual verification.
 
@@ -220,11 +223,17 @@ Evidence Trust and Completion are the only truth owners. Runtime and clients tra
 - **Behavior:** Core V1 SHALL install reproducibly with minimal dependencies, offer one certification-first quickstart, preserve receipt compatibility, and mark Workflow OS surfaces legacy/lab until separately retired.
 - **Failure behavior:** Failed upgrade SHALL support tested rollback without rewriting receipt history.
 
-### REQ-014 — Protocol maturity and cross-repo value
+### REQ-014 — Protocol maturity and cross-repository trust
 - **Status:** `SETTLED`
-- **Source:** `DEC-005, CUR-007, DER-003`
-- **Behavior:** RC/Stable SHALL require real vertical, representative hostile corpus with zero high-risk false certifications, second-repo shadow, client conformance, compatibility, upgrade/rollback, and paired human-time evidence including Nexus overhead.
-- **Failure behavior:** Missing oracle, denominator, subject, or gate artifact SHALL preserve the lower maturity/claim.
+- **Source:** `DEC-005, DEC-013, CUR-007, DER-003`
+- **Behavior:** RC/Stable SHALL require the real vertical, a representative hostile corpus with zero observed high-risk false certifications, a second-repository shadow, client conformance, compatibility, and verified upgrade/rollback evidence.
+- **Failure behavior:** Missing oracle, denominator, external subject, compatibility, or gate artifact SHALL preserve the lower protocol maturity and trust claim.
+
+### REQ-015 — Usability and design-partner value
+- **Status:** `SETTLED`
+- **Source:** `DEC-013`
+- **Behavior:** A separate value gate SHALL run a 4–8 week paired evaluation with 3–5 narrow-ICP design partners, measure human verification time including Nexus reading and follow-up overhead, require at least 30% improvement without trust regression, and record a continuation or paid signal.
+- **Failure behavior:** Missing paired denominator, human authority, overhead, trust parity, cohort duration, or continuation/paid signal SHALL forbid usability, continuation, paid, or commercial-value claims without lowering protocol truth.
 
 ## 14. Behavioral and interface decisions
 
@@ -317,14 +326,14 @@ Highest pre-Stable seam: live read-only GitHub acquisition, isolated exact-head 
 - **Fail:** HTTP bypasses either core, duplicates semantics, or loses subject/reconciliation binding.
 - **Receipt binding:** canonical request, idempotency, run, acquisition, evidence, result, response, and receipt hashes
 
-### AC-010 — Stable/value gate
+### AC-010 — Cross-repository trust gate
 - **Requirement:** `REQ-014`
 - **Evidence level:** `BENCHMARK`
-- **Verification seam:** representative hostile corpus, second-repo shadow, compatibility, and paired human-time experiment
-- **Pass:** every Stable gate is revision-bound; high-risk false certification is zero; human-time comparison includes Nexus overhead.
-- **Negative control:** remove oracle/denominator/paired subject/gate artifact.
-- **Fail:** internal source/tests or fixed corpus are promoted to Stable/commercial truth.
-- **Receipt binding:** protocol candidate, corpus/task-set, external repo/revision, paired attempts, oracle, time log, compatibility, upgrade/rollback hashes
+- **Verification seam:** representative hostile corpus and second-repository shadow
+- **Pass:** corpus and shadow are revision-bound, contain at least 50 cases across at least 8 hostile families, and record zero observed high-risk false certifications with the exact denominator.
+- **Negative control:** remove oracle, denominator, hostile-family coverage, external repository/revision, or shadow artifact.
+- **Fail:** internal source/tests or the fixed local corpus are promoted to cross-repository or Stable truth.
+- **Receipt binding:** protocol candidate, corpus/task-set, external repository/revision, attempts, oracle, denominator, and shadow-report hashes
 
 ### AC-011 — Thin-client semantic parity
 - **Requirement:** `REQ-012`
@@ -371,14 +380,23 @@ Highest pre-Stable seam: live read-only GitHub acquisition, isolated exact-head 
 - **Fail:** missing, stale, or cross-bound contract/plan can certify.
 - **Receipt binding:** contract, plan, ChangeSet, evidence requirement, protocol, and schema hashes
 
-### AC-016 — Protocol maturity and paired value gate
+### AC-016 — Public protocol maturity gate
 - **Requirement:** `REQ-014`
 - **Evidence level:** `BENCHMARK`
-- **Verification seam:** public protocol compatibility/upgrade/rollback plus paired human verification-time experiment after the external shadow
-- **Pass:** RC/Stable evidence is revision-bound and paired human-time measurements include Nexus reading/follow-up overhead without lowering trust quality.
-- **Negative control:** remove compatibility, rollback, paired denominator, human authority, or time-overhead evidence.
-- **Fail:** corpus/shadow evidence alone is promoted to Stable, value, continuation, paid, or commercial truth.
-- **Receipt binding:** protocol candidate, compatibility, upgrade/rollback, paired subjects/attempts, oracle, time log, and report hashes
+- **Verification seam:** public protocol compatibility, client conformance, upgrade, and rollback after the real vertical and external shadow
+- **Pass:** every RC/Stable input is revision-bound and explicit RC/Stable thresholds pass without inferred release or production authority.
+- **Negative control:** remove compatibility, client conformance, upgrade, rollback, real-vertical, or shadow evidence.
+- **Fail:** corpus/shadow or source-only evidence is promoted to Stable, release, production, or value truth.
+- **Receipt binding:** protocol candidate, compatibility matrix, conformance, upgrade/rollback, tracer-bullet, corpus, shadow, and report hashes
+
+### AC-017 — Paired usability and commercial-value gate
+- **Requirement:** `REQ-015`
+- **Evidence level:** `BENCHMARK`
+- **Verification seam:** 4–8 week paired human verification-time experiment with 3–5 narrow-ICP design partners after the protocol maturity gate
+- **Pass:** paired measurements show at least 30% improvement including Nexus reading/follow-up overhead, no trust regression, and a continuation or paid signal.
+- **Negative control:** remove the paired denominator, human authority, overhead, trust comparison, cohort/duration evidence, or continuation/paid signal.
+- **Fail:** protocol maturity or unpaired anecdotes are promoted to usability, continuation, paid, or commercial truth.
+- **Receipt binding:** design-partner/cohort identity, paired subjects/attempts, human authority, oracle, time log, overhead, trust comparison, continuation/paid signal, and report hashes
 
 ## 17. Traceability matrix
 
@@ -387,17 +405,18 @@ Highest pre-Stable seam: live read-only GitHub acquisition, isolated exact-head 
 | REQ-001 | DEC-001,DEC-006,CON-001,DER-001 | MODIFIED | AC-001 | STATIC | boundary candidate | TG-0 |
 | REQ-002 | DEC-001,DEC-010,CUR-004,CUR-005,CUR-006,CUR-009,DER-002 | MODIFIED | AC-013 | STATIC | crosswalk only | TG-0 |
 | REQ-003 | DEC-002 | ADDED | AC-014 | LIVE_RUNTIME | tracer bullet | TG-5 |
-| REQ-004 | DEC-002,CUR-002 | ADDED | AC-002 | LIVE_RUNTIME | trusted snapshot | TG-1 |
+| REQ-004 | DEC-002,DEC-011,CUR-002 | ADDED | AC-002 | LIVE_RUNTIME | trusted snapshot | TG-1 |
 | REQ-005 | DEC-005,CUR-001,REJ-001 | MODIFIED | AC-003 | SIMULATION | version contract | TG-0 |
 | REQ-006 | DEC-002,CUR-004 | MODIFIED | AC-015 | SIMULATION | contract bound | TG-0/TG-2 |
 | REQ-007 | DEC-003,DEC-008 | ADDED | AC-004 | LIVE_RUNTIME | Python profile | TG-2 |
 | REQ-008 | DEC-001,CUR-005,DER-001 | MODIFIED | AC-005 | LIVE_RUNTIME | trusted evidence | TG-3 |
 | REQ-009 | DEC-003,CUR-006 | MODIFIED | AC-006 | SIMULATION | factual completion | TG-0/TG-5 |
-| REQ-010 | DEC-002,DEC-007,DEC-009,DER-002 | ADDED | AC-007 | LIVE_RUNTIME | durable runtime | TG-4 |
-| REQ-011 | DEC-001,DEC-009 | ADDED | AC-008 | LIVE_RUNTIME | ledger candidate | TG-4 |
+| REQ-010 | DEC-002,DEC-007,DEC-009,DEC-011,DEC-012,DER-002 | ADDED | AC-007 | LIVE_RUNTIME | durable runtime | TG-4 |
+| REQ-011 | DEC-001,DEC-009,DEC-011,DEC-012 | ADDED | AC-008 | LIVE_RUNTIME | ledger candidate | TG-4 |
 | REQ-012 | DEC-004,DEC-007,CUR-003 | ADDED | AC-009,AC-011 | LIVE_RUNTIME | HTTP/client parity | TG-5/TG-6 |
 | REQ-013 | DEC-004,CUR-008 | MODIFIED | AC-012 | CANARY | operator journey | TG-6 |
-| REQ-014 | DEC-005,CUR-007,DER-003 | ADDED | AC-010,AC-016 | BENCHMARK | Stable/value evidence | TG-7/TG-8 |
+| REQ-014 | DEC-005,DEC-013,CUR-007,DER-003 | ADDED | AC-010,AC-016 | BENCHMARK | cross-repo trust/protocol maturity | TG-7/TG-8 |
+| REQ-015 | DEC-013 | ADDED | AC-017 | BENCHMARK | bounded usability/value evidence | TG-9 |
 
 ## 18. Evidence and claim ceiling
 
@@ -413,7 +432,7 @@ After adoption, product protocol, operator quickstart, compatibility, and legacy
 
 ## 21. Risks and unknowns
 
-The former HTTP, runner, ledger/signing, and old-card unknowns are resolved by `DEC-007` through `DEC-010`; implementation still must prove their acceptance criteria. External repo/pilot selection remains deferred by `DER-003`. Additional risks: trusted source mistaken for live acquisition; fixed corpus overclaimed; adapter/core ownership blurred; legacy orchestration retained as hidden dependency; OCI and bearer-token setup increasing operator friction.
+The former HTTP, runner, ledger/signing, old-card, operational-default, rollback-claim, protocol/value split, and pilot-threshold unknowns are resolved by `DEC-007` through `DEC-013`; implementation still must prove their acceptance criteria. External-repository and design-partner selection are execution evidence owned by TG-7 and TG-9. Additional risks: trusted source mistaken for live acquisition; fixed corpus overclaimed; adapter/core ownership blurred; legacy orchestration retained as hidden dependency; OCI and bearer-token setup increasing operator friction.
 
 ## 22. Unresolved owner decisions
 
@@ -423,18 +442,19 @@ none
 
 | Task group | Requirements | Acceptance | Observable outcome | Dependency seam | Verification seam | Maximum claim | Scope class | Minimum MCP profile | Known blocker |
 |---|---|---|---|---|---|---|---|---|---|
-| TG-0 Boundary/version/crosswalk freeze | REQ-001;REQ-002;REQ-005;REQ-006;REQ-009 | AC-001;AC-003;AC-006;AC-013;AC-015 | adopted two-core/version/invariant contract plus additive old-card reconciliation | DEC-007 through DEC-010 | static + simulation | `CORE_V1_BOUNDARY_ADOPTED` | medium | not applicable | none |
-| TG-1 Live GitHub acquisition | REQ-004 | AC-002 | authenticated immutable PR snapshot | TG-0 | live read-only probes | `LIVE_PR_SNAPSHOT_VERIFIED` | medium | CANDIDATE | none |
-| TG-2 Python profile | REQ-007 | AC-004 | clean deterministic witness bundle | TG-0 accepted contract | isolated runner matrix | `PYTHON_PROFILE_VERIFIED` | medium | CANDIDATE | none |
-| TG-3 Evidence Trust extraction | REQ-008 | AC-005 | canonical trust owner consumes TG-1/TG-2 | TG-0 interfaces | hostile ingestion tests | `EVIDENCE_TRUST_BOUNDARY_VERIFIED` | medium | CANDIDATE | none |
-| TG-4 Durable ledger/reconciliation | REQ-010;REQ-011 | AC-007;AC-008 | idempotent crash-safe receipt history | TG-0 + TG-3 identities | restart/tamper/CAS | `LOCAL_LEDGER_RECONCILIATION_VERIFIED` | medium | CANDIDATE | none |
-| TG-5 HTTP tracer bullet | REQ-003;REQ-012 | AC-009;AC-014 | real PR to inspectable receipt | TG-1 + TG-2 + TG-3 + TG-4 interfaces | live local E2E plus upstream witness consumption | `REAL_PR_TRACER_BULLET_VERIFIED` | medium | CANDIDATE | none |
-| TG-6 Thin clients/package | REQ-012;REQ-013 | AC-011;AC-012 | client parity and clean install journey | TG-5 | conformance/install/rollback | `OPERATOR_JOURNEY_VERIFIED` | medium | CANDIDATE | none |
-| TG-7 Corpus/second repo | REQ-014 | AC-010 | representative corpus and external shadow | TG-5 plus DER-003 selection | benchmark + shadow | `CROSS_REPO_TRUST_SHADOW_VERIFIED` | medium | VERIFY | none |
-| TG-8 Protocol/value gate | REQ-014 | AC-016 | evidence-gated RC/Stable and paired value data | TG-6 + TG-7 | compatibility/value experiment | bounded maturity/value claim | medium | VERIFY | none |
-After TG-0: TG-1 and TG-2 may run in parallel. TG-3 consumes both evidence contracts. TG-4 can implement ledger/reconciliation once TG-3 identities freeze. TG-5 integrates. TG-6 follows TG-5.
+| TG-0 Boundary/version/crosswalk freeze | REQ-001;REQ-002;REQ-005;REQ-006;REQ-009 | AC-001;AC-003;AC-006;AC-013;AC-015 | adopted two-core/version/invariant contract plus additive old-card reconciliation | DEC-007 through DEC-013 | static + simulation | `CORE_V1_BOUNDARY_ADOPTED` | medium | not applicable | none |
+| TG-1 Live GitHub acquisition | REQ-004 | AC-002 | authenticated immutable PR snapshot | TG-0 | live read-only probes | `LIVE_PR_SNAPSHOT_VERIFIED` | medium | not applicable | none |
+| TG-2 Python profile | REQ-007 | AC-004 | clean deterministic witness bundle | TG-0 accepted contract | isolated runner matrix | `PYTHON_PROFILE_VERIFIED` | medium | not applicable | none |
+| TG-3 Evidence Trust extraction | REQ-008 | AC-005 | canonical trust owner consumes TG-1/TG-2 | TG-1 + TG-2 accepted receipts | hostile ingestion tests | `EVIDENCE_TRUST_BOUNDARY_VERIFIED` | medium | not applicable | none |
+| TG-4 Durable ledger/reconciliation | REQ-010;REQ-011 | AC-007;AC-008 | idempotent crash-safe receipt history | TG-3 accepted identities | restart/tamper/CAS | `LOCAL_LEDGER_RECONCILIATION_VERIFIED` | medium | not applicable | none |
+| TG-5 HTTP tracer bullet | REQ-003;REQ-012 | AC-009;AC-014 | real PR to inspectable receipt | TG-1 + TG-2 + TG-3 + TG-4 accepted interfaces | live local E2E plus upstream witness consumption | `REAL_PR_TRACER_BULLET_VERIFIED` | medium | not applicable | none |
+| TG-6 Thin clients/package | REQ-012;REQ-013 | AC-011;AC-012 | client parity and clean install journey | TG-5 | conformance/install/rollback | `OPERATOR_JOURNEY_VERIFIED` | medium | not applicable | none |
+| TG-7 Corpus/second repo | REQ-014 | AC-010 | representative corpus and external shadow | TG-5 plus DER-003 selection | benchmark + shadow | `CROSS_REPO_TRUST_SHADOW_VERIFIED` | medium | not applicable | none |
+| TG-8 Protocol maturity | REQ-014 | AC-016 | evidence-gated RC/Stable readiness | TG-6 + TG-7 | compatibility/conformance/upgrade/rollback | bounded protocol-maturity claim | medium | not applicable | none |
+| TG-9 Design-partner value | REQ-015 | AC-017 | paired usability and continuation/paid evidence | TG-8 | 3–5 partner, 4–8 week paired experiment | bounded usability/value claim | medium | not applicable | none |
+After TG-0, TG-1 and TG-2 may run in parallel in isolated worktrees. TG-3 consumes both accepted evidence contracts. TG-4 follows frozen TG-3 identities. TG-5 integrates. TG-6 and TG-7 may then run in parallel. TG-8 joins their accepted evidence; TG-9 follows TG-8.
 
-TG-7 covers REQ-014/AC-010 representative corpus and second-repository shadow after TG-5; TG-8 is the final Protocol/value witness after TG-6 and TG-7. `DER-003` makes selection part of those future tasks and forbids Stable/value claims until physical evidence exists.
+TG-7 covers the representative corpus and second-repository shadow; TG-8 is the Protocol RC/Stable readiness witness; TG-9 independently measures usability and commercial-value signals. `DER-003` makes selection part of those future tasks and forbids cross-repo, Stable, or value claims until their respective physical evidence exists.
 
 ## 24. Out of scope
 
@@ -444,4 +464,4 @@ No source implementation, Task Card creation, Candidate, approval, merge, deploy
 
 - Drafted 2026-09-04 from Owner planning direction, exact current source, coordinator tests, C5 Spark review, B7 Luna review, and bounded A4 Opus partial crosswalk.
 - Corrects the false equation between public protocol v1 and internal implementation schema v2.
-- Owner adopted `DEC-007` through `DEC-010` on 2026-09-04. The old Local ChangeSet card remains physically unchanged until TG-0 performs additive formal reconciliation.
+- Owner adopted `DEC-007` through `DEC-010` on 2026-09-04, then confirmed the operational defaults and protocol/value separation in `DEC-011` through `DEC-013`. The old Local ChangeSet card remains physically unchanged until TG-0 performs additive formal reconciliation.

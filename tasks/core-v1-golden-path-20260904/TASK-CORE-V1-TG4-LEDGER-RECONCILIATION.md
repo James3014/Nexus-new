@@ -4,7 +4,7 @@
 - **Bounded authority:** Ready Issue `#763`
 - **Status:** `PLANNED`
 - **Source spec:** `SPEC-NEXUS-CORE-V1-FREEZE-001`
-- **Source spec SHA-256:** `1afae6f51f91563d8476a25c220446eab8b06391b8edd99fb95ea0881828d7ed`
+- **Source spec SHA-256:** `9ef4b46838251ce86d20d6469901e1f8f02f66ed468655bb446e170ebe90f170`
 - **Source groups:** TG-4 Durable ledger/reconciliation
 - **Requirements:** REQ-010;REQ-011
 - **Acceptance:** AC-007;AC-008
@@ -15,8 +15,8 @@
 - **Task type:** `IMPLEMENTATION`
 - **Slicing strategy:** `TRACER_BULLET`
 - **Scope class:** `medium`
-- **Execution lane:** `NEXUS_LIFECYCLE_V2`
-- **Minimum MCP profile:** `CANDIDATE`
+- **Execution lane:** `NON_MCP`
+- **Minimum MCP profile:** `not applicable`
 - **Commit required:** `true`
 - **Candidate required:** `true`
 - **Parallel safe:** `false`
@@ -24,7 +24,7 @@
 
 ## Goal
 
-Implement append-only SQLite WAL/full-sync receipt history with idempotency, generation CAS, crash recovery, hash links, corruption fail-closed inspection, and optional identity-only signing.
+Implement append-only SQLite WAL/full-sync receipt history with idempotency, generation CAS, crash recovery, hash links, corruption fail-closed inspection, and optional identity-only signing over the TG-3 canonical identity envelope and exact Completion receipt.
 
 ## Observable outcome
 
@@ -58,41 +58,41 @@ DEC-007; DEC-009. SQLite WAL/full-sync and external private-key custody are bind
 
 ## MCP execution profile
 
-- **App/server and action snapshot:** Nexus lifecycle MCP snapshot required at execution
-- **Exact required actions:** nexus_task_run;nexus_task_status;nexus_task_wait;nexus_task_reconcile;nexus_task_finish
-- **Confirmation-required actions:** nexus_task_run;nexus_task_finish
+- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna execution under Ready Issue #763
+- **Exact required actions:** not applicable
+- **Confirmation-required actions:** none
 - **Idempotency and attempt rule:** key plus canonical request hash and generation CAS; changed request never reuses entry
-- **Reconnect reconciliation:** reconcile durable ledger state before retry after any unknown effect
+- **Reconnect reconciliation:** controller re-reads the same worker/session, filesystem, Git, provider, and durable ledger state before retry after any unknown effect
 - **Transport blocker:** none
 
 ## Authority map
 
 - **Selection authority:** Owner/Campaign controller and CapabilityPlanner
-- **Execution authority:** approved Luna worker
-- **Verification authority:** independent controller restart/tamper/CAS probes
+- **Execution authority:** approved Luna worker through the non-Nexus `DIRECT_DELEGATED` control plane
+- **Verification authority:** independent controller restart/tamper/CAS probes; worker PASS is not acceptance
 - **Receipt authority:** ledger carries exact Completion receipts; it cannot change claim ceiling
 - **Approval/integration authority:** external Owner-designated authority only
 
 ## Allowed scope
 
 - **Read:** product/certification/receipt.py;product/evidence/ingestion.py;tests/product/test_evidence_receipt_hardening.py
-- **Edit:** product/certification/receipt.py;product/evidence/ingestion.py
-- **Create:** product/ledger.py
+- **Edit:** product/certification/receipt.py;product/evidence/ingestion.py;tests/product/test_evidence_receipt_hardening.py
+- **Create:** product/ledger.py;tests/product/test_ledger.py
 - **Delete:** none
 - **Maximum touched production files:** 3
-- **Maximum touched test files:** 0
+- **Maximum touched test files:** 2
 
 ## Unknown scan
 
-- **Known facts:** no product-level durable ledger/reconciliation seam is verified.
-- **Assumptions requiring verification:** SQLite schema, fsync semantics, key metadata, crash boundaries, and recovery API.
-- **Architecture risks:** ledger becoming a truth owner rather than carrier.
-- **Evidence risks:** in-memory idempotency or clean shutdown is insufficient.
-- **Missing owner decision:** none
+- **Known facts:** no product-level durable ledger/reconciliation seam is verified; current receipt and trust objects are process-local.
+- **Assumptions requiring verification:** SQLite schema, XDG path, full-sync semantics, key metadata, crash boundaries, recovery API, and external signed-head anchor availability.
+- **Architecture risks:** ledger becoming a truth owner rather than a carrier; persisting a hash without a reloadable canonical payload.
+- **Evidence risks:** in-memory idempotency, clean shutdown, or arbitrary rollback to an earlier valid state cannot support AC-007/AC-008.
+- **Missing owner decision:** none; the bounded persistence/signing contract below is required before implementation.
 
 ## Mandatory source audit
 
-Audit receipt identity, evidence generations, existing hardening tests, durable boundary ordering, corruption/recovery semantics, and signature custody boundary.
+Audit receipt identity, TG-3 envelope/generation fields, existing hardening tests, durable boundary ordering, corruption/recovery semantics, multiprocess locking, and signature custody boundary. Confirm the ledger carries trust/completion outputs but never derives a new factual disposition.
 
 ## Start-state classification
 
@@ -100,34 +100,34 @@ Audit receipt identity, evidence generations, existing hardening tests, durable 
 
 ## RED or existing-guard proof
 
-Crash at every durable boundary, duplicate key, request drift, stale generation, truncation, reorder, replacement, and key metadata mismatch must fail closed or reconcile.
+Crash at every durable boundary, duplicate key, request drift, stale generation, torn tail, reorder, replacement, multiprocess lock contention, and key metadata mismatch must fail closed or reconcile. A fully valid historical rollback is not detectable without an external signed head anchor; without one, the reader must return `ANCHOR_UNAVAILABLE`/`UNVERIFIABLE`, never claim rollback detection.
 
 ## Implementation constraints
 
-Append-only WAL/full-sync, transactional CAS, hash-linked entries, external private-key custody, and no signature-based claim elevation.
+Default path is `~/.local/state/nexus-core/ledger.sqlite3` (explicit XDG state override permitted). Configure SQLite `journal_mode=WAL`, `synchronous=FULL`, foreign keys, and `BEGIN IMMEDIATE` for append/CAS. Persist unique idempotency key, canonical request hash, attempt/generation, source snapshot hash, result/receipt hash, sequence, previous-entry hash, entry hash, signer key ID/algorithm/signature, and durable head metadata. Add failpoints before write, after write/before commit, and after commit/before response. External signer receives only canonical digest and returns public key metadata plus signature; private keys never enter Nexus. Signatures attest identity only and never elevate the claim ceiling.
 
 ## GREEN and regression gates
 
-AC-007 and AC-008 pass only with restart/replay/tamper/CAS evidence and exact receipt identity preservation.
+AC-007 and AC-008 pass only with restart/replay/tamper/CAS evidence, exact receipt identity preservation, multiprocess contention evidence, and explicit anchor behavior (`VERIFIED` only when an external signed head anchor validates; otherwise `ANCHOR_UNAVAILABLE`/`UNVERIFIABLE`).
 
 ## Mandatory command manifest
 
 | ID | cwd | Exact command/argv | Purpose | Required result |
 |---|---|---|---|---|
-| TG4-01 | TARGET_ROOT | `uv run pytest -qq tests/product/test_evidence_receipt_hardening.py` | receipt durability regression | all tests pass |
+| TG4-01 | TARGET_ROOT | `uv run pytest -qq tests/product/test_evidence_receipt_hardening.py tests/product/test_ledger.py` | receipt serialization plus SQLite WAL/restart/CAS/corruption/signing regression | all tests pass |
 | TG4-02 | TARGET_ROOT | `git diff --check` | patch integrity | exit 0 |
 
 ## Physical evidence
 
-Capture ledger generation/entry hashes, crash/restart observations, idempotency/CAS outcomes, signer/key metadata, attempt, Candidate commit, and recovery receipt.
+Capture XDG ledger path, schema/PRAGMA values, generation/entry/head hashes, crash/restart observations, idempotency/CAS and multiprocess outcomes, corruption/torn-tail and anchor result, signer/key metadata (never private key), attempt, Candidate commit, and recovery receipt.
 
 ## Independent review
 
-Fresh reviewer inspects transaction boundaries, corruption behavior, signing scope, receipt identity, tests, and authority ceiling.
+Fresh reviewer inspects transaction boundaries, WAL/full-sync/CAS behavior, multiprocess locking, chain/anchor corruption behavior, signing scope and key custody, reloadable receipt identity, exact tests, and authority ceiling.
 
 ## Exit conditions
 
-- **PASS:** restart/tamper/CAS receipt supports `LOCAL_LEDGER_RECONCILIATION_VERIFIED`.
-- **BLOCK:** ambiguous recovery, corruption accepted, duplicate truth, or signature claim elevation.
+- **PASS:** restart/tamper/CAS receipt supports `LOCAL_LEDGER_RECONCILIATION_VERIFIED`, with anchor availability or explicit `ANCHOR_UNAVAILABLE`/`UNVERIFIABLE` handling.
+- **BLOCK:** ambiguous recovery, corruption accepted, duplicate truth, missing chain/head binding, arbitrary rollback treated as detected without an anchor, private-key material crossing the port, or signature claim elevation.
 - **Residual debt:** HTTP integration remains downstream.
 - **Next gate:** TG-5 integrates the end-to-end local HTTP tracer.

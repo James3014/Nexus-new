@@ -4,7 +4,7 @@
 - **Bounded authority:** Ready Issue `#763`
 - **Status:** `PLANNED`
 - **Source spec:** `SPEC-NEXUS-CORE-V1-FREEZE-001`
-- **Source spec SHA-256:** `1afae6f51f91563d8476a25c220446eab8b06391b8edd99fb95ea0881828d7ed`
+- **Source spec SHA-256:** `9ef4b46838251ce86d20d6469901e1f8f02f66ed468655bb446e170ebe90f170`
 - **Source groups:** TG-2 Python profile
 - **Requirements:** REQ-007
 - **Acceptance:** AC-004
@@ -15,8 +15,8 @@
 - **Task type:** `IMPLEMENTATION`
 - **Slicing strategy:** `TRACER_BULLET`
 - **Scope class:** `medium`
-- **Execution lane:** `NEXUS_LIFECYCLE_V2`
-- **Minimum MCP profile:** `CANDIDATE`
+- **Execution lane:** `NON_MCP`
+- **Minimum MCP profile:** `not applicable`
 - **Commit required:** `true`
 - **Candidate required:** `true`
 - **Parallel safe:** `false`
@@ -58,33 +58,33 @@ DEC-003; DEC-008. OCI digest, offline lock, shell-free argv, limits, JUnit oracl
 
 ## MCP execution profile
 
-- **App/server and action snapshot:** Nexus lifecycle MCP snapshot required at execution
-- **Exact required actions:** nexus_task_run;nexus_task_status;nexus_task_wait;nexus_task_reconcile;nexus_task_finish
-- **Confirmation-required actions:** nexus_task_run;nexus_task_finish
-- **Idempotency and attempt rule:** one attempt per exact contract/source/environment; retries use new attempt and require matching fresh executions
-- **Reconnect reconciliation:** reconcile durable attempt before retry; unknown effect is UNVERIFIABLE/BLOCKED
+- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna execution under Ready Issue #763
+- **Exact required actions:** not applicable
+- **Confirmation-required actions:** none
+- **Idempotency and attempt rule:** one bounded Luna attempt on an issue-specific isolated worktree per exact contract/source/environment; retries use a new attempt and require matching fresh executions
+- **Reconnect reconciliation:** controller re-reads the same worker/session, filesystem, Git, provider, OCI, and attempt state before retry; unknown effect is `UNVERIFIABLE`
 - **Transport blocker:** none
 
 ## Authority map
 
 - **Selection authority:** Owner/Campaign controller and CapabilityPlanner
-- **Execution authority:** approved Luna worker in isolated runner
-- **Verification authority:** independent controller and adequate oracle receipt
+- **Execution authority:** approved Luna worker through the non-Nexus `DIRECT_DELEGATED` control plane in an isolated worktree
+- **Verification authority:** independent controller and adequate oracle receipt; worker PASS is not acceptance
 - **Receipt authority:** Completion Core after trusted ingestion
 - **Approval/integration authority:** external Owner-designated authority only
 
 ## Allowed scope
 
-- **Read:** product/execution/__init__.py;product/evidence/ingestion.py;product/verification/__init__.py;tests/product/test_kernel.py;tests/product/test_trusted_evidence_ingestion.py
-- **Edit:** product/execution/__init__.py;product/evidence/ingestion.py
-- **Create:** product/execution/python_runner.py
+- **Read:** product/execution/__init__.py;product/evidence/ingestion.py;product/verification/__init__.py;tests/product/test_kernel.py;tests/product/test_trusted_evidence_ingestion.py;uv.lock
+- **Edit:** product/execution/__init__.py
+- **Create:** product/execution/python_runner.py;product/execution/profiles/python-oci-pytest-v1.json;product/execution/profiles/python-oci-pytest-v1.lock;tests/product/test_python_runner.py
 - **Delete:** none
-- **Maximum touched production files:** 3
-- **Maximum touched test files:** 0
+- **Maximum touched production files:** 4
+- **Maximum touched test files:** 1
 
 ## Unknown scan
 
-- **Known facts:** current execution namespace contains pure ports; no clean OCI runner is verified.
+- **Known facts:** current execution namespace contains pure ports; Docker 28.5.1 is available to the controller; local base image is `python:3.12-alpine@sha256:d09d15e60962ca365d1cd544a48773bac9d33f2fb1b00f2aa0deec78ade7dc31`; current `uv.lock` SHA-256 is `3e753af334885a2f434a94d40fc8860abd151516950e7f1e3647971f2e0dfc51`; no clean OCI runner is yet verified.
 - **Assumptions requiring verification:** OCI runtime, locked dependency source, JUnit adequacy, shell-free invocation, limits, and environment reproducibility.
 - **Architecture risks:** host runner or weak oracle could be mistaken for certification.
 - **Evidence risks:** one run or exit code cannot prove determinism.
@@ -104,7 +104,7 @@ Truth table must include adequate pass/fail, inadequate oracle, unavailable runn
 
 ## Implementation constraints
 
-Use digest-pinned OCI and offline lock, shell-free argv, isolated limits, adequate JUnit oracle, two matching fresh executions; never convert unavailable or unknown to success.
+Use the bound digest-pinned OCI base and an explicit offline profile lock contract, shell-free argv, network disabled, read-only root/source where applicable, resource/time limits, adequate JUnit oracle, two matching fresh executions, deterministic artifact hashing, and replay protection. Never edit Evidence Trust in this card or convert unavailable, inadequate, nondeterministic, or unknown outcomes to success.
 
 ## GREEN and regression gates
 
@@ -114,12 +114,13 @@ AC-003 and AC-004 pass only with exact contract/version/source/environment bindi
 
 | ID | cwd | Exact command/argv | Purpose | Required result |
 |---|---|---|---|---|
-| TG2-01 | TARGET_ROOT | `uv run pytest -qq tests/product/test_kernel.py tests/product/test_trusted_evidence_ingestion.py` | runner binding regression | all tests pass |
-| TG2-02 | TARGET_ROOT | `git diff --check` | patch integrity | exit 0 |
+| TG2-01 | TARGET_ROOT | `uv run pytest -qq tests/product/test_python_runner.py tests/product/test_kernel.py tests/product/test_trusted_evidence_ingestion.py` | runner truth-table and binding regression | all tests pass |
+| TG2-02 | TARGET_ROOT | `uv run pytest --collect-only -q tests/product/test_python_runner.py` | prove dedicated runner tests are discovered | exit 0 with intended tests listed |
+| TG2-03 | TARGET_ROOT | `git diff --check` | patch integrity | exit 0 |
 
 ## Physical evidence
 
-Capture profile/image/lock digests, run and attempt IDs, source/environment/command/stdout/stderr/exit/artifact hashes, two-run comparison, Candidate commit, and final receipt.
+Capture profile/image/lock digests, exact OCI runtime/version, run and attempt IDs, source/environment/shell-free argv/stdout/stderr/exit/JUnit/artifact hashes, isolation and limits, two-run comparison, replay negative, Candidate commit, and controller live-Docker receipt.
 
 ## Independent review
 
