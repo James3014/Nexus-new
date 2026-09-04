@@ -102,16 +102,20 @@ class PythonOCIProfile:
     @classmethod
     def load(cls, manifest: Path, lock: Path, uv_lock: Optional[Path] = None) -> "PythonOCIProfile":
         data = json.loads(manifest.read_text())
+        if set(data) != {"profile_id", "image", "image_digest", "lock_digest", "network", "rootfs", "command", "timeout_seconds", "memory_bytes", "cpu_seconds", "dependency_artifacts_hash"}:
+            raise ValueError("manifest keys mismatch")
         locked = json.loads(lock.read_text())
         required = {"profile_id", "image", "image_digest", "uv_lock_sha256", "offline", "network", "dependency_artifacts"}
         if set(locked) != required or locked["offline"] is not True or locked["network"] != "none" or tuple(tuple(x) for x in locked["dependency_artifacts"]) != DEPENDENCY_ARTIFACTS:
             raise ValueError("profile lock keys or policy mismatch")
-        actual = _digest(uv_lock.read_bytes())[7:] if uv_lock is not None and uv_lock.exists() else locked["uv_lock_sha256"]
+        actual = _digest(uv_lock.read_bytes())[7:] if uv_lock is not None and uv_lock.exists() else LOCK_DIGEST[7:]
         if locked["uv_lock_sha256"] != actual:
             raise ValueError("uv.lock digest mismatch")
         profile = cls(**{k: tuple(v) if k == "command" else v for k, v in data.items()})
         if locked["profile_id"] != profile.profile_id or locked["image"] != profile.image or locked["image_digest"] != profile.image_digest:
             raise ValueError("profile lock mismatch")
+        if profile.lock_digest != "sha256:" + locked["uv_lock_sha256"] or profile.lock_digest != LOCK_DIGEST or profile.dependency_artifacts_hash != DEPENDENCY_ARTIFACTS_HASH:
+            raise ValueError("frozen profile mismatch")
         return profile
 
 
@@ -175,7 +179,11 @@ class RunnerResult:
         if len(attempts) != 2 or attempts[0].execution_id == attempts[1].execution_id:
             raise ValueError("receipt requires two distinct executions")
         status = RunnerStatus.VERIFIED if attempts[0].exit_code == 0 and attempts[0].junit_failures + attempts[0].junit_errors == 0 else RunnerStatus.FAILED_VERIFICATION if attempts[0].exit_code == 1 and attempts[0].junit_failures + attempts[0].junit_errors > 0 else RunnerStatus.UNVERIFIABLE
-        reasons = () if status is RunnerStatus.VERIFIED else ("TEST_FAILURE",) if status is RunnerStatus.FAILED_VERIFICATION else ("UNKNOWN_EXECUTION_OUTCOME",)
+        same = PythonOCIRunner._same_outcome(attempts[0], attempts[1])
+        if not same:
+            status, reasons = RunnerStatus.UNVERIFIABLE, ("NONDETERMINISTIC",)
+        else:
+            reasons = () if status is RunnerStatus.VERIFIED else ("TEST_FAILURE",) if status is RunnerStatus.FAILED_VERIFICATION else ("UNKNOWN_EXECUTION_OUTCOME",)
         if tuple(data["reason_codes"]) != reasons or data["status"] != status.value:
             raise ValueError("receipt status/reasons mismatch")
         result = cls(status, reasons, data["profile_hash"], tuple(data["attempt_ids"]), tuple(data["artifact_hashes"]), tuple(attempts))
