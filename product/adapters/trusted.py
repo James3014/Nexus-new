@@ -8,7 +8,10 @@ from enum import Enum
 import product.kernel as kernel
 from product.evidence import _hash
 from product.evidence.ingestion import (
+    EvidenceIdentityEnvelope,  # noqa: F401
     EvidenceSubmission,  # noqa: F401
+    ExternalEd25519VerifierPort,  # noqa: F401
+    ExternalVerificationReceipt,  # noqa: F401
     IngestionResult,  # noqa: F401
     IngestionTrustStatus,  # noqa: F401
     IssuerGrant,  # noqa: F401
@@ -20,6 +23,13 @@ from product.evidence.ingestion import (
     classify_ingestion_result,  # noqa: F401
     ingest_evidence,  # noqa: F401
     is_trusted_ingestion_result,  # noqa: F401
+    load_external_verification_receipt,  # noqa: F401
+    load_identity_envelope,  # noqa: F401
+    make_identity_envelope,  # noqa: F401
+    serialize_identity_envelope,  # noqa: F401
+    verify_external_ed25519,  # noqa: F401
+    verify_external_ed25519_receipt,  # noqa: F401
+    verify_trust_reference_signature,  # noqa: F401
 )
 from product.kernel import CertificationInput, CertificationResult
 
@@ -561,6 +571,16 @@ def is_trusted_certification_result(
 
 
 __all__ = [
+    "EvidenceIdentityEnvelope",
+    "ExternalVerificationReceipt",
+    "load_external_verification_receipt",
+    "ExternalEd25519VerifierPort",
+    "make_identity_envelope",
+    "serialize_identity_envelope",
+    "load_identity_envelope",
+    "verify_external_ed25519",
+    "verify_external_ed25519_receipt",
+    "verify_trust_reference_signature",
     "ExternalReceiptExpectation",
     "PrerequisiteValidationStatus",
     "PrerequisiteValidationResult",
