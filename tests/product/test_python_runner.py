@@ -125,3 +125,24 @@ def test_tampered_receipt_summary_is_rejected():
         tampered[field] = value
         with pytest.raises(ValueError):
             RunnerResult.from_dict(tampered)
+
+
+def test_volatile_junit_pair_is_semantically_deterministic_and_reloadable():
+    payloads = (
+        b'<testsuites><testsuite timestamp="2026-01-01T00:00:00" hostname="a" time="0.01" tests="1" failures="0" errors="0"><testcase classname="T" name="ok" time="0.001" /></testsuite></testsuites>',
+        b'<testsuites><testsuite timestamp="2026-02-02T00:00:00" hostname="b" time="9.99" tests="1" failures="0" errors="0"><testcase classname="T" name="ok" time="4.321" /></testsuite></testsuites>',
+    )
+    def volatile(profile, req, index):
+        return {**executor(profile, req, index), "junit": payloads[index - 1]}
+    result = PythonOCIRunner().run(request(), volatile)
+    assert result.status is RunnerStatus.VERIFIED
+    assert result.attempts[0].outcome_hash == result.attempts[1].outcome_hash
+    assert result.artifact_hashes[0] != result.artifact_hashes[1]
+    assert RunnerResult.from_dict(result.to_dict()) == result
+
+    def changed(profile, req, index):
+        value = {**executor(profile, req, index), "junit": payloads[index - 1]}
+        if index == 2:
+            value["junit"] = value["junit"].replace(b'name="ok"', b'name="changed"')
+        return value
+    assert PythonOCIRunner().run(request(), changed).status is RunnerStatus.UNVERIFIABLE
