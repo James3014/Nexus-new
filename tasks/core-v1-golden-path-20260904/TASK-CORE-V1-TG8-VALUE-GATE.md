@@ -1,7 +1,7 @@
 # TASK-CORE-V1-TG8-VALUE-GATE — Protocol RC/Stable maturity gate
 
 - **Campaign:** `CAMPAIGN-NEXUS-CORE-V1-GOLDEN-PATH-01`
-- **Bounded authority:** Ready Issue `#763`
+- **Bounded authority:** Ready Issue `#772`
 - **Status:** `PLANNED`
 - **Source spec:** `SPEC-NEXUS-CORE-V1-FREEZE-001`
 - **Source spec SHA-256:** `9ef4b46838251ce86d20d6469901e1f8f02f66ed468655bb446e170ebe90f170`
@@ -17,8 +17,8 @@
 - **Scope class:** `medium`
 - **Execution lane:** `NON_MCP`
 - **Minimum MCP profile:** `not applicable`
-- **Commit required:** `false`
-- **Candidate required:** `false`
+- **Commit required:** `true`
+- **Candidate required:** `true`
 - **Parallel safe:** `false`
 - **Supersedes:** none
 
@@ -32,7 +32,7 @@ evidence-gated RC/Stable readiness
 
 ## Non-goals
 
-No automatic RC/Stable promotion, human-value/pilot claim, public/commercial claim, release, production declaration, or source mutation. No TG9 card is created by this task.
+No automatic RC/Stable promotion, human-value/pilot claim, public/commercial claim, release, production declaration, or off-scope source mutation. TG-9 already exists in the validated bundle but remains dependency-gated and is not started or authorized by TG-8.
 
 ## Source lineage
 
@@ -52,12 +52,12 @@ DEC-005; DEC-013; DER-003. Protocol evidence readiness is adjudicated by the con
 - **Branch:** `REVERIFY_AFTER_DEPENDENCY`
 - **Starting HEAD:** `REVERIFY_AFTER_DEPENDENCY`
 - **Dirty baseline:** `REVERIFY_AFTER_DEPENDENCY`
-- **Required initial verification:** verify TG-5, TG-6, and TG-7 accepted receipts/reports
+- **Required initial verification:** verify TG-5, TG-6, and TG-7 accepted receipts/reports and a clean controller-bound integration HEAD/tree containing the exact accepted TG-6/TG-7 Candidate commits and their TG-5 ancestry
 - **Freshness rule:** re-read protocol candidate, repositories, receipts, conformance, compatibility, upgrade, and rollback before adjudication
 
 ## MCP execution profile
 
-- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna execution under Ready Issue #763
+- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna execution under Ready Issue #772
 - **Exact required actions:** not applicable
 - **Confirmation-required actions:** none
 - **Idempotency and attempt rule:** gate adjudication binds exact evidence set and candidate; replay cannot promote twice
@@ -121,7 +121,7 @@ AC-016 passes only when the accepted TG-7 cross-repository gate and every protoc
 
 | ID | cwd | Exact command/argv | Purpose | Required result |
 |---|---|---|---|---|
-| TG8-01 | TARGET_ROOT | `uv run pytest -qq tests/benchmark/test_core_v1_tg7_manifest.py tests/benchmark/test_core_v1_tg8_protocol_gate.py` | corpus/compatibility/RC-Stable gate guard | all tests pass |
+| TG8-01 | TARGET_ROOT | `uv run pytest -qq tests/benchmark/test_core_v1_tg8_protocol_gate.py` | compatibility/conformance/upgrade/rollback RC-Stable gate guard | all tests pass |
 | TG8-02 | TARGET_ROOT | `uv run python -m product.protocol.compatibility_gate --compatibility /private/tmp/nexus-core-v1-evidence/tg8/protocol-compatibility.json --upgrade-rollback /private/tmp/nexus-core-v1-evidence/tg8/upgrade-rollback.json --tg5-receipt /private/tmp/nexus-core-v1-evidence/tg8/tg5-receipt.json --tg6-receipt /private/tmp/nexus-core-v1-evidence/tg8/tg6-receipt.json --tg7-report /private/tmp/nexus-core-v1-evidence/tg7/report.json --report /private/tmp/nexus-core-v1-evidence/tg8/gate-report.json` | protocol compatibility and bounded RC/Stable evidence adjudication | hash-valid report classifies only evidence readiness and never promotes |
 | TG8-03 | TARGET_ROOT | `git diff --check` | integrity | exit 0 |
 

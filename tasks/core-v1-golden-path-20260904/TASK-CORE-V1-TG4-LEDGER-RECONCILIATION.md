@@ -1,7 +1,7 @@
 # TASK-CORE-V1-TG4-LEDGER-RECONCILIATION — Durable ledger and replay fencing
 
 - **Campaign:** `CAMPAIGN-NEXUS-CORE-V1-GOLDEN-PATH-01`
-- **Bounded authority:** Ready Issue `#763`
+- **Bounded authority:** Ready Issue `#768`
 - **Status:** `PLANNED`
 - **Source spec:** `SPEC-NEXUS-CORE-V1-FREEZE-001`
 - **Source spec SHA-256:** `9ef4b46838251ce86d20d6469901e1f8f02f66ed468655bb446e170ebe90f170`
@@ -53,12 +53,12 @@ DEC-007; DEC-009. SQLite WAL/full-sync and external private-key custody are bind
 - **Branch:** `REVERIFY_AFTER_DEPENDENCY`
 - **Starting HEAD:** `REVERIFY_AFTER_DEPENDENCY`
 - **Dirty baseline:** `REVERIFY_AFTER_DEPENDENCY`
-- **Required initial verification:** verify TG-3 accepted identity contract and clean isolated source
+- **Required initial verification:** verify TG-3 accepted identity contract and a clean controller-bound integration HEAD/tree containing the exact accepted TG-3 Candidate and its TG-1/TG-2 ancestry
 - **Freshness rule:** re-read TG-3 receipt and ledger schema before retry or acceptance
 
 ## MCP execution profile
 
-- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna execution under Ready Issue #763
+- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna execution under Ready Issue #768
 - **Exact required actions:** not applicable
 - **Confirmation-required actions:** none
 - **Idempotency and attempt rule:** key plus canonical request hash and generation CAS; changed request never reuses entry
@@ -76,11 +76,11 @@ DEC-007; DEC-009. SQLite WAL/full-sync and external private-key custody are bind
 ## Allowed scope
 
 - **Read:** product/certification/receipt.py;product/evidence/ingestion.py;tests/product/test_evidence_receipt_hardening.py
-- **Edit:** product/certification/receipt.py;product/evidence/ingestion.py;tests/product/test_evidence_receipt_hardening.py
+- **Edit:** none
 - **Create:** product/ledger.py;tests/product/test_ledger.py
 - **Delete:** none
-- **Maximum touched production files:** 3
-- **Maximum touched test files:** 2
+- **Maximum touched production files:** 1
+- **Maximum touched test files:** 1
 
 ## Unknown scan
 
@@ -114,7 +114,7 @@ AC-007 and AC-008 pass only with restart/replay/tamper/CAS evidence, exact recei
 
 | ID | cwd | Exact command/argv | Purpose | Required result |
 |---|---|---|---|---|
-| TG4-01 | TARGET_ROOT | `uv run pytest -qq tests/product/test_evidence_receipt_hardening.py tests/product/test_ledger.py` | receipt serialization plus SQLite WAL/restart/CAS/corruption/signing regression | all tests pass |
+| TG4-01 | TARGET_ROOT | `uv run pytest -qq tests/product/test_ledger.py tests/product/test_evidence_receipt_hardening.py` | SQLite WAL/restart/CAS/corruption/signing regression plus upstream receipt compatibility | all tests pass |
 | TG4-02 | TARGET_ROOT | `git diff --check` | patch integrity | exit 0 |
 
 ## Physical evidence
@@ -130,4 +130,4 @@ Fresh reviewer inspects transaction boundaries, WAL/full-sync/CAS behavior, mult
 - **PASS:** restart/tamper/CAS receipt supports `LOCAL_LEDGER_RECONCILIATION_VERIFIED`, with anchor availability or explicit `ANCHOR_UNAVAILABLE`/`UNVERIFIABLE` handling.
 - **BLOCK:** ambiguous recovery, corruption accepted, duplicate truth, missing chain/head binding, arbitrary rollback treated as detected without an anchor, private-key material crossing the port, or signature claim elevation.
 - **Residual debt:** HTTP integration remains downstream.
-- **Next gate:** TG-5 integrates the end-to-end local HTTP tracer.
+- **Next gate:** TG-5 may start only from a clean controller-bound integration HEAD/tree containing the exact accepted TG-1 through TG-4 Candidate commits and recorded conflict-free composition.

@@ -70,6 +70,14 @@
 - **Selection rationale:** TG-0 is the sole root and freezes the authority/version/crosswalk seam required by every downstream card.
 - **Exact unblock condition:** independent acceptance of the TG-0 Candidate verifies AC-001, AC-003, AC-006, AC-013, and AC-015; then TG-1/TG-2 are parallel-ready in separate isolated worktrees, not automatically ACTIVE.
 
+### Parallel orchestration semantics
+
+The machine-validated metadata remains `Parallel execution: false` and `Parallel safe: false` because `AUTO_CHAIN=false`: no card, worker, or scheduler may self-start or infer another task's authority. The Owner's separate parallel campaign contract permits the controller to dispatch TG-1 and TG-2 concurrently as distinct Ready Issues in isolated non-overlapping worktrees after TG-0 acceptance, and later TG-6 and TG-7 after TG-5 acceptance. Physical concurrency is controller-coordinated across independently authorized attempts, never card-driven auto-chain.
+
+### Accepted-source integration contract
+
+An accepted receipt does not move source code. Before every downstream dispatch, the controller must create or verify a clean integration base whose HEAD/tree contains exactly the independently accepted upstream Candidate commits, record the ordered commit/tree set and merge-tree/conflict result, and bind the downstream Issue/worktree to that base. This integration base is evidence transport only: it does not merge `main`, approve a Candidate, or imply release/production truth. Missing, conflicting, or drifted upstream source blocks that downstream dispatch.
+
 ## 5. Campaign authority and non-goals
 
 Owner/Campaign controller and CapabilityPlanner retain planning/selection authority. All implementation and evidence-tooling workers are Luna through `DIRECT_DELEGATED`/`NON_MCP`; the controller independently verifies and accepts evidence. TG-1/TG-2 are parallel after TG-0, and TG-6/TG-7 are parallel after TG-5, each in isolated disjoint worktrees. No card grants approval, integration, merge, push, release, deploy, production, Stable, or public/value authority. `AUTO_CHAIN=false`.

@@ -1,7 +1,7 @@
 # TASK-CORE-V1-TG1-GITHUB-ACQUISITION — Authenticated immutable PR acquisition
 
 - **Campaign:** `CAMPAIGN-NEXUS-CORE-V1-GOLDEN-PATH-01`
-- **Bounded authority:** Ready Issue `#763`
+- **Bounded authority:** Ready Issue `#765`
 - **Status:** `PLANNED`
 - **Source spec:** `SPEC-NEXUS-CORE-V1-FREEZE-001`
 - **Source spec SHA-256:** `9ef4b46838251ce86d20d6469901e1f8f02f66ed468655bb446e170ebe90f170`
@@ -52,12 +52,12 @@ DEC-002; DEC-007. Acquisition remains read-only and stores credential-free locat
 - **Branch:** `REVERIFY_AFTER_DEPENDENCY`
 - **Starting HEAD:** `REVERIFY_AFTER_DEPENDENCY`
 - **Dirty baseline:** `REVERIFY_AFTER_DEPENDENCY`
-- **Required initial verification:** verify TG-0 accepted receipt, exact fresh source, clean isolated worktree, and read-only GitHub permission
+- **Required initial verification:** verify TG-0 accepted receipt and Candidate source in the exact controller-bound starting HEAD/tree, clean isolated worktree, and read-only GitHub permission; this card's `Parallel safe: false` forbids auto-start but the separate Owner/controller contract permits concurrent TG-1/TG-2 dispatch as distinct Ready Issues
 - **Freshness rule:** re-read repository, PR, base/head/tree, pagination, and permissions immediately before acquisition and acceptance
 
 ## MCP execution profile
 
-- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna execution under Ready Issue #763
+- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna execution under Ready Issue #765
 - **Exact required actions:** not applicable
 - **Confirmation-required actions:** none
 - **Idempotency and attempt rule:** one bounded Luna attempt on an issue-specific isolated worktree; identical acquisition request replays the same snapshot, changed request never reuses it
@@ -130,4 +130,4 @@ Fresh reviewer checks live read-only behavior, credential exclusion, identity bi
 - **PASS:** Candidate and live receipt support `LIVE_PR_SNAPSHOT_VERIFIED`.
 - **BLOCK:** auth/permission failure, moving head, incomplete data, or caller-only truth.
 - **Residual debt:** no clean Python runner or product runtime yet.
-- **Next gate:** TG-3 may consume the accepted acquisition contract after TG-2 also passes.
+- **Next gate:** after TG-1 and TG-2 independently pass, the controller binds both exact accepted Candidate commits/trees into TG-3's clean integration base before dispatch.

@@ -1,7 +1,7 @@
 # TASK-CORE-V1-TG6-CLIENTS-PACKAGE — Thin clients and operator journey
 
 - **Campaign:** `CAMPAIGN-NEXUS-CORE-V1-GOLDEN-PATH-01`
-- **Bounded authority:** Ready Issue `#763`
+- **Bounded authority:** Ready Issue `#770`
 - **Status:** `PLANNED`
 - **Source spec:** `SPEC-NEXUS-CORE-V1-FREEZE-001`
 - **Source spec SHA-256:** `9ef4b46838251ce86d20d6469901e1f8f02f66ed468655bb446e170ebe90f170`
@@ -53,12 +53,12 @@ DEC-004; DEC-007; DEC-010.
 - **Branch:** `REVERIFY_AFTER_DEPENDENCY`
 - **Starting HEAD:** `REVERIFY_AFTER_DEPENDENCY`
 - **Dirty baseline:** `REVERIFY_AFTER_DEPENDENCY`
-- **Required initial verification:** verify TG-5 accepted live HTTP receipt and clean install environment
+- **Required initial verification:** verify TG-5 accepted live HTTP receipt and a clean controller-bound integration HEAD/tree containing the exact accepted TG-1 through TG-5 Candidate commits; this card's `Parallel safe: false` forbids auto-start but the separate Owner/controller contract permits concurrent TG-6/TG-7 dispatch as distinct Ready Issues
 - **Freshness rule:** re-read TG-5 contract, package metadata, protocol/ledger versions, and client artifacts before each canary
 
 ## MCP execution profile
 
-- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna execution under Ready Issue #763
+- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna execution under Ready Issue #770
 - **Exact required actions:** not applicable
 - **Confirmation-required actions:** none
 - **Idempotency and attempt rule:** each canary run binds canonical request and client artifact; exact replay returns same receipt
@@ -124,7 +124,7 @@ AC-011 and AC-012 pass with all three client paths hitting canonical HTTP and cl
 | TG6-01 | TARGET_ROOT | `uv run pytest -qq tests/product/test_client_conformance.py` | CLI/MCP/Action canonical HTTP parity and no local truth | all tests pass |
 | TG6-02 | TARGET_ROOT | `uv build --wheel --out-dir /private/tmp/nexus-core-v1-wheel` | reproducible wheel artifact | one hash-bound wheel is produced |
 | TG6-03 | TARGET_ROOT | `python -m venv /private/tmp/nexus-core-v1-clean-install` | create isolated clean install environment | clean environment is created |
-| TG6-04 | TARGET_ROOT | `/private/tmp/nexus-core-v1-clean-install/bin/pip install --no-deps /private/tmp/nexus-core-v1-wheel/nexus_core-BOUND-py3-none-any.whl` | install exact hash-bound wheel path recorded by TG6-02 and discover entry points | `nexus-certify` is callable and `nexus` remains legacy/lab |
+| TG6-04 | TARGET_ROOT | `/private/tmp/nexus-core-v1-clean-install/bin/pip install --no-deps /private/tmp/nexus-core-v1-wheel/nexus_core-28.3.0-py3-none-any.whl` | install the exact distribution/version wheel emitted by TG6-02 and discover entry points | `nexus-certify` is callable and `nexus` remains legacy/lab |
 | TG6-05 | TARGET_ROOT | `/private/tmp/nexus-core-v1-clean-install/bin/nexus-certify --self-test-install-upgrade-rollback` | certification-first install/upgrade/rollback canary | compatible upgrade and tested rollback preserve readable receipts; incompatible inputs fail closed |
 | TG6-06 | TARGET_ROOT | `git diff --check` | patch integrity | exit 0 |
 

@@ -1,7 +1,7 @@
 # TASK-CORE-V1-TG9-VALUE-PILOT — Paired design-partner usability and value evidence
 
 - **Campaign:** `CAMPAIGN-NEXUS-CORE-V1-GOLDEN-PATH-01`
-- **Bounded authority:** Ready Issue `#763`
+- **Bounded authority:** Ready Issue `#773`
 - **Status:** `PLANNED`
 - **Source spec:** `SPEC-NEXUS-CORE-V1-FREEZE-001`
 - **Source spec SHA-256:** `9ef4b46838251ce86d20d6469901e1f8f02f66ed468655bb446e170ebe90f170`
@@ -52,12 +52,12 @@ DEC-013. The cohort is 3–5 narrow-ICP design partners, duration is 4–8 weeks
 - **Branch:** `REVERIFY_AFTER_DEPENDENCY`
 - **Starting HEAD:** `REVERIFY_AFTER_DEPENDENCY`
 - **Dirty baseline:** `REVERIFY_AFTER_DEPENDENCY`
-- **Required initial verification:** verify TG-8 accepted receipt, exact protocol/runtime/package identity, approved privacy-safe study materials, and eligible partner evidence
+- **Required initial verification:** verify TG-8 accepted receipt and a clean controller-bound integration HEAD/tree containing the exact accepted TG-1 through TG-8 implementation/tooling Candidate ancestry, plus approved privacy-safe study materials and eligible partner evidence
 - **Freshness rule:** re-read protocol/runtime/package revisions, partner consent/status, paired subjects, oracle, time logs, overhead, and trust outcomes before every report update and final acceptance
 
 ## MCP execution profile
 
-- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna implementation/analysis under Ready Issue #763, with controller-owned human coordination
+- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna implementation/analysis under Ready Issue #773, with controller-owned human coordination
 - **Exact required actions:** not applicable
 - **Confirmation-required actions:** none
 - **Idempotency and attempt rule:** each paired subject has a pseudonymous stable pair ID and unique attempts; duplicates or changed definitions never overwrite prior observations

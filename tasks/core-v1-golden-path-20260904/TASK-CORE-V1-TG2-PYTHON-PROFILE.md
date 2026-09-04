@@ -1,7 +1,7 @@
 # TASK-CORE-V1-TG2-PYTHON-PROFILE — Deterministic isolated Python verifier
 
 - **Campaign:** `CAMPAIGN-NEXUS-CORE-V1-GOLDEN-PATH-01`
-- **Bounded authority:** Ready Issue `#763`
+- **Bounded authority:** Ready Issue `#766`
 - **Status:** `PLANNED`
 - **Source spec:** `SPEC-NEXUS-CORE-V1-FREEZE-001`
 - **Source spec SHA-256:** `9ef4b46838251ce86d20d6469901e1f8f02f66ed468655bb446e170ebe90f170`
@@ -53,12 +53,12 @@ DEC-003; DEC-008. OCI digest, offline lock, shell-free argv, limits, JUnit oracl
 - **Branch:** `REVERIFY_AFTER_DEPENDENCY`
 - **Starting HEAD:** `REVERIFY_AFTER_DEPENDENCY`
 - **Dirty baseline:** `REVERIFY_AFTER_DEPENDENCY`
-- **Required initial verification:** verify TG-0 receipt and clean exact-head isolated worker environment
+- **Required initial verification:** verify TG-0 accepted receipt and Candidate source in the exact controller-bound starting HEAD/tree plus a clean isolated worker environment; this card's `Parallel safe: false` forbids auto-start but the separate Owner/controller contract permits concurrent TG-1/TG-2 dispatch as distinct Ready Issues
 - **Freshness rule:** re-read contract, source digest, image digest, lock, environment, and runner availability before each certification attempt
 
 ## MCP execution profile
 
-- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna execution under Ready Issue #763
+- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna execution under Ready Issue #766
 - **Exact required actions:** not applicable
 - **Confirmation-required actions:** none
 - **Idempotency and attempt rule:** one bounded Luna attempt on an issue-specific isolated worktree per exact contract/source/environment; retries use a new attempt and require matching fresh executions
@@ -131,4 +131,4 @@ Fresh reviewer validates isolation, oracle adequacy, determinism, exact bindings
 - **PASS:** Candidate and isolated matrix support `PYTHON_PROFILE_VERIFIED`.
 - **BLOCK:** inadequate oracle, unavailable/unclean runner, nondeterminism, or missing binding.
 - **Residual debt:** trusted ingestion and runtime remain downstream.
-- **Next gate:** TG-3 consumes accepted acquisition and runner identity contracts.
+- **Next gate:** after TG-1 and TG-2 independently pass, the controller binds both exact accepted Candidate commits/trees into TG-3's clean integration base before dispatch.

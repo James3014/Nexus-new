@@ -1,7 +1,7 @@
 # TASK-CORE-V1-TG3-EVIDENCE-TRUST — Evidence Trust Core extraction
 
 - **Campaign:** `CAMPAIGN-NEXUS-CORE-V1-GOLDEN-PATH-01`
-- **Bounded authority:** Ready Issue `#763`
+- **Bounded authority:** Ready Issue `#767`
 - **Status:** `PLANNED`
 - **Source spec:** `SPEC-NEXUS-CORE-V1-FREEZE-001`
 - **Source spec SHA-256:** `9ef4b46838251ce86d20d6469901e1f8f02f66ed468655bb446e170ebe90f170`
@@ -51,12 +51,12 @@ DEC-001; DEC-002; DER-001. Evidence Trust is one permanent owner and does not be
 - **Branch:** `REVERIFY_AFTER_DEPENDENCY`
 - **Starting HEAD:** `REVERIFY_AFTER_DEPENDENCY`
 - **Dirty baseline:** `REVERIFY_AFTER_DEPENDENCY`
-- **Required initial verification:** verify TG-0 through TG-2 accepted receipts and clean isolated source
+- **Required initial verification:** verify TG-0 through TG-2 accepted receipts and a clean controller-bound integration HEAD/tree containing the exact accepted TG-1 and TG-2 Candidate commits with a recorded conflict-free merge-tree result
 - **Freshness rule:** re-read all upstream receipt identities before run and acceptance
 
 ## MCP execution profile
 
-- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna execution under Ready Issue #763
+- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna execution under Ready Issue #767
 - **Exact required actions:** not applicable
 - **Confirmation-required actions:** none
 - **Idempotency and attempt rule:** stable task with distinct retry attempts; duplicate evidence does not create a second trust result
@@ -73,7 +73,7 @@ DEC-001; DEC-002; DER-001. Evidence Trust is one permanent owner and does not be
 
 ## Allowed scope
 
-- **Read:** product/evidence/ingestion.py;product/adapters/trusted.py;product/evidence/__init__.py;tests/product/test_trusted_evidence_ingestion.py;tests/product/test_trusted_certification_adapter.py
+- **Read:** product/acquisition/__init__.py;product/acquisition/github.py;product/execution/__init__.py;product/execution/python_runner.py;product/execution/profiles/python-oci-pytest-v1.json;product/execution/profiles/python-oci-pytest-v1.lock;product/evidence/ingestion.py;product/adapters/trusted.py;product/evidence/__init__.py;tests/product/test_github_acquisition.py;tests/product/test_python_runner.py;tests/product/test_trusted_evidence_ingestion.py;tests/product/test_trusted_certification_adapter.py
 - **Edit:** product/evidence/ingestion.py;product/adapters/trusted.py;tests/product/test_trusted_evidence_ingestion.py;tests/product/test_trusted_certification_adapter.py
 - **Create:** tests/product/test_trusted_evidence_serialization.py (dedicated serializer/loader, external-verifier, and restart-boundary tests)
 - **Delete:** none
@@ -128,4 +128,4 @@ Fresh reviewer verifies sole ownership, provenance, freshness, replay/tamper rej
 - **PASS:** independent receipt supports `EVIDENCE_TRUST_BOUNDARY_VERIFIED` only with accepted TG-1/TG-2 receipts, a reloadable canonical identity envelope, and an external-verifier result bound to the trust subject.
 - **BLOCK:** missing upstream receipt, missing issuer/verifier contract, unverifiable signature, cross-bound evidence, duplicate owner, non-reloadable envelope, or private-key material crossing the port.
 - **Residual debt:** durable ledger and HTTP remain downstream.
-- **Next gate:** TG-4 may implement ledger/reconciliation after identities freeze.
+- **Next gate:** TG-4 may start only from a clean controller-bound integration HEAD/tree containing the exact accepted TG-3 Candidate and its accepted TG-1/TG-2 ancestry.

@@ -1,7 +1,7 @@
 # TASK-CORE-V1-TG7-CORPUS-SHADOW — Representative corpus and second-repository shadow
 
 - **Campaign:** `CAMPAIGN-NEXUS-CORE-V1-GOLDEN-PATH-01`
-- **Bounded authority:** Ready Issue `#763`
+- **Bounded authority:** Ready Issue `#771`
 - **Status:** `PLANNED`
 - **Source spec:** `SPEC-NEXUS-CORE-V1-FREEZE-001`
 - **Source spec SHA-256:** `9ef4b46838251ce86d20d6469901e1f8f02f66ed468655bb446e170ebe90f170`
@@ -17,8 +17,8 @@
 - **Scope class:** `medium`
 - **Execution lane:** `NON_MCP`
 - **Minimum MCP profile:** `not applicable`
-- **Commit required:** `false`
-- **Candidate required:** `false`
+- **Commit required:** `true`
+- **Candidate required:** `true`
 - **Parallel safe:** `false`
 - **Supersedes:** none
 
@@ -51,12 +51,12 @@ DEC-005; DER-003. Owner selects repository and pilot; worker does not.
 - **Branch:** `REVERIFY_AFTER_DEPENDENCY`
 - **Starting HEAD:** `REVERIFY_AFTER_DEPENDENCY`
 - **Dirty baseline:** `REVERIFY_AFTER_DEPENDENCY`
-- **Required initial verification:** verify TG-5 receipt and explicit DER-003 selection
+- **Required initial verification:** verify TG-5 accepted receipt and exact accepted Candidate source in a clean controller-bound integration HEAD/tree; the controller must bind the privacy-safe immutable second-repository selection in `selection.json` before worker dispatch; this card's `Parallel safe: false` forbids auto-start but the separate Owner/controller contract permits concurrent TG-6/TG-7 dispatch as distinct Ready Issues
 - **Freshness rule:** re-read selection, external revision, corpus manifest, and TG-5 receipt before each run
 
 ## MCP execution profile
 
-- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna execution under Ready Issue #763
+- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna execution under Ready Issue #771
 - **Exact required actions:** not applicable
 - **Confirmation-required actions:** none
 - **Idempotency and attempt rule:** each corpus/shadow run binds task set, repo revision, and TG-5 receipt
@@ -91,7 +91,7 @@ DEC-005; DER-003. Owner selects repository and pilot; worker does not.
 ## Selection, corpus, and report contract
 
 - Evidence paths are fixed outside the source diff: `/private/tmp/nexus-core-v1-evidence/tg7/selection.json`, `/private/tmp/nexus-core-v1-evidence/tg7/corpus.json`, `/private/tmp/nexus-core-v1-evidence/tg7/shadow-receipt.json`, and `/private/tmp/nexus-core-v1-evidence/tg7/report.json`.
-- During the task, the worker may propose a public Python repository, but the controller must bind the selection before execution. `selection.json` records canonical URL, owner/name, immutable commit/tree, observation time, license, privacy boundary, read-only permission, task-set identity, and why the repository is not Nexus-new. No repository mutation or external outreach is allowed.
+- Before worker dispatch, the controller selects and binds one public Python repository in `selection.json`; the worker may validate but may not choose or change the subject. The file records canonical URL, owner/name, immutable commit/tree, observation time, license, privacy boundary, read-only permission, task-set identity, and why the repository is not Nexus-new. No repository mutation or external outreach is allowed.
 - `corpus.json` contains at least 50 revision-bound cases spanning at least these eight hostile families: authentication/issuer, provenance/hash tamper, stale revision/generation, duplicate/replay, malformed protocol/schema, missing/inadequate oracle, path/scope escape, and crash/unknown effect. Each case has an adequate oracle and expected disposition.
 - `report.json` records eligible/infra-invalid counts, family coverage, high-risk false-certification count, trust mismatches, task-set/repository/TG5 receipt hashes, and denominator. The observed high-risk false-certification count must be exactly `0`; missing oracle, denominator, subject, or gate artifact is non-claimable.
 - The denominator is `eligible cases after infra exclusions`; infra-invalid cases are reported separately and never silently removed. No human-time/value claim is made in TG7.
@@ -137,4 +137,4 @@ Fresh reviewer verifies representativeness, external identity, denominator, fals
 - **PASS:** shadow evidence supports `CROSS_REPO_TRUST_SHADOW_VERIFIED`.
 - **BLOCK:** selection/permission or external identity is absent, license/privacy boundary is unresolved, corpus has fewer than 50 cases or fewer than 8 hostile families, oracle/denominator is inadequate, or high-risk false certification is non-zero.
 - **Residual debt:** TG-8 maturity/value gate.
-- **Next gate:** TG-8 after TG-6 and TG-7 acceptance; TG-6 and TG-7 may run in parallel after TG-5 acceptance.
+- **Next gate:** TG-8 may start only from a clean controller-bound integration HEAD/tree containing the exact accepted TG-6 and TG-7 Candidates plus their TG-5 ancestry.

@@ -1,7 +1,7 @@
 # TASK-CORE-V1-TG5-HTTP-TRACER — Canonical local HTTP real-PR tracer
 
 - **Campaign:** `CAMPAIGN-NEXUS-CORE-V1-GOLDEN-PATH-01`
-- **Bounded authority:** Ready Issue `#763`
+- **Bounded authority:** Ready Issue `#769`
 - **Status:** `PLANNED`
 - **Source spec:** `SPEC-NEXUS-CORE-V1-FREEZE-001`
 - **Source spec SHA-256:** `9ef4b46838251ce86d20d6469901e1f8f02f66ed468655bb446e170ebe90f170`
@@ -65,12 +65,12 @@ DEC-002; DEC-004; DEC-007; DEC-009.
 - **Branch:** `REVERIFY_AFTER_DEPENDENCY`
 - **Starting HEAD:** `REVERIFY_AFTER_DEPENDENCY`
 - **Dirty baseline:** `REVERIFY_AFTER_DEPENDENCY`
-- **Required initial verification:** verify TG-1 through TG-4 acceptance receipts and clean isolated source
+- **Required initial verification:** verify TG-1 through TG-4 accepted receipts and a clean controller-bound integration HEAD/tree containing exactly their accepted Candidate commits with recorded conflict-free composition, then verify loopback port availability, token-file permissions, Docker/runner availability, and controlled PR #635 read access
 - **Freshness rule:** re-read all upstream contracts, source revision, and local HTTP permission/auth state before each E2E run
 
 ## MCP execution profile
 
-- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna execution under Ready Issue #763
+- **App/server and action snapshot:** not applicable; `DIRECT_DELEGATED` Luna execution under Ready Issue #769
 - **Exact required actions:** not applicable
 - **Confirmation-required actions:** none
 - **Idempotency and attempt rule:** canonical request hash plus idempotency key; exact replay returns same run/receipt, drift reconciles and fails closed
@@ -87,11 +87,11 @@ DEC-002; DEC-004; DEC-007; DEC-009.
 
 ## Allowed scope
 
-- **Read:** product/adapters/github.py;product/execution/__init__.py;product/evidence/ingestion.py;product/certification/receipt.py;tests/product
-- **Edit:** product/adapters/github.py;product/execution/__init__.py;product/evidence/ingestion.py;product/certification/receipt.py
+- **Read:** product/acquisition;product/adapters/github.py;product/execution;product/evidence/ingestion.py;product/certification/receipt.py;product/ledger.py;tests/product
+- **Edit:** none
 - **Create:** product/runtime/__init__.py;product/runtime/schemas.py;product/runtime/auth.py;product/runtime/http.py;product/runtime/service.py;tests/product/test_http_runtime.py;tests/product/test_http_e2e.py
 - **Delete:** none
-- **Maximum touched production files:** 9
+- **Maximum touched production files:** 5
 - **Maximum touched test files:** 2
 
 ## Unknown scan
