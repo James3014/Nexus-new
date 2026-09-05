@@ -61,6 +61,16 @@ without circularly trusting that defect. An ordinary provider, model, quota,
 test, timeout, or correctly blocking healthy lifecycle failure does not
 qualify; it remains on the normal governed path.
 
+For a qualifying bounded repair, materialize the canonical one-shot Owner
+recovery authority defined by `docs/specs/NEXUS_BREAK_GLASS_RECOVERY_001.md`
+before source mutation. The authority source is an externally fetched Owner
+GitHub activation comment bound to exact repository/Issue, base HEAD/tree,
+failure evidence, recovery/attempt identity, effect class, scope, verifier set,
+expiry, and claim ceiling. A caller boolean, worker assertion, failed Task Card,
+normal standing grant, Gateway session, or model identity is not break-glass
+authority. The independent host-local consumer records only recovery evidence;
+it does not execute source mutation, merge, runtime reload, or release.
+
 For a qualifying bounded repair:
 
 1. Stop retrying the untrustworthy self-hosted mutation path.
@@ -82,6 +92,14 @@ For a qualifying bounded repair:
 10. After separately authorized clean-source acceptance and activation,
    reacquire loaded source/runtime/action identity and verify affected live
    behavior, not process liveness alone.
+11. Advance the durable recovery evidence through `PREPARED -> APPLIED ->
+   VERIFIED -> CONSUMED`; bind the immutable repair commit/tree/full-diff and
+   independent verifier evidence. `SOURCE_REPAIR`, `EMERGENCY_INTEGRATION`, and
+   `RUNTIME_RECOVERY` are separate Owner authorities. A source-repair activation
+   cannot be reused for merge or runtime effects.
+12. After the normal governance canary succeeds, record the recovery authority
+   terminal state and prove replay is denied. Do not leave standing emergency
+   authority behind.
 
 Exit bootstrap recovery as soon as the repaired canonical authority can again
 establish trustworthy current identity. Resume the normal governed path;

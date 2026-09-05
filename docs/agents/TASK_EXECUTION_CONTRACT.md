@@ -46,6 +46,36 @@ expired, unreachable, or a transport fails. The same attempt must fail closed to
 block, rebind, or reconciliation; any direct recovery is a separately
 Owner-authorized attempt with a distinct authority identity.
 
+### Governance-plane break-glass recovery
+
+When independent evidence classifies the exact failed seam as
+`GOVERNANCE_PLANE_RECOVERY_REQUIRED`, and the normal authority plane needed to
+authorize its own repair is unavailable, stale, cyclic, or itself under repair,
+use the one-shot Owner recovery contract in
+`docs/specs/NEXUS_BREAK_GLASS_RECOVERY_001.md` plus the external bootstrap
+procedure in `docs/governance/rollback_runbook.md`. This is not a normal direct
+lane and is not a fallback from the failed governed attempt.
+
+The recovery root is an externally fetched Owner GitHub activation comment bound
+to exact repository/Issue, base HEAD/tree, qualifying failure evidence,
+recovery/attempt identity, effect class, allowed/forbidden scope, verifier set,
+expiry, and claim ceiling. A caller `ownerConfirmation` Boolean, worker/model
+assertion, failed/expired Task Card or standing grant, connector session, or
+Gateway state cannot mint this authority. The break-glass consumer remains
+operationally independent of the Gateway, Task Card, normal standing-grant,
+lifecycle dispatch, Workforce Admission, and CapabilityPlanner plane it may
+need to repair.
+
+`SOURCE_REPAIR`, `EMERGENCY_INTEGRATION`, and `RUNTIME_RECOVERY` are separate
+authority effects. Source-repair authority can produce only an immutable repair
+commit/tree/full-diff plus verification evidence; it cannot approve, merge,
+mutate protected refs, reload runtime, release, or make production/public
+claims. The host-local evidence chain is `PREPARED -> APPLIED -> VERIFIED ->
+CONSUMED`, with exact-attempt reconciliation, tamper/symlink protection,
+independent verifier binding, and replay denial after terminal consumption.
+Emergency integration or runtime recovery requires a new exact Owner authority
+artifact for that effect.
+
 `NEXUS_GOVERNANCE_DEFAULT_READY` may be declared only by the Owner after a fresh
 readiness review. At minimum, that review should bind evidence that:
 

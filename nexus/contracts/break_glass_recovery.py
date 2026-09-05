@@ -1,0 +1,367 @@
+"""Typed contracts for Owner break-glass governance-plane recovery.
+
+This module is deliberately independent of Nexus Gateway, Task Cards, lifecycle
+state, Workforce Admission, and the normal standing-grant store. It validates
+an externally materialized Owner activation and the immutable evidence carried
+through one recovery attempt. It performs no mutation, network, merge, runtime,
+or release effect.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import re
+from datetime import datetime, timezone
+from enum import Enum
+from pathlib import PurePosixPath
+from typing import Any, Literal, Mapping
+
+from pydantic import BaseModel, ConfigDict, StrictStr, field_validator, model_validator
+
+_SHA40 = re.compile(r"^[0-9a-f]{40}$")
+_SHA64 = re.compile(r"^[0-9a-f]{64}$")
+_SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_ALLOWED_REPOSITORY = "James3014/Nexus-new"
+_ALLOWED_ISSUE = 806
+_ALLOWED_OWNER = "James3014"
+
+
+class BreakGlassContractError(ValueError):
+    """Fail-closed contract validation error."""
+
+
+class BreakGlassEffectClass(str, Enum):
+    SOURCE_REPAIR = "SOURCE_REPAIR"
+    EMERGENCY_INTEGRATION = "EMERGENCY_INTEGRATION"
+    RUNTIME_RECOVERY = "RUNTIME_RECOVERY"
+
+
+class BreakGlassPhase(str, Enum):
+    PREPARED = "PREPARED"
+    APPLIED = "APPLIED"
+    VERIFIED = "VERIFIED"
+    CONSUMED = "CONSUMED"
+
+
+class _FrozenModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+def canonical_json_bytes(value: Any) -> bytes:
+    """Canonical UTF-8 JSON used for every break-glass content hash."""
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def canonical_sha256(value: Any) -> str:
+    return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
+
+
+def _utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        raise ValueError("TIMEZONE_REQUIRED")
+    return value.astimezone(timezone.utc)
+
+
+def _safe_relpath(value: str) -> str:
+    if value != value.strip() or not value or "\\" in value:
+        raise ValueError("PATH_INVALID")
+    path = PurePosixPath(value)
+    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        raise ValueError("PATH_INVALID")
+    return path.as_posix()
+
+
+class BreakGlassActivationPayload(_FrozenModel):
+    """Canonical Owner-issued recovery authority for exactly one attempt."""
+
+    schema: Literal["nexus.break_glass_owner_activation.v1"] = (
+        "nexus.break_glass_owner_activation.v1"
+    )
+    repository: Literal[_ALLOWED_REPOSITORY]
+    issue: Literal[_ALLOWED_ISSUE]
+    owner_login: Literal[_ALLOWED_OWNER]
+    recovery_id: StrictStr
+    attempt_id: StrictStr
+    failure_class: Literal["GOVERNANCE_PLANE_RECOVERY_REQUIRED"]
+    failure_evidence_sha256: StrictStr
+    effect_class: BreakGlassEffectClass
+    base_sha: StrictStr
+    base_tree: StrictStr
+    allowed_paths: tuple[StrictStr, ...]
+    forbidden_paths: tuple[StrictStr, ...]
+    verifier_commands: tuple[StrictStr, ...]
+    issued_at: datetime
+    expires_at: datetime
+    claim_ceiling: Literal["break_glass_source_candidate_only"]
+
+    @field_validator("recovery_id", "attempt_id")
+    @classmethod
+    def validate_id(cls, value: str) -> str:
+        if not _SAFE_ID.fullmatch(value) or value != value.strip():
+            raise ValueError("RECOVERY_IDENTITY_INVALID")
+        return value
+
+    @field_validator("failure_evidence_sha256")
+    @classmethod
+    def validate_sha64(cls, value: str) -> str:
+        if not _SHA64.fullmatch(value):
+            raise ValueError("SHA256_INVALID")
+        return value
+
+    @field_validator("base_sha", "base_tree")
+    @classmethod
+    def validate_sha40(cls, value: str) -> str:
+        if not _SHA40.fullmatch(value):
+            raise ValueError("GIT_SHA_INVALID")
+        return value
+
+    @field_validator("allowed_paths", "forbidden_paths")
+    @classmethod
+    def validate_paths(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if not value:
+            raise ValueError("PATH_SET_EMPTY")
+        normalized = tuple(_safe_relpath(item) for item in value)
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("PATH_SET_DUPLICATE")
+        return normalized
+
+    @field_validator("verifier_commands")
+    @classmethod
+    def validate_verifiers(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if not value or any(not item.strip() or item != item.strip() for item in value):
+            raise ValueError("VERIFIER_SET_INVALID")
+        return value
+
+    @model_validator(mode="after")
+    def validate_semantics(self) -> "BreakGlassActivationPayload":
+        issued = _utc(self.issued_at)
+        expires = _utc(self.expires_at)
+        if expires <= issued:
+            raise ValueError("ACTIVATION_WINDOW_INVALID")
+        if self.effect_class is not BreakGlassEffectClass.SOURCE_REPAIR:
+            # #806 G1 activates source repair only. Other effect classes require
+            # separately issued Owner authority and separate consumers.
+            raise ValueError("SOURCE_REPAIR_AUTHORITY_REQUIRED")
+        allowed = set(self.allowed_paths)
+        forbidden = set(self.forbidden_paths)
+        if allowed & forbidden:
+            raise ValueError("ALLOWED_FORBIDDEN_OVERLAP")
+        return self
+
+    @property
+    def payload_sha256(self) -> str:
+        return canonical_sha256(self.model_dump(mode="json"))
+
+    def assert_current(self, *, now: datetime) -> None:
+        instant = _utc(now)
+        if instant < _utc(self.issued_at):
+            raise BreakGlassContractError("ACTIVATION_NOT_YET_VALID")
+        if instant >= _utc(self.expires_at):
+            raise BreakGlassContractError("ACTIVATION_EXPIRED")
+
+    def assert_paths_authorized(self, changed_paths: tuple[str, ...]) -> None:
+        normalized = tuple(_safe_relpath(item) for item in changed_paths)
+        allowed = set(self.allowed_paths)
+        forbidden = set(self.forbidden_paths)
+        if any(path in forbidden for path in normalized):
+            raise BreakGlassContractError("FORBIDDEN_PATH_CHANGED")
+        if any(path not in allowed for path in normalized):
+            raise BreakGlassContractError("OUT_OF_SCOPE_PATH_CHANGED")
+
+
+class OwnerActivationEnvelope(_FrozenModel):
+    """Externally fetched GitHub comment evidence carrying the Owner payload.
+
+    The fetcher/controller is responsible for obtaining the exact public GitHub
+    comment. This model refuses caller booleans and binds the immutable comment
+    identity, author, canonical payload hash and exact recovery payload.
+    """
+
+    schema: Literal["nexus.break_glass_owner_comment_envelope.v1"] = (
+        "nexus.break_glass_owner_comment_envelope.v1"
+    )
+    repository: Literal[_ALLOWED_REPOSITORY]
+    issue: Literal[_ALLOWED_ISSUE]
+    comment_id: int
+    comment_url: StrictStr
+    author_login: Literal[_ALLOWED_OWNER]
+    comment_body_sha256: StrictStr
+    payload_sha256: StrictStr
+    payload: BreakGlassActivationPayload
+
+    @field_validator("comment_id")
+    @classmethod
+    def validate_comment_id(cls, value: int) -> int:
+        if value <= 0:
+            raise ValueError("COMMENT_ID_INVALID")
+        return value
+
+    @field_validator("comment_body_sha256", "payload_sha256")
+    @classmethod
+    def validate_payload_hash_format(cls, value: str) -> str:
+        if not _SHA64.fullmatch(value):
+            raise ValueError("PAYLOAD_HASH_INVALID")
+        return value
+
+    @field_validator("comment_url")
+    @classmethod
+    def validate_comment_url(cls, value: str) -> str:
+        prefix = "https://github.com/James3014/Nexus-new/issues/806#issuecomment-"
+        if not value.startswith(prefix) or not value[len(prefix) :].isdigit():
+            raise ValueError("COMMENT_URL_INVALID")
+        return value
+
+    @model_validator(mode="after")
+    def validate_envelope(self) -> "OwnerActivationEnvelope":
+        if self.payload.owner_login != self.author_login:
+            raise ValueError("OWNER_IDENTITY_MISMATCH")
+        if self.payload.repository != self.repository or self.payload.issue != self.issue:
+            raise ValueError("OWNER_PROVENANCE_SCOPE_MISMATCH")
+        if self.payload.payload_sha256 != self.payload_sha256:
+            raise ValueError("PAYLOAD_HASH_MISMATCH")
+        expected_suffix = str(self.comment_id)
+        if not self.comment_url.endswith(expected_suffix):
+            raise ValueError("COMMENT_ID_URL_MISMATCH")
+        return self
+
+
+def owner_envelope_from_github_comment(comment: Mapping[str, Any]) -> OwnerActivationEnvelope:
+    """Parse and validate one raw GitHub Issue-comment API object.
+
+    This function is pure: the operator CLI owns the fixed HTTPS fetch. The raw
+    response must itself identify the immutable #806 comment and Owner, and its
+    body must contain exactly one canonical activation JSON block plus the
+    matching declared SHA-256 marker.
+    """
+
+    try:
+        comment_id = int(comment["id"])
+        comment_url = str(comment["html_url"])
+        issue_url = str(comment["issue_url"])
+        author_login = str(comment["user"]["login"])
+        body = str(comment["body"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise BreakGlassContractError("GITHUB_COMMENT_MALFORMED") from exc
+
+    if issue_url != "https://api.github.com/repos/James3014/Nexus-new/issues/806":
+        raise BreakGlassContractError("GITHUB_COMMENT_ISSUE_MISMATCH")
+    if author_login != _ALLOWED_OWNER:
+        raise BreakGlassContractError("GITHUB_COMMENT_OWNER_MISMATCH")
+
+    hash_matches = re.findall(
+        r"Canonical activation payload SHA-256:\s*`([0-9a-f]{64})`", body
+    )
+    json_matches = re.findall(r"```json\s*\n(.*?)\n```", body, flags=re.DOTALL)
+    if len(hash_matches) != 1 or len(json_matches) != 1:
+        raise BreakGlassContractError("GITHUB_COMMENT_ACTIVATION_BLOCK_INVALID")
+    try:
+        payload_data = json.loads(json_matches[0])
+    except json.JSONDecodeError as exc:
+        raise BreakGlassContractError("GITHUB_COMMENT_ACTIVATION_JSON_INVALID") from exc
+    if not isinstance(payload_data, dict):
+        raise BreakGlassContractError("GITHUB_COMMENT_ACTIVATION_JSON_INVALID")
+    declared_hash = hash_matches[0]
+    if canonical_sha256(payload_data) != declared_hash:
+        raise BreakGlassContractError("GITHUB_COMMENT_PAYLOAD_HASH_MISMATCH")
+
+    return OwnerActivationEnvelope.model_validate(
+        {
+            "repository": _ALLOWED_REPOSITORY,
+            "issue": _ALLOWED_ISSUE,
+            "comment_id": comment_id,
+            "comment_url": comment_url,
+            "author_login": author_login,
+            "comment_body_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+            "payload_sha256": declared_hash,
+            "payload": payload_data,
+        }
+    )
+
+
+class BreakGlassAppliedEvidence(_FrozenModel):
+    schema: Literal["nexus.break_glass_applied_evidence.v1"] = (
+        "nexus.break_glass_applied_evidence.v1"
+    )
+    repair_commit_sha: StrictStr
+    repair_tree_sha: StrictStr
+    full_diff_sha256: StrictStr
+    changed_paths: tuple[StrictStr, ...]
+    implementer_id: StrictStr
+
+    @field_validator("repair_commit_sha", "repair_tree_sha")
+    @classmethod
+    def validate_git_sha(cls, value: str) -> str:
+        if not _SHA40.fullmatch(value):
+            raise ValueError("GIT_SHA_INVALID")
+        return value
+
+    @field_validator("full_diff_sha256")
+    @classmethod
+    def validate_diff_hash(cls, value: str) -> str:
+        if not _SHA64.fullmatch(value):
+            raise ValueError("DIFF_HASH_INVALID")
+        return value
+
+    @field_validator("changed_paths")
+    @classmethod
+    def validate_changed_paths(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if not value:
+            raise ValueError("CHANGED_PATHS_EMPTY")
+        normalized = tuple(_safe_relpath(item) for item in value)
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("CHANGED_PATHS_DUPLICATE")
+        return normalized
+
+    @field_validator("implementer_id")
+    @classmethod
+    def validate_implementer(cls, value: str) -> str:
+        if not value.strip() or value != value.strip():
+            raise ValueError("IMPLEMENTER_ID_INVALID")
+        return value
+
+    @property
+    def evidence_sha256(self) -> str:
+        return canonical_sha256(self.model_dump(mode="json"))
+
+
+class BreakGlassVerificationEvidence(_FrozenModel):
+    schema: Literal["nexus.break_glass_verification_evidence.v1"] = (
+        "nexus.break_glass_verification_evidence.v1"
+    )
+    verifier_id: StrictStr
+    verifier_evidence_sha256: StrictStr
+    verified_commit_sha: StrictStr
+    verified_tree_sha: StrictStr
+    verified_diff_sha256: StrictStr
+
+    @field_validator("verifier_evidence_sha256", "verified_diff_sha256")
+    @classmethod
+    def validate_sha64(cls, value: str) -> str:
+        if not _SHA64.fullmatch(value):
+            raise ValueError("SHA256_INVALID")
+        return value
+
+    @field_validator("verified_commit_sha", "verified_tree_sha")
+    @classmethod
+    def validate_sha40(cls, value: str) -> str:
+        if not _SHA40.fullmatch(value):
+            raise ValueError("GIT_SHA_INVALID")
+        return value
+
+    @field_validator("verifier_id")
+    @classmethod
+    def validate_verifier(cls, value: str) -> str:
+        if not value.strip() or value != value.strip():
+            raise ValueError("VERIFIER_ID_INVALID")
+        return value
+
+    @property
+    def evidence_sha256(self) -> str:
+        return canonical_sha256(self.model_dump(mode="json"))
