@@ -1,0 +1,85 @@
+name: TG8 Protocol Candidate Physical Verify
+
+on:
+  push:
+    branches:
+      - ops/tg8-mechanical-repair-20260905
+
+permissions:
+  contents: read
+
+env:
+  TARGET_SHA: 68fad98effe979ec7c33e52e85313215ec08c888
+  EXPECTED_PROTOCOL: 1.0.0-rc.1
+  GENERATION: rc
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+          check-latest: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        with:
+          version: '0.9.2'
+          enable-cache: false
+
+      - name: Verify exact subject and one-line product mutation
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TARGET_SHA"
+          test "$(git diff --name-only HEAD^ HEAD)" = "product/protocol/__init__.py"
+          python3 -c 'import os,re,pathlib; p=pathlib.Path("product/protocol/__init__.py").read_text(); m=re.search(r"^PUBLIC_PROTOCOL_VERSION = \"([^\"]+)\"$",p,re.M); assert m and m.group(1)==os.environ["EXPECTED_PROTOCOL"]; assert "IMPLEMENTATION_SCHEMA = \"nexus.changeset_certification.v2\"" in p'
+          git diff --check HEAD^ HEAD
+
+      - name: Install exact dependencies
+        shell: bash
+        run: uv sync --frozen --all-groups --all-extras
+
+      - name: Run Product regression without live marker
+        shell: bash
+        run: uv run pytest -qq tests/product -m 'not live'
+
+      - name: Build and clean-install candidate wheel
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/tg8-wheel" "$RUNNER_TEMP/tg8-venv"
+          mkdir -p "$RUNNER_TEMP/tg8-wheel"
+          uv build --wheel --out-dir "$RUNNER_TEMP/tg8-wheel"
+          python3 -m venv "$RUNNER_TEMP/tg8-venv"
+          "$RUNNER_TEMP/tg8-venv/bin/pip" install --no-deps "$RUNNER_TEMP"/tg8-wheel/*.whl
+          "$RUNNER_TEMP/tg8-venv/bin/python" -c 'import os; from product.protocol import PUBLIC_PROTOCOL_VERSION; assert PUBLIC_PROTOCOL_VERSION == os.environ["EXPECTED_PROTOCOL"]'
+          sha256sum "$RUNNER_TEMP"/tg8-wheel/*.whl > "$RUNNER_TEMP/tg8-wheel.sha256"
+
+      - name: Emit immutable candidate receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tg8-candidate-evidence"
+          cp "$RUNNER_TEMP/tg8-wheel.sha256" "$RUNNER_TEMP/tg8-candidate-evidence/wheel.sha256"
+          SUBJECT_TREE="$(git rev-parse HEAD^{tree})"
+          PROTOCOL_BLOB="$(git rev-parse HEAD:product/protocol/__init__.py)"
+          export SUBJECT_TREE PROTOCOL_BLOB
+          python3 -c 'import json,os,pathlib; p={"schema":"nexus.core-v1.tg8-protocol-candidate-receipt.v1","generation":os.environ["GENERATION"],"subject_commit":os.environ["TARGET_SHA"],"subject_tree":os.environ["SUBJECT_TREE"],"protocol_blob":os.environ["PROTOCOL_BLOB"],"public_protocol_version":os.environ["EXPECTED_PROTOCOL"],"product_tests":"PASS","wheel_build":"PASS","clean_install_readback":"PASS"}; pathlib.Path(os.environ["RUNNER_TEMP"]+"/tg8-candidate-evidence/receipt.json").write_text(json.dumps(p,sort_keys=True,separators=(",",":"))+"\n")'
+
+      - name: Upload candidate evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: tg8-protocol-${{ env.GENERATION }}-${{ env.TARGET_SHA }}
+          path: ${{ runner.temp }}/tg8-candidate-evidence/
+          if-no-files-found: error
+          retention-days: 30
