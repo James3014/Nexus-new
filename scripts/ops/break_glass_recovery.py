@@ -141,7 +141,9 @@ def _fetch_integration(comment_id: int) -> OwnerIntegrationEnvelope:
 def _fetch_integration_readback(
     integration: OwnerIntegrationEnvelope,
 ) -> tuple[str, str, int]:
-    pr_url = f"https://api.github.com/repos/James3014/Nexus-new/pulls/{integration.payload.pr_number}"
+    pr_url = (
+        f"https://api.github.com/repos/James3014/Nexus-new/pulls/{integration.payload.pr_number}"
+    )
     main_url = "https://api.github.com/repos/James3014/Nexus-new/branches/main"
     return integration_readback_from_github(
         integration.payload,
