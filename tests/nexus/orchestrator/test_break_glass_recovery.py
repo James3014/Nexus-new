@@ -162,6 +162,7 @@ def integration_envelope(
     *,
     accepted_head: str = COMMIT,
     expected_base: str = BASE,
+    verification_payload_sha256: str | None = None,
 ) -> OwnerIntegrationEnvelope:
     source = envelope()
     payload = {
@@ -173,7 +174,9 @@ def integration_envelope(
         "integration_attempt_id": "BG-806-I1",
         "source_attempt_id": source.payload.attempt_id,
         "source_activation_payload_sha256": source.payload_sha256,
-        "verification_payload_sha256": verification.payload_sha256,
+        "verification_payload_sha256": (
+            verification_payload_sha256 or verification.payload_sha256
+        ),
         "effect_class": "EMERGENCY_INTEGRATION",
         "pr_number": 808,
         "accepted_head_sha": accepted_head,
@@ -391,6 +394,107 @@ def test_emergency_integration_requires_separate_owner_grant_and_denies_replay(
     assert inspect_emergency_integration(integration, state_root=tmp_path)["status"] == "CONSUMED"
     with pytest.raises(BreakGlassRecoveryError, match="INTEGRATION_REPLAY_DENIED"):
         assert_emergency_integration_not_consumed(integration, state_root=tmp_path)
+
+
+def test_emergency_integration_requires_verified_source_first(tmp_path: Path) -> None:
+    source = envelope()
+    verification = verification_envelope()
+    prepare_source_repair(
+        source,
+        observed_base_sha=BASE,
+        observed_base_tree=TREE,
+        now=NOW,
+        state_root=tmp_path,
+    )
+    record_source_repair_applied(source, applied(), now=NOW, state_root=tmp_path)
+    with pytest.raises(BreakGlassRecoveryError, match="VERIFIED_EVIDENCE_REQUIRED"):
+        prepare_emergency_integration(
+            source,
+            integration_envelope(verification),
+            now=NOW,
+            state_root=tmp_path,
+        )
+
+
+def test_emergency_integration_verification_grant_substitution_fails_closed(
+    tmp_path: Path,
+) -> None:
+    source = envelope()
+    verification = verification_envelope()
+    prepare_source_repair(
+        source,
+        observed_base_sha=BASE,
+        observed_base_tree=TREE,
+        now=NOW,
+        state_root=tmp_path,
+    )
+    record_source_repair_applied(source, applied(), now=NOW, state_root=tmp_path)
+    record_source_repair_verified(source, verification, now=NOW, state_root=tmp_path)
+    with pytest.raises(BreakGlassRecoveryError, match="INTEGRATION_VERIFICATION_MISMATCH"):
+        prepare_emergency_integration(
+            source,
+            integration_envelope(
+                verification,
+                verification_payload_sha256="e" * 64,
+            ),
+            now=NOW,
+            state_root=tmp_path,
+        )
+
+
+def test_emergency_integration_remote_readback_is_exact(tmp_path: Path) -> None:
+    source = envelope()
+    verification = verification_envelope()
+    prepare_source_repair(
+        source,
+        observed_base_sha=BASE,
+        observed_base_tree=TREE,
+        now=NOW,
+        state_root=tmp_path,
+    )
+    record_source_repair_applied(source, applied(), now=NOW, state_root=tmp_path)
+    record_source_repair_verified(source, verification, now=NOW, state_root=tmp_path)
+    integration = integration_envelope(verification)
+    prepare_emergency_integration(source, integration, now=NOW, state_root=tmp_path)
+
+    with pytest.raises(BreakGlassRecoveryError, match="INTEGRATION_PR_MISMATCH"):
+        record_emergency_integration_consumed(
+            integration,
+            merge_commit_sha="8" * 40,
+            observed_main_sha="8" * 40,
+            merged_pr_number=809,
+            now=NOW,
+            state_root=tmp_path,
+        )
+    with pytest.raises(BreakGlassRecoveryError, match="INTEGRATION_READBACK_MISMATCH"):
+        record_emergency_integration_consumed(
+            integration,
+            merge_commit_sha="8" * 40,
+            observed_main_sha="9" * 40,
+            merged_pr_number=808,
+            now=NOW,
+            state_root=tmp_path,
+        )
+    assert inspect_emergency_integration(integration, state_root=tmp_path)["status"] == "PREPARED"
+
+
+def test_source_consumption_rejects_canary_identity_substitution(tmp_path: Path) -> None:
+    source = envelope()
+    verification = verification_envelope()
+    prepare_source_repair(
+        source,
+        observed_base_sha=BASE,
+        observed_base_tree=TREE,
+        now=NOW,
+        state_root=tmp_path,
+    )
+    record_source_repair_applied(source, applied(), now=NOW, state_root=tmp_path)
+    record_source_repair_verified(source, verification, now=NOW, state_root=tmp_path)
+    bad_data = canary().model_dump(mode="json")
+    bad_data["recovery_id"] = "BG-OTHER"
+    bad_canary = BreakGlassGovernanceCanaryEvidence.model_validate(bad_data)
+    with pytest.raises(BreakGlassRecoveryError, match="GOVERNANCE_CANARY_MISMATCH"):
+        consume_source_repair_authority(source, bad_canary, now=NOW, state_root=tmp_path)
 
 
 def test_emergency_integration_subject_or_base_substitution_fails_closed(
