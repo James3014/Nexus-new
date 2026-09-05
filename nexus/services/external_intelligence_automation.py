@@ -19,6 +19,7 @@ from nexus.services.external_intelligence import (
     normalize_intake,
     validate_selected_worker,
 )
+from nexus.services.external_intelligence_adoption import build_external_settlement_handoff
 from nexus.services.external_intelligence_closure import (
     CLAIM_CEILING as CLOSURE_CLAIM_CEILING,
 )
@@ -887,6 +888,11 @@ class ExternalIntelligenceAutomation:
                     closure_status=closure.get("status"),
                     semantic_dispatched=True,
                 )
+            settlement_handoff = build_external_settlement_handoff(
+                repository=item.repository,
+                closure=closure,
+                task_card_bytes=task_card_text.encode("utf-8"),
+            )
             publication = compact_publication_payload(closure)
             pub_id = compute_publication_id(
                 item.repository, item.issue_number, item.identity_hash, publication
@@ -904,6 +910,7 @@ class ExternalIntelligenceAutomation:
                 intelligence_receipt_id=intelligence.get("receipt_id"),
                 fanout_run_sha256=fanout.get("run_sha256"),
                 closure_run_id=closure.get("run_id"),
+                settlement_handoff=settlement_handoff,
                 publication=publication,
                 publication_record=publication_record,
                 semantic_dispatched=True,

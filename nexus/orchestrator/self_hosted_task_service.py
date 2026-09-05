@@ -32,7 +32,7 @@ from nexus.contracts.lifecycle_action import (
     LifecycleActionEnvelope,
     LifecycleActionType,
     canonical_request_hash,
-    parse_historical_epb_task_card,
+    parse_external_adoption_task_card,
     validate_owner_inline_contract,
 )
 from nexus.contracts.operator_outcome_receipt import (
@@ -6946,7 +6946,7 @@ class SelfHostedTaskService:
             raise RuntimeError("external adoption evidence must be JSON objects")
 
         try:
-            projection = parse_historical_epb_task_card(card_bytes)
+            projection = parse_external_adoption_task_card(card_bytes)
         except ValueError as exc:
             raise RuntimeError("external adoption Task Card contract is unresolvable") from exc
         raw_derived_candidate = validation.get("candidate")
@@ -6957,7 +6957,6 @@ class SelfHostedTaskService:
             "target_base_revision": str(validation_candidate.get("base_commit") or ""),
             "allowed_files": tuple(projection.allowed_repository_paths),
             "forbidden_files": tuple(projection.forbidden_repository_paths),
-            "authorized_deletions": (),
             "verifier_commands": tuple(projection.exact_verification_commands),
             "protected_contracts": (),
         }
@@ -7023,8 +7022,11 @@ class SelfHostedTaskService:
             for path in (*changed_paths, *deleted_paths)
         ):
             raise RuntimeError("external adoption changed paths differ from contract")
-        if sorted(set(deleted_paths) - set(request.authorized_deletions)):
-            raise RuntimeError("external adoption contains unauthorized deletions")
+        expected_authorized_deletions = tuple(deleted_paths) if projection.allow_deletions else ()
+        if tuple(sorted(request.authorized_deletions)) != expected_authorized_deletions:
+            raise RuntimeError("ADOPTION_REQUEST_BINDING_MISMATCH:authorized_deletions")
+        derived["authorized_deletions"] = expected_authorized_deletions
+        derived_projection["authorized_deletions"] = list(expected_authorized_deletions)
 
         def forbidden_pattern_matches(pattern: str, path: str) -> bool:
             if pattern.endswith("/**"):
