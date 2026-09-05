@@ -6,7 +6,7 @@ on:
       - controller/core-v1-physical-recovery-20260905
     paths:
       - .github/workflows/core-v1-tg7-physical-shadow.yml
-      - scripts/ops/core_v1_tg7_physical_shadow.py.gz.b64
+      - scripts/ops/tg7_payload/*.b64
       - controller/tg7-physical-shadow.marker
 
 permissions:
@@ -44,12 +44,25 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
 
-      - name: Decode and verify controller payload
+      - name: Decode and verify segmented controller payload
         shell: bash
         run: |
           set -euo pipefail
-          base64 -d scripts/ops/core_v1_tg7_physical_shadow.py.gz.b64 | gzip -d > /tmp/core_v1_tg7_physical_shadow.py
-          echo '629ff62e85eec593b46482dbc7486818115577794df1484ece85a6a0fc469d38  /tmp/core_v1_tg7_physical_shadow.py' | sha256sum -c -
+          mkdir -p /tmp/tg7-harness
+          cat > /tmp/tg7-part-hashes.txt <<'EOF'
+          eda5bf61d95a8f49e7ea9e97b6fd45a69e4e2d8c660a96385b42560459751ff2  scripts/ops/tg7_payload/part-00.b64
+          1b439644dd5f4c5f1ec85a702854a2897bf3ea27fc28b332b225cc20e8556937  scripts/ops/tg7_payload/part-01.b64
+          1dec0e1645b1237e9a00b1e0d3a22211638026353bed59106f68ca0e959f3acb  scripts/ops/tg7_payload/part-02.b64
+          d99b1636b77169665ad4fe8b3cb75476269719b05b4fe636910e2917ea774756  scripts/ops/tg7_payload/part-03.b64
+          EOF
+          sha256sum -c /tmp/tg7-part-hashes.txt | tee /tmp/tg7-harness/payload-segment-checks.log
+          cat scripts/ops/tg7_payload/part-00.b64 \
+              scripts/ops/tg7_payload/part-01.b64 \
+              scripts/ops/tg7_payload/part-02.b64 \
+              scripts/ops/tg7_payload/part-03.b64 > /tmp/tg7-all.b64
+          echo '8f9572647791af72b38c558a4c43226cc9ad2d25396997e7644d21e85f119fdf  /tmp/tg7-all.b64' | sha256sum -c - | tee /tmp/tg7-harness/payload-concat-check.log
+          base64 -d /tmp/tg7-all.b64 | gzip -d > /tmp/core_v1_tg7_physical_shadow.py
+          echo '629ff62e85eec593b46482dbc7486818115577794df1484ece85a6a0fc469d38  /tmp/core_v1_tg7_physical_shadow.py' | sha256sum -c - | tee /tmp/tg7-harness/payload-decoded-check.log
           python -m py_compile /tmp/core_v1_tg7_physical_shadow.py
 
       - name: Sync exact TG7 environment
@@ -67,10 +80,9 @@ jobs:
           sudo chown "$(id -u):$(id -g)" /private /private/tmp
           chmod 0755 /private /private/tmp
           docker version
-          rm -rf /tmp/tg7-harness
-          mkdir -p /tmp/tg7-harness
-          printf 'workflow_run=%s\nworkflow_head=%s\ntg7_sha=%s\npayload_sha256=%s\n' \
+          printf 'workflow_run=%s\nworkflow_head=%s\ntg7_sha=%s\npayload_b64_sha256=%s\npayload_python_sha256=%s\n' \
             "$GITHUB_RUN_ID" "$GITHUB_SHA" "$TG7_SHA" \
+            '8f9572647791af72b38c558a4c43226cc9ad2d25396997e7644d21e85f119fdf' \
             '629ff62e85eec593b46482dbc7486818115577794df1484ece85a6a0fc469d38' \
             > /tmp/tg7-harness/harness-identity.txt
 
