@@ -46,7 +46,7 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git -C candidate rev-parse HEAD)" = "$CANDIDATE_SHA"
-          test "$(git -C candidate rev-parse HEAD^)" = "$BASE_SHA"
+          test "$(git -C candidate merge-base HEAD "$BASE_SHA")" = "$BASE_SHA"
           test "$(git -C candidate rev-parse HEAD^{tree})" = '1123602ed191862249487fdf28075237c97d78c2'
           git -C candidate diff --quiet
           git -C candidate diff --cached --quiet
