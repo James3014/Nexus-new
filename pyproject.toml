@@ -94,6 +94,11 @@ dev = [
     "pyright>=1.1.370",
     "bandit>=1.7.0",
 ]
+trusted-anchor = [
+    "pydantic>=2.0,<3.0",
+    "PyYAML>=6.0,<7.0",
+]
+
 
 [tool.ruff]
 # Target Python version

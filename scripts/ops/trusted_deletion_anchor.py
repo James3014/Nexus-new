@@ -34,6 +34,7 @@ WORKFLOW_REF = "refs/trusted-anchor/workflow"
 RUNTIME_FILENAMES = ("runtime.tar", "runtime-metadata.json", "requirements.txt")
 GOLDEN_EVALUATOR_PATH = "scripts/ops/run_golden_behavior_eval.py"
 PYTEST_PLUGINS = ["pytest", "pytest_asyncio", "pytest_timeout"]
+TRUSTED_RUNTIME_DEPENDENCY_GROUPS: tuple[str, ...] = ("dev", "trusted-anchor")
 UV_VERSION = "uv 0.9.2"
 # Historical one-use, four-way binding for the Owner-approved TASK-001 Open SWE
 # optional-dependency transition. The corrective external-runtime architecture
@@ -287,20 +288,25 @@ def _build_runtime(args: argparse.Namespace) -> None:
         (contract / "uv.lock").write_bytes(uv_lock)
         requirements_path = build_root / "requirements.txt"
         environment = _runtime_subprocess_env(build_root / "home")
-        subprocess.run(
+        export_args = [
+            args.uv_executable,
+            "export",
+            "--frozen",
+            "--no-default-groups",
+        ]
+        for group in TRUSTED_RUNTIME_DEPENDENCY_GROUPS:
+            export_args.extend(["--group", group])
+        export_args.extend(
             [
-                args.uv_executable,
-                "export",
-                "--frozen",
-                "--no-default-groups",
-                "--group",
-                "dev",
                 "--no-emit-project",
                 "--no-emit-workspace",
                 "--no-emit-local",
                 "--output-file",
                 str(requirements_path),
-            ],
+            ]
+        )
+        subprocess.run(
+            export_args,
             cwd=contract,
             env=environment,
             check=True,
@@ -348,6 +354,7 @@ def _build_runtime(args: argparse.Namespace) -> None:
         "uv_lock_sha256": _sha(uv_lock),
         "requirements_sha256": _sha(requirements),
         "pytest_plugins": PYTEST_PLUGINS,
+        "dependency_groups": list(TRUSTED_RUNTIME_DEPENDENCY_GROUPS),
     }
     (output / "runtime.tar").write_bytes(runtime_archive)
     (output / "runtime-metadata.json").write_bytes(_json(metadata) + b"\n")
@@ -637,6 +644,7 @@ def verify_evidence(
             if (
                 metadata.get("schema_version") != RUNTIME_SCHEMA_VERSION
                 or metadata.get("pytest_plugins") != PYTEST_PLUGINS
+                or metadata.get("dependency_groups") != list(TRUSTED_RUNTIME_DEPENDENCY_GROUPS)
                 or metadata.get("builder") != {"uv_version": UV_VERSION}
             ):
                 raise ValueError("runtime contract mismatch")
@@ -808,6 +816,7 @@ def _controller(args: argparse.Namespace) -> None:
         or runtime_identity.get("requirements_sha256") != _sha(requirements)
         or runtime_identity.get("runtime_probe") != _runtime_probe()
         or runtime_identity.get("pytest_plugins") != PYTEST_PLUGINS
+        or runtime_identity.get("dependency_groups") != list(TRUSTED_RUNTIME_DEPENDENCY_GROUPS)
         or runtime_identity.get("builder") != {"uv_version": UV_VERSION}
     ):
         raise ValueError("runtime metadata does not match trusted contract")
@@ -875,6 +884,7 @@ def _executor(args: argparse.Namespace) -> None:
         or runtime_metadata != manifest.get("runtime_identity")
         or runtime_metadata.get("runtime_probe") != _runtime_probe()
         or runtime_metadata.get("pytest_plugins") != PYTEST_PLUGINS
+        or runtime_metadata.get("dependency_groups") != list(TRUSTED_RUNTIME_DEPENDENCY_GROUPS)
         or runtime_metadata.get("builder") != {"uv_version": UV_VERSION}
     ):
         raise ValueError("offline runtime identity mismatch")
