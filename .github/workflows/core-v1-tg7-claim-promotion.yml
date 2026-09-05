@@ -1,0 +1,48 @@
+name: Core V1 TG7 Claim Promotion
+
+on:
+  push:
+    branches:
+      - controller/core-v1-physical-recovery-20260905
+    paths:
+      - controller/tg7-claim-promotion.marker
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+    env:
+      EXPECTED_HEAD: cc15bf814211b0d0df39ae18a2683d8b9675b124
+      BRANCH: codex/issue-771-tg7-postmerge-repair
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Promote only the TG7 maximum claim
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/tg7-promote
+          git init /tmp/tg7-promote
+          git -C /tmp/tg7-promote remote add origin https://github.com/James3014/Nexus-new.git
+          git -C /tmp/tg7-promote -c protocol.version=2 fetch --no-tags --no-recurse-submodules origin "$EXPECTED_HEAD"
+          git -C /tmp/tg7-promote checkout --detach FETCH_HEAD
+          test "$(git -C /tmp/tg7-promote rev-parse HEAD)" = "$EXPECTED_HEAD"
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('/tmp/tg7-promote/product/benchmark/tg7_shadow.py')
+          text = p.read_text(encoding='utf-8')
+          old = 'MAXIMUM_CLAIM = "TG7_REPAIR_READY_FOR_REVIEW"'
+          new = 'MAXIMUM_CLAIM = "CROSS_REPO_TRUST_SHADOW_VERIFIED"'
+          if text.count(old) != 1:
+              raise SystemExit('claim promotion target not unique')
+          p.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+          git -C /tmp/tg7-promote diff --check
+          test "$(git -C /tmp/tg7-promote diff --name-only)" = "product/benchmark/tg7_shadow.py"
+          git -C /tmp/tg7-promote config user.name 'Nexus Core Controller'
+          git -C /tmp/tg7-promote config user.email 'controller@nexus.local'
+          git -C /tmp/tg7-promote add product/benchmark/tg7_shadow.py
+          git -C /tmp/tg7-promote commit -m 'feat(tg7): promote verified cross-repo shadow claim'
+          git -C /tmp/tg7-promote remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/James3014/Nexus-new.git"
+          git -C /tmp/tg7-promote push origin "HEAD:refs/heads/${BRANCH}"
