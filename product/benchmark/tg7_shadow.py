@@ -50,106 +50,101 @@ HOSTILE_FAMILIES = (
 )
 
 ALLOWED_LICENSES = frozenset({"MIT", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0", "ISC"})
-INFRA_INVALID_REASONS = frozenset(
-    {
-        "MATERIALIZATION_MISSING",
-        "RUNNER_UNAVAILABLE_BEFORE_EXECUTION",
-        "DEPENDENCY_ARTIFACT_MISSING",
-        "TIMEOUT_BEFORE_EXECUTION",
-        "CORRUPT_FIXTURE",
-    }
-)
+INFRA_INVALID_REASONS = frozenset({
+    "MATERIALIZATION_MISSING",
+    "RUNNER_UNAVAILABLE_BEFORE_EXECUTION",
+    "DEPENDENCY_ARTIFACT_MISSING",
+    "TIMEOUT_BEFORE_EXECUTION",
+    "CORRUPT_FIXTURE",
+})
 
-SELECTION_REQUIRED_KEYS = frozenset(
-    {
-        "schema",
-        "canonical_url",
-        "owner",
-        "name",
-        "commit",
-        "tree",
-        "snapshot_path",
-        "snapshot_tree_hash",
-        "observed_at",
-        "license_spdx",
-        "license_evidence_hash",
-        "privacy_class",
-        "read_only_evidence_hash",
-        "task_set_id",
-        "not_nexus_reason",
-        "selection_hash",
-    }
-)
-CORPUS_REQUIRED_KEYS = frozenset(
-    {"schema", "task_set_id", "repository", "case_count", "cases", "corpus_hash"}
-)
-CORPUS_CASE_REQUIRED_KEYS = frozenset(
-    {
-        "case_id",
-        "hostile_family",
-        "repository_commit",
-        "repository_tree",
-        "operation",
-        "canonical_request_hash",
-        "request_payload",
-        "oracle_kind",
-        "oracle_source",
-        "oracle_hash",
-        "expected_status",
-        "expected_disposition",
-        "expected_reason",
-        "protocol_version",
-        "implementation_schema",
-        "profile_id",
-        "task_set_id",
-        "case_hash",
-    }
-)
-ATTEMPT_REQUIRED_KEYS = frozenset(
-    {
-        "schema",
-        "issuer_id",
-        "producer_id",
-        "attempt_id",
-        "execution_id",
-        "case_id",
-        "case_hash",
-        "hostile_family",
-        "repository_commit",
-        "repository_tree",
-        "external_material_hash",
-        "canonical_request_hash",
-        "oracle_hash",
-        "oracle_source",
-        "profile_id",
-        "protocol_version",
-        "implementation_schema",
-        "tg5_receipt_hash",
-        "actual_status",
-        "actual_disposition",
-        "evidence_hash",
-        "runner_result_hash",
-        "infra_invalid",
-        "infra_invalid_reason",
-        "observed_at",
-        "attempt_hash",
-    }
-)
-SHADOW_CASE_REQUIRED_KEYS = frozenset(
-    {
-        "case_id",
-        "hostile_family",
-        "attempt_id",
-        "attempt_hash",
-        "oracle_hash",
-        "result_hash",
-        "actual_status",
-        "actual_disposition",
-        "evidence_hash",
-        "infra_invalid",
-        "infra_invalid_reason",
-    }
-)
+SELECTION_REQUIRED_KEYS = frozenset({
+    "schema",
+    "canonical_url",
+    "owner",
+    "name",
+    "commit",
+    "tree",
+    "snapshot_path",
+    "snapshot_tree_hash",
+    "observed_at",
+    "license_spdx",
+    "license_evidence_hash",
+    "privacy_class",
+    "read_only_evidence_hash",
+    "task_set_id",
+    "not_nexus_reason",
+    "selection_hash",
+})
+CORPUS_REQUIRED_KEYS = frozenset({
+    "schema",
+    "task_set_id",
+    "repository",
+    "case_count",
+    "cases",
+    "corpus_hash",
+})
+CORPUS_CASE_REQUIRED_KEYS = frozenset({
+    "case_id",
+    "hostile_family",
+    "repository_commit",
+    "repository_tree",
+    "operation",
+    "canonical_request_hash",
+    "request_payload",
+    "oracle_kind",
+    "oracle_source",
+    "oracle_hash",
+    "expected_status",
+    "expected_disposition",
+    "expected_reason",
+    "protocol_version",
+    "implementation_schema",
+    "profile_id",
+    "task_set_id",
+    "case_hash",
+})
+ATTEMPT_REQUIRED_KEYS = frozenset({
+    "schema",
+    "issuer_id",
+    "producer_id",
+    "attempt_id",
+    "execution_id",
+    "case_id",
+    "case_hash",
+    "hostile_family",
+    "repository_commit",
+    "repository_tree",
+    "external_material_hash",
+    "canonical_request_hash",
+    "oracle_hash",
+    "oracle_source",
+    "profile_id",
+    "protocol_version",
+    "implementation_schema",
+    "tg5_receipt_hash",
+    "actual_status",
+    "actual_disposition",
+    "evidence_hash",
+    "runner_result_hash",
+    "infra_invalid",
+    "infra_invalid_reason",
+    "observed_at",
+    "attempt_hash",
+})
+SHADOW_CASE_REQUIRED_KEYS = frozenset({
+    "case_id",
+    "hostile_family",
+    "attempt_id",
+    "attempt_hash",
+    "oracle_hash",
+    "result_hash",
+    "actual_status",
+    "actual_disposition",
+    "evidence_hash",
+    "infra_invalid",
+    "infra_invalid_reason",
+})
 
 
 def _sha256_text(value: Any) -> bool:
@@ -348,13 +343,11 @@ def validate_corpus(
         if case.get("canonical_request_hash") != _digest(case.get("request_payload")):
             errors.append(f"case[{cid}] canonical_request_hash mismatch")
         oracle_kind = case.get("oracle_kind")
-        expected_oracle_hash = _digest(
-            {
-                "source": case.get("oracle_source"),
-                "kind": oracle_kind,
-                "reason": case.get("expected_reason"),
-            }
-        )
+        expected_oracle_hash = _digest({
+            "source": case.get("oracle_source"),
+            "kind": oracle_kind,
+            "reason": case.get("expected_reason"),
+        })
         if not isinstance(oracle_kind, str) or not oracle_kind:
             errors.append(f"case[{cid}] missing or empty oracle_kind")
         if case.get("oracle_hash") != expected_oracle_hash:
@@ -504,15 +497,13 @@ def validate_shadow_receipt(
             errors.append(f"case[{item.get('case_id')}] invalid attempt_hash")
         if not _sha256_text(item.get("evidence_hash")):
             errors.append(f"case[{item.get('case_id')}] invalid evidence_hash")
-        expected_result_hash = _digest(
-            {
-                "case_id": item.get("case_id"),
-                "attempt_hash": item.get("attempt_hash"),
-                "oracle_hash": item.get("oracle_hash"),
-                "actual_status": item.get("actual_status"),
-                "actual_disposition": item.get("actual_disposition"),
-            }
-        )
+        expected_result_hash = _digest({
+            "case_id": item.get("case_id"),
+            "attempt_hash": item.get("attempt_hash"),
+            "oracle_hash": item.get("oracle_hash"),
+            "actual_status": item.get("actual_status"),
+            "actual_disposition": item.get("actual_disposition"),
+        })
         if item.get("result_hash") != expected_result_hash:
             errors.append(f"case[{item.get('case_id')}] result_hash mismatch")
         if item.get("infra_invalid") is True:
@@ -565,9 +556,10 @@ def validate_report(
                 errors.append(f"report family_counts[{family}] must be >= 5")
         if isinstance(denominator, int) and sum(family_counts.values()) != denominator:
             errors.append("report family-count arithmetic mismatch")
-    if report.get("false_certification_count") != 0 or report.get(
-        "false_certification_case_ids"
-    ) != []:
+    if (
+        report.get("false_certification_count") != 0
+        or report.get("false_certification_case_ids") != []
+    ):
         errors.append("HIGH RISK FALSE CERTIFICATION reported")
     if shadow_receipt is not None:
         if report.get("shadow_receipt_hash") != shadow_receipt.get("receipt_hash"):
@@ -732,9 +724,7 @@ def build_default_corpus(selection: Mapping[str, Any]) -> dict[str, Any]:
                 "request_payload": payload,
                 "oracle_kind": oracle_kind,
                 "oracle_source": source,
-                "oracle_hash": _digest(
-                    {"source": source, "kind": oracle_kind, "reason": reason}
-                ),
+                "oracle_hash": _digest({"source": source, "kind": oracle_kind, "reason": reason}),
                 "expected_status": expected_status,
                 "expected_disposition": expected_disposition,
                 "expected_reason": reason,
@@ -851,41 +841,38 @@ def run_shadow(
             or actual_disposition != case.get("expected_disposition")
         ):
             trust_mismatches += 1
-        result_hash = _digest(
-            {
-                "case_id": case_id,
-                "attempt_hash": attempt["attempt_hash"],
-                "oracle_hash": case["oracle_hash"],
-                "actual_status": actual_status,
-                "actual_disposition": actual_disposition,
-            }
-        )
-        cases_results.append(
-            {
-                "case_id": case_id,
-                "hostile_family": family,
-                "attempt_id": attempt_id,
-                "attempt_hash": attempt["attempt_hash"],
-                "oracle_hash": case["oracle_hash"],
-                "result_hash": result_hash,
-                "actual_status": actual_status,
-                "actual_disposition": actual_disposition,
-                "evidence_hash": attempt["evidence_hash"],
-                "infra_invalid": infra_invalid,
-                "infra_invalid_reason": infra_reason,
-            }
-        )
+        result_hash = _digest({
+            "case_id": case_id,
+            "attempt_hash": attempt["attempt_hash"],
+            "oracle_hash": case["oracle_hash"],
+            "actual_status": actual_status,
+            "actual_disposition": actual_disposition,
+        })
+        cases_results.append({
+            "case_id": case_id,
+            "hostile_family": family,
+            "attempt_id": attempt_id,
+            "attempt_hash": attempt["attempt_hash"],
+            "oracle_hash": case["oracle_hash"],
+            "result_hash": result_hash,
+            "actual_status": actual_status,
+            "actual_disposition": actual_disposition,
+            "evidence_hash": attempt["evidence_hash"],
+            "infra_invalid": infra_invalid,
+            "infra_invalid_reason": infra_reason,
+        })
 
     eligible_count = sum(not row["infra_invalid"] for row in cases_results)
     infra_invalid_count = len(cases_results) - eligible_count
-    run_id = "tg7-run-" + _digest(
-        {
+    run_id = (
+        "tg7-run-"
+        + _digest({
             "selection_hash": selection["selection_hash"],
             "corpus_hash": corpus["corpus_hash"],
             "tg5_receipt_hash": tg5_receipt["receipt_hash"],
             "attempt_hashes": [row["attempt_hash"] for row in cases_results],
-        }
-    )[7:23]
+        })[7:23]
+    )
     generated_at = max(observed_times)
     shadow_receipt = {
         "schema": SHADOW_RECEIPT_SCHEMA,
