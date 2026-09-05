@@ -38,9 +38,9 @@ def _refresh_trust(trust: dict, observations: list[dict]) -> None:
     trust["all_assigned_pairs"] = len(assigned)
     trust["baseline_counts"] = gate._counts(assigned, "baseline_outcome")
     trust["assisted_counts"] = gate._counts(assigned, "assisted_outcome")
-    trust["partner_high_risk_errors"] = sorted(
-        {row["partner_id"] for row in assigned if row["high_risk_error"]}
-    )
+    trust["partner_high_risk_errors"] = sorted({
+        row["partner_id"] for row in assigned if row["high_risk_error"]
+    })
     _rehash(trust, "trust_hash")
 
 
@@ -286,15 +286,13 @@ def test_verbal_signal_is_rejected() -> None:
 
 
 def test_privacy_findings_detect_forbidden_keys_and_values() -> None:
-    findings = gate.privacy_findings(
-        [
-            {
-                "email": "synthetic@example.invalid",
-                "private_url": "https://example.invalid/private",
-                "ip_address": "10.0.0.1",
-            }
-        ]
-    )
+    findings = gate.privacy_findings([
+        {
+            "email": "synthetic@example.invalid",
+            "private_url": "https://example.invalid/private",
+            "ip_address": "10.0.0.1",
+        }
+    ])
     assert any(item.startswith("FORBIDDEN_KEY:") for item in findings)
     assert any(item.startswith("EMAIL_VALUE:") for item in findings)
     assert any(item.startswith("URL_VALUE:") for item in findings)
@@ -381,24 +379,22 @@ def test_cli_full_synthetic_round_trip(tmp_path: Path, capsys: pytest.CaptureFix
     ):
         _write_json(path, value)
     _write_jsonl(observations_path, observations)
-    rc = gate.main(
-        [
-            "--manifest",
-            str(manifest_path),
-            "--eligibility",
-            str(eligibility_path),
-            "--consent",
-            str(consent_path),
-            "--observations",
-            str(observations_path),
-            "--trust",
-            str(trust_path),
-            "--signal",
-            str(signal_path),
-            "--report",
-            str(report_path),
-        ]
-    )
+    rc = gate.main([
+        "--manifest",
+        str(manifest_path),
+        "--eligibility",
+        str(eligibility_path),
+        "--consent",
+        str(consent_path),
+        "--observations",
+        str(observations_path),
+        "--trust",
+        str(trust_path),
+        "--signal",
+        str(signal_path),
+        "--report",
+        str(report_path),
+    ])
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["state"] == gate.SYNTHETIC_STATE

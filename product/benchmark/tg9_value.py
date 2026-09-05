@@ -31,15 +31,13 @@ REPORT_SCHEMA = "nexus.core-v1.tg9-report.v1"
 
 SYNTHETIC_STATE = "SYNTHETIC_ONLY"
 VALUE_READY_STATE = "PAIRED_USABILITY_VALUE_EVIDENCE_READY"
-ALLOWED_STATES = frozenset(
-    {
-        VALUE_READY_STATE,
-        SYNTHETIC_STATE,
-        "MISSING_EVIDENCE",
-        "INVALID_EVIDENCE",
-        "UNVERIFIABLE",
-    }
-)
+ALLOWED_STATES = frozenset({
+    VALUE_READY_STATE,
+    SYNTHETIC_STATE,
+    "MISSING_EVIDENCE",
+    "INVALID_EVIDENCE",
+    "UNVERIFIABLE",
+})
 CLAIM_CEILING = "BOUNDED_PAIRED_USABILITY_VALUE_EVIDENCE"
 ASSIGNMENT_SEED = "20260904"
 BOOTSTRAP_SEED = 20260904
@@ -55,23 +53,19 @@ MIN_POSITIVE_FRACTION = 0.70
 MIN_WASHOUT_MS = 24 * 60 * 60 * 1000
 
 TRUST_OUTCOMES = ("CORRECT", "FALSE_ACCEPT", "FALSE_REJECT", "UNRESOLVED")
-SIGNAL_TYPES = frozenset(
-    {
-        "SIGNED_PILOT_CONTINUATION",
-        "SIGNED_LOI_ORDER",
-        "PAID_INVOICE_PROCESSOR_RECEIPT",
-        "RENEWAL",
-    }
-)
-CLOSED_EXCLUSIONS = frozenset(
-    {
-        "CONSENT_WITHDRAWAL",
-        "CORRUPTED_TIMING_BEFORE_OUTCOME",
-        "PROTOCOL_RUNTIME_DRIFT_BEFORE_PAIR",
-        "MISSING_BLINDED_ORACLE",
-        "PRIVACY_INVALIDATION",
-    }
-)
+SIGNAL_TYPES = frozenset({
+    "SIGNED_PILOT_CONTINUATION",
+    "SIGNED_LOI_ORDER",
+    "PAID_INVOICE_PROCESSOR_RECEIPT",
+    "RENEWAL",
+})
+CLOSED_EXCLUSIONS = frozenset({
+    "CONSENT_WITHDRAWAL",
+    "CORRUPTED_TIMING_BEFORE_OUTCOME",
+    "PROTOCOL_RUNTIME_DRIFT_BEFORE_PAIR",
+    "MISSING_BLINDED_ORACLE",
+    "PRIVACY_INVALIDATION",
+})
 FORBIDDEN_KEY_FRAGMENTS = (
     "real_name",
     "full_name",
@@ -186,141 +180,127 @@ def assignment_for(study_id: str, partner_id: str, pair_id: str) -> str:
     return "AB" if low_bit == 0 else "BA"
 
 
-STUDY_KEYS = frozenset(
-    {
-        "schema",
-        "study_id",
-        "synthetic",
-        "tg8_receipt_hash",
-        "source_commit",
-        "source_tree",
-        "protocol_version",
-        "runtime_hash",
-        "package_hash",
-        "package_version",
-        "study_start_at",
-        "study_end_at",
-        "analysis_at",
-        "narrow_icp_code",
-        "assignment_seed",
-        "bootstrap_seed",
-        "bootstrap_replicates",
-        "min_partners",
-        "max_partners",
-        "min_pairs_per_partner",
-        "min_total_pairs",
-        "min_weeks",
-        "max_weeks",
-        "min_improvement",
-        "min_positive_fraction",
-        "oracle_rubric_hash",
-        "consent_version",
-        "retention_policy_code",
-        "withdrawal_channel_code",
-        "manifest_hash",
-    }
-)
-ELIGIBILITY_KEYS = frozenset(
-    {
-        "schema",
-        "study_id",
-        "partners",
-        "reserve_order",
-        "selected_at",
-        "eligibility_hash",
-    }
-)
-PARTNER_KEYS = frozenset(
-    {
-        "partner_id",
-        "eligibility_state",
-        "role_class",
-        "organization_size_bucket",
-        "workflow_class",
-        "inclusion_reason_code",
-        "exclusion_reason_code",
-        "slot_number",
-        "reserve_rank",
-        "eligibility_receipt_hash",
-    }
-)
+STUDY_KEYS = frozenset({
+    "schema",
+    "study_id",
+    "synthetic",
+    "tg8_receipt_hash",
+    "source_commit",
+    "source_tree",
+    "protocol_version",
+    "runtime_hash",
+    "package_hash",
+    "package_version",
+    "study_start_at",
+    "study_end_at",
+    "analysis_at",
+    "narrow_icp_code",
+    "assignment_seed",
+    "bootstrap_seed",
+    "bootstrap_replicates",
+    "min_partners",
+    "max_partners",
+    "min_pairs_per_partner",
+    "min_total_pairs",
+    "min_weeks",
+    "max_weeks",
+    "min_improvement",
+    "min_positive_fraction",
+    "oracle_rubric_hash",
+    "consent_version",
+    "retention_policy_code",
+    "withdrawal_channel_code",
+    "manifest_hash",
+})
+ELIGIBILITY_KEYS = frozenset({
+    "schema",
+    "study_id",
+    "partners",
+    "reserve_order",
+    "selected_at",
+    "eligibility_hash",
+})
+PARTNER_KEYS = frozenset({
+    "partner_id",
+    "eligibility_state",
+    "role_class",
+    "organization_size_bucket",
+    "workflow_class",
+    "inclusion_reason_code",
+    "exclusion_reason_code",
+    "slot_number",
+    "reserve_rank",
+    "eligibility_receipt_hash",
+})
 CONSENT_KEYS = frozenset({"schema", "study_id", "receipts", "consent_hash"})
-CONSENT_RECEIPT_KEYS = frozenset(
-    {
-        "partner_id",
-        "consent_version",
-        "status",
-        "scope_code",
-        "consented_at",
-        "data_classes",
-        "retention_policy_code",
-        "withdrawal_channel_code",
-        "issuer_authority_hash",
-        "external_verification_receipt_hash",
-        "receipt_hash",
-    }
-)
-OBSERVATION_KEYS = frozenset(
-    {
-        "schema",
-        "study_id",
-        "partner_id",
-        "pair_id",
-        "assignment",
-        "baseline_task_id",
-        "assisted_task_id",
-        "difficulty_hash",
-        "source_commit",
-        "protocol_version",
-        "runtime_hash",
-        "package_hash",
-        "baseline_human_ms",
-        "nexus_human_ms",
-        "nexus_read_followup_ms",
-        "washout_ms",
-        "baseline_outcome",
-        "assisted_outcome",
-        "high_risk_error",
-        "oracle_receipt_hash",
-        "attempt_ids",
-        "excluded",
-        "exclusion_reason",
-        "observed_at",
-        "observation_hash",
-    }
-)
-TRUST_KEYS = frozenset(
-    {
-        "schema",
-        "study_id",
-        "oracle_rubric_hash",
-        "all_assigned_pairs",
-        "baseline_counts",
-        "assisted_counts",
-        "partner_high_risk_errors",
-        "trust_hash",
-    }
-)
-SIGNAL_KEYS = frozenset(
-    {
-        "schema",
-        "study_id",
-        "partner_id",
-        "type",
-        "issuer_authority_hash",
-        "observed_at",
-        "issued_at",
-        "expires_at",
-        "revoked",
-        "algorithm",
-        "signature_hash",
-        "signed_payload_hash",
-        "external_verification_receipt_schema",
-        "external_verification_receipt_hash",
-        "verified",
-        "signal_hash",
-    }
-)
+CONSENT_RECEIPT_KEYS = frozenset({
+    "partner_id",
+    "consent_version",
+    "status",
+    "scope_code",
+    "consented_at",
+    "data_classes",
+    "retention_policy_code",
+    "withdrawal_channel_code",
+    "issuer_authority_hash",
+    "external_verification_receipt_hash",
+    "receipt_hash",
+})
+OBSERVATION_KEYS = frozenset({
+    "schema",
+    "study_id",
+    "partner_id",
+    "pair_id",
+    "assignment",
+    "baseline_task_id",
+    "assisted_task_id",
+    "difficulty_hash",
+    "source_commit",
+    "protocol_version",
+    "runtime_hash",
+    "package_hash",
+    "baseline_human_ms",
+    "nexus_human_ms",
+    "nexus_read_followup_ms",
+    "washout_ms",
+    "baseline_outcome",
+    "assisted_outcome",
+    "high_risk_error",
+    "oracle_receipt_hash",
+    "attempt_ids",
+    "excluded",
+    "exclusion_reason",
+    "observed_at",
+    "observation_hash",
+})
+TRUST_KEYS = frozenset({
+    "schema",
+    "study_id",
+    "oracle_rubric_hash",
+    "all_assigned_pairs",
+    "baseline_counts",
+    "assisted_counts",
+    "partner_high_risk_errors",
+    "trust_hash",
+})
+SIGNAL_KEYS = frozenset({
+    "schema",
+    "study_id",
+    "partner_id",
+    "type",
+    "issuer_authority_hash",
+    "observed_at",
+    "issued_at",
+    "expires_at",
+    "revoked",
+    "algorithm",
+    "signature_hash",
+    "signed_payload_hash",
+    "external_verification_receipt_schema",
+    "external_verification_receipt_hash",
+    "verified",
+    "signal_hash",
+})
 
 
 def validate_manifest(manifest: Mapping[str, Any]) -> list[str]:
@@ -641,7 +621,10 @@ def scan_privacy_root(root: Path) -> dict[str, Any]:
             if path.suffix not in {".json", ".jsonl"}:
                 findings.append(f"UNEXPECTED_FILE_TYPE:{path.name}")
                 continue
-            scanned.append({"path": path.relative_to(root).as_posix(), "sha256": _file_digest(path)})
+            scanned.append({
+                "path": path.relative_to(root).as_posix(),
+                "sha256": _file_digest(path),
+            })
             try:
                 if path.suffix == ".json":
                     values = [json.loads(path.read_text(encoding="utf-8"))]
@@ -698,7 +681,9 @@ def _error_state(errors: Sequence[str]) -> str:
     return "INVALID_EVIDENCE"
 
 
-def _minimal_report(manifest: Mapping[str, Any], state: str, reasons: Sequence[str]) -> dict[str, Any]:
+def _minimal_report(
+    manifest: Mapping[str, Any], state: str, reasons: Sequence[str]
+) -> dict[str, Any]:
     if state not in ALLOWED_STATES:
         raise ValueError(state)
     body = {
@@ -1099,9 +1084,9 @@ def synthetic_self_test() -> dict[str, Any]:
     manifest, eligibility, consent, observations, trust, signal = fixture
     bad = dict(observations[0])
     bad["nexus_read_followup_ms"] = -1
-    bad["observation_hash"] = _digest(
-        {key: value for key, value in bad.items() if key != "observation_hash"}
-    )
+    bad["observation_hash"] = _digest({
+        key: value for key, value in bad.items() if key != "observation_hash"
+    })
     negative = adjudicate(manifest, eligibility, consent, [bad, *observations[1:]], trust, signal)
     if negative["state"] == VALUE_READY_STATE:
         raise RuntimeError("invalid synthetic evidence produced value-ready")
