@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+STAGE="bootstrap"
+trap 'rc=$?; echo "TG9_SYNTHETIC_SUPPORT_FAILURE stage=$STAGE rc=$rc" >&2; exit "$rc"' ERR
+
 MODE="${1:?collect|audit}"
 TARGET_SHA="${TARGET_SHA:?}"
 TARGET_TREE="${TARGET_TREE:?}"
 WORKTREE="$RUNNER_TEMP/tg9-candidate-${MODE}"
 OUT="$RUNNER_TEMP/tg9-${MODE}"
 
+STAGE="materialize"
 rm -rf "$WORKTREE" "$OUT"
 mkdir -p "$OUT"
 git cat-file -e "$TARGET_SHA^{commit}"
@@ -15,9 +19,13 @@ test "$(git -C "$WORKTREE" rev-parse HEAD)" = "$TARGET_SHA"
 test "$(git -C "$WORKTREE" rev-parse HEAD^{tree})" = "$TARGET_TREE"
 
 cd "$WORKTREE"
+STAGE="frozen-sync"
 uv sync --frozen --all-groups --all-extras
+STAGE="tg9-tests"
 uv run pytest -qq tests/benchmark/test_core_v1_tg9_value_manifest.py | tee "$OUT/tg9-pytest.log"
+STAGE="collect-only"
 uv run pytest --collect-only -q tests/benchmark/test_core_v1_tg9_value_manifest.py > "$OUT/tg9-collect.txt"
+STAGE="normalize-nodeids"
 python - "$OUT/tg9-collect.txt" "$OUT/tg9-nodeids.txt" <<'PY'
 import sys
 from pathlib import Path
@@ -32,24 +40,31 @@ for line in source.read_text(encoding="utf-8").splitlines():
         rows.append(line[index:].strip())
 rows = sorted(set(rows))
 destination.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
+print(f"TG9_NORMALIZED_NODE_COUNT={len(rows)}")
 PY
 NODE_COUNT="$(wc -l < "$OUT/tg9-nodeids.txt" | tr -d ' ')"
+STAGE="node-count"
 test "$NODE_COUNT" -ge 30
+STAGE="synthetic-self-test"
 uv run python -m product.benchmark.tg9_value --synthetic-self-test > "$OUT/synthetic-self-test.json"
 
+STAGE="diff-check"
 git diff --check "$TARGET_SHA^" "$TARGET_SHA"
 
+STAGE="privacy-fixture"
 PRIVACY_ROOT="$RUNNER_TEMP/tg9-synthetic-study-${MODE}"
 rm -rf "$PRIVACY_ROOT"
 mkdir -p "$PRIVACY_ROOT"
 chmod 700 "$PRIVACY_ROOT"
 printf '%s\n' '{"schema":"nexus.core-v1.tg9-synthetic-privacy-fixture.v1","value":"SAFE_CODE"}' > "$PRIVACY_ROOT/safe.json"
 chmod 600 "$PRIVACY_ROOT/safe.json"
+STAGE="privacy-scan"
 uv run python -m product.benchmark.tg9_value \
   --privacy-scan "$PRIVACY_ROOT" \
   --report "$PRIVACY_ROOT/privacy-scan.json" > "$OUT/privacy-stdout.json"
 cp "$PRIVACY_ROOT/privacy-scan.json" "$OUT/privacy-scan.json"
 
+STAGE="facts-assertions"
 python - "$OUT" "$TARGET_SHA" "$TARGET_TREE" "$NODE_COUNT" <<'PY'
 import hashlib
 import json
@@ -91,6 +106,7 @@ facts = {
 PY
 
 if [ "$MODE" = "collect" ]; then
+  STAGE="collector-acceptance"
   python - "$OUT" <<'PY'
 import hashlib
 import json
@@ -114,8 +130,10 @@ body["acceptance_hash"] = "sha256:" + hashlib.sha256(json.dumps(body, sort_keys=
 PY
   echo "TG9_COLLECT_ROOT=$OUT" >> "$GITHUB_ENV"
 elif [ "$MODE" = "audit" ]; then
+  STAGE="audit-compare"
   COLLECTOR_ROOT="${COLLECTOR_ROOT:?}"
   cmp "$OUT/facts.json" "$COLLECTOR_ROOT/facts.json"
+  STAGE="audit-receipt"
   python - "$OUT" "$COLLECTOR_ROOT" <<'PY'
 import hashlib
 import json
@@ -148,3 +166,6 @@ else
   echo "unknown mode: $MODE" >&2
   exit 2
 fi
+
+STAGE="done"
+echo "TG9_SYNTHETIC_SUPPORT_OK mode=$MODE node_count=$NODE_COUNT"
