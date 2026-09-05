@@ -1225,6 +1225,8 @@ def test_runtime_builder_uses_frozen_hash_bound_binary_only_contract(tmp_path: P
     } <= set(export)
     group_flags = [export[i + 1] for i, token in enumerate(export) if token == "--group"]
     assert group_flags == list(trusted_anchor.TRUSTED_RUNTIME_DEPENDENCY_GROUPS)
+    extra_flags = [export[i + 1] for i, token in enumerate(export) if token == "--extra"]
+    assert extra_flags == ["legacy"]
     excluded_packages = [
         export[i + 1] for i, token in enumerate(export) if token == "--no-emit-package"
     ]
