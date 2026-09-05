@@ -27,25 +27,31 @@ STAGE="collect-only"
 uv run pytest --collect-only -q tests/benchmark/test_core_v1_tg9_value_manifest.py > "$OUT/tg9-collect.txt"
 STAGE="normalize-nodeids"
 python - "$OUT/tg9-collect.txt" "$OUT/tg9-nodeids.txt" <<'PY'
+import re
 import sys
 from pathlib import Path
 
 source = Path(sys.argv[1])
 destination = Path(sys.argv[2])
-marker = "test_core_v1_tg9_value_manifest.py::"
-rows = []
 text = source.read_text(encoding="utf-8")
+rows = []
 for line in text.splitlines():
-    index = line.find(marker)
-    if index >= 0:
-        rows.append(line[index:].strip())
+    match = re.search(r"<Function ([^>]+)>", line)
+    if match:
+        rows.append("tests/benchmark/test_core_v1_tg9_value_manifest.py::" + match.group(1))
 rows = sorted(set(rows))
+summary_matches = [
+    int(match.group(1))
+    for pattern in (r"collected (\d+) items", r"(\d+) tests collected")
+    for match in re.finditer(pattern, text)
+]
+if not summary_matches:
+    raise SystemExit("pytest collect summary count missing")
+summary_count = max(summary_matches)
+if summary_count != len(rows):
+    raise SystemExit(f"pytest collect tree mismatch summary={summary_count} functions={len(rows)}")
 destination.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
 print(f"TG9_NORMALIZED_NODE_COUNT={len(rows)}")
-if not rows:
-    print("TG9_COLLECT_ONLY_SAMPLE_START")
-    print("\n".join(text.splitlines()[:80]))
-    print("TG9_COLLECT_ONLY_SAMPLE_END")
 PY
 NODE_COUNT="$(wc -l < "$OUT/tg9-nodeids.txt" | tr -d ' ')"
 STAGE="node-count"
