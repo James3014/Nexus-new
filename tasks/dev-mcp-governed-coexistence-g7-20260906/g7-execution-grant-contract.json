@@ -1,0 +1,21 @@
+{
+  "schema": "nexus.devspace.execution_grant.v1",
+  "grantId": "grant-g7-nexus-governed-coexistence-20260906-01",
+  "issuer": "nexus",
+  "taskId": "g7-nexus-governed-coexistence-20260906",
+  "attemptId": "g7-governed-live-attempt-20260906-01",
+  "devspaceBaseRevision": "8e8e02911c888d4c8a4667d4b5dd13df85c20cfd",
+  "dispatchIntentHash": "85a40b7cd9ce7eb7a5b157ffbce1895d064d0de57f03fbdc7c30f82651ee9d10",
+  "profile": "opencode-muse-high-review",
+  "writeScope": [],
+  "effectCeiling": "READ_ONLY",
+  "claimCeiling": "RESULT_RETURNED",
+  "authorityPath": "tasks/dev-mcp-governed-coexistence-g7-20260906/00-g7-nexus-governed-coexistence.md",
+  "authoritySha256": "a0dc4353f9b59270e3797f1be3868be8487df0498b4e6decc4ce7b906a31c457",
+  "issuedAt": "2026-09-05T22:46:00Z",
+  "expiresAt": "2026-09-06T22:46:00Z",
+  "revocationState": "NOT_REVOKED",
+  "revokedAt": null,
+  "revocationReason": null,
+  "grantHash": "e6284b2bc2a556fecb19076e621e11236d28f1e14210c320c8c928b2af049517"
+}
