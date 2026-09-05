@@ -1,0 +1,3 @@
+schema=nexus.core-v1.tg7-claim-promotion.v1
+expected_head=cc15bf814211b0d0df39ae18a2683d8b9675b124
+target_claim=CROSS_REPO_TRUST_SHADOW_VERIFIED
