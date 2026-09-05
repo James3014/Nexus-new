@@ -4,9 +4,11 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import tg8_physical_v4_overlay as base
 
@@ -18,9 +20,12 @@ def _sh(
     check: bool = True,
     input: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
+    effective_cwd = cwd
+    if effective_cwd is None and cmd and "/venvs/" in str(Path(cmd[0])):
+        effective_cwd = Path(os.environ.get("RUNNER_TEMP", "/tmp")).resolve()
     result = subprocess.run(
         cmd,
-        cwd=cwd,
+        cwd=effective_cwd,
         check=False,
         text=True,
         capture_output=True,
@@ -28,6 +33,8 @@ def _sh(
     )
     if check and result.returncode:
         sys.stderr.write("COMMAND_FAILED: " + " ".join(cmd) + "\n")
+        if effective_cwd is not None:
+            sys.stderr.write(f"CWD: {effective_cwd}\n")
         if result.stdout:
             sys.stderr.write("STDOUT:\n" + result.stdout + "\n")
         if result.stderr:
@@ -99,8 +106,50 @@ def _state(venv: Path) -> dict[str, str]:
     }
 
 
+def _run_schema_validator(venv: Path, function_name: str, payload: dict[str, Any]) -> bool:
+    python = venv / "bin" / "python"
+    code = (
+        "import json,runpy,sys; from pathlib import Path; import product; "
+        "ns=runpy.run_path(str(Path(product.__file__).resolve().parent/'runtime'/'schemas.py')); "
+        "f=ns[sys.argv[1]]; print(json.dumps(list(f(json.loads(sys.stdin.read())))))"
+    )
+    result = _sh([str(python), "-c", code, function_name], input=json.dumps(payload))
+    return not json.loads(result.stdout)
+
+
+def _req_probe(venv: Path, protocol: str, schema: str) -> bool:
+    payload = {
+        "protocol_version": protocol,
+        "implementation_schema": schema,
+        "repository": {
+            "owner": "James3014",
+            "name": "Nexus-new",
+            "pr_number": 635,
+            "expected_base_sha": "a" * 40,
+            "expected_head_sha": "b" * 40,
+        },
+        "acceptance_contract": {},
+        "verification_plan": {},
+        "profile_id": "python-oci-pytest-v1",
+        "idempotency_key": "tg8-v4",
+        "expected_generation": 0,
+    }
+    return _run_schema_validator(venv, "validate_certification_request", payload)
+
+
+def _receipt_probe(venv: Path, receipt: dict[str, Any]) -> bool:
+    payload = {
+        "receipt": receipt,
+        "requested_scope": "ENVELOPE_ONLY",
+        "original_inputs": None,
+    }
+    return _run_schema_validator(venv, "validate_receipt_verify_request", payload)
+
+
 base.sh = _sh
 base.state = _state
+base.req_probe = _req_probe
+base.receipt_probe = _receipt_probe
 
 if __name__ == "__main__":
     raise SystemExit(base.main())
