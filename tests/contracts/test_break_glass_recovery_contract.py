@@ -233,7 +233,7 @@ def integration_payload_dict() -> dict[str, object]:
         "accepted_tree_sha": "2" * 40,
         "accepted_diff_sha256": "3" * 64,
         "expected_base_sha": "8e8e02911c888d4c8a4667d4b5dd13df85c20cfd",
-        "merge_method": "squash",
+        "merge_method": "merge",
         "checks": verification["checks"],
         "issued_at": "2026-09-06T07:05:00+08:00",
         "expires_at": "2026-09-06T23:00:00+08:00",

@@ -408,7 +408,7 @@ class BreakGlassOwnerIntegrationPayload(_FrozenModel):
     accepted_tree_sha: StrictStr
     accepted_diff_sha256: StrictStr
     expected_base_sha: StrictStr
-    merge_method: Literal["merge", "squash", "rebase"]
+    merge_method: Literal["merge"]
     checks: tuple[BreakGlassCheckEvidence, ...]
     issued_at: datetime
     expires_at: datetime

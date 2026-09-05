@@ -183,7 +183,7 @@ def integration_envelope(
         "accepted_tree_sha": REPAIR_TREE,
         "accepted_diff_sha256": DIFF_HASH,
         "expected_base_sha": expected_base,
-        "merge_method": "squash",
+        "merge_method": "merge",
         "checks": [
             {
                 **item.model_dump(mode="json"),

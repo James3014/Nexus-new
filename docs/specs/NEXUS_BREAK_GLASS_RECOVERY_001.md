@@ -109,11 +109,13 @@ payload, or repair-subject substitution SHALL fail closed.
 When normal integration authority is part of the unavailable governance plane,
 merge requires a separate Owner `EMERGENCY_INTEGRATION` comment bound to exact
 source activation, exact Owner verification payload, PR number, accepted
-head/tree/diff, expected main/base, merge method, successful exact-head checks,
-expiry, and claim ceiling. The validated grant may be consumed only by an
+head/tree/diff, expected main/base, `merge` integration method, successful
+exact-head checks, expiry, and claim ceiling. The validated grant may be consumed only by an
 existing bounded exact-head/CAS merge sink such as `git_merge_pull_request`.
 A bare `ownerConfirmation=true` is an effect confirmation, not the break-glass
-authority source. No force push, ref deletion, unrelated merge, runtime
+authority source. Break-glass integration does not permit squash or rebase,
+preserving the accepted head as merge lineage. No force push, ref deletion,
+unrelated merge, runtime
 activation, release, or production/public claim is granted.
 
 ### REQ-008 — Crash/retry/replay safety
