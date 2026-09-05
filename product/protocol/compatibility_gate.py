@@ -50,58 +50,60 @@ HOSTILE_FAMILIES = (
     "PROVENANCE_HASH_TAMPER",
     "STALE_REVISION_GENERATION",
 )
-REQUIRED_AXES = frozenset(
-    {
-        "public_protocol",
-        "implementation_schema",
-        "evidence_bundle_schema",
-        "provenance_envelope_schema",
-        "certification_receipt_schema",
-        "ledger_schema",
-        "ledger_generation",
-        "http_schema",
-        "cli_client",
-        "mcp_client",
-        "action_client",
-        "reader_version",
-    }
-)
-REQUIRED_UPGRADE_KINDS = frozenset(
-    {
-        "CURRENT_TO_RC",
-        "RC_PATCH",
-        "RC_TO_STABLE",
-        "INCOMPATIBLE_PROTOCOL",
-        "INCOMPATIBLE_SCHEMA",
-        "INCOMPATIBLE_LEDGER",
-        "FAILED_UPGRADE_ROLLBACK",
-    }
-)
-REQUIRED_INPUTS = frozenset(
-    {
-        "tg4_receipt",
-        "tg5_receipt",
-        "tg6_receipt",
-        "compatibility",
-        "conformance",
-        "upgrade_rollback",
-        "open_issues",
-        "tg7_selection",
-        "tg7_corpus",
-        "tg7_shadow",
-        "tg7_report",
-    }
-)
+REQUIRED_AXES = frozenset({
+    "public_protocol",
+    "implementation_schema",
+    "evidence_bundle_schema",
+    "provenance_envelope_schema",
+    "certification_receipt_schema",
+    "ledger_schema",
+    "ledger_generation",
+    "http_schema",
+    "cli_client",
+    "mcp_client",
+    "action_client",
+    "reader_version",
+})
+EXPECTED_AXIS_SOURCES = {
+    "public_protocol": PUBLIC_PROTOCOL_VERSION,
+    "implementation_schema": IMPLEMENTATION_SCHEMA,
+    "evidence_bundle_schema": EVIDENCE_BUNDLE_SCHEMA,
+    "provenance_envelope_schema": PROVENANCE_ENVELOPE_SCHEMA,
+    "certification_receipt_schema": CERTIFICATION_RECEIPT_SCHEMA,
+    "ledger_schema": LEDGER_SCHEMA,
+    "http_schema": HTTP_SCHEMA,
+}
+
+REQUIRED_UPGRADE_KINDS = frozenset({
+    "CURRENT_TO_RC",
+    "RC_PATCH",
+    "RC_TO_STABLE",
+    "INCOMPATIBLE_PROTOCOL",
+    "INCOMPATIBLE_SCHEMA",
+    "INCOMPATIBLE_LEDGER",
+    "FAILED_UPGRADE_ROLLBACK",
+})
+REQUIRED_INPUTS = frozenset({
+    "tg4_receipt",
+    "tg5_receipt",
+    "tg6_receipt",
+    "compatibility",
+    "conformance",
+    "upgrade_rollback",
+    "open_issues",
+    "tg7_selection",
+    "tg7_corpus",
+    "tg7_shadow",
+    "tg7_report",
+})
 STABLE_INPUTS = ("stable_run_1", "stable_run_2", "stable_run_3")
-FORBIDDEN_OUTPUT_STATES = frozenset(
-    {
-        "PROTOCOL_RC_OR_STABLE_EVIDENCE_READY",
-        "PROMOTED",
-        "RELEASED",
-        "PRODUCTION_READY",
-        "VALUE_READY",
-    }
-)
+FORBIDDEN_OUTPUT_STATES = frozenset({
+    "PROTOCOL_RC_OR_STABLE_EVIDENCE_READY",
+    "PROMOTED",
+    "RELEASED",
+    "PRODUCTION_READY",
+    "VALUE_READY",
+})
 CLAIM_CEILING = (
     "EVIDENCE_READINESS_ONLY",
     "NO_PROTOCOL_PROMOTION",
@@ -127,9 +129,7 @@ def _sha(value: Any) -> bool:
 
 def _git(value: Any) -> bool:
     return (
-        isinstance(value, str)
-        and len(value) == 40
-        and all(c in "0123456789abcdef" for c in value)
+        isinstance(value, str) and len(value) == 40 and all(c in "0123456789abcdef" for c in value)
     )
 
 
@@ -152,9 +152,7 @@ def _keys(value: Any, expected: set[str] | frozenset[str], label: str) -> list[s
 
 def _hashok(value: Mapping[str, Any], key: str) -> bool:
     claimed = value.get(key)
-    return _sha(claimed) and claimed == _digest(
-        {k: v for k, v in value.items() if k != key}
-    )
+    return _sha(claimed) and claimed == _digest({k: v for k, v in value.items() if k != key})
 
 
 def _load(
@@ -166,11 +164,7 @@ def _load(
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return None, [f"{label}:MALFORMED"]
-    return (
-        (value, [])
-        if isinstance(value, dict)
-        else (None, [f"{label}:NOT_OBJECT"])
-    )
+    return (value, []) if isinstance(value, dict) else (None, [f"{label}:NOT_OBJECT"])
 
 
 def _forbidden(value: Any, path: str = "") -> list[str]:
@@ -198,24 +192,22 @@ def _forbidden(value: Any, path: str = "") -> list[str]:
 
 
 def _validate_thresholds(value: Mapping[str, Any], sha_file: Path) -> list[str]:
-    keys = frozenset(
-        {
-            "schema",
-            "repository",
-            "rc_candidate",
-            "stable_candidate",
-            "subject_commit",
-            "subject_tree",
-            "dependency_subjects",
-            "input_hashes",
-            "compatibility_manifest",
-            "upgrade_manifest",
-            "required_clients",
-            "forbidden_output_states",
-            "observed_at",
-            "threshold_hash",
-        }
-    )
+    keys = frozenset({
+        "schema",
+        "repository",
+        "rc_candidate",
+        "stable_candidate",
+        "subject_commit",
+        "subject_tree",
+        "dependency_subjects",
+        "input_hashes",
+        "compatibility_manifest",
+        "upgrade_manifest",
+        "required_clients",
+        "forbidden_output_states",
+        "observed_at",
+        "threshold_hash",
+    })
     e = _keys(value, keys, "THRESHOLDS")
     if e:
         return e
@@ -223,15 +215,19 @@ def _validate_thresholds(value: Mapping[str, Any], sha_file: Path) -> list[str]:
         (value["schema"] == THRESHOLDS_SCHEMA, "SCHEMA"),
         (value["repository"] == "James3014/Nexus-new", "REPOSITORY"),
         (
-            value["rc_candidate"] == RC_CANDIDATE
-            and value["stable_candidate"] == STABLE_CANDIDATE,
+            value["rc_candidate"] == RC_CANDIDATE and value["stable_candidate"] == STABLE_CANDIDATE,
             "CANDIDATES",
         ),
         (_git(value["subject_commit"]) and _git(value["subject_tree"]), "SUBJECT"),
         (_time(value["observed_at"]), "OBSERVED_AT"),
-        (tuple(value["required_clients"]) == REQUIRED_CLIENTS, "CLIENTS"),
         (
-            set(value["forbidden_output_states"]) == FORBIDDEN_OUTPUT_STATES,
+            isinstance(value["required_clients"], list)
+            and tuple(value["required_clients"]) == REQUIRED_CLIENTS,
+            "CLIENTS",
+        ),
+        (
+            isinstance(value["forbidden_output_states"], list)
+            and set(value["forbidden_output_states"]) == FORBIDDEN_OUTPUT_STATES,
             "FORBIDDEN",
         ),
         (_hashok(value, "threshold_hash"), "HASH"),
@@ -273,8 +269,14 @@ def _validate_thresholds(value: Mapping[str, Any], sha_file: Path) -> list[str]:
             }:
                 e.append("THRESHOLDS:COMPATIBILITY_ROW")
                 continue
+            if not all(isinstance(row[key], str) for key in row):
+                e.append("THRESHOLDS:COMPATIBILITY_ROW_TYPES")
+                continue
             if row["row_id"] in ids or row["expected"] not in {"SUPPORTED", "REFUSED"}:
                 e.append("THRESHOLDS:COMPATIBILITY_ROW_ID")
+            expected_source = EXPECTED_AXIS_SOURCES.get(row["axis"])
+            if expected_source is not None and row["source"] != expected_source:
+                e.append(f"THRESHOLDS:COMPATIBILITY_SOURCE:{row['axis']}")
             ids.add(row["row_id"])
             axes.add(row["axis"])
         if axes != REQUIRED_AXES:
@@ -293,6 +295,9 @@ def _validate_thresholds(value: Mapping[str, Any], sha_file: Path) -> list[str]:
                 "expected",
             }:
                 e.append("THRESHOLDS:UPGRADE_ROW")
+                continue
+            if not all(isinstance(row[key], str) for key in row):
+                e.append("THRESHOLDS:UPGRADE_ROW_TYPES")
                 continue
             if row["row_id"] in ids or row["expected"] not in {"SUPPORTED", "REFUSED"}:
                 e.append("THRESHOLDS:UPGRADE_ROW_ID")
@@ -313,20 +318,18 @@ def _validate_thresholds(value: Mapping[str, Any], sha_file: Path) -> list[str]:
 def _binding(
     value: Mapping[str, Any], schema: str, dep: Mapping[str, Any], claim: str
 ) -> list[str]:
-    keys = frozenset(
-        {
-            "schema",
-            "repository",
-            "subject_commit",
-            "subject_tree",
-            "status",
-            "claim",
-            "authority_source",
-            "evidence_hashes",
-            "observed_at",
-            "receipt_hash",
-        }
-    )
+    keys = frozenset({
+        "schema",
+        "repository",
+        "subject_commit",
+        "subject_tree",
+        "status",
+        "claim",
+        "authority_source",
+        "evidence_hashes",
+        "observed_at",
+        "receipt_hash",
+    })
     e = _keys(value, keys, schema)
     if e:
         return e
@@ -335,21 +338,17 @@ def _binding(
         (value["schema"] == schema, "SCHEMA"),
         (value["repository"] == "James3014/Nexus-new", "REPOSITORY"),
         (
-            value["subject_commit"] == dep["commit"]
-            and value["subject_tree"] == dep["tree"],
+            value["subject_commit"] == dep["commit"] and value["subject_tree"] == dep["tree"],
             "SUBJECT",
         ),
         (value["receipt_hash"] == dep["receipt_hash"], "BOUND_HASH"),
         (value["status"] == "ACCEPTED" and value["claim"] == claim, "STATUS"),
         (
-            isinstance(value["authority_source"], str)
-            and bool(value["authority_source"]),
+            isinstance(value["authority_source"], str) and bool(value["authority_source"]),
             "AUTHORITY",
         ),
         (
-            isinstance(hashes, Mapping)
-            and bool(hashes)
-            and all(_sha(x) for x in hashes.values()),
+            isinstance(hashes, Mapping) and bool(hashes) and all(_sha(x) for x in hashes.values()),
             "EVIDENCE",
         ),
         (_time(value["observed_at"]), "OBSERVED_AT"),
@@ -359,21 +358,19 @@ def _binding(
 
 
 def _cert(value: Mapping[str, Any]) -> list[str]:
-    keys = frozenset(
-        {
-            "acceptance_contract_hash",
-            "certification",
-            "change_set_hash",
-            "claim_ceiling",
-            "evidence_hash",
-            "implementation_schema",
-            "protocol_version",
-            "receipt_hash",
-            "receipt_schema",
-            "verification",
-            "verification_plan_hash",
-        }
-    )
+    keys = frozenset({
+        "acceptance_contract_hash",
+        "certification",
+        "change_set_hash",
+        "claim_ceiling",
+        "evidence_hash",
+        "implementation_schema",
+        "protocol_version",
+        "receipt_hash",
+        "receipt_schema",
+        "verification",
+        "verification_plan_hash",
+    })
     e = _keys(value, keys, "TG5_CERT")
     if e:
         return e
@@ -398,24 +395,22 @@ def _cert(value: Mapping[str, Any]) -> list[str]:
 
 
 def _tg5(value: Mapping[str, Any], dep: Mapping[str, Any]) -> list[str]:
-    keys = frozenset(
-        {
-            "schema",
-            "repository",
-            "subject_commit",
-            "subject_tree",
-            "status",
-            "controlled_pr",
-            "controlled_pr_base",
-            "controlled_pr_head",
-            "live_run_id",
-            "mandatory_commands",
-            "certification_receipt",
-            "certification_receipt_hash",
-            "observed_at",
-            "receipt_hash",
-        }
-    )
+    keys = frozenset({
+        "schema",
+        "repository",
+        "subject_commit",
+        "subject_tree",
+        "status",
+        "controlled_pr",
+        "controlled_pr_base",
+        "controlled_pr_head",
+        "live_run_id",
+        "mandatory_commands",
+        "certification_receipt",
+        "certification_receipt_hash",
+        "observed_at",
+        "receipt_hash",
+    })
     e = _keys(value, keys, "TG5")
     if e:
         return e
@@ -427,13 +422,11 @@ def _tg5(value: Mapping[str, Any], dep: Mapping[str, Any]) -> list[str]:
             "SCHEMA",
         ),
         (
-            value["subject_commit"] == dep["commit"]
-            and value["subject_tree"] == dep["tree"],
+            value["subject_commit"] == dep["commit"] and value["subject_tree"] == dep["tree"],
             "SUBJECT",
         ),
         (
-            value["receipt_hash"] == dep["receipt_hash"]
-            and _hashok(value, "receipt_hash"),
+            value["receipt_hash"] == dep["receipt_hash"] and _hashok(value, "receipt_hash"),
             "HASH",
         ),
         (value["status"] == "ACCEPTED", "STATUS"),
@@ -445,8 +438,7 @@ def _tg5(value: Mapping[str, Any], dep: Mapping[str, Any]) -> list[str]:
         ),
         (isinstance(value["live_run_id"], str) and bool(value["live_run_id"]), "LIVE"),
         (
-            isinstance(value["mandatory_commands"], list)
-            and len(value["mandatory_commands"]) >= 2,
+            isinstance(value["mandatory_commands"], list) and len(value["mandatory_commands"]) >= 2,
             "COMMANDS",
         ),
         (isinstance(receipt, Mapping), "CERT"),
@@ -462,12 +454,14 @@ def _tg5(value: Mapping[str, Any], dep: Mapping[str, Any]) -> list[str]:
 
 
 def _index(rows: Sequence[Mapping[str, Any]]) -> dict[str, Mapping[str, Any]]:
-    return {str(row["row_id"]): row for row in rows}
+    return {
+        row["row_id"]: row
+        for row in rows
+        if isinstance(row, Mapping) and isinstance(row.get("row_id"), str)
+    }
 
 
-def _compat(
-    value: Mapping[str, Any], t: Mapping[str, Any]
-) -> tuple[list[str], list[str]]:
+def _compat(value: Mapping[str, Any], t: Mapping[str, Any]) -> tuple[list[str], list[str]]:
     e = _keys(
         value,
         frozenset({"schema", "subject_commit", "subject_tree", "rows", "matrix_hash"}),
@@ -521,23 +515,19 @@ def _compat(
     return e, f
 
 
-def _conformance(
-    value: Mapping[str, Any], t: Mapping[str, Any]
-) -> tuple[list[str], list[str]]:
-    keys = frozenset(
-        {
-            "schema",
-            "subject_commit",
-            "subject_tree",
-            "canonical_request_hash",
-            "canonical_response_hash",
-            "endpoint_sequence",
-            "redaction_set",
-            "clients",
-            "parity",
-            "report_hash",
-        }
-    )
+def _conformance(value: Mapping[str, Any], t: Mapping[str, Any]) -> tuple[list[str], list[str]]:
+    keys = frozenset({
+        "schema",
+        "subject_commit",
+        "subject_tree",
+        "canonical_request_hash",
+        "canonical_response_hash",
+        "endpoint_sequence",
+        "redaction_set",
+        "clients",
+        "parity",
+        "report_hash",
+    })
     e, f = _keys(value, keys, "CONFORMANCE"), []
     if e:
         return e, f
@@ -548,21 +538,26 @@ def _conformance(
         or not _hashok(value, "report_hash")
     ):
         e.append("CONFORMANCE:ENVELOPE")
-    if not _sha(value["canonical_request_hash"]) or not _sha(
-        value["canonical_response_hash"]
-    ):
+    if not _sha(value["canonical_request_hash"]) or not _sha(value["canonical_response_hash"]):
         e.append("CONFORMANCE:CANONICAL")
     rows = value["clients"]
     if not isinstance(rows, list):
         return e + ["CONFORMANCE:CLIENTS"], f
-    actual = {r.get("name"): r for r in rows if isinstance(r, Mapping)}
+    actual = {
+        r["name"]: r
+        for r in rows
+        if isinstance(r, Mapping) and isinstance(r.get("name"), str)
+    }
     if set(actual) != set(REQUIRED_CLIENTS) or len(actual) != len(rows):
         e.append("CONFORMANCE:CLIENT_SET")
     for name, row in actual.items():
-        if (
-            set(row) != {"name", "artifact_hash", "output_hash", "parity", "row_hash"}
-            or not _hashok(row, "row_hash")
-        ):
+        if set(row) != {
+            "name",
+            "artifact_hash",
+            "output_hash",
+            "parity",
+            "row_hash",
+        } or not _hashok(row, "row_hash"):
             e.append(f"CONFORMANCE:ROW:{name}")
             continue
         if not _sha(row["artifact_hash"]) or not _sha(row["output_hash"]):
@@ -574,9 +569,7 @@ def _conformance(
     return e, f
 
 
-def _upgrade(
-    value: Mapping[str, Any], t: Mapping[str, Any]
-) -> tuple[list[str], list[str]]:
+def _upgrade(value: Mapping[str, Any], t: Mapping[str, Any]) -> tuple[list[str], list[str]]:
     e = _keys(
         value,
         frozenset({"schema", "subject_commit", "subject_tree", "rows", "report_hash"}),
@@ -641,28 +634,23 @@ def _upgrade(
             f.append(f"UPGRADE:OUTCOME:{rid}")
         if row["old_receipt_byte_equal"] is not True:
             f.append(f"UPGRADE:RECEIPT_REWRITE:{rid}")
-        if (
-            spec["kind"] == "FAILED_UPGRADE_ROLLBACK"
-            and row["rollback_state"] != "RESTORED_EXACT"
-        ):
+        if spec["kind"] == "FAILED_UPGRADE_ROLLBACK" and row["rollback_state"] != "RESTORED_EXACT":
             f.append(f"UPGRADE:ROLLBACK:{rid}")
     return e, f
 
 
 def _issues(value: Mapping[str, Any]) -> list[str]:
-    keys = frozenset(
-        {
-            "schema",
-            "repository",
-            "observed_at",
-            "query_manifest_hash",
-            "raw_issue_ids",
-            "severity_high_issue_ids",
-            "classifications",
-            "severity_high_count",
-            "snapshot_hash",
-        }
-    )
+    keys = frozenset({
+        "schema",
+        "repository",
+        "observed_at",
+        "query_manifest_hash",
+        "raw_issue_ids",
+        "severity_high_issue_ids",
+        "classifications",
+        "severity_high_count",
+        "snapshot_hash",
+    })
     e = _keys(value, keys, "OPEN_ISSUES")
     if e:
         return e
@@ -673,21 +661,20 @@ def _issues(value: Mapping[str, Any]) -> list[str]:
     )
     checks = [
         (
-            value["schema"] == OPEN_ISSUES_SCHEMA
-            and value["repository"] == "James3014/Nexus-new",
+            value["schema"] == OPEN_ISSUES_SCHEMA and value["repository"] == "James3014/Nexus-new",
             "SCHEMA",
         ),
         (_time(value["observed_at"]) and _sha(value["query_manifest_hash"]), "IDENTITY"),
         (
             isinstance(raw, list)
-            and raw == sorted(set(raw))
-            and all(type(x) is int and x > 0 for x in raw),
+            and all(type(x) is int and x > 0 for x in raw)
+            and raw == sorted(set(raw)),
             "RAW",
         ),
         (
             isinstance(high, list)
-            and high == sorted(set(high))
-            and all(type(x) is int and x > 0 for x in high),
+            and all(type(x) is int and x > 0 for x in high)
+            and high == sorted(set(high)),
             "HIGH",
         ),
         (
@@ -695,8 +682,7 @@ def _issues(value: Mapping[str, Any]) -> list[str]:
             "CLASSIFICATIONS",
         ),
         (
-            type(value["severity_high_count"]) is int
-            and value["severity_high_count"] == len(high),
+            type(value["severity_high_count"]) is int and value["severity_high_count"] == len(high),
             "COUNT",
         ),
         (_hashok(value, "snapshot_hash"), "HASH"),
@@ -716,31 +702,23 @@ def _tg7(
     tg5_hash: str,
 ) -> tuple[list[str], list[str]]:
     e, f = [], []
-    if s.get("schema") != "nexus.core-v1.tg7-selection.v1" or not _hashok(
-        s, "selection_hash"
-    ):
+    if s.get("schema") != "nexus.core-v1.tg7-selection.v1" or not _hashok(s, "selection_hash"):
         e.append("TG7:SELECTION")
-    if c.get("schema") != "nexus.core-v1.tg7-corpus.v1" or not _hashok(
-        c, "corpus_hash"
-    ):
+    if c.get("schema") != "nexus.core-v1.tg7-corpus.v1" or not _hashok(c, "corpus_hash"):
         e.append("TG7:CORPUS")
-    if sh.get("schema") != "nexus.core-v1.tg7-shadow-receipt.v1" or not _hashok(
-        sh, "receipt_hash"
-    ):
+    if sh.get("schema") != "nexus.core-v1.tg7-shadow-receipt.v1" or not _hashok(sh, "receipt_hash"):
         e.append("TG7:SHADOW")
-    if r.get("schema") != "nexus.core-v1.tg7-report.v1" or not _hashok(
-        r, "report_hash"
-    ):
+    if r.get("schema") != "nexus.core-v1.tg7-report.v1" or not _hashok(r, "report_hash"):
         e.append("TG7:REPORT")
     if r.get("report_hash") != dep["receipt_hash"]:
         e.append("TG7:BOUND_REPORT")
-    if r.get("selection_hash") != s.get("selection_hash") or sh.get(
+    if r.get("selection_hash") != s.get("selection_hash") or sh.get("selection_hash") != s.get(
         "selection_hash"
-    ) != s.get("selection_hash"):
+    ):
         e.append("TG7:SELECTION_BIND")
-    if r.get("shadow_receipt_hash") != sh.get("receipt_hash") or sh.get(
+    if r.get("shadow_receipt_hash") != sh.get("receipt_hash") or sh.get("corpus_hash") != c.get(
         "corpus_hash"
-    ) != c.get("corpus_hash"):
+    ):
         e.append("TG7:SHADOW_BIND")
     if r.get("tg5_receipt_hash") != tg5_hash or sh.get("tg5_receipt_hash") != tg5_hash:
         e.append("TG7:TG5_BIND")
@@ -756,8 +734,7 @@ def _tg7(
     if not isinstance(cases, list) or c.get("case_count") != len(cases) or len(cases) < 50:
         f.append("TG7:CORPUS_DENOMINATOR")
     elif any(
-        not isinstance(x, Mapping) or x.get("hostile_family") not in HOSTILE_FAMILIES
-        for x in cases
+        not isinstance(x, Mapping) or x.get("hostile_family") not in HOSTILE_FAMILIES for x in cases
     ):
         e.append("TG7:CORPUS_CASES")
     if (
@@ -766,9 +743,7 @@ def _tg7(
         or r["denominator"] < 50
     ):
         f.append("TG7:DENOMINATOR")
-    if r.get("false_certification_count") != 0 or r.get(
-        "false_certification_case_ids"
-    ) != []:
+    if r.get("false_certification_count") != 0 or r.get("false_certification_case_ids") != []:
         f.append("TG7:FALSE_CERTIFICATION")
     if r.get("infra_invalid_count") != 0 or r.get("trust_mismatches") != 0:
         f.append("TG7:TRUST_OR_INFRA")
@@ -785,29 +760,27 @@ def _tg7(
 def _stable(
     value: Mapping[str, Any], t: Mapping[str, Any], bindings: Mapping[str, str]
 ) -> tuple[list[str], list[str]]:
-    keys = frozenset(
-        {
-            "schema",
-            "run_id",
-            "candidate_commit",
-            "candidate_tree",
-            "observed_at",
-            "complete",
-            "tg5_run_id",
-            "tg7_run_id",
-            "eligible_attempts",
-            "required_skips",
-            "false_certification_count",
-            "client_parity",
-            "factual_outcome_hash",
-            "compatibility_hash",
-            "conformance_hash",
-            "upgrade_rollback_hash",
-            "tg5_receipt_hash",
-            "tg7_report_hash",
-            "run_hash",
-        }
-    )
+    keys = frozenset({
+        "schema",
+        "run_id",
+        "candidate_commit",
+        "candidate_tree",
+        "observed_at",
+        "complete",
+        "tg5_run_id",
+        "tg7_run_id",
+        "eligible_attempts",
+        "required_skips",
+        "false_certification_count",
+        "client_parity",
+        "factual_outcome_hash",
+        "compatibility_hash",
+        "conformance_hash",
+        "upgrade_rollback_hash",
+        "tg5_receipt_hash",
+        "tg7_report_hash",
+        "run_hash",
+    })
     e, f = _keys(value, keys, "STABLE_RUN"), []
     if e:
         return e, f
@@ -914,10 +887,10 @@ def adjudicate(
     t, e = _load(thresholds_path, "THRESHOLDS")
     structural += e
     if t is None:
-        return _report(
-            report_path, None, {}, UNVERIFIABLE, structural, {}, {}, {}, [], 0, 0
-        )
-    structural += _validate_thresholds(t, expected_thresholds_sha256_file)
+        return _report(report_path, None, {}, UNVERIFIABLE, structural, {}, {}, {}, [], 0, 0)
+    threshold_errors = _validate_thresholds(t, expected_thresholds_sha256_file)
+    structural += threshold_errors
+    thresholds_valid = not threshold_errors
 
     paths = {
         "compatibility": compatibility_path,
@@ -957,7 +930,7 @@ def adjudicate(
                 structural.append(f"UNBOUND_INPUT:{key}")
 
     deps = t.get("dependency_subjects", {})
-    if isinstance(deps, Mapping):
+    if thresholds_valid and isinstance(deps, Mapping):
         if docs["tg4_receipt"] is not None:
             structural += _binding(
                 docs["tg4_receipt"],
@@ -978,17 +951,17 @@ def adjudicate(
     cf: list[str] = []
     conf_f: list[str] = []
     up_f: list[str] = []
-    if docs["compatibility"] is not None:
+    if thresholds_valid and docs["compatibility"] is not None:
         se, sf = _compat(docs["compatibility"], t)
         structural += se
         failures += sf
         cf = sf
-    if docs["conformance"] is not None:
+    if thresholds_valid and docs["conformance"] is not None:
         se, sf = _conformance(docs["conformance"], t)
         structural += se
         failures += sf
         conf_f = sf
-    if docs["upgrade_rollback"] is not None:
+    if thresholds_valid and docs["upgrade_rollback"] is not None:
         se, sf = _upgrade(docs["upgrade_rollback"], t)
         structural += se
         failures += sf
@@ -999,10 +972,14 @@ def adjudicate(
     denominator = false_count = 0
     tg5 = docs["tg5_receipt"]
     tg7r = docs["tg7_report"]
-    if all(
-        docs[k] is not None
-        for k in ("tg7_selection", "tg7_corpus", "tg7_shadow", "tg7_report")
-    ) and isinstance(tg5, Mapping) and isinstance(deps, Mapping):
+    if (
+        all(
+            docs[k] is not None for k in ("tg7_selection", "tg7_corpus", "tg7_shadow", "tg7_report")
+        )
+        and isinstance(tg5, Mapping)
+        and thresholds_valid
+        and isinstance(deps, Mapping)
+    ):
         se, sf = _tg7(
             docs["tg7_selection"],
             docs["tg7_corpus"],
@@ -1013,15 +990,21 @@ def adjudicate(
         )
         structural += se
         failures += sf
-        denominator = int(tg7r.get("denominator", 0) or 0)
-        false_count = int(tg7r.get("false_certification_count", 0) or 0)
+        denominator_value = tg7r.get("denominator", 0)
+        false_count_value = tg7r.get("false_certification_count", 0)
+        denominator = denominator_value if type(denominator_value) is int else 0
+        false_count = false_count_value if type(false_count_value) is int else 0
 
     runs: list[dict[str, Any]] = []
     stable_failures: list[str] = []
-    if all(
-        isinstance(docs[k], Mapping)
-        for k in ("compatibility", "conformance", "upgrade_rollback", "tg7_report")
-    ) and isinstance(tg5, Mapping):
+    if (
+        thresholds_valid
+        and all(
+            isinstance(docs[k], Mapping)
+            for k in ("compatibility", "conformance", "upgrade_rollback", "tg7_report")
+        )
+        and isinstance(tg5, Mapping)
+    ):
         bindings = {
             "compatibility_hash": str(docs["compatibility"]["matrix_hash"]),
             "conformance_hash": str(docs["conformance"]["report_hash"]),
@@ -1042,14 +1025,12 @@ def adjudicate(
 
     comp = docs["compatibility"]
     rows = comp.get("rows", []) if isinstance(comp, Mapping) else []
+    if not isinstance(rows, list):
+        rows = []
     compat_summary = {
         "total": len(rows),
-        "supported": sum(
-            r.get("observed") == "SUPPORTED" for r in rows if isinstance(r, Mapping)
-        ),
-        "refused": sum(
-            r.get("observed") == "REFUSED" for r in rows if isinstance(r, Mapping)
-        ),
+        "supported": sum(r.get("observed") == "SUPPORTED" for r in rows if isinstance(r, Mapping)),
+        "refused": sum(r.get("observed") == "REFUSED" for r in rows if isinstance(r, Mapping)),
         "failed": len(cf),
     }
     conf_summary = {
@@ -1061,12 +1042,15 @@ def adjudicate(
         ),
         "failed": len(conf_f),
     }
+    upgrade_rows = (
+        docs["upgrade_rollback"].get("rows", [])
+        if isinstance(docs["upgrade_rollback"], Mapping)
+        else []
+    )
+    if not isinstance(upgrade_rows, list):
+        upgrade_rows = []
     upgrade_summary = {
-        "total": (
-            len(docs["upgrade_rollback"].get("rows", []))
-            if isinstance(docs["upgrade_rollback"], Mapping)
-            else 0
-        ),
+        "total": len(upgrade_rows),
         "failed": len(up_f),
     }
 
