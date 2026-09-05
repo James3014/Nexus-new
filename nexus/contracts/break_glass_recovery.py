@@ -550,9 +550,7 @@ class OwnerIntegrationEnvelope(_OwnerEvidenceEnvelope):
 
 
 class BreakGlassOwnerTerminalPayload(_FrozenModel):
-    schema: Literal["nexus.break_glass_owner_terminal.v1"] = (
-        "nexus.break_glass_owner_terminal.v1"
-    )
+    schema: Literal["nexus.break_glass_owner_terminal.v1"] = "nexus.break_glass_owner_terminal.v1"
     repository: Literal[_ALLOWED_REPOSITORY]
     issue: Literal[_ALLOWED_ISSUE]
     owner_login: Literal[_ALLOWED_OWNER]
