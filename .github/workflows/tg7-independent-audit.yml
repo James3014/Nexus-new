@@ -72,7 +72,8 @@ jobs:
           actual="$(sha256sum received/tg7-physical.tar.gz | awk '{print $1}')"
           test -n "$expected"
           test "$actual" = "$expected"
-          mkdir -p /private/tmp/nexus-core-v1-evidence
+          sudo mkdir -p /private/tmp/nexus-core-v1-evidence
+          sudo chown -R "$(id -u):$(id -g)" /private
           tar -xzf received/tg7-physical.tar.gz -C /private/tmp/nexus-core-v1-evidence
           test "$(git -C tg7-subject rev-parse HEAD)" = "$TG7_SUBJECT"
           test "$(git -C tg5-subject rev-parse HEAD)" = "$TG5_SUBJECT"
