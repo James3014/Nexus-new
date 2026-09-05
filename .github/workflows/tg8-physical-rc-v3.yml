@@ -1,0 +1,248 @@
+name: TG8 Physical RC Controller v3
+
+on:
+  push:
+    branches:
+      - ops/tg8-physical-rc-a5d7
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+
+jobs:
+  collect:
+    name: TG8 physical RC evidence collector v3
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      CANDIDATE_SHA: a5d7d032fe80838a84ed596ca36ea5bd923ae7a1
+      BASE_SHA: b8c67329f2065ac57491868a4acbddde9f2f3f8b
+      CANDIDATE_TREE: bb8739812a5beb13e5897c40014cf69b4d49389a
+      EVIDENCE_ROOT: /tmp/tg8-evidence
+    steps:
+      - name: Checkout support controller
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ops/tg8-physical-rc-a5d7
+          path: support
+          persist-credentials: true
+      - name: Checkout exact TG8 Candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Strip checkout credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for d in support candidate; do
+            while IFS= read -r key; do git -C "$d" config --local --unset-all "$key" || true; done < <(git -C "$d" config --local --name-only --get-regexp '^includeIf\.gitdir:' || true)
+            git -C "$d" config --local --unset-all 'http.https://github.com/.extraheader' || true
+          done
+      - name: Verify exact Candidate identity and base ancestry
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C candidate rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git -C candidate rev-parse HEAD^{tree})" = "$CANDIDATE_TREE"
+          test "$(git -C candidate merge-base HEAD "$BASE_SHA")" = "$BASE_SHA"
+          git -C candidate diff --quiet
+          git -C candidate diff --cached --quiet
+      - name: Install frozen Candidate dependencies
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        with:
+          version: '0.9.2'
+          enable-cache: false
+      - name: Sync frozen dependencies
+        shell: bash
+        run: cd candidate && uv sync --frozen --all-groups --all-extras
+      - name: Bind controller to exact accepted Candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp support/scripts/ops/tg8_physical_rc_controller.py /tmp/tg8-controller.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('/tmp/tg8-controller.py')
+          s=p.read_text(encoding='utf-8')
+          old='d005c6e013d9f2a5315092b3aaf375b9ae322d7c'
+          new='a5d7d032fe80838a84ed596ca36ea5bd923ae7a1'
+          if s.count(old) < 1:
+              raise SystemExit('old TG8 subject not found in controller')
+          p.write_text(s.replace(old,new), encoding='utf-8')
+          PY
+          python3 -m py_compile /tmp/tg8-controller.py
+      - name: Download and verify retained TG6/TG7 physical artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/upstream/tg6" "$RUNNER_TEMP/upstream/tg7zip" "$RUNNER_TEMP/upstream/tg7"
+          gh api /repos/James3014/Nexus-new/actions/artifacts/9960033003/zip > "$RUNNER_TEMP/upstream/tg6.zip"
+          gh api /repos/James3014/Nexus-new/actions/artifacts/9962254836/zip > "$RUNNER_TEMP/upstream/tg7.zip"
+          echo '67c68ee594face7097770eb95aa58b9d75afc02a26c33ae68476c9c3a34e9d84  '"$RUNNER_TEMP/upstream/tg6.zip" | sha256sum -c -
+          echo 'c0d49da97640610498b1cddf455c4eebdd93bb62ce93f80d5ea813f4cd543a08  '"$RUNNER_TEMP/upstream/tg7.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/upstream/tg6.zip" -d "$RUNNER_TEMP/upstream/tg6"
+          unzip -q "$RUNNER_TEMP/upstream/tg7.zip" -d "$RUNNER_TEMP/upstream/tg7zip"
+          cd "$RUNNER_TEMP/upstream/tg7zip"
+          expected="$(tr -d '\r\n' < tg7-semantic-physical.sha256)"
+          [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
+          test "$(sha256sum tg7-semantic-physical.tar.gz | awk '{print $1}')" = "$expected"
+          tar -xzf tg7-semantic-physical.tar.gz -C "$RUNNER_TEMP/upstream/tg7"
+          test -f "$RUNNER_TEMP/upstream/tg7/tg7/tg5-reverification.json"
+          test -f "$RUNNER_TEMP/upstream/tg7/tg7/report.json"
+      - name: Exact-base HTTP differential; Candidate client and ledger must pass
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_ROOT"
+          pytest_bin="$PWD/candidate/.venv/bin/pytest"
+          git -C candidate worktree add --detach "$RUNNER_TEMP/tg8-base" "$BASE_SHA"
+          set +e
+          (cd "$RUNNER_TEMP/tg8-base" && "$pytest_bin" -q tests/product/test_http_runtime.py tests/product/test_http_e2e.py -m 'not live') > "$EVIDENCE_ROOT/http-base.log" 2>&1
+          base_rc=$?
+          (cd candidate && .venv/bin/pytest -q tests/product/test_http_runtime.py tests/product/test_http_e2e.py -m 'not live') > "$EVIDENCE_ROOT/http-head.log" 2>&1
+          head_rc=$?
+          set -e
+          grep '^FAILED ' "$EVIDENCE_ROOT/http-base.log" | sed 's/^FAILED //' | sed 's/ - .*//' | sort -u > "$EVIDENCE_ROOT/http-base-failures.txt" || true
+          grep '^FAILED ' "$EVIDENCE_ROOT/http-head.log" | sed 's/^FAILED //' | sed 's/ - .*//' | sort -u > "$EVIDENCE_ROOT/http-head-failures.txt" || true
+          if [ "$head_rc" -ne 0 ]; then
+            test "$base_rc" -ne 0
+            diff -u "$EVIDENCE_ROOT/http-base-failures.txt" "$EVIDENCE_ROOT/http-head-failures.txt"
+            test -s "$EVIDENCE_ROOT/http-head-failures.txt"
+            ! grep -q '^ERROR ' "$EVIDENCE_ROOT/http-head.log"
+            printf 'EXACT_BASELINE_DEBT\n' > "$EVIDENCE_ROOT/http-differential-status.txt"
+          else
+            printf 'HEAD_PASS\n' > "$EVIDENCE_ROOT/http-differential-status.txt"
+          fi
+          cd candidate
+          uv run pytest -qq tests/product/test_client_conformance.py
+          uv run pytest -qq tests/product/test_ledger.py
+          git worktree remove --force "$RUNNER_TEMP/tg8-base"
+      - name: Prepare immutable RC evidence packet
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 /tmp/tg8-controller.py prepare --candidate candidate --tg6 "$RUNNER_TEMP/upstream/tg6" --tg7 "$RUNNER_TEMP/upstream/tg7/tg7" --out "$EVIDENCE_ROOT"
+      - name: Run exact TG8 guard and collection matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd candidate
+          uv run pytest -qq tests/benchmark/test_core_v1_tg8_protocol_gate.py | tee "$EVIDENCE_ROOT/tg8-pytest.log"
+          uv run pytest --collect-only -q tests/benchmark/test_core_v1_tg8_protocol_gate.py > "$EVIDENCE_ROOT/tg8-collect.txt"
+          test -s "$EVIDENCE_ROOT/tg8-collect.txt"
+      - name: Run exact TG8 RC adjudication
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd candidate
+          uv run python -m product.protocol.compatibility_gate \
+            --thresholds "$EVIDENCE_ROOT/thresholds.json" --expected-thresholds-sha256-file "$EVIDENCE_ROOT/thresholds.sha256" \
+            --compatibility "$EVIDENCE_ROOT/protocol-compatibility.json" --conformance "$EVIDENCE_ROOT/client-conformance.json" \
+            --upgrade-rollback "$EVIDENCE_ROOT/upgrade-rollback.json" --open-issues "$EVIDENCE_ROOT/open-issues.json" \
+            --tg4-receipt "$EVIDENCE_ROOT/tg4-receipt.json" --tg5-receipt "$EVIDENCE_ROOT/tg5-receipt.json" --tg6-receipt "$EVIDENCE_ROOT/tg6-receipt.json" \
+            --tg7-selection "$EVIDENCE_ROOT/tg7-selection.json" --tg7-corpus "$EVIDENCE_ROOT/tg7-corpus.json" --tg7-shadow "$EVIDENCE_ROOT/tg7-shadow-receipt.json" --tg7-report "$EVIDENCE_ROOT/tg7-report.json" \
+            --stable-run-1 "$EVIDENCE_ROOT/stable-run-1.json" --stable-run-2 "$EVIDENCE_ROOT/stable-run-2.json" --stable-run-3 "$EVIDENCE_ROOT/stable-run-3.json" \
+            --report "$EVIDENCE_ROOT/gate-report.json" | tee "$EVIDENCE_ROOT/gate-stdout.json"
+          python3 - "$EVIDENCE_ROOT/gate-report.json" <<'PY'
+          import json, sys
+          r=json.load(open(sys.argv[1], encoding='utf-8'))
+          assert r['classification']=='PROTOCOL_RC_EVIDENCE_READY', r
+          assert r['stable_run_count']==0, r
+          assert r['false_certification_count']==0, r
+          PY
+      - name: Finalize physical RC acceptance
+        shell: bash
+        run: python3 /tmp/tg8-controller.py finalize --out "$EVIDENCE_ROOT"
+      - name: Upload immutable TG8 physical RC evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: tg8-physical-rc-v3-${{ env.CANDIDATE_SHA }}
+          path: /tmp/tg8-evidence/
+          if-no-files-found: error
+          retention-days: 30
+
+  audit:
+    name: TG8 fresh independent RC acceptance audit v3
+    needs: collect
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      CANDIDATE_SHA: a5d7d032fe80838a84ed596ca36ea5bd923ae7a1
+      AUDIT_ROOT: /tmp/tg8-audit
+    steps:
+      - name: Checkout support auditor
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ops/tg8-physical-rc-a5d7
+          path: support
+          persist-credentials: true
+      - name: Checkout exact TG8 Candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.CANDIDATE_SHA }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Strip checkout credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for d in support candidate; do
+            while IFS= read -r key; do git -C "$d" config --local --unset-all "$key" || true; done < <(git -C "$d" config --local --name-only --get-regexp '^includeIf\.gitdir:' || true)
+            git -C "$d" config --local --unset-all 'http.https://github.com/.extraheader' || true
+          done
+      - name: Install frozen Candidate dependencies
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        with:
+          version: '0.9.2'
+          enable-cache: false
+      - name: Sync frozen dependencies
+        shell: bash
+        run: cd candidate && uv sync --frozen --all-groups --all-extras
+      - name: Bind auditor to exact accepted Candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp support/scripts/ops/tg8_physical_rc_controller.py /tmp/tg8-controller.py
+          sed -i 's/d005c6e013d9f2a5315092b3aaf375b9ae322d7c/a5d7d032fe80838a84ed596ca36ea5bd923ae7a1/g' /tmp/tg8-controller.py
+          python3 -m py_compile /tmp/tg8-controller.py
+      - name: Download collector artifact
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e
+        with:
+          name: tg8-physical-rc-v3-${{ env.CANDIDATE_SHA }}
+          path: /tmp/tg8-audit
+      - name: Independently recompute immutable packet
+        shell: bash
+        run: python3 /tmp/tg8-controller.py audit --candidate candidate --out "$AUDIT_ROOT" | tee "$AUDIT_ROOT/audit-stdout.json"
+      - name: Independently rerun exact adjudicator
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd candidate
+          uv run python -m product.protocol.compatibility_gate \
+            --thresholds "$AUDIT_ROOT/thresholds.json" --expected-thresholds-sha256-file "$AUDIT_ROOT/thresholds.sha256" \
+            --compatibility "$AUDIT_ROOT/protocol-compatibility.json" --conformance "$AUDIT_ROOT/client-conformance.json" \
+            --upgrade-rollback "$AUDIT_ROOT/upgrade-rollback.json" --open-issues "$AUDIT_ROOT/open-issues.json" \
+            --tg4-receipt "$AUDIT_ROOT/tg4-receipt.json" --tg5-receipt "$AUDIT_ROOT/tg5-receipt.json" --tg6-receipt "$AUDIT_ROOT/tg6-receipt.json" \
+            --tg7-selection "$AUDIT_ROOT/tg7-selection.json" --tg7-corpus "$AUDIT_ROOT/tg7-corpus.json" --tg7-shadow "$AUDIT_ROOT/tg7-shadow-receipt.json" --tg7-report "$AUDIT_ROOT/tg7-report.json" \
+            --stable-run-1 "$AUDIT_ROOT/stable-run-1.json" --stable-run-2 "$AUDIT_ROOT/stable-run-2.json" --stable-run-3 "$AUDIT_ROOT/stable-run-3.json" \
+            --report "$AUDIT_ROOT/audit-gate-report.json" > "$AUDIT_ROOT/audit-gate-stdout.json"
+          cmp "$AUDIT_ROOT/gate-report.json" "$AUDIT_ROOT/audit-gate-report.json"
+      - name: Upload independent audit receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: tg8-rc-independent-audit-v3-${{ env.CANDIDATE_SHA }}
+          path: |
+            /tmp/tg8-audit/independent-audit.json
+            /tmp/tg8-audit/audit-stdout.json
+            /tmp/tg8-audit/audit-gate-report.json
+          if-no-files-found: error
+          retention-days: 30
