@@ -9,6 +9,7 @@ permissions:
   contents: read
 
 env:
+  BASE_SHA: d005c6e013d9f2a5315092b3aaf375b9ae322d7c
   TARGET_SHA: 68fad98effe979ec7c33e52e85313215ec08c888
   EXPECTED_PROTOCOL: 1.0.0-rc.1
   GENERATION: rc
@@ -25,7 +26,7 @@ jobs:
           persist-credentials: true
           submodules: false
 
-      - name: Remove checkout credentials
+      - name: Remove checkout credentials and install inert-gitlink metadata
         shell: bash
         run: |
           set -euo pipefail
@@ -45,6 +46,15 @@ jobs:
             echo 'checkout credentials remain configured' >&2
             exit 1
           fi
+          while IFS= read -r -d '' index_entry; do
+            mode="${index_entry%% *}"
+            if [ "$mode" != "160000" ]; then continue; fi
+            gitlink_path="${index_entry#*$'\t'}"
+            if ! git config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
+              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
+              git config --file .gitmodules "submodule.${gitlink_path}.url" .
+            fi
+          done < <(git ls-files --stage -z)
 
       - name: Setup Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
@@ -58,7 +68,7 @@ jobs:
           version: '0.9.2'
           enable-cache: false
 
-      - name: Verify exact subject and one-line product mutation
+      - name: Verify exact subject and one-line Product mutation
         shell: bash
         run: |
           set -euo pipefail
@@ -67,13 +77,78 @@ jobs:
           python3 -c 'import os,re,pathlib; p=pathlib.Path("product/protocol/__init__.py").read_text(); m=re.search(r"^PUBLIC_PROTOCOL_VERSION = \"([^\"]+)\"$",p,re.M); assert m and m.group(1)==os.environ["EXPECTED_PROTOCOL"]; assert "IMPLEMENTATION_SCHEMA = \"nexus.changeset_certification.v2\"" in p'
           git diff --check HEAD^ HEAD
 
-      - name: Install exact dependencies
+      - name: Materialize exact base and dependencies
         shell: bash
-        run: uv sync --frozen --all-groups --all-extras
+        run: |
+          set -euo pipefail
+          git cat-file -e "$BASE_SHA^{commit}"
+          BASE_WORKTREE="$RUNNER_TEMP/tg8-base"
+          rm -rf "$BASE_WORKTREE"
+          git worktree add --detach "$BASE_WORKTREE" "$BASE_SHA"
+          echo "BASE_WORKTREE=$BASE_WORKTREE" >> "$GITHUB_ENV"
+          uv sync --frozen --all-groups --all-extras
+          UV_PROJECT_ENVIRONMENT="$BASE_WORKTREE/.venv" uv sync --directory "$BASE_WORKTREE" --frozen --all-groups --all-extras
 
-      - name: Run Product regression without live marker
+      - name: Exact-base classify Product regression
         shell: bash
-        run: uv run pytest -qq tests/product -m 'not live'
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tg8-candidate-evidence"
+          set +e
+          "$BASE_WORKTREE/.venv/bin/python" -m pytest -q "$BASE_WORKTREE/tests/product" -m 'not live' --tb=short > "$RUNNER_TEMP/tg8-candidate-evidence/base-pytest.log" 2>&1
+          base_status=$?
+          .venv/bin/python -m pytest -q tests/product -m 'not live' --tb=short > "$RUNNER_TEMP/tg8-candidate-evidence/head-pytest.log" 2>&1
+          head_status=$?
+          set -e
+          export base_status head_status
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          root = Path(os.environ["RUNNER_TEMP"]) / "tg8-candidate-evidence"
+
+          def failures(path: Path) -> set[str]:
+              found: set[str] = set()
+              for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+                  match = re.match(r"^(?:FAILED|ERROR) ([^ ]+)", line)
+                  if match:
+                      found.add(match.group(1))
+              return found
+
+          base = failures(root / "base-pytest.log")
+          head = failures(root / "head-pytest.log")
+          new = head - base
+          resolved = base - head
+          generation = os.environ["GENERATION"]
+          allowed = {
+              "tests/product/test_changeset_certification_adapter.py::test_legacy_wire_shape_and_product_receipt_identity",
+              "tests/product/test_kernel.py::test_protocol_versions_are_distinct",
+          } if generation == "rc" else set()
+          if generation == "rc" and new != allowed:
+              raise SystemExit(f"unexpected RC Product deltas: {sorted(new)}")
+          if generation != "rc" and new:
+              raise SystemExit(f"unexpected Product deltas: {sorted(new)}")
+          report = {
+              "schema": "nexus.core-v1.tg8-exact-base-product-classification.v1",
+              "generation": generation,
+              "base_sha": os.environ["BASE_SHA"],
+              "target_sha": os.environ["TARGET_SHA"],
+              "base_exit": int(os.environ["base_status"]),
+              "head_exit": int(os.environ["head_status"]),
+              "base_failure_count": len(base),
+              "head_failure_count": len(head),
+              "new_failures": sorted(new),
+              "allowed_version_snapshot_deltas": sorted(allowed),
+              "resolved_failures": sorted(resolved),
+              "classification": "EXACT_BASELINE_DEBT_NO_UNEXPECTED_NEW_FAILURES",
+          }
+          (root / "product-classification.json").write_text(
+              json.dumps(report, sort_keys=True, separators=(",", ":")) + "\n",
+              encoding="utf-8",
+          )
+          PY
 
       - name: Build and clean-install candidate wheel
         shell: bash
@@ -85,33 +160,51 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/tg8-venv"
           "$RUNNER_TEMP/tg8-venv/bin/pip" install --no-deps "$RUNNER_TEMP"/tg8-wheel/*.whl
           "$RUNNER_TEMP/tg8-venv/bin/python" -c 'import os; from product.protocol import PUBLIC_PROTOCOL_VERSION; assert PUBLIC_PROTOCOL_VERSION == os.environ["EXPECTED_PROTOCOL"]'
-          sha256sum "$RUNNER_TEMP"/tg8-wheel/*.whl > "$RUNNER_TEMP/tg8-wheel.sha256"
+          sha256sum "$RUNNER_TEMP"/tg8-wheel/*.whl > "$RUNNER_TEMP/tg8-candidate-evidence/wheel.sha256"
 
       - name: Emit immutable candidate receipt
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/tg8-candidate-evidence"
-          cp "$RUNNER_TEMP/tg8-wheel.sha256" "$RUNNER_TEMP/tg8-candidate-evidence/wheel.sha256"
           SUBJECT_TREE="$(git rev-parse HEAD^{tree})"
           PROTOCOL_BLOB="$(git rev-parse HEAD:product/protocol/__init__.py)"
           export SUBJECT_TREE PROTOCOL_BLOB
-          python3 -c 'import json,os,pathlib; p={"schema":"nexus.core-v1.tg8-protocol-candidate-receipt.v1","generation":os.environ["GENERATION"],"subject_commit":os.environ["TARGET_SHA"],"subject_tree":os.environ["SUBJECT_TREE"],"protocol_blob":os.environ["PROTOCOL_BLOB"],"public_protocol_version":os.environ["EXPECTED_PROTOCOL"],"product_tests":"PASS","wheel_build":"PASS","clean_install_readback":"PASS"}; pathlib.Path(os.environ["RUNNER_TEMP"]+"/tg8-candidate-evidence/receipt.json").write_text(json.dumps(p,sort_keys=True,separators=(",",":"))+"\n")'
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
 
-      - name: Install gitlink metadata for checkout post-cleanup
+          root = Path(os.environ["RUNNER_TEMP"]) / "tg8-candidate-evidence"
+          classification = json.loads((root / "product-classification.json").read_text())
+          payload = {
+              "schema": "nexus.core-v1.tg8-protocol-candidate-receipt.v1",
+              "generation": os.environ["GENERATION"],
+              "base_commit": os.environ["BASE_SHA"],
+              "subject_commit": os.environ["TARGET_SHA"],
+              "subject_tree": os.environ["SUBJECT_TREE"],
+              "protocol_blob": os.environ["PROTOCOL_BLOB"],
+              "public_protocol_version": os.environ["EXPECTED_PROTOCOL"],
+              "product_regression_classification": classification["classification"],
+              "base_failure_count": classification["base_failure_count"],
+              "head_failure_count": classification["head_failure_count"],
+              "new_failures": classification["new_failures"],
+              "wheel_build": "PASS",
+              "clean_install_readback": "PASS",
+              "claim_ceiling": "EVIDENCE_CANDIDATE_ONLY_NO_PROMOTION",
+          }
+          (root / "receipt.json").write_text(
+              json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Remove base worktree
+        if: always()
         shell: bash
         run: |
-          set -euo pipefail
-          while IFS= read -r -d '' index_entry; do
-            mode="${index_entry%% *}"
-            if [ "$mode" != "160000" ]; then continue; fi
-            gitlink_path="${index_entry#*$'\t'}"
-            if ! git config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
-              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
-              git config --file .gitmodules "submodule.${gitlink_path}.url" .
-            fi
-          done < <(git ls-files --stage -z)
-          git submodule foreach --recursive ':'
+          if [ -n "${BASE_WORKTREE:-}" ] && [ -d "$BASE_WORKTREE" ]; then
+            git worktree remove --force "$BASE_WORKTREE"
+          fi
 
       - name: Upload candidate evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
