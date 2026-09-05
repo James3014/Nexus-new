@@ -52,6 +52,7 @@ jobs:
         with:
           ref: ${{ env.RC2_SHA }}
           path: rc2
+          fetch-depth: 2
           persist-credentials: true
           submodules: false
       - name: Checkout exact Stable evidence subject
@@ -59,15 +60,25 @@ jobs:
         with:
           ref: ${{ env.STABLE_SHA }}
           path: stable
+          fetch-depth: 2
           persist-credentials: true
           submodules: false
-      - name: Strip checkout credentials
+      - name: Strip checkout credentials and install inert gitlink metadata
         shell: bash
         run: |
           set -euo pipefail
           for d in support gate rc1 rc2 stable; do
             while IFS= read -r key; do git -C "$d" config --local --unset-all "$key" || true; done < <(git -C "$d" config --local --name-only --get-regexp '^includeIf\.gitdir:' || true)
             git -C "$d" config --local --unset-all 'http.https://github.com/.extraheader' || true
+            while IFS= read -r -d '' index_entry; do
+              mode="${index_entry%% *}"
+              if [ "$mode" != "160000" ]; then continue; fi
+              gitlink_path="${index_entry#*$'\t'}"
+              if ! git -C "$d" config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
+                git -C "$d" config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
+                git -C "$d" config --file .gitmodules "submodule.${gitlink_path}.url" .
+              fi
+            done < <(git -C "$d" ls-files --stage -z)
           done
       - name: Setup Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
@@ -181,6 +192,7 @@ jobs:
         with:
           ref: ${{ env.RC2_SHA }}
           path: rc2
+          fetch-depth: 2
           persist-credentials: true
           submodules: false
       - name: Checkout exact Stable evidence subject
@@ -188,15 +200,25 @@ jobs:
         with:
           ref: ${{ env.STABLE_SHA }}
           path: stable
+          fetch-depth: 2
           persist-credentials: true
           submodules: false
-      - name: Strip checkout credentials
+      - name: Strip checkout credentials and install inert gitlink metadata
         shell: bash
         run: |
           set -euo pipefail
           for d in support gate rc1 rc2 stable; do
             while IFS= read -r key; do git -C "$d" config --local --unset-all "$key" || true; done < <(git -C "$d" config --local --name-only --get-regexp '^includeIf\.gitdir:' || true)
             git -C "$d" config --local --unset-all 'http.https://github.com/.extraheader' || true
+            while IFS= read -r -d '' index_entry; do
+              mode="${index_entry%% *}"
+              if [ "$mode" != "160000" ]; then continue; fi
+              gitlink_path="${index_entry#*$'\t'}"
+              if ! git -C "$d" config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
+                git -C "$d" config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
+                git -C "$d" config --file .gitmodules "submodule.${gitlink_path}.url" .
+              fi
+            done < <(git -C "$d" ls-files --stage -z)
           done
       - name: Setup Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
