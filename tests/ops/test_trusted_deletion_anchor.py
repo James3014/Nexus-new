@@ -940,6 +940,37 @@ def test_verifier_does_not_substitute_its_runner_runtime_for_executor_identity(
     assert _verify(manifest, evidence) == "PASS"
 
 
+def test_global_conftest_stub_installation_does_not_require_optional_ml_or_legacy_deps(
+    tmp_path: Path,
+):
+    blocker = tmp_path / "sitecustomize.py"
+    blocker.write_text(
+        "import builtins\n"
+        "_real_import = builtins.__import__\n"
+        "def _blocked_import(name, globals=None, locals=None, fromlist=(), level=0):\n"
+        "    if name.split('.', 1)[0] in {'numpy', 'pandas'}:\n"
+        "        raise ModuleNotFoundError(f'blocked optional dependency: {name}')\n"
+        "    return _real_import(name, globals, locals, fromlist, level)\n"
+        "builtins.__import__ = _blocked_import\n",
+        encoding="utf-8",
+    )
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = os.pathsep.join((str(tmp_path), str(ROOT)))
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import runpy; runpy.run_path('tests/conftest.py', run_name='__nexus_conftest_probe__')",
+        ],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_runtime_builder_uses_frozen_hash_bound_binary_only_contract(tmp_path: Path):
     repo = tmp_path / "repo"
     subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
