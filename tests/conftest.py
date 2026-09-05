@@ -278,8 +278,6 @@ def _install_dependency_injector_stub() -> None:
 def _install_sentence_transformers_stub() -> None:
     if "sentence_transformers" in sys.modules:
         return
-    import numpy as _np
-
     mod = types.ModuleType("sentence_transformers")
 
     class SentenceTransformer:
@@ -287,6 +285,8 @@ def _install_sentence_transformers_stub() -> None:
             self.model_name = model_name
 
         def encode(self, texts):
+            import numpy as _np
+
             if isinstance(texts, str):
                 texts = [texts]
             out = []
@@ -303,8 +303,6 @@ def _install_sentence_transformers_stub() -> None:
 def _install_lancedb_stub() -> None:
     if "lancedb" in sys.modules and "lancedb.pydantic" in sys.modules:
         return
-    import pandas as _pd
-
     lancedb_mod = types.ModuleType("lancedb")
     pyd_mod = types.ModuleType("lancedb.pydantic")
 
@@ -317,6 +315,8 @@ def _install_lancedb_stub() -> None:
             return self
 
         def to_pandas(self):
+            import pandas as _pd
+
             return _pd.DataFrame([])
 
         def to_list(self):
@@ -380,19 +380,21 @@ def _install_lancedb_stub() -> None:
 def _install_scipy_stub() -> None:
     if "scipy" in sys.modules and "scipy.stats" in sys.modules:
         return
-    import numpy as _np
-
     scipy_mod = types.ModuleType("scipy")
     stats_mod = types.ModuleType("scipy.stats")
 
     class _Norm:
         @staticmethod
         def cdf(x):
+            import numpy as _np
+
             x = _np.asarray(x, dtype=float)
             return 0.5 * (1.0 + _np.vectorize(math.erf)(x / _np.sqrt(2.0)))
 
         @staticmethod
         def pdf(x):
+            import numpy as _np
+
             x = _np.asarray(x, dtype=float)
             return (1.0 / _np.sqrt(2.0 * _np.pi)) * _np.exp(-0.5 * x * x)
 
