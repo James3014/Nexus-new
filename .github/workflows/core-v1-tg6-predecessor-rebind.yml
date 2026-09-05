@@ -1,0 +1,52 @@
+name: Core V1 TG6 Predecessor Rebind
+
+on:
+  push:
+    branches:
+      - controller/core-v1-physical-recovery-20260905
+    paths:
+      - controller/tg6-predecessor-rebind.marker
+
+permissions:
+  contents: write
+
+jobs:
+  rebind:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Patch exact TG6 Candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OLD_HEAD: 6a713fd7defb6e9ad30e7897490578635317319e
+          OLD_HASH: 162c2e79b9df15255be59f42968dab4ef9374fc470cc17be19caa8d2c3b153d7
+          NEW_HASH: 18b1e54b6c1404ed5348ce2197e3f30c1f6d70d422e4ce5ddd1dbe293a5e90f7
+          BRANCH: codex/issue-770-core-v1-tg6
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init "$GITHUB_WORKSPACE"
+          cd "$GITHUB_WORKSPACE"
+          git remote add origin https://github.com/James3014/Nexus-new.git
+          git fetch --no-tags origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+          test "$(git rev-parse refs/remotes/origin/$BRANCH)" = "$OLD_HEAD"
+          git checkout -B "$BRANCH" "refs/remotes/origin/$BRANCH"
+          FILE=tests/product/test_client_conformance.py
+          test "$(grep -o "$OLD_HASH" "$FILE" | wc -l)" = "1"
+          python - "$FILE" "$OLD_HASH" "$NEW_HASH" <<'PY'
+          from pathlib import Path
+          import sys
+          path = Path(sys.argv[1]); old = sys.argv[2]; new = sys.argv[3]
+          text = path.read_text(encoding="utf-8")
+          if text.count(old) != 1:
+              raise SystemExit("old predecessor hash count != 1")
+          path.write_text(text.replace(old, new), encoding="utf-8")
+          PY
+          git diff --check
+          test "$(git diff --name-only | tr -d '\r')" = "$FILE"
+          grep -q "$NEW_HASH" "$FILE"
+          git config user.name "Nexus Core Controller"
+          git config user.email "controller@nexus.local"
+          git add "$FILE"
+          git commit -m "fix(tg6): bind predecessor to reproducible exact base artifact"
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic $auth" push origin "HEAD:refs/heads/$BRANCH"
