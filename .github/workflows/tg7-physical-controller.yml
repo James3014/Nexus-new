@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/tg7-physical-controller.yml
       - scripts/ops/tg7_github_physical.py
+      - scripts/ops/tg7_github_physical_v2.py
 
 permissions:
   contents: read
@@ -78,11 +79,12 @@ jobs:
             --output physical/tg5-receipt.json \
             --provenance physical/tg5-reverification.json
 
-      - name: Collect 56 real OCI attempts and TG7 reduction
+      - name: Collect 56 real OCI attempts and TG7 reduction using exact TG5 profile lock
         run: |
           set -euo pipefail
-          tg7-subject/.venv/bin/python ops/scripts/ops/tg7_github_physical.py tg7-collect \
+          tg7-subject/.venv/bin/python ops/scripts/ops/tg7_github_physical_v2.py tg7-collect \
             --subject tg7-subject \
+            --tg5-subject tg5-subject \
             --tg5-receipt physical/tg5-receipt.json \
             --tg5-provenance physical/tg5-reverification.json \
             --root physical/tg7 \
@@ -105,12 +107,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - name: Materialize exact support and TG7 sources without checkout action
+      - name: Materialize exact support/TG7/TG5 sources without checkout action
         env:
           SUPPORT_HEAD: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
-          for spec in "ops:$SUPPORT_HEAD" "tg7-subject:$TG7_SUBJECT"; do
+          for spec in "ops:$SUPPORT_HEAD" "tg7-subject:$TG7_SUBJECT" "tg5-subject:$TG5_SUBJECT"; do
             dir="${spec%%:*}"
             sha="${spec#*:}"
             git init -q "$dir"
@@ -133,7 +135,10 @@ jobs:
           enable-cache: false
 
       - name: Install frozen exact-subject dependencies
-        run: uv sync --directory tg7-subject --frozen --all-groups --all-extras
+        run: |
+          set -euo pipefail
+          uv sync --directory tg5-subject --frozen --all-groups --all-extras
+          uv sync --directory tg7-subject --frozen --all-groups --all-extras
 
       - name: Download collector artifact in fresh runner
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -150,6 +155,7 @@ jobs:
           mkdir -p /private/tmp/nexus-core-v1-evidence
           tar -xzf received/tg7-physical.tar.gz -C /private/tmp/nexus-core-v1-evidence
           test "$(git -C tg7-subject rev-parse HEAD)" = "$TG7_SUBJECT"
+          test "$(git -C tg5-subject rev-parse HEAD)" = "$TG5_SUBJECT"
 
       - name: Run exact TG7-03 physical CLI readback
         working-directory: tg7-subject
@@ -176,11 +182,12 @@ jobs:
           uv run pytest -qq tests/product/test_false_completion_benchmark.py tests/benchmark/test_core_v1_tg7_manifest.py \
             --junitxml="$RUNNER_TEMP/tg7-physical-pytest.xml"
 
-      - name: Independently recompute physical acceptance
+      - name: Independently recompute physical acceptance under exact TG5 profile lock
         run: |
           set -euo pipefail
-          tg7-subject/.venv/bin/python ops/scripts/ops/tg7_github_physical.py audit \
+          tg7-subject/.venv/bin/python ops/scripts/ops/tg7_github_physical_v2.py audit \
             --subject tg7-subject \
+            --tg5-subject tg5-subject \
             --root /private/tmp/nexus-core-v1-evidence/tg7 \
             --junit "$RUNNER_TEMP/tg7-physical-pytest.xml" \
             --output "$RUNNER_TEMP/tg7-independent-acceptance.json"
