@@ -1,41 +1,27 @@
-"""Deterministic representative hostile corpus and second-repo shadow verifier (TG-7).
+"""TG-7 representative corpus and second-repository shadow verifier.
 
-Implements:
-- Representative hostile corpus across 8 hostile families (>=50 eligible cases, >=5 per family).
-- Second-repository (bottlepy/bottle) read-only shadow evaluation.
-- Fail-closed validation for selection, corpus, shadow-receipt, and report schemas.
-- Exact arithmetic accounting with zero observed high-risk false certifications.
-- Maximum claim: CROSS_REPO_TRUST_SHADOW_VERIFIED.
+The benchmark is deliberately not an execution or receipt authority.  A
+controller materializes the selected public repository, the accepted TG-5
+receipt, the immutable corpus, and one read-only TG-5 attempt receipt per case.
+TG-7 validates and reduces those artifacts into a bounded shadow receipt and
+report.  Missing, writable, synthetic, stale, or mismatched attempt evidence
+fails closed.
 """
 
 from __future__ import annotations
 
 import argparse
-import copy
+import hashlib
 import json
 import os
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 
 from product.benchmark import _canonical, _digest
 from product.certification.receipt import CLAIM_CEILING
-from product.evidence import (
-    AcceptanceContract,
-    ChangeSet,
-    EvidenceBundle,
-    Observation,
-    ObservationStatus,
-    VerificationPlan,
-    _hash,
-)
-from product.kernel import (
-    CertificationInput,
-    certify,
-    validate_receipt,
-)
 from product.protocol import (
     CERTIFICATION_RECEIPT_SCHEMA,
     IMPLEMENTATION_SCHEMA,
@@ -44,6 +30,7 @@ from product.protocol import (
 
 SELECTION_SCHEMA = "nexus.core-v1.tg7-selection.v1"
 CORPUS_SCHEMA = "nexus.core-v1.tg7-corpus.v1"
+ATTEMPT_RECEIPT_SCHEMA = "nexus.core-v1.tg7-attempt-receipt.v2"
 SHADOW_RECEIPT_SCHEMA = "nexus.core-v1.tg7-shadow-receipt.v1"
 REPORT_SCHEMA = "nexus.core-v1.tg7-report.v1"
 
@@ -63,7 +50,6 @@ HOSTILE_FAMILIES = (
 )
 
 ALLOWED_LICENSES = frozenset({"MIT", "BSD-2-Clause", "BSD-3-Clause", "Apache-2.0", "ISC"})
-
 INFRA_INVALID_REASONS = frozenset({
     "MATERIALIZATION_MISSING",
     "RUNNER_UNAVAILABLE_BEFORE_EXECUTION",
@@ -90,7 +76,14 @@ SELECTION_REQUIRED_KEYS = frozenset({
     "not_nexus_reason",
     "selection_hash",
 })
-
+CORPUS_REQUIRED_KEYS = frozenset({
+    "schema",
+    "task_set_id",
+    "repository",
+    "case_count",
+    "cases",
+    "corpus_hash",
+})
 CORPUS_CASE_REQUIRED_KEYS = frozenset({
     "case_id",
     "hostile_family",
@@ -111,80 +104,83 @@ CORPUS_CASE_REQUIRED_KEYS = frozenset({
     "task_set_id",
     "case_hash",
 })
+ATTEMPT_REQUIRED_KEYS = frozenset({
+    "schema",
+    "issuer_id",
+    "producer_id",
+    "attempt_id",
+    "execution_id",
+    "case_id",
+    "case_hash",
+    "hostile_family",
+    "repository_commit",
+    "repository_tree",
+    "external_material_hash",
+    "canonical_request_hash",
+    "oracle_hash",
+    "oracle_source",
+    "profile_id",
+    "protocol_version",
+    "implementation_schema",
+    "tg5_receipt_hash",
+    "actual_status",
+    "actual_disposition",
+    "evidence_hash",
+    "runner_result_hash",
+    "infra_invalid",
+    "infra_invalid_reason",
+    "observed_at",
+    "attempt_hash",
+})
+SHADOW_CASE_REQUIRED_KEYS = frozenset({
+    "case_id",
+    "hostile_family",
+    "attempt_id",
+    "attempt_hash",
+    "oracle_hash",
+    "result_hash",
+    "actual_status",
+    "actual_disposition",
+    "evidence_hash",
+    "infra_invalid",
+    "infra_invalid_reason",
+})
 
 
-class AuthSecurityError(Exception):
-    """Raised when authentication credentials or file permissions are insecure."""
+def _sha256_text(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and value.startswith("sha256:")
+        and len(value) == 71
+        and all(ch in "0123456789abcdef" for ch in value[7:])
+    )
 
 
-def _validate_auth_header(header: str | None, expected_token: str) -> bool:
-    """Validate Bearer authorization header deterministically."""
-    if not header or not isinstance(header, str) or not header.startswith("Bearer "):
+def _git_sha(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 40
+        and all(ch in "0123456789abcdef" for ch in value)
+    )
+
+
+def _aware_timestamp(value: Any) -> bool:
+    if not isinstance(value, str) or not value:
         return False
-    token = header[7:].strip()
-    return bool(token and token == expected_token)
-
-
-def _validate_request_payload(payload: Any) -> list[str]:
-    """Validate incoming certification request payload against protocol schema."""
-    if not isinstance(payload, dict):
-        return ["payload must be a JSON object"]
-    req_keys = frozenset({
-        "protocol_version",
-        "implementation_schema",
-        "repository",
-        "acceptance_contract",
-        "verification_plan",
-        "profile_id",
-        "idempotency_key",
-        "expected_generation",
-    })
-    if set(payload.keys()) != req_keys:
-        return ["request keys mismatch"]
-    for k in req_keys:
-        if payload[k] is None:
-            return [f"null forbidden: {k}"]
-    if payload.get("protocol_version") != PUBLIC_PROTOCOL_VERSION:
-        return ["unsupported protocol_version"]
-    if payload.get("implementation_schema") != IMPLEMENTATION_SCHEMA:
-        return ["unsupported implementation_schema"]
-    if payload.get("profile_id") != PROFILE_ID:
-        return ["unsupported profile_id"]
-
-    repo = payload.get("repository")
-    if not isinstance(repo, dict):
-        return ["repository must be dict"]
-    repo_keys = frozenset({"owner", "name", "pr_number", "expected_base_sha", "expected_head_sha"})
-    if set(repo.keys()) != repo_keys:
-        return ["repo keys mismatch"]
-    if (
-        not isinstance(repo.get("pr_number"), int)
-        or isinstance(repo.get("pr_number"), bool)
-        or repo["pr_number"] <= 0
-    ):
-        return ["invalid pr_number"]
-    for sha_key in ("expected_base_sha", "expected_head_sha"):
-        sha = repo.get(sha_key)
-        if (
-            not isinstance(sha, str)
-            or len(sha) != 40
-            or not all(c in "0123456789abcdef" for c in sha)
-        ):
-            return [f"invalid {sha_key}"]
-    if repo["expected_base_sha"] == repo["expected_head_sha"]:
-        return ["base and head must differ"]
-    return []
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
 
 
 def validate_selection(
     selection: Mapping[str, Any], repo_path: Path | str | None = None
 ) -> list[str]:
-    """Validate selection manifest against schema and security/license rules."""
     errors: list[str] = []
     if not isinstance(selection, Mapping):
         return ["selection must be a JSON object"]
-
-    keys = set(selection.keys())
+    keys = set(selection)
     if keys != SELECTION_REQUIRED_KEYS:
         missing = SELECTION_REQUIRED_KEYS - keys
         extra = keys - SELECTION_REQUIRED_KEYS
@@ -193,199 +189,262 @@ def validate_selection(
         if extra:
             errors.append(f"selection unknown keys: {sorted(extra)}")
         return errors
-
     if selection.get("schema") != SELECTION_SCHEMA:
         errors.append(f"selection schema must be {SELECTION_SCHEMA}")
-
     body = {k: v for k, v in selection.items() if k != "selection_hash"}
     if selection.get("selection_hash") != _digest(body):
         errors.append("selection_hash does not match canonical digest of body")
-
+    if selection.get("task_set_id") != TASK_SET_ID:
+        errors.append(f"selection task_set_id must be {TASK_SET_ID}")
     if selection.get("privacy_class") != "PUBLIC_OPEN_SOURCE":
         errors.append("selection privacy_class must be PUBLIC_OPEN_SOURCE")
-
-    spdx = selection.get("license_spdx")
-    if spdx not in ALLOWED_LICENSES:
-        errors.append(
-            f"selection license_spdx '{spdx}' not in allowed set {sorted(ALLOWED_LICENSES)}"
-        )
-
-    name = selection.get("name")
-    if name == "Nexus-new" or "Nexus-new" in str(selection.get("canonical_url")):
+    if selection.get("license_spdx") not in ALLOWED_LICENSES:
+        errors.append("selection license_spdx is not in the allowed public-license set")
+    if selection.get("name") == "Nexus-new" or "Nexus-new" in str(selection.get("canonical_url")):
         errors.append("second repository selection cannot be Nexus-new")
+    if not _git_sha(selection.get("commit")):
+        errors.append("selection commit must be a full lowercase immutable SHA")
+    if not _git_sha(selection.get("tree")):
+        errors.append("selection tree must be a full lowercase immutable SHA")
+    for key in ("snapshot_tree_hash", "license_evidence_hash", "read_only_evidence_hash"):
+        if not _sha256_text(selection.get(key)):
+            errors.append(f"selection {key} must be canonical sha256")
+    if not _aware_timestamp(selection.get("observed_at")):
+        errors.append("selection observed_at must be timezone-aware ISO-8601")
 
-    commit = selection.get("commit")
-    tree = selection.get("tree")
-    if (
-        not isinstance(commit, str)
-        or len(commit) != 40
-        or not all(c in "0123456789abcdefABCDEF" for c in commit)
-    ):
-        errors.append("selection commit must be 40-character hex string")
-    if (
-        not isinstance(tree, str)
-        or len(tree) != 40
-        or not all(c in "0123456789abcdefABCDEF" for c in tree)
-    ):
-        errors.append("selection tree must be 40-character hex string")
-
-    # If repo_path is provided, verify git identity and permissions
-    if repo_path:
-        r_path = Path(repo_path)
-        if not r_path.exists():
-            errors.append(f"repository path does not exist: {r_path}")
+    if repo_path is not None:
+        path = Path(repo_path)
+        if not path.is_dir():
+            errors.append(f"repository path does not exist: {path}")
+            return errors
+        try:
+            actual_commit = subprocess.check_output(
+                ["git", "-C", str(path), "rev-parse", "HEAD"],
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+            actual_tree = subprocess.check_output(
+                ["git", "-C", str(path), "rev-parse", "HEAD^{tree}"],
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+        except (OSError, subprocess.CalledProcessError) as exc:
+            errors.append(f"failed to read immutable repository identity: {exc}")
         else:
-            try:
-                actual_commit = (
-                    subprocess
-                    .check_output(
-                        ["git", "-C", str(r_path), "rev-parse", "HEAD"],
-                        stderr=subprocess.DEVNULL,
-                    )
-                    .decode()
-                    .strip()
-                )
-                if actual_commit != commit:
-                    errors.append(
-                        f"repository HEAD commit {actual_commit} does not match selection {commit}"
-                    )
-            except Exception as e:
-                errors.append(f"failed to read repository commit: {e}")
-
-            try:
-                actual_tree = (
-                    subprocess
-                    .check_output(
-                        ["git", "-C", str(r_path), "rev-parse", "HEAD^{tree}"],
-                        stderr=subprocess.DEVNULL,
-                    )
-                    .decode()
-                    .strip()
-                )
-                if actual_tree != tree:
-                    errors.append(
-                        f"repository HEAD tree {actual_tree} does not match selection {tree}"
-                    )
-            except Exception as e:
-                errors.append(f"failed to read repository tree: {e}")
-
-            # Check read-only permission: repo directory must not be writable
-            st = r_path.stat()
-            if (st.st_mode & 0o222) != 0:
-                errors.append(f"repository directory is not read-only (mode: {oct(st.st_mode)})")
-
+            if actual_commit != selection.get("commit"):
+                errors.append("repository HEAD commit does not match selection")
+            if actual_tree != selection.get("tree"):
+                errors.append("repository HEAD tree does not match selection")
+        if path.stat().st_mode & 0o222:
+            errors.append("repository directory is not read-only")
     return errors
 
 
 def validate_tg5_receipt(receipt: Mapping[str, Any]) -> list[str]:
-    """Validate TG-5 accepted receipt against canonical schema and hashes."""
     errors: list[str] = []
     if not isinstance(receipt, Mapping):
         return ["tg5-receipt must be a JSON object"]
-
     if receipt.get("receipt_schema") != CERTIFICATION_RECEIPT_SCHEMA:
         errors.append(f"tg5-receipt schema must be {CERTIFICATION_RECEIPT_SCHEMA}")
     if receipt.get("protocol_version") != PUBLIC_PROTOCOL_VERSION:
         errors.append(f"tg5-receipt protocol_version must be {PUBLIC_PROTOCOL_VERSION}")
     if receipt.get("implementation_schema") != IMPLEMENTATION_SCHEMA:
         errors.append(f"tg5-receipt implementation_schema must be {IMPLEMENTATION_SCHEMA}")
-
     body = {k: v for k, v in receipt.items() if k != "receipt_hash"}
     if receipt.get("receipt_hash") != _digest(body):
         errors.append("tg5-receipt receipt_hash does not match canonical digest of body")
-
     verification = receipt.get("verification", {})
-    if not isinstance(verification, dict) or verification.get("status") != "VERIFIED":
+    if not isinstance(verification, Mapping) or verification.get("status") != "VERIFIED":
         errors.append("tg5-receipt verification.status must be VERIFIED")
-
     certification = receipt.get("certification", {})
-    if not isinstance(certification, dict) or certification.get("disposition") != "CERTIFIED":
+    if not isinstance(certification, Mapping) or certification.get("disposition") != "CERTIFIED":
         errors.append("tg5-receipt certification.disposition must be CERTIFIED")
-
     return errors
 
 
 def validate_corpus(
     corpus: Mapping[str, Any], selection: Mapping[str, Any] | None = None
 ) -> list[str]:
-    """Validate corpus manifest against schema, accounting, and oracle requirements."""
     errors: list[str] = []
     if not isinstance(corpus, Mapping):
         return ["corpus must be a JSON object"]
-
+    keys = set(corpus)
+    if keys != CORPUS_REQUIRED_KEYS:
+        missing = CORPUS_REQUIRED_KEYS - keys
+        extra = keys - CORPUS_REQUIRED_KEYS
+        if missing:
+            errors.append(f"corpus missing keys: {sorted(missing)}")
+        if extra:
+            errors.append(f"corpus unknown keys: {sorted(extra)}")
+        return errors
     if corpus.get("schema") != CORPUS_SCHEMA:
         errors.append(f"corpus schema must be {CORPUS_SCHEMA}")
-
     body = {k: v for k, v in corpus.items() if k != "corpus_hash"}
     if corpus.get("corpus_hash") != _digest(body):
         errors.append("corpus_hash does not match canonical digest of body")
-
+    if corpus.get("task_set_id") != TASK_SET_ID:
+        errors.append(f"corpus task_set_id must be {TASK_SET_ID}")
     cases = corpus.get("cases")
     if not isinstance(cases, list):
-        return ["corpus cases must be a list"]
-
+        return [*errors, "corpus cases must be a list"]
+    if corpus.get("case_count") != len(cases):
+        errors.append("corpus case_count does not equal physical case count")
     if len(cases) < 50:
         errors.append(f"corpus eligible case denominator must be >= 50, found {len(cases)}")
 
-    seen_ids: set[str] = set()
-    sorted_ids: list[str] = []
-    family_counts: dict[str, int] = {f: 0 for f in HOSTILE_FAMILIES}
+    if selection is not None:
+        repo = corpus.get("repository")
+        expected_repo = {
+            "owner": selection.get("owner"),
+            "name": selection.get("name"),
+            "commit": selection.get("commit"),
+            "tree": selection.get("tree"),
+        }
+        if repo != expected_repo:
+            errors.append("corpus repository identity does not match selection")
 
-    for idx, case in enumerate(cases):
+    seen: set[str] = set()
+    ordered: list[str] = []
+    family_counts = {family: 0 for family in HOSTILE_FAMILIES}
+    for index, case in enumerate(cases):
         if not isinstance(case, Mapping):
-            errors.append(f"case at index {idx} must be a JSON object")
+            errors.append(f"case at index {index} must be a JSON object")
             continue
-
-        c_keys = set(case.keys())
-        if c_keys != CORPUS_CASE_REQUIRED_KEYS:
-            missing = CORPUS_CASE_REQUIRED_KEYS - c_keys
-            extra = c_keys - CORPUS_CASE_REQUIRED_KEYS
+        case_keys = set(case)
+        if case_keys != CORPUS_CASE_REQUIRED_KEYS:
+            missing = CORPUS_CASE_REQUIRED_KEYS - case_keys
+            extra = case_keys - CORPUS_CASE_REQUIRED_KEYS
             if missing:
-                errors.append(f"case[{idx}] missing keys: {sorted(missing)}")
+                errors.append(f"case[{index}] missing keys: {sorted(missing)}")
             if extra:
-                errors.append(f"case[{idx}] unknown keys: {sorted(extra)}")
+                errors.append(f"case[{index}] unknown keys: {sorted(extra)}")
             continue
-
-        cid = case["case_id"]
-        if cid in seen_ids:
+        cid = case.get("case_id")
+        if not isinstance(cid, str) or not cid:
+            errors.append(f"case[{index}] missing case_id")
+            continue
+        if cid in seen:
             errors.append(f"duplicate case_id: {cid}")
-        seen_ids.add(cid)
-        sorted_ids.append(cid)
-
-        # Check canonical case_hash
-        c_body = {k: v for k, v in case.items() if k != "case_hash"}
-        if case["case_hash"] != _digest(c_body):
+        seen.add(cid)
+        ordered.append(cid)
+        case_body = {k: v for k, v in case.items() if k != "case_hash"}
+        if case.get("case_hash") != _digest(case_body):
             errors.append(f"case[{cid}] case_hash mismatch")
-
-        # Family check
-        fam = case.get("hostile_family")
-        if fam not in HOSTILE_FAMILIES:
-            errors.append(f"case[{cid}] invalid hostile_family: {fam}")
+        family = case.get("hostile_family")
+        if family not in HOSTILE_FAMILIES:
+            errors.append(f"case[{cid}] invalid hostile_family: {family}")
         else:
-            family_counts[fam] += 1
-
-        # Revision binding check if selection is present
-        if selection:
+            family_counts[str(family)] += 1
+        if selection is not None:
             if case.get("repository_commit") != selection.get("commit"):
                 errors.append(f"case[{cid}] repository_commit mismatch with selection")
             if case.get("repository_tree") != selection.get("tree"):
                 errors.append(f"case[{cid}] repository_tree mismatch with selection")
-
-        # Oracle check: kind must not be empty, hash must be sha256:64hex
-        okind = case.get("oracle_kind")
-        if not okind or not isinstance(okind, str):
+        if case.get("canonical_request_hash") != _digest(case.get("request_payload")):
+            errors.append(f"case[{cid}] canonical_request_hash mismatch")
+        oracle_kind = case.get("oracle_kind")
+        expected_oracle_hash = _digest({
+            "source": case.get("oracle_source"),
+            "kind": oracle_kind,
+            "reason": case.get("expected_reason"),
+        })
+        if not isinstance(oracle_kind, str) or not oracle_kind:
             errors.append(f"case[{cid}] missing or empty oracle_kind")
-        ohash = case.get("oracle_hash", "")
-        if not isinstance(ohash, str) or not ohash.startswith("sha256:") or len(ohash) != 71:
-            errors.append(f"case[{cid}] invalid oracle_hash format")
-
-    if sorted_ids != sorted(sorted_ids):
+        if case.get("oracle_hash") != expected_oracle_hash:
+            errors.append(f"case[{cid}] oracle_hash mismatch with oracle source/kind/reason")
+        if case.get("protocol_version") != PUBLIC_PROTOCOL_VERSION:
+            errors.append(f"case[{cid}] protocol_version mismatch")
+        if case.get("implementation_schema") != IMPLEMENTATION_SCHEMA:
+            errors.append(f"case[{cid}] implementation_schema mismatch")
+        if case.get("profile_id") != PROFILE_ID:
+            errors.append(f"case[{cid}] profile_id mismatch")
+        if case.get("task_set_id") != TASK_SET_ID:
+            errors.append(f"case[{cid}] task_set_id mismatch")
+    if ordered != sorted(ordered):
         errors.append("case_ids must be strictly in sorted order")
+    for family, count in family_counts.items():
+        if count < 5:
+            errors.append(f"hostile family {family} has fewer than 5 cases: {count}")
+    return errors
 
-    for fam, cnt in family_counts.items():
-        if cnt < 5:
-            errors.append(f"hostile family {fam} has fewer than 5 cases: {cnt}")
 
+def validate_attempt_receipt(
+    attempt: Mapping[str, Any],
+    *,
+    case: Mapping[str, Any],
+    selection: Mapping[str, Any],
+    tg5_receipt: Mapping[str, Any],
+    external_material_hash: str,
+) -> list[str]:
+    """Validate one controller-staged TG-5 attempt; TG-7 never issues it."""
+    errors: list[str] = []
+    if not isinstance(attempt, Mapping):
+        return ["attempt receipt must be a JSON object"]
+    keys = set(attempt)
+    if keys != ATTEMPT_REQUIRED_KEYS:
+        missing = ATTEMPT_REQUIRED_KEYS - keys
+        extra = keys - ATTEMPT_REQUIRED_KEYS
+        if missing:
+            errors.append(f"attempt missing keys: {sorted(missing)}")
+        if extra:
+            errors.append(f"attempt unknown keys: {sorted(extra)}")
+        return errors
+    body = {k: v for k, v in attempt.items() if k != "attempt_hash"}
+    if attempt.get("attempt_hash") != _digest(body):
+        errors.append("attempt_hash does not match canonical attempt body")
+    if attempt.get("schema") != ATTEMPT_RECEIPT_SCHEMA:
+        errors.append(f"attempt schema must be {ATTEMPT_RECEIPT_SCHEMA}")
+    if attempt.get("issuer_id") != "nexus.service.v1":
+        errors.append("attempt issuer_id must be nexus.service.v1")
+    if attempt.get("producer_id") != "nexus.controller.v1":
+        errors.append("attempt producer_id must be nexus.controller.v1")
+    if not isinstance(attempt.get("attempt_id"), str) or not attempt.get("attempt_id"):
+        errors.append("attempt_id must be non-empty")
+    if not isinstance(attempt.get("execution_id"), str) or not attempt.get("execution_id"):
+        errors.append("execution_id must be non-empty")
+    binding_pairs = (
+        ("case_id", case.get("case_id")),
+        ("case_hash", case.get("case_hash")),
+        ("hostile_family", case.get("hostile_family")),
+        ("repository_commit", selection.get("commit")),
+        ("repository_tree", selection.get("tree")),
+        ("external_material_hash", external_material_hash),
+        ("canonical_request_hash", case.get("canonical_request_hash")),
+        ("oracle_hash", case.get("oracle_hash")),
+        ("oracle_source", case.get("oracle_source")),
+        ("profile_id", PROFILE_ID),
+        ("protocol_version", PUBLIC_PROTOCOL_VERSION),
+        ("implementation_schema", IMPLEMENTATION_SCHEMA),
+        ("tg5_receipt_hash", tg5_receipt.get("receipt_hash")),
+    )
+    for key, expected in binding_pairs:
+        if attempt.get(key) != expected:
+            errors.append(f"attempt {key} binding mismatch")
+    for key in ("external_material_hash", "evidence_hash", "runner_result_hash", "attempt_hash"):
+        if not _sha256_text(attempt.get(key)):
+            errors.append(f"attempt {key} must be canonical sha256")
+    if not _aware_timestamp(attempt.get("observed_at")):
+        errors.append("attempt observed_at must be timezone-aware ISO-8601")
+    infra_invalid = attempt.get("infra_invalid")
+    reason = attempt.get("infra_invalid_reason")
+    if not isinstance(infra_invalid, bool):
+        errors.append("attempt infra_invalid must be boolean")
+    elif infra_invalid:
+        if reason not in INFRA_INVALID_REASONS:
+            errors.append("attempt infra_invalid_reason is outside the closed taxonomy")
+        if attempt.get("actual_status") != "INFRA_INVALID":
+            errors.append("infra-invalid attempt must use actual_status=INFRA_INVALID")
+    else:
+        if reason is not None:
+            errors.append("eligible attempt must not carry infra_invalid_reason")
+        if attempt.get("actual_status") == "INFRA_INVALID":
+            errors.append("eligible attempt cannot use actual_status=INFRA_INVALID")
+    if not isinstance(attempt.get("actual_status"), str) or not attempt.get("actual_status"):
+        errors.append("attempt actual_status must be non-empty")
+    if not isinstance(attempt.get("actual_disposition"), str) or not attempt.get(
+        "actual_disposition"
+    ):
+        errors.append("attempt actual_disposition must be non-empty")
     return errors
 
 
@@ -395,69 +454,75 @@ def validate_shadow_receipt(
     tg5_receipt: Mapping[str, Any] | None = None,
     selection: Mapping[str, Any] | None = None,
 ) -> list[str]:
-    """Validate shadow receipt against schema, zero skips, and hash linkages."""
     errors: list[str] = []
     if not isinstance(shadow_receipt, Mapping):
         return ["shadow_receipt must be a JSON object"]
-
     if shadow_receipt.get("schema") != SHADOW_RECEIPT_SCHEMA:
         errors.append(f"shadow_receipt schema must be {SHADOW_RECEIPT_SCHEMA}")
-
     body = {k: v for k, v in shadow_receipt.items() if k != "receipt_hash"}
     if shadow_receipt.get("receipt_hash") != _digest(body):
         errors.append("shadow_receipt receipt_hash does not match canonical digest of body")
-
-    if selection and shadow_receipt.get("selection_hash") != selection.get("selection_hash"):
+    if selection is not None and shadow_receipt.get("selection_hash") != selection.get(
+        "selection_hash"
+    ):
         errors.append("shadow_receipt selection_hash mismatch with selection.json")
-
-    if tg5_receipt and shadow_receipt.get("tg5_receipt_hash") != tg5_receipt.get("receipt_hash"):
+    if tg5_receipt is not None and shadow_receipt.get("tg5_receipt_hash") != tg5_receipt.get(
+        "receipt_hash"
+    ):
         errors.append("shadow_receipt tg5_receipt_hash mismatch with tg5-receipt.json")
-
-    if corpus and shadow_receipt.get("corpus_hash") != corpus.get("corpus_hash"):
+    if corpus is not None and shadow_receipt.get("corpus_hash") != corpus.get("corpus_hash"):
         errors.append("shadow_receipt corpus_hash mismatch with corpus.json")
-
+    if shadow_receipt.get("task_set_id") != TASK_SET_ID:
+        errors.append("shadow_receipt task_set_id mismatch")
     cases = shadow_receipt.get("cases")
     if not isinstance(cases, list):
-        return ["shadow_receipt cases must be a list"]
-
-    eligible_count = shadow_receipt.get("eligible_count")
-    infra_invalid_count = shadow_receipt.get("infra_invalid_count")
-    if not isinstance(eligible_count, int) or eligible_count < 50:
-        errors.append(f"shadow_receipt eligible_count must be >= 50, found {eligible_count}")
-    if not isinstance(infra_invalid_count, int) or infra_invalid_count < 0:
+        return [*errors, "shadow_receipt cases must be a list"]
+    eligible = shadow_receipt.get("eligible_count")
+    infra = shadow_receipt.get("infra_invalid_count")
+    if not isinstance(eligible, int) or eligible < 50:
+        errors.append(f"shadow_receipt eligible_count must be >= 50, found {eligible}")
+    if not isinstance(infra, int) or infra < 0:
         errors.append("shadow_receipt infra_invalid_count must be non-negative integer")
-
-    if eligible_count + infra_invalid_count != len(cases):
-        errors.append(
-            f"arithmetic mismatch: eligible ({eligible_count}) + infra ({infra_invalid_count}) != total cases ({len(cases)})"
-        )
-
-    # Check zero skips if corpus is provided
-    if corpus:
-        c_cases = corpus.get("cases", [])
-        if len(cases) != len(c_cases):
-            errors.append(
-                f"shadow_receipt case count {len(cases)} does not match corpus case count {len(c_cases)}"
-            )
-        for i, (rc, cc) in enumerate(zip(cases, c_cases)):
-            if rc.get("case_id") != cc.get("case_id"):
-                errors.append(
-                    f"shadow_receipt case[{i}] id mismatch: {rc.get('case_id')} != {cc.get('case_id')}"
-                )
-
-    # Check infra-invalid reasons
-    for rc in cases:
-        if rc.get("infra_invalid") is True:
-            reason = rc.get("infra_invalid_reason")
-            if reason not in INFRA_INVALID_REASONS:
-                errors.append(
-                    f"case[{rc.get('case_id')}] invalid infra_invalid_reason: {reason} not in closed set"
-                )
-            if rc.get("actual_status") != "INFRA_INVALID":
-                errors.append(
-                    f"case[{rc.get('case_id')}] infra_invalid=True but actual_status is not INFRA_INVALID"
-                )
-
+    actual_infra = 0
+    case_ids: list[str] = []
+    for item in cases:
+        if not isinstance(item, Mapping):
+            errors.append("shadow_receipt case must be an object")
+            continue
+        if set(item) != SHADOW_CASE_REQUIRED_KEYS:
+            errors.append(f"shadow_receipt case[{item.get('case_id')}] keys mismatch")
+            continue
+        case_ids.append(str(item.get("case_id")))
+        if not _sha256_text(item.get("attempt_hash")):
+            errors.append(f"case[{item.get('case_id')}] invalid attempt_hash")
+        if not _sha256_text(item.get("evidence_hash")):
+            errors.append(f"case[{item.get('case_id')}] invalid evidence_hash")
+        expected_result_hash = _digest({
+            "case_id": item.get("case_id"),
+            "attempt_hash": item.get("attempt_hash"),
+            "oracle_hash": item.get("oracle_hash"),
+            "actual_status": item.get("actual_status"),
+            "actual_disposition": item.get("actual_disposition"),
+        })
+        if item.get("result_hash") != expected_result_hash:
+            errors.append(f"case[{item.get('case_id')}] result_hash mismatch")
+        if item.get("infra_invalid") is True:
+            actual_infra += 1
+            if item.get("infra_invalid_reason") not in INFRA_INVALID_REASONS:
+                errors.append(f"case[{item.get('case_id')}] invalid infra reason")
+            if item.get("actual_status") != "INFRA_INVALID":
+                errors.append(f"case[{item.get('case_id')}] infra status mismatch")
+        elif item.get("infra_invalid_reason") is not None:
+            errors.append(f"case[{item.get('case_id')}] eligible case carries infra reason")
+    if isinstance(eligible, int) and isinstance(infra, int):
+        if eligible + infra != len(cases):
+            errors.append("shadow_receipt arithmetic mismatch")
+        if infra != actual_infra:
+            errors.append("shadow_receipt infra_invalid_count disagrees with case rows")
+    if corpus is not None:
+        expected_ids = [str(case.get("case_id")) for case in corpus.get("cases", [])]
+        if case_ids != expected_ids:
+            errors.append("shadow_receipt case order/identity does not exactly match corpus")
     return errors
 
 
@@ -466,695 +531,219 @@ def validate_report(
     shadow_receipt: Mapping[str, Any] | None = None,
     corpus: Mapping[str, Any] | None = None,
 ) -> list[str]:
-    """Validate final report against schema, false certification count, and arithmetic accounting."""
     errors: list[str] = []
     if not isinstance(report, Mapping):
         return ["report must be a JSON object"]
-
     if report.get("schema") != REPORT_SCHEMA:
         errors.append(f"report schema must be {REPORT_SCHEMA}")
-
     body = {k: v for k, v in report.items() if k != "report_hash"}
     if report.get("report_hash") != _digest(body):
         errors.append("report_hash does not match canonical digest of body")
-
-    if report.get("maximum_claim") != MAXIMUM_CLAIM:
-        errors.append(f"report maximum_claim must be {MAXIMUM_CLAIM}")
-
+    if report.get("maximum_claim") not in {
+        "TG7_REPAIR_READY_FOR_REVIEW",
+        "CROSS_REPO_TRUST_SHADOW_VERIFIED",
+    }:
+        errors.append("report maximum_claim exceeds the TG-7 claim vocabulary")
     denominator = report.get("denominator")
     if not isinstance(denominator, int) or denominator < 50:
         errors.append(f"report denominator must be >= 50, found {denominator}")
-
-    # False certification must strictly be 0
-    fc_count = report.get("false_certification_count")
-    fc_cases = report.get("false_certification_case_ids")
-    if fc_count != 0 or fc_cases != []:
-        errors.append(f"HIGH RISK FALSE CERTIFICATION: count={fc_count}, cases={fc_cases}")
-
-    # Family counts check
-    family_counts = report.get("family_counts", {})
-    if not isinstance(family_counts, dict):
-        errors.append("report family_counts must be a dict")
+    family_counts = report.get("family_counts")
+    if not isinstance(family_counts, Mapping):
+        errors.append("report family_counts must be an object")
     else:
-        for fam in HOSTILE_FAMILIES:
-            cnt = family_counts.get(fam, 0)
-            if cnt < 5:
-                errors.append(f"report family_counts[{fam}] must be >= 5, found {cnt}")
-        if sum(family_counts.values()) != denominator:
-            errors.append(
-                f"accounting mismatch: sum of family_counts ({sum(family_counts.values())}) != denominator ({denominator})"
-            )
-
-    # Recompute false certification from shadow_receipt if provided
-    if shadow_receipt:
+        for family in HOSTILE_FAMILIES:
+            if family_counts.get(family, 0) < 5:
+                errors.append(f"report family_counts[{family}] must be >= 5")
+        if isinstance(denominator, int) and sum(family_counts.values()) != denominator:
+            errors.append("report family-count arithmetic mismatch")
+    if (
+        report.get("false_certification_count") != 0
+        or report.get("false_certification_case_ids") != []
+    ):
+        errors.append("HIGH RISK FALSE CERTIFICATION reported")
+    if shadow_receipt is not None:
         if report.get("shadow_receipt_hash") != shadow_receipt.get("receipt_hash"):
-            errors.append("report shadow_receipt_hash mismatch with shadow-receipt.json")
-        sr_eligible = shadow_receipt.get("eligible_count")
-        if denominator != sr_eligible:
-            errors.append(
-                f"report denominator {denominator} != shadow_receipt eligible_count {sr_eligible}"
-            )
-
-        # Independent re-verification of false certification from case receipts
-        recomputed_fc: list[str] = []
-        for rc in shadow_receipt.get("cases", []):
-            if not rc.get("infra_invalid", False):
-                if (
-                    rc.get("actual_status") == "VERIFIED"
-                    and rc.get("actual_disposition") == "CERTIFIED"
-                ):
-                    recomputed_fc.append(rc["case_id"])
-        if recomputed_fc:
-            errors.append(f"independent audit found false certifications: {recomputed_fc}")
-
+            errors.append("report shadow_receipt_hash mismatch")
+        if denominator != shadow_receipt.get("eligible_count"):
+            errors.append("report denominator differs from shadow receipt")
+    if shadow_receipt is not None and corpus is not None:
+        expected = {str(case.get("case_id")): case for case in corpus.get("cases", [])}
+        recomputed: list[str] = []
+        for row in shadow_receipt.get("cases", []):
+            case = expected.get(str(row.get("case_id")))
+            if case is None or row.get("infra_invalid") is True:
+                continue
+            if (
+                case.get("expected_disposition") != "CERTIFIED"
+                and row.get("actual_status") == "VERIFIED"
+                and row.get("actual_disposition") == "CERTIFIED"
+            ):
+                recomputed.append(str(row.get("case_id")))
+        if recomputed:
+            errors.append(f"independent audit found false certifications: {sorted(recomputed)}")
     return errors
 
 
 def build_default_corpus(selection: Mapping[str, Any]) -> dict[str, Any]:
-    """Construct deterministic 56-case representative corpus across 8 hostile families."""
-    commit = selection["commit"]
-    tree = selection["tree"]
-
-    spec_templates: list[tuple[str, str, str, dict[str, Any], str, str, str, str]] = [
-        # Family 1: AUTH_ISSUER_TAMPER
-        (
-            "AUTH_ISSUER_TAMPER",
-            "tg7_auth_issuer_tamper_001",
-            "validate_bearer_token",
-            {"token": "invalid_forged_token_01"},
+    """Build a deterministic SELF_TEST corpus; it is never acceptance evidence."""
+    family_contracts: dict[str, tuple[str, str, str, tuple[str, ...]]] = {
+        "AUTH_ISSUER_TAMPER": (
             "product.protocol.auth",
             "UNVERIFIABLE",
             "BLOCKED",
-            "Forged bearer token fails authentication check",
+            (
+                "validate_bearer_token",
+                "validate_bearer_header",
+                "read_bearer_token",
+                "verify_envelope_issuer",
+                "validate_bearer_token_empty",
+                "validate_issuer_mismatch",
+                "validate_token_permissions",
+            ),
         ),
-        (
-            "AUTH_ISSUER_TAMPER",
-            "tg7_auth_issuer_tamper_002",
-            "validate_bearer_header",
-            {"header": "Basic dXNlcjpwYXNz"},
-            "product.protocol.auth",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Malformed non-Bearer authorization header rejected",
-        ),
-        (
-            "AUTH_ISSUER_TAMPER",
-            "tg7_auth_issuer_tamper_003",
-            "validate_bearer_token",
-            {"token": ""},
-            "product.protocol.auth",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Empty bearer token rejected",
-        ),
-        (
-            "AUTH_ISSUER_TAMPER",
-            "tg7_auth_issuer_tamper_004",
-            "read_bearer_token",
-            {"path_mode": 0o666},
-            "product.protocol.auth",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Loose file permissions on token file raise AuthSecurityError",
-        ),
-        (
-            "AUTH_ISSUER_TAMPER",
-            "tg7_auth_issuer_tamper_005",
-            "validate_bearer_header",
-            {"header": None},
-            "product.protocol.auth",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Null authorization header rejected",
-        ),
-        (
-            "AUTH_ISSUER_TAMPER",
-            "tg7_auth_issuer_tamper_006",
-            "verify_envelope_issuer",
-            {"issuer_id": "unauthorized.thirdparty.com"},
-            "product.evidence.identity_envelope",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Untrusted envelope issuer rejected",
-        ),
-        (
-            "AUTH_ISSUER_TAMPER",
-            "tg7_auth_issuer_tamper_007",
-            "validate_bearer_header",
-            {"header": "Bearer "},
-            "product.protocol.auth",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Whitespace-only bearer token rejected",
-        ),
-        # Family 2: PROVENANCE_HASH_TAMPER
-        (
-            "PROVENANCE_HASH_TAMPER",
-            "tg7_provenance_hash_tamper_001",
-            "certify_tampered_bundle",
-            {"tamper_target": "claimed_bundle_hash"},
-            "product.kernel.certify",
+        "PROVENANCE_HASH_TAMPER": (
+            "product.evidence.provenance",
             "UNVERIFIABLE",
             "REJECTED",
-            "EvidenceBundle claimed_bundle_hash mismatch marks integrity TAMPERED",
+            (
+                "bundle_hash_tamper",
+                "contract_hash_tamper",
+                "plan_hash_tamper",
+                "change_set_hash_tamper",
+                "receipt_hash_tamper",
+                "tree_hash_tamper",
+                "runner_hash_tamper",
+            ),
         ),
-        (
-            "PROVENANCE_HASH_TAMPER",
-            "tg7_provenance_hash_tamper_002",
-            "certify_tampered_bundle",
-            {"tamper_target": "contract_hash"},
-            "product.kernel.certify",
-            "UNVERIFIABLE",
-            "REJECTED",
-            "EvidenceBundle acceptance_contract_hash mismatch marks integrity CROSS_BOUND",
-        ),
-        (
-            "PROVENANCE_HASH_TAMPER",
-            "tg7_provenance_hash_tamper_003",
-            "certify_tampered_bundle",
-            {"tamper_target": "plan_contract_hash"},
-            "product.kernel.certify",
-            "UNVERIFIABLE",
-            "REJECTED",
-            "VerificationPlan acceptance_contract_hash mismatch marks integrity CROSS_BOUND",
-        ),
-        (
-            "PROVENANCE_HASH_TAMPER",
-            "tg7_provenance_hash_tamper_004",
-            "certify_tampered_bundle",
-            {"tamper_target": "plan_change_set_hash"},
-            "product.kernel.certify",
-            "UNVERIFIABLE",
-            "REJECTED",
-            "VerificationPlan change_set_hash mismatch marks integrity CROSS_BOUND",
-        ),
-        (
-            "PROVENANCE_HASH_TAMPER",
-            "tg7_provenance_hash_tamper_005",
-            "certify_tampered_bundle",
-            {"tamper_target": "bundle_plan_hash"},
-            "product.kernel.certify",
-            "UNVERIFIABLE",
-            "REJECTED",
-            "EvidenceBundle verification_plan_hash mismatch marks integrity CROSS_BOUND",
-        ),
-        (
-            "PROVENANCE_HASH_TAMPER",
-            "tg7_provenance_hash_tamper_006",
-            "validate_receipt_tamper",
-            {"tamper_target": "claimed_receipt_hash"},
-            "product.kernel.validate_receipt",
-            "UNVERIFIABLE",
-            "REJECTED",
-            "Receipt claimed_receipt_hash does not match recomputed hash",
-        ),
-        (
-            "PROVENANCE_HASH_TAMPER",
-            "tg7_provenance_hash_tamper_007",
-            "validate_snapshot_tree",
-            {"tamper_target": "head_tree_sha"},
-            "product.evidence.tree",
-            "UNVERIFIABLE",
-            "REJECTED",
-            "Tree hash mismatch with repository git tree",
-        ),
-        # Family 3: STALE_REVISION_GENERATION
-        (
-            "STALE_REVISION_GENERATION",
-            "tg7_stale_revision_generation_001",
-            "check_cas_generation",
-            {"expected_generation": 0, "committed_generation": 1},
-            "product.protocol.cas",
+        "STALE_REVISION_GENERATION": (
+            "product.protocol.freshness",
             "UNVERIFIABLE",
             "BLOCKED",
-            "Stale CAS expected_generation lower than committed ledger generation",
+            (
+                "stale_generation",
+                "stale_base",
+                "stale_head",
+                "stale_slot",
+                "stale_timestamp",
+                "stale_tree",
+                "stale_request_generation",
+            ),
         ),
-        (
-            "STALE_REVISION_GENERATION",
-            "tg7_stale_revision_generation_002",
-            "check_base_sha_lineage",
-            {"expected_base_sha": "0" * 40},
-            "product.evidence.lineage",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Unknown base_sha not in repository commit history",
-        ),
-        (
-            "STALE_REVISION_GENERATION",
-            "tg7_stale_revision_generation_003",
-            "validate_request_generation",
-            {"expected_generation": -1},
-            "product.protocol.schemas",
-            "UNVERIFIABLE",
-            "INPUT_REJECTED",
-            "Negative expected_generation rejected at request validation seam",
-        ),
-        (
-            "STALE_REVISION_GENERATION",
-            "tg7_stale_revision_generation_004",
-            "check_cas_generation",
-            {"expected_generation": 0, "committed_generation": 5},
-            "product.protocol.cas",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Generation lag > 1 causes CAS conflict",
-        ),
-        (
-            "STALE_REVISION_GENERATION",
-            "tg7_stale_revision_generation_005",
-            "check_replay_slot",
-            {"stale_slot_override": True},
-            "product.protocol.ledger",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Stale generation replay on immutable committed slot rejected",
-        ),
-        (
-            "STALE_REVISION_GENERATION",
-            "tg7_stale_revision_generation_006",
-            "check_head_sha_freshness",
-            {"expected_head_sha": "e" * 40},
-            "product.evidence.freshness",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Stale head sha divergent from current PR head",
-        ),
-        (
-            "STALE_REVISION_GENERATION",
-            "tg7_stale_revision_generation_007",
-            "check_timestamp_order",
-            {"change_set_epoch": 1000, "base_snapshot_epoch": 2000},
-            "product.evidence.change_set",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "ChangeSet timestamp preceding base snapshot rejected as stale",
-        ),
-        # Family 4: DUPLICATE_REPLAY_CONFLICT
-        (
-            "DUPLICATE_REPLAY_CONFLICT",
-            "tg7_duplicate_replay_conflict_001",
-            "check_idempotency_conflict",
-            {"idempotency_key": "key-conflict-1", "mutated_payload": True},
+        "DUPLICATE_REPLAY_CONFLICT": (
             "product.protocol.idempotency",
             "UNVERIFIABLE",
             "BLOCKED",
-            "Reused idempotency key with altered request payload yields IDEMPOTENCY_MISMATCH",
+            (
+                "idempotency_payload_conflict",
+                "idempotency_contract_conflict",
+                "duplicate_verifier",
+                "duplicate_observation",
+                "duplicate_slot",
+                "generation_replay",
+                "concurrent_conflict",
+            ),
         ),
-        (
-            "DUPLICATE_REPLAY_CONFLICT",
-            "tg7_duplicate_replay_conflict_002",
-            "check_idempotency_conflict",
-            {"idempotency_key": "key-conflict-2", "mutated_contract": True},
-            "product.protocol.idempotency",
+        "MALFORMED_PROTOCOL_SCHEMA": (
+            "product.protocol.schemas",
+            "UNVERIFIABLE",
+            "INPUT_REJECTED",
+            (
+                "bad_protocol",
+                "bad_schema",
+                "bad_profile",
+                "null_repository",
+                "bad_base_sha",
+                "bad_head_sha",
+                "bad_pr_number",
+            ),
+        ),
+        "MISSING_INADEQUATE_ORACLE": (
+            "product.evidence.oracle",
             "UNVERIFIABLE",
             "BLOCKED",
-            "Reused idempotency key with altered contract rejected",
+            (
+                "missing_verifier",
+                "empty_artifact",
+                "empty_bundle",
+                "plan_contract_mismatch",
+                "profile_hash_mismatch",
+                "missing_oracle",
+                "oracle_hash_mismatch",
+            ),
         ),
-        (
-            "DUPLICATE_REPLAY_CONFLICT",
-            "tg7_duplicate_replay_conflict_003",
-            "create_contract",
-            {"required_verifier_ids": ("pytest", "pytest")},
-            "product.evidence.AcceptanceContract",
-            "UNVERIFIABLE",
-            "INPUT_REJECTED",
-            "Duplicate verifier in AcceptanceContract raises ValueError",
-        ),
-        (
-            "DUPLICATE_REPLAY_CONFLICT",
-            "tg7_duplicate_replay_conflict_004",
-            "create_plan",
-            {"required_verifier_ids": ("pytest", "pytest")},
-            "product.evidence.VerificationPlan",
-            "UNVERIFIABLE",
-            "INPUT_REJECTED",
-            "Duplicate verifier in VerificationPlan raises ValueError",
-        ),
-        (
-            "DUPLICATE_REPLAY_CONFLICT",
-            "tg7_duplicate_replay_conflict_005",
-            "certify_duplicate_observation",
-            {"verifier_id": "pytest"},
-            "product.evidence.EvidenceBundle",
-            "UNVERIFIABLE",
-            "REJECTED",
-            "Duplicate observation in EvidenceBundle fails evidence reduction with DUPLICATE",
-        ),
-        (
-            "DUPLICATE_REPLAY_CONFLICT",
-            "tg7_duplicate_replay_conflict_006",
-            "check_idempotency_conflict",
-            {"idempotency_key": "key-conflict-3", "mutated_generation": True},
-            "product.protocol.idempotency",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Reused idempotency key with conflicting expected_generation rejected",
-        ),
-        (
-            "DUPLICATE_REPLAY_CONFLICT",
-            "tg7_duplicate_replay_conflict_007",
-            "concurrent_lock_collision",
-            {"request_id": "req-concurrent-01"},
-            "product.protocol.lock",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Concurrent conflicting in-flight dispatch blocked",
-        ),
-        # Family 5: MALFORMED_PROTOCOL_SCHEMA
-        (
-            "MALFORMED_PROTOCOL_SCHEMA",
-            "tg7_malformed_protocol_schema_001",
-            "validate_certification_request",
-            {"protocol_version": "0.2.0-experimental"},
-            "product.protocol.schemas",
-            "UNVERIFIABLE",
-            "INPUT_REJECTED",
-            "Unsupported protocol_version fails request validation",
-        ),
-        (
-            "MALFORMED_PROTOCOL_SCHEMA",
-            "tg7_malformed_protocol_schema_002",
-            "validate_certification_request",
-            {"implementation_schema": "nexus.legacy.v0"},
-            "product.protocol.schemas",
-            "UNVERIFIABLE",
-            "INPUT_REJECTED",
-            "Unsupported implementation_schema fails request validation",
-        ),
-        (
-            "MALFORMED_PROTOCOL_SCHEMA",
-            "tg7_malformed_protocol_schema_003",
-            "validate_certification_request",
-            {"profile_id": "unsupported-oci-runner"},
-            "product.protocol.schemas",
-            "UNVERIFIABLE",
-            "INPUT_REJECTED",
-            "Unsupported runner profile_id fails request validation",
-        ),
-        (
-            "MALFORMED_PROTOCOL_SCHEMA",
-            "tg7_malformed_protocol_schema_004",
-            "validate_certification_request",
-            {"repository": None},
-            "product.protocol.schemas",
-            "UNVERIFIABLE",
-            "INPUT_REJECTED",
-            "Null repository in request fails request validation",
-        ),
-        (
-            "MALFORMED_PROTOCOL_SCHEMA",
-            "tg7_malformed_protocol_schema_005",
-            "validate_certification_request",
-            {"expected_base_sha": "not_hex_base_sha"},
-            "product.protocol.schemas",
-            "UNVERIFIABLE",
-            "INPUT_REJECTED",
-            "Non-hex base_sha fails request validation",
-        ),
-        (
-            "MALFORMED_PROTOCOL_SCHEMA",
-            "tg7_malformed_protocol_schema_006",
-            "validate_certification_request",
-            {"expected_head_sha": "A" * 40},
-            "product.protocol.schemas",
-            "UNVERIFIABLE",
-            "INPUT_REJECTED",
-            "Uppercase hex string in expected_head_sha fails validation",
-        ),
-        (
-            "MALFORMED_PROTOCOL_SCHEMA",
-            "tg7_malformed_protocol_schema_007",
-            "validate_certification_request",
-            {"pr_number": -1},
-            "product.protocol.schemas",
-            "UNVERIFIABLE",
-            "INPUT_REJECTED",
-            "Non-positive pr_number fails request validation",
-        ),
-        # Family 6: MISSING_INADEQUATE_ORACLE
-        (
-            "MISSING_INADEQUATE_ORACLE",
-            "tg7_missing_inadequate_oracle_001",
-            "create_contract",
-            {"required_verifier_ids": ()},
-            "product.evidence.AcceptanceContract",
-            "UNVERIFIABLE",
-            "INPUT_REJECTED",
-            "Empty required_verifier_ids in contract raises ValueError",
-        ),
-        (
-            "MISSING_INADEQUATE_ORACLE",
-            "tg7_missing_inadequate_oracle_002",
-            "certify_missing_verifier",
-            {"observations": "missing_required_verifier"},
-            "product.kernel.certify",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Required verifier absent from EvidenceBundle yields UNVERIFIABLE:BLOCKED",
-        ),
-        (
-            "MISSING_INADEQUATE_ORACLE",
-            "tg7_missing_inadequate_oracle_003",
-            "create_observation",
-            {"artifact_id": ""},
-            "product.evidence.Observation",
-            "UNVERIFIABLE",
-            "INPUT_REJECTED",
-            "Empty artifact_id in Observation raises ValueError",
-        ),
-        (
-            "MISSING_INADEQUATE_ORACLE",
-            "tg7_missing_inadequate_oracle_004",
-            "certify_failing_verifier",
-            {"observations": "fail"},
-            "product.kernel.certify",
+        "PATH_SCOPE_ESCAPE": (
+            "product.evidence.scope",
             "FAILED_VERIFICATION",
             "REJECTED",
-            "Verifier observation status FAIL marks verification FAILED_VERIFICATION:REJECTED",
+            (
+                "parent_escape",
+                "absolute_escape",
+                "contract_scope_escape",
+                "workflow_scope_escape",
+                "changeset_escape",
+                "dot_component_escape",
+                "backslash_escape",
+            ),
         ),
-        (
-            "MISSING_INADEQUATE_ORACLE",
-            "tg7_missing_inadequate_oracle_005",
-            "create_bundle",
-            {"observations": ()},
-            "product.evidence.EvidenceBundle",
-            "UNVERIFIABLE",
-            "INPUT_REJECTED",
-            "Empty observations tuple in bundle raises ValueError",
-        ),
-        (
-            "MISSING_INADEQUATE_ORACLE",
-            "tg7_missing_inadequate_oracle_006",
-            "plan_contract_mismatch",
-            {"plan_verifiers": ("lint",), "contract_verifiers": ("pytest",)},
-            "product.kernel.certify",
+        "CRASH_UNKNOWN_EFFECT": (
+            "product.execution.python_oci",
             "UNVERIFIABLE",
             "BLOCKED",
-            "Verification plan required verifiers diverge from acceptance contract",
+            (
+                "runner_sigkill",
+                "runner_timeout",
+                "partial_ledger_write",
+                "corrupt_runner_output",
+                "readonly_mutation",
+                "runner_oom",
+                "db_lock_timeout",
+            ),
         ),
-        (
-            "MISSING_INADEQUATE_ORACLE",
-            "tg7_missing_inadequate_oracle_007",
-            "profile_hash_mismatch",
-            {"runner_profile_hash": "sha256:" + "0" * 64},
-            "product.protocol.profile",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Runner profile hash mismatch with required OCI profile",
-        ),
-        # Family 7: PATH_SCOPE_ESCAPE
-        (
-            "PATH_SCOPE_ESCAPE",
-            "tg7_path_scope_escape_001",
-            "create_contract",
-            {"allowed_paths": ("../bottle.py",)},
-            "product.evidence.AcceptanceContract",
-            "UNVERIFIABLE",
-            "INPUT_REJECTED",
-            "Directory traversal in allowed_paths raises ValueError",
-        ),
-        (
-            "PATH_SCOPE_ESCAPE",
-            "tg7_path_scope_escape_002",
-            "create_contract",
-            {"allowed_paths": ("/etc/passwd",)},
-            "product.evidence.AcceptanceContract",
-            "UNVERIFIABLE",
-            "INPUT_REJECTED",
-            "Absolute path in allowed_paths raises ValueError",
-        ),
-        (
-            "PATH_SCOPE_ESCAPE",
-            "tg7_path_scope_escape_003",
-            "certify_scope_escape",
-            {"change_paths": ("bottle.py",), "allowed_paths": ("test/test_router.py",)},
-            "product.kernel.certify",
-            "FAILED_VERIFICATION",
-            "REJECTED",
-            "Modified path outside contract allowed_paths yields FAILED_VERIFICATION:REJECTED",
-        ),
-        (
-            "PATH_SCOPE_ESCAPE",
-            "tg7_path_scope_escape_004",
-            "certify_scope_escape",
-            {
-                "change_paths": (".github/workflows/ci.yml",),
-                "allowed_paths": ("bottle.py",),
-            },
-            "product.kernel.certify",
-            "FAILED_VERIFICATION",
-            "REJECTED",
-            "CI workflow path escape outside contract yields FAILED_VERIFICATION:REJECTED",
-        ),
-        (
-            "PATH_SCOPE_ESCAPE",
-            "tg7_path_scope_escape_005",
-            "create_change_set",
-            {"paths": ("test/../../escape.py",)},
-            "product.evidence.ChangeSet",
-            "UNVERIFIABLE",
-            "INPUT_REJECTED",
-            "Directory traversal in ChangeSet paths raises ValueError",
-        ),
-        (
-            "PATH_SCOPE_ESCAPE",
-            "tg7_path_scope_escape_006",
-            "create_contract",
-            {"allowed_paths": ("test/./config",)},
-            "product.evidence.AcceptanceContract",
-            "UNVERIFIABLE",
-            "INPUT_REJECTED",
-            "Relative path with dot component in contract rejected",
-        ),
-        (
-            "PATH_SCOPE_ESCAPE",
-            "tg7_path_scope_escape_007",
-            "create_contract",
-            {"allowed_paths": ("bottle.py\\config",)},
-            "product.evidence.AcceptanceContract",
-            "UNVERIFIABLE",
-            "INPUT_REJECTED",
-            "Backslash in path raises ValueError",
-        ),
-        # Family 8: CRASH_UNKNOWN_EFFECT
-        (
-            "CRASH_UNKNOWN_EFFECT",
-            "tg7_crash_unknown_effect_001",
-            "simulate_runner_sigkill",
-            {"signal": 9},
-            "product.protocol.crash",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Runner process terminated by SIGKILL yields UNVERIFIABLE:BLOCKED",
-        ),
-        (
-            "CRASH_UNKNOWN_EFFECT",
-            "tg7_crash_unknown_effect_002",
-            "simulate_runner_timeout",
-            {"timeout_sec": 0.001},
-            "product.protocol.crash",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Runner execution timeout yields UNVERIFIABLE:BLOCKED",
-        ),
-        (
-            "CRASH_UNKNOWN_EFFECT",
-            "tg7_crash_unknown_effect_003",
-            "simulate_partial_ledger_write",
-            {"simulate_io_error": True},
-            "product.protocol.crash",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Interrupted ledger write reconciles to UNVERIFIABLE without corrupting state",
-        ),
-        (
-            "CRASH_UNKNOWN_EFFECT",
-            "tg7_crash_unknown_effect_004",
-            "simulate_corrupted_runner_json",
-            {"corrupt_output": "NOT_JSON{...}"},
-            "product.protocol.crash",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Corrupted non-JSON runner output fails closed to UNVERIFIABLE",
-        ),
-        (
-            "CRASH_UNKNOWN_EFFECT",
-            "tg7_crash_unknown_effect_005",
-            "simulate_ro_filesystem_error",
-            {"write_attempt": True},
-            "product.protocol.crash",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Attempt to mutate read-only second repo raises PermissionError",
-        ),
-        (
-            "CRASH_UNKNOWN_EFFECT",
-            "tg7_crash_unknown_effect_006",
-            "simulate_memory_allocation_failure",
-            {"simulate_oom": True},
-            "product.kernel.certify",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Unhandled runner exception fails closed to UNVERIFIABLE",
-        ),
-        (
-            "CRASH_UNKNOWN_EFFECT",
-            "tg7_crash_unknown_effect_007",
-            "simulate_db_lock_timeout",
-            {"lock_timeout": True},
-            "product.protocol.crash",
-            "UNVERIFIABLE",
-            "BLOCKED",
-            "Database lock timeout during append fails closed to UNVERIFIABLE",
-        ),
-    ]
-
+    }
     cases: list[dict[str, Any]] = []
-    for (
-        fam,
-        cid,
-        op,
-        payload,
-        oracle_source,
-        exp_status,
-        exp_disp,
-        exp_reason,
-    ) in spec_templates:
-        req_hash = _digest(payload)
-        oracle_kind = "DETERMINISTIC_PROTOCOL_GUARD"
-        oracle_hash = _digest({"source": oracle_source, "kind": oracle_kind, "reason": exp_reason})
-
-        case_data = {
-            "case_id": cid,
-            "hostile_family": fam,
-            "repository_commit": commit,
-            "repository_tree": tree,
-            "operation": op,
-            "canonical_request_hash": req_hash,
-            "request_payload": payload,
-            "oracle_kind": oracle_kind,
-            "oracle_source": oracle_source,
-            "oracle_hash": oracle_hash,
-            "expected_status": exp_status,
-            "expected_disposition": exp_disp,
-            "expected_reason": exp_reason,
-            "protocol_version": PUBLIC_PROTOCOL_VERSION,
-            "implementation_schema": IMPLEMENTATION_SCHEMA,
-            "profile_id": PROFILE_ID,
-            "task_set_id": TASK_SET_ID,
-        }
-        case_data["case_hash"] = _digest(case_data)
-        cases.append(case_data)
-
-    cases.sort(key=lambda c: c["case_id"])
+    for family in HOSTILE_FAMILIES:
+        source, expected_status, expected_disposition, operations = family_contracts[family]
+        slug = family.lower()
+        for index, operation in enumerate(operations, start=1):
+            case_id = f"tg7_{slug}_{index:03d}"
+            payload = {
+                "operation": operation,
+                "variant": index,
+                "repository_commit": selection["commit"],
+                "repository_tree": selection["tree"],
+            }
+            reason = f"{family} deterministic hostile control {index} must fail closed"
+            oracle_kind = "DETERMINISTIC_PROTOCOL_GUARD"
+            case = {
+                "case_id": case_id,
+                "hostile_family": family,
+                "repository_commit": selection["commit"],
+                "repository_tree": selection["tree"],
+                "operation": operation,
+                "canonical_request_hash": _digest(payload),
+                "request_payload": payload,
+                "oracle_kind": oracle_kind,
+                "oracle_source": source,
+                "oracle_hash": _digest({"source": source, "kind": oracle_kind, "reason": reason}),
+                "expected_status": expected_status,
+                "expected_disposition": expected_disposition,
+                "expected_reason": reason,
+                "protocol_version": PUBLIC_PROTOCOL_VERSION,
+                "implementation_schema": IMPLEMENTATION_SCHEMA,
+                "profile_id": PROFILE_ID,
+                "task_set_id": TASK_SET_ID,
+            }
+            case["case_hash"] = _digest(case)
+            cases.append(case)
+    cases.sort(key=lambda item: item["case_id"])
     corpus = {
         "schema": CORPUS_SCHEMA,
         "task_set_id": TASK_SET_ID,
         "repository": {
             "owner": selection["owner"],
             "name": selection["name"],
-            "commit": commit,
-            "tree": tree,
+            "commit": selection["commit"],
+            "tree": selection["tree"],
         },
         "case_count": len(cases),
         "cases": cases,
@@ -1163,285 +752,17 @@ def build_default_corpus(selection: Mapping[str, Any]) -> dict[str, Any]:
     return corpus
 
 
-def execute_shadow_case(
-    case: Mapping[str, Any],
-    selection: Mapping[str, Any],
-    repo_path: Path,
-) -> tuple[str, str, bool, str | None]:
-    """Deterministically execute one hostile case using TG-5 core logic.
-
-    Returns: (actual_status, actual_disposition, infra_invalid, infra_invalid_reason)
-    """
-    op = case["operation"]
-    payload = case["request_payload"]
-
+def _load_attempt_file(path: Path) -> dict[str, Any]:
+    raw = path.read_bytes()
     try:
-        if op == "validate_bearer_token":
-            token = payload.get("token")
-            valid = _validate_auth_header(f"Bearer {token}", "valid_secret_bearer_token_tg5")
-            if not valid:
-                return ("UNVERIFIABLE", "BLOCKED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
-
-        elif op == "validate_bearer_header":
-            header = payload.get("header")
-            valid = _validate_auth_header(header, "valid_secret_bearer_token_tg5")
-            if not valid:
-                return ("UNVERIFIABLE", "BLOCKED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
-
-        elif op == "read_bearer_token":
-            mode = payload.get("path_mode", 0o666)
-            if mode & 0o077:
-                raise AuthSecurityError("insecure token file permissions")
-            return ("VERIFIED", "CERTIFIED", False, None)
-
-        elif op == "verify_envelope_issuer":
-            issuer = payload.get("issuer_id")
-            if issuer != "nexus.service.v1":
-                return ("UNVERIFIABLE", "BLOCKED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
-
-        elif op == "certify_tampered_bundle":
-            tamper = payload.get("tamper_target")
-            change_paths = ("bottle.py",)
-            allowed_paths = ("bottle.py",)
-
-            contract = AcceptanceContract(
-                "ac-test", _hash("reqs"), ("pytest",), allowed_paths, "FORBID"
-            )
-            change_set = ChangeSet(
-                "cs-test", "a" * 40, selection["commit"], _hash("diff"), change_paths
-            )
-
-            plan_c_hash = contract.hash if tamper != "plan_contract_hash" else _hash("wrong_c")
-            plan_cs_hash = (
-                change_set.hash if tamper != "plan_change_set_hash" else _hash("wrong_cs")
-            )
-            plan = VerificationPlan("plan-test", plan_c_hash, plan_cs_hash, ("pytest",))
-
-            obs = (Observation("pytest", "art-1", _hash("art"), ObservationStatus.PASS),)
-
-            b_c_hash = contract.hash if tamper != "contract_hash" else _hash("wrong_c")
-            b_cs_hash = change_set.hash
-            b_p_hash = plan.hash if tamper != "bundle_plan_hash" else _hash("wrong_p")
-            claimed_b_hash = None if tamper != "claimed_bundle_hash" else _hash("wrong_claimed_b")
-
-            bundle = EvidenceBundle(
-                "b-test",
-                b_c_hash,
-                b_cs_hash,
-                b_p_hash,
-                obs,
-                claimed_bundle_hash=claimed_b_hash,
-            )
-
-            cert_input = CertificationInput(
-                contract=contract,
-                change_set=change_set,
-                plan=plan,
-                evidence=bundle,
-                policy_accepted=True,
-                authority_present=True,
-                approval_present=True,
-                signing_present=True,
-            )
-            res = certify(cert_input)
-            return (res.verification.status.value, res.disposition.value, False, None)
-
-        elif op == "validate_receipt_tamper":
-            c = AcceptanceContract("ac-test", _hash("reqs"), ("pytest",), ("bottle.py",), "FORBID")
-            cs = ChangeSet("cs-test", "a" * 40, selection["commit"], _hash("diff"), ("bottle.py",))
-            p = VerificationPlan("plan-test", c.hash, cs.hash, ("pytest",))
-            b = EvidenceBundle(
-                "b-test",
-                c.hash,
-                cs.hash,
-                p.hash,
-                (Observation("pytest", "art-1", _hash("art"), ObservationStatus.PASS),),
-            )
-            s = CertificationInput(c, cs, p, b, True, True, True, True)
-            r = certify(s)
-            tampered_receipt = copy.copy(r.receipt)
-            object.__setattr__(tampered_receipt, "claimed_receipt_hash", _hash("tampered_hash"))
-            valid = validate_receipt(tampered_receipt, s)
-            if not valid:
-                return ("UNVERIFIABLE", "REJECTED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
-
-        elif op == "validate_snapshot_tree":
-            return ("UNVERIFIABLE", "REJECTED", False, None)
-
-        elif op == "check_cas_generation":
-            exp = payload.get("expected_generation", 0)
-            comm = payload.get("committed_generation", 1)
-            if exp != comm:
-                return ("UNVERIFIABLE", "BLOCKED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
-
-        elif op == "check_base_sha_lineage":
-            return ("UNVERIFIABLE", "BLOCKED", False, None)
-
-        elif op == "validate_request_generation":
-            gen = payload.get("expected_generation")
-            if gen is not None and gen < 0:
-                return ("UNVERIFIABLE", "INPUT_REJECTED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
-
-        elif op == "check_replay_slot":
-            return ("UNVERIFIABLE", "BLOCKED", False, None)
-
-        elif op == "check_head_sha_freshness":
-            return ("UNVERIFIABLE", "BLOCKED", False, None)
-
-        elif op == "check_timestamp_order":
-            return ("UNVERIFIABLE", "BLOCKED", False, None)
-
-        elif op == "check_idempotency_conflict":
-            return ("UNVERIFIABLE", "BLOCKED", False, None)
-
-        elif op == "create_contract":
-            try:
-                allowed_paths = tuple(payload.get("allowed_paths", ("bottle.py",)))
-                verifiers = tuple(payload.get("required_verifier_ids", ("pytest",)))
-                AcceptanceContract("ac-test", _hash("req"), verifiers, allowed_paths, "FORBID")
-            except (ValueError, TypeError):
-                return ("UNVERIFIABLE", "INPUT_REJECTED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
-
-        elif op == "create_plan":
-            try:
-                verifiers = tuple(payload.get("required_verifier_ids", ("pytest",)))
-                VerificationPlan("p-test", _hash("c"), _hash("cs"), verifiers)
-            except (ValueError, TypeError):
-                return ("UNVERIFIABLE", "INPUT_REJECTED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
-
-        elif op == "create_change_set":
-            try:
-                paths = tuple(payload.get("paths", ("bottle.py",)))
-                ChangeSet("cs-test", "a" * 40, "b" * 40, _hash("diff"), paths)
-            except (ValueError, TypeError):
-                return ("UNVERIFIABLE", "INPUT_REJECTED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
-
-        elif op == "create_observation":
-            try:
-                art_id = payload.get("artifact_id", "art-1")
-                Observation("pytest", art_id, _hash("art"), ObservationStatus.PASS)
-            except (ValueError, TypeError):
-                return ("UNVERIFIABLE", "INPUT_REJECTED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
-
-        elif op == "create_bundle":
-            try:
-                obs = tuple(payload.get("observations", ()))
-                EvidenceBundle("b-test", _hash("c"), _hash("cs"), _hash("p"), obs)
-            except (ValueError, TypeError):
-                return ("UNVERIFIABLE", "INPUT_REJECTED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
-
-        elif op == "certify_duplicate_observation":
-            v_id = payload.get("verifier_id", "pytest")
-            c = AcceptanceContract("ac-test", _hash("req"), (v_id,), ("bottle.py",), "FORBID")
-            cs = ChangeSet("cs-test", "a" * 40, "b" * 40, _hash("diff"), ("bottle.py",))
-            p = VerificationPlan("p-test", c.hash, cs.hash, (v_id,))
-            obs = (
-                Observation(v_id, "art-1", _hash("art-1"), ObservationStatus.PASS),
-                Observation(v_id, "art-2", _hash("art-2"), ObservationStatus.PASS),
-            )
-            bundle = EvidenceBundle("b-test", c.hash, cs.hash, p.hash, obs)
-            res = certify(CertificationInput(c, cs, p, bundle, True, True, True, True))
-            return (res.verification.status.value, res.disposition.value, False, None)
-
-        elif op == "certify_missing_verifier":
-            c = AcceptanceContract("ac-test", _hash("req"), ("pytest",), ("bottle.py",), "FORBID")
-            cs = ChangeSet("cs-test", "a" * 40, "b" * 40, _hash("diff"), ("bottle.py",))
-            p = VerificationPlan("p-test", c.hash, cs.hash, ("pytest",))
-            obs = (Observation("lint", "art-1", _hash("art"), ObservationStatus.PASS),)
-            b = EvidenceBundle("b-test", c.hash, cs.hash, p.hash, obs)
-            res = certify(CertificationInput(c, cs, p, b, True, True, True, True))
-            return (res.verification.status.value, res.disposition.value, False, None)
-
-        elif op == "certify_failing_verifier":
-            c = AcceptanceContract("ac-test", _hash("req"), ("pytest",), ("bottle.py",), "FORBID")
-            cs = ChangeSet("cs-test", "a" * 40, "b" * 40, _hash("diff"), ("bottle.py",))
-            p = VerificationPlan("p-test", c.hash, cs.hash, ("pytest",))
-            obs = (Observation("pytest", "art-1", _hash("art"), ObservationStatus.FAIL),)
-            b = EvidenceBundle("b-test", c.hash, cs.hash, p.hash, obs)
-            res = certify(CertificationInput(c, cs, p, b, True, True, True, True))
-            return (res.verification.status.value, res.disposition.value, False, None)
-
-        elif op == "certify_scope_escape":
-            c_paths = tuple(payload.get("change_paths", ("bottle.py",)))
-            a_paths = tuple(payload.get("allowed_paths", ("test/test_router.py",)))
-            c = AcceptanceContract("ac-test", _hash("req"), ("pytest",), a_paths, "FORBID")
-            cs = ChangeSet("cs-test", "a" * 40, "b" * 40, _hash("diff"), c_paths)
-            p = VerificationPlan("p-test", c.hash, cs.hash, ("pytest",))
-            obs = (Observation("pytest", "art-1", _hash("art"), ObservationStatus.PASS),)
-            b = EvidenceBundle("b-test", c.hash, cs.hash, p.hash, obs)
-            res = certify(CertificationInput(c, cs, p, b, True, True, True, True))
-            return (res.verification.status.value, res.disposition.value, False, None)
-
-        elif op == "plan_contract_mismatch":
-            return ("UNVERIFIABLE", "BLOCKED", False, None)
-
-        elif op == "profile_hash_mismatch":
-            return ("UNVERIFIABLE", "BLOCKED", False, None)
-
-        elif op == "concurrent_lock_collision":
-            return ("UNVERIFIABLE", "BLOCKED", False, None)
-
-        elif op == "validate_certification_request":
-            base_req = {
-                "protocol_version": PUBLIC_PROTOCOL_VERSION,
-                "implementation_schema": IMPLEMENTATION_SCHEMA,
-                "repository": {
-                    "owner": selection["owner"],
-                    "name": selection["name"],
-                    "pr_number": 101,
-                    "expected_base_sha": "a" * 40,
-                    "expected_head_sha": selection["commit"],
-                },
-                "acceptance_contract": {
-                    "contract_id": "ac-1",
-                    "requirements_hash": _hash("req"),
-                    "required_verifier_ids": ["pytest"],
-                    "allowed_paths": ["bottle.py"],
-                    "deletion_policy": "FORBID",
-                },
-                "verification_plan": {
-                    "plan_id": "plan-1",
-                    "acceptance_contract_hash": _hash("ac"),
-                    "change_set_hash": _hash("cs"),
-                    "required_verifier_ids": ["pytest"],
-                },
-                "profile_id": PROFILE_ID,
-                "idempotency_key": "idemp-test",
-                "expected_generation": 1,
-            }
-            for k, v in payload.items():
-                if k in (
-                    "expected_base_sha",
-                    "expected_head_sha",
-                    "pr_number",
-                ) and isinstance(base_req["repository"], dict):
-                    base_req["repository"][k] = v
-                else:
-                    base_req[k] = v
-
-            errs = _validate_request_payload(base_req)
-            if errs:
-                return ("UNVERIFIABLE", "INPUT_REJECTED", False, None)
-            return ("VERIFIED", "CERTIFIED", False, None)
-
-        elif op.startswith("simulate_"):
-            return ("UNVERIFIABLE", "BLOCKED", False, None)
-
-        return ("UNVERIFIABLE", "BLOCKED", False, None)
-
-    except Exception:
-        return ("UNVERIFIABLE", "BLOCKED", False, None)
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"attempt receipt is not canonical JSON: {path}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"attempt receipt must be a JSON object: {path}")
+    if raw != (_canonical(value) + "\n").encode("utf-8"):
+        raise ValueError(f"attempt receipt bytes are not canonical: {path}")
+    return value
 
 
 def run_shadow(
@@ -1450,71 +771,109 @@ def run_shadow(
     corpus: Mapping[str, Any],
     tg5_receipt: Mapping[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Execute shadow verification and return (shadow_receipt, report)."""
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    run_id = f"tg7-run-{os.urandom(8).hex()}"
+    """Consume immutable controller-staged attempts and reduce the TG-7 report."""
+    repo_path = Path(repository_path)
+    bottle_path = repo_path / "bottle.py"
+    if not bottle_path.is_file():
+        raise FileNotFoundError(f"external repository bottle.py missing: {bottle_path}")
+    bottle_hash = "sha256:" + hashlib.sha256(bottle_path.read_bytes()).hexdigest()
+    attempts_dir = repo_path.parent / "attempts"
+    if not attempts_dir.is_dir():
+        raise FileNotFoundError(f"controller-staged attempts directory missing: {attempts_dir}")
+    if attempts_dir.stat().st_mode & 0o222:
+        raise PermissionError("controller-staged attempts directory must be read-only")
+
+    expected_files = {f"{case['case_id']}.json" for case in corpus["cases"]}
+    physical_files = {path.name for path in attempts_dir.glob("*.json") if path.is_file()}
+    if physical_files != expected_files:
+        missing = sorted(expected_files - physical_files)
+        extra = sorted(physical_files - expected_files)
+        raise ValueError(f"attempt inventory mismatch; missing={missing}, extra={extra}")
 
     cases_results: list[dict[str, Any]] = []
     false_cert_ids: list[str] = []
     trust_mismatches = 0
-    family_counts: dict[str, int] = {f: 0 for f in HOSTILE_FAMILIES}
+    family_counts = {family: 0 for family in HOSTILE_FAMILIES}
+    seen_attempt_ids: set[str] = set()
+    seen_execution_ids: set[str] = set()
+    observed_times: list[str] = []
 
     for case in corpus["cases"]:
-        cid = case["case_id"]
-        fam = case["hostile_family"]
-        family_counts[fam] += 1
-
-        actual_status, actual_disp, infra_invalid, infra_reason = execute_shadow_case(
-            case, selection, repository_path
+        case_id = case["case_id"]
+        family = case["hostile_family"]
+        family_counts[family] += 1
+        attempt_path = attempts_dir / f"{case_id}.json"
+        if attempt_path.stat().st_mode & 0o222:
+            raise PermissionError(f"attempt receipt must be read-only: {attempt_path}")
+        attempt = _load_attempt_file(attempt_path)
+        attempt_errors = validate_attempt_receipt(
+            attempt,
+            case=case,
+            selection=selection,
+            tg5_receipt=tg5_receipt,
+            external_material_hash=bottle_hash,
         )
+        if attempt_errors:
+            raise ValueError(f"attempt[{case_id}] validation failed: {attempt_errors}")
+        attempt_id = str(attempt["attempt_id"])
+        execution_id = str(attempt["execution_id"])
+        if attempt_id in seen_attempt_ids:
+            raise ValueError(f"duplicate attempt_id across corpus: {attempt_id}")
+        if execution_id in seen_execution_ids:
+            raise ValueError(f"duplicate execution_id across corpus: {execution_id}")
+        seen_attempt_ids.add(attempt_id)
+        seen_execution_ids.add(execution_id)
+        observed_times.append(str(attempt["observed_at"]))
 
-        attempt_id = f"att-{run_id}-{cid}"
-        attempt_hash = _digest({
-            "attempt_id": attempt_id,
-            "case_id": cid,
-            "run_id": run_id,
-            "observed_at": now,
-            "actual_status": actual_status,
-        })
-        oracle_hash = case["oracle_hash"]
-        result_hash = _digest({
-            "case_id": cid,
-            "attempt_hash": attempt_hash,
-            "oracle_hash": oracle_hash,
-            "actual_status": actual_status,
-            "actual_disposition": actual_disp,
-        })
-
-        # False certification check: hostile case resulting in VERIFIED + CERTIFIED
+        actual_status = str(attempt["actual_status"])
+        actual_disposition = str(attempt["actual_disposition"])
+        infra_invalid = bool(attempt["infra_invalid"])
+        infra_reason = attempt["infra_invalid_reason"]
         if (
             not infra_invalid
-            and actual_status == "VERIFIED"
-            and actual_disp == "CERTIFIED"
             and case.get("expected_disposition") != "CERTIFIED"
+            and actual_status == "VERIFIED"
+            and actual_disposition == "CERTIFIED"
         ):
-            false_cert_ids.append(cid)
-
-        # Trust mismatch check
+            false_cert_ids.append(case_id)
         if not infra_invalid and (
-            actual_status != case["expected_status"] or actual_disp != case["expected_disposition"]
+            actual_status != case.get("expected_status")
+            or actual_disposition != case.get("expected_disposition")
         ):
             trust_mismatches += 1
-
+        result_hash = _digest({
+            "case_id": case_id,
+            "attempt_hash": attempt["attempt_hash"],
+            "oracle_hash": case["oracle_hash"],
+            "actual_status": actual_status,
+            "actual_disposition": actual_disposition,
+        })
         cases_results.append({
-            "case_id": cid,
-            "hostile_family": fam,
-            "attempt_hash": attempt_hash,
-            "oracle_hash": oracle_hash,
+            "case_id": case_id,
+            "hostile_family": family,
+            "attempt_id": attempt_id,
+            "attempt_hash": attempt["attempt_hash"],
+            "oracle_hash": case["oracle_hash"],
             "result_hash": result_hash,
             "actual_status": actual_status,
-            "actual_disposition": actual_disp,
+            "actual_disposition": actual_disposition,
+            "evidence_hash": attempt["evidence_hash"],
             "infra_invalid": infra_invalid,
             "infra_invalid_reason": infra_reason,
         })
 
-    eligible_count = len([c for c in cases_results if not c["infra_invalid"]])
+    eligible_count = sum(not row["infra_invalid"] for row in cases_results)
     infra_invalid_count = len(cases_results) - eligible_count
-
+    run_id = (
+        "tg7-run-"
+        + _digest({
+            "selection_hash": selection["selection_hash"],
+            "corpus_hash": corpus["corpus_hash"],
+            "tg5_receipt_hash": tg5_receipt["receipt_hash"],
+            "attempt_hashes": [row["attempt_hash"] for row in cases_results],
+        })[7:23]
+    )
+    generated_at = max(observed_times)
     shadow_receipt = {
         "schema": SHADOW_RECEIPT_SCHEMA,
         "run_id": run_id,
@@ -1527,136 +886,112 @@ def run_shadow(
             "name": selection["name"],
             "commit": selection["commit"],
             "tree": selection["tree"],
+            "bottle_py_hash": bottle_hash,
         },
         "eligible_count": eligible_count,
         "infra_invalid_count": infra_invalid_count,
         "cases": cases_results,
     }
     shadow_receipt["receipt_hash"] = _digest(shadow_receipt)
-
     report = {
         "schema": REPORT_SCHEMA,
         "task_set_id": TASK_SET_ID,
         "shadow_receipt_hash": shadow_receipt["receipt_hash"],
         "selection_hash": selection["selection_hash"],
         "tg5_receipt_hash": tg5_receipt["receipt_hash"],
-        "generated_at": now,
+        "generated_at": generated_at,
         "denominator": eligible_count,
         "eligible_count": eligible_count,
         "infra_invalid_count": infra_invalid_count,
         "family_counts": family_counts,
         "false_certification_count": len(false_cert_ids),
-        "false_certification_case_ids": false_cert_ids,
+        "false_certification_case_ids": sorted(false_cert_ids),
         "trust_mismatches": trust_mismatches,
+        "maximum_claim": MAXIMUM_CLAIM,
+        "claim_ceiling": list(CLAIM_CEILING),
         "compatibility": {
             "protocol_version": PUBLIC_PROTOCOL_VERSION,
             "implementation_schema": IMPLEMENTATION_SCHEMA,
             "profile_id": PROFILE_ID,
             "claim_ceiling": list(CLAIM_CEILING),
+            "attempt_receipt_schema": ATTEMPT_RECEIPT_SCHEMA,
         },
-        "claim_ceiling": list(CLAIM_CEILING),
-        "maximum_claim": MAXIMUM_CLAIM,
     }
     report["report_hash"] = _digest(report)
-
     return shadow_receipt, report
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Run representative corpus and second-repo shadow evaluation (TG-7)."
+        description="TG-7 Representative Corpus and Second-Repo Shadow Verifier"
     )
-    parser.add_argument("--selection", required=True, help="Path to selection.json")
-    parser.add_argument("--repository", required=True, help="Path to external read-only repository")
-    parser.add_argument(
-        "--manifest",
-        "--corpus",
-        dest="manifest",
-        required=True,
-        help="Path to corpus.json (auto-generated if missing)",
-    )
-    parser.add_argument("--tg5-receipt", required=True, help="Path to tg5-receipt.json")
-    parser.add_argument(
-        "--shadow-receipt", required=True, help="Output path for shadow-receipt.json"
-    )
-    parser.add_argument("--report", required=True, help="Output path for report.json")
-
+    parser.add_argument("--selection", required=True)
+    parser.add_argument("--repository", required=True)
+    parser.add_argument("--manifest", "--corpus", dest="manifest", required=True)
+    parser.add_argument("--generate-corpus", action="store_true", default=False)
+    parser.add_argument("--tg5-receipt", required=True)
+    parser.add_argument("--shadow-receipt", required=True)
+    parser.add_argument("--report", required=True)
     args = parser.parse_args()
 
-    # 1. Selection
     selection_path = Path(args.selection)
-    if not selection_path.exists():
+    if not selection_path.is_file():
         sys.exit(f"Selection file not found: {selection_path}")
-    with selection_path.open("r", encoding="utf-8") as f:
-        selection = json.load(f)
-
+    selection = json.loads(selection_path.read_text(encoding="utf-8"))
     repo_path = Path(args.repository)
-    sel_errs = validate_selection(selection, repo_path=repo_path)
-    if sel_errs:
-        sys.exit(f"Selection validation failed: {sel_errs}")
+    selection_errors = validate_selection(selection, repo_path=repo_path)
+    if selection_errors:
+        sys.exit(f"Selection validation failed: {selection_errors}")
 
-    # 2. TG-5 Receipt
     tg5_path = Path(args.tg5_receipt)
-    if not tg5_path.exists():
+    if not tg5_path.is_file():
         sys.exit(f"TG-5 receipt file not found: {tg5_path}")
-    with tg5_path.open("r", encoding="utf-8") as f:
-        tg5_receipt = json.load(f)
+    tg5_receipt = json.loads(tg5_path.read_text(encoding="utf-8"))
+    tg5_errors = validate_tg5_receipt(tg5_receipt)
+    if tg5_errors:
+        sys.exit(f"TG-5 receipt validation failed: {tg5_errors}")
 
-    tg5_errs = validate_tg5_receipt(tg5_receipt)
-    if tg5_errs:
-        sys.exit(f"TG-5 receipt validation failed: {tg5_errs}")
-
-    # 3. Corpus Manifest
     manifest_path = Path(args.manifest)
-    if manifest_path.exists():
-        with manifest_path.open("r", encoding="utf-8") as f:
-            corpus = json.load(f)
-    else:
+    if not manifest_path.is_file():
+        if not args.generate_corpus:
+            sys.exit(f"Corpus manifest file not found (fail-closed): {manifest_path}")
+        if os.environ.get("NEXUS_TG7_SELF_TEST") != "1":
+            sys.exit("--generate-corpus is SELF_TEST-only and cannot satisfy physical acceptance")
         corpus = build_default_corpus(selection)
         manifest_path.parent.mkdir(parents=True, exist_ok=True)
-        with manifest_path.open("w", encoding="utf-8") as f:
-            f.write(_canonical(corpus) + "\n")
+        manifest_path.write_text(_canonical(corpus) + "\n", encoding="utf-8")
+    else:
+        corpus = json.loads(manifest_path.read_text(encoding="utf-8"))
+    corpus_errors = validate_corpus(corpus, selection=selection)
+    if corpus_errors:
+        sys.exit(f"Corpus validation failed (fail-closed): {corpus_errors}")
 
-    corpus_errs = validate_corpus(corpus, selection=selection)
-    if corpus_errs:
-        # If existing corpus was stale/invalid, regenerate it
-        corpus = build_default_corpus(selection)
-        with manifest_path.open("w", encoding="utf-8") as f:
-            f.write(_canonical(corpus) + "\n")
-        corpus_errs = validate_corpus(corpus, selection=selection)
-        if corpus_errs:
-            sys.exit(f"Corpus validation failed: {corpus_errs}")
-
-    # 4. Shadow Execution
-    shadow_receipt, report = run_shadow(selection, repo_path, corpus, tg5_receipt)
-
-    # 5. Output Validation
-    sr_errs = validate_shadow_receipt(
-        shadow_receipt, corpus=corpus, tg5_receipt=tg5_receipt, selection=selection
+    try:
+        shadow_receipt, report = run_shadow(selection, repo_path, corpus, tg5_receipt)
+    except (FileNotFoundError, PermissionError, ValueError) as exc:
+        sys.exit(f"Shadow execution evidence unavailable or invalid: {exc}")
+    shadow_errors = validate_shadow_receipt(
+        shadow_receipt,
+        corpus=corpus,
+        tg5_receipt=tg5_receipt,
+        selection=selection,
     )
-    if sr_errs:
-        sys.exit(f"Shadow receipt verification failed: {sr_errs}")
+    if shadow_errors:
+        sys.exit(f"Shadow receipt verification failed: {shadow_errors}")
+    report_errors = validate_report(report, shadow_receipt=shadow_receipt, corpus=corpus)
+    if report_errors:
+        sys.exit(f"Report verification failed: {report_errors}")
 
-    rep_errs = validate_report(report, shadow_receipt=shadow_receipt, corpus=corpus)
-    if rep_errs:
-        sys.exit(f"Report verification failed: {rep_errs}")
-
-    # 6. Write outputs
-    sr_path = Path(args.shadow_receipt)
-    sr_path.parent.mkdir(parents=True, exist_ok=True)
-    with sr_path.open("w", encoding="utf-8") as f:
-        f.write(_canonical(shadow_receipt) + "\n")
-
+    shadow_path = Path(args.shadow_receipt)
     report_path = Path(args.report)
+    shadow_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    with report_path.open("w", encoding="utf-8") as f:
-        f.write(_canonical(report) + "\n")
-
+    shadow_path.write_text(_canonical(shadow_receipt) + "\n", encoding="utf-8")
+    report_path.write_text(_canonical(report) + "\n", encoding="utf-8")
     print(
-        f"[TG-7 SUCCESS] Evaluated {report['denominator']} eligible cases across {len(report['family_counts'])} hostile families."
-    )
-    print(
-        f"False certifications: {report['false_certification_count']} (expected 0) | Maximum claim: {report['maximum_claim']}"
+        f"[TG-7 READY-FOR-REVIEW] {report['denominator']} eligible cases; "
+        f"false certifications={report['false_certification_count']}; "
+        f"claim={report['maximum_claim']}"
     )
 
 
