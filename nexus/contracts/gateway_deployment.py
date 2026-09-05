@@ -2329,13 +2329,9 @@ def validate_recovery_continuation_authority(
             raise ContractError(f"recovery continuation {binding_field} mismatch")
     if authority.old_manager_sha256 == authority.successor_manager_sha256:
         raise ContractError("recovery continuation requires a distinct successor manager")
-    expected_hash = canonical_hash(
-        {
-            key: value
-            for key, value in authority.model_dump().items()
-            if key != "authority_hash"
-        }
-    )
+    expected_hash = canonical_hash({
+        key: value for key, value in authority.model_dump().items() if key != "authority_hash"
+    })
     if authority.authority_hash != expected_hash:
         raise ContractError("recovery continuation authority hash mismatch")
     _validate_revocation_fields(
@@ -2353,17 +2349,11 @@ def validate_recovery_continuation_authority(
 
 def validate_receipt_freshness(
     receipt: (
-        HostEffectAuthorityReceipt
-        | RecoveryAuthorityReceipt
-        | RecoveryContinuationAuthorityReceipt
+        HostEffectAuthorityReceipt | RecoveryAuthorityReceipt | RecoveryContinuationAuthorityReceipt
     ),
     *,
     now: str,
-) -> (
-    HostEffectAuthorityReceipt
-    | RecoveryAuthorityReceipt
-    | RecoveryContinuationAuthorityReceipt
-):
+) -> HostEffectAuthorityReceipt | RecoveryAuthorityReceipt | RecoveryContinuationAuthorityReceipt:
     if not isinstance(
         receipt,
         (
