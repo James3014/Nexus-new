@@ -9,10 +9,10 @@ permissions:
   contents: read
 
 env:
-  BASE_SHA: a5d7d032fe80838a84ed596ca36ea5bd923ae7a1
-  TARGET_SHA: d1fbe1f1f399351b1fac2591db00a6f150179753
-  EXPECTED_PROTOCOL: 1.0.0-rc.1
-  GENERATION: rc
+  BASE_SHA: d1fbe1f1f399351b1fac2591db00a6f150179753
+  TARGET_SHA: 968e88f2e8df7444ee2758d25182111830cd03e8
+  EXPECTED_PROTOCOL: 1.0.0-rc.2
+  GENERATION: rc_patch
 
 jobs:
   verify:
