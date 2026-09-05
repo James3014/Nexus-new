@@ -18,6 +18,7 @@ from nexus.contracts.break_glass_recovery import (
     owner_envelope_from_github_comment,
     owner_integration_from_github_comment,
     owner_terminal_from_github_comment,
+    owner_terminals_from_github_comments,
     owner_verification_from_github_comment,
 )
 
@@ -343,6 +344,40 @@ def test_owner_terminal_comment_binds_global_consumption() -> None:
     assert isinstance(parsed.payload, BreakGlassOwnerTerminalPayload)
     assert parsed.payload.terminal_state == "CONSUMED"
     assert parsed.payload.source_activation_payload_sha256 == EXPECTED_PAYLOAD_SHA256
+
+
+def test_non_owner_terminal_marker_cannot_dos_global_scan() -> None:
+    payload = terminal_payload_dict()
+    comment = raw_owner_evidence_comment(
+        marker="Canonical terminal payload SHA-256",
+        payload=payload,
+        comment_id=6000000004,
+    )
+    comment["user"] = {"login": "external-commenter"}
+    assert owner_terminals_from_github_comments((comment,)) == ()
+
+
+def test_owner_incidental_terminal_marker_without_schema_is_ignored() -> None:
+    comment = {
+        "id": 6000000005,
+        "html_url": "https://github.com/James3014/Nexus-new/issues/806#issuecomment-6000000005",
+        "issue_url": "https://api.github.com/repos/James3014/Nexus-new/issues/806",
+        "user": {"login": "James3014"},
+        "body": "Canonical terminal payload SHA-256: mentioned only as documentation",
+    }
+    assert owner_terminals_from_github_comments((comment,)) == ()
+
+
+def test_owner_malformed_terminal_candidate_fails_closed() -> None:
+    payload = terminal_payload_dict()
+    comment = raw_owner_evidence_comment(
+        marker="Canonical terminal payload SHA-256",
+        payload=payload,
+        comment_id=6000000006,
+    )
+    comment["body"] = str(comment["body"]).replace('"terminal_state":"CONSUMED"', "broken")
+    with pytest.raises(BreakGlassContractError):
+        owner_terminals_from_github_comments((comment,))
 
 
 def test_consumed_terminal_requires_integrated_main_and_canary() -> None:

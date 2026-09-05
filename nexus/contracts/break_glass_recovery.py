@@ -727,6 +727,23 @@ def owner_terminal_from_github_comment(
     return envelope
 
 
+def owner_terminals_from_github_comments(
+    comments: tuple[Mapping[str, Any], ...],
+) -> tuple[OwnerTerminalEnvelope, ...]:
+    terminals: list[OwnerTerminalEnvelope] = []
+    marker = "Canonical terminal payload SHA-256:"
+    schema = "nexus.break_glass_owner_terminal.v1"
+    for comment in comments:
+        user = comment.get("user")
+        body = comment.get("body")
+        if not isinstance(user, Mapping) or user.get("login") != _ALLOWED_OWNER:
+            continue
+        if not isinstance(body, str) or marker not in body or schema not in body:
+            continue
+        terminals.append(owner_terminal_from_github_comment(comment))
+    return tuple(terminals)
+
+
 class BreakGlassGovernanceCanaryEvidence(_FrozenModel):
     schema: Literal["nexus.break_glass_governance_canary.v1"] = (
         "nexus.break_glass_governance_canary.v1"

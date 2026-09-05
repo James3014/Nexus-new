@@ -34,7 +34,7 @@ from nexus.contracts.break_glass_recovery import (  # noqa: E402
     OwnerVerificationEnvelope,
     owner_envelope_from_github_comment,
     owner_integration_from_github_comment,
-    owner_terminal_from_github_comment,
+    owner_terminals_from_github_comments,
     owner_verification_from_github_comment,
 )
 from nexus.orchestrator.break_glass_recovery import (  # noqa: E402
@@ -135,13 +135,7 @@ def _fetch_integration(comment_id: int) -> OwnerIntegrationEnvelope:
 
 
 def _fetch_terminals() -> tuple[OwnerTerminalEnvelope, ...]:
-    terminals: list[OwnerTerminalEnvelope] = []
-    marker = "Canonical terminal payload SHA-256:"
-    for comment in _fetch_issue_comments():
-        body = comment.get("body")
-        if isinstance(body, str) and marker in body:
-            terminals.append(owner_terminal_from_github_comment(comment))
-    return tuple(terminals)
+    return owner_terminals_from_github_comments(_fetch_issue_comments())
 
 
 def _assert_not_globally_terminal(envelope: OwnerActivationEnvelope) -> None:
