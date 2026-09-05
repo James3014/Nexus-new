@@ -1,0 +1,4 @@
+schema=nexus.core-v1.tg6-owner-head-rebind.v1
+source_head=c577ada0fcd0b964ebc389e5aa5f82bbe44bfb8b
+source_tree=b918875e2b2536d59d0713ff41dd0321819a0b91
+purpose=trigger owner-authored no-tree-change commit on TG6 branch
