@@ -1,3 +1,6 @@
 [submodule "SWE-bench"]
 	path = SWE-bench
 	url = .
+[submodule "nexus-mempalace"]
+	path = nexus-mempalace
+	url = .
