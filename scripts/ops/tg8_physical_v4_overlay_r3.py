@@ -5,8 +5,10 @@ import ast
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tarfile
 from pathlib import Path
 from typing import Any
 
@@ -146,10 +148,81 @@ def _receipt_probe(venv: Path, receipt: dict[str, Any]) -> bool:
     return _run_schema_validator(venv, "validate_receipt_verify_request", payload)
 
 
+def _tracked_export(src: Path, dst: Path) -> None:
+    shutil.rmtree(dst, ignore_errors=True)
+    dst.mkdir(parents=True, exist_ok=True)
+    archive = dst.parent / f"{dst.name}.tar"
+    try:
+        with archive.open("wb") as handle:
+            result = subprocess.run(
+                ["git", "-C", str(src), "archive", "--format=tar", "HEAD"],
+                check=False,
+                stdout=handle,
+                stderr=subprocess.PIPE,
+            )
+        if result.returncode:
+            raise subprocess.CalledProcessError(
+                result.returncode,
+                result.args,
+                stderr=result.stderr,
+            )
+        with tarfile.open(archive, "r:") as tf:
+            tf.extractall(dst, filter="data")
+    finally:
+        archive.unlink(missing_ok=True)
+
+
+def _hostile(src: Path, root: Path, kind: str) -> Path:
+    dst = root / ("src-" + kind)
+    _tracked_export(src, dst)
+    if kind == "protocol":
+        path = dst / "product/protocol/__init__.py"
+        text = path.read_text(encoding="utf-8")
+        old = 'PUBLIC_PROTOCOL_VERSION = "1.0.0-rc.1"'
+        assert text.count(old) == 1
+        path.write_text(text.replace(old, 'PUBLIC_PROTOCOL_VERSION = "2.0.0-foreign"', 1), encoding="utf-8")
+    elif kind == "schema":
+        path = dst / "product/protocol/__init__.py"
+        text = path.read_text(encoding="utf-8")
+        old = 'IMPLEMENTATION_SCHEMA = "nexus.changeset_certification.v2"'
+        assert text.count(old) == 1
+        path.write_text(text.replace(old, 'IMPLEMENTATION_SCHEMA = "nexus.foreign.v9"', 1), encoding="utf-8")
+    elif kind == "ledger":
+        path = dst / "product/ledger.py"
+        text = path.read_text(encoding="utf-8")
+        old = 'LEDGER_SCHEMA_VERSION = "nexus.ledger-entry.v1"'
+        assert text.count(old) == 1
+        path.write_text(text.replace(old, 'LEDGER_SCHEMA_VERSION = "nexus.ledger-entry.v9"', 1), encoding="utf-8")
+    else:
+        raise ValueError(kind)
+    out = root / ("wheel-" + kind)
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        ["uv", "build", "--wheel", "--out-dir", str(out)],
+        cwd=dst,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if result.returncode:
+        sys.stderr.write(f"HOSTILE_BUILD_FAILED:{kind}\n{result.stdout}\n{result.stderr}\n")
+        raise subprocess.CalledProcessError(
+            result.returncode,
+            result.args,
+            output=result.stdout,
+            stderr=result.stderr,
+        )
+    wheels = list(out.glob("*.whl"))
+    assert len(wheels) == 1
+    return wheels[0]
+
+
 base.sh = _sh
 base.state = _state
 base.req_probe = _req_probe
 base.receipt_probe = _receipt_probe
+base.hostile = _hostile
 
 if __name__ == "__main__":
     raise SystemExit(base.main())
