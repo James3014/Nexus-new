@@ -8,7 +8,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tarfile
 from pathlib import Path
 from typing import Any
 
@@ -149,27 +148,30 @@ def _receipt_probe(venv: Path, receipt: dict[str, Any]) -> bool:
 
 
 def _tracked_export(src: Path, dst: Path) -> None:
+    """Export only tracked regular files; never dereference symlinks or gitlinks."""
     shutil.rmtree(dst, ignore_errors=True)
     dst.mkdir(parents=True, exist_ok=True)
-    archive = dst.parent / f"{dst.name}.tar"
-    try:
-        with archive.open("wb") as handle:
-            result = subprocess.run(
-                ["git", "-C", str(src), "archive", "--format=tar", "HEAD"],
-                check=False,
-                stdout=handle,
-                stderr=subprocess.PIPE,
-            )
-        if result.returncode:
-            raise subprocess.CalledProcessError(
-                result.returncode,
-                result.args,
-                stderr=result.stderr,
-            )
-        with tarfile.open(archive, "r:") as tf:
-            tf.extractall(dst, filter="data")
-    finally:
-        archive.unlink(missing_ok=True)
+    result = subprocess.run(
+        ["git", "-C", str(src), "ls-files", "-s", "-z"],
+        check=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    for raw_entry in result.stdout.split(b"\0"):
+        if not raw_entry:
+            continue
+        entry = raw_entry.decode("utf-8", errors="strict")
+        meta, rel = entry.split("\t", 1)
+        mode = meta.split(" ", 1)[0]
+        if mode not in {"100644", "100755"}:
+            continue
+        source = src / rel
+        target = dst / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_symlink() or not source.is_file():
+            raise RuntimeError(f"tracked regular file is not regular: {rel}")
+        shutil.copyfile(source, target)
+        target.chmod(0o755 if mode == "100755" else 0o644)
 
 
 def _hostile(src: Path, root: Path, kind: str) -> Path:
