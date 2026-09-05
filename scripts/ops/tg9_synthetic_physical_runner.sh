@@ -32,15 +32,20 @@ from pathlib import Path
 
 source = Path(sys.argv[1])
 destination = Path(sys.argv[2])
-marker = "tests/benchmark/test_core_v1_tg9_value_manifest.py::"
+marker = "test_core_v1_tg9_value_manifest.py::"
 rows = []
-for line in source.read_text(encoding="utf-8").splitlines():
+text = source.read_text(encoding="utf-8")
+for line in text.splitlines():
     index = line.find(marker)
     if index >= 0:
         rows.append(line[index:].strip())
 rows = sorted(set(rows))
 destination.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
 print(f"TG9_NORMALIZED_NODE_COUNT={len(rows)}")
+if not rows:
+    print("TG9_COLLECT_ONLY_SAMPLE_START")
+    print("\n".join(text.splitlines()[:80]))
+    print("TG9_COLLECT_ONLY_SAMPLE_END")
 PY
 NODE_COUNT="$(wc -l < "$OUT/tg9-nodeids.txt" | tr -d ' ')"
 STAGE="node-count"
