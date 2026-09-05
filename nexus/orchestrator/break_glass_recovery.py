@@ -18,9 +18,13 @@ from typing import Any, Mapping
 from nexus.contracts.break_glass_recovery import (
     BreakGlassActivationPayload,
     BreakGlassAppliedEvidence,
+    BreakGlassGovernanceCanaryEvidence,
+    BreakGlassOwnerIntegrationPayload,
     BreakGlassPhase,
     BreakGlassVerificationEvidence,
     OwnerActivationEnvelope,
+    OwnerIntegrationEnvelope,
+    OwnerVerificationEnvelope,
     canonical_json_bytes,
     canonical_sha256,
 )
@@ -35,6 +39,8 @@ _PHASE_FILE = {
     BreakGlassPhase.CONSUMED: "04-consumed.json",
 }
 _PHASE_ORDER = tuple(_PHASE_FILE)
+_INTEGRATION_PREPARED_FILE = "01-integration-prepared.json"
+_INTEGRATION_CONSUMED_FILE = "02-integration-consumed.json"
 
 
 class BreakGlassRecoveryError(Exception):
@@ -322,13 +328,21 @@ def record_source_repair_applied(
 
 def record_source_repair_verified(
     envelope: OwnerActivationEnvelope,
-    verification: BreakGlassVerificationEvidence,
+    verification_envelope: OwnerVerificationEnvelope,
     *,
     now: datetime,
     state_root: Path | None = None,
 ) -> dict[str, Any]:
     activation = envelope.payload
     activation.assert_current(now=now)
+    verification_envelope.payload.assert_current(now=now)
+    verified = verification_envelope.payload
+    if (
+        verified.recovery_id != activation.recovery_id
+        or verified.source_attempt_id != activation.attempt_id
+        or verified.source_activation_payload_sha256 != envelope.payload_sha256
+    ):
+        raise BreakGlassRecoveryError("VERIFICATION_AUTHORITY_MISMATCH")
     chain = _read_chain(activation, state_root=state_root)
     if len(chain) < 2:
         raise BreakGlassRecoveryError("APPLIED_EVIDENCE_REQUIRED")
@@ -337,16 +351,25 @@ def record_source_repair_verified(
     if latest["phase"] == BreakGlassPhase.CONSUMED.value:
         raise BreakGlassRecoveryError("RECOVERY_REPLAY_DENIED")
     applied = BreakGlassAppliedEvidence.model_validate(chain[1]["evidence"]["applied"])
-    if verification.verifier_id == applied.implementer_id:
+    if verified.verifier_id == applied.implementer_id:
         raise BreakGlassRecoveryError("INDEPENDENT_VERIFIER_REQUIRED")
     if (
-        verification.verified_commit_sha != applied.repair_commit_sha
-        or verification.verified_tree_sha != applied.repair_tree_sha
-        or verification.verified_diff_sha256 != applied.full_diff_sha256
+        verified.verified_commit_sha != applied.repair_commit_sha
+        or verified.verified_tree_sha != applied.repair_tree_sha
+        or verified.verified_diff_sha256 != applied.full_diff_sha256
     ):
         raise BreakGlassRecoveryError("VERIFICATION_SUBJECT_MISMATCH")
+    verification = BreakGlassVerificationEvidence(
+        verifier_id=verified.verifier_id,
+        verifier_evidence_sha256=verification_envelope.payload_sha256,
+        verified_commit_sha=verified.verified_commit_sha,
+        verified_tree_sha=verified.verified_tree_sha,
+        verified_diff_sha256=verified.verified_diff_sha256,
+    )
     if latest["phase"] == BreakGlassPhase.VERIFIED.value:
-        if latest["evidence"].get("verification_evidence_sha256") == verification.evidence_sha256:
+        if latest["evidence"].get("owner_verification_payload_sha256") == (
+            verification_envelope.payload_sha256
+        ):
             return latest
         raise BreakGlassRecoveryError("VERIFICATION_EVIDENCE_CONFLICT")
     if latest["phase"] != BreakGlassPhase.APPLIED.value:
@@ -357,8 +380,11 @@ def record_source_repair_verified(
         phase=BreakGlassPhase.VERIFIED,
         predecessor_hash=str(latest["transition_hash"]),
         evidence={
+            "owner_verification_comment_id": verification_envelope.comment_id,
+            "owner_verification_payload_sha256": verification_envelope.payload_sha256,
             "verification_evidence_sha256": verification.evidence_sha256,
             "verification": verification.model_dump(mode="json"),
+            "checks": [item.model_dump(mode="json") for item in verified.checks],
         },
     )
     return _atomic_create(attempt_dir / _PHASE_FILE[BreakGlassPhase.VERIFIED], payload)
@@ -366,12 +392,18 @@ def record_source_repair_verified(
 
 def consume_source_repair_authority(
     envelope: OwnerActivationEnvelope,
+    canary: BreakGlassGovernanceCanaryEvidence,
     *,
     now: datetime,
     state_root: Path | None = None,
 ) -> dict[str, Any]:
     activation = envelope.payload
     activation.assert_current(now=now)
+    if (
+        canary.recovery_id != activation.recovery_id
+        or canary.source_attempt_id != activation.attempt_id
+    ):
+        raise BreakGlassRecoveryError("GOVERNANCE_CANARY_MISMATCH")
     chain = _read_chain(activation, state_root=state_root)
     if not chain:
         raise BreakGlassRecoveryError("VERIFIED_EVIDENCE_REQUIRED")
@@ -388,6 +420,8 @@ def consume_source_repair_authority(
         predecessor_hash=str(latest["transition_hash"]),
         evidence={
             "verified_transition_hash": latest["transition_hash"],
+            "governance_canary_sha256": canary.evidence_sha256,
+            "governance_canary": canary.model_dump(mode="json"),
             "authority_terminal": True,
             "post_consume_replay": "DENY",
             "granted_effect": "SOURCE_REPAIR_ONLY",
@@ -402,6 +436,204 @@ def consume_source_repair_authority(
         },
     )
     return _atomic_create(attempt_dir / _PHASE_FILE[BreakGlassPhase.CONSUMED], payload)
+
+
+def _integration_attempt_dir(
+    integration: BreakGlassOwnerIntegrationPayload, *, state_root: Path | None = None
+) -> Path:
+    root = state_root or DEFAULT_BREAK_GLASS_ROOT
+    return root / integration.recovery_id / integration.integration_attempt_id
+
+
+def _integration_envelope_hash(envelope: OwnerIntegrationEnvelope) -> str:
+    return canonical_sha256(envelope.model_dump(mode="json"))
+
+
+def prepare_emergency_integration(
+    source_envelope: OwnerActivationEnvelope,
+    integration_envelope: OwnerIntegrationEnvelope,
+    *,
+    now: datetime,
+    state_root: Path | None = None,
+) -> dict[str, Any]:
+    source = source_envelope.payload
+    integration = integration_envelope.payload
+    source.assert_current(now=now)
+    integration.assert_current(now=now)
+    if (
+        integration.recovery_id != source.recovery_id
+        or integration.source_attempt_id != source.attempt_id
+        or integration.source_activation_payload_sha256 != source_envelope.payload_sha256
+        or integration.expected_base_sha != source.base_sha
+    ):
+        raise BreakGlassRecoveryError("INTEGRATION_AUTHORITY_MISMATCH")
+
+    chain = _read_chain(source, state_root=state_root)
+    if len(chain) < 3 or chain[-1]["phase"] != BreakGlassPhase.VERIFIED.value:
+        raise BreakGlassRecoveryError("VERIFIED_EVIDENCE_REQUIRED")
+    _assert_envelope_matches_existing(source_envelope, chain)
+    verified_record = chain[2]
+    if verified_record["evidence"].get("owner_verification_payload_sha256") != (
+        integration.verification_payload_sha256
+    ):
+        raise BreakGlassRecoveryError("INTEGRATION_VERIFICATION_MISMATCH")
+    applied = BreakGlassAppliedEvidence.model_validate(chain[1]["evidence"]["applied"])
+    if (
+        integration.accepted_head_sha != applied.repair_commit_sha
+        or integration.accepted_tree_sha != applied.repair_tree_sha
+        or integration.accepted_diff_sha256 != applied.full_diff_sha256
+    ):
+        raise BreakGlassRecoveryError("INTEGRATION_SUBJECT_MISMATCH")
+
+    attempt_dir = _integration_attempt_dir(integration, state_root=state_root)
+    _ensure_safe_dir(attempt_dir, create=True)
+    consumed_path = attempt_dir / _INTEGRATION_CONSUMED_FILE
+    if consumed_path.exists() or consumed_path.is_symlink():
+        raise BreakGlassRecoveryError("INTEGRATION_REPLAY_DENIED")
+    payload = {
+        "schema": "nexus.break_glass_integration_transition.v1",
+        "repository": integration.repository,
+        "issue": integration.issue,
+        "recovery_id": integration.recovery_id,
+        "integration_attempt_id": integration.integration_attempt_id,
+        "source_attempt_id": integration.source_attempt_id,
+        "effect_class": integration.effect_class,
+        "phase": "PREPARED",
+        "integration_comment_id": integration_envelope.comment_id,
+        "integration_envelope_sha256": _integration_envelope_hash(integration_envelope),
+        "integration_payload_sha256": integration_envelope.payload_sha256,
+        "source_activation_payload_sha256": source_envelope.payload_sha256,
+        "verification_payload_sha256": integration.verification_payload_sha256,
+        "pr_number": integration.pr_number,
+        "expected_base_sha": integration.expected_base_sha,
+        "accepted_head_sha": integration.accepted_head_sha,
+        "accepted_tree_sha": integration.accepted_tree_sha,
+        "accepted_diff_sha256": integration.accepted_diff_sha256,
+        "merge_method": integration.merge_method,
+        "checks": [item.model_dump(mode="json") for item in integration.checks],
+        "claim_ceiling": integration.claim_ceiling,
+        "forbidden_effects": [
+            "FORCE_PUSH",
+            "REF_DELETE",
+            "UNRELATED_MERGE",
+            "RUNTIME_RECOVERY",
+            "RELEASE",
+            "PRODUCTION_PUBLIC_CLAIM",
+        ],
+    }
+    return _atomic_create(attempt_dir / _INTEGRATION_PREPARED_FILE, payload)
+
+
+def record_emergency_integration_consumed(
+    integration_envelope: OwnerIntegrationEnvelope,
+    *,
+    merge_commit_sha: str,
+    observed_main_sha: str,
+    merged_pr_number: int,
+    now: datetime,
+    state_root: Path | None = None,
+) -> dict[str, Any]:
+    integration = integration_envelope.payload
+    integration.assert_current(now=now)
+    if merged_pr_number != integration.pr_number:
+        raise BreakGlassRecoveryError("INTEGRATION_PR_MISMATCH")
+    if not re_full_sha40(merge_commit_sha) or not re_full_sha40(observed_main_sha):
+        raise BreakGlassRecoveryError("GIT_SHA_INVALID")
+    if merge_commit_sha != observed_main_sha:
+        raise BreakGlassRecoveryError("INTEGRATION_READBACK_MISMATCH")
+
+    attempt_dir = _integration_attempt_dir(integration, state_root=state_root)
+    _ensure_safe_dir(attempt_dir, create=False)
+    prepared_path = attempt_dir / _INTEGRATION_PREPARED_FILE
+    if not prepared_path.exists() and not prepared_path.is_symlink():
+        raise BreakGlassRecoveryError("INTEGRATION_PREPARE_REQUIRED")
+    prepared = _load_json_file(prepared_path)
+    if (
+        prepared.get("integration_envelope_sha256")
+        != _integration_envelope_hash(integration_envelope)
+        or prepared.get("accepted_head_sha") != integration.accepted_head_sha
+        or prepared.get("expected_base_sha") != integration.expected_base_sha
+    ):
+        raise BreakGlassRecoveryError("INTEGRATION_PREPARED_MISMATCH")
+
+    consumed_path = attempt_dir / _INTEGRATION_CONSUMED_FILE
+    payload = {
+        "schema": "nexus.break_glass_integration_transition.v1",
+        "repository": integration.repository,
+        "issue": integration.issue,
+        "recovery_id": integration.recovery_id,
+        "integration_attempt_id": integration.integration_attempt_id,
+        "source_attempt_id": integration.source_attempt_id,
+        "effect_class": integration.effect_class,
+        "phase": "CONSUMED",
+        "predecessor_hash": prepared["transition_hash"],
+        "integration_comment_id": integration_envelope.comment_id,
+        "integration_envelope_sha256": _integration_envelope_hash(integration_envelope),
+        "integration_payload_sha256": integration_envelope.payload_sha256,
+        "pr_number": integration.pr_number,
+        "accepted_head_sha": integration.accepted_head_sha,
+        "expected_base_sha": integration.expected_base_sha,
+        "merge_commit_sha": merge_commit_sha,
+        "observed_main_sha": observed_main_sha,
+        "authority_terminal": True,
+        "post_consume_replay": "DENY",
+        "granted_effect": "EMERGENCY_INTEGRATION_ONLY",
+    }
+    if consumed_path.exists() or consumed_path.is_symlink():
+        existing = _load_json_file(consumed_path)
+        candidate = {**payload, "transition_hash": canonical_sha256(payload)}
+        if canonical_json_bytes(existing) == canonical_json_bytes(candidate):
+            return existing
+        raise BreakGlassRecoveryError("INTEGRATION_CONSUME_CONFLICT")
+    return _atomic_create(consumed_path, payload)
+
+
+def inspect_emergency_integration(
+    integration_envelope: OwnerIntegrationEnvelope, *, state_root: Path | None = None
+) -> dict[str, Any]:
+    integration = integration_envelope.payload
+    attempt_dir = _integration_attempt_dir(integration, state_root=state_root)
+    if not attempt_dir.exists():
+        return {
+            "schema": "nexus.break_glass_integration_inspection.v1",
+            "status": "MISSING",
+            "recovery_id": integration.recovery_id,
+            "integration_attempt_id": integration.integration_attempt_id,
+        }
+    _ensure_safe_dir(attempt_dir, create=False)
+    prepared_path = attempt_dir / _INTEGRATION_PREPARED_FILE
+    consumed_path = attempt_dir / _INTEGRATION_CONSUMED_FILE
+    prepared = _load_json_file(prepared_path)
+    if consumed_path.exists() or consumed_path.is_symlink():
+        consumed = _load_json_file(consumed_path)
+        if consumed.get("predecessor_hash") != prepared.get("transition_hash"):
+            raise BreakGlassRecoveryError("INTEGRATION_CHAIN_INVALID")
+        return {
+            "schema": "nexus.break_glass_integration_inspection.v1",
+            "status": "CONSUMED",
+            "recovery_id": integration.recovery_id,
+            "integration_attempt_id": integration.integration_attempt_id,
+            "latest": consumed,
+        }
+    return {
+        "schema": "nexus.break_glass_integration_inspection.v1",
+        "status": "PREPARED",
+        "recovery_id": integration.recovery_id,
+        "integration_attempt_id": integration.integration_attempt_id,
+        "latest": prepared,
+    }
+
+
+def assert_emergency_integration_not_consumed(
+    integration_envelope: OwnerIntegrationEnvelope, *, state_root: Path | None = None
+) -> None:
+    inspection = inspect_emergency_integration(integration_envelope, state_root=state_root)
+    if inspection["status"] == "CONSUMED":
+        raise BreakGlassRecoveryError("INTEGRATION_REPLAY_DENIED")
+
+
+def re_full_sha40(value: str) -> bool:
+    return len(value) == 40 and all(char in "0123456789abcdef" for char in value)
 
 
 def assert_source_repair_not_consumed(
@@ -422,4 +654,8 @@ __all__ = [
     "consume_source_repair_authority",
     "inspect_attempt",
     "assert_source_repair_not_consumed",
+    "prepare_emergency_integration",
+    "record_emergency_integration_consumed",
+    "inspect_emergency_integration",
+    "assert_emergency_integration_not_consumed",
 ]

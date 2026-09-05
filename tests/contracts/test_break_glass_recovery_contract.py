@@ -10,9 +10,13 @@ from nexus.contracts.break_glass_recovery import (
     BreakGlassActivationPayload,
     BreakGlassContractError,
     BreakGlassEffectClass,
+    BreakGlassOwnerIntegrationPayload,
+    BreakGlassOwnerVerificationPayload,
     OwnerActivationEnvelope,
     canonical_sha256,
     owner_envelope_from_github_comment,
+    owner_integration_from_github_comment,
+    owner_verification_from_github_comment,
 )
 
 EXPECTED_PAYLOAD_SHA256 = "d2313d38c4b15d16cf42497c267bd7071195bf3f58f485eea6d659ded6e09a95"
@@ -169,6 +173,141 @@ def test_scope_widening_and_forbidden_path_fail_closed() -> None:
         payload.assert_paths_authorized(("README.md",))
     with pytest.raises(BreakGlassContractError, match="FORBIDDEN_PATH_CHANGED"):
         payload.assert_paths_authorized(("nexus/orchestrator/standing_grant_store.py",))
+
+
+def verification_payload_dict() -> dict[str, object]:
+    return {
+        "schema": "nexus.break_glass_owner_verification.v1",
+        "repository": "James3014/Nexus-new",
+        "issue": 806,
+        "owner_login": "James3014",
+        "recovery_id": "BG-806-20260906",
+        "source_attempt_id": "BG-806-A1",
+        "source_activation_payload_sha256": EXPECTED_PAYLOAD_SHA256,
+        "verified_commit_sha": "1" * 40,
+        "verified_tree_sha": "2" * 40,
+        "verified_diff_sha256": "3" * 64,
+        "verifier_id": "primary-coordinator",
+        "checks": [
+            {
+                "schema": "nexus.break_glass_check_evidence.v1",
+                "name": "Nexus Exact-Base Ruff CI",
+                "run_id": 1001,
+                "head_sha": "1" * 40,
+                "conclusion": "success",
+            },
+            {
+                "schema": "nexus.break_glass_check_evidence.v1",
+                "name": "Nexus Pytest CI",
+                "run_id": 1002,
+                "head_sha": "1" * 40,
+                "conclusion": "success",
+            },
+        ],
+        "issued_at": "2026-09-06T07:00:00+08:00",
+        "expires_at": "2026-09-06T23:00:00+08:00",
+        "claim_ceiling": "source_repair_verification_only",
+    }
+
+
+def integration_payload_dict() -> dict[str, object]:
+    verification = verification_payload_dict()
+    verification_hash = canonical_sha256(verification)
+    return {
+        "schema": "nexus.break_glass_owner_integration.v1",
+        "repository": "James3014/Nexus-new",
+        "issue": 806,
+        "owner_login": "James3014",
+        "recovery_id": "BG-806-20260906",
+        "integration_attempt_id": "BG-806-I1",
+        "source_attempt_id": "BG-806-A1",
+        "source_activation_payload_sha256": EXPECTED_PAYLOAD_SHA256,
+        "verification_payload_sha256": verification_hash,
+        "effect_class": "EMERGENCY_INTEGRATION",
+        "pr_number": 808,
+        "accepted_head_sha": "1" * 40,
+        "accepted_tree_sha": "2" * 40,
+        "accepted_diff_sha256": "3" * 64,
+        "expected_base_sha": "8e8e02911c888d4c8a4667d4b5dd13df85c20cfd",
+        "merge_method": "squash",
+        "checks": verification["checks"],
+        "issued_at": "2026-09-06T07:05:00+08:00",
+        "expires_at": "2026-09-06T23:00:00+08:00",
+        "claim_ceiling": "emergency_integration_only",
+    }
+
+
+def raw_owner_evidence_comment(
+    *, marker: str, payload: dict[str, object], comment_id: int
+) -> dict[str, object]:
+    body = (
+        f"{marker}: `{canonical_sha256(payload)}`\n\n"
+        "```json\n"
+        + json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        + "\n```\n"
+    )
+    return {
+        "id": comment_id,
+        "html_url": (
+            "https://github.com/James3014/Nexus-new/issues/806#issuecomment-"
+            f"{comment_id}"
+        ),
+        "issue_url": "https://api.github.com/repos/James3014/Nexus-new/issues/806",
+        "user": {"login": "James3014"},
+        "body": body,
+    }
+
+
+def test_owner_verification_comment_binds_successful_exact_head_checks() -> None:
+    payload = verification_payload_dict()
+    parsed = owner_verification_from_github_comment(
+        raw_owner_evidence_comment(
+            marker="Canonical verification payload SHA-256",
+            payload=payload,
+            comment_id=6000000001,
+        )
+    )
+    assert isinstance(parsed.payload, BreakGlassOwnerVerificationPayload)
+    assert parsed.payload.verified_commit_sha == "1" * 40
+    assert {item.conclusion for item in parsed.payload.checks} == {"success"}
+
+
+def test_verification_check_subject_substitution_is_rejected() -> None:
+    payload = verification_payload_dict()
+    checks = list(payload["checks"])  # type: ignore[arg-type]
+    checks[0] = {**checks[0], "head_sha": "4" * 40}  # type: ignore[arg-type]
+    payload["checks"] = checks
+    with pytest.raises(ValidationError, match="CHECK_SUBJECT_MISMATCH"):
+        BreakGlassOwnerVerificationPayload.model_validate(payload)
+
+
+def test_owner_integration_comment_is_separate_exact_effect_authority() -> None:
+    payload = integration_payload_dict()
+    parsed = owner_integration_from_github_comment(
+        raw_owner_evidence_comment(
+            marker="Canonical integration payload SHA-256",
+            payload=payload,
+            comment_id=6000000002,
+        )
+    )
+    assert isinstance(parsed.payload, BreakGlassOwnerIntegrationPayload)
+    assert parsed.payload.effect_class == "EMERGENCY_INTEGRATION"
+    assert parsed.payload.pr_number == 808
+    assert parsed.payload.claim_ceiling == "emergency_integration_only"
+
+
+def test_integration_comment_tamper_is_rejected_by_canonical_hash() -> None:
+    payload = integration_payload_dict()
+    comment = raw_owner_evidence_comment(
+        marker="Canonical integration payload SHA-256",
+        payload=payload,
+        comment_id=6000000002,
+    )
+    comment["body"] = str(comment["body"]).replace(
+        '"pr_number":808', '"pr_number":809'
+    )
+    with pytest.raises(BreakGlassContractError, match="GITHUB_COMMENT_PAYLOAD_HASH_MISMATCH"):
+        owner_integration_from_github_comment(comment)
 
 
 def test_relative_path_escape_is_rejected() -> None:

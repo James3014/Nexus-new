@@ -9,16 +9,22 @@ import pytest
 
 from nexus.contracts.break_glass_recovery import (
     BreakGlassAppliedEvidence,
-    BreakGlassVerificationEvidence,
+    BreakGlassGovernanceCanaryEvidence,
     OwnerActivationEnvelope,
+    OwnerIntegrationEnvelope,
+    OwnerVerificationEnvelope,
     canonical_json_bytes,
     canonical_sha256,
 )
 from nexus.orchestrator.break_glass_recovery import (
     BreakGlassRecoveryError,
+    assert_emergency_integration_not_consumed,
     consume_source_repair_authority,
     inspect_attempt,
+    inspect_emergency_integration,
+    prepare_emergency_integration,
     prepare_source_repair,
+    record_emergency_integration_consumed,
     record_source_repair_applied,
     record_source_repair_verified,
 )
@@ -102,13 +108,116 @@ def applied(
     )
 
 
-def verification(*, verifier: str = "primary-coordinator") -> BreakGlassVerificationEvidence:
-    return BreakGlassVerificationEvidence(
-        verifier_id=verifier,
-        verifier_evidence_sha256=VERIFY_HASH,
-        verified_commit_sha=COMMIT,
-        verified_tree_sha=REPAIR_TREE,
-        verified_diff_sha256=DIFF_HASH,
+def verification_envelope(
+    *, verifier: str = "primary-coordinator", commit: str = COMMIT
+) -> OwnerVerificationEnvelope:
+    source = envelope()
+    payload = {
+        "schema": "nexus.break_glass_owner_verification.v1",
+        "repository": "James3014/Nexus-new",
+        "issue": 806,
+        "owner_login": "James3014",
+        "recovery_id": source.payload.recovery_id,
+        "source_attempt_id": source.payload.attempt_id,
+        "source_activation_payload_sha256": source.payload_sha256,
+        "verified_commit_sha": commit,
+        "verified_tree_sha": REPAIR_TREE,
+        "verified_diff_sha256": DIFF_HASH,
+        "verifier_id": verifier,
+        "checks": [
+            {
+                "schema": "nexus.break_glass_check_evidence.v1",
+                "name": "Nexus Exact-Base Ruff CI",
+                "run_id": 1001,
+                "head_sha": commit,
+                "conclusion": "success",
+            },
+            {
+                "schema": "nexus.break_glass_check_evidence.v1",
+                "name": "Nexus Pytest CI",
+                "run_id": 1002,
+                "head_sha": commit,
+                "conclusion": "success",
+            },
+        ],
+        "issued_at": "2026-09-06T07:00:00+08:00",
+        "expires_at": "2026-09-06T23:00:00+08:00",
+        "claim_ceiling": "source_repair_verification_only",
+    }
+    payload_hash = canonical_sha256(payload)
+    return OwnerVerificationEnvelope.model_validate({
+        "repository": "James3014/Nexus-new",
+        "issue": 806,
+        "comment_id": 6000000001,
+        "comment_url": "https://github.com/James3014/Nexus-new/issues/806#issuecomment-6000000001",
+        "author_login": "James3014",
+        "comment_body_sha256": "6" * 64,
+        "payload_sha256": payload_hash,
+        "payload": payload,
+    })
+
+
+def integration_envelope(
+    verification: OwnerVerificationEnvelope,
+    *,
+    accepted_head: str = COMMIT,
+    expected_base: str = BASE,
+) -> OwnerIntegrationEnvelope:
+    source = envelope()
+    payload = {
+        "schema": "nexus.break_glass_owner_integration.v1",
+        "repository": "James3014/Nexus-new",
+        "issue": 806,
+        "owner_login": "James3014",
+        "recovery_id": source.payload.recovery_id,
+        "integration_attempt_id": "BG-806-I1",
+        "source_attempt_id": source.payload.attempt_id,
+        "source_activation_payload_sha256": source.payload_sha256,
+        "verification_payload_sha256": verification.payload_sha256,
+        "effect_class": "EMERGENCY_INTEGRATION",
+        "pr_number": 808,
+        "accepted_head_sha": accepted_head,
+        "accepted_tree_sha": REPAIR_TREE,
+        "accepted_diff_sha256": DIFF_HASH,
+        "expected_base_sha": expected_base,
+        "merge_method": "squash",
+        "checks": [
+            {
+                **item.model_dump(mode="json"),
+                "head_sha": accepted_head,
+            }
+            for item in verification.payload.checks
+        ],
+        "issued_at": "2026-09-06T07:05:00+08:00",
+        "expires_at": "2026-09-06T23:00:00+08:00",
+        "claim_ceiling": "emergency_integration_only",
+    }
+    payload_hash = canonical_sha256(payload)
+    return OwnerIntegrationEnvelope.model_validate({
+        "repository": "James3014/Nexus-new",
+        "issue": 806,
+        "comment_id": 6000000002,
+        "comment_url": "https://github.com/James3014/Nexus-new/issues/806#issuecomment-6000000002",
+        "author_login": "James3014",
+        "comment_body_sha256": "7" * 64,
+        "payload_sha256": payload_hash,
+        "payload": payload,
+    })
+
+
+def canary(*, main_sha: str = "8" * 40) -> BreakGlassGovernanceCanaryEvidence:
+    source = envelope()
+    return BreakGlassGovernanceCanaryEvidence(
+        recovery_id=source.payload.recovery_id,
+        source_attempt_id=source.payload.attempt_id,
+        integrated_main_sha=main_sha,
+        source_runtime_identity_sha256="9" * 64,
+        action_binding_sha256="a" * 64,
+        normal_authority_readback_sha256="b" * 64,
+        governance_operation_receipt_sha256="c" * 64,
+        verifier_receipt_sha256="d" * 64,
+        observed_at=NOW,
+        normal_governance_restored=True,
     )
 
 
@@ -152,21 +261,29 @@ def test_full_chain_requires_independent_verifier_and_denies_replay(tmp_path: Pa
 
     with pytest.raises(BreakGlassRecoveryError, match="INDEPENDENT_VERIFIER_REQUIRED"):
         record_source_repair_verified(
-            env, verification(verifier="worker-1"), now=NOW, state_root=tmp_path
+            env,
+            verification_envelope(verifier="worker-1"),
+            now=NOW,
+            state_root=tmp_path,
         )
 
     verified = record_source_repair_verified(
-        env, verification(verifier="primary-coordinator"), now=NOW, state_root=tmp_path
+        env,
+        verification_envelope(verifier="primary-coordinator"),
+        now=NOW,
+        state_root=tmp_path,
     )
     assert verified["phase"] == "VERIFIED"
-    consumed = consume_source_repair_authority(env, now=NOW, state_root=tmp_path)
+    consumed = consume_source_repair_authority(
+        env, canary(), now=NOW, state_root=tmp_path
+    )
     assert consumed["phase"] == "CONSUMED"
     assert consumed["evidence"]["granted_effect"] == "SOURCE_REPAIR_ONLY"
     assert "GITHUB_MERGE" in consumed["evidence"]["excluded_effects"]
     assert "RUNTIME_RECOVERY" in consumed["evidence"]["excluded_effects"]
 
     with pytest.raises(BreakGlassRecoveryError, match="RECOVERY_REPLAY_DENIED"):
-        consume_source_repair_authority(env, now=NOW, state_root=tmp_path)
+        consume_source_repair_authority(env, canary(), now=NOW, state_root=tmp_path)
     with pytest.raises(BreakGlassRecoveryError, match="RECOVERY_REPLAY_DENIED"):
         record_source_repair_applied(env, app, now=NOW, state_root=tmp_path)
 
@@ -179,9 +296,11 @@ def test_phase_skips_fail_closed(tmp_path: Path) -> None:
         env, observed_base_sha=BASE, observed_base_tree=TREE, now=NOW, state_root=tmp_path
     )
     with pytest.raises(BreakGlassRecoveryError, match="APPLIED_EVIDENCE_REQUIRED"):
-        record_source_repair_verified(env, verification(), now=NOW, state_root=tmp_path)
+        record_source_repair_verified(
+            env, verification_envelope(), now=NOW, state_root=tmp_path
+        )
     with pytest.raises(BreakGlassRecoveryError, match="VERIFIED_EVIDENCE_REQUIRED"):
-        consume_source_repair_authority(env, now=NOW, state_root=tmp_path)
+        consume_source_repair_authority(env, canary(), now=NOW, state_root=tmp_path)
 
 
 def test_scope_widening_and_forbidden_change_fail_before_applied_transition(tmp_path: Path) -> None:
@@ -229,15 +348,149 @@ def test_verification_subject_substitution_is_rejected(tmp_path: Path) -> None:
         env, observed_base_sha=BASE, observed_base_tree=TREE, now=NOW, state_root=tmp_path
     )
     record_source_repair_applied(env, applied(), now=NOW, state_root=tmp_path)
-    bad = BreakGlassVerificationEvidence(
-        verifier_id="primary-coordinator",
-        verifier_evidence_sha256=VERIFY_HASH,
-        verified_commit_sha="6" * 40,
-        verified_tree_sha=REPAIR_TREE,
-        verified_diff_sha256=DIFF_HASH,
-    )
+    bad = verification_envelope(commit="6" * 40)
     with pytest.raises(BreakGlassRecoveryError, match="VERIFICATION_SUBJECT_MISMATCH"):
         record_source_repair_verified(env, bad, now=NOW, state_root=tmp_path)
+
+
+def test_emergency_integration_requires_separate_owner_grant_and_denies_replay(
+    tmp_path: Path,
+) -> None:
+    source = envelope()
+    verification = verification_envelope()
+    prepare_source_repair(
+        source,
+        observed_base_sha=BASE,
+        observed_base_tree=TREE,
+        now=NOW,
+        state_root=tmp_path,
+    )
+    record_source_repair_applied(source, applied(), now=NOW, state_root=tmp_path)
+    record_source_repair_verified(
+        source, verification, now=NOW, state_root=tmp_path
+    )
+
+    integration = integration_envelope(verification)
+    prepared = prepare_emergency_integration(
+        source, integration, now=NOW, state_root=tmp_path
+    )
+    assert prepared["phase"] == "PREPARED"
+    assert prepared["effect_class"] == "EMERGENCY_INTEGRATION"
+    assert prepared["forbidden_effects"] == [
+        "FORCE_PUSH",
+        "REF_DELETE",
+        "UNRELATED_MERGE",
+        "RUNTIME_RECOVERY",
+        "RELEASE",
+        "PRODUCTION_PUBLIC_CLAIM",
+    ]
+
+    merged_main = "8" * 40
+    consumed = record_emergency_integration_consumed(
+        integration,
+        merge_commit_sha=merged_main,
+        observed_main_sha=merged_main,
+        merged_pr_number=808,
+        now=NOW,
+        state_root=tmp_path,
+    )
+    assert consumed["phase"] == "CONSUMED"
+    assert consumed["granted_effect"] == "EMERGENCY_INTEGRATION_ONLY"
+    assert inspect_emergency_integration(integration, state_root=tmp_path)["status"] == (
+        "CONSUMED"
+    )
+    with pytest.raises(BreakGlassRecoveryError, match="INTEGRATION_REPLAY_DENIED"):
+        assert_emergency_integration_not_consumed(integration, state_root=tmp_path)
+
+
+def test_emergency_integration_subject_or_base_substitution_fails_closed(
+    tmp_path: Path,
+) -> None:
+    source = envelope()
+    verification = verification_envelope()
+    prepare_source_repair(
+        source,
+        observed_base_sha=BASE,
+        observed_base_tree=TREE,
+        now=NOW,
+        state_root=tmp_path,
+    )
+    record_source_repair_applied(source, applied(), now=NOW, state_root=tmp_path)
+    record_source_repair_verified(
+        source, verification, now=NOW, state_root=tmp_path
+    )
+
+    with pytest.raises(BreakGlassRecoveryError, match="INTEGRATION_SUBJECT_MISMATCH"):
+        prepare_emergency_integration(
+            source,
+            integration_envelope(verification, accepted_head="5" * 40),
+            now=NOW,
+            state_root=tmp_path,
+        )
+    with pytest.raises(BreakGlassRecoveryError, match="INTEGRATION_AUTHORITY_MISMATCH"):
+        prepare_emergency_integration(
+            source,
+            integration_envelope(verification, expected_base="6" * 40),
+            now=NOW,
+            state_root=tmp_path,
+        )
+
+
+def test_self_hosting_recovery_e2e_restores_normal_path_then_collapses_authority(
+    tmp_path: Path,
+) -> None:
+    normal_governance_available = False
+
+    def normal_governance_canary() -> BreakGlassGovernanceCanaryEvidence:
+        if not normal_governance_available:
+            raise RuntimeError("NORMAL_GOVERNANCE_UNAVAILABLE")
+        return canary(main_sha="8" * 40)
+
+    with pytest.raises(RuntimeError, match="NORMAL_GOVERNANCE_UNAVAILABLE"):
+        normal_governance_canary()
+
+    source = envelope()
+    verification = verification_envelope()
+    prepare_source_repair(
+        source,
+        observed_base_sha=BASE,
+        observed_base_tree=TREE,
+        now=NOW,
+        state_root=tmp_path,
+    )
+    record_source_repair_applied(
+        source, applied(implementer="dev-mcp-owner-direct"), now=NOW, state_root=tmp_path
+    )
+    record_source_repair_verified(
+        source, verification, now=NOW, state_root=tmp_path
+    )
+
+    integration = integration_envelope(verification)
+    prepare_emergency_integration(source, integration, now=NOW, state_root=tmp_path)
+    merged_main = "8" * 40
+    record_emergency_integration_consumed(
+        integration,
+        merge_commit_sha=merged_main,
+        observed_main_sha=merged_main,
+        merged_pr_number=808,
+        now=NOW,
+        state_root=tmp_path,
+    )
+
+    normal_governance_available = True
+    restored_canary = normal_governance_canary()
+    consumed = consume_source_repair_authority(
+        source, restored_canary, now=NOW, state_root=tmp_path
+    )
+    assert consumed["evidence"]["governance_canary_sha256"] == (
+        restored_canary.evidence_sha256
+    )
+    assert consumed["evidence"]["authority_terminal"] is True
+
+    with pytest.raises(BreakGlassRecoveryError, match="RECOVERY_REPLAY_DENIED"):
+        record_source_repair_applied(source, applied(), now=NOW, state_root=tmp_path)
+    with pytest.raises(BreakGlassRecoveryError, match="INTEGRATION_REPLAY_DENIED"):
+        assert_emergency_integration_not_consumed(integration, state_root=tmp_path)
 
 
 def test_transition_tamper_is_detected(tmp_path: Path) -> None:

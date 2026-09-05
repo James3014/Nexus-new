@@ -32,6 +32,7 @@ retroactive Task Card, acceptance, merge, runtime, or release authority.
 | DEC-001 | OWNER_DECISION | Owner requires #806 to be carried through implementation and closure rather than stopping at G0 analysis. |
 | DEC-002 | OWNER_DECISION | Owner selected an external Owner-rooted break-glass authority rather than permanent direct bypass; source repair, integration, and runtime recovery remain separate authorities. |
 | DEC-003 | OWNER_DECISION | Issue #806 comment 5555340739 explicitly authorizes one SOURCE_REPAIR attempt only, with exact repo/base/tree/scope/expiry/verifiers/claim ceiling. |
+| DEC-004 | OWNER_DECISION | Issue #806 comment 5555313946 selects Dev MCP / DevSpace OWNER_DIRECT as the independent recovery execution substrate and forbids creation of a second general recovery executor. |
 | CUR-001 | CURRENT_STATE | Normal Task Card and standing-grant consumers are inside the governance plane and therefore cannot be the independent recovery root when that plane is the failed seam. |
 | CUR-002 | CURRENT_STATE | Existing rollback guidance already defines bounded clean-base repair, immutable repair identity, tamper/retry checks, separate integration/activation, and live post-recovery proof, but previously did not materialize independent Owner authority. |
 | DER-001 | DERIVATION | The smallest safe addition is an external Owner activation plus a host-local evidence consumer that never imports or calls Gateway, Task Card, lifecycle, Workforce Admission, or normal standing-grant authority. |
@@ -39,9 +40,9 @@ retroactive Task Card, acceptance, merge, runtime, or release authority.
 ## Brownfield delta
 
 - **ADDED:** canonical `nexus.break_glass_owner_activation.v1` authority payload.
-- **ADDED:** externally materialized GitHub Owner comment envelope and exact payload hash binding.
-- **ADDED:** durable host-local recovery evidence chain `PREPARED -> APPLIED -> VERIFIED -> CONSUMED`.
-- **ADDED:** narrow operator CLI that reads fixed Git identity/diff evidence but performs no repair effect itself.
+- **ADDED:** externally materialized GitHub Owner activation, verification, and emergency-integration comment envelopes with exact canonical payload hash binding.
+- **ADDED:** durable host-local source-repair evidence chain `PREPARED -> APPLIED -> VERIFIED -> CONSUMED` plus a separate emergency-integration `PREPARED -> CONSUMED` chain.
+- **ADDED:** narrow operator CLI that reads fixed Git/GitHub evidence but performs no repair, merge, push, reload, or release effect itself.
 - **MODIFIED:** bootstrap recovery documentation now requires this canonical authority for governance-plane self-repair.
 - **UNCHANGED:** normal standing grants, Task Cards, CapabilityPlanner, Workforce Admission, Candidate acceptance, protected merge, Gateway reload/rebind, release, and production authority.
 
@@ -95,25 +96,47 @@ run the source mutation, commit, push, merge, or runtime effect itself.
 
 ### REQ-007 — Verification binding
 
-VERIFIED SHALL bind the same repair commit/tree/diff plus verifier evidence.
-The verifier identity SHALL differ from the implementer identity. Verification
-subject substitution SHALL fail closed.
+VERIFIED SHALL require a separately materialized Owner verification comment
+whose canonical payload binds the same repair commit/tree/full-diff plus a
+non-empty set of exact-head successful CI/check run identities. The production
+consumer SHALL re-read that GitHub comment and SHALL NOT accept a caller-supplied
+`verifier_id` or opaque verification hash as sufficient evidence. The verifier
+identity SHALL differ from the implementer identity. Check-head, comment,
+payload, or repair-subject substitution SHALL fail closed.
+
+### REQ-007A — Emergency integration authority
+
+When normal integration authority is part of the unavailable governance plane,
+merge requires a separate Owner `EMERGENCY_INTEGRATION` comment bound to exact
+source activation, exact Owner verification payload, PR number, accepted
+head/tree/diff, expected main/base, merge method, successful exact-head checks,
+expiry, and claim ceiling. The validated grant may be consumed only by an
+existing bounded exact-head/CAS merge sink such as `git_merge_pull_request`.
+A bare `ownerConfirmation=true` is an effect confirmation, not the break-glass
+authority source. No force push, ref deletion, unrelated merge, runtime
+activation, release, or production/public claim is granted.
 
 ### REQ-008 — Crash/retry/replay safety
 
-Each `recovery_id + attempt_id` SHALL use durable immutable phase transition
-records with canonical hashes and predecessor chaining. Exact same-operation
-retry MAY return the same transition; conflicting retry SHALL fail closed.
-Phase gaps, hash tamper, symlink state, or post-CONSUMED replay SHALL fail
-closed. A retry after uncertain acknowledgement SHALL inspect the same attempt
-rather than create a replacement authority identity.
+Each source or integration attempt SHALL use stable recovery/effect identity and
+durable immutable transition records with canonical hashes and predecessor
+binding. Exact same-operation reconciliation MAY return the same terminal
+record; conflicting retry SHALL fail closed. Phase gaps, hash tamper, symlink
+state, or post-CONSUMED replay SHALL fail closed. After an uncertain remote
+merge acknowledgement, the controller SHALL read back the same PR/default-branch
+state before deciding whether any effect remains; it SHALL NOT blindly invoke a
+second merge attempt.
 
 ### REQ-009 — Authority collapse
 
-CONSUMED SHALL exist only after VERIFIED and SHALL record SOURCE_REPAIR as the
-only granted effect plus explicit excluded effects. After CONSUMED, mutation
-replay through that recovery attempt SHALL be denied. Runtime recovery and
-emergency integration, if actually required, need new Owner authority artifacts.
+SOURCE_REPAIR `CONSUMED` SHALL exist only after VERIFIED plus a fresh typed
+normal-governance canary proving source/runtime identity, action binding, normal
+authority readback, one bounded governance operation receipt, and verifier
+receipt. It SHALL record SOURCE_REPAIR as the only granted source effect plus
+explicit excluded effects. Emergency integration has its own terminal record
+bound to authoritative merge/main readback. After either authority is terminal,
+effect replay through that attempt SHALL be denied. Runtime recovery, if
+actually required, needs a third Owner authority artifact.
 
 ### REQ-010 — Post-recovery closure
 
@@ -130,10 +153,11 @@ break-glass authority is terminal and replay is denied.
 | AC-002 | REQ-003 | Static/source inspection shows no dependency on standing-grant/Gateway/lifecycle/Task Card/Workforce execution consumers. | Import/search check fails if forbidden authority modules are referenced by recovery consumer. |
 | AC-003 | REQ-004 | G1 activation validates only SOURCE_REPAIR. | EMERGENCY_INTEGRATION or RUNTIME_RECOVERY substitution fails. |
 | AC-004 | REQ-005 | Exact base/tree prepares and authorized paths apply. | Wrong base/tree, README scope widening, forbidden standing-grant path, and `..` escape fail. |
-| AC-005 | REQ-006/007 | APPLIED and VERIFIED bind one immutable repair subject and distinct implementer/verifier identities. | Verifier==implementer and commit substitution fail. |
-| AC-006 | REQ-008 | Exact PREPARED retry is idempotent; valid chain reaches CONSUMED. | Phase skip, conflicting APPLIED retry, transition tamper and symlink state fail. |
-| AC-007 | REQ-009 | CONSUMED explicitly records `SOURCE_REPAIR_ONLY` and excluded merge/runtime/release effects. | Second consume and post-consume apply fail with replay denial. |
+| AC-005 | REQ-006/007 | APPLIED and VERIFIED bind one immutable repair subject; VERIFIED is rooted in an Owner GitHub verification comment whose exact-head checks are all successful. | Caller-only verifier/hash, verifier==implementer, check-head substitution, and commit substitution fail. |
+| AC-006 | REQ-008 | Exact PREPARED retry is idempotent; source and integration attempts reconcile through durable terminal records. | Phase skip, conflicting APPLIED retry, transition tamper, symlink state, and blind post-merge retry fail. |
+| AC-007 | REQ-007A/009 | A separate Owner integration grant binds exact PR/base/head/checks and only an existing exact-head/CAS merge sink may consume it; source CONSUMED requires a fresh normal-governance canary. | Source authority cannot merge; integration grant cannot widen effect; post-consume source/integration replay fails. |
 | AC-008 | REQ-010 | Integrated revision passes focused/regression evidence and a fresh normal-governance canary, then terminal/replay-denial evidence is recorded. | Green source tests alone or merged PR without canary cannot close #806. |
+| AC-009 | REQ-003/007A/009 | Controlled self-hosting E2E starts with normal governance unavailable, exercises real break-glass source/integration contracts, restores the normal-path canary, consumes emergency authority, and proves replay denial. | Harness that never begins in a failed-governance state or never exercises replay denial is not sufficient. |
 
 ## Verification set for G1 source Candidate
 

@@ -70,11 +70,23 @@ need to repair.
 authority effects. Source-repair authority can produce only an immutable repair
 commit/tree/full-diff plus verification evidence; it cannot approve, merge,
 mutate protected refs, reload runtime, release, or make production/public
-claims. The host-local evidence chain is `PREPARED -> APPLIED -> VERIFIED ->
-CONSUMED`, with exact-attempt reconciliation, tamper/symlink protection,
-independent verifier binding, and replay denial after terminal consumption.
-Emergency integration or runtime recovery requires a new exact Owner authority
-artifact for that effect.
+claims. `VERIFIED` requires an externally re-read Owner verification comment
+bound to the same commit/tree/full-diff and successful exact-head checks; a
+caller-provided verifier name or opaque hash is not sufficient. The host-local
+source evidence chain is `PREPARED -> APPLIED -> VERIFIED -> CONSUMED`, with
+exact-attempt reconciliation, tamper/symlink protection, and replay denial after
+terminal consumption. SOURCE_REPAIR becomes CONSUMED only after a fresh normal-
+governance canary. Emergency integration or runtime recovery requires a new
+exact Owner authority artifact for that effect.
+
+When normal merge authority is itself inside the failed plane, a separately
+validated `EMERGENCY_INTEGRATION` Owner grant may authorize only one exact PR,
+accepted head/tree/diff, expected base/main, merge method, and successful exact-
+head check set. The controller then delegates the physical merge to an existing
+bounded exact-head/CAS sink such as `git_merge_pull_request`; its
+`ownerConfirmation=true` is effect confirmation, not the recovery authority
+source. Force push, ref deletion, unrelated merge, runtime activation, release,
+and production/public claims remain forbidden.
 
 `NEXUS_GOVERNANCE_DEFAULT_READY` may be declared only by the Owner after a fresh
 readiness review. At minimum, that review should bind evidence that:

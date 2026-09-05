@@ -85,20 +85,29 @@ For a qualifying bounded repair:
    checks. A retry keeps the same `task_id` and uses fresh `attempt_id`,
    `action_id`, and `idempotency_key` values; it must not create a second
    Controller or a `v2`/`v3` task identity.
-8. Obtain independent review of the frozen commit and its evidence by an
-   authority distinct from the implementer.
+8. Obtain independent verification of the frozen commit from evidence outside
+   the implementer's own assertion. For #806, the production consumer requires
+   an Owner GitHub verification comment bound to the exact commit/tree/full-diff
+   and successful exact-head check run identities; a caller-supplied verifier
+   string/hash is insufficient.
 9. Keep Candidate approval, integration, push, reload, activation, and cleanup as
-   separate explicit authorities; repair completion performs none of them.
+   separate explicit authorities; repair completion performs none of them. If
+   normal merge authority is part of the failed plane, require a separate Owner
+   `EMERGENCY_INTEGRATION` grant and delegate only its exact PR/base/head/method
+   to the existing bounded exact-head/CAS merge sink. Never treat that sink's
+   caller confirmation Boolean as the break-glass authority source.
 10. After separately authorized clean-source acceptance and activation,
    reacquire loaded source/runtime/action identity and verify affected live
    behavior, not process liveness alone.
-11. Advance the durable recovery evidence through `PREPARED -> APPLIED ->
-   VERIFIED -> CONSUMED`; bind the immutable repair commit/tree/full-diff and
-   independent verifier evidence. `SOURCE_REPAIR`, `EMERGENCY_INTEGRATION`, and
-   `RUNTIME_RECOVERY` are separate Owner authorities. A source-repair activation
-   cannot be reused for merge or runtime effects.
-12. After the normal governance canary succeeds, record the recovery authority
-   terminal state and prove replay is denied. Do not leave standing emergency
+11. Advance source recovery evidence through `PREPARED -> APPLIED -> VERIFIED`;
+   if emergency integration is required, advance its distinct durable attempt
+   through `PREPARED -> CONSUMED` only after authoritative PR/main readback.
+   `SOURCE_REPAIR`, `EMERGENCY_INTEGRATION`, and `RUNTIME_RECOVERY` are separate
+   Owner authorities. A source-repair activation cannot be reused for merge or
+   runtime effects.
+12. After the normal governance canary succeeds, record SOURCE_REPAIR as
+   `CONSUMED`, binding the canary evidence, then prove both source-repair and any
+   emergency-integration replay are denied. Do not leave standing emergency
    authority behind.
 
 Exit bootstrap recovery as soon as the repaired canonical authority can again

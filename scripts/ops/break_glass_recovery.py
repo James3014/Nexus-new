@@ -27,15 +27,22 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from nexus.contracts.break_glass_recovery import (  # noqa: E402
     BreakGlassAppliedEvidence,
-    BreakGlassVerificationEvidence,
+    BreakGlassGovernanceCanaryEvidence,
     OwnerActivationEnvelope,
+    OwnerIntegrationEnvelope,
+    OwnerVerificationEnvelope,
     owner_envelope_from_github_comment,
+    owner_integration_from_github_comment,
+    owner_verification_from_github_comment,
 )
 from nexus.orchestrator.break_glass_recovery import (  # noqa: E402
     BreakGlassRecoveryError,
     consume_source_repair_authority,
     inspect_attempt,
+    inspect_emergency_integration,
+    prepare_emergency_integration,
     prepare_source_repair,
+    record_emergency_integration_consumed,
     record_source_repair_applied,
     record_source_repair_verified,
 )
@@ -49,7 +56,7 @@ def _print(value: object) -> None:
     print(json.dumps(value, ensure_ascii=False, sort_keys=True))
 
 
-def _fetch_envelope(comment_id: int) -> OwnerActivationEnvelope:
+def _fetch_comment(comment_id: int) -> dict[str, object]:
     if comment_id <= 0:
         raise BreakGlassRecoveryError("COMMENT_ID_INVALID")
     url = f"https://api.github.com/repos/James3014/Nexus-new/issues/comments/{comment_id}"
@@ -75,7 +82,19 @@ def _fetch_envelope(comment_id: int) -> OwnerActivationEnvelope:
         raise BreakGlassRecoveryError("GITHUB_COMMENT_MALFORMED") from exc
     if not isinstance(parsed, dict):
         raise BreakGlassRecoveryError("GITHUB_COMMENT_MALFORMED")
-    return owner_envelope_from_github_comment(parsed)
+    return parsed
+
+
+def _fetch_envelope(comment_id: int) -> OwnerActivationEnvelope:
+    return owner_envelope_from_github_comment(_fetch_comment(comment_id))
+
+
+def _fetch_verification(comment_id: int) -> OwnerVerificationEnvelope:
+    return owner_verification_from_github_comment(_fetch_comment(comment_id))
+
+
+def _fetch_integration(comment_id: int) -> OwnerIntegrationEnvelope:
+    return owner_integration_from_github_comment(_fetch_comment(comment_id))
 
 
 def _git(repo_root: Path, *args: str) -> bytes:
@@ -173,14 +192,14 @@ def _record_applied(args: argparse.Namespace) -> int:
 
 def _record_verified(args: argparse.Namespace) -> int:
     envelope = _fetch_envelope(args.comment_id)
+    verification = _fetch_verification(args.verification_comment_id)
     physical = _repair_evidence(args.repo_root, envelope, args.implementer_id)
-    verification = BreakGlassVerificationEvidence(
-        verifier_id=args.verifier_id,
-        verifier_evidence_sha256=args.verifier_evidence_sha256,
-        verified_commit_sha=physical.repair_commit_sha,
-        verified_tree_sha=physical.repair_tree_sha,
-        verified_diff_sha256=physical.full_diff_sha256,
-    )
+    if (
+        verification.payload.verified_commit_sha != physical.repair_commit_sha
+        or verification.payload.verified_tree_sha != physical.repair_tree_sha
+        or verification.payload.verified_diff_sha256 != physical.full_diff_sha256
+    ):
+        raise BreakGlassRecoveryError("VERIFICATION_PHYSICAL_SUBJECT_MISMATCH")
     result = record_source_repair_verified(envelope, verification, now=_now())
     _print(result)
     return 0
@@ -188,8 +207,57 @@ def _record_verified(args: argparse.Namespace) -> int:
 
 def _consume(args: argparse.Namespace) -> int:
     envelope = _fetch_envelope(args.comment_id)
-    result = consume_source_repair_authority(envelope, now=_now())
+    try:
+        payload = json.loads(args.canary_json.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise BreakGlassRecoveryError("GOVERNANCE_CANARY_MALFORMED") from exc
+    canary = BreakGlassGovernanceCanaryEvidence.model_validate(payload)
+    result = consume_source_repair_authority(envelope, canary, now=_now())
     _print(result)
+    return 0
+
+
+def _validate_integration(args: argparse.Namespace) -> int:
+    integration = _fetch_integration(args.integration_comment_id)
+    integration.payload.assert_current(now=_now())
+    _print({
+        "status": "VALID",
+        "comment_id": integration.comment_id,
+        "recovery_id": integration.payload.recovery_id,
+        "integration_attempt_id": integration.payload.integration_attempt_id,
+        "effect_class": integration.payload.effect_class,
+        "pr_number": integration.payload.pr_number,
+        "expected_base_sha": integration.payload.expected_base_sha,
+        "accepted_head_sha": integration.payload.accepted_head_sha,
+        "payload_sha256": integration.payload_sha256,
+    })
+    return 0
+
+
+def _prepare_integration(args: argparse.Namespace) -> int:
+    source = _fetch_envelope(args.comment_id)
+    integration = _fetch_integration(args.integration_comment_id)
+    result = prepare_emergency_integration(source, integration, now=_now())
+    _print(result)
+    return 0
+
+
+def _record_integration_consumed(args: argparse.Namespace) -> int:
+    integration = _fetch_integration(args.integration_comment_id)
+    result = record_emergency_integration_consumed(
+        integration,
+        merge_commit_sha=args.merge_commit_sha,
+        observed_main_sha=args.observed_main_sha,
+        merged_pr_number=args.pr_number,
+        now=_now(),
+    )
+    _print(result)
+    return 0
+
+
+def _inspect_integration(args: argparse.Namespace) -> int:
+    integration = _fetch_integration(args.integration_comment_id)
+    _print(inspect_emergency_integration(integration))
     return 0
 
 
@@ -225,17 +293,37 @@ def build_parser() -> argparse.ArgumentParser:
     activation(verified)
     verified.add_argument("--repo-root", type=Path, required=True)
     verified.add_argument("--implementer-id", required=True)
-    verified.add_argument("--verifier-id", required=True)
-    verified.add_argument("--verifier-evidence-sha256", required=True)
+    verified.add_argument("--verification-comment-id", type=int, required=True)
     verified.set_defaults(handler=_record_verified)
 
     consume = commands.add_parser("consume")
     activation(consume)
+    consume.add_argument("--canary-json", type=Path, required=True)
     consume.set_defaults(handler=_consume)
 
     inspect = commands.add_parser("inspect")
     activation(inspect)
     inspect.set_defaults(handler=_inspect)
+
+    validate_integration = commands.add_parser("validate-integration")
+    validate_integration.add_argument("--integration-comment-id", type=int, required=True)
+    validate_integration.set_defaults(handler=_validate_integration)
+
+    prepare_integration = commands.add_parser("prepare-integration")
+    activation(prepare_integration)
+    prepare_integration.add_argument("--integration-comment-id", type=int, required=True)
+    prepare_integration.set_defaults(handler=_prepare_integration)
+
+    consumed_integration = commands.add_parser("record-integration-consumed")
+    consumed_integration.add_argument("--integration-comment-id", type=int, required=True)
+    consumed_integration.add_argument("--pr-number", type=int, required=True)
+    consumed_integration.add_argument("--merge-commit-sha", required=True)
+    consumed_integration.add_argument("--observed-main-sha", required=True)
+    consumed_integration.set_defaults(handler=_record_integration_consumed)
+
+    inspect_integration = commands.add_parser("inspect-integration")
+    inspect_integration.add_argument("--integration-comment-id", type=int, required=True)
+    inspect_integration.set_defaults(handler=_inspect_integration)
 
     return parser
 
