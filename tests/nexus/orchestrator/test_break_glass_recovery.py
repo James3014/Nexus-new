@@ -176,9 +176,7 @@ def integration_envelope(
         "integration_attempt_id": "BG-806-I1",
         "source_attempt_id": source.payload.attempt_id,
         "source_activation_payload_sha256": source.payload_sha256,
-        "verification_payload_sha256": (
-            verification_payload_sha256 or verification.payload_sha256
-        ),
+        "verification_payload_sha256": verification_payload_sha256 or verification.payload_sha256,
         "effect_class": "EMERGENCY_INTEGRATION",
         "pr_number": 808,
         "accepted_head_sha": accepted_head,
