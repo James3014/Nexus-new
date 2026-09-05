@@ -22,9 +22,10 @@ import re
 import stat
 import tempfile
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal, Mapping
+from uuid import uuid4
 
 from pydantic import (
     BaseModel,
@@ -48,6 +49,7 @@ from nexus.orchestrator.autonomy_policy import (
 
 _HOME = pwd.getpwuid(os.getuid()).pw_dir
 DEFAULT_RECEIPT_PATH = Path(_HOME) / ".local/state/nexus/authority/standing-grant.json"
+DEFAULT_TRANSITIONS_DIR = DEFAULT_RECEIPT_PATH.parent / "transitions"
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _SHA64_HEX = re.compile(r"^[0-9a-f]{64}$")
 _MAX_RECEIPT_BYTES = 16 * 1024
@@ -282,6 +284,53 @@ def _coordination_lock(directory: Path):
         os.close(fd)
 
 
+def _write_bytes_locked(
+    canonical: str,
+    supersedes_grant_hash: str | None,
+    destination: Path,
+    expected: str | None,
+) -> None:
+    present = os.path.lexists(destination)
+    if present:
+        # Replacing an existing receipt requires exact predecessor binding.
+        if supersedes_grant_hash is None:
+            raise StandingGrantReceiptError("SUPERSEDES_HASH_REQUIRED_FOR_REPLACE")
+        if expected is None:
+            raise StandingGrantReceiptError("EXISTS_NO_CAS")
+        if supersedes_grant_hash != expected:
+            raise StandingGrantReceiptError("SUPERSEDES_CAS_MISMATCH")
+        current = _read_current_hash_nofollow(destination)
+        if current != expected:
+            raise StandingGrantReceiptError("STALE_WRITER_CAS_MISMATCH")
+    else:
+        # Initial write: neither a predecessor hash nor a CAS may be supplied.
+        if supersedes_grant_hash is not None or expected is not None:
+            raise StandingGrantReceiptError("INITIAL_WRITE_NO_SUPERSEDES")
+    fd, tmp_name = tempfile.mkstemp(prefix=".standing-grant-", dir=str(destination.parent))
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(canonical.encode("utf-8") + b"\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, destination)
+        os.chmod(destination, 0o600)
+        # fsync the parent directory so the rename survives a crash.
+        parent_fd = os.open(
+            str(destination.parent), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        )
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
 def _write_bytes(
     canonical: str,
     supersedes_grant_hash: str | None,
@@ -290,45 +339,7 @@ def _write_bytes(
 ) -> None:
     _assert_dir_chain_safe(destination.parent, create=True)
     with _coordination_lock(destination.parent):
-        present = os.path.lexists(destination)
-        if present:
-            # Replacing an existing receipt requires exact predecessor binding.
-            if supersedes_grant_hash is None:
-                raise StandingGrantReceiptError("SUPERSEDES_HASH_REQUIRED_FOR_REPLACE")
-            if expected is None:
-                raise StandingGrantReceiptError("EXISTS_NO_CAS")
-            if supersedes_grant_hash != expected:
-                raise StandingGrantReceiptError("SUPERSEDES_CAS_MISMATCH")
-            current = _read_current_hash_nofollow(destination)
-            if current != expected:
-                raise StandingGrantReceiptError("STALE_WRITER_CAS_MISMATCH")
-        else:
-            # Initial write: neither a predecessor hash nor a CAS may be supplied.
-            if supersedes_grant_hash is not None or expected is not None:
-                raise StandingGrantReceiptError("INITIAL_WRITE_NO_SUPERSEDES")
-        fd, tmp_name = tempfile.mkstemp(prefix=".standing-grant-", dir=str(destination.parent))
-        try:
-            os.fchmod(fd, 0o600)
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(canonical.encode("utf-8") + b"\n")
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(tmp_name, destination)
-            os.chmod(destination, 0o600)
-            # fsync the parent directory so the rename survives a crash.
-            parent_fd = os.open(
-                str(destination.parent), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-            )
-            try:
-                os.fsync(parent_fd)
-            finally:
-                os.close(parent_fd)
-        except BaseException:
-            try:
-                os.unlink(tmp_name)
-            except FileNotFoundError:
-                pass
-            raise
+        _write_bytes_locked(canonical, supersedes_grant_hash, destination, expected)
 
 
 def write_standing_grant_receipt(
@@ -799,3 +810,470 @@ def _evaluate_durable_standing_grant_at(
         )
     except Exception:
         return evaluate_standing_grant_decision({}, {})
+
+
+def _write_transition_file(path: Path, payload: dict[str, Any]) -> None:
+    _assert_dir_chain_safe(path.parent, create=True)
+    canonical = _canonical_json(payload)
+    fd, tmp_name = tempfile.mkstemp(prefix=".trans-", dir=str(path.parent))
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(canonical.encode("utf-8") + b"\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_name, path)
+        os.chmod(path, 0o600)
+        parent_fd = os.open(str(path.parent), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _read_transition_file(path: Path) -> dict[str, Any]:
+    fd = _open_receipt_fd(path)
+    try:
+        fst = os.fstat(fd)
+    except OSError as exc:
+        if fd >= 0:
+            os.close(fd)
+        raise StandingGrantReceiptError("TRANSITION_READ_FAILED") from exc
+    if not stat.S_ISREG(fst.st_mode) or fst.st_uid != os.geteuid():
+        os.close(fd)
+        raise StandingGrantReceiptError("NOT_REGULAR_FILE")
+    if stat.S_IMODE(fst.st_mode) != 0o600:
+        os.close(fd)
+        raise StandingGrantReceiptError("UNSAFE_PERMISSIONS")
+    if fst.st_size > _MAX_RECEIPT_BYTES:
+        os.close(fd)
+        raise StandingGrantReceiptError("RECEIPT_TOO_LARGE")
+    raw = _read_all_fd(fd, fst.st_size)
+    os.close(fd)
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise StandingGrantReceiptError("MALFORMED") from exc
+    if text.endswith("\n"):
+        text = text[:-1]
+    if "\x00" in text or "\n" in text:
+        raise StandingGrantReceiptError("NONCANONICAL_SERIALIZATION")
+    try:
+        parsed = json.loads(text, object_pairs_hook=_reject_duplicates)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise StandingGrantReceiptError("MALFORMED") from exc
+    if not isinstance(parsed, dict):
+        raise StandingGrantReceiptError("MALFORMED")
+    if _canonical_json(parsed) != text:
+        raise StandingGrantReceiptError("NONCANONICAL_SERIALIZATION")
+    return parsed
+
+
+def _switch_task_card_authority_at(
+    target_path: Path,
+    *,
+    attempt_key: str,
+    expected_current_receipt_hash: str,
+    expected_current_goal_id: str,
+    successor_goal_id: str,
+    successor_thread_id: str,
+    ttl_minutes: int,
+    owner_confirmation: bool,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Switch standing grant to a bounded temporary task-card authority scope at an explicit path."""
+    if owner_confirmation is not True:
+        raise StandingGrantReceiptError("OWNER_CONFIRMATION_REQUIRED")
+    if not isinstance(ttl_minutes, int) or ttl_minutes < 1 or ttl_minutes > 30:
+        raise StandingGrantReceiptError("TTL_MINUTES_INVALID")
+    if not _SAFE_ID.fullmatch(attempt_key):
+        raise StandingGrantReceiptError("ATTEMPT_KEY_INVALID")
+    if not _SHA64_HEX.fullmatch(expected_current_receipt_hash):
+        raise StandingGrantReceiptError("RECEIPT_HASH_INVALID")
+    if not _SAFE_ID.fullmatch(expected_current_goal_id):
+        raise StandingGrantReceiptError("EXPECTED_GOAL_INVALID")
+    if not _SAFE_ID.fullmatch(successor_goal_id):
+        raise StandingGrantReceiptError("SUCCESSOR_GOAL_INVALID")
+    if not _SAFE_ID.fullmatch(successor_thread_id):
+        raise StandingGrantReceiptError("SUCCESSOR_THREAD_INVALID")
+
+    effective_now = now if now is not None else datetime.now(timezone.utc)
+    if not isinstance(effective_now, datetime) or effective_now.tzinfo is None:
+        raise StandingGrantReceiptError("EXACT_TIMEZONE_REQUIRED")
+
+    request_payload = {
+        "operation": "SWITCH",
+        "attempt_key": attempt_key,
+        "expected_current_receipt_hash": expected_current_receipt_hash,
+        "expected_current_goal_id": expected_current_goal_id,
+        "successor_goal_id": successor_goal_id,
+        "successor_thread_id": successor_thread_id,
+        "ttl_minutes": ttl_minutes,
+    }
+    request_hash = canonical_autonomy_hash(request_payload)
+
+    authority_dir = target_path.parent
+    transitions_dir = authority_dir / "transitions"
+    attempt_path = transitions_dir / f"attempt_{attempt_key}.json"
+
+    _assert_dir_chain_safe(authority_dir, create=True)
+    with _coordination_lock(authority_dir):
+        if attempt_path.exists():
+            attempt_record = _read_transition_file(attempt_path)
+            if attempt_record.get("request_hash") != request_hash:
+                raise StandingGrantReceiptError("ATTEMPT_KEY_CONFLICT")
+
+            attempt_status = attempt_record.get("status")
+            if attempt_status == "COMMITTED" or attempt_status is None:
+                return dict(attempt_record["result"])
+
+            if attempt_status == "PREPARED":
+                predecessor_hash = attempt_record["predecessor_receipt_hash"]
+                intended_successor_hash = attempt_record["intended_successor_receipt_hash"]
+                switch_operation_id = attempt_record["switch_operation_id"]
+                op_path = transitions_dir / f"op_{switch_operation_id}.json"
+                if not op_path.exists():
+                    raise StandingGrantReceiptError("SWITCH_OPERATION_NOT_FOUND")
+                op_record = _read_transition_file(op_path)
+                temporary_receipt = StandingGrantReceipt.model_validate(op_record["temporary_receipt"])
+
+                try:
+                    current_hash = _read_current_hash_nofollow(target_path)
+                except StandingGrantReceiptError:
+                    current_hash = None
+
+                if current_hash == predecessor_hash:
+                    _write_bytes_locked(
+                        _canonical_json(temporary_receipt.model_dump(mode="json")),
+                        temporary_receipt.supersedes_grant_hash,
+                        target_path,
+                        predecessor_hash,
+                    )
+                    op_record["status"] = "ACTIVE"
+                    _write_transition_file(op_path, op_record)
+                    attempt_record["status"] = "COMMITTED"
+                    _write_transition_file(attempt_path, attempt_record)
+                    return dict(attempt_record["result"])
+                elif current_hash == intended_successor_hash:
+                    op_record["status"] = "ACTIVE"
+                    _write_transition_file(op_path, op_record)
+                    attempt_record["status"] = "COMMITTED"
+                    _write_transition_file(attempt_path, attempt_record)
+                    return dict(attempt_record["result"])
+                else:
+                    raise StandingGrantReceiptError("CURRENT_RECEIPT_HASH_MISMATCH")
+
+            raise StandingGrantReceiptError("ATTEMPT_STATE_INVALID")
+
+        current_receipt = _load_receipt_at(target_path, now=effective_now)
+        if current_receipt is None:
+            raise StandingGrantReceiptError("RECEIPT_MISSING")
+        if current_receipt.receipt_hash != expected_current_receipt_hash:
+            raise StandingGrantReceiptError("CURRENT_RECEIPT_HASH_MISMATCH")
+        if current_receipt.context.goal_id != expected_current_goal_id:
+            raise StandingGrantReceiptError("CURRENT_GOAL_MISMATCH")
+
+        switch_operation_id = f"switch_{uuid4().hex}"
+        temporary_actions = (
+            AutonomyActionClass.TASK_CARD_COMMIT,
+            AutonomyActionClass.TASK_CARD_CREATE,
+        )
+        temporary_context = StandingGrantContext.issue(
+            owner_id=current_receipt.context.owner_id,
+            coordinator_id=current_receipt.context.coordinator_id,
+            repository=current_receipt.context.repository,
+            thread_id=successor_thread_id,
+            goal_id=successor_goal_id,
+            allowed_actions=temporary_actions,
+            issued_at=effective_now,
+            expires_at=effective_now + timedelta(minutes=ttl_minutes),
+        )
+        temporary_grant_id = f"{current_receipt.grant_id}-switch-{uuid4().hex[:8]}"
+        temporary_receipt = StandingGrantReceipt.issue(
+            grant_id=temporary_grant_id,
+            context=temporary_context,
+            supersedes_grant_hash=current_receipt.receipt_hash,
+        )
+
+        result: dict[str, Any] = {
+            "schema": "nexus.task_card_authority_switch.v1",
+            "status": "SWITCHED",
+            "switch_operation_id": switch_operation_id,
+            "attempt_key": attempt_key,
+            "predecessor_receipt_hash": current_receipt.receipt_hash,
+            "predecessor_goal_id": current_receipt.context.goal_id,
+            "temporary_grant_id": temporary_receipt.grant_id,
+            "temporary_receipt_hash": temporary_receipt.receipt_hash,
+            "temporary_goal_id": successor_goal_id,
+            "temporary_thread_id": successor_thread_id,
+            "allowed_actions": [a.value for a in temporary_actions],
+            "expires_at": temporary_context.expires_at.isoformat(),
+            "owner_confirmation": True,
+        }
+
+        op_record: dict[str, Any] = {
+            "schema": "nexus.task_card_authority_switch_record.v1",
+            "switch_operation_id": switch_operation_id,
+            "attempt_key": attempt_key,
+            "status": "PREPARED",
+            "predecessor_receipt": current_receipt.model_dump(mode="json"),
+            "predecessor_receipt_hash": current_receipt.receipt_hash,
+            "predecessor_goal_id": current_receipt.context.goal_id,
+            "temporary_receipt": temporary_receipt.model_dump(mode="json"),
+            "temporary_receipt_hash": temporary_receipt.receipt_hash,
+            "temporary_goal_id": successor_goal_id,
+            "temporary_thread_id": successor_thread_id,
+            "allowed_actions": [a.value for a in temporary_actions],
+            "created_at": effective_now.isoformat(),
+            "expires_at": temporary_context.expires_at.isoformat(),
+            "restored_at": None,
+            "restored_receipt_hash": None,
+        }
+        op_path = transitions_dir / f"op_{switch_operation_id}.json"
+        _write_transition_file(op_path, op_record)
+
+        attempt_record = {
+            "schema": "nexus.task_card_authority_transition_attempt.v1",
+            "attempt_key": attempt_key,
+            "operation_type": "SWITCH",
+            "status": "PREPARED",
+            "switch_operation_id": switch_operation_id,
+            "request": request_payload,
+            "request_hash": request_hash,
+            "predecessor_receipt_hash": current_receipt.receipt_hash,
+            "intended_successor_receipt_hash": temporary_receipt.receipt_hash,
+            "result": result,
+            "created_at": effective_now.isoformat(),
+        }
+        _write_transition_file(attempt_path, attempt_record)
+
+        _write_bytes_locked(
+            _canonical_json(temporary_receipt.model_dump(mode="json")),
+            temporary_receipt.supersedes_grant_hash,
+            target_path,
+            current_receipt.receipt_hash,
+        )
+
+        op_record["status"] = "ACTIVE"
+        _write_transition_file(op_path, op_record)
+
+        attempt_record["status"] = "COMMITTED"
+        _write_transition_file(attempt_path, attempt_record)
+
+        return result
+
+
+def switch_task_card_authority(
+    *,
+    attempt_key: str,
+    expected_current_receipt_hash: str,
+    expected_current_goal_id: str,
+    successor_goal_id: str,
+    successor_thread_id: str,
+    ttl_minutes: int,
+    owner_confirmation: bool,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Switch canonical standing grant to a bounded temporary task-card authority scope."""
+    return _switch_task_card_authority_at(
+        DEFAULT_RECEIPT_PATH,
+        attempt_key=attempt_key,
+        expected_current_receipt_hash=expected_current_receipt_hash,
+        expected_current_goal_id=expected_current_goal_id,
+        successor_goal_id=successor_goal_id,
+        successor_thread_id=successor_thread_id,
+        ttl_minutes=ttl_minutes,
+        owner_confirmation=owner_confirmation,
+        now=now,
+    )
+
+
+def _restore_task_card_authority_at(
+    target_path: Path,
+    *,
+    attempt_key: str,
+    switch_operation_id: str,
+    expected_temporary_receipt_hash: str,
+    owner_confirmation: bool,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Restore standing grant from temporary task-card scope to exact predecessor at an explicit path."""
+    if owner_confirmation is not True:
+        raise StandingGrantReceiptError("OWNER_CONFIRMATION_REQUIRED")
+    if not _SAFE_ID.fullmatch(attempt_key):
+        raise StandingGrantReceiptError("ATTEMPT_KEY_INVALID")
+    if not _SAFE_ID.fullmatch(switch_operation_id):
+        raise StandingGrantReceiptError("SWITCH_OPERATION_ID_INVALID")
+    if not _SHA64_HEX.fullmatch(expected_temporary_receipt_hash):
+        raise StandingGrantReceiptError("RECEIPT_HASH_INVALID")
+
+    effective_now = now if now is not None else datetime.now(timezone.utc)
+    if not isinstance(effective_now, datetime) or effective_now.tzinfo is None:
+        raise StandingGrantReceiptError("EXACT_TIMEZONE_REQUIRED")
+
+    request_payload = {
+        "operation": "RESTORE",
+        "attempt_key": attempt_key,
+        "switch_operation_id": switch_operation_id,
+        "expected_temporary_receipt_hash": expected_temporary_receipt_hash,
+    }
+    request_hash = canonical_autonomy_hash(request_payload)
+
+    authority_dir = target_path.parent
+    transitions_dir = authority_dir / "transitions"
+    attempt_path = transitions_dir / f"attempt_{attempt_key}.json"
+    op_path = transitions_dir / f"op_{switch_operation_id}.json"
+
+    _assert_dir_chain_safe(authority_dir, create=True)
+    with _coordination_lock(authority_dir):
+        if attempt_path.exists():
+            attempt_record = _read_transition_file(attempt_path)
+            if attempt_record.get("request_hash") != request_hash:
+                raise StandingGrantReceiptError("ATTEMPT_KEY_CONFLICT")
+
+            attempt_status = attempt_record.get("status")
+            if attempt_status == "COMMITTED" or attempt_status is None:
+                return dict(attempt_record["result"])
+
+            if attempt_status == "PREPARED":
+                if not op_path.exists():
+                    raise StandingGrantReceiptError("SWITCH_OPERATION_NOT_FOUND")
+                op_record = _read_transition_file(op_path)
+                expected_temp_hash = attempt_record["expected_temporary_receipt_hash"]
+                intended_restored_hash = attempt_record["intended_restored_receipt_hash"]
+                intended_restored_receipt = StandingGrantReceipt.model_validate(
+                    attempt_record["intended_restored_receipt"]
+                )
+
+                try:
+                    current_hash = _read_current_hash_nofollow(target_path)
+                except StandingGrantReceiptError:
+                    current_hash = None
+
+                if current_hash == expected_temp_hash:
+                    _write_bytes_locked(
+                        _canonical_json(intended_restored_receipt.model_dump(mode="json")),
+                        intended_restored_receipt.supersedes_grant_hash,
+                        target_path,
+                        expected_temp_hash,
+                    )
+                    op_record["status"] = "RESTORED"
+                    op_record["restored_at"] = effective_now.isoformat()
+                    op_record["restored_receipt_hash"] = intended_restored_receipt.receipt_hash
+                    _write_transition_file(op_path, op_record)
+
+                    attempt_record["status"] = "COMMITTED"
+                    _write_transition_file(attempt_path, attempt_record)
+                    return dict(attempt_record["result"])
+                elif current_hash == intended_restored_hash:
+                    op_record["status"] = "RESTORED"
+                    op_record["restored_at"] = effective_now.isoformat()
+                    op_record["restored_receipt_hash"] = intended_restored_receipt.receipt_hash
+                    _write_transition_file(op_path, op_record)
+
+                    attempt_record["status"] = "COMMITTED"
+                    _write_transition_file(attempt_path, attempt_record)
+                    return dict(attempt_record["result"])
+                else:
+                    raise StandingGrantReceiptError("CURRENT_RECEIPT_HASH_MISMATCH")
+
+            raise StandingGrantReceiptError("ATTEMPT_STATE_INVALID")
+
+        if not op_path.exists():
+            raise StandingGrantReceiptError("SWITCH_OPERATION_NOT_FOUND")
+
+        op_record = _read_transition_file(op_path)
+        if op_record.get("temporary_receipt_hash") != expected_temporary_receipt_hash:
+            raise StandingGrantReceiptError("TEMPORARY_RECEIPT_HASH_MISMATCH")
+        if op_record.get("status") == "RESTORED":
+            raise StandingGrantReceiptError("SWITCH_OPERATION_ALREADY_RESTORED")
+        if op_record.get("status") not in ("ACTIVE", "PREPARED"):
+            raise StandingGrantReceiptError("SWITCH_OPERATION_NOT_ACTIVE")
+
+        current_receipt = _load_receipt_structural_at(target_path)
+        if current_receipt.receipt_hash != expected_temporary_receipt_hash:
+            raise StandingGrantReceiptError("CURRENT_RECEIPT_HASH_MISMATCH")
+
+        predecessor_dict = op_record.get("predecessor_receipt")
+        if not isinstance(predecessor_dict, dict):
+            raise StandingGrantReceiptError("PREDECESSOR_RECORD_MALFORMED")
+        predecessor_receipt = StandingGrantReceipt.model_validate(predecessor_dict)
+
+        restored_grant_id = f"{predecessor_receipt.grant_id}-restored-{uuid4().hex[:8]}"
+        restored_receipt = StandingGrantReceipt.issue(
+            grant_id=restored_grant_id,
+            context=predecessor_receipt.context,
+            supersedes_grant_hash=expected_temporary_receipt_hash,
+        )
+
+        result: dict[str, Any] = {
+            "schema": "nexus.task_card_authority_restore.v1",
+            "status": "RESTORED",
+            "switch_operation_id": switch_operation_id,
+            "attempt_key": attempt_key,
+            "restored_grant_id": restored_receipt.grant_id,
+            "restored_receipt_hash": restored_receipt.receipt_hash,
+            "restored_goal_id": restored_receipt.context.goal_id,
+            "restored_thread_id": restored_receipt.context.thread_id,
+            "restored_allowed_actions": [a.value for a in restored_receipt.context.allowed_actions],
+            "temporary_receipt_hash": expected_temporary_receipt_hash,
+            "owner_confirmation": True,
+        }
+
+        attempt_record = {
+            "schema": "nexus.task_card_authority_transition_attempt.v1",
+            "attempt_key": attempt_key,
+            "operation_type": "RESTORE",
+            "status": "PREPARED",
+            "switch_operation_id": switch_operation_id,
+            "request": request_payload,
+            "request_hash": request_hash,
+            "expected_temporary_receipt_hash": expected_temporary_receipt_hash,
+            "intended_restored_receipt": restored_receipt.model_dump(mode="json"),
+            "intended_restored_receipt_hash": restored_receipt.receipt_hash,
+            "result": result,
+            "created_at": effective_now.isoformat(),
+        }
+        _write_transition_file(attempt_path, attempt_record)
+
+        _write_bytes_locked(
+            _canonical_json(restored_receipt.model_dump(mode="json")),
+            restored_receipt.supersedes_grant_hash,
+            target_path,
+            expected_temporary_receipt_hash,
+        )
+
+        op_record["status"] = "RESTORED"
+        op_record["restored_at"] = effective_now.isoformat()
+        op_record["restored_receipt_hash"] = restored_receipt.receipt_hash
+        _write_transition_file(op_path, op_record)
+
+        attempt_record["status"] = "COMMITTED"
+        _write_transition_file(attempt_path, attempt_record)
+
+        return result
+
+
+def restore_task_card_authority(
+    *,
+    attempt_key: str,
+    switch_operation_id: str,
+    expected_temporary_receipt_hash: str,
+    owner_confirmation: bool,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Restore canonical standing grant from a temporary task-card authority scope to exact predecessor."""
+    return _restore_task_card_authority_at(
+        DEFAULT_RECEIPT_PATH,
+        attempt_key=attempt_key,
+        switch_operation_id=switch_operation_id,
+        expected_temporary_receipt_hash=expected_temporary_receipt_hash,
+        owner_confirmation=owner_confirmation,
+        now=now,
+    )

@@ -65,6 +65,8 @@ from nexus.orchestrator.self_hosted_task_service import (
 from nexus.orchestrator.standing_grant_store import (
     StandingGrantReceiptError,
     authorize_durable_standing_grant_effect,
+    restore_task_card_authority,
+    switch_task_card_authority,
 )
 from nexus.services.model_capability_lineage import (
     CHANGE_KIND_VALUES,
@@ -112,6 +114,7 @@ MAX_SEARCH_STDERR_BYTES = 64 * 1024
 FRESHNESS_SEMANTICS_REVISION = "nexus.gateway_freshness.v3"
 CLINE_RUN_TIMEOUT_SECONDS = 60
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_SHA64_RE = re.compile(r"^[0-9a-f]{64}$")
 GITHUB_REPOSITORY = RepositoryIdentity(
     repository_id="James3014/Nexus-new",
     canonical_remote="https://github.com/James3014/Nexus-new.git",
@@ -2590,6 +2593,84 @@ class UnifiedMCPGateway:
             "owner_authority": owner_authority,
         }
 
+    def _task_card_authority_switch(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        owner_confirmation = arguments.get("owner_confirmation") if "owner_confirmation" in arguments else arguments.get("ownerConfirmation")
+        if owner_confirmation is not True:
+            raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
+        attempt_key = _text(arguments.get("attempt_key") or arguments.get("attemptKey"), "attempt_key", max_length=128)
+        expected_current_receipt_hash = _text(
+            arguments.get("expected_current_receipt_hash") or arguments.get("expectedCurrentReceiptHash"),
+            "expected_current_receipt_hash",
+            max_length=64,
+        ).lower()
+        if not _SHA64_RE.fullmatch(expected_current_receipt_hash):
+            raise GatewayInputError("expected_current_receipt_hash must be a lowercase 64-hex SHA-256")
+        expected_current_goal_id = _text(
+            arguments.get("expected_current_goal_id") or arguments.get("expectedCurrentGoalId"),
+            "expected_current_goal_id",
+            max_length=128,
+        )
+        successor_goal_id = _text(
+            arguments.get("successor_goal_id") or arguments.get("successorGoalId"),
+            "successor_goal_id",
+            max_length=128,
+        )
+        successor_thread_id = _text(
+            arguments.get("successor_thread_id") or arguments.get("successorThreadId"),
+            "successor_thread_id",
+            max_length=128,
+        )
+        raw_ttl = arguments.get("ttl_minutes") if "ttl_minutes" in arguments else arguments.get("ttlMinutes")
+        if raw_ttl is None:
+            raise GatewayInputError("ttl_minutes is required")
+        try:
+            ttl_minutes = int(raw_ttl)
+        except (TypeError, ValueError):
+            raise GatewayInputError("ttl_minutes must be an integer between 1 and 30")
+        if ttl_minutes < 1 or ttl_minutes > 30:
+            raise GatewayInputError("ttl_minutes must be between 1 and 30")
+
+        try:
+            return switch_task_card_authority(
+                attempt_key=attempt_key,
+                expected_current_receipt_hash=expected_current_receipt_hash,
+                expected_current_goal_id=expected_current_goal_id,
+                successor_goal_id=successor_goal_id,
+                successor_thread_id=successor_thread_id,
+                ttl_minutes=ttl_minutes,
+                owner_confirmation=True,
+            )
+        except StandingGrantReceiptError as exc:
+            raise GatewayInputError(str(exc)) from exc
+
+    def _task_card_authority_restore(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        owner_confirmation = arguments.get("owner_confirmation") if "owner_confirmation" in arguments else arguments.get("ownerConfirmation")
+        if owner_confirmation is not True:
+            raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
+        attempt_key = _text(arguments.get("attempt_key") or arguments.get("attemptKey"), "attempt_key", max_length=128)
+        switch_operation_id = _text(
+            arguments.get("switch_operation_id") or arguments.get("switchOperationId"),
+            "switch_operation_id",
+            max_length=128,
+        )
+        expected_temporary_receipt_hash = _text(
+            arguments.get("expected_temporary_receipt_hash") or arguments.get("expectedTemporaryReceiptHash"),
+            "expected_temporary_receipt_hash",
+            max_length=64,
+        ).lower()
+        if not _SHA64_RE.fullmatch(expected_temporary_receipt_hash):
+            raise GatewayInputError("expected_temporary_receipt_hash must be a lowercase 64-hex SHA-256")
+
+        try:
+            return restore_task_card_authority(
+                attempt_key=attempt_key,
+                switch_operation_id=switch_operation_id,
+                expected_temporary_receipt_hash=expected_temporary_receipt_hash,
+                owner_confirmation=True,
+            )
+        except StandingGrantReceiptError as exc:
+            raise GatewayInputError(str(exc)) from exc
+
     def _model_probe_submit(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         provider = str(arguments.get("provider") or "cline").strip().lower()
         metadata, executable = self._provider_executable(provider)
@@ -3409,6 +3490,61 @@ class UnifiedMCPGateway:
                         "expected_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
                         "card_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                         "index_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                    },
+                },
+            },
+            {
+                "name": "nexus_task_card_authority_switch",
+                "description": "Switch canonical standing grant to a bounded temporary task-card authority scope.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": [
+                        "owner_confirmation",
+                        "attempt_key",
+                        "expected_current_receipt_hash",
+                        "expected_current_goal_id",
+                        "successor_goal_id",
+                        "successor_thread_id",
+                        "ttl_minutes",
+                    ],
+                    "properties": {
+                        "owner_confirmation": {"type": "boolean", "const": True},
+                        "ownerConfirmation": {"type": "boolean"},
+                        "attempt_key": {"type": "string", "maxLength": 128},
+                        "attemptKey": {"type": "string", "maxLength": 128},
+                        "expected_current_receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "expectedCurrentReceiptHash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "expected_current_goal_id": {"type": "string", "maxLength": 128},
+                        "expectedCurrentGoalId": {"type": "string", "maxLength": 128},
+                        "successor_goal_id": {"type": "string", "maxLength": 128},
+                        "successorGoalId": {"type": "string", "maxLength": 128},
+                        "successor_thread_id": {"type": "string", "maxLength": 128},
+                        "successorThreadId": {"type": "string", "maxLength": 128},
+                        "ttl_minutes": {"type": "integer", "minimum": 1, "maximum": 30},
+                        "ttlMinutes": {"type": "integer", "minimum": 1, "maximum": 30},
+                    },
+                },
+            },
+            {
+                "name": "nexus_task_card_authority_restore",
+                "description": "Restore canonical standing grant from a temporary task-card authority scope to exact predecessor.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": [
+                        "owner_confirmation",
+                        "attempt_key",
+                        "switch_operation_id",
+                        "expected_temporary_receipt_hash",
+                    ],
+                    "properties": {
+                        "owner_confirmation": {"type": "boolean", "const": True},
+                        "ownerConfirmation": {"type": "boolean"},
+                        "attempt_key": {"type": "string", "maxLength": 128},
+                        "attemptKey": {"type": "string", "maxLength": 128},
+                        "switch_operation_id": {"type": "string", "maxLength": 128},
+                        "switchOperationId": {"type": "string", "maxLength": 128},
+                        "expected_temporary_receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "expectedTemporaryReceiptHash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                     },
                 },
             },
@@ -4866,6 +5002,10 @@ class UnifiedMCPGateway:
             return self._task_card_create(arguments)
         if name == "nexus_task_card_commit":
             return self._task_card_commit(arguments)
+        if name == "nexus_task_card_authority_switch":
+            return self._task_card_authority_switch(arguments)
+        if name == "nexus_task_card_authority_restore":
+            return self._task_card_authority_restore(arguments)
         if name == "nexus_model_probe":
             return self._model_probe_submit(arguments)
         if name == "nexus_model_probe_result":
