@@ -22,6 +22,7 @@ import zipfile
 from importlib.machinery import ModuleSpec
 from pathlib import Path
 
+# Owner-authored synchronization fence after the one-shot wheel bootstrap.
 
 _LOCKED_PYDANTIC_WHEELS = {
     "annotated_types-0.7.0-py3-none-any.whl": "1f02e8b43a8fbbc3f3e0d4f0f4bfc8131bcb4eebe8849b8e5c773f3a1c582a53",
