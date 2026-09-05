@@ -245,9 +245,7 @@ def test_transition_tamper_is_detected(tmp_path: Path) -> None:
     prepare_source_repair(
         env, observed_base_sha=BASE, observed_base_tree=TREE, now=NOW, state_root=tmp_path
     )
-    prepared = (
-        tmp_path / env.payload.recovery_id / env.payload.attempt_id / "01-prepared.json"
-    )
+    prepared = tmp_path / env.payload.recovery_id / env.payload.attempt_id / "01-prepared.json"
     payload = json.loads(prepared.read_text())
     payload["evidence"]["claim_ceiling"] = "forged"
     prepared.write_bytes(canonical_json_bytes(payload) + b"\n")
