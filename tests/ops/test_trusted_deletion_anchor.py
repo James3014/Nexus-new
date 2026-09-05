@@ -986,6 +986,8 @@ def test_runtime_builder_uses_frozen_hash_bound_binary_only_contract(tmp_path: P
         "--no-default-groups",
         "--group",
         "dev",
+        "--extra",
+        "legacy",
         "--no-emit-project",
         "--no-emit-workspace",
         "--no-emit-local",
