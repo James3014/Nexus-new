@@ -44,7 +44,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
 
-      - name: Decode and verify segmented controller payload
+      - name: Decode, verify, and host-adapt segmented controller payload
         shell: bash
         run: |
           set -euo pipefail
@@ -63,6 +63,17 @@ jobs:
           echo '8f9572647791af72b38c558a4c43226cc9ad2d25396997e7644d21e85f119fdf  /tmp/tg7-all.b64' | sha256sum -c - | tee /tmp/tg7-harness/payload-concat-check.log
           base64 -d /tmp/tg7-all.b64 | gzip -d > /tmp/core_v1_tg7_physical_shadow.py
           echo '629ff62e85eec593b46482dbc7486818115577794df1484ece85a6a0fc469d38  /tmp/core_v1_tg7_physical_shadow.py' | sha256sum -c - | tee /tmp/tg7-harness/payload-decoded-check.log
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('/tmp/core_v1_tg7_physical_shadow.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''    with urllib.request.urlopen(req, timeout=120) as resp:\n        zip_path.write_bytes(resp.read())'''
+          new = '''    class _StripAuthRedirect(urllib.request.HTTPRedirectHandler):\n        def redirect_request(self, req, fp, code, msg, headers, newurl):\n            redirected = super().redirect_request(req, fp, code, msg, headers, newurl)\n            if redirected is not None:\n                redirected.remove_header("Authorization")\n            return redirected\n    opener = urllib.request.build_opener(_StripAuthRedirect())\n    with opener.open(req, timeout=120) as resp:\n        zip_path.write_bytes(resp.read())'''
+          if text.count(old) != 1:
+              raise SystemExit('artifact redirect host patch target not unique')
+          path.write_text(text.replace(old, new), encoding='utf-8')
+          PY
+          sha256sum /tmp/core_v1_tg7_physical_shadow.py | tee /tmp/tg7-harness/payload-hosted-sha256.txt
           python -m py_compile /tmp/core_v1_tg7_physical_shadow.py
 
       - name: Sync exact TG7 environment
@@ -80,7 +91,7 @@ jobs:
           sudo chown "$(id -u):$(id -g)" /private /private/tmp
           chmod 0755 /private /private/tmp
           docker version
-          printf 'workflow_run=%s\nworkflow_head=%s\ntg7_sha=%s\npayload_b64_sha256=%s\npayload_python_sha256=%s\n' \
+          printf 'workflow_run=%s\nworkflow_head=%s\ntg7_sha=%s\npayload_b64_sha256=%s\npayload_python_sha256=%s\nhost_adapter=strip-authorization-on-artifact-redirect\n' \
             "$GITHUB_RUN_ID" "$GITHUB_SHA" "$TG7_SHA" \
             '8f9572647791af72b38c558a4c43226cc9ad2d25396997e7644d21e85f119fdf' \
             '629ff62e85eec593b46482dbc7486818115577794df1484ece85a6a0fc469d38' \
