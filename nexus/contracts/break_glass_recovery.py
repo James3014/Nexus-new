@@ -282,9 +282,7 @@ def owner_envelope_from_github_comment(comment: Mapping[str, Any]) -> OwnerActiv
 
 
 class BreakGlassCheckEvidence(_FrozenModel):
-    schema: Literal["nexus.break_glass_check_evidence.v1"] = (
-        "nexus.break_glass_check_evidence.v1"
-    )
+    schema: Literal["nexus.break_glass_check_evidence.v1"] = "nexus.break_glass_check_evidence.v1"
     name: StrictStr
     run_id: int
     head_sha: StrictStr

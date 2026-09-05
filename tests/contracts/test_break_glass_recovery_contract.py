@@ -249,8 +249,7 @@ def raw_owner_evidence_comment(
     return {
         "id": comment_id,
         "html_url": (
-            "https://github.com/James3014/Nexus-new/issues/806#issuecomment-"
-            f"{comment_id}"
+            f"https://github.com/James3014/Nexus-new/issues/806#issuecomment-{comment_id}"
         ),
         "issue_url": "https://api.github.com/repos/James3014/Nexus-new/issues/806",
         "user": {"login": "James3014"},
@@ -303,9 +302,7 @@ def test_integration_comment_tamper_is_rejected_by_canonical_hash() -> None:
         payload=payload,
         comment_id=6000000002,
     )
-    comment["body"] = str(comment["body"]).replace(
-        '"pr_number":808', '"pr_number":809'
-    )
+    comment["body"] = str(comment["body"]).replace('"pr_number":808', '"pr_number":809')
     with pytest.raises(BreakGlassContractError, match="GITHUB_COMMENT_PAYLOAD_HASH_MISMATCH"):
         owner_integration_from_github_comment(comment)
 

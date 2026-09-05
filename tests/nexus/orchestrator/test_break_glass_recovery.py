@@ -274,9 +274,7 @@ def test_full_chain_requires_independent_verifier_and_denies_replay(tmp_path: Pa
         state_root=tmp_path,
     )
     assert verified["phase"] == "VERIFIED"
-    consumed = consume_source_repair_authority(
-        env, canary(), now=NOW, state_root=tmp_path
-    )
+    consumed = consume_source_repair_authority(env, canary(), now=NOW, state_root=tmp_path)
     assert consumed["phase"] == "CONSUMED"
     assert consumed["evidence"]["granted_effect"] == "SOURCE_REPAIR_ONLY"
     assert "GITHUB_MERGE" in consumed["evidence"]["excluded_effects"]
@@ -296,9 +294,7 @@ def test_phase_skips_fail_closed(tmp_path: Path) -> None:
         env, observed_base_sha=BASE, observed_base_tree=TREE, now=NOW, state_root=tmp_path
     )
     with pytest.raises(BreakGlassRecoveryError, match="APPLIED_EVIDENCE_REQUIRED"):
-        record_source_repair_verified(
-            env, verification_envelope(), now=NOW, state_root=tmp_path
-        )
+        record_source_repair_verified(env, verification_envelope(), now=NOW, state_root=tmp_path)
     with pytest.raises(BreakGlassRecoveryError, match="VERIFIED_EVIDENCE_REQUIRED"):
         consume_source_repair_authority(env, canary(), now=NOW, state_root=tmp_path)
 
@@ -366,14 +362,10 @@ def test_emergency_integration_requires_separate_owner_grant_and_denies_replay(
         state_root=tmp_path,
     )
     record_source_repair_applied(source, applied(), now=NOW, state_root=tmp_path)
-    record_source_repair_verified(
-        source, verification, now=NOW, state_root=tmp_path
-    )
+    record_source_repair_verified(source, verification, now=NOW, state_root=tmp_path)
 
     integration = integration_envelope(verification)
-    prepared = prepare_emergency_integration(
-        source, integration, now=NOW, state_root=tmp_path
-    )
+    prepared = prepare_emergency_integration(source, integration, now=NOW, state_root=tmp_path)
     assert prepared["phase"] == "PREPARED"
     assert prepared["effect_class"] == "EMERGENCY_INTEGRATION"
     assert prepared["forbidden_effects"] == [
@@ -396,9 +388,7 @@ def test_emergency_integration_requires_separate_owner_grant_and_denies_replay(
     )
     assert consumed["phase"] == "CONSUMED"
     assert consumed["granted_effect"] == "EMERGENCY_INTEGRATION_ONLY"
-    assert inspect_emergency_integration(integration, state_root=tmp_path)["status"] == (
-        "CONSUMED"
-    )
+    assert inspect_emergency_integration(integration, state_root=tmp_path)["status"] == "CONSUMED"
     with pytest.raises(BreakGlassRecoveryError, match="INTEGRATION_REPLAY_DENIED"):
         assert_emergency_integration_not_consumed(integration, state_root=tmp_path)
 
@@ -416,9 +406,7 @@ def test_emergency_integration_subject_or_base_substitution_fails_closed(
         state_root=tmp_path,
     )
     record_source_repair_applied(source, applied(), now=NOW, state_root=tmp_path)
-    record_source_repair_verified(
-        source, verification, now=NOW, state_root=tmp_path
-    )
+    record_source_repair_verified(source, verification, now=NOW, state_root=tmp_path)
 
     with pytest.raises(BreakGlassRecoveryError, match="INTEGRATION_SUBJECT_MISMATCH"):
         prepare_emergency_integration(
@@ -461,9 +449,7 @@ def test_self_hosting_recovery_e2e_restores_normal_path_then_collapses_authority
     record_source_repair_applied(
         source, applied(implementer="dev-mcp-owner-direct"), now=NOW, state_root=tmp_path
     )
-    record_source_repair_verified(
-        source, verification, now=NOW, state_root=tmp_path
-    )
+    record_source_repair_verified(source, verification, now=NOW, state_root=tmp_path)
 
     integration = integration_envelope(verification)
     prepare_emergency_integration(source, integration, now=NOW, state_root=tmp_path)
@@ -482,9 +468,7 @@ def test_self_hosting_recovery_e2e_restores_normal_path_then_collapses_authority
     consumed = consume_source_repair_authority(
         source, restored_canary, now=NOW, state_root=tmp_path
     )
-    assert consumed["evidence"]["governance_canary_sha256"] == (
-        restored_canary.evidence_sha256
-    )
+    assert consumed["evidence"]["governance_canary_sha256"] == restored_canary.evidence_sha256
     assert consumed["evidence"]["authority_terminal"] is True
 
     with pytest.raises(BreakGlassRecoveryError, match="RECOVERY_REPLAY_DENIED"):
