@@ -1,9 +1,15 @@
 [project]
-name = "nexus-singularity"
+name = "nexus-core"
 version = "28.3.0"
 description = "Nexus Singularity OS: Hardened Governance & Swarm Engine"
 authors = [{name = "Nexus Engineers", email = "eng@nexus-singularity.os"}]
 dependencies = [
+    "aiohttp>=3.13.5,<4.0.0",
+]
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+legacy = [
     "pydantic>=2.0,<3.0",
     "PyYAML>=6.0,<7.0",
     "lancedb>=0.4.0",
@@ -18,7 +24,6 @@ dependencies = [
     "rich>=13.0.0,<14.0.0",
     "networkx>=3.0,<4.0",
     "anyio>=4.0.0,<5.0.0",
-    "aiohttp>=3.8.0",
     "httpx>=0.24.0",
     "click>=8.1.0,<9.0.0",
     "websockets>=11.0",
@@ -28,9 +33,6 @@ dependencies = [
     "rank-bm25>=0.2.2,<1.0.0",
     "datasets>=5.0.0",
 ]
-requires-python = ">=3.10"
-
-[project.optional-dependencies]
 ml = [
     "torch>=2.0.0",
     "transformers>=4.30.0",
@@ -49,8 +51,12 @@ browser = [
     "playwright>=1.58.0",
 ]
 
+[project.scripts]
+nexus-certify = "product.clients.cli:main"
+nexus = "scripts.engine.nexus_cli:nexus"
+
 [tool.poetry]
-name = "nexus-singularity"
+name = "nexus-core"
 version = "28.3.0"
 description = "Nexus Singularity OS: Hardened Governance & Swarm Engine"
 authors = ["Nexus Engineers <eng@nexus-singularity.os>"]
@@ -71,8 +77,8 @@ slack = ["slack-sdk", "websocket-client"]
 graph = ["langgraph"]
 
 [tool.poetry.scripts]
+nexus-certify = "product.clients.cli:main"
 nexus = "scripts.engine.nexus_cli:nexus"
-nexus-cueline-worker = "scripts.ops.nexus_cueline_worker:main"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
