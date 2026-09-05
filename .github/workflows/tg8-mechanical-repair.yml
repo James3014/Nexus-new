@@ -23,64 +23,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-
-          path = Path("product/protocol/compatibility_gate.py")
-          text = path.read_text(encoding="utf-8")
-          old_import = "from product.benchmark import _digest\n"
-          if text.count(old_import) != 1:
-              raise SystemExit("expected exactly one product.benchmark _digest import")
-          text = text.replace(old_import, "", 1)
-          if "import math\n" not in text:
-              text = text.replace("import json\n", "import json\nimport math\n", 1)
-          marker = "\n\ndef _file_hash(path: Path) -> str:\n"
-          if text.count(marker) != 1:
-              raise SystemExit("expected one _file_hash insertion marker")
-          helpers = r'''
-
-
-def _canonical(value: Any, *, _isfinite=math.isfinite, _dumps=json.dumps) -> str:
-    active: set[int] = set()
-
-    def enc(v: Any) -> Any:
-        if v is None or type(v) in (bool, int, str):
-            return v
-        if type(v) is float:
-            if not _isfinite(v):
-                raise ValueError("non-finite")
-            return v
-        if isinstance(v, Mapping):
-            if any(type(k) is not str for k in v):
-                raise TypeError("mapping key")
-            if id(v) in active:
-                raise ValueError("cycle")
-            active.add(id(v))
-            try:
-                return {k: enc(v[k]) for k in sorted(v)}
-            finally:
-                active.remove(id(v))
-        if isinstance(v, (list, tuple)):
-            if id(v) in active:
-                raise ValueError("cycle")
-            active.add(id(v))
-            try:
-                return [enc(x) for x in v]
-            finally:
-                active.remove(id(v))
-        raise TypeError(type(v).__name__)
-
-    return _dumps(
-        enc(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
-    )
-
-
-def _digest(value: Any, *, _canonical_fn=_canonical, _sha256=hashlib.sha256) -> str:
-    return "sha256:" + _sha256(_canonical_fn(value).encode()).hexdigest()
-'''
-          text = text.replace(marker, helpers + marker, 1)
-          path.write_text(text, encoding="utf-8")
-          PY
+          echo 'ZnJvbSBwYXRobGliIGltcG9ydCBQYXRoCgpwYXRoID0gUGF0aCgicHJvZHVjdC9wcm90b2NvbC9jb21wYXRpYmlsaXR5X2dhdGUucHkiKQp0ZXh0ID0gcGF0aC5yZWFkX3RleHQoZW5jb2Rpbmc9InV0Zi04IikKb2xkX2ltcG9ydCA9ICJmcm9tIHByb2R1Y3QuYmVuY2htYXJrIGltcG9ydCBfZGlnZXN0XG4iCmlmIHRleHQuY291bnQob2xkX2ltcG9ydCkgIT0gMToKICAgIHJhaXNlIFN5c3RlbUV4aXQoImV4cGVjdGVkIGV4YWN0bHkgb25lIHByb2R1Y3QuYmVuY2htYXJrIF9kaWdlc3QgaW1wb3J0IikKdGV4dCA9IHRleHQucmVwbGFjZShvbGRfaW1wb3J0LCAiIiwgMSkKaWYgImltcG9ydCBtYXRoXG4iIG5vdCBpbiB0ZXh0OgogICAgdGV4dCA9IHRleHQucmVwbGFjZSgiaW1wb3J0IGpzb25cbiIsICJpbXBvcnQganNvblxuaW1wb3J0IG1hdGhcbiIsIDEpCm1hcmtlciA9ICJcblxuZGVmIF9maWxlX2hhc2gocGF0aDogUGF0aCkgLT4gc3RyOlxuIgppZiB0ZXh0LmNvdW50KG1hcmtlcikgIT0gMToKICAgIHJhaXNlIFN5c3RlbUV4aXQoImV4cGVjdGVkIG9uZSBfZmlsZV9oYXNoIGluc2VydGlvbiBtYXJrZXIiKQpoZWxwZXJzID0gcicnJwoKZGVmIF9jYW5vbmljYWwodmFsdWU6IEFueSwgKiwgX2lzZmluaXRlPW1hdGguaXNmaW5pdGUsIF9kdW1wcz1qc29uLmR1bXBzKSAtPiBzdHI6CiAgICBhY3RpdmU6IHNldFtpbnRdID0gc2V0KCkKCiAgICBkZWYgZW5jKHY6IEFueSkgLT4gQW55OgogICAgICAgIGlmIHYgaXMgTm9uZSBvciB0eXBlKHYpIGluIChib29sLCBpbnQsIHN0cik6CiAgICAgICAgICAgIHJldHVybiB2CiAgICAgICAgaWYgdHlwZSh2KSBpcyBmbG9hdDoKICAgICAgICAgICAgaWYgbm90IF9pc2Zpbml0ZSh2KToKICAgICAgICAgICAgICAgIHJhaXNlIFZhbHVlRXJyb3IoIm5vbi1maW5pdGUiKQogICAgICAgICAgICByZXR1cm4gdgogICAgICAgIGlmIGlzaW5zdGFuY2UodiwgTWFwcGluZyk6CiAgICAgICAgICAgIGlmIGFueSh0eXBlKGspIGlzIG5vdCBzdHIgZm9yIGsgaW4gdik6CiAgICAgICAgICAgICAgICByYWlzZSBUeXBlRXJyb3IoIm1hcHBpbmcga2V5IikKICAgICAgICAgICAgaWYgaWQodikgaW4gYWN0aXZlOgogICAgICAgICAgICAgICAgcmFpc2UgVmFsdWVFcnJvcigiY3ljbGUiKQogICAgICAgICAgICBhY3RpdmUuYWRkKGlkKHYpKQogICAgICAgICAgICB0cnk6CiAgICAgICAgICAgICAgICByZXR1cm4ge2s6IGVuYyh2W2tdKSBmb3IgayBpbiBzb3J0ZWQodil9CiAgICAgICAgICAgIGZpbmFsbHk6CiAgICAgICAgICAgICAgICBhY3RpdmUucmVtb3ZlKGlkKHYpKQogICAgICAgIGlmIGlzaW5zdGFuY2UodiwgKGxpc3QsIHR1cGxlKSk6CiAgICAgICAgICAgIGlmIGlkKHYpIGluIGFjdGl2ZToKICAgICAgICAgICAgICAgIHJhaXNlIFZhbHVlRXJyb3IoImN5Y2xlIikKICAgICAgICAgICAgYWN0aXZlLmFkZChpZCh2KSkKICAgICAgICAgICAgdHJ5OgogICAgICAgICAgICAgICAgcmV0dXJuIFtlbmMoeCkgZm9yIHggaW4gdl0KICAgICAgICAgICAgZmluYWxseToKICAgICAgICAgICAgICAgIGFjdGl2ZS5yZW1vdmUoaWQodikpCiAgICAgICAgcmFpc2UgVHlwZUVycm9yKHR5cGUodikuX19uYW1lX18pCgogICAgcmV0dXJuIF9kdW1wcygKICAgICAgICBlbmModmFsdWUpLCBzb3J0X2tleXM9VHJ1ZSwgc2VwYXJhdG9ycz0oIiwiLCAiOiIpLCBlbnN1cmVfYXNjaWk9RmFsc2UsIGFsbG93X25hbj1GYWxzZQogICAgKQoKCmRlZiBfZGlnZXN0KHZhbHVlOiBBbnksICosIF9jYW5vbmljYWxfZm49X2Nhbm9uaWNhbCwgX3NoYTI1Nj1oYXNobGliLnNoYTI1NikgLT4gc3RyOgogICAgcmV0dXJuICJzaGEyNTY6IiArIF9zaGEyNTYoX2Nhbm9uaWNhbF9mbih2YWx1ZSkuZW5jb2RlKCkpLmhleGRpZ2VzdCgpCicnJwp0ZXh0ID0gdGV4dC5yZXBsYWNlKG1hcmtlciwgaGVscGVycyArIG1hcmtlciwgMSkKcGF0aC53cml0ZV90ZXh0KHRleHQsIGVuY29kaW5nPSJ1dGYtOCIpCg==' | base64 --decode | python3
 
       - name: Format only authorized TG8 files
         shell: bash
