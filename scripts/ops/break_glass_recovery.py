@@ -52,10 +52,7 @@ def _print(value: object) -> None:
 def _fetch_envelope(comment_id: int) -> OwnerActivationEnvelope:
     if comment_id <= 0:
         raise BreakGlassRecoveryError("COMMENT_ID_INVALID")
-    url = (
-        "https://api.github.com/repos/James3014/Nexus-new/issues/comments/"
-        f"{comment_id}"
-    )
+    url = f"https://api.github.com/repos/James3014/Nexus-new/issues/comments/{comment_id}"
     request = urllib.request.Request(
         url,
         headers={
@@ -140,18 +137,16 @@ def _repair_evidence(
 def _validate(args: argparse.Namespace) -> int:
     envelope = _fetch_envelope(args.comment_id)
     envelope.payload.assert_current(now=_now())
-    _print(
-        {
-            "status": "VALID",
-            "comment_id": envelope.comment_id,
-            "comment_body_sha256": envelope.comment_body_sha256,
-            "owner_login": envelope.author_login,
-            "recovery_id": envelope.payload.recovery_id,
-            "attempt_id": envelope.payload.attempt_id,
-            "effect_class": envelope.payload.effect_class.value,
-            "payload_sha256": envelope.payload_sha256,
-        }
-    )
+    _print({
+        "status": "VALID",
+        "comment_id": envelope.comment_id,
+        "comment_body_sha256": envelope.comment_body_sha256,
+        "owner_login": envelope.author_login,
+        "recovery_id": envelope.payload.recovery_id,
+        "attempt_id": envelope.payload.attempt_id,
+        "effect_class": envelope.payload.effect_class.value,
+        "payload_sha256": envelope.payload_sha256,
+    })
     return 0
 
 

@@ -256,8 +256,7 @@ def owner_envelope_from_github_comment(comment: Mapping[str, Any]) -> OwnerActiv
         raise BreakGlassContractError("GITHUB_COMMENT_OWNER_MISMATCH")
 
     hash_matches = re.findall(
-        r"Canonical activation payload SHA-256:\s*`([0-9a-f]{64})`", body
-    )
+        r"Canonical activation payload SHA-256:\s*`([0-9a-f]{64})`", body)
     json_matches = re.findall(r"```json\s*\n(.*?)\n```", body, flags=re.DOTALL)
     if len(hash_matches) != 1 or len(json_matches) != 1:
         raise BreakGlassContractError("GITHUB_COMMENT_ACTIVATION_BLOCK_INVALID")
@@ -271,18 +270,16 @@ def owner_envelope_from_github_comment(comment: Mapping[str, Any]) -> OwnerActiv
     if canonical_sha256(payload_data) != declared_hash:
         raise BreakGlassContractError("GITHUB_COMMENT_PAYLOAD_HASH_MISMATCH")
 
-    return OwnerActivationEnvelope.model_validate(
-        {
-            "repository": _ALLOWED_REPOSITORY,
-            "issue": _ALLOWED_ISSUE,
-            "comment_id": comment_id,
-            "comment_url": comment_url,
-            "author_login": author_login,
-            "comment_body_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
-            "payload_sha256": declared_hash,
-            "payload": payload_data,
-        }
-    )
+    return OwnerActivationEnvelope.model_validate({
+        "repository": _ALLOWED_REPOSITORY,
+        "issue": _ALLOWED_ISSUE,
+        "comment_id": comment_id,
+        "comment_url": comment_url,
+        "author_login": author_login,
+        "comment_body_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+        "payload_sha256": declared_hash,
+        "payload": payload_data,
+    })
 
 
 class BreakGlassAppliedEvidence(_FrozenModel):

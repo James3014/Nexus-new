@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import json
+from datetime import datetime, timezone
 
 import pytest
 from pydantic import ValidationError
@@ -118,9 +118,7 @@ def test_raw_github_comment_forged_owner_is_rejected() -> None:
 def test_raw_github_comment_body_payload_tamper_is_rejected() -> None:
     comment = raw_github_comment()
     body = str(comment["body"])
-    comment["body"] = body.replace(
-        "8e8e02911c888d4c8a4667d4b5dd13df85c20cfd", "0" * 40
-    )
+    comment["body"] = body.replace("8e8e02911c888d4c8a4667d4b5dd13df85c20cfd", "0" * 40)
     with pytest.raises(BreakGlassContractError, match="GITHUB_COMMENT_PAYLOAD_HASH_MISMATCH"):
         owner_envelope_from_github_comment(comment)
 

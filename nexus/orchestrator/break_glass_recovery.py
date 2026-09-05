@@ -18,7 +18,6 @@ from typing import Any, Mapping
 from nexus.contracts.break_glass_recovery import (
     BreakGlassActivationPayload,
     BreakGlassAppliedEvidence,
-    BreakGlassContractError,
     BreakGlassPhase,
     BreakGlassVerificationEvidence,
     OwnerActivationEnvelope,
@@ -192,9 +191,10 @@ def _read_chain(
         record = _load_json_file(path)
         if record.get("phase") != phase.value:
             raise BreakGlassRecoveryError("TRANSITION_PHASE_INVALID")
-        if record.get("recovery_id") != activation.recovery_id or record.get(
-            "attempt_id"
-        ) != activation.attempt_id:
+        if (
+            record.get("recovery_id") != activation.recovery_id
+            or record.get("attempt_id") != activation.attempt_id
+        ):
             raise BreakGlassRecoveryError("ATTEMPT_IDENTITY_MISMATCH")
         if record.get("effect_class") != activation.effect_class.value:
             raise BreakGlassRecoveryError("EFFECT_CLASS_MISMATCH")

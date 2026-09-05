@@ -74,21 +74,21 @@ def envelope() -> OwnerActivationEnvelope:
     }
     payload_hash = canonical_sha256(payload)
     assert payload_hash == "d2313d38c4b15d16cf42497c267bd7071195bf3f58f485eea6d659ded6e09a95"
-    return OwnerActivationEnvelope.model_validate(
-        {
-            "repository": "James3014/Nexus-new",
-            "issue": 806,
-            "comment_id": 5555340739,
-            "comment_url": "https://github.com/James3014/Nexus-new/issues/806#issuecomment-5555340739",
-            "author_login": "James3014",
-            "comment_body_sha256": "5" * 64,
-            "payload_sha256": payload_hash,
-            "payload": payload,
-        }
-    )
+    return OwnerActivationEnvelope.model_validate({
+        "repository": "James3014/Nexus-new",
+        "issue": 806,
+        "comment_id": 5555340739,
+        "comment_url": "https://github.com/James3014/Nexus-new/issues/806#issuecomment-5555340739",
+        "author_login": "James3014",
+        "comment_body_sha256": "5" * 64,
+        "payload_sha256": payload_hash,
+        "payload": payload,
+    })
 
 
-def applied(*, changed_paths: tuple[str, ...] | None = None, implementer: str = "impl") -> BreakGlassAppliedEvidence:
+def applied(
+    *, changed_paths: tuple[str, ...] | None = None, implementer: str = "impl"
+) -> BreakGlassAppliedEvidence:
     return BreakGlassAppliedEvidence(
         repair_commit_sha=COMMIT,
         repair_tree_sha=REPAIR_TREE,
@@ -144,7 +144,9 @@ def test_prepare_is_idempotent_and_binds_exact_base(tmp_path: Path) -> None:
 
 def test_full_chain_requires_independent_verifier_and_denies_replay(tmp_path: Path) -> None:
     env = envelope()
-    prepare_source_repair(env, observed_base_sha=BASE, observed_base_tree=TREE, now=NOW, state_root=tmp_path)
+    prepare_source_repair(
+        env, observed_base_sha=BASE, observed_base_tree=TREE, now=NOW, state_root=tmp_path
+    )
     app = applied(implementer="worker-1")
     record_source_repair_applied(env, app, now=NOW, state_root=tmp_path)
 
@@ -173,7 +175,9 @@ def test_phase_skips_fail_closed(tmp_path: Path) -> None:
     env = envelope()
     with pytest.raises(BreakGlassRecoveryError, match="PREPARE_REQUIRED"):
         record_source_repair_applied(env, applied(), now=NOW, state_root=tmp_path)
-    prepare_source_repair(env, observed_base_sha=BASE, observed_base_tree=TREE, now=NOW, state_root=tmp_path)
+    prepare_source_repair(
+        env, observed_base_sha=BASE, observed_base_tree=TREE, now=NOW, state_root=tmp_path
+    )
     with pytest.raises(BreakGlassRecoveryError, match="APPLIED_EVIDENCE_REQUIRED"):
         record_source_repair_verified(env, verification(), now=NOW, state_root=tmp_path)
     with pytest.raises(BreakGlassRecoveryError, match="VERIFIED_EVIDENCE_REQUIRED"):
@@ -182,7 +186,9 @@ def test_phase_skips_fail_closed(tmp_path: Path) -> None:
 
 def test_scope_widening_and_forbidden_change_fail_before_applied_transition(tmp_path: Path) -> None:
     env = envelope()
-    prepare_source_repair(env, observed_base_sha=BASE, observed_base_tree=TREE, now=NOW, state_root=tmp_path)
+    prepare_source_repair(
+        env, observed_base_sha=BASE, observed_base_tree=TREE, now=NOW, state_root=tmp_path
+    )
     with pytest.raises(Exception, match="OUT_OF_SCOPE_PATH_CHANGED"):
         record_source_repair_applied(
             env,
@@ -202,7 +208,9 @@ def test_scope_widening_and_forbidden_change_fail_before_applied_transition(tmp_
 
 def test_conflicting_retry_is_rejected(tmp_path: Path) -> None:
     env = envelope()
-    prepare_source_repair(env, observed_base_sha=BASE, observed_base_tree=TREE, now=NOW, state_root=tmp_path)
+    prepare_source_repair(
+        env, observed_base_sha=BASE, observed_base_tree=TREE, now=NOW, state_root=tmp_path
+    )
     record_source_repair_applied(env, applied(), now=NOW, state_root=tmp_path)
     conflicting = BreakGlassAppliedEvidence(
         repair_commit_sha="5" * 40,
@@ -217,7 +225,9 @@ def test_conflicting_retry_is_rejected(tmp_path: Path) -> None:
 
 def test_verification_subject_substitution_is_rejected(tmp_path: Path) -> None:
     env = envelope()
-    prepare_source_repair(env, observed_base_sha=BASE, observed_base_tree=TREE, now=NOW, state_root=tmp_path)
+    prepare_source_repair(
+        env, observed_base_sha=BASE, observed_base_tree=TREE, now=NOW, state_root=tmp_path
+    )
     record_source_repair_applied(env, applied(), now=NOW, state_root=tmp_path)
     bad = BreakGlassVerificationEvidence(
         verifier_id="primary-coordinator",
@@ -232,8 +242,12 @@ def test_verification_subject_substitution_is_rejected(tmp_path: Path) -> None:
 
 def test_transition_tamper_is_detected(tmp_path: Path) -> None:
     env = envelope()
-    prepare_source_repair(env, observed_base_sha=BASE, observed_base_tree=TREE, now=NOW, state_root=tmp_path)
-    prepared = tmp_path / env.payload.recovery_id / env.payload.attempt_id / "01-prepared.json"
+    prepare_source_repair(
+        env, observed_base_sha=BASE, observed_base_tree=TREE, now=NOW, state_root=tmp_path
+    )
+    prepared = (
+        tmp_path / env.payload.recovery_id / env.payload.attempt_id / "01-prepared.json"
+    )
     payload = json.loads(prepared.read_text())
     payload["evidence"]["claim_ceiling"] = "forged"
     prepared.write_bytes(canonical_json_bytes(payload) + b"\n")
