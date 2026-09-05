@@ -34,7 +34,7 @@ ATTEMPT_RECEIPT_SCHEMA = "nexus.core-v1.tg7-attempt-receipt.v2"
 SHADOW_RECEIPT_SCHEMA = "nexus.core-v1.tg7-shadow-receipt.v1"
 REPORT_SCHEMA = "nexus.core-v1.tg7-report.v1"
 
-MAXIMUM_CLAIM = "TG7_REPAIR_READY_FOR_REVIEW"
+MAXIMUM_CLAIM = "CROSS_REPO_TRUST_SHADOW_VERIFIED"
 PROFILE_ID = "python-oci-pytest-v1"
 TASK_SET_ID = "tg7-shadow-bottle-v1"
 
