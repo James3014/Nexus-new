@@ -18,7 +18,21 @@ cd "$WORKTREE"
 uv sync --frozen --all-groups --all-extras
 uv run pytest -qq tests/benchmark/test_core_v1_tg9_value_manifest.py | tee "$OUT/tg9-pytest.log"
 uv run pytest --collect-only -q tests/benchmark/test_core_v1_tg9_value_manifest.py > "$OUT/tg9-collect.txt"
-grep '^tests/benchmark/test_core_v1_tg9_value_manifest.py::' "$OUT/tg9-collect.txt" | sort > "$OUT/tg9-nodeids.txt"
+python - "$OUT/tg9-collect.txt" "$OUT/tg9-nodeids.txt" <<'PY'
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1])
+destination = Path(sys.argv[2])
+marker = "tests/benchmark/test_core_v1_tg9_value_manifest.py::"
+rows = []
+for line in source.read_text(encoding="utf-8").splitlines():
+    index = line.find(marker)
+    if index >= 0:
+        rows.append(line[index:].strip())
+rows = sorted(set(rows))
+destination.write_text("\n".join(rows) + ("\n" if rows else ""), encoding="utf-8")
+PY
 NODE_COUNT="$(wc -l < "$OUT/tg9-nodeids.txt" | tr -d ' ')"
 test "$NODE_COUNT" -ge 30
 uv run python -m product.benchmark.tg9_value --synthetic-self-test > "$OUT/synthetic-self-test.json"
