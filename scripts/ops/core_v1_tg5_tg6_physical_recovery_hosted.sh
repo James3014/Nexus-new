@@ -11,7 +11,7 @@ chmod 0755 /private /private/tmp
 # Rebind recovery to the exact TG6 Candidate after replacing the stale,
 # unreproducible predecessor artifact hash with the reproducible exact-base
 # artifact rebuilt from main@f5fa2d69.
-export TG6_SHA="c577ada0fcd0b964ebc389e5aa5f82bbe44bfb8b"
+export TG6_SHA="c0de1a82bdb6456a7c90c3d5c1396764d1c48f64"
 export EXPECTED_PREDECESSOR_SHA256="18b1e54b6c1404ed5348ce2197e3f30c1f6d70d422e4ce5ddd1dbe293a5e90f7"
 
 # TG5 recovery is bound by the exact request subject plus the retained receipt
