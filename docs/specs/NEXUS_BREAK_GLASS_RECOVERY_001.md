@@ -109,9 +109,13 @@ payload, or repair-subject substitution SHALL fail closed.
 When normal integration authority is part of the unavailable governance plane,
 merge requires a separate Owner `EMERGENCY_INTEGRATION` comment bound to exact
 source activation, exact Owner verification payload, PR number, accepted
-head/tree/diff, expected main/base, `merge` integration method, successful
-exact-head checks, expiry, and claim ceiling. The validated grant may be consumed only by an
-existing bounded exact-head/CAS merge sink such as `git_merge_pull_request`.
+head/tree/diff, the freshly observed integration-time main/base, `merge`
+integration method, successful exact-head checks, expiry, and claim ceiling.
+The source-repair base remains immutable provenance and MAY differ from the
+integration-time main after benign concurrent main movement; the integration
+grant MUST rebind current main rather than silently reuse the source base. The
+validated grant may be consumed only by an existing bounded exact-head/CAS merge
+sink such as `git_merge_pull_request`.
 A bare `ownerConfirmation=true` is an effect confirmation, not the break-glass
 authority source. Break-glass integration does not permit squash or rebase,
 preserving the accepted head as merge lineage. No force push, ref deletion,
@@ -162,7 +166,7 @@ break-glass authority is terminal and replay is denied.
 | AC-004 | REQ-005 | Exact base/tree prepares and authorized paths apply. | Wrong base/tree, README scope widening, forbidden standing-grant path, and `..` escape fail. |
 | AC-005 | REQ-006/007 | APPLIED and VERIFIED bind one immutable repair subject; VERIFIED is rooted in an Owner GitHub verification comment whose exact-head checks are all successful. | Caller-only verifier/hash, verifier==implementer, check-head substitution, and commit substitution fail. |
 | AC-006 | REQ-008 | Exact PREPARED retry is idempotent; source and integration attempts reconcile through durable terminal records. | Phase skip, conflicting APPLIED retry, transition tamper, symlink state, and blind post-merge retry fail. |
-| AC-007 | REQ-007A/009 | A separate Owner integration grant binds exact PR/base/head/checks and only an existing exact-head/CAS merge sink may consume it; source CONSUMED requires a fresh normal-governance canary plus a global Owner terminal/revocation comment. | Source authority cannot merge; integration grant cannot widen effect; local and fresh-session global post-consume replay fail. |
+| AC-007 | REQ-007A/009 | A separate Owner integration grant rebinds the freshly observed current main and exact PR/head/checks; only an existing exact-head/CAS merge sink may consume it. Source-repair base may remain older immutable provenance. Source CONSUMED requires a fresh normal-governance canary plus a global Owner terminal/revocation comment. | Source authority cannot merge; stale integration base is rejected by the merge sink; integration grant cannot widen effect; local and fresh-session global post-consume replay fail. |
 | AC-008 | REQ-010 | Integrated revision passes focused/regression evidence and a fresh normal-governance canary, then terminal/replay-denial evidence is recorded. | Green source tests alone or merged PR without canary cannot close #806. |
 | AC-009 | REQ-003/007A/009 | Controlled self-hosting E2E starts with normal governance unavailable, exercises real break-glass source/integration contracts, restores the normal-path canary, consumes emergency authority, and proves replay denial. | Harness that never begins in a failed-governance state or never exercises replay denial is not sufficient. |
 

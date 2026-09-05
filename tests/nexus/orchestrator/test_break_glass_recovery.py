@@ -529,7 +529,7 @@ def test_source_consumption_rejects_canary_identity_substitution(tmp_path: Path)
         consume_source_repair_authority(source, bad_canary, now=NOW, state_root=tmp_path)
 
 
-def test_emergency_integration_subject_or_base_substitution_fails_closed(
+def test_emergency_integration_rebinds_current_main_after_source_base_drift(
     tmp_path: Path,
 ) -> None:
     source = envelope()
@@ -551,13 +551,16 @@ def test_emergency_integration_subject_or_base_substitution_fails_closed(
             now=NOW,
             state_root=tmp_path,
         )
-    with pytest.raises(BreakGlassRecoveryError, match="INTEGRATION_AUTHORITY_MISMATCH"):
-        prepare_emergency_integration(
-            source,
-            integration_envelope(verification, expected_base="6" * 40),
-            now=NOW,
-            state_root=tmp_path,
-        )
+
+    current_main = "6" * 40
+    rebound = prepare_emergency_integration(
+        source,
+        integration_envelope(verification, expected_base=current_main),
+        now=NOW,
+        state_root=tmp_path / "rebound",
+    )
+    assert rebound["expected_base_sha"] == current_main
+    assert rebound["accepted_head_sha"] == COMMIT
 
 
 def test_self_hosting_recovery_e2e_restores_normal_path_then_collapses_authority(

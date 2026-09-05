@@ -93,10 +93,13 @@ For a qualifying bounded repair:
 9. Keep Candidate approval, integration, push, reload, activation, and cleanup as
    separate explicit authorities; repair completion performs none of them. If
    normal merge authority is part of the failed plane, require a separate Owner
-   `EMERGENCY_INTEGRATION` grant and delegate only its exact PR/base/head with
-   `merge` method to the existing bounded exact-head/CAS merge sink. Squash and
-   rebase are outside break-glass integration. Never treat that sink's
-   caller confirmation Boolean as the break-glass authority source.
+   `EMERGENCY_INTEGRATION` grant and delegate only its exact PR/head plus the
+   freshly observed integration-time main/base with `merge` method to the existing
+   bounded exact-head/CAS merge sink. The original SOURCE_REPAIR base remains
+   immutable provenance and may be older after benign concurrent main movement;
+   never silently reuse it as the integration expected base. Squash and rebase
+   are outside break-glass integration. Never treat that sink's caller
+   confirmation Boolean as the break-glass authority source.
 10. After separately authorized clean-source acceptance and activation,
    reacquire loaded source/runtime/action identity and verify affected live
    behavior, not process liveness alone.

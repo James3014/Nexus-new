@@ -465,7 +465,6 @@ def prepare_emergency_integration(
         integration.recovery_id != source.recovery_id
         or integration.source_attempt_id != source.attempt_id
         or integration.source_activation_payload_sha256 != source_envelope.payload_sha256
-        or integration.expected_base_sha != source.base_sha
     ):
         raise BreakGlassRecoveryError("INTEGRATION_AUTHORITY_MISMATCH")
 

@@ -85,9 +85,12 @@ for that effect.
 
 When normal merge authority is itself inside the failed plane, a separately
 validated `EMERGENCY_INTEGRATION` Owner grant may authorize only one exact PR,
-accepted head/tree/diff, expected base/main, `merge` method, and successful exact-
-head check set. Squash/rebase are not break-glass integration effects. The
-controller then delegates the physical merge to an existing
+accepted head/tree/diff, the freshly observed integration-time base/main,
+`merge` method, and successful exact-head check set. The immutable SOURCE_REPAIR
+base remains provenance and may be older after benign concurrent main movement;
+the integration grant must rebind current main rather than reuse that old base.
+Squash/rebase are not break-glass integration effects. The controller then
+delegates the physical merge to an existing
 bounded exact-head/CAS sink such as `git_merge_pull_request`; its
 `ownerConfirmation=true` is effect confirmation, not the recovery authority
 source. Force push, ref deletion, unrelated merge, runtime activation, release,
