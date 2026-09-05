@@ -1,0 +1,58 @@
+name: Core V1 TG6 Owner Head Rebind
+
+on:
+  push:
+    branches:
+      - controller/core-v1-physical-recovery-20260905
+    paths:
+      - controller/tg6-owner-head-rebind.marker
+
+permissions:
+  contents: write
+
+jobs:
+  rebind:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Create owner-authored no-tree-change commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_HEAD: c577ada0fcd0b964ebc389e5aa5f82bbe44bfb8b
+          SOURCE_TREE: b918875e2b2536d59d0713ff41dd0321819a0b91
+          BRANCH: codex/issue-770-core-v1-tg6
+        shell: bash
+        run: |
+          set -euo pipefail
+          body=$(python - <<'PY'
+          import json, os
+          print(json.dumps({
+              "message": "chore(tg6): owner rebind exact candidate identity",
+              "tree": os.environ["SOURCE_TREE"],
+              "parents": [os.environ["SOURCE_HEAD"]],
+          }))
+          PY
+          )
+          response=$(curl --fail-with-body -sS \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -d "$body" \
+            https://api.github.com/repos/James3014/Nexus-new/git/commits)
+          new_sha=$(python -c 'import json,sys; print(json.load(sys.stdin)["sha"])' <<<"$response")
+          patch=$(python - <<'PY'
+          import json, os
+          print(json.dumps({"sha": os.environ["NEW_SHA"], "force": False}))
+          PY
+          )
+          NEW_SHA="$new_sha" patch=$(python - "$new_sha" <<'PY'
+          import json, sys
+          print(json.dumps({"sha": sys.argv[1], "force": False}))
+          PY
+          )
+          curl --fail-with-body -sS -X PATCH \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            -d "$patch" \
+            "https://api.github.com/repos/James3014/Nexus-new/git/refs/heads/$BRANCH"
+          echo "new_sha=$new_sha" >> "$GITHUB_OUTPUT"
