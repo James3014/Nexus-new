@@ -39,12 +39,7 @@ jobs:
             -d "$body" \
             https://api.github.com/repos/James3014/Nexus-new/git/commits)
           new_sha=$(python -c 'import json,sys; print(json.load(sys.stdin)["sha"])' <<<"$response")
-          patch=$(python - <<'PY'
-          import json, os
-          print(json.dumps({"sha": os.environ["NEW_SHA"], "force": False}))
-          PY
-          )
-          NEW_SHA="$new_sha" patch=$(python - "$new_sha" <<'PY'
+          patch=$(python - "$new_sha" <<'PY'
           import json, sys
           print(json.dumps({"sha": sys.argv[1], "force": False}))
           PY
