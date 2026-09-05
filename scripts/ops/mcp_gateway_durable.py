@@ -3439,6 +3439,14 @@ def _gateway_recover_with_adapters(
                 prepared = _prepare_recovery_source(typed, receipt)
                 if prepared.bundle_evidence.evidence_hash != evidence_hash:
                     raise GatewayContractError("recovery evidence changed")
+                _r1_verify_worktree(
+                    Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.desired_manifest_id,
+                    receipt.desired_manifest,
+                )
+                _r1_verify_worktree(
+                    Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.predecessor_manifest_id,
+                    receipt.predecessor_manifest,
+                )
             evidence = prepared.bundle_evidence
             owner_pid = records[-1].pre_effect_identity.get("effect_owner_pid")
             owner_start = records[-1].pre_effect_identity.get("effect_owner_start")

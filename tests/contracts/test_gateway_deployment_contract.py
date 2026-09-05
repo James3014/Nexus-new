@@ -1158,13 +1158,16 @@ def test_r1_successor_continuation_authority_binds_exact_historical_operation():
     )
 
     receipt, request, authority = _r1_continuation_authority_fixture()
-    assert validate_recovery_continuation_authority(
-        authority,
-        request=request,
-        historical_receipt=receipt,
-        successor_manager_sha256=authority.successor_manager_sha256,
-        now="2026-08-25T00:00:00Z",
-    ) == authority
+    assert (
+        validate_recovery_continuation_authority(
+            authority,
+            request=request,
+            historical_receipt=receipt,
+            successor_manager_sha256=authority.successor_manager_sha256,
+            now="2026-08-25T00:00:00Z",
+        )
+        == authority
+    )
 
 
 @pytest.mark.parametrize(
