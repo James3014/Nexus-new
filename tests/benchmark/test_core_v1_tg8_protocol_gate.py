@@ -135,24 +135,20 @@ def _compatibility_manifest() -> list[dict[str, str]]:
     }
     rows: list[dict[str, str]] = []
     for axis, source in current.items():
-        rows.append(
-            {
-                "row_id": f"{axis}-supported",
-                "axis": axis,
-                "source": source,
-                "target": f"{axis}-rc-compatible",
-                "expected": "SUPPORTED",
-            }
-        )
-        rows.append(
-            {
-                "row_id": f"{axis}-refused",
-                "axis": axis,
-                "source": source,
-                "target": f"{axis}-incompatible",
-                "expected": "REFUSED",
-            }
-        )
+        rows.append({
+            "row_id": f"{axis}-supported",
+            "axis": axis,
+            "source": source,
+            "target": f"{axis}-rc-compatible",
+            "expected": "SUPPORTED",
+        })
+        rows.append({
+            "row_id": f"{axis}-refused",
+            "axis": axis,
+            "source": source,
+            "target": f"{axis}-incompatible",
+            "expected": "REFUSED",
+        })
     return rows
 
 
@@ -229,8 +225,20 @@ def _upgrade_manifest() -> list[dict[str, str]]:
         ("rc-to-stable", "RC_TO_STABLE", gate.RC_CANDIDATE, gate.STABLE_CANDIDATE, "SUPPORTED"),
         ("bad-protocol", "INCOMPATIBLE_PROTOCOL", gate.RC_CANDIDATE, "2.0.0-foreign", "REFUSED"),
         ("bad-schema", "INCOMPATIBLE_SCHEMA", IMPLEMENTATION_SCHEMA, "nexus.foreign.v9", "REFUSED"),
-        ("bad-ledger", "INCOMPATIBLE_LEDGER", gate.LEDGER_SCHEMA, "nexus.ledger-entry.v9", "REFUSED"),
-        ("failed-upgrade", "FAILED_UPGRADE_ROLLBACK", gate.RC_CANDIDATE, gate.STABLE_CANDIDATE, "REFUSED"),
+        (
+            "bad-ledger",
+            "INCOMPATIBLE_LEDGER",
+            gate.LEDGER_SCHEMA,
+            "nexus.ledger-entry.v9",
+            "REFUSED",
+        ),
+        (
+            "failed-upgrade",
+            "FAILED_UPGRADE_ROLLBACK",
+            gate.RC_CANDIDATE,
+            gate.STABLE_CANDIDATE,
+            "REFUSED",
+        ),
     ]
     return [
         {"row_id": row_id, "kind": kind, "source": source, "target": target, "expected": expected}
@@ -291,9 +299,7 @@ def _open_issues(high: list[int] | None = None) -> dict[str, Any]:
     high = sorted(high or [])
     raw = sorted(set(high + [772, 773]))
     classes = {
-        str(issue): (
-            "CORE_SEVERITY_HIGH_BLOCKER" if issue in high else "GATE_META_EXCLUDED"
-        )
+        str(issue): ("CORE_SEVERITY_HIGH_BLOCKER" if issue in high else "GATE_META_EXCLUDED")
         for issue in raw
     }
     return _hashed(
@@ -464,9 +470,7 @@ def _thresholds(
     upgrade_manifest: list[dict[str, str]],
     stable_paths: list[Path],
 ) -> dict[str, Any]:
-    input_hashes = {
-        key: gate._file_hash(path) for key, path in paths.items() if path.is_file()
-    }
+    input_hashes = {key: gate._file_hash(path) for key, path in paths.items() if path.is_file()}
     for index, path in enumerate(stable_paths, start=1):
         if path.is_file():
             input_hashes[f"stable_run_{index}"] = gate._file_hash(path)
@@ -536,9 +540,7 @@ def _fixture(
             "tg5_receipt": tg5["certification_receipt_hash"],
         },
     )
-    selection, corpus, shadow, tg7_report = _tg7(
-        tg5["certification_receipt_hash"]
-    )
+    selection, corpus, shadow, tg7_report = _tg7(tg5["certification_receipt_hash"])
     compat_manifest = _compatibility_manifest()
     upgrade_manifest = _upgrade_manifest()
     compatibility = _compatibility(subject, tree, compat_manifest)
@@ -626,9 +628,7 @@ def _fixture(
 def _refresh(fx: dict[str, Any]) -> None:
     thresholds = fx["thresholds"]
     paths = fx["paths"]
-    input_hashes = {
-        key: gate._file_hash(path) for key, path in paths.items() if path.is_file()
-    }
+    input_hashes = {key: gate._file_hash(path) for key, path in paths.items() if path.is_file()}
     for index, path in enumerate(fx["stable_paths"], start=1):
         if path.is_file():
             input_hashes[f"stable_run_{index}"] = gate._file_hash(path)
@@ -636,9 +636,7 @@ def _refresh(fx: dict[str, Any]) -> None:
     thresholds.pop("threshold_hash", None)
     thresholds["threshold_hash"] = _digest(thresholds)
     _write(fx["threshold_path"], thresholds)
-    fx["expected_path"].write_text(
-        thresholds["threshold_hash"][7:] + "\n", encoding="utf-8"
-    )
+    fx["expected_path"].write_text(thresholds["threshold_hash"][7:] + "\n", encoding="utf-8")
 
 
 def _run(fx: dict[str, Any]) -> dict[str, Any]:
@@ -719,9 +717,7 @@ def test_missing_compatibility_axis_fails_closed(tmp_path: Path) -> None:
     fx["thresholds"].pop("threshold_hash")
     fx["thresholds"]["threshold_hash"] = _digest(fx["thresholds"])
     _write(fx["threshold_path"], fx["thresholds"])
-    fx["expected_path"].write_text(
-        fx["thresholds"]["threshold_hash"][7:] + "\n", encoding="utf-8"
-    )
+    fx["expected_path"].write_text(fx["thresholds"]["threshold_hash"][7:] + "\n", encoding="utf-8")
     assert _run(fx)["classification"] == gate.UNVERIFIABLE
 
 
@@ -777,9 +773,7 @@ def test_tg7_false_certification_blocks_rc(tmp_path: Path) -> None:
     report.pop("report_hash")
     report["report_hash"] = _digest(report)
     _write(fx["paths"]["tg7_report"], report)
-    fx["thresholds"]["dependency_subjects"]["tg7"]["receipt_hash"] = report[
-        "report_hash"
-    ]
+    fx["thresholds"]["dependency_subjects"]["tg7"]["receipt_hash"] = report["report_hash"]
     _refresh(fx)
     assert _run(fx)["classification"] == gate.LOWER_MATURITY
 
@@ -791,9 +785,7 @@ def test_tg7_family_denominator_blocks_rc(tmp_path: Path) -> None:
     report.pop("report_hash")
     report["report_hash"] = _digest(report)
     _write(fx["paths"]["tg7_report"], report)
-    fx["thresholds"]["dependency_subjects"]["tg7"]["receipt_hash"] = report[
-        "report_hash"
-    ]
+    fx["thresholds"]["dependency_subjects"]["tg7"]["receipt_hash"] = report["report_hash"]
     _refresh(fx)
     assert _run(fx)["classification"] == gate.LOWER_MATURITY
 
@@ -853,9 +845,7 @@ def test_forged_tg5_controlled_pr_binding_is_unverifiable(tmp_path: Path) -> Non
     value.pop("receipt_hash")
     value["receipt_hash"] = _digest(value)
     _write(fx["paths"]["tg5_receipt"], value)
-    fx["thresholds"]["dependency_subjects"]["tg5"]["receipt_hash"] = value[
-        "receipt_hash"
-    ]
+    fx["thresholds"]["dependency_subjects"]["tg5"]["receipt_hash"] = value["receipt_hash"]
     _refresh(fx)
     assert _run(fx)["classification"] == gate.UNVERIFIABLE
 
@@ -871,6 +861,45 @@ def test_forbidden_value_ready_claim_fails_closed(tmp_path: Path) -> None:
     report = _run(fx)
     assert report["classification"] == gate.UNVERIFIABLE
     assert any("FORBIDDEN_CLAIM_VALUE" in reason for reason in report["reasons"])
+
+
+def test_malformed_threshold_nested_row_is_unverifiable_not_exception(tmp_path: Path) -> None:
+    fx = _fixture(tmp_path)
+    fx["thresholds"]["compatibility_manifest"][0]["row_id"] = ["not-hashable"]
+    fx["thresholds"].pop("threshold_hash")
+    fx["thresholds"]["threshold_hash"] = _digest(fx["thresholds"])
+    _write(fx["threshold_path"], fx["thresholds"])
+    fx["expected_path"].write_text(
+        fx["thresholds"]["threshold_hash"][7:] + "\n", encoding="utf-8"
+    )
+    assert _run(fx)["classification"] == gate.UNVERIFIABLE
+
+
+def test_missing_dependency_binding_is_unverifiable_not_exception(tmp_path: Path) -> None:
+    fx = _fixture(tmp_path)
+    del fx["thresholds"]["dependency_subjects"]["tg4"]
+    fx["thresholds"].pop("threshold_hash")
+    fx["thresholds"]["threshold_hash"] = _digest(fx["thresholds"])
+    _write(fx["threshold_path"], fx["thresholds"])
+    fx["expected_path"].write_text(
+        fx["thresholds"]["threshold_hash"][7:] + "\n", encoding="utf-8"
+    )
+    assert _run(fx)["classification"] == gate.UNVERIFIABLE
+
+
+def test_non_integer_tg7_denominator_is_unverifiable_not_exception(tmp_path: Path) -> None:
+    fx = _fixture(tmp_path)
+    report = fx["values"]["tg7_report"]
+    report["denominator"] = "fifty-six"
+    report["eligible_count"] = "fifty-six"
+    report.pop("report_hash")
+    report["report_hash"] = _digest(report)
+    _write(fx["paths"]["tg7_report"], report)
+    fx["thresholds"]["dependency_subjects"]["tg7"]["receipt_hash"] = report[
+        "report_hash"
+    ]
+    _refresh(fx)
+    assert _run(fx)["classification"] == gate.LOWER_MATURITY
 
 
 def test_cli_exit_code_is_zero_only_for_ready_states(tmp_path: Path) -> None:
