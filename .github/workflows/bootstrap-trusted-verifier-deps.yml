@@ -1,0 +1,69 @@
+name: One-shot trusted verifier dependency bootstrap
+
+on:
+  push:
+    branches:
+      - ops/trusted-verifier-runtime-bootstrap-20260905
+    paths:
+      - .github/workflows/bootstrap-trusted-verifier-deps.yml
+
+permissions:
+  contents: write
+
+jobs:
+  vendor-locked-pydantic:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Download and verify exact locked wheels
+        run: |
+          set -euo pipefail
+          mkdir -p .bootstrap/trusted_runtime
+          python - <<'PY'
+          from pathlib import Path
+          from urllib.request import urlopen
+          import hashlib
+
+          wheels = {
+              "annotated_types-0.7.0-py3-none-any.whl": (
+                  "https://files.pythonhosted.org/packages/78/b6/6307fbef88d9b5ee7421e68d78a9f162e0da4900bc5f5793f6d3d0e34fb8/annotated_types-0.7.0-py3-none-any.whl",
+                  "1f02e8b43a8fbbc3f3e0d4f0f4bfc8131bcb4eebe8849b8e5c773f3a1c582a53",
+              ),
+              "pydantic-2.12.5-py3-none-any.whl": (
+                  "https://files.pythonhosted.org/packages/5a/87/b70ad306ebb6f9b585f114d0ac2137d792b48be34d732d60e597c2f8465a/pydantic-2.12.5-py3-none-any.whl",
+                  "e561593fccf61e8a20fc46dfc2dfe075b8be7d0188df33f221ad1f0139180f9d",
+              ),
+              "pydantic_core-2.41.5-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl": (
+                  "https://files.pythonhosted.org/packages/0d/76/941cc9f73529988688a665a5c0ecff1112b3d95ab48f81db5f7606f522d3/pydantic_core-2.41.5-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+                  "eceb81a8d74f9267ef4081e246ffd6d129da5d87e37a77c9bde550cb04870c1c",
+              ),
+              "typing_extensions-4.15.0-py3-none-any.whl": (
+                  "https://files.pythonhosted.org/packages/18/67/36e9267722cc04a6b9f15c7f3441c2363321a3ea07da7ae0c0707beb2a9c/typing_extensions-4.15.0-py3-none-any.whl",
+                  "f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548",
+              ),
+              "typing_inspection-0.4.2-py3-none-any.whl": (
+                  "https://files.pythonhosted.org/packages/dc/9b/47798a6c91d8bdb567fe2698fe81e0c6b7cb7ef4d13da4114b41d239f65d/typing_inspection-0.4.2-py3-none-any.whl",
+                  "4ed1cacbdc298c220f1bd249ed5287caa16f34d44ef4e9c3d0cbad5b521545e7",
+              ),
+          }
+          root = Path(".bootstrap/trusted_runtime")
+          for name, (url, expected) in wheels.items():
+              data = urlopen(url, timeout=60).read()
+              actual = hashlib.sha256(data).hexdigest()
+              if actual != expected:
+                  raise SystemExit(f"hash mismatch for {name}: {actual}")
+              (root / name).write_bytes(data)
+              print(name, actual, len(data))
+          PY
+      - name: Commit locked bootstrap payload and retire this workflow
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/bootstrap-trusted-verifier-deps.yml
+          git add .bootstrap/trusted_runtime
+          git diff --check --cached
+          git commit -m "test(ci): vendor locked pydantic bootstrap wheels"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
