@@ -4,6 +4,8 @@ Provides lightweight transport-only client entry points:
 - CLI: nexus-certify (product.clients.cli)
 - MCP: library adapter (product.clients.mcp)
 - GitHub Action: self-hosted runner wrapper (product.clients.github_action)
+
+Candidate provenance is bound to the exact PR head; this module does not mint acceptance truth.
 """
 
 from product.clients.cli import main as cli_main
