@@ -5188,3 +5188,697 @@ def test_r1b2_live_effect_owner_timeout_returns_uncertain_without_contender_effe
     assert terminal_reopen.exitcode == 0
     assert terminal_results.get(timeout=2)[0] == "VERIFIED"
     assert _r1b2_durable_count(contender_effect_count) == 0
+
+
+# ---------------------------------------------------------------------------
+# Hostile tests for #526 ledger-capacity repair (V6 recovery seam).
+# These verify the bounded Gateway-ledger capacity contract: a single legal
+# append can never render the ledger unreadable, and an external effect never
+# fires unless the post-effect durable closure still fits.
+# ---------------------------------------------------------------------------
+
+
+def _write_v2_rows(ledger_path, rows):
+    """Write canonical JSONL rows to a ledger path without going through the
+    GatewayLedger (so we can craft oversized / hostile files directly)."""
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    data = b"".join(
+        json.dumps(row, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+        for row in rows
+    )
+    ledger_path.write_bytes(data)
+    ledger_path.chmod(0o600)
+
+
+def _build_valid_v2_fill_rows(fixture, count):
+    """Build ``count`` valid canonical V2 REQUESTED rows suitable for filling a
+    ledger.  Each row has a unique request_id / fence, correct sequence numbers,
+    proper parent-hash chaining, and valid record hashes."""
+    from nexus.contracts.gateway_deployment import canonical_hash
+
+    receipt = fixture["receipt"]
+    rows = []
+    parent_hash = ""
+    for i in range(count):
+        request_id = f"fill-req-{i}"
+        fence = f"fill-fence-{i}"
+        values = {
+            "schema": "nexus.gateway.ledger.v2",
+            "request_id": request_id,
+            "request_hash": "a" * 64,
+            "state": "REQUESTED",
+            "sequence": i + 1,
+            "parent_hash": parent_hash,
+            "authority_schema": receipt.schema,
+            "receipt_id": receipt.receipt_id,
+            "receipt_hash": receipt.receipt_hash,
+            "card_sha256": receipt.card_sha256,
+            "accepted_source_merge": receipt.accepted_source_merge,
+            "accepted_source_tree": receipt.accepted_source_tree,
+            "final_manager_sha256": receipt.final_manager_sha256,
+            "independent_acceptance_receipt_hash": receipt.independent_acceptance_receipt_hash,
+            "source_set_sha256": receipt.source_set.source_set_sha256,
+            "desired_manifest_id": receipt.desired_manifest_id,
+            "desired_manifest_hash": receipt.desired_manifest_sha256,
+            "predecessor_manifest_id": receipt.predecessor_manifest_id,
+            "predecessor_manifest_hash": receipt.predecessor_manifest_sha256,
+            "source_bundle_evidence_hash": None,
+            "operation": "gateway-recover",
+            "effect_class": "GATEWAY_DURABLE_RECOVERY",
+            "idempotency_fence": fence,
+            "pre_effect_identity": {},
+            "observed_identity": {},
+        }
+        values["record_hash"] = canonical_hash(values)
+        rows.append(values)
+        parent_hash = values["record_hash"]
+    return rows
+
+
+def test_hostile_1_ledger_just_over_old_64k_reads_under_new_contract(tmp_path, monkeypatch):
+    """A ledger slightly larger than the old 64 KiB generic bound (but below the
+    new explicit Gateway-ledger total bound) must read successfully under the
+    repaired contract."""
+    fixture = _r1b2_prepared_fixture(tmp_path, monkeypatch)
+    ledger_path = fixture["ledger_path"]
+    fill_rows = _build_valid_v2_fill_rows(fixture, 50)
+    _write_v2_rows(ledger_path, fill_rows)
+    ledger = g.GatewayLedger(ledger_path, lock_path=fixture["lock_path"])
+    scanned = ledger.read()
+    assert len(scanned) == len(fill_rows)
+    assert all(r["schema"] == "nexus.gateway.ledger.v2" for r in scanned)
+    file_bytes = len(ledger_path.read_bytes())
+    assert file_bytes > g.MAX_GATEWAY_STORE_BYTES
+
+
+def test_hostile_2_ledger_over_old_64k_with_history_tamper_fails_closed(tmp_path, monkeypatch):
+    """Same size as #1, but one historical record's hash tampered: must fail
+    closed despite being under the new total bound."""
+    fixture = _r1b2_prepared_fixture(tmp_path, monkeypatch)
+    ledger_path = fixture["ledger_path"]
+    fill_rows = _build_valid_v2_fill_rows(fixture, 50)
+    # Tamper: flip desired_manifest_hash in the first record.
+    fill_rows[0]["desired_manifest_hash"] = "f" * 64
+    _write_v2_rows(ledger_path, fill_rows)
+    ledger = g.GatewayLedger(ledger_path, lock_path=fixture["lock_path"])
+    with pytest.raises((g.LedgerCorruption, g.GatewayContractError)):
+        ledger.read()
+
+
+def test_hostile_3_record_exceeding_per_record_bound_rejected_before_write(tmp_path, monkeypatch):
+    """A single encoded record larger than MAX_GATEWAY_LEDGER_RECORD_BYTES must
+    be rejected before the file is written."""
+    fixture = _r1b2_prepared_fixture(tmp_path, monkeypatch)
+    ledger_path = fixture["ledger_path"]
+    record = _r1b2_record(fixture, fixture["staged"], "REQUESTED", 1, "")
+    values = record.model_dump()
+    values["observed_identity"] = {"junk": "X" * (g.MAX_GATEWAY_LEDGER_RECORD_BYTES + 1)}
+    values["record_hash"] = __import__(
+        "nexus.contracts.gateway_deployment", fromlist=["canonical_hash"]
+    ).canonical_hash({k: v for k, v in values.items() if k != "record_hash"})
+    encoded = (
+        json.dumps(values, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    )
+    assert len(encoded) > g.MAX_GATEWAY_LEDGER_RECORD_BYTES
+    before = ledger_path.read_bytes() if ledger_path.exists() else b""
+    with pytest.raises(g.LedgerCorruption):
+        g._validate_prospective_ledger_append([], encoded, current_size=len(before))
+    after = ledger_path.read_bytes() if ledger_path.exists() else b""
+    assert before == after
+
+
+def test_hostile_4_prospective_append_exceeds_total_bound_rejected(tmp_path, monkeypatch):
+    """An append whose prospective total would exceed MAX_GATEWAY_LEDGER_BYTES
+    must be rejected before write, leaving file bytes unchanged."""
+    fixture = _r1b2_prepared_fixture(tmp_path, monkeypatch)
+    ledger_path = fixture["ledger_path"]
+    record = _r1b2_record(fixture, fixture["staged"], "REQUESTED", 1, "")
+    row = record.model_dump()
+    row_bytes = (
+        json.dumps(row, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    )
+    rows = [row] * g.MAX_GATEWAY_LEDGER_RECORDS
+    _write_v2_rows(ledger_path, rows)
+    before = ledger_path.read_bytes()
+    with pytest.raises(g.LedgerCorruption):
+        g._validate_prospective_ledger_append(rows, row_bytes, current_size=len(before))
+    assert ledger_path.read_bytes() == before
+
+
+def test_hostile_5_record_count_exhaustion_rejected_before_write(tmp_path, monkeypatch):
+    """When MAX_GATEWAY_LEDGER_RECORDS is reached, the next append must be
+    rejected before write."""
+    fixture = _r1b2_prepared_fixture(tmp_path, monkeypatch)
+    record = _r1b2_record(fixture, fixture["staged"], "REQUESTED", 1, "")
+    rows = [record.model_dump()] * g.MAX_GATEWAY_LEDGER_RECORDS
+    encoded = (
+        json.dumps(record.model_dump(), sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    )
+    with pytest.raises(g.LedgerCorruption):
+        g._validate_prospective_ledger_append(
+            rows, encoded, current_size=len(encoded) * len(rows)
+        )
+
+
+def test_hostile_6_pre_effect_capacity_insufficient_blocks_before_effect(tmp_path, monkeypatch):
+    """If remaining capacity is insufficient for the post-effect reserve, the
+    recovery must BLOCK before any external effect fires."""
+    fixture = _r1b2_prepared_fixture(tmp_path, monkeypatch)
+    ledger_path = fixture["ledger_path"]
+    record = _r1b2_record(fixture, fixture["staged"], "REQUESTED", 1, "")
+    row = record.model_dump()
+    max_rows = g.MAX_GATEWAY_LEDGER_RECORDS - g.POST_EFFECT_LEDGER_RESERVE_SLOTS + 1
+    rows = [row] * max_rows
+    _write_v2_rows(ledger_path, rows)
+    ledger = g.GatewayLedger(ledger_path, lock_path=fixture["lock_path"])
+    with pytest.raises(g.GatewayContractError):
+        g._reserve_post_effect_ledger_capacity(ledger, rows)
+
+
+def _r1b2_effect_count(ledger_path):
+    """Count EFFECT_STARTED rows in the ledger."""
+    count = 0
+    if not ledger_path.exists():
+        return 0
+    for line in ledger_path.read_bytes().splitlines():
+        row = json.loads(line)
+        if row.get("state") == "EFFECT_STARTED":
+            count += 1
+    return count
+
+
+def test_hostile_7_just_room_for_effect_started_but_not_terminals_blocks(tmp_path, monkeypatch):
+    """Ledger has enough room for EFFECT_STARTED but not terminal rows:
+    pre-effect reserve check must BLOCK."""
+    fixture = _r1b2_prepared_fixture(tmp_path, monkeypatch)
+    ledger_path = fixture["ledger_path"]
+    record = _r1b2_record(fixture, fixture["staged"], "REQUESTED", 1, "")
+    row = record.model_dump()
+    max_rows = g.MAX_GATEWAY_LEDGER_RECORDS - g.POST_EFFECT_LEDGER_RESERVE_SLOTS + 1
+    _write_v2_rows(ledger_path, [row] * max_rows)
+    rows = [row] * max_rows
+    ledger = g.GatewayLedger(ledger_path, lock_path=fixture["lock_path"])
+    with pytest.raises(g.GatewayContractError):
+        g._reserve_post_effect_ledger_capacity(ledger, rows)
+
+
+def test_hostile_8_existing_effect_started_with_desired_deployment_reconciles_to_verified(
+    tmp_path, monkeypatch
+):
+    """The actual V6 post-recovery scenario: ledger has only up to EFFECT_STARTED,
+    physical Gateway is already at the authorized desired deployment, re-running
+    the same request must reconcile to VERIFIED with zero new external effect."""
+    fixture = _r1b2_prepared_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    seam_calls = []
+    external_calls = []
+    adapters = _r1b2_adapters(
+        fixture, ledger,
+        already_desired=True,
+        effect_calls=seam_calls,
+        external_calls=external_calls,
+        )
+    outcome = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=adapters, ledger=ledger
+    )
+    assert outcome.result == "VERIFIED"
+    assert len(seam_calls) == 1
+    assert external_calls == []
+    replay_calls = []
+    replay_adapters = _r1b2_adapters(
+        fixture, ledger,
+        already_desired=True,
+        effect_calls=replay_calls,
+        external_calls=[],
+    )
+    replay_adapters = replay_adapters.__class__(
+        observe=replay_adapters.observe,
+        effect=lambda _plan: pytest.fail("terminal replay cannot enter the effect seam"),
+        postflight=replay_adapters.postflight,
+        clock=replay_adapters.clock,
+        crash_hook=replay_adapters.crash_hook,
+    )
+    replayed = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=replay_adapters, ledger=ledger
+    )
+    assert replayed.result == "VERIFIED"
+    assert replayed.evidence_hash == outcome.evidence_hash
+    assert len(replay_calls) == 0
+
+
+def test_hostile_9_timeout_or_lost_ack_replays_same_request_same_fence(tmp_path, monkeypatch):
+    """A timeout / lost-ack replay must use the same request/fence and converge
+    to the same terminal result."""
+    fixture = _r1b2_prepared_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    seam_calls = []
+    external_calls = []
+    # First pass: effect fires with lost_ack=True, leading to UNCERTAIN_EFFECT.
+    adapters = _r1b2_adapters(
+        fixture, ledger,
+        lost_ack=True,
+        effect_calls=seam_calls,
+        external_calls=external_calls,
+    )
+    first = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=adapters, ledger=ledger
+    )
+    assert first.result == "UNCERTAIN_EFFECT"
+    assert len(seam_calls) == 1
+    # Second pass: same request, already desired → VERIFIED.
+    replay_calls = []
+    replay_adapters = _r1b2_adapters(
+        fixture, ledger,
+        already_desired=True,
+        effect_calls=replay_calls,
+        external_calls=[],
+    )
+    replayed = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=replay_adapters, ledger=ledger
+    )
+    assert replayed.result == "VERIFIED"
+    assert len(replay_calls) == 0
+
+
+def test_hostile_10_v5_and_v6_historical_rows_remain_validatable(tmp_path, monkeypatch):
+    """Valid V1/V2 historical rows (from earlier recoveries) must still
+    validate under the repaired manager."""
+    fixture = _r1b2_prepared_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    v1 = ledger.append(
+        request_id="legacy-request",
+        request_hash="a" * 64,
+        state="REQUESTED",
+        host_authority=_ledger_receipt("legacy-request", "legacy-fence"),
+        operation="reload",
+        effect_class="GATEWAY_RELOAD",
+        idempotency_fence="legacy-fence",
+    )
+    v2 = _r1b2_record(fixture, fixture["staged"], "REQUESTED", 2, v1["record_hash"])
+    ledger.append_recovery(
+        v2,
+        expected_tail=v1["record_hash"],
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=None,
+    )
+    rows = ledger.read()
+    assert rows[0]["schema"] == "nexus.gateway.ledger.v1"
+    assert rows[1]["schema"] == "nexus.gateway.ledger.v2"
+    recovery = ledger.recovery_rows(
+        fixture["request"].request_id,
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=fixture["staged"].bundle_evidence,
+    )
+    assert [r.state for r in recovery] == ["REQUESTED"]
+
+
+def test_hostile_11_single_legal_append_never_breaks_subsequent_scan(tmp_path, monkeypatch):
+    """After any single legal append, _scan_unlocked must still succeed: a
+    single legal append can never make the ledger unreadable."""
+    fixture = _r1b2_prepared_fixture(tmp_path, monkeypatch)
+    ledger_path = fixture["ledger_path"]
+    # Build valid chain leaving room for 2 more records.
+    fill_count = g.MAX_GATEWAY_LEDGER_RECORDS - 2
+    fill_rows = _build_valid_v2_fill_rows(fixture, fill_count)
+    _write_v2_rows(ledger_path, fill_rows)
+    ledger = g.GatewayLedger(ledger_path, lock_path=fixture["lock_path"])
+    scanned = ledger.read()
+    assert len(scanned) == fill_count
+    last_hash = scanned[-1]["record_hash"]
+    # Append 1: build a single valid row with unique request_id.
+    from nexus.contracts.gateway_deployment import canonical_hash
+    values1 = dict(fill_rows[0])
+    values1["request_id"] = "append-req-1"
+    values1["idempotency_fence"] = "append-fence-1"
+    values1["sequence"] = fill_count + 1
+    values1["parent_hash"] = last_hash
+    values1["record_hash"] = canonical_hash(
+        {k: v for k, v in values1.items() if k != "record_hash"}
+    )
+    append1_bytes = (
+        json.dumps(values1, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    )
+    g._validate_prospective_ledger_append(
+        scanned, append1_bytes, current_size=len(ledger_path.read_bytes())
+    )
+    fill_rows.append(values1)
+    _write_v2_rows(ledger_path, fill_rows)
+    scanned2 = ledger.read()
+    assert len(scanned2) == fill_count + 1
+    # Append 2: another unique request starting in REQUESTED state.
+    values2 = dict(fill_rows[0])
+    values2["request_id"] = "append-req-2"
+    values2["idempotency_fence"] = "append-fence-2"
+    values2["sequence"] = fill_count + 2
+    values2["parent_hash"] = scanned2[-1]["record_hash"]
+    values2["record_hash"] = canonical_hash(
+        {k: v for k, v in values2.items() if k != "record_hash"}
+    )
+    append2_bytes = (
+        json.dumps(values2, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    )
+    g._validate_prospective_ledger_append(
+        scanned2, append2_bytes, current_size=len(ledger_path.read_bytes())
+    )
+
+
+def test_hostile_12_append_exceeding_bound_leaves_file_unchanged(tmp_path, monkeypatch):
+    """A hostile append that would exceed the total bound must leave the file
+    completely unchanged."""
+    fixture = _r1b2_prepared_fixture(tmp_path, monkeypatch)
+    ledger_path = fixture["ledger_path"]
+    record = _r1b2_record(fixture, fixture["staged"], "REQUESTED", 1, "")
+    row = record.model_dump()
+    row_bytes = (
+        json.dumps(row, sort_keys=True, separators=(",", ":")).encode() + b"\n"
+    )
+    rows = [row] * g.MAX_GATEWAY_LEDGER_RECORDS
+    _write_v2_rows(ledger_path, rows)
+    before = ledger_path.read_bytes()
+    with pytest.raises(g.LedgerCorruption):
+        g._validate_prospective_ledger_append(
+            rows, row_bytes, current_size=len(before)
+        )
+    assert ledger_path.read_bytes() == before
+
+
+def test_hostile_13_repeated_postflight_replay_blocks_before_terminal_reserve_exhaustion(
+    tmp_path, monkeypatch
+):
+    """Repeated same-request reconciliation may consume retry headroom, but it
+    must durably BLOCK before the protected terminal path is exhausted."""
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(g, "MAX_GATEWAY_LEDGER_RECORDS", 14)
+    monkeypatch.setattr(
+        g,
+        "MAX_GATEWAY_LEDGER_BYTES",
+        14 * g.MAX_GATEWAY_LEDGER_RECORD_BYTES,
+    )
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    effect_calls = []
+    external_calls = []
+
+    failing = _r1b2_adapters(
+        fixture,
+        ledger,
+        postflight_changes={"authenticated": False},
+        effect_calls=effect_calls,
+        external_calls=external_calls,
+    )
+    first = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=failing, ledger=ledger
+    )
+    assert first.result == "UNCERTAIN_EFFECT"
+    first_count = len(ledger.read())
+    assert len(effect_calls) == 1
+    assert external_calls == ["fixed-effect"]
+
+    retry_one = _r1b2_adapters(
+        fixture,
+        ledger,
+        postflight_changes={"authenticated": False},
+        effect_calls=[],
+        external_calls=[],
+    )
+    second = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=retry_one, ledger=ledger
+    )
+    assert second.result == "UNCERTAIN_EFFECT"
+    second_count = len(ledger.read())
+    assert second_count > first_count
+
+    retry_two = _r1b2_adapters(
+        fixture,
+        ledger,
+        postflight_changes={"authenticated": False},
+        effect_calls=[],
+        external_calls=[],
+    )
+    terminal = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=retry_two, ledger=ledger
+    )
+    assert terminal.result == "BLOCKED"
+    scanned = ledger.read()
+    assert scanned[-1]["state"] == "BLOCKED"
+    assert len(scanned) <= g.MAX_GATEWAY_LEDGER_RECORDS
+    assert len(effect_calls) == 1
+    assert external_calls == ["fixed-effect"]
+
+    recovery_rows = [
+        row for row in scanned if row.get("request_id") == fixture["request"].request_id
+    ]
+    assert recovery_rows
+    assert {row["request_hash"] for row in recovery_rows} == {
+        fixture["request"].request_hash
+    }
+    assert {row["idempotency_fence"] for row in recovery_rows} == {
+        fixture["request"].idempotency_fence
+    }
+    replay = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=retry_two, ledger=ledger
+    )
+    assert replay.result == "BLOCKED"
+    assert len(ledger.read()) == len(scanned)
+
+
+def test_hostile_14_replay_can_still_verify_before_terminal_reserve_is_invaded(
+    tmp_path, monkeypatch
+):
+    """Capacity protection must not turn a recoverable transient failure into an
+    eager BLOCK when a complete successful replay still fits."""
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(g, "MAX_GATEWAY_LEDGER_RECORDS", 14)
+    monkeypatch.setattr(
+        g,
+        "MAX_GATEWAY_LEDGER_BYTES",
+        14 * g.MAX_GATEWAY_LEDGER_RECORD_BYTES,
+    )
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    effect_calls = []
+    external_calls = []
+    first = _r1b2_adapters(
+        fixture,
+        ledger,
+        postflight_changes={"authenticated": False},
+        effect_calls=effect_calls,
+        external_calls=external_calls,
+    )
+    assert g._gateway_recover_with_adapters(
+        fixture["request"], adapters=first, ledger=ledger
+    ).result == "UNCERTAIN_EFFECT"
+
+    successful = _r1b2_adapters(
+        fixture,
+        ledger,
+        already_desired=True,
+        effect_calls=[],
+        external_calls=[],
+    )
+    result = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=successful, ledger=ledger
+    )
+    assert result.result == "VERIFIED"
+    assert ledger.read()[-1]["state"] == "VERIFIED"
+    assert len(effect_calls) == 1
+    assert external_calls == ["fixed-effect"]
+
+
+def test_hostile_15_real_recovery_blocks_pre_effect_when_reserve_does_not_fit(
+    tmp_path, monkeypatch
+):
+    """Exercise the real recovery path: insufficient post-effect reserve must
+    produce durable BLOCKED with zero effect, not merely fail a helper call."""
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(g, "MAX_GATEWAY_LEDGER_RECORDS", 16)
+    monkeypatch.setattr(
+        g,
+        "MAX_GATEWAY_LEDGER_BYTES",
+        16 * g.MAX_GATEWAY_LEDGER_RECORD_BYTES,
+    )
+    _write_v2_rows(
+        fixture["ledger_path"],
+        _build_valid_v2_fill_rows(fixture, 3),
+    )
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    effect_calls = []
+    external_calls = []
+    adapters = _r1b2_adapters(
+        fixture,
+        ledger,
+        effect_calls=effect_calls,
+        external_calls=external_calls,
+    )
+    outcome = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=adapters, ledger=ledger
+    )
+    assert outcome.result == "BLOCKED"
+    assert outcome.effect_started is False
+    assert effect_calls == []
+    assert external_calls == []
+    scanned = ledger.read()
+    assert scanned[-1]["state"] == "BLOCKED"
+    assert all(
+        row["state"] != "EFFECT_STARTED"
+        for row in scanned
+        if row.get("request_id") == fixture["request"].request_id
+    )
+
+
+def test_hostile_16_exact_replay_headroom_blocks_before_partial_reconcile(
+    tmp_path, monkeypatch
+):
+    """A replay with only four physical slots left is not crash-safe: writing
+    SERVICE_OBSERVED/IDENTITY_VERIFIED/CLIENT_BOUND would leave no two-row
+    UNCERTAIN_EFFECT -> BLOCKED escape if the process died at CLIENT_BOUND.
+    The precheck must therefore consume only the protected terminal path.
+    """
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(g, "MAX_GATEWAY_LEDGER_RECORDS", 14)
+    monkeypatch.setattr(
+        g,
+        "MAX_GATEWAY_LEDGER_BYTES",
+        14 * g.MAX_GATEWAY_LEDGER_RECORD_BYTES,
+    )
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    effect_calls = []
+    external_calls = []
+    failing = _r1b2_adapters(
+        fixture,
+        ledger,
+        postflight_changes={"authenticated": False},
+        effect_calls=effect_calls,
+        external_calls=external_calls,
+    )
+    first = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=failing, ledger=ledger
+    )
+    assert first.result == "UNCERTAIN_EFFECT"
+    assert len(ledger.read()) == 8
+
+    # Four slots remain after rebinding the bounded test ceiling. That used to
+    # pass the replay precheck, then fail later while appending CLIENT_BOUND.
+    monkeypatch.setattr(g, "MAX_GATEWAY_LEDGER_RECORDS", 12)
+    monkeypatch.setattr(
+        g,
+        "MAX_GATEWAY_LEDGER_BYTES",
+        12 * g.MAX_GATEWAY_LEDGER_RECORD_BYTES,
+    )
+    successful_surface = _r1b2_adapters(
+        fixture,
+        ledger,
+        already_desired=True,
+        effect_calls=[],
+        external_calls=[],
+    )
+    terminal = g._gateway_recover_with_adapters(
+        fixture["request"], adapters=successful_surface, ledger=ledger
+    )
+    assert terminal.result == "BLOCKED"
+    scanned = ledger.read()
+    assert scanned[-1]["state"] == "BLOCKED"
+    assert len(scanned) == 9
+    assert len(effect_calls) == 1
+    assert external_calls == ["fixed-effect"]
+
+
+def test_hostile_17_pre_effect_reserve_cannot_be_stolen_during_external_effect(
+    tmp_path, monkeypatch
+):
+    """The 10-slot pre-effect reserve is a durable budget, not a one-time check.
+
+    While the external effect call is in flight, unrelated ledger operations
+    must be unable to consume the remaining nine slots owned by this recovery.
+    When the effect returns, the original request must still have enough room to
+    reconcile to VERIFIED without a capacity exception or a second effect.
+    """
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(g, "MAX_GATEWAY_LEDGER_RECORDS", 14)
+    monkeypatch.setattr(
+        g,
+        "MAX_GATEWAY_LEDGER_BYTES",
+        14 * g.MAX_GATEWAY_LEDGER_RECORD_BYTES,
+    )
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    effect_entered = threading.Event()
+    release_effect = threading.Event()
+    effect_calls = []
+    external_calls = []
+    base = _r1b2_adapters(
+        fixture,
+        ledger,
+        effect_calls=effect_calls,
+        external_calls=external_calls,
+    )
+    original_effect = base.effect
+
+    def blocking_effect(plan):
+        effect_entered.set()
+        assert release_effect.wait(timeout=5)
+        return original_effect(plan)
+
+    adapters = base.__class__(
+        observe=base.observe,
+        effect=blocking_effect,
+        postflight=base.postflight,
+        clock=base.clock,
+        crash_hook=base.crash_hook,
+    )
+    result_box = {}
+    error_box = {}
+
+    def run_recovery():
+        try:
+            result_box["outcome"] = g._gateway_recover_with_adapters(
+                fixture["request"], adapters=adapters, ledger=ledger
+            )
+        except BaseException as exc:
+            error_box["error"] = exc
+
+    worker = threading.Thread(target=run_recovery)
+    worker.start()
+    assert effect_entered.wait(timeout=5)
+    assert len(ledger.read()) == 5
+
+    for index in range(3):
+        request_id = f"unrelated-{index}"
+        fence = f"unrelated-fence-{index}"
+        receipt = _ledger_receipt(request_id, fence)
+        with pytest.raises(g.GatewayContractError, match="post-effect terminal reserve"):
+            ledger.append(
+                request_id=request_id,
+                request_hash="b" * 64,
+                state="REQUESTED",
+                host_authority=receipt,
+                operation=receipt.operation,
+                effect_class=receipt.effect_class.value,
+                idempotency_fence=fence,
+            )
+    assert len(ledger.read()) == 5
+
+    release_effect.set()
+    worker.join(timeout=10)
+    assert not worker.is_alive()
+    assert error_box == {}
+    assert result_box["outcome"].result == "VERIFIED"
+    scanned = ledger.read()
+    assert scanned[-1]["state"] == "VERIFIED"
+    assert len(effect_calls) == 1
+    assert external_calls == ["fixed-effect"]
