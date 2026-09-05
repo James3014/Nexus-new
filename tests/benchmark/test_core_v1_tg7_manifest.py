@@ -185,9 +185,9 @@ def test_negative_missing_or_forged_oracle(
 ):
     tampered = copy.deepcopy(self_test_corpus)
     tampered["cases"][0]["oracle_hash"] = "sha256:" + "f" * 64
-    tampered["cases"][0]["case_hash"] = _digest(
-        {k: v for k, v in tampered["cases"][0].items() if k != "case_hash"}
-    )
+    tampered["cases"][0]["case_hash"] = _digest({
+        k: v for k, v in tampered["cases"][0].items() if k != "case_hash"
+    })
     tampered = _rehash(tampered, "corpus_hash")
     assert any("oracle_hash" in error for error in validate_corpus(tampered, self_test_selection))
 
@@ -288,15 +288,13 @@ def test_negative_forged_infra_invalid_reasons(
         "infra_invalid": True,
         "infra_invalid_reason": "UNAUTHORIZED_FORGED_REASON",
     }
-    result["result_hash"] = _digest(
-        {
-            "case_id": result["case_id"],
-            "attempt_hash": result["attempt_hash"],
-            "oracle_hash": result["oracle_hash"],
-            "actual_status": result["actual_status"],
-            "actual_disposition": result["actual_disposition"],
-        }
-    )
+    result["result_hash"] = _digest({
+        "case_id": result["case_id"],
+        "attempt_hash": result["attempt_hash"],
+        "oracle_hash": result["oracle_hash"],
+        "actual_status": result["actual_status"],
+        "actual_disposition": result["actual_disposition"],
+    })
     shadow = {
         "schema": "nexus.core-v1.tg7-shadow-receipt.v1",
         "run_id": "self-test-run",
