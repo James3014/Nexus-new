@@ -73,10 +73,13 @@ def _setup(tmp_path: Path, remote_url: str = "https://github.com/o/r.git", **con
     card.write_text(
         "# Task Card: task-1\n\n"
         "- task_id: `task-1`\n"
-        "- status: ACTIVE\n\n"
+        "- status: ACTIVE\n"
+        "- AUTO_CHAIN: false\n\n"
         "## Allowed files\n"
         "- `nexus/a.py`\n"
         "- `tests/test_a.py`\n\n"
+        "## Forbidden scope\n\n"
+        "No writes to `tasks/**`; no merge or release authority.\n\n"
         "## Verification commands\n"
         "```bash\n"
         "python3 -m pytest -q tests/test_a.py\n"
@@ -168,22 +171,81 @@ class FakeD:
 
     def close_task(self, **kwargs):
         self.calls.append(kwargs)
+        claim = "TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE"
+        task_candidate = {
+            "schema": "external_intelligence_task_candidate.v1",
+            "task_id": "task-1",
+            "base_sha": kwargs["main_sha"],
+            "workspace_id": "workspace-1",
+            "workspace_path": "/tmp/workspace-1",
+            "candidate_commit": "1" * 40,
+            "candidate_tree": "2" * 40,
+            "candidate_diff_sha256": "4" * 64,
+            "changed_paths": ["nexus/a.py", "tests/test_a.py"],
+            "deleted_paths": [],
+            "composition_order": ["u1", "u2"],
+            "unit_lineage": [],
+            "claim_ceiling": "TASK_CANDIDATE_REQUIRES_WHOLE_TASK_VERIFICATION",
+            "task_candidate_id": "task-candidate-1",
+        }
+        whole = {
+            "schema": "external_intelligence_whole_task_verification.v1",
+            "status": "PASS",
+            "task_id": "task-1",
+            "task_candidate_id": "task-candidate-1",
+            "verification_id": "whole-verification-1",
+            "results": [],
+        }
+        acceptance_packet = {
+            "schema": "external_intelligence_acceptance_packet.v1",
+            "task_id": "task-1",
+            "task_card_ref": kwargs["task_card_ref"],
+            "task_card_hash": kwargs["task_card_hash"],
+            "external_intelligence_refs": list(kwargs["external_intelligence_refs"]),
+            "task_candidate": {
+                "task_candidate_id": "task-candidate-1",
+                "base_sha": kwargs["main_sha"],
+                "candidate_commit": "1" * 40,
+                "candidate_tree": "2" * 40,
+                "candidate_diff_sha256": "4" * 64,
+                "changed_paths": ["nexus/a.py", "tests/test_a.py"],
+                "deleted_paths": [],
+                "composition_order": ["u1", "u2"],
+            },
+            "unit_lineage": [],
+            "whole_task_verification_id": "whole-verification-1",
+            "whole_task_status": "PASS",
+            "current_gate": "PENDING_INDEPENDENT_ACCEPTANCE",
+            "claim_ceiling": claim,
+            "packet_id": "packet-1",
+        }
         return {
-            "status": "TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE",
+            "schema": "external_intelligence_closure_run.v1",
+            "status": claim,
             "run_id": "d" * 64,
+            "task_id": "task-1",
+            "task_candidate": task_candidate,
+            "whole_verification": whole,
+            "unit_verifications": [],
+            "repair_deltas": [],
+            "acceptance_packet": acceptance_packet,
             "control_capsule": {
+                "schema": "external_intelligence_closure_capsule.v1",
                 "task_id": "task-1",
                 "candidate_commit": "1" * 40,
                 "candidate_tree": "2" * 40,
-                "verification_state": "PASS",
+                "candidate_diff_sha256": "4" * 64,
+                "verification_state": "WHOLE_TASK_PASS",
                 "current_gate": "PENDING_INDEPENDENT_ACCEPTANCE",
                 "acceptance_packet_ref": "state/acceptance.json",
                 "acceptance_packet_sha256": "3" * 64,
-                "next_action": "independent_acceptance",
-                "stop_condition": "acceptance_failed",
-                "claim_ceiling": "TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE",
+                "next_action": "run_independent_candidate_acceptance_audit",
+                "stop_if": "independent_acceptance_not_explicitly_granted",
+                "claim_ceiling": claim,
                 "secret_envelope": "must-not-leak",
             },
+            "telemetry": {},
+            "claim_ceiling": claim,
             "envelope": {"big": "secret"},
             "raw_prompt": "secret",
         }
@@ -395,6 +457,15 @@ def test_d_gets_exact_verifiers_and_compact_publication(tmp_path):
     assert publication["candidate_commit"] == "1" * 40
     assert "secret_envelope" not in rendered
     assert "raw_prompt" not in rendered
+    handoff = result["settlement_handoff"]
+    assert handoff["schema"] == "nexus.external_intelligence_settlement_handoff.v1"
+    assert handoff["candidate_commit"] == "1" * 40
+    assert handoff["required_acceptance_schema"] == "nexus.external_candidate_acceptance.v1"
+    assert handoff["independent_acceptance_required"] is True
+    assert handoff["next_action"] == "nexus_candidate_adopt_external"
+    assert handoff["automatic_adoption_performed"] is False
+    assert handoff["approval_performed"] is False
+    assert handoff["integration_performed"] is False
 
 
 def test_complete_identity_reuses_without_external_calls(tmp_path):

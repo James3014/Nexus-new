@@ -6023,6 +6023,9 @@ def _external_adoption_fixture(tmp_path, monkeypatch, **overrides):
     import nexus.orchestrator.self_hosted_task_service as service_module
 
     card_allowed_paths = overrides.pop("card_allowed_paths", ("src/one.py", "src/two.py"))
+    current_eia_card = bool(overrides.pop("current_eia_card", False))
+    card_allow_deletions = bool(overrides.pop("card_allow_deletions", False))
+    candidate_delete_path = str(overrides.pop("candidate_delete_path", "") or "")
     tmp_path.mkdir(parents=True, exist_ok=True)
     controller = tmp_path / "controller"
     controller.mkdir()
@@ -6038,19 +6041,38 @@ def _external_adoption_fixture(tmp_path, monkeypatch, **overrides):
     card_path = "tasks/adoption/01-external.md"
     physical_card = controller / card_path
     physical_card.parent.mkdir(parents=True)
-    physical_card.write_text(
-        "# TASK-EXT — External\n\n"
-        "task_id: `TASK-EXT`\n\n"
-        "`AUTO_CHAIN=false`\n\n"
-        "## Allowed repository paths\n\n"
-        + "".join(f"- `{path}`\n" for path in card_allowed_paths)
-        + "\n"
-        "## Forbidden scope\n\n"
-        "- `tasks/**`\n\n"
-        "## Exact verification commands\n\n"
-        "- `git diff --check`\n",
-        encoding="utf-8",
-    )
+    if current_eia_card:
+        card_text = (
+            "# TASK-EXT — External\n\n"
+            "## Identity\n\n"
+            "- task_id: `TASK-EXT`\n"
+            "- status: ACTIVE\n"
+            "- AUTO_CHAIN: false\n"
+            f"- allow_deletions: {'true' if card_allow_deletions else 'false'}\n\n"
+            "## Allowed files\n\n"
+            + "".join(f"- `{path}`\n" for path in card_allowed_paths)
+            + "\n"
+            "## Forbidden scope\n\n"
+            "No writes to `tasks/**`; no merge or release authority.\n\n"
+            "## Verification commands\n\n"
+            "```bash\n"
+            "git diff --check\n"
+            "```\n"
+        )
+    else:
+        card_text = (
+            "# TASK-EXT — External\n\n"
+            "task_id: `TASK-EXT`\n\n"
+            "`AUTO_CHAIN=false`\n\n"
+            "## Allowed repository paths\n\n"
+            + "".join(f"- `{path}`\n" for path in card_allowed_paths)
+            + "\n"
+            "## Forbidden scope\n\n"
+            "- `tasks/**`\n\n"
+            "## Exact verification commands\n\n"
+            "- `git diff --check`\n"
+        )
+    physical_card.write_text(card_text, encoding="utf-8")
     _git(controller, "add", card_path)
     _git(controller, "commit", "-m", "bind card")
     controller_revision = _git(controller, "rev-parse", "HEAD")
@@ -6063,6 +6085,9 @@ def _external_adoption_fixture(tmp_path, monkeypatch, **overrides):
     (candidate_target / "src" / "two.py").write_text("two = 2\n", encoding="utf-8")
     _git(candidate_target, "add", "src/two.py")
     _git(candidate_target, "commit", "-m", "candidate two")
+    if candidate_delete_path:
+        _git(candidate_target, "rm", candidate_delete_path)
+        _git(candidate_target, "commit", "-m", "candidate deletion")
     candidate = _git(candidate_target, "rev-parse", "HEAD")
     candidate_tree = _git(candidate_target, "rev-parse", "HEAD^{tree}")
     diff = subprocess.run(
@@ -6071,6 +6096,12 @@ def _external_adoption_fixture(tmp_path, monkeypatch, **overrides):
     ).stdout
     diff_hash = hashlib.sha256(diff).hexdigest()
     card_hash = hashlib.sha256(physical_card.read_bytes()).hexdigest()
+    changed_paths = sorted(
+        _git(controller, "diff", "--name-only", base, candidate).splitlines()
+    )
+    deleted_paths = sorted(
+        _git(controller, "diff", "--name-only", "--diff-filter=D", base, candidate).splitlines()
+    )
     validation = {
         "schema": "nexus.evidence_producer_bridge.validation_receipt.v1",
         "status": "EVIDENCE_PRODUCER_BRIDGE_VALIDATED",
@@ -6081,8 +6112,8 @@ def _external_adoption_fixture(tmp_path, monkeypatch, **overrides):
             "base_commit": base,
             "commit": candidate,
             "tree": candidate_tree,
-            "changed_paths": ["src/one.py", "src/two.py"],
-            "deleted_paths": [],
+            "changed_paths": changed_paths,
+            "deleted_paths": deleted_paths,
         },
     }
     validation_bytes = json.dumps(validation, sort_keys=True, separators=(",", ":")).encode()
@@ -6123,7 +6154,7 @@ def _external_adoption_fixture(tmp_path, monkeypatch, **overrides):
         "acceptance_receipt_b64": base64.b64encode(acceptance_bytes).decode(),
         "allowed_files": tuple(card_allowed_paths),
         "forbidden_files": (),
-        "authorized_deletions": (),
+        "authorized_deletions": tuple(deleted_paths) if card_allow_deletions else (),
         "verifier_commands": ("git diff --check",),
         "protected_contracts": (),
     }
@@ -6178,6 +6209,57 @@ def test_adopt_external_candidate_physically_verifies_exact_chain_and_stops_pend
     assert adopted["push_performed"] is False
     replay = service.adopt_external_candidate(request)
     assert replay["adoption_receipt_hash"] == adopted["adoption_receipt_hash"]
+
+
+def test_adopt_external_candidate_accepts_current_eia_card_and_preserves_settlement_ceiling(
+    tmp_path, monkeypatch,
+):
+    service, request, candidate, tree = _external_adoption_fixture(
+        tmp_path, monkeypatch, current_eia_card=True,
+    )
+
+    adopted = service.adopt_external_candidate(request)
+
+    assert adopted["status"] == "PENDING_HUMAN_APPROVAL"
+    assert adopted["promotion_status"] == "PENDING_HUMAN_APPROVAL"
+    assert adopted["candidate_commit_sha"] == candidate
+    assert adopted["candidate_tree_sha"] == tree
+    assert adopted["adoption_receipt"]["worker_invocations"] == 0
+    assert adopted["adoption_receipt"]["candidate_rewritten"] is False
+    assert adopted["adoption_receipt"]["approval_performed"] is False
+    assert adopted["adoption_receipt"]["integration_performed"] is False
+    assert adopted["adoption_receipt"]["forbidden_repository_patterns"] == ["tasks/**"]
+    assert adopted["approved_binding"] is None
+    assert adopted["merge_performed"] is False
+    assert adopted["push_performed"] is False
+
+
+def test_adopt_external_candidate_accepts_current_eia_authorized_deletion_without_widening(
+    tmp_path, monkeypatch,
+):
+    service, request, candidate, tree = _external_adoption_fixture(
+        tmp_path,
+        monkeypatch,
+        current_eia_card=True,
+        card_allow_deletions=True,
+        candidate_delete_path="src/one.py",
+    )
+
+    assert request.authorized_deletions == ("src/one.py",)
+    adopted = service.adopt_external_candidate(request)
+
+    assert adopted["status"] == "PENDING_HUMAN_APPROVAL"
+    assert adopted["candidate_commit_sha"] == candidate
+    assert adopted["candidate_tree_sha"] == tree
+    assert adopted["adoption_receipt"]["derived_contract_projection"]["authorized_deletions"] == [
+        "src/one.py"
+    ]
+    assert adopted["adoption_receipt"]["worker_invocations"] == 0
+    assert adopted["adoption_receipt"]["candidate_rewritten"] is False
+    assert adopted["adoption_receipt"]["approval_performed"] is False
+    assert adopted["adoption_receipt"]["integration_performed"] is False
+    assert adopted["merge_performed"] is False
+    assert adopted["push_performed"] is False
 
 
 def test_adopt_external_candidate_allows_unchanged_card_scope_path(tmp_path, monkeypatch):

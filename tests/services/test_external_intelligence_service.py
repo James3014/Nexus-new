@@ -883,21 +883,80 @@ def test_critical_regression_eia_unattended_freshness_end_to_end(tmp_path):
 
     class FakeD:
         def close_task(self, **kwargs):
+            claim = "TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE"
+            task_candidate = {
+                "schema": "external_intelligence_task_candidate.v1",
+                "task_id": "task-b",
+                "base_sha": kwargs["main_sha"],
+                "workspace_id": "workspace-b",
+                "workspace_path": "/tmp/workspace-b",
+                "candidate_commit": sha_B,
+                "candidate_tree": "2" * 40,
+                "candidate_diff_sha256": "4" * 64,
+                "changed_paths": ["nexus/a.py"],
+                "deleted_paths": [],
+                "composition_order": ["u1"],
+                "unit_lineage": [],
+                "claim_ceiling": "TASK_CANDIDATE_REQUIRES_WHOLE_TASK_VERIFICATION",
+                "task_candidate_id": "task-candidate-b",
+            }
+            whole = {
+                "schema": "external_intelligence_whole_task_verification.v1",
+                "status": "PASS",
+                "task_id": "task-b",
+                "task_candidate_id": "task-candidate-b",
+                "verification_id": "whole-verification-b",
+                "results": [],
+            }
+            acceptance_packet = {
+                "schema": "external_intelligence_acceptance_packet.v1",
+                "task_id": "task-b",
+                "task_card_ref": kwargs["task_card_ref"],
+                "task_card_hash": kwargs["task_card_hash"],
+                "external_intelligence_refs": list(kwargs["external_intelligence_refs"]),
+                "task_candidate": {
+                    "task_candidate_id": "task-candidate-b",
+                    "base_sha": kwargs["main_sha"],
+                    "candidate_commit": sha_B,
+                    "candidate_tree": "2" * 40,
+                    "candidate_diff_sha256": "4" * 64,
+                    "changed_paths": ["nexus/a.py"],
+                    "deleted_paths": [],
+                    "composition_order": ["u1"],
+                },
+                "unit_lineage": [],
+                "whole_task_verification_id": "whole-verification-b",
+                "whole_task_status": "PASS",
+                "current_gate": "PENDING_INDEPENDENT_ACCEPTANCE",
+                "claim_ceiling": claim,
+                "packet_id": "packet-b",
+            }
             return {
-                "status": "TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE",
+                "schema": "external_intelligence_closure_run.v1",
+                "status": claim,
                 "run_id": "d" * 64,
+                "task_id": "task-b",
+                "task_candidate": task_candidate,
+                "whole_verification": whole,
+                "unit_verifications": [],
+                "repair_deltas": [],
+                "acceptance_packet": acceptance_packet,
                 "control_capsule": {
+                    "schema": "external_intelligence_closure_capsule.v1",
                     "task_id": "task-b",
                     "candidate_commit": sha_B,
-                    "candidate_tree": "t" * 40,
-                    "verification_state": "PASS",
+                    "candidate_tree": "2" * 40,
+                    "candidate_diff_sha256": "4" * 64,
+                    "verification_state": "WHOLE_TASK_PASS",
                     "current_gate": "PENDING_INDEPENDENT_ACCEPTANCE",
                     "acceptance_packet_ref": "state/a.json",
                     "acceptance_packet_sha256": "3" * 64,
-                    "next_action": "independent_acceptance",
-                    "stop_condition": "acceptance_failed",
-                    "claim_ceiling": "TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE",
+                    "next_action": "run_independent_candidate_acceptance_audit",
+                    "stop_if": "independent_acceptance_not_explicitly_granted",
+                    "claim_ceiling": claim,
                 },
+                "telemetry": {},
+                "claim_ceiling": claim,
             }
 
     def factory(cfg, repo_name):

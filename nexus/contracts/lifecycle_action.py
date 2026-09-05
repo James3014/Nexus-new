@@ -68,7 +68,7 @@ class ContractKind(str, Enum):
 
 @dataclass(frozen=True)
 class HistoricalEpbTaskCardProjection:
-    """The bounded, non-authoritative projection of the immutable EPB card."""
+    """The bounded, non-authoritative projection consumed by Candidate adoption."""
 
     allowed_repository_paths: tuple[str, ...]
     forbidden_scope: tuple[str, ...]
@@ -76,6 +76,7 @@ class HistoricalEpbTaskCardProjection:
     auto_chain: Literal[False] = False
     forbidden_repository_paths: tuple[str, ...] = ()
     forbidden_repository_patterns: tuple[str, ...] = ()
+    allow_deletions: bool = False
 
 
 _HISTORICAL_CARD_SECTIONS = (
@@ -197,6 +198,149 @@ def parse_historical_epb_task_card(card_bytes: bytes) -> HistoricalEpbTaskCardPr
         False,
         tuple(forbidden_paths),
         tuple(forbidden_patterns),
+    )
+
+
+def parse_external_adoption_task_card(card_bytes: bytes) -> HistoricalEpbTaskCardProjection:
+    """Parse either the historical EPB card or the current EIA Task Card shape.
+
+    The return type stays the existing adoption projection so lifecycle authority
+    does not change; this only removes a formatting-generation mismatch between
+    External Intelligence and external Candidate adoption.
+    """
+    try:
+        return parse_historical_epb_task_card(card_bytes)
+    except ValueError:
+        pass
+    if not isinstance(card_bytes, bytes) or not card_bytes:
+        raise _unresolvable_card()
+    try:
+        text = card_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _unresolvable_card() from exc
+    if "\r" in text:
+        raise _unresolvable_card()
+    lines = text.split("\n")
+    if lines and lines[-1] == "":
+        lines.pop()
+
+    false_markers = [
+        line
+        for line in lines
+        if re.fullmatch(r"\s*-\s*AUTO_CHAIN:\s*false\s*", line, re.IGNORECASE)
+    ]
+    if len(false_markers) > 1 or any(
+        re.fullmatch(r"\s*-\s*AUTO_CHAIN:\s*true\s*", line, re.IGNORECASE)
+        for line in lines
+    ):
+        raise _unresolvable_card()
+    deletion_markers = [
+        match.group(1).lower()
+        for line in lines
+        if (match := re.fullmatch(
+            r"\s*-\s*allow_deletions:\s*(true|false)\s*", line, re.IGNORECASE
+        ))
+    ]
+    if len(deletion_markers) > 1:
+        raise _unresolvable_card()
+    allow_deletions = bool(deletion_markers and deletion_markers[0] == "true")
+
+    def section(title: str, *, required: bool = True) -> list[str]:
+        heading = f"## {title}".lower()
+        starts = [index for index, line in enumerate(lines) if line.strip().lower() == heading]
+        if not starts and not required:
+            return []
+        if len(starts) != 1:
+            raise _unresolvable_card()
+        start = starts[0] + 1
+        end = len(lines)
+        for index in range(start, len(lines)):
+            if lines[index].startswith("## "):
+                end = index
+                break
+        return lines[start:end]
+
+    allowed_section = section("Allowed files")
+    allowed: list[str] = []
+    for raw in allowed_section:
+        line = raw.strip()
+        if not line:
+            continue
+        match = re.fullmatch(r"[-*]\s*`([^`]+)`", line)
+        if not match:
+            raise _unresolvable_card()
+        try:
+            allowed.append(_repo_path(match.group(1), "allowed_repository_paths"))
+        except ValueError as exc:
+            raise _unresolvable_card() from exc
+    if not allowed or len(allowed) != len(set(allowed)):
+        raise _unresolvable_card()
+
+    forbidden_section = section("Forbidden scope", required=False)
+    forbidden_scope = tuple(line.strip() for line in forbidden_section if line.strip())
+    forbidden_paths: list[str] = []
+    forbidden_patterns: list[str] = []
+    for raw in forbidden_section:
+        for token in re.findall(r"`([^`]+)`", raw):
+            if "/" not in token:
+                continue
+            if token.endswith("/**") or token.endswith("/*"):
+                prefix = token[:-3] if token.endswith("/**") else token[:-2]
+                try:
+                    _repo_path(prefix, "forbidden_repository_patterns")
+                except ValueError as exc:
+                    raise _unresolvable_card() from exc
+                if "*" in prefix:
+                    raise _unresolvable_card()
+                if token not in forbidden_patterns:
+                    forbidden_patterns.append(token)
+                continue
+            if "*" in token:
+                raise _unresolvable_card()
+            try:
+                normalized = _repo_path(token, "forbidden_repository_paths")
+            except ValueError as exc:
+                raise _unresolvable_card() from exc
+            if normalized not in forbidden_paths:
+                forbidden_paths.append(normalized)
+
+    verifier_section = section("Verification commands")
+    commands: list[str] = []
+    in_fence = False
+    for raw in verifier_section:
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("```"):
+            language = line[3:].strip().lower()
+            if not in_fence:
+                if language not in ("", "bash", "sh", "shell", "zsh"):
+                    raise _unresolvable_card()
+                in_fence = True
+            else:
+                in_fence = False
+            continue
+        if in_fence:
+            if line.startswith("#"):
+                continue
+            commands.append(line)
+            continue
+        match = re.fullmatch(r"[-*]\s*`([^`]+)`", line)
+        if match:
+            commands.append(match.group(1).strip())
+            continue
+        raise _unresolvable_card()
+    if in_fence or not commands or len(commands) != len(set(commands)):
+        raise _unresolvable_card()
+
+    return HistoricalEpbTaskCardProjection(
+        tuple(allowed),
+        forbidden_scope,
+        tuple(commands),
+        False,
+        tuple(forbidden_paths),
+        tuple(forbidden_patterns),
+        allow_deletions,
     )
 
 

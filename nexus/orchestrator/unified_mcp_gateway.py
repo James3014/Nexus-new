@@ -48,6 +48,10 @@ from nexus.orchestrator.canonical_mcp_ingress import (
     build_mcp_execution_context,
     reject_caller_route_overrides,
 )
+from nexus.orchestrator.session_issue_bootstrap import (
+    GhIssueAuthorityProvider,
+    SessionIssueBootstrap,
+)
 from nexus.orchestrator.lifecycle_guards import (
     LifecycleGuardError,
     configure_runtime_manifest_hash,
@@ -951,6 +955,7 @@ class UnifiedMCPGateway:
         self._workforce_loader = WorkforcePolicyLoader()
         self._lineage_registry = ModelCapabilityLineageRegistry()
         self._calibration_planner = CalibrationPlanner(self._lineage_registry)
+        self._issue_provider = GhIssueAuthorityProvider()
         self._assist_processes: dict[str, subprocess.Popen[str]] = {}
         self._assist_lock = threading.RLock()
 
@@ -3343,6 +3348,18 @@ class UnifiedMCPGateway:
                 },
             },
             {
+                "name": "nexus_issue_continue",
+                "description": "Bind one open GitHub Issue plus exact current-main source identity into the canonical Nexus runtime. The ingress chooses no route, worker, model, verifier, acceptance, merge, or release authority.",
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["issue_number"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "issue_number": {"type": "integer", "minimum": 1},
+                    },
+                },
+            },
+            {
                 "name": "nexus_worker_candidate",
                 "description": "Submit one tracked-card worker candidate through canonical planner/admission dispatch.",
                 "inputSchema": {
@@ -4665,6 +4682,27 @@ class UnifiedMCPGateway:
         seed = json.dumps([what, why, sorted(allowed)], ensure_ascii=False, separators=(",", ":"))
         return "dispatch-" + hashlib.sha256(seed.encode("utf-8")).hexdigest()[:16]
 
+    def _issue_continue(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        unexpected = sorted(set(arguments) - {"issue_number"})
+        if unexpected:
+            raise GatewayInputError(f"ISSUE_CONTINUE_FIELD_FORBIDDEN:{unexpected[0]}")
+        issue_number = arguments.get("issue_number")
+        if not isinstance(issue_number, int) or isinstance(issue_number, bool) or issue_number <= 0:
+            raise GatewayInputError("issue_number must be a positive integer")
+
+        from nexus.services.gateway import BattlesuitGateway
+
+        bootstrap = SessionIssueBootstrap(
+            repository=GITHUB_REPOSITORY.repository_id,
+            project_root=CANONICAL_SOURCE_ROOT,
+            provider=self._issue_provider,
+        )
+        continuation = bootstrap.run(
+            issue_number,
+            gateway=BattlesuitGateway(project_root=CANONICAL_SOURCE_ROOT),
+        )
+        return continuation.to_dict()
+
     def _task_run(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         try:
             reject_caller_route_overrides(arguments)
@@ -4958,6 +4996,8 @@ class UnifiedMCPGateway:
             return self._diff(arguments)
         if name == "nexus_task_run":
             return self._task_run(arguments)
+        if name == "nexus_issue_continue":
+            return self._issue_continue(arguments)
         if name == "nexus_worker_candidate":
             return self._worker_candidate(arguments)
         if name == "nexus_task_status":
