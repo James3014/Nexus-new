@@ -154,6 +154,19 @@ def _acceptance_bytes(validation_sha: str, **overrides) -> bytes:
 def test_external_adoption_task_card_parser_accepts_historical_and_current_eia_shapes():
     historical = parse_external_adoption_task_card(_historical_epb_card())
     current = parse_external_adoption_task_card(_current_eia_card())
+    minimal_current = parse_external_adoption_task_card(
+        (
+            "# Task Card\n\n"
+            "- task_id: `task-1`\n"
+            "- status: ACTIVE\n\n"
+            "## Allowed files\n"
+            "- `src/a.py`\n\n"
+            "## Verification commands\n"
+            "```bash\n"
+            "git diff --check\n"
+            "```\n"
+        ).encode("utf-8")
+    )
 
     assert historical.allowed_repository_paths == ("src/a.py",)
     assert historical.exact_verification_commands == ("git diff --check",)
@@ -164,6 +177,14 @@ def test_external_adoption_task_card_parser_accepts_historical_and_current_eia_s
     )
     assert current.forbidden_repository_patterns == ("tasks/**",)
     assert current.auto_chain is False
+    assert minimal_current.allowed_repository_paths == ("src/a.py",)
+    assert minimal_current.forbidden_scope == ()
+    assert minimal_current.exact_verification_commands == ("git diff --check",)
+    assert minimal_current.auto_chain is False
+    with pytest.raises(ValueError, match="ADOPTION_CARD_CONTRACT_UNRESOLVABLE"):
+        parse_external_adoption_task_card(
+            _current_eia_card().replace(b"- AUTO_CHAIN: false", b"- AUTO_CHAIN: true")
+        )
 
 
 def test_closure_builds_non_accepting_settlement_handoff_for_single_existing_adoption_authority():

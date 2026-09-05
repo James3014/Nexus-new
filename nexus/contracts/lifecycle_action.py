@@ -229,7 +229,7 @@ def parse_external_adoption_task_card(card_bytes: bytes) -> HistoricalEpbTaskCar
         for line in lines
         if re.fullmatch(r"\s*-\s*AUTO_CHAIN:\s*false\s*", line, re.IGNORECASE)
     ]
-    if len(false_markers) != 1 or any(
+    if len(false_markers) > 1 or any(
         re.fullmatch(r"\s*-\s*AUTO_CHAIN:\s*true\s*", line, re.IGNORECASE)
         for line in lines
     ):
@@ -245,9 +245,11 @@ def parse_external_adoption_task_card(card_bytes: bytes) -> HistoricalEpbTaskCar
         raise _unresolvable_card()
     allow_deletions = bool(deletion_markers and deletion_markers[0] == "true")
 
-    def section(title: str) -> list[str]:
+    def section(title: str, *, required: bool = True) -> list[str]:
         heading = f"## {title}".lower()
         starts = [index for index, line in enumerate(lines) if line.strip().lower() == heading]
+        if not starts and not required:
+            return []
         if len(starts) != 1:
             raise _unresolvable_card()
         start = starts[0] + 1
@@ -274,9 +276,7 @@ def parse_external_adoption_task_card(card_bytes: bytes) -> HistoricalEpbTaskCar
     if not allowed or len(allowed) != len(set(allowed)):
         raise _unresolvable_card()
 
-    forbidden_section = section("Forbidden scope")
-    if not any(line.strip() for line in forbidden_section):
-        raise _unresolvable_card()
+    forbidden_section = section("Forbidden scope", required=False)
     forbidden_scope = tuple(line.strip() for line in forbidden_section if line.strip())
     forbidden_paths: list[str] = []
     forbidden_patterns: list[str] = []
