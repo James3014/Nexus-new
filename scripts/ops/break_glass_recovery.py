@@ -141,10 +141,7 @@ def _fetch_integration(comment_id: int) -> OwnerIntegrationEnvelope:
 def _fetch_integration_readback(
     integration: OwnerIntegrationEnvelope,
 ) -> tuple[str, str, int]:
-    pr_url = (
-        "https://api.github.com/repos/James3014/Nexus-new/pulls/"
-        f"{integration.payload.pr_number}"
-    )
+    pr_url = f"https://api.github.com/repos/James3014/Nexus-new/pulls/{integration.payload.pr_number}"
     main_url = "https://api.github.com/repos/James3014/Nexus-new/branches/main"
     return integration_readback_from_github(
         integration.payload,
@@ -313,9 +310,7 @@ def _prepare_integration(args: argparse.Namespace) -> int:
 
 def _record_integration_consumed(args: argparse.Namespace) -> int:
     integration = _fetch_integration(args.integration_comment_id)
-    merge_commit_sha, observed_main_sha, merged_pr_number = _fetch_integration_readback(
-        integration
-    )
+    merge_commit_sha, observed_main_sha, merged_pr_number = _fetch_integration_readback(integration)
     result = record_emergency_integration_consumed(
         integration,
         merge_commit_sha=merge_commit_sha,
