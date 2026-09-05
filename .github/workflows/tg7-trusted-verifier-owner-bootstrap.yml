@@ -39,7 +39,6 @@ jobs:
           test "$HEAD_SHA" = "$(printf '%s' "$HEAD_SHA" | grep -E '^[0-9a-f]{40}$')"
           script="scripts/ops/trusted_deletion_anchor.py"
           test -f "$script"
-          mkdir -p "$RUNNER_TEMP/runtime"
           python - <<'PY'
           import json, os
           event = {
@@ -64,13 +63,13 @@ jobs:
               json.dump(event, fh, sort_keys=True)
           PY
           python "$script" runtime-builder \
-            --repo-root . \
+            --repo-root "$GITHUB_WORKSPACE" \
             --workflow-sha "$HEAD_SHA" \
             --uv-executable "$(command -v uv)" \
             --output-dir "$RUNNER_TEMP/runtime-built"
           python "$script" controller \
             --event-json "$RUNNER_TEMP/bootstrap-event.json" \
-            --repo-root . \
+            --repo-root "$GITHUB_WORKSPACE" \
             --output-dir "$RUNNER_TEMP/bundle" \
             --runtime-dir "$RUNNER_TEMP/runtime-built"
           python "$RUNNER_TEMP/bundle/trusted_deletion_anchor.py" executor \
