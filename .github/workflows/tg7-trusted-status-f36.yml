@@ -1,4 +1,4 @@
-name: TG7 trusted status publisher f36
+name: TG7 trusted status publisher 18a
 
 on:
   push:
@@ -10,7 +10,7 @@ permissions:
   statuses: write
 
 env:
-  TARGET_SHA: f36fbb4c50278c60101409ef219b700afa48a8d5
+  TARGET_SHA: 18a1e7a665ad9af6cc9857f5f30f20fa67840bab
   TARGET_TREE: bb74d5811819e7248142570c9dbd5f50f9a548ae
   BASE_SHA: d3b3652e7c7391aa075fc7d6fd4c5e0f076d886a
   PR_NUMBER: "791"
