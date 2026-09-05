@@ -16,6 +16,11 @@ if repo_root in sys.path:
     sys.path.remove(repo_root)
 sys.path.insert(0, repo_root)
 
+from nexus.contracts.autonomy_goal import (  # noqa: E402
+    AutonomyActionClass,
+    RepositoryIdentity,
+    StandingGrantContext,
+)
 from nexus.engine.canonical_task_seam import (  # noqa: E402
     VerifiedCampaignIdentity,
     VerifiedTaskCardIdentity,
@@ -24,6 +29,7 @@ from nexus.engine.canonical_task_seam import (  # noqa: E402
 )
 from nexus.orchestrator.lifecycle_guards import LifecycleGuardError  # noqa: E402
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService  # noqa: E402
+from nexus.orchestrator.standing_grant_store import StandingGrantReceipt  # noqa: E402
 from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     FULL_TOOL_SCHEMA_HASH,
     GATEWAY_NAME,
@@ -3008,3 +3014,215 @@ def test_assisted_retry_valid_same_task_uses_fresh_attempt_action_and_idempotenc
     assert second["action"]["action_type"] == "TASK_RETRY"
     assert second["bound_action_request"] == first["bound_action_request"]
     assert second["attempt_history"][0]["attempt_id"] == first["attempt_id"]
+
+
+def test_gateway_task_card_authority_switch_and_restore_workflow(monkeypatch, tmp_path):
+    import nexus.orchestrator.standing_grant_store as sg_store
+
+    receipt_path = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(sg_store, "DEFAULT_RECEIPT_PATH", receipt_path)
+    monkeypatch.setattr(sg_store, "DEFAULT_TRANSITIONS_DIR", tmp_path / "authority" / "transitions")
+
+    context = StandingGrantContext.issue(
+        owner_id="owner-james",
+        coordinator_id="coordinator-codex",
+        repository=RepositoryIdentity(
+            repository_id="James3014/Nexus-new",
+            canonical_remote="https://github.com/James3014/Nexus-new.git",
+        ),
+        thread_id="thread-orig",
+        goal_id="goal-orig",
+        allowed_actions=(AutonomyActionClass.REPOSITORY_PUSH,),
+        issued_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    orig_receipt = StandingGrantReceipt.issue(grant_id="grant-orig", context=context)
+    sg_store._write_standing_grant_receipt_at(orig_receipt, receipt_path)
+
+    gateway = UnifiedMCPGateway(service=FakeService())
+
+    # Switch using settled camelCase fields
+    switch_res = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 901,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_task_card_authority_switch",
+            "arguments": {
+                "ownerConfirmation": True,
+                "attemptKey": "attempt-gw-switch",
+                "expectedCurrentReceiptHash": orig_receipt.receipt_hash,
+                "expectedCurrentGoalId": "goal-orig",
+                "successorGoalId": "goal-succ",
+                "successorThreadId": "thread-succ",
+                "ttlMinutes": 15,
+            },
+        },
+    })
+    payload = switch_res["result"]["structuredContent"]
+    assert payload["status"] == "SWITCHED"
+    assert payload["temporary_goal_id"] == "goal-succ"
+    assert payload["temporary_thread_id"] == "thread-succ"
+    assert payload["allowed_actions"] == ["TASK_CARD_COMMIT", "TASK_CARD_CREATE"]
+    temp_hash = payload["temporary_receipt_hash"]
+    op_id = payload["switch_operation_id"]
+
+    # Restore using camelCase inputs
+    restore_res = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 902,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_task_card_authority_restore",
+            "arguments": {
+                "ownerConfirmation": True,
+                "attemptKey": "attempt-gw-restore",
+                "switchOperationId": op_id,
+                "expectedTemporaryReceiptHash": temp_hash,
+            },
+        },
+    })
+    restore_payload = restore_res["result"]["structuredContent"]
+    assert restore_payload["status"] == "RESTORED"
+    assert restore_payload["restored_goal_id"] == "goal-orig"
+    assert restore_payload["restored_thread_id"] == "thread-orig"
+    assert restore_payload["restored_allowed_actions"] == ["REPOSITORY_PUSH"]
+
+
+def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch, tmp_path):
+    import nexus.orchestrator.standing_grant_store as sg_store
+
+    receipt_path = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(sg_store, "DEFAULT_RECEIPT_PATH", receipt_path)
+    monkeypatch.setattr(sg_store, "DEFAULT_TRANSITIONS_DIR", tmp_path / "authority" / "transitions")
+
+    context = StandingGrantContext.issue(
+        owner_id="owner-james",
+        coordinator_id="coordinator-codex",
+        repository=RepositoryIdentity(
+            repository_id="James3014/Nexus-new",
+            canonical_remote="https://github.com/James3014/Nexus-new.git",
+        ),
+        thread_id="thread-orig",
+        goal_id="goal-orig",
+        allowed_actions=(AutonomyActionClass.REPOSITORY_PUSH,),
+        issued_at=datetime.now(timezone.utc) - timedelta(minutes=5),
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    orig_receipt = StandingGrantReceipt.issue(grant_id="grant-orig", context=context)
+    sg_store._write_standing_grant_receipt_at(orig_receipt, receipt_path)
+
+    gateway = UnifiedMCPGateway(service=FakeService())
+
+    # Switch rejected without ownerConfirmation
+    res = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 903,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_task_card_authority_switch",
+            "arguments": {
+                "ownerConfirmation": False,
+                "attemptKey": "attempt-gw-fail-1",
+                "expectedCurrentReceiptHash": orig_receipt.receipt_hash,
+                "expectedCurrentGoalId": "goal-orig",
+                "successorGoalId": "goal-succ",
+                "successorThreadId": "thread-succ",
+                "ttlMinutes": 15,
+            },
+        },
+    })
+    assert res["result"]["isError"] is True
+    assert "OWNER_CONFIRMATION_REQUIRED" in res["result"]["structuredContent"]["error"]
+
+    # Switch rejected with ttlMinutes > 30
+    res = gateway.handle({
+        "jsonrpc": "2.0",
+        "id": 904,
+        "method": "tools/call",
+        "params": {
+            "name": "nexus_task_card_authority_switch",
+            "arguments": {
+                "ownerConfirmation": True,
+                "attemptKey": "attempt-gw-fail-2",
+                "expectedCurrentReceiptHash": orig_receipt.receipt_hash,
+                "expectedCurrentGoalId": "goal-orig",
+                "successorGoalId": "goal-succ",
+                "successorThreadId": "thread-succ",
+                "ttlMinutes": 45,
+            },
+        },
+    })
+    assert res["result"]["isError"] is True
+    assert "ttlMinutes" in res["result"]["structuredContent"]["error"]
+
+    # Unknown / extra / snake_case fields rejected before effect
+    for bad_field, bad_value in (
+        ("actions", ["TASK_CARD_COMMIT"]),
+        ("receiptPath", "/tmp/standing-grant.json"),
+        ("rawReceipt", {}),
+        ("path", "standing-grant.json"),
+        ("owner_confirmation", True),
+        ("attempt_key", "attempt-bad"),
+        ("extra_unrecognized_prop", "evil"),
+    ):
+        switch_args = {
+            "ownerConfirmation": True,
+            "attemptKey": "attempt-gw-bad-field",
+            "expectedCurrentReceiptHash": orig_receipt.receipt_hash,
+            "expectedCurrentGoalId": "goal-orig",
+            "successorGoalId": "goal-succ",
+            "successorThreadId": "thread-succ",
+            "ttlMinutes": 15,
+            bad_field: bad_value,
+        }
+        bad_res = gateway.handle({
+            "jsonrpc": "2.0",
+            "id": 905,
+            "method": "tools/call",
+            "params": {"name": "nexus_task_card_authority_switch", "arguments": switch_args},
+        })
+        assert bad_res["result"]["isError"] is True
+        assert "unknown arguments" in bad_res["result"]["structuredContent"]["error"]
+
+        restore_args = {
+            "ownerConfirmation": True,
+            "attemptKey": "attempt-gw-restore-bad",
+            "switchOperationId": "switch_test123",
+            "expectedTemporaryReceiptHash": "a" * 64,
+            bad_field: bad_value,
+        }
+        bad_restore_res = gateway.handle({
+            "jsonrpc": "2.0",
+            "id": 906,
+            "method": "tools/call",
+            "params": {"name": "nexus_task_card_authority_restore", "arguments": restore_args},
+        })
+        assert bad_restore_res["result"]["isError"] is True
+        assert "unknown arguments" in bad_restore_res["result"]["structuredContent"]["error"]
+
+    # Tool schemas are exact, closed, and camelCase only
+    switch_spec = next(item for item in UnifiedMCPGateway.tool_specs() if item["name"] == "nexus_task_card_authority_switch")
+    switch_schema = switch_spec["inputSchema"]
+    assert switch_schema["additionalProperties"] is False
+    assert set(switch_schema["required"]) == {
+        "ownerConfirmation",
+        "attemptKey",
+        "expectedCurrentReceiptHash",
+        "expectedCurrentGoalId",
+        "successorGoalId",
+        "successorThreadId",
+        "ttlMinutes",
+    }
+    assert set(switch_schema["properties"]) == set(switch_schema["required"])
+
+    restore_spec = next(item for item in UnifiedMCPGateway.tool_specs() if item["name"] == "nexus_task_card_authority_restore")
+    restore_schema = restore_spec["inputSchema"]
+    assert restore_schema["additionalProperties"] is False
+    assert set(restore_schema["required"]) == {
+        "ownerConfirmation",
+        "attemptKey",
+        "switchOperationId",
+        "expectedTemporaryReceiptHash",
+    }
+    assert set(restore_schema["properties"]) == set(restore_schema["required"])
