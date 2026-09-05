@@ -40,7 +40,7 @@ retroactive Task Card, acceptance, merge, runtime, or release authority.
 ## Brownfield delta
 
 - **ADDED:** canonical `nexus.break_glass_owner_activation.v1` authority payload.
-- **ADDED:** externally materialized GitHub Owner activation, verification, and emergency-integration comment envelopes with exact canonical payload hash binding.
+- **ADDED:** externally materialized GitHub Owner activation, verification, emergency-integration, and terminal/revocation comment envelopes with exact canonical payload hash binding.
 - **ADDED:** durable host-local source-repair evidence chain `PREPARED -> APPLIED -> VERIFIED -> CONSUMED` plus a separate emergency-integration `PREPARED -> CONSUMED` chain.
 - **ADDED:** narrow operator CLI that reads fixed Git/GitHub evidence but performs no repair, merge, push, reload, or release effect itself.
 - **MODIFIED:** bootstrap recovery documentation now requires this canonical authority for governance-plane self-repair.
@@ -134,7 +134,12 @@ normal-governance canary proving source/runtime identity, action binding, normal
 authority readback, one bounded governance operation receipt, and verifier
 receipt. It SHALL record SOURCE_REPAIR as the only granted source effect plus
 explicit excluded effects. Emergency integration has its own terminal record
-bound to authoritative merge/main readback. After either authority is terminal,
+bound to authoritative merge/main readback. After recovery succeeds, the Owner
+SHALL also publish a canonical `nexus.break_glass_owner_terminal.v1` comment
+bound to the source activation, integrated main and canary evidence (or an
+explicit REVOKED reason). Production recovery consumers SHALL scan #806 for that
+terminal witness before source mutation so a fresh session with no host-local
+state cannot replay the old grant. After either local or global terminality,
 effect replay through that attempt SHALL be denied. Runtime recovery, if
 actually required, needs a third Owner authority artifact.
 
@@ -155,7 +160,7 @@ break-glass authority is terminal and replay is denied.
 | AC-004 | REQ-005 | Exact base/tree prepares and authorized paths apply. | Wrong base/tree, README scope widening, forbidden standing-grant path, and `..` escape fail. |
 | AC-005 | REQ-006/007 | APPLIED and VERIFIED bind one immutable repair subject; VERIFIED is rooted in an Owner GitHub verification comment whose exact-head checks are all successful. | Caller-only verifier/hash, verifier==implementer, check-head substitution, and commit substitution fail. |
 | AC-006 | REQ-008 | Exact PREPARED retry is idempotent; source and integration attempts reconcile through durable terminal records. | Phase skip, conflicting APPLIED retry, transition tamper, symlink state, and blind post-merge retry fail. |
-| AC-007 | REQ-007A/009 | A separate Owner integration grant binds exact PR/base/head/checks and only an existing exact-head/CAS merge sink may consume it; source CONSUMED requires a fresh normal-governance canary. | Source authority cannot merge; integration grant cannot widen effect; post-consume source/integration replay fails. |
+| AC-007 | REQ-007A/009 | A separate Owner integration grant binds exact PR/base/head/checks and only an existing exact-head/CAS merge sink may consume it; source CONSUMED requires a fresh normal-governance canary plus a global Owner terminal/revocation comment. | Source authority cannot merge; integration grant cannot widen effect; local and fresh-session global post-consume replay fail. |
 | AC-008 | REQ-010 | Integrated revision passes focused/regression evidence and a fresh normal-governance canary, then terminal/replay-denial evidence is recorded. | Green source tests alone or merged PR without canary cannot close #806. |
 | AC-009 | REQ-003/007A/009 | Controlled self-hosting E2E starts with normal governance unavailable, exercises real break-glass source/integration contracts, restores the normal-path canary, consumes emergency authority, and proves replay denial. | Harness that never begins in a failed-governance state or never exercises replay denial is not sufficient. |
 

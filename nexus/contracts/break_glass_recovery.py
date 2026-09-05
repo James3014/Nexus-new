@@ -549,14 +549,106 @@ class OwnerIntegrationEnvelope(_OwnerEvidenceEnvelope):
         return self
 
 
+class BreakGlassOwnerTerminalPayload(_FrozenModel):
+    schema: Literal["nexus.break_glass_owner_terminal.v1"] = (
+        "nexus.break_glass_owner_terminal.v1"
+    )
+    repository: Literal[_ALLOWED_REPOSITORY]
+    issue: Literal[_ALLOWED_ISSUE]
+    owner_login: Literal[_ALLOWED_OWNER]
+    recovery_id: StrictStr
+    source_attempt_id: StrictStr
+    source_activation_payload_sha256: StrictStr
+    terminal_state: Literal["CONSUMED", "REVOKED"]
+    reason: StrictStr
+    integrated_main_sha: StrictStr | None = None
+    canary_evidence_sha256: StrictStr | None = None
+    integration_payload_sha256: StrictStr | None = None
+    issued_at: datetime
+
+    @field_validator("recovery_id", "source_attempt_id")
+    @classmethod
+    def validate_id(cls, value: str) -> str:
+        if not _SAFE_ID.fullmatch(value) or value != value.strip():
+            raise ValueError("RECOVERY_IDENTITY_INVALID")
+        return value
+
+    @field_validator("source_activation_payload_sha256")
+    @classmethod
+    def validate_source_hash(cls, value: str) -> str:
+        if not _SHA64.fullmatch(value):
+            raise ValueError("SHA256_INVALID")
+        return value
+
+    @field_validator("canary_evidence_sha256", "integration_payload_sha256")
+    @classmethod
+    def validate_optional_sha256(cls, value: str | None) -> str | None:
+        if value is not None and not _SHA64.fullmatch(value):
+            raise ValueError("SHA256_INVALID")
+        return value
+
+    @field_validator("integrated_main_sha")
+    @classmethod
+    def validate_optional_git_sha(cls, value: str | None) -> str | None:
+        if value is not None and not _SHA40.fullmatch(value):
+            raise ValueError("GIT_SHA_INVALID")
+        return value
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, value: str) -> str:
+        if not value.strip() or value != value.strip():
+            raise ValueError("TERMINAL_REASON_INVALID")
+        return value
+
+    @field_validator("issued_at")
+    @classmethod
+    def validate_issued_at(cls, value: datetime) -> datetime:
+        return _utc(value)
+
+    @model_validator(mode="after")
+    def validate_semantics(self) -> "BreakGlassOwnerTerminalPayload":
+        if self.terminal_state == "CONSUMED" and (
+            self.integrated_main_sha is None or self.canary_evidence_sha256 is None
+        ):
+            raise ValueError("CONSUMED_TERMINAL_EVIDENCE_REQUIRED")
+        return self
+
+    @property
+    def payload_sha256(self) -> str:
+        return canonical_sha256(self.model_dump(mode="json"))
+
+
+class OwnerTerminalEnvelope(_OwnerEvidenceEnvelope):
+    schema: Literal["nexus.break_glass_owner_terminal_envelope.v1"] = (
+        "nexus.break_glass_owner_terminal_envelope.v1"
+    )
+    payload: BreakGlassOwnerTerminalPayload
+
+    @model_validator(mode="after")
+    def validate_envelope(self) -> "OwnerTerminalEnvelope":
+        if self.payload.owner_login != self.author_login:
+            raise ValueError("OWNER_IDENTITY_MISMATCH")
+        if self.payload.repository != self.repository or self.payload.issue != self.issue:
+            raise ValueError("OWNER_PROVENANCE_SCOPE_MISMATCH")
+        if self.payload.payload_sha256 != self.payload_sha256:
+            raise ValueError("PAYLOAD_HASH_MISMATCH")
+        if not self.comment_url.endswith(str(self.comment_id)):
+            raise ValueError("COMMENT_ID_URL_MISMATCH")
+        return self
+
+
 def _owner_evidence_from_github_comment(
     comment: Mapping[str, Any],
     *,
     marker: str,
     payload_model: type[BreakGlassOwnerVerificationPayload]
-    | type[BreakGlassOwnerIntegrationPayload],
-    envelope_model: type[OwnerVerificationEnvelope] | type[OwnerIntegrationEnvelope],
-) -> OwnerVerificationEnvelope | OwnerIntegrationEnvelope:
+    | type[BreakGlassOwnerIntegrationPayload]
+    | type[BreakGlassOwnerTerminalPayload],
+    envelope_model: type[OwnerVerificationEnvelope]
+    | type[OwnerIntegrationEnvelope]
+    | type[OwnerTerminalEnvelope],
+) -> OwnerVerificationEnvelope | OwnerIntegrationEnvelope | OwnerTerminalEnvelope:
     try:
         comment_id = int(comment["id"])
         comment_url = str(comment["html_url"])
@@ -620,6 +712,20 @@ def owner_integration_from_github_comment(
     )
     if not isinstance(envelope, OwnerIntegrationEnvelope):
         raise BreakGlassContractError("INTEGRATION_ENVELOPE_INVALID")
+    return envelope
+
+
+def owner_terminal_from_github_comment(
+    comment: Mapping[str, Any],
+) -> OwnerTerminalEnvelope:
+    envelope = _owner_evidence_from_github_comment(
+        comment,
+        marker="Canonical terminal payload SHA-256",
+        payload_model=BreakGlassOwnerTerminalPayload,
+        envelope_model=OwnerTerminalEnvelope,
+    )
+    if not isinstance(envelope, OwnerTerminalEnvelope):
+        raise BreakGlassContractError("TERMINAL_ENVELOPE_INVALID")
     return envelope
 
 

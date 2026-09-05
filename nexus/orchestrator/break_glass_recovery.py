@@ -24,6 +24,7 @@ from nexus.contracts.break_glass_recovery import (
     BreakGlassVerificationEvidence,
     OwnerActivationEnvelope,
     OwnerIntegrationEnvelope,
+    OwnerTerminalEnvelope,
     OwnerVerificationEnvelope,
     canonical_json_bytes,
     canonical_sha256,
@@ -636,6 +637,21 @@ def re_full_sha40(value: str) -> bool:
     return len(value) == 40 and all(char in "0123456789abcdef" for char in value)
 
 
+def assert_source_not_globally_terminal(
+    envelope: OwnerActivationEnvelope,
+    terminal_envelopes: tuple[OwnerTerminalEnvelope, ...],
+) -> None:
+    activation = envelope.payload
+    for terminal in terminal_envelopes:
+        payload = terminal.payload
+        if (
+            payload.recovery_id == activation.recovery_id
+            and payload.source_attempt_id == activation.attempt_id
+            and payload.source_activation_payload_sha256 == envelope.payload_sha256
+        ):
+            raise BreakGlassRecoveryError("RECOVERY_GLOBALLY_TERMINAL")
+
+
 def assert_source_repair_not_consumed(
     envelope: OwnerActivationEnvelope, *, state_root: Path | None = None
 ) -> None:
@@ -654,6 +670,7 @@ __all__ = [
     "consume_source_repair_authority",
     "inspect_attempt",
     "assert_source_repair_not_consumed",
+    "assert_source_not_globally_terminal",
     "prepare_emergency_integration",
     "record_emergency_integration_consumed",
     "inspect_emergency_integration",

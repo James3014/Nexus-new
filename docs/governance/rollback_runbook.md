@@ -106,9 +106,12 @@ For a qualifying bounded repair:
    Owner authorities. A source-repair activation cannot be reused for merge or
    runtime effects.
 12. After the normal governance canary succeeds, record SOURCE_REPAIR as
-   `CONSUMED`, binding the canary evidence, then prove both source-repair and any
-   emergency-integration replay are denied. Do not leave standing emergency
-   authority behind.
+   `CONSUMED`, binding the canary evidence, and publish a canonical Owner
+   terminal/revocation comment bound to the original source activation. Recovery
+   consumers must scan that global terminal witness before later source mutation
+   so a fresh session cannot replay authority merely because it lacks the prior
+   host-local state. Then prove both source-repair and any emergency-integration
+   replay are denied. Do not leave standing emergency authority behind.
 
 Exit bootstrap recovery as soon as the repaired canonical authority can again
 establish trustworthy current identity. Resume the normal governed path;

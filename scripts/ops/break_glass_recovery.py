@@ -30,13 +30,16 @@ from nexus.contracts.break_glass_recovery import (  # noqa: E402
     BreakGlassGovernanceCanaryEvidence,
     OwnerActivationEnvelope,
     OwnerIntegrationEnvelope,
+    OwnerTerminalEnvelope,
     OwnerVerificationEnvelope,
     owner_envelope_from_github_comment,
     owner_integration_from_github_comment,
+    owner_terminal_from_github_comment,
     owner_verification_from_github_comment,
 )
 from nexus.orchestrator.break_glass_recovery import (  # noqa: E402
     BreakGlassRecoveryError,
+    assert_source_not_globally_terminal,
     consume_source_repair_authority,
     inspect_attempt,
     inspect_emergency_integration,
@@ -85,6 +88,40 @@ def _fetch_comment(comment_id: int) -> dict[str, object]:
     return parsed
 
 
+def _fetch_issue_comments() -> tuple[dict[str, object], ...]:
+    comments: list[dict[str, object]] = []
+    for page in range(1, 11):
+        url = (
+            "https://api.github.com/repos/James3014/Nexus-new/issues/806/comments"
+            f"?per_page=100&page={page}"
+        )
+        request = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "nexus-break-glass-recovery/1.0",
+            },
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=10.0) as response:  # nosec B310 - fixed HTTPS host/path
+                if response.geturl() != url:
+                    raise BreakGlassRecoveryError("GITHUB_COMMENT_REDIRECT_REJECTED")
+                raw = response.read()
+        except (OSError, urllib.error.URLError, urllib.error.HTTPError) as exc:
+            raise BreakGlassRecoveryError("GITHUB_COMMENT_FETCH_FAILED") from exc
+        try:
+            parsed = json.loads(raw.decode("utf-8"))
+        except (UnicodeError, json.JSONDecodeError) as exc:
+            raise BreakGlassRecoveryError("GITHUB_COMMENT_MALFORMED") from exc
+        if not isinstance(parsed, list) or any(not isinstance(item, dict) for item in parsed):
+            raise BreakGlassRecoveryError("GITHUB_COMMENT_MALFORMED")
+        comments.extend(parsed)
+        if len(parsed) < 100:
+            return tuple(comments)
+    raise BreakGlassRecoveryError("GITHUB_COMMENT_LIST_TRUNCATED")
+
+
 def _fetch_envelope(comment_id: int) -> OwnerActivationEnvelope:
     return owner_envelope_from_github_comment(_fetch_comment(comment_id))
 
@@ -95,6 +132,20 @@ def _fetch_verification(comment_id: int) -> OwnerVerificationEnvelope:
 
 def _fetch_integration(comment_id: int) -> OwnerIntegrationEnvelope:
     return owner_integration_from_github_comment(_fetch_comment(comment_id))
+
+
+def _fetch_terminals() -> tuple[OwnerTerminalEnvelope, ...]:
+    terminals: list[OwnerTerminalEnvelope] = []
+    marker = "Canonical terminal payload SHA-256:"
+    for comment in _fetch_issue_comments():
+        body = comment.get("body")
+        if isinstance(body, str) and marker in body:
+            terminals.append(owner_terminal_from_github_comment(comment))
+    return tuple(terminals)
+
+
+def _assert_not_globally_terminal(envelope: OwnerActivationEnvelope) -> None:
+    assert_source_not_globally_terminal(envelope, _fetch_terminals())
 
 
 def _git(repo_root: Path, *args: str) -> bytes:
@@ -155,6 +206,7 @@ def _repair_evidence(
 
 def _validate(args: argparse.Namespace) -> int:
     envelope = _fetch_envelope(args.comment_id)
+    _assert_not_globally_terminal(envelope)
     envelope.payload.assert_current(now=_now())
     _print({
         "status": "VALID",
@@ -171,6 +223,7 @@ def _validate(args: argparse.Namespace) -> int:
 
 def _prepare(args: argparse.Namespace) -> int:
     envelope = _fetch_envelope(args.comment_id)
+    _assert_not_globally_terminal(envelope)
     head, tree = _physical_base(args.repo_root)
     result = prepare_source_repair(
         envelope,
@@ -184,6 +237,7 @@ def _prepare(args: argparse.Namespace) -> int:
 
 def _record_applied(args: argparse.Namespace) -> int:
     envelope = _fetch_envelope(args.comment_id)
+    _assert_not_globally_terminal(envelope)
     applied = _repair_evidence(args.repo_root, envelope, args.implementer_id)
     result = record_source_repair_applied(envelope, applied, now=_now())
     _print(result)
@@ -192,6 +246,7 @@ def _record_applied(args: argparse.Namespace) -> int:
 
 def _record_verified(args: argparse.Namespace) -> int:
     envelope = _fetch_envelope(args.comment_id)
+    _assert_not_globally_terminal(envelope)
     verification = _fetch_verification(args.verification_comment_id)
     physical = _repair_evidence(args.repo_root, envelope, args.implementer_id)
     if (
@@ -236,6 +291,7 @@ def _validate_integration(args: argparse.Namespace) -> int:
 
 def _prepare_integration(args: argparse.Namespace) -> int:
     source = _fetch_envelope(args.comment_id)
+    _assert_not_globally_terminal(source)
     integration = _fetch_integration(args.integration_comment_id)
     result = prepare_emergency_integration(source, integration, now=_now())
     _print(result)

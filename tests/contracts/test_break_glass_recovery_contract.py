@@ -11,11 +11,13 @@ from nexus.contracts.break_glass_recovery import (
     BreakGlassContractError,
     BreakGlassEffectClass,
     BreakGlassOwnerIntegrationPayload,
+    BreakGlassOwnerTerminalPayload,
     BreakGlassOwnerVerificationPayload,
     OwnerActivationEnvelope,
     canonical_sha256,
     owner_envelope_from_github_comment,
     owner_integration_from_github_comment,
+    owner_terminal_from_github_comment,
     owner_verification_from_github_comment,
 )
 
@@ -305,6 +307,63 @@ def test_integration_comment_tamper_is_rejected_by_canonical_hash() -> None:
     comment["body"] = str(comment["body"]).replace('"pr_number":808', '"pr_number":809')
     with pytest.raises(BreakGlassContractError, match="GITHUB_COMMENT_PAYLOAD_HASH_MISMATCH"):
         owner_integration_from_github_comment(comment)
+
+
+def terminal_payload_dict(*, state: str = "CONSUMED") -> dict[str, object]:
+    payload: dict[str, object] = {
+        "schema": "nexus.break_glass_owner_terminal.v1",
+        "repository": "James3014/Nexus-new",
+        "issue": 806,
+        "owner_login": "James3014",
+        "recovery_id": "BG-806-20260906",
+        "source_attempt_id": "BG-806-A1",
+        "source_activation_payload_sha256": EXPECTED_PAYLOAD_SHA256,
+        "terminal_state": state,
+        "reason": "normal-governance-restored-after-pr-808",
+        "issued_at": "2026-09-06T08:00:00+08:00",
+    }
+    if state == "CONSUMED":
+        payload.update({
+            "integrated_main_sha": "8" * 40,
+            "canary_evidence_sha256": "9" * 64,
+            "integration_payload_sha256": "a" * 64,
+        })
+    return payload
+
+
+def test_owner_terminal_comment_binds_global_consumption() -> None:
+    payload = terminal_payload_dict()
+    parsed = owner_terminal_from_github_comment(
+        raw_owner_evidence_comment(
+            marker="Canonical terminal payload SHA-256",
+            payload=payload,
+            comment_id=6000000003,
+        )
+    )
+    assert isinstance(parsed.payload, BreakGlassOwnerTerminalPayload)
+    assert parsed.payload.terminal_state == "CONSUMED"
+    assert parsed.payload.source_activation_payload_sha256 == EXPECTED_PAYLOAD_SHA256
+
+
+def test_consumed_terminal_requires_integrated_main_and_canary() -> None:
+    payload = terminal_payload_dict()
+    payload.pop("integrated_main_sha")
+    with pytest.raises(ValidationError, match="CONSUMED_TERMINAL_EVIDENCE_REQUIRED"):
+        BreakGlassOwnerTerminalPayload.model_validate(payload)
+
+
+def test_terminal_comment_tamper_is_rejected_by_canonical_hash() -> None:
+    payload = terminal_payload_dict()
+    comment = raw_owner_evidence_comment(
+        marker="Canonical terminal payload SHA-256",
+        payload=payload,
+        comment_id=6000000003,
+    )
+    comment["body"] = str(comment["body"]).replace(
+        '"terminal_state":"CONSUMED"', '"terminal_state":"REVOKED"'
+    )
+    with pytest.raises(BreakGlassContractError, match="GITHUB_COMMENT_PAYLOAD_HASH_MISMATCH"):
+        owner_terminal_from_github_comment(comment)
 
 
 def test_relative_path_escape_is_rejected() -> None:

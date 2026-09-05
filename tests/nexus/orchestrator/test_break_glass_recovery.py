@@ -12,6 +12,7 @@ from nexus.contracts.break_glass_recovery import (
     BreakGlassGovernanceCanaryEvidence,
     OwnerActivationEnvelope,
     OwnerIntegrationEnvelope,
+    OwnerTerminalEnvelope,
     OwnerVerificationEnvelope,
     canonical_json_bytes,
     canonical_sha256,
@@ -19,6 +20,7 @@ from nexus.contracts.break_glass_recovery import (
 from nexus.orchestrator.break_glass_recovery import (
     BreakGlassRecoveryError,
     assert_emergency_integration_not_consumed,
+    assert_source_not_globally_terminal,
     consume_source_repair_authority,
     inspect_attempt,
     inspect_emergency_integration,
@@ -222,6 +224,38 @@ def canary(*, main_sha: str = "8" * 40) -> BreakGlassGovernanceCanaryEvidence:
         observed_at=NOW,
         normal_governance_restored=True,
     )
+
+
+def terminal_envelope(
+    *, recovery_id: str = "BG-806-20260906", source_hash: str | None = None
+) -> OwnerTerminalEnvelope:
+    source = envelope()
+    payload = {
+        "schema": "nexus.break_glass_owner_terminal.v1",
+        "repository": "James3014/Nexus-new",
+        "issue": 806,
+        "owner_login": "James3014",
+        "recovery_id": recovery_id,
+        "source_attempt_id": source.payload.attempt_id,
+        "source_activation_payload_sha256": source_hash or source.payload_sha256,
+        "terminal_state": "CONSUMED",
+        "reason": "normal-governance-restored-after-pr-808",
+        "integrated_main_sha": "8" * 40,
+        "canary_evidence_sha256": canary().evidence_sha256,
+        "integration_payload_sha256": "a" * 64,
+        "issued_at": "2026-09-06T08:00:00+08:00",
+    }
+    payload_hash = canonical_sha256(payload)
+    return OwnerTerminalEnvelope.model_validate({
+        "repository": "James3014/Nexus-new",
+        "issue": 806,
+        "comment_id": 6000000003,
+        "comment_url": "https://github.com/James3014/Nexus-new/issues/806#issuecomment-6000000003",
+        "author_login": "James3014",
+        "comment_body_sha256": "8" * 64,
+        "payload_sha256": payload_hash,
+        "payload": payload,
+    })
 
 
 def test_prepare_is_idempotent_and_binds_exact_base(tmp_path: Path) -> None:
@@ -579,6 +613,22 @@ def test_self_hosting_recovery_e2e_restores_normal_path_then_collapses_authority
         record_source_repair_applied(source, applied(), now=NOW, state_root=tmp_path)
     with pytest.raises(BreakGlassRecoveryError, match="INTEGRATION_REPLAY_DENIED"):
         assert_emergency_integration_not_consumed(integration, state_root=tmp_path)
+    with pytest.raises(BreakGlassRecoveryError, match="RECOVERY_GLOBALLY_TERMINAL"):
+        assert_source_not_globally_terminal(source, (terminal_envelope(),))
+
+
+def test_matching_owner_terminal_blocks_fresh_session_source_replay() -> None:
+    source = envelope()
+    with pytest.raises(BreakGlassRecoveryError, match="RECOVERY_GLOBALLY_TERMINAL"):
+        assert_source_not_globally_terminal(source, (terminal_envelope(),))
+
+
+def test_unrelated_owner_terminal_does_not_block_source() -> None:
+    source = envelope()
+    assert_source_not_globally_terminal(
+        source,
+        (terminal_envelope(recovery_id="BG-806-OTHER"),),
+    )
 
 
 def test_transition_tamper_is_detected(tmp_path: Path) -> None:

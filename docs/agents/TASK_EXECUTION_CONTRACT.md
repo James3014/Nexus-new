@@ -76,8 +76,12 @@ caller-provided verifier name or opaque hash is not sufficient. The host-local
 source evidence chain is `PREPARED -> APPLIED -> VERIFIED -> CONSUMED`, with
 exact-attempt reconciliation, tamper/symlink protection, and replay denial after
 terminal consumption. SOURCE_REPAIR becomes CONSUMED only after a fresh normal-
-governance canary. Emergency integration or runtime recovery requires a new
-exact Owner authority artifact for that effect.
+governance canary. After successful recovery the Owner also publishes a
+canonical terminal/revocation comment bound to the original source activation;
+recovery consumers scan #806 for that global terminal witness before later
+source mutation so a new session cannot replay the old grant. Emergency
+integration or runtime recovery requires a new exact Owner authority artifact
+for that effect.
 
 When normal merge authority is itself inside the failed plane, a separately
 validated `EMERGENCY_INTEGRATION` Owner grant may authorize only one exact PR,
