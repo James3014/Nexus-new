@@ -1,0 +1,111 @@
+name: TG8 Mechanical Repair
+
+on:
+  push:
+    branches:
+      - ops/tg8-mechanical-repair-20260905
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout TG8 Candidate
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: codex/issue-772-tg8-protocol-maturity
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Repair layer DAG seam
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("product/protocol/compatibility_gate.py")
+          text = path.read_text(encoding="utf-8")
+          old_import = "from product.benchmark import _digest\n"
+          if text.count(old_import) != 1:
+              raise SystemExit("expected exactly one product.benchmark _digest import")
+          text = text.replace(old_import, "", 1)
+          if "import math\n" not in text:
+              text = text.replace("import json\n", "import json\nimport math\n", 1)
+          marker = "\n\ndef _file_hash(path: Path) -> str:\n"
+          if text.count(marker) != 1:
+              raise SystemExit("expected one _file_hash insertion marker")
+          helpers = r'''
+
+
+def _canonical(value: Any, *, _isfinite=math.isfinite, _dumps=json.dumps) -> str:
+    active: set[int] = set()
+
+    def enc(v: Any) -> Any:
+        if v is None or type(v) in (bool, int, str):
+            return v
+        if type(v) is float:
+            if not _isfinite(v):
+                raise ValueError("non-finite")
+            return v
+        if isinstance(v, Mapping):
+            if any(type(k) is not str for k in v):
+                raise TypeError("mapping key")
+            if id(v) in active:
+                raise ValueError("cycle")
+            active.add(id(v))
+            try:
+                return {k: enc(v[k]) for k in sorted(v)}
+            finally:
+                active.remove(id(v))
+        if isinstance(v, (list, tuple)):
+            if id(v) in active:
+                raise ValueError("cycle")
+            active.add(id(v))
+            try:
+                return [enc(x) for x in v]
+            finally:
+                active.remove(id(v))
+        raise TypeError(type(v).__name__)
+
+    return _dumps(
+        enc(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+    )
+
+
+def _digest(value: Any, *, _canonical_fn=_canonical, _sha256=hashlib.sha256) -> str:
+    return "sha256:" + _sha256(_canonical_fn(value).encode()).hexdigest()
+'''
+          text = text.replace(marker, helpers + marker, 1)
+          path.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Format only authorized TG8 files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --disable-pip-version-check --no-input 'ruff==0.15.17'
+          ruff format --isolated product/protocol/compatibility_gate.py tests/benchmark/test_core_v1_tg8_protocol_gate.py
+          ruff format --isolated --check product/protocol/compatibility_gate.py tests/benchmark/test_core_v1_tg8_protocol_gate.py
+
+      - name: Static repair assertions
+        shell: bash
+        run: |
+          set -euo pipefail
+          ! grep -R '^from product\.benchmark' product/protocol/compatibility_gate.py
+          python3 -m py_compile product/protocol/compatibility_gate.py tests/benchmark/test_core_v1_tg8_protocol_gate.py
+          changed="$(git diff --name-only | sort)"
+          expected="$(printf '%s\n' product/protocol/compatibility_gate.py tests/benchmark/test_core_v1_tg8_protocol_gate.py | sort)"
+          test "$changed" = "$expected"
+
+      - name: Publish repaired commit to isolated output ref
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Nexus TG8 Mechanical Repair'
+          git config user.email 'nexus-tg8-repair@example.invalid'
+          git add product/protocol/compatibility_gate.py tests/benchmark/test_core_v1_tg8_protocol_gate.py
+          git commit -m 'fix(core-v1): repair TG8 layer boundary and format (#772)'
+          git push --force-with-lease origin HEAD:refs/heads/ops/tg8-mechanical-repaired-output
