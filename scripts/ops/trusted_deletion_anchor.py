@@ -295,6 +295,8 @@ def _build_runtime(args: argparse.Namespace) -> None:
                 "--no-default-groups",
                 "--group",
                 "dev",
+                "--extra",
+                "legacy",
                 "--no-emit-project",
                 "--no-emit-workspace",
                 "--no-emit-local",
