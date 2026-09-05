@@ -86,6 +86,11 @@ jobs:
           if text.count(cleanup_old) != 1:
               raise SystemExit('case workspace cleanup patch target not unique')
           text = text.replace(cleanup_old, cleanup_new)
+          seal_old = '''    chmod_readonly_tree(EVIDENCE)\n    print(canonical(summary))'''
+          seal_new = '''    subprocess.run(["sudo", "chmod", "-R", "a-w", str(EVIDENCE)], check=True)\n    print(canonical(summary))'''
+          if text.count(seal_old) != 1:
+              raise SystemExit('final evidence seal patch target not unique')
+          text = text.replace(seal_old, seal_new)
           path.write_text(text, encoding='utf-8')
           PY
           sha256sum /tmp/core_v1_tg7_physical_shadow.py | tee /tmp/tg7-harness/payload-hosted-sha256.txt
@@ -106,7 +111,7 @@ jobs:
           sudo chown "$(id -u):$(id -g)" /private /private/tmp
           chmod 0755 /private /private/tmp
           docker version
-          printf 'workflow_run=%s\nworkflow_head=%s\ntg7_sha=%s\npayload_b64_sha256=%s\npayload_python_sha256=%s\nhost_adapter=strip-auth-redirect+direct-runtime-schema-load+fail-closed-case-cleanup\n' \
+          printf 'workflow_run=%s\nworkflow_head=%s\ntg7_sha=%s\npayload_b64_sha256=%s\npayload_python_sha256=%s\nhost_adapter=strip-auth-redirect+direct-runtime-schema-load+fail-closed-case-cleanup+host-evidence-seal\n' \
             "$GITHUB_RUN_ID" "$GITHUB_SHA" "$TG7_SHA" \
             '8f9572647791af72b38c558a4c43226cc9ad2d25396997e7644d21e85f119fdf' \
             '629ff62e85eec593b46482dbc7486818115577794df1484ece85a6a0fc469d38' \
