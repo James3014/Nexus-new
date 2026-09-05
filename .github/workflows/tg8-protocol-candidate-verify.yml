@@ -113,8 +113,13 @@ jobs:
               found: set[str] = set()
               for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
                   match = re.match(r"^(?:FAILED|ERROR) ([^ ]+)", line)
-                  if match:
-                      found.add(match.group(1))
+                  if not match:
+                      continue
+                  node = match.group(1)
+                  marker = "tests/"
+                  if marker in node:
+                      node = node[node.index(marker):]
+                  found.add(node)
               return found
 
           base = failures(root / "base-pytest.log")
