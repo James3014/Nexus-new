@@ -22,7 +22,29 @@ jobs:
         with:
           ref: ${{ env.TARGET_SHA }}
           fetch-depth: 0
-          persist-credentials: false
+          persist-credentials: true
+          submodules: false
+
+      - name: Remove checkout credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r entry; do
+            key="${entry%% *}"
+            credential_file="${entry#* }"
+            case "$credential_file" in
+              "$RUNNER_TEMP"/git-credentials-*.config) rm -f -- "$credential_file" ;;
+              /github/runner_temp/git-credentials-*.config) ;;
+              *) echo "unexpected checkout credential path: $credential_file" >&2; exit 1 ;;
+            esac
+            git config --local --unset-all "$key"
+          done < <(git config --local --get-regexp '^includeif\.gitdir:.*\.path$' || true)
+          git config --local --unset-all 'http.https://github.com/.extraheader' || true
+          git config --local --unset-all core.sshCommand || true
+          if git config --local --get-regexp '^includeif\.gitdir:.*\.path$' >/dev/null; then
+            echo 'checkout credentials remain configured' >&2
+            exit 1
+          fi
 
       - name: Setup Python
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
@@ -75,6 +97,21 @@ jobs:
           PROTOCOL_BLOB="$(git rev-parse HEAD:product/protocol/__init__.py)"
           export SUBJECT_TREE PROTOCOL_BLOB
           python3 -c 'import json,os,pathlib; p={"schema":"nexus.core-v1.tg8-protocol-candidate-receipt.v1","generation":os.environ["GENERATION"],"subject_commit":os.environ["TARGET_SHA"],"subject_tree":os.environ["SUBJECT_TREE"],"protocol_blob":os.environ["PROTOCOL_BLOB"],"public_protocol_version":os.environ["EXPECTED_PROTOCOL"],"product_tests":"PASS","wheel_build":"PASS","clean_install_readback":"PASS"}; pathlib.Path(os.environ["RUNNER_TEMP"]+"/tg8-candidate-evidence/receipt.json").write_text(json.dumps(p,sort_keys=True,separators=(",",":"))+"\n")'
+
+      - name: Install gitlink metadata for checkout post-cleanup
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' index_entry; do
+            mode="${index_entry%% *}"
+            if [ "$mode" != "160000" ]; then continue; fi
+            gitlink_path="${index_entry#*$'\t'}"
+            if ! git config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
+              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
+              git config --file .gitmodules "submodule.${gitlink_path}.url" .
+            fi
+          done < <(git ls-files --stage -z)
+          git submodule foreach --recursive ':'
 
       - name: Upload candidate evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
