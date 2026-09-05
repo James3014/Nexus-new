@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     env:
-      TG7_SHA: 914481b807697d9d2c66c9befa40d653cee09cdb
+      TG7_SHA: 3067b379a17e3848e6ee416bb1e5dca6b1b2938b
       TG5_ARTIFACT_ID: '9960033003'
       TG5_ARTIFACT_DIGEST: sha256:67c68ee594face7097770eb95aa58b9d75afc02a26c33ae68476c9c3a34e9d84
       GITHUB_TOKEN: ${{ github.token }}
