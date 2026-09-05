@@ -414,6 +414,7 @@ def _manifest() -> dict[str, object]:
         "uv_lock_sha256": hashlib.sha256(b"").hexdigest(),
         "requirements_sha256": hashlib.sha256(b"").hexdigest(),
         "pytest_plugins": trusted_anchor.PYTEST_PLUGINS,
+        "dependency_groups": list(trusted_anchor.TRUSTED_RUNTIME_DEPENDENCY_GROUPS),
     }
     runtime_metadata = _json(runtime_identity) + b"\n"
     return build_manifest(
@@ -600,6 +601,7 @@ def _synthetic_runtime(
         "uv_lock_sha256": hashlib.sha256(uv_lock).hexdigest(),
         "requirements_sha256": hashlib.sha256(requirements).hexdigest(),
         "pytest_plugins": trusted_anchor.PYTEST_PLUGINS,
+        "dependency_groups": list(trusted_anchor.TRUSTED_RUNTIME_DEPENDENCY_GROUPS),
     }
     (runtime_dir / "runtime.tar").write_bytes(stream.getvalue())
     (runtime_dir / "runtime-metadata.json").write_bytes(_json(metadata) + b"\n")
@@ -1015,16 +1017,52 @@ def test_runtime_builder_uses_frozen_hash_bound_binary_only_contract(tmp_path: P
     assert {
         "--frozen",
         "--no-default-groups",
-        "--group",
-        "dev",
         "--no-emit-project",
         "--no-emit-workspace",
         "--no-emit-local",
     } <= set(export)
+    group_flags = [export[i + 1] for i, token in enumerate(export) if token == "--group"]
+    assert group_flags == list(trusted_anchor.TRUSTED_RUNTIME_DEPENDENCY_GROUPS)
     assert {"--require-hashes", "--only-binary", "--no-cache", "--no-python-downloads"} <= set(
         install
     )
     assert all((output / name).is_file() for name in trusted_anchor.RUNTIME_FILENAMES)
+    metadata = json.loads((output / "runtime-metadata.json").read_text(encoding="utf-8"))
+    assert metadata["dependency_groups"] == list(trusted_anchor.TRUSTED_RUNTIME_DEPENDENCY_GROUPS)
+
+
+@pytest.mark.parametrize(
+    "tampered_groups",
+    [
+        None,  # missing key
+        [],
+        ["dev"],
+        ["trusted-anchor"],
+        ["trusted-anchor", "dev"],  # reordered
+        ["dev", "trusted-anchor", "extra"],
+        ["dev", "hostile"],
+    ],
+)
+def test_runtime_metadata_dependency_groups_drift_fails_closed(
+    tampered_groups: list[str] | None,
+) -> None:
+    manifest = _manifest()
+    metadata = dict(manifest["runtime_identity"])  # type: ignore[arg-type]
+    if tampered_groups is None:
+        metadata.pop("dependency_groups", None)
+    else:
+        metadata["dependency_groups"] = tampered_groups
+    tampered_metadata = _json(metadata) + b"\n"
+    evidence = _evidence(manifest)
+    assert _verify(manifest, evidence, runtime_metadata=tampered_metadata) == "IMPACT_UNKNOWN"
+    manifest_tampered = dict(manifest)
+    manifest_tampered["runtime_identity"] = metadata
+    manifest_tampered["runtime_metadata_sha256"] = trusted_anchor._sha(tampered_metadata)
+    evidence_tampered = _evidence(manifest_tampered)
+    assert (
+        _verify(manifest_tampered, evidence_tampered, runtime_metadata=tampered_metadata)
+        == "IMPACT_UNKNOWN"
+    )
 
 
 def test_controller_executor_verifier_path_from_non_repository_cwd():
