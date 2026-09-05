@@ -47,6 +47,17 @@ jobs:
           test "$(git status --porcelain)" = ""
           echo "FINAL_SHA=$final_sha" >> "$GITHUB_ENV"
           echo "FINAL_TREE=$final_tree" >> "$GITHUB_ENV"
+      - name: Publish final candidate to isolated proof ref
+        env:
+          PROOF_BRANCH: infra/tg7-trusted-verifier-final-proof
+        run: |
+          set -euo pipefail
+          test "$FINAL_SHA" = "$(git rev-parse HEAD)"
+          existing="$(git ls-remote origin "refs/heads/$PROOF_BRANCH" | cut -f1)"
+          test -z "$existing"
+          git push origin "HEAD:refs/heads/$PROOF_BRANCH"
+          remote_proof_sha="$(git ls-remote origin "refs/heads/$PROOF_BRANCH" | cut -f1)"
+          test "$remote_proof_sha" = "$FINAL_SHA"
       - name: Execute exact verifier pipeline on final candidate
         env:
           REPOSITORY: ${{ github.repository }}
@@ -199,3 +210,16 @@ jobs:
               "target_url": target_url,
           }, sort_keys=True))
           PY
+      - name: Cleanup isolated proof ref
+        if: always()
+        env:
+          PROOF_BRANCH: infra/tg7-trusted-verifier-final-proof
+        run: |
+          set -euo pipefail
+          remote_proof_sha="$(git ls-remote origin "refs/heads/$PROOF_BRANCH" | cut -f1)"
+          if [ -z "$remote_proof_sha" ]; then
+            exit 0
+          fi
+          test -n "${FINAL_SHA:-}"
+          test "$remote_proof_sha" = "$FINAL_SHA"
+          git push origin --delete "$PROOF_BRANCH"
