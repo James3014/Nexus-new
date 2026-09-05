@@ -238,6 +238,52 @@ def test_core_v1_tg6_dependency_snapshot_transition_hashes_are_exact() -> None:
     )
 
 
+def test_conftest_optional_stubs_are_collection_safe_without_legacy_dependencies() -> None:
+    probe = r'''
+import builtins
+import runpy
+import sys
+
+blocked = {"sentence_transformers", "lancedb", "scipy", "numpy", "pandas"}
+real_import = builtins.__import__
+
+
+def guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+    if name.split(".", 1)[0] in blocked:
+        error = ModuleNotFoundError(f"blocked optional dependency: {name}")
+        error.name = name.split(".", 1)[0]
+        raise error
+    return real_import(name, globals, locals, fromlist, level)
+
+
+builtins.__import__ = guarded_import
+runpy.run_path(sys.argv[1], run_name="trusted_conftest_probe")
+
+# Stub installation itself must be dependency-free, but real use must remain
+# truthful when the optional dependency is absent.
+for call, expected in (
+    (lambda: sys.modules["sentence_transformers"].SentenceTransformer("stub").encode("x"), "numpy"),
+    (lambda: sys.modules["lancedb"].connect(".").open_table("t").search("x").to_pandas(), "pandas"),
+    (lambda: sys.modules["scipy.stats"].norm.cdf(0.0), "numpy"),
+):
+    try:
+        call()
+    except ModuleNotFoundError as exc:
+        assert exc.name == expected, (exc.name, expected)
+    else:
+        raise AssertionError(f"missing {expected} must fail at invocation time")
+'''
+    completed = subprocess.run(
+        [sys.executable, "-c", probe, str(ROOT / "tests/conftest.py")],
+        cwd=ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+
+
 @pytest.mark.parametrize(
     ("name", "head", "head_lock", "product_init_is_regular"),
     [
