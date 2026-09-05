@@ -402,7 +402,10 @@ def _tg7(
             "corpus_hash": corpus["corpus_hash"],
             "eligible_count": 56,
             "infra_invalid_count": 0,
-            "repository": corpus["repository"],
+            "repository": {
+                **corpus["repository"],
+                "bottle_py_hash": "sha256:" + "e" * 64,
+            },
             "run_id": "tg7-physical-run",
             "selection_hash": selection["selection_hash"],
             "task_set_id": "tg7-shadow-bottle-v1",
@@ -987,3 +990,29 @@ def test_cli_exit_code_is_zero_only_for_ready_states(tmp_path: Path) -> None:
 @pytest.mark.parametrize("state", sorted(gate.FORBIDDEN_OUTPUT_STATES))
 def test_forbidden_output_states_are_not_allowed_machine_states(state: str) -> None:
     assert state not in gate.ALLOWED_STATES
+
+
+def test_tg7_shadow_repository_requires_external_material_hash(tmp_path: Path) -> None:
+    fx = _fixture(tmp_path)
+    shadow = fx["values"]["tg7_shadow"]
+    shadow["repository"].pop("bottle_py_hash")
+    shadow.pop("receipt_hash")
+    shadow["receipt_hash"] = _digest(shadow)
+    _write(fx["paths"]["tg7_shadow"], shadow)
+    _refresh(fx)
+    report = _run(fx)
+    assert report["classification"] == gate.UNVERIFIABLE
+    assert "TG7:REPOSITORY" in report["reasons"]
+
+
+def test_tg7_shadow_repository_rejects_invalid_external_material_hash(tmp_path: Path) -> None:
+    fx = _fixture(tmp_path)
+    shadow = fx["values"]["tg7_shadow"]
+    shadow["repository"]["bottle_py_hash"] = "not-a-sha256"
+    shadow.pop("receipt_hash")
+    shadow["receipt_hash"] = _digest(shadow)
+    _write(fx["paths"]["tg7_shadow"], shadow)
+    _refresh(fx)
+    report = _run(fx)
+    assert report["classification"] == gate.UNVERIFIABLE
+    assert "TG7:REPOSITORY" in report["reasons"]

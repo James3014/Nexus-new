@@ -772,8 +772,20 @@ def _tg7(
         "commit": s.get("commit"),
         "tree": s.get("tree"),
     }
-    if c.get("repository") != repo or sh.get("repository") != repo:
+    shadow_repo = sh.get("repository")
+    if c.get("repository") != repo:
         e.append("TG7:REPOSITORY")
+    elif not isinstance(shadow_repo, Mapping):
+        e.append("TG7:REPOSITORY")
+    else:
+        shadow_identity = {key: shadow_repo.get(key) for key in ("owner", "name", "commit", "tree")}
+        expected_shadow_keys = {"owner", "name", "commit", "tree", "bottle_py_hash"}
+        if (
+            shadow_identity != repo
+            or set(shadow_repo) != expected_shadow_keys
+            or not _sha(shadow_repo.get("bottle_py_hash"))
+        ):
+            e.append("TG7:REPOSITORY")
     cases = c.get("cases")
     if not isinstance(cases, list) or c.get("case_count") != len(cases) or len(cases) < 50:
         f.append("TG7:CORPUS_DENOMINATOR")
