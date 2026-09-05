@@ -25,14 +25,28 @@ def _patch_family_contracts() -> None:
 def _semantic_test_source(case: dict, bottle_hash: str) -> str:
     source = _ORIGINAL_SEMANTIC_TEST_SOURCE(case, bottle_hash)
     source = source.replace(
-        "from product.runtime.auth import validate_auth_header\\n",
+        "from product.runtime.auth import validate_auth_header\n",
         "",
     )
-    old = '''    if family == "AUTH_ISSUER_TAMPER":\\n        expected_token = "A" * 43\\n        hostile_token = "B" * 43\\n        accepted = validate_auth_header("Bearer " + hostile_token, expected_token)\\n        assert accepted is False\\n        status, disposition = "UNVERIFIABLE", "BLOCKED"\\n        guard_source = "product.runtime.auth.validate_auth_header"\\n        actual_detail = {"accepted": accepted}\\n'''
-    new = '''    if family == "AUTH_ISSUER_TAMPER":\\n        status, disposition, actual_detail = _benchmark_observation("direct_missing_authority_present")\\n        guard_source = "product.benchmark:direct_missing_authority_present"\\n'''
+    old = '''    if family == "AUTH_ISSUER_TAMPER":
+        expected_token = "A" * 43
+        hostile_token = "B" * 43
+        accepted = validate_auth_header("Bearer " + hostile_token, expected_token)
+        assert accepted is False
+        status, disposition = "UNVERIFIABLE", "BLOCKED"
+        guard_source = "product.runtime.auth.validate_auth_header"
+        actual_detail = {"accepted": accepted}
+'''
+    new = '''    if family == "AUTH_ISSUER_TAMPER":
+        status, disposition, actual_detail = _benchmark_observation("direct_missing_authority_present")
+        guard_source = "product.benchmark:direct_missing_authority_present"
+'''
     if old not in source:
         raise RuntimeError("AUTH semantic source patch target drifted")
-    return source.replace(old, new)
+    source = source.replace(old, new)
+    if "from product.runtime.auth import validate_auth_header" in source:
+        raise RuntimeError("AUTH runtime import was not removed")
+    return source
 
 
 def _install_patches() -> None:
