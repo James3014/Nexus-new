@@ -1,0 +1,103 @@
+name: TG8 RC Product Diagnostic
+
+on:
+  push:
+    branches:
+      - ops/tg8-mechanical-repair-20260905
+
+permissions:
+  contents: read
+
+env:
+  TARGET_SHA: 68fad98effe979ec7c33e52e85313215ec08c888
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact RC subject
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 0
+          persist-credentials: true
+          submodules: false
+
+      - name: Remove checkout credentials and install inert-gitlink metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r entry; do
+            key="${entry%% *}"
+            credential_file="${entry#* }"
+            case "$credential_file" in
+              "$RUNNER_TEMP"/git-credentials-*.config) rm -f -- "$credential_file" ;;
+              /github/runner_temp/git-credentials-*.config) ;;
+              *) echo "unexpected checkout credential path: $credential_file" >&2; exit 1 ;;
+            esac
+            git config --local --unset-all "$key"
+          done < <(git config --local --get-regexp '^includeif\.gitdir:.*\.path$' || true)
+          git config --local --unset-all 'http.https://github.com/.extraheader' || true
+          git config --local --unset-all core.sshCommand || true
+          while IFS= read -r -d '' index_entry; do
+            mode="${index_entry%% *}"
+            if [ "$mode" != "160000" ]; then continue; fi
+            gitlink_path="${index_entry#*$'\t'}"
+            if ! git config --file .gitmodules --get "submodule.${gitlink_path}.path" >/dev/null 2>&1; then
+              git config --file .gitmodules "submodule.${gitlink_path}.path" "$gitlink_path"
+              git config --file .gitmodules "submodule.${gitlink_path}.url" .
+            fi
+          done < <(git ls-files --stage -z)
+
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+          check-latest: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        with:
+          version: '0.9.2'
+          enable-cache: false
+
+      - name: Install exact dependencies
+        shell: bash
+        run: uv sync --frozen --all-groups --all-extras
+
+      - name: Capture exact Product failures
+        id: pytest
+        shell: bash
+        continue-on-error: true
+        run: |
+          set +e
+          mkdir -p "$RUNNER_TEMP/tg8-rc-diagnostic"
+          uv run pytest -q tests/product -m 'not live' --tb=short \
+            > "$RUNNER_TEMP/tg8-rc-diagnostic/pytest.log" 2>&1
+          status=$?
+          printf '%s\n' "$status" > "$RUNNER_TEMP/tg8-rc-diagnostic/pytest.exit"
+          grep -E '^(FAILED|ERROR|=+ short test summary info =+|[0-9]+ failed|[0-9]+ passed)' \
+            "$RUNNER_TEMP/tg8-rc-diagnostic/pytest.log" \
+            > "$RUNNER_TEMP/tg8-rc-diagnostic/failure-summary.txt" || true
+          tail -n 240 "$RUNNER_TEMP/tg8-rc-diagnostic/pytest.log" \
+            > "$RUNNER_TEMP/tg8-rc-diagnostic/pytest-tail.txt"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Upload diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: tg8-rc-product-diagnostic-${{ env.TARGET_SHA }}
+          path: ${{ runner.temp }}/tg8-rc-diagnostic/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Preserve truthful failure
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          status='${{ steps.pytest.outputs.status }}'
+          test -n "$status"
+          exit "$status"
