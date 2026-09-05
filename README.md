@@ -1,3 +1,14 @@
+# Nexus-new — Legacy Integration Lab & Compatibility Host
+
+> [!IMPORTANT]
+> **Repository Boundary & Ownership Transition Note**
+> `James3014/Nexus-new` is no longer the canonical implementation repository for Nexus Core, Nexus Learning, or Open SWE runtime.
+> - **Nexus Core**: Canonical repository is [`James3014/nexus-core`](https://github.com/James3014/nexus-core).
+> - **Nexus Learning**: Canonical repository is [`James3014/nexus-learning`](https://github.com/James3014/nexus-learning).
+> - **Open SWE Runtime**: Canonical repository is [`James3014/nexus-open-swe-runtime`](https://github.com/James3014/nexus-open-swe-runtime).
+>
+> `James3014/Nexus-new` now serves as the **Legacy Integration Lab & Compatibility Host**. Existing paths (`product/`, `runtimes/open_swe/`, `nexus/learning/`) are marked as `LEGACY_COMPATIBILITY_SNAPSHOT` with `NO_NEW_FEATURE_DEVELOPMENT`.
+
 # Nexus Core v28.3.0 — Continuous Pull Request Certification
 
 Nexus Core is a hardened local-first certification runtime for pull requests. It evaluates code changes against explicit Acceptance Contracts, verifies execution in hermetic environments, generates cryptographically verifiable receipts, and maintains an append-only ledger.
