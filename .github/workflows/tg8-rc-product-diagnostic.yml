@@ -1,4 +1,4 @@
-name: TG8 RC Product Diagnostic
+name: TG8 Base Product Diagnostic
 
 on:
   push:
@@ -9,13 +9,13 @@ permissions:
   contents: read
 
 env:
-  TARGET_SHA: 68fad98effe979ec7c33e52e85313215ec08c888
+  TARGET_SHA: d005c6e013d9f2a5315092b3aaf375b9ae322d7c
 
 jobs:
   diagnose:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout exact RC subject
+      - name: Checkout exact TG8 gate base
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           ref: ${{ env.TARGET_SHA }}
@@ -71,16 +71,16 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          mkdir -p "$RUNNER_TEMP/tg8-rc-diagnostic"
+          mkdir -p "$RUNNER_TEMP/tg8-base-diagnostic"
           uv run pytest -q tests/product -m 'not live' --tb=short \
-            > "$RUNNER_TEMP/tg8-rc-diagnostic/pytest.log" 2>&1
+            > "$RUNNER_TEMP/tg8-base-diagnostic/pytest.log" 2>&1
           status=$?
-          printf '%s\n' "$status" > "$RUNNER_TEMP/tg8-rc-diagnostic/pytest.exit"
+          printf '%s\n' "$status" > "$RUNNER_TEMP/tg8-base-diagnostic/pytest.exit"
           grep -E '^(FAILED|ERROR|=+ short test summary info =+|[0-9]+ failed|[0-9]+ passed)' \
-            "$RUNNER_TEMP/tg8-rc-diagnostic/pytest.log" \
-            > "$RUNNER_TEMP/tg8-rc-diagnostic/failure-summary.txt" || true
-          tail -n 240 "$RUNNER_TEMP/tg8-rc-diagnostic/pytest.log" \
-            > "$RUNNER_TEMP/tg8-rc-diagnostic/pytest-tail.txt"
+            "$RUNNER_TEMP/tg8-base-diagnostic/pytest.log" \
+            > "$RUNNER_TEMP/tg8-base-diagnostic/failure-summary.txt" || true
+          tail -n 240 "$RUNNER_TEMP/tg8-base-diagnostic/pytest.log" \
+            > "$RUNNER_TEMP/tg8-base-diagnostic/pytest-tail.txt"
           echo "status=$status" >> "$GITHUB_OUTPUT"
           exit 0
 
@@ -88,8 +88,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: tg8-rc-product-diagnostic-${{ env.TARGET_SHA }}
-          path: ${{ runner.temp }}/tg8-rc-diagnostic/
+          name: tg8-base-product-diagnostic-${{ env.TARGET_SHA }}
+          path: ${{ runner.temp }}/tg8-base-diagnostic/
           if-no-files-found: error
           retention-days: 14
 
