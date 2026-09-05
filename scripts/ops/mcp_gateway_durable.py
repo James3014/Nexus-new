@@ -371,6 +371,33 @@ MAX_GATEWAY_LEDGER_BYTES = MAX_GATEWAY_LEDGER_RECORDS * MAX_GATEWAY_LEDGER_RECOR
 # mandatory pre-effect capacity reserve.
 POST_EFFECT_LEDGER_RESERVE_SLOTS = 10
 POST_EFFECT_LEDGER_RESERVE_BYTES = POST_EFFECT_LEDGER_RESERVE_SLOTS * MAX_GATEWAY_LEDGER_RECORD_BYTES
+# Once an external recovery effect may have occurred, these state-specific slots
+# are permanently protected from unrelated ledger appends until that request
+# reaches a terminal state.  They are the minimum legal fail-closed path:
+# most post-effect states need UNCERTAIN_EFFECT -> BLOCKED; UNCERTAIN_EFFECT
+# itself needs only BLOCKED.
+POST_EFFECT_TERMINAL_RESERVE_SLOTS = {
+    DeploymentState.EFFECT_STARTED.value: 2,
+    DeploymentState.SERVICE_OBSERVED.value: 2,
+    DeploymentState.IDENTITY_VERIFIED.value: 2,
+    DeploymentState.CLIENT_BOUND.value: 2,
+    DeploymentState.UNCERTAIN_EFFECT.value: 1,
+}
+# Before a replay performs more nonterminal reconciliation work, require enough
+# capacity to finish one whole attempt while still retaining a terminal path.
+# These counts include the terminal row(s), not the current row.
+POST_EFFECT_RECONCILE_ATTEMPT_SLOTS = {
+    # Include the next persisted intermediate state *and* the terminal reserve
+    # that must still survive a crash immediately after that state is written.
+    # Example: from UNCERTAIN_EFFECT, SERVICE_OBSERVED + IDENTITY_VERIFIED +
+    # CLIENT_BOUND consumes three rows, and a crash at CLIENT_BOUND still needs
+    # UNCERTAIN_EFFECT -> BLOCKED (two more rows), so five slots are required.
+    DeploymentState.EFFECT_STARTED.value: 5,
+    DeploymentState.UNCERTAIN_EFFECT.value: 5,
+    DeploymentState.SERVICE_OBSERVED.value: 4,
+    DeploymentState.IDENTITY_VERIFIED.value: 3,
+    DeploymentState.CLIENT_BOUND.value: 2,
+}
 # Legacy aliases preserved for internal callers and the existing tests.
 MAX_LEDGER_BYTES = MAX_GATEWAY_LEDGER_BYTES
 MAX_LEDGER_RECORDS = MAX_GATEWAY_LEDGER_RECORDS
@@ -1684,19 +1711,74 @@ def _record_hash(record: Mapping[str, Any]) -> str:
     return canonical_hash({key: value for key, value in record.items() if key != "record_hash"})
 
 
+def _post_effect_reserved_slots_by_request(
+    rows: list[Mapping[str, Any]],
+) -> dict[str, int]:
+    """Derive each active recovery's still-owned post-effect capacity budget.
+
+    ``POST_EFFECT_LEDGER_RESERVE_SLOTS`` is reserved before ``EFFECT_STARTED``.
+    The ``EFFECT_STARTED`` row itself consumes one slot, and each later durable
+    row for that same request consumes another.  While the request remains
+    nonterminal, unrelated operations may not consume the unspent remainder.
+    The remainder can shrink only when this same request appends its next row.
+
+    A minimum legal fail-closed path is retained even after the original budget
+    is exhausted, so old/historical active ledgers cannot be made unclosable.
+    Terminal rows release the reservation entirely.
+    """
+    latest: dict[str, str] = {}
+    post_effect_rows: dict[str, int] = {}
+    effect_started: set[str] = set()
+    for row in rows:
+        if (
+            row.get("schema") != "nexus.gateway.ledger.v2"
+            or row.get("operation") != "gateway-recover"
+            or not isinstance(row.get("request_id"), str)
+        ):
+            continue
+        request_id = row["request_id"]
+        state = row.get("state")
+        if isinstance(state, DeploymentState):
+            state = state.value
+        if not isinstance(state, str):
+            continue
+        latest[request_id] = state
+        if state == DeploymentState.EFFECT_STARTED.value:
+            effect_started.add(request_id)
+            post_effect_rows[request_id] = post_effect_rows.get(request_id, 0) + 1
+        elif request_id in effect_started:
+            post_effect_rows[request_id] = post_effect_rows.get(request_id, 0) + 1
+
+    reserved: dict[str, int] = {}
+    for request_id, state in latest.items():
+        terminal_minimum = POST_EFFECT_TERMINAL_RESERVE_SLOTS.get(state)
+        if terminal_minimum is None:
+            continue
+        consumed = post_effect_rows.get(request_id, 0)
+        remaining_budget = max(POST_EFFECT_LEDGER_RESERVE_SLOTS - consumed, 0)
+        reserved[request_id] = max(remaining_budget, terminal_minimum)
+    return reserved
+
+
+def _post_effect_terminal_reserve(
+    rows: list[Mapping[str, Any]],
+) -> tuple[int, int]:
+    """Return total post-effect capacity still owned by active recoveries."""
+    slots = sum(_post_effect_reserved_slots_by_request(rows).values())
+    return slots, slots * MAX_GATEWAY_LEDGER_RECORD_BYTES
+
+
 def _validate_prospective_ledger_append(
-    rows: list[Mapping[str, Any]], encoded: bytes, current_size: int
+    rows: list[Mapping[str, Any]],
+    encoded: bytes,
+    current_size: int,
+    *,
+    candidate_row: Mapping[str, Any] | None = None,
 ) -> None:
     """Fail closed BEFORE a ledger append if the next record would break any of the
-    ledger capacity invariants.  This guarantees a single legal append can never
-    turn the ledger into a file the next ``_scan_unlocked`` cannot read:
-
-    * per-record byte ceiling (``MAX_GATEWAY_LEDGER_RECORD_BYTES``);
-    * prospective total byte ceiling (``MAX_GATEWAY_LEDGER_BYTES``);
-    * prospective record-count ceiling (``MAX_GATEWAY_LEDGER_RECORDS``).
-
-    Current file size is passed in because the caller already knows it (either from
-    a read or from the rows it encoded), so this is validation-only, not a read.
+    ledger capacity invariants.  Besides the physical byte/record ceilings, an
+    actual manager append must preserve terminal closure capacity for every
+    already-effectful recovery operation.
     """
     if len(encoded) > MAX_GATEWAY_LEDGER_RECORD_BYTES:
         raise LedgerCorruption("ledger record exceeds per-record bound")
@@ -1704,6 +1786,13 @@ def _validate_prospective_ledger_append(
         raise LedgerCorruption("ledger append exceeds total size bound")
     if len(rows) + 1 > MAX_GATEWAY_LEDGER_RECORDS:
         raise LedgerCorruption("ledger append exceeds record-count bound")
+    if candidate_row is not None:
+        prospective_rows = [*rows, candidate_row]
+        reserve_slots, reserve_bytes = _post_effect_terminal_reserve(prospective_rows)
+        if len(prospective_rows) + reserve_slots > MAX_GATEWAY_LEDGER_RECORDS:
+            raise LedgerCorruption("ledger append would consume post-effect terminal reserve")
+        if current_size + len(encoded) + reserve_bytes > MAX_GATEWAY_LEDGER_BYTES:
+            raise LedgerCorruption("ledger append would consume post-effect terminal reserve")
 
 
 def _reserve_post_effect_ledger_capacity(
@@ -1721,10 +1810,47 @@ def _reserve_post_effect_ledger_capacity(
     ``BLOCKED`` row and returning WITHOUT ever invoking the external effect.
     """
     current_bytes = ledger.path.stat().st_size if ledger.path.exists() else 0
-    if len(rows) + POST_EFFECT_LEDGER_RESERVE_SLOTS > MAX_GATEWAY_LEDGER_RECORDS:
+    active_slots, active_bytes = _post_effect_terminal_reserve(rows)
+    if (
+        len(rows) + active_slots + POST_EFFECT_LEDGER_RESERVE_SLOTS
+        > MAX_GATEWAY_LEDGER_RECORDS
+    ):
         raise GatewayContractError("recovery post-effect ledger capacity reserve exhausted")
-    if current_bytes + POST_EFFECT_LEDGER_RESERVE_BYTES > MAX_GATEWAY_LEDGER_BYTES:
+    if (
+        current_bytes + active_bytes + POST_EFFECT_LEDGER_RESERVE_BYTES
+        > MAX_GATEWAY_LEDGER_BYTES
+    ):
         raise GatewayContractError("recovery post-effect ledger capacity reserve exhausted")
+
+
+def _reserve_post_effect_reconcile_attempt(
+    ledger: "GatewayLedger",
+    rows: list[Mapping[str, Any]],
+    request_id: str,
+    state: DeploymentState,
+) -> None:
+    """Prove one replay attempt fits inside this request's remaining budget.
+
+    Unrelated active recoveries keep their full derived reservations.  The
+    current request may spend only its own remaining reserve.  If that reserve
+    is smaller than one crash-safe reconciliation attempt, the caller must use
+    the protected legal terminal path instead of starting a partial replay.
+    """
+    required_slots = POST_EFFECT_RECONCILE_ATTEMPT_SLOTS.get(state.value)
+    if required_slots is None:
+        return
+    reserved_by_request = _post_effect_reserved_slots_by_request(rows)
+    current_reserved = reserved_by_request.get(request_id, 0)
+    if current_reserved < required_slots:
+        raise GatewayContractError("recovery replay would consume terminal ledger reserve")
+    other_slots = sum(reserved_by_request.values()) - current_reserved
+    other_bytes = other_slots * MAX_GATEWAY_LEDGER_RECORD_BYTES
+    current_bytes = ledger.path.stat().st_size if ledger.path.exists() else 0
+    required_bytes = required_slots * MAX_GATEWAY_LEDGER_RECORD_BYTES
+    if len(rows) + other_slots + required_slots > MAX_GATEWAY_LEDGER_RECORDS:
+        raise GatewayContractError("recovery replay would consume terminal ledger reserve")
+    if current_bytes + other_bytes + required_bytes > MAX_GATEWAY_LEDGER_BYTES:
+        raise GatewayContractError("recovery replay would consume terminal ledger reserve")
 
 
 
@@ -2007,7 +2133,12 @@ class GatewayLedger:
             + b"\n"
         )
         current_size = self.path.stat().st_size if self.path.exists() else 0
-        _validate_prospective_ledger_append(rows, encoded, current_size)
+        _validate_prospective_ledger_append(
+            rows,
+            encoded,
+            current_size,
+            candidate_row=record.model_dump(),
+        )
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         if self.path.exists():
             with self.path.open("ab") as handle:
@@ -2133,7 +2264,12 @@ class GatewayLedger:
             row["record_hash"] = _record_hash(row)
             encoded = (json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n").encode()
             previous = self.path.read_bytes() if self.path.exists() else b""
-            _validate_prospective_ledger_append(rows, encoded, current_size=len(previous))
+            _validate_prospective_ledger_append(
+                rows,
+                encoded,
+                current_size=len(previous),
+                candidate_row=row,
+            )
             self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             if previous:
                 with self.path.open("ab") as handle:
@@ -2480,6 +2616,50 @@ def _terminal_recovery_outcome(
     } and isinstance(payload, Mapping):
         return GatewayReconcileOutcome.model_validate(payload)
     return None
+
+
+def _block_post_effect_recovery_for_capacity_unlocked(
+    ledger: GatewayLedger,
+    rows: list[dict[str, Any]],
+    records: list[RecoveryLedgerRecord],
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    evidence: SourceBundleEvidence,
+) -> GatewayReconcileOutcome:
+    """Consume only the protected legal terminal path when replay capacity is low."""
+    state = records[-1].state
+    if state is not DeploymentState.UNCERTAIN_EFFECT:
+        _append_recovery_state_unlocked(
+            ledger,
+            rows,
+            request,
+            receipt,
+            evidence,
+            DeploymentState.UNCERTAIN_EFFECT,
+            observed_identity={
+                "reason": "post-effect ledger terminal reserve protected",
+            },
+        )
+    blocked = _recovery_outcome(
+        request,
+        receipt,
+        result=ResultClass.BLOCKED,
+        effect_started=True,
+        observation={
+            "state": "BLOCKED",
+            "reason": "post-effect ledger terminal reserve protected",
+        },
+    )
+    _append_recovery_state_unlocked(
+        ledger,
+        rows,
+        request,
+        receipt,
+        evidence,
+        DeploymentState.BLOCKED,
+        observed_identity={"outcome": blocked.model_dump()},
+    )
+    return blocked
 
 
 def _validate_recovery_postflight(
@@ -3249,6 +3429,44 @@ def _gateway_recover_with_adapters(
                 effect_started=True,
                 observation={"state": "EFFECT_STARTED", "owner_live": True},
             )
+    if not invoke_effect:
+        # A replay is allowed to consume capacity only when one complete
+        # reconciliation attempt still fits alongside every active operation's
+        # protected terminal path.  Otherwise terminate this same request/fence
+        # before another nonterminal replay can exhaust the ledger.
+        with InterProcessLock(
+            ledger.lock_path, timeout=RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS
+        ):
+            rows = ledger._scan_unlocked()
+            records = _recovery_typed_rows(rows, typed.request_id)
+            terminal = _terminal_recovery_outcome(records)
+            if terminal is not None:
+                return _validate_terminal_recovery_replay(
+                    terminal, records, typed, receipt, adapters
+                )
+            state = records[-1].state
+            if state in {
+                DeploymentState.EFFECT_STARTED,
+                DeploymentState.SERVICE_OBSERVED,
+                DeploymentState.IDENTITY_VERIFIED,
+                DeploymentState.CLIENT_BOUND,
+                DeploymentState.UNCERTAIN_EFFECT,
+            }:
+                try:
+                    _reserve_post_effect_reconcile_attempt(
+                        ledger, rows, typed.request_id, state
+                    )
+                except GatewayContractError:
+                    if evidence is None:
+                        raise GatewayContractError("recovery evidence binding missing")
+                    return _block_post_effect_recovery_for_capacity_unlocked(
+                        ledger,
+                        rows,
+                        records,
+                        typed,
+                        receipt,
+                        evidence,
+                    )
     ack: RecoveryEffectAck | None = None
     if invoke_effect:
         try:
