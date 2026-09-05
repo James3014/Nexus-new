@@ -1,0 +1,268 @@
+name: TG8 Physical Repair Controller v4
+
+on:
+  push:
+    branches:
+      - ops/tg8-physical-repair-v4-20260905
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+
+env:
+  GATE_SHA: a5d7d032fe80838a84ed596ca36ea5bd923ae7a1
+  RC1_SHA: d1fbe1f1f399351b1fac2591db00a6f150179753
+  RC2_SHA: 968e88f2e8df7444ee2758d25182111830cd03e8
+  STABLE_SHA: 4fd27ee64a0b4ad8e3f3326fd8c32014c9a391de
+  SEED_ARTIFACT_ID: '9966978707'
+  SEED_ARCHIVE_SHA: f68276f3e77237383c4c8491b543be4b017c766556bb844fdef95ad8370d13c9
+  TG6_ARTIFACT_ID: '9960033003'
+  TG6_ARCHIVE_SHA: 67c68ee594face7097770eb95aa58b9d75afc02a26c33ae68476c9c3a34e9d84
+
+jobs:
+  collect:
+    name: Observation-driven TG8 physical repair collector v4
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout support controller
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ops/tg8-physical-repair-v4-20260905
+          path: support
+          persist-credentials: true
+          submodules: false
+      - name: Checkout exact TG8 gate subject
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.GATE_SHA }}
+          path: gate
+          persist-credentials: true
+          submodules: false
+      - name: Checkout exact RC1 subject
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.RC1_SHA }}
+          path: rc1
+          persist-credentials: true
+          submodules: false
+      - name: Checkout exact RC2 subject
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.RC2_SHA }}
+          path: rc2
+          persist-credentials: true
+          submodules: false
+      - name: Checkout exact Stable evidence subject
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.STABLE_SHA }}
+          path: stable
+          persist-credentials: true
+          submodules: false
+      - name: Strip checkout credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for d in support gate rc1 rc2 stable; do
+            while IFS= read -r key; do git -C "$d" config --local --unset-all "$key" || true; done < <(git -C "$d" config --local --name-only --get-regexp '^includeIf\.gitdir:' || true)
+            git -C "$d" config --local --unset-all 'http.https://github.com/.extraheader' || true
+          done
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+          check-latest: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        with:
+          version: '0.9.2'
+          enable-cache: false
+      - name: Sync exact gate dependencies
+        shell: bash
+        run: cd gate && uv sync --frozen --all-groups --all-extras
+      - name: Download immutable seed and TG6 retained evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/seed" "$RUNNER_TEMP/tg6"
+          gh api "/repos/James3014/Nexus-new/actions/artifacts/$SEED_ARTIFACT_ID/zip" > "$RUNNER_TEMP/seed.zip"
+          gh api "/repos/James3014/Nexus-new/actions/artifacts/$TG6_ARTIFACT_ID/zip" > "$RUNNER_TEMP/tg6.zip"
+          echo "$SEED_ARCHIVE_SHA  $RUNNER_TEMP/seed.zip" | sha256sum -c -
+          echo "$TG6_ARCHIVE_SHA  $RUNNER_TEMP/tg6.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/seed.zip" -d "$RUNNER_TEMP/seed"
+          unzip -q "$RUNNER_TEMP/tg6.zip" -d "$RUNNER_TEMP/tg6"
+          test -f "$RUNNER_TEMP/seed/thresholds.json"
+          test -f "$RUNNER_TEMP/tg6/tg5-receipt.json"
+      - name: Collect fresh physical transition and client observations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gate/.venv/bin/python support/scripts/ops/tg8_physical_rc_controller_v4.py collect \
+            --gate gate --rc1 rc1 --rc2 rc2 --stable stable \
+            --seed "$RUNNER_TEMP/seed" --tg6 "$RUNNER_TEMP/tg6" --out /tmp/tg8-v4
+      - name: Run exact merged TG8 adjudicator on repaired packet
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd gate
+          .venv/bin/python -m product.protocol.compatibility_gate \
+            --thresholds /tmp/tg8-v4/thresholds.json \
+            --expected-thresholds-sha256-file /tmp/tg8-v4/thresholds.sha256 \
+            --compatibility /tmp/tg8-v4/protocol-compatibility.json \
+            --conformance /tmp/tg8-v4/client-conformance.json \
+            --upgrade-rollback /tmp/tg8-v4/upgrade-rollback.json \
+            --open-issues /tmp/tg8-v4/open-issues.json \
+            --tg4-receipt /tmp/tg8-v4/tg4-receipt.json \
+            --tg5-receipt /tmp/tg8-v4/tg5-receipt.json \
+            --tg6-receipt /tmp/tg8-v4/tg6-receipt.json \
+            --tg7-selection /tmp/tg8-v4/tg7-selection.json \
+            --tg7-corpus /tmp/tg8-v4/tg7-corpus.json \
+            --tg7-shadow /tmp/tg8-v4/tg7-shadow-receipt.json \
+            --tg7-report /tmp/tg8-v4/tg7-report.json \
+            --stable-run-1 /tmp/tg8-v4/stable-run-1.json \
+            --stable-run-2 /tmp/tg8-v4/stable-run-2.json \
+            --stable-run-3 /tmp/tg8-v4/stable-run-3.json \
+            --report /tmp/tg8-v4/gate-report.json | tee /tmp/tg8-v4/gate-stdout.json
+          .venv/bin/python ../support/scripts/ops/tg8_physical_rc_controller_v4.py finalize --out /tmp/tg8-v4
+      - name: Run exact TG8 guard tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd gate
+          .venv/bin/pytest -qq tests/benchmark/test_core_v1_tg8_protocol_gate.py | tee /tmp/tg8-v4/tg8-gate-pytest.log
+      - name: Upload immutable repaired physical packet
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: tg8-physical-repair-v4-${{ env.GATE_SHA }}
+          path: |
+            /tmp/tg8-v4/*.json
+            /tmp/tg8-v4/*.sha256
+            /tmp/tg8-v4/*.log
+            /tmp/tg8-v4/physical/client-*-response.json
+            /tmp/tg8-v4/physical/logs/*.log
+          if-no-files-found: error
+          retention-days: 30
+
+  audit:
+    name: Fresh independent TG8 physical repair audit v4
+    needs: collect
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout support auditor
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ops/tg8-physical-repair-v4-20260905
+          path: support
+          persist-credentials: true
+          submodules: false
+      - name: Checkout exact TG8 gate subject
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.GATE_SHA }}
+          path: gate
+          persist-credentials: true
+          submodules: false
+      - name: Checkout exact RC1 subject
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.RC1_SHA }}
+          path: rc1
+          persist-credentials: true
+          submodules: false
+      - name: Checkout exact RC2 subject
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.RC2_SHA }}
+          path: rc2
+          persist-credentials: true
+          submodules: false
+      - name: Checkout exact Stable evidence subject
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ env.STABLE_SHA }}
+          path: stable
+          persist-credentials: true
+          submodules: false
+      - name: Strip checkout credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          for d in support gate rc1 rc2 stable; do
+            while IFS= read -r key; do git -C "$d" config --local --unset-all "$key" || true; done < <(git -C "$d" config --local --name-only --get-regexp '^includeIf\.gitdir:' || true)
+            git -C "$d" config --local --unset-all 'http.https://github.com/.extraheader' || true
+          done
+      - name: Setup Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+          check-latest: false
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+        with:
+          version: '0.9.2'
+          enable-cache: false
+      - name: Sync exact gate dependencies
+        shell: bash
+        run: cd gate && uv sync --frozen --all-groups --all-extras
+      - name: Download collector packet
+        uses: actions/download-artifact@95815c38cf2ff2164869cbab79da8d1f422bc89e
+        with:
+          name: tg8-physical-repair-v4-${{ env.GATE_SHA }}
+          path: /tmp/tg8-collector
+      - name: Download immutable TG6 retained evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/tg6"
+          gh api "/repos/James3014/Nexus-new/actions/artifacts/$TG6_ARTIFACT_ID/zip" > "$RUNNER_TEMP/tg6.zip"
+          echo "$TG6_ARCHIVE_SHA  $RUNNER_TEMP/tg6.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/tg6.zip" -d "$RUNNER_TEMP/tg6"
+      - name: Independently rerun all physical observations
+        shell: bash
+        run: |
+          set -euo pipefail
+          gate/.venv/bin/python support/scripts/ops/tg8_physical_rc_controller_v4.py audit \
+            --gate gate --rc1 rc1 --rc2 rc2 --stable stable \
+            --tg6 "$RUNNER_TEMP/tg6" --collector /tmp/tg8-collector --out /tmp/tg8-audit-v4
+      - name: Independently rerun exact adjudicator against collector packet
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd gate
+          .venv/bin/python -m product.protocol.compatibility_gate \
+            --thresholds /tmp/tg8-collector/thresholds.json \
+            --expected-thresholds-sha256-file /tmp/tg8-collector/thresholds.sha256 \
+            --compatibility /tmp/tg8-collector/protocol-compatibility.json \
+            --conformance /tmp/tg8-collector/client-conformance.json \
+            --upgrade-rollback /tmp/tg8-collector/upgrade-rollback.json \
+            --open-issues /tmp/tg8-collector/open-issues.json \
+            --tg4-receipt /tmp/tg8-collector/tg4-receipt.json \
+            --tg5-receipt /tmp/tg8-collector/tg5-receipt.json \
+            --tg6-receipt /tmp/tg8-collector/tg6-receipt.json \
+            --tg7-selection /tmp/tg8-collector/tg7-selection.json \
+            --tg7-corpus /tmp/tg8-collector/tg7-corpus.json \
+            --tg7-shadow /tmp/tg8-collector/tg7-shadow-receipt.json \
+            --tg7-report /tmp/tg8-collector/tg7-report.json \
+            --stable-run-1 /tmp/tg8-collector/stable-run-1.json \
+            --stable-run-2 /tmp/tg8-collector/stable-run-2.json \
+            --stable-run-3 /tmp/tg8-collector/stable-run-3.json \
+            --report /tmp/tg8-audit-v4/gate-report-independent.json > /tmp/tg8-audit-v4/gate-stdout-independent.json
+          cmp /tmp/tg8-collector/gate-report.json /tmp/tg8-audit-v4/gate-report-independent.json
+      - name: Upload independent audit receipt
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: tg8-physical-repair-v4-independent-audit-${{ env.GATE_SHA }}
+          path: |
+            /tmp/tg8-audit-v4/independent-audit-v4.json
+            /tmp/tg8-audit-v4/gate-report-independent.json
+          if-no-files-found: error
+          retention-days: 30
