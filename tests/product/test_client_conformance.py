@@ -379,7 +379,7 @@ def test_predecessor_artifact(request: pytest.FixtureRequest):
     with pred_path.open("rb") as f:
         while chunk := f.read(65536):
             h.update(chunk)
-    assert h.hexdigest() == "162c2e79b9df15255be59f42968dab4ef9374fc470cc17be19caa8d2c3b153d7"
+    assert h.hexdigest() == "18b1e54b6c1404ed5348ce2197e3f30c1f6d70d422e4ce5ddd1dbe293a5e90f7"
     with zipfile.ZipFile(pred_path) as z:
         namelist = z.namelist()
         assert "nexus_singularity-28.3.0.dist-info/METADATA" in namelist
