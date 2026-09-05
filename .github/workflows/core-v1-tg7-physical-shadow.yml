@@ -81,6 +81,11 @@ jobs:
           if text.count(schema_call) != 1:
               raise SystemExit('runtime schema call patch target not unique')
           text = text.replace(schema_call, schema_direct)
+          cleanup_old = '''    shutil.rmtree(CASE_DIR, ignore_errors=True)\n    CASE_DIR.mkdir()'''
+          cleanup_new = '''    if CASE_DIR.exists():\n        CASE_DIR.chmod(0o755)\n        shutil.rmtree(CASE_DIR)\n    CASE_DIR.mkdir()'''
+          if text.count(cleanup_old) != 1:
+              raise SystemExit('case workspace cleanup patch target not unique')
+          text = text.replace(cleanup_old, cleanup_new)
           path.write_text(text, encoding='utf-8')
           PY
           sha256sum /tmp/core_v1_tg7_physical_shadow.py | tee /tmp/tg7-harness/payload-hosted-sha256.txt
@@ -101,7 +106,7 @@ jobs:
           sudo chown "$(id -u):$(id -g)" /private /private/tmp
           chmod 0755 /private /private/tmp
           docker version
-          printf 'workflow_run=%s\nworkflow_head=%s\ntg7_sha=%s\npayload_b64_sha256=%s\npayload_python_sha256=%s\nhost_adapter=strip-auth-redirect+direct-runtime-schema-load\n' \
+          printf 'workflow_run=%s\nworkflow_head=%s\ntg7_sha=%s\npayload_b64_sha256=%s\npayload_python_sha256=%s\nhost_adapter=strip-auth-redirect+direct-runtime-schema-load+fail-closed-case-cleanup\n' \
             "$GITHUB_RUN_ID" "$GITHUB_SHA" "$TG7_SHA" \
             '8f9572647791af72b38c558a4c43226cc9ad2d25396997e7644d21e85f119fdf' \
             '629ff62e85eec593b46482dbc7486818115577794df1484ece85a6a0fc469d38' \
