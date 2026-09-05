@@ -94,7 +94,7 @@ jobs:
           set -euo pipefail
           cd candidate
           uv run pytest -qq tests/product/test_client_conformance.py
-          uv run pytest -qq tests/product/test_http_runtime.py tests/product/test_http_e2e.py -m not-live
+          uv run pytest -qq tests/product/test_http_runtime.py tests/product/test_http_e2e.py -m 'not live'
           uv run pytest -qq tests/product/test_ledger.py
 
       - name: Prepare immutable RC evidence packet
