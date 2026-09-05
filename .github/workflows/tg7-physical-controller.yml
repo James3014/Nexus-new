@@ -65,7 +65,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           NEXUS_CORE_HTTP_PORT: "8767"
-        run: uv run pytest -qq tests/product/test_http_e2e.py -m live --run-live
+        run: uv run pytest -p tests.product.test_http_e2e -qq tests/product/test_http_e2e.py -m live --run-live
 
       - name: Capture fresh TG5 receipt and provenance
         env:
@@ -155,6 +155,8 @@ jobs:
         working-directory: tg7-subject
         run: |
           set -euo pipefail
+          rm -f /private/tmp/nexus-core-v1-evidence/tg7/shadow-receipt.json
+          rm -f /private/tmp/nexus-core-v1-evidence/tg7/report.json
           uv run python -m product.benchmark.tg7_shadow \
             --selection /private/tmp/nexus-core-v1-evidence/tg7/selection.json \
             --repository /private/tmp/nexus-core-v1-evidence/tg7/repository \
@@ -162,6 +164,8 @@ jobs:
             --tg5-receipt /private/tmp/nexus-core-v1-evidence/tg7/tg5-receipt.json \
             --shadow-receipt /private/tmp/nexus-core-v1-evidence/tg7/shadow-receipt.json \
             --report /private/tmp/nexus-core-v1-evidence/tg7/report.json
+          chmod 0444 /private/tmp/nexus-core-v1-evidence/tg7/shadow-receipt.json
+          chmod 0444 /private/tmp/nexus-core-v1-evidence/tg7/report.json
 
       - name: Run explicit physical acceptance tests with zero required skips
         working-directory: tg7-subject
