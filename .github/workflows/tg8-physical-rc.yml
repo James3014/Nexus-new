@@ -80,7 +80,10 @@ jobs:
           unzip -q "$RUNNER_TEMP/upstream/tg6.zip" -d "$RUNNER_TEMP/upstream/tg6"
           unzip -q "$RUNNER_TEMP/upstream/tg7.zip" -d "$RUNNER_TEMP/upstream/tg7zip"
           cd "$RUNNER_TEMP/upstream/tg7zip"
-          sha256sum -c tg7-semantic-physical.sha256
+          expected="$(tr -d '\r\n' < tg7-semantic-physical.sha256)"
+          [[ "$expected" =~ ^[0-9a-f]{64}$ ]]
+          actual="$(sha256sum tg7-semantic-physical.tar.gz | awk '{print $1}')"
+          test "$actual" = "$expected"
           tar -xzf tg7-semantic-physical.tar.gz -C "$RUNNER_TEMP/upstream/tg7"
           test -f "$RUNNER_TEMP/upstream/tg7/tg7/tg5-reverification.json"
           test -f "$RUNNER_TEMP/upstream/tg7/tg7/report.json"
