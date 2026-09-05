@@ -3251,7 +3251,12 @@ def _gateway_recover_live(
         validate_recovery_request(typed)
     except ContractError as exc:
         raise _gateway_error("R1 live recovery request rejected", exc) from exc
-    receipt = _require_recovery_authority(typed)
+    # Load the immutable historical authority first, but defer the manager-mode
+    # decision to the durable recovery state machine below. The normal/pre-effect
+    # path still requires the historical final manager hash because any distinct
+    # manager enters successor_mode and is rejected unless this exact V6 ledger
+    # already contains EFFECT_STARTED plus a valid continuation authority.
+    receipt = _load_recovery_authority(typed)
     return _gateway_recover_with_adapters(
         typed,
         adapters=_production_recovery_adapters(receipt),

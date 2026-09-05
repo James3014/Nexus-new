@@ -5554,10 +5554,10 @@ def test_g5_successor_manager_requires_historical_effect_started_before_continua
         effect_calls=effect_calls,
         external_calls=[],
     )
+    monkeypatch.setattr(g, "_production_recovery_adapters", lambda _receipt: adapters)
+    monkeypatch.setattr(g, "GatewayLedger", lambda: ledger)
     with pytest.raises(g.GatewayContractError, match="historical EFFECT_STARTED"):
-        g._gateway_recover_with_adapters(
-            fixture["request"], adapters=adapters, ledger=ledger
-        )
+        g._gateway_recover_live(fixture["request"])
     assert continuation_calls == []
     assert effect_calls == []
     assert not fixture["ledger_path"].exists()
@@ -5638,9 +5638,9 @@ def test_g5_historical_old_manager_to_successor_continuation_is_reconcile_only_a
         clock=replay.clock,
         crash_hook=replay.crash_hook,
     )
-    outcome = g._gateway_recover_with_adapters(
-        fixture["request"], adapters=replay, ledger=ledger
-    )
+    monkeypatch.setattr(g, "_production_recovery_adapters", lambda _receipt: replay)
+    monkeypatch.setattr(g, "GatewayLedger", lambda: ledger)
+    outcome = g._gateway_recover_live(fixture["request"])
     assert outcome.result == "VERIFIED"
     assert authority_calls == [
         (fixture["request"].request_id, fixture["request"].idempotency_fence)
@@ -5649,9 +5649,7 @@ def test_g5_historical_old_manager_to_successor_continuation_is_reconcile_only_a
     assert _r1b2_effect_count(fixture["ledger_path"]) == 1
 
     terminal_bytes = fixture["ledger_path"].read_bytes()
-    replayed = g._gateway_recover_with_adapters(
-        fixture["request"], adapters=replay, ledger=ledger
-    )
+    replayed = g._gateway_recover_live(fixture["request"])
     assert replayed.result == "VERIFIED"
     assert replayed.evidence_hash == outcome.evidence_hash
     assert fixture["ledger_path"].read_bytes() == terminal_bytes
