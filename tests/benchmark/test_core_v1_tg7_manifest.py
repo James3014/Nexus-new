@@ -171,7 +171,9 @@ def test_negative_repository_tree_or_commit_tamper(
     bad_commit = copy.deepcopy(self_test_selection)
     bad_commit["commit"] = "0" * 40
     bad_commit = _rehash(bad_commit, "selection_hash")
-    assert any("commit mismatch" in error for error in validate_corpus(self_test_corpus, bad_commit))
+    assert any(
+        "commit mismatch" in error for error in validate_corpus(self_test_corpus, bad_commit)
+    )
     bad_tree = copy.deepcopy(self_test_selection)
     bad_tree["tree"] = "0" * 40
     bad_tree = _rehash(bad_tree, "selection_hash")
@@ -204,7 +206,9 @@ def test_negative_denominator_below_50_or_family_below_5(
     ]
     skewed["case_count"] = len(skewed["cases"])
     skewed = _rehash(skewed, "corpus_hash")
-    assert any("AUTH_ISSUER_TAMPER" in error for error in validate_corpus(skewed, self_test_selection))
+    assert any(
+        "AUTH_ISSUER_TAMPER" in error for error in validate_corpus(skewed, self_test_selection)
+    )
 
 
 def test_negative_attempt_receipt_cannot_self_assert_authority(
@@ -215,13 +219,16 @@ def test_negative_attempt_receipt_cannot_self_assert_authority(
     case = self_test_corpus["cases"][0]
     material_hash = "sha256:" + "d" * 64
     valid = _make_attempt(case, self_test_selection, self_test_tg5, material_hash=material_hash)
-    assert validate_attempt_receipt(
-        valid,
-        case=case,
-        selection=self_test_selection,
-        tg5_receipt=self_test_tg5,
-        external_material_hash=material_hash,
-    ) == []
+    assert (
+        validate_attempt_receipt(
+            valid,
+            case=case,
+            selection=self_test_selection,
+            tg5_receipt=self_test_tg5,
+            external_material_hash=material_hash,
+        )
+        == []
+    )
 
     for field, bad_value in (
         ("issuer_id", "tg7.worker.local"),
@@ -263,7 +270,7 @@ def test_negative_tg5_receipt_mismatch_or_stale(self_test_tg5: dict[str, Any]):
     assert any("VERIFIED" in error for error in validate_tg5_receipt(bad_tg5))
 
 
-def test_negative_forged_infra_invalid_reason(
+def test_negative_forged_infra_invalid_reasons(
     self_test_selection: dict[str, Any],
     self_test_corpus: dict[str, Any],
     self_test_tg5: dict[str, Any],
@@ -426,13 +433,16 @@ def test_tg7_attempt_inventory_conformance(request: pytest.FixtureRequest):
         raw = path.read_bytes()
         attempt = json.loads(raw.decode("utf-8"))
         assert raw == (_canonical(attempt) + "\n").encode("utf-8")
-        assert validate_attempt_receipt(
-            attempt,
-            case=case,
-            selection=selection,
-            tg5_receipt=tg5,
-            external_material_hash=bottle_hash,
-        ) == []
+        assert (
+            validate_attempt_receipt(
+                attempt,
+                case=case,
+                selection=selection,
+                tg5_receipt=tg5,
+                external_material_hash=bottle_hash,
+            )
+            == []
+        )
 
 
 def test_tg7_shadow_receipt_conformance(request: pytest.FixtureRequest):
@@ -442,9 +452,9 @@ def test_tg7_shadow_receipt_conformance(request: pytest.FixtureRequest):
     corpus = _load_json(CORPUS_PATH)
     tg5 = _load_json(TG5_PATH)
     shadow = _load_json(SHADOW_RECEIPT_PATH)
-    assert validate_shadow_receipt(
-        shadow, corpus=corpus, tg5_receipt=tg5, selection=selection
-    ) == []
+    assert (
+        validate_shadow_receipt(shadow, corpus=corpus, tg5_receipt=tg5, selection=selection) == []
+    )
     assert shadow["eligible_count"] >= 50
     assert shadow["infra_invalid_count"] == 0
     assert len(shadow["cases"]) == len(corpus["cases"])
