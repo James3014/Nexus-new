@@ -1,0 +1,108 @@
+name: Core V1 TG7 Physical Shadow
+
+on:
+  push:
+    branches:
+      - controller/core-v1-physical-recovery-20260905
+    paths:
+      - .github/workflows/core-v1-tg7-physical-shadow.yml
+      - scripts/ops/core_v1_tg7_physical_shadow.py.gz.b64
+      - controller/tg7-physical-shadow.marker
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  physical-shadow:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      TG7_SHA: 914481b807697d9d2c66c9befa40d653cee09cdb
+      TG5_ARTIFACT_ID: '9960033003'
+      TG5_ARTIFACT_DIGEST: sha256:67c68ee594face7097770eb95aa58b9d75afc02a26c33ae68476c9c3a34e9d84
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - name: Materialize controller and exact TG7 without checkout action
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin https://github.com/James3014/Nexus-new.git
+          git -c protocol.version=2 fetch --no-tags --no-recurse-submodules origin "$GITHUB_SHA"
+          git checkout --detach FETCH_HEAD
+          git -c protocol.version=2 fetch --no-tags --no-recurse-submodules origin "$TG7_SHA"
+          rm -rf /tmp/nexus-tg7
+          git worktree add --detach /tmp/nexus-tg7 "$TG7_SHA"
+          test "$(git -C /tmp/nexus-tg7 rev-parse HEAD)" = "$TG7_SHA"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@d0d8abe699bfb85fec6de9f7adb5ae17292296ff
+
+      - name: Decode and verify controller payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d scripts/ops/core_v1_tg7_physical_shadow.py.gz.b64 | gzip -d > /tmp/core_v1_tg7_physical_shadow.py
+          echo '629ff62e85eec593b46482dbc7486818115577794df1484ece85a6a0fc469d38  /tmp/core_v1_tg7_physical_shadow.py' | sha256sum -c -
+          python -m py_compile /tmp/core_v1_tg7_physical_shadow.py
+
+      - name: Sync exact TG7 environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/nexus-tg7
+          uv sync --frozen --all-groups --all-extras
+
+      - name: Prepare physical host
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /private/tmp
+          sudo chown "$(id -u):$(id -g)" /private /private/tmp
+          chmod 0755 /private /private/tmp
+          docker version
+          rm -rf /tmp/tg7-harness
+          mkdir -p /tmp/tg7-harness
+          printf 'workflow_run=%s\nworkflow_head=%s\ntg7_sha=%s\npayload_sha256=%s\n' \
+            "$GITHUB_RUN_ID" "$GITHUB_SHA" "$TG7_SHA" \
+            '629ff62e85eec593b46482dbc7486818115577794df1484ece85a6a0fc469d38' \
+            > /tmp/tg7-harness/harness-identity.txt
+
+      - name: Run 56-case physical shadow
+        id: physical
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          /tmp/nexus-tg7/.venv/bin/python /tmp/core_v1_tg7_physical_shadow.py 2>&1 | tee /tmp/tg7-harness/controller-stdout.log
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "$code" > /tmp/tg7-harness/controller-exit-code.txt
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit "$code"
+
+      - name: Upload retained TG7 physical evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: core-v1-tg7-physical-${{ env.TG7_SHA }}
+          path: |
+            /private/tmp/nexus-core-v1-evidence/tg7/
+            /tmp/tg7-harness/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Enforce physical result
+        if: always()
+        shell: bash
+        env:
+          EXIT_CODE: ${{ steps.physical.outputs.exit_code }}
+        run: |
+          set -euo pipefail
+          test "${EXIT_CODE:-missing}" = "0"
