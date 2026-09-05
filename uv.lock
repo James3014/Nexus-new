@@ -1862,6 +1862,10 @@ dev = [
     { name = "pytest-timeout" },
     { name = "ruff" },
 ]
+trusted-anchor = [
+    { name = "pydantic" },
+    { name = "pyyaml" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -1911,6 +1915,10 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=0.23.0" },
     { name = "pytest-timeout", specifier = ">=2.3.1" },
     { name = "ruff", specifier = ">=0.4.0" },
+]
+trusted-anchor = [
+    { name = "pydantic", specifier = ">=2.0,<3.0" },
+    { name = "pyyaml", specifier = ">=6.0,<7.0" },
 ]
 
 [[package]]
