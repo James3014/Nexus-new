@@ -15,6 +15,7 @@ from nexus.contracts.break_glass_recovery import (
     BreakGlassOwnerVerificationPayload,
     OwnerActivationEnvelope,
     canonical_sha256,
+    integration_readback_from_github,
     owner_envelope_from_github_comment,
     owner_integration_from_github_comment,
     owner_terminal_from_github_comment,
@@ -330,6 +331,53 @@ def terminal_payload_dict(*, state: str = "CONSUMED") -> dict[str, object]:
             "integration_payload_sha256": "a" * 64,
         })
     return payload
+
+
+def github_integration_readback(
+    *,
+    merged: bool = True,
+    state: str = "closed",
+    head_sha: str = "1" * 40,
+    merge_sha: str = "8" * 40,
+    main_sha: str = "8" * 40,
+) -> tuple[dict[str, object], dict[str, object]]:
+    pull_request = {
+        "number": 808,
+        "state": state,
+        "merged": merged,
+        "merge_commit_sha": merge_sha,
+        "head": {"sha": head_sha},
+        "base": {"ref": "main"},
+    }
+    main_branch = {"commit": {"sha": main_sha}}
+    return pull_request, main_branch
+
+
+def test_github_integration_readback_binds_merged_pr_head_and_main() -> None:
+    integration = BreakGlassOwnerIntegrationPayload.model_validate(integration_payload_dict())
+    pull_request, main_branch = github_integration_readback()
+    assert integration_readback_from_github(integration, pull_request, main_branch) == (
+        "8" * 40,
+        "8" * 40,
+        808,
+    )
+
+
+def test_github_integration_readback_rejects_unmerged_or_head_substitution() -> None:
+    integration = BreakGlassOwnerIntegrationPayload.model_validate(integration_payload_dict())
+    pull_request, main_branch = github_integration_readback(merged=False, state="open")
+    with pytest.raises(BreakGlassContractError, match="GITHUB_PR_NOT_MERGED"):
+        integration_readback_from_github(integration, pull_request, main_branch)
+    pull_request, main_branch = github_integration_readback(head_sha="7" * 40)
+    with pytest.raises(BreakGlassContractError, match="INTEGRATION_HEAD_READBACK_MISMATCH"):
+        integration_readback_from_github(integration, pull_request, main_branch)
+
+
+def test_github_integration_readback_rejects_main_mismatch() -> None:
+    integration = BreakGlassOwnerIntegrationPayload.model_validate(integration_payload_dict())
+    pull_request, main_branch = github_integration_readback(main_sha="9" * 40)
+    with pytest.raises(BreakGlassContractError, match="INTEGRATION_READBACK_MISMATCH"):
+        integration_readback_from_github(integration, pull_request, main_branch)
 
 
 def test_owner_terminal_comment_binds_global_consumption() -> None:

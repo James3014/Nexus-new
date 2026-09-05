@@ -32,6 +32,7 @@ from nexus.contracts.break_glass_recovery import (  # noqa: E402
     OwnerIntegrationEnvelope,
     OwnerTerminalEnvelope,
     OwnerVerificationEnvelope,
+    integration_readback_from_github,
     owner_envelope_from_github_comment,
     owner_integration_from_github_comment,
     owner_terminals_from_github_comments,
@@ -59,10 +60,7 @@ def _print(value: object) -> None:
     print(json.dumps(value, ensure_ascii=False, sort_keys=True))
 
 
-def _fetch_comment(comment_id: int) -> dict[str, object]:
-    if comment_id <= 0:
-        raise BreakGlassRecoveryError("COMMENT_ID_INVALID")
-    url = f"https://api.github.com/repos/James3014/Nexus-new/issues/comments/{comment_id}"
+def _fetch_json_object(url: str) -> dict[str, object]:
     request = urllib.request.Request(
         url,
         headers={
@@ -72,20 +70,26 @@ def _fetch_comment(comment_id: int) -> dict[str, object]:
         method="GET",
     )
     try:
-        with urllib.request.urlopen(request, timeout=10.0) as response:  # nosec B310 - fixed HTTPS host/path
-            final_url = response.geturl()
-            if final_url != url:
-                raise BreakGlassRecoveryError("GITHUB_COMMENT_REDIRECT_REJECTED")
+        with urllib.request.urlopen(request, timeout=10.0) as response:  # nosec B310 - fixed GitHub HTTPS URLs only
+            if response.geturl() != url:
+                raise BreakGlassRecoveryError("GITHUB_READBACK_REDIRECT_REJECTED")
             raw = response.read()
     except (OSError, urllib.error.URLError, urllib.error.HTTPError) as exc:
-        raise BreakGlassRecoveryError("GITHUB_COMMENT_FETCH_FAILED") from exc
+        raise BreakGlassRecoveryError("GITHUB_READBACK_FETCH_FAILED") from exc
     try:
         parsed = json.loads(raw.decode("utf-8"))
     except (UnicodeError, json.JSONDecodeError) as exc:
-        raise BreakGlassRecoveryError("GITHUB_COMMENT_MALFORMED") from exc
+        raise BreakGlassRecoveryError("GITHUB_READBACK_MALFORMED") from exc
     if not isinstance(parsed, dict):
-        raise BreakGlassRecoveryError("GITHUB_COMMENT_MALFORMED")
+        raise BreakGlassRecoveryError("GITHUB_READBACK_MALFORMED")
     return parsed
+
+
+def _fetch_comment(comment_id: int) -> dict[str, object]:
+    if comment_id <= 0:
+        raise BreakGlassRecoveryError("COMMENT_ID_INVALID")
+    url = f"https://api.github.com/repos/James3014/Nexus-new/issues/comments/{comment_id}"
+    return _fetch_json_object(url)
 
 
 def _fetch_issue_comments() -> tuple[dict[str, object], ...]:
@@ -132,6 +136,21 @@ def _fetch_verification(comment_id: int) -> OwnerVerificationEnvelope:
 
 def _fetch_integration(comment_id: int) -> OwnerIntegrationEnvelope:
     return owner_integration_from_github_comment(_fetch_comment(comment_id))
+
+
+def _fetch_integration_readback(
+    integration: OwnerIntegrationEnvelope,
+) -> tuple[str, str, int]:
+    pr_url = (
+        "https://api.github.com/repos/James3014/Nexus-new/pulls/"
+        f"{integration.payload.pr_number}"
+    )
+    main_url = "https://api.github.com/repos/James3014/Nexus-new/branches/main"
+    return integration_readback_from_github(
+        integration.payload,
+        _fetch_json_object(pr_url),
+        _fetch_json_object(main_url),
+    )
 
 
 def _fetch_terminals() -> tuple[OwnerTerminalEnvelope, ...]:
@@ -294,11 +313,14 @@ def _prepare_integration(args: argparse.Namespace) -> int:
 
 def _record_integration_consumed(args: argparse.Namespace) -> int:
     integration = _fetch_integration(args.integration_comment_id)
+    merge_commit_sha, observed_main_sha, merged_pr_number = _fetch_integration_readback(
+        integration
+    )
     result = record_emergency_integration_consumed(
         integration,
-        merge_commit_sha=args.merge_commit_sha,
-        observed_main_sha=args.observed_main_sha,
-        merged_pr_number=args.pr_number,
+        merge_commit_sha=merge_commit_sha,
+        observed_main_sha=observed_main_sha,
+        merged_pr_number=merged_pr_number,
         now=_now(),
     )
     _print(result)
@@ -366,9 +388,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     consumed_integration = commands.add_parser("record-integration-consumed")
     consumed_integration.add_argument("--integration-comment-id", type=int, required=True)
-    consumed_integration.add_argument("--pr-number", type=int, required=True)
-    consumed_integration.add_argument("--merge-commit-sha", required=True)
-    consumed_integration.add_argument("--observed-main-sha", required=True)
     consumed_integration.set_defaults(handler=_record_integration_consumed)
 
     inspect_integration = commands.add_parser("inspect-integration")

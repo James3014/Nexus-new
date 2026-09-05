@@ -744,6 +744,36 @@ def owner_terminals_from_github_comments(
     return tuple(terminals)
 
 
+def integration_readback_from_github(
+    integration: BreakGlassOwnerIntegrationPayload,
+    pull_request: Mapping[str, Any],
+    main_branch: Mapping[str, Any],
+) -> tuple[str, str, int]:
+    try:
+        pr_number = int(pull_request["number"])
+        state = str(pull_request["state"])
+        merged = pull_request["merged"] is True
+        merge_commit_sha = str(pull_request["merge_commit_sha"])
+        head_sha = str(pull_request["head"]["sha"])
+        base_ref = str(pull_request["base"]["ref"])
+        observed_main_sha = str(main_branch["commit"]["sha"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise BreakGlassContractError("GITHUB_INTEGRATION_READBACK_MALFORMED") from exc
+    if pr_number != integration.pr_number:
+        raise BreakGlassContractError("INTEGRATION_PR_MISMATCH")
+    if state != "closed" or not merged:
+        raise BreakGlassContractError("GITHUB_PR_NOT_MERGED")
+    if base_ref != "main":
+        raise BreakGlassContractError("INTEGRATION_BASE_REF_MISMATCH")
+    if head_sha != integration.accepted_head_sha:
+        raise BreakGlassContractError("INTEGRATION_HEAD_READBACK_MISMATCH")
+    if not _SHA40.fullmatch(merge_commit_sha) or not _SHA40.fullmatch(observed_main_sha):
+        raise BreakGlassContractError("GIT_SHA_INVALID")
+    if merge_commit_sha != observed_main_sha:
+        raise BreakGlassContractError("INTEGRATION_READBACK_MISMATCH")
+    return merge_commit_sha, observed_main_sha, pr_number
+
+
 class BreakGlassGovernanceCanaryEvidence(_FrozenModel):
     schema: Literal["nexus.break_glass_governance_canary.v1"] = (
         "nexus.break_glass_governance_canary.v1"
