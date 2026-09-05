@@ -859,12 +859,20 @@ def test_restore_succeeds_even_when_temporary_grant_expired(tmp_path):
     assert restored["restored_goal_id"] == "goal-exp-pred"
 
 
-def test_public_switch_and_restore_use_canonical_path_and_reject_receipt_path(monkeypatch, tmp_path):
+def test_public_switch_and_restore_use_canonical_path_and_reject_receipt_path(
+    monkeypatch, tmp_path
+):
     canonical_path = tmp_path / "authority" / "standing-grant.json"
     monkeypatch.setattr(standing_grant_store, "DEFAULT_RECEIPT_PATH", canonical_path)
-    monkeypatch.setattr(standing_grant_store, "DEFAULT_TRANSITIONS_DIR", tmp_path / "authority" / "transitions")
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_TRANSITIONS_DIR", tmp_path / "authority" / "transitions"
+    )
 
-    context = _make_context(goal_id="goal-pub", thread_id="thread-pub", allowed_actions=(AutonomyActionClass.REPOSITORY_PUSH,))
+    context = _make_context(
+        goal_id="goal-pub",
+        thread_id="thread-pub",
+        allowed_actions=(AutonomyActionClass.REPOSITORY_PUSH,),
+    )
     orig_receipt = StandingGrantReceipt.issue(grant_id="grant-pub", context=context)
     _write_standing_grant_receipt_at(orig_receipt, canonical_path)
 
@@ -948,7 +956,9 @@ def test_switch_crash_before_cas_replay_succeeds(tmp_path, monkeypatch):
     assert current.receipt_hash == receipt.receipt_hash
 
     # Verify attempt record was PREPARED
-    attempt_path = tmp_path / "authority" / "transitions" / "attempt_attempt-switch-crash-before-cas.json"
+    attempt_path = (
+        tmp_path / "authority" / "transitions" / "attempt_attempt-switch-crash-before-cas.json"
+    )
     attempt_record = json.loads(attempt_path.read_text(encoding="utf-8"))
     assert attempt_record["status"] == "PREPARED"
 
@@ -975,7 +985,9 @@ def test_switch_crash_before_cas_replay_succeeds(tmp_path, monkeypatch):
     # Journal finalized to COMMITTED / ACTIVE
     final_attempt = json.loads(attempt_path.read_text(encoding="utf-8"))
     assert final_attempt["status"] == "COMMITTED"
-    op_path = tmp_path / "authority" / "transitions" / f"op_{replay_result['switch_operation_id']}.json"
+    op_path = (
+        tmp_path / "authority" / "transitions" / f"op_{replay_result['switch_operation_id']}.json"
+    )
     final_op = json.loads(op_path.read_text(encoding="utf-8"))
     assert final_op["status"] == "ACTIVE"
 
@@ -995,7 +1007,9 @@ def test_switch_crash_after_cas_replay_succeeds_without_duplicate_cas(tmp_path, 
             raise RuntimeError("SIMULATED_CRASH_AFTER_SWITCH_CAS")
         real_write_transition_file(p, payload)
 
-    monkeypatch.setattr(standing_grant_store, "_write_transition_file", faulty_write_transition_file)
+    monkeypatch.setattr(
+        standing_grant_store, "_write_transition_file", faulty_write_transition_file
+    )
 
     with pytest.raises(RuntimeError, match="SIMULATED_CRASH_AFTER_SWITCH_CAS"):
         _switch_task_card_authority_at(
@@ -1016,7 +1030,9 @@ def test_switch_crash_after_cas_replay_succeeds_without_duplicate_cas(tmp_path, 
     assert temp_receipt.context.goal_id == "goal-succ-2"
 
     # Attempt record is still in PREPARED state
-    attempt_path = tmp_path / "authority" / "transitions" / "attempt_attempt-switch-crash-after-cas.json"
+    attempt_path = (
+        tmp_path / "authority" / "transitions" / "attempt_attempt-switch-crash-after-cas.json"
+    )
     attempt_record = json.loads(attempt_path.read_text(encoding="utf-8"))
     assert attempt_record["status"] == "PREPARED"
 
@@ -1052,13 +1068,17 @@ def test_switch_crash_after_cas_replay_succeeds_without_duplicate_cas(tmp_path, 
     # Transition records finalized
     final_attempt = json.loads(attempt_path.read_text(encoding="utf-8"))
     assert final_attempt["status"] == "COMMITTED"
-    op_path = tmp_path / "authority" / "transitions" / f"op_{replay_result['switch_operation_id']}.json"
+    op_path = (
+        tmp_path / "authority" / "transitions" / f"op_{replay_result['switch_operation_id']}.json"
+    )
     final_op = json.loads(op_path.read_text(encoding="utf-8"))
     assert final_op["status"] == "ACTIVE"
 
 
 def test_switch_prepared_foreign_current_fails_closed_no_mutation(tmp_path):
-    receipt, path = _make_receipt(tmp_path, grant_id="grant-orig-foreign", goal_id="goal-orig-foreign")
+    receipt, path = _make_receipt(
+        tmp_path, grant_id="grant-orig-foreign", goal_id="goal-orig-foreign"
+    )
 
     # Initiate a switch that is interrupted after PREPARED
     transitions_dir = tmp_path / "authority" / "transitions"
@@ -1085,7 +1105,10 @@ def test_switch_prepared_foreign_current_fails_closed_no_mutation(tmp_path):
         repository=receipt.context.repository,
         thread_id="thread-temp-foreign",
         goal_id="goal-temp-foreign",
-        allowed_actions=(AutonomyActionClass.TASK_CARD_COMMIT, AutonomyActionClass.TASK_CARD_CREATE),
+        allowed_actions=(
+            AutonomyActionClass.TASK_CARD_COMMIT,
+            AutonomyActionClass.TASK_CARD_CREATE,
+        ),
         issued_at=NOW,
         expires_at=NOW + timedelta(minutes=15),
     )
@@ -1180,7 +1203,9 @@ def test_switch_prepared_foreign_current_fails_closed_no_mutation(tmp_path):
 
 
 def test_restore_crash_before_cas_replay_succeeds(tmp_path, monkeypatch):
-    receipt, path = _make_receipt(tmp_path, grant_id="grant-pred-rcrash", goal_id="goal-pred-rcrash")
+    receipt, path = _make_receipt(
+        tmp_path, grant_id="grant-pred-rcrash", goal_id="goal-pred-rcrash"
+    )
     switched = _switch_task_card_authority_at(
         path,
         attempt_key="attempt-switch-for-restore-crash1",
@@ -1217,7 +1242,9 @@ def test_restore_crash_before_cas_replay_succeeds(tmp_path, monkeypatch):
     assert current.receipt_hash == temp_hash
 
     # Restore attempt record is PREPARED
-    attempt_path = tmp_path / "authority" / "transitions" / "attempt_attempt-restore-crash-before-cas.json"
+    attempt_path = (
+        tmp_path / "authority" / "transitions" / "attempt_attempt-restore-crash-before-cas.json"
+    )
     attempt_record = json.loads(attempt_path.read_text(encoding="utf-8"))
     assert attempt_record["status"] == "PREPARED"
 
@@ -1247,7 +1274,9 @@ def test_restore_crash_before_cas_replay_succeeds(tmp_path, monkeypatch):
 
 
 def test_restore_crash_after_cas_replay_succeeds_without_duplicate_cas(tmp_path, monkeypatch):
-    receipt, path = _make_receipt(tmp_path, grant_id="grant-pred-rcrash2", goal_id="goal-pred-rcrash2")
+    receipt, path = _make_receipt(
+        tmp_path, grant_id="grant-pred-rcrash2", goal_id="goal-pred-rcrash2"
+    )
     switched = _switch_task_card_authority_at(
         path,
         attempt_key="attempt-switch-for-restore-crash2",
@@ -1274,7 +1303,9 @@ def test_restore_crash_after_cas_replay_succeeds_without_duplicate_cas(tmp_path,
             raise RuntimeError("SIMULATED_CRASH_AFTER_RESTORE_CAS")
         real_write_transition_file(p, payload)
 
-    monkeypatch.setattr(standing_grant_store, "_write_transition_file", faulty_write_transition_file)
+    monkeypatch.setattr(
+        standing_grant_store, "_write_transition_file", faulty_write_transition_file
+    )
 
     with pytest.raises(RuntimeError, match="SIMULATED_CRASH_AFTER_RESTORE_CAS"):
         _restore_task_card_authority_at(
@@ -1292,7 +1323,9 @@ def test_restore_crash_after_cas_replay_succeeds_without_duplicate_cas(tmp_path,
     assert restored_receipt.context.goal_id == "goal-pred-rcrash2"
 
     # Attempt record is still in PREPARED state
-    attempt_path = tmp_path / "authority" / "transitions" / "attempt_attempt-restore-crash-after-cas.json"
+    attempt_path = (
+        tmp_path / "authority" / "transitions" / "attempt_attempt-restore-crash-after-cas.json"
+    )
     attempt_record = json.loads(attempt_path.read_text(encoding="utf-8"))
     assert attempt_record["status"] == "PREPARED"
 
@@ -1446,8 +1479,18 @@ def test_transition_files_contain_valid_record_hash(tmp_path):
 
     assert "record_hash" in attempt_data
     assert "record_hash" in op_data
-    assert standing_grant_store.canonical_autonomy_hash({k: v for k, v in attempt_data.items() if k != "record_hash"}) == attempt_data["record_hash"]
-    assert standing_grant_store.canonical_autonomy_hash({k: v for k, v in op_data.items() if k != "record_hash"}) == op_data["record_hash"]
+    assert (
+        standing_grant_store.canonical_autonomy_hash({
+            k: v for k, v in attempt_data.items() if k != "record_hash"
+        })
+        == attempt_data["record_hash"]
+    )
+    assert (
+        standing_grant_store.canonical_autonomy_hash({
+            k: v for k, v in op_data.items() if k != "record_hash"
+        })
+        == op_data["record_hash"]
+    )
 
 
 def test_switch_journal_tamper_fails_closed_zero_mutation(tmp_path):
@@ -1489,7 +1532,10 @@ def test_switch_journal_tamper_fails_closed_zero_mutation(tmp_path):
         repository=receipt.context.repository,
         thread_id="thread-tamper-succ",
         goal_id="goal-tamper-succ",
-        allowed_actions=(AutonomyActionClass.TASK_CARD_COMMIT, AutonomyActionClass.TASK_CARD_CREATE),
+        allowed_actions=(
+            AutonomyActionClass.TASK_CARD_COMMIT,
+            AutonomyActionClass.TASK_CARD_CREATE,
+        ),
         issued_at=NOW,
         expires_at=NOW + timedelta(minutes=15),
     )
@@ -1578,7 +1624,9 @@ def test_switch_journal_tamper_fails_closed_zero_mutation(tmp_path):
         target_file = op_path if target_rec == "op" else attempt_path
         raw_json = json.loads(target_file.read_text(encoding="utf-8"))
         raw_json[field] = evil_val
-        target_file.write_text(standing_grant_store._canonical_json(raw_json) + "\n", encoding="utf-8")
+        target_file.write_text(
+            standing_grant_store._canonical_json(raw_json) + "\n", encoding="utf-8"
+        )
 
         with pytest.raises(StandingGrantReceiptError, match="TRANSITION_TAMPERED"):
             _switch_task_card_authority_at(
@@ -1596,7 +1644,9 @@ def test_switch_journal_tamper_fails_closed_zero_mutation(tmp_path):
 
 
 def test_restore_journal_tamper_fails_closed_zero_mutation(tmp_path):
-    receipt, path = _make_receipt(tmp_path, grant_id="grant-tamper-rest", goal_id="goal-tamper-rest")
+    receipt, path = _make_receipt(
+        tmp_path, grant_id="grant-tamper-rest", goal_id="goal-tamper-rest"
+    )
     switched = _switch_task_card_authority_at(
         path,
         attempt_key="attempt-sw-for-tamper-rest",
@@ -1615,7 +1665,6 @@ def test_restore_journal_tamper_fails_closed_zero_mutation(tmp_path):
     transitions_dir = tmp_path / "authority" / "transitions"
     attempt_key = "attempt-tamper-rest"
     attempt_path = transitions_dir / f"attempt_{attempt_key}.json"
-    op_path = transitions_dir / f"op_{op_id}.json"
 
     # Craft PREPARED restore attempt
     restored_receipt = StandingGrantReceipt.issue(
@@ -1671,7 +1720,9 @@ def test_restore_journal_tamper_fails_closed_zero_mutation(tmp_path):
         standing_grant_store._write_transition_file(attempt_path, dict(base_attempt_record))
         raw_json = json.loads(attempt_path.read_text(encoding="utf-8"))
         raw_json[field] = evil_val
-        attempt_path.write_text(standing_grant_store._canonical_json(raw_json) + "\n", encoding="utf-8")
+        attempt_path.write_text(
+            standing_grant_store._canonical_json(raw_json) + "\n", encoding="utf-8"
+        )
 
         with pytest.raises(StandingGrantReceiptError, match="TRANSITION_TAMPERED"):
             _restore_task_card_authority_at(
@@ -1701,7 +1752,10 @@ def test_cross_record_substitution_fails_closed_zero_mutation(tmp_path):
         repository=receipt.context.repository,
         thread_id="thread-xrec-succ",
         goal_id="goal-xrec-succ",
-        allowed_actions=(AutonomyActionClass.TASK_CARD_COMMIT, AutonomyActionClass.TASK_CARD_CREATE),
+        allowed_actions=(
+            AutonomyActionClass.TASK_CARD_COMMIT,
+            AutonomyActionClass.TASK_CARD_CREATE,
+        ),
         issued_at=NOW,
         expires_at=NOW + timedelta(minutes=15),
     )
@@ -1788,7 +1842,9 @@ def test_cross_record_substitution_fails_closed_zero_mutation(tmp_path):
 
     # Case 2: Op record with mismatched temporary_receipt_hash vs internal temporary_receipt
     op_record["switch_operation_id"] = op_id
-    op_record["temporary_receipt_hash"] = "9" * 64  # Recomputed record_hash, but hash mismatch internally
+    op_record["temporary_receipt_hash"] = (
+        "9" * 64
+    )  # Recomputed record_hash, but hash mismatch internally
     standing_grant_store._write_transition_file(op_path, op_record)
 
     with pytest.raises(StandingGrantReceiptError, match="TRANSITION_RECORD_INCONSISTENT"):

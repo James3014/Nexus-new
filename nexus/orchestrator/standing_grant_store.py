@@ -316,9 +316,7 @@ def _write_bytes_locked(
         os.replace(tmp_name, destination)
         os.chmod(destination, 0o600)
         # fsync the parent directory so the rename survives a crash.
-        parent_fd = os.open(
-            str(destination.parent), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-        )
+        parent_fd = os.open(str(destination.parent), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
         try:
             os.fsync(parent_fd)
         finally:
@@ -1209,7 +1207,9 @@ def _restore_task_card_authority_at(
                 if not isinstance(intended_restored_dict, dict):
                     raise StandingGrantReceiptError("TRANSITION_RECORD_INCONSISTENT")
                 try:
-                    intended_restored_receipt = StandingGrantReceipt.model_validate(intended_restored_dict)
+                    intended_restored_receipt = StandingGrantReceipt.model_validate(
+                        intended_restored_dict
+                    )
                 except Exception as exc:
                     raise StandingGrantReceiptError("TRANSITION_RECORD_INCONSISTENT") from exc
 

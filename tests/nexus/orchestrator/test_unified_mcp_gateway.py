@@ -16,16 +16,16 @@ if repo_root in sys.path:
     sys.path.remove(repo_root)
 sys.path.insert(0, repo_root)
 
+from nexus.contracts.autonomy_goal import (  # noqa: E402
+    AutonomyActionClass,
+    RepositoryIdentity,
+    StandingGrantContext,
+)
 from nexus.engine.canonical_task_seam import (  # noqa: E402
     VerifiedCampaignIdentity,
     VerifiedTaskCardIdentity,
     _derive_campaign_id_from_task_card,
     build_canonical_planner_admission,
-)
-from nexus.contracts.autonomy_goal import (  # noqa: E402
-    AutonomyActionClass,
-    RepositoryIdentity,
-    StandingGrantContext,
 )
 from nexus.orchestrator.lifecycle_guards import LifecycleGuardError  # noqa: E402
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService  # noqa: E402
