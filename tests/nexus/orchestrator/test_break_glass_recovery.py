@@ -557,7 +557,7 @@ def test_emergency_integration_rebinds_current_main_after_source_base_drift(
         source,
         integration_envelope(verification, expected_base=current_main),
         now=NOW,
-        state_root=tmp_path / "rebound",
+        state_root=tmp_path,
     )
     assert rebound["expected_base_sha"] == current_main
     assert rebound["accepted_head_sha"] == COMMIT

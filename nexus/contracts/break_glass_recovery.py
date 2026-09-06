@@ -602,7 +602,9 @@ class BreakGlassOwnerTerminalPayload(_FrozenModel):
     @field_validator("issued_at")
     @classmethod
     def validate_issued_at(cls, value: datetime) -> datetime:
-        return _utc(value)
+        if value.tzinfo is None:
+            raise ValueError("TIMEZONE_REQUIRED")
+        return value
 
     @model_validator(mode="after")
     def validate_semantics(self) -> "BreakGlassOwnerTerminalPayload":
