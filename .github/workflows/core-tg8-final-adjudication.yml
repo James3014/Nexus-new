@@ -99,7 +99,9 @@ jobs:
 
           mkdir -p inputs/tg7-outer inputs/tg7-raw
           unzip -q inputs/zips/tg7.zip -d inputs/tg7-outer
-          (cd inputs/tg7-outer && sha256sum -c tg7-semantic-physical.sha256)
+          expected_inner=$(tr -d '[:space:]' < inputs/tg7-outer/tg7-semantic-physical.sha256)
+          actual_inner=$(sha256sum inputs/tg7-outer/tg7-semantic-physical.tar.gz | awk '{print $1}')
+          test "${actual_inner}" = "${expected_inner}"
           python - <<'PY'
           import pathlib, tarfile
           source = pathlib.Path("inputs/tg7-outer/tg7-semantic-physical.tar.gz")
@@ -237,7 +239,7 @@ jobs:
               anc = subprocess.run(["git", "-C", "core-current", "merge-base", "--is-ancestor", base, head])
               files = subprocess.check_output(["git", "-C", "core-current", "diff", "--name-only", base, head], text=True).splitlines()
               version_only = version_only and anc.returncode == 0 and files == ["product/protocol/__init__.py"]
-          failed = load("../final-evidence/failed-upgrade-rc1.json") if False else json.loads(pathlib.Path("final-evidence/failed-upgrade-rc1.json").read_text())
+          failed = json.loads(pathlib.Path("final-evidence/failed-upgrade-rc1.json").read_text())
           payload = {
               "architecture_gate": True,
               "tg8_gate_tests": True,
