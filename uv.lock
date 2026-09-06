@@ -1799,7 +1799,7 @@ wheels = [
 ]
 
 [[package]]
-name = "nexus-core"
+name = "nexus-legacy"
 version = "28.3.0"
 source = { editable = "." }
 dependencies = [
