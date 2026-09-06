@@ -1,0 +1,175 @@
+name: Core Standalone Physical Replay Evidence
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    env:
+      CORE_SHA: 9f98df1f52a8770c75892e3d9e246467823d0fbd
+      LEGACY_ARTIFACT_ID: "9960033003"
+      LEGACY_ARTIFACT_SHA256: 67c68ee594face7097770eb95aa58b9d75afc02a26c33ae68476c9c3a34e9d84
+      PREDECESSOR_SHA256: 18b1e54b6c1404ed5348ce2197e3f30c1f6d70d422e4ce5ddd1dbe293a5e90f7
+      SOURCE_DATE_EPOCH: "1700000000"
+    steps:
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: latest
+
+      - name: Acquire accepted legacy physical artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/James3014/Nexus-new/actions/artifacts/${LEGACY_ARTIFACT_ID}/zip" \
+            -o /tmp/legacy-physical.zip
+          test "$(sha256sum /tmp/legacy-physical.zip | awk '{print $1}')" = "${LEGACY_ARTIFACT_SHA256}"
+          mkdir -p /tmp/legacy-physical
+          unzip -q /tmp/legacy-physical.zip -d /tmp/legacy-physical
+          test "$(sha256sum /tmp/legacy-physical/nexus_singularity-28.3.0-py3-none-any.whl | awk '{print $1}')" = "${PREDECESSOR_SHA256}"
+          test -s /tmp/legacy-physical/tg5-receipt.json
+
+      - name: Acquire exact standalone Core source
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/James3014/nexus-core.git core
+          git -C core checkout --quiet --detach "${CORE_SHA}"
+          test "$(git -C core rev-parse HEAD)" = "${CORE_SHA}"
+          test -z "$(git -C core status --porcelain)"
+
+      - name: Build standalone successor twice
+        working-directory: core
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/build-a /tmp/build-b
+          SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" uv build --wheel --out-dir /tmp/build-a
+          rm -rf build *.egg-info
+          SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" uv build --wheel --out-dir /tmp/build-b
+          A=$(find /tmp/build-a -maxdepth 1 -name 'nexus_core-*.whl' -print -quit)
+          B=$(find /tmp/build-b -maxdepth 1 -name 'nexus_core-*.whl' -print -quit)
+          test -n "$A" && test -n "$B"
+          test "$(basename "$A")" = "$(basename "$B")"
+          test "$(sha256sum "$A" | awk '{print $1}')" = "$(sha256sum "$B" | awk '{print $1}')"
+
+      - name: Build controller wheelhouse and manifest
+        working-directory: core
+        run: |
+          set -euo pipefail
+          WH=/private/tmp/nexus-core-v1-wheelhouse
+          mkdir -p "$WH" /private/tmp/nexus-core-v1-predecessor /private/tmp/nexus-core-v1-evidence/tg7 evidence
+          cp /tmp/legacy-physical/nexus_singularity-28.3.0-py3-none-any.whl /private/tmp/nexus-core-v1-predecessor/
+          cp /tmp/legacy-physical/tg5-receipt.json /private/tmp/nexus-core-v1-evidence/tg7/tg5-receipt.json
+          cp /tmp/build-a/nexus_core-*.whl "$WH/"
+          python - <<'PY' > /tmp/core-runtime-requirements.txt
+          import tomllib
+          with open('pyproject.toml', 'rb') as f:
+              data = tomllib.load(f)
+          for requirement in data['project']['dependencies']:
+              print(requirement)
+          PY
+          python -m pip download --quiet --only-binary=:all: --dest "$WH" -r /tmp/core-runtime-requirements.txt
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          wh = Path('/private/tmp/nexus-core-v1-wheelhouse')
+          a = next(Path('/tmp/build-a').glob('nexus_core-*.whl'))
+          b = next(Path('/tmp/build-b').glob('nexus_core-*.whl'))
+          def sha(path):
+              return 'sha256:' + hashlib.sha256(path.read_bytes()).hexdigest()
+          ah, bh = sha(a), sha(b)
+          assert ah == bh
+          closure = [
+              {'filename': p.name, 'sha256': sha(p)}
+              for p in sorted(wh.glob('*.whl'))
+          ]
+          payload = {
+              'schema': 'nexus.core-v1.tg6-wheelhouse.v1',
+              'build_a_hash': ah,
+              'build_b_hash': bh,
+              'selected_successor_hash': ah,
+              'build_a_files': [a.name],
+              'build_b_files': [b.name],
+              'closure': closure,
+              'source_lock_hash': sha(Path('uv.lock')),
+          }
+          (wh / 'wheelhouse-manifest.json').write_text(json.dumps(payload, sort_keys=True, indent=2) + '\n')
+          Path('evidence/wheelhouse-manifest.json').write_text(json.dumps(payload, sort_keys=True, indent=2) + '\n')
+          Path('evidence/successor-wheel.sha256').write_text(ah + '\n')
+          PY
+
+      - name: Sync exact Core test environment
+        working-directory: core
+        run: uv sync --locked
+
+      - name: Run current Core physical predecessor witness
+        working-directory: core
+        run: |
+          set -euo pipefail
+          uv run pytest -q tests/product/test_client_conformance.py -k predecessor_artifact | tee evidence/predecessor.log
+
+      - name: Run current Core physical wheelhouse witness
+        working-directory: core
+        run: |
+          set -euo pipefail
+          uv run pytest -q tests/product/test_client_conformance.py -k wheelhouse_manifest | tee evidence/wheelhouse.log
+
+      - name: Run current Core physical migration rollback witness
+        working-directory: core
+        run: |
+          set -euo pipefail
+          uv run pytest -q tests/product/test_client_conformance.py -k install_upgrade_rollback | tee evidence/migration.log
+
+      - name: Emit exact replay summary
+        working-directory: core
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, json, os
+          from importlib.metadata import version
+          from pathlib import Path
+          receipt = json.loads(Path('/private/tmp/nexus-core-v1-evidence/tg7/tg5-receipt.json').read_text())
+          successor = next(Path('/private/tmp/nexus-core-v1-wheelhouse').glob('nexus_core-*.whl'))
+          payload = {
+              'schema': 'nexus.core.tg6-standalone-physical-replay.v1',
+              'core_sha': os.environ['CORE_SHA'],
+              'controller_repository': 'James3014/Nexus-new',
+              'legacy_artifact_id': int(os.environ['LEGACY_ARTIFACT_ID']),
+              'legacy_artifact_sha256': 'sha256:' + os.environ['LEGACY_ARTIFACT_SHA256'],
+              'predecessor_sha256': 'sha256:' + os.environ['PREDECESSOR_SHA256'],
+              'accepted_tg5_receipt_hash': receipt['receipt_hash'],
+              'successor_distribution': 'nexus-core',
+              'successor_distribution_version': version('nexus-core'),
+              'successor_wheel': successor.name,
+              'successor_wheel_sha256': 'sha256:' + hashlib.sha256(successor.read_bytes()).hexdigest(),
+              'results': {
+                  'predecessor_artifact': 'PASS',
+                  'wheelhouse_manifest': 'PASS',
+                  'install_upgrade_rollback': 'PASS',
+              },
+              'claim_ceiling': 'PHYSICAL_REPLAY_EVIDENCE_ONLY',
+          }
+          Path('evidence/summary.json').write_text(json.dumps(payload, sort_keys=True, indent=2) + '\n')
+          print(json.dumps(payload, sort_keys=True))
+          PY
+
+      - name: Upload physical replay evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-standalone-physical-replay-${{ env.CORE_SHA }}
+          path: core/evidence/
+          if-no-files-found: error
+          retention-days: 14
