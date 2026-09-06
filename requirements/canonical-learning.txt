@@ -1,0 +1,3 @@
+# Canonical Learning consumer boundary for Nexus-new G8.
+# Keep exact commit identity; do not replace with a branch or floating tag.
+nexus-learning @ git+https://github.com/James3014/nexus-learning.git@3b8ece75fac4d2554245c29590748a84c5c671d5
