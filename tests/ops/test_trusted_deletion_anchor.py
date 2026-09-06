@@ -583,16 +583,14 @@ def _synthetic_runtime(
         )
     )
     external_contract = trusted_anchor._trusted_external_package_contract()[0]
-    external_direct_url = _json(
-        {
-            "url": external_contract["repository"],
-            "vcs_info": {
-                "vcs": "git",
-                "commit_id": external_contract["commit"],
-                "requested_revision": external_contract["commit"],
-            },
-        }
-    )
+    external_direct_url = _json({
+        "url": external_contract["repository"],
+        "vcs_info": {
+            "vcs": "git",
+            "commit_id": external_contract["commit"],
+            "requested_revision": external_contract["commit"],
+        },
+    })
     files = {
         "site-packages/pytest/__init__.py": b"",
         "site-packages/pytest/__main__.py": test_driver,
@@ -1149,16 +1147,14 @@ def test_external_runtime_package_provenance_rejects_wrong_commit(tmp_path: Path
     )
     contract = trusted_anchor._trusted_external_package_contract()[0]
     (dist_info / "direct_url.json").write_bytes(
-        _json(
-            {
-                "url": contract["repository"],
-                "vcs_info": {
-                    "vcs": "git",
-                    "commit_id": "f" * 40,
-                    "requested_revision": contract["commit"],
-                },
-            }
-        )
+        _json({
+            "url": contract["repository"],
+            "vcs_info": {
+                "vcs": "git",
+                "commit_id": "f" * 40,
+                "requested_revision": contract["commit"],
+            },
+        })
     )
     with pytest.raises(ValueError, match="provenance mismatch"):
         trusted_anchor._verify_external_runtime_packages(site_packages)

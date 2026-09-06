@@ -293,7 +293,9 @@ def _verify_external_runtime_packages(site_packages: Path) -> list[dict[str, str
         try:
             direct_url = json.loads(direct_url_bytes)
         except (UnicodeDecodeError, ValueError) as exc:
-            raise ValueError(f"trusted external package provenance is malformed: {distribution}") from exc
+            raise ValueError(
+                f"trusted external package provenance is malformed: {distribution}"
+            ) from exc
         vcs_info = direct_url.get("vcs_info")
         if (
             direct_url.get("url") != repository
@@ -306,15 +308,13 @@ def _verify_external_runtime_packages(site_packages: Path) -> list[dict[str, str
         metadata_text = metadata_files[0].read_text(encoding="utf-8")
         if f"Name: {distribution}\n" not in metadata_text:
             raise ValueError(f"trusted external package distribution mismatch: {distribution}")
-        verified.append(
-            {
-                "distribution": distribution,
-                "package": package,
-                "repository": repository,
-                "commit": commit,
-                "direct_url_sha256": _sha(direct_url_bytes),
-            }
-        )
+        verified.append({
+            "distribution": distribution,
+            "package": package,
+            "repository": repository,
+            "commit": commit,
+            "direct_url_sha256": _sha(direct_url_bytes),
+        })
     return verified
 
 
@@ -1004,7 +1004,9 @@ def _executor(args: argparse.Namespace) -> None:
     site_packages = (runtime / "site-packages").resolve()
     if not site_packages.is_dir():
         raise ValueError("offline runtime site-packages is missing")
-    if _verify_external_runtime_packages(site_packages) != runtime_metadata.get("external_packages"):
+    if _verify_external_runtime_packages(site_packages) != runtime_metadata.get(
+        "external_packages"
+    ):
         raise ValueError("offline external runtime package identity mismatch")
     executor_home = runtime / "home"
     executor_home.mkdir()
