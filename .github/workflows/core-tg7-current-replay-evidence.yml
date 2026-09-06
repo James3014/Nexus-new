@@ -1,0 +1,221 @@
+name: Core TG7 Current Replay Evidence
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  replay-and-falsify:
+    runs-on: ubuntu-latest
+    env:
+      CORE_SHA: 9f98df1f52a8770c75892e3d9e246467823d0fbd
+      COLLECTOR_ARTIFACT_ID: "9962254836"
+      COLLECTOR_ARTIFACT_SHA256: c0d49da97640610498b1cddf455c4eebdd93bb62ce93f80d5ea813f4cd543a08
+      ACCEPTANCE_ARTIFACT_ID: "9962270488"
+      ACCEPTANCE_ARTIFACT_SHA256: 2c96ea72deaf2255a0faee36d566bd3ceb9c173ac69043037345c60a28914d87
+    steps:
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: latest
+
+      - name: Acquire accepted TG7 collector and independent acceptance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/James3014/Nexus-new/actions/artifacts/${COLLECTOR_ARTIFACT_ID}/zip" \
+            -o /tmp/tg7-collector.zip
+          test "$(sha256sum /tmp/tg7-collector.zip | awk '{print $1}')" = "${COLLECTOR_ARTIFACT_SHA256}"
+          curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/James3014/Nexus-new/actions/artifacts/${ACCEPTANCE_ARTIFACT_ID}/zip" \
+            -o /tmp/tg7-acceptance.zip
+          test "$(sha256sum /tmp/tg7-acceptance.zip | awk '{print $1}')" = "${ACCEPTANCE_ARTIFACT_SHA256}"
+          mkdir -p /tmp/tg7-collector /tmp/tg7-acceptance
+          unzip -q /tmp/tg7-collector.zip -d /tmp/tg7-collector
+          unzip -q /tmp/tg7-acceptance.zip -d /tmp/tg7-acceptance
+          INNER_EXPECTED=$(awk '{print $1}' /tmp/tg7-collector/tg7-semantic-physical.sha256)
+          INNER_ACTUAL=$(sha256sum /tmp/tg7-collector/tg7-semantic-physical.tar.gz | awk '{print $1}')
+          test "$INNER_EXPECTED" = "$INNER_ACTUAL"
+          python - <<'PY'
+          import pathlib, tarfile
+          archive = '/tmp/tg7-collector/tg7-semantic-physical.tar.gz'
+          with tarfile.open(archive, 'r:gz') as tf:
+              members = tf.getmembers()
+              assert members
+              for member in members:
+                  path = pathlib.PurePosixPath(member.name)
+                  assert not path.is_absolute()
+                  assert '..' not in path.parts
+                  assert path.parts and path.parts[0] == 'tg7'
+          PY
+          test -s /tmp/tg7-acceptance/tg7-independent-acceptance.json
+
+      - name: Acquire exact standalone Core source
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/James3014/nexus-core.git core
+          git -C core checkout --quiet --detach "${CORE_SHA}"
+          test "$(git -C core rev-parse HEAD)" = "${CORE_SHA}"
+          test -z "$(git -C core status --porcelain)"
+
+      - name: Sync exact Core test environment
+        working-directory: core
+        run: uv sync --locked
+
+      - name: Prove physical mode rejects missing controller evidence
+        working-directory: core
+        run: |
+          set -euo pipefail
+          test ! -e /private/tmp/nexus-core-v1-evidence/tg7
+          mkdir -p evidence
+          set +e
+          NEXUS_TG7_PHYSICAL_ACCEPTANCE=1 uv run pytest -q tests/benchmark/test_core_v1_tg7_manifest.py -k tg7_selection_manifest_conformance > evidence/tg7-missing.log 2>&1
+          code=$?
+          set -e
+          cat evidence/tg7-missing.log
+          test "$code" -ne 0
+          grep -F "TG7_PHYSICAL_ACCEPTANCE_DEPENDENCY_MISSING" evidence/tg7-missing.log >/dev/null
+
+      - name: Stage immutable accepted TG7 evidence
+        run: |
+          set -euo pipefail
+          sudo mkdir -p /private/tmp/nexus-core-v1-evidence
+          sudo chown "$USER":"$(id -gn)" /private/tmp/nexus-core-v1-evidence
+          tar -xzf /tmp/tg7-collector/tg7-semantic-physical.tar.gz -C /private/tmp/nexus-core-v1-evidence
+          test -f /private/tmp/nexus-core-v1-evidence/tg7/selection.json
+          test -f /private/tmp/nexus-core-v1-evidence/tg7/repository/bottle.py
+          test -f /private/tmp/nexus-core-v1-evidence/tg7/report.json
+          test "$(find /private/tmp/nexus-core-v1-evidence/tg7/attempts -maxdepth 1 -name '*.json' -type f | wc -l)" -eq 56
+          test "$(stat -c '%a' /private/tmp/nexus-core-v1-evidence/tg7/attempts)" = "555"
+          test "$(stat -c '%a' /private/tmp/nexus-core-v1-evidence/tg7/attempts/tg7_auth_issuer_tamper_001.json)" = "444"
+          test "$(stat -c '%a' /private/tmp/nexus-core-v1-evidence/tg7/repository/bottle.py)" = "444"
+
+      - name: Run current Core TG7 physical positive replay
+        working-directory: core
+        run: |
+          set -euo pipefail
+          NEXUS_TG7_PHYSICAL_ACCEPTANCE=1 uv run pytest -q tests/benchmark/test_core_v1_tg7_manifest.py --junitxml=evidence/tg7-current-positive.xml | tee evidence/tg7-current-positive.log
+
+      - name: Falsify external repository byte substitution
+        working-directory: core
+        run: |
+          set -euo pipefail
+          TARGET=/private/tmp/nexus-core-v1-evidence/tg7/repository/bottle.py
+          cp "$TARGET" /tmp/bottle.py.pristine
+          sudo chmod u+w "$TARGET"
+          printf '\n# TG7_CURRENT_REPLAY_TAMPER\n' >> "$TARGET"
+          set +e
+          NEXUS_TG7_PHYSICAL_ACCEPTANCE=1 uv run pytest -q tests/benchmark/test_core_v1_tg7_manifest.py -k tg7_selection_manifest_conformance > evidence/tg7-repo-tamper.log 2>&1
+          code=$?
+          set -e
+          cat evidence/tg7-repo-tamper.log
+          test "$code" -ne 0
+          sudo cp /tmp/bottle.py.pristine "$TARGET"
+          sudo chmod 444 "$TARGET"
+
+      - name: Falsify missing attempt inventory
+        working-directory: core
+        run: |
+          set -euo pipefail
+          FIRST=$(find /private/tmp/nexus-core-v1-evidence/tg7/attempts -maxdepth 1 -name '*.json' -type f | sort | head -1)
+          sudo mv "$FIRST" /tmp/tg7-attempt-missing.json
+          set +e
+          NEXUS_TG7_PHYSICAL_ACCEPTANCE=1 uv run pytest -q tests/benchmark/test_core_v1_tg7_manifest.py -k tg7_attempt_inventory_conformance > evidence/tg7-attempt-missing.log 2>&1
+          code=$?
+          set -e
+          cat evidence/tg7-attempt-missing.log
+          test "$code" -ne 0
+          sudo cp /tmp/tg7-attempt-missing.json "$FIRST"
+          sudo chmod 444 "$FIRST"
+
+      - name: Falsify attempt receipt tamper
+        working-directory: core
+        run: |
+          set -euo pipefail
+          FIRST=$(find /private/tmp/nexus-core-v1-evidence/tg7/attempts -maxdepth 1 -name '*.json' -type f | sort | head -1)
+          cp "$FIRST" /tmp/tg7-attempt-pristine.json
+          sudo python - "$FIRST" <<'PY'
+          import json, pathlib, sys
+          path = pathlib.Path(sys.argv[1])
+          payload = json.loads(path.read_text())
+          payload['external_material_hash'] = 'sha256:' + '0' * 64
+          path.write_text(json.dumps(payload, sort_keys=True, separators=(',', ':')) + '\n')
+          PY
+          sudo chmod 444 "$FIRST"
+          set +e
+          NEXUS_TG7_PHYSICAL_ACCEPTANCE=1 uv run pytest -q tests/benchmark/test_core_v1_tg7_manifest.py -k tg7_attempt_inventory_conformance > evidence/tg7-attempt-tamper.log 2>&1
+          code=$?
+          set -e
+          cat evidence/tg7-attempt-tamper.log
+          test "$code" -ne 0
+          sudo cp /tmp/tg7-attempt-pristine.json "$FIRST"
+          sudo chmod 444 "$FIRST"
+
+      - name: Emit exact TG7 current replay summary
+        working-directory: core
+        run: |
+          set -euo pipefail
+          cp /tmp/tg7-acceptance/tg7-independent-acceptance.json evidence/historical-independent-acceptance.json
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          root = Path('/private/tmp/nexus-core-v1-evidence/tg7')
+          selection = json.loads((root / 'selection.json').read_text())
+          tg5 = json.loads((root / 'tg5-receipt.json').read_text())
+          corpus = json.loads((root / 'corpus.json').read_text())
+          report = json.loads((root / 'report.json').read_text())
+          acceptance = json.loads(Path('/tmp/tg7-acceptance/tg7-independent-acceptance.json').read_text())
+          inner = hashlib.sha256(Path('/tmp/tg7-collector/tg7-semantic-physical.tar.gz').read_bytes()).hexdigest()
+          payload = {
+              'schema': 'nexus.core.tg7-current-replay.v1',
+              'core_sha': os.environ['CORE_SHA'],
+              'collector_artifact_id': int(os.environ['COLLECTOR_ARTIFACT_ID']),
+              'collector_artifact_sha256': 'sha256:' + os.environ['COLLECTOR_ARTIFACT_SHA256'],
+              'independent_acceptance_artifact_id': int(os.environ['ACCEPTANCE_ARTIFACT_ID']),
+              'independent_acceptance_artifact_sha256': 'sha256:' + os.environ['ACCEPTANCE_ARTIFACT_SHA256'],
+              'inner_physical_tar_sha256': 'sha256:' + inner,
+              'historical_subject': acceptance['subject'],
+              'historical_subject_tree': acceptance['subject_tree'],
+              'selection_hash': selection['selection_hash'],
+              'tg5_receipt_hash': tg5['receipt_hash'],
+              'corpus_hash': corpus['corpus_hash'],
+              'report_hash': report['report_hash'],
+              'attempt_count': len(list((root / 'attempts').glob('*.json'))),
+              'denominator': report['denominator'],
+              'family_counts': report['family_counts'],
+              'false_certification_count': report['false_certification_count'],
+              'trust_mismatches': report['trust_mismatches'],
+              'results': {
+                  'missing_controller_evidence': 'FAIL_CLOSED',
+                  'pristine_current_physical_replay': 'PASS',
+                  'external_repository_byte_tamper': 'FAIL_CLOSED',
+                  'missing_attempt_inventory': 'FAIL_CLOSED',
+                  'attempt_receipt_tamper': 'FAIL_CLOSED',
+              },
+              'claim_ceiling': 'CURRENT_SOURCE_REPLAY_AND_FALSIFICATION_ONLY',
+          }
+          Path('evidence/tg7-current-summary.json').write_text(json.dumps(payload, sort_keys=True, indent=2) + '\n')
+          print(json.dumps(payload, sort_keys=True))
+          PY
+
+      - name: Upload TG7 current replay evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-tg7-current-replay-${{ env.CORE_SHA }}
+          path: core/evidence/
+          if-no-files-found: error
+          retention-days: 14
