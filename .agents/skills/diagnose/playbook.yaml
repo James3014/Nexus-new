@@ -2,7 +2,7 @@ schema: nexus.shared_playbook.v1
 playbook_id: diagnose
 skill_id: diagnose
 version: 1.0.0
-status: ACTIVE
+status: CANDIDATE
 primary: true
 capability_mounts:
   - xray
