@@ -566,12 +566,24 @@ def test_emergency_integration_rebinds_current_main_after_source_base_drift(
 def test_self_hosting_recovery_e2e_restores_normal_path_then_collapses_authority(
     tmp_path: Path,
 ) -> None:
-    normal_governance_available = False
+    candidate_plane = tmp_path / "candidate-governance-plane.json"
+    integrated_plane = tmp_path / "main-governance-plane.json"
+    merged_main = "8" * 40
 
     def normal_governance_canary() -> BreakGlassGovernanceCanaryEvidence:
-        if not normal_governance_available:
-            raise RuntimeError("NORMAL_GOVERNANCE_UNAVAILABLE")
-        return canary(main_sha="8" * 40)
+        try:
+            observed = json.loads(integrated_plane.read_text(encoding="utf-8"))
+        except FileNotFoundError as exc:
+            raise RuntimeError("NORMAL_GOVERNANCE_UNAVAILABLE") from exc
+        expected = {
+            "recovery_id": "BG-806-20260906",
+            "repair_commit": COMMIT,
+            "integrated_main": merged_main,
+            "authority_path": "normal-governance",
+        }
+        if observed != expected:
+            raise RuntimeError("NORMAL_GOVERNANCE_NOT_RESTORED")
+        return canary(main_sha=observed["integrated_main"])
 
     with pytest.raises(RuntimeError, match="NORMAL_GOVERNANCE_UNAVAILABLE"):
         normal_governance_canary()
@@ -585,6 +597,18 @@ def test_self_hosting_recovery_e2e_restores_normal_path_then_collapses_authority
         now=NOW,
         state_root=tmp_path,
     )
+
+    repaired_state = {
+        "recovery_id": source.payload.recovery_id,
+        "repair_commit": COMMIT,
+        "authority_path": "normal-governance",
+    }
+    candidate_plane.write_text(
+        json.dumps(repaired_state, sort_keys=True),
+        encoding="utf-8",
+    )
+    assert json.loads(candidate_plane.read_text(encoding="utf-8")) == repaired_state
+
     record_source_repair_applied(
         source, applied(implementer="dev-mcp-owner-direct"), now=NOW, state_root=tmp_path
     )
@@ -592,7 +616,14 @@ def test_self_hosting_recovery_e2e_restores_normal_path_then_collapses_authority
 
     integration = integration_envelope(verification)
     prepare_emergency_integration(source, integration, now=NOW, state_root=tmp_path)
-    merged_main = "8" * 40
+    integrated_state = {
+        **json.loads(candidate_plane.read_text(encoding="utf-8")),
+        "integrated_main": merged_main,
+    }
+    integrated_plane.write_text(
+        json.dumps(integrated_state, sort_keys=True),
+        encoding="utf-8",
+    )
     record_emergency_integration_consumed(
         integration,
         merge_commit_sha=merged_main,
@@ -602,7 +633,6 @@ def test_self_hosting_recovery_e2e_restores_normal_path_then_collapses_authority
         state_root=tmp_path,
     )
 
-    normal_governance_available = True
     restored_canary = normal_governance_canary()
     consumed = consume_source_repair_authority(
         source, restored_canary, now=NOW, state_root=tmp_path
@@ -610,6 +640,9 @@ def test_self_hosting_recovery_e2e_restores_normal_path_then_collapses_authority
     assert consumed["evidence"]["governance_canary_sha256"] == restored_canary.evidence_sha256
     assert consumed["evidence"]["authority_terminal"] is True
 
+    integrated_plane.unlink()
+    with pytest.raises(RuntimeError, match="NORMAL_GOVERNANCE_UNAVAILABLE"):
+        normal_governance_canary()
     with pytest.raises(BreakGlassRecoveryError, match="RECOVERY_REPLAY_DENIED"):
         record_source_repair_applied(source, applied(), now=NOW, state_root=tmp_path)
     with pytest.raises(BreakGlassRecoveryError, match="INTEGRATION_REPLAY_DENIED"):
