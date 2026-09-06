@@ -8,6 +8,7 @@ import nexus_learning.closure_effectiveness as canonical_closure
 import nexus_learning.contracts as canonical_contracts
 import nexus_learning.episode_projection as canonical_projection
 import nexus_learning.outcome_memory as canonical_memory
+
 from nexus.contracts import learning_experience as legacy_contracts
 from nexus.learning import learning_closure_effectiveness as legacy_closure
 from nexus.learning import learning_episode_projection as legacy_projection
@@ -20,7 +21,9 @@ def test_forwarding_facades_bind_canonical_symbol_identity() -> None:
     assert legacy_contracts.LearningExperience is canonical_contracts.LearningExperience
     assert legacy_memory.OutcomeMemoryManager is canonical_memory.OutcomeMemoryManager
     assert legacy_memory.EpisodeOutcomeRecord is canonical_memory.EpisodeOutcomeRecord
-    assert legacy_projection.project_learning_entries is canonical_projection.project_learning_entries
+    assert (
+        legacy_projection.project_learning_entries is canonical_projection.project_learning_entries
+    )
     assert (
         legacy_closure.canonical_learning_episode_path
         is canonical_closure.canonical_learning_episode_path
