@@ -1,0 +1,290 @@
+name: Core TG8 Final Adjudication
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  adjudicate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CURRENT_SHA: c935a1f3c72514052a692e62c2b3c40e1a48a6ae
+      RC1_SHA: 9e7ff0767c0d00783235e2cfa08b14865557a165
+      RC2_SHA: a12fa34bd409fc23cc4ed458f36ed03d4d075682
+      STABLE_SHA: ca003f4aa20490b3200b433970d7ccc65425aae4
+      SOURCE_DATE_EPOCH: "1700000000"
+    steps:
+      - name: Checkout final evidence harness
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: latest
+
+      - name: Materialize exact Core current and Stable subjects
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/James3014/nexus-core.git core-current
+          git -C core-current fetch --quiet origin "${RC1_SHA}" "${RC2_SHA}" "${STABLE_SHA}"
+          git -C core-current checkout --quiet --detach "${CURRENT_SHA}"
+          test "$(git -C core-current rev-parse HEAD)" = "${CURRENT_SHA}"
+          test -z "$(git -C core-current status --porcelain)"
+
+          git clone --quiet https://github.com/James3014/nexus-core.git core-stable
+          git -C core-stable checkout --quiet --detach "${STABLE_SHA}"
+          test "$(git -C core-stable rev-parse HEAD)" = "${STABLE_SHA}"
+          test -z "$(git -C core-stable status --porcelain)"
+
+      - name: Sync current Core and run architecture/TG8 reducer gates
+        run: |
+          set -euo pipefail
+          (cd core-current && uv sync --locked)
+          (cd core-current && uv run pytest -q tests/architecture)
+          (cd core-current && uv run pytest -q tests/benchmark/test_core_v1_tg8_protocol_gate.py tests/benchmark/test_core_v1_tg8_repository_cutover.py)
+
+      - name: Acquire and digest-bind retained evidence artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p inputs/zips
+          download() {
+            id="$1"; name="$2"; expected="$3"
+            curl -fsSL \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/James3014/Nexus-new/actions/artifacts/${id}/zip" \
+              -o "inputs/zips/${name}"
+            actual=$(sha256sum "inputs/zips/${name}" | awk '{print $1}')
+            test "sha256:${actual}" = "${expected}"
+          }
+          download 9960033003 tg6.zip sha256:67c68ee594face7097770eb95aa58b9d75afc02a26c33ae68476c9c3a34e9d84
+          download 9962254836 tg7.zip sha256:c0d49da97640610498b1cddf455c4eebdd93bb62ce93f80d5ea813f4cd543a08
+          download 9980733804 tg7-falsification.zip sha256:c429bc5194ab024ed291a3d8f11097f012b8730a104bb22885387a74872c7f13
+          download 9980916494 transition.zip sha256:5559c95c4fe75c9f3e9e309c854cbc3f4846fcd086e630bcdeb818e0de3a1b14
+          download 9980941672 corrupt.zip sha256:e33c6c7d9d2ef70cbe1fae3a7a7d28b6969cd4ce0e8c7a605ebbd1af3bc0d8f8
+          download 9981086295 rcpatch.zip sha256:cba36eb188d1dc824ec61b55a39bc78430dbcd53ce2ce119218002b8494fe221
+          download 9981112766 stable1.zip sha256:3cd0e02a023f4095a843a2e94b43c4b954061c693277b7f2cedefe9033041cfb
+          download 9981114031 stable2.zip sha256:44c1d0500b2e78b251f8af1e8d35978ea68bcfec8669569b98347524c5523b7e
+          download 9981118174 stable3.zip sha256:c4ae6315cfeae981cb6b5dc7aacb9daa8e9527fd4314d49d215b438959b1a8f1
+          download 9981119929 stable-repro.zip sha256:bb943d957ffd0a242f55b1a2f09fa18d3af7b0441cf02373009863d08a1b7848
+
+          for pair in \
+            "tg6.zip:tg6" \
+            "tg7-falsification.zip:tg7-falsification" \
+            "transition.zip:transition" \
+            "corrupt.zip:corrupt" \
+            "rcpatch.zip:rcpatch" \
+            "stable1.zip:stable1" \
+            "stable2.zip:stable2" \
+            "stable3.zip:stable3" \
+            "stable-repro.zip:stable-repro"
+          do
+            zip="${pair%%:*}"; dir="${pair##*:}"
+            mkdir -p "inputs/${dir}"
+            unzip -q "inputs/zips/${zip}" -d "inputs/${dir}"
+          done
+
+          mkdir -p inputs/tg7-outer inputs/tg7-raw
+          unzip -q inputs/zips/tg7.zip -d inputs/tg7-outer
+          (cd inputs/tg7-outer && sha256sum -c tg7-semantic-physical.sha256)
+          python - <<'PY'
+          import pathlib, tarfile
+          source = pathlib.Path("inputs/tg7-outer/tg7-semantic-physical.tar.gz")
+          target = pathlib.Path("inputs/tg7-raw")
+          with tarfile.open(source, "r:gz") as tf:
+              members = tf.getmembers()
+              assert members
+              for member in members:
+                  p = pathlib.PurePosixPath(member.name)
+                  assert not p.is_absolute()
+                  assert ".." not in p.parts
+                  assert p.parts and p.parts[0] == "tg7"
+              tf.extractall(target)
+          PY
+
+      - name: Capture live authority, issue, release, tag, PR, and CI snapshots
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p api
+          get() {
+            url="$1"; out="$2"
+            curl -fsSL \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "${url}" -o "api/${out}"
+          }
+          get https://api.github.com/repos/James3014/nexus-core/branches/main core-main.json
+          get 'https://api.github.com/repos/James3014/nexus-core/issues?state=open&per_page=100' open-issues.json
+          get https://api.github.com/repos/James3014/nexus-core/issues/4 issue4.json
+          get 'https://api.github.com/repos/James3014/nexus-core/releases?per_page=100' releases.json
+          get 'https://api.github.com/repos/James3014/nexus-core/tags?per_page=100' tags.json
+          get https://api.github.com/repos/James3014/Nexus-new/issues/comments/5542807802 tg4-comment.json
+          get https://api.github.com/repos/James3014/Nexus-new/issues/comments/5549587546 tg5-comment.json
+          get https://api.github.com/repos/James3014/Nexus-new/issues/comments/5548355769 tg6-comment.json
+          get https://api.github.com/repos/James3014/nexus-core/issues/comments/5556223119 tg7-terminal-comment.json
+          get https://api.github.com/repos/James3014/nexus-core/pulls/14 pr14.json
+          get https://api.github.com/repos/James3014/nexus-core/pulls/15 pr15.json
+          get https://api.github.com/repos/James3014/Nexus-new/pulls/817 pr817.json
+          get "https://api.github.com/repos/James3014/nexus-core/commits/${CURRENT_SHA}/check-runs?per_page=100" check-current.json
+          get "https://api.github.com/repos/James3014/nexus-core/commits/${RC1_SHA}/check-runs?per_page=100" check-rc1.json
+          get "https://api.github.com/repos/James3014/nexus-core/commits/${STABLE_SHA}/check-runs?per_page=100" check-stable.json
+          get "https://api.github.com/repos/James3014/nexus-core/commits/${RC2_SHA}/check-runs?per_page=100" check-rc2.json
+
+      - name: Physically falsify RC1 to corrupt-Stable upgrade
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/final-rc1 /tmp/final-stable /tmp/final-corrupt final-evidence
+          git -C core-current checkout --quiet --detach "${RC1_SHA}"
+          (cd core-current && SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" uv build --wheel --out-dir /tmp/final-rc1)
+          rm -rf core-current/build core-current/*.egg-info
+          git -C core-current checkout --quiet --detach "${STABLE_SHA}"
+          (cd core-current && SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" uv build --wheel --out-dir /tmp/final-stable)
+          RC1_WHEEL=$(find /tmp/final-rc1 -maxdepth 1 -name 'nexus_core-*.whl' -print -quit)
+          STABLE_WHEEL=$(find /tmp/final-stable -maxdepth 1 -name 'nexus_core-*.whl' -print -quit)
+          test "sha256:$(sha256sum "${RC1_WHEEL}" | awk '{print $1}')" = "sha256:46b35d1a4d021b0e26dba553eda7b2f32a3b5e67f7f26664a2adcaa753d4b888"
+          test "sha256:$(sha256sum "${STABLE_WHEEL}" | awk '{print $1}')" = "sha256:0ba1529947738c5bad71a4bc7f157443787d1ace879ebad9c0044cc63b2081d1"
+
+          python -m venv /tmp/final-upgrade-venv
+          PIP=/tmp/final-upgrade-venv/bin/pip
+          PY=/tmp/final-upgrade-venv/bin/python
+          "${PIP}" install --quiet "${RC1_WHEEL}"
+          "${PY}" - <<'PY' > final-evidence/installed-before.json
+          import hashlib, json
+          import product.protocol as p
+          from pathlib import Path
+          path = Path(p.__file__)
+          assert p.PUBLIC_PROTOCOL_VERSION == "1.0.0-rc.1"
+          print(json.dumps({"protocol_version": p.PUBLIC_PROTOCOL_VERSION, "protocol_file": str(path), "protocol_file_sha256": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()}, sort_keys=True))
+          PY
+
+          CORRUPT=/tmp/final-corrupt/$(basename "${STABLE_WHEEL}")
+          python - "${STABLE_WHEEL}" "${CORRUPT}" <<'PY'
+          from pathlib import Path
+          import sys
+          data = Path(sys.argv[1]).read_bytes()
+          assert len(data) > 1000
+          Path(sys.argv[2]).write_bytes(data[: len(data)//2])
+          PY
+          set +e
+          "${PIP}" install --force-reinstall --no-deps "${CORRUPT}" > final-evidence/failed-upgrade.log 2>&1
+          code=$?
+          set -e
+          cat final-evidence/failed-upgrade.log
+          test "${code}" -ne 0
+          "${PY}" - <<'PY' > final-evidence/installed-after.json
+          import hashlib, json
+          import product.protocol as p
+          from pathlib import Path
+          path = Path(p.__file__)
+          assert p.PUBLIC_PROTOCOL_VERSION == "1.0.0-rc.1"
+          print(json.dumps({"protocol_version": p.PUBLIC_PROTOCOL_VERSION, "protocol_file": str(path), "protocol_file_sha256": "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()}, sort_keys=True))
+          PY
+          python - "${RC1_WHEEL}" "${STABLE_WHEEL}" "${CORRUPT}" "${code}" <<'PY'
+          import hashlib, json, pathlib, sys
+          before = json.load(open("final-evidence/installed-before.json"))
+          after = json.load(open("final-evidence/installed-after.json"))
+          assert before == after
+          def sha(p):
+              return "sha256:" + hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
+          payload = {
+              "schema": "nexus.core.tg8-final-failed-upgrade-falsification.v1",
+              "rc1_commit": "9e7ff0767c0d00783235e2cfa08b14865557a165",
+              "stable_commit": "ca003f4aa20490b3200b433970d7ccc65425aae4",
+              "rc1_wheel_sha256": sha(sys.argv[1]),
+              "stable_wheel_sha256": sha(sys.argv[2]),
+              "corrupt_stable_wheel_sha256": sha(sys.argv[3]),
+              "corrupt_upgrade_exit_code": int(sys.argv[4]),
+              "installed_before": before,
+              "installed_after": after,
+              "result": "FAIL_CLOSED_WITH_RC1_INSTALLATION_PRESERVED",
+              "claim_ceiling": "TG8_FAILED_UPGRADE_FALSIFICATION_ONLY",
+          }
+          pathlib.Path("final-evidence/failed-upgrade-rc1.json").write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n")
+          PY
+          git -C core-current checkout --quiet --detach "${CURRENT_SHA}"
+
+      - name: Emit workflow prechecks
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, pathlib, subprocess
+          def load(name):
+              return json.loads(pathlib.Path("api", name).read_text())
+          def ci_ok(name):
+              return any(x.get("status") == "completed" and x.get("conclusion") == "success" for x in load(name).get("check_runs", []))
+          lineages = [
+              ("c935a1f3c72514052a692e62c2b3c40e1a48a6ae", "9e7ff0767c0d00783235e2cfa08b14865557a165"),
+              ("9e7ff0767c0d00783235e2cfa08b14865557a165", "ca003f4aa20490b3200b433970d7ccc65425aae4"),
+              ("9e7ff0767c0d00783235e2cfa08b14865557a165", "a12fa34bd409fc23cc4ed458f36ed03d4d075682"),
+          ]
+          version_only = True
+          for base, head in lineages:
+              anc = subprocess.run(["git", "-C", "core-current", "merge-base", "--is-ancestor", base, head])
+              files = subprocess.check_output(["git", "-C", "core-current", "diff", "--name-only", base, head], text=True).splitlines()
+              version_only = version_only and anc.returncode == 0 and files == ["product/protocol/__init__.py"]
+          failed = load("../final-evidence/failed-upgrade-rc1.json") if False else json.loads(pathlib.Path("final-evidence/failed-upgrade-rc1.json").read_text())
+          payload = {
+              "architecture_gate": True,
+              "tg8_gate_tests": True,
+              "current_ci_success": ci_ok("check-current.json"),
+              "rc1_ci_success": ci_ok("check-rc1.json"),
+              "stable_ci_success": ci_ok("check-stable.json"),
+              "rc2_ci_success": ci_ok("check-rc2.json"),
+              "version_only_lineage": version_only,
+              "no_release_or_tag": load("releases.json") == [] and load("tags.json") == [],
+              "failed_upgrade_falsifier": failed["result"] == "FAIL_CLOSED_WITH_RC1_INSTALLATION_PRESERVED",
+          }
+          pathlib.Path("final-evidence/prechecks.json").write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n")
+          print(json.dumps(payload, sort_keys=True))
+          PY
+
+      - name: Run direct and legacy-reducer final adjudication
+        env:
+          PYTHONPATH: core-current
+        run: |
+          set -euo pipefail
+          core-current/.venv/bin/python scripts/ops/tg8_final_adjudication.py \
+            --core-current core-current \
+            --core-stable core-stable \
+            --inputs inputs \
+            --api api \
+            --prechecks final-evidence/prechecks.json \
+            --failed-upgrade final-evidence/failed-upgrade-rc1.json \
+            --out final-evidence/adjudication
+
+      - name: Upload final adjudication evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-tg8-final-adjudication-${{ env.STABLE_SHA }}
+          path: |
+            final-evidence/
+            api/core-main.json
+            api/open-issues.json
+            api/issue4.json
+            api/releases.json
+            api/tags.json
+            api/tg4-comment.json
+            api/tg5-comment.json
+            api/tg6-comment.json
+            api/tg7-terminal-comment.json
+            api/pr14.json
+            api/pr15.json
+            api/pr817.json
+          if-no-files-found: error
+          retention-days: 30
