@@ -1135,7 +1135,7 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
             behavioral_pytest=True,
         )
         verifier_script = ROOT / "scripts/ops/trusted_deletion_anchor.py"
-        controller_completed = subprocess.run(
+        subprocess.run(
             [
                 sys.executable,
                 str(verifier_script),
