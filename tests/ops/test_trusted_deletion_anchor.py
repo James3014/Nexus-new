@@ -227,13 +227,14 @@ def test_open_swe_dependency_snapshot_transition_hashes_are_exact() -> None:
 
 
 def test_core_v1_tg6_dependency_snapshot_transition_hashes_are_exact() -> None:
+    # Keep the historical test node stable while advancing the active one-use binding.
     assert trusted_anchor.TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION == (
-        780,
+        811,
         (
-            "c7d84dd5cbc4e533db65445ebb5691296f732d49f2fb39c6028745b18ca1d412",
-            "3e753af334885a2f434a94d40fc8860abd151516950e7f1e3647971f2e0dfc51",
-            "8cbbe36ab4487b0827e27f51d937a58a9e8815ccd47720a7a9e0cb4c7a19991a",
-            "4dc5d7bf464eda5cf75889021891ca7df730a4fba90b24ec3f06dc4c2c58bf93",
+            "95dc46753fa8d630ad5abcc00f0fc9bfd62e6767a8d943b027a56cddddb74bae",
+            "1ca1b7f706c9202ab6cd8df8d86f0051a6769d6fe525c954bdb326971fb65111",
+            "261ea0f2a2ffe179615d48acfa02ef89ed617e7970635ce39d70d8bede276b05",
+            "5933bdf1497f6d0e852fc26730dd4eec7985d72512e0ff061fc2ab7f59842961",
         ),
     )
 
@@ -1134,7 +1135,7 @@ def test_controller_executor_verifier_path_from_non_repository_cwd():
             behavioral_pytest=True,
         )
         verifier_script = ROOT / "scripts/ops/trusted_deletion_anchor.py"
-        subprocess.run(
+        controller_completed = subprocess.run(
             [
                 sys.executable,
                 str(verifier_script),
