@@ -50,15 +50,15 @@ RETIRED_TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION = (
         "cb5ecbb7fcce287f9bcdbb17f65a3b931f13613b6fd1608b428e1c19c5f6965a",
     ),
 )
-# Exact one-use, four-way binding for Owner-approved PR #780 (Core V1 TG6
-# package rename and dependency slim to nexus-core 28.3.0).
+# Exact one-use, four-way binding for Owner-approved PR #811 (legacy
+# distribution rename from nexus-core to nexus-legacy with lockfile alignment).
 TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] | None = (
-    780,
+    811,
     (
-        "c7d84dd5cbc4e533db65445ebb5691296f732d49f2fb39c6028745b18ca1d412",
-        "3e753af334885a2f434a94d40fc8860abd151516950e7f1e3647971f2e0dfc51",
-        "8cbbe36ab4487b0827e27f51d937a58a9e8815ccd47720a7a9e0cb4c7a19991a",
-        "4dc5d7bf464eda5cf75889021891ca7df730a4fba90b24ec3f06dc4c2c58bf93",
+        "95dc46753fa8d630ad5abcc00f0fc9bfd62e6767a8d943b027a56cddddb74bae",
+        "1ca1b7f706c9202ab6cd8df8d86f0051a6769d6fe525c954bdb326971fb65111",
+        "261ea0f2a2ffe179615d48acfa02ef89ed617e7970635ce39d70d8bede276b05",
+        "5933bdf1497f6d0e852fc26730dd4eec7985d72512e0ff061fc2ab7f59842961",
     ),
 )
 REQUIRED_EVIDENCE_KEYS = {
