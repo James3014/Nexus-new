@@ -1,0 +1,270 @@
+name: Core TG8 Current Protocol Physical Evidence
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  physical-transition:
+    runs-on: ubuntu-latest
+    env:
+      CURRENT_SHA: c935a1f3c72514052a692e62c2b3c40e1a48a6ae
+      RC_SHA: 9e7ff0767c0d00783235e2cfa08b14865557a165
+      STABLE_SHA: ca003f4aa20490b3200b433970d7ccc65425aae4
+      LEGACY_ARTIFACT_ID: "9960033003"
+      LEGACY_ARTIFACT_SHA256: 67c68ee594face7097770eb95aa58b9d75afc02a26c33ae68476c9c3a34e9d84
+      SOURCE_DATE_EPOCH: "1700000000"
+    steps:
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: latest
+
+      - name: Acquire accepted historical TG5 receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/James3014/Nexus-new/actions/artifacts/${LEGACY_ARTIFACT_ID}/zip" \
+            -o /tmp/legacy-physical.zip
+          test "$(sha256sum /tmp/legacy-physical.zip | awk '{print $1}')" = "${LEGACY_ARTIFACT_SHA256}"
+          mkdir -p /tmp/legacy-physical evidence
+          unzip -q /tmp/legacy-physical.zip -d /tmp/legacy-physical
+          test -s /tmp/legacy-physical/tg5-receipt.json
+          cp /tmp/legacy-physical/tg5-receipt.json evidence/accepted-tg5-receipt.json
+          sha256sum evidence/accepted-tg5-receipt.json > evidence/accepted-tg5-receipt.file.sha256
+
+      - name: Acquire exact current Core source
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/James3014/nexus-core.git core
+          git -C core checkout --quiet --detach "${CURRENT_SHA}"
+          test "$(git -C core rev-parse HEAD)" = "${CURRENT_SHA}"
+          test -z "$(git -C core status --porcelain)"
+
+      - name: Build each exact subject twice and require deterministic wheels
+        working-directory: core
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/tg8-wheels/{current-a,current-b,rc-a,rc-b,stable-a,stable-b}
+          build_pair() {
+            label="$1"
+            sha="$2"
+            expected_protocol="$3"
+            git checkout --quiet --detach "$sha"
+            test "$(git rev-parse HEAD)" = "$sha"
+            test -z "$(git status --porcelain)"
+            python - "$expected_protocol" <<'PY'
+          import pathlib, re, sys
+          expected = sys.argv[1]
+          text = pathlib.Path('product/protocol/__init__.py').read_text()
+          match = re.search(r'^PUBLIC_PROTOCOL_VERSION = "([^"]+)"$', text, re.M)
+          assert match and match.group(1) == expected, (match.group(1) if match else None, expected)
+          PY
+            SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" uv build --wheel --out-dir "/tmp/tg8-wheels/${label}-a"
+            rm -rf build *.egg-info
+            SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" uv build --wheel --out-dir "/tmp/tg8-wheels/${label}-b"
+            a=$(find "/tmp/tg8-wheels/${label}-a" -maxdepth 1 -name 'nexus_core-*.whl' -print -quit)
+            b=$(find "/tmp/tg8-wheels/${label}-b" -maxdepth 1 -name 'nexus_core-*.whl' -print -quit)
+            test -n "$a" && test -n "$b"
+            test "$(basename "$a")" = "$(basename "$b")"
+            test "$(sha256sum "$a" | awk '{print $1}')" = "$(sha256sum "$b" | awk '{print $1}')"
+          }
+          build_pair current "${CURRENT_SHA}" "0.1.0-experimental"
+          build_pair rc "${RC_SHA}" "1.0.0-rc.1"
+          build_pair stable "${STABLE_SHA}" "1.0.0"
+          git checkout --quiet --detach "${CURRENT_SHA}"
+
+      - name: Record exact wheel identities
+        run: |
+          set -euo pipefail
+          for label in current rc stable; do
+            wheel=$(find "/tmp/tg8-wheels/${label}-a" -maxdepth 1 -name 'nexus_core-*.whl' -print -quit)
+            test -n "$wheel"
+            printf '%s  %s\n' "$(sha256sum "$wheel" | awk '{print $1}')" "$(basename "$wheel")" > "evidence/${label}-wheel.sha256"
+          done
+          test "$(cut -d' ' -f1 evidence/current-wheel.sha256)" != "$(cut -d' ' -f1 evidence/rc-wheel.sha256)"
+          test "$(cut -d' ' -f1 evidence/rc-wheel.sha256)" != "$(cut -d' ' -f1 evidence/stable-wheel.sha256)"
+
+      - name: Create isolated migration environment and install current
+        run: |
+          set -euo pipefail
+          python -m venv /tmp/tg8-venv
+          PIP=/tmp/tg8-venv/bin/pip
+          PY=/tmp/tg8-venv/bin/python
+          CURRENT_WHEEL=$(find /tmp/tg8-wheels/current-a -maxdepth 1 -name 'nexus_core-*.whl' -print -quit)
+          "$PIP" install --quiet "$CURRENT_WHEEL"
+          /tmp/tg8-venv/bin/nexus-certify --help >/dev/null
+          "$PY" - "0.1.0-experimental" "evidence/accepted-tg5-receipt.json" <<'PY'
+          import json, pathlib, sys
+          from product.evidence import _hash
+          from product.protocol import PUBLIC_PROTOCOL_VERSION
+          from product.runtime.schemas import validate_receipt_verify_request
+          expected, receipt_path = sys.argv[1], pathlib.Path(sys.argv[2])
+          receipt = json.loads(receipt_path.read_text())
+          assert PUBLIC_PROTOCOL_VERSION == expected
+          assert validate_receipt_verify_request({"receipt": receipt, "requested_scope": "ENVELOPE_ONLY", "original_inputs": None}) == ()
+          claimed = receipt["receipt_hash"]
+          body = {k: v for k, v in receipt.items() if k != "receipt_hash"}
+          assert claimed == _hash(body)
+          PY
+          sha256sum -c evidence/accepted-tg5-receipt.file.sha256
+
+      - name: Upgrade current to exact RC and verify old receipt readability
+        run: |
+          set -euo pipefail
+          PIP=/tmp/tg8-venv/bin/pip
+          PY=/tmp/tg8-venv/bin/python
+          RC_WHEEL=$(find /tmp/tg8-wheels/rc-a -maxdepth 1 -name 'nexus_core-*.whl' -print -quit)
+          "$PIP" install --quiet --force-reinstall --no-deps "$RC_WHEEL"
+          /tmp/tg8-venv/bin/nexus-certify --help >/dev/null
+          "$PY" - "1.0.0-rc.1" "evidence/accepted-tg5-receipt.json" <<'PY'
+          import json, pathlib, sys
+          from product.evidence import _hash
+          from product.protocol import PUBLIC_PROTOCOL_VERSION
+          from product.runtime.schemas import validate_receipt_verify_request
+          expected, receipt_path = sys.argv[1], pathlib.Path(sys.argv[2])
+          receipt = json.loads(receipt_path.read_text())
+          assert PUBLIC_PROTOCOL_VERSION == expected
+          assert validate_receipt_verify_request({"receipt": receipt, "requested_scope": "ENVELOPE_ONLY", "original_inputs": None}) == ()
+          claimed = receipt["receipt_hash"]
+          body = {k: v for k, v in receipt.items() if k != "receipt_hash"}
+          assert claimed == _hash(body)
+          PY
+          sha256sum -c evidence/accepted-tg5-receipt.file.sha256
+
+      - name: Upgrade RC to exact Stable and verify old receipt readability
+        run: |
+          set -euo pipefail
+          PIP=/tmp/tg8-venv/bin/pip
+          PY=/tmp/tg8-venv/bin/python
+          STABLE_WHEEL=$(find /tmp/tg8-wheels/stable-a -maxdepth 1 -name 'nexus_core-*.whl' -print -quit)
+          "$PIP" install --quiet --force-reinstall --no-deps "$STABLE_WHEEL"
+          /tmp/tg8-venv/bin/nexus-certify --help >/dev/null
+          "$PY" - "1.0.0" "evidence/accepted-tg5-receipt.json" <<'PY'
+          import json, pathlib, sys
+          from product.evidence import _hash
+          from product.protocol import PUBLIC_PROTOCOL_VERSION
+          from product.runtime.schemas import validate_receipt_verify_request
+          expected, receipt_path = sys.argv[1], pathlib.Path(sys.argv[2])
+          receipt = json.loads(receipt_path.read_text())
+          assert PUBLIC_PROTOCOL_VERSION == expected
+          assert validate_receipt_verify_request({"receipt": receipt, "requested_scope": "ENVELOPE_ONLY", "original_inputs": None}) == ()
+          claimed = receipt["receipt_hash"]
+          body = {k: v for k, v in receipt.items() if k != "receipt_hash"}
+          assert claimed == _hash(body)
+          PY
+          sha256sum -c evidence/accepted-tg5-receipt.file.sha256
+
+      - name: Falsify failed upgrade without corrupting Stable installation
+        run: |
+          set -euo pipefail
+          PIP=/tmp/tg8-venv/bin/pip
+          PY=/tmp/tg8-venv/bin/python
+          cp "$(find /tmp/tg8-wheels/stable-a -maxdepth 1 -name 'nexus_core-*.whl' -print -quit)" /tmp/nexus_core-0.1.0-py3-none-any-corrupt.whl
+          printf 'CORRUPT' >> /tmp/nexus_core-0.1.0-py3-none-any-corrupt.whl
+          set +e
+          "$PIP" install --quiet --force-reinstall --no-deps /tmp/nexus_core-0.1.0-py3-none-any-corrupt.whl > evidence/failed-upgrade.log 2>&1
+          code=$?
+          set -e
+          cat evidence/failed-upgrade.log
+          test "$code" -ne 0
+          "$PY" - <<'PY'
+          from product.protocol import PUBLIC_PROTOCOL_VERSION
+          assert PUBLIC_PROTOCOL_VERSION == "1.0.0"
+          PY
+          /tmp/tg8-venv/bin/nexus-certify --help >/dev/null
+          sha256sum -c evidence/accepted-tg5-receipt.file.sha256
+
+      - name: Roll back Stable to RC then current
+        run: |
+          set -euo pipefail
+          PIP=/tmp/tg8-venv/bin/pip
+          PY=/tmp/tg8-venv/bin/python
+          RC_WHEEL=$(find /tmp/tg8-wheels/rc-a -maxdepth 1 -name 'nexus_core-*.whl' -print -quit)
+          CURRENT_WHEEL=$(find /tmp/tg8-wheels/current-a -maxdepth 1 -name 'nexus_core-*.whl' -print -quit)
+          "$PIP" install --quiet --force-reinstall --no-deps "$RC_WHEEL"
+          "$PY" - <<'PY'
+          from product.protocol import PUBLIC_PROTOCOL_VERSION
+          assert PUBLIC_PROTOCOL_VERSION == "1.0.0-rc.1"
+          PY
+          /tmp/tg8-venv/bin/nexus-certify --help >/dev/null
+          sha256sum -c evidence/accepted-tg5-receipt.file.sha256
+          "$PIP" install --quiet --force-reinstall --no-deps "$CURRENT_WHEEL"
+          "$PY" - "evidence/accepted-tg5-receipt.json" <<'PY'
+          import json, pathlib, sys
+          from product.evidence import _hash
+          from product.protocol import PUBLIC_PROTOCOL_VERSION
+          from product.runtime.schemas import validate_receipt_verify_request
+          receipt_path = pathlib.Path(sys.argv[1])
+          receipt = json.loads(receipt_path.read_text())
+          assert PUBLIC_PROTOCOL_VERSION == "0.1.0-experimental"
+          assert validate_receipt_verify_request({"receipt": receipt, "requested_scope": "ENVELOPE_ONLY", "original_inputs": None}) == ()
+          claimed = receipt["receipt_hash"]
+          body = {k: v for k, v in receipt.items() if k != "receipt_hash"}
+          assert claimed == _hash(body)
+          PY
+          /tmp/tg8-venv/bin/nexus-certify --help >/dev/null
+          sha256sum -c evidence/accepted-tg5-receipt.file.sha256
+
+      - name: Emit exact TG8 physical transition summary
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          def wheel_row(label, sha):
+              wheel = next(Path(f'/tmp/tg8-wheels/{label}-a').glob('nexus_core-*.whl'))
+              twin = next(Path(f'/tmp/tg8-wheels/{label}-b').glob('nexus_core-*.whl'))
+              digest = 'sha256:' + hashlib.sha256(wheel.read_bytes()).hexdigest()
+              twin_digest = 'sha256:' + hashlib.sha256(twin.read_bytes()).hexdigest()
+              assert digest == twin_digest
+              return {'commit': sha, 'wheel': wheel.name, 'wheel_sha256': digest, 'reproducible_build': True}
+          receipt_path = Path('evidence/accepted-tg5-receipt.json')
+          receipt = json.loads(receipt_path.read_text())
+          payload = {
+              'schema': 'nexus.core.tg8-current-protocol-physical-transition.v1',
+              'controller_repository': 'James3014/Nexus-new',
+              'subjects': {
+                  'current': wheel_row('current', os.environ['CURRENT_SHA']),
+                  'rc': wheel_row('rc', os.environ['RC_SHA']),
+                  'stable': wheel_row('stable', os.environ['STABLE_SHA']),
+              },
+              'accepted_historical_receipt_hash': receipt['receipt_hash'],
+              'accepted_historical_receipt_file_sha256': 'sha256:' + hashlib.sha256(receipt_path.read_bytes()).hexdigest(),
+              'results': {
+                  'current_install': 'PASS',
+                  'current_to_rc_upgrade': 'PASS',
+                  'rc_to_stable_upgrade': 'PASS',
+                  'failed_upgrade_preserves_stable': 'PASS',
+                  'stable_to_rc_rollback': 'PASS',
+                  'rc_to_current_rollback': 'PASS',
+                  'old_receipt_readable_at_current': 'PASS',
+                  'old_receipt_readable_at_rc': 'PASS',
+                  'old_receipt_readable_at_stable': 'PASS',
+                  'old_receipt_bytes_and_hash_preserved': 'PASS',
+              },
+              'claim_ceiling': 'TG8_PHYSICAL_TRANSITION_EVIDENCE_ONLY',
+          }
+          Path('evidence/tg8-physical-transition-summary.json').write_text(json.dumps(payload, sort_keys=True, indent=2) + '\n')
+          print(json.dumps(payload, sort_keys=True))
+          PY
+
+      - name: Upload TG8 physical transition evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-tg8-current-protocol-physical-${{ env.STABLE_SHA }}
+          path: evidence/
+          if-no-files-found: error
+          retention-days: 14
