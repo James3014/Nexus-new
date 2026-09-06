@@ -27,12 +27,13 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from nexus.contracts.break_glass_recovery import (  # noqa: E402
     BreakGlassAppliedEvidence,
-    BreakGlassGovernanceCanaryEvidence,
     OwnerActivationEnvelope,
+    OwnerCanaryEnvelope,
     OwnerIntegrationEnvelope,
     OwnerTerminalEnvelope,
     OwnerVerificationEnvelope,
     integration_readback_from_github,
+    owner_canary_from_github_comment,
     owner_envelope_from_github_comment,
     owner_integration_from_github_comment,
     owner_terminals_from_github_comments,
@@ -136,6 +137,10 @@ def _fetch_verification(comment_id: int) -> OwnerVerificationEnvelope:
 
 def _fetch_integration(comment_id: int) -> OwnerIntegrationEnvelope:
     return owner_integration_from_github_comment(_fetch_comment(comment_id))
+
+
+def _fetch_canary(comment_id: int) -> OwnerCanaryEnvelope:
+    return owner_canary_from_github_comment(_fetch_comment(comment_id))
 
 
 def _fetch_integration_readback(
@@ -274,11 +279,8 @@ def _record_verified(args: argparse.Namespace) -> int:
 
 def _consume(args: argparse.Namespace) -> int:
     envelope = _fetch_envelope(args.comment_id)
-    try:
-        payload = json.loads(args.canary_json.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        raise BreakGlassRecoveryError("GOVERNANCE_CANARY_MALFORMED") from exc
-    canary = BreakGlassGovernanceCanaryEvidence.model_validate(payload)
+    _assert_not_globally_terminal(envelope)
+    canary = _fetch_canary(args.canary_comment_id)
     result = consume_source_repair_authority(envelope, canary, now=_now())
     _print(result)
     return 0
@@ -367,7 +369,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     consume = commands.add_parser("consume")
     activation(consume)
-    consume.add_argument("--canary-json", type=Path, required=True)
+    consume.add_argument("--canary-comment-id", type=int, required=True)
     consume.set_defaults(handler=_consume)
 
     inspect = commands.add_parser("inspect")

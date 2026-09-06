@@ -135,10 +135,12 @@ second merge attempt.
 
 ### REQ-009 — Authority collapse
 
-SOURCE_REPAIR `CONSUMED` SHALL exist only after VERIFIED plus a fresh typed
-normal-governance canary proving source/runtime identity, action binding, normal
-authority readback, one bounded governance operation receipt, and verifier
-receipt. It SHALL record SOURCE_REPAIR as the only granted source effect plus
+SOURCE_REPAIR `CONSUMED` SHALL exist only after VERIFIED plus a fresh Owner
+GitHub canary comment whose canonical payload binds physical evidence for
+source/runtime identity, action binding, normal authority readback, one bounded
+governance operation receipt, and verifier receipt. A caller-provided JSON blob,
+Boolean, or opaque hashes are not sufficient canary provenance. It SHALL record
+SOURCE_REPAIR as the only granted source effect plus
 explicit excluded effects. Emergency integration has its own terminal record
 bound to authoritative merge/main readback. After recovery succeeds, the Owner
 SHALL also publish a canonical `nexus.break_glass_owner_terminal.v1` comment
@@ -166,8 +168,8 @@ break-glass authority is terminal and replay is denied.
 | AC-004 | REQ-005 | Exact base/tree prepares and authorized paths apply. | Wrong base/tree, README scope widening, forbidden standing-grant path, and `..` escape fail. |
 | AC-005 | REQ-006/007 | APPLIED and VERIFIED bind one immutable repair subject; VERIFIED is rooted in an Owner GitHub verification comment whose exact-head checks are all successful. | Caller-only verifier/hash, verifier==implementer, check-head substitution, and commit substitution fail. |
 | AC-006 | REQ-008 | Exact PREPARED retry is idempotent; source and integration attempts reconcile through durable terminal records. | Phase skip, conflicting APPLIED retry, transition tamper, symlink state, and blind post-merge retry fail. |
-| AC-007 | REQ-007A/009 | A separate Owner integration grant rebinds the freshly observed current main and exact PR/head/checks; only an existing exact-head/CAS merge sink may consume it. Source-repair base may remain older immutable provenance. Source CONSUMED requires a fresh normal-governance canary plus a global Owner terminal/revocation comment. | Source authority cannot merge; stale integration base is rejected by the merge sink; integration grant cannot widen effect; local and fresh-session global post-consume replay fail. |
-| AC-008 | REQ-010 | Integrated revision passes focused/regression evidence and a fresh normal-governance canary, then terminal/replay-denial evidence is recorded. | Green source tests alone or merged PR without canary cannot close #806. |
+| AC-007 | REQ-007A/009 | A separate Owner integration grant rebinds the freshly observed current main and exact PR/head/checks; only an existing exact-head/CAS merge sink may consume it. Source-repair base may remain older immutable provenance. Source CONSUMED requires a fresh Owner GitHub canary comment bound to the physical normal-governance evidence plus a global Owner terminal/revocation comment. | Source authority cannot merge; stale integration base is rejected by the merge sink; integration grant cannot widen effect; caller-local canary JSON/hashes cannot consume source authority; local and fresh-session global post-consume replay fail. |
+| AC-008 | REQ-010 | Integrated revision passes focused/regression evidence and a fresh Owner-bound normal-governance canary, then terminal/replay-denial evidence is recorded. | Green source tests alone, merged PR without physical canary evidence, or caller-authored canary JSON cannot close #806. |
 | AC-009 | REQ-003/007A/009 | Controlled self-hosting E2E starts with normal governance unavailable, exercises real break-glass source/integration contracts, restores the normal-path canary, consumes emergency authority, and proves replay denial. | Harness that never begins in a failed-governance state or never exercises replay denial is not sufficient. |
 
 ## Verification set for G1 source Candidate

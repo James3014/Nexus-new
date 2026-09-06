@@ -85,8 +85,9 @@ For a qualifying bounded repair:
    checks. A retry keeps the same `task_id` and uses fresh `attempt_id`,
    `action_id`, and `idempotency_key` values; it must not create a second
    Controller or a `v2`/`v3` task identity.
-8. Obtain independent verification of the frozen commit from evidence outside
-   the implementer's own assertion. For #806, the production consumer requires
+8. Obtain independent review and verification of the frozen commit by an
+   authority distinct from the implementer and from evidence outside the
+   implementer's own assertion. For #806, the production consumer requires
    an Owner GitHub verification comment bound to the exact commit/tree/full-diff
    and successful exact-head check run identities; a caller-supplied verifier
    string/hash is insufficient.
@@ -109,9 +110,13 @@ For a qualifying bounded repair:
    `SOURCE_REPAIR`, `EMERGENCY_INTEGRATION`, and `RUNTIME_RECOVERY` are separate
    Owner authorities. A source-repair activation cannot be reused for merge or
    runtime effects.
-12. After the normal governance canary succeeds, record SOURCE_REPAIR as
-   `CONSUMED`, binding the canary evidence, and publish a canonical Owner
-   terminal/revocation comment bound to the original source activation. Recovery
+12. After the normal governance canary succeeds, publish a canonical Owner
+   canary comment bound to the physical source/runtime identity, action binding,
+   normal authority readback, bounded governance operation, and verifier receipt.
+   Caller-local JSON or opaque hashes are not sufficient. Re-read that exact
+   Owner canary comment, record SOURCE_REPAIR as `CONSUMED` binding its payload,
+   and publish a canonical Owner terminal/revocation comment bound to the original
+   source activation. Recovery
    consumers must scan that global terminal witness before later source mutation
    so a fresh session cannot replay authority merely because it lacks the prior
    host-local state. Then prove both source-repair and any emergency-integration

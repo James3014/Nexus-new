@@ -10,12 +10,14 @@ from nexus.contracts.break_glass_recovery import (
     BreakGlassActivationPayload,
     BreakGlassContractError,
     BreakGlassEffectClass,
+    BreakGlassOwnerCanaryPayload,
     BreakGlassOwnerIntegrationPayload,
     BreakGlassOwnerTerminalPayload,
     BreakGlassOwnerVerificationPayload,
     OwnerActivationEnvelope,
     canonical_sha256,
     integration_readback_from_github,
+    owner_canary_from_github_comment,
     owner_envelope_from_github_comment,
     owner_integration_from_github_comment,
     owner_terminal_from_github_comment,
@@ -241,6 +243,28 @@ def integration_payload_dict() -> dict[str, object]:
     }
 
 
+def canary_payload_dict() -> dict[str, object]:
+    return {
+        "schema": "nexus.break_glass_owner_canary.v1",
+        "repository": "James3014/Nexus-new",
+        "issue": 806,
+        "owner_login": "James3014",
+        "recovery_id": "BG-806-20260906",
+        "source_attempt_id": "BG-806-A1",
+        "source_activation_payload_sha256": EXPECTED_PAYLOAD_SHA256,
+        "integrated_main_sha": "8" * 40,
+        "source_runtime_identity_sha256": "9" * 64,
+        "action_binding_sha256": "a" * 64,
+        "normal_authority_readback_sha256": "b" * 64,
+        "governance_operation_receipt_sha256": "c" * 64,
+        "verifier_receipt_sha256": "d" * 64,
+        "observed_at": "2026-09-06T08:00:00+08:00",
+        "normal_governance_restored": True,
+        "issued_at": "2026-09-06T08:01:00+08:00",
+        "claim_ceiling": "post_recovery_canary_only",
+    }
+
+
 def raw_owner_evidence_comment(
     *, marker: str, payload: dict[str, object], comment_id: int
 ) -> dict[str, object]:
@@ -309,6 +333,40 @@ def test_integration_comment_tamper_is_rejected_by_canonical_hash() -> None:
     comment["body"] = str(comment["body"]).replace('"pr_number":808', '"pr_number":809')
     with pytest.raises(BreakGlassContractError, match="GITHUB_COMMENT_PAYLOAD_HASH_MISMATCH"):
         owner_integration_from_github_comment(comment)
+
+
+def test_owner_canary_comment_binds_post_recovery_physical_evidence() -> None:
+    payload = canary_payload_dict()
+    parsed = owner_canary_from_github_comment(
+        raw_owner_evidence_comment(
+            marker="Canonical canary payload SHA-256",
+            payload=payload,
+            comment_id=6000000007,
+        )
+    )
+    assert isinstance(parsed.payload, BreakGlassOwnerCanaryPayload)
+    assert parsed.payload.normal_governance_restored is True
+    assert parsed.payload.integrated_main_sha == "8" * 40
+    assert parsed.payload.source_activation_payload_sha256 == EXPECTED_PAYLOAD_SHA256
+
+
+def test_owner_canary_comment_tamper_is_rejected() -> None:
+    payload = canary_payload_dict()
+    comment = raw_owner_evidence_comment(
+        marker="Canonical canary payload SHA-256",
+        payload=payload,
+        comment_id=6000000007,
+    )
+    comment["body"] = str(comment["body"]).replace('"integrated_main_sha":"' + "8" * 40, '"integrated_main_sha":"' + "9" * 40)
+    with pytest.raises(BreakGlassContractError, match="GITHUB_COMMENT_PAYLOAD_HASH_MISMATCH"):
+        owner_canary_from_github_comment(comment)
+
+
+def test_owner_canary_requires_observation_before_owner_evidence() -> None:
+    payload = canary_payload_dict()
+    payload["issued_at"] = "2026-09-06T07:59:00+08:00"
+    with pytest.raises(ValidationError, match="CANARY_ISSUED_BEFORE_OBSERVED"):
+        BreakGlassOwnerCanaryPayload.model_validate(payload)
 
 
 def terminal_payload_dict(*, state: str = "CONSUMED") -> dict[str, object]:

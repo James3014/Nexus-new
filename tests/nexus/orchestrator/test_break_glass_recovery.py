@@ -11,6 +11,7 @@ from nexus.contracts.break_glass_recovery import (
     BreakGlassAppliedEvidence,
     BreakGlassGovernanceCanaryEvidence,
     OwnerActivationEnvelope,
+    OwnerCanaryEnvelope,
     OwnerIntegrationEnvelope,
     OwnerTerminalEnvelope,
     OwnerVerificationEnvelope,
@@ -224,6 +225,45 @@ def canary(*, main_sha: str = "8" * 40) -> BreakGlassGovernanceCanaryEvidence:
     )
 
 
+def owner_canary(
+    evidence: BreakGlassGovernanceCanaryEvidence | None = None,
+    *,
+    source_hash: str | None = None,
+) -> OwnerCanaryEnvelope:
+    source = envelope()
+    observed = evidence or canary()
+    payload = {
+        "schema": "nexus.break_glass_owner_canary.v1",
+        "repository": "James3014/Nexus-new",
+        "issue": 806,
+        "owner_login": "James3014",
+        "recovery_id": observed.recovery_id,
+        "source_attempt_id": observed.source_attempt_id,
+        "source_activation_payload_sha256": source_hash or source.payload_sha256,
+        "integrated_main_sha": observed.integrated_main_sha,
+        "source_runtime_identity_sha256": observed.source_runtime_identity_sha256,
+        "action_binding_sha256": observed.action_binding_sha256,
+        "normal_authority_readback_sha256": observed.normal_authority_readback_sha256,
+        "governance_operation_receipt_sha256": observed.governance_operation_receipt_sha256,
+        "verifier_receipt_sha256": observed.verifier_receipt_sha256,
+        "observed_at": observed.model_dump(mode="json")["observed_at"],
+        "normal_governance_restored": True,
+        "issued_at": "2026-09-06T08:01:00+08:00",
+        "claim_ceiling": "post_recovery_canary_only",
+    }
+    payload_hash = canonical_sha256(payload)
+    return OwnerCanaryEnvelope.model_validate({
+        "repository": "James3014/Nexus-new",
+        "issue": 806,
+        "comment_id": 6000000007,
+        "comment_url": "https://github.com/James3014/Nexus-new/issues/806#issuecomment-6000000007",
+        "author_login": "James3014",
+        "comment_body_sha256": "f" * 64,
+        "payload_sha256": payload_hash,
+        "payload": payload,
+    })
+
+
 def terminal_envelope(
     *, recovery_id: str = "BG-806-20260906", source_hash: str | None = None
 ) -> OwnerTerminalEnvelope:
@@ -309,14 +349,18 @@ def test_full_chain_requires_independent_verifier_and_denies_replay(tmp_path: Pa
         state_root=tmp_path,
     )
     assert verified["phase"] == "VERIFIED"
-    consumed = consume_source_repair_authority(env, canary(), now=NOW, state_root=tmp_path)
+    consumed = consume_source_repair_authority(
+        env, owner_canary(), now=NOW, state_root=tmp_path
+    )
     assert consumed["phase"] == "CONSUMED"
     assert consumed["evidence"]["granted_effect"] == "SOURCE_REPAIR_ONLY"
     assert "GITHUB_MERGE" in consumed["evidence"]["excluded_effects"]
     assert "RUNTIME_RECOVERY" in consumed["evidence"]["excluded_effects"]
 
     with pytest.raises(BreakGlassRecoveryError, match="RECOVERY_REPLAY_DENIED"):
-        consume_source_repair_authority(env, canary(), now=NOW, state_root=tmp_path)
+        consume_source_repair_authority(
+            env, owner_canary(), now=NOW, state_root=tmp_path
+        )
     with pytest.raises(BreakGlassRecoveryError, match="RECOVERY_REPLAY_DENIED"):
         record_source_repair_applied(env, app, now=NOW, state_root=tmp_path)
 
@@ -331,7 +375,9 @@ def test_phase_skips_fail_closed(tmp_path: Path) -> None:
     with pytest.raises(BreakGlassRecoveryError, match="APPLIED_EVIDENCE_REQUIRED"):
         record_source_repair_verified(env, verification_envelope(), now=NOW, state_root=tmp_path)
     with pytest.raises(BreakGlassRecoveryError, match="VERIFIED_EVIDENCE_REQUIRED"):
-        consume_source_repair_authority(env, canary(), now=NOW, state_root=tmp_path)
+        consume_source_repair_authority(
+            env, owner_canary(), now=NOW, state_root=tmp_path
+        )
 
 
 def test_scope_widening_and_forbidden_change_fail_before_applied_transition(tmp_path: Path) -> None:
@@ -525,8 +571,37 @@ def test_source_consumption_rejects_canary_identity_substitution(tmp_path: Path)
     bad_data = canary().model_dump(mode="json")
     bad_data["recovery_id"] = "BG-OTHER"
     bad_canary = BreakGlassGovernanceCanaryEvidence.model_validate(bad_data)
-    with pytest.raises(BreakGlassRecoveryError, match="GOVERNANCE_CANARY_MISMATCH"):
-        consume_source_repair_authority(source, bad_canary, now=NOW, state_root=tmp_path)
+    with pytest.raises(
+        BreakGlassRecoveryError, match="GOVERNANCE_CANARY_AUTHORITY_MISMATCH"
+    ):
+        consume_source_repair_authority(
+            source, owner_canary(bad_canary), now=NOW, state_root=tmp_path
+        )
+
+
+def test_source_consumption_rejects_canary_activation_hash_substitution(
+    tmp_path: Path,
+) -> None:
+    source = envelope()
+    verification = verification_envelope()
+    prepare_source_repair(
+        source,
+        observed_base_sha=BASE,
+        observed_base_tree=TREE,
+        now=NOW,
+        state_root=tmp_path,
+    )
+    record_source_repair_applied(source, applied(), now=NOW, state_root=tmp_path)
+    record_source_repair_verified(source, verification, now=NOW, state_root=tmp_path)
+    with pytest.raises(
+        BreakGlassRecoveryError, match="GOVERNANCE_CANARY_AUTHORITY_MISMATCH"
+    ):
+        consume_source_repair_authority(
+            source,
+            owner_canary(source_hash="e" * 64),
+            now=NOW,
+            state_root=tmp_path,
+        )
 
 
 def test_emergency_integration_rebinds_current_main_after_source_base_drift(
@@ -635,7 +710,7 @@ def test_self_hosting_recovery_e2e_restores_normal_path_then_collapses_authority
 
     restored_canary = normal_governance_canary()
     consumed = consume_source_repair_authority(
-        source, restored_canary, now=NOW, state_root=tmp_path
+        source, owner_canary(restored_canary), now=NOW, state_root=tmp_path
     )
     assert consumed["evidence"]["governance_canary_sha256"] == restored_canary.evidence_sha256
     assert consumed["evidence"]["authority_terminal"] is True

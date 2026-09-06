@@ -479,6 +479,73 @@ class BreakGlassOwnerIntegrationPayload(_FrozenModel):
             raise BreakGlassContractError("INTEGRATION_EXPIRED")
 
 
+class BreakGlassOwnerCanaryPayload(_FrozenModel):
+    schema: Literal["nexus.break_glass_owner_canary.v1"] = (
+        "nexus.break_glass_owner_canary.v1"
+    )
+    repository: Literal[_ALLOWED_REPOSITORY]
+    issue: Literal[_ALLOWED_ISSUE]
+    owner_login: Literal[_ALLOWED_OWNER]
+    recovery_id: StrictStr
+    source_attempt_id: StrictStr
+    source_activation_payload_sha256: StrictStr
+    integrated_main_sha: StrictStr
+    source_runtime_identity_sha256: StrictStr
+    action_binding_sha256: StrictStr
+    normal_authority_readback_sha256: StrictStr
+    governance_operation_receipt_sha256: StrictStr
+    verifier_receipt_sha256: StrictStr
+    observed_at: datetime
+    normal_governance_restored: Literal[True]
+    issued_at: datetime
+    claim_ceiling: Literal["post_recovery_canary_only"]
+
+    @field_validator("recovery_id", "source_attempt_id")
+    @classmethod
+    def validate_id(cls, value: str) -> str:
+        if not _SAFE_ID.fullmatch(value) or value != value.strip():
+            raise ValueError("RECOVERY_IDENTITY_INVALID")
+        return value
+
+    @field_validator(
+        "source_activation_payload_sha256",
+        "source_runtime_identity_sha256",
+        "action_binding_sha256",
+        "normal_authority_readback_sha256",
+        "governance_operation_receipt_sha256",
+        "verifier_receipt_sha256",
+    )
+    @classmethod
+    def validate_sha256(cls, value: str) -> str:
+        if not _SHA64.fullmatch(value):
+            raise ValueError("SHA256_INVALID")
+        return value
+
+    @field_validator("integrated_main_sha")
+    @classmethod
+    def validate_main_sha(cls, value: str) -> str:
+        if not _SHA40.fullmatch(value):
+            raise ValueError("GIT_SHA_INVALID")
+        return value
+
+    @field_validator("observed_at", "issued_at")
+    @classmethod
+    def validate_timestamp(cls, value: datetime) -> datetime:
+        if value.tzinfo is None:
+            raise ValueError("TIMEZONE_REQUIRED")
+        return value
+
+    @model_validator(mode="after")
+    def validate_semantics(self) -> "BreakGlassOwnerCanaryPayload":
+        if _utc(self.issued_at) < _utc(self.observed_at):
+            raise ValueError("CANARY_ISSUED_BEFORE_OBSERVED")
+        return self
+
+    @property
+    def payload_sha256(self) -> str:
+        return canonical_sha256(self.model_dump(mode="json"))
+
+
 class _OwnerEvidenceEnvelope(_FrozenModel):
     repository: Literal[_ALLOWED_REPOSITORY]
     issue: Literal[_ALLOWED_ISSUE]
@@ -538,6 +605,25 @@ class OwnerIntegrationEnvelope(_OwnerEvidenceEnvelope):
 
     @model_validator(mode="after")
     def validate_envelope(self) -> "OwnerIntegrationEnvelope":
+        if self.payload.owner_login != self.author_login:
+            raise ValueError("OWNER_IDENTITY_MISMATCH")
+        if self.payload.repository != self.repository or self.payload.issue != self.issue:
+            raise ValueError("OWNER_PROVENANCE_SCOPE_MISMATCH")
+        if self.payload.payload_sha256 != self.payload_sha256:
+            raise ValueError("PAYLOAD_HASH_MISMATCH")
+        if not self.comment_url.endswith(str(self.comment_id)):
+            raise ValueError("COMMENT_ID_URL_MISMATCH")
+        return self
+
+
+class OwnerCanaryEnvelope(_OwnerEvidenceEnvelope):
+    schema: Literal["nexus.break_glass_owner_canary_envelope.v1"] = (
+        "nexus.break_glass_owner_canary_envelope.v1"
+    )
+    payload: BreakGlassOwnerCanaryPayload
+
+    @model_validator(mode="after")
+    def validate_envelope(self) -> "OwnerCanaryEnvelope":
         if self.payload.owner_login != self.author_login:
             raise ValueError("OWNER_IDENTITY_MISMATCH")
         if self.payload.repository != self.repository or self.payload.issue != self.issue:
@@ -644,11 +730,18 @@ def _owner_evidence_from_github_comment(
     marker: str,
     payload_model: type[BreakGlassOwnerVerificationPayload]
     | type[BreakGlassOwnerIntegrationPayload]
+    | type[BreakGlassOwnerCanaryPayload]
     | type[BreakGlassOwnerTerminalPayload],
     envelope_model: type[OwnerVerificationEnvelope]
     | type[OwnerIntegrationEnvelope]
+    | type[OwnerCanaryEnvelope]
     | type[OwnerTerminalEnvelope],
-) -> OwnerVerificationEnvelope | OwnerIntegrationEnvelope | OwnerTerminalEnvelope:
+) -> (
+    OwnerVerificationEnvelope
+    | OwnerIntegrationEnvelope
+    | OwnerCanaryEnvelope
+    | OwnerTerminalEnvelope
+):
     try:
         comment_id = int(comment["id"])
         comment_url = str(comment["html_url"])
@@ -712,6 +805,20 @@ def owner_integration_from_github_comment(
     )
     if not isinstance(envelope, OwnerIntegrationEnvelope):
         raise BreakGlassContractError("INTEGRATION_ENVELOPE_INVALID")
+    return envelope
+
+
+def owner_canary_from_github_comment(
+    comment: Mapping[str, Any],
+) -> OwnerCanaryEnvelope:
+    envelope = _owner_evidence_from_github_comment(
+        comment,
+        marker="Canonical canary payload SHA-256",
+        payload_model=BreakGlassOwnerCanaryPayload,
+        envelope_model=OwnerCanaryEnvelope,
+    )
+    if not isinstance(envelope, OwnerCanaryEnvelope):
+        raise BreakGlassContractError("CANARY_ENVELOPE_INVALID")
     return envelope
 
 

@@ -23,6 +23,7 @@ from nexus.contracts.break_glass_recovery import (
     BreakGlassPhase,
     BreakGlassVerificationEvidence,
     OwnerActivationEnvelope,
+    OwnerCanaryEnvelope,
     OwnerIntegrationEnvelope,
     OwnerTerminalEnvelope,
     OwnerVerificationEnvelope,
@@ -393,18 +394,32 @@ def record_source_repair_verified(
 
 def consume_source_repair_authority(
     envelope: OwnerActivationEnvelope,
-    canary: BreakGlassGovernanceCanaryEvidence,
+    canary_envelope: OwnerCanaryEnvelope,
     *,
     now: datetime,
     state_root: Path | None = None,
 ) -> dict[str, Any]:
     activation = envelope.payload
     activation.assert_current(now=now)
+    owner_canary = canary_envelope.payload
     if (
-        canary.recovery_id != activation.recovery_id
-        or canary.source_attempt_id != activation.attempt_id
+        owner_canary.recovery_id != activation.recovery_id
+        or owner_canary.source_attempt_id != activation.attempt_id
+        or owner_canary.source_activation_payload_sha256 != envelope.payload_sha256
     ):
-        raise BreakGlassRecoveryError("GOVERNANCE_CANARY_MISMATCH")
+        raise BreakGlassRecoveryError("GOVERNANCE_CANARY_AUTHORITY_MISMATCH")
+    canary = BreakGlassGovernanceCanaryEvidence(
+        recovery_id=owner_canary.recovery_id,
+        source_attempt_id=owner_canary.source_attempt_id,
+        integrated_main_sha=owner_canary.integrated_main_sha,
+        source_runtime_identity_sha256=owner_canary.source_runtime_identity_sha256,
+        action_binding_sha256=owner_canary.action_binding_sha256,
+        normal_authority_readback_sha256=owner_canary.normal_authority_readback_sha256,
+        governance_operation_receipt_sha256=owner_canary.governance_operation_receipt_sha256,
+        verifier_receipt_sha256=owner_canary.verifier_receipt_sha256,
+        observed_at=owner_canary.observed_at,
+        normal_governance_restored=owner_canary.normal_governance_restored,
+    )
     chain = _read_chain(activation, state_root=state_root)
     if not chain:
         raise BreakGlassRecoveryError("VERIFIED_EVIDENCE_REQUIRED")
@@ -421,6 +436,8 @@ def consume_source_repair_authority(
         predecessor_hash=str(latest["transition_hash"]),
         evidence={
             "verified_transition_hash": latest["transition_hash"],
+            "owner_canary_comment_id": canary_envelope.comment_id,
+            "owner_canary_payload_sha256": canary_envelope.payload_sha256,
             "governance_canary_sha256": canary.evidence_sha256,
             "governance_canary": canary.model_dump(mode="json"),
             "authority_terminal": True,

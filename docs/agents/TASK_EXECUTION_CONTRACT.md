@@ -75,9 +75,13 @@ bound to the same commit/tree/full-diff and successful exact-head checks; a
 caller-provided verifier name or opaque hash is not sufficient. The host-local
 source evidence chain is `PREPARED -> APPLIED -> VERIFIED -> CONSUMED`, with
 exact-attempt reconciliation, tamper/symlink protection, and replay denial after
-terminal consumption. SOURCE_REPAIR becomes CONSUMED only after a fresh normal-
-governance canary. After successful recovery the Owner also publishes a
-canonical terminal/revocation comment bound to the original source activation;
+terminal consumption. SOURCE_REPAIR becomes CONSUMED only after a fresh Owner
+GitHub canary comment binds physical normal-governance evidence for loaded
+source/runtime identity, action binding, normal authority readback, one bounded
+governance operation, and verifier receipt. Caller-local JSON, booleans, or
+opaque hashes are not sufficient canary provenance. After successful recovery
+the Owner also publishes a canonical terminal/revocation comment bound to the
+original source activation;
 recovery consumers scan #806 for that global terminal witness before later
 source mutation so a new session cannot replay the old grant. Emergency
 integration or runtime recovery requires a new exact Owner authority artifact
