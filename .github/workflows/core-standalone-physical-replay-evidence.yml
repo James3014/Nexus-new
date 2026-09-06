@@ -70,7 +70,9 @@ jobs:
         run: |
           set -euo pipefail
           WH=/private/tmp/nexus-core-v1-wheelhouse
-          mkdir -p "$WH" /private/tmp/nexus-core-v1-predecessor /private/tmp/nexus-core-v1-evidence/tg7 evidence
+          sudo mkdir -p "$WH" /private/tmp/nexus-core-v1-predecessor /private/tmp/nexus-core-v1-evidence/tg7
+          sudo chown -R "$USER":"$(id -gn)" /private/tmp/nexus-core-v1-wheelhouse /private/tmp/nexus-core-v1-predecessor /private/tmp/nexus-core-v1-evidence
+          mkdir -p evidence
           cp /tmp/legacy-physical/nexus_singularity-28.3.0-py3-none-any.whl /private/tmp/nexus-core-v1-predecessor/
           cp /tmp/legacy-physical/tg5-receipt.json /private/tmp/nexus-core-v1-evidence/tg7/tg5-receipt.json
           cp /tmp/build-a/nexus_core-*.whl "$WH/"
