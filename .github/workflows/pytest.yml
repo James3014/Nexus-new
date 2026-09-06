@@ -82,6 +82,11 @@ jobs:
         env:
           UV_SYSTEM_PYTHON: 0
 
+      - name: Install exact canonical Learning package
+        run: |
+          set -euo pipefail
+          uv pip install --python .venv/bin/python --requirement requirements/canonical-learning.txt
+
       - name: Resolve exact comparison base
         id: base
         env:
@@ -345,6 +350,10 @@ jobs:
           enable-cache: false
       - name: Install dependencies
         run: uv sync --frozen --all-groups --all-extras
+      - name: Install exact canonical Learning package
+        run: |
+          set -euo pipefail
+          uv pip install --python .venv/bin/python --requirement requirements/canonical-learning.txt
       - name: Run full repository regression
         run: uv run pytest tests/ -v --timeout=300 --junitxml="$RUNNER_TEMP/full-regression.xml"
         env:
