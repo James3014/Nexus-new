@@ -51,6 +51,7 @@ from nexus.contracts.gateway_deployment import (
     HostEffectAuthorityReceipt,
     PostflightIdentity,
     RecoveryAuthorityReceipt,
+    RecoveryContinuationAuthorityReceipt,
     RecoveryEffectAck,
     RecoveryEffectPlan,
     RecoveryEntrypointIdentity,
@@ -72,6 +73,7 @@ from nexus.contracts.gateway_deployment import (
     validate_receipt_freshness,
     validate_reconcile_outcome,
     validate_recovery_authority,
+    validate_recovery_continuation_authority,
     validate_recovery_effect_ack,
     validate_recovery_effect_plan,
     validate_recovery_ledger_record,
@@ -316,6 +318,13 @@ GATEWAY_PREDECESSOR_ARTIFACT_ROOT = GATEWAY_STATE_ROOT / "predecessor-artifacts"
 GATEWAY_REPOSITORY = GATEWAY_STATE_ROOT / "repository.git"
 GATEWAY_RECOVERY_AUTHORITY_STORE = GATEWAY_STATE_ROOT / "recovery-authority.json"
 RECOVERY_AUTHORITY_SOURCE_PATH = RECOVERY_RECEIPT_PATH
+RECOVERY_CONTINUATION_AUTHORITY_SOURCE_PATH = (
+    "tasks/github-issue-526-g20-r1-source-contract-delta-20260903/"
+    "04-v6-successor-manager-continuation-authority.json"
+)
+GATEWAY_RECOVERY_CONTINUATION_AUTHORITY_STORE = (
+    GATEWAY_STATE_ROOT / "recovery-continuation-authority.json"
+)
 GATEWAY_LEDGER = GATEWAY_STATE_ROOT / "ledger.jsonl"
 GATEWAY_LOCK = GATEWAY_STATE_ROOT / "ledger.lock"
 GATEWAY_ARTIFACT = GATEWAY_STATE_ROOT / "manager.py"
@@ -1472,6 +1481,41 @@ def _persist_or_load_recovery_evidence(
     return current
 
 
+def _load_persisted_recovery_evidence(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+) -> SourceBundleEvidence:
+    """Load immutable historical source evidence without rebinding it to fresh main."""
+    path = _safe_store_path(_recovery_evidence_path(request), leaf_mode=0o600)
+    try:
+        if not path.exists() or path.is_symlink():
+            raise _gateway_error("persisted recovery bundle evidence missing")
+        info = path.stat()
+        if (
+            info.st_uid != HOST_UID
+            or info.st_gid != HOST_GID
+            or stat.S_IMODE(info.st_mode) != 0o600
+        ):
+            raise _gateway_error("persisted recovery bundle evidence permissions invalid")
+        persisted = SourceBundleEvidence.model_validate(
+            json.loads(path.read_text(), object_pairs_hook=_unique_pairs)
+        )
+        validate_source_bundle_evidence(
+            persisted,
+            request=request,
+            receipt=receipt,
+            source_set=receipt.source_set,
+            expected_fresh_main_commit=persisted.observed_fresh_main_commit,
+            expected_fresh_main_tree=persisted.observed_fresh_main_tree,
+            expected_bare_store=persisted.bare_store,
+        )
+    except (OSError, ValueError, ContractError) as exc:
+        if isinstance(exc, GatewayContractError):
+            raise
+        raise _gateway_error("persisted recovery bundle evidence invalid", exc) from exc
+    return persisted
+
+
 def _prepare_recovery_source(
     request: GatewayRecoveryRequest,
     receipt: RecoveryAuthorityReceipt,
@@ -1556,8 +1600,9 @@ def _resolve_manifest_source(manifest: DeploymentManifest) -> Path:
     return target / manifest.entrypoint
 
 
-def _require_recovery_authority(request: GatewayRecoveryRequest) -> RecoveryAuthorityReceipt:
-    path = _safe_store_path(GATEWAY_RECOVERY_AUTHORITY_STORE)
+def _load_recovery_authority(request: GatewayRecoveryRequest) -> RecoveryAuthorityReceipt:
+    """Load the immutable historical recovery receipt without granting an effect."""
+    path = _safe_store_path(GATEWAY_RECOVERY_AUTHORITY_STORE, leaf_mode=0o600)
     if not path.exists() or path.stat().st_uid != HOST_UID or path.stat().st_gid != HOST_GID:
         raise _gateway_error("R1 recovery authority store invalid")
     try:
@@ -1569,10 +1614,74 @@ def _require_recovery_authority(request: GatewayRecoveryRequest) -> RecoveryAuth
         )
     except (OSError, UnicodeError, ValueError, ContractError) as exc:
         raise _gateway_error("R1 recovery authority rejected", exc) from exc
-    if hashlib.sha256(Path(__file__).read_bytes()).hexdigest() != receipt.final_manager_sha256:
-        raise _gateway_error("R1 recovery manager hash mismatch")
     _r1_local_receipt(receipt)
     return receipt
+
+
+def _current_manager_sha256() -> str:
+    return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+
+
+def _require_recovery_authority(request: GatewayRecoveryRequest) -> RecoveryAuthorityReceipt:
+    """Normal/pre-effect authority: the historical final manager must still match."""
+    receipt = _load_recovery_authority(request)
+    if _current_manager_sha256() != receipt.final_manager_sha256:
+        raise _gateway_error("R1 recovery manager hash mismatch")
+    return receipt
+
+
+def _require_recovery_continuation_authority(
+    request: GatewayRecoveryRequest,
+    historical_receipt: RecoveryAuthorityReceipt,
+) -> RecoveryContinuationAuthorityReceipt:
+    """Authorize only a successor manager continuing an already-started effect."""
+    manager_sha256 = _current_manager_sha256()
+    path = _safe_store_path(
+        GATEWAY_RECOVERY_CONTINUATION_AUTHORITY_STORE, leaf_mode=0o600
+    )
+    if not path.exists() or path.stat().st_uid != HOST_UID or path.stat().st_gid != HOST_GID:
+        raise _gateway_error("R1 recovery continuation authority store invalid")
+    try:
+        raw = path.read_bytes()
+        authority = RecoveryContinuationAuthorityReceipt.model_validate(
+            json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_pairs)
+        )
+        validate_recovery_continuation_authority(
+            authority,
+            request=request,
+            historical_receipt=historical_receipt,
+            successor_manager_sha256=manager_sha256,
+            now=_current_observation_time(),
+        )
+        fresh_main, _fresh_tree = _r1_mirror_fresh_main()
+        root = str(HOST_AUTHORITY_SOURCE_ROOT)
+        if _r1_run(
+            "git", "-C", root, "merge-base", "--is-ancestor",
+            authority.accepted_successor_source_merge, fresh_main,
+        ) != "":
+            raise _gateway_error("R1 recovery continuation source is outside fresh main")
+        if _r1_run(
+            "git", "-C", root, "rev-parse",
+            f"{authority.accepted_successor_source_merge}^{{tree}}",
+        ) != authority.accepted_successor_source_tree:
+            raise _gateway_error("R1 recovery continuation source tree mismatch")
+        manager_bytes = _r1_run(
+            "git", "-C", root, "show",
+            f"{authority.accepted_successor_source_merge}:scripts/ops/mcp_gateway_durable.py",
+            bytes_output=True,
+        )
+        if hashlib.sha256(bytes(manager_bytes)).hexdigest() != manager_sha256:
+            raise _gateway_error("R1 recovery continuation manager/source mismatch")
+        tracked = _r1_run(
+            "git", "-C", root, "show",
+            f"{fresh_main}:{RECOVERY_CONTINUATION_AUTHORITY_SOURCE_PATH}",
+            bytes_output=True,
+        )
+        if bytes(tracked) != raw:
+            raise _gateway_error("R1 recovery continuation remote/local byte mismatch")
+    except (OSError, UnicodeError, ValueError, ContractError) as exc:
+        raise _gateway_error("R1 recovery continuation authority rejected", exc) from exc
+    return authority
 
 
 def _resolve_manifest_reference(
@@ -3142,7 +3251,12 @@ def _gateway_recover_live(
         validate_recovery_request(typed)
     except ContractError as exc:
         raise _gateway_error("R1 live recovery request rejected", exc) from exc
-    receipt = _require_recovery_authority(typed)
+    # Load the immutable historical authority first, but defer the manager-mode
+    # decision to the durable recovery state machine below. The normal/pre-effect
+    # path still requires the historical final manager hash because any distinct
+    # manager enters successor_mode and is rejected unless this exact V6 ledger
+    # already contains EFFECT_STARTED plus a valid continuation authority.
+    receipt = _load_recovery_authority(typed)
     return _gateway_recover_with_adapters(
         typed,
         adapters=_production_recovery_adapters(receipt),
@@ -3172,12 +3286,35 @@ def _revalidate_recovery_artifacts(
     )
 
 
+def _reuse_historical_recovery_artifacts(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    *,
+    expected_bundle_evidence_hash: str,
+) -> _R1PreparedSource:
+    """Reuse the V6 evidence/worktrees without deriving authority from later main."""
+    evidence = _load_persisted_recovery_evidence(request, receipt)
+    if evidence.evidence_hash != expected_bundle_evidence_hash:
+        raise GatewayContractError("historical recovery bundle evidence mismatch")
+    desired = Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.desired_manifest_id
+    predecessor = Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.predecessor_manifest_id
+    _r1_verify_worktree(desired, receipt.desired_manifest)
+    _r1_verify_worktree(predecessor, receipt.predecessor_manifest)
+    return _R1PreparedSource(
+        desired_manifest=receipt.desired_manifest,
+        predecessor_manifest=receipt.predecessor_manifest,
+        bundle_evidence=evidence,
+    )
+
+
 def _validate_terminal_recovery_replay(
     terminal: GatewayReconcileOutcome,
     records: list[RecoveryLedgerRecord],
     request: GatewayRecoveryRequest,
     receipt: RecoveryAuthorityReceipt,
     adapters: _RecoveryAdapters,
+    *,
+    successor_mode: bool = False,
 ) -> GatewayReconcileOutcome:
     if terminal.result is ResultClass.BLOCKED:
         return terminal
@@ -3188,11 +3325,18 @@ def _validate_terminal_recovery_replay(
     }
     if len(evidence_hashes) != 1:
         raise GatewayContractError("terminal recovery evidence binding invalid")
-    _revalidate_recovery_artifacts(
-        request,
-        receipt,
-        expected_bundle_evidence_hash=next(iter(evidence_hashes)),
-    )
+    if successor_mode:
+        _reuse_historical_recovery_artifacts(
+            request,
+            receipt,
+            expected_bundle_evidence_hash=next(iter(evidence_hashes)),
+        )
+    else:
+        _revalidate_recovery_artifacts(
+            request,
+            receipt,
+            expected_bundle_evidence_hash=next(iter(evidence_hashes)),
+        )
     plan = _recovery_plan(request, receipt)
     identity = adapters.observe(plan)
     classification = _gateway_reconcile_physical(request, receipt, identity)
@@ -3220,7 +3364,9 @@ def _gateway_recover_with_adapters(
         validate_recovery_request(typed)
     except ContractError as exc:
         raise _gateway_error("R1 B2 recovery request rejected", exc) from exc
-    receipt = _require_recovery_authority(typed)
+    receipt = _load_recovery_authority(typed)
+    current_manager_sha256 = _current_manager_sha256()
+    successor_mode = current_manager_sha256 != receipt.final_manager_sha256
     prepared: _R1PreparedSource | None = None
     evidence: SourceBundleEvidence | None = None
     plan = _recovery_plan(typed, receipt)
@@ -3236,11 +3382,29 @@ def _gateway_recover_with_adapters(
                 and prior["request_id"] != typed.request_id
             ):
                 raise GatewayContractError("recovery idempotency fence conflict")
-        records = _recovery_typed_rows(rows, typed.request_id)
+        records = ledger.recovery_rows(
+            typed.request_id,
+            request=typed,
+            receipt=receipt,
+            source_bundle_evidence=None,
+        )
+        if successor_mode:
+            if not any(
+                record.state is DeploymentState.EFFECT_STARTED for record in records
+            ):
+                raise _gateway_error(
+                    "R1 successor manager requires historical EFFECT_STARTED"
+                )
+            _require_recovery_continuation_authority(typed, receipt)
         terminal = _terminal_recovery_outcome(records)
         if terminal is not None:
             return _validate_terminal_recovery_replay(
-                terminal, records, typed, receipt, adapters
+                terminal,
+                records,
+                typed,
+                receipt,
+                adapters,
+                successor_mode=successor_mode,
             )
         if not records:
             _append_recovery_state_unlocked(
@@ -3265,18 +3429,25 @@ def _gateway_recover_with_adapters(
             if len(evidence_hashes) != 1:
                 raise GatewayContractError("recovery evidence binding missing")
             evidence_hash = next(iter(evidence_hashes))
-            prepared = _prepare_recovery_source(typed, receipt)
+            if successor_mode:
+                prepared = _reuse_historical_recovery_artifacts(
+                    typed,
+                    receipt,
+                    expected_bundle_evidence_hash=evidence_hash,
+                )
+            else:
+                prepared = _prepare_recovery_source(typed, receipt)
+                if prepared.bundle_evidence.evidence_hash != evidence_hash:
+                    raise GatewayContractError("recovery evidence changed")
+                _r1_verify_worktree(
+                    Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.desired_manifest_id,
+                    receipt.desired_manifest,
+                )
+                _r1_verify_worktree(
+                    Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.predecessor_manifest_id,
+                    receipt.predecessor_manifest,
+                )
             evidence = prepared.bundle_evidence
-            if evidence.evidence_hash != evidence_hash:
-                raise GatewayContractError("recovery evidence changed")
-            _r1_verify_worktree(
-                Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.desired_manifest_id,
-                receipt.desired_manifest,
-            )
-            _r1_verify_worktree(
-                Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.predecessor_manifest_id,
-                receipt.predecessor_manifest,
-            )
             owner_pid = records[-1].pre_effect_identity.get("effect_owner_pid")
             owner_start = records[-1].pre_effect_identity.get("effect_owner_start")
             if (
@@ -3388,6 +3559,8 @@ def _gateway_recover_with_adapters(
             state = DeploymentState.EFFECT_STARTED
             invoke_effect = True
             adapters.crash_hook("after_effect_started_before_call")
+    if successor_mode and invoke_effect:
+        raise GatewayContractError("successor recovery continuation cannot invoke effect")
     if wait_for_owner is not None:
         owner_pid, owner_start = wait_for_owner
         deadline = time.monotonic() + RECOVERY_OWNER_COMPLETION_SECONDS
@@ -3403,7 +3576,12 @@ def _gateway_recover_with_adapters(
                 terminal = _terminal_recovery_outcome(current_records)
                 if terminal is not None:
                     return _validate_terminal_recovery_replay(
-                        terminal, current_records, typed, receipt, adapters
+                        terminal,
+                        current_records,
+                        typed,
+                        receipt,
+                        adapters,
+                        successor_mode=successor_mode,
                     )
             owner_live = _recovery_owner_is_live(owner_pid, owner_start)
             now = time.monotonic()
@@ -3419,7 +3597,12 @@ def _gateway_recover_with_adapters(
             terminal = _terminal_recovery_outcome(current_records)
             if terminal is not None:
                 return _validate_terminal_recovery_replay(
-                    terminal, current_records, typed, receipt, adapters
+                    terminal,
+                    current_records,
+                    typed,
+                    receipt,
+                    adapters,
+                    successor_mode=successor_mode,
                 )
         if owner_live and _recovery_owner_is_live(owner_pid, owner_start):
             return _recovery_outcome(
@@ -3442,7 +3625,12 @@ def _gateway_recover_with_adapters(
             terminal = _terminal_recovery_outcome(records)
             if terminal is not None:
                 return _validate_terminal_recovery_replay(
-                    terminal, records, typed, receipt, adapters
+                    terminal,
+                    records,
+                    typed,
+                    receipt,
+                    adapters,
+                    successor_mode=successor_mode,
                 )
             state = records[-1].state
             if state in {
@@ -3507,7 +3695,12 @@ def _gateway_recover_with_adapters(
         terminal = _terminal_recovery_outcome(records)
         if terminal is not None:
             return _validate_terminal_recovery_replay(
-                terminal, records, typed, receipt, adapters
+                terminal,
+                records,
+                typed,
+                receipt,
+                adapters,
+                successor_mode=successor_mode,
             )
         state = records[-1].state
         if classification == "predecessor":
@@ -3665,7 +3858,12 @@ def _gateway_recover_with_adapters(
         terminal = _terminal_recovery_outcome(records)
         if terminal is not None:
             return _validate_terminal_recovery_replay(
-                terminal, records, typed, receipt, adapters
+                terminal,
+                records,
+                typed,
+                receipt,
+                adapters,
+                successor_mode=successor_mode,
             )
         state = records[-1].state
         if state is DeploymentState.IDENTITY_VERIFIED:

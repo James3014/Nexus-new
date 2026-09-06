@@ -398,6 +398,11 @@ def _r1b1_fixture(
     monkeypatch.setattr(g, "GATEWAY_REPOSITORY", state / "repository.git")
     monkeypatch.setattr(g, "GATEWAY_DEPLOYMENTS_ROOT", state / "deployments")
     monkeypatch.setattr(g, "GATEWAY_RECOVERY_AUTHORITY_STORE", state / "recovery-authority.json")
+    monkeypatch.setattr(
+        g,
+        "GATEWAY_RECOVERY_CONTINUATION_AUTHORITY_STORE",
+        state / "recovery-continuation-authority.json",
+    )
     monkeypatch.setattr(g, "GATEWAY_LOCK", state / "ledger.lock")
 
     def tree(commit):
@@ -5426,6 +5431,229 @@ def test_hostile_8_existing_effect_started_with_desired_deployment_reconciles_to
     assert replayed.result == "VERIFIED"
     assert replayed.evidence_hash == outcome.evidence_hash
     assert len(replay_calls) == 0
+
+
+def _g5_continuation_authority(fixture, successor_manager_sha256):
+    from nexus.contracts.gateway_deployment import (
+        RecoveryContinuationAuthorityReceipt,
+        canonical_hash,
+    )
+
+    receipt = fixture["receipt"]
+    request = fixture["request"]
+    values = {
+        "schema": RecoveryContinuationAuthorityReceipt.SCHEMA,
+        "authority_version": 1,
+        "authority_id": "continuation-v6-test",
+        "repository": "James3014/Nexus-new",
+        "historical_receipt_id": receipt.receipt_id,
+        "historical_receipt_hash": receipt.receipt_hash,
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "idempotency_fence": request.idempotency_fence,
+        "old_manager_sha256": receipt.final_manager_sha256,
+        "successor_manager_sha256": successor_manager_sha256,
+        "desired_manifest_id": receipt.desired_manifest_id,
+        "desired_manifest_sha256": receipt.desired_manifest_sha256,
+        "predecessor_manifest_id": receipt.predecessor_manifest_id,
+        "predecessor_manifest_sha256": receipt.predecessor_manifest_sha256,
+        "accepted_successor_source_merge": "a" * 40,
+        "accepted_successor_source_tree": "b" * 40,
+        "independent_acceptance_receipt_hash": "c" * 64,
+        "standing_grant_id": "OWNER_G5_SUCCESSOR_CONTINUATION_20260905",
+        "standing_grant_receipt_sha256": "d" * 64,
+        "owner_id": "owner-james",
+        "coordinator_id": "coordinator-codex",
+        "issued_at": "2026-09-05T00:00:00Z",
+        "expires_at": "2026-09-10T00:00:00Z",
+        "revocation_state": "NOT_REVOKED",
+        "revoked_at": None,
+        "revocation_reason": None,
+    }
+    return RecoveryContinuationAuthorityReceipt(
+        **values, authority_hash=canonical_hash(values)
+    )
+
+
+def test_g5_successor_continuation_manager_requires_tracked_authority_and_accepted_source(
+    tmp_path, monkeypatch
+):
+    """The manager accepts continuation only through tracked-main provenance."""
+    fixture = _r1b1_fixture(tmp_path, monkeypatch)
+    successor_bytes = b"accepted-successor-manager-bytes"
+    successor_sha = hashlib.sha256(successor_bytes).hexdigest()
+    authority = _g5_continuation_authority(fixture, successor_sha)
+    raw = json.dumps(
+        authority.model_dump(), sort_keys=True, separators=(",", ":")
+    ).encode()
+    store = g.GATEWAY_RECOVERY_CONTINUATION_AUTHORITY_STORE
+    store.write_bytes(raw)
+    store.chmod(0o600)
+    fresh_main = "e" * 40
+    monkeypatch.setattr(g, "_current_manager_sha256", lambda: successor_sha)
+    monkeypatch.setattr(
+        g, "_r1_mirror_fresh_main", lambda: (fresh_main, "f" * 40)
+    )
+
+    def run(*args, **kwargs):
+        command = tuple(str(value) for value in args)
+        if "merge-base" in command:
+            return ""
+        if "rev-parse" in command:
+            return authority.accepted_successor_source_tree
+        if "show" in command:
+            target = command[-1]
+            if target.endswith(":scripts/ops/mcp_gateway_durable.py"):
+                return successor_bytes
+            if target.endswith(
+                ":" + g.RECOVERY_CONTINUATION_AUTHORITY_SOURCE_PATH
+            ):
+                return raw
+        raise AssertionError(command)
+
+    monkeypatch.setattr(g, "_r1_run", run)
+    assert g._require_recovery_continuation_authority(
+        fixture["request"], fixture["receipt"]
+    ) == authority
+
+    def substituted(*args, **kwargs):
+        value = run(*args, **kwargs)
+        command = tuple(str(item) for item in args)
+        if "show" in command and command[-1].endswith(
+            ":" + g.RECOVERY_CONTINUATION_AUTHORITY_SOURCE_PATH
+        ):
+            return b"substituted-authority"
+        return value
+
+    monkeypatch.setattr(g, "_r1_run", substituted)
+    with pytest.raises(g.GatewayContractError, match="remote/local byte mismatch"):
+        g._require_recovery_continuation_authority(
+            fixture["request"], fixture["receipt"]
+        )
+
+
+def test_g5_successor_manager_requires_historical_effect_started_before_continuation(
+    tmp_path, monkeypatch
+):
+    """A new manager cannot use successor authority to cross the pre-effect gate."""
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    monkeypatch.setattr(g, "_current_manager_sha256", lambda: "f" * 64)
+    continuation_calls = []
+    monkeypatch.setattr(
+        g,
+        "_require_recovery_continuation_authority",
+        lambda *args: continuation_calls.append(args),
+    )
+    effect_calls = []
+    adapters = _r1b2_adapters(
+        fixture,
+        ledger,
+        effect_calls=effect_calls,
+        external_calls=[],
+    )
+    monkeypatch.setattr(g, "_production_recovery_adapters", lambda _receipt: adapters)
+    monkeypatch.setattr(g, "GatewayLedger", lambda: ledger)
+    with pytest.raises(g.GatewayContractError, match="historical EFFECT_STARTED"):
+        g._gateway_recover_live(fixture["request"])
+    assert continuation_calls == []
+    assert effect_calls == []
+    assert not fixture["ledger_path"].exists()
+
+
+def test_g5_historical_old_manager_to_successor_continuation_is_reconcile_only_and_replay_idempotent(
+    tmp_path, monkeypatch
+):
+    """Hostile migration witness for the exact old-manager -> successor shape.
+
+    The old manager durably reaches EFFECT_STARTED and crashes before the call.
+    The successor must bind that exact historical ledger/receipt/request/fence,
+    reuse persisted V6 source evidence, never enter the effect seam, converge to
+    VERIFIED, and make a terminal replay byte-for-byte idempotent.
+    """
+    fixture = _r1b2_runtime_fixture(tmp_path, monkeypatch)
+    ledger = g.GatewayLedger(
+        fixture["ledger_path"], lock_path=fixture["lock_path"]
+    )
+    old_manager_sha = fixture["receipt"].final_manager_sha256
+    assert g._current_manager_sha256() == old_manager_sha
+
+    old_adapters = _r1b2_adapters(
+        fixture,
+        ledger,
+        crash_point="after_effect_started_before_call",
+        effect_calls=[],
+        external_calls=[],
+    )
+    with pytest.raises(_R1B2Crash):
+        g._gateway_recover_with_adapters(
+            fixture["request"], adapters=old_adapters, ledger=ledger
+        )
+    historical_prefix = fixture["ledger_path"].read_bytes()
+    historical_rows = ledger.recovery_rows(
+        fixture["request"].request_id,
+        request=fixture["request"],
+        receipt=fixture["receipt"],
+        source_bundle_evidence=None,
+    )
+    assert historical_rows[-1].state == "EFFECT_STARTED"
+    assert historical_rows[-1].final_manager_sha256 == old_manager_sha
+    assert historical_rows[-1].request_id == fixture["request"].request_id
+    assert historical_rows[-1].idempotency_fence == fixture["request"].idempotency_fence
+
+    successor_sha = "f" * 64
+    assert successor_sha != old_manager_sha
+    monkeypatch.setattr(g, "_current_manager_sha256", lambda: successor_sha)
+    authority_calls = []
+
+    def continuation_authority(request, receipt):
+        assert request == fixture["request"]
+        assert receipt == fixture["receipt"]
+        authority_calls.append((request.request_id, request.idempotency_fence))
+        return object()
+
+    monkeypatch.setattr(
+        g, "_require_recovery_continuation_authority", continuation_authority
+    )
+    monkeypatch.setattr(
+        g,
+        "_prepare_recovery_source",
+        lambda *_args, **_kwargs: pytest.fail(
+            "successor continuation must not rebind historical evidence to fresh main"
+        ),
+    )
+    replay = _r1b2_adapters(
+        fixture,
+        ledger,
+        already_desired=True,
+        effect_calls=[],
+        external_calls=[],
+    )
+    replay = replay.__class__(
+        observe=replay.observe,
+        effect=lambda _plan: pytest.fail("successor continuation effect seam is forbidden"),
+        postflight=replay.postflight,
+        clock=replay.clock,
+        crash_hook=replay.crash_hook,
+    )
+    monkeypatch.setattr(g, "_production_recovery_adapters", lambda _receipt: replay)
+    monkeypatch.setattr(g, "GatewayLedger", lambda: ledger)
+    outcome = g._gateway_recover_live(fixture["request"])
+    assert outcome.result == "VERIFIED"
+    assert authority_calls == [
+        (fixture["request"].request_id, fixture["request"].idempotency_fence)
+    ]
+    assert fixture["ledger_path"].read_bytes().startswith(historical_prefix)
+    assert _r1b2_effect_count(fixture["ledger_path"]) == 1
+
+    terminal_bytes = fixture["ledger_path"].read_bytes()
+    replayed = g._gateway_recover_live(fixture["request"])
+    assert replayed.result == "VERIFIED"
+    assert replayed.evidence_hash == outcome.evidence_hash
+    assert fixture["ledger_path"].read_bytes() == terminal_bytes
+    assert _r1b2_effect_count(fixture["ledger_path"]) == 1
 
 
 def test_hostile_9_timeout_or_lost_ack_replays_same_request_same_fence(tmp_path, monkeypatch):
