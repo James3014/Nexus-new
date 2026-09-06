@@ -480,9 +480,7 @@ class BreakGlassOwnerIntegrationPayload(_FrozenModel):
 
 
 class BreakGlassOwnerCanaryPayload(_FrozenModel):
-    schema: Literal["nexus.break_glass_owner_canary.v1"] = (
-        "nexus.break_glass_owner_canary.v1"
-    )
+    schema: Literal["nexus.break_glass_owner_canary.v1"] = "nexus.break_glass_owner_canary.v1"
     repository: Literal[_ALLOWED_REPOSITORY]
     issue: Literal[_ALLOWED_ISSUE]
     owner_login: Literal[_ALLOWED_OWNER]

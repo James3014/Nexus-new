@@ -349,18 +349,14 @@ def test_full_chain_requires_independent_verifier_and_denies_replay(tmp_path: Pa
         state_root=tmp_path,
     )
     assert verified["phase"] == "VERIFIED"
-    consumed = consume_source_repair_authority(
-        env, owner_canary(), now=NOW, state_root=tmp_path
-    )
+    consumed = consume_source_repair_authority(env, owner_canary(), now=NOW, state_root=tmp_path)
     assert consumed["phase"] == "CONSUMED"
     assert consumed["evidence"]["granted_effect"] == "SOURCE_REPAIR_ONLY"
     assert "GITHUB_MERGE" in consumed["evidence"]["excluded_effects"]
     assert "RUNTIME_RECOVERY" in consumed["evidence"]["excluded_effects"]
 
     with pytest.raises(BreakGlassRecoveryError, match="RECOVERY_REPLAY_DENIED"):
-        consume_source_repair_authority(
-            env, owner_canary(), now=NOW, state_root=tmp_path
-        )
+        consume_source_repair_authority(env, owner_canary(), now=NOW, state_root=tmp_path)
     with pytest.raises(BreakGlassRecoveryError, match="RECOVERY_REPLAY_DENIED"):
         record_source_repair_applied(env, app, now=NOW, state_root=tmp_path)
 
@@ -375,9 +371,7 @@ def test_phase_skips_fail_closed(tmp_path: Path) -> None:
     with pytest.raises(BreakGlassRecoveryError, match="APPLIED_EVIDENCE_REQUIRED"):
         record_source_repair_verified(env, verification_envelope(), now=NOW, state_root=tmp_path)
     with pytest.raises(BreakGlassRecoveryError, match="VERIFIED_EVIDENCE_REQUIRED"):
-        consume_source_repair_authority(
-            env, owner_canary(), now=NOW, state_root=tmp_path
-        )
+        consume_source_repair_authority(env, owner_canary(), now=NOW, state_root=tmp_path)
 
 
 def test_scope_widening_and_forbidden_change_fail_before_applied_transition(tmp_path: Path) -> None:
@@ -571,9 +565,7 @@ def test_source_consumption_rejects_canary_identity_substitution(tmp_path: Path)
     bad_data = canary().model_dump(mode="json")
     bad_data["recovery_id"] = "BG-OTHER"
     bad_canary = BreakGlassGovernanceCanaryEvidence.model_validate(bad_data)
-    with pytest.raises(
-        BreakGlassRecoveryError, match="GOVERNANCE_CANARY_AUTHORITY_MISMATCH"
-    ):
+    with pytest.raises(BreakGlassRecoveryError, match="GOVERNANCE_CANARY_AUTHORITY_MISMATCH"):
         consume_source_repair_authority(
             source, owner_canary(bad_canary), now=NOW, state_root=tmp_path
         )
@@ -593,9 +585,7 @@ def test_source_consumption_rejects_canary_activation_hash_substitution(
     )
     record_source_repair_applied(source, applied(), now=NOW, state_root=tmp_path)
     record_source_repair_verified(source, verification, now=NOW, state_root=tmp_path)
-    with pytest.raises(
-        BreakGlassRecoveryError, match="GOVERNANCE_CANARY_AUTHORITY_MISMATCH"
-    ):
+    with pytest.raises(BreakGlassRecoveryError, match="GOVERNANCE_CANARY_AUTHORITY_MISMATCH"):
         consume_source_repair_authority(
             source,
             owner_canary(source_hash="e" * 64),

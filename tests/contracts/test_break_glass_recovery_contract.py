@@ -357,7 +357,9 @@ def test_owner_canary_comment_tamper_is_rejected() -> None:
         payload=payload,
         comment_id=6000000007,
     )
-    comment["body"] = str(comment["body"]).replace('"integrated_main_sha":"' + "8" * 40, '"integrated_main_sha":"' + "9" * 40)
+    comment["body"] = str(comment["body"]).replace(
+        '"integrated_main_sha":"' + "8" * 40, '"integrated_main_sha":"' + "9" * 40
+    )
     with pytest.raises(BreakGlassContractError, match="GITHUB_COMMENT_PAYLOAD_HASH_MISMATCH"):
         owner_canary_from_github_comment(comment)
 
