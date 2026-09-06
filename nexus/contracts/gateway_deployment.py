@@ -694,6 +694,47 @@ class RecoveryAuthorityReceipt(StrictRecord):
 
 
 @dataclass(frozen=True)
+class RecoveryContinuationAuthorityReceipt(StrictRecord):
+    """Narrow successor-manager authority for one already-started R1 recovery.
+
+    This authority can never start a recovery effect. It binds one accepted
+    successor manager to the immutable historical recovery receipt/request/fence
+    so a post-EFFECT_STARTED operation can be reconciled without weakening the
+    original ``final_manager_sha256`` gate.
+    """
+
+    SCHEMA: ClassVar[str] = "nexus.gateway.recovery_continuation_authority.v1"
+    schema: str
+    authority_version: int
+    authority_id: str
+    authority_hash: str
+    repository: str
+    historical_receipt_id: str
+    historical_receipt_hash: str
+    request_id: str
+    request_hash: str
+    idempotency_fence: str
+    old_manager_sha256: str
+    successor_manager_sha256: str
+    desired_manifest_id: str
+    desired_manifest_sha256: str
+    predecessor_manifest_id: str
+    predecessor_manifest_sha256: str
+    accepted_successor_source_merge: str
+    accepted_successor_source_tree: str
+    independent_acceptance_receipt_hash: str
+    standing_grant_id: str
+    standing_grant_receipt_sha256: str
+    owner_id: str
+    coordinator_id: str
+    issued_at: str
+    expires_at: str
+    revocation_state: str
+    revoked_at: str | None
+    revocation_reason: str | None
+
+
+@dataclass(frozen=True)
 class HostEffectAuthorityBundle(StrictRecord):
     """Immutable pre-authority for the complete host effect sequence.
 
@@ -2224,10 +2265,103 @@ def validate_recovery_authority(
     return receipt
 
 
+def validate_recovery_continuation_authority(
+    authority: RecoveryContinuationAuthorityReceipt,
+    *,
+    request: GatewayRecoveryRequest,
+    historical_receipt: RecoveryAuthorityReceipt,
+    successor_manager_sha256: str,
+    now: str | None = None,
+) -> RecoveryContinuationAuthorityReceipt:
+    """Validate reconcile-only authority for one historical post-effect recovery."""
+    validate_recovery_request(request)
+    validate_recovery_authority(historical_receipt, request=request)
+    if (
+        not isinstance(authority, RecoveryContinuationAuthorityReceipt)
+        or authority.schema != RecoveryContinuationAuthorityReceipt.SCHEMA
+        or type(authority.authority_version) is not int
+        or authority.authority_version != 1
+    ):
+        raise ContractError("recovery continuation authority schema mismatch")
+    if authority.repository != REPOSITORY:
+        raise ContractError("recovery continuation repository mismatch")
+    if authority.owner_id != "owner-james" or authority.coordinator_id != "coordinator-codex":
+        raise ContractError("recovery continuation actor mismatch")
+    _id(authority.authority_id, "recovery continuation authority id")
+    _id(authority.standing_grant_id, "recovery continuation standing grant id")
+    for value, label, length in (
+        (authority.authority_hash, "recovery continuation authority", 64),
+        (authority.historical_receipt_hash, "historical recovery receipt", 64),
+        (authority.request_hash, "historical recovery request", 64),
+        (authority.old_manager_sha256, "old recovery manager", 64),
+        (authority.successor_manager_sha256, "successor recovery manager", 64),
+        (authority.desired_manifest_sha256, "desired recovery manifest", 64),
+        (authority.predecessor_manifest_sha256, "predecessor recovery manifest", 64),
+        (authority.accepted_successor_source_merge, "accepted successor source merge", 40),
+        (authority.accepted_successor_source_tree, "accepted successor source tree", 40),
+        (authority.independent_acceptance_receipt_hash, "successor acceptance receipt", 64),
+        (authority.standing_grant_receipt_sha256, "continuation standing grant receipt", 64),
+    ):
+        _hash(value, label, length)
+    for value, label in (
+        (authority.historical_receipt_id, "historical recovery receipt id"),
+        (authority.request_id, "historical recovery request id"),
+        (authority.idempotency_fence, "historical recovery fence"),
+        (authority.desired_manifest_id, "desired recovery manifest id"),
+        (authority.predecessor_manifest_id, "predecessor recovery manifest id"),
+    ):
+        _id(value, label)
+    expected = {
+        "historical_receipt_id": historical_receipt.receipt_id,
+        "historical_receipt_hash": historical_receipt.receipt_hash,
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "idempotency_fence": request.idempotency_fence,
+        "old_manager_sha256": historical_receipt.final_manager_sha256,
+        "successor_manager_sha256": successor_manager_sha256,
+        "desired_manifest_id": historical_receipt.desired_manifest_id,
+        "desired_manifest_sha256": historical_receipt.desired_manifest_sha256,
+        "predecessor_manifest_id": historical_receipt.predecessor_manifest_id,
+        "predecessor_manifest_sha256": historical_receipt.predecessor_manifest_sha256,
+    }
+    for binding_field, expected_value in expected.items():
+        if getattr(authority, binding_field) != expected_value:
+            raise ContractError(f"recovery continuation {binding_field} mismatch")
+    if authority.old_manager_sha256 == authority.successor_manager_sha256:
+        raise ContractError("recovery continuation requires a distinct successor manager")
+    expected_hash = canonical_hash({
+        key: value for key, value in authority.model_dump().items() if key != "authority_hash"
+    })
+    if authority.authority_hash != expected_hash:
+        raise ContractError("recovery continuation authority hash mismatch")
+    _validate_revocation_fields(
+        authority.revocation_state,
+        authority.revoked_at,
+        authority.revocation_reason,
+        label="recovery continuation authority",
+    )
+    if authority.revocation_state != "NOT_REVOKED":
+        raise ContractError("recovery continuation authority revoked")
+    if now is not None:
+        validate_receipt_freshness(authority, now=now)
+    return authority
+
+
 def validate_receipt_freshness(
-    receipt: HostEffectAuthorityReceipt | RecoveryAuthorityReceipt, *, now: str
-) -> HostEffectAuthorityReceipt | RecoveryAuthorityReceipt:
-    if not isinstance(receipt, (HostEffectAuthorityReceipt, RecoveryAuthorityReceipt)):
+    receipt: (
+        HostEffectAuthorityReceipt | RecoveryAuthorityReceipt | RecoveryContinuationAuthorityReceipt
+    ),
+    *,
+    now: str,
+) -> HostEffectAuthorityReceipt | RecoveryAuthorityReceipt | RecoveryContinuationAuthorityReceipt:
+    if not isinstance(
+        receipt,
+        (
+            HostEffectAuthorityReceipt,
+            RecoveryAuthorityReceipt,
+            RecoveryContinuationAuthorityReceipt,
+        ),
+    ):
         raise ContractError("authority freshness receipt must be typed")
 
     def parse(value: str) -> datetime:
