@@ -1,5 +1,5 @@
 [project]
-name = "nexus-core"
+name = "nexus-legacy"
 version = "28.3.0"
 description = "Nexus Singularity OS: Hardened Governance & Swarm Engine"
 authors = [{name = "Nexus Engineers", email = "eng@nexus-singularity.os"}]
@@ -56,7 +56,7 @@ nexus-certify = "product.clients.cli:main"
 nexus = "scripts.engine.nexus_cli:nexus"
 
 [tool.poetry]
-name = "nexus-core"
+name = "nexus-legacy"
 version = "28.3.0"
 description = "Nexus Singularity OS: Hardened Governance & Swarm Engine"
 authors = ["Nexus Engineers <eng@nexus-singularity.os>"]
