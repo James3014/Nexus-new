@@ -52,7 +52,6 @@ browser = [
 ]
 
 [project.scripts]
-nexus-certify = "product.clients.cli:main"
 nexus = "scripts.engine.nexus_cli:nexus"
 
 [tool.poetry]
@@ -61,7 +60,6 @@ version = "28.3.0"
 description = "Nexus Singularity OS: Hardened Governance & Swarm Engine"
 authors = ["Nexus Engineers <eng@nexus-singularity.os>"]
 packages = [
-    {include = "product"},
     {include = "nexus"},
     {include = "scripts"},
 ]
@@ -77,7 +75,6 @@ slack = ["slack-sdk", "websocket-client"]
 graph = ["langgraph"]
 
 [tool.poetry.scripts]
-nexus-certify = "product.clients.cli:main"
 nexus = "scripts.engine.nexus_cli:nexus"
 
 [build-system]

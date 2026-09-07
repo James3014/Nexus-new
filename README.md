@@ -54,6 +54,19 @@ nexus-certify verify --receipt receipt.json
 - **MCP Adapter (`product.clients.mcp`)**: Host-projected Model Context Protocol library adapter (`nexus_certify`).
 - **GitHub Action (`.github/actions/nexus-certify`)**: Thin action wrapper designed for self-hosted GitHub runners.
 
+### Canonical Core Action binding
+
+The Action requires `core-python`, an absolute executable path to a
+pre-provisioned isolated `nexus-core` virtual environment. Provision the exact
+Core wheel before invocation and record its SHA-256. The Action shell guard
+rejects empty, relative, missing, directory, or non-executable paths, then
+validates the installed `nexus-core` distribution, exact Action module path and
+`RECORD` hash before reading the token. It also rejects `nexus-legacy`
+co-installation. Existing self-hosted-runner, loopback, request, token, and
+receipt-output semantics remain unchanged. This binds the Action to canonical
+Core; it does not make the MCP library a native MCP server or retire legacy
+integration-lab code.
+
 ## 🧪 Legacy Orchestration & Lab Surfaces
 
 The historical agent orchestration and sensory swarm capabilities of Nexus Singularity have been sequestered under the `legacy` optional extra to ensure a clean, dependency-light Core installation:

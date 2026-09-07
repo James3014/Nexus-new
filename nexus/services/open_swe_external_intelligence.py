@@ -51,6 +51,8 @@ REPAIR_TOOL_SURFACE = frozenset({
     "write_file",
 })
 _SESSION_RE = re.compile(r"^ses_open_swe_[0-9a-f]{20}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+OPEN_SWE_DISTRIBUTION = "nexus-open-swe-runtime"
 _SYSTEM_ENV_ALLOWLIST = (
     "HOME",
     "LANG",
@@ -69,6 +71,49 @@ _PROVIDER_ENV_ALLOWLIST = {
 
 class OpenSWEExternalIntelligenceError(RuntimeError):
     """Fail-closed external Open SWE transport error."""
+
+
+def _validate_runtime_binding(executable: str, expected_artifact_sha256: str) -> tuple[str, str]:
+    selected = str(executable or "").strip()
+    expected = str(expected_artifact_sha256 or "").strip().lower()
+    if not selected:
+        raise OpenSWEExternalIntelligenceError("OPEN_SWE_EXECUTABLE_REQUIRED")
+    if "\x00" in selected or not Path(selected).is_absolute():
+        raise OpenSWEExternalIntelligenceError("OPEN_SWE_EXECUTABLE_ABSOLUTE_REQUIRED")
+    if _SHA256_RE.fullmatch(expected) is None:
+        raise OpenSWEExternalIntelligenceError("OPEN_SWE_EXPECTED_ARTIFACT_HASH_REQUIRED")
+    return selected, expected
+
+
+def _validate_runtime_identity(value: Mapping[str, Any], expected_hash: str) -> None:
+    if (
+        value.get("schema") != PROTOCOL_RESULT_SCHEMA
+        or value.get("kind") != "identity"
+        or value.get("status") != "IDENTIFIED"
+        or value.get("distribution_name") != OPEN_SWE_DISTRIBUTION
+        or not isinstance(value.get("distribution_version"), str)
+        or value.get("runtime_protocol_version") != PROTOCOL_REQUEST_SCHEMA
+        or value.get("authority_boundary") != "execution_runtime_only"
+        or value.get("process_started") is not False
+        or value.get("outcome_unknown") is not False
+        or value.get("retry_safe") is not True
+    ):
+        raise OpenSWEExternalIntelligenceError("OPEN_SWE_RUNTIME_IDENTITY_INVALID")
+    artifact = value.get("artifact_identity")
+    if not isinstance(artifact, Mapping):
+        raise OpenSWEExternalIntelligenceError("OPEN_SWE_RUNTIME_IDENTITY_INVALID")
+    module_file = artifact.get("module_file")
+    module_hash = artifact.get("module_sha256")
+    if (
+        not isinstance(module_file, str)
+        or not module_file
+        or not Path(module_file).is_absolute()
+        or not isinstance(module_hash, str)
+        or _SHA256_RE.fullmatch(module_hash.lower()) is None
+        or module_hash.lower() != expected_hash
+        or not isinstance(artifact.get("deepagents_version"), str)
+    ):
+        raise OpenSWEExternalIntelligenceError("OPEN_SWE_RUNTIME_ARTIFACT_MISMATCH")
 
 
 def _now() -> str:
@@ -244,7 +289,8 @@ class OpenSWEExternalIntelligenceTransport:
         repository_root: str | Path,
         model_provider: str,
         model_id: str,
-        executable: str = "nexus-open-swe-runtime",
+        executable: str = "",
+        expected_artifact_sha256: str = "",
         runtime_state_root: str | Path | None = None,
         timeout: float = 180.0,
         transport_config: Mapping[str, Any] | None = None,
@@ -254,15 +300,16 @@ class OpenSWEExternalIntelligenceTransport:
             raise OpenSWEExternalIntelligenceError("OPEN_SWE_REPOSITORY_ROOT_INVALID")
         provider = str(model_provider or "").strip()
         selected_model = str(model_id or "").strip()
-        selected_executable = str(executable or "").strip()
+        selected_executable, expected_hash = _validate_runtime_binding(
+            executable, expected_artifact_sha256
+        )
         if not provider or not selected_model:
             raise OpenSWEExternalIntelligenceError("OPEN_SWE_MODEL_BINDING_REQUIRED")
-        if not selected_executable:
-            raise OpenSWEExternalIntelligenceError("OPEN_SWE_EXECUTABLE_REQUIRED")
         self.repository_root = root
         self.model_provider = provider
         self.model_id = selected_model
         self.executable = selected_executable
+        self.expected_artifact_sha256 = expected_hash
         self.runtime_state_root = (
             Path(
                 runtime_state_root
@@ -283,6 +330,14 @@ class OpenSWEExternalIntelligenceTransport:
         return _sha256(prompt)
 
     def _request(self, operation: str, prompt: str) -> TransportResult:
+        if not self._ensure_runtime_identity():
+            return _semantic_failure(
+                "OPEN_SWE_RUNTIME_IDENTITY_FAILED",
+                outcome_unknown=operation == "semantic_reconcile",
+                retry_safe=False,
+                started=_now(),
+                safe_argv=self.safe_argv(),
+            )
         started = _now()
         payload = {
             "schema": PROTOCOL_REQUEST_SCHEMA,
@@ -348,6 +403,26 @@ class OpenSWEExternalIntelligenceTransport:
             safe_argv=safe,
         )
 
+    def _ensure_runtime_identity(self) -> bool:
+        payload = {
+            "schema": PROTOCOL_REQUEST_SCHEMA,
+            "operation": "identity",
+            "provider_id": self.model_provider,
+            "model_id": self.model_id,
+            "runtime_state_root": str(self.runtime_state_root),
+            "transport_config": dict(self.transport_config),
+        }
+        value, _stderr, _started, failure = _runtime_call(
+            self.executable, payload, provider_id=self.model_provider, timeout=self.timeout
+        )
+        if value is None:
+            return False
+        try:
+            _validate_runtime_identity(value, self.expected_artifact_sha256)
+        except OpenSWEExternalIntelligenceError:
+            return False
+        return True
+
     def invoke(self, prompt: str) -> TransportResult:
         return self._request("semantic_run", prompt)
 
@@ -363,7 +438,8 @@ class OpenSWEWorkerTransport:
         *,
         model_provider: str,
         model_id: str,
-        executable: str = "nexus-open-swe-runtime",
+        executable: str = "",
+        expected_artifact_sha256: str = "",
         runtime_state_root: str | Path | None = None,
         timeout: float = 300.0,
         require_worker_binding: bool = False,
@@ -371,15 +447,16 @@ class OpenSWEWorkerTransport:
     ) -> None:
         provider = str(model_provider or "").strip()
         selected_model = str(model_id or "").strip()
-        selected_executable = str(executable or "").strip()
+        selected_executable, expected_hash = _validate_runtime_binding(
+            executable, expected_artifact_sha256
+        )
         if not provider or not selected_model:
             raise OpenSWEExternalIntelligenceError("OPEN_SWE_MODEL_BINDING_REQUIRED")
-        if not selected_executable:
-            raise OpenSWEExternalIntelligenceError("OPEN_SWE_EXECUTABLE_REQUIRED")
         self.provider_id = provider
         self.model_id = selected_model
         self.model = f"{provider}/{selected_model}"
         self.executable = selected_executable
+        self.expected_artifact_sha256 = expected_hash
         self.runtime_state_root = (
             Path(
                 runtime_state_root
@@ -467,6 +544,8 @@ class OpenSWEWorkerTransport:
         workspace_path: str,
         session_id: str = "",
     ) -> OpenCodeRunResult:
+        if session_id and _SESSION_RE.fullmatch(session_id) is None:
+            raise FanoutError("INVALID_SESSION_ID")
         workspace = Path(workspace_path).expanduser().resolve()
         if operation != "worker_reconcile":
             artifact = Path(artifact_path).expanduser().resolve()
@@ -478,8 +557,13 @@ class OpenSWEWorkerTransport:
                 return self._local_failure(
                     "OPEN_SWE_WORKER_BINDING_REQUIRED", workspace_path=str(workspace)
                 )
-        if session_id and _SESSION_RE.fullmatch(session_id) is None:
-            raise FanoutError("INVALID_SESSION_ID")
+        if not self._ensure_runtime_identity():
+            return self._local_failure(
+                "OPEN_SWE_RUNTIME_IDENTITY_FAILED",
+                workspace_path=str(workspace),
+                outcome_unknown=operation == "worker_reconcile",
+                retry_safe=False,
+            )
         operation_id = self._operation_id(
             operation,
             prompt=prompt,
@@ -589,6 +673,26 @@ class OpenSWEWorkerTransport:
             repair_phase_count=int(value.get("repair_phase_count") or 0),
             worker_identity_sha256=worker_hash,
         )
+
+    def _ensure_runtime_identity(self) -> bool:
+        payload = {
+            "schema": PROTOCOL_REQUEST_SCHEMA,
+            "operation": "identity",
+            "provider_id": self.provider_id,
+            "model_id": self.model_id,
+            "runtime_state_root": str(self.runtime_state_root),
+            "transport_config": dict(self.transport_config),
+        }
+        value, _stderr, _started, _failure = _runtime_call(
+            self.executable, payload, provider_id=self.provider_id, timeout=self.timeout
+        )
+        if value is None:
+            return False
+        try:
+            _validate_runtime_identity(value, self.expected_artifact_sha256)
+        except OpenSWEExternalIntelligenceError:
+            return False
+        return True
 
     def run_new(self, *, prompt: str, artifact_path: str, workspace_path: str) -> OpenCodeRunResult:
         return self._request(
