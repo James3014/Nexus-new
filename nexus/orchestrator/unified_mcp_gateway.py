@@ -28,6 +28,14 @@ from typing import Any, Mapping, Optional
 from uuid import uuid4
 
 from nexus.contracts.autonomy_goal import AutonomyActionClass, RepositoryIdentity
+from nexus.contracts.execution_readiness import (
+    COMPLETION_AUTHORITY_KIND,
+    HOST_GATEWAY_SERVICE_LABEL,
+    ExecutionReadinessBlockerCode,
+    ExecutionReadinessPlane,
+    ExecutionReadinessRequest,
+    ExecutionReadinessStatus,
+)
 from nexus.contracts.lifecycle_action import (
     ContractKind,
     ExternalCandidateAdoptionRequest,
@@ -47,6 +55,17 @@ from nexus.engine.canonical_task_seam import (
 from nexus.orchestrator.canonical_mcp_ingress import (
     build_mcp_execution_context,
     reject_caller_route_overrides,
+)
+from nexus.orchestrator.execution_readiness import (
+    _COMPLETION_REQUIRED_CAPABILITIES,
+    COMPLETION_INTERFACE_REVISION,
+    COMPLETION_REPOSITORY,
+    CompletionAuthorityObservation,
+    GatewayReadinessObservation,
+    PlaneObservation,
+    evaluate_completion_contract,
+    evaluate_execution_readiness,
+    evaluate_source_binding,
 )
 from nexus.orchestrator.lifecycle_guards import (
     LifecycleGuardError,
@@ -206,6 +225,221 @@ def _text(value: Any, field: str, *, max_length: int = 4096) -> str:
     if len(result) > max_length:
         raise GatewayInputError(f"{field} exceeds {max_length} characters")
     return result
+
+
+EXECUTION_READINESS_TOOL_NAME = "nexus_execution_readiness"
+# In-process preflight realm only: each status variable accepts exactly
+# "PASSED" or "BLOCKED"; anything else fails closed.
+_READINESS_ENV_STATUS_VARS: dict[ExecutionReadinessPlane, str] = {
+    ExecutionReadinessPlane.GOVERNANCE: "NEXUS_READINESS_GOVERNANCE_STATUS",
+    ExecutionReadinessPlane.AUTHORITY: "NEXUS_READINESS_AUTHORITY_STATUS",
+    ExecutionReadinessPlane.REPLAY_FENCE: "NEXUS_READINESS_REPLAY_FENCE_STATUS",
+    ExecutionReadinessPlane.WORKFORCE: "NEXUS_READINESS_WORKFORCE_STATUS",
+}
+# Planes that default to PASSED in the in-process preflight realm, each with an
+# explicit evidence identity.  Source is never defaulted: it is derived from
+# the exact requested commit/tree versus the canonical checkout.  Gateway,
+# host-binding, and action-surface planes carry derived evidence separately.
+_READINESS_DEFAULTED_PASSED_PLANES = {
+    ExecutionReadinessPlane.GOVERNANCE: "governance_plane:default_no_open_recovery",
+    ExecutionReadinessPlane.AUTHORITY: "authority_plane:in_process_caller_context",
+    ExecutionReadinessPlane.REPLAY_FENCE: "replay_fence_plane:in_process_first_observation",
+}
+
+
+def _in_process_readiness_plane_observations(
+    gateway_observation: GatewayReadinessObservation,
+    *,
+    request: ExecutionReadinessRequest,
+    completion_observation: CompletionAuthorityObservation | None = None,
+    required_completion_contract: object | None = None,
+) -> dict[ExecutionReadinessPlane, tuple[PlaneObservation, ...]]:
+    """Gather in-process plane observations for the local preflight realm.
+
+    The gateway plane reuses the exact freshness primitives that
+    ``nexus_gateway_status`` uses (same digest, same ``reload_required``
+    semantics), so the readiness gate can never disagree with the running
+    instance's own status payload.  Remaining env-declared planes accept
+    exactly ``PASSED`` or ``BLOCKED``; anything else fails closed.
+    """
+
+    observations: dict[ExecutionReadinessPlane, tuple[PlaneObservation, ...]] = {
+        ExecutionReadinessPlane.SOURCE: (evaluate_source_binding(request, gateway_observation),)
+    }
+
+    if gateway_observation.reload_required:
+        observations[ExecutionReadinessPlane.GATEWAY] = (
+            PlaneObservation(
+                plane=ExecutionReadinessPlane.GATEWAY,
+                status=ExecutionReadinessStatus.BLOCKED,
+                blocker_code=ExecutionReadinessBlockerCode.GATEWAY_REBIND_REQUIRED,
+                evidence_identities=gateway_observation.to_observation_payload(),
+            ),
+        )
+    else:
+        observations[ExecutionReadinessPlane.GATEWAY] = (
+            PlaneObservation(
+                plane=ExecutionReadinessPlane.GATEWAY,
+                status=ExecutionReadinessStatus.PASSED,
+                evidence_identities=(
+                    f"gateway_instance={gateway_observation.gateway_instance_id}",
+                    "gateway_reload_required=false",
+                    f"gateway_runtime_sha256={gateway_observation.observed_runtime_sha256}",
+                ),
+            ),
+        )
+
+    observations[ExecutionReadinessPlane.HOST_BINDING] = (
+        PlaneObservation(
+            plane=ExecutionReadinessPlane.HOST_BINDING,
+            status=ExecutionReadinessStatus.PASSED,
+            evidence_identities=(f"host_binding:{HOST_GATEWAY_SERVICE_LABEL}:in_process",),
+        ),
+    )
+    if required_completion_contract is not None:
+        completion_ok, completion_code, completion_evidence = evaluate_completion_contract(
+            required_completion_contract, completion_observation
+        )
+        surface_evidence = (
+            f"action_surface:manifest={gateway_observation.tool_manifest_revision}",
+            f"action_surface:schema={gateway_observation.full_tool_schema_hash}",
+            f"action_surface:permission={gateway_observation.permission_policy_hash}",
+        )
+        if completion_ok:
+            observations[ExecutionReadinessPlane.ACTION_SURFACE] = (
+                PlaneObservation(
+                    plane=ExecutionReadinessPlane.ACTION_SURFACE,
+                    status=ExecutionReadinessStatus.PASSED,
+                    evidence_identities=surface_evidence + tuple(completion_evidence),
+                ),
+            )
+        else:
+            observations[ExecutionReadinessPlane.ACTION_SURFACE] = (
+                PlaneObservation(
+                    plane=ExecutionReadinessPlane.ACTION_SURFACE,
+                    status=ExecutionReadinessStatus.BLOCKED,
+                    blocker_code=(
+                        completion_code
+                        or ExecutionReadinessBlockerCode.COMPLETION_CONTRACT_BINDING_REQUIRED
+                    ),
+                    evidence_identities=surface_evidence + tuple(completion_evidence),
+                ),
+            )
+    else:
+        observations[ExecutionReadinessPlane.ACTION_SURFACE] = (
+            PlaneObservation(
+                plane=ExecutionReadinessPlane.ACTION_SURFACE,
+                status=ExecutionReadinessStatus.PASSED,
+                evidence_identities=(
+                    f"action_surface:manifest={gateway_observation.tool_manifest_revision}",
+                    f"action_surface:schema={gateway_observation.full_tool_schema_hash}",
+                    f"action_surface:permission={gateway_observation.permission_policy_hash}",
+                ),
+            ),
+        )
+
+    _env_declared_blockers = {
+        ExecutionReadinessPlane.GOVERNANCE: (
+            ExecutionReadinessBlockerCode.GOVERNANCE_PLANE_RECOVERY_REQUIRED
+        ),
+        ExecutionReadinessPlane.AUTHORITY: ExecutionReadinessBlockerCode.TASK_AUTHORITY_MISSING,
+        ExecutionReadinessPlane.REPLAY_FENCE: ExecutionReadinessBlockerCode.SEMANTIC_REPLAY_FENCE,
+        ExecutionReadinessPlane.WORKFORCE: ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY,
+    }
+    # Banded env statuses are processed in G0 precedence order.  An unset
+    # status for a plane that has no default (workforce) is UNPROVEN whenever
+    # any higher-precedence plane already observed a BLOCK, and fails closed
+    # otherwise (a READY verdict can never be fabricated from missing evidence).
+    for plane in tuple(_READINESS_ENV_STATUS_VARS):
+        env_var = _READINESS_ENV_STATUS_VARS[plane]
+        raw = os.environ.get(env_var)
+        if raw is None:
+            default_identity = _READINESS_DEFAULTED_PASSED_PLANES.get(plane)
+            if default_identity is not None:
+                observations[plane] = (
+                    PlaneObservation(
+                        plane=plane,
+                        status=ExecutionReadinessStatus.PASSED,
+                        evidence_identities=(default_identity,),
+                    ),
+                )
+                continue
+            higher_unproven = any(
+                observation.status is ExecutionReadinessStatus.BLOCKED
+                for higher_plane, higher_observations in observations.items()
+                for observation in higher_observations
+                if higher_plane.precedence < plane.precedence
+            )
+            if higher_unproven:
+                observations[plane] = (
+                    PlaneObservation(
+                        plane=plane,
+                        status=ExecutionReadinessStatus.UNPROVEN,
+                        evidence_identities=(),
+                    ),
+                )
+                continue
+            raise GatewayInputError(f"{env_var} is required for in-process preflight")
+        normalized = raw.strip().upper()
+        if normalized == "PASSED":
+            observations[plane] = (
+                PlaneObservation(
+                    plane=plane,
+                    status=ExecutionReadinessStatus.PASSED,
+                    evidence_identities=(f"{env_var}=PASSED",),
+                ),
+            )
+            continue
+        if normalized != "BLOCKED":
+            raise GatewayInputError(f"{env_var} must be PASSED or BLOCKED")
+        blocker = _env_declared_blockers.get(plane)
+        if blocker is None:
+            raise GatewayInputError(f"{env_var}=BLOCKED is not evaluable in-process")
+        observations[plane] = (
+            PlaneObservation(
+                plane=plane,
+                status=ExecutionReadinessStatus.BLOCKED,
+                blocker_code=blocker,
+                evidence_identities=(f"{env_var}=BLOCKED",),
+            ),
+        )
+    return observations
+
+
+def _completion_authority_observation_from_environment() -> (
+    CompletionAuthorityObservation | None
+):
+    """Read the observed completion authority identity from the environment.
+
+    Returns ``None`` when no completion environment is configured, which is
+    itself a fail-closed blocker whenever the request requires one.
+    """
+
+    artifact = os.environ.get("NEXUS_READINESS_COMPLETION_ARTIFACT_IDENTITY")
+    if not artifact:
+        return None
+    return CompletionAuthorityObservation(
+        observed_authority_kind=os.environ.get(
+            "NEXUS_READINESS_COMPLETION_AUTHORITY_KIND",
+            COMPLETION_AUTHORITY_KIND,
+        ),
+        observed_repository=os.environ.get(
+            "NEXUS_READINESS_COMPLETION_REPOSITORY", COMPLETION_REPOSITORY
+        ),
+        observed_artifact_identity=artifact.strip(),
+        observed_interface_revision=os.environ.get(
+            "NEXUS_READINESS_COMPLETION_INTERFACE_REVISION",
+            COMPLETION_INTERFACE_REVISION,
+        ),
+        observed_capabilities=tuple(
+            item.strip()
+            for item in os.environ.get(
+                "NEXUS_READINESS_COMPLETION_CAPABILITIES",
+                ",".join(_COMPLETION_REQUIRED_CAPABILITIES),
+            ).split(",")
+            if item.strip()
+        ),
+    )
 
 
 def _safe_relative_path(value: Any, field: str = "path") -> Path:
@@ -3286,6 +3520,64 @@ class UnifiedMCPGateway:
                 "inputSchema": {"type": "object", "properties": {}},
             },
             {
+                "name": "nexus_execution_readiness",
+                "description": (
+                    "Evaluate the pre-execution readiness convergence gate: exactly one typed "
+                    "result, READY_TO_EXECUTE or one primary blocker with a canonical next "
+                    "action. Observe-only; never repairs, reloads, routes, admits, or certifies."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "required": [
+                        "repository_owner",
+                        "repository_name",
+                        "intended_source_commit",
+                        "intended_source_tree",
+                        "execution_realm",
+                        "required_action_family",
+                        "execution_contract_kind",
+                    ],
+                    "properties": {
+                        "repository_owner": {"type": "string", "maxLength": 128},
+                        "repository_name": {"type": "string", "maxLength": 128},
+                        "intended_source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "intended_source_tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "task_campaign_goal_identity": {"type": "string", "maxLength": 4096},
+                        "desired_deployment_identity": {"type": "string", "maxLength": 4096},
+                        "execution_realm": {"type": "string", "enum": ["in_process_preflight"]},
+                        "required_action_family": {"type": "string", "maxLength": 128},
+                        "execution_contract_kind": {"type": "string", "maxLength": 128},
+                        "worker_constraints": {
+                            "type": "array",
+                            "items": {"type": "string", "maxLength": 256},
+                            "maxItems": 8,
+                        },
+                        "required_completion_contract": {
+                            "type": "object",
+                            "required": [
+                                "authority_kind",
+                                "repository",
+                                "artifact_or_source_identity",
+                                "interface_revision",
+                            ],
+                            "properties": {
+                                "authority_kind": {"type": "string"},
+                                "repository": {"type": "string"},
+                                "artifact_or_source_identity": {"type": "string"},
+                                "interface_revision": {"type": "string"},
+                                "required_capabilities": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "maxItems": 8,
+                                },
+                            },
+                            "additionalProperties": False,
+                        },
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            {
                 "name": "nexus_workspace_snapshot",
                 "description": "Read the canonical checkout snapshot without creating state or a Target.",
                 "inputSchema": {"type": "object", "properties": {}},
@@ -3896,6 +4188,106 @@ class UnifiedMCPGateway:
             "canonical_repo_root": str(CANONICAL_SOURCE_ROOT),
             "lifecycle": lifecycle,
         }
+
+    def _gateway_execution_readiness(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        """Evaluate the #807 pre-execution readiness convergence gate.
+
+        One typed request in, one typed result out (READY_TO_EXECUTE or
+        BLOCKED with exactly one primary blocker).  This tool observes and
+        reports only: it never repairs, reloads, routes, admits, grants,
+        approves, or certifies.
+        """
+
+        required_fields = (
+            "repository_owner",
+            "repository_name",
+            "intended_source_commit",
+            "intended_source_tree",
+            "execution_realm",
+            "required_action_family",
+            "execution_contract_kind",
+        )
+        fields: dict[str, str] = {}
+        for field in required_fields:
+            raw = arguments.get(field)
+            if raw is None:
+                raise GatewayInputError(f"{field} is required")
+            fields[field] = _text(raw, field, max_length=4096)
+        optional_fields = ("task_campaign_goal_identity", "desired_deployment_identity")
+        optionals: dict[str, str] = {}
+        for field in optional_fields:
+            raw = arguments.get(field)
+            if raw is not None:
+                optionals[field] = _text(raw, field, max_length=4096)
+        worker_constraints = arguments.get("worker_constraints") or []
+        if not isinstance(worker_constraints, (list, tuple)):
+            raise GatewayInputError("worker_constraints must be an array of strings")
+        worker_constraint_values = tuple(
+            _text(item, "worker_constraints[]", max_length=256) for item in worker_constraints
+        )
+        completion_contract = arguments.get("required_completion_contract")
+        if completion_contract is not None and not isinstance(completion_contract, Mapping):
+            raise GatewayInputError("required_completion_contract must be an object")
+
+        try:
+            request = ExecutionReadinessRequest(
+                repository_owner=fields["repository_owner"],
+                repository_name=fields["repository_name"],
+                intended_source_commit=fields["intended_source_commit"],
+                intended_source_tree=fields["intended_source_tree"],
+                execution_realm=fields["execution_realm"],
+                required_action_family=fields["required_action_family"],
+                execution_contract_kind=fields["execution_contract_kind"],
+                task_campaign_goal_identity=optionals.get("task_campaign_goal_identity"),
+                desired_deployment_identity=optionals.get("desired_deployment_identity"),
+                worker_constraints=worker_constraint_values,
+                required_completion_contract=completion_contract,
+            )
+        except ValueError as exc:
+            raise GatewayInputError(str(exc)) from exc
+
+        realm = fields["execution_realm"]
+        if realm == "in_process_preflight":
+            observed_runtime_sha256 = _hash_source_paths(RUNTIME_SOURCE_PATHS)
+            try:
+                observed_repo_head = _git("rev-parse", "HEAD").strip()
+                observed_repo_tree = _git("rev-parse", "HEAD^{tree}").strip()
+            except RuntimeError:
+                observed_repo_head = ""
+                observed_repo_tree = ""
+            gateway_observation = GatewayReadinessObservation(
+                gateway_instance_id=SERVER_INSTANCE_ID,
+                observed_repo_head=observed_repo_head,
+                observed_repo_tree=observed_repo_tree,
+                observed_runtime_sha256=observed_runtime_sha256,
+                runtime_sha256_at_start=RUNTIME_SOURCE_SHA256_AT_START,
+                tool_manifest_revision=TOOL_MANIFEST_REVISION,
+                full_tool_schema_hash=FULL_TOOL_SCHEMA_HASH,
+                permission_policy_hash=PERMISSION_POLICY_HASH,
+                reload_required=observed_runtime_sha256 != RUNTIME_SOURCE_SHA256_AT_START,
+            )
+            completion_observation = _completion_authority_observation_from_environment()
+            plane_observations = _in_process_readiness_plane_observations(
+                gateway_observation,
+                request=request,
+                completion_observation=completion_observation,
+                required_completion_contract=request.required_completion_contract,
+            )
+        else:
+            raise GatewayInputError(f"execution_realm {realm!r} is not a supported observation realm")
+
+        result = evaluate_execution_readiness(
+            request,
+            plane_observations,
+            completion_observation=completion_observation,
+        )
+        payload = result.model_dump(mode="json")
+        payload["certification_fence"] = {
+            "ready_vocabulary": ["READY_TO_EXECUTE"],
+            "forbidden_vocabulary_ref": "NEXUS_EXECUTION_READINESS_FORBIDDEN_CERTIFICATION_VOCABULARY",
+            "satisfied": result.request_satisfies_certification_fence(),
+        }
+        return payload
 
     @staticmethod
     def _recovery_payload(state: Mapping[str, Any], *, operation: str = "status", include_state: bool = False) -> dict[str, Any]:
@@ -4948,6 +5340,8 @@ class UnifiedMCPGateway:
     def _call_tool(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         if name == "nexus_gateway_status":
             return self._gateway_status()
+        if name == EXECUTION_READINESS_TOOL_NAME:
+            return self._gateway_execution_readiness(arguments)
         if name == "nexus_workspace_snapshot":
             return self._workspace_snapshot()
         if name == "nexus_read":
