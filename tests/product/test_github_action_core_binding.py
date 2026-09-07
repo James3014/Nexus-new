@@ -29,7 +29,9 @@ def _run_script() -> str:
 
 
 def _record_digest(path: Path) -> str:
-    return base64.urlsafe_b64encode(hashlib.sha256(path.read_bytes()).digest()).rstrip(b"=").decode()
+    return (
+        base64.urlsafe_b64encode(hashlib.sha256(path.read_bytes()).digest()).rstrip(b"=").decode()
+    )
 
 
 @pytest.fixture
@@ -91,14 +93,24 @@ web = _Web()
     action_module = site / "product/clients/github_action.py"
     dist = site / "nexus_core-0.1.0.dist-info"
     dist.mkdir()
-    (dist / "METADATA").write_text("Metadata-Version: 2.1\nName: nexus-core\nVersion: 0.1.0\n", encoding="utf-8")
+    (dist / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: nexus-core\nVersion: 0.1.0\n", encoding="utf-8"
+    )
     (dist / "WHEEL").write_text("Wheel-Version: 1.0\n", encoding="utf-8")
     (dist / "top_level.txt").write_text("product\n", encoding="utf-8")
     rows = [
-        ["product/clients/github_action.py", f"sha256={_record_digest(action_module)}", str(action_module.stat().st_size)],
+        [
+            "product/clients/github_action.py",
+            f"sha256={_record_digest(action_module)}",
+            str(action_module.stat().st_size),
+        ],
         ["nexus_core-0.1.0.dist-info/METADATA", "", str((dist / "METADATA").stat().st_size)],
         ["nexus_core-0.1.0.dist-info/WHEEL", "", str((dist / "WHEEL").stat().st_size)],
-        ["nexus_core-0.1.0.dist-info/top_level.txt", "", str((dist / "top_level.txt").stat().st_size)],
+        [
+            "nexus_core-0.1.0.dist-info/top_level.txt",
+            "",
+            str((dist / "top_level.txt").stat().st_size),
+        ],
         ["nexus_core-0.1.0.dist-info/RECORD", "", ""],
     ]
     with (dist / "RECORD").open("w", newline="", encoding="utf-8") as handle:
@@ -119,19 +131,19 @@ def _invoke(
     request_file: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     env = dict(os.environ)
-    env.update(
-        {
-            "CORE_PYTHON": core_python,
-            "REQUEST_FILE": str(request_file or (tmp_path / "missing-request.json")),
-            "SERVICE_URL": service_url,
-            "TOKEN_FILE": str(tmp_path / "missing-token"),
-            "RUNNER_ENVIRONMENT": runner,
-        }
-    )
+    env.update({
+        "CORE_PYTHON": core_python,
+        "REQUEST_FILE": str(request_file or (tmp_path / "missing-request.json")),
+        "SERVICE_URL": service_url,
+        "TOKEN_FILE": str(tmp_path / "missing-token"),
+        "RUNNER_ENVIRONMENT": runner,
+    })
     if shadow:
         shadow_dir = tmp_path / "shadow"
         (shadow_dir / "product/clients").mkdir(parents=True)
-        (shadow_dir / "product/__init__.py").write_text("raise RuntimeError('shadowed')\n", encoding="utf-8")
+        (shadow_dir / "product/__init__.py").write_text(
+            "raise RuntimeError('shadowed')\n", encoding="utf-8"
+        )
         env["PYTHONPATH"] = str(shadow_dir)
         cwd = shadow_dir
     if unset_core:
@@ -181,7 +193,9 @@ def test_wrong_or_legacy_distribution_ownership_fails_closed(action_fixture, tmp
     (dist / "RECORD").write_text("", encoding="utf-8")
     result = _invoke(action_fixture, tmp_path, core_python=str(action_fixture["python"]))
     assert result.returncode == 78
-    assert "co-install" in result.stderr or "invalid product distribution ownership" in result.stderr
+    assert (
+        "co-install" in result.stderr or "invalid product distribution ownership" in result.stderr
+    )
 
 
 def test_tampered_record_and_module_fail_before_action_execution(action_fixture, tmp_path):
