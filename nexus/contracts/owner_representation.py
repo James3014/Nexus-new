@@ -343,6 +343,108 @@ class OwnerRepresentationGrant(OwnerRepresentationGrantSpec):
         return self
 
 
+class OwnerExactPublicationAuthorizationSpec(_FrozenModel):
+    """Immutable exact Owner authorization for one exact external publication effect.
+
+    Issued only by the Owner.  Binds the exact destination, effect, target,
+    content hash, narrow purpose, actor, transport, operation, and grant hash.
+    A worker/coordinator/agent can never mint, infer, inherit, widen, or
+    self-approve this authority.
+    """
+
+    schema: Literal["nexus.owner_exact_publication_authorization.v1"] = (
+        "nexus.owner_exact_publication_authorization.v1"
+    )
+    authorization_id: StrictStr
+    owner_id: StrictStr
+    coordinator_id: StrictStr
+    destination: ExternalDestination
+    effect: ExternalPublicationEffect
+    target: StrictStr | None = None
+    content_hash: StrictStr
+    purpose: StrictStr
+    actor: StrictStr
+    transport: StrictStr
+    operation_id: StrictStr
+    grant_hash: StrictStr
+    replay_mode: Literal["ONE_SHOT"] = "ONE_SHOT"
+    issued_at: AwareDatetime
+    expires_at: AwareDatetime
+    revoked_at: AwareDatetime | None = None
+    revocation_reason: StrictStr | None = None
+    superseded_by: StrictStr | None = None
+
+    @field_validator(
+        "authorization_id",
+        "owner_id",
+        "coordinator_id",
+        "actor",
+        "transport",
+        "operation_id",
+    )
+    @classmethod
+    def validate_ids(cls, value: str, info) -> str:
+        return _safe_id(value, info.field_name)
+
+    @field_validator("target")
+    @classmethod
+    def validate_target(cls, value: str | None) -> str | None:
+        return _safe_target(value, "target")
+
+    @field_validator("content_hash", "grant_hash")
+    @classmethod
+    def validate_hashes(cls, value: str, info) -> str:
+        return _sha64(value, info.field_name)
+
+    @field_validator("purpose")
+    @classmethod
+    def validate_purpose(cls, value: str) -> str:
+        text = value.strip()
+        if not text or text != value or len(text) > 256:
+            raise ValueError("PURPOSE_INVALID")
+        return text
+
+    @field_validator("revocation_reason")
+    @classmethod
+    def validate_revocation_reason(cls, value: str | None) -> str | None:
+        if value is not None and (not value.strip() or value.strip() != value):
+            raise ValueError("REVOCATION_REASON_INVALID")
+        return value
+
+    @field_validator("superseded_by")
+    @classmethod
+    def validate_superseded_by(cls, value: str | None) -> str | None:
+        if value is not None:
+            _safe_id(value, "superseded_by")
+        return value
+
+    @model_validator(mode="after")
+    def validate_authorization(self) -> "OwnerExactPublicationAuthorizationSpec":
+        if self.expires_at <= self.issued_at:
+            raise ValueError("AUTHORIZATION_EXPIRY_INVALID")
+        if (self.revoked_at is None) != (self.revocation_reason is None):
+            raise ValueError("REVOCATION_BINDING_INVALID")
+        return self
+
+
+class OwnerExactPublicationAuthorization(OwnerExactPublicationAuthorizationSpec):
+    """Hash-sealed immutable Owner authorization for one exact external publication."""
+
+    authorization_hash: StrictStr
+
+    @field_validator("authorization_hash")
+    @classmethod
+    def validate_auth_hash_format(cls, value: str) -> str:
+        return _sha64(value, "authorization_hash")
+
+    @model_validator(mode="after")
+    def validate_authorization_hash(self) -> "OwnerExactPublicationAuthorization":
+        payload = self.model_dump(mode="json", exclude={"authorization_hash"})
+        if self.authorization_hash != canonical_autonomy_hash(payload):
+            raise ValueError("AUTHORIZATION_HASH_INVALID")
+        return self
+
+
 class InternalCollaborationBound(_FrozenModel):
     """One explicitly Owner-controlled internal collaboration contract.
 
@@ -414,6 +516,12 @@ class OwnerRepresentationReason(str, Enum):
     ISSUANCE_AUTHORITY_NOT_LIVE = "ISSUANCE_AUTHORITY_NOT_LIVE"
     ISSUANCE_PERMIT_SLOT_CONSUMED = "ISSUANCE_PERMIT_SLOT_CONSUMED"
     PERMIT_ALREADY_MINTED = "PERMIT_ALREADY_MINTED"
+    EXACT_OWNER_AUTHORIZATION_REQUIRED = "EXACT_OWNER_AUTHORIZATION_REQUIRED"
+    EXACT_OWNER_AUTHORIZATION_REJECTED = "EXACT_OWNER_AUTHORIZATION_REJECTED"
+    EXACT_OWNER_AUTHORIZATION_MISMATCH = "EXACT_OWNER_AUTHORIZATION_MISMATCH"
+    EXACT_OWNER_AUTHORIZATION_EXPIRED = "EXACT_OWNER_AUTHORIZATION_EXPIRED"
+    EXACT_OWNER_AUTHORIZATION_REVOKED = "EXACT_OWNER_AUTHORIZATION_REVOKED"
+    EXACT_OWNER_AUTHORIZATION_CONSUMED = "EXACT_OWNER_AUTHORIZATION_CONSUMED"
 
 
 class OwnerRepresentationOutcome(str, Enum):
@@ -632,6 +740,8 @@ __all__ = [
     "ExternalPublicationEffect",
     "ExternalPublicationProposal",
     "InternalCollaborationBound",
+    "OwnerExactPublicationAuthorization",
+    "OwnerExactPublicationAuthorizationSpec",
     "OwnerRepresentationBlocked",
     "OwnerRepresentationDecision",
     "OwnerRepresentationGrant",

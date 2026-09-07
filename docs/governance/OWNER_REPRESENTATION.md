@@ -118,28 +118,48 @@ credential helpers, and arbitrary shell wrappers cannot be excluded; Nexus
 therefore cannot physically certify non-publication and classifies the route
 `UNKNOWN_BLOCKED` (registered fail-closed, never usable).
 
-Grant **issuance** additionally requires a sealed one-shot issuance permit
-minted from live Owner standing-grant authority: the store
-(`mint_owner_representation_publication_issuance_permit`) derives the exact
-`nexus.owner_representation_publication_issuance_permit.v1` permit for the
-`OWNER_REPRESENTATION_GRANT_ISSUE` effect from the canonical durable Owner
-standing-grant receipt, addressed by the receipt hash
-(`permits/<grant_receipt_hash>.json`), with the grant identity, effect hash,
-repository, and effect bound inside a sealed record.  **One standing-grant
-receipt mints at most one permit** (`ISSUANCE_PERMIT_SLOT_CONSUMED` /
-`PERMIT_ALREADY_MINTED`); the permit is non-reusable.  `issue` re-reads the
-permit sealed from disk, ignores every caller-supplied permit field except the
-grant-hash mapping, binds the grant identity/effect exactly, and re-derives the
-standing-grant authority fresh.  A missing permit
-(`ISSUANCE_AUTHORIZATION_REQUIRED`), a wrong or replayed one
-(`ISSUANCE_AUTHORIZATION_REJECTED`), a replaced standing grant
-(`ISSUANCE_AUTHORITY_CHANGED`), or a revoked/unreadable standing grant
-(`ISSUANCE_AUTHORITY_NOT_LIVE`) all fail closed with no receipt persisted and
-no dispatch effect.  The first accepted issuance writes a sealed
-`permits/consumed/<grant_hash>.json` consumption marker before the grant
-receipt, so a grant receipt destroyed after issuance can never be re-issued
-(`GRANT_REUSED`) and a live receipt is never double-issued
-(`GRANT_ALREADY_ISSUED`).
+Grant **issuance** strictly requires both an immutable exact Owner
+authorization (`OwnerExactPublicationAuthorization` /
+`nexus.owner_exact_publication_authorization.v1`) and a sealed one-shot issuance
+permit minted under live Owner standing-grant authority:
+
+* **Explicit Owner authorization is mandatory.**  A broad standing grant
+  (`OWNER_REPRESENTATION_GRANT_ISSUE`) never functions as a blank cheque for
+  worker-invented publications.  The store
+  (`mint_owner_representation_publication_issuance_permit` /
+  `consume_exact_owner_authorization`) requires an exact matching Owner
+  authorization record (`owner_issues_exact_publication_authorization`) binding
+  destination, effect, target, content_hash, purpose, actor, transport, and
+  operation_id field-for-field.  A missing authorization
+  (`EXACT_OWNER_AUTHORIZATION_REQUIRED`), tampered or substituted fields
+  (`EXACT_OWNER_AUTHORIZATION_MISMATCH`), expired authorization
+  (`EXACT_OWNER_AUTHORIZATION_EXPIRED`), or revoked authorization
+  (`EXACT_OWNER_AUTHORIZATION_REVOKED`) fails closed immediately on the first
+  attempt.
+* **Exact authorization consumption.**  Minting an issuance permit consumes the
+  exact Owner authorization by writing a sealed
+  `authorizations/consumed/<grant_hash>.json` marker fail-closed.  A replayed
+  authorization fails `EXACT_OWNER_AUTHORIZATION_CONSUMED`.
+* **One-shot issuance permit.**  The store derives the exact
+  `nexus.owner_representation_publication_issuance_permit.v1` permit for the
+  `OWNER_REPRESENTATION_GRANT_ISSUE` effect from the canonical durable Owner
+  standing-grant receipt, addressed by the receipt hash
+  (`permits/<grant_receipt_hash>.json`), with the grant identity, authorization
+  identity and hash, effect hash, repository, and effect bound inside a sealed
+  record.  **One standing-grant receipt mints at most one permit**
+  (`ISSUANCE_PERMIT_SLOT_CONSUMED` / `PERMIT_ALREADY_MINTED`); the permit is
+  non-reusable.  `issue` re-reads both the permit and the exact authorization
+  sealed from disk, ignores caller-supplied fields, binds the grant identity and
+  effect exactly, and re-derives the standing-grant authority fresh.  A missing permit
+  (`ISSUANCE_AUTHORIZATION_REQUIRED`), a wrong or replayed one
+  (`ISSUANCE_AUTHORIZATION_REJECTED`), a replaced standing grant
+  (`ISSUANCE_AUTHORITY_CHANGED`), or a revoked/unreadable standing grant
+  (`ISSUANCE_AUTHORITY_NOT_LIVE`) all fail closed with no receipt persisted and
+  no dispatch effect.  The first accepted issuance writes a sealed
+  `permits/consumed/<grant_hash>.json` consumption marker before the grant
+  receipt, so a grant receipt destroyed after issuance can never be re-issued
+  (`GRANT_REUSED`) and a live receipt is never double-issued
+  (`GRANT_ALREADY_ISSUED`).
 
 ## Failure-mode guarantees
 

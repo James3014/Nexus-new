@@ -73,6 +73,8 @@ from nexus.contracts.autonomy_goal import (
 from nexus.contracts.owner_representation import (
     ExternalDestination,
     ExternalPublicationProposal,
+    OwnerExactPublicationAuthorization,
+    OwnerExactPublicationAuthorizationSpec,
     OwnerRepresentationDecision,
     OwnerRepresentationGrant,
     OwnerRepresentationOutcome,
@@ -98,12 +100,16 @@ _GRANTS_DIR = "grants"
 _REVOCATIONS_DIR = "revocations"
 _PERMITS_DIR = "permits"
 _PERMITS_CONSUMED_DIR = "consumed"
+_AUTHORIZATIONS_DIR = "authorizations"
+_AUTHORIZATIONS_CONSUMED_DIR = "consumed"
 _SHA64_HEX = re.compile(r"^[0-9a-f]{64}$")
 _MAX_RECORD_BYTES = 32 * 1024
 _RECEIPT_SCHEMA = "nexus.owner_representation_grant_receipt.v1"
 _REVOCATION_SCHEMA = "nexus.owner_representation_grant_revocation.v1"
 _PERMIT_SCHEMA = "nexus.owner_representation_publication_issuance_permit.v1"
 _PERMIT_CONSUMED_SCHEMA = "nexus.owner_representation_issuance_permit_consumed.v1"
+_AUTHORIZATION_SCHEMA = "nexus.owner_exact_publication_authorization.v1"
+_AUTHORIZATION_CONSUMED_SCHEMA = "nexus.owner_exact_publication_authorization_consumed.v1"
 
 
 class OwnerRepresentationGrantStoreError(Exception):
@@ -124,6 +130,8 @@ class OwnerRepresentationGrantReceipt(_FrozenModel):
     schema: Literal["nexus.owner_representation_grant_receipt.v1"] = _RECEIPT_SCHEMA
     grant: OwnerRepresentationGrant
     supersedes_grant_hash: str | None = None
+    permit_id: str | None = None
+    authorization_id: str | None = None
     receipt_hash: str
 
 
@@ -411,6 +419,295 @@ def _permit_consumed(root: Path, grant_hash: str) -> bool:
     return True
 
 
+def _authorizations_dir(root: Path) -> Path:
+    return Path(root) / _AUTHORIZATIONS_DIR
+
+
+def _authorizations_consumed_dir(root: Path) -> Path:
+    return _authorizations_dir(root) / _AUTHORIZATIONS_CONSUMED_DIR
+
+
+def _authorization_path(root: Path, grant_hash: str) -> Path:
+    return _authorizations_dir(root) / f"{grant_hash}.json"
+
+
+def _authorization_consumed_marker_path(root: Path, grant_hash: str) -> Path:
+    return _authorizations_consumed_dir(root) / f"{grant_hash}.json"
+
+
+def _authorization_consumed(root: Path, grant_hash: str) -> bool:
+    if not _SHA64_HEX.fullmatch(grant_hash):
+        return False
+    path = _authorization_consumed_marker_path(root, grant_hash)
+    if not path.exists():
+        return False
+    _read_sealed_record(path, _AUTHORIZATION_CONSUMED_SCHEMA, "record_hash")
+    return True
+
+
+def _load_authorization_for_grant(root: Path, grant_hash: str) -> dict[str, Any] | None:
+    if not _SHA64_HEX.fullmatch(grant_hash):
+        return None
+    path = _authorization_path(root, grant_hash)
+    if not path.exists():
+        return None
+    return _read_sealed_record(path, _AUTHORIZATION_SCHEMA, "authorization_hash")
+
+
+def _authorization_records(root: Path) -> list[dict[str, Any]]:
+    auth_dir = _authorizations_dir(root)
+    if not auth_dir.exists():
+        return []
+    records = []
+    for entry in sorted(auth_dir.iterdir()):
+        name = entry.name
+        if name.startswith("."):
+            continue
+        if entry.is_dir():
+            if name == _AUTHORIZATIONS_CONSUMED_DIR:
+                continue
+            raise OwnerRepresentationGrantStoreError("AUTHORIZATIONS_DIR_UNEXPECTED_ENTRY")
+        if not name.endswith(".json"):
+            raise OwnerRepresentationGrantStoreError("AUTHORIZATIONS_DIR_UNEXPECTED_ENTRY")
+        records.append(_read_sealed_record(entry, _AUTHORIZATION_SCHEMA, "authorization_hash"))
+    return records
+
+
+def _write_authorization_consumed_marker(
+    root: Path,
+    *,
+    grant_hash: str,
+    authorization_id: str,
+    consumed_at: datetime,
+) -> None:
+    payload = {
+        "schema": _AUTHORIZATION_CONSUMED_SCHEMA,
+        "grant_hash": grant_hash,
+        "authorization_id": authorization_id,
+        "consumed_at": consumed_at.isoformat(),
+    }
+    record = {
+        **payload,
+        "record_hash": canonical_autonomy_hash(payload),
+    }
+    canonical = _canonical_json(record)
+    destination = _authorization_consumed_marker_path(root, grant_hash)
+    _write_bytes(canonical, None, destination, None)
+
+
+def owner_issues_exact_publication_authorization(
+    grant: OwnerRepresentationGrant,
+    *,
+    authorization_id: str | None = None,
+    issued_at: datetime | None = None,
+    expires_at: datetime | None = None,
+    authority_root: Path | None = None,
+) -> OwnerExactPublicationAuthorization:
+    """Issue one immutable exact Owner authorization for one exact grant."""
+    if not isinstance(grant, OwnerRepresentationGrant):
+        raise TypeError("grant must be a validated OwnerRepresentationGrant")
+    if grant.revoked_at is not None:
+        raise OwnerRepresentationGrantBlocked(OwnerRepresentationReason.GRANT_REVOKED.value)
+    if grant.superseded_by is not None:
+        raise OwnerRepresentationGrantBlocked(OwnerRepresentationReason.GRANT_SUPERSEDED.value)
+    effective_now = issued_at if issued_at is not None else datetime.now(timezone.utc)
+    if not isinstance(effective_now, datetime) or effective_now.tzinfo is None:
+        raise OwnerRepresentationGrantBlocked("EXACT_TIMEZONE_REQUIRED")
+    auth_expires = expires_at if expires_at is not None else grant.expires_at
+    if not isinstance(auth_expires, datetime) or auth_expires.tzinfo is None:
+        raise OwnerRepresentationGrantBlocked("EXACT_TIMEZONE_REQUIRED")
+    if auth_expires <= effective_now:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_EXPIRED.value
+        )
+    auth_id = authorization_id or f"auth-{grant.grant_hash}"
+    spec = OwnerExactPublicationAuthorizationSpec.model_validate({
+        "schema": _AUTHORIZATION_SCHEMA,
+        "authorization_id": auth_id,
+        "owner_id": grant.owner_id,
+        "coordinator_id": grant.coordinator_id,
+        "destination": grant.destination,
+        "effect": grant.effect,
+        "target": grant.target,
+        "content_hash": grant.content_hash,
+        "purpose": grant.purpose,
+        "actor": grant.actor,
+        "transport": grant.transport,
+        "operation_id": grant.operation_id,
+        "grant_hash": grant.grant_hash,
+        "replay_mode": "ONE_SHOT",
+        "issued_at": effective_now,
+        "expires_at": auth_expires,
+        "revoked_at": grant.revoked_at,
+        "revocation_reason": grant.revocation_reason,
+        "superseded_by": grant.superseded_by,
+    })
+    payload = spec.model_dump(mode="json")
+    record = {
+        **payload,
+        "authorization_hash": canonical_autonomy_hash(payload),
+    }
+    auth = OwnerExactPublicationAuthorization.model_validate(record)
+    if authority_root is not None:
+        root = Path(authority_root)
+        destination = _authorization_path(root, grant.grant_hash)
+        canonical = _canonical_json(record)
+        _write_bytes(canonical, None, destination, None)
+    return auth
+
+
+def exact_owner_publication_authorization_exists(
+    grant_hash: str | None = None,
+    *,
+    authority_root: Path | None = None,
+) -> bool:
+    """Return True if an exact unconsumed Owner publication authorization exists."""
+    root = (
+        Path(authority_root)
+        if authority_root is not None
+        else DEFAULT_OWNER_REPRESENTATION_AUTHORITY_ROOT
+    )
+    if grant_hash is not None:
+        if not _SHA64_HEX.fullmatch(grant_hash):
+            return False
+        rec = _load_authorization_for_grant(root, grant_hash)
+        if rec is None:
+            return False
+        if _authorization_consumed(root, grant_hash):
+            return False
+        return True
+    records = _authorization_records(root)
+    for rec in records:
+        gh = rec.get("grant_hash")
+        if gh and isinstance(gh, str) and not _authorization_consumed(root, gh):
+            return True
+    return False
+
+
+def validate_exact_owner_authorization(
+    grant: OwnerRepresentationGrant,
+    owner_authorization: OwnerExactPublicationAuthorization | Mapping[str, Any],
+    *,
+    authority_root: Path | None = None,
+    now: datetime | None = None,
+) -> OwnerExactPublicationAuthorization:
+    """Validate one exact Owner authorization against one proposed grant."""
+    if not isinstance(grant, OwnerRepresentationGrant):
+        raise TypeError("grant must be a validated OwnerRepresentationGrant")
+    try:
+        auth = (
+            owner_authorization
+            if isinstance(owner_authorization, OwnerExactPublicationAuthorization)
+            else OwnerExactPublicationAuthorization.model_validate(owner_authorization)
+        )
+    except Exception as exc:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REJECTED.value
+        ) from exc
+
+    effective_now = now if now is not None else datetime.now(timezone.utc)
+    if not isinstance(effective_now, datetime) or effective_now.tzinfo is None:
+        raise OwnerRepresentationGrantBlocked("EXACT_TIMEZONE_REQUIRED")
+    if effective_now < auth.issued_at:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REJECTED.value
+        )
+    if effective_now >= auth.expires_at:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_EXPIRED.value
+        )
+    if auth.revoked_at is not None:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REVOKED.value
+        )
+    if auth.grant_hash != grant.grant_hash:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_MISMATCH.value
+        )
+    if auth.owner_id != grant.owner_id:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_MISMATCH.value
+        )
+    if auth.coordinator_id != grant.coordinator_id:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_MISMATCH.value
+        )
+    if auth.destination != grant.destination:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_MISMATCH.value
+        )
+    if auth.effect != grant.effect:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_MISMATCH.value
+        )
+    if auth.target != grant.target:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_MISMATCH.value
+        )
+    if auth.content_hash != grant.content_hash:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_MISMATCH.value
+        )
+    if auth.purpose != grant.purpose:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_MISMATCH.value
+        )
+    if auth.actor != grant.actor:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_MISMATCH.value
+        )
+    if auth.transport != grant.transport:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_MISMATCH.value
+        )
+    if auth.operation_id != grant.operation_id:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_MISMATCH.value
+        )
+    if auth.replay_mode != "ONE_SHOT":
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.STANDING_EXTERNAL_GRANT_NOT_SUPPORTED.value
+        )
+
+    if authority_root is not None:
+        root = Path(authority_root)
+        if _authorization_consumed(root, grant.grant_hash):
+            raise OwnerRepresentationGrantBlocked(
+                OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_CONSUMED.value
+            )
+        disk_rec = _load_authorization_for_grant(root, grant.grant_hash)
+        if disk_rec is not None and disk_rec.get("authorization_hash") != auth.authorization_hash:
+            raise OwnerRepresentationGrantBlocked(
+                OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_MISMATCH.value
+            )
+    return auth
+
+
+def consume_exact_owner_authorization(
+    grant: OwnerRepresentationGrant,
+    owner_authorization: OwnerExactPublicationAuthorization | Mapping[str, Any] | None = None,
+    *,
+    authority_root: Path | None = None,
+    standing_grant_path: Path | None = None,
+    requested_at: datetime | None = None,
+    expires_at: datetime | None = None,
+) -> dict[str, Any]:
+    """Consume one exact Owner authorization to mint a sealed issuance permit."""
+    root = (
+        Path(authority_root)
+        if authority_root is not None
+        else DEFAULT_OWNER_REPRESENTATION_AUTHORITY_ROOT
+    )
+    return mint_owner_representation_publication_issuance_permit(
+        grant,
+        authority_root=root,
+        standing_grant_path=standing_grant_path,
+        requested_at=requested_at,
+        expires_at=expires_at,
+        owner_authorization=owner_authorization,
+    )
+
+
 def mint_owner_representation_publication_issuance_permit(
     grant: OwnerRepresentationGrant,
     *,
@@ -418,21 +715,9 @@ def mint_owner_representation_publication_issuance_permit(
     standing_grant_path: Path | None = None,
     requested_at: datetime | None = None,
     expires_at: datetime | None = None,
+    owner_authorization: OwnerExactPublicationAuthorization | Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Mint the exact sealed one-shot issuance permit for one owned grant.
-
-    The permit slot is addressed by the standing-grant receipt hash
-    (``permits/<grant_receipt_hash>.json``), which makes it a strict superset
-    of the durable Owner standing-grant receipt's single issuance decision: at
-    most one permit can ever exist per standing-grant receipt, and that permit
-    is sealed to exactly one grant hash.  A second mint on the same slot fails
-    ``ISSUANCE_PERMIT_SLOT_CONSUMED`` (or ``PERMIT_ALREADY_MINTED`` for a
-    repeat mint of the identical grant).
-
-    ``authority_root`` is a test/operator-only surface; production uses the
-    canonical Owner-representation authority root.  ``standing_grant_path`` is
-    a test/operator-only selection of the canonical standing-grant receipt.
-    """
+    """Mint the exact sealed one-shot issuance permit for one owned grant."""
     if not isinstance(grant, OwnerRepresentationGrant):
         raise TypeError("grant must be a validated OwnerRepresentationGrant")
     if grant.revoked_at is not None:
@@ -445,6 +730,22 @@ def mint_owner_representation_publication_issuance_permit(
     permits_root = Path(authority_root)
     if _load_permit_for_grant(permits_root, grant.grant_hash) is not None:
         raise OwnerRepresentationGrantBlocked(OwnerRepresentationReason.PERMIT_ALREADY_MINTED.value)
+
+    if owner_authorization is None:
+        disk_rec = _load_authorization_for_grant(permits_root, grant.grant_hash)
+        if disk_rec is None:
+            raise OwnerRepresentationGrantBlocked(
+                OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REQUIRED.value
+            )
+        owner_authorization = OwnerExactPublicationAuthorization.model_validate(disk_rec)
+
+    auth = validate_exact_owner_authorization(
+        grant,
+        owner_authorization,
+        authority_root=permits_root,
+        now=effective_now,
+    )
+
     try:
         allowed = authorize_owner_representation_grant_issuance(
             grant,
@@ -464,6 +765,8 @@ def mint_owner_representation_publication_issuance_permit(
         "schema": _PERMIT_SCHEMA,
         "permit_id": f"permit-{grant.grant_hash}",
         "grant_hash": grant.grant_hash,
+        "authorization_id": auth.authorization_id,
+        "authorization_hash": auth.authorization_hash,
         "action": str(allowed.get("action")),
         "effect": allowed.get("effect"),
         "effect_hash": str(allowed.get("effect_hash")),
@@ -486,6 +789,20 @@ def mint_owner_representation_publication_issuance_permit(
             raise OwnerRepresentationGrantBlocked(
                 f"{OwnerRepresentationReason.ISSUANCE_PERMIT_SLOT_CONSUMED.value}:"
                 "grant_b_receipt_does_not_exist"
+            ) from exc
+        raise OwnerRepresentationGrantStoreError(str(exc)) from exc
+
+    try:
+        _write_authorization_consumed_marker(
+            permits_root,
+            grant_hash=grant.grant_hash,
+            authorization_id=auth.authorization_id,
+            consumed_at=effective_now,
+        )
+    except StandingGrantReceiptError as exc:
+        if str(exc) in {"SUPERSEDES_HASH_REQUIRED_FOR_REPLACE", "EXISTS_NO_CAS"}:
+            raise OwnerRepresentationGrantBlocked(
+                OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_CONSUMED.value
             ) from exc
         raise OwnerRepresentationGrantStoreError(str(exc)) from exc
     return record
@@ -569,7 +886,39 @@ def _authorize_at(
         )
     if record.get("permit_id") != permit.get("permit_id"):
         raise OwnerRepresentationGrantStoreError("TAMPERED")
+    if record.get("authorization_id") != permit.get("authorization_id"):
+        raise OwnerRepresentationGrantStoreError("TAMPERED")
+
+    auth_rec = _load_authorization_for_grant(root, grant_hash)
+    if auth_rec is None:
+        return _blocked_decision(
+            proposal,
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REQUIRED,
+            grant_hash=grant_hash,
+        )
+    if auth_rec.get("authorization_hash") != permit.get("authorization_hash"):
+        return _blocked_decision(
+            proposal,
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_MISMATCH,
+            grant_hash=grant_hash,
+        )
+    try:
+        auth = OwnerExactPublicationAuthorization.model_validate(auth_rec)
+    except Exception as exc:
+        raise OwnerRepresentationGrantStoreError("TAMPERED") from exc
+    if auth.revoked_at is not None:
+        return _blocked_decision(
+            proposal,
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REVOKED,
+            grant_hash=grant_hash,
+        )
     effective_now = now if now is not None else datetime.now(timezone.utc)
+    if effective_now >= auth.expires_at:
+        return _blocked_decision(
+            proposal,
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_EXPIRED,
+            grant_hash=grant_hash,
+        )
     try:
         permit_valid = _parse_iso(permit["requested_at"])
         permit_expires = _parse_iso(permit["expires_at"])
@@ -743,6 +1092,33 @@ class OwnerRepresentationGrantStore:
                 raise OwnerRepresentationGrantBlocked(
                     OwnerRepresentationReason.ISSUANCE_AUTHORITY_CHANGED.value
                 )
+        auth_id = permit.get("authorization_id")
+        auth_hash = permit.get("authorization_hash")
+        if not auth_id or not auth_hash:
+            raise OwnerRepresentationGrantBlocked(
+                OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REQUIRED.value
+            )
+        auth_rec = _load_authorization_for_grant(self.root, grant.grant_hash)
+        if auth_rec is None:
+            raise OwnerRepresentationGrantBlocked(
+                OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REQUIRED.value
+            )
+        if (
+            auth_rec.get("authorization_hash") != auth_hash
+            or auth_rec.get("authorization_id") != auth_id
+        ):
+            raise OwnerRepresentationGrantBlocked(
+                OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_MISMATCH.value
+            )
+        auth = OwnerExactPublicationAuthorization.model_validate(auth_rec)
+        if auth.revoked_at is not None:
+            raise OwnerRepresentationGrantBlocked(
+                OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REVOKED.value
+            )
+        if now >= auth.expires_at:
+            raise OwnerRepresentationGrantBlocked(
+                OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_EXPIRED.value
+            )
         if _permit_consumed(self.root, grant.grant_hash):
             raise OwnerRepresentationGrantBlocked(OwnerRepresentationReason.GRANT_REUSED.value)
         if _has_revocation(self.root, grant.grant_hash):
@@ -767,6 +1143,7 @@ class OwnerRepresentationGrantStore:
             "grant": grant.model_dump(mode="json"),
             "supersedes_grant_hash": supersedes_grant_hash,
             "permit_id": str(permit.get("permit_id")),
+            "authorization_id": str(auth_id),
         }
         record = {
             **payload,
@@ -852,6 +1229,8 @@ class OwnerRepresentationGrantStore:
         status = "ISSUED"
         permit = None
         consumed = False
+        auth_rec = None
+        auth_consumed = False
         try:
             if _has_revocation(self.root, grant_hash):
                 status = "REVOKED"
@@ -859,10 +1238,14 @@ class OwnerRepresentationGrantStore:
                 status = "SUPERSEDED"
             permit = _load_permit_for_grant(self.root, grant_hash)
             consumed = _permit_consumed(self.root, grant_hash)
+            auth_rec = _load_authorization_for_grant(self.root, grant_hash)
+            auth_consumed = _authorization_consumed(self.root, grant_hash)
         except OwnerRepresentationGrantStoreError:
             status = "INTEGRITY_ERROR"
             permit = None
             consumed = False
+            auth_rec = None
+            auth_consumed = False
         return {
             "grant_hash": grant_hash,
             "status": status,
@@ -871,6 +1254,8 @@ class OwnerRepresentationGrantStore:
             "issued_with_authority": permit is not None,
             "permit_minted": permit is not None,
             "permit_consumed": consumed,
+            "owner_authorization_present": auth_rec is not None,
+            "owner_authorization_consumed": auth_consumed,
         }
 
 
@@ -879,18 +1264,21 @@ def issue_owner_representation_grant(
     *,
     requested_at: datetime | None = None,
     supersedes_grant_hash: str | None = None,
+    owner_authorization: OwnerExactPublicationAuthorization | Mapping[str, Any] | None = None,
 ) -> Path:
     """Persist one one-shot Owner-representation grant to the canonical root.
 
     Mints the exact sealed issuance permit bound to the durable Owner standing
-    grant at one fixed ``requested_at`` and passes it to ``issue``, which
-    re-reads the permit sealed from disk and re-derives the same standing-grant
-    authority.  A self-authorized worker can never mint an authority-backed
-    receipt for a grant it constructed itself.
+    grant and the exact Owner publication authorization at one fixed
+    ``requested_at`` and passes it to ``issue``, which re-reads the permit sealed
+    from disk and re-derives the same standing-grant authority.  A self-authorized
+    worker can never mint an authority-backed receipt for a grant it constructed
+    itself.
     """
     now = requested_at if requested_at is not None else datetime.now(timezone.utc)
-    permit = mint_owner_representation_publication_issuance_permit(
+    permit = consume_exact_owner_authorization(
         grant,
+        owner_authorization=owner_authorization,
         authority_root=DEFAULT_OWNER_REPRESENTATION_AUTHORITY_ROOT,
         requested_at=now,
     )
@@ -939,6 +1327,7 @@ def inspect_owner_representation_grant(grant_hash: str) -> Mapping[str, Any]:
 
 __all__ = [
     "DEFAULT_OWNER_REPRESENTATION_AUTHORITY_ROOT",
+    "OwnerExactPublicationAuthorization",
     "OwnerRepresentationGrantBlocked",
     "OwnerRepresentationGrantReceipt",
     "OwnerRepresentationGrantRevocation",
@@ -946,10 +1335,14 @@ __all__ = [
     "OwnerRepresentationGrantStoreError",
     "authorize_owner_representation_grant_issuance",
     "authorize_owner_representation_publication",
+    "consume_exact_owner_authorization",
+    "exact_owner_publication_authorization_exists",
     "inspect_owner_representation_grant",
     "issue_owner_representation_grant",
     "load_owner_representation_grant",
     "mint_owner_representation_publication_issuance_permit",
+    "owner_issues_exact_publication_authorization",
     "owner_representation_issuance_effect",
     "revoke_owner_representation_grant",
+    "validate_exact_owner_authorization",
 ]

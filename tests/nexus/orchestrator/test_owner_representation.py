@@ -46,7 +46,10 @@ from nexus.orchestrator.owner_representation import (
 from nexus.orchestrator.owner_representation_store import (
     OwnerRepresentationGrantBlocked,
     OwnerRepresentationGrantStore,
+    consume_exact_owner_authorization,
+    exact_owner_publication_authorization_exists,
     mint_owner_representation_publication_issuance_permit,
+    owner_issues_exact_publication_authorization,
 )
 from nexus.orchestrator.standing_grant_store import (
     StandingGrantReceipt,
@@ -162,12 +165,18 @@ def _issue_grant(
     """Issue a durable, store-backed grant (the only authoritative form).
 
     Mint the exact sealed one-shot issuance permit bound to the fixture's
-    durable Owner standing-grant receipt at one fixed instant, then issue the
-    same grant with that permit at the same instant.  A replayed, forged, or
-    different-grant permit can never drive a receipt.
+    durable Owner standing-grant receipt and exact Owner publication
+    authorization at one fixed instant, then issue the same grant with that
+    permit at the same instant.  A replayed, forged, or different-grant permit
+    can never drive a receipt.
     """
     grant = _grant(**overrides)
     now = datetime.now(timezone.utc)
+    owner_issues_exact_publication_authorization(
+        grant,
+        issued_at=now,
+        authority_root=grant_store.root,
+    )
     permit = mint_owner_representation_publication_issuance_permit(
         grant,
         authority_root=grant_store.root,
@@ -1035,6 +1044,11 @@ def test_worker_cannot_create_authority_store_receipt(grant_store):
 def test_forged_owner_identity_cannot_issue_receipt(grant_store, standing_grant_path):
     """An attacker cannot present a minted permit but claim a different Owner identity."""
     forged = _grant(owner_id="attacker", issued_by="attacker")
+    owner_issues_exact_publication_authorization(
+        forged,
+        issued_at=NOW,
+        authority_root=grant_store.root,
+    )
     permit = mint_owner_representation_publication_issuance_permit(
         forged,
         authority_root=grant_store.root,
@@ -1050,6 +1064,11 @@ def test_replayed_authorization_cannot_issue_another_grant(grant_store, standing
     """A permit minted for grant A can never be replayed to issue grant B."""
     grant_a = _grant()
     grant_b = _grant(grant_id="g-827-2", operation_id="op-2")
+    owner_issues_exact_publication_authorization(
+        grant_a,
+        issued_at=NOW,
+        authority_root=grant_store.root,
+    )
     permit_a = mint_owner_representation_publication_issuance_permit(
         grant_a,
         authority_root=grant_store.root,
@@ -1138,13 +1157,23 @@ def test_revoked_owner_issuance_authority_blocks_publish(
 def test_one_standing_grant_cannot_mint_both_a_and_b(grant_store, standing_grant_path):
     """A single Owner standing-grant receipt authorizes exactly ONE permit."""
     grant_a = _grant()
+    grant_b = _grant(grant_id="g-827-2", operation_id="op-2")
+    owner_issues_exact_publication_authorization(
+        grant_a,
+        issued_at=NOW,
+        authority_root=grant_store.root,
+    )
+    owner_issues_exact_publication_authorization(
+        grant_b,
+        issued_at=NOW,
+        authority_root=grant_store.root,
+    )
     mint_owner_representation_publication_issuance_permit(
         grant_a,
         authority_root=grant_store.root,
         standing_grant_path=standing_grant_path,
         requested_at=NOW,
     )
-    grant_b = _grant(grant_id="g-827-2", operation_id="op-2")
     with pytest.raises(OwnerRepresentationGrantBlocked) as exc:
         mint_owner_representation_publication_issuance_permit(
             grant_b,
@@ -1159,7 +1188,18 @@ def test_one_standing_grant_cannot_mint_both_a_and_b(grant_store, standing_grant
 def test_hostile_owner_authorization_issues_exact_grant_once(grant_store, standing_grant_path):
     """One Owner authorization issues exact grant A exactly once, nothing else."""
     grant_a = _grant()
+    grant_b = _grant(grant_id="g-827-2", operation_id="op-2")
     now = datetime.now(timezone.utc)
+    owner_issues_exact_publication_authorization(
+        grant_a,
+        issued_at=now,
+        authority_root=grant_store.root,
+    )
+    owner_issues_exact_publication_authorization(
+        grant_b,
+        issued_at=now,
+        authority_root=grant_store.root,
+    )
     permit = mint_owner_representation_publication_issuance_permit(
         grant_a,
         authority_root=grant_store.root,
@@ -1169,7 +1209,6 @@ def test_hostile_owner_authorization_issues_exact_grant_once(grant_store, standi
     receipt_path = grant_store.issue(grant_a, issuance_permit=permit, requested_at=now)
     assert receipt_path.exists()
     # A different grant can never share that standing-grant receipt's permit.
-    grant_b = _grant(grant_id="g-827-2", operation_id="op-2")
     with pytest.raises(OwnerRepresentationGrantBlocked) as exc:
         mint_owner_representation_publication_issuance_permit(
             grant_b,
@@ -1189,6 +1228,11 @@ def test_consumed_permit_blocks_reissue_even_if_receipt_missing(grant_store, sta
     """Destroying the grant receipt cannot resurrect a consumed permit."""
     grant_a = _grant()
     now = datetime.now(timezone.utc)
+    owner_issues_exact_publication_authorization(
+        grant_a,
+        issued_at=now,
+        authority_root=grant_store.root,
+    )
     permit = mint_owner_representation_publication_issuance_permit(
         grant_a,
         authority_root=grant_store.root,
@@ -1200,3 +1244,219 @@ def test_consumed_permit_blocks_reissue_even_if_receipt_missing(grant_store, sta
     with pytest.raises(OwnerRepresentationGrantBlocked) as exc:
         grant_store.issue(grant_a, issuance_permit=permit, requested_at=now)
     assert OwnerRepresentationReason.GRANT_REUSED.value in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# Section 5: Mandatory independent hostile oracle (#827)
+# ---------------------------------------------------------------------------
+
+
+def test_mandatory_hostile_oracle_worker_cannot_mint_arbitrary_publication_without_owner_exact_authorization(
+    grant_store, standing_grant_path, remote, publisher
+):
+    """Hostile oracle: Broad standing authority + worker-selected grant without
+    exact Owner authorization MUST fail on the first attempt.
+    """
+
+    def valid_owner_standing_grant():
+        # Broad standing grant with OWNER_REPRESENTATION_GRANT_ISSUE exists.
+        receipt = _load_receipt_at(standing_grant_path, now=NOW)
+        assert (
+            AutonomyActionClass.OWNER_REPRESENTATION_GRANT_ISSUE in receipt.context.allowed_actions
+        )
+        return standing_grant_path
+
+    def exact_owner_publication_authorization_exists() -> bool:
+        auth_dir = grant_store.root / "authorizations"
+        if not auth_dir.exists():
+            return False
+        return any(p.name.endswith(".json") for p in auth_dir.iterdir() if p.is_file())
+
+    def worker_constructs_exact_publication_grant(**overrides):
+        return _grant(**overrides)
+
+    def mint_or_issue(grant, *, standing_authority):
+        now = datetime.now(timezone.utc)
+        permit = mint_owner_representation_publication_issuance_permit(
+            grant,
+            authority_root=grant_store.root,
+            standing_grant_path=standing_authority,
+            requested_at=now,
+        )
+        return grant_store.issue(grant, issuance_permit=permit, requested_at=now)
+
+    def no_publication_permit_written() -> bool:
+        permits_dir = grant_store.root / "permits"
+        if not permits_dir.exists():
+            return True
+        records = [p for p in permits_dir.iterdir() if p.is_file() and p.name.endswith(".json")]
+        return len(records) == 0
+
+    def no_grant_receipt_written() -> bool:
+        grants_dir = grant_store.root / "grants"
+        if not grants_dir.exists():
+            return True
+        records = [p for p in grants_dir.iterdir() if p.is_file() and p.name.endswith(".json")]
+        return len(records) == 0
+
+    def no_remote_effect() -> bool:
+        return len(remote.writes) == 0
+
+    # 1. Broad standing authority exists.
+    standing = valid_owner_standing_grant()
+
+    # 2. No exact Owner publication decision exists.
+    assert exact_owner_publication_authorization_exists() is False
+
+    # 3. Worker invents publication A.
+    grant_a = worker_constructs_exact_publication_grant()
+
+    # 4. FIRST attempt must already fail.
+    with pytest.raises(OwnerRepresentationGrantBlocked):
+        mint_or_issue(grant_a, standing_authority=standing)
+
+    assert no_publication_permit_written()
+    assert no_grant_receipt_written()
+    assert no_remote_effect()
+
+
+def test_hostile_substitution_auth_a_grant_b_rejected(grant_store, standing_grant_path):
+    """Owner authorizes publication A; worker tries to mint/issue publication B."""
+    grant_a = _grant()
+    grant_b = _grant(grant_id="g-827-diff", operation_id="op-diff")
+    now = datetime.now(timezone.utc)
+    auth_a = owner_issues_exact_publication_authorization(
+        grant_a,
+        issued_at=now,
+        authority_root=grant_store.root,
+    )
+    with pytest.raises(OwnerRepresentationGrantBlocked) as exc:
+        mint_owner_representation_publication_issuance_permit(
+            grant_b,
+            authority_root=grant_store.root,
+            standing_grant_path=standing_grant_path,
+            requested_at=now,
+            owner_authorization=auth_a,
+        )
+    assert OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_MISMATCH.value in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "tamper_field,tamper_value",
+    [
+        ("content_hash", "a" * 64),
+        ("target", "issue-999"),
+        ("effect", ExternalPublicationEffect.COMMENT),
+        ("purpose", "unauthorized purpose"),
+        ("actor", "unauthorized_actor"),
+        ("transport", "github_graphql"),
+        ("operation_id", "op-tampered"),
+    ],
+)
+def test_hostile_substitution_auth_a_tampered_field_rejected(
+    grant_store, standing_grant_path, tamper_field, tamper_value
+):
+    """Any mutation between Owner authorization and publication grant fails fail-closed."""
+    grant_a = _grant()
+    now = datetime.now(timezone.utc)
+    auth_a = owner_issues_exact_publication_authorization(
+        grant_a,
+        issued_at=now,
+        authority_root=grant_store.root,
+    )
+    grant_tampered = _grant(**{tamper_field: tamper_value})
+    with pytest.raises(OwnerRepresentationGrantBlocked) as exc:
+        mint_owner_representation_publication_issuance_permit(
+            grant_tampered,
+            authority_root=grant_store.root,
+            standing_grant_path=standing_grant_path,
+            requested_at=now,
+            owner_authorization=auth_a,
+        )
+    assert OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_MISMATCH.value in str(exc.value)
+
+
+def test_hostile_replay_auth_a_rejected(grant_store, standing_grant_path):
+    """Replaying exact Owner authorization A to mint a second permit fails fail-closed."""
+    grant_a = _grant()
+    now = datetime.now(timezone.utc)
+    auth_a = owner_issues_exact_publication_authorization(
+        grant_a,
+        issued_at=now,
+        authority_root=grant_store.root,
+    )
+    permit = consume_exact_owner_authorization(
+        grant_a,
+        owner_authorization=auth_a,
+        authority_root=grant_store.root,
+        standing_grant_path=standing_grant_path,
+        requested_at=now,
+    )
+    assert permit is not None
+    # If permit file is removed to simulate re-mint attempt, the consumed marker blocks it.
+    permit_file = grant_store.root / "permits" / f"{permit['grant_receipt_hash']}.json"
+    if permit_file.exists():
+        permit_file.unlink()
+
+    with pytest.raises(OwnerRepresentationGrantBlocked) as exc:
+        consume_exact_owner_authorization(
+            grant_a,
+            owner_authorization=auth_a,
+            authority_root=grant_store.root,
+            standing_grant_path=standing_grant_path,
+            requested_at=now,
+        )
+    assert OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_CONSUMED.value in str(exc.value)
+
+
+def test_positive_control_exact_owner_authorization_allows_a_once(
+    grant_store, standing_grant_path, publisher, remote
+):
+    """Positive control: exact Owner authorization + exact matching publication
+    succeeds once, and cannot be reused or replayed.
+    """
+    grant_a = _grant()
+    now = datetime.now(timezone.utc)
+
+    # 1. Owner issues exact publication authorization for A.
+    auth_a = owner_issues_exact_publication_authorization(
+        grant_a,
+        issued_at=now,
+        authority_root=grant_store.root,
+    )
+    assert exact_owner_publication_authorization_exists(
+        grant_a.grant_hash, authority_root=grant_store.root
+    )
+
+    # 2. Worker consumes exact Owner authorization to mint permit.
+    permit_a = consume_exact_owner_authorization(
+        grant_a,
+        owner_authorization=auth_a,
+        authority_root=grant_store.root,
+        standing_grant_path=standing_grant_path,
+        requested_at=now,
+    )
+    assert permit_a["grant_hash"] == grant_a.grant_hash
+    assert permit_a["authorization_id"] == auth_a.authorization_id
+    assert permit_a["authorization_hash"] == auth_a.authorization_hash
+
+    # Authorization is now consumed
+    assert not exact_owner_publication_authorization_exists(
+        grant_a.grant_hash, authority_root=grant_store.root
+    )
+
+    # 3. Store issues the durable receipt.
+    receipt_path = grant_store.issue(grant_a, issuance_permit=permit_a, requested_at=now)
+    assert receipt_path.exists()
+
+    # 4. Publication succeeds exactly once.
+    prepared = publisher.prepare(_proposal(), grant_a)
+    record = publisher.publish(prepared)
+    assert record["state"] == "COMPLETED"
+    assert len(remote.writes) == 1
+
+    # 5. Subsequent publication fails closed (REPLAY_FORBIDDEN).
+    with pytest.raises(OwnerRepresentationBlocked) as exc:
+        publisher.publish(prepared)
+    assert OwnerRepresentationReason.REPLAY_FORBIDDEN.value in str(exc.value)
+    assert len(remote.writes) == 1
