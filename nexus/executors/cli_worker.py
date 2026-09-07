@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from enum import Enum
 import hashlib
 import os
-from pathlib import Path
-import signal
 import shutil
+import signal
 import subprocess
 import time
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
 from typing import Callable, Mapping, Optional, Tuple
 
 
@@ -20,12 +20,15 @@ class CliWorkerStatus(str, Enum):
     START_FAILED = "START_FAILED"
 
 
-_FORBIDDEN_SUBCOMMANDS = {
+_FORBIDDEN_SUBCOMMANDS = (
     ("git", "commit"),
     ("git", "merge"),
     ("git", "push"),
     ("git", "rebase"),
-}
+    ("gh", "issue", "create"),
+    ("gh", "pr", "create"),
+    ("gh", "api"),
+)
 
 _INHERITED_ENV_ALLOWLIST = frozenset({
     "HOME",
@@ -71,11 +74,16 @@ def _validate_worker_argv(argv: Tuple[str, ...]) -> None:
     if not argv:
         raise ValueError("argv must be non-empty")
     normalized = tuple(str(item).strip().lower() for item in argv)
-    for command, subcommand in _FORBIDDEN_SUBCOMMANDS:
-        if command in normalized:
-            index = normalized.index(command)
-            if normalized[index + 1 : index + 2] == (subcommand,):
-                raise ValueError(f"worker command cannot invoke git {subcommand}")
+    # Flag-only tokens are not part of a subcommand run (e.g.
+    # `gh --silent issue create`); ignoring them prevents a global-flag bypass
+    # while a forbidden subcommand must still appear as an adjacent run of
+    # verb tokens.
+    filtered = tuple(item for item in normalized if not item.startswith("-"))
+    for block in _FORBIDDEN_SUBCOMMANDS:
+        block_tuple = tuple(block)
+        for index in range(len(filtered) - len(block_tuple) + 1):
+            if filtered[index : index + len(block_tuple)] == block_tuple:
+                raise ValueError(f"worker command cannot invoke {' '.join(block)}")
 
 
 def _hash_file(path: str) -> str:

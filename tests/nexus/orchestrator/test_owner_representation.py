@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from nexus.contracts.autonomy_goal import canonical_autonomy_hash
 from nexus.contracts.owner_representation import (
     ExternalDestination,
     ExternalDestinationKind,
@@ -22,6 +23,7 @@ from nexus.contracts.owner_representation import (
     InternalCollaborationBound,
     OwnerRepresentationBlocked,
     OwnerRepresentationGrant,
+    OwnerRepresentationGrantSpec,
     OwnerRepresentationOutcome,
     OwnerRepresentationReason,
     PublicationDerivation,
@@ -36,10 +38,12 @@ from nexus.orchestrator.owner_representation import (
     WriteOutcome,
     bind_external_publication,
 )
+from nexus.orchestrator.owner_representation_store import OwnerRepresentationGrantStore
 from nexus.security.owner_representation_transport_inventory import (
     PublicationRouteState,
     assert_no_unknown_routes,
     classify_transport_route,
+    physical_witnesses_for,
     transport_inventory_status,
 )
 
@@ -105,7 +109,20 @@ def _grant(**overrides) -> OwnerRepresentationGrant:
         "expires_at": NOW + timedelta(hours=1),
     }
     values.update(overrides)
-    return OwnerRepresentationGrant.issue(**values)
+    spec = OwnerRepresentationGrantSpec.model_validate(values)
+    return OwnerRepresentationGrant.model_validate({
+        **spec.model_dump(mode="json"),
+        "grant_hash": canonical_autonomy_hash(spec.model_dump(mode="json")),
+    })
+
+
+def _issue_grant(
+    grant_store: OwnerRepresentationGrantStore, **overrides
+) -> OwnerRepresentationGrant:
+    """Issue a durable, store-backed grant (the only authoritative form)."""
+    grant = _grant(**overrides)
+    grant_store.issue(grant)
+    return grant
 
 
 class FakeRemote:
@@ -155,11 +172,21 @@ def remote() -> FakeRemote:
 
 
 @pytest.fixture
-def publisher(tmp_path: Path, remote: FakeRemote) -> OwnerRepresentationPublisher:
+def grant_store(tmp_path: Path) -> OwnerRepresentationGrantStore:
+    return OwnerRepresentationGrantStore(root=tmp_path / "grant-authority")
+
+
+@pytest.fixture
+def publisher(
+    tmp_path: Path,
+    remote: FakeRemote,
+    grant_store: OwnerRepresentationGrantStore,
+) -> OwnerRepresentationPublisher:
     return OwnerRepresentationPublisher(
         operation_root=tmp_path / "ops",
         write_transport=remote.write,
         readback_transport=remote.readback,
+        grant_store=grant_store,
     )
 
 
@@ -446,9 +473,11 @@ def test_internal_bound_never_validates_external_passthrough_to_writer(
 
 
 def test_happy_path_publishes_exactly_once_and_completes(
-    publisher: OwnerRepresentationPublisher, remote: FakeRemote
+    publisher: OwnerRepresentationPublisher,
+    remote: FakeRemote,
+    grant_store: OwnerRepresentationGrantStore,
 ):
-    prepared = publisher.prepare(_proposal(), _grant())
+    prepared = publisher.prepare(_proposal(), _issue_grant(grant_store))
     assert prepared.state == "PREPARED"
     result = publisher.publish(prepared)
     assert result["state"] == "COMPLETED"
@@ -456,10 +485,12 @@ def test_happy_path_publishes_exactly_once_and_completes(
 
 
 def test_completed_one_shot_cannot_be_replayed(
-    publisher: OwnerRepresentationPublisher, remote: FakeRemote
+    publisher: OwnerRepresentationPublisher,
+    remote: FakeRemote,
+    grant_store: OwnerRepresentationGrantStore,
 ):
     proposal = _proposal()
-    prepared = publisher.prepare(proposal, _grant())
+    prepared = publisher.prepare(proposal, _issue_grant(grant_store))
     publisher.publish(prepared)
     with pytest.raises(OwnerRepresentationBlocked) as exc:
         publisher.publish(prepared)
@@ -468,17 +499,19 @@ def test_completed_one_shot_cannot_be_replayed(
 
 
 def test_same_grant_cannot_drive_a_different_operation(
-    publisher: OwnerRepresentationPublisher, remote: FakeRemote
+    publisher: OwnerRepresentationPublisher,
+    remote: FakeRemote,
+    grant_store: OwnerRepresentationGrantStore,
 ):
     # Grant bound to op-1: publish consumes its one-shot ledger entry.
-    grant_op1 = _grant(operation_id="op-1")
+    grant_op1 = _issue_grant(grant_store, operation_id="op-1")
     first = publisher.prepare(_proposal(operation_id="op-1"), grant_op1)
     publisher.publish(first)
     assert len(remote.writes) == 1
     # Prepare op-2 legitimately with its own grant so its operation file is in
     # PREPARED state, then forge a PreparedPublication for op-2 that reuses the
     # already-consumed grant.  The consumed-grant ledger must refuse it.
-    grant_op2 = _grant(grant_id="g-827-2", operation_id="op-2")
+    grant_op2 = _issue_grant(grant_store, grant_id="g-827-2", operation_id="op-2")
     publisher.prepare(_proposal(operation_id="op-2"), grant_op2)
     forged = PreparedPublication(
         operation_id="op-2",
@@ -510,10 +543,12 @@ def test_unsolicited_publish_without_prepare_is_blocked(
 
 
 def test_unacknowledged_dispatch_reconciles_read_only_no_duplicate(
-    publisher: OwnerRepresentationPublisher, remote: FakeRemote
+    publisher: OwnerRepresentationPublisher,
+    remote: FakeRemote,
+    grant_store: OwnerRepresentationGrantStore,
 ):
     remote.unack_next = True
-    prepared = publisher.prepare(_proposal(), _grant())
+    prepared = publisher.prepare(_proposal(), _issue_grant(grant_store))
     with pytest.raises(OwnerRepresentationBlocked) as exc:
         publisher.publish(prepared)
     assert OwnerRepresentationReason.RECONCILIATION_REQUIRED.value in str(exc.value)
@@ -524,7 +559,9 @@ def test_unacknowledged_dispatch_reconciles_read_only_no_duplicate(
 
 
 def test_write_lands_then_ack_lost_reconciles_read_only(
-    publisher: OwnerRepresentationPublisher, remote: FakeRemote
+    publisher: OwnerRepresentationPublisher,
+    remote: FakeRemote,
+    grant_store: OwnerRepresentationGrantStore,
 ):
     """Remote write lands but ACK is lost -> OUTCOME_UNKNOWN -> readback-only."""
     proposal = _proposal()
@@ -540,7 +577,7 @@ def test_write_lands_then_ack_lost_reconciles_read_only(
         return None
 
     publisher.write_transport = write_then_lose_ack
-    prepared = publisher.prepare(proposal, _grant())
+    prepared = publisher.prepare(proposal, _issue_grant(grant_store))
     with pytest.raises(OwnerRepresentationBlocked) as exc:
         publisher.publish(prepared)
     assert OwnerRepresentationReason.RECONCILIATION_REQUIRED.value in str(exc.value)
@@ -561,7 +598,9 @@ def test_write_lands_then_ack_lost_reconciles_read_only(
 
 
 def test_ack_but_readback_missing_parks_at_outcome_unknown(
-    publisher: OwnerRepresentationPublisher, remote: FakeRemote
+    publisher: OwnerRepresentationPublisher,
+    remote: FakeRemote,
+    grant_store: OwnerRepresentationGrantStore,
 ):
     original_write = publisher.write_transport
     original_readback = publisher.readback_transport
@@ -573,7 +612,7 @@ def test_ack_but_readback_missing_parks_at_outcome_unknown(
 
     publisher.write_transport = write_without_marker
     publisher.readback_transport = lambda p: None
-    prepared = publisher.prepare(_proposal(), _grant())
+    prepared = publisher.prepare(_proposal(), _issue_grant(grant_store))
     with pytest.raises(OwnerRepresentationBlocked) as exc:
         publisher.publish(prepared)
     assert OwnerRepresentationReason.RECONCILIATION_REQUIRED.value in str(exc.value)
@@ -586,14 +625,16 @@ def test_ack_but_readback_missing_parks_at_outcome_unknown(
 
 
 def test_transport_exception_parks_outcome_unknown_not_second_write(
-    publisher: OwnerRepresentationPublisher, remote: FakeRemote
+    publisher: OwnerRepresentationPublisher,
+    remote: FakeRemote,
+    grant_store: OwnerRepresentationGrantStore,
 ):
     def explode(_proposal):
         raise RuntimeError("socket reset mid-request")
 
     original_readback = publisher.readback_transport
     publisher.write_transport = explode
-    prepared = publisher.prepare(_proposal(), _grant())
+    prepared = publisher.prepare(_proposal(), _issue_grant(grant_store))
     with pytest.raises(OwnerRepresentationBlocked) as exc:
         publisher.publish(prepared)
     assert OwnerRepresentationReason.RECONCILIATION_REQUIRED.value in str(exc.value)
@@ -702,3 +743,166 @@ def test_no_silent_github_write_sink_in_source(repo_root: Path, pattern_name: st
             if re.search(pattern, line):
                 offenders.append(f"{py.relative_to(repo_root)}:{lineno}")
     assert offenders == [], f"silent GitHub write sink matched {pattern}: {offenders}"
+
+
+# ---------------------------------------------------------------------------
+# BLOCKER 1: store-backed trust.  A grant object is inert without a durable
+# OwnerRepresentationGrantStore receipt; the seam revalidates the store fresh
+# immediately before dispatch.
+# ---------------------------------------------------------------------------
+
+
+def test_self_minted_grant_without_store_receipt_is_blocked(
+    publisher: OwnerRepresentationPublisher,
+    remote: FakeRemote,
+):
+    """A grant object no canonical store ever issued must fail closed."""
+    self_minted = _grant()
+    prepared = publisher.prepare(_proposal(), self_minted)
+    assert prepared.state == "PREPARED"
+    with pytest.raises(OwnerRepresentationBlocked) as exc:
+        publisher.publish(prepared)
+    assert OwnerRepresentationReason.GRANT_NOT_ISSUED.value in str(exc.value)
+    assert remote.writes == []
+
+
+@pytest.mark.parametrize("forged_field", [{"owner_id": "attacker"}, {"issued_by": "attacker"}])
+def test_forged_grant_object_never_authorizes(publisher, remote, forged_field):
+    """Forged ownership identity, even with a self-consistent hash, is blocked."""
+    grant = _grant(**forged_field)
+    prepared = publisher.prepare(_proposal(), grant)
+    with pytest.raises(OwnerRepresentationBlocked) as exc:
+        publisher.publish(prepared)
+    assert OwnerRepresentationReason.GRANT_NOT_ISSUED.value in str(exc.value)
+    assert remote.writes == []
+
+
+def test_stale_serialized_grant_blocked_after_canonical_revocation(
+    publisher: OwnerRepresentationPublisher,
+    remote: FakeRemote,
+    grant_store: OwnerRepresentationGrantStore,
+):
+    grant = _issue_grant(grant_store)
+    stale = OwnerRepresentationGrant.model_validate(grant.model_dump(mode="json"))
+    grant_store.revoke(
+        grant.grant_hash,
+        revoked_by="owner-james",
+        reason="owner rescinded",
+    )
+    prepared = publisher.prepare(_proposal(), stale)
+    with pytest.raises(OwnerRepresentationBlocked) as exc:
+        publisher.publish(prepared)
+    assert OwnerRepresentationReason.GRANT_REVOKED.value in str(exc.value)
+    assert remote.writes == []
+
+
+# ---------------------------------------------------------------------------
+# BLOCKER 2: fenced transitions, consumed-grant ledger, single winner
+# ---------------------------------------------------------------------------
+
+
+def test_completed_operation_cannot_be_reprepared(
+    publisher: OwnerRepresentationPublisher,
+    remote: FakeRemote,
+    grant_store: OwnerRepresentationGrantStore,
+):
+    grant = _issue_grant(grant_store)
+    proposal = _proposal()
+    prepared = publisher.prepare(proposal, grant)
+    publisher.publish(prepared)
+    assert len(remote.writes) == 1
+    with pytest.raises(OwnerRepresentationBlocked) as exc:
+        publisher.prepare(proposal, grant)
+    assert OwnerRepresentationReason.OPERATION_TERMINAL_OR_INFLIGHT.value in str(exc.value)
+    assert len(remote.writes) == 1
+
+
+def test_two_publisher_instances_share_single_winner(
+    publisher: OwnerRepresentationPublisher,
+    remote: FakeRemote,
+    grant_store: OwnerRepresentationGrantStore,
+):
+    """Two instances sharing operation_root/store serialize to one effect."""
+    grant = _issue_grant(grant_store)
+    prepared_a = publisher.prepare(_proposal(), grant)
+    twin = OwnerRepresentationPublisher(
+        operation_root=publisher.operation_root,
+        write_transport=remote.write,
+        readback_transport=remote.readback,
+        grant_store=grant_store,
+    )
+    prepared_b = twin.prepare(_proposal(), grant)
+    assert remote.writes == []
+    assert prepared_a.state == "PREPARED" and prepared_b.state == "PREPARED"
+    first = publisher.publish(prepared_a)
+    assert first["state"] == "COMPLETED"
+    with pytest.raises(OwnerRepresentationBlocked) as exc:
+        twin.publish(prepared_b)
+    assert OwnerRepresentationReason.REPLAY_FORBIDDEN.value in str(exc.value)
+    assert len(remote.writes) == 1
+
+
+# ---------------------------------------------------------------------------
+# BLOCKER 3: inventory classification + no broad GitHub credential passthrough
+# ---------------------------------------------------------------------------
+
+
+def test_inventory_classifies_devspace_and_seam():
+    assert_no_unknown_routes()
+    status = transport_inventory_status()
+    assert (
+        status["devspace_worker"] == PublicationRouteState.INCAPABLE_OF_EXTERNAL_PUBLICATION.value
+    )
+    assert (
+        status["owner_representation_seam"]
+        == PublicationRouteState.EXTERNAL_PUBLICATION_AUTHORITY_ENFORCED.value
+    )
+    assert "UNKNOWN_BLOCKED" not in set(status.values())
+
+
+def test_enforced_and_incapable_route_witnesses_exist(repo_root: Path):
+    for route_id in ("owner_representation_seam", "devspace_worker"):
+        witnesses = physical_witnesses_for(route_id)
+        assert witnesses, f"{route_id} has no physical witnesses"
+        for witness in witnesses:
+            assert (repo_root / witness).is_file(), f"{route_id} witness missing on disk: {witness}"
+    seam = physical_witnesses_for("owner_representation_seam")
+    assert "nexus/orchestrator/owner_representation.py" in seam
+    assert "nexus/orchestrator/owner_representation_store.py" in seam
+
+
+def test_inventory_docstring_marks_source_scope_limitation():
+    import nexus.security.owner_representation_transport_inventory as inventory
+
+    assert "INCAPABILITY_IS_SOURCE_SCOPE_ONLY" in inventory.__doc__
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("issue", "create", "-R", "acme/demo", "--title", "x"),
+        ("--silent", "issue", "create", "--title", "x"),
+        ("pr", "create", "--title", "x", "--body", "y", "--repo", "z"),
+        ("api", "repos/acme/demo/issues", "-f", "title=x"),
+    ],
+)
+def test_cli_worker_forbids_gh_publication_invocations(tmp_path, argv):
+    from nexus.executors.cli_worker import CliWorkerRequest
+
+    with pytest.raises(ValueError, match="gh"):
+        CliWorkerRequest(executable="gh", argv=argv, cwd=str(tmp_path))
+
+
+def test_build_isolated_env_strips_github_credentials(monkeypatch):
+    from nexus.services.agy_account_pool import (
+        GITHUB_CREDENTIAL_KEYS,
+        SENSITIVE_API_KEYS,
+        build_isolated_env,
+    )
+
+    assert set(GITHUB_CREDENTIAL_KEYS) <= set(SENSITIVE_API_KEYS)
+    for key in (*GITHUB_CREDENTIAL_KEYS, "GEMINI_API_KEY"):
+        monkeypatch.setenv(key, "secret")
+    isolated = build_isolated_env(home_dir="/isolated/home")
+    for key in GITHUB_CREDENTIAL_KEYS:
+        assert key not in isolated

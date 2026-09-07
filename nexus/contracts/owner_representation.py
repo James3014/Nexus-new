@@ -321,8 +321,11 @@ class OwnerRepresentationGrant(OwnerRepresentationGrantSpec):
     """Immutable one-shot Owner grant for one exact external publication.
 
     A worker/model/agent can never mint, infer, inherit, widen, or self-approve
-    this grant.  Only the canonical Owner-facing seam may materialize one, and
-    the consuming seam verifies every bound field against the exact proposal.
+    this grant.  Building this object validates and hash-binds a grant, but a
+    grant object alone is inert: only a durable receipt persisted by the
+    canonical :class:`OwnerRepresentationGrantStore` makes it authoritative,
+    and the consuming seam verifies that store-backed trust chain immediately
+    before any effect.
     """
 
     grant_hash: StrictStr
@@ -338,20 +341,6 @@ class OwnerRepresentationGrant(OwnerRepresentationGrantSpec):
         if self.grant_hash != canonical_autonomy_hash(payload):
             raise ValueError("GRANT_HASH_INVALID")
         return self
-
-    @classmethod
-    def issue(cls, **values: Any) -> "OwnerRepresentationGrant":
-        """Materialize a canonical one-shot Owner grant with bound hash."""
-        return cls.materialize(**values)
-
-    @classmethod
-    def materialize(cls, **values: Any) -> "OwnerRepresentationGrant":
-        values.setdefault("schema", "nexus.owner_representation_grant.v1")
-        values.setdefault("replay_mode", "ONE_SHOT")
-        values.setdefault("granted_at", datetime.now(timezone.utc))
-        spec = OwnerRepresentationGrantSpec.model_validate(dict(values))
-        payload = spec.model_dump(mode="json")
-        return cls.model_validate({**payload, "grant_hash": canonical_autonomy_hash(payload)})
 
 
 class InternalCollaborationBound(_FrozenModel):
@@ -410,6 +399,10 @@ class OwnerRepresentationReason(str, Enum):
     PUBLICATION_AUTHORITY_NON_INFERABLE = "PUBLICATION_AUTHORITY_NON_INFERABLE"
     FOLLOWUP_NOT_IMPLIED = "FOLLOWUP_NOT_IMPLIED"
     PUBLICATION_BLOCKED = "PUBLICATION_BLOCKED"
+    GRANT_NOT_ISSUED = "GRANT_NOT_ISSUED"
+    GRANT_ALREADY_ISSUED = "GRANT_ALREADY_ISSUED"
+    OPERATION_CONFLICT = "OPERATION_CONFLICT"
+    OPERATION_TERMINAL_OR_INFLIGHT = "OPERATION_TERMINAL_OR_INFLIGHT"
     GRANT_REUSED = "GRANT_REUSED"
     REPLAY_FORBIDDEN = "REPLAY_FORBIDDEN"
     RECONCILIATION_REQUIRED = "RECONCILIATION_REQUIRED"
@@ -636,6 +629,7 @@ __all__ = [
     "OwnerRepresentationBlocked",
     "OwnerRepresentationDecision",
     "OwnerRepresentationGrant",
+    "OwnerRepresentationGrantSpec",
     "OwnerRepresentationOutcome",
     "OwnerRepresentationReason",
     "PublicationDerivation",
