@@ -14,7 +14,12 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from nexus.contracts.autonomy_goal import canonical_autonomy_hash
+from nexus.contracts.autonomy_goal import (
+    AutonomyActionClass,
+    RepositoryIdentity,
+    StandingGrantContext,
+    canonical_autonomy_hash,
+)
 from nexus.contracts.owner_representation import (
     ExternalDestination,
     ExternalDestinationKind,
@@ -38,7 +43,16 @@ from nexus.orchestrator.owner_representation import (
     WriteOutcome,
     bind_external_publication,
 )
-from nexus.orchestrator.owner_representation_store import OwnerRepresentationGrantStore
+from nexus.orchestrator.owner_representation_store import (
+    OwnerRepresentationGrantBlocked,
+    OwnerRepresentationGrantStore,
+    authorize_owner_representation_grant_issuance,
+)
+from nexus.orchestrator.standing_grant_store import (
+    StandingGrantReceipt,
+    _load_receipt_at,
+    _write_standing_grant_receipt_at,
+)
 from nexus.security.owner_representation_transport_inventory import (
     PublicationRouteState,
     assert_no_unknown_routes,
@@ -58,11 +72,37 @@ UNKNOWN_HOST = ExternalDestination(
     host="pubsub.example.com", owner_account="acme", repository="board"
 )
 
+# The durable Owner standing grant that authorizes grant issuance is scoped to
+# the exact THIRD_PARTY destination used by the issued test grants.
+OWNER_REPRESENTATION_STANDING_REPOSITORY = RepositoryIdentity(
+    repository_id="Waishnav/devspace",
+    canonical_remote="https://github.com/Waishnav/devspace.git",
+)
+
 
 @pytest.fixture
 def repo_root() -> Path:
     # tests/nexus/orchestrator/test_owner_representation.py -> repository root
     return Path(__file__).resolve().parents[3]
+
+
+@pytest.fixture
+def standing_grant_path(tmp_path: Path) -> Path:
+    """One durable Owner standing grant authorizing OWNER_REPRESENTATION_GRANT_ISSUE."""
+    path = tmp_path / "standing-grant.json"
+    context = StandingGrantContext.issue(
+        owner_id="owner-james",
+        coordinator_id="coordinator-codex",
+        repository=OWNER_REPRESENTATION_STANDING_REPOSITORY,
+        thread_id="thread-coord-1",
+        goal_id="goal-827",
+        allowed_actions=(AutonomyActionClass.OWNER_REPRESENTATION_GRANT_ISSUE,),
+        issued_at=NOW - timedelta(hours=2),
+        expires_at=NOW + timedelta(hours=2),
+    )
+    receipt = StandingGrantReceipt.issue(grant_id="standing-grant-827", context=context)
+    _write_standing_grant_receipt_at(receipt, path)
+    return path
 
 
 def _dest(**overrides) -> ExternalDestination:
@@ -119,9 +159,20 @@ def _grant(**overrides) -> OwnerRepresentationGrant:
 def _issue_grant(
     grant_store: OwnerRepresentationGrantStore, **overrides
 ) -> OwnerRepresentationGrant:
-    """Issue a durable, store-backed grant (the only authoritative form)."""
+    """Issue a durable, store-backed grant (the only authoritative form).
+
+    Issuance replay-proof: authority is re-derived live from the fixture's
+    durable Owner standing-grant receipt at the same requested_at the store
+    binds to the persisted record.
+    """
     grant = _grant(**overrides)
-    grant_store.issue(grant)
+    now = datetime.now(timezone.utc)
+    authorization = authorize_owner_representation_grant_issuance(
+        grant,
+        standing_grant_path=grant_store.standing_grant_path,
+        requested_at=now,
+    )
+    grant_store.issue(grant, issuance_authorization=authorization, requested_at=now)
     return grant
 
 
@@ -172,8 +223,11 @@ def remote() -> FakeRemote:
 
 
 @pytest.fixture
-def grant_store(tmp_path: Path) -> OwnerRepresentationGrantStore:
-    return OwnerRepresentationGrantStore(root=tmp_path / "grant-authority")
+def grant_store(tmp_path: Path, standing_grant_path: Path) -> OwnerRepresentationGrantStore:
+    return OwnerRepresentationGrantStore(
+        root=tmp_path / "grant-authority",
+        standing_grant_path=standing_grant_path,
+    )
 
 
 @pytest.fixture
@@ -850,14 +904,30 @@ def test_two_publisher_instances_share_single_winner(
 def test_inventory_classifies_devspace_and_seam():
     assert_no_unknown_routes()
     status = transport_inventory_status()
-    assert (
-        status["devspace_worker"] == PublicationRouteState.INCAPABLE_OF_EXTERNAL_PUBLICATION.value
-    )
+    assert status["devspace_worker"] == PublicationRouteState.UNKNOWN_BLOCKED.value
     assert (
         status["owner_representation_seam"]
         == PublicationRouteState.EXTERNAL_PUBLICATION_AUTHORITY_ENFORCED.value
     )
-    assert "UNKNOWN_BLOCKED" not in set(status.values())
+    # The seam is the sole authority-enforced external write route; the
+    # devspace route is registered but fail-closed (never usable).
+    assert (
+        list(status.values()).count(
+            PublicationRouteState.EXTERNAL_PUBLICATION_AUTHORITY_ENFORCED.value
+        )
+        == 1
+    )
+    assert PublicationRouteState.UNKNOWN_BLOCKED.value in set(status.values())
+
+
+def test_devspace_route_state_matches_physical_evidence(repo_root: Path):
+    status = transport_inventory_status()
+    assert status["devspace_worker"] == PublicationRouteState.UNKNOWN_BLOCKED.value
+    worker_registry_source = (repo_root / "nexus/executors/worker_registry.py").read_text(
+        encoding="utf-8"
+    )
+    assert "devspace" not in worker_registry_source.lower()
+    assert "nexus/executors/cli_worker.py" in physical_witnesses_for("devspace_worker")
 
 
 def test_enforced_and_incapable_route_witnesses_exist(repo_root: Path):
@@ -906,3 +976,112 @@ def test_build_isolated_env_strips_github_credentials(monkeypatch):
     isolated = build_isolated_env(home_dir="/isolated/home")
     for key in GITHUB_CREDENTIAL_KEYS:
         assert key not in isolated
+
+
+# ---------------------------------------------------------------------------
+# BLOCKER 1 (re-verification): issuance requires live Owner standing-grant
+# authority; a worker can never self-authorize a canonical store receipt.
+# ---------------------------------------------------------------------------
+
+
+def test_worker_cannot_create_authority_store_receipt(grant_store):
+    """A worker calling issue() without Owner issuance authority gets no receipt."""
+    with pytest.raises(OwnerRepresentationGrantBlocked) as exc:
+        grant_store.issue(_grant(), issuance_authorization=None)
+    assert OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REQUIRED.value in str(exc.value)
+    grants_dir = grant_store.root / "grants"
+    assert not grants_dir.exists() or not any(grants_dir.iterdir())
+
+
+def test_forged_owner_identity_cannot_issue_receipt(grant_store, standing_grant_path):
+    """An attacker cannot present a valid auth but claim a different Owner identity."""
+    forged = _grant(owner_id="attacker", issued_by="attacker")
+    authorization = authorize_owner_representation_grant_issuance(
+        forged,
+        standing_grant_path=standing_grant_path,
+        requested_at=NOW,
+    )
+    with pytest.raises(OwnerRepresentationGrantBlocked) as exc:
+        grant_store.issue(forged, issuance_authorization=authorization, requested_at=NOW)
+    assert OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value in str(exc.value)
+
+
+def test_replayed_authorization_cannot_issue_another_grant(grant_store, standing_grant_path):
+    """Authorization minted for grant A can never be replayed to issue grant B."""
+    grant_a = _grant()
+    grant_b = _grant(grant_id="g-827-2", operation_id="op-2")
+    auth_a = authorize_owner_representation_grant_issuance(
+        grant_a,
+        standing_grant_path=standing_grant_path,
+        requested_at=NOW,
+    )
+    with pytest.raises(OwnerRepresentationGrantBlocked) as exc:
+        grant_store.issue(grant_b, issuance_authorization=auth_a, requested_at=NOW)
+    assert OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value in str(exc.value)
+
+
+def test_stale_or_replaced_owner_issuance_authority_blocks(
+    grant_store, standing_grant_path, publisher, remote
+):
+    """A grant issued under today's authority must not publish once the standing
+    grant has been replaced (context/receipt hash changed)."""
+    _issue_grant(grant_store)
+    predecessor = _load_receipt_at(standing_grant_path, now=NOW)
+    replacement_context = StandingGrantContext.issue(
+        owner_id="owner-james",
+        coordinator_id="coordinator-codex",
+        repository=OWNER_REPRESENTATION_STANDING_REPOSITORY,
+        thread_id="thread-coord-1",
+        goal_id="goal-827",
+        allowed_actions=(AutonomyActionClass.OWNER_REPRESENTATION_GRANT_ISSUE,),
+        issued_at=NOW - timedelta(hours=2),
+        expires_at=NOW + timedelta(hours=3),
+    )
+    _write_standing_grant_receipt_at(
+        StandingGrantReceipt.issue(
+            grant_id="standing-grant-827b",
+            context=replacement_context,
+            supersedes_grant_hash=predecessor.receipt_hash,
+        ),
+        standing_grant_path,
+        expected_receipt_hash=predecessor.receipt_hash,
+    )
+    prepared = publisher.prepare(_proposal(), _grant())
+    with pytest.raises(OwnerRepresentationBlocked) as exc:
+        publisher.publish(prepared)
+    assert OwnerRepresentationReason.ISSUANCE_AUTHORITY_CHANGED.value in str(exc.value)
+    assert remote.writes == []
+
+
+def test_revoked_owner_issuance_authority_blocks_publish(
+    grant_store, standing_grant_path, publisher, remote
+):
+    """Publishing after the Owner standing grant is revoked fails closed."""
+    _issue_grant(grant_store)
+    predecessor = _load_receipt_at(standing_grant_path, now=NOW)
+    revoked_context = StandingGrantContext.issue(
+        owner_id="owner-james",
+        coordinator_id="coordinator-codex",
+        repository=OWNER_REPRESENTATION_STANDING_REPOSITORY,
+        thread_id="thread-coord-1",
+        goal_id="goal-827",
+        allowed_actions=(AutonomyActionClass.OWNER_REPRESENTATION_GRANT_ISSUE,),
+        issued_at=NOW - timedelta(hours=2),
+        expires_at=NOW + timedelta(hours=2),
+        revoked_at=NOW - timedelta(minutes=1),
+        revocation_reason="standing authority revoked",
+    )
+    _write_standing_grant_receipt_at(
+        StandingGrantReceipt.issue(
+            grant_id="standing-grant-827-revoked",
+            context=revoked_context,
+            supersedes_grant_hash=predecessor.receipt_hash,
+        ),
+        standing_grant_path,
+        expected_receipt_hash=predecessor.receipt_hash,
+    )
+    prepared = publisher.prepare(_proposal(), _grant())
+    with pytest.raises(OwnerRepresentationBlocked) as exc:
+        publisher.publish(prepared)
+    assert OwnerRepresentationReason.ISSUANCE_AUTHORITY_NOT_LIVE.value in str(exc.value)
+    assert remote.writes == []
