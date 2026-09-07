@@ -6,6 +6,9 @@ inputs:
   request-file:
     description: "Path to certification request JSON file"
     required: true
+  core-python:
+    description: "Absolute executable path for the pre-provisioned nexus-core venv Python interpreter"
+    required: true
   service-url:
     description: "Loopback service URL"
     required: false
@@ -33,8 +36,85 @@ runs:
   steps:
     - id: certify
       shell: bash
+      env:
+        CORE_PYTHON: ${{ inputs.core-python }}
+        REQUEST_FILE: ${{ inputs.request-file }}
+        SERVICE_URL: ${{ inputs.service-url }}
+        TOKEN_FILE: ${{ inputs.token-file }}
       run: |
-        python3 -m product.clients.github_action \
-          --request-file "${{ inputs.request-file }}" \
-          --service-url "${{ inputs.service-url }}" \
-          --token-file "${{ inputs.token-file }}"
+        set -euo pipefail
+        case "${CORE_PYTHON:-}" in
+          /*) ;;
+          *) echo "CORE_PYTHON must be an absolute path" >&2; exit 78 ;;
+        esac
+        if [[ ! -f "$CORE_PYTHON" || ! -x "$CORE_PYTHON" ]]; then
+          echo "CORE_PYTHON must be an executable regular file: $CORE_PYTHON" >&2
+          exit 78
+        fi
+        "$CORE_PYTHON" -I - <<'PY'
+        import base64
+        import csv
+        import hashlib
+        import importlib.metadata as metadata
+        from importlib.machinery import PathFinder
+        import pathlib
+        import sys
+
+        try:
+            core = metadata.distribution("nexus-core")
+        except metadata.PackageNotFoundError:
+            print("nexus-core distribution is not installed", file=sys.stderr)
+            raise SystemExit(78)
+
+        try:
+            metadata.distribution("nexus-legacy")
+        except metadata.PackageNotFoundError:
+            pass
+        else:
+            print("nexus-legacy co-install is forbidden", file=sys.stderr)
+            raise SystemExit(78)
+
+        owners = {
+            name.lower().replace("_", "-")
+            for name in metadata.packages_distributions().get("product", [])
+        }
+        if owners != {"nexus-core"}:
+            print(f"invalid product distribution ownership: {sorted(owners)}", file=sys.stderr)
+            raise SystemExit(78)
+
+        files = {str(path): path for path in (core.files or ())}
+        expected = files.get("product/clients/github_action.py")
+        if expected is None:
+            print("nexus-core RECORD lacks product/clients/github_action.py", file=sys.stderr)
+            raise SystemExit(78)
+        product_spec = PathFinder.find_spec("product", sys.path)
+        client_locations = product_spec.submodule_search_locations if product_spec else None
+        clients_spec = PathFinder.find_spec("clients", client_locations or ())
+        action_locations = clients_spec.submodule_search_locations if clients_spec else None
+        spec = PathFinder.find_spec("github_action", action_locations or ())
+        if spec is None or spec.origin is None:
+            print("Action module cannot be located", file=sys.stderr)
+            raise SystemExit(78)
+        origin = pathlib.Path(spec.origin).resolve()
+        expected_path = pathlib.Path(core.locate_file(expected)).resolve()
+        if origin != expected_path:
+            print(f"Action module path mismatch: {origin} != {expected_path}", file=sys.stderr)
+            raise SystemExit(78)
+        record = None
+        record_text = core.read_text("RECORD")
+        for row in csv.reader(record_text.splitlines() if record_text else ()):
+            if row and row[0] == str(expected):
+                record = row
+                break
+        if not record or len(record) < 2 or not record[1].startswith("sha256="):
+            print("nexus-core RECORD has no SHA-256 for Action module", file=sys.stderr)
+            raise SystemExit(78)
+        digest = base64.urlsafe_b64encode(hashlib.sha256(origin.read_bytes()).digest()).rstrip(b"=").decode()
+        if record[1].removeprefix("sha256=") != digest:
+            print("Action module hash does not match nexus-core RECORD", file=sys.stderr)
+            raise SystemExit(78)
+        PY
+        "$CORE_PYTHON" -I -m product.clients.github_action \
+          --request-file "$REQUEST_FILE" \
+          --service-url "$SERVICE_URL" \
+          --token-file "$TOKEN_FILE"
