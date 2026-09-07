@@ -48,6 +48,9 @@ jobs:
       - name: Install Nexus legacy benchmark dependencies
         run: uv pip install --system -e ".[legacy]"
 
+      - name: Install exact canonical Learning package
+        run: uv pip install --system --requirement requirements/canonical-learning.txt
+
       - name: Run Smoke Benchmark
         run: python scripts/ci/run_smoke_benchmark.py
         env:
