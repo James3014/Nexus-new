@@ -5,10 +5,16 @@ external publication / Owner representation.  It consumes the pure policy
 contracts in ``nexus/contracts/owner_representation.py`` and adds:
 
 * fail-closed destination/effect classification,
-* exact one-shot grant binding plus revalidation immediately before any effect,
+* store-backed one-shot grant binding: the published grant must exist as a
+  durable receipt in the canonical :class:`OwnerRepresentationGrantStore`
+  (a worker/agent cannot make self-minted grant objects authoritative), with
+  fresh revalidation of live revocation/supersession immediately before any
+  effect,
 * a durable per-operation state machine mirroring the proven EIA publication
   pattern (PREPARED -> DISPATCHING -> COMPLETED / OUTCOME_UNKNOWN), with
-  readback reconciliation and a consumed-grant ledger that forbids replay.
+  readback reconciliation and a consumed-grant ledger that forbids replay,
+* a single-writer flock around the send critical section so two concurrent
+  dispatches of the same operation/grant resolve to exactly one winner.
 
 No real third-party transport is ever invoked here; ``write_transport`` and
 ``readback_transport`` are injected callables, which keeps the seam testable
@@ -18,9 +24,13 @@ on its own.
 
 from __future__ import annotations
 
+import errno
+import fcntl
 import json
 import os
+import stat
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,6 +51,10 @@ from nexus.contracts.owner_representation import (
     PublicationDerivation,
     classification,
     evaluate_owner_representation,
+)
+from nexus.orchestrator.owner_representation_store import (
+    OwnerRepresentationGrantStore,
+    OwnerRepresentationGrantStoreError,
 )
 
 
@@ -202,6 +216,9 @@ class OwnerRepresentationPublisher:
     ``DISPATCHING`` is persisted before any physical effect and cannot be
     blindly re-dispatched: an unacknowledged dispatch always routes to
     readback-only reconciliation.  A consumed one-shot grant is never reused.
+    A published grant must be authoritative in the canonical grant store at
+    send time; a grant object no store has ever issued is inert and fails
+    closed with ``GRANT_NOT_ISSUED``.
     """
 
     def __init__(
@@ -209,10 +226,12 @@ class OwnerRepresentationPublisher:
         operation_root: Path,
         write_transport: Callable[[ExternalPublicationProposal], WriteOutcome],
         readback_transport: Callable[[ExternalPublicationProposal], str | None],
+        grant_store: OwnerRepresentationGrantStore | None = None,
     ) -> None:
         self.operation_root = Path(operation_root)
         self.write_transport = write_transport
         self.readback_transport = readback_transport
+        self.grant_store = grant_store or OwnerRepresentationGrantStore()
 
     # -- durable paths -------------------------------------------------------
 
@@ -221,6 +240,74 @@ class OwnerRepresentationPublisher:
 
     def _ledger_path(self, grant_hash: str) -> Path:
         return self.operation_root / "consumed_grants" / f"{grant_hash}.json"
+
+    # -- concurrency ---------------------------------------------------------
+
+    @contextmanager
+    def _dispatch_lock(self):
+        """Serialize the send critical section for one operation root."""
+        lock_path = self.operation_root / ".owner-representation-dispatch.lock"
+        self.operation_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            fd = os.open(str(lock_path), flags, 0o600)
+        except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                raise OwnerRepresentationBlocked("DISPATCH_LOCK_NOT_REGULAR_FILE") from exc
+            if exc.errno == errno.ENOENT:
+                raise OwnerRepresentationBlocked("DISPATCH_LOCK_OPEN_FAILED") from exc
+            raise OwnerRepresentationBlocked("DISPATCH_LOCK_OPEN_FAILED") from exc
+        try:
+            st = os.fstat(fd)
+            if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid():
+                raise OwnerRepresentationBlocked("DISPATCH_LOCK_NOT_REGULAR_FILE")
+            if stat.S_IMODE(st.st_mode) != 0o600:
+                raise OwnerRepresentationBlocked("DISPATCH_LOCK_UNSAFE_PERMISSIONS")
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        except OSError as exc:
+            raise OwnerRepresentationBlocked("DISPATCH_LOCK_FAILED") from exc
+        finally:
+            os.close(fd)
+
+    def _assert_repreparable(
+        self,
+        operation: Mapping[str, Any] | None,
+        proposal: ExternalPublicationProposal,
+        grant: OwnerRepresentationGrant | None,
+    ) -> None:
+        """Refuse to re-prepare a terminal or in-flight operation."""
+        if operation is None:
+            return
+        state = operation.get("state")
+        if state in {"COMPLETED", "DISPATCHING", "OUTCOME_UNKNOWN"}:
+            raise OwnerRepresentationBlocked(
+                f"{OwnerRepresentationReason.OPERATION_TERMINAL_OR_INFLIGHT.value}:{state}"
+            )
+        if state not in {"PREPARED", "INTERNAL_PASSTHROUGH"}:
+            raise OwnerRepresentationBlocked("OPERATION_NOT_REPREPARABLE")
+        expected_grant_hash = grant.grant_hash if grant is not None else None
+        if (
+            operation.get("proposal_hash")
+            != canonical_autonomy_hash(proposal.model_dump(mode="json"))
+            or operation.get("grant_hash") != expected_grant_hash
+        ):
+            raise OwnerRepresentationBlocked(OwnerRepresentationReason.OPERATION_CONFLICT.value)
+
+    def _authorize_grant(
+        self,
+        grant: OwnerRepresentationGrant,
+        proposal: ExternalPublicationProposal,
+        now: datetime | None,
+    ) -> OwnerRepresentationDecision:
+        """Fresh store-backed authorization immediately before any effect."""
+        try:
+            decision = self.grant_store.authorize(grant.grant_hash, proposal, now=now)
+        except OwnerRepresentationGrantStoreError as exc:
+            raise OwnerRepresentationBlocked(f"GRANT_STORE_FAIL_CLOSED:{exc}") from exc
+        if decision.outcome is not OwnerRepresentationOutcome.GRANT_MATCH:
+            raise OwnerRepresentationBlocked(":".join(code.value for code in decision.reason_codes))
+        return decision
 
     # -- prepare -------------------------------------------------------------
 
@@ -231,6 +318,8 @@ class OwnerRepresentationPublisher:
         boundary: tuple[InternalCollaborationBound, ...] = (),
         now: datetime | None = None,
     ) -> PreparedPublication:
+        operation = _load_json(self._operation_path(proposal.operation_id))
+        self._assert_repreparable(operation, proposal, grant)
         kind = classification(proposal.destination, proposal.effect, boundary)
         if kind is ExternalDestinationKind.UNKNOWN:
             raise OwnerRepresentationBlocked("DESTINATION_UNKNOWN")
@@ -302,46 +391,51 @@ class OwnerRepresentationPublisher:
             }
 
         assert prepared.grant is not None, "third-party publish requires a grant"
-        operation = _load_json(self._operation_path(prepared.operation_id))
-        if operation is None:
-            raise OwnerRepresentationBlocked(OwnerRepresentationReason.DISPATCH_NOT_PREPARED.value)
-        if operation["state"] == "COMPLETED":
-            raise OwnerRepresentationBlocked(OwnerRepresentationReason.REPLAY_FORBIDDEN.value)
-        if operation["state"] in {"DISPATCHING", "OUTCOME_UNKNOWN"}:
-            raise OwnerRepresentationBlocked(
-                OwnerRepresentationReason.RECONCILIATION_REQUIRED.value
+
+        # Single-writer critical section: re-read the operation, verify it is
+        # still sendable, consume the one-shot ledger, fresh-authorize against
+        # the canonical store, and persist DISPATCHING atomically.
+        with self._dispatch_lock():
+            operation = _load_json(self._operation_path(prepared.operation_id))
+            if operation is None:
+                raise OwnerRepresentationBlocked(
+                    OwnerRepresentationReason.DISPATCH_NOT_PREPARED.value
+                )
+            if operation["state"] == "COMPLETED":
+                raise OwnerRepresentationBlocked(OwnerRepresentationReason.REPLAY_FORBIDDEN.value)
+            if operation["state"] in {"DISPATCHING", "OUTCOME_UNKNOWN"}:
+                raise OwnerRepresentationBlocked(
+                    OwnerRepresentationReason.RECONCILIATION_REQUIRED.value
+                )
+            if operation["state"] != "PREPARED":
+                raise OwnerRepresentationBlocked("DISPATCH_NOT_PREPARED")
+
+            # One-shot ledger first: a consumed grant may never drive another
+            # operation, regardless of how well it revalidates.  Existence is
+            # sufficient: re-preparing the same operation with the same grant
+            # must still fail after the grant was consumed exactly once.
+            ledger = _load_json(self._ledger_path(prepared.grant.grant_hash))
+            if ledger is not None:
+                raise OwnerRepresentationBlocked(OwnerRepresentationReason.GRANT_REUSED.value)
+
+            # Fresh store-backed authorization immediately before any effect.
+            self._authorize_grant(prepared.grant, prepared.proposal, now)
+
+            _atomic_json(
+                self._ledger_path(prepared.grant.grant_hash),
+                {
+                    "grant_hash": prepared.grant.grant_hash,
+                    "operation_id": prepared.operation_id,
+                    "consumed_at": (now or _now()).isoformat(),
+                    "state": "CONSUMED",
+                },
             )
-        if operation["state"] != "PREPARED":
-            raise OwnerRepresentationBlocked("DISPATCH_NOT_PREPARED")
-
-        # One-shot ledger first: a consumed grant may never drive another
-        # operation, regardless of how well it revalidates.
-        ledger = _load_json(self._ledger_path(prepared.grant.grant_hash))
-        if ledger is not None and ledger.get("operation_id") != prepared.operation_id:
-            raise OwnerRepresentationBlocked(OwnerRepresentationReason.GRANT_REUSED.value)
-        _atomic_json(
-            self._ledger_path(prepared.grant.grant_hash),
-            {
-                "grant_hash": prepared.grant.grant_hash,
-                "operation_id": prepared.operation_id,
-                "consumed_at": (now or _now()).isoformat(),
-                "state": "CONSUMED",
-            },
-        )
-
-        # Fresh revalidation immediately before any physical effect.
-        decision = evaluate_owner_representation(
-            prepared.grant, prepared.proposal, now=now or _now()
-        )
-        if decision.outcome is not OwnerRepresentationOutcome.GRANT_MATCH:
-            raise OwnerRepresentationBlocked(":".join(code.value for code in decision.reason_codes))
-
-        # Persist DISPATCHING before any effect; a crash after this point must
-        # reconcile read-only rather than blindly re-dispatch.
-        dispatch_record = dict(operation)
-        dispatch_record["state"] = "DISPATCHING"
-        dispatch_record["dispatched_at"] = (now or _now()).isoformat()
-        _atomic_json(self._operation_path(prepared.operation_id), dispatch_record)
+            # Persist DISPATCHING before any effect; a crash after this point
+            # must reconcile read-only rather than blindly re-dispatch.
+            dispatch_record = dict(operation)
+            dispatch_record["state"] = "DISPATCHING"
+            dispatch_record["dispatched_at"] = (now or _now()).isoformat()
+            _atomic_json(self._operation_path(prepared.operation_id), dispatch_record)
 
         outcome: WriteOutcome
         try:

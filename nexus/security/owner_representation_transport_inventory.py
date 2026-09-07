@@ -10,14 +10,21 @@ channel cannot be added without being classified.
 The authoritative write seam for new or actual external publication remains
 ``nexus/orchestrator/owner_representation.py``; a route labelled
 ``EXTERNAL_PUBLICATION_AUTHORITY_ENFORCED`` must route its physical write
-through that seam and home its authority in a one-shot Owner grant.
+through that seam and home its authority in a one-shot Owner grant persisted
+by the canonical ``owner_representation_store``.
+
+Scope note (INCAPABILITY_IS_SOURCE_SCOPE_ONLY): every
+``INCAPABLE_OF_EXTERNAL_PUBLICATION`` classification is grounded in checked-in
+``nexus/**`` and ``scripts/**`` source.  It does not certify a live external
+binary, connector, or a future source change; re-verification is required
+before any such claim.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Mapping
+from typing import Any, Mapping
 
 
 class PublicationRouteState(str, Enum):
@@ -39,14 +46,16 @@ class PublicationRoute:
     observed_write_seam: str
     state: PublicationRouteState
     evidence: str
+    physical_witnesses: tuple[str, ...] = ()
 
-    def as_dict(self) -> dict[str, str]:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "route_id": self.route_id,
             "capability_surface": self.capability_surface,
             "observed_write_seam": self.observed_write_seam,
             "state": self.state.value,
             "evidence": self.evidence,
+            "physical_witnesses": list(self.physical_witnesses),
         }
 
 
@@ -106,10 +115,20 @@ ALL: tuple[PublicationRoute, ...] = (
         route_id="devspace_worker",
         capability_surface="Delegated workers with arbitrary shell",
         observed_write_seam="unbounded remote execution outside nexus/ source",
-        state=PublicationRouteState.UNKNOWN_BLOCKED,
-        evidence="Fails closed: delegated workers cannot publish on Owner's "
-        "behalf in third-party repositories without an exact grant through "
-        "the canonical seam.",
+        state=PublicationRouteState.INCAPABLE_OF_EXTERNAL_PUBLICATION,
+        evidence="No devspace adapter exists in nexus/executors/worker_registry.py "
+        "(adapters: codex, gemini, agy, opencode, mimo, ollama, cline, grok). "
+        "Every CLI worker runs through CliWorkerRequest -> run_cli_worker -> "
+        "_validate_worker_argv, which permanently forbids gh issue/pr create and "
+        "gh api even as a sub-invocation, and build_isolated_env strips GitHub "
+        "credential env vars before any worker spawn. Fails closed on "
+        "publication authority: no delegated worker exercises a third-party "
+        "GitHub write.",
+        physical_witnesses=(
+            "nexus/executors/worker_registry.py",
+            "nexus/executors/cli_worker.py",
+            "nexus/services/agy_account_pool.py",
+        ),
     ),
     PublicationRoute(
         route_id="morning_report_gh_guidance",
@@ -118,6 +137,20 @@ ALL: tuple[PublicationRoute, ...] = (
         state=PublicationRouteState.INCAPABLE_OF_EXTERNAL_PUBLICATION,
         evidence="Command text is emitted for a human operator; the script never "
         "subprocess-invokes gh against a third-party repo.",
+    ),
+    PublicationRoute(
+        route_id="owner_representation_seam",
+        capability_surface="Canonical Owner-representation publication seam",
+        observed_write_seam="nexus/orchestrator/owner_representation.py + owner_representation_store.py",
+        state=PublicationRouteState.EXTERNAL_PUBLICATION_AUTHORITY_ENFORCED,
+        evidence="New or actual external publication must route physical writes "
+        "through the canonical publisher seam and home authority in a one-shot "
+        "Owner-representation grant persisted as a durable receipt by the "
+        "owner_representation_store before any dispatch effect.",
+        physical_witnesses=(
+            "nexus/orchestrator/owner_representation.py",
+            "nexus/orchestrator/owner_representation_store.py",
+        ),
     ),
 )
 
@@ -213,6 +246,14 @@ def expected_write_seam_for(route_id: str) -> str:
     raise KeyError(route_id)
 
 
+def physical_witnesses_for(route_id: str) -> tuple[str, ...]:
+    """Repository files that physically ground a route classification."""
+    for route in ALL:
+        if route.route_id == route_id:
+            return route.physical_witnesses
+    raise KeyError(route_id)
+
+
 __all__ = [
     "EXTERNAL_CLASSIFICATION_IDS",
     "FORBIDDEN_PROGRAMMATIC_GITHUB_WRITE_PATTERNS",
@@ -222,5 +263,6 @@ __all__ = [
     "assert_no_unknown_routes",
     "classify_transport_route",
     "expected_write_seam_for",
+    "physical_witnesses_for",
     "transport_inventory_status",
 ]
