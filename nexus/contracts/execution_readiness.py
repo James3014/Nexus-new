@@ -177,9 +177,7 @@ _BLOCKER_PLANE: dict[str, ExecutionReadinessPlane] = {
         ExecutionReadinessPlane.ACTION_SURFACE
     ),
     ExecutionReadinessBlockerCode.TASK_AUTHORITY_MISSING.value: ExecutionReadinessPlane.AUTHORITY,
-    ExecutionReadinessBlockerCode.AUTHORITY_OUT_OF_SCOPE.value: (
-        ExecutionReadinessPlane.AUTHORITY
-    ),
+    ExecutionReadinessBlockerCode.AUTHORITY_OUT_OF_SCOPE.value: (ExecutionReadinessPlane.AUTHORITY),
     ExecutionReadinessBlockerCode.SEMANTIC_REPLAY_FENCE.value: (
         ExecutionReadinessPlane.REPLAY_FENCE
     ),
@@ -238,8 +236,7 @@ class RequiredCompletionContract(BaseModel):
             raise ValueError("COMPLETION_ARTIFACT_IDENTITY_EMPTY")
         segments = normalized.replace(":", "/").replace("@", "/").split("/")
         if any(
-            segment in {"main", "master", "head", "heads", "origin", "refs"}
-            for segment in segments
+            segment in {"main", "master", "head", "heads", "origin", "refs"} for segment in segments
         ):
             raise ValueError("COMPLETION_ARTIFACT_IDENTITY_NOT_AN_INSTALLED_ARTIFACT")
         return value
@@ -448,7 +445,9 @@ class ExecutionReadinessResult(BaseModel):
         guidance may reference forbidden words; machine vocabulary may not.
         """
 
-        machine_vocabulary = [self.outcome.value] + [result.status.value for result in self.plane_results]
+        machine_vocabulary = [self.outcome.value] + [
+            result.status.value for result in self.plane_results
+        ]
         machine_vocabulary.extend(result.plane.value for result in self.plane_results)
         for result in self.plane_results:
             if result.blocker_code is not None:
@@ -473,7 +472,9 @@ class ExecutionReadinessResult(BaseModel):
 def _min_blocked_precedence(
     plane_results: tuple[ExecutionReadinessPlaneResult, ...],
 ) -> int | None:
-    blocked = [result for result in plane_results if result.status is ExecutionReadinessStatus.BLOCKED]
+    blocked = [
+        result for result in plane_results if result.status is ExecutionReadinessStatus.BLOCKED
+    ]
     if not blocked:
         return None
     return min(result.plane.precedence for result in blocked)
