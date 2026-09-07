@@ -361,10 +361,17 @@ def _aggregate_plane(
         else:
             if observation.blocker_code is not None:
                 raise ReadinessEvidenceError("NON_BLOCKED_OBSERVATION_MUST_NOT_CARRY_CODE", plane)
-        if observation.status is ExecutionReadinessStatus.UNPROVEN and observation.evidence_identities:
+        if (
+            observation.status is ExecutionReadinessStatus.UNPROVEN
+            and observation.evidence_identities
+        ):
             raise ReadinessEvidenceError("UNPROVEN_OBSERVATION_MUST_NOT_CARRY_EVIDENCE", plane)
     blocked = next(
-        (observation for observation in observations if observation.status is ExecutionReadinessStatus.BLOCKED),
+        (
+            observation
+            for observation in observations
+            if observation.status is ExecutionReadinessStatus.BLOCKED
+        ),
         None,
     )
     if blocked is not None:
@@ -459,7 +466,9 @@ def evaluate_execution_readiness(
             )
             for result in results
         ]
-        blocked = [result for result in results if result.status is ExecutionReadinessStatus.BLOCKED]
+        blocked = [
+            result for result in results if result.status is ExecutionReadinessStatus.BLOCKED
+        ]
         primary = min(blocked, key=lambda result: result.plane.precedence)
         # Deterministic capacity bound: keep the first plane evidence
         # identities so the blocker always fits the outcome evidence cap with

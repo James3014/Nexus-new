@@ -299,7 +299,9 @@ class TestCanonicalRouting:
         result = _evaluate(_request(), overrides)
         assert result.primary_blocker is not None
         assert result.primary_blocker.code is ExecutionReadinessBlockerCode.AUTHORITY_OUT_OF_SCOPE
-        assert result.primary_blocker.next_action is CanonicalNextAction.OBTAIN_NORMAL_TASK_AUTHORITY
+        assert (
+            result.primary_blocker.next_action is CanonicalNextAction.OBTAIN_NORMAL_TASK_AUTHORITY
+        )
 
     def test_replay_fence_requires_reconcile_not_retry(self) -> None:
         overrides = {
@@ -359,9 +361,7 @@ class TestCompletionOptionality:
     def test_missing_observation_does_not_block_ordinary_task(self) -> None:
         result = _evaluate(_request())
         surface = next(
-            r
-            for r in result.plane_results
-            if r.plane is ExecutionReadinessPlane.ACTION_SURFACE
+            r for r in result.plane_results if r.plane is ExecutionReadinessPlane.ACTION_SURFACE
         )
         assert surface.status is ExecutionReadinessStatus.PASSED
         assert surface.blocker_code is None
@@ -401,10 +401,7 @@ class TestCompletionBinding:
         assert result.primary_blocker.next_action is (
             CanonicalNextAction.BIND_COMPLETION_CONTRACT_IDENTITY
         )
-        assert any(
-            "stale" in identity
-            for identity in result.primary_blocker.evidence_identities
-        )
+        assert any("stale" in identity for identity in result.primary_blocker.evidence_identities)
 
     def test_substituted_artifact_blocks(self) -> None:
         result = _evaluate(
@@ -430,8 +427,7 @@ class TestCompletionBinding:
             ExecutionReadinessBlockerCode.COMPLETION_CONTRACT_BINDING_REQUIRED
         )
         assert any(
-            "interface" in identity
-            for identity in result.primary_blocker.evidence_identities
+            "interface" in identity for identity in result.primary_blocker.evidence_identities
         )
 
     def test_missing_observation_fails_closed(self) -> None:
@@ -442,8 +438,7 @@ class TestCompletionBinding:
             ExecutionReadinessBlockerCode.COMPLETION_CONTRACT_BINDING_REQUIRED
         )
         assert any(
-            "unavailable" in identity
-            for identity in result.primary_blocker.evidence_identities
+            "unavailable" in identity for identity in result.primary_blocker.evidence_identities
         )
 
     def test_missing_capability_blocks(self) -> None:
