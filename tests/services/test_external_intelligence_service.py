@@ -244,7 +244,9 @@ def test_load_config_binds_open_swe_provider_and_model(tmp_path):
     assert loaded.open_swe_runtime_artifact_sha256 == "a" * 64
 
 
-def test_open_swe_activation_overlay_merges_with_host_and_binds_both_consumers(tmp_path, monkeypatch):
+def test_open_swe_activation_overlay_merges_with_host_and_binds_both_consumers(
+    tmp_path, monkeypatch
+):
     overlay = json.loads(
         Path("scripts/ops/configs/external_intelligence_open_swe_activation_v1.json").read_text()
     )
@@ -277,7 +279,11 @@ def test_open_swe_activation_overlay_merges_with_host_and_binds_both_consumers(t
     assert calls[0][1]["executable"] == overlay["open_swe_executable"]
     assert calls[0][1]["expected_artifact_sha256"] == calls[1][1]["expected_artifact_sha256"]
     assert calls[0][1]["expected_artifact_sha256"] == overlay["open_swe_runtime_artifact_sha256"]
-    assert calls[0][1]["runtime_state_root"] == calls[1][1]["runtime_state_root"] == tmp_path / "state" / "open_swe_runtime"
+    assert (
+        calls[0][1]["runtime_state_root"]
+        == calls[1][1]["runtime_state_root"]
+        == tmp_path / "state" / "open_swe_runtime"
+    )
 
 
 def test_open_swe_activation_overlay_placeholders_fail_closed(tmp_path):

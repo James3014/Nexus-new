@@ -86,8 +86,10 @@ def test_semantic_timeout_is_unknown_and_never_retry_safe(tmp_path, monkeypatch)
         module,
         "_runtime_call",
         lambda *_args, **_kwargs: (
-            _identity(module, _args[1]), "", False, ""
-        ) if _args[1]["operation"] == "identity" else (None, "", True, "runtime_timeout"),
+            (_identity(module, _args[1]), "", False, "")
+            if _args[1]["operation"] == "identity"
+            else (None, "", True, "runtime_timeout")
+        ),
     )
     transport = module.OpenSWEExternalIntelligenceTransport(
         repository_root=tmp_path,
@@ -110,8 +112,10 @@ def test_semantic_runtime_missing_before_start_is_retry_safe(tmp_path, monkeypat
         module,
         "_runtime_call",
         lambda *_args, **_kwargs: (
-            _identity(module, _args[1]), "", False, ""
-        ) if _args[1]["operation"] == "identity" else (None, "", False, "runtime_not_found"),
+            (_identity(module, _args[1]), "", False, "")
+            if _args[1]["operation"] == "identity"
+            else (None, "", False, "runtime_not_found")
+        ),
     )
     transport = module.OpenSWEExternalIntelligenceTransport(
         repository_root=tmp_path,
@@ -402,10 +406,16 @@ def _identity(module, payload, *, module_hash="a" * 64):
         ("distribution_name", "wrong-runtime", "OPEN_SWE_RUNTIME_IDENTITY_INVALID"),
         ("runtime_protocol_version", "wrong-protocol", "OPEN_SWE_RUNTIME_IDENTITY_INVALID"),
         ("authority_boundary", "controller-authority", "OPEN_SWE_RUNTIME_IDENTITY_INVALID"),
-        ("artifact_identity", {"module_file": "/opt/runtime.py", "module_sha256": "b" * 64}, "OPEN_SWE_RUNTIME_ARTIFACT_MISMATCH"),
+        (
+            "artifact_identity",
+            {"module_file": "/opt/runtime.py", "module_sha256": "b" * 64},
+            "OPEN_SWE_RUNTIME_ARTIFACT_MISMATCH",
+        ),
     ),
 )
-def test_invalid_runtime_identity_blocks_semantic_effect(tmp_path, monkeypatch, field, value, error):
+def test_invalid_runtime_identity_blocks_semantic_effect(
+    tmp_path, monkeypatch, field, value, error
+):
     module = _module()
     calls = []
 
@@ -440,7 +450,12 @@ def test_runtime_identity_is_required_before_semantic_dispatch(tmp_path, monkeyp
         calls.append(payload["operation"])
         if payload["operation"] == "identity":
             return _identity(module, payload), "", False, ""
-        return {"schema": module.PROTOCOL_RESULT_SCHEMA, "kind": "semantic", "status": "OK"}, "", True, ""
+        return (
+            {"schema": module.PROTOCOL_RESULT_SCHEMA, "kind": "semantic", "status": "OK"},
+            "",
+            True,
+            "",
+        )
 
     monkeypatch.setattr(module, "_runtime_call", runtime_call)
     transport = module.OpenSWEExternalIntelligenceTransport(
@@ -473,7 +488,9 @@ def test_runtime_identity_hash_mismatch_blocks_worker_before_effect(tmp_path, mo
         executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
         expected_artifact_sha256="a" * 64,
     )
-    result = transport.run_new(prompt="p", artifact_path=str(artifact), workspace_path=str(workspace))
+    result = transport.run_new(
+        prompt="p", artifact_path=str(artifact), workspace_path=str(workspace)
+    )
     assert result.status == "OPEN_SWE_RUNTIME_IDENTITY_FAILED"
     assert calls == ["identity"]
 
@@ -488,8 +505,20 @@ def test_runtime_identity_is_revalidated_after_runtime_change(tmp_path, monkeypa
         calls.append(payload["operation"])
         if payload["operation"] == "identity":
             identity_count += 1
-            return _identity(module, payload, module_hash=_RUNTIME_HASH if identity_count == 1 else "b" * 64), "", False, ""
-        return {"schema": module.PROTOCOL_RESULT_SCHEMA, "kind": "semantic", "status": "OK"}, "", True, ""
+            return (
+                _identity(
+                    module, payload, module_hash=_RUNTIME_HASH if identity_count == 1 else "b" * 64
+                ),
+                "",
+                False,
+                "",
+            )
+        return (
+            {"schema": module.PROTOCOL_RESULT_SCHEMA, "kind": "semantic", "status": "OK"},
+            "",
+            True,
+            "",
+        )
 
     monkeypatch.setattr(module, "_runtime_call", runtime_call)
     transport = module.OpenSWEExternalIntelligenceTransport(
@@ -516,7 +545,12 @@ def test_failed_reconcile_is_unknown_and_never_retry_safe(tmp_path, monkeypatch)
             return _identity(module, payload), "", False, ""
         if payload["operation"] == "semantic_reconcile":
             return None, "", True, "runtime_timeout"
-        return {"schema": module.PROTOCOL_RESULT_SCHEMA, "kind": "semantic", "status": "OK"}, "", True, ""
+        return (
+            {"schema": module.PROTOCOL_RESULT_SCHEMA, "kind": "semantic", "status": "OK"},
+            "",
+            True,
+            "",
+        )
 
     monkeypatch.setattr(module, "_runtime_call", runtime_call)
     transport = module.OpenSWEExternalIntelligenceTransport(
