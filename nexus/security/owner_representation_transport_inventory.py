@@ -149,9 +149,11 @@ ALL: tuple[PublicationRoute, ...] = (
         observed_write_seam="nexus/orchestrator/owner_representation.py + owner_representation_store.py",
         state=PublicationRouteState.EXTERNAL_PUBLICATION_AUTHORITY_ENFORCED,
         evidence="New or actual external publication must route physical writes "
-        "through the canonical publisher seam and home authority in a one-shot "
-        "Owner-representation grant persisted as a durable receipt by the "
-        "owner_representation_store before any dispatch effect.",
+        "through the canonical publisher seam and home authority in a sealed "
+        "one-shot issuance permit minted from live Owner standing-grant authority "
+        "and consumed once; the Owner-representation grant is persisted as a "
+        "durable receipt by the owner_representation_store before any dispatch "
+        "effect.",
         physical_witnesses=(
             "nexus/orchestrator/owner_representation.py",
             "nexus/orchestrator/owner_representation_store.py",

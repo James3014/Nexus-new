@@ -118,17 +118,28 @@ credential helpers, and arbitrary shell wrappers cannot be excluded; Nexus
 therefore cannot physically certify non-publication and classifies the route
 `UNKNOWN_BLOCKED` (registered fail-closed, never usable).
 
-Grant **issuance** additionally requires live Owner standing-grant authority:
-the store re-derives the exact
-`nexus.standing_grant_effect_authorization.v1` authorization for the
+Grant **issuance** additionally requires a sealed one-shot issuance permit
+minted from live Owner standing-grant authority: the store
+(`mint_owner_representation_publication_issuance_permit`) derives the exact
+`nexus.owner_representation_publication_issuance_permit.v1` permit for the
 `OWNER_REPRESENTATION_GRANT_ISSUE` effect from the canonical durable Owner
-standing-grant receipt at the same `requested_at` it persists, and requires
-exact field equality. A missing authorization
+standing-grant receipt, addressed by the receipt hash
+(`permits/<grant_receipt_hash>.json`), with the grant identity, effect hash,
+repository, and effect bound inside a sealed record.  **One standing-grant
+receipt mints at most one permit** (`ISSUANCE_PERMIT_SLOT_CONSUMED` /
+`PERMIT_ALREADY_MINTED`); the permit is non-reusable.  `issue` re-reads the
+permit sealed from disk, ignores every caller-supplied permit field except the
+grant-hash mapping, binds the grant identity/effect exactly, and re-derives the
+standing-grant authority fresh.  A missing permit
 (`ISSUANCE_AUTHORIZATION_REQUIRED`), a wrong or replayed one
 (`ISSUANCE_AUTHORIZATION_REJECTED`), a replaced standing grant
 (`ISSUANCE_AUTHORITY_CHANGED`), or a revoked/unreadable standing grant
 (`ISSUANCE_AUTHORITY_NOT_LIVE`) all fail closed with no receipt persisted and
-no dispatch effect.
+no dispatch effect.  The first accepted issuance writes a sealed
+`permits/consumed/<grant_hash>.json` consumption marker before the grant
+receipt, so a grant receipt destroyed after issuance can never be re-issued
+(`GRANT_REUSED`) and a live receipt is never double-issued
+(`GRANT_ALREADY_ISSUED`).
 
 ## Failure-mode guarantees
 
