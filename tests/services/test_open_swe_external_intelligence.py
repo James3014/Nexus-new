@@ -14,6 +14,10 @@ def _module():
     return importlib.import_module("nexus.services.open_swe_external_intelligence")
 
 
+_RUNTIME_EXECUTABLE = "/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime"
+_RUNTIME_HASH = "a" * 64
+
+
 def test_nexus_adapter_is_thin_and_has_no_deepagents_or_langchain_imports():
     source = Path("nexus/services/open_swe_external_intelligence.py").read_text(encoding="utf-8")
     assert "import deepagents" not in source
@@ -29,6 +33,8 @@ def test_semantic_transport_maps_external_protocol_and_reconcile_is_separate(tmp
 
     def runtime_call(executable, payload, *, provider_id, timeout):
         calls.append((executable, dict(payload), provider_id, timeout))
+        if payload["operation"] == "identity":
+            return _identity(module, payload), "", False, ""
         return (
             {
                 "schema": module.PROTOCOL_RESULT_SCHEMA,
@@ -53,7 +59,8 @@ def test_semantic_transport_maps_external_protocol_and_reconcile_is_separate(tmp
         repository_root=tmp_path,
         model_provider="google_genai",
         model_id="gemini-test",
-        executable="runtime-bin",
+        executable=_RUNTIME_EXECUTABLE,
+        expected_artifact_sha256=_RUNTIME_HASH,
         runtime_state_root=tmp_path / "runtime-state",
     )
 
@@ -63,9 +70,14 @@ def test_semantic_transport_maps_external_protocol_and_reconcile_is_separate(tmp
     assert first.status == "INTELLIGENCE_COMPLETED"
     assert json.loads(first.raw) == envelope
     assert reconciled.status == "INTELLIGENCE_COMPLETED"
-    assert [call[1]["operation"] for call in calls] == ["semantic_run", "semantic_reconcile"]
-    assert calls[0][1]["operation_id"] == calls[1][1]["operation_id"]
-    assert first.safe_argv == ("runtime-bin", "<json-stdin>")
+    assert [call[1]["operation"] for call in calls] == [
+        "identity",
+        "semantic_run",
+        "identity",
+        "semantic_reconcile",
+    ]
+    assert calls[1][1]["operation_id"] == calls[3][1]["operation_id"]
+    assert first.safe_argv == (_RUNTIME_EXECUTABLE, "<json-stdin>")
 
 
 def test_semantic_timeout_is_unknown_and_never_retry_safe(tmp_path, monkeypatch):
@@ -73,12 +85,18 @@ def test_semantic_timeout_is_unknown_and_never_retry_safe(tmp_path, monkeypatch)
     monkeypatch.setattr(
         module,
         "_runtime_call",
-        lambda *_args, **_kwargs: (None, "", True, "runtime_timeout"),
+        lambda *_args, **_kwargs: (
+            (_identity(module, _args[1]), "", False, "")
+            if _args[1]["operation"] == "identity"
+            else (None, "", True, "runtime_timeout")
+        ),
     )
     transport = module.OpenSWEExternalIntelligenceTransport(
         repository_root=tmp_path,
         model_provider="google_genai",
         model_id="gemini-test",
+        executable=_RUNTIME_EXECUTABLE,
+        expected_artifact_sha256=_RUNTIME_HASH,
     )
 
     result = transport.invoke("prompt")
@@ -93,12 +111,18 @@ def test_semantic_runtime_missing_before_start_is_retry_safe(tmp_path, monkeypat
     monkeypatch.setattr(
         module,
         "_runtime_call",
-        lambda *_args, **_kwargs: (None, "", False, "runtime_not_found"),
+        lambda *_args, **_kwargs: (
+            (_identity(module, _args[1]), "", False, "")
+            if _args[1]["operation"] == "identity"
+            else (None, "", False, "runtime_not_found")
+        ),
     )
     transport = module.OpenSWEExternalIntelligenceTransport(
         repository_root=tmp_path,
         model_provider="google_genai",
         model_id="gemini-test",
+        executable=_RUNTIME_EXECUTABLE,
+        expected_artifact_sha256=_RUNTIME_HASH,
     )
 
     result = transport.invoke("prompt")
@@ -110,10 +134,12 @@ def test_semantic_runtime_missing_before_start_is_retry_safe(tmp_path, monkeypat
 
 def test_semantic_model_attestation_mismatch_fails_closed(tmp_path, monkeypatch):
     module = _module()
-    monkeypatch.setattr(
-        module,
-        "_runtime_call",
-        lambda *_args, **_kwargs: (
+
+    def runtime_call(*_args, **_kwargs):
+        payload = _args[1]
+        if payload["operation"] == "identity":
+            return _identity(module, payload), "", False, ""
+        return (
             {
                 "schema": module.PROTOCOL_RESULT_SCHEMA,
                 "kind": "semantic",
@@ -125,12 +151,19 @@ def test_semantic_model_attestation_mismatch_fails_closed(tmp_path, monkeypatch)
             "",
             True,
             "",
-        ),
+        )
+
+    monkeypatch.setattr(
+        module,
+        "_runtime_call",
+        runtime_call,
     )
     transport = module.OpenSWEExternalIntelligenceTransport(
         repository_root=tmp_path,
         model_provider="google_genai",
         model_id="gemini-test",
+        executable=_RUNTIME_EXECUTABLE,
+        expected_artifact_sha256=_RUNTIME_HASH,
     )
 
     result = transport.invoke("prompt")
@@ -172,6 +205,8 @@ def test_opencli_semantic_transport_sends_explicit_binding(tmp_path, monkeypatch
 
     def runtime_call(executable, payload, *, provider_id, timeout):
         calls.append(dict(payload))
+        if payload["operation"] == "identity":
+            return _identity(module, payload), "", False, ""
         return (
             {
                 "schema": module.PROTOCOL_RESULT_SCHEMA,
@@ -200,6 +235,8 @@ def test_opencli_semantic_transport_sends_explicit_binding(tmp_path, monkeypatch
         repository_root=tmp_path,
         model_provider="opencli_chatgpt",
         model_id="very-high",
+        executable=_RUNTIME_EXECUTABLE,
+        expected_artifact_sha256=_RUNTIME_HASH,
         transport_config=binding,
     )
 
@@ -218,6 +255,8 @@ def test_opencli_worker_transport_sends_explicit_binding(tmp_path, monkeypatch):
 
     def runtime_call(_executable, payload, **_kwargs):
         calls.append(dict(payload))
+        if payload["operation"] == "identity":
+            return _identity(module, payload), "", False, ""
         return None, "", True, "runtime_timeout"
 
     monkeypatch.setattr(module, "_runtime_call", runtime_call)
@@ -230,6 +269,8 @@ def test_opencli_worker_transport_sends_explicit_binding(tmp_path, monkeypatch):
     transport = module.OpenSWEWorkerTransport(
         model_provider="opencli_chatgpt",
         model_id="very-high",
+        executable=_RUNTIME_EXECUTABLE,
+        expected_artifact_sha256=_RUNTIME_HASH,
         transport_config=binding,
     )
 
@@ -256,12 +297,16 @@ def test_opencli_transport_binding_validation_is_fail_closed(tmp_path):
         repository_root=tmp_path,
         model_provider="opencli_chatgpt",
         model_id="very-high",
+        executable=_RUNTIME_EXECUTABLE,
+        expected_artifact_sha256=_RUNTIME_HASH,
         transport_config=valid,
     )
     module.OpenSWEExternalIntelligenceTransport(
         repository_root=tmp_path,
         model_provider="opencli_chatgpt",
         model_id="very-high",
+        executable=_RUNTIME_EXECUTABLE,
+        expected_artifact_sha256=_RUNTIME_HASH,
         transport_config={**valid, "timeout_seconds": 900},
     )
     for invalid in (
@@ -281,6 +326,8 @@ def test_opencli_transport_binding_validation_is_fail_closed(tmp_path):
                 repository_root=tmp_path,
                 model_provider="opencli_chatgpt",
                 model_id="very-high",
+                executable=_RUNTIME_EXECUTABLE,
+                expected_artifact_sha256=_RUNTIME_HASH,
                 transport_config=invalid,
             )
     with pytest.raises(
@@ -291,6 +338,8 @@ def test_opencli_transport_binding_validation_is_fail_closed(tmp_path):
             repository_root=tmp_path,
             model_provider="google_genai",
             model_id="gemini-test",
+            executable=_RUNTIME_EXECUTABLE,
+            expected_artifact_sha256=_RUNTIME_HASH,
             transport_config=valid,
         )
 
@@ -305,7 +354,219 @@ def test_empty_external_runtime_executable_is_rejected(tmp_path):
             model_provider="google_genai",
             model_id="gemini-test",
             executable="",
+            expected_artifact_sha256=_RUNTIME_HASH,
         )
+
+
+@pytest.mark.parametrize(
+    ("executable", "expected_artifact_sha256", "error"),
+    (
+        ("", _RUNTIME_HASH, "OPEN_SWE_EXECUTABLE_REQUIRED"),
+        (_RUNTIME_EXECUTABLE, "", "OPEN_SWE_EXPECTED_ARTIFACT_HASH_REQUIRED"),
+        ("relative/runtime", _RUNTIME_HASH, "OPEN_SWE_EXECUTABLE_ABSOLUTE_REQUIRED"),
+    ),
+)
+def test_runtime_binding_requires_explicit_absolute_executable_and_hash(
+    tmp_path, executable, expected_artifact_sha256, error
+):
+    module = _module()
+    with pytest.raises(module.OpenSWEExternalIntelligenceError, match=error):
+        module.OpenSWEExternalIntelligenceTransport(
+            repository_root=tmp_path,
+            model_provider="google_genai",
+            model_id="gemini-test",
+            executable=executable,
+            expected_artifact_sha256=expected_artifact_sha256,
+        )
+
+
+def _identity(module, payload, *, module_hash="a" * 64):
+    return {
+        "schema": module.PROTOCOL_RESULT_SCHEMA,
+        "kind": "identity",
+        "status": "IDENTIFIED",
+        "distribution_name": "nexus-open-swe-runtime",
+        "distribution_version": "0.1.0",
+        "runtime_protocol_version": module.PROTOCOL_REQUEST_SCHEMA,
+        "artifact_identity": {
+            "module_file": "/opt/nexus-open-swe-runtime/cli.py",
+            "module_sha256": module_hash,
+            "deepagents_version": "0.7.6",
+        },
+        "authority_boundary": "execution_runtime_only",
+        "process_started": False,
+        "outcome_unknown": False,
+        "retry_safe": True,
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    (
+        ("distribution_name", "wrong-runtime", "OPEN_SWE_RUNTIME_IDENTITY_INVALID"),
+        ("runtime_protocol_version", "wrong-protocol", "OPEN_SWE_RUNTIME_IDENTITY_INVALID"),
+        ("authority_boundary", "controller-authority", "OPEN_SWE_RUNTIME_IDENTITY_INVALID"),
+        (
+            "artifact_identity",
+            {"module_file": "/opt/runtime.py", "module_sha256": "b" * 64},
+            "OPEN_SWE_RUNTIME_ARTIFACT_MISMATCH",
+        ),
+    ),
+)
+def test_invalid_runtime_identity_blocks_semantic_effect(
+    tmp_path, monkeypatch, field, value, error
+):
+    module = _module()
+    calls = []
+
+    def runtime_call(_executable, payload, **_kwargs):
+        calls.append(payload["operation"])
+        identity = _identity(module, payload)
+        identity[field] = value
+        return identity, "", False, ""
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEExternalIntelligenceTransport(
+        repository_root=tmp_path,
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable=_RUNTIME_EXECUTABLE,
+        expected_artifact_sha256=_RUNTIME_HASH,
+    )
+
+    result = transport.invoke("prompt")
+
+    assert result.status == "OPEN_SWE_RUNTIME_IDENTITY_FAILED"
+    assert result.outcome_unknown is False
+    assert result.retry_safe is False
+    assert calls == ["identity"]
+
+
+def test_runtime_identity_is_required_before_semantic_dispatch(tmp_path, monkeypatch):
+    module = _module()
+    calls = []
+
+    def runtime_call(_executable, payload, **_kwargs):
+        calls.append(payload["operation"])
+        if payload["operation"] == "identity":
+            return _identity(module, payload), "", False, ""
+        return (
+            {"schema": module.PROTOCOL_RESULT_SCHEMA, "kind": "semantic", "status": "OK"},
+            "",
+            True,
+            "",
+        )
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEExternalIntelligenceTransport(
+        repository_root=tmp_path,
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        expected_artifact_sha256="a" * 64,
+    )
+    transport.invoke("prompt")
+    assert calls == ["identity", "semantic_run"]
+
+
+def test_runtime_identity_hash_mismatch_blocks_worker_before_effect(tmp_path, monkeypatch):
+    module = _module()
+    calls = []
+
+    def runtime_call(_executable, payload, **_kwargs):
+        calls.append(payload["operation"])
+        return _identity(module, payload, module_hash="b" * 64), "", False, ""
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    artifact = tmp_path / "evidence.json"
+    artifact.write_text("{}", encoding="utf-8")
+    transport = module.OpenSWEWorkerTransport(
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        expected_artifact_sha256="a" * 64,
+    )
+    result = transport.run_new(
+        prompt="p", artifact_path=str(artifact), workspace_path=str(workspace)
+    )
+    assert result.status == "OPEN_SWE_RUNTIME_IDENTITY_FAILED"
+    assert calls == ["identity"]
+
+
+def test_runtime_identity_is_revalidated_after_runtime_change(tmp_path, monkeypatch):
+    module = _module()
+    calls = []
+    identity_count = 0
+
+    def runtime_call(_executable, payload, **_kwargs):
+        nonlocal identity_count
+        calls.append(payload["operation"])
+        if payload["operation"] == "identity":
+            identity_count += 1
+            return (
+                _identity(
+                    module, payload, module_hash=_RUNTIME_HASH if identity_count == 1 else "b" * 64
+                ),
+                "",
+                False,
+                "",
+            )
+        return (
+            {"schema": module.PROTOCOL_RESULT_SCHEMA, "kind": "semantic", "status": "OK"},
+            "",
+            True,
+            "",
+        )
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEExternalIntelligenceTransport(
+        repository_root=tmp_path,
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable=_RUNTIME_EXECUTABLE,
+        expected_artifact_sha256=_RUNTIME_HASH,
+    )
+
+    assert transport.invoke("first").status == "OK"
+    changed = transport.invoke("second")
+    assert changed.status == "OPEN_SWE_RUNTIME_IDENTITY_FAILED"
+    assert calls == ["identity", "semantic_run", "identity"]
+
+
+def test_failed_reconcile_is_unknown_and_never_retry_safe(tmp_path, monkeypatch):
+    module = _module()
+    calls = []
+
+    def runtime_call(_executable, payload, **_kwargs):
+        calls.append(payload["operation"])
+        if payload["operation"] == "identity":
+            return _identity(module, payload), "", False, ""
+        if payload["operation"] == "semantic_reconcile":
+            return None, "", True, "runtime_timeout"
+        return (
+            {"schema": module.PROTOCOL_RESULT_SCHEMA, "kind": "semantic", "status": "OK"},
+            "",
+            True,
+            "",
+        )
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEExternalIntelligenceTransport(
+        repository_root=tmp_path,
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable=_RUNTIME_EXECUTABLE,
+        expected_artifact_sha256=_RUNTIME_HASH,
+    )
+
+    assert transport.invoke("prompt").status == "OK"
+    reconciled = transport.reconcile("prompt")
+    assert reconciled.status == "OPEN_SWE_OUTCOME_UNKNOWN"
+    assert reconciled.outcome_unknown is True
+    assert reconciled.retry_safe is False
+    assert calls == ["identity", "semantic_run", "identity", "semantic_reconcile"]
 
 
 # Exact-base lineage witnesses. The historical node IDs remain collected while
