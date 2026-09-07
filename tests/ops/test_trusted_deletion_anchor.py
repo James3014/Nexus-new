@@ -228,12 +228,24 @@ def test_open_swe_dependency_snapshot_transition_hashes_are_exact() -> None:
 
 def test_core_v1_tg6_dependency_snapshot_transition_hashes_are_exact() -> None:
     # Keep the historical test node stable while advancing the active one-use binding.
-    assert trusted_anchor.TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION == (
+    assert trusted_anchor.RETIRED_CORE_V1_TG6_DEPENDENCY_SNAPSHOT_TRANSITION == (
         811,
         (
             "95dc46753fa8d630ad5abcc00f0fc9bfd62e6767a8d943b027a56cddddb74bae",
             "1ca1b7f706c9202ab6cd8df8d86f0051a6769d6fe525c954bdb326971fb65111",
             "261ea0f2a2ffe179615d48acfa02ef89ed617e7970635ce39d70d8bede276b05",
+            "5933bdf1497f6d0e852fc26730dd4eec7985d72512e0ff061fc2ab7f59842961",
+        ),
+    )
+
+
+def test_core_namespace_retirement_transition_hashes_are_exact() -> None:
+    assert trusted_anchor.TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        833,
+        (
+            "261ea0f2a2ffe179615d48acfa02ef89ed617e7970635ce39d70d8bede276b05",
+            "5933bdf1497f6d0e852fc26730dd4eec7985d72512e0ff061fc2ab7f59842961",
+            "382f05ca47059a15465515ab704d2d54b8a2a95ae83318b3f98617cd982029c3",
             "5933bdf1497f6d0e852fc26730dd4eec7985d72512e0ff061fc2ab7f59842961",
         ),
     )
