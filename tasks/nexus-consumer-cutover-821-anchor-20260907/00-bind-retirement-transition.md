@@ -10,7 +10,7 @@ The Owner's continuing cutover authorization covers completion of the separately
 - task_id: 00-bind-retirement-transition
 - owner_id: James3014
 - coordinator_id: primary-codex-coordinator
-- grant_receipt_hash: f89760565b37501c3eac2700c21965e71ac514fc5b2d2038bde0cefbfa7efd6b
+- grant_receipt_hash: 701ef204f2d2199bd11c20f535c116a4cc67fe4431b6d8a508d40ad51d6a9536
 - grant_expires_at: 2026-09-07T07:55:37.742677Z
 - grant_actions: GITHUB_MERGE, TASK_CARD_COMMIT, TASK_CARD_CREATE
 - eligibility: Owner-dispatched necessary prerequisite for bounded Ready Issue #821 and accepted PR #833 packaging delta
@@ -21,6 +21,10 @@ The Owner's continuing cutover authorization covers completion of the separately
 - AUTO_CHAIN: false
 
 G8 remains accepted at `4887d8f6a3faf50d6b600f2c170526e08d4bf408`; primary G8 receipt SHA-256 `855137d51b9123c4a342051e3254616957bbaadc50673d0e25e47f29c3d413d0`. PR #833's physical packaging acceptance is independently evidenced, but required CI is blocked. This card does not override that failed check and does not alter PR #833's four-file scope.
+
+## Explicit Owner authorization and receipt rebind
+
+Owner explicitly authorized: "trusted-anchor 從 #811 更新為 #833，綁定四個既定雜湊，保留歷史紀錄與拒絕規則。" This resolves the previous automatic-review missing-authorization block for this exact change. The formal CAS rebind superseded restored receipt `26ee19653baa2c80d8eda1448193fe938d6451e33f1dc714d760e698a5cf5533`, preserving the original scope and expiry. Historical card issuance receipt was `f89760565b37501c3eac2700c21965e71ac514fc5b2d2038bde0cefbfa7efd6b`.
 
 ## Exact admitted subject
 
