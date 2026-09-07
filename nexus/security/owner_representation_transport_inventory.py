@@ -115,15 +115,20 @@ ALL: tuple[PublicationRoute, ...] = (
         route_id="devspace_worker",
         capability_surface="Delegated workers with arbitrary shell",
         observed_write_seam="unbounded remote execution outside nexus/ source",
-        state=PublicationRouteState.INCAPABLE_OF_EXTERNAL_PUBLICATION,
+        state=PublicationRouteState.UNKNOWN_BLOCKED,
         evidence="No devspace adapter exists in nexus/executors/worker_registry.py "
-        "(adapters: codex, gemini, agy, opencode, mimo, ollama, cline, grok). "
-        "Every CLI worker runs through CliWorkerRequest -> run_cli_worker -> "
-        "_validate_worker_argv, which permanently forbids gh issue/pr create and "
-        "gh api even as a sub-invocation, and build_isolated_env strips GitHub "
-        "credential env vars before any worker spawn. Fails closed on "
-        "publication authority: no delegated worker exercises a third-party "
-        "GitHub write.",
+        "(adapters: codex, gemini, agy, opencode, mimo, ollama, cline, grok), so "
+        "no path in checked-in nexus/** source spawns or exercises a devspace "
+        "worker.  Local CLI workers run through CliWorkerRequest -> "
+        "run_cli_worker, which rejects forbidden publication invocations and "
+        "fails closed on GitHub credential env keys (GITHUB_CREDENTIAL_KEYS), "
+        "and build_isolated_env strips those credentials before any local "
+        "spawn.  Unlike those routes, a real devspace deployment executes on an "
+        "uncontrolled remote shell outside nexus/ source where ambient GitHub "
+        "credentials, HOME-based gh config, credential helpers, and arbitrary "
+        "shell wrappers cannot be excluded; Nexus therefore cannot physically "
+        "certify non-publication and classifies the route UNKNOWN_BLOCKED "
+        "(never usable as publication authority, fail closed).",
         physical_witnesses=(
             "nexus/executors/worker_registry.py",
             "nexus/executors/cli_worker.py",

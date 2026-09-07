@@ -7,9 +7,19 @@ semantic evaluator.  Design boundaries:
 
 * **No minting.**  ``issue`` only persists a fully-built,
   already-hash-bound :class:`OwnerRepresentationGrant` object supplied by the
-  Owner-facing issuer.  It never derives, infers, widens, or self-approves a
-  grant, and a worker/agent can never cause a receipt to appear for a grant it
-  constructed itself.
+  Owner-facing issuer.  Issuance requires the exact canonical
+  ``nexus.standing_grant_effect_authorization.v1`` authorization for the
+  ``OWNER_REPRESENTATION_GRANT_ISSUE`` effect bound to the durable Owner
+  standing grant; ``issue`` independently re-derives that authorization and
+  requires exact equality, so a worker/agent can never cause an authority-backed
+  receipt to appear for a grant it constructed itself.
+* **Live issuance authority.**  The persisted ``issuance_authorization`` is
+  re-validated fresh against the single canonical Owner standing-grant receipt
+  at publication time.  A superseded, revoked, expired, or missing standing
+  grant (``ISSUANCE_AUTHORITY_CHANGED`` / ``ISSUANCE_AUTHORITY_NOT_LIVE``) or a
+  stripped/forged authorization (``ISSUANCE_AUTHORIZATION_REQUIRED`` /
+  ``ISSUANCE_AUTHORIZATION_REJECTED``) fails the publication closed even if the
+  one-shot grant itself still exists.
 * **Fail closed.**  A missing, malformed, tampered, unsafe-permissioned, or
   unexpected sibling record is a hard ``OwnerRepresentationGrantStoreError``
   (never a silent GRANT_MATCH).
@@ -39,8 +49,13 @@ from typing import Any, Literal, Mapping
 
 from pydantic import ConfigDict
 
-from nexus.contracts.autonomy_goal import canonical_autonomy_hash
+from nexus.contracts.autonomy_goal import (
+    AutonomyActionClass,
+    RepositoryIdentity,
+    canonical_autonomy_hash,
+)
 from nexus.contracts.owner_representation import (
+    ExternalDestination,
     ExternalPublicationProposal,
     OwnerRepresentationDecision,
     OwnerRepresentationGrant,
@@ -50,11 +65,13 @@ from nexus.contracts.owner_representation import (
 )
 from nexus.orchestrator.standing_grant_store import (
     StandingGrantReceiptError,
+    _authorize_durable_standing_grant_effect_at,
     _canonical_json,
     _open_receipt_fd,
     _read_all_fd,
     _reject_duplicates,
     _write_bytes,
+    authorize_durable_standing_grant_effect,
 )
 
 _HOME = pwd.getpwuid(os.getuid()).pw_dir
@@ -67,6 +84,32 @@ _SHA64_HEX = re.compile(r"^[0-9a-f]{64}$")
 _MAX_RECORD_BYTES = 32 * 1024
 _RECEIPT_SCHEMA = "nexus.owner_representation_grant_receipt.v1"
 _REVOCATION_SCHEMA = "nexus.owner_representation_grant_revocation.v1"
+_ISSUANCE_AUTHORIZATION_SCHEMA = "nexus.standing_grant_effect_authorization.v1"
+_ISSUANCE_AUTHORIZATION_FIELDS = (
+    "schema",
+    "grant_id",
+    "grant_receipt_hash",
+    "context_hash",
+    "owner_id",
+    "coordinator_id",
+    "repository",
+    "goal_id",
+    "action",
+    "requested_at",
+    "effect",
+    "effect_hash",
+    "decision_hash",
+    "mutation_authorized",
+    "claim_ceiling",
+    "authorization_hash",
+)
+
+# The wall-clock timestamp (and its derived hash) legitimately advances between
+# the issuance instant and a later publication instant.  Full exact equality is
+# still required at issuance time (both sides share the same requested_at);
+# publication-time revalidation compares every other binding field invariantly
+# and relies on the fresh live re-derivation to catch revocation/replacement.
+_ISSUANCE_AUTHORIZATION_TIME_VARYING_FIELDS = frozenset({"requested_at", "authorization_hash"})
 
 
 class OwnerRepresentationGrantStoreError(Exception):
@@ -240,17 +283,144 @@ def _blocked_decision(
     })
 
 
+def owner_representation_issuance_effect(grant: OwnerRepresentationGrant) -> dict[str, Any]:
+    """Return the exact Owner-representation grant issuance effect.
+
+    The effect payload binds the complete ``grant`` so the issuance
+    authorization can only ever cover exactly this grant object.
+    """
+    return {
+        "operation": AutonomyActionClass.OWNER_REPRESENTATION_GRANT_ISSUE.value,
+        "grant": grant.model_dump(mode="json"),
+    }
+
+
+def _repository_identity_for_destination(destination: ExternalDestination) -> RepositoryIdentity:
+    """Map one external destination to the standing-grant repository identity."""
+    return RepositoryIdentity(
+        repository_id=destination.repository_id,
+        canonical_remote=destination.canonical_remote,
+    )
+
+
+def authorize_owner_representation_grant_issuance(
+    grant: OwnerRepresentationGrant,
+    *,
+    standing_grant_path: Path | None = None,
+    requested_at: datetime | None = None,
+) -> dict[str, Any]:
+    """Bind one exact Owner-representation grant issuance to the canonical
+    durable Owner standing grant (``OWNER_REPRESENTATION_GRANT_ISSUE``).
+
+    ``standing_grant_path`` is a test/operator-only surface; production uses
+    the single canonical standing-grant receipt path.
+    """
+    if not isinstance(grant, OwnerRepresentationGrant):
+        raise TypeError("grant must be a validated OwnerRepresentationGrant")
+    if grant.revoked_at is not None:
+        raise OwnerRepresentationGrantBlocked(OwnerRepresentationReason.GRANT_REVOKED.value)
+    if grant.superseded_by is not None:
+        raise OwnerRepresentationGrantBlocked(OwnerRepresentationReason.GRANT_SUPERSEDED.value)
+    effective_now = requested_at if requested_at is not None else datetime.now(timezone.utc)
+    if not isinstance(effective_now, datetime) or effective_now.tzinfo is None:
+        raise OwnerRepresentationGrantBlocked("EXACT_TIMEZONE_REQUIRED")
+    repository = _repository_identity_for_destination(grant.destination)
+    effect = owner_representation_issuance_effect(grant)
+    if standing_grant_path is None:
+        return authorize_durable_standing_grant_effect(
+            repository=repository,
+            action=AutonomyActionClass.OWNER_REPRESENTATION_GRANT_ISSUE,
+            effect=effect,
+            requested_at=effective_now,
+        )
+    return _authorize_durable_standing_grant_effect_at(
+        Path(standing_grant_path),
+        repository=repository,
+        action=AutonomyActionClass.OWNER_REPRESENTATION_GRANT_ISSUE,
+        effect=effect,
+        requested_at=effective_now,
+    )
+
+
+def _revalidate_issuance_authorization(
+    grant: OwnerRepresentationGrant,
+    issuance_authorization: Mapping[str, Any],
+    *,
+    standing_grant_path: Path | None,
+    requested_at: datetime,
+) -> dict[str, Any]:
+    """Independently re-derive the exact issuance authorization for one grant.
+
+    Requires full field equality (including ``authorization_hash``) between the
+    caller-supplied authorization and a fresh authorization re-derived from the
+    canonical durable Owner standing grant at the same ``requested_at``.  The
+    grant identity bindings (``owner_id``, ``coordinator_id``, ``issued_by``)
+    are additionally enforced so a forged ``issued_by``/``owner_id`` can never
+    masquerade as Owner issuance.
+    """
+    if not isinstance(issuance_authorization, Mapping):
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REQUIRED.value
+        )
+    if issuance_authorization.get("schema") != _ISSUANCE_AUTHORIZATION_SCHEMA:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value
+        )
+    try:
+        allowed = authorize_owner_representation_grant_issuance(
+            grant,
+            standing_grant_path=standing_grant_path,
+            requested_at=requested_at,
+        )
+    except OwnerRepresentationGrantBlocked:
+        raise
+    except StandingGrantReceiptError as exc:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value
+        ) from exc
+    supplied = {key: issuance_authorization.get(key) for key in _ISSUANCE_AUTHORIZATION_FIELDS}
+    derived = {key: allowed.get(key) for key in _ISSUANCE_AUTHORIZATION_FIELDS}
+    if supplied != derived:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value
+        )
+    if grant.owner_id != str(allowed.get("owner_id")):
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value
+        )
+    if grant.coordinator_id != str(allowed.get("coordinator_id")):
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value
+        )
+    if grant.issued_by != str(allowed.get("owner_id")):
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value
+        )
+    return allowed
+
+
 def _authorize_at(
     root: Path,
     grant_hash: str,
     proposal: ExternalPublicationProposal,
     now: datetime | None,
+    standing_grant_path: Path | None = None,
 ) -> OwnerRepresentationDecision:
     """Revalidate one issued grant against one exact proposal right now.
 
     Order of checks is deliberately fail-closed: issuance first (the grant
     must exist in canonical form), then live revocation, then live
-    supersession, and only then the pure field-for-field semantic evaluation.
+    supersession, then live issuance-authority revalidation against the
+    canonical durable Owner standing grant, and only then the pure field-for-field
+    semantic evaluation.
+
+    Issuance-authority revalidation re-derives the authorization fresh at the
+    current instant, which fails closed on a revoked/unreadable standing grant
+    (``ISSUANCE_AUTHORITY_NOT_LIVE``) and on a replaced standing grant whose
+    context/receipt/binding fields changed (``ISSUANCE_AUTHORITY_CHANGED``).
+    The time-varying ``requested_at``/``authorization_hash`` pair is excluded
+    from the comparison because the clock legitimately advances between
+    issuance and publication; every other issuance binding is compared exactly.
     """
     record = _require_issued(root, grant_hash)
     if _has_revocation(root, grant_hash):
@@ -266,6 +436,36 @@ def _authorize_at(
         grant = OwnerRepresentationGrant.model_validate(record["grant"])
     except Exception as exc:
         raise OwnerRepresentationGrantStoreError("TAMPERED") from exc
+    stored_auth = record.get("issuance_authorization")
+    if not isinstance(stored_auth, Mapping):
+        return _blocked_decision(
+            proposal,
+            OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REQUIRED,
+            grant_hash=grant_hash,
+        )
+    effective_now = now if now is not None else datetime.now(timezone.utc)
+    try:
+        fresh = authorize_owner_representation_grant_issuance(
+            grant,
+            standing_grant_path=standing_grant_path,
+            requested_at=effective_now,
+        )
+    except OwnerRepresentationGrantStoreError:
+        raise
+    except StandingGrantReceiptError as exc:
+        raise OwnerRepresentationGrantStoreError(f"ISSUANCE_AUTHORITY_NOT_LIVE:{exc}") from exc
+    invariant_fields = [
+        key
+        for key in _ISSUANCE_AUTHORIZATION_FIELDS
+        if key not in _ISSUANCE_AUTHORIZATION_TIME_VARYING_FIELDS
+    ]
+    for key in invariant_fields:
+        if fresh.get(key) != stored_auth.get(key):
+            return _blocked_decision(
+                proposal,
+                OwnerRepresentationReason.ISSUANCE_AUTHORITY_CHANGED,
+                grant_hash=grant_hash,
+            )
     return evaluate_owner_representation(grant, proposal, now=now)
 
 
@@ -273,19 +473,40 @@ class OwnerRepresentationGrantStore:
     """Machine-local one-shot Owner-representation grant store.
 
     ``root`` selects the authority root; production defaults to the single
-    canonical path.  Explicit roots are for tests/operator tooling only.
+    canonical path.  ``standing_grant_path`` selects the durable Owner
+    standing-grant receipt used to re-derive issuance authorization; production
+    defaults to the single canonical standing-grant path.  Explicit roots/paths
+    are for tests/operator tooling only.
     """
 
-    def __init__(self, root: Path | None = None) -> None:
+    def __init__(
+        self,
+        root: Path | None = None,
+        *,
+        standing_grant_path: Path | None = None,
+    ) -> None:
         self.root = Path(root) if root is not None else DEFAULT_OWNER_REPRESENTATION_AUTHORITY_ROOT
+        self.standing_grant_path = (
+            Path(standing_grant_path) if standing_grant_path is not None else None
+        )
 
     def issue(
         self,
         grant: OwnerRepresentationGrant,
         *,
+        issuance_authorization: Mapping[str, Any],
         supersedes_grant_hash: str | None = None,
+        requested_at: datetime | None = None,
     ) -> Path:
         """Persist one validated Owner-supplied grant as a durable receipt.
+
+        ``issuance_authorization`` is the exact
+        ``nexus.standing_grant_effect_authorization.v1`` authorization produced
+        by :func:`authorize_owner_representation_grant_issuance`.  The store
+        independently re-derives that authorization from the canonical durable
+        Owner standing grant and requires exact equality, so a worker/agent can
+        never mint an authority-backed receipt for a grant it constructed
+        itself.
 
         ``supersedes_grant_hash`` must name an already-issued sibling, which
         makes this grant a live supersession of that earlier one-shot grant.
@@ -296,6 +517,9 @@ class OwnerRepresentationGrantStore:
             raise OwnerRepresentationGrantBlocked(OwnerRepresentationReason.GRANT_REVOKED.value)
         if grant.superseded_by is not None:
             raise OwnerRepresentationGrantBlocked(OwnerRepresentationReason.GRANT_SUPERSEDED.value)
+        now = requested_at if requested_at is not None else datetime.now(timezone.utc)
+        if not isinstance(now, datetime) or now.tzinfo is None:
+            raise OwnerRepresentationGrantBlocked("EXACT_TIMEZONE_REQUIRED")
         if supersedes_grant_hash is not None:
             if not _SHA64_HEX.fullmatch(supersedes_grant_hash):
                 raise OwnerRepresentationGrantBlocked(
@@ -315,10 +539,17 @@ class OwnerRepresentationGrantStore:
         if _has_revocation(self.root, grant.grant_hash):
             raise OwnerRepresentationGrantBlocked(OwnerRepresentationReason.GRANT_REVOKED.value)
 
+        allowed = _revalidate_issuance_authorization(
+            grant,
+            issuance_authorization,
+            standing_grant_path=self.standing_grant_path,
+            requested_at=now,
+        )
         payload = {
             "schema": _RECEIPT_SCHEMA,
             "grant": grant.model_dump(mode="json"),
             "supersedes_grant_hash": supersedes_grant_hash,
+            "issuance_authorization": allowed,
         }
         record = {
             **payload,
@@ -383,7 +614,13 @@ class OwnerRepresentationGrantStore:
         now: datetime | None = None,
     ) -> OwnerRepresentationDecision:
         """Fresh pre-effect revalidation against the canonical store."""
-        return _authorize_at(self.root, grant_hash, proposal, now)
+        return _authorize_at(
+            self.root,
+            grant_hash,
+            proposal,
+            now,
+            standing_grant_path=self.standing_grant_path,
+        )
 
     def inspect_grant(self, grant_hash: str) -> Mapping[str, Any]:
         """Read-only status projection; never raises for a non-issued hash."""
@@ -404,16 +641,32 @@ class OwnerRepresentationGrantStore:
             "status": status,
             "grant": record["grant"],
             "supersedes_grant_hash": record.get("supersedes_grant_hash"),
+            "issued_with_authority": isinstance(record.get("issuance_authorization"), Mapping),
         }
 
 
 def issue_owner_representation_grant(
     grant: OwnerRepresentationGrant,
     *,
+    requested_at: datetime | None = None,
     supersedes_grant_hash: str | None = None,
 ) -> Path:
-    """Persist one one-shot Owner-representation grant to the canonical root."""
-    return OwnerRepresentationGrantStore().issue(grant, supersedes_grant_hash=supersedes_grant_hash)
+    """Persist one one-shot Owner-representation grant to the canonical root.
+
+    Computes the exact canonical issuance authorization bound to the durable
+    Owner standing grant at one fixed ``requested_at`` and passes it to
+    ``issue``, which re-derives the same authorization from the canonical
+    standing-grant receipt.  A self-authorized worker can never mint an
+    authority-backed receipt for a grant it constructed itself.
+    """
+    now = requested_at if requested_at is not None else datetime.now(timezone.utc)
+    authorization = authorize_owner_representation_grant_issuance(grant, requested_at=now)
+    return OwnerRepresentationGrantStore().issue(
+        grant,
+        issuance_authorization=authorization,
+        requested_at=now,
+        supersedes_grant_hash=supersedes_grant_hash,
+    )
 
 
 def revoke_owner_representation_grant(
@@ -458,9 +711,11 @@ __all__ = [
     "OwnerRepresentationGrantRevocation",
     "OwnerRepresentationGrantStore",
     "OwnerRepresentationGrantStoreError",
+    "authorize_owner_representation_grant_issuance",
     "authorize_owner_representation_publication",
     "inspect_owner_representation_grant",
     "issue_owner_representation_grant",
     "load_owner_representation_grant",
+    "owner_representation_issuance_effect",
     "revoke_owner_representation_grant",
 ]

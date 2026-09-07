@@ -90,7 +90,7 @@ are blocked with `PUSH_DENIED_IS_NOT_PUBLICATION_AUTHORITY` /
 | `repository_contract_gate` | Collaboration boundary checks | INCAPABLE_OF_EXTERNAL_PUBLICATION |
 | `chatgpt_connector` | ChatGPT UI ask-before-write | OWNER_INTERACTIVE_GATED |
 | `codex_cli_pat` | Codex CLI / PAT | OWNER_INTERACTIVE_GATED |
-| `devspace_worker` | Delegated arbitrary shell | INCAPABLE_OF_EXTERNAL_PUBLICATION |
+| `devspace_worker` | Delegated arbitrary shell | UNKNOWN_BLOCKED |
 | `morning_report_gh_guidance` | Rendered human guidance only | INCAPABLE_OF_EXTERNAL_PUBLICATION |
 | `owner_representation_seam` | Canonical publication seam | EXTERNAL_PUBLICATION_AUTHORITY_ENFORCED |
 
@@ -104,11 +104,31 @@ grounded in checked-in `nexus/**` and `scripts/**` source only
 (`INCAPABILITY_IS_SOURCE_SCOPE_ONLY`): it does not certify a live external
 binary or a future source change.
 
-Delegated workers (DevSpace) cannot publish on the Owner's behalf: no
-`devspace` worker adapter exists in `worker_registry.py`, and every CLI worker
-runs through `_validate_worker_argv`, which permanently forbids
-`gh issue create` / `gh pr create` / `gh api`, while `build_isolated_env`
-strips all GitHub credential environment variables before any worker spawn.
+Delegated workers (DevSpace) are `UNKNOWN_BLOCKED`, never publication
+authority: no `devspace` worker adapter exists in `worker_registry.py`
+(adapters: codex, gemini, agy, opencode, mimo, ollama, cline, grok), so no
+path in checked-in `nexus/**` source spawns a devspace worker. Local CLI
+workers run through `CliWorkerRequest` -> `run_cli_worker`, which rejects
+forbidden publication invocations and fails closed on GitHub credential env
+keys (`GITHUB_CREDENTIAL_KEYS`), while `build_isolated_env` strips those
+credentials before any local spawn. Unlike those local routes, a real
+DevSpace deployment executes on an uncontrolled remote shell outside
+`nexus/**` source where ambient GitHub credentials, `HOME`-based `gh` config,
+credential helpers, and arbitrary shell wrappers cannot be excluded; Nexus
+therefore cannot physically certify non-publication and classifies the route
+`UNKNOWN_BLOCKED` (registered fail-closed, never usable).
+
+Grant **issuance** additionally requires live Owner standing-grant authority:
+the store re-derives the exact
+`nexus.standing_grant_effect_authorization.v1` authorization for the
+`OWNER_REPRESENTATION_GRANT_ISSUE` effect from the canonical durable Owner
+standing-grant receipt at the same `requested_at` it persists, and requires
+exact field equality. A missing authorization
+(`ISSUANCE_AUTHORIZATION_REQUIRED`), a wrong or replayed one
+(`ISSUANCE_AUTHORIZATION_REJECTED`), a replaced standing grant
+(`ISSUANCE_AUTHORITY_CHANGED`), or a revoked/unreadable standing grant
+(`ISSUANCE_AUTHORITY_NOT_LIVE`) all fail closed with no receipt persisted and
+no dispatch effect.
 
 ## Failure-mode guarantees
 

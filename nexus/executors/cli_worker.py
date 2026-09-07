@@ -13,6 +13,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Callable, Mapping, Optional, Tuple
 
+from nexus.services.agy_account_pool import GITHUB_CREDENTIAL_KEYS
+
 
 class CliWorkerStatus(str, Enum):
     COMPLETED = "COMPLETED"
@@ -45,13 +47,15 @@ def bounded_environment_receipt(
     environment: Optional[Mapping[str, str]],
 ) -> Tuple[Tuple[str, str], ...]:
     """Bind task-scoped environment values without persisting secrets."""
-    return tuple(sorted(
-        (
-            str(key),
-            hashlib.sha256(str(value).encode("utf-8")).hexdigest(),
+    return tuple(
+        sorted(
+            (
+                str(key),
+                hashlib.sha256(str(value).encode("utf-8")).hexdigest(),
+            )
+            for key, value in (environment or {}).items()
         )
-        for key, value in (environment or {}).items()
-    ))
+    )
 
 
 def _resolve_executable(executable: str) -> str:
@@ -86,6 +90,25 @@ def _validate_worker_argv(argv: Tuple[str, ...]) -> None:
                 raise ValueError(f"worker command cannot invoke {' '.join(block)}")
 
 
+# GitHub credentials (GH_TOKEN / GITHUB_TOKEN / GITHUB_PAT / ...) must never
+# enter a worker process namespace: a delegated worker could otherwise
+# interpret an inherited broad Owner GitHub credential as external-publication
+# authority.  The canonical key set is owned by
+# nexus.services.agy_account_pool.GITHUB_CREDENTIAL_KEYS.
+_GITHUB_CREDENTIAL_ENV_KEYS = frozenset(key.upper() for key in GITHUB_CREDENTIAL_KEYS)
+
+
+def _reject_github_credentials(environment: Optional[Mapping[str, str]]) -> None:
+    """Fail closed when a worker environment carries a GitHub credential key."""
+    if environment is None:
+        return
+    present = sorted(key for key in environment if str(key).upper() in _GITHUB_CREDENTIAL_ENV_KEYS)
+    if present:
+        raise ValueError(
+            "worker environment cannot carry GitHub credentials: " + ", ".join(present)
+        )
+
+
 def _hash_file(path: str) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
@@ -108,6 +131,7 @@ class CliWorkerRequest:
         object.__setattr__(self, "cwd", str(target_cwd))
         if self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
+        _reject_github_credentials(self.env)
 
     @property
     def command(self) -> Tuple[str, ...]:
@@ -165,9 +189,12 @@ def run_cli_worker(
     # or target-root overrides.  Callers can still pass task-scoped values
     # explicitly through ``request.env``.
     environment = {
-        key: value for key, value in os.environ.items()
-        if key in _INHERITED_ENV_ALLOWLIST
+        key: value for key, value in os.environ.items() if key in _INHERITED_ENV_ALLOWLIST
     }
+    # Defensive second check: the request constructor already rejects GitHub
+    # credential keys, but the send path must also fail closed so a future
+    # env-supplying caller can never reintroduce a broad Owner credential.
+    _reject_github_credentials(request.env)
     if request.env is not None:
         environment.update({str(key): str(value) for key, value in request.env.items()})
     environment["PYTHONDONTWRITEBYTECODE"] = "1"

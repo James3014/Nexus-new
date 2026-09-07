@@ -1,7 +1,5 @@
 import hashlib
-import os
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -35,7 +33,9 @@ def test_worker_runs_without_shell_and_records_hashes_and_telemetry(tmp_path):
     assert result.status is CliWorkerStatus.COMPLETED
     assert result.exit_code == 0
     assert result.executable_identity == request.executable
-    assert result.executable_sha256 == result.hash_bytes(Path(result.executable_identity).read_bytes())
+    assert result.executable_sha256 == result.hash_bytes(
+        Path(result.executable_identity).read_bytes()
+    )
     assert result.argv == request.argv
     assert result.cwd == str(tmp_path.resolve())
     assert result.stdout_sha256 == result.hash_bytes(result.stdout)
@@ -55,7 +55,9 @@ def test_worker_records_nonzero_exit_with_executable_hash(tmp_path):
 
     assert result.status is CliWorkerStatus.COMPLETED
     assert result.exit_code == 7
-    assert result.executable_sha256 == result.hash_bytes(Path(result.executable_identity).read_bytes())
+    assert result.executable_sha256 == result.hash_bytes(
+        Path(result.executable_identity).read_bytes()
+    )
     assert result.timed_out is False
     assert result.process_group_killed is False
 
@@ -105,6 +107,40 @@ def test_worker_rejects_commit_merge_and_push_commands(tmp_path):
         )
 
 
+def test_explicit_gh_token_cannot_reenter_worker_environment(tmp_path):
+    for key in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_PAT"):
+        with pytest.raises(ValueError, match="credential"):
+            CliWorkerRequest(
+                executable=sys.executable,
+                argv=("-c", "print('ok')"),
+                cwd=str(tmp_path),
+                env={key: "secret"},
+            )
+
+
+def test_run_cli_worker_also_fails_closed_on_gh_token_env(tmp_path):
+    request = CliWorkerRequest(
+        executable=sys.executable,
+        argv=("-c", "print('ok')"),
+        cwd=str(tmp_path),
+        env={"TASK_SCOPED_MARKER": "kept"},
+    )
+    # Simulate a future env-supplying caller injecting a token after the
+    # constructor guards: the send path must fail closed on its own.
+    object.__setattr__(request, "env", {"GH_TOKEN": "secret"})
+    with pytest.raises(ValueError, match="credential"):
+        run_cli_worker(request)
+
+
+def test_shell_wrapper_cannot_bypass_publication_boundary(tmp_path):
+    with pytest.raises(ValueError, match="gh"):
+        CliWorkerRequest(
+            executable=sys.executable,
+            argv=("-c", "gh", "pr", "create", "--title", "x", "--repo", "acme/demo"),
+            cwd=str(tmp_path),
+        )
+
+
 def test_worker_timeout_kills_process_group(tmp_path):
     request = _python_request(
         tmp_path,
@@ -129,10 +165,15 @@ def test_worker_requires_existing_target_cwd(tmp_path):
         )
 
 
-def test_worker_forces_pythondontwritebytecode_and_prevents_bytecode_generation(tmp_path, monkeypatch):
+def test_worker_forces_pythondontwritebytecode_and_prevents_bytecode_generation(
+    tmp_path, monkeypatch
+):
     monkeypatch.setenv("PYTHONDONTWRITEBYTECODE", "0")
     script_path = tmp_path / "test_bytecode.py"
-    script_path.write_text("import os\nprint('BYTECODE_ENV=' + os.environ.get('PYTHONDONTWRITEBYTECODE', ''))\n", encoding="utf-8")
+    script_path.write_text(
+        "import os\nprint('BYTECODE_ENV=' + os.environ.get('PYTHONDONTWRITEBYTECODE', ''))\n",
+        encoding="utf-8",
+    )
 
     request = CliWorkerRequest(
         executable=sys.executable,
