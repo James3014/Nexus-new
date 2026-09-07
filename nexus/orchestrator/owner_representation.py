@@ -68,9 +68,9 @@ class TransportDispatchedButUnacknowledged(RuntimeError):
 
 def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = (
-        json.dumps(dict(value), indent=2, sort_keys=True, ensure_ascii=False) + "\n"
-    ).encode("utf-8")
+    data = (json.dumps(dict(value), indent=2, sort_keys=True, ensure_ascii=False) + "\n").encode(
+        "utf-8"
+    )
     fd, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
     try:
         with os.fdopen(fd, "wb") as handle:
@@ -176,9 +176,10 @@ def _decision_for(
         "proposal_hash": canonical_autonomy_hash(proposal.model_dump(mode="json")),
         "claim_ceiling": "OWNER_REPRESENTATION_EXACT_ONE_SHOT_ONLY",
     }
-    return OwnerRepresentationDecision.model_validate(
-        {**payload, "decision_hash": canonical_autonomy_hash(payload)}
-    )
+    return OwnerRepresentationDecision.model_validate({
+        **payload,
+        "decision_hash": canonical_autonomy_hash(payload),
+    })
 
 
 @dataclass(frozen=True)
@@ -241,9 +242,7 @@ class OwnerRepresentationPublisher:
                 reason_codes=(OwnerRepresentationReason.INTERNAL_AUTOMATION_PASSTHROUGH,),
                 grant_hash=grant.grant_hash if grant is not None else None,
             )
-            record = self._record_for(
-                proposal, grant, kind, "INTERNAL_PASSTHROUGH", decision, now
-            )
+            record = self._record_for(proposal, grant, kind, "INTERNAL_PASSTHROUGH", decision, now)
             _atomic_json(self._operation_path(proposal.operation_id), record)
             return PreparedPublication(
                 operation_id=proposal.operation_id,
@@ -255,9 +254,7 @@ class OwnerRepresentationPublisher:
 
         decision = bind_external_publication(proposal, grant, boundary, now=now)
         if decision.outcome is not OwnerRepresentationOutcome.GRANT_MATCH:
-            raise OwnerRepresentationBlocked(
-                ":".join(code.value for code in decision.reason_codes)
-            )
+            raise OwnerRepresentationBlocked(":".join(code.value for code in decision.reason_codes))
         record = self._record_for(proposal, grant, kind, "PREPARED", decision, now)
         _atomic_json(self._operation_path(proposal.operation_id), record)
         return PreparedPublication(
@@ -280,9 +277,7 @@ class OwnerRepresentationPublisher:
         return {
             "schema": "nexus.owner_representation_operation.v1",
             "operation_id": proposal.operation_id,
-            "proposal_hash": canonical_autonomy_hash(
-                proposal.model_dump(mode="json")
-            ),
+            "proposal_hash": canonical_autonomy_hash(proposal.model_dump(mode="json")),
             "grant_hash": grant.grant_hash if grant is not None else None,
             "kind": kind.value,
             "state": state,
@@ -309,13 +304,9 @@ class OwnerRepresentationPublisher:
         assert prepared.grant is not None, "third-party publish requires a grant"
         operation = _load_json(self._operation_path(prepared.operation_id))
         if operation is None:
-            raise OwnerRepresentationBlocked(
-                OwnerRepresentationReason.DISPATCH_NOT_PREPARED.value
-            )
+            raise OwnerRepresentationBlocked(OwnerRepresentationReason.DISPATCH_NOT_PREPARED.value)
         if operation["state"] == "COMPLETED":
-            raise OwnerRepresentationBlocked(
-                OwnerRepresentationReason.REPLAY_FORBIDDEN.value
-            )
+            raise OwnerRepresentationBlocked(OwnerRepresentationReason.REPLAY_FORBIDDEN.value)
         if operation["state"] in {"DISPATCHING", "OUTCOME_UNKNOWN"}:
             raise OwnerRepresentationBlocked(
                 OwnerRepresentationReason.RECONCILIATION_REQUIRED.value
@@ -327,9 +318,7 @@ class OwnerRepresentationPublisher:
         # operation, regardless of how well it revalidates.
         ledger = _load_json(self._ledger_path(prepared.grant.grant_hash))
         if ledger is not None and ledger.get("operation_id") != prepared.operation_id:
-            raise OwnerRepresentationBlocked(
-                OwnerRepresentationReason.GRANT_REUSED.value
-            )
+            raise OwnerRepresentationBlocked(OwnerRepresentationReason.GRANT_REUSED.value)
         _atomic_json(
             self._ledger_path(prepared.grant.grant_hash),
             {
@@ -345,9 +334,7 @@ class OwnerRepresentationPublisher:
             prepared.grant, prepared.proposal, now=now or _now()
         )
         if decision.outcome is not OwnerRepresentationOutcome.GRANT_MATCH:
-            raise OwnerRepresentationBlocked(
-                ":".join(code.value for code in decision.reason_codes)
-            )
+            raise OwnerRepresentationBlocked(":".join(code.value for code in decision.reason_codes))
 
         # Persist DISPATCHING before any effect; a crash after this point must
         # reconcile read-only rather than blindly re-dispatch.
@@ -360,17 +347,13 @@ class OwnerRepresentationPublisher:
         try:
             outcome = self.write_transport(prepared.proposal)
         except TransportDispatchedButUnacknowledged:
-            self._mark_outcome_unknown(
-                prepared.operation_id, now, "unacknowledged_dispatch"
-            )
+            self._mark_outcome_unknown(prepared.operation_id, now, "unacknowledged_dispatch")
             raise OwnerRepresentationBlocked(
                 OwnerRepresentationReason.RECONCILIATION_REQUIRED.value
             ) from None
         except Exception as exc:
             # A transport exception after DISPATCHING may or may not have landed.
-            self._mark_outcome_unknown(
-                prepared.operation_id, now, "transport_exception"
-            )
+            self._mark_outcome_unknown(prepared.operation_id, now, "transport_exception")
             raise OwnerRepresentationBlocked(
                 OwnerRepresentationReason.RECONCILIATION_REQUIRED.value
             ) from exc
@@ -387,9 +370,7 @@ class OwnerRepresentationPublisher:
 
         marker = outcome.remote_marker or self.readback_transport(prepared.proposal)
         if marker is None:
-            self._mark_outcome_unknown(
-                prepared.operation_id, now, "readback_marker_missing"
-            )
+            self._mark_outcome_unknown(prepared.operation_id, now, "readback_marker_missing")
             raise OwnerRepresentationBlocked(
                 OwnerRepresentationReason.RECONCILIATION_REQUIRED.value
             )
@@ -410,9 +391,7 @@ class OwnerRepresentationPublisher:
         if operation["state"] == "COMPLETED":
             return operation
         if operation["state"] not in {"DISPATCHING", "OUTCOME_UNKNOWN"}:
-            raise OwnerRepresentationBlocked(
-                f"RECONCILE_INVALID_STATE:{operation['state']}"
-            )
+            raise OwnerRepresentationBlocked(f"RECONCILE_INVALID_STATE:{operation['state']}")
         marker = self.readback_transport(prepared.proposal)
         if marker is None:
             return None

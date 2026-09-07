@@ -26,9 +26,7 @@ class PublicationRouteState(str, Enum):
     INCAPABLE_OF_EXTERNAL_PUBLICATION = "INCAPABLE_OF_EXTERNAL_PUBLICATION"
     OWNER_INTERACTIVE_GATED = "OWNER_INTERACTIVE_GATED"
     BOUNDED_INTERNAL_ONLY = "BOUNDED_INTERNAL_ONLY"
-    EXTERNAL_PUBLICATION_AUTHORITY_ENFORCED = (
-        "EXTERNAL_PUBLICATION_AUTHORITY_ENFORCED"
-    )
+    EXTERNAL_PUBLICATION_AUTHORITY_ENFORCED = "EXTERNAL_PUBLICATION_AUTHORITY_ENFORCED"
     UNKNOWN_BLOCKED = "UNKNOWN_BLOCKED"
 
 
@@ -127,15 +125,11 @@ ALL: tuple[PublicationRoute, ...] = (
 # excluded from the external classification set but kept as a positive control
 # that existing internal automation is preserved.
 INTERNAL_ONLY_ROUTE_IDS = frozenset(
-    route.route_id
-    for route in ALL
-    if route.state is PublicationRouteState.BOUNDED_INTERNAL_ONLY
+    route.route_id for route in ALL if route.state is PublicationRouteState.BOUNDED_INTERNAL_ONLY
 )
 
 EXTERNAL_CLASSIFICATION_IDS = frozenset(
-    route.route_id
-    for route in ALL
-    if route.route_id not in INTERNAL_ONLY_ROUTE_IDS
+    route.route_id for route in ALL if route.route_id not in INTERNAL_ONLY_ROUTE_IDS
 )
 
 
