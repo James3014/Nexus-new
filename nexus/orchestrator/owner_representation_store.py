@@ -7,17 +7,32 @@ semantic evaluator.  Design boundaries:
 
 * **No minting.**  ``issue`` only persists a fully-built,
   already-hash-bound :class:`OwnerRepresentationGrant` object supplied by the
-  Owner-facing issuer.  Issuance requires the exact canonical
-  ``nexus.standing_grant_effect_authorization.v1`` authorization for the
-  ``OWNER_REPRESENTATION_GRANT_ISSUE`` effect bound to the durable Owner
-  standing grant; ``issue`` independently re-derives that authorization and
-  requires exact equality, so a worker/agent can never cause an authority-backed
-  receipt to appear for a grant it constructed itself.
-* **Live issuance authority.**  The persisted ``issuance_authorization`` is
-  re-validated fresh against the single canonical Owner standing-grant receipt
-  at publication time.  A superseded, revoked, expired, or missing standing
-  grant (``ISSUANCE_AUTHORITY_CHANGED`` / ``ISSUANCE_AUTHORITY_NOT_LIVE``) or a
-  stripped/forged authorization (``ISSUANCE_AUTHORIZATION_REQUIRED`` /
+  Owner-facing issuer.  Issuance requires a sealed non-reusable issuance permit
+  (``nexus.owner_representation_publication_issuance_permit.v1``) that is exact,
+  effect-bound, and consumed once.  Each owned one-shot grant must first be
+  minted into ``permits/<standing_grant_receipt_hash>.json``; ``issue`` accepts
+  only the one permit whose ``grant_hash`` matches the grant, re-reads it sealed
+  from disk, and refuses everything else
+  (``ISSUANCE_AUTHORIZATION_REQUIRED`` / ``ISSUANCE_AUTHORIZATION_REJECTED``),
+  so a worker/agent can never cause an authority-backed receipt to appear for a
+  grant it constructed itself.
+* **One Owner standing-grant receipt mints at most one permit.**  The permit
+  slot is addressed by the standing-grant receipt hash; a second mint on the
+  same slot fails ``ISSUANCE_PERMIT_SLOT_CONSUMED`` (``PERMIT_ALREADY_MINTED``
+  for a repeat mint of the identical grant).  The permit is therefore a strict
+  superset of the standing grant's "one issuance decision" scope and cannot be
+  replayed to drive a different grant or a second issuance.
+* **Consumption fence.**  The authority store creates the sealed issuance
+  permit during ``authorize_owner_representation_grant_issuance`` and, on the
+  first accepted ``issue``, writes a ``permits/consumed/<grant_hash>.json``
+  marker before the grant receipt.  Any subsequent issue attempt fails closed
+  (``GRANT_ALREADY_ISSUED`` if the receipt still exists, ``GRANT_REUSED`` if
+  the grant receipt was destroyed but the consumed marker remains).
+* **Live issuance authority.**  The persisted permit is re-validated fresh
+  against the single canonical Owner standing-grant receipt at issue and at
+  publication time.  A superseded, revoked, expired, or missing standing grant
+  (``ISSUANCE_AUTHORITY_CHANGED`` / ``ISSUANCE_AUTHORITY_NOT_LIVE``) or a
+  stripped/forged permit (``ISSUANCE_AUTHORIZATION_REQUIRED`` /
   ``ISSUANCE_AUTHORIZATION_REJECTED``) fails the publication closed even if the
   one-shot grant itself still exists.
 * **Fail closed.**  A missing, malformed, tampered, unsafe-permissioned, or
@@ -31,9 +46,10 @@ semantic evaluator.  Design boundaries:
   proposal right now".
 
 Production load/evaluate use the single canonical authority root only.
-Explicit temp roots exist solely on the ``*_at`` helpers and the
-:class:`OwnerRepresentationGrantStore` ``root`` parameter for the security
-test matrix and never select an alternative authority root by themselves.
+Explicit temp roots exist solely on the ``*_at`` helpers, the
+:class:`OwnerRepresentationGrantStore` ``root`` parameter, and the permit
+``authority_root`` parameter for the security test matrix and never select an
+alternative authority root by themselves.
 """
 
 from __future__ import annotations
@@ -80,36 +96,14 @@ DEFAULT_OWNER_REPRESENTATION_AUTHORITY_ROOT = (
 )
 _GRANTS_DIR = "grants"
 _REVOCATIONS_DIR = "revocations"
+_PERMITS_DIR = "permits"
+_PERMITS_CONSUMED_DIR = "consumed"
 _SHA64_HEX = re.compile(r"^[0-9a-f]{64}$")
 _MAX_RECORD_BYTES = 32 * 1024
 _RECEIPT_SCHEMA = "nexus.owner_representation_grant_receipt.v1"
 _REVOCATION_SCHEMA = "nexus.owner_representation_grant_revocation.v1"
-_ISSUANCE_AUTHORIZATION_SCHEMA = "nexus.standing_grant_effect_authorization.v1"
-_ISSUANCE_AUTHORIZATION_FIELDS = (
-    "schema",
-    "grant_id",
-    "grant_receipt_hash",
-    "context_hash",
-    "owner_id",
-    "coordinator_id",
-    "repository",
-    "goal_id",
-    "action",
-    "requested_at",
-    "effect",
-    "effect_hash",
-    "decision_hash",
-    "mutation_authorized",
-    "claim_ceiling",
-    "authorization_hash",
-)
-
-# The wall-clock timestamp (and its derived hash) legitimately advances between
-# the issuance instant and a later publication instant.  Full exact equality is
-# still required at issuance time (both sides share the same requested_at);
-# publication-time revalidation compares every other binding field invariantly
-# and relies on the fresh live re-derivation to catch revocation/replacement.
-_ISSUANCE_AUTHORIZATION_TIME_VARYING_FIELDS = frozenset({"requested_at", "authorization_hash"})
+_PERMIT_SCHEMA = "nexus.owner_representation_publication_issuance_permit.v1"
+_PERMIT_CONSUMED_SCHEMA = "nexus.owner_representation_issuance_permit_consumed.v1"
 
 
 class OwnerRepresentationGrantStoreError(Exception):
@@ -342,61 +336,186 @@ def authorize_owner_representation_grant_issuance(
     )
 
 
-def _revalidate_issuance_authorization(
-    grant: OwnerRepresentationGrant,
-    issuance_authorization: Mapping[str, Any],
-    *,
-    standing_grant_path: Path | None,
-    requested_at: datetime,
-) -> dict[str, Any]:
-    """Independently re-derive the exact issuance authorization for one grant.
+def _parse_iso(value: Any) -> datetime:
+    """Parse one permit timestamp strictly; a malformed value fails closed."""
+    if not isinstance(value, str):
+        raise OwnerRepresentationGrantStoreError("MALFORMED")
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as exc:
+        raise OwnerRepresentationGrantStoreError("MALFORMED") from exc
+    if parsed.tzinfo is None:
+        raise OwnerRepresentationGrantStoreError("MALFORMED")
+    return parsed
 
-    Requires full field equality (including ``authorization_hash``) between the
-    caller-supplied authorization and a fresh authorization re-derived from the
-    canonical durable Owner standing grant at the same ``requested_at``.  The
-    grant identity bindings (``owner_id``, ``coordinator_id``, ``issued_by``)
-    are additionally enforced so a forged ``issued_by``/``owner_id`` can never
-    masquerade as Owner issuance.
+
+def _permits_dir(root: Path) -> Path:
+    return Path(root) / _PERMITS_DIR
+
+
+def _permits_consumed_dir(root: Path) -> Path:
+    return _permits_dir(root) / _PERMITS_CONSUMED_DIR
+
+
+def _permit_path(root: Path, standing_grant_receipt_hash: str) -> Path:
+    if not _SHA64_HEX.fullmatch(standing_grant_receipt_hash):
+        raise OwnerRepresentationGrantStoreError("RECEIPT_HASH_INVALID")
+    return _permits_dir(root) / f"{standing_grant_receipt_hash}.json"
+
+
+def _consumed_marker_path(root: Path, grant_hash: str) -> Path:
+    if not _SHA64_HEX.fullmatch(grant_hash):
+        raise OwnerRepresentationGrantStoreError("RECEIPT_HASH_INVALID")
+    return _permits_consumed_dir(root) / f"{grant_hash}.json"
+
+
+def _permit_records(root: Path) -> list[dict[str, Any]]:
+    """Return every sealed issuance permit under the authority root.
+
+    A malformed or unexpected sibling inside ``permits/`` fails closed: the
+    authority surface is ambiguous and must never be evaluated optimistically.
     """
-    if not isinstance(issuance_authorization, Mapping):
-        raise OwnerRepresentationGrantBlocked(
-            OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REQUIRED.value
-        )
-    if issuance_authorization.get("schema") != _ISSUANCE_AUTHORIZATION_SCHEMA:
-        raise OwnerRepresentationGrantBlocked(
-            OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value
-        )
+    permits_dir = _permits_dir(root)
+    if not permits_dir.exists():
+        return []
+    records = []
+    for entry in sorted(permits_dir.iterdir()):
+        name = entry.name
+        if name.startswith("."):
+            # Coordination artifacts (e.g. the flock file) are not records.
+            continue
+        if entry.is_dir():
+            if name == _PERMITS_CONSUMED_DIR:
+                continue
+            raise OwnerRepresentationGrantStoreError("PERMITS_DIR_UNEXPECTED_ENTRY")
+        if not name.endswith(".json"):
+            raise OwnerRepresentationGrantStoreError("PERMITS_DIR_UNEXPECTED_ENTRY")
+        records.append(_read_sealed_record(entry, _PERMIT_SCHEMA, "permit_hash"))
+    return records
+
+
+def _load_permit_for_grant(root: Path, grant_hash: str) -> dict[str, Any] | None:
+    """Return the sealed issuance permit for one grant hash, if minted."""
+    for record in _permit_records(root):
+        if record.get("grant_hash") == grant_hash:
+            return record
+    return None
+
+
+def _permit_consumed(root: Path, grant_hash: str) -> bool:
+    """Return True when a sealed consumption marker exists for the grant hash."""
+    path = _consumed_marker_path(root, grant_hash)
+    if not path.exists():
+        return False
+    _read_sealed_record(path, _PERMIT_CONSUMED_SCHEMA, "record_hash")
+    return True
+
+
+def mint_owner_representation_publication_issuance_permit(
+    grant: OwnerRepresentationGrant,
+    *,
+    authority_root: Path,
+    standing_grant_path: Path | None = None,
+    requested_at: datetime | None = None,
+    expires_at: datetime | None = None,
+) -> dict[str, Any]:
+    """Mint the exact sealed one-shot issuance permit for one owned grant.
+
+    The permit slot is addressed by the standing-grant receipt hash
+    (``permits/<grant_receipt_hash>.json``), which makes it a strict superset
+    of the durable Owner standing-grant receipt's single issuance decision: at
+    most one permit can ever exist per standing-grant receipt, and that permit
+    is sealed to exactly one grant hash.  A second mint on the same slot fails
+    ``ISSUANCE_PERMIT_SLOT_CONSUMED`` (or ``PERMIT_ALREADY_MINTED`` for a
+    repeat mint of the identical grant).
+
+    ``authority_root`` is a test/operator-only surface; production uses the
+    canonical Owner-representation authority root.  ``standing_grant_path`` is
+    a test/operator-only selection of the canonical standing-grant receipt.
+    """
+    if not isinstance(grant, OwnerRepresentationGrant):
+        raise TypeError("grant must be a validated OwnerRepresentationGrant")
+    if grant.revoked_at is not None:
+        raise OwnerRepresentationGrantBlocked(OwnerRepresentationReason.GRANT_REVOKED.value)
+    if grant.superseded_by is not None:
+        raise OwnerRepresentationGrantBlocked(OwnerRepresentationReason.GRANT_SUPERSEDED.value)
+    effective_now = requested_at if requested_at is not None else datetime.now(timezone.utc)
+    if not isinstance(effective_now, datetime) or effective_now.tzinfo is None:
+        raise OwnerRepresentationGrantBlocked("EXACT_TIMEZONE_REQUIRED")
+    permits_root = Path(authority_root)
+    if _load_permit_for_grant(permits_root, grant.grant_hash) is not None:
+        raise OwnerRepresentationGrantBlocked(OwnerRepresentationReason.PERMIT_ALREADY_MINTED.value)
     try:
         allowed = authorize_owner_representation_grant_issuance(
             grant,
             standing_grant_path=standing_grant_path,
-            requested_at=requested_at,
+            requested_at=effective_now,
         )
-    except OwnerRepresentationGrantBlocked:
+    except OwnerRepresentationGrantStoreError:
         raise
     except StandingGrantReceiptError as exc:
-        raise OwnerRepresentationGrantBlocked(
-            OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value
-        ) from exc
-    supplied = {key: issuance_authorization.get(key) for key in _ISSUANCE_AUTHORIZATION_FIELDS}
-    derived = {key: allowed.get(key) for key in _ISSUANCE_AUTHORIZATION_FIELDS}
-    if supplied != derived:
-        raise OwnerRepresentationGrantBlocked(
-            OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value
-        )
-    if grant.owner_id != str(allowed.get("owner_id")):
-        raise OwnerRepresentationGrantBlocked(
-            OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value
-        )
-    if grant.coordinator_id != str(allowed.get("coordinator_id")):
-        raise OwnerRepresentationGrantBlocked(
-            OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value
-        )
-    if grant.issued_by != str(allowed.get("owner_id")):
-        raise OwnerRepresentationGrantBlocked(
-            OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value
-        )
-    return allowed
+        raise OwnerRepresentationGrantStoreError(f"ISSUANCE_AUTHORITY_NOT_LIVE:{exc}") from exc
+    standing_receipt_hash = str(allowed.get("grant_receipt_hash"))
+    permit_expires = expires_at if expires_at is not None else grant.expires_at
+    if not isinstance(permit_expires, datetime) or permit_expires.tzinfo is None:
+        raise OwnerRepresentationGrantBlocked("EXACT_TIMEZONE_REQUIRED")
+    destination = _permit_path(permits_root, standing_receipt_hash)
+    payload = {
+        "schema": _PERMIT_SCHEMA,
+        "permit_id": f"permit-{grant.grant_hash}",
+        "grant_hash": grant.grant_hash,
+        "action": str(allowed.get("action")),
+        "effect": allowed.get("effect"),
+        "effect_hash": str(allowed.get("effect_hash")),
+        "grant_receipt_hash": standing_receipt_hash,
+        "owner_id": str(allowed.get("owner_id")),
+        "coordinator_id": str(allowed.get("coordinator_id")),
+        "repository": allowed.get("repository"),
+        "requested_at": effective_now.isoformat(),
+        "expires_at": permit_expires.isoformat(),
+    }
+    record = {
+        **payload,
+        "permit_hash": canonical_autonomy_hash(payload),
+    }
+    canonical = _canonical_json(record)
+    try:
+        _write_bytes(canonical, None, destination, None)
+    except StandingGrantReceiptError as exc:
+        if str(exc) in {"SUPERSEDES_HASH_REQUIRED_FOR_REPLACE", "EXISTS_NO_CAS"}:
+            raise OwnerRepresentationGrantBlocked(
+                f"{OwnerRepresentationReason.ISSUANCE_PERMIT_SLOT_CONSUMED.value}:"
+                "grant_b_receipt_does_not_exist"
+            ) from exc
+        raise OwnerRepresentationGrantStoreError(str(exc)) from exc
+    return record
+
+
+def _write_consumed_marker(
+    root: Path,
+    *,
+    grant_hash: str,
+    permit_id: str,
+    consumed_at: datetime,
+    destination: Path | None = None,
+) -> None:
+    """Persist the fail-closed consumption marker for one issued grant.
+
+    The marker is sealed the same way as every other authority record and must
+    be written before the grant receipt.
+    """
+    payload = {
+        "schema": _PERMIT_CONSUMED_SCHEMA,
+        "grant_hash": grant_hash,
+        "permit_id": permit_id,
+        "consumed_at": consumed_at.isoformat(),
+    }
+    record = {
+        **payload,
+        "record_hash": canonical_autonomy_hash(payload),
+    }
+    canonical = _canonical_json(record)
+    _write_bytes(canonical, None, destination, None)
 
 
 def _authorize_at(
@@ -410,17 +529,22 @@ def _authorize_at(
 
     Order of checks is deliberately fail-closed: issuance first (the grant
     must exist in canonical form), then live revocation, then live
-    supersession, then live issuance-authority revalidation against the
-    canonical durable Owner standing grant, and only then the pure field-for-field
+    supersession, then the stored one-shot issuance permit, then live
+    standing-grant revalidation, and only then the pure field-for-field
     semantic evaluation.
 
-    Issuance-authority revalidation re-derives the authorization fresh at the
-    current instant, which fails closed on a revoked/unreadable standing grant
-    (``ISSUANCE_AUTHORITY_NOT_LIVE``) and on a replaced standing grant whose
-    context/receipt/binding fields changed (``ISSUANCE_AUTHORITY_CHANGED``).
-    The time-varying ``requested_at``/``authorization_hash`` pair is excluded
-    from the comparison because the clock legitimately advances between
-    issuance and publication; every other issuance binding is compared exactly.
+    Issuance-authority revalidation requires the stored sealed one-shot
+    issuance permit (``ISSUANCE_AUTHORIZATION_REQUIRED`` if none was minted and
+    ``TAMPERED`` if the receipt's ``permit_id`` does not match the permit it
+    names), then re-derives the standing-grant authority fresh at the current
+    instant.  A revoked/unreadable standing grant fails
+    ``ISSUANCE_AUTHORITY_NOT_LIVE``, and a replaced standing grant whose
+    binding fields changed fails ``ISSUANCE_AUTHORITY_CHANGED``.  The permit's
+    time-varying ``requested_at`` is excluded from the invariant comparison
+    because the clock legitimately advances between issuance and publication;
+    the consumption fence lives in the store's ``permits/consumed/`` markers,
+    so a replayed receipt is caught by the publisher before it reaches this
+    evaluator.
     """
     record = _require_issued(root, grant_hash)
     if _has_revocation(root, grant_hash):
@@ -436,14 +560,25 @@ def _authorize_at(
         grant = OwnerRepresentationGrant.model_validate(record["grant"])
     except Exception as exc:
         raise OwnerRepresentationGrantStoreError("TAMPERED") from exc
-    stored_auth = record.get("issuance_authorization")
-    if not isinstance(stored_auth, Mapping):
+    permit = _load_permit_for_grant(root, grant_hash)
+    if permit is None:
         return _blocked_decision(
             proposal,
             OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REQUIRED,
             grant_hash=grant_hash,
         )
+    if record.get("permit_id") != permit.get("permit_id"):
+        raise OwnerRepresentationGrantStoreError("TAMPERED")
     effective_now = now if now is not None else datetime.now(timezone.utc)
+    try:
+        permit_valid = _parse_iso(permit["requested_at"])
+        permit_expires = _parse_iso(permit["expires_at"])
+    except KeyError as exc:
+        raise OwnerRepresentationGrantStoreError("MALFORMED") from exc
+    if effective_now < permit_valid:
+        raise OwnerRepresentationGrantStoreError("ISSUANCE_AUTHORITY_NOT_LIVE:PERMIT_NOT_YET_VALID")
+    if effective_now >= permit_expires:
+        raise OwnerRepresentationGrantStoreError("ISSUANCE_AUTHORITY_NOT_LIVE:PERMIT_EXPIRED")
     try:
         fresh = authorize_owner_representation_grant_issuance(
             grant,
@@ -454,13 +589,16 @@ def _authorize_at(
         raise
     except StandingGrantReceiptError as exc:
         raise OwnerRepresentationGrantStoreError(f"ISSUANCE_AUTHORITY_NOT_LIVE:{exc}") from exc
-    invariant_fields = [
-        key
-        for key in _ISSUANCE_AUTHORIZATION_FIELDS
-        if key not in _ISSUANCE_AUTHORIZATION_TIME_VARYING_FIELDS
-    ]
+    invariant_fields = (
+        "grant_receipt_hash",
+        "owner_id",
+        "coordinator_id",
+        "repository",
+        "effect_hash",
+        "action",
+    )
     for key in invariant_fields:
-        if fresh.get(key) != stored_auth.get(key):
+        if fresh.get(key) != permit.get(key):
             return _blocked_decision(
                 proposal,
                 OwnerRepresentationReason.ISSUANCE_AUTHORITY_CHANGED,
@@ -474,9 +612,9 @@ class OwnerRepresentationGrantStore:
 
     ``root`` selects the authority root; production defaults to the single
     canonical path.  ``standing_grant_path`` selects the durable Owner
-    standing-grant receipt used to re-derive issuance authorization; production
-    defaults to the single canonical standing-grant path.  Explicit roots/paths
-    are for tests/operator tooling only.
+    standing-grant receipt used to mint/re-derive the one-shot issuance
+    permit; production defaults to the single canonical standing-grant path.
+    Explicit roots/paths are for tests/operator tooling only.
     """
 
     def __init__(
@@ -494,19 +632,29 @@ class OwnerRepresentationGrantStore:
         self,
         grant: OwnerRepresentationGrant,
         *,
-        issuance_authorization: Mapping[str, Any],
+        issuance_permit: Mapping[str, Any],
         supersedes_grant_hash: str | None = None,
         requested_at: datetime | None = None,
     ) -> Path:
         """Persist one validated Owner-supplied grant as a durable receipt.
 
-        ``issuance_authorization`` is the exact
-        ``nexus.standing_grant_effect_authorization.v1`` authorization produced
-        by :func:`authorize_owner_representation_grant_issuance`.  The store
-        independently re-derives that authorization from the canonical durable
-        Owner standing grant and requires exact equality, so a worker/agent can
-        never mint an authority-backed receipt for a grant it constructed
-        itself.
+        ``issuance_permit`` is the sealed
+        ``nexus.owner_representation_publication_issuance_permit.v1`` permit
+        produced by :func:`mint_owner_representation_publication_issuance_permit`
+        for exactly this grant.  The store ignores every caller-supplied field
+        except the grant-hash mapping, re-reads the permit sealed from disk
+        (``permits/<standing_grant_receipt_hash>.json``), re-derives the
+        standing-grant authority from the canonical durable Owner standing
+        grant, and binds the grant identity and effect exactly, so a
+        worker/agent can never mint an authority-backed receipt for a grant it
+        constructed itself.
+
+        The first accepted issuance writes a
+        ``permits/consumed/<grant_hash>.json`` consumption marker before the
+        grant receipt (fail-closed: a failed receipt write never consumes the
+        permit).  Any later issuance attempt is refused
+        (``GRANT_ALREADY_ISSUED`` when the receipt still exists, ``GRANT_REUSED``
+        when the receipt was deleted but the marker remains).
 
         ``supersedes_grant_hash`` must name an already-issued sibling, which
         makes this grant a live supersession of that earlier one-shot grant.
@@ -536,20 +684,89 @@ class OwnerRepresentationGrantStore:
             raise OwnerRepresentationGrantBlocked(
                 OwnerRepresentationReason.GRANT_ALREADY_ISSUED.value
             )
+        if issuance_permit is None:
+            raise OwnerRepresentationGrantBlocked(
+                OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REQUIRED.value
+            )
+        if not isinstance(issuance_permit, Mapping) or (
+            issuance_permit.get("grant_hash") != grant.grant_hash
+        ):
+            raise OwnerRepresentationGrantBlocked(
+                OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value
+            )
+        permit = _load_permit_for_grant(self.root, grant.grant_hash)
+        if permit is None:
+            raise OwnerRepresentationGrantBlocked(
+                OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value
+            )
+        # Exact identity and effect bindings against the sealed disk permit.
+        if grant.owner_id != str(permit.get("owner_id")):
+            raise OwnerRepresentationGrantBlocked(
+                OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value
+            )
+        if grant.coordinator_id != str(permit.get("coordinator_id")):
+            raise OwnerRepresentationGrantBlocked(
+                OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value
+            )
+        if grant.issued_by != str(permit.get("owner_id")):
+            raise OwnerRepresentationGrantBlocked(
+                OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value
+            )
+        if canonical_autonomy_hash(owner_representation_issuance_effect(grant)) != permit.get(
+            "effect_hash"
+        ):
+            raise OwnerRepresentationGrantBlocked(
+                OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value
+            )
+        try:
+            allowed = authorize_owner_representation_grant_issuance(
+                grant,
+                standing_grant_path=self.standing_grant_path,
+                requested_at=now,
+            )
+        except OwnerRepresentationGrantBlocked:
+            raise
+        except StandingGrantReceiptError as exc:
+            raise OwnerRepresentationGrantBlocked(
+                OwnerRepresentationReason.ISSUANCE_AUTHORITY_NOT_LIVE.value
+            ) from exc
+        invariant_fields = (
+            "grant_receipt_hash",
+            "owner_id",
+            "coordinator_id",
+            "repository",
+            "effect_hash",
+            "action",
+        )
+        for key in invariant_fields:
+            if allowed.get(key) != permit.get(key):
+                raise OwnerRepresentationGrantBlocked(
+                    OwnerRepresentationReason.ISSUANCE_AUTHORITY_CHANGED.value
+                )
+        if _permit_consumed(self.root, grant.grant_hash):
+            raise OwnerRepresentationGrantBlocked(OwnerRepresentationReason.GRANT_REUSED.value)
         if _has_revocation(self.root, grant.grant_hash):
             raise OwnerRepresentationGrantBlocked(OwnerRepresentationReason.GRANT_REVOKED.value)
 
-        allowed = _revalidate_issuance_authorization(
-            grant,
-            issuance_authorization,
-            standing_grant_path=self.standing_grant_path,
-            requested_at=now,
-        )
+        try:
+            _write_consumed_marker(
+                self.root,
+                grant_hash=grant.grant_hash,
+                permit_id=str(permit.get("permit_id")),
+                consumed_at=now,
+                destination=_consumed_marker_path(self.root, grant.grant_hash),
+            )
+        except StandingGrantReceiptError as exc:
+            if str(exc) in {"SUPERSEDES_HASH_REQUIRED_FOR_REPLACE", "EXISTS_NO_CAS"}:
+                raise OwnerRepresentationGrantBlocked(
+                    OwnerRepresentationReason.GRANT_REUSED.value
+                ) from exc
+            raise OwnerRepresentationGrantStoreError(str(exc)) from exc
         payload = {
             "schema": _RECEIPT_SCHEMA,
             "grant": grant.model_dump(mode="json"),
             "supersedes_grant_hash": supersedes_grant_hash,
-            "issuance_authorization": allowed,
+            "permit_id": str(permit.get("permit_id")),
         }
         record = {
             **payload,
@@ -559,6 +776,10 @@ class OwnerRepresentationGrantStore:
         try:
             _write_bytes(canonical, None, destination, None)
         except StandingGrantReceiptError as exc:
+            if str(exc) in {"SUPERSEDES_HASH_REQUIRED_FOR_REPLACE", "EXISTS_NO_CAS"}:
+                raise OwnerRepresentationGrantBlocked(
+                    OwnerRepresentationReason.GRANT_ALREADY_ISSUED.value
+                ) from exc
             raise OwnerRepresentationGrantStoreError(str(exc)) from exc
         return destination
 
@@ -629,19 +850,27 @@ class OwnerRepresentationGrantStore:
         except OwnerRepresentationGrantBlocked:
             return {"grant_hash": grant_hash, "status": "GRANT_NOT_ISSUED"}
         status = "ISSUED"
+        permit = None
+        consumed = False
         try:
             if _has_revocation(self.root, grant_hash):
                 status = "REVOKED"
             elif _superseding_grant_hash(self.root, grant_hash) is not None:
                 status = "SUPERSEDED"
+            permit = _load_permit_for_grant(self.root, grant_hash)
+            consumed = _permit_consumed(self.root, grant_hash)
         except OwnerRepresentationGrantStoreError:
             status = "INTEGRITY_ERROR"
+            permit = None
+            consumed = False
         return {
             "grant_hash": grant_hash,
             "status": status,
             "grant": record["grant"],
             "supersedes_grant_hash": record.get("supersedes_grant_hash"),
-            "issued_with_authority": isinstance(record.get("issuance_authorization"), Mapping),
+            "issued_with_authority": permit is not None,
+            "permit_minted": permit is not None,
+            "permit_consumed": consumed,
         }
 
 
@@ -653,17 +882,21 @@ def issue_owner_representation_grant(
 ) -> Path:
     """Persist one one-shot Owner-representation grant to the canonical root.
 
-    Computes the exact canonical issuance authorization bound to the durable
-    Owner standing grant at one fixed ``requested_at`` and passes it to
-    ``issue``, which re-derives the same authorization from the canonical
-    standing-grant receipt.  A self-authorized worker can never mint an
-    authority-backed receipt for a grant it constructed itself.
+    Mints the exact sealed issuance permit bound to the durable Owner standing
+    grant at one fixed ``requested_at`` and passes it to ``issue``, which
+    re-reads the permit sealed from disk and re-derives the same standing-grant
+    authority.  A self-authorized worker can never mint an authority-backed
+    receipt for a grant it constructed itself.
     """
     now = requested_at if requested_at is not None else datetime.now(timezone.utc)
-    authorization = authorize_owner_representation_grant_issuance(grant, requested_at=now)
+    permit = mint_owner_representation_publication_issuance_permit(
+        grant,
+        authority_root=DEFAULT_OWNER_REPRESENTATION_AUTHORITY_ROOT,
+        requested_at=now,
+    )
     return OwnerRepresentationGrantStore().issue(
         grant,
-        issuance_authorization=authorization,
+        issuance_permit=permit,
         requested_at=now,
         supersedes_grant_hash=supersedes_grant_hash,
     )
@@ -716,6 +949,7 @@ __all__ = [
     "inspect_owner_representation_grant",
     "issue_owner_representation_grant",
     "load_owner_representation_grant",
+    "mint_owner_representation_publication_issuance_permit",
     "owner_representation_issuance_effect",
     "revoke_owner_representation_grant",
 ]

@@ -46,7 +46,7 @@ from nexus.orchestrator.owner_representation import (
 from nexus.orchestrator.owner_representation_store import (
     OwnerRepresentationGrantBlocked,
     OwnerRepresentationGrantStore,
-    authorize_owner_representation_grant_issuance,
+    mint_owner_representation_publication_issuance_permit,
 )
 from nexus.orchestrator.standing_grant_store import (
     StandingGrantReceipt,
@@ -161,19 +161,51 @@ def _issue_grant(
 ) -> OwnerRepresentationGrant:
     """Issue a durable, store-backed grant (the only authoritative form).
 
-    Issuance replay-proof: authority is re-derived live from the fixture's
-    durable Owner standing-grant receipt at the same requested_at the store
-    binds to the persisted record.
+    Mint the exact sealed one-shot issuance permit bound to the fixture's
+    durable Owner standing-grant receipt at one fixed instant, then issue the
+    same grant with that permit at the same instant.  A replayed, forged, or
+    different-grant permit can never drive a receipt.
     """
     grant = _grant(**overrides)
     now = datetime.now(timezone.utc)
-    authorization = authorize_owner_representation_grant_issuance(
+    permit = mint_owner_representation_publication_issuance_permit(
         grant,
+        authority_root=grant_store.root,
         standing_grant_path=grant_store.standing_grant_path,
         requested_at=now,
     )
-    grant_store.issue(grant, issuance_authorization=authorization, requested_at=now)
+    grant_store.issue(grant, issuance_permit=permit, requested_at=now)
     return grant
+
+
+def _rotate_standing_grant(
+    standing_grant_path: Path, *, grant_id: str, expires_delta: timedelta
+) -> StandingGrantReceipt:
+    """CAS-supersede the fixture standing grant so the next permit slot is fresh.
+
+    One standing-grant receipt authorizes exactly one one-shot issuance permit;
+    a second grant needs a rotated (CAS-superseded) standing-grant receipt.
+    """
+    predecessor = _load_receipt_at(standing_grant_path, now=NOW)
+    context = StandingGrantContext.issue(
+        owner_id="owner-james",
+        coordinator_id="coordinator-codex",
+        repository=OWNER_REPRESENTATION_STANDING_REPOSITORY,
+        thread_id="thread-coord-1",
+        goal_id="goal-827",
+        allowed_actions=(AutonomyActionClass.OWNER_REPRESENTATION_GRANT_ISSUE,),
+        issued_at=NOW - timedelta(hours=2),
+        expires_at=NOW + expires_delta,
+    )
+    receipt = StandingGrantReceipt.issue(
+        grant_id=grant_id,
+        context=context,
+        supersedes_grant_hash=predecessor.receipt_hash,
+    )
+    _write_standing_grant_receipt_at(
+        receipt, standing_grant_path, expected_receipt_hash=predecessor.receipt_hash
+    )
+    return receipt
 
 
 class FakeRemote:
@@ -564,7 +596,14 @@ def test_same_grant_cannot_drive_a_different_operation(
     assert len(remote.writes) == 1
     # Prepare op-2 legitimately with its own grant so its operation file is in
     # PREPARED state, then forge a PreparedPublication for op-2 that reuses the
-    # already-consumed grant.  The consumed-grant ledger must refuse it.
+    # already-consumed grant.  The consumed-grant ledger must refuse it.  The
+    # second grant needs its own one-shot permit slot, so the standing grant is
+    # rotated (CAS-superseded) first.
+    _rotate_standing_grant(
+        grant_store.standing_grant_path,
+        grant_id="standing-grant-827-r2",
+        expires_delta=timedelta(hours=3),
+    )
     grant_op2 = _issue_grant(grant_store, grant_id="g-827-2", operation_id="op-2")
     publisher.prepare(_proposal(operation_id="op-2"), grant_op2)
     forged = PreparedPublication(
@@ -985,38 +1024,40 @@ def test_build_isolated_env_strips_github_credentials(monkeypatch):
 
 
 def test_worker_cannot_create_authority_store_receipt(grant_store):
-    """A worker calling issue() without Owner issuance authority gets no receipt."""
+    """A worker calling issue() without an Owner issuance permit gets no receipt."""
     with pytest.raises(OwnerRepresentationGrantBlocked) as exc:
-        grant_store.issue(_grant(), issuance_authorization=None)
+        grant_store.issue(_grant(), issuance_permit=None)
     assert OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REQUIRED.value in str(exc.value)
     grants_dir = grant_store.root / "grants"
     assert not grants_dir.exists() or not any(grants_dir.iterdir())
 
 
 def test_forged_owner_identity_cannot_issue_receipt(grant_store, standing_grant_path):
-    """An attacker cannot present a valid auth but claim a different Owner identity."""
+    """An attacker cannot present a minted permit but claim a different Owner identity."""
     forged = _grant(owner_id="attacker", issued_by="attacker")
-    authorization = authorize_owner_representation_grant_issuance(
+    permit = mint_owner_representation_publication_issuance_permit(
         forged,
+        authority_root=grant_store.root,
         standing_grant_path=standing_grant_path,
         requested_at=NOW,
     )
     with pytest.raises(OwnerRepresentationGrantBlocked) as exc:
-        grant_store.issue(forged, issuance_authorization=authorization, requested_at=NOW)
+        grant_store.issue(forged, issuance_permit=permit, requested_at=NOW)
     assert OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value in str(exc.value)
 
 
 def test_replayed_authorization_cannot_issue_another_grant(grant_store, standing_grant_path):
-    """Authorization minted for grant A can never be replayed to issue grant B."""
+    """A permit minted for grant A can never be replayed to issue grant B."""
     grant_a = _grant()
     grant_b = _grant(grant_id="g-827-2", operation_id="op-2")
-    auth_a = authorize_owner_representation_grant_issuance(
+    permit_a = mint_owner_representation_publication_issuance_permit(
         grant_a,
+        authority_root=grant_store.root,
         standing_grant_path=standing_grant_path,
         requested_at=NOW,
     )
     with pytest.raises(OwnerRepresentationGrantBlocked) as exc:
-        grant_store.issue(grant_b, issuance_authorization=auth_a, requested_at=NOW)
+        grant_store.issue(grant_b, issuance_permit=permit_a, requested_at=NOW)
     assert OwnerRepresentationReason.ISSUANCE_AUTHORIZATION_REJECTED.value in str(exc.value)
 
 
@@ -1085,3 +1126,77 @@ def test_revoked_owner_issuance_authority_blocks_publish(
         publisher.publish(prepared)
     assert OwnerRepresentationReason.ISSUANCE_AUTHORITY_NOT_LIVE.value in str(exc.value)
     assert remote.writes == []
+
+
+# ---------------------------------------------------------------------------
+# BLOCKER 2 (re-verification): one Owner standing-grant receipt drives exactly
+# one exact grant exactly once; the issuance permit is non-reusable and the
+# consumption fence survives grant-receipt destruction.
+# ---------------------------------------------------------------------------
+
+
+def test_one_standing_grant_cannot_mint_both_a_and_b(grant_store, standing_grant_path):
+    """A single Owner standing-grant receipt authorizes exactly ONE permit."""
+    grant_a = _grant()
+    mint_owner_representation_publication_issuance_permit(
+        grant_a,
+        authority_root=grant_store.root,
+        standing_grant_path=standing_grant_path,
+        requested_at=NOW,
+    )
+    grant_b = _grant(grant_id="g-827-2", operation_id="op-2")
+    with pytest.raises(OwnerRepresentationGrantBlocked) as exc:
+        mint_owner_representation_publication_issuance_permit(
+            grant_b,
+            authority_root=grant_store.root,
+            standing_grant_path=standing_grant_path,
+            requested_at=NOW,
+        )
+    assert OwnerRepresentationReason.ISSUANCE_PERMIT_SLOT_CONSUMED.value in str(exc.value)
+    assert "grant_b_receipt_does_not_exist" in str(exc.value)
+
+
+def test_hostile_owner_authorization_issues_exact_grant_once(grant_store, standing_grant_path):
+    """One Owner authorization issues exact grant A exactly once, nothing else."""
+    grant_a = _grant()
+    now = datetime.now(timezone.utc)
+    permit = mint_owner_representation_publication_issuance_permit(
+        grant_a,
+        authority_root=grant_store.root,
+        standing_grant_path=standing_grant_path,
+        requested_at=now,
+    )
+    receipt_path = grant_store.issue(grant_a, issuance_permit=permit, requested_at=now)
+    assert receipt_path.exists()
+    # A different grant can never share that standing-grant receipt's permit.
+    grant_b = _grant(grant_id="g-827-2", operation_id="op-2")
+    with pytest.raises(OwnerRepresentationGrantBlocked) as exc:
+        mint_owner_representation_publication_issuance_permit(
+            grant_b,
+            authority_root=grant_store.root,
+            standing_grant_path=standing_grant_path,
+            requested_at=now,
+        )
+    assert OwnerRepresentationReason.ISSUANCE_PERMIT_SLOT_CONSUMED.value in str(exc.value)
+    assert "grant_b_receipt_does_not_exist" in str(exc.value)
+    # Re-issuing the same grant is refused while the receipt still exists.
+    with pytest.raises(OwnerRepresentationGrantBlocked) as exc:
+        grant_store.issue(grant_a, issuance_permit=permit, requested_at=now)
+    assert OwnerRepresentationReason.GRANT_ALREADY_ISSUED.value in str(exc.value)
+
+
+def test_consumed_permit_blocks_reissue_even_if_receipt_missing(grant_store, standing_grant_path):
+    """Destroying the grant receipt cannot resurrect a consumed permit."""
+    grant_a = _grant()
+    now = datetime.now(timezone.utc)
+    permit = mint_owner_representation_publication_issuance_permit(
+        grant_a,
+        authority_root=grant_store.root,
+        standing_grant_path=standing_grant_path,
+        requested_at=now,
+    )
+    receipt_path = grant_store.issue(grant_a, issuance_permit=permit, requested_at=now)
+    receipt_path.unlink()
+    with pytest.raises(OwnerRepresentationGrantBlocked) as exc:
+        grant_store.issue(grant_a, issuance_permit=permit, requested_at=now)
+    assert OwnerRepresentationReason.GRANT_REUSED.value in str(exc.value)
