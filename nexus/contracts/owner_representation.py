@@ -80,12 +80,8 @@ def canonical_publication_content_hash(title: str, body: str) -> str:
 
 
 class ExternalDestinationKind(str, Enum):
-    OWNER_CONTROLLED_INTERNAL_COLLABORATION = (
-        "OWNER_CONTROLLED_INTERNAL_COLLABORATION"
-    )
-    THIRD_PARTY_OR_EXTERNAL_OWNER_REPRESENTATION = (
-        "THIRD_PARTY_OR_EXTERNAL_OWNER_REPRESENTATION"
-    )
+    OWNER_CONTROLLED_INTERNAL_COLLABORATION = "OWNER_CONTROLLED_INTERNAL_COLLABORATION"
+    THIRD_PARTY_OR_EXTERNAL_OWNER_REPRESENTATION = "THIRD_PARTY_OR_EXTERNAL_OWNER_REPRESENTATION"
     UNKNOWN = "UNKNOWN"
 
 
@@ -98,9 +94,7 @@ class ExternalPublicationEffect(str, Enum):
     CLOSE = "CLOSE"
     CREATE_PR = "CREATE_PR"
     PUBLIC_FORK = "PUBLIC_FORK"
-    PUBLISH_BRANCH_AS_EXTERNAL_CONTRIBUTION = (
-        "PUBLISH_BRANCH_AS_EXTERNAL_CONTRIBUTION"
-    )
+    PUBLISH_BRANCH_AS_EXTERNAL_CONTRIBUTION = "PUBLISH_BRANCH_AS_EXTERNAL_CONTRIBUTION"
     PUBLIC_TRANSPORT_WRITE = "PUBLIC_TRANSPORT_WRITE"
 
 
@@ -137,9 +131,7 @@ class _FrozenModel(BaseModel):
 class ExternalDestination(_FrozenModel):
     """One exact public destination host/account/repository."""
 
-    schema: Literal["nexus.external_destination.v1"] = (
-        "nexus.external_destination.v1"
-    )
+    schema: Literal["nexus.external_destination.v1"] = "nexus.external_destination.v1"
     host: StrictStr
     owner_account: StrictStr
     repository: StrictStr
@@ -170,9 +162,7 @@ class ExternalDestination(_FrozenModel):
 class ExternalContentEnvelope(_FrozenModel):
     """Frozen purpose envelope: narrow purpose text plus exact content hash."""
 
-    schema: Literal["nexus.external_content_envelope.v1"] = (
-        "nexus.external_content_envelope.v1"
-    )
+    schema: Literal["nexus.external_content_envelope.v1"] = "nexus.external_content_envelope.v1"
     purpose: StrictStr
     content_hash: StrictStr
 
@@ -245,10 +235,7 @@ class ExternalPublicationProposal(_FrozenModel):
         }
         if self.effect in requires_target and self.target is None:
             raise ValueError("TARGET_REQUIRED")
-        if (
-            self.effect is ExternalPublicationEffect.CREATE_ISSUE
-            and self.target is not None
-        ):
+        if self.effect is ExternalPublicationEffect.CREATE_ISSUE and self.target is not None:
             raise ValueError("TARGET_FORBIDDEN_FOR_CREATE_ISSUE")
         return self
 
@@ -256,9 +243,7 @@ class ExternalPublicationProposal(_FrozenModel):
 class OwnerRepresentationGrantSpec(_FrozenModel):
     """All Owner-grant policy fields; hash is bound by the concrete grant."""
 
-    schema: Literal["nexus.owner_representation_grant.v1"] = (
-        "nexus.owner_representation_grant.v1"
-    )
+    schema: Literal["nexus.owner_representation_grant.v1"] = "nexus.owner_representation_grant.v1"
     grant_id: StrictStr
     issued_by: StrictStr
     owner_id: StrictStr
@@ -366,9 +351,7 @@ class OwnerRepresentationGrant(OwnerRepresentationGrantSpec):
         values.setdefault("granted_at", datetime.now(timezone.utc))
         spec = OwnerRepresentationGrantSpec.model_validate(dict(values))
         payload = spec.model_dump(mode="json")
-        return cls.model_validate(
-            {**payload, "grant_hash": canonical_autonomy_hash(payload)}
-        )
+        return cls.model_validate({**payload, "grant_hash": canonical_autonomy_hash(payload)})
 
 
 class InternalCollaborationBound(_FrozenModel):
@@ -398,9 +381,7 @@ class InternalCollaborationBound(_FrozenModel):
     ) -> tuple[ExternalPublicationEffect, ...]:
         if not values:
             raise ValueError("AUTHORIZED_EFFECTS_REQUIRED")
-        normalized = tuple(
-            sorted(set(values), key=lambda item: item.value)
-        )
+        normalized = tuple(sorted(set(values), key=lambda item: item.value))
         if _ALWAYS_EXTERNAL_EFFECTS & set(normalized):
             raise ValueError("ALWAYS_EXTERNAL_EFFECT_FORBIDDEN_IN_INTERNAL_BOUND")
         return normalized
@@ -425,9 +406,7 @@ class OwnerRepresentationReason(str, Enum):
     TRANSPORT_MISMATCH = "TRANSPORT_MISMATCH"
     OPERATION_MISMATCH = "OPERATION_MISMATCH"
     OWNER_REPRESENTATION_REQUIRED = "OWNER_REPRESENTATION_REQUIRED"
-    PUSH_DENIED_IS_NOT_PUBLICATION_AUTHORITY = (
-        "PUSH_DENIED_IS_NOT_PUBLICATION_AUTHORITY"
-    )
+    PUSH_DENIED_IS_NOT_PUBLICATION_AUTHORITY = "PUSH_DENIED_IS_NOT_PUBLICATION_AUTHORITY"
     PUBLICATION_AUTHORITY_NON_INFERABLE = "PUBLICATION_AUTHORITY_NON_INFERABLE"
     FOLLOWUP_NOT_IMPLIED = "FOLLOWUP_NOT_IMPLIED"
     PUBLICATION_BLOCKED = "PUBLICATION_BLOCKED"
@@ -495,9 +474,10 @@ def _decision(
         "proposal_hash": proposal_hash,
         "claim_ceiling": "OWNER_REPRESENTATION_EXACT_ONE_SHOT_ONLY",
     }
-    return OwnerRepresentationDecision.model_validate(
-        {**payload, "decision_hash": canonical_autonomy_hash(payload)}
-    )
+    return OwnerRepresentationDecision.model_validate({
+        **payload,
+        "decision_hash": canonical_autonomy_hash(payload),
+    })
 
 
 def _proposal_hash(proposal: ExternalPublicationProposal) -> str:
@@ -519,18 +499,12 @@ def classification(
     ``UNKNOWN`` (BLOCK).
     """
     if effect in _ALWAYS_EXTERNAL_EFFECTS:
-        return (
-            ExternalDestinationKind.THIRD_PARTY_OR_EXTERNAL_OWNER_REPRESENTATION
-        )
+        return ExternalDestinationKind.THIRD_PARTY_OR_EXTERNAL_OWNER_REPRESENTATION
     for bound in bounds:
         if bound.destination == destination and effect in bound.authorized_effects:
-            return (
-                ExternalDestinationKind.OWNER_CONTROLLED_INTERNAL_COLLABORATION
-            )
+            return ExternalDestinationKind.OWNER_CONTROLLED_INTERNAL_COLLABORATION
     if destination.host in {"github.com", "gitlab.com", "bitbucket.org"}:
-        return (
-            ExternalDestinationKind.THIRD_PARTY_OR_EXTERNAL_OWNER_REPRESENTATION
-        )
+        return ExternalDestinationKind.THIRD_PARTY_OR_EXTERNAL_OWNER_REPRESENTATION
     return ExternalDestinationKind.UNKNOWN
 
 
@@ -546,9 +520,7 @@ def evaluate_owner_representation(
     """
     try:
         validated_grant = OwnerRepresentationGrant.model_validate(
-            grant.model_dump(mode="json")
-            if isinstance(grant, OwnerRepresentationGrant)
-            else grant
+            grant.model_dump(mode="json") if isinstance(grant, OwnerRepresentationGrant) else grant
         )
     except Exception:
         validated_grant = None
@@ -563,9 +535,7 @@ def evaluate_owner_representation(
             outcome=OwnerRepresentationOutcome.BLOCKED,
             reason_codes=(OwnerRepresentationReason.PROPOSAL_INVALID,),
             proposal_hash="0" * 64,
-            grant_hash=(
-                validated_grant.grant_hash if validated_grant is not None else None
-            ),
+            grant_hash=(validated_grant.grant_hash if validated_grant is not None else None),
         )
 
     proposal_hash = _proposal_hash(validated_proposal)
@@ -575,9 +545,7 @@ def evaluate_owner_representation(
             OwnerRepresentationReason.PUBLICATION_AUTHORITY_NON_INFERABLE,
         ]
         if validated_proposal.derivation is PublicationDerivation.PUSH_DENIED:
-            reasons.append(
-                OwnerRepresentationReason.PUSH_DENIED_IS_NOT_PUBLICATION_AUTHORITY
-            )
+            reasons.append(OwnerRepresentationReason.PUSH_DENIED_IS_NOT_PUBLICATION_AUTHORITY)
         return _decision(
             outcome=OwnerRepresentationOutcome.BLOCKED,
             reason_codes=tuple(dict.fromkeys(reasons)),
@@ -587,9 +555,7 @@ def evaluate_owner_representation(
     if validated_grant.replay_mode != "ONE_SHOT":
         return _decision(
             outcome=OwnerRepresentationOutcome.BLOCKED,
-            reason_codes=(
-                OwnerRepresentationReason.STANDING_EXTERNAL_GRANT_NOT_SUPPORTED,
-            ),
+            reason_codes=(OwnerRepresentationReason.STANDING_EXTERNAL_GRANT_NOT_SUPPORTED,),
             proposal_hash=proposal_hash,
             grant_hash=validated_grant.grant_hash,
         )

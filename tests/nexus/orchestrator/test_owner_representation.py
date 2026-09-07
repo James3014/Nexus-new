@@ -130,26 +130,21 @@ class FakeRemote:
             raise TransportDispatchedButUnacknowledged()
         self.issue_id_ctr += 1
         marker = str(self.issue_id_ctr)
-        self.writes.append(
-            {
-                "marker": marker,
-                "op": proposal.operation_id,
-                "effect": proposal.effect.value,
-                "destination": proposal.destination.repository_id,
-                "title": proposal.title,
-                "body": proposal.body,
-                "purpose": proposal.purpose,
-                "actor": proposal.actor,
-            }
-        )
+        self.writes.append({
+            "marker": marker,
+            "op": proposal.operation_id,
+            "effect": proposal.effect.value,
+            "destination": proposal.destination.repository_id,
+            "title": proposal.title,
+            "body": proposal.body,
+            "purpose": proposal.purpose,
+            "actor": proposal.actor,
+        })
         return WriteOutcome(status="ACK", remote_marker=marker)
 
     def readback(self, proposal: ExternalPublicationProposal) -> str | None:
         for entry in reversed(self.writes):
-            if (
-                entry["op"] == proposal.operation_id
-                and entry["effect"] == proposal.effect.value
-            ):
+            if entry["op"] == proposal.operation_id and entry["effect"] == proposal.effect.value:
                 return entry["marker"]
         return None
 
@@ -188,8 +183,7 @@ def test_inference_derivations_never_authorize_external_publication(derivation):
     assert decision.publication_authorized is False
     assert decision.reason_codes
     assert (
-        OwnerRepresentationReason.PUBLICATION_AUTHORITY_NON_INFERABLE
-        in decision.reason_codes
+        OwnerRepresentationReason.PUBLICATION_AUTHORITY_NON_INFERABLE in decision.reason_codes
         or (
             OwnerRepresentationReason.PUSH_DENIED_IS_NOT_PUBLICATION_AUTHORITY
             in decision.reason_codes
@@ -204,8 +198,7 @@ def test_push_denied_is_not_issue_publication_authority():
     decision = bind_external_publication(proposal)
     assert decision.outcome is OwnerRepresentationOutcome.BLOCKED
     assert (
-        OwnerRepresentationReason.PUSH_DENIED_IS_NOT_PUBLICATION_AUTHORITY
-        in decision.reason_codes
+        OwnerRepresentationReason.PUSH_DENIED_IS_NOT_PUBLICATION_AUTHORITY in decision.reason_codes
     )
     assert decision.publication_authorized is False
 
@@ -219,22 +212,14 @@ def test_authenticated_identity_is_not_owner_authorized():
         )
     )
     assert decision.outcome is OwnerRepresentationOutcome.BLOCKED
-    assert (
-        OwnerRepresentationReason.PUBLICATION_AUTHORITY_NON_INFERABLE
-        in decision.reason_codes
-    )
+    assert OwnerRepresentationReason.PUBLICATION_AUTHORITY_NON_INFERABLE in decision.reason_codes
 
 
 def test_can_edit_code_is_not_can_publish():
     """CAN_EDIT_CODE != CAN_PUBLISH."""
-    decision = bind_external_publication(
-        _proposal(derivation=PublicationDerivation.UNTYPED)
-    )
+    decision = bind_external_publication(_proposal(derivation=PublicationDerivation.UNTYPED))
     assert decision.outcome is OwnerRepresentationOutcome.BLOCKED
-    assert (
-        OwnerRepresentationReason.PUBLICATION_AUTHORITY_NON_INFERABLE
-        in decision.reason_codes
-    )
+    assert OwnerRepresentationReason.PUBLICATION_AUTHORITY_NON_INFERABLE in decision.reason_codes
 
 
 def test_can_commit_is_not_can_publish():
@@ -242,21 +227,13 @@ def test_can_commit_is_not_can_publish():
         _proposal(derivation=PublicationDerivation.TASK_COMPLETION)
     )
     assert decision.outcome is OwnerRepresentationOutcome.BLOCKED
-    assert (
-        OwnerRepresentationReason.PUBLICATION_AUTHORITY_NON_INFERABLE
-        in decision.reason_codes
-    )
+    assert OwnerRepresentationReason.PUBLICATION_AUTHORITY_NON_INFERABLE in decision.reason_codes
 
 
 def test_can_push_is_not_can_represent_owner():
-    decision = bind_external_publication(
-        _proposal(derivation=PublicationDerivation.WORKER_OUTPUT)
-    )
+    decision = bind_external_publication(_proposal(derivation=PublicationDerivation.WORKER_OUTPUT))
     assert decision.outcome is OwnerRepresentationOutcome.BLOCKED
-    assert (
-        OwnerRepresentationReason.PUBLICATION_AUTHORITY_NON_INFERABLE
-        in decision.reason_codes
-    )
+    assert OwnerRepresentationReason.PUBLICATION_AUTHORITY_NON_INFERABLE in decision.reason_codes
 
 
 def test_can_merge_is_not_can_represent_owner():
@@ -264,21 +241,13 @@ def test_can_merge_is_not_can_represent_owner():
         _proposal(derivation=PublicationDerivation.TASK_COMPLETION)
     )
     assert decision.outcome is OwnerRepresentationOutcome.BLOCKED
-    assert (
-        OwnerRepresentationReason.PUBLICATION_AUTHORITY_NON_INFERABLE
-        in decision.reason_codes
-    )
+    assert OwnerRepresentationReason.PUBLICATION_AUTHORITY_NON_INFERABLE in decision.reason_codes
 
 
 def test_model_worker_output_is_not_owner_statement():
-    decision = bind_external_publication(
-        _proposal(derivation=PublicationDerivation.WORKER_OUTPUT)
-    )
+    decision = bind_external_publication(_proposal(derivation=PublicationDerivation.WORKER_OUTPUT))
     assert decision.outcome is OwnerRepresentationOutcome.BLOCKED
-    assert (
-        OwnerRepresentationReason.PUBLICATION_AUTHORITY_NON_INFERABLE
-        in decision.reason_codes
-    )
+    assert OwnerRepresentationReason.PUBLICATION_AUTHORITY_NON_INFERABLE in decision.reason_codes
 
 
 def test_no_grant_never_reaches_transport(
@@ -318,29 +287,21 @@ def test_grant_requires_every_bound_field():
     )
     assert (
         OwnerRepresentationReason.ACTOR_MISMATCH
-        in bind_external_publication(
-            _proposal(actor="someone-else"), grant
-        ).reason_codes
+        in bind_external_publication(_proposal(actor="someone-else"), grant).reason_codes
     )
     assert (
         OwnerRepresentationReason.TRANSPORT_MISMATCH
-        in bind_external_publication(
-            _proposal(transport="other-transport"), grant
-        ).reason_codes
+        in bind_external_publication(_proposal(transport="other-transport"), grant).reason_codes
     )
     assert (
         OwnerRepresentationReason.OPERATION_MISMATCH
-        in bind_external_publication(
-            _proposal(operation_id="op-2"), grant
-        ).reason_codes
+        in bind_external_publication(_proposal(operation_id="op-2"), grant).reason_codes
     )
 
 
 def test_create_issue_grant_does_not_imply_comment_or_fork():
     grant = _grant(effect=ExternalPublicationEffect.CREATE_ISSUE)
-    comment = _proposal(
-        effect=ExternalPublicationEffect.COMMENT, target="42", operation_id="op-1"
-    )
+    comment = _proposal(effect=ExternalPublicationEffect.COMMENT, target="42", operation_id="op-1")
     decision = bind_external_publication(comment, grant)
     assert decision.outcome is OwnerRepresentationOutcome.BLOCKED
     assert OwnerRepresentationReason.FOLLOWUP_NOT_IMPLIED in decision.reason_codes
@@ -393,9 +354,7 @@ def test_purpose_substitution_is_blocked():
 
 
 def test_expired_grant_is_blocked():
-    grant = _grant(
-        granted_at=NOW - timedelta(days=2), expires_at=NOW - timedelta(days=1)
-    )
+    grant = _grant(granted_at=NOW - timedelta(days=2), expires_at=NOW - timedelta(days=1))
     decision = bind_external_publication(_proposal(), grant, now=NOW)
     assert decision.outcome is OwnerRepresentationOutcome.BLOCKED
     assert OwnerRepresentationReason.GRANT_EXPIRED in decision.reason_codes
@@ -462,10 +421,7 @@ def test_bound_internal_collaboration_is_passthrough_not_publication():
     proposal = _proposal(destination=OWNER_REPO)
     decision = bind_external_publication(proposal, _grant(), (bound,))
     assert decision.outcome is OwnerRepresentationOutcome.BLOCKED
-    assert (
-        OwnerRepresentationReason.INTERNAL_AUTOMATION_PASSTHROUGH
-        in decision.reason_codes
-    )
+    assert OwnerRepresentationReason.INTERNAL_AUTOMATION_PASSTHROUGH in decision.reason_codes
 
 
 def test_internal_bound_never_validates_external_passthrough_to_writer(
@@ -477,9 +433,7 @@ def test_internal_bound_never_validates_external_passthrough_to_writer(
         destination=OWNER_REPO,
         authorized_effects=(ExternalPublicationEffect.CREATE_ISSUE,),
     )
-    prepared = publisher.prepare(
-        _proposal(destination=OWNER_REPO), grant=None, boundary=(bound,)
-    )
+    prepared = publisher.prepare(_proposal(destination=OWNER_REPO), grant=None, boundary=(bound,))
     assert prepared.state == "INTERNAL_PASSTHROUGH"
     result = publisher.publish(prepared)
     assert result["published"] is False
@@ -721,15 +675,15 @@ def test_inventory_has_no_unknown_by_default():
         "http_write_to_issues_endpoint",
     ],
 )
-def test_no_silent_github_write_sink_in_source(
-    repo_root: Path, pattern_name: str
-):
+def test_no_silent_github_write_sink_in_source(repo_root: Path, pattern_name: str):
     from nexus.security.owner_representation_transport_inventory import (
         FORBIDDEN_PROGRAMMATIC_GITHUB_WRITE_PATTERNS,
     )
 
     pattern = next(
-        pat for pat, _name, _why in FORBIDDEN_PROGRAMMATIC_GITHUB_WRITE_PATTERNS if _name == pattern_name
+        pat
+        for pat, _name, _why in FORBIDDEN_PROGRAMMATIC_GITHUB_WRITE_PATTERNS
+        if _name == pattern_name
     )
     offenders: list[str] = []
     for py in sorted((repo_root / "nexus").rglob("*.py")) + sorted(
@@ -742,7 +696,9 @@ def test_no_silent_github_write_sink_in_source(
         # inventoried as human-facing guidance, never an invocation.
         if py.name == "morning_report.py":
             continue
-        for lineno, line in enumerate(py.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+        for lineno, line in enumerate(
+            py.read_text(encoding="utf-8", errors="replace").splitlines(), 1
+        ):
             if re.search(pattern, line):
                 offenders.append(f"{py.relative_to(repo_root)}:{lineno}")
     assert offenders == [], f"silent GitHub write sink matched {pattern}: {offenders}"
