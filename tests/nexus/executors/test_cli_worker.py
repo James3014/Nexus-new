@@ -107,6 +107,50 @@ def test_worker_rejects_commit_merge_and_push_commands(tmp_path):
         )
 
 
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("gh", "issue", "comment", "1", "--body", "x"),
+        ("gh", "--repo", "acme/demo", "issue", "edit", "1", "--title", "x"),
+        ("gh", "-R", "acme/demo", "issue", "comment", "1", "--body", "x"),
+        ("gh", "issue", "close", "1"),
+        ("gh", "pr", "comment", "1", "--body", "x"),
+        ("gh", "pr", "edit", "1", "--title", "x"),
+        ("gh", "pr", "close", "1"),
+        ("gh", "--repo", "acme/demo", "pr", "review", "1", "--approve"),
+        ("gh", "pr", "merge", "1"),
+        ("gh", "repo", "fork", "acme/demo"),
+    ],
+)
+def test_worker_rejects_github_followup_publication_verbs_before_spawn(tmp_path, monkeypatch, argv):
+    def no_spawn(*args, **kwargs):
+        raise AssertionError("forbidden command reached subprocess spawn")
+
+    monkeypatch.setattr("nexus.executors.cli_worker.subprocess.Popen", no_spawn)
+    gh = tmp_path / "gh"
+    gh.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    gh.chmod(0o700)
+    with pytest.raises(ValueError, match="gh"):
+        CliWorkerRequest(
+            executable=str(gh),
+            argv=argv[1:],
+            cwd=str(tmp_path),
+        )
+
+
+def test_worker_preserves_github_read_only_commands(tmp_path):
+    gh = tmp_path / "gh"
+    gh.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    gh.chmod(0o700)
+    request = CliWorkerRequest(
+        executable=str(gh),
+        argv=("issue", "view", "1"),
+        cwd=str(tmp_path),
+    )
+    assert request.command == (str(gh), "issue", "view", "1")
+    assert run_cli_worker(request).status is CliWorkerStatus.COMPLETED
+
+
 def test_explicit_gh_token_cannot_reenter_worker_environment(tmp_path):
     for key in ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_PAT"):
         with pytest.raises(ValueError, match="credential"):

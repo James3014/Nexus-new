@@ -28,9 +28,31 @@ _FORBIDDEN_SUBCOMMANDS = (
     ("git", "push"),
     ("git", "rebase"),
     ("gh", "issue", "create"),
+    ("gh", "issue", "comment"),
+    ("gh", "issue", "close"),
+    ("gh", "issue", "edit"),
+    ("gh", "issue", "delete"),
+    ("gh", "issue", "lock"),
+    ("gh", "issue", "pin"),
+    ("gh", "issue", "reopen"),
+    ("gh", "issue", "unlock"),
+    ("gh", "issue", "unpin"),
+    ("gh", "issue", "transfer"),
     ("gh", "pr", "create"),
+    ("gh", "pr", "comment"),
+    ("gh", "pr", "close"),
+    ("gh", "pr", "edit"),
+    ("gh", "pr", "lock"),
+    ("gh", "pr", "reopen"),
+    ("gh", "pr", "unlock"),
+    ("gh", "pr", "review"),
+    ("gh", "pr", "merge"),
+    ("gh", "pr", "ready"),
+    ("gh", "repo", "fork"),
     ("gh", "api"),
 )
+
+_GLOBAL_FLAGS_WITH_VALUES = frozenset({"--config", "--hostname", "--repo", "-r", "-R"})
 
 _INHERITED_ENV_ALLOWLIST = frozenset({
     "HOME",
@@ -78,11 +100,23 @@ def _validate_worker_argv(argv: Tuple[str, ...]) -> None:
     if not argv:
         raise ValueError("argv must be non-empty")
     normalized = tuple(str(item).strip().lower() for item in argv)
-    # Flag-only tokens are not part of a subcommand run (e.g.
-    # `gh --silent issue create`); ignoring them prevents a global-flag bypass
-    # while a forbidden subcommand must still appear as an adjacent run of
-    # verb tokens.
-    filtered = tuple(item for item in normalized if not item.startswith("-"))
+    # Ignore global options and their values (e.g. `gh --repo org/repo issue
+    # comment`) before matching a forbidden verb sequence.  Options after the
+    # verb are naturally irrelevant because the verb sequence has already
+    # matched.
+    filtered_items = []
+    index = 0
+    while index < len(normalized):
+        item = normalized[index]
+        if item.startswith("-"):
+            if "=" not in item and item in _GLOBAL_FLAGS_WITH_VALUES:
+                index += 2
+            else:
+                index += 1
+            continue
+        filtered_items.append(item)
+        index += 1
+    filtered = tuple(filtered_items)
     for block in _FORBIDDEN_SUBCOMMANDS:
         block_tuple = tuple(block)
         for index in range(len(filtered) - len(block_tuple) + 1):
