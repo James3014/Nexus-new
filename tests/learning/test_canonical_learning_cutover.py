@@ -15,7 +15,7 @@ from nexus.learning import learning_closure_effectiveness as legacy_closure
 from nexus.learning import learning_episode_projection as legacy_projection
 from nexus.learning import outcome_memory as legacy_memory
 
-CANONICAL_LEARNING_COMMIT = "b5993a128d720884aa51e71e6df75154a36854fa"
+CANONICAL_LEARNING_COMMIT = "8d29d31db63eccfda707e76cad31d88f2814b42d"
 
 
 def test_forwarding_facades_bind_canonical_symbol_identity() -> None:
@@ -163,3 +163,59 @@ def test_facade_rejects_corrupt_unterminated_tail_without_mutation_or_policy(
 
     assert storage.read_bytes() == history_before
     assert state_root.dynamic_policy_path.read_bytes() == policy_before
+
+
+def _closure_episode(episode_id: str) -> dict[str, object]:
+    episode = legacy_closure.normalize_learning_episode(
+        task_id=episode_id, attempt_id=f"attempt-{episode_id}"
+    )
+    episode["episode_id"] = episode_id
+    return episode
+
+
+def test_closure_facade_preserves_rows_across_unterminated_tail(tmp_path: Path) -> None:
+    first = _closure_episode("A")
+    second = _closure_episode("B")
+    third = _closure_episode("C")
+    path = legacy_closure.canonical_learning_episode_path(tmp_path)
+
+    assert legacy_closure.append_learning_episode(path, first) is True
+    path.write_bytes(path.read_bytes() + json.dumps(second).encode("utf-8"))
+    assert legacy_closure.append_learning_episode(path, third) is True
+
+    rows = legacy_closure.load_canonical_learning_episodes(tmp_path)
+    assert [row["episode_id"] for row in rows] == ["A", "B", "C"]
+
+
+def test_closure_facade_duplicate_after_tail_repair_is_idempotent(tmp_path: Path) -> None:
+    first = _closure_episode("A")
+    second = _closure_episode("B")
+    path = legacy_closure.canonical_learning_episode_path(tmp_path)
+
+    assert legacy_closure.append_learning_episode(path, first) is True
+    path.write_bytes(path.read_bytes() + json.dumps(second).encode("utf-8"))
+    assert legacy_closure.append_learning_episode(path, _closure_episode("C")) is True
+    before = path.read_bytes()
+
+    assert legacy_closure.append_learning_episode(path, _closure_episode("C")) is True
+    assert path.read_bytes() == before
+    assert [
+        row["episode_id"] for row in legacy_closure.load_canonical_learning_episodes(tmp_path)
+    ] == [
+        "A",
+        "B",
+        "C",
+    ]
+
+
+@pytest.mark.parametrize("tail", [b'{"episode_id":"partial"', b"not-json", b"[]"])
+def test_closure_facade_rejects_invalid_unterminated_tail_preserving_bytes(
+    tmp_path: Path, tail: bytes
+) -> None:
+    path = legacy_closure.canonical_learning_episode_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(tail)
+    before = path.read_bytes()
+
+    assert legacy_closure.append_learning_episode(path, _closure_episode("C")) is False
+    assert path.read_bytes() == before
