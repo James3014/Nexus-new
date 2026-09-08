@@ -230,7 +230,9 @@ def test_semantic_missing_or_malformed_attestation_fails_closed_without_redispat
         expected_artifact_sha256=_RUNTIME_HASH,
     )
 
-    result = transport.invoke("prompt") if operation == "semantic_run" else transport.reconcile("prompt")
+    result = (
+        transport.invoke("prompt") if operation == "semantic_run" else transport.reconcile("prompt")
+    )
 
     assert result.status == "OPEN_SWE_MODEL_ATTESTATION_MISMATCH"
     assert result.outcome_unknown is True
@@ -278,7 +280,9 @@ def test_semantic_single_identity_mismatch_fails_closed(
         expected_artifact_sha256=_RUNTIME_HASH,
     )
 
-    result = transport.invoke("prompt") if operation == "semantic_run" else transport.reconcile("prompt")
+    result = (
+        transport.invoke("prompt") if operation == "semantic_run" else transport.reconcile("prompt")
+    )
 
     assert result.status == "OPEN_SWE_MODEL_ATTESTATION_MISMATCH"
     assert result.outcome_unknown is True
@@ -949,10 +953,12 @@ def test_open_swe_optional_dependency_contract_is_exactly_pinned():
 def test_real_deepagents_toolnode_is_physically_read_only_when_optional_extra_installed(tmp_path):
     pytest.importorskip("deepagents")
     runtime = _external_runtime_module()
-    assert runtime.SEMANTIC_TOOLS == frozenset({
-        "glob",
-        "grep",
-        "ls",
-        "read_file",
-        "record_finding",
-    })
+    assert runtime.SEMANTIC_TOOLS == frozenset(
+        {
+            "glob",
+            "grep",
+            "ls",
+            "read_file",
+            "record_finding",
+        }
+    )
