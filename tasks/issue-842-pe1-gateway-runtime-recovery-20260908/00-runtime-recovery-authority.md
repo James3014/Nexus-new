@@ -5,7 +5,8 @@ task_id: ISSUE-842-PE1-GATEWAY-RUNTIME-RECOVERY
 campaign_id: issue-842-pe1-gateway-runtime-recovery-20260908
 issue: 842
 repository: James3014/Nexus-new
-status: ACTIVE
+status: SUPERSEDED_BY_SOURCE_DRIFT
+superseded_by: 01-runtime-recovery-authority-r2.md
 execution_lane: GOVERNED
 auto_chain: false
 commit_required: true
@@ -140,3 +141,11 @@ extra path/deletion, unknown external effect, failed required check, authority
 mirror ambiguity, or observed DevSpace/Open SWE effect.
 
 `AUTO_CHAIN=false`.
+
+## Supersession record
+
+Candidate `0a4a7d696aee93ba31c196e3ac17dfdb9b3b53f5` was internally
+valid relative to its frozen source, but independent review returned
+`ACCEPTANCE_BLOCKED` after remote main advanced through material readiness
+dependencies. No receipt was merged or materialized and no recovery effect
+began. Card `01-runtime-recovery-authority-r2.md` is the sole active successor.
