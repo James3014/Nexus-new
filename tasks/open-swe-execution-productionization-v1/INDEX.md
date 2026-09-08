@@ -1,15 +1,15 @@
 # Open SWE Execution Productionization V1
 
 - **Campaign ID:** `CAMPAIGN-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1`
-- **Status:** `H11_CONTRACT_FROZEN_H12_ACTIVE`
+- **Status:** `TASK_006_RESIDENT_ACTIVATION_ACTIVE`
 - **Source mode:** `VALIDATED_SPEC`
 - **Source spec ID:** `SPEC-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1`
 - **Source spec SHA-256:** `17e2b27e2ad57d02cd33fd37d0c7d97a29a1ff14e182d7661b141baf9f925d74`
 - **Source basis snapshot:** `James3014/Nexus-new@c00c299152599a87efd831c3e146ecadd8f8b21f`; pilot evidence `764333bcbed67e5b83870d5ceeb8e9d70f7e749f`; Open SWE `4bed1112362d4ce74db86e704329fda0f3412b69`; Deep Agents `0.7.6`.
 - **Auto-chain:** `false`
 - **Parallel execution:** `false`
-- **Current frontier:** `TASK-005`
-- **Maximum campaign claim:** `EXTERNAL_RUNTIME_CONFIRMED`; the corrective external-runtime architecture and dormant ChatGPT Web model bridge are integrated. Current work hardens explicit OpenCLI transport binding and post-integration Web qualification. No GPT Web default activation, OpenCLI retirement, release, deployment, or production-readiness claim is authorized by this state.
+- **Current frontier:** `TASK-006`
+- **Maximum campaign claim:** `RESIDENT_OPEN_SWE_AUTOMATION_READY_FOR_FIVE_MOUNTED_REPOSITORIES`; this requires fresh source/config/runtime/PID-bound readiness plus a harmless unattended canary. It does not approve or merge repository Candidates and does not establish release or public production readiness.
 
 ## 1. Source handoff import
 
@@ -49,19 +49,21 @@
 | TASK-002 | COMPLETED | PROOF | PROOF_SPIKE | TASK-001 | EVIDENCE | Qualified portable credential-isolated execution evidence | Portable credential-isolated backend passes real model qualification. | Live backend qualification. | Portable backend qualified; no activation. | small | VERIFY | COMPLETE |
 | TASK-003 | COMPLETED | IMPLEMENTATION | TRACER_BULLET | TASK-001 | CONTRACT | Qualified diagnosis/repair Candidate path evidence | Diagnosis/repair uses Open SWE execution while Nexus retains queue/replay/Candidate acceptance. | Real bounded canary + independent verification. | Diagnosis/repair Candidate path qualified. | medium | CANDIDATE | COMPLETE |
 | TASK-004 | COMPLETED | INTEGRATION_VERIFY | TRACER_BULLET | TASK-002; TASK-003 | EVIDENCE; EVIDENCE | G8 portfolio + G9 adjudication | Minimum three-canary portfolio and artifact-aware attribution complete. | Canary portfolio audit. | `READY_FOR_ACTIVATION_DECISION`. | medium | VERIFY | COMPLETE |
-| TASK-005 | ACTIVE | IMPLEMENTATION | TRACER_BULLET | none | none | Owner-authorized Issue #695 Ready reconciliation | ChatGPT Web transport enforces explicit 1.8.7 binding, conservative pacing, bounded turns, and fail-closed retry/reconciliation behavior. | Deterministic fake-clock and negative-control tests plus exact Candidate verification. | `IMPLEMENTER_PASS_PENDING_ACCEPTANCE`. | medium | CANDIDATE | READY |
+| TASK-005 | SUPERSEDED_AT_ACTIVATION_GATE | IMPLEMENTATION | TRACER_BULLET | none | none | Owner-authorized Issue #695 Ready reconciliation | ChatGPT Web transport enforces explicit 1.8.7 binding, conservative pacing, bounded turns, and fail-closed retry/reconciliation behavior. | Deterministic fake-clock and negative-control tests plus exact Candidate verification. | Historical hardening evidence only; its `persistent`/`very-high` activation assumptions are superseded. | medium | CANDIDATE | HISTORICAL |
+| TASK-006 | ACTIVE | INTEGRATION_ACTIVATION | TRACER_BULLET | TASK-005 bounded Web evidence | EVIDENCE | Owner-authorized Issue #850 | Resident External Intelligence uses Open SWE through OpenCLI/ChatGPT Web and mounts five exact repositories. | Exact source/runtime/config/launchd identity, five-repo mount preflight, and unattended canary. | `RESIDENT_OPEN_SWE_AUTOMATION_READY_FOR_FIVE_MOUNTED_REPOSITORIES`. | medium | CANDIDATE | READY |
 
 ## 4. Ready candidates and frontier selection
 
-- **Dependency-ready candidates:** `TASK-005`.
-- **Selected frontier:** `TASK-005`.
-- **Selection rationale:** the external-runtime corrective architecture is already integrated, and PR #688 integrated the dormant ChatGPT Web model bridge without changing Nexus authority. Current evidence shows the next correctness boundary is explicit controller-to-runtime binding for OpenCLI executable/profile/site-session/timeout plus post-integration runtime qualification.
-- **Exact unblock condition:** bind OpenCLI transport identity explicitly through the external runtime request contract, independently accept and integrate that bounded change, then complete process-death/reconciliation and real Web semantic/diagnosis/repair witnesses before any default-activation decision.
+- **Dependency-ready candidates:** `TASK-006`.
+- **Selected frontier:** `TASK-006`.
+- **Selection rationale:** bounded semantic and worker canaries verified the external runtime through OpenCLI/ChatGPT Web, and Issue #850 supplies the explicit Owner decision to integrate that correction into the resident service and mount five repositories.
+- **TASK-006 rationale:** Issue #850 is the explicit Owner activation decision after bounded semantic and worker Web qualification. It supersedes TASK-005 activation assumptions only where live evidence selected `balanced` plus `ephemeral`; TASK-005 remains historical hardening evidence and does not itself authorize deployment.
+- **Exact unblock condition:** independently accept and merge the Issue #850 source Candidate, install and identity-bind the durable runtime, mount all five exact repository roots, restart the service from a clean deployment checkout, obtain fresh readiness, and complete one unattended canary.
 
 ## 5. Campaign authority and non-goals
 
-TASK-001 through TASK-004 remain historical completed snapshots of the original productionization campaign, and their in-process dependency/runtime topology remains superseded. The corrective external-runtime architecture and dormant ChatGPT Web bridge are now integrated; the active bounded frontier is explicit OpenCLI transport binding plus post-integration Web qualification under Bootstrap Governance. Open SWE receives no route-selection, Workforce Admission, GitHub mutation, approval, release, deploy, or production-claim authority. Runtime/default activation remains a separate later gate.
+TASK-001 through TASK-004 remain historical completed snapshots of the original productionization campaign, and their in-process dependency/runtime topology remains superseded. TASK-005 remains historical transport-hardening evidence; its activation assumptions are superseded by actual bounded Web qualification and the explicit Owner decision in Issue #850. TASK-006 is the resident activation frontier. Open SWE receives no route-selection, Workforce Admission, approval, merge, release, or public production-claim authority.
 
 ## 6. Supersession and change history
 
-Compiled on 2026-08-31 from `SPEC-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1` SHA-256 `17e2b27e2ad57d02cd33fd37d0c7d97a29a1ff14e182d7661b141baf9f925d74`. Pilot Candidate `764333bc...` is evidence only and is not imported as production code authority. On 2026-09-01, a corrective Owner handoff established that Pilot import mechanics did not prove production deployment topology; `OPEN_SWE_EXTERNAL_RUNTIME_CORRECTIVE_CONTRACT.md` supersedes in-process dependency/runtime instructions while preserving the historical Task Card records and settled Nexus authority boundaries. On 2026-09-03, `NEXUS_CONTROLLER_HANDOFF_V2` plus the Owner-authorized sanitized Ready reconciliation on Issue #695 froze H11 and activated TASK-005 on current-main `dc315c38562834923729dcb45bd2b85344c35bc9`. OpenCLI `1.8.7` is an explicit Owner-approved roadmap delta from unavailable npm `1.8.8`. A later explicit Owner decision on 2026-09-03 expanded TASK-005 to preserve pacing across Open SWE subprocess and runtime-restart boundaries using only hashed lock/state under the existing `runtime_state_root`; it forbids profile/session plaintext and any new queue/router authority.
+Compiled on 2026-08-31 from `SPEC-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1` SHA-256 `17e2b27e2ad57d02cd33fd37d0c7d97a29a1ff14e182d7661b141baf9f925d74`. Pilot Candidate `764333bc...` is evidence only and is not imported as production code authority. On 2026-09-01, a corrective Owner handoff established that Pilot import mechanics did not prove production deployment topology; `OPEN_SWE_EXTERNAL_RUNTIME_CORRECTIVE_CONTRACT.md` supersedes in-process dependency/runtime instructions while preserving the historical Task Card records and settled Nexus authority boundaries. On 2026-09-03, `NEXUS_CONTROLLER_HANDOFF_V2` plus the Owner-authorized sanitized Ready reconciliation on Issue #695 froze H11 and activated TASK-005 on current-main `dc315c38562834923729dcb45bd2b85344c35bc9`. OpenCLI `1.8.7` is an explicit Owner-approved roadmap delta from unavailable npm `1.8.8`. A later explicit Owner decision on 2026-09-03 expanded TASK-005 to preserve pacing across Open SWE subprocess and runtime-restart boundaries using only hashed lock/state under the existing `runtime_state_root`; it forbids profile/session plaintext and any new queue/router authority. On 2026-09-08, bounded Web acceptance plus explicit Owner Issue #850 superseded TASK-005's activation assumptions with `balanced`/`ephemeral` and activated TASK-006 for resident five-repository integration.
