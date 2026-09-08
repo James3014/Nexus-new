@@ -454,11 +454,15 @@ def _resolve_policy_workforce_bindings(
     )
     bindings: dict[str, Any] = {}
     providers: dict[str, str] = {}
+    seen_channels: set[str] = set()
     for demand in demands:
         if not isinstance(demand, Mapping):
             raise ValueError("canonical_workforce_demand_malformed")
         channel = str(demand.get("execution_channel") or "")
         role = str(demand.get("requested_role") or "")
+        if channel in seen_channels:
+            raise ValueError(f"canonical_workforce_demand_conflict:{channel}")
+        seen_channels.add(channel)
         if channel == "online":
             # Use campaign-aware resolution for online channel
             worker_id = policy.resolve_route(role, campaign_id=campaign_id)
