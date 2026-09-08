@@ -90,12 +90,33 @@ def test_precommit_staged_file_discovery_failure_blocks(monkeypatch) -> None:
 class TestHardLane:
     """Hard lane: public claim, cutover, 3B promotion, evidence verifier."""
 
-    def test_hard_lane_modify_without_drill_blocked(self):
+    def test_hard_lane_modify_without_drill_blocked(self, monkeypatch):
         """Hard lane: modify without rollback drill → BLOCK."""
         result = check_lane_gate("P-TEST-NODRILL-01", "modify")
         assert result["allowed"] is False
         assert result["lane"] == "hard"
         assert "ROLLBACK_DRILL_MISSING" in result["errors"]
+
+        original = load_manifest()
+        tampered = {
+            **original,
+            "policies": [
+                {
+                    **policy,
+                    "test_entrypoints": [],
+                }
+                if policy["policy_id"] == "P-GATE-03"
+                else policy
+                for policy in original["policies"]
+            ],
+        }
+        monkeypatch.setattr(
+            "scripts.ops.check_policy_lane_gate.load_manifest",
+            lambda: tampered,
+        )
+        hostile = check_lane_gate("P-GATE-03", "modify")
+        assert hostile["allowed"] is False
+        assert "TEST_COVERAGE_MISSING" in hostile["errors"]
 
     def test_hard_lane_modify_with_drill_allowed(self):
         """Hard lane: modify with rollback drill → ALLOW (for P-GATE-03 which has drill)."""

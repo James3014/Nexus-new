@@ -55,6 +55,14 @@ def test_admission_decision_enum_values() -> None:
     assert result["overall_decision"] == AdmissionDecision.ALLOW.value
     assert result["records"][0]["decision"] == AdmissionDecision.ALLOW.value
 
+    hostile = evaluate_committee_member_admission(
+        [_member_demand(route_authority="HostileRouter")],
+        bindings={"member-a": _member_binding()},
+    )
+    assert hostile["overall_decision"] == AdmissionDecision.BLOCK.value
+    assert hostile["records"][0]["decision"] == AdmissionDecision.BLOCK.value
+    assert "Route authorization required" in hostile["records"][0]["reasons"][0]
+
 
 class _WrongEnumFamily(Enum):
     YES = "YES"
