@@ -118,9 +118,11 @@ class FakeSidecar:
         self.store = store
         self.calls = []
         self.non_dispatched = non_dispatched
+        self.worker_bindings = []
 
-    def analyze(self, record, sources):
+    def analyze(self, record, sources, selected_worker=None):
         self.calls.append((record, list(sources)))
+        self.worker_bindings.append(selected_worker)
         if self.non_dispatched:
             return {"status": "NOT_DISPATCHED", "intake": {"disposition": "BLOCKED"}}
         envelope = {"schema": "external_execution_envelope.v1", "x": 1}
@@ -418,8 +420,14 @@ def test_recoverable_dispatching_state_resumes_pipeline(tmp_path, state):
     d = FakeD()
     automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
     item = IssueWorkItem("o/r", 7, "title", body, contract)
+    binding = automation._canonical_worker_binding(
+        item, Path("tasks/x.md"), card.read_text(encoding="utf-8")
+    )
+    automation._worker_binding = binding
     effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
-    automation.state_store.save(item, state, intelligence_effect_id=effect_id)
+    automation.state_store.save(
+        item, state, intelligence_effect_id=effect_id, worker_binding=binding
+    )
 
     result = automation.run_issue("o/r", 7, "title", body)
 
@@ -437,8 +445,14 @@ def test_fanout_dispatching_fence_rejects_changed_issue_context_before_any_stage
     d = FakeD()
     automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
     item = IssueWorkItem("o/r", 805, "title", body, contract)
+    binding = automation._canonical_worker_binding(
+        item, Path("tasks/x.md"), card.read_text(encoding="utf-8")
+    )
+    automation._worker_binding = binding
     old_effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
-    automation.state_store.save(item, "FANOUT_DISPATCHING", intelligence_effect_id=old_effect_id)
+    automation.state_store.save(
+        item, "FANOUT_DISPATCHING", intelligence_effect_id=old_effect_id, worker_binding=binding
+    )
 
     changed_body = _body(contract).replace("issue prose", "changed issue prose and context")
     result = automation.run_issue("o/r", 805, "title", changed_body)
@@ -472,12 +486,17 @@ def test_recoverable_reconciliation_required_resumes_from_fanout(tmp_path):
     d = FakeD()
     automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
     item = IssueWorkItem("o/r", 8, "title", body, contract)
+    binding = automation._canonical_worker_binding(
+        item, Path("tasks/x.md"), card.read_text(encoding="utf-8")
+    )
+    automation._worker_binding = binding
     effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
     automation.state_store.save(
         item,
         "RECONCILIATION_REQUIRED",
         prior_state="FANOUT_DISPATCHING",
         intelligence_effect_id=effect_id,
+        worker_binding=binding,
         semantic_dispatched=True,
     )
 
@@ -494,11 +513,16 @@ def test_dispatching_fence_rejects_changed_issue_context_before_new_sidecar_invo
     sidecar = FakeSidecar(store)
     automation = _automation(tmp_path, repo, store, sidecar=sidecar)
     item = IssueWorkItem("o/r", 801, "title", body, contract)
+    binding = automation._canonical_worker_binding(
+        item, Path("tasks/x.md"), card.read_text(encoding="utf-8")
+    )
+    automation._worker_binding = binding
     old_effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
     automation.state_store.save(
         item,
         "INTELLIGENCE_DISPATCHING",
         intelligence_effect_id=old_effect_id,
+        worker_binding=binding,
     )
 
     changed_body = _body(contract).replace("issue prose", "changed issue prose and context")
@@ -532,11 +556,13 @@ def test_same_persisted_effect_id_without_lower_attempt_allows_one_first_invoke(
     sidecar = FakeSidecar(store)
     automation = _automation(tmp_path, repo, store, sidecar=sidecar)
     item = IssueWorkItem("o/r", 803, "title", body, contract)
+    binding = automation._canonical_worker_binding(
+        item, Path("tasks/x.md"), card.read_text(encoding="utf-8")
+    )
+    automation._worker_binding = binding
     effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
     automation.state_store.save(
-        item,
-        "INTELLIGENCE_DISPATCHING",
-        intelligence_effect_id=effect_id,
+        item, "INTELLIGENCE_DISPATCHING", intelligence_effect_id=effect_id, worker_binding=binding
     )
 
     result = automation.run_issue("o/r", 803, "title", body)
@@ -550,12 +576,17 @@ def test_reconciliation_required_resumes_lower_intelligence_reconcile_without_in
     sidecar = FakeSidecar(store)
     automation = _automation(tmp_path, repo, store, sidecar=sidecar)
     item = IssueWorkItem("o/r", 804, "title", body, contract)
+    binding = automation._canonical_worker_binding(
+        item, Path("tasks/x.md"), card.read_text(encoding="utf-8")
+    )
+    automation._worker_binding = binding
     effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
     automation.state_store.save(
         item,
         "RECONCILIATION_REQUIRED",
         prior_state="INTELLIGENCE_DISPATCHING",
         intelligence_effect_id=effect_id,
+        worker_binding=binding,
     )
 
     result = automation.run_issue("o/r", 804, "title", body)
@@ -592,7 +623,7 @@ def test_process_started_uncertainty_remains_reconcile_only_on_repoll(tmp_path):
             super().__init__(store)
             self.attempts = 0
 
-        def analyze(self, record, sources):
+        def analyze(self, record, sources, selected_worker=None):
             self.attempts += 1
             if self.attempts == 1:
                 self.calls.append((record, list(sources)))
@@ -1479,6 +1510,200 @@ def test_homogeneous_bound_worker_contract_validation():
     )
     with pytest.raises(AutomationError, match="ISSUE_CONTRACT_UNIT_WORKER_MISMATCH"):
         parse_issue_contract(_body(c_divergent))
+
+
+def _canonical_result(worker_id="canonical/worker"):
+    """Small deterministic seam result; Issue-provided workers are deliberately different."""
+    return {
+        "binding": {
+            "demand_id": "demand-canonical",
+            "worker_id": worker_id,
+            "provider": "canonical-provider",
+            "model": "canonical-provider/model",
+            "policy_hash": "1" * 64,
+            "binding_hash": "2" * 64,
+            "aggregate_binding_hash": "3" * 64,
+        },
+        "planner_output": {"decision_hash": "4" * 64, "planner": "canonical"},
+        "workforce_admission": {
+            "overall_decision": "ALLOW",
+            "records": [
+                {
+                    "decision": {
+                        "decision": "ALLOW",
+                        "resolved_worker_id": worker_id,
+                        "resolved_provider": "canonical-provider",
+                        "resolved_model": "canonical-provider/model",
+                    }
+                }
+            ],
+            "decision": "ALLOW",
+            "admission": "canonical",
+        },
+        "workforce_demands": {"demands": [{"requested_role": "bounded worker"}]},
+    }
+
+
+def test_issue_workers_never_override_canonical_binding_in_sidecar_or_fanout(tmp_path, monkeypatch):
+    import nexus.services.external_intelligence_automation as module
+
+    repo, _, original_contract, body, store = _setup(tmp_path)
+    forged = {
+        "worker_id": "issue/forged",
+        "provider": "issue-provider",
+        "model": "issue-provider/model",
+        "role_ceiling": "forged",
+        "admission_evidence_ref": "issue-admission",
+        "admission_evidence_hash": "a" * 64,
+        "selection_evidence_ref": "issue-selection",
+        "selection_evidence_hash": "b" * 64,
+    }
+    contract = dict(original_contract)
+    contract.update(
+        selected_worker=forged,
+        execution_units=[
+            {"unit_id": "u1", "mutation_paths": ["nexus/a.py"], "selected_worker": forged},
+            {"unit_id": "u2", "mutation_paths": ["tests/test_a.py"], "selected_worker": forged},
+        ],
+    )
+    # Recreate a valid card hash/main SHA after replacing the test contract only.
+    body = _body(contract)
+    canonical = _canonical_result()
+    monkeypatch.setattr(module, "build_canonical_planner_admission", lambda **_: canonical)
+    sidecar = FakeSidecar(store)
+    c = FakeC()
+    result = _automation(tmp_path, repo, store, sidecar=sidecar, c=c).run_issue(
+        "o/r", 901, "title", body
+    )
+    assert result["state"] == "COMPLETE"
+    expected = result["worker_binding"]
+    assert sidecar.worker_bindings == [expected]
+    assert sidecar.worker_bindings[0]["worker_id"] == "canonical/worker"
+    units, _ = c.calls[0]
+    assert [unit["selected_worker"] for unit in units] == [expected, expected]
+
+
+@pytest.mark.parametrize("failure", ["exception", "malformed", "blocked"])
+def test_canonical_planner_failure_blocks_before_any_effect(tmp_path, monkeypatch, failure):
+    import nexus.services.external_intelligence_automation as module
+
+    repo, _, _, body, store = _setup(tmp_path)
+    if failure == "exception":
+
+        def planner(**_kwargs):
+            raise RuntimeError("planner unavailable")
+
+    elif failure == "malformed":
+
+        def planner(**_kwargs):
+            return {"binding": {}}
+
+    else:
+
+        def planner(**_kwargs):
+            return {**_canonical_result(), "workforce_admission": {"decision": "BLOCK"}}
+
+    monkeypatch.setattr(module, "build_canonical_planner_admission", planner)
+    sidecar, c, d = FakeSidecar(store), FakeC(), FakeD()
+    result = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d).run_issue(
+        "o/r", 902, "title", body
+    )
+    assert result["state"] == "BLOCKED"
+    assert sidecar.calls == [] and c.calls == [] and d.calls == []
+
+
+class _MismatchingTransport:
+    def bind_worker(self, _worker):
+        raise RuntimeError("MODEL_SUBSTITUTION_FORBIDDEN")
+
+
+class _TransportBackedC(FakeC):
+    transport = _MismatchingTransport()
+
+
+def test_transport_binding_mismatch_blocks_before_sidecar(tmp_path, monkeypatch):
+    import nexus.services.external_intelligence_automation as module
+
+    repo, _, _, body, store = _setup(tmp_path)
+    monkeypatch.setattr(
+        module, "build_canonical_planner_admission", lambda **_: _canonical_result()
+    )
+    sidecar, c = FakeSidecar(store), _TransportBackedC()
+    result = _automation(tmp_path, repo, store, sidecar=sidecar, c=c).run_issue(
+        "o/r", 903, "title", body
+    )
+    assert result["state"] == "BLOCKED"
+    assert sidecar.calls == [] and c.calls == []
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        "INTELLIGENCE_DISPATCHING",
+        "INTELLIGENCE_COMPLETED",
+        "FANOUT_DISPATCHING",
+        "FANOUT_COMPLETED",
+    ],
+)
+@pytest.mark.parametrize("binding_case", ["missing", "drifted"])
+def test_effectful_state_binding_replay_is_reconcile_only(
+    tmp_path, monkeypatch, state, binding_case
+):
+    import nexus.services.external_intelligence_automation as module
+
+    repo, card, contract, body, store = _setup(tmp_path)
+    monkeypatch.setattr(
+        module, "build_canonical_planner_admission", lambda **_: _canonical_result()
+    )
+    sidecar, c, d = FakeSidecar(store), FakeC(), FakeD()
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
+    item = IssueWorkItem("o/r", 904, "title", body, contract)
+    text = card.read_text(encoding="utf-8")
+    effect_id = automation._intelligence_effect_id(item, text)
+    persisted = (
+        None
+        if binding_case == "missing"
+        else {**_canonical_result()["binding"], "worker_id": "drifted"}
+    )
+    automation.state_store.save(
+        item, state, intelligence_effect_id=effect_id, worker_binding=persisted
+    )
+    result = automation.run_issue("o/r", 904, "title", body)
+    assert result["state"] == "RECONCILIATION_REQUIRED"
+    assert result["reconcile_only"] is True
+    assert sidecar.calls == [] and c.calls == [] and d.calls == []
+
+
+def test_non_executable_intake_does_not_invoke_canonical_planner(tmp_path, monkeypatch):
+    import nexus.services.external_intelligence_automation as module
+
+    repo, _, contract, _, store = _setup(tmp_path, ready=False)
+    calls = []
+    monkeypatch.setattr(module, "build_canonical_planner_admission", lambda **_: calls.append(1))
+    sidecar = FakeSidecar(store, non_dispatched=True)
+    result = _automation(tmp_path, repo, store, sidecar=sidecar).run_issue(
+        "o/r", 905, "title", _body(contract)
+    )
+    assert result["state"] == "BLOCKED"
+    assert calls == []
+
+
+def test_corrupt_canonical_evidence_fails_before_sidecar(tmp_path, monkeypatch):
+    import nexus.services.external_intelligence_automation as module
+
+    repo, _, _, body, store = _setup(tmp_path)
+    canonical = _canonical_result()
+    monkeypatch.setattr(module, "build_canonical_planner_admission", lambda **_: canonical)
+    sidecar = FakeSidecar(store)
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar)
+    first = automation.run_issue("o/r", 906, "title", body)
+    assert first["state"] == "COMPLETE"
+    artifact = next((tmp_path / "state" / "canonical-workforce-evidence").glob("planner-*.json"))
+    artifact.write_text(json.dumps({"corrupted": True}), encoding="utf-8")
+    # A fresh issue identity forces the persisted evidence readback to be checked again.
+    result = automation.run_issue("o/r", 907, "title", body)
+    assert result["state"] == "BLOCKED"
+    assert len(sidecar.calls) == 1
 
 
 def test_exact_source_grounding_reads_git_blob_from_main_sha_not_filesystem(tmp_path):
