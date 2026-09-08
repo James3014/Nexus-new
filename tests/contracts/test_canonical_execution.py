@@ -481,13 +481,37 @@ def test_real_capability_planner_produces_bound_canonical_projection():
     assert projection.decision_hash == decision.decision_hash
 
 
-def test_context_budget_rejects_policy_or_memory_injection():
-    with pytest.raises(ValueError, match="canonical_context_budget_key_forbidden:learning_policy"):
+def test_context_budget_accepts_policy_data_but_rejects_unknown_or_authority_keys():
+    accepted = CanonicalTaskContext(
+        task_id="task-policy-data",
+        task_type="bugfix",
+        task_desc="Carry governed policy evidence as planner input.",
+        budget={
+            "learning_policy": {"promoted_capabilities": ["memory"]},
+            "policy_overlay": {"source": "governed-evidence"},
+        },
+    )
+    assert accepted.budget["learning_policy"]["promoted_capabilities"] == ("memory",)
+    assert accepted.budget["policy_overlay"]["source"] == "governed-evidence"
+
+    for forbidden_key, error in (
+        ("memory", "canonical_context_budget_key_forbidden:memory"),
+        ("route_override", "canonical_context_route_override_forbidden:budget.route_override"),
+    ):
+        with pytest.raises(ValueError, match=error):
+            CanonicalTaskContext(
+                task_id="task-1",
+                task_type="bugfix",
+                task_desc="Reject an unknown or authority-bearing budget key.",
+                budget={forbidden_key: {"promoted_capabilities": ["swarm"]}},
+            )
+
+    with pytest.raises(ValueError, match="canonical_context_route_override_forbidden:budget.execution_topology"):
         CanonicalTaskContext(
             task_id="task-1",
             task_type="bugfix",
             task_desc="Fix a bounded parser defect.",
-            budget={"learning_policy": {"promoted_capabilities": ["swarm"]}},
+            budget={"execution_topology": "alternate"},
         )
 
 
