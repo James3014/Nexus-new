@@ -174,26 +174,30 @@ def test_semantic_model_attestation_mismatch_fails_closed(tmp_path, monkeypatch)
 
 
 @pytest.mark.parametrize(
-    ("field", "value"),
+    ("operation", "field", "value"),
     (
-        ("provider_id", _MISSING),
-        ("provider_id", None),
-        ("provider_id", ""),
-        ("provider_id", "   "),
-        ("provider_id", {"provider": "google_genai"}),
-        ("provider_id", 42),
-        ("provider_id", False),
-        ("model_id", _MISSING),
-        ("model_id", None),
-        ("model_id", ""),
-        ("model_id", "   "),
-        ("model_id", ["gemini-test"]),
-        ("model_id", 42),
-        ("model_id", False),
+        (operation, field, value)
+        for operation in ("semantic_run", "semantic_reconcile")
+        for field, value in (
+            ("provider_id", _MISSING),
+            ("provider_id", None),
+            ("provider_id", ""),
+            ("provider_id", "   "),
+            ("provider_id", {"provider": "google_genai"}),
+            ("provider_id", 42),
+            ("provider_id", False),
+            ("model_id", _MISSING),
+            ("model_id", None),
+            ("model_id", ""),
+            ("model_id", "   "),
+            ("model_id", ["gemini-test"]),
+            ("model_id", 42),
+            ("model_id", False),
+        )
     ),
 )
 def test_semantic_missing_or_malformed_attestation_fails_closed_without_redispatch(
-    tmp_path, monkeypatch, field, value
+    tmp_path, monkeypatch, operation, field, value
 ):
     module = _module()
     calls = []
@@ -226,11 +230,114 @@ def test_semantic_missing_or_malformed_attestation_fails_closed_without_redispat
         expected_artifact_sha256=_RUNTIME_HASH,
     )
 
+    result = transport.invoke("prompt") if operation == "semantic_run" else transport.reconcile("prompt")
+
+    assert result.status == "OPEN_SWE_MODEL_ATTESTATION_MISMATCH"
+    assert result.outcome_unknown is True
+    assert calls == ["identity", operation]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (("provider_id", "other-provider"), ("model_id", "other-model")),
+)
+def test_semantic_single_identity_mismatch_fails_closed(tmp_path, monkeypatch, field, value):
+    module = _module()
+
+    def runtime_call(*_args, **_kwargs):
+        payload = _args[1]
+        if payload["operation"] == "identity":
+            return _identity(module, payload), "", False, ""
+        result = {
+            "schema": module.PROTOCOL_RESULT_SCHEMA,
+            "kind": "semantic",
+            "status": "INTELLIGENCE_COMPLETED",
+            "provider_id": "google_genai",
+            "model_id": "gemini-test",
+        }
+        result[field] = value
+        return result, "", True, ""
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEExternalIntelligenceTransport(
+        repository_root=tmp_path,
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable=_RUNTIME_EXECUTABLE,
+        expected_artifact_sha256=_RUNTIME_HASH,
+    )
+
+    result = transport.reconcile("prompt")
+
+    assert result.status == "OPEN_SWE_MODEL_ATTESTATION_MISMATCH"
+    assert result.outcome_unknown is True
+    assert result.retry_safe is False
+
+
+def test_semantic_reconcile_accepts_valid_explicit_attestation(tmp_path, monkeypatch):
+    module = _module()
+
+    def runtime_call(*_args, **_kwargs):
+        payload = _args[1]
+        if payload["operation"] == "identity":
+            return _identity(module, payload), "", False, ""
+        return (
+            {
+                "schema": module.PROTOCOL_RESULT_SCHEMA,
+                "kind": "semantic",
+                "status": "INTELLIGENCE_COMPLETED",
+                "provider_id": "google_genai",
+                "model_id": "gemini-test",
+                "raw": "{}",
+            },
+            "",
+            True,
+            "",
+        )
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEExternalIntelligenceTransport(
+        repository_root=tmp_path,
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable=_RUNTIME_EXECUTABLE,
+        expected_artifact_sha256=_RUNTIME_HASH,
+    )
+
+    result = transport.reconcile("prompt")
+
+    assert result.status == "INTELLIGENCE_COMPLETED"
+    assert result.outcome_unknown is False
+
+
+def test_semantic_subprocess_json_missing_attestation_fails_closed(tmp_path):
+    module = _module()
+    script = tmp_path / "runtime.py"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "request = json.load(sys.stdin)\n"
+        "if request['operation'] == 'identity':\n"
+        "    result = {'schema': 'nexus.open_swe_runtime.result.v1', 'kind': 'identity', 'status': 'IDENTIFIED', 'distribution_name': 'nexus-open-swe-runtime', 'distribution_version': 'test', 'runtime_protocol_version': 'nexus.open_swe_runtime.request.v1', 'authority_boundary': 'execution_runtime_only', 'process_started': False, 'outcome_unknown': False, 'retry_safe': True, 'artifact_identity': {'module_file': '/opt/runtime.py', 'module_sha256': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'deepagents_version': 'test'}}\n"
+        "else:\n"
+        "    result = {'schema': 'nexus.open_swe_runtime.result.v1', 'kind': 'semantic', 'status': 'INTELLIGENCE_COMPLETED', 'raw': '{}'}\n"
+        "print(json.dumps(result))\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    transport = module.OpenSWEExternalIntelligenceTransport(
+        repository_root=tmp_path,
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable=str(script),
+        expected_artifact_sha256=_RUNTIME_HASH,
+    )
+
     result = transport.invoke("prompt")
 
     assert result.status == "OPEN_SWE_MODEL_ATTESTATION_MISMATCH"
     assert result.outcome_unknown is True
-    assert calls == ["identity", "semantic_run"]
+    assert result.retry_safe is False
 
 
 def test_runtime_environment_passes_selected_provider_key_but_not_github_credentials(monkeypatch):
