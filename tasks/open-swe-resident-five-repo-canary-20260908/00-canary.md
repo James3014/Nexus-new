@@ -2,6 +2,7 @@
 
 - task_id: `open-swe-resident-five-repo-canary-20260908`
 - campaign_id: `open-swe-resident-five-repo-canary-20260908`
+Campaign: `open-swe-resident-five-repo-canary-20260908`
 - status: `ACTIVE`
 - owner: `James Chen`
 - commit_required: `true`

@@ -200,6 +200,78 @@ def test_missing_workforce_demands_fail_at_canonical_consumer(monkeypatch) -> No
         )
 
 
+@pytest.mark.parametrize(
+    ("channel", "demands"),
+    [
+        (
+            "local",
+            [
+                {"execution_channel": "local", "requested_role": "bounded_code_candidate"},
+                {"execution_channel": "local", "requested_role": "compact_diagnosis"},
+            ],
+        ),
+        (
+            "local",
+            [
+                {"execution_channel": "local", "requested_role": "bounded_code_candidate"},
+                {"execution_channel": "local", "requested_role": "bounded_code_candidate"},
+            ],
+        ),
+        (
+            "online",
+            [
+                {"execution_channel": "online", "requested_role": "fast_bounded_implementation"},
+                {"execution_channel": "online", "requested_role": "main_engineering"},
+            ],
+        ),
+        (
+            "online",
+            [
+                {"execution_channel": "online", "requested_role": "fast_bounded_implementation"},
+                {"execution_channel": "online", "requested_role": "fast_bounded_implementation"},
+            ],
+        ),
+    ],
+    ids=("local-conflict", "local-duplicate", "online-conflict", "online-duplicate"),
+)
+def test_canonical_workforce_consumer_rejects_repeated_execution_channel(channel, demands):
+    from nexus.engine.canonical_task_seam import _resolve_policy_workforce_bindings
+
+    with pytest.raises(ValueError, match=f"canonical_workforce_demand_conflict:{channel}"):
+        _resolve_policy_workforce_bindings(
+            {"signal_snapshot": {"workforce_demands": {"demands": demands}}},
+            allowed_files=("x.py",),
+            verifier_command=(),
+        )
+
+
+def test_canonical_workforce_consumer_resolves_legitimate_hybrid_channels():
+    from nexus.engine.canonical_task_seam import _resolve_policy_workforce_bindings
+
+    bindings, providers = _resolve_policy_workforce_bindings(
+        {
+            "signal_snapshot": {
+                "workforce_demands": {
+                    "demands": [
+                        {"execution_channel": "local", "requested_role": "bounded_code_candidate"},
+                        {
+                            "execution_channel": "online",
+                            "requested_role": "fast_bounded_implementation",
+                        },
+                    ]
+                }
+            }
+        },
+        allowed_files=("x.py",),
+        verifier_command=(),
+    )
+    assert set(bindings) == {"local", "online"}
+    assert set(providers) == {"local", "online"}
+    assert bindings["local"]["worker_id"] == "local_coder_7b"
+    assert bindings["online"]["worker_id"] == "agy_flash_37_medium"
+    assert providers == {"local": "ollama", "online": "agy"}
+
+
 def test_canonical_planning_bundle_binds_the_exact_plan_without_replanning(monkeypatch):
     context = CanonicalTaskContext(
         task_id="task-bundle-1",
