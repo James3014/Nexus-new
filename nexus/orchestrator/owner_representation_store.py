@@ -54,11 +54,14 @@ alternative authority root by themselves.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import pwd
 import re
 import stat
+import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Mapping
@@ -110,6 +113,10 @@ _PERMIT_SCHEMA = "nexus.owner_representation_publication_issuance_permit.v1"
 _PERMIT_CONSUMED_SCHEMA = "nexus.owner_representation_issuance_permit_consumed.v1"
 _AUTHORIZATION_SCHEMA = "nexus.owner_exact_publication_authorization.v1"
 _AUTHORIZATION_CONSUMED_SCHEMA = "nexus.owner_exact_publication_authorization_consumed.v1"
+# Deployment-owned trust root.  This is deliberately not derived from the
+# caller's authority_root or from fields in an authorization record.
+OWNER_AUTHORIZATION_TRUST_ROOT = Path("/etc/nexus/owner-representation/trusted-keys")
+OPENSSL_BINARY = "/usr/bin/openssl"
 
 
 class OwnerRepresentationGrantStoreError(Exception):
@@ -473,6 +480,62 @@ def _authorization_records(root: Path) -> list[dict[str, Any]]:
     return records
 
 
+def _verify_owner_signature(auth: OwnerExactPublicationAuthorization) -> None:
+    """Verify an Owner signature against the deployment trust root.
+
+    The trust root is process/deployment configuration, never caller data.
+    Missing keys, malformed signatures, unavailable OpenSSL, and verification
+    failures all fail closed.
+    """
+    key_path = OWNER_AUTHORIZATION_TRUST_ROOT / f"{auth.owner_id}--{auth.owner_key_id}.pem"
+    try:
+        root_stat = OWNER_AUTHORIZATION_TRUST_ROOT.lstat()
+        key_stat = key_path.lstat()
+    except OSError:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REJECTED.value
+        )
+    if (
+        not stat.S_ISDIR(root_stat.st_mode)
+        or stat.S_ISLNK(root_stat.st_mode)
+        or root_stat.st_uid != 0
+        or stat.S_IMODE(root_stat.st_mode) & 0o022
+        or not stat.S_ISREG(key_stat.st_mode)
+        or stat.S_ISLNK(key_stat.st_mode)
+        or key_stat.st_uid != 0
+        or stat.S_IMODE(key_stat.st_mode) & 0o077
+        or not Path(OPENSSL_BINARY).is_file()
+    ):
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REJECTED.value
+        )
+    try:
+        signature = base64.b64decode(auth.owner_signature, validate=True)
+        payload = auth.model_dump(mode="json", exclude={"owner_signature", "authorization_hash"})
+        encoded = _canonical_json(payload).encode("utf-8")
+        with tempfile.TemporaryDirectory(prefix="nexus-owner-auth-") as directory:
+            payload_path = Path(directory) / "payload"
+            signature_path = Path(directory) / "signature"
+            payload_path.write_bytes(encoded)
+            signature_path.write_bytes(signature)
+            result = subprocess.run(
+                [OPENSSL_BINARY, "pkeyutl", "-verify", "-pubin", "-inkey", str(key_path),
+                 "-rawin", "-in", str(payload_path), "-sigfile", str(signature_path)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=2,
+                check=False,
+            )
+    except (OSError, ValueError, subprocess.SubprocessError):
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REJECTED.value
+        )
+    if result.returncode != 0:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REJECTED.value
+        )
+
+
 def _write_authorization_consumed_marker(
     root: Path,
     *,
@@ -502,6 +565,8 @@ def owner_issues_exact_publication_authorization(
     issued_at: datetime | None = None,
     expires_at: datetime | None = None,
     authority_root: Path | None = None,
+    owner_key_id: str | None = None,
+    owner_signature: str | None = None,
 ) -> OwnerExactPublicationAuthorization:
     """Issue one immutable exact Owner authorization for one exact grant."""
     if not isinstance(grant, OwnerRepresentationGrant):
@@ -521,6 +586,10 @@ def owner_issues_exact_publication_authorization(
             OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_EXPIRED.value
         )
     auth_id = authorization_id or f"auth-{grant.grant_hash}"
+    if not owner_key_id or not owner_signature:
+        raise OwnerRepresentationGrantBlocked(
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REQUIRED.value
+        )
     spec = OwnerExactPublicationAuthorizationSpec.model_validate({
         "schema": _AUTHORIZATION_SCHEMA,
         "authorization_id": auth_id,
@@ -535,6 +604,8 @@ def owner_issues_exact_publication_authorization(
         "transport": grant.transport,
         "operation_id": grant.operation_id,
         "grant_hash": grant.grant_hash,
+        "owner_key_id": owner_key_id,
+        "owner_signature": owner_signature,
         "replay_mode": "ONE_SHOT",
         "issued_at": effective_now,
         "expires_at": auth_expires,
@@ -548,6 +619,7 @@ def owner_issues_exact_publication_authorization(
         "authorization_hash": canonical_autonomy_hash(payload),
     }
     auth = OwnerExactPublicationAuthorization.model_validate(record)
+    _verify_owner_signature(auth)
     if authority_root is not None:
         root = Path(authority_root)
         destination = _authorization_path(root, grant.grant_hash)
@@ -676,10 +748,15 @@ def validate_exact_owner_authorization(
                 OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_CONSUMED.value
             )
         disk_rec = _load_authorization_for_grant(root, grant.grant_hash)
-        if disk_rec is not None and disk_rec.get("authorization_hash") != auth.authorization_hash:
+        if disk_rec is None:
+            raise OwnerRepresentationGrantBlocked(
+                OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REQUIRED.value
+            )
+        if disk_rec.get("authorization_hash") != auth.authorization_hash:
             raise OwnerRepresentationGrantBlocked(
                 OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_MISMATCH.value
             )
+    _verify_owner_signature(auth)
     return auth
 
 
@@ -906,6 +983,14 @@ def _authorize_at(
         auth = OwnerExactPublicationAuthorization.model_validate(auth_rec)
     except Exception as exc:
         raise OwnerRepresentationGrantStoreError("TAMPERED") from exc
+    try:
+        _verify_owner_signature(auth)
+    except OwnerRepresentationGrantBlocked:
+        return _blocked_decision(
+            proposal,
+            OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REJECTED,
+            grant_hash=grant_hash,
+        )
     if auth.revoked_at is not None:
         return _blocked_decision(
             proposal,

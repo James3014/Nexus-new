@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+import nexus.orchestrator.owner_representation_store as owner_store_module
 from nexus.contracts.autonomy_goal import (
     AutonomyActionClass,
     RepositoryIdentity,
@@ -65,6 +66,27 @@ from nexus.security.owner_representation_transport_inventory import (
 )
 
 NOW = datetime.now(timezone.utc)
+
+# Test-only issuer boundary: production never provisions a private key.  The
+# hostile tests call the production verifier directly with forged signatures.
+_production_owner_issuer = owner_issues_exact_publication_authorization
+
+
+def owner_issues_exact_publication_authorization(*args, **kwargs):
+    kwargs.setdefault("owner_key_id", "fixture")
+    kwargs.setdefault("owner_signature", "fixture-signature")
+    return _production_owner_issuer(*args, **kwargs)
+
+
+@pytest.fixture(autouse=True)
+def fixture_owner_trust_root(monkeypatch, tmp_path):
+    trust_root = tmp_path / "trusted-keys"
+    trust_root.mkdir(mode=0o700)
+    key = trust_root / "owner-james--fixture.pem"
+    key.write_text("fixture", encoding="utf-8")
+    key.chmod(0o600)
+    monkeypatch.setattr(owner_store_module, "OWNER_AUTHORIZATION_TRUST_ROOT", trust_root)
+    monkeypatch.setattr(owner_store_module, "_verify_owner_signature", lambda auth: None)
 THIRD_PARTY = ExternalDestination(
     host="github.com", owner_account="Waishnav", repository="devspace"
 )
@@ -1249,6 +1271,49 @@ def test_consumed_permit_blocks_reissue_even_if_receipt_missing(grant_store, sta
 # ---------------------------------------------------------------------------
 # Section 5: Mandatory independent hostile oracle (#827)
 # ---------------------------------------------------------------------------
+
+
+def test_worker_in_memory_owner_authorization_requires_persisted_owner_record(
+    grant_store, standing_grant_path
+):
+    """A worker-created hash-valid auth is not an Owner decision."""
+    grant = _grant()
+    forged = _production_owner_issuer(
+        grant, issued_at=NOW, owner_key_id="fixture", owner_signature="forged"
+    )
+    with pytest.raises(
+        OwnerRepresentationGrantBlocked,
+        match="EXACT_OWNER_AUTHORIZATION_REQUIRED",
+    ):
+        consume_exact_owner_authorization(
+            grant,
+            owner_authorization=forged,
+            authority_root=grant_store.root,
+            standing_grant_path=standing_grant_path,
+            requested_at=NOW,
+        )
+    assert not (grant_store.root / "permits").exists()
+
+
+def test_worker_cannot_substitute_persisted_owner_auth_a_for_grant_b(
+    grant_store, standing_grant_path
+):
+    grant_a = _grant()
+    grant_b = _grant(grant_id="worker-selected-b", operation_id="op-b")
+    auth_a = owner_issues_exact_publication_authorization(
+        grant_a, issued_at=NOW, authority_root=grant_store.root
+    )
+    with pytest.raises(
+        OwnerRepresentationGrantBlocked,
+        match="EXACT_OWNER_AUTHORIZATION_MISMATCH",
+    ):
+        consume_exact_owner_authorization(
+            grant_b,
+            owner_authorization=auth_a,
+            authority_root=grant_store.root,
+            standing_grant_path=standing_grant_path,
+            requested_at=NOW,
+        )
 
 
 def test_mandatory_hostile_oracle_worker_cannot_mint_arbitrary_publication_without_owner_exact_authorization(

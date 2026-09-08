@@ -136,6 +136,13 @@ permit minted under live Owner standing-grant authority:
   (`EXACT_OWNER_AUTHORIZATION_EXPIRED`), or revoked authorization
   (`EXACT_OWNER_AUTHORIZATION_REVOKED`) fails closed immediately on the first
   attempt.
+  The exact authorization also carries an Owner signature and deployment-bound
+  key id. Verification uses a fixed, deployment-owned public-key trust root
+  (not `authority_root`, authorization fields, or worker-selected paths) and a
+  fixed OpenSSL verifier. Missing/unreadable/unsafe keys, unavailable verifier,
+  malformed signatures, and verification failures all fail closed. Production
+  never provisions or exposes the corresponding private key; test keys remain
+  confined to explicit test fixtures.
 * **Exact authorization consumption.**  Minting an issuance permit consumes the
   exact Owner authorization by writing a sealed
   `authorizations/consumed/<grant_hash>.json` marker fail-closed.  A replayed

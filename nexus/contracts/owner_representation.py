@@ -367,6 +367,8 @@ class OwnerExactPublicationAuthorizationSpec(_FrozenModel):
     transport: StrictStr
     operation_id: StrictStr
     grant_hash: StrictStr
+    owner_key_id: StrictStr
+    owner_signature: StrictStr
     replay_mode: Literal["ONE_SHOT"] = "ONE_SHOT"
     issued_at: AwareDatetime
     expires_at: AwareDatetime
@@ -381,6 +383,7 @@ class OwnerExactPublicationAuthorizationSpec(_FrozenModel):
         "actor",
         "transport",
         "operation_id",
+        "owner_key_id",
     )
     @classmethod
     def validate_ids(cls, value: str, info) -> str:
@@ -395,6 +398,13 @@ class OwnerExactPublicationAuthorizationSpec(_FrozenModel):
     @classmethod
     def validate_hashes(cls, value: str, info) -> str:
         return _sha64(value, info.field_name)
+
+    @field_validator("owner_signature")
+    @classmethod
+    def validate_signature(cls, value: str) -> str:
+        if not value or len(value) > 4096:
+            raise ValueError("OWNER_SIGNATURE_INVALID")
+        return value
 
     @field_validator("purpose")
     @classmethod
