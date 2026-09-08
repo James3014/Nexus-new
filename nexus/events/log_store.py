@@ -17,6 +17,13 @@ from nexus.feedback.contracts import (
     DeveloperFeedbackDecision,
     _tokens,
 )
+from nexus.events.writer_generation import (
+    EventWriterGeneration,
+    GenerationError,
+    event_store_lock,
+    manifest_path,
+    read_generation,
+)
 
 
 class JsonlEventLogStore:
@@ -27,14 +34,57 @@ class JsonlEventLogStore:
         self.lock_path: Optional[Path] = None
         self._attempt_tails: Dict[Tuple[str, str], Tuple[int, str]] = {}
         self._lock = threading.RLock()
+        self._writer_generation: Optional[EventWriterGeneration] = None
+        self._enforce_generation = False
+        self._generation_manifest_path: Optional[Path] = None
 
-    def configure(self, project_root: Path) -> Tuple[Path, Path]:
+    def configure(
+        self,
+        project_root: Path,
+        *,
+        writer_generation: Optional[EventWriterGeneration] = None,
+        enforce_generation: bool = False,
+    ) -> Tuple[Path, Path]:
         log_dir = project_root / ".nexus" / "events"
         log_dir.mkdir(parents=True, exist_ok=True)
-        self.event_log_path = log_dir / "event_log.jsonl"
-        self.lock_path = log_dir / "event_log.lock"
+        event_log_path = log_dir / "event_log.jsonl"
+        lock_path = log_dir / "event_log.lock"
+        generation_manifest_path = manifest_path(project_root)
         with self._lock:
-            self._attempt_tails = self._scan_attempt_tails()
+            with event_store_lock(project_root):
+                installed = read_generation(project_root)
+                if installed is not None and writer_generation is None:
+                    raise GenerationError("GENERATION_REQUIRED")
+                if enforce_generation and writer_generation is None:
+                    raise GenerationError("GENERATION_REQUIRED")
+                if writer_generation is not None:
+                    if installed is None or installed != writer_generation:
+                        raise GenerationError("GENERATION_TOKEN_MISMATCH")
+                previous = (
+                    self.event_log_path,
+                    self.lock_path,
+                    self._generation_manifest_path,
+                    self._writer_generation,
+                    self._enforce_generation,
+                    self._attempt_tails,
+                )
+                try:
+                    self.event_log_path = event_log_path
+                    self.lock_path = lock_path
+                    self._generation_manifest_path = generation_manifest_path
+                    self._writer_generation = writer_generation
+                    self._enforce_generation = bool(enforce_generation or installed is not None)
+                    self._attempt_tails = self._scan_attempt_tails()
+                except Exception:
+                    (
+                        self.event_log_path,
+                        self.lock_path,
+                        self._generation_manifest_path,
+                        self._writer_generation,
+                        self._enforce_generation,
+                        self._attempt_tails,
+                    ) = previous
+                    raise
         return log_dir, self.event_log_path
 
     def append_record(self, record: Dict[str, Any]) -> None:
@@ -43,27 +93,43 @@ class JsonlEventLogStore:
         with self._lock:
             if not self.lock_path:
                 raise RuntimeError("event store is not configured")
-            with open(self.lock_path, "a+", encoding="utf-8") as lock:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            with event_store_lock(self.lock_path.parents[2]):
+                self._check_generation_locked(record)
+                self._attempt_tails = self._scan_attempt_tails()
+                key = self._attempt_key(record)
+                previous = self._attempt_tails.get(key) if key else None
+                self._bind_attempt_record(record)
                 try:
-                    self._attempt_tails = self._scan_attempt_tails()
-                    key = self._attempt_key(record)
-                    previous = self._attempt_tails.get(key) if key else None
-                    self._bind_attempt_record(record)
-                    try:
-                        with open(self.event_log_path, "a", encoding="utf-8") as f:
-                            f.write(json.dumps(record, default=str) + "\n")
-                            f.flush()
-                            os.fsync(f.fileno())
-                    except Exception:
-                        if key is not None:
-                            if previous is None:
-                                self._attempt_tails.pop(key, None)
-                            else:
-                                self._attempt_tails[key] = previous
-                        raise
-                finally:
-                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+                    with open(self.event_log_path, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(record, default=str) + "\n")
+                        f.flush()
+                        os.fsync(f.fileno())
+                except Exception:
+                    if key is not None:
+                        if previous is None:
+                            self._attempt_tails.pop(key, None)
+                        else:
+                            self._attempt_tails[key] = previous
+                    raise
+
+    def _check_generation_locked(self, record: Dict[str, Any]) -> None:
+        if self._generation_manifest_path is None:
+            raise RuntimeError("event store is not configured")
+        installed = read_generation(self._generation_manifest_path.parents[2])
+        if installed is None:
+            if self._writer_generation is not None or self._enforce_generation:
+                raise GenerationError("GENERATION_REQUIRED")
+            return
+        if self._writer_generation is None or installed != self._writer_generation:
+            raise GenerationError("GENERATION_REQUIRED")
+        existing_generation = record.get("_writer_generation")
+        existing_writer = record.get("_writer_id")
+        if existing_generation is not None and existing_generation != installed.generation:
+            raise GenerationError("GENERATION_RECORD_MISMATCH")
+        if existing_writer is not None and existing_writer != installed.writer_id:
+            raise GenerationError("GENERATION_RECORD_MISMATCH")
+        record["_writer_generation"] = installed.generation
+        record["_writer_id"] = installed.writer_id
 
     @staticmethod
     def _attempt_key(record: Dict[str, Any]) -> Optional[Tuple[str, str]]:

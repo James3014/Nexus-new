@@ -17,6 +17,7 @@ from nexus.events.contracts import (
     build_attempt_transition_event,
 )
 from nexus.events.log_store import JsonlEventLogStore
+from nexus.events.writer_generation import EventWriterGeneration, install_generation
 from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 
 
@@ -73,6 +74,21 @@ def test_event_bus_persistence(tmp_path):
     content = log_file.read_text()
     assert "persist_event" in content
     assert "hello" in content
+
+
+def test_event_bus_opt_in_generation_fence_preserves_legacy_before_manifest(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    NexusEventBus.publish("legacy_event", {"value": "before-fence"})
+    token = EventWriterGeneration(1, "event-bus-test")
+    install_generation(tmp_path, token)
+    NexusEventBus._event_log_path = None
+    NexusEventBus._log_store = JsonlEventLogStore()
+    NexusEventBus.configure(tmp_path, writer_generation=token, enforce_generation=True)
+    NexusEventBus.publish("fenced_event", {"value": "after-fence"})
+    records = [json.loads(line) for line in (tmp_path / ".nexus" / "events" / "event_log.jsonl").read_text().splitlines()]
+    assert records[0]["event_type"] == "legacy_event"
+    assert records[1]["_writer_generation"] == 1
+    assert records[1]["_writer_id"] == "event-bus-test"
 
 
 def test_attempt_transition_append_read_restart_and_interleaving(tmp_path):

@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from nexus.events.contracts import AttemptTransitionEvent
 from nexus.events.log_store import DeveloperFeedbackDecisionStore, JsonlEventLogStore
+from nexus.events.writer_generation import EventWriterGeneration
 from nexus.events.signal_queue_service import SignalQueueService
 from nexus.feedback.contracts import DeveloperFeedbackDecision
 
@@ -59,9 +60,19 @@ class NexusEventBus:
         cls._remote_broadcaster = broadcaster
 
     @classmethod
-    def configure(cls, project_root: Path) -> None:
+    def configure(
+        cls,
+        project_root: Path,
+        *,
+        writer_generation: Optional[EventWriterGeneration] = None,
+        enforce_generation: bool = False,
+    ) -> None:
         """初始化持久化路徑"""
-        log_dir, event_log_path = cls._log_store.configure(project_root)
+        log_dir, event_log_path = cls._log_store.configure(
+            project_root,
+            writer_generation=writer_generation,
+            enforce_generation=enforce_generation,
+        )
         cls._event_log_path = event_log_path
         cls._developer_feedback_store.configure(project_root)
         with cls._sequence_lock:

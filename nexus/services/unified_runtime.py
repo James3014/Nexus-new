@@ -2788,6 +2788,10 @@ class UnifiedRuntime:
         verifier: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
         learning: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
         receipt_path: str | Path | None = None,
+        effect_journal: Any = None,
+        effect_dispatch: Any = None,
+        effect_reconcile: Callable[[Mapping[str, Any]], Any] | None = None,
+        effect_fenced: bool = False,
     ) -> dict[str, Any]:
         return self._run_once(
             request=request,
@@ -2799,6 +2803,10 @@ class UnifiedRuntime:
             replan_authorization=None,
             attempt_number=1,
             parent_receipt=None,
+            effect_journal=effect_journal,
+            effect_dispatch=effect_dispatch,
+            effect_reconcile=effect_reconcile,
+            effect_fenced=effect_fenced,
         )
 
     def run_replan(
@@ -2811,6 +2819,10 @@ class UnifiedRuntime:
         verifier: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
         learning: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
         receipt_path: str | Path | None = None,
+        effect_journal: Any = None,
+        effect_dispatch: Any = None,
+        effect_reconcile: Callable[[Mapping[str, Any]], Any] | None = None,
+        effect_fenced: bool = False,
     ) -> dict[str, Any]:
         _validate_workforce_route(request.route)
         res = validate_receipt_base(previous_receipt, mode="strict")
@@ -2826,6 +2838,17 @@ class UnifiedRuntime:
             raise ValueError("prior_receipt_not_incomplete")
         if bool(previous_receipt.get("public_claim_allowed")):
             raise ValueError("prior_receipt_public_claim_not_false")
+        if effect_journal is not None:
+            from nexus.events.effect_journal import EffectJournal
+            if not isinstance(effect_journal, EffectJournal): raise ValueError("canonical_effect_journal_required")
+        if previous_receipt.get("effect_journal_bindings") and effect_journal is None:
+            raise ValueError("replan_effect_journal_required")
+        for binding in previous_receipt.get("effect_journal_bindings", []) or []:
+            if not isinstance(binding, Mapping) or binding.get("state") != "COMPLETED":
+                raise ValueError("replan_effect_binding_incomplete")
+            record = effect_journal.get(str(binding.get("effect_id"))) if effect_journal is not None else None
+            if not isinstance(record, Mapping) or any(record.get(k) != binding.get(k) for k in ("operation_id", "effect_id", "request_digest", "generation", "state", "result_digest", "project_root")):
+                raise ValueError("replan_effect_binding_mismatch")
 
         if str(previous_receipt.get("task_id", "")) != str(request.task_id):
             raise ValueError("replan_task_id_mismatch")
@@ -2919,6 +2942,10 @@ class UnifiedRuntime:
             replan_authorization=authorization,
             attempt_number=2,
             parent_receipt=previous_receipt,
+            effect_journal=effect_journal,
+            effect_dispatch=effect_dispatch,
+            effect_reconcile=effect_reconcile,
+            effect_fenced=effect_fenced,
         )
 
     def _run_once(
@@ -2933,8 +2960,27 @@ class UnifiedRuntime:
         replan_authorization: ExecutionReplanAuthorization | None = None,
         attempt_number: int = 1,
         parent_receipt: Mapping[str, Any] | None = None,
+        effect_journal: Any = None,
+        effect_dispatch: Any = None,
+        effect_reconcile: Callable[[Mapping[str, Any]], Any] | None = None,
+        effect_fenced: bool = False,
     ) -> dict[str, Any]:
         request.validate()
+        fenced = effect_fenced or bool(request.route.get("effect_fenced", False))
+        from nexus.events.effect_journal import EffectDispatchPort, EffectJournal, EffectReconcilePort
+        if effect_journal is not None:
+            if not isinstance(effect_journal, EffectJournal):
+                raise ValueError("canonical_effect_journal_required")
+            if not isinstance(effect_dispatch, EffectDispatchPort):
+                raise ValueError("effect_dispatch_port_required")
+            if not isinstance(effect_reconcile, EffectReconcilePort):
+                raise ValueError("effect_reconcile_port_required")
+        if fenced and effect_journal is None:
+            raise ValueError("effect_journal_required_for_fenced_effects")
+        if fenced and not isinstance(effect_dispatch, EffectDispatchPort):
+            raise ValueError("effect_dispatch_port_required")
+        if fenced and not isinstance(effect_reconcile, EffectReconcilePort):
+            raise ValueError("effect_reconcile_port_required")
         _validate_workforce_route(request.route)
         planner_route = dict(request.route)
         planner_route.setdefault("local_enabled", request.local_enabled)
@@ -3349,6 +3395,7 @@ class UnifiedRuntime:
                 return terminal_receipt
 
         capability_results: dict[str, dict[str, Any]] = {}
+        effect_journal_bindings: list[dict[str, Any]] = []
         postflight_names = {
             "acceptance_check",
             "artifact_gate",
@@ -3399,7 +3446,36 @@ class UnifiedRuntime:
                 }
             else:
                 try:
-                    result = invoker(capability_context)
+                    if fenced and getattr(invoker, "effectful", False) is not True and getattr(invoker, "pure", False) is not True:
+                        raise ValueError("unclassified_selected_capability")
+                    if effect_journal is not None and getattr(invoker, "effectful", False) is True:
+                        import hashlib as _effect_hash
+                        import json as _effect_json
+                        effect_context = dict(capability_context)
+                        effect_context["capability_name"] = capability_name
+                        request_digest = _effect_hash.sha256(_effect_json.dumps(effect_context, sort_keys=True, default=str).encode()).hexdigest()
+                        identity = {
+                            "task_id": request.task_id,
+                            "workspace_revision": request.workspace_revision,
+                            "planner_decision_id": planner_decision_id,
+                            "attempt_number": attempt_number,
+                            "action": f"capability:{capability_name}",
+                            "subject_revision": request.workspace_revision,
+                            "request_digest": request_digest,
+                        }
+                        from nexus.events.effect_journal import deterministic_effect_id, operation_digest
+                        effect_journal_bindings.append({"effect_id": deterministic_effect_id(identity), "operation_id": operation_digest(identity), "action": identity["action"], "request_digest": request_digest, "project_root": str(effect_journal.project_root)})
+                        result = effect_journal.execute(
+                            identity=identity,
+                            subject=request.task_id,
+                            request_digest=request_digest,
+                            dispatch=lambda: effect_dispatch.dispatch(lambda: invoker(capability_context)),
+                            reconcile=lambda record: effect_reconcile.reconcile(record),
+                        )
+                        saved = effect_journal.get(deterministic_effect_id(identity)) or {}
+                        effect_journal_bindings[-1].update({"generation": saved.get("generation"), "state": saved.get("state"), "result_digest": saved.get("result_digest", ""), "project_root": str(effect_journal.project_root)})
+                    else:
+                        result = invoker(capability_context)
                 except Exception as exc:  # fail closed in the shared receipt
                     result = {
                         "task_id": request.task_id,
@@ -3664,6 +3740,12 @@ class UnifiedRuntime:
             request,
             plan_payload,
             workforce_admission_required=workforce_admission_required,
+            effect_journal=effect_journal,
+            effect_dispatch=effect_dispatch,
+            effect_reconcile=effect_reconcile,
+            planner_decision_id=planner_decision_id,
+            attempt_number=attempt_number,
+            effect_journal_bindings=effect_journal_bindings,
         )
         if request.local_enabled:
             stages["local"] = local_stage
@@ -3767,6 +3849,30 @@ class UnifiedRuntime:
             context["gateway_invocation_authority"] = gateway_invocation_authority
         if local_model_invocation_authority is not None:
             context["local_model_invocation_authority"] = local_model_invocation_authority
+        if effect_journal is not None and online_invoker is not None:
+            original_online_invoker = online_invoker
+            def _journaled_online(context: Mapping[str, Any]) -> Mapping[str, Any]:
+                import hashlib as _effect_hash
+                import json as _effect_json
+                identity = {
+                    "task_id": request.task_id, "workspace_revision": request.workspace_revision,
+                    "planner_decision_id": planner_decision_id, "attempt_number": attempt_number,
+                    "action": "online_invocation", "subject_revision": request.workspace_revision,
+                    "request_digest": _effect_hash.sha256(_effect_json.dumps(dict(context), sort_keys=True, default=str).encode()).hexdigest(),
+                }
+                req_digest = str(identity["request_digest"])
+                def dispatch():
+                    return effect_dispatch.dispatch(lambda: original_online_invoker(context))
+                from nexus.events.effect_journal import deterministic_effect_id, operation_digest
+                effect_journal_bindings.append({"effect_id": deterministic_effect_id(identity), "operation_id": operation_digest(identity), "action": identity["action"], "request_digest": req_digest, "project_root": str(effect_journal.project_root)})
+                result = effect_journal.execute(identity=identity, subject=request.task_id, request_digest=req_digest, dispatch=dispatch, reconcile=lambda record: effect_reconcile.reconcile(record))
+                if effect_journal_bindings:
+                    saved = effect_journal.get(deterministic_effect_id(identity)) or {}
+                    effect_journal_bindings[-1].update({"generation": saved.get("generation"), "state": saved.get("state"), "result_digest": saved.get("result_digest", ""), "project_root": str(effect_journal.project_root)})
+                return result if isinstance(result, Mapping) else {"task_id": request.task_id, "invoked": True, "output_delivered": bool(result), "gate_passed": bool(result), "response": result}
+            for attr in ("provider", "online_invoker_provider", "physical_provider_transport"):
+                if hasattr(original_online_invoker, attr): setattr(_journaled_online, attr, getattr(original_online_invoker, attr))
+            online_invoker = _journaled_online
         online_stage = self._run_online(
             request,
             online_invoker,
@@ -4515,6 +4621,13 @@ class UnifiedRuntime:
             receipt["gateway_invocation_authority"] = gateway_invocation_authority
         if local_model_invocation_authority is not None:
             receipt["local_model_invocation_authority"] = local_model_invocation_authority
+        receipt["effect_journal_bindings"] = list(effect_journal_bindings)
+        if receipt["effect_journal_bindings"] and any(item.get("state") != "COMPLETED" for item in receipt["effect_journal_bindings"]):
+            receipt["receipt_complete"] = False
+            receipt["terminal_status"] = "INCOMPLETE"
+            receipt["public_claim_allowed"] = False
+            receipt.setdefault("claim_boundary", {})["receipt_complete"] = False
+            receipt["claim_boundary"]["public_claim_allowed"] = False
         from nexus.contracts.root_receipt import build_root_receipt
 
         receipt["root_receipt"] = build_root_receipt(receipt)
@@ -4536,6 +4649,7 @@ class UnifiedRuntime:
         learning: Mapping[str, Any],
         outcome: Mapping[str, Any] | None = None,
         receipt_path: str | Path | None = None,
+        effect_journal: Any = None,
     ) -> dict[str, Any]:
         """Attach final verifier/learning evidence to an existing task receipt.
 
@@ -4546,6 +4660,9 @@ class UnifiedRuntime:
         """
         if not isinstance(receipt, Mapping) or receipt.get("schema") != RECEIPT_SCHEMA:
             raise ValueError("unsupported_receipt_schema")
+        if effect_journal is not None:
+            from nexus.events.effect_journal import EffectJournal
+            if not isinstance(effect_journal, EffectJournal): raise ValueError("canonical_effect_journal_required")
 
         finalized = dict(receipt)
 
@@ -4651,6 +4768,22 @@ class UnifiedRuntime:
             for stage in required_stages
         )
         outcome_contributed = any(bool(stage.get("outcome_contributed")) for stage in required_stages if isinstance(stage, Mapping))
+        bindings = finalized.get("effect_journal_bindings")
+        if isinstance(bindings, list) and bindings:
+            if effect_journal is None:
+                receipt_complete = False
+            else:
+                for item in bindings:
+                    if not isinstance(item, Mapping) or item.get("state") != "COMPLETED":
+                        receipt_complete = False; break
+                    record = effect_journal.get(str(item.get("effect_id") or ""))
+                    if not isinstance(record, Mapping):
+                        receipt_complete = False; break
+                    for key in ("operation_id", "effect_id", "request_digest", "generation", "state", "result_digest", "project_root"):
+                        if record.get(key) != item.get(key):
+                            receipt_complete = False; break
+                    if not receipt_complete:
+                        break
         evidence_refs: set[str] = set(str(ref) for ref in finalized.get("evidence_refs", []) or [])
         for stage in stages:
             evidence_refs.update(str(ref) for ref in stage.get("evidence_refs", []) or [])
@@ -4697,6 +4830,12 @@ class UnifiedRuntime:
         plan: Mapping[str, Any],
         *,
         workforce_admission_required: bool | None = None,
+        effect_journal: Any = None,
+        effect_dispatch: Any = None,
+        effect_reconcile: Callable[[Mapping[str, Any]], Any] | None = None,
+        planner_decision_id: str = "",
+        attempt_number: int = 1,
+        effect_journal_bindings: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         if not request.local_enabled:
             return _stage("local", status="NOT_REQUESTED", reason="local_route_disabled")
@@ -4822,7 +4961,28 @@ class UnifiedRuntime:
                 **local_authority_stage_fields,
             )
         try:
-            if hasattr(self._local_service, "handle"):
+            if effect_journal is not None:
+                import hashlib as _effect_hash
+                import json as _effect_json
+                local_context = {"task_id": request.task_id, "workspace_revision": request.workspace_revision, "planner_decision_id": planner_decision_id, "attempt_number": attempt_number, "action": "local_model_invocation", "subject_revision": request.workspace_revision, "local_request": local_request}
+                request_digest = _effect_hash.sha256(_effect_json.dumps(local_context, sort_keys=True, default=str).encode()).hexdigest()
+                local_identity = {key: value for key, value in local_context.items() if key != "local_request"}
+                local_identity["request_digest"] = request_digest
+                from nexus.events.effect_journal import deterministic_effect_id, operation_digest
+                def _local_dispatch():
+                    if hasattr(self._local_service, "handle"):
+                        return self._local_service.handle(local_request)
+                    if callable(self._local_service):
+                        return self._local_service(local_request)
+                    raise TypeError("local_service_not_callable")
+                response = effect_journal.execute(identity=local_identity, subject=request.task_id, request_digest=request_digest, dispatch=lambda: effect_dispatch.dispatch(_local_dispatch), reconcile=lambda record: effect_reconcile.reconcile(record))
+                from nexus.events.effect_journal import deterministic_effect_id, operation_digest
+                binding = {"effect_id": deterministic_effect_id(local_identity), "operation_id": operation_digest(local_identity), "action": local_identity["action"], "request_digest": request_digest}
+                saved = effect_journal.get(binding["effect_id"]) or {}
+                binding.update({"generation": saved.get("generation"), "state": saved.get("state"), "result_digest": saved.get("result_digest", ""), "project_root": str(effect_journal.project_root)})
+                if effect_journal_bindings is not None:
+                    effect_journal_bindings.append(binding)
+            elif hasattr(self._local_service, "handle"):
                 response = self._local_service.handle(local_request)
             elif callable(self._local_service):
                 response = self._local_service(local_request)
