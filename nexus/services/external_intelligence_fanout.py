@@ -893,9 +893,7 @@ class OpenCodeWorkerTransport:
     def _sql_literal(value: str) -> str:
         return "'" + value.replace("'", "''") + "'"
 
-    def reconcile_workspace(
-        self, *, workspace_path: str, operation_id: str = ""
-    ) -> OpenCodeRunResult:
+    def reconcile_workspace(self, *, workspace_path: str) -> OpenCodeRunResult:
         expected_directory = str(Path(workspace_path).expanduser().resolve())
         directory_sql = self._sql_literal(expected_directory)
         sessions = self._db_json(
@@ -1526,11 +1524,14 @@ class AdaptiveWorkerFanoutRuntime:
         if attempt is None or attempt.get("state") not in {"DISPATCHING", "OUTCOME_UNKNOWN"}:
             raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
         operation_id = attempt.get("operation_id")
-        if not isinstance(operation_id, str) or _SHA256_RE.fullmatch(operation_id) is None:
-            raise FanoutError("OPERATION_ID_REQUIRED")
-        result: OpenCodeRunResult = transport.reconcile_workspace(
-            workspace_path=workspace.path, operation_id=operation_id
-        )
+        if hasattr(transport, "prepare_operation_id"):
+            if not isinstance(operation_id, str) or _SHA256_RE.fullmatch(operation_id) is None:
+                raise FanoutError("OPERATION_ID_REQUIRED")
+            result: OpenCodeRunResult = transport.reconcile_workspace(
+                workspace_path=workspace.path, operation_id=operation_id
+            )
+        else:
+            result = transport.reconcile_workspace(workspace_path=workspace.path)
         return self._finalize_initial(unit, workspace, attempt, result, transport=transport)
 
     def _finalize_initial(
