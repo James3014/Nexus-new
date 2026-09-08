@@ -12,7 +12,6 @@ from types import SimpleNamespace
 import pytest
 
 from nexus.services.external_intelligence_closure import _receipt_identity
-
 from nexus.services.external_intelligence_fanout import (
     CLAIM_CEILING,
     MODEL,
