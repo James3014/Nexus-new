@@ -197,3 +197,15 @@ class TestCanonicalHash:
     def test_non_serializable_fail_closed(self) -> None:
         with pytest.raises(ValueError):
             canonical_hash({"bad": object()})
+
+
+def test_workforce_binding_requires_full_canonical_identity() -> None:
+    with pytest.raises(ValidationError, match="WORKFORCE_DISPATCH_BINDING_INCOMPLETE"):
+        _request(
+            worker_constraints=("provider=agy",),
+            workforce_dispatch_binding={
+                "planner_output": {},
+                "workforce_demands": {},
+                "workforce_admission": {},
+            },
+        )
