@@ -536,7 +536,7 @@ def test_campaign_37_medium_worker_advertises_role() -> None:
     w = manifest["workers"]["agy_flash_37_medium"]
     assert w["provider"] == "agy"
     assert w["model"] == "gemini-3.7-flash-medium"
-    assert "bounded_candidate_generation" in w["roles"]
+    assert "fast_bounded_implementation" in w["roles"]
     assert w["availability"] == "AVAILABLE"
     assert w["state"] == "REGISTERED_CONDITIONAL"
     assert w["autonomy"] == "L3"
@@ -581,7 +581,7 @@ def test_opencli_chatgpt_balanced_web_registration() -> None:
     assert w["state"] == "REGISTERED_CONDITIONAL"
     assert w["availability"] == "AVAILABLE"
     assert w["autonomy"] == "L1"
-    assert "fast_bounded_implementation" in w["roles"]
+    assert "bounded_candidate_generation" in w["roles"]
     assert w["default_route"] is False
 
 

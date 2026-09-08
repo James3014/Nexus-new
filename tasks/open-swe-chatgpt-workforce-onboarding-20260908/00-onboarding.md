@@ -38,7 +38,7 @@ No deletion is allowed.
 
 ## Required behavior
 
-1. Add worker `opencli_chatgpt_balanced_web` with provider `opencli_chatgpt`, model `opencli_chatgpt/balanced`, state `REGISTERED_CONDITIONAL`, availability `AVAILABLE`, autonomy `L1`, role `bounded_candidate_generation`, and `default_route: false`.
+1. Add worker `opencli_chatgpt_balanced_web` with provider `opencli_chatgpt`, model `opencli_chatgpt/balanced`, state `REGISTERED_CONDITIONAL`, availability `AVAILABLE`, autonomy `L1`, role `bounded_candidate_generation`, and `default_route: false`. Workforce-required controls remain canonical Task Card/isolation/parser/verifier controls; OpenCLI 1.8.7, Browser Bridge 1.0.24, foreground/ephemeral session, launcher, and runtime artifact identity remain separately enforced by the External Intelligence activation/runtime layer rather than caller-supplied admission controls.
 2. Add only one campaign override: `open-swe-resident-five-repo-canary-20260908.bounded_candidate_generation -> opencli_chatgpt_balanced_web`.
 3. Preserve global `fast_bounded_implementation -> agy_flash_37_medium`.
 4. Derive both canary campaign identity and candidate-only topology only from the exact verified Task Card bytes/hash. The exact canary produces `bounded_candidate_generation / L1`; blank, unrelated, prefixed, forged, or hash-mismatched identities must use the ordinary global route or fail closed.

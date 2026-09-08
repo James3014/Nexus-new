@@ -399,6 +399,7 @@ def _derive_campaign_id_from_task_card(task_card_identity: 'VerifiedTaskCardIden
     known_campaigns = {
         "CAMPAIGN-NEXUS-LEARNING-CANONICAL-WIRING-01",
         "CAMPAIGN-PLANNER-WORKFORCE-SELECTION-REPAIR-01",
+        "open-swe-resident-five-repo-canary-20260908",
     }
     canonical_path = Path(task_card_identity.canonical_task_card_path)
     try:
@@ -499,6 +500,10 @@ def build_canonical_planner_admission(
     if task_card_identity.task_id != task_id:
         raise ValueError("canonical_task_card_task_mismatch")
 
+    task_card_campaign_id = _derive_campaign_id_from_task_card(task_card_identity)
+    candidate_generation_only = (
+        task_card_campaign_id == "open-swe-resident-five-repo-canary-20260908"
+    )
     context = CanonicalTaskContext(
         task_id=str(task_id),
         task_type="feature" if infer_task_kind(task_text) == "feature" else "repair",
@@ -507,8 +512,9 @@ def build_canonical_planner_admission(
         transport_ingress="mcp",
         execution_channels=("online",),
         task_facts={
-            "mutation_requested": bool(allowed_files),
+            "mutation_requested": bool(allowed_files) and not candidate_generation_only,
             "candidate_required": True,
+            **({"candidate_generation_only": True} if candidate_generation_only else {}),
         },
         authority_inputs={
             "direct_canonical_eligible": False,
@@ -535,7 +541,7 @@ def build_canonical_planner_admission(
         raise ValueError("canonical_workforce_demands_missing")
     policy = WorkforcePolicyLoader()
     snapshot = policy.load()
-    campaign_id = _derive_campaign_id_from_task_card(task_card_identity)
+    campaign_id = task_card_campaign_id
     if campaign_identity is not None:
         if not isinstance(campaign_identity, VerifiedCampaignIdentity):
             raise ValueError("canonical_campaign_identity_unverified")

@@ -615,7 +615,8 @@ def test_open_swe_canary_task_card_produces_canonical_opencli_chatgpt_allow_bind
     assert record["decision"]["resolved_provider"] == "opencli_chatgpt"
     assert record["decision"]["resolved_model"] == "opencli_chatgpt/balanced"
     assert record["request"]["role"] == "bounded_candidate_generation"
-    assert record["request"]["minimum_autonomy"] == "L1"
+    assert record["request"]["autonomy"] == "L1"
+    assert record["demand"]["minimum_autonomy"] == "L1"
 
     binding = result["binding"]
     assert binding["worker_id"] == "opencli_chatgpt_balanced_web"
