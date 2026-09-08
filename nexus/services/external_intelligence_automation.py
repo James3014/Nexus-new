@@ -10,6 +10,10 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping
 
+from nexus.engine.canonical_task_seam import (
+    VerifiedTaskCardIdentity,
+    build_canonical_planner_admission,
+)
 from nexus.services.external_intelligence import (
     ExternalIntelligenceError,
     ExternalIntelligenceSidecar,
@@ -408,6 +412,7 @@ class ExternalIntelligenceAutomation:
         self.c_runtime = c_runtime
         self.d_runtime = d_runtime
         self.capacity_factory = capacity_factory or self._default_capacity
+        self._worker_binding: dict[str, str] | None = None
 
     @staticmethod
     def _default_capacity(contract: Mapping[str, Any]) -> CapacityLease:
@@ -671,9 +676,134 @@ class ExternalIntelligenceAutomation:
         request = build_request(
             intake,
             context_pack,
-            selected_worker=item.contract.get("selected_worker"),
+            selected_worker=self._worker_binding,
         )
         return str(request["request_sha256"])
+
+    def _canonical_worker_binding(
+        self, item: IssueWorkItem, task_card_path: Path, task_card_text: str
+    ) -> dict[str, str]:
+        self.state_store.root.mkdir(parents=True, exist_ok=True)
+        materialized = tempfile.NamedTemporaryFile(
+            mode="wb", prefix=".task-card.", dir=self.state_store.root, delete=False
+        )
+        try:
+            materialized.write(task_card_text.encode("utf-8"))
+            materialized.flush()
+            os.fsync(materialized.fileno())
+            materialized.close()
+        except Exception:
+            materialized.close()
+            Path(materialized.name).unlink(missing_ok=True)
+            raise
+        allowed_files = tuple(
+            dict.fromkeys(
+                path for unit in item.contract["execution_units"] for path in unit["mutation_paths"]
+            )
+        )
+        verifier_command = tuple(item.contract["whole_verifiers"][0]["argv"])
+        identity = VerifiedTaskCardIdentity(
+            task_id=str(item.contract["task_id"]),
+            task_card_path=task_card_path.as_posix(),
+            canonical_task_card_path=str(Path(materialized.name).resolve()),
+            task_card_hash=str(item.contract["task_card_hash"]).lower(),
+        )
+        try:
+            result = build_canonical_planner_admission(
+                task_id=identity.task_id,
+                task_text=f"{item.title}\n\n{item.contract['task_id']}\n{task_card_text}",
+                allowed_files=allowed_files,
+                verifier_command=verifier_command,
+                task_card_identity=identity,
+            )
+        except (TypeError, ValueError, RuntimeError) as exc:
+            raise AutomationError(f"CANONICAL_WORKFORCE_BINDING_INVALID:{exc}") from exc
+        finally:
+            Path(materialized.name).unlink(missing_ok=True)
+        binding = result.get("binding") if isinstance(result, Mapping) else None
+        required = {
+            "demand_id",
+            "worker_id",
+            "provider",
+            "model",
+            "policy_hash",
+            "binding_hash",
+            "aggregate_binding_hash",
+        }
+        if not isinstance(binding, Mapping) or set(binding) != required:
+            raise AutomationError("CANONICAL_WORKFORCE_BINDING_MALFORMED")
+        for key in required:
+            if not isinstance(binding.get(key), str) or not str(binding[key]).strip():
+                raise AutomationError("CANONICAL_WORKFORCE_BINDING_MALFORMED")
+        for key in ("policy_hash", "binding_hash", "aggregate_binding_hash"):
+            if len(binding[key]) != 64 or any(
+                char not in "0123456789abcdef" for char in binding[key].lower()
+            ):
+                raise AutomationError("CANONICAL_WORKFORCE_BINDING_EVIDENCE_INVALID")
+        planner = result.get("planner_output")
+        admission = result.get("workforce_admission")
+        if not isinstance(planner, Mapping) or not isinstance(admission, Mapping):
+            raise AutomationError("CANONICAL_WORKFORCE_EVIDENCE_MISSING")
+        records = admission.get("records")
+        if (
+            admission.get("overall_decision") != "ALLOW"
+            or not isinstance(records, list)
+            or len(records) != 1
+            or not isinstance(records[0], Mapping)
+            or not isinstance(records[0].get("decision"), Mapping)
+            or records[0]["decision"].get("decision") != "ALLOW"
+        ):
+            raise AutomationError("CANONICAL_WORKFORCE_ADMISSION_NOT_SINGLE_ALLOW")
+        decision = records[0]["decision"]
+        for admission_key, binding_key in (
+            ("resolved_worker_id", "worker_id"),
+            ("resolved_provider", "provider"),
+            ("resolved_model", "model"),
+        ):
+            if decision.get(admission_key) != binding.get(binding_key):
+                raise AutomationError("CANONICAL_WORKFORCE_BINDING_ADMISSION_MISMATCH")
+        evidence_root = self.state_store.root / "canonical-workforce-evidence"
+        planner_hash = _sha256_json(planner)
+        admission_hash = _sha256_json(admission)
+        artifacts = (("planner", planner_hash, planner), ("admission", admission_hash, admission))
+        try:
+            for kind, digest, payload in artifacts:
+                path = evidence_root / f"{kind}-{digest}.json"
+                if path.exists():
+                    existing = json.loads(path.read_text(encoding="utf-8"))
+                    if _sha256_json(existing) != digest or existing != dict(payload):
+                        raise AutomationError("CANONICAL_WORKFORCE_EVIDENCE_COLLISION")
+                else:
+                    _atomic_json(path, payload)
+                readback = json.loads(path.read_text(encoding="utf-8"))
+                if _sha256_json(readback) != digest or readback != dict(payload):
+                    raise AutomationError("CANONICAL_WORKFORCE_EVIDENCE_READBACK_MISMATCH")
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise AutomationError("CANONICAL_WORKFORCE_EVIDENCE_PERSIST_FAILED") from exc
+        demands = result.get("workforce_demands") or {}
+        demand = (demands.get("demands") or [{}])[0]
+        selection_hash = str(planner.get("decision_hash") or "").lower()
+        if len(selection_hash) != 64 or any(
+            char not in "0123456789abcdef" for char in selection_hash
+        ):
+            raise AutomationError("CANONICAL_WORKFORCE_SELECTION_EVIDENCE_INVALID")
+        role_ceiling = str(demand.get("requested_role") or "").strip()
+        if not role_ceiling:
+            raise AutomationError("CANONICAL_WORKFORCE_ROLE_CEILING_MISSING")
+        worker = {
+            "worker_id": str(binding["worker_id"]),
+            "provider": str(binding["provider"]),
+            "model": str(binding["model"]),
+            "role_ceiling": role_ceiling,
+            "admission_evidence_ref": str(evidence_root / f"admission-{admission_hash}.json"),
+            "admission_evidence_hash": admission_hash,
+            "selection_evidence_ref": str(evidence_root / f"planner-{planner_hash}.json"),
+            "selection_evidence_hash": planner_hash,
+        }
+        try:
+            return validate_selected_worker(worker)
+        except ExternalIntelligenceError as exc:
+            raise AutomationError("CANONICAL_WORKFORCE_BINDING_INVALID") from exc
 
     def _c_units(
         self, item: IssueWorkItem, intelligence: Mapping[str, Any]
@@ -689,9 +819,11 @@ class ExternalIntelligenceAutomation:
         if _sha256_json(json.loads(envelope_path.read_text(encoding="utf-8"))) != envelope_sha:
             raise AutomationError("INTELLIGENCE_ENVELOPE_ARTIFACT_MISMATCH")
         units: list[dict[str, Any]] = []
-        contract_worker = item.contract.get("selected_worker")
+        contract_worker = self._worker_binding
         for unit in item.contract["execution_units"]:
-            unit_worker = unit.get("selected_worker") or contract_worker
+            # Issue prose is never workforce authority; every unit inherits the
+            # single binding resolved by the canonical planner seam.
+            unit_worker = contract_worker
             unit_data = {
                 "task_id": item.contract["task_id"],
                 "unit_id": unit["unit_id"],
@@ -707,6 +839,19 @@ class ExternalIntelligenceAutomation:
                 unit_data["selected_worker"] = dict(unit_worker)
             units.append(unit_data)
         return units
+
+    def _validate_worker_transport_binding(self) -> None:
+        """Reject a planner binding incompatible with the configured worker before effect."""
+        if self._worker_binding is None:
+            return
+        transport = getattr(self.c_runtime, "transport", None)
+        bind_worker = getattr(transport, "bind_worker", None)
+        if not callable(bind_worker):
+            return
+        try:
+            bind_worker(dict(self._worker_binding))
+        except Exception as exc:
+            raise AutomationError(f"CANONICAL_WORKER_TRANSPORT_BINDING_INVALID:{exc}") from exc
 
     @staticmethod
     def _valid_receipts(run: Mapping[str, Any], expected_ids: set[str]) -> list[Mapping[str, Any]]:
@@ -728,6 +873,7 @@ class ExternalIntelligenceAutomation:
     def run_issue(
         self, repository: str, issue_number: int, title: str, body: str
     ) -> dict[str, Any]:
+        self._worker_binding = None
         try:
             contract = parse_issue_contract(body)
         except AutomationError as exc:
@@ -770,10 +916,51 @@ class ExternalIntelligenceAutomation:
         dispatched = False
         try:
             self._validate_source_lineage(item.repository, str(contract["main_sha"]))
-            _, task_card_text = self._task_card(contract)
+            task_card_path, task_card_text = self._task_card(contract)
             self._validate_task_card_authority(contract, task_card_text)
             record = self._record(item)
             intake = normalize_intake(record)
+            if intake["disposition"] == "EXECUTABLE":
+                self._worker_binding = self._canonical_worker_binding(
+                    item, task_card_path, task_card_text
+                )
+                self._validate_worker_transport_binding()
+            prior_dispatch_state = resume_from in {
+                "INTELLIGENCE_DISPATCHING",
+                "INTELLIGENCE_COMPLETED",
+                "FANOUT_DISPATCHING",
+                "FANOUT_COMPLETED",
+            } or (
+                previous is not None
+                and str(previous.get("state") or "") == "RECONCILIATION_REQUIRED"
+                and str(previous.get("prior_state") or "")
+                in {
+                    "INTELLIGENCE_DISPATCHING",
+                    "INTELLIGENCE_COMPLETED",
+                    "FANOUT_DISPATCHING",
+                    "FANOUT_COMPLETED",
+                }
+            )
+            if prior_dispatch_state:
+                persisted_binding = previous.get("worker_binding") if previous else None
+                if not isinstance(persisted_binding, Mapping):
+                    return self.state_store.save(
+                        item,
+                        "RECONCILIATION_REQUIRED",
+                        prior_state=resume_from,
+                        error="CANONICAL_WORKFORCE_BINDING_MISSING",
+                        reconcile_only=True,
+                        semantic_dispatched=True,
+                    )
+                if dict(persisted_binding) != self._worker_binding:
+                    return self.state_store.save(
+                        item,
+                        "RECONCILIATION_REQUIRED",
+                        prior_state=resume_from,
+                        error="CANONICAL_WORKFORCE_BINDING_REPLAY_MISMATCH",
+                        reconcile_only=True,
+                        semantic_dispatched=True,
+                    )
             intelligence_effect_id = (
                 self._intelligence_effect_id(item, task_card_text)
                 if intake["disposition"] == "EXECUTABLE"
@@ -781,14 +968,18 @@ class ExternalIntelligenceAutomation:
             )
             prior_intelligence_state = resume_from in {
                 "INTELLIGENCE_DISPATCHING",
+                "INTELLIGENCE_COMPLETED",
                 "FANOUT_DISPATCHING",
+                "FANOUT_COMPLETED",
             } or (
                 previous is not None
                 and str(previous.get("state") or "") == "RECONCILIATION_REQUIRED"
                 and str(previous.get("prior_state") or "")
                 in {
                     "INTELLIGENCE_DISPATCHING",
+                    "INTELLIGENCE_COMPLETED",
                     "FANOUT_DISPATCHING",
+                    "FANOUT_COMPLETED",
                 }
             )
             if prior_intelligence_state:
@@ -814,10 +1005,15 @@ class ExternalIntelligenceAutomation:
             dispatch_state = {}
             if intelligence_effect_id is not None:
                 dispatch_state["intelligence_effect_id"] = intelligence_effect_id
-            self.state_store.save(item, "INTELLIGENCE_DISPATCHING", **dispatch_state)
+            self.state_store.save(
+                item,
+                "INTELLIGENCE_DISPATCHING",
+                worker_binding=self._worker_binding,
+                **dispatch_state,
+            )
             sidecar_kwargs = {}
-            if contract.get("selected_worker") is not None:
-                sidecar_kwargs["selected_worker"] = contract["selected_worker"]
+            if self._worker_binding is not None:
+                sidecar_kwargs["selected_worker"] = self._worker_binding
             intelligence = self.sidecar.analyze(
                 record,
                 self._sources(item, task_card_text),
@@ -835,13 +1031,19 @@ class ExternalIntelligenceAutomation:
             completed_state = {"intelligence_receipt_id": intelligence.get("receipt_id")}
             if intelligence_effect_id is not None:
                 completed_state["intelligence_effect_id"] = intelligence_effect_id
-            self.state_store.save(item, "INTELLIGENCE_COMPLETED", **completed_state)
+            self.state_store.save(
+                item,
+                "INTELLIGENCE_COMPLETED",
+                worker_binding=self._worker_binding,
+                **completed_state,
+            )
 
             units = self._c_units(item, intelligence)
             self.state_store.save(
                 item,
                 "FANOUT_DISPATCHING",
                 intelligence_effect_id=intelligence_effect_id,
+                worker_binding=self._worker_binding,
             )
             fanout = self.c_runtime.run(units, self.capacity_factory(contract))
             receipts = self._valid_receipts(fanout, {unit["unit_id"] for unit in units})
@@ -850,12 +1052,14 @@ class ExternalIntelligenceAutomation:
                 "FANOUT_COMPLETED",
                 intelligence_effect_id=intelligence_effect_id,
                 run_sha256=fanout.get("run_sha256"),
+                worker_binding=self._worker_binding,
             )
 
             self.state_store.save(
                 item,
                 "CLOSURE_DISPATCHING",
                 intelligence_effect_id=intelligence_effect_id,
+                worker_binding=self._worker_binding,
             )
             closure = self.d_runtime.close_task(
                 main_sha=str(contract["main_sha"]),
@@ -901,6 +1105,7 @@ class ExternalIntelligenceAutomation:
                 item,
                 "COMPLETE",
                 intelligence_effect_id=intelligence_effect_id,
+                worker_binding=self._worker_binding,
                 intelligence_receipt_id=intelligence.get("receipt_id"),
                 fanout_run_sha256=fanout.get("run_sha256"),
                 closure_run_id=closure.get("run_id"),
@@ -920,6 +1125,7 @@ class ExternalIntelligenceAutomation:
                     "RECONCILIATION_REQUIRED",
                     prior_state=current.get("state"),
                     intelligence_effect_id=current.get("intelligence_effect_id"),
+                    worker_binding=self._worker_binding or current.get("worker_binding"),
                     error=type(exc).__name__,
                     reconcile_only=True,
                     semantic_dispatched=dispatched,
