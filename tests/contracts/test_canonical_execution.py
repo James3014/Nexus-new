@@ -141,7 +141,7 @@ def test_candidate_generation_only_rejects_missing_contradictory_or_malformed_fa
         )
 
 
-def test_canonical_context_allows_formal_route_receipt_evidence() -> None:
+def test_canonical_context_allows_formal_route_receipt_evidence(monkeypatch) -> None:
     context = CanonicalTaskContext(
         task_id="task-route-receipt-evidence",
         task_type="audit",
@@ -164,6 +164,16 @@ def test_canonical_context_allows_formal_route_receipt_evidence() -> None:
             "gate_passed": True,
         }
     ]
+    planner = _RecordingPlanner()
+    monkeypatch.setattr(
+        CapabilityPlanner,
+        "plan",
+        lambda _self, **kwargs: planner.plan(**kwargs),
+    )
+    decision, projection = plan_canonical_task(context)
+    assert decision.authority == "CapabilityPlanner"
+    assert projection.execution_decision_authority == "CapabilityPlanner"
+    assert planner.calls[0]["route"]["route_features"] == {}
 
 
 def test_forged_route_receipt_cannot_replace_planner_authority(monkeypatch) -> None:
@@ -257,6 +267,14 @@ def test_canonical_context_requires_workforce_demands_for_available_execution_ch
         "online_enabled": True,
         "local_enabled": True,
     }
+    from nexus.engine.canonical_task_seam import _resolve_policy_workforce_bindings
+
+    with pytest.raises(ValueError, match="canonical_workforce_demand_malformed"):
+        _resolve_policy_workforce_bindings(
+            {"signal_snapshot": {"workforce_demands": {"demands": ["forged"]}}},
+            allowed_files=("x.py",),
+            verifier_command=(),
+        )
 
 
 def test_canonical_replan_builds_one_fresh_bundle_from_explicit_authorization(monkeypatch):

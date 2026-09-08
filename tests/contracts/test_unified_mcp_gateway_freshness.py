@@ -120,6 +120,17 @@ def test_head_drift_only_is_informational():
     assert result["reload_required"] is False
     assert result["action_review_required"] is False
     assert result["reload_reasons"] == []
+    tampered = _evaluate_freshness(
+        repo_head_at_start=SHA40_A,
+        repo_head_current=SHA40_B,
+        runtime_sha_at_start=DIGEST_1,
+        runtime_sha_current=DIGEST_1,
+        action_sha_at_start=DIGEST_2,
+        action_sha_current=DIGEST_2,
+    )
+    assert tampered["repository_drift"] is True
+    assert tampered["reload_required"] is False
+    assert tampered["action_review_required"] is False
 
 
 def test_tampered_head_only_signal_cannot_invent_action_review():
