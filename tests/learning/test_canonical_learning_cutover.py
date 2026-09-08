@@ -8,13 +8,14 @@ import nexus_learning.closure_effectiveness as canonical_closure
 import nexus_learning.contracts as canonical_contracts
 import nexus_learning.episode_projection as canonical_projection
 import nexus_learning.outcome_memory as canonical_memory
+import pytest
 
 from nexus.contracts import learning_experience as legacy_contracts
 from nexus.learning import learning_closure_effectiveness as legacy_closure
 from nexus.learning import learning_episode_projection as legacy_projection
 from nexus.learning import outcome_memory as legacy_memory
 
-CANONICAL_LEARNING_COMMIT = "3b8ece75fac4d2554245c29590748a84c5c671d5"
+CANONICAL_LEARNING_COMMIT = "b5993a128d720884aa51e71e6df75154a36854fa"
 
 
 def test_forwarding_facades_bind_canonical_symbol_identity() -> None:
@@ -78,3 +79,87 @@ def test_explicit_state_root_is_single_writer_and_cwd_independent(
     assert outcome_path.is_file()
     assert len(outcome_path.read_text(encoding="utf-8").splitlines()) == 1
     assert not (unrelated_cwd / ".nexus").exists()
+
+
+def _record(task_id: str, idempotency_key: str) -> legacy_memory.EpisodeOutcomeRecord:
+    return legacy_memory.EpisodeOutcomeRecord.from_task(
+        task_id=task_id,
+        task_type="consumer-cutover",
+        task_desc="canonical consumer tail boundary",
+        solved=True,
+        wall_duration_sec=1.0,
+        total_tokens_used=1,
+        trust_mismatch=False,
+        idempotency_key=idempotency_key,
+        terminal_outcome="SUCCEEDED",
+        qualification_evidence_present=True,
+    )
+
+
+def test_facade_preserves_canonical_history_and_policy_across_unterminated_tail(
+    tmp_path: Path,
+) -> None:
+    first = _record("A", "key-A")
+    second = _record("B", "key-B")
+    third = _record("C", "key-C")
+    state_root = legacy_memory.LearningStateRoot.from_project_root(tmp_path)
+
+    legacy_memory.OutcomeMemoryManager.save_episode_and_tune_sync(first, project_root=state_root)
+    storage = state_root.outcome_history_path
+    storage.write_bytes(
+        storage.read_bytes() + json.dumps(second.to_dict(), sort_keys=True).encode("utf-8")
+    )
+    result = legacy_memory.OutcomeMemoryManager.save_episode_and_tune_sync(
+        third, project_root=state_root
+    )
+
+    rows = legacy_memory.OutcomeMemoryManager.load_recent_records(project_root=state_root)
+    assert [row["task_id"] for row in rows] == ["A", "B", "C"]
+    assert result["policy"]["source_experiences"] == ["A", "B", "C"]
+    policy = json.loads(state_root.dynamic_policy_path.read_text(encoding="utf-8"))
+    assert policy["source_experiences"] == ["A", "B", "C"]
+
+
+def test_facade_duplicate_retry_does_not_append_second_record(tmp_path: Path) -> None:
+    state_root = legacy_memory.LearningStateRoot.from_project_root(tmp_path)
+    first_record = _record("A", "key-A")
+    record = _record("C", "key-C")
+
+    legacy_memory.OutcomeMemoryManager.save_episode_and_tune_sync(
+        first_record, project_root=state_root
+    )
+    storage = state_root.outcome_history_path
+    storage.write_bytes(storage.read_bytes().rstrip(b"\n"))
+    legacy_memory.OutcomeMemoryManager.save_episode_and_tune_sync(record, project_root=state_root)
+    history_before = storage.read_bytes()
+    duplicate = legacy_memory.OutcomeMemoryManager.save_episode_and_tune_sync(
+        record, project_root=state_root
+    )
+
+    rows = legacy_memory.OutcomeMemoryManager.load_recent_records(project_root=state_root)
+    assert duplicate["status"] == "IDEMPOTENT_DUPLICATE"
+    assert [row["task_id"] for row in rows] == ["A", "C"]
+    assert storage.read_bytes() == history_before
+    policy = json.loads(state_root.dynamic_policy_path.read_text(encoding="utf-8"))
+    assert policy["source_experiences"] == ["A", "C"]
+
+
+@pytest.mark.parametrize("tail", [b'{"task_id":"partial"', b"[]", b"not-json"])
+def test_facade_rejects_corrupt_unterminated_tail_without_mutation_or_policy(
+    tmp_path: Path, tail: bytes
+) -> None:
+    state_root = legacy_memory.LearningStateRoot.from_project_root(tmp_path)
+    storage = state_root.outcome_history_path
+    storage.parent.mkdir(parents=True)
+    storage.write_bytes(tail)
+    policy_before = b'{"status":"existing-policy"}\n'
+    state_root.dynamic_policy_path.write_bytes(policy_before)
+    history_before = storage.read_bytes()
+
+    with pytest.raises(ValueError, match="OUTCOME_HISTORY_TAIL_INVALID"):
+        legacy_memory.OutcomeMemoryManager.save_episode_and_tune_sync(
+            _record("new", "new-key"), project_root=state_root
+        )
+
+    assert storage.read_bytes() == history_before
+    assert state_root.dynamic_policy_path.read_bytes() == policy_before
