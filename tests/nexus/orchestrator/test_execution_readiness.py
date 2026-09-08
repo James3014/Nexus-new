@@ -6,6 +6,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
 from nexus.contracts.execution_readiness import (
     CanonicalNextAction,
     ExecutionReadinessBlockerCode,
@@ -68,6 +70,7 @@ def _evaluate(
     overrides: dict[ExecutionReadinessPlane, tuple[PlaneObservation, ...]] | None = None,
     *,
     completion_observation: CompletionAuthorityObservation | None = None,
+    provider_preflight_observer=None,
 ):
     observations = _all_pass()
     if overrides:
@@ -77,6 +80,7 @@ def _evaluate(
         observations,
         completion_observation=completion_observation,
         evaluated_at=datetime(2026, 9, 6, 12, 0, 0, tzinfo=timezone.utc),
+        provider_preflight_observer=provider_preflight_observer,
     )
 
 
@@ -92,6 +96,210 @@ def _workforce_binding() -> dict[str, object]:
         "task_card_path": "tasks/card.md",
         "task_card_hash": "c" * 64,
     }
+
+
+def _valid_preflight(provider: str, model: str) -> dict[str, object]:
+    return {
+        "schema": "nexus.provider_preflight.v1",
+        "provider": provider,
+        "requested_model": model,
+        "resolved_model": model,
+        "execution_ready": True,
+        "readiness_status": "MODEL_VERIFIED",
+        "model_reachable": True,
+        "requested_model_verified": True,
+        "binary_found": True,
+        "binary_path": "/bin/agy",
+        "binary_sha256": "b" * 64,
+        "cli_version_sha256": "c" * 64,
+        "probe_evidence_hash": "d" * 64,
+        "probe_expires_at": "2099-01-01T00:00:00Z",
+        "authentication_required": False,
+        "authenticated": False,
+    }
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "wrong_task",
+        "missing_attempt",
+        "missing_action",
+        "missing_request",
+        "missing_action_map",
+        "wrong_action_task",
+        "malformed_request_hash",
+        "not_found",
+        "invalid_state",
+    ),
+)
+def test_material_replay_identity_hostiles_block(monkeypatch, mutation):
+    import nexus.orchestrator.self_hosted_task_service as task_service
+
+    snapshot = {
+        "task_id": "goal-test",
+        "attempt_id": "attempt-1",
+        "action_id": "action-1",
+        "request_hash": "r" * 64,
+        "status": "READY",
+        "task_action": {
+            "task_id": "goal-test",
+            "action_id": "action-1",
+            "request_hash": "a" * 64,
+            "next_action": "none",
+        },
+        "found": True,
+        "state_valid": True,
+    }
+    if mutation == "wrong_task":
+        snapshot["task_id"] = "other"
+    elif mutation == "missing_attempt":
+        snapshot.pop("attempt_id")
+    elif mutation == "missing_action":
+        snapshot.pop("action_id")
+    elif mutation == "missing_request":
+        snapshot.pop("request_hash")
+    elif mutation == "missing_action_map":
+        snapshot.pop("task_action")
+    elif mutation == "wrong_action_task":
+        snapshot["task_action"]["task_id"] = "other"
+    elif mutation == "malformed_request_hash":
+        snapshot["request_hash"] = "R" * 64
+    elif mutation == "not_found":
+        snapshot["found"] = False
+    else:
+        snapshot["state_valid"] = False
+    monkeypatch.setattr(
+        task_service,
+        "SelfHostedTaskService",
+        lambda: SimpleNamespace(get_task_snapshot=lambda *_a, **_k: snapshot),
+    )
+    from nexus.orchestrator.execution_readiness import _canonical_replay_observation
+
+    observation = _canonical_replay_observation(
+        _request(
+            task_campaign_goal_identity="goal-test", execution_contract_kind="TRACKED_TASK_CARD"
+        )
+    )
+    assert observation.blocker_code is ExecutionReadinessBlockerCode.SEMANTIC_REPLAY_FENCE
+
+
+def test_material_replay_valid_identity_passes(monkeypatch):
+    import nexus.orchestrator.self_hosted_task_service as task_service
+
+    snapshot = {
+        "task_id": "goal-test",
+        "attempt_id": "attempt-1",
+        "action_id": "action-1",
+        "request_hash": "a" * 64,
+        "status": "READY",
+        "task_action": {
+            "task_id": "goal-test",
+            "action_id": "action-1",
+            "request_hash": "r" * 64,
+            "next_action": "none",
+        },
+        "found": True,
+        "state_valid": True,
+    }
+    monkeypatch.setattr(
+        task_service,
+        "SelfHostedTaskService",
+        lambda: SimpleNamespace(get_task_snapshot=lambda *_a, **_k: snapshot),
+    )
+    from nexus.orchestrator.execution_readiness import _canonical_replay_observation
+
+    assert (
+        _canonical_replay_observation(
+            _request(
+                task_campaign_goal_identity="goal-test", execution_contract_kind="TRACKED_TASK_CARD"
+            )
+        ).status
+        is ExecutionReadinessStatus.PASSED
+    )
+
+
+def test_cline_requested_and_resolved_model_identities_pass(monkeypatch):
+    import nexus.orchestrator.self_hosted_task_service as task_service
+
+    monkeypatch.setattr(
+        task_service,
+        "validate_workforce_dispatch_binding",
+        lambda *_a, **_k: {
+            "worker_id": "worker-1",
+            "provider": "cline",
+            "model": "glm-5.2",
+            "policy_hash": "p" * 64,
+            "binding_hash": "b" * 64,
+            "aggregate_binding_hash": "a" * 64,
+        },
+    )
+    binding = _workforce_binding()
+    result = _evaluate(
+        _request(worker_constraints=("provider=cline",)),
+        {
+            ExecutionReadinessPlane.WORKFORCE: (
+                PlaneObservation(
+                    plane=ExecutionReadinessPlane.WORKFORCE,
+                    status=ExecutionReadinessStatus.PASSED,
+                    workforce_dispatch_binding=binding,
+                ),
+            )
+        },
+        provider_preflight_observer=lambda p, m: {
+            **_valid_preflight(p, m),
+            "requested_model": "glm-5.2",
+            "resolved_model": "cline-pass/glm-5.2",
+        },
+    )
+    assert result.plane_results[-1].status is ExecutionReadinessStatus.PASSED
+    evidence = result.plane_results[-1].evidence_identities
+    assert "provider_preflight_requested_model=glm-5.2" in evidence
+    assert "provider_preflight_resolved_model=cline-pass/glm-5.2" in evidence
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"authentication_required": None},
+        {"authentication_required": "false"},
+        {"authenticated": "false"},
+        {"resolved_model": {"model": "model-1"}},
+        {"binary_path": {"path": "/bin/agy"}},
+    ],
+)
+def test_material_workforce_preflight_identity_types_fail(monkeypatch, override):
+    import nexus.orchestrator.self_hosted_task_service as task_service
+
+    monkeypatch.setattr(
+        task_service,
+        "validate_workforce_dispatch_binding",
+        lambda *_a, **_k: {
+            "worker_id": "worker-1",
+            "provider": "agy",
+            "model": "model-1",
+            "policy_hash": "p" * 64,
+            "binding_hash": "b" * 64,
+            "aggregate_binding_hash": "a" * 64,
+        },
+    )
+    result = _evaluate(
+        _request(worker_constraints=("provider=agy",)),
+        {
+            ExecutionReadinessPlane.WORKFORCE: (
+                PlaneObservation(
+                    plane=ExecutionReadinessPlane.WORKFORCE,
+                    status=ExecutionReadinessStatus.PASSED,
+                    workforce_dispatch_binding=_workforce_binding(),
+                ),
+            )
+        },
+        provider_preflight_observer=lambda p, m: {
+            **_valid_preflight(p, m),
+            **override,
+        },
+    )
+    assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
 
 
 def _completion_observation(**overrides: object) -> CompletionAuthorityObservation:
@@ -759,6 +967,7 @@ class TestCorrectiveFalseGreenControls:
                     ),
                 )
             },
+            provider_preflight_observer=_valid_preflight,
         )
         assert result.plane_results[-1].status is ExecutionReadinessStatus.PASSED
         assert any(
@@ -883,6 +1092,7 @@ class TestCorrectiveFalseGreenControls:
                         ),
                     )
                 },
+                provider_preflight_observer=_valid_preflight,
             )
             assert result.plane_results[-1].status is ExecutionReadinessStatus.PASSED
         result = _evaluate(

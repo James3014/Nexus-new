@@ -3376,6 +3376,149 @@ def test_execution_readiness_forwards_typed_workforce_binding(monkeypatch, readi
     assert captured["binding"] == binding
 
 
+def _public_workforce_binding():
+    demands = {"required_provider": "agy", "required_model": "model-1"}
+    return {
+        "planner_output": {
+            "plan_payload": {"signal_snapshot": {"workforce_demands": demands}},
+        },
+        "workforce_demands": demands,
+        "workforce_admission": {"overall_decision": "ALLOW"},
+        "canonical_dispatch_envelope": {"schema": "nexus.canonical_dispatch.v1"},
+        "task_id": "task-public-readiness",
+        "attempt_id": "attempt-public-readiness",
+        "task_card_path": "tasks/test/task-public-readiness.md",
+        "task_card_hash": "c" * 64,
+    }
+
+
+def _public_replay_snapshot(task_id):
+    return {
+        "task_id": task_id,
+        "found": True,
+        "state_valid": True,
+        "status": "APPROVED",
+        "attempt_id": "attempt-public-readiness",
+        "action_id": "action-public-readiness",
+        "request_hash": "d" * 64,
+        "task_action": {"task_id": task_id, "next_action": "none"},
+    }
+
+
+def _public_preflight(**overrides):
+    result = {
+        "schema": "nexus.provider_preflight.v1",
+        "provider": "agy",
+        "requested_model": "model-1",
+        "resolved_model": "model-1",
+        "execution_ready": True,
+        "readiness_status": "MODEL_VERIFIED",
+        "model_reachable": True,
+        "requested_model_verified": True,
+        "binary_found": True,
+        "binary_path": "/usr/local/bin/agy",
+        "binary_sha256": "a" * 64,
+        "cli_version_sha256": "b" * 64,
+        "probe_evidence_hash": "c" * 64,
+        "probe_expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        "authentication_required": False,
+        "authenticated": False,
+        "authentication_evidence": None,
+    }
+    result.update(overrides)
+    return result
+
+
+def _patch_public_readiness(monkeypatch, gateway):
+    import nexus.orchestrator.self_hosted_task_service as service_module
+
+    monkeypatch.setattr(
+        service_module,
+        "validate_workforce_dispatch_binding",
+        lambda binding, require_binding=False: {
+            "worker_id": "worker-1",
+            "provider": "agy",
+            "model": "model-1",
+            "policy_hash": "p" * 64,
+            "binding_hash": "q" * 64,
+            "aggregate_binding_hash": "r" * 64,
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(gateway.service, "get_task_snapshot", _public_replay_snapshot)
+    return gateway
+
+
+def test_execution_readiness_public_workforce_callback_reaches_ready_without_env_pass(
+    monkeypatch, readiness_env
+):
+    gateway = _patch_public_readiness(monkeypatch, UnifiedMCPGateway(service=FakeService()))
+    captured = {}
+
+    def preflight(arguments):
+        captured.update(provider=arguments["provider"], model=arguments["model"])
+        return _public_preflight()
+
+    monkeypatch.setattr(gateway, "_provider_preflight", preflight)
+    payload = _call_readiness(
+        gateway,
+        {"worker_constraints": ["worker=worker-1", "provider=agy", "model=model-1"],
+         "workforce_dispatch_binding": _public_workforce_binding()},
+    )
+    assert payload["outcome"] == "READY_TO_EXECUTE"
+    workforce = next(item for item in payload["plane_results"] if item["plane"] == "WORKFORCE_PLANE")
+    assert workforce["status"] == "PASSED"
+    assert captured == {"provider": "agy", "model": "model-1"}
+    assert "NEXUS_READINESS_WORKFORCE_STATUS=PASSED" not in json.dumps(workforce)
+    assert {"provider_preflight_provider=agy", "provider_preflight_requested_model=model-1"}.issubset(
+        workforce["evidence_identities"]
+    )
+    assert any(item.startswith("provider_preflight_binary_sha256=") for item in workforce["evidence_identities"])
+    assert any(item.startswith("provider_preflight_cli_version_sha256=") for item in workforce["evidence_identities"])
+    assert any(item.startswith("provider_preflight_probe_evidence_hash=") for item in workforce["evidence_identities"])
+    assert any(item.startswith("provider_preflight_probe_expires_at=") for item in workforce["evidence_identities"])
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"kind": "non_mapping"}, {"kind": "raises"},
+        {"probe_expires_at": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()},
+        {"probe_expires_at": datetime.now().replace(tzinfo=None).isoformat()},
+        {"provider": "other"}, {"requested_model": "other-model"},
+        {"binary_sha256": "bad"}, {"cli_version_sha256": "bad"},
+        {"probe_evidence_hash": "bad"}, {"execution_ready": False},
+        {"model_reachable": False}, {"requested_model_verified": False},
+        {"authentication_required": True, "authenticated": False},
+        {"authentication_required": True, "authenticated": True, "authentication_evidence": None},
+    ],
+    ids=[
+        "non_mapping", "raises", "expired", "naive", "wrong_provider", "wrong_model",
+        "bad_binary_hash", "bad_cli_hash", "bad_probe_hash", "execution_not_ready",
+        "model_unreachable", "model_unverified", "auth_false", "auth_evidence_missing",
+    ],
+)
+def test_execution_readiness_public_workforce_preflight_fail_closed(monkeypatch, readiness_env, override):
+    gateway = _patch_public_readiness(monkeypatch, UnifiedMCPGateway(service=FakeService()))
+
+    def preflight(arguments):
+        if override.get("kind") == "raises":
+            raise RuntimeError("probe failed")
+        if override.get("kind") == "non_mapping":
+            return ["not", "a", "mapping"]
+        values = dict(override)
+        values.pop("kind", None)
+        return _public_preflight(**values)
+
+    monkeypatch.setattr(gateway, "_provider_preflight", preflight)
+    payload = _call_readiness(
+        gateway,
+        {"worker_constraints": ["provider=agy"], "workforce_dispatch_binding": _public_workforce_binding()},
+    )
+    assert payload["outcome"] == "BLOCKED"
+    assert payload["primary_blocker"]["code"] == "WORKFORCE_NOT_READY"
+
+
 def test_execution_readiness_ready_path_end_to_end(readiness_env):
     gateway = UnifiedMCPGateway(service=FakeService())
     readiness_env.set(NEXUS_READINESS_WORKFORCE_STATUS="PASSED")

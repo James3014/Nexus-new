@@ -2532,6 +2532,7 @@ class UnifiedMCPGateway:
             "binary_sha256": None,
             "cli_version": None,
             "authenticated": False,
+            "authentication_required": self._provider_requires_authentication(provider),
             "model_reachable": False,
             "probe_requested": bool(arguments.get("probe", False)),
             "probe_latency_ms": 0,
@@ -4315,6 +4316,9 @@ class UnifiedMCPGateway:
             request,
             plane_observations,
             completion_observation=completion_observation,
+            provider_preflight_observer=lambda provider, model: self._provider_preflight(
+                {"provider": provider, "model": model}
+            ),
         )
         payload = result.model_dump(mode="json")
         payload["certification_fence"] = {

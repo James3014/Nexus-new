@@ -25,7 +25,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from nexus.contracts.autonomy_goal import AutonomyActionClass, RepositoryIdentity
 from nexus.contracts.execution_readiness import (
@@ -140,18 +140,24 @@ _BLOCKER_MESSAGE: dict[ExecutionReadinessBlockerCode, str] = {
 }
 
 _UNTRUSTED_COMPATIBILITY_PASSES: dict[ExecutionReadinessPlane, frozenset[str]] = {
-    ExecutionReadinessPlane.GOVERNANCE: frozenset({
-        "governance_plane:default_no_open_recovery",
-        "NEXUS_READINESS_GOVERNANCE_STATUS=PASSED",
-    }),
-    ExecutionReadinessPlane.AUTHORITY: frozenset({
-        "authority_plane:in_process_caller_context",
-        "NEXUS_READINESS_AUTHORITY_STATUS=PASSED",
-    }),
-    ExecutionReadinessPlane.REPLAY_FENCE: frozenset({
-        "replay_fence_plane:in_process_first_observation",
-        "NEXUS_READINESS_REPLAY_FENCE_STATUS=PASSED",
-    }),
+    ExecutionReadinessPlane.GOVERNANCE: frozenset(
+        {
+            "governance_plane:default_no_open_recovery",
+            "NEXUS_READINESS_GOVERNANCE_STATUS=PASSED",
+        }
+    ),
+    ExecutionReadinessPlane.AUTHORITY: frozenset(
+        {
+            "authority_plane:in_process_caller_context",
+            "NEXUS_READINESS_AUTHORITY_STATUS=PASSED",
+        }
+    ),
+    ExecutionReadinessPlane.REPLAY_FENCE: frozenset(
+        {
+            "replay_fence_plane:in_process_first_observation",
+            "NEXUS_READINESS_REPLAY_FENCE_STATUS=PASSED",
+        }
+    ),
     ExecutionReadinessPlane.WORKFORCE: frozenset({"NEXUS_READINESS_WORKFORCE_STATUS=PASSED"}),
 }
 
@@ -572,16 +578,56 @@ def _canonical_replay_observation(request: ExecutionReadinessRequest) -> PlaneOb
             evidence_identities=(f"replay_task_id={task_id}", "replay_snapshot=missing"),
         )
     task_action = snapshot.get("task_action")
-    action = task_action if isinstance(task_action, Mapping) else {}
+    if (
+        snapshot.get("task_id") != task_id
+        or snapshot.get("found", True) is not True
+        or snapshot.get("state_valid", True) is not True
+    ):
+        return PlaneObservation(
+            plane=ExecutionReadinessPlane.REPLAY_FENCE,
+            status=ExecutionReadinessStatus.BLOCKED,
+            blocker_code=ExecutionReadinessBlockerCode.SEMANTIC_REPLAY_FENCE,
+            evidence_identities=(f"replay_task_id={task_id}", "replay_snapshot=identity_invalid"),
+        )
+    if not isinstance(task_action, Mapping):
+        return PlaneObservation(
+            plane=ExecutionReadinessPlane.REPLAY_FENCE,
+            status=ExecutionReadinessStatus.BLOCKED,
+            blocker_code=ExecutionReadinessBlockerCode.SEMANTIC_REPLAY_FENCE,
+            evidence_identities=(f"replay_task_id={task_id}", "replay_task_action=missing"),
+        )
+    action = task_action
     status = str(snapshot.get("status") or "UNKNOWN")
     next_action = str(action.get("next_action") or snapshot.get("next_action") or "")
+    attempt_id = snapshot.get("attempt_id")
+    action_id = snapshot.get("action_id")
+    request_hash = snapshot.get("request_hash")
+    if (
+        not isinstance(attempt_id, str)
+        or not attempt_id
+        or not isinstance(action_id, str)
+        or not action_id
+        or not isinstance(request_hash, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", request_hash)
+        or not isinstance(action.get("task_id"), str)
+        or action.get("task_id") != task_id
+    ):
+        return PlaneObservation(
+            plane=ExecutionReadinessPlane.REPLAY_FENCE,
+            status=ExecutionReadinessStatus.BLOCKED,
+            blocker_code=ExecutionReadinessBlockerCode.SEMANTIC_REPLAY_FENCE,
+            evidence_identities=(
+                f"replay_task_id={task_id}",
+                "replay_snapshot=identity_incomplete",
+            ),
+        )
     evidence = (
         f"replay_task_id={task_id}",
-        f"replay_attempt_id={snapshot.get('attempt_id') or '<missing>'}",
+        f"replay_attempt_id={attempt_id}",
         f"replay_status={status}",
         f"replay_next_action={next_action or '<none>'}",
-        f"replay_action_id={snapshot.get('action_id') or '<missing>'}",
-        f"replay_request_hash={snapshot.get('request_hash') or '<missing>'}",
+        f"replay_action_id={action_id}",
+        f"replay_request_hash={request_hash}",
     )
     reconciliation_required = bool(
         snapshot.get("reconciliation_required")
@@ -616,6 +662,8 @@ def _evidence_map(observation: PlaneObservation) -> dict[str, str]:
 def _canonical_workforce_observation(
     request: ExecutionReadinessRequest,
     supplied: Sequence[PlaneObservation],
+    provider_preflight_observer: Callable[[str, str], Mapping[str, Any]] | None = None,
+    moment: datetime | None = None,
 ) -> PlaneObservation:
     """Revalidate the canonical Planner -> Admission binding for material work."""
 
@@ -656,6 +704,8 @@ def _canonical_workforce_observation(
         )
         if planned_demands != demands:
             continue
+        if provider_preflight_observer is None:
+            continue
         try:
             from nexus.orchestrator.self_hosted_task_service import (
                 validate_workforce_dispatch_binding,
@@ -678,6 +728,65 @@ def _canonical_workforce_observation(
             continue
         if not isinstance(validated, Mapping):
             continue
+        if not all(
+            isinstance(validated.get(key), str) and validated.get(key)
+            for key in ("worker_id", "provider", "model")
+        ):
+            continue
+        try:
+            preflight = provider_preflight_observer(
+                str(validated.get("provider") or ""), str(validated.get("model") or "")
+            )
+        except Exception:
+            continue
+        if not isinstance(preflight, Mapping) or not (
+            preflight.get("schema") == "nexus.provider_preflight.v1"
+            and isinstance(preflight.get("provider"), str)
+            and preflight.get("provider") == validated.get("provider")
+            and isinstance(preflight.get("requested_model"), str)
+            and preflight.get("requested_model") == validated.get("model")
+            and isinstance(preflight.get("resolved_model"), str)
+            and preflight.get("resolved_model")
+            and preflight.get("execution_ready") is True
+            and preflight.get("readiness_status") == "MODEL_VERIFIED"
+            and preflight.get("model_reachable") is True
+            and preflight.get("requested_model_verified") is True
+            and preflight.get("binary_found") is True
+            and isinstance(preflight.get("binary_path"), str)
+            and preflight.get("binary_path")
+            and isinstance(preflight.get("probe_expires_at"), str)
+            and preflight.get("probe_expires_at")
+        ):
+            continue
+        try:
+            expiry = datetime.fromisoformat(
+                str(preflight["probe_expires_at"]).replace("Z", "+00:00")
+            )
+        except (TypeError, ValueError):
+            continue
+        if (
+            expiry.tzinfo is None
+            or moment is None
+            or expiry <= moment
+            or not all(
+                isinstance(preflight.get(key), str)
+                and re.fullmatch(r"[0-9a-f]{64}", preflight[key])
+                for key in ("binary_sha256", "cli_version_sha256", "probe_evidence_hash")
+            )
+        ):
+            continue
+        if not isinstance(preflight.get("authentication_required"), bool):
+            continue
+        if not isinstance(preflight.get("authenticated"), bool):
+            continue
+        if preflight.get("authentication_required") is True and not (
+            preflight.get("authenticated") is True and preflight.get("authentication_evidence")
+        ):
+            continue
+        if preflight.get("authentication_required") is True and not isinstance(
+            preflight.get("authentication_evidence"), str
+        ):
+            continue
         identity = {
             "worker": str(validated.get("worker_id") or "").strip().lower(),
             "worker_id": str(validated.get("worker_id") or "").strip().lower(),
@@ -687,7 +796,13 @@ def _canonical_workforce_observation(
         for raw_constraint in request.worker_constraints:
             key, separator, value = str(raw_constraint).partition("=")
             key, value = key.strip().lower(), value.strip().lower()
-            if separator and key in identity and identity[key] != value:
+            if (
+                not separator
+                or not key
+                or not value
+                or key not in identity
+                or identity[key] != value
+            ):
                 break
         else:
             evidence = tuple(
@@ -705,6 +820,23 @@ def _canonical_workforce_observation(
                     "aggregate_binding_hash",
                 )
                 if isinstance(validated.get(key), str) and validated[key]
+            )
+            evidence += tuple(
+                f"provider_preflight_{key}={preflight[key]}"
+                for key in (
+                    "provider",
+                    "requested_model",
+                    "resolved_model",
+                    "authentication_required",
+                    "authenticated",
+                    "binary_path",
+                    "binary_sha256",
+                    "cli_version_sha256",
+                    "probe_evidence_hash",
+                    "probe_expires_at",
+                    "authentication_evidence",
+                )
+                if key in {"authentication_required", "authenticated"} or preflight.get(key)
             )
             return PlaneObservation(
                 plane=ExecutionReadinessPlane.WORKFORCE,
@@ -731,6 +863,7 @@ def _normalize_canonical_planes(
     request: ExecutionReadinessRequest,
     plane_observations: Mapping[ExecutionReadinessPlane, Sequence[PlaneObservation]],
     moment: datetime,
+    provider_preflight_observer: Callable[[str, str], Mapping[str, Any]] | None = None,
 ) -> dict[ExecutionReadinessPlane, tuple[PlaneObservation, ...]]:
     """Replace compatibility PASS observations with canonical/typed evidence."""
 
@@ -753,7 +886,11 @@ def _normalize_canonical_planes(
         elif plane is ExecutionReadinessPlane.REPLAY_FENCE:
             normalized[plane] = (_canonical_replay_observation(request),)
         else:
-            normalized[plane] = (_canonical_workforce_observation(request, supplied),)
+            normalized[plane] = (
+                _canonical_workforce_observation(
+                    request, supplied, provider_preflight_observer, moment
+                ),
+            )
     return normalized
 
 
@@ -803,6 +940,7 @@ def evaluate_execution_readiness(
     *,
     completion_observation: CompletionAuthorityObservation | None = None,
     evaluated_at: datetime | None = None,
+    provider_preflight_observer: Callable[[str, str], Mapping[str, Any]] | None = None,
 ) -> ExecutionReadinessResult:
     """Converge evidence after re-binding canonical planes at one watermark."""
 
@@ -810,7 +948,9 @@ def evaluate_execution_readiness(
     if moment.tzinfo is None:
         raise ReadinessEvidenceError("EVALUATED_AT_MUST_BE_TIMEZONE_AWARE")
 
-    canonical_observations = _normalize_canonical_planes(request, plane_observations, moment)
+    canonical_observations = _normalize_canonical_planes(
+        request, plane_observations, moment, provider_preflight_observer
+    )
     aggregated: dict[
         ExecutionReadinessPlane,
         tuple[ExecutionReadinessStatus, ExecutionReadinessBlockerCode | None, tuple[str, ...]],
