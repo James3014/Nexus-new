@@ -4218,19 +4218,81 @@ def _launchctl_observation(*, runner: Callable[..., Any] | None = None) -> dict[
     return {"loaded": True, "service_loaded": True, "pid": int(match.group(1)) if match else None}
 
 
+def _load_source_owned_writer_quiescence_receipt(data: bytes) -> dict[str, Any]:
+    """Decode the authoritative Card B receipt and expose the old projection."""
+    try:
+        from nexus.orchestrator.writer_quiescence import WriterQuiescenceReceipt
+
+        receipt = WriterQuiescenceReceipt.from_bytes(data).verify()
+        if not receipt.source_identity or not receipt.server_identity:
+            raise ValueError("writer receipt source identity is incomplete")
+        roots = tuple(receipt.ordered_roots)
+        if not roots or any(
+            not Path(root).is_absolute()
+            or Path(root).is_symlink()
+            or not Path(root).is_dir()
+            for root in roots
+        ):
+            raise ValueError("writer receipt root is not physically present")
+        for observation in receipt.observations:
+            identity = observation.identity
+            if (
+                identity.source_identity != receipt.source_identity
+                or identity.process_start_identity != receipt.process_start_identity
+                or identity.root not in roots
+            ):
+                raise ValueError("writer receipt observation identity mismatch")
+        for lease in receipt.leases:
+            identity = lease.identity
+            if (
+                identity.source_identity != receipt.source_identity
+                or identity.process_start_identity != receipt.process_start_identity
+                or identity.root not in roots
+            ):
+                raise ValueError("writer receipt lease identity mismatch")
+    except (ImportError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise _gateway_error("typed writer quiescence receipt unavailable", exc) from exc
+    if receipt.drain_state not in {"DRAINED", "UNKNOWN"}:
+        raise _gateway_error("typed writer quiescence receipt unresolved")
+    if receipt.drain_state == "UNKNOWN":
+        raise _gateway_error("typed writer quiescence receipt has unknown writers")
+    if receipt.unknowns:
+        raise _gateway_error("typed writer quiescence receipt has unknown writers")
+    historical = {
+        "schema": receipt.schema,
+        "receipt_sha256": receipt.receipt_sha256,
+        "source_head": "",
+        "hold_epoch": receipt.hold_epoch,
+        "root_vector": list(receipt.ordered_roots),
+        "observations": [item.to_dict() for item in receipt.observations],
+        "leases": [item.to_dict() for item in receipt.leases],
+        "unknowns": list(receipt.unknowns),
+        "pending_observations": [item.pending_work for item in receipt.observations],
+        "snapshot_hashes": {
+            f"{item.identity.root}|{item.identity.role}": item.snapshot_sha256
+            for item in receipt.observations
+        },
+    }
+    return {
+        "schema": "nexus.gateway.quiescence.observation.v2",
+        "disposition": "unknown",
+        "lifecycle_state": "UNKNOWN",
+        "assist_state": "",
+        "evidence_sha256": "",
+        "reacquisition_receipt": "",
+        "historical_projection": historical,
+        "unknown_reason": "CURRENT_PROVENANCE_REQUIRES_F_REGISTRY_BRIDGE",
+    }
+
+
 def observe_gateway_quiescence() -> dict[str, Any]:
-    """Read the manager-owned durable quiescence receipt; never trust request input."""
+    """Read manager-owned bytes through the source-owned typed collector."""
     path = _safe_store_path(GATEWAY_EVIDENCE_STORE)
     try:
-        value = json.loads(path.read_text(), object_pairs_hook=_unique_pairs)
-    except (OSError, ValueError) as exc:
+        data = path.read_bytes()
+    except OSError as exc:
         raise _gateway_error("Gateway quiescence evidence unavailable", exc) from exc
-    if not isinstance(value, Mapping) or value.get("disposition") not in {"drained", "held", "reconciled"}:
-        raise _gateway_error("Gateway quiescence evidence malformed")
-    required = ("lifecycle_state", "assist_state", "evidence_sha256", "reacquisition_receipt")
-    if any(not value.get(key) for key in required):
-        raise _gateway_error("Gateway quiescence evidence incomplete")
-    return dict(value)
+    return _load_source_owned_writer_quiescence_receipt(data)
 
 
 def collect_gateway_observation(request: GatewayDeploymentRequest, *, observation_time: str | None = None,

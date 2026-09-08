@@ -1158,11 +1158,104 @@ class SelfHostedTaskService:
         self.stale_after_seconds = stale_after_seconds
         self.worker_registry = worker_registry or WorkerRegistry.default()
         self._threads: dict[str, threading.Thread] = {}
+        self._writer_observer_thread = threading.current_thread()
+        self._writer_observer_pid = os.getpid()
         if auto_reconcile:
             self.reconcile_tasks()
 
     def _state_path(self, task_id: str) -> Path:
         return self.state_dir / f"{task_id}.json"
+
+    @staticmethod
+    def writer_quiescence_file_bytes(path: Path) -> bytes:
+        """Read one regular snapshot without following a file symlink."""
+        for parent in (path.parent, *path.parent.parents):
+            if parent.is_symlink():
+                raise OSError("symlinked snapshot parent")
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            before = os.fstat(fd)
+            if not stat.S_ISREG(before.st_mode):
+                raise OSError("snapshot is not regular")
+            with os.fdopen(fd, "rb", closefd=False) as stream:
+                data = stream.read()
+            after = os.fstat(fd)
+            current = path.lstat()
+            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+                after.st_dev,
+                after.st_ino,
+                after.st_size,
+                after.st_mtime_ns,
+            ) or (current.st_dev, current.st_ino) != (after.st_dev, after.st_ino):
+                raise OSError("snapshot changed during observation")
+            return data
+        finally:
+            os.close(fd)
+
+    @staticmethod
+    def writer_quiescence_json_bytes(data: bytes) -> Any:
+        def unique(pairs):
+            value = {}
+            for key, item in pairs:
+                if key in value:
+                    raise ValueError("duplicate observation field")
+                value[key] = item
+            return value
+
+        return json.loads(data, object_pairs_hook=unique)
+
+    def writer_quiescence_snapshot_bytes(self) -> bytes:
+        """Observe exact task files; collector hold files are a different domain."""
+        root = self.state_dir
+        if root.is_symlink() or not root.is_dir():
+            raise OSError("task-state root unavailable")
+        paths = sorted(root.glob("*.json"))
+        records: list[bytes] = []
+        for path in paths:
+            name = path.name.encode("utf-8")
+            data = self.writer_quiescence_file_bytes(path)
+            records.extend((len(name).to_bytes(8, "big"), name, len(data).to_bytes(8, "big"), data))
+        if paths != sorted(root.glob("*.json")):
+            raise OSError("task-state inventory changed")
+        return b"".join(records)
+
+    def writer_quiescence_process_state(self, thread_id: str) -> str:
+        """Observe the loader and actual worker threads, without inventing IDs."""
+        if self._writer_observer_pid != os.getpid():
+            return "UNKNOWN"
+        threads = (self._writer_observer_thread, *tuple(self._threads.values()))
+        for thread in threads:
+            if str(thread.ident) == str(thread_id):
+                return "alive" if thread.is_alive() else "UNKNOWN"
+        return "UNKNOWN"
+
+    def writer_quiescence_pending_work(self) -> Sequence[str]:
+        """Read task, target, action and actual worker liveness evidence."""
+        if not self.state_dir.is_dir():
+            return ("UNKNOWN:task-state-root",)
+        pending: list[str] = []
+        try:
+            for path in sorted(self.state_dir.glob("*.json")):
+                raw = self.writer_quiescence_json_bytes(self.writer_quiescence_file_bytes(path))
+                if not isinstance(raw, dict) or not raw.get("status"):
+                    raise ValueError("invalid task snapshot")
+                task_id = path.stem
+                status = str(raw["status"])
+                if status not in TERMINAL_STATUSES:
+                    pending.append(f"task:{task_id}:status:{status}")
+                lease = raw.get("lease") if isinstance(raw.get("lease"), Mapping) else {}
+                target = lease.get("target_worktree")
+                if target and status not in TERMINAL_STATUSES:
+                    pending.append(f"target:{task_id}:{target}")
+                action = self._task_action_envelope(raw)
+                if action.get("attention_required") is True:
+                    pending.append(f"action:{task_id}")
+            for task_id, thread in tuple(self._threads.items()):
+                if thread.is_alive():
+                    pending.append(f"thread:{task_id}:{thread.ident}")
+        except (OSError, ValueError, TypeError, KeyError, RuntimeError):
+            pending.append("UNKNOWN:task-observation")
+        return tuple(sorted(set(pending)))
 
     @classmethod
     def _bound_custom_runner_values(cls, values: Mapping[str, Any]) -> dict[str, Any]:

@@ -22,6 +22,8 @@ import sys
 import tempfile
 import threading
 import time
+from contextvars import ContextVar
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -70,6 +72,12 @@ from nexus.orchestrator.self_hosted_task_service import (
 from nexus.orchestrator.standing_grant_store import (
     StandingGrantReceiptError,
     authorize_durable_standing_grant_effect,
+)
+from nexus.orchestrator.writer_quiescence import (
+    WriterIdentity,
+    WriterQuiescenceReceipt,
+    WriterRegistry,
+    current_process_start_identity,
 )
 from nexus.services.model_capability_lineage import (
     CHANGE_KIND_VALUES,
@@ -121,6 +129,69 @@ GITHUB_REPOSITORY = RepositoryIdentity(
     repository_id="James3014/Nexus-new",
     canonical_remote="https://github.com/James3014/Nexus-new.git",
 )
+
+@dataclass(frozen=True)
+class LoadedWriterCollectorPlan:
+    """Internal loaded evidence locators; this type is never an MCP input."""
+
+    request_digest: str
+    cohort_id: str
+    root_id: str
+    root: Path
+    source_head: str
+    source_tree: str
+    generation: int
+    writer_id: str
+    source_receipt: Path
+    snapshot_receipt: Path
+    rollback_receipt: Path
+    writer_plan_receipt: Path
+    artifacts: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        if not re.fullmatch(r"[0-9a-f]{64}", self.request_digest):
+            raise ValueError("invalid collector request digest")
+        if not all(
+            re.fullmatch(r"[0-9a-f]{40}", value) for value in (self.source_head, self.source_tree)
+        ):
+            raise ValueError("invalid collector source identity")
+        if type(self.generation) is not int or self.generation < 0:
+            raise ValueError("invalid collector generation")
+        for value in (self.cohort_id, self.root_id, self.writer_id):
+            if not isinstance(value, str) or not value or any(ord(c) < 32 for c in value):
+                raise ValueError("invalid collector identity")
+        for path in (
+            self.root,
+            self.source_receipt,
+            self.snapshot_receipt,
+            self.rollback_receipt,
+            self.writer_plan_receipt,
+        ):
+            if not isinstance(path, Path) or not path.is_absolute():
+                raise ValueError("collector locators must be loaded absolute paths")
+        if (
+            not isinstance(self.artifacts, tuple)
+            or not self.artifacts
+            or len(set(self.artifacts)) != len(self.artifacts)
+        ):
+            raise ValueError("invalid collector artifact inventory")
+
+
+_WRITER_TRANSITION_COLLECTOR_LOCK = threading.RLock()
+_WRITER_TRANSITION_CONTEXT: ContextVar[Any] = ContextVar("writer_transition_context", default=None)
+
+
+def _dispatch_writer_transition_collector(request: WriterTransitionRequest) -> Mapping[str, Any]:
+    from nexus.orchestrator.state_owner_transition_service import MissingDependency
+
+    binding = _WRITER_TRANSITION_CONTEXT.get()
+    if binding is None:
+        raise MissingDependency("MISSING_WRITER_TRANSITION_COLLECTOR_CONTEXT")
+    gateway, digest, pid, thread_id = binding
+    if (digest, pid, thread_id) != (request.request_digest, os.getpid(), threading.get_ident()):
+        raise MissingDependency("WRITER_TRANSITION_COLLECTOR_CONTEXT_MISMATCH")
+    return gateway._writer_transition_collector(request)
+
 
 def build_source_owned_transition_service(
     service: SelfHostedTaskService | None = None,
@@ -972,6 +1043,347 @@ class UnifiedMCPGateway:
         self._calibration_planner = CalibrationPlanner(self._lineage_registry)
         self._assist_processes: dict[str, subprocess.Popen[str]] = {}
         self._assist_lock = threading.RLock()
+        # Source-owned registry belongs to this loaded Gateway instance.
+        self._writer_quiescence_registry = self._build_writer_quiescence_registry()
+        self._writer_collector_plan: LoadedWriterCollectorPlan | None = None
+        self._writer_collector_binding_lock = threading.RLock()
+
+    def _build_writer_quiescence_registry(self) -> WriterRegistry | None:
+        """Build a registry only from already-loaded source-owned identities."""
+        source = getattr(self.service, "loaded_source_identity", None)
+        if source is None:
+            source = getattr(self.service, "source_identity", None)
+        source_head = str(getattr(source, "source_head", "") or "")
+        source_tree = str(getattr(source, "source_tree", "") or "")
+        if not source_head or not source_tree:
+            return None
+        source_identity = f"{GITHUB_REPOSITORY.repository_id}@{source_head}:{source_tree}"
+        registry = WriterRegistry(
+            source_identity=source_identity,
+            process_start_identity=current_process_start_identity(),
+            server_identity=SERVER_INSTANCE_ID,
+        )
+        state_root = getattr(self.service, "state_dir", None)
+        generation = getattr(self.service, "writer_generation", None)
+        writer_id = getattr(self.service, "writer_id", None)
+        if state_root is not None and generation is not None and writer_id:
+            thread_id = str(threading.get_ident())
+            registry.register(
+                WriterIdentity(
+                    root=str(Path(state_root).resolve()),
+                    role="task_state",
+                    source_identity=source_identity,
+                    process_start_identity=current_process_start_identity(),
+                    thread_id=thread_id,
+                    generation=int(generation),
+                    writer_id=str(writer_id),
+                ),
+                snapshot=lambda: (
+                    self.service.writer_quiescence_snapshot_bytes()
+                    + self._writer_assist_snapshot_bytes()
+                ),
+                process_state=lambda: self.service.writer_quiescence_process_state(thread_id),
+                pending=lambda: (
+                    *self.service.writer_quiescence_pending_work(),
+                    *self._writer_assist_pending_work(),
+                ),
+            )
+        return registry
+
+    def _bind_loaded_writer_collector_plan(self) -> None:
+        """Bind the service-owned plan after this instance finalized its hold.
+
+        This internal coordinator seam has no request/transport argument. It
+        cannot replace an already bound plan or select another registry.
+        """
+        from nexus.orchestrator.state_owner_transition_service import MissingDependency
+
+        plan = getattr(self.service, "loaded_writer_collector_plan", None)
+        registry = self._writer_quiescence_registry
+        if not isinstance(plan, LoadedWriterCollectorPlan) or registry is None:
+            raise MissingDependency("MISSING_LOADED_WRITER_COLLECTOR_PLAN")
+        receipt = registry.load_finalized(plan.cohort_id)
+        if (
+            str(plan.root.resolve()) not in receipt.ordered_roots
+            or receipt.source_identity
+            != f"{GITHUB_REPOSITORY.repository_id}@{plan.source_head}:{plan.source_tree}"
+        ):
+            raise MissingDependency("LOADED_WRITER_COLLECTOR_PLAN_MISMATCH")
+        with self._writer_collector_binding_lock:
+            if self._writer_collector_plan is not None and self._writer_collector_plan != plan:
+                raise MissingDependency("LOADED_WRITER_COLLECTOR_PLAN_ALREADY_BOUND")
+            self._writer_collector_plan = plan
+
+    def _writer_transition_collector(self, request: WriterTransitionRequest) -> Mapping[str, Any]:
+        """Load finalized evidence only, including when inspecting APPLY."""
+        from nexus.orchestrator.state_owner_transition_service import MissingDependency
+
+        registry = self._writer_quiescence_registry
+        if registry is None:
+            raise MissingDependency("MISSING_LOADED_WRITER_REGISTRY")
+        plan = self._writer_collector_plan
+        if plan is None:
+            raise MissingDependency("MISSING_LOADED_WRITER_COLLECTOR_PLAN")
+        receipt = registry.load_finalized(plan.cohort_id)
+        root = plan.root.resolve()
+        source_identity = f"{GITHUB_REPOSITORY.repository_id}@{plan.source_head}:{plan.source_tree}"
+        from nexus.events.state_owner_manifest import read_manifest
+        from nexus.events.writer_generation import read_generation
+
+        installed = read_generation(root)
+        manifest = read_manifest(root)
+        physical_generation = installed.generation if installed is not None else None
+        if installed is None and manifest is None:
+            if request.expected_generation is not None or plan.generation != 0:
+                raise MissingDependency("COLLECTOR_INITIAL_GENERATION_MISMATCH")
+        elif installed is None or manifest is None:
+            raise MissingDependency("COLLECTOR_PARTIAL_GENERATION_STATE")
+        elif (
+            installed.generation != manifest.generation or installed.writer_id != manifest.writer_id
+        ):
+            raise MissingDependency("COLLECTOR_PHYSICAL_GENERATION_MISMATCH")
+        elif installed.generation == request.expected_generation:
+            if installed.generation != plan.generation or installed.writer_id != plan.writer_id:
+                raise MissingDependency("COLLECTOR_LOADED_GENERATION_MISMATCH")
+        elif not (
+            installed.generation == request.next_generation
+            and installed.writer_id == request.next_writer_id
+            and manifest.transaction_id == request.transaction_id
+            and manifest.state == "COMMITTED"
+        ):
+            raise MissingDependency("COLLECTOR_GENERATION_DRIFT")
+        observations = [item for item in receipt.observations if item.identity.root == str(root)]
+        if (
+            request.request_digest != plan.request_digest
+            or request.transaction_id != plan.cohort_id
+            or request.root_id != plan.root_id
+            or request.expected_root_identity != hashlib.sha256(str(root).encode()).hexdigest()
+            or request.expected_source_head != plan.source_head
+            or request.expected_source_tree != plan.source_tree
+            or registry.source_identity != source_identity
+            or receipt.source_identity != source_identity
+            or not observations
+            or not {item.role for item in request.selections}.issubset({
+                item.identity.role for item in observations
+            })
+            or any(
+                item.identity.generation != plan.generation
+                or item.identity.writer_id != plan.writer_id
+                for item in observations
+            )
+            or (
+                request.expected_generation is not None
+                and request.expected_generation != plan.generation
+            )
+            or request.expected_writer_id != plan.writer_id
+        ):
+            raise MissingDependency("LOADED_WRITER_COLLECTOR_PLAN_MISMATCH")
+        if any(item.identity.role != "task_state" for item in observations):
+            raise MissingDependency("MISSING_ROLE_SPECIFIC_COLLECTOR_OBSERVER")
+        if any(
+            self.service.writer_quiescence_process_state(item.identity.thread_id)
+            not in {"alive", "idle"}
+            for item in observations
+        ):
+            raise MissingDependency("LOADED_COLLECTOR_PROCESS_OBSERVATION_CHANGED")
+        current_snapshot = (
+            self.service.writer_quiescence_snapshot_bytes() + self._writer_assist_snapshot_bytes()
+        )
+        if (
+            any(
+                item.snapshot_sha256 != hashlib.sha256(current_snapshot).hexdigest()
+                for item in observations
+                if item.identity.role == "task_state"
+            )
+            or self.service.writer_quiescence_pending_work()
+            or self._writer_assist_pending_work()
+        ):
+            raise MissingDependency("LOADED_COLLECTOR_OBSERVATION_CHANGED")
+        # Read source-owned immutable evidence files, never request locators.
+        read = SelfHostedTaskService.writer_quiescence_file_bytes
+        evidence: dict[str, Any] = {
+            "request_digest": plan.request_digest,
+            "root_id": plan.root_id,
+            "root_identity": hashlib.sha256(str(root).encode()).hexdigest(),
+            "source_head": plan.source_head,
+            "source_tree": plan.source_tree,
+            "generation": physical_generation,
+            "registered_writer_generation": plan.generation,
+            "physical_manifest_present": manifest is not None,
+            "drain_state": receipt.drain_state,
+            "drain_receipt_id": receipt.cohort_id,
+            "drain_receipt_hash": hashlib.sha256(receipt.to_bytes()).hexdigest(),
+        }
+        for prefix, path in (
+            ("snapshot_receipt", plan.snapshot_receipt),
+            ("rollback_receipt", plan.rollback_receipt),
+            ("loaded_writer_plan", plan.writer_plan_receipt),
+        ):
+            data = read(path)
+            value = SelfHostedTaskService.writer_quiescence_json_bytes(data)
+            if not isinstance(value, dict) or not isinstance(value.get("receipt_id"), str):
+                raise MissingDependency("LOADED_COLLECTOR_ARTIFACT_INVALID")
+            evidence[prefix + "_id"] = value["receipt_id"]
+            evidence[prefix + "_hash"] = hashlib.sha256(data).hexdigest()
+        artifact_bytes = {}
+        for relative in plan.artifacts:
+            path = Path(relative)
+            if path.is_absolute() or ".." in path.parts or not path.parts:
+                raise MissingDependency("LOADED_COLLECTOR_ARTIFACT_PATH_INVALID")
+            artifact_bytes[relative] = read(root / path)
+        if set(artifact_bytes) != {item.relative_path for item in request.selections}:
+            raise MissingDependency("LOADED_COLLECTOR_SELECTION_MISMATCH")
+        evidence["artifact_bytes"] = artifact_bytes
+        evidence["source_receipt_bytes"] = read(plan.source_receipt)
+        for prefix in (
+            "drain_receipt",
+            "snapshot_receipt",
+            "rollback_receipt",
+            "loaded_writer_plan",
+        ):
+            if evidence[prefix + "_id"] != getattr(request, prefix + "_id") or evidence[
+                prefix + "_hash"
+            ] != getattr(request, prefix + "_hash"):
+                raise MissingDependency("LOADED_COLLECTOR_RECEIPT_MISMATCH")
+        for selection in request.selections:
+            data = artifact_bytes[selection.relative_path]
+            if (
+                len(data) != selection.size
+                or hashlib.sha256(data).hexdigest() != selection.expected_sha256
+            ):
+                raise MissingDependency("LOADED_COLLECTOR_ARTIFACT_MISMATCH")
+        if (
+            hashlib.sha256(evidence["source_receipt_bytes"]).hexdigest()
+            != request.accepted_source_receipt_hash
+        ):
+            raise MissingDependency("LOADED_SOURCE_ACCEPTANCE_RECEIPT_MISMATCH")
+        return evidence
+
+    def _prepare_writer_quiescence(self, cohort_id: str) -> WriterQuiescenceReceipt:
+        """Explicit internal collector operation; transition loader never calls it.
+
+        Adapter acknowledgement belongs to the actual writer (Cards C-E).
+        An unacknowledged legacy writer remains UNKNOWN and cannot be persisted
+        as a drained receipt. Card F alone releases the resulting hold.
+        """
+        from nexus.orchestrator.state_owner_transition_service import MissingDependency
+
+        registry = self._writer_quiescence_registry
+        if registry is None:
+            raise MissingDependency("MISSING_LOADED_WRITER_REGISTRY")
+        roots = tuple(dict.fromkeys(item["root"] for item in registry.snapshot()["writers"]))
+        if not roots:
+            raise MissingDependency("MISSING_REGISTERED_WRITERS")
+        hold = registry.begin_hold(roots, cohort_id=cohort_id)
+        hold.wait_for_drain(timeout=0.0)
+        return registry.persist_finalized(hold)
+
+    def _invoke_writer_transition_operation(
+        self, service: Any, request: WriterTransitionRequest, *, inspect_only: bool = False
+    ) -> Any:
+        """Use a fixed dispatcher; unrelated threads have no collector binding."""
+        import nexus.orchestrator.state_owner_transition_service as transition_module
+
+        with _WRITER_TRANSITION_COLLECTOR_LOCK:
+            if transition_module._COLLECTOR_LOADER is None:
+                transition_module._COLLECTOR_LOADER = _dispatch_writer_transition_collector
+            elif transition_module._COLLECTOR_LOADER is not _dispatch_writer_transition_collector:
+                raise transition_module.MissingDependency(
+                    "WRITER_TRANSITION_COLLECTOR_ALREADY_BOUND"
+                )
+        operation = (
+            service.preflight
+            if inspect_only
+            else {
+                Operation.PREFLIGHT: service.preflight,
+                Operation.APPLY: service.apply,
+                Operation.RECONCILE: service.reconcile,
+            }[request.operation]
+        )
+        # Card A reconciles by reading and validating its original APPLY
+        # request; permit exactly that operation normalization, no field drift.
+        collector_request = (
+            replace(request, operation=Operation.APPLY)
+            if request.operation is Operation.RECONCILE
+            else request
+        )
+        token = _WRITER_TRANSITION_CONTEXT.set((
+            self,
+            collector_request.request_digest,
+            os.getpid(),
+            threading.get_ident(),
+        ))
+        try:
+            return operation(request)
+        finally:
+            _WRITER_TRANSITION_CONTEXT.reset(token)
+
+    def _writer_assist_snapshot_bytes(self) -> bytes:
+        """Observe durable jobs without invoking refreshing/writing helpers."""
+        root = self._assist_read_root()
+        with self._assist_lock:
+            processes = tuple(self._assist_processes.items())
+        process_bytes = json.dumps(
+            [
+                {"task_id": task_id, "pid": process.pid, "returncode": process.poll()}
+                for task_id, process in sorted(processes)
+            ],
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+        if not root.exists():
+            # A never-created job domain is observed absent, not a missing task root.
+            return b"assist-domain:absent" + process_bytes
+        if root.is_symlink() or not root.is_dir():
+            raise OSError("assist root unavailable")
+        paths = sorted(root.glob("*.json"))
+        records = []
+        for path in paths:
+            name = path.name.encode()
+            data = SelfHostedTaskService.writer_quiescence_file_bytes(path)
+            records.extend((len(name).to_bytes(8, "big"), name, len(data).to_bytes(8, "big"), data))
+        if paths != sorted(root.glob("*.json")):
+            raise OSError("assist inventory changed")
+        return b"".join(records) + process_bytes
+
+    def _writer_assist_pending_work(self) -> tuple[str, ...]:
+        pending = []
+        root = self._assist_read_root()
+        try:
+            with self._assist_lock:
+                processes = tuple(self._assist_processes.items())
+            observed = {task_id: process for task_id, process in processes}
+            for task_id, process in processes:
+                if process.poll() is None:
+                    pending.append(f"assist-process:{task_id}:pid:{process.pid}")
+            if root.is_symlink() or (root.exists() and not root.is_dir()):
+                raise OSError("assist root unavailable")
+            for path in sorted(root.glob("*.json")):
+                value = SelfHostedTaskService.writer_quiescence_json_bytes(
+                    SelfHostedTaskService.writer_quiescence_file_bytes(path)
+                )
+                if not isinstance(value, dict) or value.get("task_id") != path.stem:
+                    raise ValueError("invalid assist job")
+                status = value.get("status")
+                if status not in {"COMPLETED", "FAILED", "CANCELLED"}:
+                    pending.append(f"assist-job:{path.stem}:status:{status or 'UNKNOWN'}")
+                    if path.stem not in observed:
+                        pending.append(f"UNKNOWN:orphan-assist:{path.stem}")
+                pid = value.get("pid")
+                if path.stem not in observed and type(pid) is int and pid > 0:
+                    try:
+                        os.kill(pid, 0)
+                    except ProcessLookupError:
+                        pass
+                    except PermissionError:
+                        pending.append(f"UNKNOWN:assist-pid-permission:{path.stem}:{pid}")
+                    else:
+                        pending.append(f"UNKNOWN:untracked-assist-pid:{path.stem}:{pid}")
+                if self._assist_action(value).get("attention_required"):
+                    pending.append(f"assist-action:{path.stem}")
+        except (OSError, ValueError, TypeError, RuntimeError, AttributeError):
+            pending.append("UNKNOWN:assist-observation")
+        return tuple(sorted(set(pending)))
 
     def writer_transition_ingress(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         """Inspect or execute one strictly typed, source-owned transition.
@@ -990,12 +1402,7 @@ class UnifiedMCPGateway:
         # Keep construction separate from request parsing: request fields can
         # identify an expected source, but cannot choose the source or roots.
         service = build_source_owned_transition_service(self.service)
-        operation = {
-            Operation.PREFLIGHT: service.preflight,
-            Operation.APPLY: service.apply,
-            Operation.RECONCILE: service.reconcile,
-        }[request.operation]
-        return operation(request).to_dict()
+        return self._invoke_writer_transition_operation(service, request).to_dict()
 
     @staticmethod
     def _utc_now() -> str:
