@@ -69,6 +69,8 @@ from nexus.security.owner_representation_transport_inventory import (
     transport_inventory_status,
 )
 
+_production_verify_owner_signature = owner_store_module._verify_owner_signature
+
 NOW = datetime.now(timezone.utc)
 
 # Test-only issuer boundary: production never provisions a private key.  The
@@ -1321,7 +1323,7 @@ def test_worker_cannot_substitute_persisted_owner_auth_a_for_grant_b(
 
 
 def test_real_rsa_owner_signature_accepts_and_rejects_tamper(
-    grant_store, standing_grant_path, monkeypatch, tmp_path
+    grant_store, standing_grant_path, publisher, remote, monkeypatch, tmp_path
 ):
     """Use /usr/bin/openssl RSA-3072 signing; no verifier stubs involved."""
     import nexus.orchestrator.owner_representation_store as store
@@ -1337,14 +1339,17 @@ def test_real_rsa_owner_signature_accepts_and_rejects_tamper(
     real_lstat = Path.lstat
     def trusted_lstat(path):
         result = real_lstat(path)
-        if Path(path) in {trust_root, public_key}:
+        if Path(path) in {trust_root, public_key} or trust_root in Path(path).parents:
             values = list(result)
             values[4] = 0
+            if Path(path) != public_key:
+                values[0] = (values[0] & ~0o170000) | 0o040000
+                values[3] = (values[3] & ~0o777) | 0o700
             return type(result)(values)
         return result
     monkeypatch.setattr(Path, "lstat", trusted_lstat)
     monkeypatch.setattr(store, "OWNER_AUTHORIZATION_TRUST_ROOT", trust_root)
-    monkeypatch.setattr(store, "_verify_owner_signature", store._verify_owner_signature)
+    monkeypatch.setattr(store, "_verify_owner_signature", _production_verify_owner_signature)
     grant = _grant(grant_id="rsa-real")
     spec = OwnerExactPublicationAuthorizationSpec.model_validate({
         "schema": "nexus.owner_exact_publication_authorization.v1",
@@ -1370,6 +1375,30 @@ def test_real_rsa_owner_signature_accepts_and_rejects_tamper(
         standing_grant_path=standing_grant_path, requested_at=NOW,
     )
     assert permit["authorization_hash"] == auth.authorization_hash
+    receipt = grant_store.issue(grant, issuance_permit=permit, requested_at=NOW)
+    assert receipt.exists()
+    prepared = publisher.prepare(_proposal(), grant)
+    public_key.unlink()
+    with pytest.raises(OwnerRepresentationBlocked, match="AUTHORIZATION"):
+        publisher.publish(prepared)
+    assert remote.writes == []
+    subprocess.run([store.OPENSSL_BINARY, "rsa", "-in", str(private_key), "-pubout", "-out", str(public_key)], check=True)
+    public_key.chmod(0o600)
+    assert publisher.publish(prepared)["state"] == "COMPLETED"
+    with pytest.raises(OwnerRepresentationBlocked, match="REPLAY_FORBIDDEN"):
+        publisher.publish(prepared)
+    assert len(remote.writes) == 1
+
+    bad_auth = auth.model_copy(update={"owner_signature": base64.b64encode(b"wrong").decode()})
+    with pytest.raises(OwnerRepresentationGrantBlocked, match="EXACT_OWNER_AUTHORIZATION_REJECTED"):
+        store._verify_owner_signature(bad_auth)
+    bad_grant = _grant(grant_id="rsa-bad-signature", operation_id="op-bad")
+    with pytest.raises(OwnerRepresentationGrantBlocked, match="EXACT_OWNER_AUTHORIZATION_REJECTED"):
+        owner_issues_exact_publication_authorization(
+            bad_grant, issued_at=NOW, authority_root=grant_store.root,
+            owner_key_id="rsa", owner_signature=base64.b64encode(b"wrong").decode(),
+        )
+    assert not (grant_store.root / "authorizations" / f"{bad_grant.grant_hash}.json").exists()
 
 
 def test_mandatory_hostile_oracle_worker_cannot_mint_arbitrary_publication_without_owner_exact_authorization(

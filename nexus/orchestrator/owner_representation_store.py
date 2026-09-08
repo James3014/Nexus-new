@@ -491,6 +491,7 @@ def _verify_owner_signature(auth: OwnerExactPublicationAuthorization) -> None:
     try:
         root_stat = OWNER_AUTHORIZATION_TRUST_ROOT.lstat()
         key_stat = key_path.lstat()
+        ancestor_stats = [parent.lstat() for parent in OWNER_AUTHORIZATION_TRUST_ROOT.parents]
     except OSError:
         raise OwnerRepresentationGrantBlocked(
             OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REJECTED.value
@@ -507,6 +508,12 @@ def _verify_owner_signature(auth: OwnerExactPublicationAuthorization) -> None:
         or key_stat.st_uid != 0
         or stat.S_IMODE(key_stat.st_mode) & 0o077
         or not Path(OPENSSL_BINARY).is_file()
+        or any(
+            stat.S_ISLNK(item.st_mode)
+            or not stat.S_ISDIR(item.st_mode)
+            or stat.S_IMODE(item.st_mode) & 0o022
+            for item in ancestor_stats
+        )
     ):
         raise OwnerRepresentationGrantBlocked(
             OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REJECTED.value
@@ -524,7 +531,8 @@ def _verify_owner_signature(auth: OwnerExactPublicationAuthorization) -> None:
                 [OPENSSL_BINARY, "rsa", "-pubin", "-in", str(key_path), "-text", "-noout"],
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=2, check=False,
             )
-            if result.returncode != 0 or b"3072 bit" not in result.stdout:
+            bits = re.search(rb"(\d+) bit", result.stdout or b"")
+            if result.returncode != 0 or bits is None or int(bits.group(1)) < 3072:
                 raise OwnerRepresentationGrantBlocked(
                     OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REJECTED.value
                 )
