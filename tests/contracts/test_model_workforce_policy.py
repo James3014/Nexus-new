@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from nexus.services.model_workforce_policy import WorkforcePolicyLoader
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 POLICY_PATH = REPO_ROOT / "docs/arch/MODEL_WORKFORCE_POLICY.md"
 MANIFEST_PATH = REPO_ROOT / "nexus/config/model_workforce.yaml"
@@ -563,3 +565,71 @@ def test_36_and_37_identity_separation_preserved() -> None:
     assert w37["provider"] == "agy"
     assert w36["autonomy"] == "L2"
     assert w37["autonomy"] == "L3"
+
+
+# --- Open SWE ChatGPT Workforce Onboarding tests (Card: open-swe-chatgpt-workforce-onboarding-20260908) ---
+
+
+def test_opencli_chatgpt_balanced_web_registration() -> None:
+    """Workforce policy registers opencli_chatgpt_balanced_web with exact properties."""
+    manifest = _manifest()
+    workers = manifest["workers"]
+    assert "opencli_chatgpt_balanced_web" in workers
+    w = workers["opencli_chatgpt_balanced_web"]
+    assert w["provider"] == "opencli_chatgpt"
+    assert w["model"] == "opencli_chatgpt/balanced"
+    assert w["state"] == "REGISTERED_CONDITIONAL"
+    assert w["availability"] == "AVAILABLE"
+    assert w["autonomy"] == "L1"
+    assert "bounded_candidate_generation" in w["roles"]
+    assert w["default_route"] is False
+
+
+def test_global_fast_bounded_implementation_remains_agy_flash_37_medium() -> None:
+    """Global fast_bounded_implementation remains agy_flash_37_medium."""
+    manifest = _manifest()
+    routing = manifest["routing"]
+    assert routing["online"]["fast_bounded_implementation"] == "agy_flash_37_medium"
+    defaults = routing["online"]["route_defaults"]["fast_bounded_implementation"]
+    assert defaults["current_default"] == "agy_flash_37_medium"
+    loader = WorkforcePolicyLoader()
+    assert loader.resolve_route("fast_bounded_implementation") == "agy_flash_37_medium"
+
+
+def test_campaign_route_resolution_open_swe_resident_canary() -> None:
+    """Exact canary campaign resolves fast_bounded_implementation to opencli_chatgpt_balanced_web; others use global."""
+    manifest = _manifest()
+    campaign_routing = manifest["routing"]["online"].get("campaign_routing", {})
+    assert "open-swe-resident-five-repo-canary-20260908" in campaign_routing
+    assert (
+        campaign_routing["open-swe-resident-five-repo-canary-20260908"][
+            "bounded_candidate_generation"
+        ]
+        == "opencli_chatgpt_balanced_web"
+    )
+
+    loader = WorkforcePolicyLoader()
+    assert (
+        loader.resolve_route(
+            "bounded_candidate_generation",
+            campaign_id="open-swe-resident-five-repo-canary-20260908",
+        )
+        == "opencli_chatgpt_balanced_web"
+    )
+    assert (
+        loader.resolve_route("fast_bounded_implementation", campaign_id="") == "agy_flash_37_medium"
+    )
+    assert (
+        loader.resolve_route(
+            "fast_bounded_implementation",
+            campaign_id="prefix-open-swe-resident-five-repo-canary-20260908",
+        )
+        == "agy_flash_37_medium"
+    )
+    assert (
+        loader.resolve_route(
+            "fast_bounded_implementation",
+            campaign_id="unrelated-campaign",
+        )
+        == "agy_flash_37_medium"
+    )

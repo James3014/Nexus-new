@@ -1793,3 +1793,168 @@ def test_exact_source_grounding_reads_git_blob_from_main_sha_not_filesystem(tmp_
         refs["tests/test_missing.py"]["content"]
         == f"FILE_NOT_FOUND_AT_REVISION:{main_sha}:tests/test_missing.py"
     )
+
+
+# --- Open SWE ChatGPT Workforce Onboarding tests (Card: open-swe-chatgpt-workforce-onboarding-20260908) ---
+
+
+def _setup_canary_repo(tmp_path: Path, **contract_overrides):
+    repo, _, _, _, store = _setup(tmp_path)
+    canary_rel = "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+    canary_src = Path(__file__).resolve().parents[2] / canary_rel
+    canary_text = canary_src.read_text(encoding="utf-8")
+    canary_card = repo / canary_rel
+    canary_card.parent.mkdir(parents=True, exist_ok=True)
+    canary_card.write_text(canary_text, encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=repo, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "commit", "-m", "commit canary card"],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    )
+    main_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", main_sha],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    )
+    base_overrides = {
+        "task_id": "open-swe-resident-five-repo-canary-20260908",
+        "main_sha": main_sha,
+        "execution_units": [
+            {
+                "unit_id": "u1",
+                "mutation_paths": ["tests/ops/test_open_swe_resident_five_repo_canary_20260908.py"],
+            }
+        ],
+        "unit_verifiers": {
+            "u1": [
+                {
+                    "id": "u1",
+                    "argv": [
+                        "python3",
+                        "-m",
+                        "pytest",
+                        "-q",
+                        "tests/ops/test_open_swe_resident_five_repo_canary_20260908.py",
+                    ],
+                }
+            ]
+        },
+        "whole_verifiers": [
+            {
+                "id": "whole",
+                "argv": [
+                    "python3",
+                    "-m",
+                    "pytest",
+                    "-q",
+                    "tests/ops/test_open_swe_resident_five_repo_canary_20260908.py",
+                ],
+            }
+        ],
+    }
+    base_overrides.update(contract_overrides)
+    contract = _contract(canary_rel, _sha(canary_card), **base_overrides)
+    body = _body(contract)
+    return repo, canary_card, contract, body, store
+
+
+def test_opencli_chatgpt_canary_binding_caller_independent(tmp_path: Path) -> None:
+    """Canary External Intelligence binding remains caller-independent and resolves to opencli_chatgpt."""
+    forged_worker = {
+        "worker_id": "issue/forged-worker",
+        "provider": "forged-provider",
+        "model": "forged-model",
+        "role_ceiling": "forged",
+        "admission_evidence_ref": "issue-admission",
+        "admission_evidence_hash": "a" * 64,
+        "selection_evidence_ref": "issue-selection",
+        "selection_evidence_hash": "b" * 64,
+    }
+    repo, _, contract, body, store = _setup_canary_repo(
+        tmp_path,
+        selected_worker=forged_worker,
+        execution_units=[
+            {
+                "unit_id": "u1",
+                "mutation_paths": ["tests/ops/test_open_swe_resident_five_repo_canary_20260908.py"],
+                "selected_worker": forged_worker,
+            }
+        ],
+    )
+
+    class _OpenCLIChatGPTTransport:
+        def __init__(self):
+            self.bound_workers = []
+
+        def bind_worker(self, selected_worker: dict) -> None:
+            self.bound_workers.append(dict(selected_worker))
+            provider = str(selected_worker.get("provider") or "").strip()
+            model = str(selected_worker.get("model") or "").strip()
+            if provider != "opencli_chatgpt" or model != "opencli_chatgpt/balanced":
+                raise RuntimeError("MODEL_SUBSTITUTION_FORBIDDEN")
+
+    class _OpenCLIC(FakeC):
+        def __init__(self):
+            super().__init__()
+            self.transport = _OpenCLIChatGPTTransport()
+
+    sidecar = FakeSidecar(store)
+    c = _OpenCLIC()
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c)
+    result = automation.run_issue("o/r", 867, "canary issue", body)
+
+    assert result["state"] == "COMPLETE"
+    assert result["worker_binding"]["worker_id"] == "opencli_chatgpt_balanced_web"
+    assert result["worker_binding"]["provider"] == "opencli_chatgpt"
+    assert result["worker_binding"]["model"] == "opencli_chatgpt/balanced"
+    assert sidecar.worker_bindings == [result["worker_binding"]]
+    assert len(c.calls) == 1
+    units, _ = c.calls[0]
+    assert units[0]["selected_worker"] == result["worker_binding"]
+    assert len(c.transport.bound_workers) == 1
+    assert c.transport.bound_workers[0]["worker_id"] == "opencli_chatgpt_balanced_web"
+
+
+def test_opencli_chatgpt_canary_transport_incompatible_substitution_blocks_before_semantic_dispatch(
+    tmp_path: Path,
+) -> None:
+    """Incompatible transport provider/model substitution is rejected before semantic dispatch."""
+    repo, _, contract, body, store = _setup_canary_repo(tmp_path)
+
+    class _IncompatibleTransport:
+        def __init__(self):
+            self.attempted_workers = []
+
+        def bind_worker(self, selected_worker: dict) -> None:
+            self.attempted_workers.append(dict(selected_worker))
+            provider = str(selected_worker.get("provider") or "").strip()
+            if provider != "incompatible_provider":
+                raise RuntimeError("MODEL_SUBSTITUTION_FORBIDDEN")
+
+    class _IncompatibleC(FakeC):
+        def __init__(self):
+            super().__init__()
+            self.transport = _IncompatibleTransport()
+
+    sidecar = FakeSidecar(store)
+    c = _IncompatibleC()
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c)
+    result = automation.run_issue("o/r", 868, "canary incompatible transport", body)
+
+    assert result["state"] == "BLOCKED"
+    assert result["semantic_dispatched"] is False
+    assert sidecar.calls == []
+    assert c.calls == []
+    assert "CANONICAL_WORKER_TRANSPORT_BINDING_INVALID:MODEL_SUBSTITUTION_FORBIDDEN" in str(
+        result.get("error", "")
+    )
+    assert len(c.transport.attempted_workers) == 1
+    assert c.transport.attempted_workers[0]["worker_id"] == "opencli_chatgpt_balanced_web"
+    assert c.transport.attempted_workers[0]["provider"] == "opencli_chatgpt"
+    assert c.transport.attempted_workers[0]["model"] == "opencli_chatgpt/balanced"
