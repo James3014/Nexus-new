@@ -577,6 +577,50 @@ def test_authenticated_campaign_identity_is_bound_and_conflicts_fail(tmp_path):
         )
 
 
+def test_open_swe_canary_task_card_produces_canonical_opencli_chatgpt_allow_binding() -> None:
+    canary_rel_path = "tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md"
+    canary_path = Path(repo_root) / canary_rel_path
+    assert canary_path.is_file()
+    card_bytes = canary_path.read_bytes()
+    card_hash = hashlib.sha256(card_bytes).hexdigest()
+
+    task_card = VerifiedTaskCardIdentity(
+        task_id="open-swe-resident-five-repo-canary-20260908",
+        task_card_path=canary_rel_path,
+        canonical_task_card_path=str(canary_path),
+        task_card_hash=card_hash,
+    )
+
+    derived_campaign = _derive_campaign_id_from_task_card(task_card)
+    assert derived_campaign == "open-swe-resident-five-repo-canary-20260908"
+
+    result = build_canonical_planner_admission(
+        task_id=task_card.task_id,
+        task_text="Open SWE resident unattended canary",
+        allowed_files=("tests/ops/test_open_swe_resident_five_repo_canary_20260908.py",),
+        verifier_command=(
+            "python3 -m pytest -q tests/ops/test_open_swe_resident_five_repo_canary_20260908.py",
+            "git diff --check",
+        ),
+        task_card_identity=task_card,
+    )
+
+    admission = result["workforce_admission"]
+    assert admission["overall_decision"] == "ALLOW"
+    records = admission.get("records") or []
+    assert len(records) == 1
+    record = records[0]
+    assert record["decision"]["decision"] == "ALLOW"
+    assert record["decision"]["resolved_worker_id"] == "opencli_chatgpt_balanced_web"
+    assert record["decision"]["resolved_provider"] == "opencli_chatgpt"
+    assert record["decision"]["resolved_model"] == "opencli_chatgpt/balanced"
+
+    binding = result["binding"]
+    assert binding["worker_id"] == "opencli_chatgpt_balanced_web"
+    assert binding["provider"] == "opencli_chatgpt"
+    assert binding["model"] == "opencli_chatgpt/balanced"
+
+
 def _worker_args(
     task_id: str,
     *,
