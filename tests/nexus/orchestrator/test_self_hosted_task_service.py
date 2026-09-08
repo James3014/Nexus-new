@@ -4627,12 +4627,17 @@ def test_retry_integration_reuses_approved_binding_without_worker_retry(tmp_path
 
 
 def test_default_production_target_root_is_outside_disabled_worktree_namespace(monkeypatch):
-    monkeypatch.chdir("/Users/jameschen/Workspace/nexus")
+    import nexus.orchestrator.self_hosted_task_service as service_module
+
+    source_root = service_module.CANONICAL_SOURCE_ROOT
+    monkeypatch.chdir(source_root)
 
     root, target = resolve_canonical_target_roots("root-test")
 
-    assert str(root) == "/Users/jameschen/Workspace/nexus-runtime-targets"
-    assert str(target) == "/Users/jameschen/Workspace/nexus-runtime-targets/root-test"
+    expected_root = source_root.parent / "nexus-runtime-targets"
+    assert root == expected_root
+    assert target == expected_root / "root-test"
+    assert source_root not in root.parents
 
 
 def test_activation_root_derives_target_namespace_from_bound_source_root(monkeypatch, tmp_path):
