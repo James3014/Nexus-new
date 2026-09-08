@@ -1138,6 +1138,9 @@ class WriterRegistry:
         self._epoch = 0
         self._lease_history: list[LeaseObservation] = []
         self._finalized: dict[str, tuple[WriterHold, Path, str]] = {}
+        # Original admission records remain in place as durable replay fences.
+        # Pins only qualify exact terminal bytes from a verified F recovery.
+        self._reconciled_terminal_records: dict[str, str] = {}
 
     def _check_process(self) -> None:
         if os.getpid() != self._pid:
@@ -1190,18 +1193,81 @@ class WriterRegistry:
     def _lease_path(self, root: str, operation_id: str) -> Path:
         return self._lease_dir(root) / f"{_hash(operation_id.encode())}.json"
 
+    def reconcile_terminal_history(self, coordinator: Any) -> int:
+        """Qualify immutable prior-process terminal records through F only.
+
+        This does not adopt a hold, change a lease, or release admission. The
+        fixed verifier observes the actual loaded cohort and dead producer;
+        request data and callbacks cannot supply the qualification.
+        """
+        self._check_process()
+        from nexus.orchestrator.writer_activation_cohort import (
+            verify_loaded_cohort_terminal_history,
+        )
+
+        pins = verify_loaded_cohort_terminal_history(self, coordinator)
+        if not isinstance(pins, tuple):
+            raise WriterAdmissionDenied("terminal history proof is not typed")
+        qualified: dict[str, str] = {}
+        roots: set[str] = set()
+        for pin in pins:
+            if not isinstance(pin, tuple) or len(pin) != 2:
+                raise WriterAdmissionDenied("terminal history pin is malformed")
+            locator, digest = pin
+            if not isinstance(locator, str) or not Path(locator).is_absolute():
+                raise WriterAdmissionDenied("terminal history path is not absolute")
+            _digest(digest)
+            data = _safe_bytes(Path(locator))
+            if _hash(data) != digest:
+                raise WriterAdmissionDenied("terminal history bytes changed")
+            raw = json.loads(data, object_pairs_hook=_unique_object)
+            root = _root(raw["root"])
+            if (Path(locator) != self._lease_path(root, raw["operation_id"])
+                or raw.get("durable_outcome") not in {"committed", "failed"}
+                or type(raw.get("entered_at")) not in (int, float)
+                or type(raw.get("exited_at")) not in (int, float)
+                or type(raw.get("expires_at")) not in (int, float)
+                or not raw["entered_at"] <= raw["exited_at"] <= raw["expires_at"]
+                or raw.get("source_identity") != self.source_identity):
+                raise WriterAdmissionDenied("terminal history record is invalid")
+            if locator in qualified:
+                raise WriterAdmissionDenied("terminal history pin is duplicated")
+            qualified[locator] = digest
+            roots.add(root)
+        with self._mutex:
+            self._check_process()
+            if any(root not in self._held_roots for root in roots) or self._leases_for(tuple(roots)):
+                raise WriterAdmissionDenied("terminal history requires a drained held root")
+            for locator, digest in qualified.items():
+                previous = self._reconciled_terminal_records.get(locator)
+                if previous is not None and previous != digest:
+                    raise WriterAdmissionDenied("terminal history pin conflicts")
+                if _hash(_safe_bytes(Path(locator))) != digest:
+                    raise WriterAdmissionDenied("terminal history bytes changed")
+            self._reconciled_terminal_records.update(qualified)
+        return len(qualified)
+
     def _durable_leases(self, root: str) -> tuple[list[LeaseObservation], list[str]]:
         directory = self._lease_dir(root)
         _parents(directory / "probe")
+        pinned = {path: digest for path, digest in self._reconciled_terminal_records.items()
+                  if Path(path).parent == directory}
         if not _exists(directory):
-            return [], []
+            return [], ([f"leases:reconciled-history-missing:{root}"] if pinned else [])
         leases, issues = [], []
+        for path, digest in pinned.items():
+            try:
+                if _hash(_safe_bytes(Path(path))) != digest:
+                    issues.append(f"leases:reconciled-history-changed:{root}")
+            except (OSError, ValueError, WriterQuiescenceError):
+                issues.append(f"leases:reconciled-history-missing:{root}")
         try:
             entries = list(directory.iterdir())
             for path in entries:
                 if path.name.startswith("."):
                     continue
-                raw = json.loads(_safe_bytes(path), object_pairs_hook=_unique_object)
+                record_bytes = _safe_bytes(path)
+                raw = json.loads(record_bytes, object_pairs_hook=_unique_object)
                 identity_keys = (
                     "root",
                     "role",
@@ -1227,7 +1293,11 @@ class WriterRegistry:
                 if lease.exited_at is None or lease.durable_outcome not in {"committed", "failed"}:
                     issues.append(f"lease:unresolved:{lease.operation_id}")
                 if identity.process_start_identity != self.process_start_identity:
-                    issues.append(f"lease:foreign-process:{lease.operation_id}")
+                    qualified = (pinned.get(str(path)) == _hash(record_bytes)
+                                 and lease.exited_at is not None
+                                 and lease.durable_outcome in {"committed", "failed"})
+                    if not qualified:
+                        issues.append(f"lease:foreign-process:{lease.operation_id}")
         except (OSError, ValueError, KeyError, TypeError, WriterQuiescenceError) as exc:
             issues.append(f"leases:unreadable:{root}:{type(exc).__name__}")
         return leases, issues
