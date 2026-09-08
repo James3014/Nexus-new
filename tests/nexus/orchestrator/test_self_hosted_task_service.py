@@ -2288,6 +2288,16 @@ def test_approval_is_hash_bound_and_does_not_merge(tmp_path):
     assert approved["merge_performed"] is False
     assert approved["push_performed"] is False
 
+    invalid = service.approve_promotion(
+        request["task_id"],
+        candidate_commit_sha="c" * 40,
+        candidate_tree_sha="0" * 40,
+        candidate_state_hash="e" * 64,
+        verified_receipt_hash="f" * 64,
+    )
+    assert invalid["status"] == "APPROVAL_INVALIDATED"
+    assert invalid["task_action"]["action_state"] == "ACTION_REQUIRED"
+
 
 def test_marked_authority_approval_requires_exact_nested_ack_and_persists(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False)
