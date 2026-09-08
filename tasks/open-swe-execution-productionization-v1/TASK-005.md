@@ -3,7 +3,8 @@
 task_id: `TASK-005`
 
 - **Campaign:** `CAMPAIGN-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1`
-- **Status:** `ACTIVE`
+- **Status:** `SUPERSEDED_AT_ACTIVATION_GATE`
+- **Superseded by:** `TASK-006` under explicit Owner Issue #850; this card remains immutable hardening history, while its `persistent`/`very-high` qualification values are not resident activation defaults.
 - **Authority:** Owner-authorized sanitized Ready reconciliation on GitHub Issue #695
 - **Source delta:** `NEXUS_CONTROLLER_HANDOFF_V2` H9-H13
 - **Auto-chain:** `false`

@@ -1,8 +1,14 @@
 {
   "semantic_backend": "open_swe",
   "worker_backend": "open_swe",
-  "open_swe_model_provider": "google_genai",
-  "open_swe_model": "gemini-3.7-flash",
+  "open_swe_model_provider": "opencli_chatgpt",
+  "open_swe_model": "balanced",
   "open_swe_executable": "<DEPLOYMENT_SUPPLIED_ABSOLUTE_RUNTIME_PATH>",
-  "open_swe_runtime_artifact_sha256": "<DEPLOYMENT_SUPPLIED_MODULE_SHA256>"
+  "open_swe_runtime_artifact_sha256": "<DEPLOYMENT_SUPPLIED_MODULE_SHA256>",
+  "open_swe_opencli_executable": "<DEPLOYMENT_SUPPLIED_ABSOLUTE_OPENCLI_PATH>",
+  "open_swe_opencli_profile": "<DEPLOYMENT_SUPPLIED_OPENCLI_PROFILE>",
+  "open_swe_opencli_site_session": "ephemeral",
+  "open_swe_opencli_timeout_seconds": 180,
+  "open_swe_semantic_timeout_seconds": 600,
+  "open_swe_worker_timeout_seconds": 1200
 }
