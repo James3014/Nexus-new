@@ -4295,6 +4295,82 @@ def observe_gateway_quiescence() -> dict[str, Any]:
     return _load_source_owned_writer_quiescence_receipt(data)
 
 
+def observe_writer_activation_cohort(coordinator: Any) -> Mapping[str, Any]:
+    """Read F's durable cohort receipt through its loaded coordinator.
+
+    The durable manager is deliberately not a second coordinator.  In
+    particular it does not accept a path, root vector, registry, or writer
+    identity from a CLI request.  A caller must pass the source-owned F
+    coordinator that already owns the loaded B registry and hold.  This keeps
+    the historical manager projection separate from current ``ACTIVE`` truth.
+    """
+    try:
+        from nexus.orchestrator.writer_activation_cohort import (
+            WriterActivationCohort,
+            WriterActivationError,
+            status_loaded_cohort,
+        )
+
+        if not isinstance(coordinator, WriterActivationCohort):
+            raise TypeError("source-owned F coordinator required")
+        receipt = status_loaded_cohort(coordinator)
+        if getattr(receipt, "state", None) == "ACTIVE":
+            readonly = getattr(coordinator, "reconcile_read_only", None)
+            if not callable(readonly):
+                raise WriterActivationError("F read-only physical reconciliation unavailable")
+            receipt = readonly()
+        data = receipt.to_dict()
+    except Exception as exc:
+        raise _gateway_error("writer activation cohort unavailable", exc) from exc
+    if not isinstance(data, Mapping) or data.get("cohort_id") != coordinator.cohort_id:
+        raise _gateway_error("writer activation cohort identity mismatch")
+    # Return the exact source-owned receipt.  Do not turn an F receipt into a
+    # gateway lifecycle or deployment success projection.
+    return dict(data)
+
+
+def reconcile_writer_activation_cohort(coordinator: Any) -> Mapping[str, Any]:
+    """Delegate recovery to F; the manager cannot recover in a new process."""
+    try:
+        from nexus.orchestrator.writer_activation_cohort import (
+            WriterActivationCohort,
+            reconcile_loaded_cohort,
+        )
+
+        if not isinstance(coordinator, WriterActivationCohort):
+            raise TypeError("source-owned F coordinator required")
+        # The manager is a read-only observer.  The typed F bridge is the only
+        # permitted readback operation; it cannot resume activation.
+        result = reconcile_loaded_cohort(coordinator)
+    except Exception as exc:
+        raise _gateway_error("writer activation cohort reconciliation unavailable", exc) from exc
+    if hasattr(result, "to_dict"):
+        result = result.to_dict()
+    if not isinstance(result, Mapping):
+        raise _gateway_error("writer activation cohort reconciliation malformed")
+    return dict(result)
+
+
+def observe_loaded_writer_activation_cohort() -> Mapping[str, Any]:
+    """Observe current F state through the owning process binding.
+
+    A separate manager process has no valid registry/hold, so the F bridge
+    returns ``None`` and this operation fails closed.  Historical B JSON is
+    intentionally not used as a substitute for current F provenance.
+    """
+    try:
+        from nexus.orchestrator.writer_activation_cohort import (
+            WriterActivationError,
+            get_loaded_writer_activation_cohort,
+        )
+        coordinator = get_loaded_writer_activation_cohort()
+        if coordinator is None:
+            raise WriterActivationError("source-owned loaded F coordinator unavailable")
+        return observe_writer_activation_cohort(coordinator)
+    except Exception as exc:
+        raise _gateway_error("current writer activation cohort unavailable", exc) from exc
+
+
 def collect_gateway_observation(request: GatewayDeploymentRequest, *, observation_time: str | None = None,
                                 operation: str | None = None,
                                 runner: Callable[..., Any] | None = None,
@@ -4306,6 +4382,7 @@ def collect_gateway_observation(request: GatewayDeploymentRequest, *, observatio
                                 artifact_observer: Callable[[Path], str] | None = None,
                                 health_observer: Callable[[str], Mapping[str, Any]] | None = None,
                                 quiescence_observer: Callable[[], Mapping[str, Any]] | None = None,
+                                cohort_observer: Callable[[], Any] | None = None,
                                 authority_command_runner: Callable[..., Any] | None = None) -> dict[str, Any]:
     """Collect all preflight evidence from fixed manager-owned observations."""
     request = _require_host_authority(
@@ -4378,7 +4455,15 @@ def collect_gateway_observation(request: GatewayDeploymentRequest, *, observatio
             artifact_digest = ""
     else:
         artifact_digest = artifact_observer(Path(GATEWAY_ARTIFACT))
-    quiescence = (quiescence_observer or observe_gateway_quiescence)()
+    if cohort_observer is not None and quiescence_observer is not None:
+        raise _gateway_error("cohort and historical quiescence observers are mutually exclusive")
+    if cohort_observer is not None:
+        # The callback is bound by the owning gateway process to a loaded F
+        # coordinator.  The manager only reads the exact receipt returned by
+        # that coordinator and never constructs a registry or selects roots.
+        quiescence = dict(observe_writer_activation_cohort(cohort_observer()))
+    else:
+        quiescence = (quiescence_observer or observe_gateway_quiescence)()
     normalized_health = (
         {}
         if rollback_unloaded

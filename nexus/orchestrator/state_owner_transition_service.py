@@ -8,7 +8,7 @@ import os
 import stat
 import subprocess
 import tempfile
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -50,6 +50,55 @@ class TransitionServiceError(RuntimeError):
 
 class MissingDependency(TransitionServiceError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedRootTransition:
+    """Typed one-root A boundary consumed by the F cohort coordinator.
+
+    The request and service are captured from the already-loaded source
+    service.  No method accepts a root selector or constructs a replacement
+    service, which keeps the cohort barrier separate from A's per-root CAS.
+    """
+
+    service: "StateOwnerTransitionService"
+    request: WriterTransitionRequest
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.service, StateOwnerTransitionService):
+            raise TypeError("loaded state owner transition service required")
+        if (
+            not isinstance(self.request, WriterTransitionRequest)
+            or self.request.operation is not Operation.APPLY
+        ):
+            raise TypeError("typed APPLY request required")
+
+    @property
+    def root_id(self) -> str:
+        return self.request.root_id
+
+    def preflight(self) -> TransitionReceipt:
+        return self.service.preflight(self.request)
+
+    def apply(self) -> TransitionReceipt:
+        return self.service.apply(self.request)
+
+    def has_intent(self) -> bool:
+        root = self.service._roots.get(self.request.root_id)
+        if not isinstance(root, Path):
+            raise MissingDependency("MISSING_LOADED_ROOT")
+        prior = _read_intent(root)
+        if prior is None:
+            return False
+        if (
+            prior.get("request_digest") != self.request.request_digest
+            or prior.get("idempotency_key") != self.request.idempotency_key
+        ):
+            raise TransitionServiceError("CONFLICTING_REPLAY")
+        return True
+
+    def reconcile(self) -> TransitionReceipt:
+        return self.service.reconcile(replace(self.request, operation=Operation.RECONCILE))
 
 
 class _VerifiedCollectorEvidence:
@@ -270,6 +319,19 @@ class StateOwnerTransitionService:
         self._grant_result: Mapping[str, Any] = {}
         self._service = service
         self._authority_handle = None
+
+    def loaded_root_transition(self, request: WriterTransitionRequest) -> LoadedRootTransition:
+        """Bind one exact loaded A request for a multi-root coordinator.
+
+        This is a typed adapter boundary only.  The cohort owner determines
+        ordering and ACTIVE/release; A continues to own one-root physical
+        intent, generation CAS, and manifest readback.
+        """
+        if not isinstance(request, WriterTransitionRequest):
+            raise TransitionValidationError("LOADED_REQUEST_REQUIRED")
+        if request.root_id not in self._roots:
+            raise TransitionServiceError("ROOT_UNKNOWN")
+        return LoadedRootTransition(self, request)
 
     def _receipt(
         self,
