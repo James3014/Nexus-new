@@ -58,3 +58,11 @@ Allowed files:
 
 Stop at a scoped Candidate PR pending independent false-green review. Maximum
 claim: `GOLDEN_WITNESS_GATE_B_SEMANTIC_TESTS_CANDIDATE_ONLY`.
+
+## Owner-goal rebind — 2026-09-08
+
+The active Owner engineering goal resumes #65 test-only completion. Source baseline f4dbc863c0023b893fd499d72575eb0b9d46d29a; original GateB PR231 is merged, but current independent mapped-node review identifies three survivors.
+
+Bounded implementation: add applicable hostile consumer controls inside existing mapped nodes for GB013, GB021 and GB081. Only tests/contracts/test_hybrid_route_contract.py, tests/contracts/test_workforce_admission_contract.py and tests/ops/test_policy_lane_gate.py may change. Preserve existing positive behavior, node IDs, adjacent tests, all production and corpus. No manifest or workflow change. #867 source/test scope independently checked and does not overlap these files.
+
+Run exact seven GateB cases plus complete three changed test modules, Ruff exact-base, diff check and independent false-green review. Missing product behavior stops only that slice; no invented default flags. worker_may_commit=false; AUTO_CHAIN=false; controller acceptance and protected PR gates remain separate. Existing seven-file ceiling includes this card/INDEX. No GateA/whole65/production claim.
