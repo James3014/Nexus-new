@@ -74,6 +74,8 @@ from nexus.orchestrator.standing_grant_store import (
     authorize_durable_standing_grant_effect,
 )
 from nexus.orchestrator.writer_quiescence import (
+    TaskStateWriterAdapter,
+    TaskStateWriterFactory,
     WriterIdentity,
     WriterQuiescenceReceipt,
     WriterRegistry,
@@ -175,6 +177,29 @@ class LoadedWriterCollectorPlan:
             or len(set(self.artifacts)) != len(self.artifacts)
         ):
             raise ValueError("invalid collector artifact inventory")
+
+
+@dataclass(frozen=True)
+class LoadedTaskWriterBinding:
+    """Source-owned C binding, distinct from B collector/transition evidence."""
+
+    root: Path
+    owner_id: str
+    transaction_id: str
+    generation: int
+    writer_id: str
+    source_head: str
+    source_tree: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.root, Path) or not self.root.is_absolute():
+            raise ValueError("task writer root must be absolute")
+        if not self.owner_id or not self.transaction_id or not self.writer_id:
+            raise ValueError("task writer binding identity is required")
+        if type(self.generation) is not int or self.generation < 1:
+            raise ValueError("task writer generation must be positive")
+        if not re.fullmatch(r"[0-9a-f]{40}", self.source_head) or not re.fullmatch(r"[0-9a-f]{40}", self.source_tree):
+            raise ValueError("invalid loaded source identity")
 
 
 _WRITER_TRANSITION_COLLECTOR_LOCK = threading.RLock()
@@ -1030,7 +1055,8 @@ class UnifiedMCPGateway:
     """JSON-RPC MCP server with one public identity and bounded tools."""
 
     def __init__(self, service: Optional[SelfHostedTaskService] = None, *, model_runner: Any = None, apply_runner: Any = None):
-        self.service = service or SelfHostedTaskService()
+        owns_service = service is None
+        self.service = SelfHostedTaskService(auto_reconcile=False) if owns_service else service
         # These kwargs remain accepted for compatibility with older callers,
         # but neither runner is a gateway authority.  Assisted jobs are
         # provider probes/advice only; governed implementation enters through
@@ -1047,6 +1073,9 @@ class UnifiedMCPGateway:
         self._writer_quiescence_registry = self._build_writer_quiescence_registry()
         self._writer_collector_plan: LoadedWriterCollectorPlan | None = None
         self._writer_collector_binding_lock = threading.RLock()
+        self._writer_bootstrap_done = False
+        if owns_service:
+            self.bootstrap_writer_admission()
 
     def _build_writer_quiescence_registry(self) -> WriterRegistry | None:
         """Build a registry only from already-loaded source-owned identities."""
@@ -1066,18 +1095,24 @@ class UnifiedMCPGateway:
         state_root = getattr(self.service, "state_dir", None)
         generation = getattr(self.service, "writer_generation", None)
         writer_id = getattr(self.service, "writer_id", None)
+        loaded_binding = getattr(self.service, "loaded_task_writer_binding", None)
+        if isinstance(loaded_binding, LoadedTaskWriterBinding):
+            state_root = loaded_binding.root
+            generation = loaded_binding.generation
+            writer_id = loaded_binding.writer_id
         if state_root is not None and generation is not None and writer_id:
             thread_id = str(threading.get_ident())
+            identity = WriterIdentity(
+                root=str(Path(state_root).resolve()),
+                role="task_state",
+                source_identity=source_identity,
+                process_start_identity=current_process_start_identity(),
+                thread_id=thread_id,
+                generation=int(generation),
+                writer_id=str(writer_id),
+            )
             registry.register(
-                WriterIdentity(
-                    root=str(Path(state_root).resolve()),
-                    role="task_state",
-                    source_identity=source_identity,
-                    process_start_identity=current_process_start_identity(),
-                    thread_id=thread_id,
-                    generation=int(generation),
-                    writer_id=str(writer_id),
-                ),
+                identity,
                 snapshot=lambda: (
                     self.service.writer_quiescence_snapshot_bytes()
                     + self._writer_assist_snapshot_bytes()
@@ -1087,8 +1122,108 @@ class UnifiedMCPGateway:
                     *self.service.writer_quiescence_pending_work(),
                     *self._writer_assist_pending_work(),
                 ),
+                loaded_identity=lambda identity=identity: identity,
             )
         return registry
+
+    def bootstrap_writer_admission(self) -> str:
+        """Bind the loaded task writer before reconciliation or ingress.
+
+        This is an internal, no-argument seam: all identity and root values are
+        read from the already-loaded service/plan.  Card F retains ownership of
+        hold release and the word ACTIVE.
+        """
+        if self._writer_bootstrap_done:
+            return "ALREADY_BOUND"
+        registry = self._writer_quiescence_registry
+        binding_spec = getattr(self.service, "loaded_task_writer_binding", None)
+        if not hasattr(self.service, "state_dir"):
+            # Lightweight gateway test doubles and read-only callers do not
+            # expose a task store; preserve the pre-C gateway construction
+            # contract without attempting bootstrap writes.
+            self._writer_bootstrap_done = True
+            return "LEGACY_UNACTIVATED"
+        from nexus.events.state_owner_manifest import read_manifest
+        from nexus.events.writer_generation import read_generation
+
+        physical_root = Path(self.service.state_dir).resolve()
+        physical_manifest = read_manifest(physical_root)
+        physical_generation = read_generation(physical_root)
+        hold_path = physical_root / ".nexus" / "writer-quiescence-hold.json"
+        try:
+            hold_info = hold_path.lstat()
+            held = stat.S_ISREG(hold_info.st_mode)
+            if stat.S_ISLNK(hold_info.st_mode) or (hold_path.exists() and not held):
+                raise RuntimeError("MALFORMED_ACTIVATED_TASK_WRITER_HOLD")
+        except FileNotFoundError:
+            held = False
+        activated = physical_manifest is not None or physical_generation is not None or held
+        if held and not isinstance(binding_spec, LoadedTaskWriterBinding):
+            # A durable cohort hold is itself a deny/hold admission decision.
+            # HTTP may construct a read-only server while Card F retains the
+            # binding/release authority.
+            self.service._writer_admission_held = True
+            self._writer_bootstrap_done = True
+            return "HELD"
+        if registry is None and activated:
+            raise RuntimeError("MISSING_ACTIVATED_TASK_WRITER_BINDING")
+        if registry is None or not isinstance(binding_spec, LoadedTaskWriterBinding):
+            if activated:
+                raise RuntimeError("MISSING_ACTIVATED_TASK_WRITER_PLAN")
+            self.service.reconcile_tasks()
+            self._writer_bootstrap_done = True
+            return "LEGACY_UNACTIVATED"
+
+        from nexus.events.state_owner_manifest import StateOwnerBinding
+        from nexus.events.writer_generation import EventWriterGeneration
+
+        expected_source_identity = (
+            f"{GITHUB_REPOSITORY.repository_id}@{binding_spec.source_head}:{binding_spec.source_tree}"
+        )
+        if registry.source_identity != expected_source_identity:
+            raise RuntimeError("ACTIVATED_TASK_WRITER_SOURCE_MISMATCH")
+        root = binding_spec.root.resolve()
+        if root != physical_root:
+            raise RuntimeError("ACTIVATED_TASK_WRITER_ROOT_MISMATCH")
+        source = getattr(self.service, "loaded_source_identity", None)
+        if source is not None and (
+            str(getattr(source, "source_head", "")) != binding_spec.source_head
+            or str(getattr(source, "source_tree", "")) != binding_spec.source_tree
+        ):
+            raise RuntimeError("ACTIVATED_TASK_WRITER_SOURCE_MISMATCH")
+        manifest = read_manifest(root)
+        generation = read_generation(root)
+        if manifest is None or generation is None:
+            raise RuntimeError("MISSING_ACTIVATED_TASK_WRITER_BINDING")
+        if (
+            manifest.state != "COMMITTED"
+            or manifest.owner_id != binding_spec.owner_id
+            or manifest.transaction_id != binding_spec.transaction_id
+            or manifest.generation != binding_spec.generation
+            or manifest.writer_id != binding_spec.writer_id
+            or generation != EventWriterGeneration(binding_spec.generation, binding_spec.writer_id)
+        ):
+            raise RuntimeError("ACTIVATED_TASK_WRITER_BINDING_MISMATCH")
+        binding = StateOwnerBinding(
+            manifest.owner_id, root, manifest.generation, manifest.transaction_id
+        )
+        token = EventWriterGeneration(binding_spec.generation, binding_spec.writer_id)
+        adapter = TaskStateWriterAdapter(
+            registry,
+            binding=binding,
+            writer_generation=token,
+            root=root,
+            writer_id=binding_spec.writer_id,
+            path_for_task=self.service._state_path,
+            loaded_identity=lambda: registry._writers[(str(root), "task_state", binding_spec.writer_id)].identity,
+        )
+        self.service._writer_factory = TaskStateWriterFactory(adapter)
+        # Reconciliation is attempted only through the newly bound factory;
+        # a durable hold therefore denies before any task-state bytes change.
+        if not held:
+            self.service.reconcile_tasks()
+        self._writer_bootstrap_done = True
+        return "HELD" if held else "BOUND"
 
     def _bind_loaded_writer_collector_plan(self) -> None:
         """Bind the service-owned plan after this instance finalized its hold.

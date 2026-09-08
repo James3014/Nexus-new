@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
+from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService  # noqa: E402
 from nexus.orchestrator.unified_mcp_gateway import (  # noqa: E402
     CANONICAL_SOURCE_ROOT,
     FULL_TOOL_SCHEMA_HASH,
@@ -170,12 +171,40 @@ def build_handler(gateway: UnifiedMCPGateway, *, token: str, max_body_bytes: int
     return GatewayHTTPHandler
 
 
+def build_gateway() -> UnifiedMCPGateway:
+    """Construct and admit the production HTTP gateway without pre-binding writes.
+
+    The service is deliberately created with reconciliation disabled.  The
+    gateway owns validation of its loaded source binding, writer plan, and
+    durable cohort admission; only that source-owned bootstrap seam can enable
+    reconciliation and ingress.  No HTTP or environment input can replace the
+    loaded root or writer identity.
+    """
+    service = SelfHostedTaskService(auto_reconcile=False)
+    gateway = UnifiedMCPGateway(service=service)
+    bootstrap = getattr(gateway, "bootstrap_writer_admission", None)
+    if not callable(bootstrap):
+        raise GatewayHTTPConfigError("writer admission bootstrap is unavailable")
+    bootstrap()
+    return gateway
+
+
+def build_server(*, host: str, port: int, token: str) -> http.server.ThreadingHTTPServer:
+    """Build the real loopback HTTP server after source-owned admission."""
+    gateway = build_gateway()
+    server = http.server.ThreadingHTTPServer((host, port), build_handler(gateway, token=token))
+    # Keep the source-owned instance discoverable for local lifecycle shutdown
+    # and fixture readback; request data never replaces this binding.
+    server.gateway = gateway  # type: ignore[attr-defined]
+    return server
+
+
 def main() -> int:
     token = os.environ.get(TOKEN_ENV, "")
     if not token:
         raise SystemExit(f"{TOKEN_ENV} is required")
     host, port = resolve_bind_address()
-    server = http.server.ThreadingHTTPServer((host, port), build_handler(UnifiedMCPGateway(), token=token))
+    server = build_server(host=host, port=port, token=token)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -597,6 +597,163 @@ class WriterLease:
         self.close("failed" if exc else "committed")
 
 
+class TaskStateWriterAdapter:
+    """Short-lived task-state writer binding for one service operation.
+
+    The registry, binding, generation and path resolver are source-owned at
+    construction.  Callers can supply only an operation/task identifier; they
+    cannot select a root, writer identity, or owner context.
+    """
+
+    def __init__(
+        self,
+        registry: "WriterRegistry",
+        *,
+        binding: Any,
+        writer_generation: Any,
+        root: str | Path,
+        writer_id: str,
+        path_for_task: Callable[[str], Path],
+        loaded_identity: Callable[[], WriterIdentity] | None = None,
+        selection_entry_id: str = "task-state",
+    ) -> None:
+        from nexus.events.state_owner_manifest import StateOwnerBinding
+        from nexus.events.writer_generation import EventWriterGeneration
+
+        if not isinstance(registry, WriterRegistry):
+            raise TypeError("registry is required")
+        if not isinstance(binding, StateOwnerBinding):
+            raise TypeError("source-owned state owner binding is required")
+        if not isinstance(writer_generation, EventWriterGeneration):
+            raise TypeError("source-owned writer generation is required")
+        canonical_root = _root(root)
+        if binding.root.resolve() != Path(canonical_root):
+            raise UnknownWriter("task writer root does not match owner binding")
+        if writer_generation.generation != binding.generation:
+            raise UnknownWriter("task writer generation does not match owner binding")
+        self.registry = registry
+        self.binding = binding
+        self.writer_generation = writer_generation
+        self.root = canonical_root
+        self.writer_id = _text(writer_id, "writer_id")
+        self._path_for_task = path_for_task
+        self._loaded_identity = loaded_identity
+        self._selection_entry_id = _text(selection_entry_id, "selection_entry_id")
+        self._active_contexts: dict[int, tuple[Any, WriterLease]] = {}
+
+    def assert_context(self, context: Any) -> None:
+        active = self._active_contexts.get(id(context))
+        if active is None or active[0] is not context:
+            raise WriterAdmissionDenied("task context has no active source-owned lease")
+        active[1].validate()
+
+    @contextlib.contextmanager
+    def operation(
+        self,
+        task_id: str,
+        *,
+        operation_id: str | None = None,
+        transaction_id: str | None = None,
+    ) -> Any:
+        from nexus.events.state_owner_manifest import (
+            StateOwnerSelection,
+            commit_owner_transaction,
+            owner_transaction_guard,
+            read_manifest,
+        )
+        from nexus.events.writer_generation import event_store_lock
+
+        task = _text(task_id, "task_id")
+        destination = Path(self._path_for_task(task)).resolve()
+        try:
+            relative = destination.relative_to(Path(self.root)).as_posix()
+        except ValueError as exc:
+            raise WriterAdmissionDenied("task path escapes registered root") from exc
+        if not relative or relative.startswith(".nexus/") or "/" in task:
+            # Task ids are file names in this store; reject traversal before
+            # lease/manifest work and therefore before any selected bytes.
+            raise WriterAdmissionDenied("invalid task-state path")
+        lease = self.registry.acquire(
+            root=self.root,
+            role="task_state",
+            writer_id=self.writer_id,
+            operation_id=operation_id,
+            transaction_id=transaction_id,
+            generation=self.writer_generation.generation,
+        )
+        prepared = False
+        try:
+            if self._loaded_identity is not None:
+                loaded = self._loaded_identity()
+                expected = lease.registered.identity
+                if (
+                    not isinstance(loaded, WriterIdentity)
+                    or loaded.root != expected.root
+                    or loaded.role != expected.role
+                    or loaded.source_identity != expected.source_identity
+                    or loaded.process_start_identity != expected.process_start_identity
+                    or loaded.generation != expected.generation
+                    or loaded.writer_id != expected.writer_id
+                ):
+                    raise UnknownWriter("loaded task writer identity changed")
+            selection = StateOwnerSelection(f"{self._selection_entry_id}:{task}", "task_state", relative)
+            # Each operation receives a fresh transaction identity.  The
+            # binding's owner/root/generation remain source-owned, while the
+            # lease transaction fences this operation's manifest history.
+            operation_binding = replace(self.binding, transaction_id=lease.transaction_id)
+            # CAS read and prepare share the same physical guard. Accepted
+            # primitives reenter this guard; no second store lock is acquired.
+            with event_store_lock(Path(self.root)):
+                lease.validate()
+                previous = read_manifest(Path(self.root))
+                if previous is None or previous.state != "COMMITTED":
+                    raise WriterAdmissionDenied("task owner manifest is not committed")
+                # Preparation itself changes durable manifest/snapshot bytes;
+                # any subsequent exception must retain an unresolved lease.
+                prepared = True
+                with owner_transaction_guard(
+                    operation_binding,
+                    writer_generation=self.writer_generation,
+                    selections=(selection,),
+                    previous_manifest_sha256=previous.manifest_sha256,
+                ) as context:
+                    self._active_contexts[id(context)] = (context, lease)
+                    try:
+                        lease.validate()
+                        yield context
+                        lease.validate()
+                        outcome = commit_owner_transaction(context)
+                        committed = read_manifest(Path(self.root))
+                        if committed != outcome or committed.transaction_id != lease.transaction_id:
+                            raise WriterAdmissionDenied("task owner transaction readback mismatch")
+                    finally:
+                        self._active_contexts.pop(id(context), None)
+            lease.close("committed")
+        except BaseException:
+            if not lease._closed:
+                lease.close("unresolved" if prepared else "failed")
+            raise
+
+    write_context = operation
+
+
+class TaskStateWriterFactory:
+    """Source-owned factory used by HTTP/worker operation threads."""
+
+    def __init__(self, adapter: TaskStateWriterAdapter):
+        if not isinstance(adapter, TaskStateWriterAdapter):
+            raise TypeError("task writer adapter is required")
+        self._adapter = adapter
+
+    def assert_context(self, context: Any) -> None:
+        self._adapter.assert_context(context)
+
+    def for_operation(self, task_id: str, **kwargs: Any):
+        return self._adapter.operation(task_id, **kwargs)
+
+    __call__ = for_operation
+
+
 @dataclass(slots=True)
 class WriterHold:
     registry: "WriterRegistry"

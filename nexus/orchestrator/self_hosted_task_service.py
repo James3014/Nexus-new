@@ -1141,6 +1141,7 @@ class SelfHostedTaskService:
         worker_registry: Optional[WorkerRegistry] = None,
         ephemeral: bool = False,
         owner_context: Any | None = None,
+        writer_factory: Any | None = None,
     ):
         canonical = self.canonical_state_dir()
         raw_state_dir = Path(state_dir).expanduser() if state_dir is not None else canonical
@@ -1153,7 +1154,10 @@ class SelfHostedTaskService:
         if runner is not None and not self.ephemeral:
             raise RuntimeError("CUSTOM_RUNNER_REQUIRES_EPHEMERAL_STATE")
         self._custom_runner = runner
-        self._owner_context = owner_context
+        # Compatibility contexts must be supplied explicitly per operation.
+        # Set only by the source-owned Gateway bootstrap.  It is deliberately
+        # an operation factory, never a long-lived OwnerWriteContext.
+        self._writer_factory = writer_factory
         self.runner = runner or self._run_default
         self.stale_after_seconds = stale_after_seconds
         self.worker_registry = worker_registry or WorkerRegistry.default()
@@ -1847,8 +1851,30 @@ class SelfHostedTaskService:
     def _lock_path(self) -> Path:
         return self.state_dir / ".state.lock"
 
+    def _activated_state_root(self) -> bool:
+        """Detect a physically installed P6-C binding before any write."""
+        try:
+            from nexus.events.state_owner_manifest import read_manifest
+            from nexus.events.writer_generation import read_generation
+            hold = self.state_dir / ".nexus" / "writer-quiescence-hold.json"
+            info = hold.lstat()
+            if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+                raise RuntimeError("MALFORMED_ACTIVATED_TASK_WRITER_HOLD")
+            return True
+        except FileNotFoundError:
+            pass
+        except RuntimeError:
+            return True
+        try:
+            return read_manifest(self.state_dir) is not None or read_generation(self.state_dir) is not None
+        except Exception:
+            return True
+
     @contextmanager
     def _state_lock(self) -> Iterator[None]:
+        if self._activated_state_root():
+            from nexus.orchestrator.writer_quiescence import WriterAdmissionDenied
+            raise WriterAdmissionDenied("activated task root forbids the legacy state lock")
         self.state_dir.mkdir(parents=True, exist_ok=True)
         with self._lock_path().open("a+", encoding="utf-8") as handle:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
@@ -1857,13 +1883,31 @@ class SelfHostedTaskService:
             finally:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
+    @contextmanager
+    def _task_operation_guard(self, task_id: str, owner_context: Any | None = None) -> Iterator[Any]:
+        factory = getattr(self, "_writer_factory", None)
+        if owner_context is not None:
+            self._assert_owner_state_write_context(task_id, owner_context)
+            yield owner_context
+        elif factory is not None:
+            with factory.for_operation(task_id) as context:
+                yield context
+        else:
+            self._assert_owner_state_write_context(task_id, None)
+            with self._state_lock():
+                yield None
+
     def _assert_owner_state_write_context(
         self, task_id: str, owner_context: Any | None
     ) -> None:
-        if owner_context is None:
-            owner_context = getattr(self, "_owner_context", None)
+        if (getattr(self, "_writer_factory", None) is not None or self._activated_state_root()) and owner_context is None:
+            from nexus.orchestrator.writer_quiescence import WriterAdmissionDenied
+            raise WriterAdmissionDenied("activated task writer requires an operation context")
         if owner_context is None:
             return
+        factory = getattr(self, "_writer_factory", None)
+        if factory is not None:
+            factory.assert_context(owner_context)
         from nexus.events.state_owner_manifest import OwnerConflict, assert_owner_write
 
         destination = self._state_path(task_id)
@@ -1880,6 +1924,7 @@ class SelfHostedTaskService:
         self, task_id: str, state: dict[str, Any], *, owner_context: Any | None = None
     ) -> dict[str, Any]:
         self._assert_owner_state_write_context(task_id, owner_context)
+        self.state_dir.mkdir(parents=True, exist_ok=True)
         normalized = _jsonable(state)
         normalized["task_action"] = self._task_action_envelope(normalized)
         destination = self._state_path(task_id)
@@ -1907,6 +1952,13 @@ class SelfHostedTaskService:
     def _write_state(
         self, task_id: str, state: dict[str, Any], *, owner_context: Any | None = None
     ) -> dict[str, Any]:
+        factory = getattr(self, "_writer_factory", None)
+        if factory is not None and owner_context is None:
+            with factory.for_operation(task_id) as context:
+                return self._write_state_locked(task_id, state, owner_context=context)
+        if owner_context is not None:
+            self._assert_owner_state_write_context(task_id, owner_context)
+            return self._write_state_locked(task_id, state, owner_context=owner_context)
         self._assert_owner_state_write_context(task_id, owner_context)
         with self._state_lock():
             return self._write_state_locked(task_id, state, owner_context=owner_context)
@@ -1914,6 +1966,29 @@ class SelfHostedTaskService:
     def _create_state(
         self, task_id: str, state: dict[str, Any], *, owner_context: Any | None = None
     ) -> tuple[dict[str, Any], bool]:
+        factory = getattr(self, "_writer_factory", None)
+        if factory is not None and owner_context is None:
+            with factory.for_operation(task_id) as context:
+                destination = self._state_path(task_id)
+                if destination.exists():
+                    existing = self._load_state_path(destination, task_id)
+                    if existing is not None:
+                        return existing, False
+                _, archived = self._latest_archived_state(task_id)
+                if archived is not None:
+                    return archived, False
+                return self._write_state_locked(task_id, state, owner_context=context), True
+        if owner_context is not None:
+            self._assert_owner_state_write_context(task_id, owner_context)
+            destination = self._state_path(task_id)
+            if destination.exists():
+                existing = self._load_state_path(destination, task_id)
+                if existing is not None:
+                    return existing, False
+            _, archived = self._latest_archived_state(task_id)
+            if archived is not None:
+                return archived, False
+            return self._write_state_locked(task_id, state, owner_context=owner_context), True
         self._assert_owner_state_write_context(task_id, owner_context)
         with self._state_lock():
             destination = self._state_path(task_id)
@@ -1927,6 +2002,8 @@ class SelfHostedTaskService:
             return self._write_state_locked(task_id, state, owner_context=owner_context), True
 
     def _read_state(self, task_id: str) -> Optional[dict[str, Any]]:
+        if self._activated_state_root():
+            return self._read_state_snapshot(task_id)
         path = self._state_path(task_id)
         if not path.exists():
             _, archived = self._latest_archived_state(task_id)
@@ -2173,6 +2250,14 @@ class SelfHostedTaskService:
         return None
 
     def _reactivate_archived_state(self, task_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        if getattr(self, "_writer_factory", None) is not None:
+            with self._writer_factory.for_operation(task_id) as context:
+                path = self._state_path(task_id)
+                if path.exists():
+                    return self._with_task_action(json.loads(path.read_text(encoding="utf-8")))
+                if not self._archive_state_candidates(task_id):
+                    raise RuntimeError("archived task receipt disappeared before retry")
+                return self._write_state_locked(task_id, state, owner_context=context)
         with self._state_lock():
             path = self._state_path(task_id)
             if path.exists():
@@ -2184,6 +2269,23 @@ class SelfHostedTaskService:
     def _mutate_state(
         self, task_id: str, mutator: Callable[[dict[str, Any]], None], *, owner_context: Any | None = None
     ) -> Optional[dict[str, Any]]:
+        factory = getattr(self, "_writer_factory", None)
+        if factory is not None and owner_context is None:
+            with factory.for_operation(task_id) as context:
+                path = self._state_path(task_id)
+                if not path.exists():
+                    return None
+                state = json.loads(path.read_text(encoding="utf-8"))
+                mutator(state)
+                return self._write_state_locked(task_id, state, owner_context=context)
+        if owner_context is not None:
+            self._assert_owner_state_write_context(task_id, owner_context)
+            path = self._state_path(task_id)
+            if not path.exists():
+                return None
+            state = json.loads(path.read_text(encoding="utf-8"))
+            mutator(state)
+            return self._write_state_locked(task_id, state, owner_context=owner_context)
         self._assert_owner_state_write_context(task_id, owner_context)
         with self._state_lock():
             path = self._state_path(task_id)
@@ -2272,8 +2374,7 @@ class SelfHostedTaskService:
         task_id = candidate["identity"]["task_id"]
         if not task_id:
             return {"status": "BLOCKED", "reason": "TASK_ID_REQUIRED"}
-        self._assert_owner_state_write_context(task_id, owner_context)
-        with self._state_lock():
+        with self._task_operation_guard(task_id, owner_context) as context:
             path = self._state_path(task_id)
             if not path.exists():
                 return {"status": "BLOCKED", "reason": "TASK_NOT_FOUND"}
@@ -2289,13 +2390,18 @@ class SelfHostedTaskService:
             candidate["status"] = "CLAIMED"
             candidate["claimed_at"] = _utc_now()
             state["work_claim"] = candidate
-            self._write_state_locked(task_id, state, owner_context=owner_context)
+            self._write_state_locked(task_id, state, owner_context=context)
             return {"status": "CLAIMED", "claim": candidate}
 
     claim_work = acquire_work_claim
 
     def validate_work_claim(self, request: Mapping[str, Any]) -> dict[str, Any]:
         task_id = str(request.get("task_id") or "")
+        if self._activated_state_root():
+            state = self._read_state_snapshot(task_id)
+            if state is None:
+                raise RuntimeError("WORK_CLAIM_NOT_FOUND")
+            return {"status": "CLAIMED", "claim": self._validate_claim_locked(state, request)}
         with self._state_lock():
             path = self._state_path(task_id)
             if not path.exists():
@@ -2308,20 +2414,18 @@ class SelfHostedTaskService:
         self, request: Mapping[str, Any], *, owner_context: Any | None = None
     ) -> dict[str, Any]:
         task_id = str(request["task_id"])
-        self._assert_owner_state_write_context(task_id, owner_context)
-        with self._state_lock():
+        with self._task_operation_guard(task_id, owner_context) as context:
             state = json.loads(self._state_path(task_id).read_text(encoding="utf-8"))
             self._validate_claim_locked(state, request)
             state.pop("work_claim", None)
-            self._write_state_locked(task_id, state, owner_context=owner_context)
+            self._write_state_locked(task_id, state, owner_context=context)
         return {"status": "RELEASED", "task_id": task_id}
 
     def recover_work_claim(
         self, request: Mapping[str, Any], *, reason: str = "RECOVERY", owner_context: Any | None = None
     ) -> dict[str, Any]:
         task_id = str(request["task_id"])
-        self._assert_owner_state_write_context(task_id, owner_context)
-        with self._state_lock():
+        with self._task_operation_guard(task_id, owner_context) as context:
             state = json.loads(self._state_path(task_id).read_text(encoding="utf-8"))
             record = self._validate_claim_locked(state, request)
             generation = int(record["generation"]) + 1
@@ -2329,7 +2433,7 @@ class SelfHostedTaskService:
             record["fencing_token"] = f"{record['claim_id']}:{generation}"
             record["recovery_reason"] = _bounded_failure_text(reason)
             record["recovered_at"] = _utc_now()
-            self._write_state_locked(task_id, state, owner_context=owner_context)
+            self._write_state_locked(task_id, state, owner_context=context)
             return {"status": "CLAIMED", "claim": record}
 
     renew_work_claim = validate_work_claim
@@ -10758,6 +10862,9 @@ class SelfHostedTaskService:
         admission, integration manager, or ref update; all physical facts are
         re-read while holding the lifecycle state lock.
         """
+        if self._activated_state_root() and getattr(self, "_writer_factory", None) is None:
+            from nexus.orchestrator.writer_quiescence import WriterAdmissionDenied
+            raise WriterAdmissionDenied("activated correction requires the task writer adapter")
         if reason != "RECOVERY_BASE_MISBOUND_TO_APPLIED_HEAD":
             raise RuntimeError("RECEIPT_CORRECTION_REASON_UNSUPPORTED")
         if not isinstance(approval, Mapping) or not isinstance(authorization, Mapping):
@@ -10780,7 +10887,7 @@ class SelfHostedTaskService:
             raise RuntimeError("RECEIPT_CORRECTION_STATE_REQUIRED") from exc
         if str(expected_state_hash) != prelock_state_hash:
             reject("RECEIPT_CORRECTION_STATE_BINDING_MISMATCH")
-        with self._state_lock():
+        with self._task_operation_guard(task_id) as context:
             try:
                 locked_state_bytes = state_path.read_bytes()
             except OSError as exc:
@@ -10989,7 +11096,7 @@ class SelfHostedTaskService:
             state["integration_receipt"] = corrected
             state["integration_base_sha"] = corrected_base_sha
             state["integration_receipt_correction_history"] = [*history, entry]
-            self._write_state_locked(task_id, state)
+            self._write_state_locked(task_id, state, owner_context=context)
             return {**state, "duplicate": False}
 
     # Compatibility spelling for callers that use the shorter public name.
