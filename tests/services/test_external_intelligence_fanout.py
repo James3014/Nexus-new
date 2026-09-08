@@ -11,6 +11,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from nexus.services.external_intelligence_closure import _receipt_identity
+
 from nexus.services.external_intelligence_fanout import (
     CLAIM_CEILING,
     MODEL,
@@ -1300,6 +1302,7 @@ def test_repair_operation_id_binds_child_effect_to_own_target(tmp_path, returned
         [unit(base, envelope, envelope_sha, "ua", ["a.py"])], CapacityLease(1, 1, 1, 1)
     )["receipts"]["ua"]
     initial = dict(initial, operation_id=parent_id)
+    initial["receipt_id"] = _receipt_identity(initial)
     runtime = AdaptiveWorkerFanoutRuntime(
         allocator=initial_runtime.allocator, store=initial_runtime.store, transport=transport
     )
@@ -1316,6 +1319,8 @@ def test_repair_operation_id_binds_child_effect_to_own_target(tmp_path, returned
             initial, repair_id="r1", repair_ref=str(repair), repair_sha256=repair_sha
         )
         assert child["operation_id"] == child_id
+        assert child["receipt_id"] == _receipt_identity(child)
+        assert child["parent_receipt_id"] == initial["receipt_id"]
 
 
 def test_repair_session_cannot_be_rebound_to_another_unit(tmp_path):
