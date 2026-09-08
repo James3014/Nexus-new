@@ -1842,7 +1842,7 @@ def test_registered_provider_executable_unifies_agy_aliases(monkeypatch) -> None
             "NEXUS_AGY_EXECUTABLE": "/bin/echo",
         },
     )
-    assert resolved == "/bin/echo"
+    assert resolved == str(Path("/bin/echo").resolve())
 
 
 def test_registered_provider_executable_rejects_agy_alias_drift(monkeypatch) -> None:
