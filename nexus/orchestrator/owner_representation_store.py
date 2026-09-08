@@ -292,10 +292,12 @@ def _blocked_decision(
         "proposal_hash": canonical_autonomy_hash(proposal.model_dump(mode="json")),
         "claim_ceiling": "OWNER_REPRESENTATION_EXACT_ONE_SHOT_ONLY",
     }
-    return OwnerRepresentationDecision.model_validate({
-        **payload,
-        "decision_hash": canonical_autonomy_hash(payload),
-    })
+    return OwnerRepresentationDecision.model_validate(
+        {
+            **payload,
+            "decision_hash": canonical_autonomy_hash(payload),
+        }
+    )
 
 
 def owner_representation_issuance_effect(grant: OwnerRepresentationGrant) -> dict[str, Any]:
@@ -504,8 +506,7 @@ def _verify_owner_signature(auth: OwnerExactPublicationAuthorization) -> None:
         )
     if (
         auth.owner_signature_algorithm != "RSA-SHA256"
-        or
-        not stat.S_ISDIR(root_stat.st_mode)
+        or not stat.S_ISDIR(root_stat.st_mode)
         or stat.S_ISLNK(root_stat.st_mode)
         or root_stat.st_uid != 0
         or stat.S_IMODE(root_stat.st_mode) & 0o022
@@ -536,7 +537,10 @@ def _verify_owner_signature(auth: OwnerExactPublicationAuthorization) -> None:
             signature_path.write_bytes(signature)
             result = subprocess.run(
                 [OPENSSL_BINARY, "rsa", "-pubin", "-in", str(key_path), "-text", "-noout"],
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=2, check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                timeout=2,
+                check=False,
             )
             bits = re.search(rb"(\d+) bit", result.stdout or b"")
             if result.returncode != 0 or bits is None or int(bits.group(1)) < 3072:
@@ -544,8 +548,16 @@ def _verify_owner_signature(auth: OwnerExactPublicationAuthorization) -> None:
                     OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REJECTED.value
                 )
             result = subprocess.run(
-                [OPENSSL_BINARY, "dgst", "-sha256", "-verify", str(key_path),
-                 "-signature", str(signature_path), str(payload_path)],
+                [
+                    OPENSSL_BINARY,
+                    "dgst",
+                    "-sha256",
+                    "-verify",
+                    str(key_path),
+                    "-signature",
+                    str(signature_path),
+                    str(payload_path),
+                ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=2,
@@ -615,30 +627,32 @@ def owner_issues_exact_publication_authorization(
         raise OwnerRepresentationGrantBlocked(
             OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REQUIRED.value
         )
-    spec = OwnerExactPublicationAuthorizationSpec.model_validate({
-        "schema": _AUTHORIZATION_SCHEMA,
-        "authorization_id": auth_id,
-        "owner_id": grant.owner_id,
-        "coordinator_id": grant.coordinator_id,
-        "destination": grant.destination,
-        "effect": grant.effect,
-        "target": grant.target,
-        "content_hash": grant.content_hash,
-        "purpose": grant.purpose,
-        "actor": grant.actor,
-        "transport": grant.transport,
-        "operation_id": grant.operation_id,
-        "grant_hash": grant.grant_hash,
-        "owner_key_id": owner_key_id,
-        "owner_signature": owner_signature,
-        "owner_signature_algorithm": "RSA-SHA256",
-        "replay_mode": "ONE_SHOT",
-        "issued_at": effective_now,
-        "expires_at": auth_expires,
-        "revoked_at": grant.revoked_at,
-        "revocation_reason": grant.revocation_reason,
-        "superseded_by": grant.superseded_by,
-    })
+    spec = OwnerExactPublicationAuthorizationSpec.model_validate(
+        {
+            "schema": _AUTHORIZATION_SCHEMA,
+            "authorization_id": auth_id,
+            "owner_id": grant.owner_id,
+            "coordinator_id": grant.coordinator_id,
+            "destination": grant.destination,
+            "effect": grant.effect,
+            "target": grant.target,
+            "content_hash": grant.content_hash,
+            "purpose": grant.purpose,
+            "actor": grant.actor,
+            "transport": grant.transport,
+            "operation_id": grant.operation_id,
+            "grant_hash": grant.grant_hash,
+            "owner_key_id": owner_key_id,
+            "owner_signature": owner_signature,
+            "owner_signature_algorithm": "RSA-SHA256",
+            "replay_mode": "ONE_SHOT",
+            "issued_at": effective_now,
+            "expires_at": auth_expires,
+            "revoked_at": grant.revoked_at,
+            "revocation_reason": grant.revocation_reason,
+            "superseded_by": grant.superseded_by,
+        }
+    )
     payload = spec.model_dump(mode="json")
     record = {
         **payload,

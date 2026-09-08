@@ -103,6 +103,8 @@ def fixture_owner_trust_root(monkeypatch, tmp_path):
         "route_for_transport",
         lambda identity: "owner_representation_seam" if identity == "fixture" else None,
     )
+
+
 THIRD_PARTY = ExternalDestination(
     host="github.com", owner_account="Waishnav", repository="devspace"
 )
@@ -191,10 +193,12 @@ def _grant(**overrides) -> OwnerRepresentationGrant:
     }
     values.update(overrides)
     spec = OwnerRepresentationGrantSpec.model_validate(values)
-    return OwnerRepresentationGrant.model_validate({
-        **spec.model_dump(mode="json"),
-        "grant_hash": canonical_autonomy_hash(spec.model_dump(mode="json")),
-    })
+    return OwnerRepresentationGrant.model_validate(
+        {
+            **spec.model_dump(mode="json"),
+            "grant_hash": canonical_autonomy_hash(spec.model_dump(mode="json")),
+        }
+    )
 
 
 def _issue_grant(
@@ -277,16 +281,18 @@ class FakeRemote:
             raise TransportDispatchedButUnacknowledged()
         self.issue_id_ctr += 1
         marker = str(self.issue_id_ctr)
-        self.writes.append({
-            "marker": marker,
-            "op": proposal.operation_id,
-            "effect": proposal.effect.value,
-            "destination": proposal.destination.repository_id,
-            "title": proposal.title,
-            "body": proposal.body,
-            "purpose": proposal.purpose,
-            "actor": proposal.actor,
-        })
+        self.writes.append(
+            {
+                "marker": marker,
+                "op": proposal.operation_id,
+                "effect": proposal.effect.value,
+                "destination": proposal.destination.repository_id,
+                "title": proposal.title,
+                "body": proposal.body,
+                "purpose": proposal.purpose,
+                "actor": proposal.actor,
+            }
+        )
         return WriteOutcome(status="ACK", remote_marker=marker)
 
     def readback(self, proposal: ExternalPublicationProposal) -> str | None:
@@ -1084,9 +1090,7 @@ def test_prepare_rejects_unregistered_transport_even_with_exact_owner_grant(
     remote: FakeRemote,
 ):
     proposal = _proposal(transport="made_up_transport", operation_id="op-unregistered")
-    grant = _issue_grant(
-        grant_store, transport="made_up_transport", operation_id="op-unregistered"
-    )
+    grant = _issue_grant(grant_store, transport="made_up_transport", operation_id="op-unregistered")
     with pytest.raises(OwnerRepresentationBlocked, match="TRANSPORT_UNREGISTERED"):
         publisher.prepare(proposal, grant)
     assert remote.writes == []
@@ -1469,10 +1473,14 @@ def test_real_rsa_owner_signature_accepts_and_rejects_tamper(
     private_key = tmp_path / "owner-private.pem"
     public_key = trust_root / "owner-james--rsa.pem"
     subprocess.run([store.OPENSSL_BINARY, "genrsa", "-out", str(private_key), "3072"], check=True)
-    subprocess.run([store.OPENSSL_BINARY, "rsa", "-in", str(private_key), "-pubout", "-out", str(public_key)], check=True)
+    subprocess.run(
+        [store.OPENSSL_BINARY, "rsa", "-in", str(private_key), "-pubout", "-out", str(public_key)],
+        check=True,
+    )
     private_key.chmod(0o600)
     public_key.chmod(0o600)
     real_lstat = Path.lstat
+
     def trusted_lstat(path):
         result = real_lstat(path)
         if Path(path) in {trust_root, public_key} or Path(path) in trust_root.parents:
@@ -1485,32 +1493,66 @@ def test_real_rsa_owner_signature_accepts_and_rejects_tamper(
                 values[0] = (values[0] & ~0o17777) | stat.S_IFDIR | 0o700
             return type(result)(values)
         return result
+
     monkeypatch.setattr(Path, "lstat", trusted_lstat)
     monkeypatch.setattr(store, "OWNER_AUTHORIZATION_TRUST_ROOT", trust_root)
     monkeypatch.setattr(store, "_verify_owner_signature", _production_verify_owner_signature)
     grant = _grant(grant_id="rsa-real")
-    spec = OwnerExactPublicationAuthorizationSpec.model_validate({
-        "schema": "nexus.owner_exact_publication_authorization.v1",
-        "authorization_id": f"auth-{grant.grant_hash}", "owner_id": grant.owner_id,
-        "coordinator_id": grant.coordinator_id, "destination": grant.destination,
-        "effect": grant.effect, "target": grant.target, "content_hash": grant.content_hash,
-        "purpose": grant.purpose, "actor": grant.actor, "transport": grant.transport,
-        "operation_id": grant.operation_id, "grant_hash": grant.grant_hash,
-        "owner_key_id": "rsa", "owner_signature": "placeholder", "issued_at": NOW,
-        "expires_at": grant.expires_at,
-    })
-    payload = json.dumps(spec.model_dump(mode="json", exclude={"owner_signature"}), sort_keys=True, separators=(",", ":")).encode()
+    spec = OwnerExactPublicationAuthorizationSpec.model_validate(
+        {
+            "schema": "nexus.owner_exact_publication_authorization.v1",
+            "authorization_id": f"auth-{grant.grant_hash}",
+            "owner_id": grant.owner_id,
+            "coordinator_id": grant.coordinator_id,
+            "destination": grant.destination,
+            "effect": grant.effect,
+            "target": grant.target,
+            "content_hash": grant.content_hash,
+            "purpose": grant.purpose,
+            "actor": grant.actor,
+            "transport": grant.transport,
+            "operation_id": grant.operation_id,
+            "grant_hash": grant.grant_hash,
+            "owner_key_id": "rsa",
+            "owner_signature": "placeholder",
+            "issued_at": NOW,
+            "expires_at": grant.expires_at,
+        }
+    )
+    payload = json.dumps(
+        spec.model_dump(mode="json", exclude={"owner_signature"}),
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
     payload_path = tmp_path / "payload"
     signature_path = tmp_path / "signature"
     payload_path.write_bytes(payload)
-    subprocess.run([store.OPENSSL_BINARY, "dgst", "-sha256", "-sign", str(private_key), "-out", str(signature_path), str(payload_path)], check=True)
+    subprocess.run(
+        [
+            store.OPENSSL_BINARY,
+            "dgst",
+            "-sha256",
+            "-sign",
+            str(private_key),
+            "-out",
+            str(signature_path),
+            str(payload_path),
+        ],
+        check=True,
+    )
     auth = owner_issues_exact_publication_authorization(
-        grant, issued_at=NOW, authority_root=grant_store.root,
-        owner_key_id="rsa", owner_signature=base64.b64encode(signature_path.read_bytes()).decode(),
+        grant,
+        issued_at=NOW,
+        authority_root=grant_store.root,
+        owner_key_id="rsa",
+        owner_signature=base64.b64encode(signature_path.read_bytes()).decode(),
     )
     permit = consume_exact_owner_authorization(
-        grant, owner_authorization=auth, authority_root=grant_store.root,
-        standing_grant_path=standing_grant_path, requested_at=NOW,
+        grant,
+        owner_authorization=auth,
+        authority_root=grant_store.root,
+        standing_grant_path=standing_grant_path,
+        requested_at=NOW,
     )
     assert permit["authorization_hash"] == auth.authorization_hash
     receipt = grant_store.issue(grant, issuance_permit=permit, requested_at=NOW)
@@ -1520,7 +1562,10 @@ def test_real_rsa_owner_signature_accepts_and_rejects_tamper(
     with pytest.raises(OwnerRepresentationBlocked, match="AUTHORIZATION"):
         publisher.publish(prepared)
     assert remote.writes == []
-    subprocess.run([store.OPENSSL_BINARY, "rsa", "-in", str(private_key), "-pubout", "-out", str(public_key)], check=True)
+    subprocess.run(
+        [store.OPENSSL_BINARY, "rsa", "-in", str(private_key), "-pubout", "-out", str(public_key)],
+        check=True,
+    )
     public_key.chmod(0o600)
     assert publisher.publish(prepared)["state"] == "COMPLETED"
     with pytest.raises(OwnerRepresentationBlocked, match="REPLAY_FORBIDDEN"):
@@ -1533,8 +1578,11 @@ def test_real_rsa_owner_signature_accepts_and_rejects_tamper(
     bad_grant = _grant(grant_id="rsa-bad-signature", operation_id="op-bad")
     with pytest.raises(OwnerRepresentationGrantBlocked, match="EXACT_OWNER_AUTHORIZATION_REJECTED"):
         owner_issues_exact_publication_authorization(
-            bad_grant, issued_at=NOW, authority_root=grant_store.root,
-            owner_key_id="rsa", owner_signature=base64.b64encode(b"wrong").decode(),
+            bad_grant,
+            issued_at=NOW,
+            authority_root=grant_store.root,
+            owner_key_id="rsa",
+            owner_signature=base64.b64encode(b"wrong").decode(),
         )
     assert not (grant_store.root / "authorizations" / f"{bad_grant.grant_hash}.json").exists()
 
