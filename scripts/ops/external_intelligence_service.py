@@ -365,17 +365,19 @@ def service_status(
             else ServiceReadiness.STARTING.value
         )
         return result
-    result.update({
-        key: receipt.get(key)
-        for key in (
-            "run_id",
-            "pid",
-            "heartbeat_at",
-            "last_error",
-            "started_at",
-            "successful_polls",
-        )
-    })
+    result.update(
+        {
+            key: receipt.get(key)
+            for key in (
+                "run_id",
+                "pid",
+                "heartbeat_at",
+                "last_error",
+                "started_at",
+                "successful_polls",
+            )
+        }
+    )
     if (
         receipt.get("source_path") not in (None, source_path)
         or receipt.get("source_sha256") != source_sha
@@ -477,7 +479,9 @@ def load_config(path: str | os.PathLike[str]) -> ServiceConfig:
     open_swe_executable = raw.get("open_swe_executable", "")
     open_swe_runtime_artifact_sha256 = raw.get("open_swe_runtime_artifact_sha256", "")
     for timeout_key in ("open_swe_semantic_timeout_seconds", "open_swe_worker_timeout_seconds"):
-        timeout_value = raw.get(timeout_key, 180 if timeout_key.endswith("semantic_timeout_seconds") else 300)
+        timeout_value = raw.get(
+            timeout_key, 180 if timeout_key.endswith("semantic_timeout_seconds") else 300
+        )
         if (
             not isinstance(timeout_value, int)
             or isinstance(timeout_value, bool)
@@ -564,21 +568,23 @@ class GhIssueTransport:
         return result.stdout or ""
 
     def list_open_labeled(self, repository: str, label: str) -> list[dict[str, Any]]:
-        out = self._run([
-            "gh",
-            "issue",
-            "list",
-            "--repo",
-            repository,
-            "--state",
-            "open",
-            "--label",
-            label,
-            "--limit",
-            "100",
-            "--json",
-            "number,title,body,updatedAt",
-        ])
+        out = self._run(
+            [
+                "gh",
+                "issue",
+                "list",
+                "--repo",
+                repository,
+                "--state",
+                "open",
+                "--label",
+                label,
+                "--limit",
+                "100",
+                "--json",
+                "number,title,body,updatedAt",
+            ]
+        )
         value = json.loads(out)
         if not isinstance(value, list):
             raise ServiceError("GH_ISSUE_LIST_INVALID")
@@ -586,13 +592,15 @@ class GhIssueTransport:
 
     def list_comments(self, repository: str, issue_number: int) -> list[dict[str, Any]]:
         clean_repo = repository.strip().strip("/")
-        out = self._run([
-            "gh",
-            "api",
-            f"repos/{clean_repo}/issues/{issue_number}/comments",
-            "--paginate",
-            "--slurp",
-        ])
+        out = self._run(
+            [
+                "gh",
+                "api",
+                f"repos/{clean_repo}/issues/{issue_number}/comments",
+                "--paginate",
+                "--slurp",
+            ]
+        )
         try:
             value = json.loads(out)
         except Exception as exc:
@@ -616,16 +624,18 @@ class GhIssueTransport:
         raise ServiceError("GH_COMMENTS_LIST_INVALID")
 
     def comment(self, repository: str, issue_number: int, body: str) -> None:
-        self._run([
-            "gh",
-            "issue",
-            "comment",
-            str(issue_number),
-            "--repo",
-            repository,
-            "--body",
-            body,
-        ])
+        self._run(
+            [
+                "gh",
+                "issue",
+                "comment",
+                str(issue_number),
+                "--repo",
+                repository,
+                "--body",
+                body,
+            ]
+        )
 
 
 def _safe_repo(repo: str) -> str:

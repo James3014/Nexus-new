@@ -82,12 +82,14 @@ def _config(tmp_path, **overrides):
 def _config_file(tmp_path):
     path = tmp_path / "config.json"
     path.write_text(
-        json.dumps({
-            "repositories": ["o/r"],
-            "repository_roots": {"o/r": str(tmp_path / "repo")},
-            "state_root": str(tmp_path / "state"),
-            "workspace_root": str(tmp_path / "workspaces"),
-        }),
+        json.dumps(
+            {
+                "repositories": ["o/r"],
+                "repository_roots": {"o/r": str(tmp_path / "repo")},
+                "state_root": str(tmp_path / "state"),
+                "workspace_root": str(tmp_path / "workspaces"),
+            }
+        ),
         encoding="utf-8",
     )
     return path
@@ -126,13 +128,15 @@ def _complete(reuse=False, publication_state="COMPLETED"):
 def test_load_config_is_strict_and_profile_is_configurable(tmp_path):
     cfg = tmp_path / "config.json"
     cfg.write_text(
-        json.dumps({
-            "repositories": ["o/r"],
-            "repository_roots": {"o/r": str(tmp_path / "repo")},
-            "state_root": str(tmp_path / "state"),
-            "workspace_root": str(tmp_path / "workspaces"),
-            "opencli_profile": "profile-alias",
-        }),
+        json.dumps(
+            {
+                "repositories": ["o/r"],
+                "repository_roots": {"o/r": str(tmp_path / "repo")},
+                "state_root": str(tmp_path / "state"),
+                "workspace_root": str(tmp_path / "workspaces"),
+                "opencli_profile": "profile-alias",
+            }
+        ),
         encoding="utf-8",
     )
     loaded = load_config(cfg)
@@ -443,15 +447,23 @@ def test_load_config_rejects_opencli_transport_fields_for_other_provider(tmp_pat
         load_config(config_path)
 
 
-@pytest.mark.parametrize("field,value", [
-    ("open_swe_semantic_timeout_seconds", 29),
-    ("open_swe_worker_timeout_seconds", 3601),
-    ("open_swe_semantic_timeout_seconds", True),
-])
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("open_swe_semantic_timeout_seconds", 29),
+        ("open_swe_worker_timeout_seconds", 3601),
+        ("open_swe_semantic_timeout_seconds", True),
+    ],
+)
 def test_load_config_rejects_invalid_open_swe_consumer_timeout(tmp_path, field, value):
     config_path = _config_file(tmp_path)
     raw = json.loads(config_path.read_text(encoding="utf-8"))
-    raw.update(semantic_backend="open_swe", open_swe_model_provider="google_genai", open_swe_model="gemini-test", **{field: value})
+    raw.update(
+        semantic_backend="open_swe",
+        open_swe_model_provider="google_genai",
+        open_swe_model="gemini-test",
+        **{field: value},
+    )
     config_path.write_text(json.dumps(raw), encoding="utf-8")
     with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_TIMEOUT_INVALID"):
         load_config(config_path)
@@ -527,12 +539,14 @@ def test_build_automation_fails_closed_when_open_swe_optional_runtime_is_missing
 
 def test_run_once_processes_at_most_one_issue_and_publishes_compact_result(tmp_path):
     config = _config(tmp_path)
-    gh = FakeGh({
-        "o/r": [
-            {"number": 2, "title": "later", "body": "b"},
-            {"number": 1, "title": "first", "body": "a"},
-        ]
-    })
+    gh = FakeGh(
+        {
+            "o/r": [
+                {"number": 2, "title": "later", "body": "b"},
+                {"number": 1, "title": "first", "body": "a"},
+            ]
+        }
+    )
     automation = FakeAutomation(_complete())
     result = run_once(
         config,
@@ -574,12 +588,14 @@ def test_run_once_skips_reused_issue_to_reach_eligible_next(tmp_path):
                 return _complete(reuse=True)
             return _complete()
 
-    gh = FakeGh({
-        "o/r": [
-            {"number": 2, "title": "eligible", "body": "b"},
-            {"number": 1, "title": "already-done", "body": "a"},
-        ]
-    })
+    gh = FakeGh(
+        {
+            "o/r": [
+                {"number": 2, "title": "eligible", "body": "b"},
+                {"number": 1, "title": "already-done", "body": "a"},
+            ]
+        }
+    )
     result = run_once(
         config,
         gh=gh,
@@ -607,12 +623,14 @@ def test_run_once_skips_pre_dispatch_blocked_issue_to_reach_eligible_next(tmp_pa
                 }
             return _complete()
 
-    gh = FakeGh({
-        "o/r": [
-            {"number": 2, "title": "eligible", "body": "b"},
-            {"number": 1, "title": "blocked", "body": "a"},
-        ]
-    })
+    gh = FakeGh(
+        {
+            "o/r": [
+                {"number": 2, "title": "eligible", "body": "b"},
+                {"number": 1, "title": "blocked", "body": "a"},
+            ]
+        }
+    )
     result = run_once(
         config,
         gh=gh,
@@ -640,12 +658,14 @@ def test_run_once_skips_source_lineage_blocked_issue_to_reach_eligible_next(tmp_
                 }
             return _complete()
 
-    gh = FakeGh({
-        "o/r": [
-            {"number": 2, "title": "eligible", "body": "b"},
-            {"number": 1, "title": "blocked-lineage", "body": "a"},
-        ]
-    })
+    gh = FakeGh(
+        {
+            "o/r": [
+                {"number": 2, "title": "eligible", "body": "b"},
+                {"number": 1, "title": "blocked-lineage", "body": "a"},
+            ]
+        }
+    )
     result = run_once(
         config,
         gh=gh,
@@ -683,12 +703,14 @@ def test_run_once_skips_terminal_or_reconcile_issue_to_reach_eligible_next(tmp_p
                 return dict(disposition)
             return _complete()
 
-    gh = FakeGh({
-        "o/r": [
-            {"number": 2, "title": "eligible", "body": "b"},
-            {"number": 1, "title": "durable-stop", "body": "a"},
-        ]
-    })
+    gh = FakeGh(
+        {
+            "o/r": [
+                {"number": 2, "title": "eligible", "body": "b"},
+                {"number": 1, "title": "durable-stop", "body": "a"},
+            ]
+        }
+    )
     result = run_once(
         config,
         gh=gh,
@@ -717,12 +739,14 @@ def test_run_once_skips_dispatched_blocked_issue_to_reach_eligible_next(tmp_path
                 }
             return _complete()
 
-    gh = FakeGh({
-        "o/r": [
-            {"number": 2, "title": "eligible", "body": "b"},
-            {"number": 1, "title": "dispatched-blocked", "body": "a"},
-        ]
-    })
+    gh = FakeGh(
+        {
+            "o/r": [
+                {"number": 2, "title": "eligible", "body": "b"},
+                {"number": 1, "title": "dispatched-blocked", "body": "a"},
+            ]
+        }
+    )
     result = run_once(
         config,
         gh=gh,
@@ -965,9 +989,9 @@ def test_critical_regression_eia_unattended_freshness_end_to_end(tmp_path):
         state_root=tmp_path / "state",
         workspace_root=tmp_path / "workspaces",
     )
-    gh = FakeGh({
-        repo_identity: [{"number": 201, "title": "New work on advanced main", "body": body}]
-    })
+    gh = FakeGh(
+        {repo_identity: [{"number": 201, "title": "New work on advanced main", "body": body}]}
+    )
 
     # Run real run_once with real refresh_remote_main and real automation
     class FakeSidecar:
@@ -1651,10 +1675,12 @@ def test_t3_prepared_persists_dispatching_posts_reads_back_and_next_poll_no_extr
     assert spy_store.records["o/r:1"]["state"] == "COMPLETED"
 
     # Second poll: next poll sees already completed publication -> no extra comments
-    automation_reuse = FakeAutomation({
-        **_complete(reuse=True),
-        "publication_record": spy_store.records["o/r:1"],
-    })
+    automation_reuse = FakeAutomation(
+        {
+            **_complete(reuse=True),
+            "publication_record": spy_store.records["o/r:1"],
+        }
+    )
     automation_reuse.state_store = spy_store
     r2 = run_once(
         config,
@@ -1681,15 +1707,17 @@ def test_t4_remote_accepted_before_local_confirm_reconciles_without_post(tmp_pat
         comments=[("o/r", 1, existing_comment_body)],
     )
     # Restart from DISPATCHING/OUTCOME_UNKNOWN with marker present
-    automation = FakeAutomation({
-        "state": "COMPLETE",
-        "publication": pub_payload,
-        "publication_record": {
-            "publication_id": pub_id,
-            "state": "DISPATCHING",
-            "payload": pub_payload,
-        },
-    })
+    automation = FakeAutomation(
+        {
+            "state": "COMPLETE",
+            "publication": pub_payload,
+            "publication_record": {
+                "publication_id": pub_id,
+                "state": "DISPATCHING",
+                "payload": pub_payload,
+            },
+        }
+    )
     r = run_once(
         config,
         gh=gh,
@@ -1709,15 +1737,17 @@ def test_t5_dispatching_or_outcome_unknown_with_zero_marker_fails_closed(tmp_pat
     pub_id = compute_publication_id("o/r", 1, "", pub_payload)
     gh = FakeGh({"o/r": [{"number": 1, "title": "t", "body": "b"}]})
 
-    automation = FakeAutomation({
-        "state": "COMPLETE",
-        "publication": pub_payload,
-        "publication_record": {
-            "publication_id": pub_id,
-            "state": "DISPATCHING",
-            "payload": pub_payload,
-        },
-    })
+    automation = FakeAutomation(
+        {
+            "state": "COMPLETE",
+            "publication": pub_payload,
+            "publication_record": {
+                "publication_id": pub_id,
+                "state": "DISPATCHING",
+                "payload": pub_payload,
+            },
+        }
+    )
     r = run_once(
         config,
         gh=gh,
@@ -1743,15 +1773,17 @@ def test_t6_duplicate_marker_fails_closed(tmp_path):
         {"o/r": [{"number": 1, "title": "t", "body": "b"}]},
         comments=[("o/r", 1, dup_body), ("o/r", 1, dup_body)],
     )
-    automation = FakeAutomation({
-        "state": "COMPLETE",
-        "publication": pub_payload,
-        "publication_record": {
-            "publication_id": pub_id,
-            "state": "PREPARED",
-            "payload": pub_payload,
-        },
-    })
+    automation = FakeAutomation(
+        {
+            "state": "COMPLETE",
+            "publication": pub_payload,
+            "publication_record": {
+                "publication_id": pub_id,
+                "state": "PREPARED",
+                "payload": pub_payload,
+            },
+        }
+    )
     r = run_once(
         config,
         gh=gh,
@@ -1800,12 +1832,14 @@ def test_legacy_reuse_without_publication_record_fails_closed_without_starving_n
                 }
             return _complete(reuse=False)
 
-    gh = FakeGh({
-        "o/r": [
-            {"number": 2, "title": "eligible", "body": "b"},
-            {"number": 1, "title": "legacy", "body": "a"},
-        ]
-    })
+    gh = FakeGh(
+        {
+            "o/r": [
+                {"number": 2, "title": "eligible", "body": "b"},
+                {"number": 1, "title": "legacy", "body": "a"},
+            ]
+        }
+    )
     r = run_once(
         config,
         gh=gh,
@@ -1885,10 +1919,12 @@ def test_gh_issue_transport_list_comments_paginated_api(monkeypatch):
 
     def fake_run(argv):
         recorded_argv.append(argv)
-        return json.dumps([
-            [{"id": 10, "body": "comment 1"}, {"id": 11, "body": "comment 2"}],
-            [{"id": 12, "body": "comment 3"}],
-        ])
+        return json.dumps(
+            [
+                [{"id": 10, "body": "comment 1"}, {"id": 11, "body": "comment 2"}],
+                [{"id": 12, "body": "comment 3"}],
+            ]
+        )
 
     monkeypatch.setattr(gh, "_run", fake_run)
     comments = gh.list_comments("James3014/Nexus-new", 438)
@@ -1917,12 +1953,14 @@ def test_publication_disabled_reused_complete_does_not_starve_next_eligible_issu
                 return _complete(reuse=True, publication_state="PREPARED")
             return _complete(reuse=False, publication_state="PREPARED")
 
-    gh = FakeGh({
-        "o/r": [
-            {"number": 2, "title": "eligible", "body": "b"},
-            {"number": 1, "title": "already-done", "body": "a"},
-        ]
-    })
+    gh = FakeGh(
+        {
+            "o/r": [
+                {"number": 2, "title": "eligible", "body": "b"},
+                {"number": 1, "title": "already-done", "body": "a"},
+            ]
+        }
+    )
     r = run_once(
         config,
         gh=gh,
@@ -2201,12 +2239,14 @@ LAUNCHCTL_PRINT_IO_ERROR = "Could not read domain: 5: Input/output error\n"
 def _make_config(tmp_path: Path) -> str:
     config_path = tmp_path / "config.json"
     config_path.write_text(
-        json.dumps({
-            "repositories": ["o/r"],
-            "repository_roots": {"o/r": str(tmp_path / "repo")},
-            "state_root": str(tmp_path / "state"),
-            "workspace_root": str(tmp_path / "workspaces"),
-        }),
+        json.dumps(
+            {
+                "repositories": ["o/r"],
+                "repository_roots": {"o/r": str(tmp_path / "repo")},
+                "state_root": str(tmp_path / "state"),
+                "workspace_root": str(tmp_path / "workspaces"),
+            }
+        ),
         encoding="utf-8",
     )
     return str(config_path)
