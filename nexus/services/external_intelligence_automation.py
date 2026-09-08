@@ -683,6 +683,19 @@ class ExternalIntelligenceAutomation:
     def _canonical_worker_binding(
         self, item: IssueWorkItem, task_card_path: Path, task_card_text: str
     ) -> dict[str, str]:
+        self.state_store.root.mkdir(parents=True, exist_ok=True)
+        materialized = tempfile.NamedTemporaryFile(
+            mode="wb", prefix=".task-card.", dir=self.state_store.root, delete=False
+        )
+        try:
+            materialized.write(task_card_text.encode("utf-8"))
+            materialized.flush()
+            os.fsync(materialized.fileno())
+            materialized.close()
+        except Exception:
+            materialized.close()
+            Path(materialized.name).unlink(missing_ok=True)
+            raise
         allowed_files = tuple(
             dict.fromkeys(path for unit in item.contract["execution_units"] for path in unit["mutation_paths"])
         )
@@ -690,7 +703,7 @@ class ExternalIntelligenceAutomation:
         identity = VerifiedTaskCardIdentity(
             task_id=str(item.contract["task_id"]),
             task_card_path=task_card_path.as_posix(),
-            canonical_task_card_path=str((self.repository_root / task_card_path).resolve()),
+            canonical_task_card_path=str(Path(materialized.name).resolve()),
             task_card_hash=str(item.contract["task_card_hash"]).lower(),
         )
         try:
@@ -703,6 +716,8 @@ class ExternalIntelligenceAutomation:
             )
         except (TypeError, ValueError, RuntimeError) as exc:
             raise AutomationError(f"CANONICAL_WORKFORCE_BINDING_INVALID:{exc}") from exc
+        finally:
+            Path(materialized.name).unlink(missing_ok=True)
         binding = result.get("binding") if isinstance(result, Mapping) else None
         required = {"demand_id", "worker_id", "provider", "model", "policy_hash", "binding_hash", "aggregate_binding_hash"}
         if not isinstance(binding, Mapping) or set(binding) != required:

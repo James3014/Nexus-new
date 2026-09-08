@@ -419,6 +419,7 @@ def test_recoverable_dispatching_state_resumes_pipeline(tmp_path, state):
     automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
     item = IssueWorkItem("o/r", 7, "title", body, contract)
     binding = automation._canonical_worker_binding(item, Path("tasks/x.md"), card.read_text(encoding="utf-8"))
+    automation._worker_binding = binding
     effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
     automation.state_store.save(item, state, intelligence_effect_id=effect_id, worker_binding=binding)
 
@@ -439,6 +440,7 @@ def test_fanout_dispatching_fence_rejects_changed_issue_context_before_any_stage
     automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
     item = IssueWorkItem("o/r", 805, "title", body, contract)
     binding = automation._canonical_worker_binding(item, Path("tasks/x.md"), card.read_text(encoding="utf-8"))
+    automation._worker_binding = binding
     old_effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
     automation.state_store.save(item, "FANOUT_DISPATCHING", intelligence_effect_id=old_effect_id, worker_binding=binding)
 
@@ -475,6 +477,7 @@ def test_recoverable_reconciliation_required_resumes_from_fanout(tmp_path):
     automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
     item = IssueWorkItem("o/r", 8, "title", body, contract)
     binding = automation._canonical_worker_binding(item, Path("tasks/x.md"), card.read_text(encoding="utf-8"))
+    automation._worker_binding = binding
     effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
     automation.state_store.save(
         item,
@@ -499,6 +502,7 @@ def test_dispatching_fence_rejects_changed_issue_context_before_new_sidecar_invo
     automation = _automation(tmp_path, repo, store, sidecar=sidecar)
     item = IssueWorkItem("o/r", 801, "title", body, contract)
     binding = automation._canonical_worker_binding(item, Path("tasks/x.md"), card.read_text(encoding="utf-8"))
+    automation._worker_binding = binding
     old_effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
     automation.state_store.save(item, "INTELLIGENCE_DISPATCHING", intelligence_effect_id=old_effect_id, worker_binding=binding)
 
@@ -534,6 +538,7 @@ def test_same_persisted_effect_id_without_lower_attempt_allows_one_first_invoke(
     automation = _automation(tmp_path, repo, store, sidecar=sidecar)
     item = IssueWorkItem("o/r", 803, "title", body, contract)
     binding = automation._canonical_worker_binding(item, Path("tasks/x.md"), card.read_text(encoding="utf-8"))
+    automation._worker_binding = binding
     effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
     automation.state_store.save(item, "INTELLIGENCE_DISPATCHING", intelligence_effect_id=effect_id, worker_binding=binding)
 
@@ -549,6 +554,7 @@ def test_reconciliation_required_resumes_lower_intelligence_reconcile_without_in
     automation = _automation(tmp_path, repo, store, sidecar=sidecar)
     item = IssueWorkItem("o/r", 804, "title", body, contract)
     binding = automation._canonical_worker_binding(item, Path("tasks/x.md"), card.read_text(encoding="utf-8"))
+    automation._worker_binding = binding
     effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
     automation.state_store.save(
         item,
