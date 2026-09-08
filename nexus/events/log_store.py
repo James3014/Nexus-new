@@ -5,18 +5,15 @@ import hashlib
 import json
 import os
 import re
+import stat
 import threading
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from nexus.feedback.contracts import (
-    _CODE_RE,
-    _REF_RE,
-    AUTHORITY_FLAG_KEYS,
-    DeveloperFeedbackDecision,
-    _tokens,
-)
+from nexus.events.state_owner_manifest import OwnerWriteContext, assert_owner_write
 from nexus.events.writer_generation import (
     EventWriterGeneration,
     GenerationError,
@@ -24,7 +21,34 @@ from nexus.events.writer_generation import (
     manifest_path,
     read_generation,
 )
-from nexus.events.state_owner_manifest import OwnerWriteContext, assert_owner_write
+from nexus.feedback.contracts import (
+    _CODE_RE,
+    _REF_RE,
+    AUTHORITY_FLAG_KEYS,
+    DeveloperFeedbackDecision,
+    _tokens,
+)
+
+# The loaded event writer installs a context only for the publishing thread
+# and only for the duration of one append transaction.  Keeping this in the
+# store module avoids a transport/store import cycle and makes the boundary
+# explicit for direct store users.
+_EVENT_OWNER_CONTEXT: ContextVar[OwnerWriteContext | None] = ContextVar(
+    "nexus_event_owner_context", default=None
+)
+
+
+@contextmanager
+def event_owner_context(context: OwnerWriteContext):
+    token = _EVENT_OWNER_CONTEXT.set(context)
+    try:
+        yield context
+    finally:
+        _EVENT_OWNER_CONTEXT.reset(token)
+
+
+def current_event_owner_context() -> OwnerWriteContext | None:
+    return _EVENT_OWNER_CONTEXT.get()
 
 
 class JsonlEventLogStore:
@@ -39,6 +63,7 @@ class JsonlEventLogStore:
         self._enforce_generation = False
         self._generation_manifest_path: Optional[Path] = None
         self._owner_context: Optional[OwnerWriteContext] = None
+        self._writer_factory: Any = None
 
     def configure(
         self,
@@ -47,7 +72,59 @@ class JsonlEventLogStore:
         writer_generation: Optional[EventWriterGeneration] = None,
         enforce_generation: bool = False,
         owner_context: Optional[OwnerWriteContext] = None,
+        writer_factory: Any = None,
     ) -> Tuple[Path, Path]:
+        if self._writer_factory is not None and writer_factory is not self._writer_factory:
+            raise GenerationError("EVENT_WRITER_RECONFIGURATION_DENIED")
+        if writer_factory is not None and owner_context is not None:
+            raise GenerationError("EVENT_WRITER_CONTEXT_CONFLICT")
+        if writer_factory is not None:
+            from nexus.events.transport import EventWriterFactory
+            if not isinstance(writer_factory, EventWriterFactory):
+                raise GenerationError("EVENT_WRITER_FACTORY_INVALID")
+            factory_root = Path(writer_factory._adapter.root)
+            if project_root.resolve() != factory_root:
+                raise GenerationError("EVENT_WRITER_ROOT_MISMATCH")
+            factory_generation = writer_factory._adapter.writer_generation
+            if writer_generation is None:
+                writer_generation = factory_generation
+            elif writer_generation != factory_generation:
+                raise GenerationError("EVENT_WRITER_GENERATION_MISMATCH")
+        if self._writer_factory is not None and writer_factory is None:
+            raise GenerationError("EVENT_WRITER_FACTORY_REQUIRED")
+        if writer_factory is not None:
+            from nexus.events.transport import EventWriterFactory
+            if not isinstance(writer_factory, EventWriterFactory):
+                raise GenerationError("EVENT_WRITER_FACTORY_INVALID")
+            validate_entry = writer_factory.validate_entry
+            # This must run before creating .nexus/events.  A loaded binding
+            # owns the root selection; configure cannot become a bootstrap.
+            validate_entry()
+        # Inspect existing activation state and path components before any
+        # mkdir.  A configured root is source-owned even when a caller omits
+        # the optional generation argument.
+        if writer_factory is not None:
+            installed_before = read_generation(project_root)
+            if installed_before is not None and writer_generation is None:
+                raise GenerationError("GENERATION_REQUIRED")
+            if enforce_generation and writer_generation is None:
+                raise GenerationError("GENERATION_REQUIRED")
+        cursor = Path(project_root)
+        for part in (".nexus", "events"):
+            cursor = cursor / part
+            try:
+                info = cursor.lstat()
+            except FileNotFoundError:
+                continue
+            if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+                raise GenerationError("EVENT_WRITER_PATH_UNSAFE")
+        hold = Path(project_root) / ".nexus" / "writer-quiescence-hold.json"
+        try:
+            hold_info = hold.lstat()
+        except FileNotFoundError:
+            hold_info = None
+        if hold_info is not None:
+            raise GenerationError("EVENT_WRITER_ROOT_HELD")
         if owner_context is not None:
             # Validate the opaque context before inspecting any of its fields.
             # This rejects forged/malformed values without a dereference path.
@@ -62,11 +139,15 @@ class JsonlEventLogStore:
                     raise GenerationError("OWNER_CONTEXT_ROOT_MISMATCH")
                 if writer_generation is not None and writer_generation != effective_owner_context.writer_generation:
                     raise GenerationError("OWNER_CONTEXT_TOKEN_MISMATCH")
+            if writer_factory is not None:
+                validate_entry()
             log_dir = project_root / ".nexus" / "events"
             log_dir.mkdir(parents=True, exist_ok=True)
             event_log_path = log_dir / "event_log.jsonl"
             lock_path = log_dir / "event_log.lock"
             generation_manifest_path = manifest_path(project_root)
+            if writer_factory is not None:
+                self._assert_selected_paths(root=Path(writer_factory._adapter.root), actual=(event_log_path, lock_path, generation_manifest_path))
             with event_store_lock(project_root):
                 # Re-read after lock acquisition: a same-thread reentrant
                 # callback may install an owner context between preflight and
@@ -94,6 +175,7 @@ class JsonlEventLogStore:
                     self._enforce_generation,
                     self._attempt_tails,
                     self._owner_context,
+                    self._writer_factory,
                 )
                 try:
                     self.event_log_path = event_log_path
@@ -101,7 +183,8 @@ class JsonlEventLogStore:
                     self._generation_manifest_path = generation_manifest_path
                     self._writer_generation = writer_generation
                     self._enforce_generation = bool(enforce_generation or installed is not None)
-                    self._owner_context = effective_owner_context
+                    self._owner_context = None if writer_factory is not None else effective_owner_context
+                    self._writer_factory = writer_factory
                     self._attempt_tails = self._scan_attempt_tails()
                 except Exception:
                     (
@@ -112,25 +195,84 @@ class JsonlEventLogStore:
                         self._enforce_generation,
                         self._attempt_tails,
                         self._owner_context,
+                        self._writer_factory,
                     ) = previous
                     raise
         return log_dir, self.event_log_path
 
+    def _assert_selected_paths(self, context=None, *, root=None, actual=None) -> None:
+        """Validate the actual paths, before acquiring any physical guard."""
+        if root is not None:
+            root = Path(root)
+        elif self._writer_factory is not None:
+            root = Path(self._writer_factory._adapter.root)
+        elif context is not None:
+            root = context.binding.root.resolve()
+        else:
+            return
+        expected = (root / ".nexus/events/event_log.jsonl",
+                    root / ".nexus/events/event_log.lock", manifest_path(root))
+        if actual is None:
+            actual = (self.event_log_path, self.lock_path, self._generation_manifest_path)
+        if actual != expected:
+            raise GenerationError("EVENT_WRITER_PATH_MISMATCH")
+        for path in expected:
+            cursor = root
+            for component in path.relative_to(root).parts:
+                cursor = cursor / component
+                try:
+                    info = cursor.lstat()
+                except FileNotFoundError:
+                    continue
+                if stat.S_ISLNK(info.st_mode):
+                    raise GenerationError("EVENT_WRITER_PATH_UNSAFE")
+                if cursor != path and not stat.S_ISDIR(info.st_mode):
+                    raise GenerationError("EVENT_WRITER_PATH_UNSAFE")
+                if cursor == path and not stat.S_ISREG(info.st_mode):
+                    raise GenerationError("EVENT_WRITER_PATH_UNSAFE")
+
     def append_record(self, record: Dict[str, Any], *, owner_context: Optional[OwnerWriteContext] = None) -> None:
         if not self.event_log_path:
             return
-        context = self._owner_context if owner_context is None else owner_context
+        if self._writer_factory is not None:
+            context = current_event_owner_context() if owner_context is None else owner_context
+            if context is None:
+                raise GenerationError("EVENT_WRITER_CONTEXT_REQUIRED")
+            from nexus.events.transport import EventWriterFactory
+            if not isinstance(self._writer_factory, EventWriterFactory):
+                raise GenerationError("EVENT_WRITER_FACTORY_INVALID")
+            self._writer_factory.assert_context(context)
+        else:
+            context = self._owner_context if owner_context is None else owner_context
         if context is not None:
             # Fast rejection preserves the no-side-effect boundary.  The same
             # check is repeated below while the instance lock is held.
             assert_owner_write(context, role="event_log", relative_path=".nexus/events/event_log.jsonl")
             if context.binding.root.resolve() != self.event_log_path.parents[2].resolve():
                 raise GenerationError("OWNER_CONTEXT_ROOT_MISMATCH")
+        if context is None:
+            from nexus.events.state_owner_manifest import read_manifest
+            root = self.event_log_path.parents[2]
+            installed = read_generation(root)
+            if installed != self._writer_generation:
+                raise GenerationError("GENERATION_REQUIRED")
+            hold = root / ".nexus/writer-quiescence-hold.json"
+            if hold.exists() or hold.is_symlink() or read_manifest(root) is not None:
+                raise GenerationError("EVENT_WRITER_CONTEXT_REQUIRED")
+        self._assert_selected_paths(context)
         with self._lock:
             if not self.lock_path:
                 raise RuntimeError("event store is not configured")
+            self._assert_selected_paths(context)
             with event_store_lock(self.lock_path.parents[2]):
+                self._assert_selected_paths(context)
                 active_context = self._owner_context if owner_context is None else owner_context
+                if self._writer_factory is not None:
+                    active_context = current_event_owner_context() if owner_context is None else owner_context
+                    from nexus.events.transport import EventWriterFactory
+                    if not isinstance(self._writer_factory, EventWriterFactory):
+                        raise GenerationError("EVENT_WRITER_FACTORY_INVALID")
+                    self._writer_factory.assert_context(active_context)
                 if active_context is not None:
                     assert_owner_write(active_context, role="event_log", relative_path=".nexus/events/event_log.jsonl")
                     if active_context.binding.root.resolve() != self.event_log_path.parents[2].resolve():
@@ -141,6 +283,9 @@ class JsonlEventLogStore:
                 previous = self._attempt_tails.get(key) if key else None
                 self._bind_attempt_record(record)
                 try:
+                    self._assert_selected_paths(active_context)
+                    if self._writer_factory is not None:
+                        self._writer_factory.assert_context(active_context)
                     with open(self.event_log_path, "a", encoding="utf-8") as f:
                         f.write(json.dumps(record, default=str) + "\n")
                         f.flush()

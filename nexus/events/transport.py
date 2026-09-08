@@ -1,14 +1,22 @@
 import logging
+import os
+import stat
 import threading
 import time
 import uuid
+from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from nexus.events.contracts import AttemptTransitionEvent
-from nexus.events.log_store import DeveloperFeedbackDecisionStore, JsonlEventLogStore
-from nexus.events.writer_generation import EventWriterGeneration
+from nexus.events.log_store import (
+    DeveloperFeedbackDecisionStore,
+    JsonlEventLogStore,
+    event_owner_context,
+)
 from nexus.events.signal_queue_service import SignalQueueService
+from nexus.events.writer_generation import EventWriterGeneration, GenerationError
 from nexus.feedback.contracts import DeveloperFeedbackDecision
 
 logger = logging.getLogger(__name__)
@@ -37,6 +45,224 @@ RAW_EVENT_TYPES = frozenset(
 )
 
 
+class EventWriterAdapter:
+    """Operation-scoped event-log binding over an already loaded registry."""
+
+    def __init__(self, registry, *, binding, writer_generation, root, writer_id):
+        from nexus.events.state_owner_manifest import StateOwnerBinding
+        from nexus.events.writer_generation import EventWriterGeneration
+        from nexus.orchestrator.writer_quiescence import UnknownWriter, WriterRegistry, _root
+
+        if not isinstance(registry, WriterRegistry):
+            raise TypeError("registry is required")
+        if not isinstance(binding, StateOwnerBinding):
+            raise TypeError("source-owned state owner binding is required")
+        if not isinstance(writer_generation, EventWriterGeneration):
+            raise TypeError("source-owned writer generation is required")
+        canonical = _root(root)
+        if (binding.root.resolve() != Path(canonical)
+            or writer_generation.generation != binding.generation
+            or writer_generation.writer_id != writer_id):
+            raise UnknownWriter("event writer root or generation does not match binding")
+        self.registry = registry
+        self.binding = binding
+        self.writer_generation = writer_generation
+        self.root = canonical
+        self.writer_id = writer_id
+        self._root_identity = self._physical_identity()
+        self._active_contexts = {}
+        self._identity()
+
+    def _physical_identity(self):
+        root = Path(self.root)
+        info = root.lstat()
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+            raise RuntimeError("event writer root is unsafe")
+        return info.st_dev, info.st_ino
+
+    def _identity(self):
+        from nexus.orchestrator.writer_quiescence import UnknownWriter
+
+        item = self.registry._writers.get((self.root, "event_log", self.writer_id))
+        if item is None or item.identity.generation != self.writer_generation.generation:
+            raise UnknownWriter("event writer is unknown or stale")
+        if item.loaded_identity is None:
+            raise UnknownWriter("event writer loaded identity is unavailable")
+        loaded = item.loaded_identity()
+        if loaded != item.identity:
+            raise UnknownWriter("loaded event writer identity changed")
+        return item.identity
+
+    def validate_entry(self):
+        from nexus.events.state_owner_manifest import read_manifest
+        from nexus.events.writer_generation import read_generation
+        from nexus.orchestrator.writer_quiescence import UnknownWriter, WriterAdmissionDenied
+
+        if os.getpid() != self.registry._pid:
+            raise UnknownWriter("event writer belongs to another process")
+        if self._physical_identity() != self._root_identity:
+            raise WriterAdmissionDenied("event writer root physical identity changed")
+        marker = Path(self.root) / ".nexus" / "writer-quiescence-hold.json"
+        try:
+            info = marker.lstat()
+        except FileNotFoundError:
+            info = None
+        if info is not None:
+            if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+                raise WriterAdmissionDenied("event writer hold marker is unsafe")
+            raise WriterAdmissionDenied("event writer root is held")
+        installed = read_generation(Path(self.root))
+        if installed != self.writer_generation:
+            raise UnknownWriter("event writer generation is stale")
+        manifest = read_manifest(Path(self.root))
+        if manifest is None or manifest.state != "COMMITTED":
+            raise UnknownWriter("event writer owner manifest is unavailable")
+        if (
+            manifest.owner_id != self.binding.owner_id
+            or manifest.generation != self.writer_generation.generation
+            or manifest.writer_id != self.writer_generation.writer_id
+        ):
+            raise UnknownWriter("event writer owner binding mismatch")
+        self._identity()
+
+    def assert_context(self, context):
+        from nexus.events.state_owner_manifest import assert_owner_write
+        lease = self._active_contexts.get(id(context))
+        if lease is None:
+            raise RuntimeError("event writer context is not active")
+        lease.validate()
+        self._identity()
+        if os.getpid() != context.owner_pid or threading.get_ident() != context.owner_thread_id:
+            raise RuntimeError("event writer context thread mismatch")
+        if self._physical_identity() != self._root_identity:
+            raise RuntimeError("event writer root physical identity changed")
+        assert_owner_write(context, role="event_log", relative_path=".nexus/events/event_log.jsonl")
+
+    @contextmanager
+    def operation(self, event_id: str, *, operation_id: str | None = None, transaction_id: str | None = None):
+        from nexus.events.state_owner_manifest import (
+            StateOwnerSelection,
+            commit_owner_transaction,
+            owner_transaction_guard,
+            read_manifest,
+        )
+        from nexus.events.writer_generation import event_store_lock
+        from nexus.orchestrator.writer_quiescence import WriterAdmissionDenied
+
+        self.validate_entry()
+        lease = self.registry.acquire(
+            root=self.root,
+            role="event_log",
+            writer_id=self._identity().writer_id,
+            operation_id=operation_id,
+            transaction_id=transaction_id,
+            generation=self.writer_generation.generation,
+        )
+        prepared = False
+        try:
+            with event_store_lock(Path(self.root)):
+                # The lease may expire while waiting for the single event
+                # domain guard; reject before prepare_manifest writes bytes.
+                lease.validate()
+                self.validate_entry()
+                previous = read_manifest(Path(self.root))
+                if previous is None or previous.state != "COMMITTED":
+                    raise WriterAdmissionDenied("event writer owner manifest is unavailable")
+                op_binding = replace(self.binding, transaction_id=lease.transaction_id)
+                selection = StateOwnerSelection(
+                    f"event:{event_id}", "event_log", ".nexus/events/event_log.jsonl"
+                )
+                with owner_transaction_guard(
+                    op_binding,
+                    writer_generation=self.writer_generation,
+                    selections=(selection,),
+                    previous_manifest_sha256=previous.manifest_sha256,
+                ) as context:
+                    prepared = True
+                    lease.validate()
+                    self._active_contexts[id(context)] = lease
+                    try:
+                        with event_owner_context(context):
+                            yield context
+                            self.assert_context(context)
+                            committed = commit_owner_transaction(context)
+                            if read_manifest(Path(self.root)) != committed:
+                                raise WriterAdmissionDenied("event writer owner readback mismatch")
+                            lease.validate()
+                    finally:
+                        self._active_contexts.pop(id(context), None)
+            lease.close("committed")
+        except BaseException:
+            if not lease._closed:
+                lease.close("unresolved" if prepared else "failed")
+            raise
+
+    __call__ = operation
+
+
+class EventWriterFactory:
+    def __init__(self, adapter: EventWriterAdapter):
+        if not isinstance(adapter, EventWriterAdapter):
+            raise TypeError("event writer adapter is required")
+        self._adapter = adapter
+
+    def validate_entry(self):
+        self._adapter.validate_entry()
+
+    def assert_context(self, context):
+        self._adapter.assert_context(context)
+
+    def for_operation(self, event_id: str, **kwargs):
+        return self._adapter.operation(event_id, **kwargs)
+
+    __call__ = for_operation
+
+
+_LOADED_EVENT_WRITER_FACTORIES: dict[str, EventWriterFactory] = {}
+
+
+def register_event_writer_factory(factory: EventWriterFactory) -> EventWriterFactory:
+    if not isinstance(factory, EventWriterFactory):
+        raise TypeError("event writer factory is required")
+    root = factory._adapter.root
+    existing = _LOADED_EVENT_WRITER_FACTORIES.get(root)
+    if existing is not None and existing is not factory:
+        raise RuntimeError("event writer factory already loaded for root")
+    if os.getpid() != factory._adapter.registry._pid:
+        raise RuntimeError("event writer factory belongs to another process")
+    _LOADED_EVENT_WRITER_FACTORIES[root] = factory
+    return factory
+
+
+def lookup_event_writer_factory(project_root: str | Path) -> EventWriterFactory | None:
+    try:
+        root = str(Path(project_root).expanduser().resolve())
+    except (TypeError, ValueError, OSError):
+        return None
+    return _LOADED_EVENT_WRITER_FACTORIES.get(root)
+
+
+def load_event_writer_factory(
+    registry,
+    *,
+    binding,
+    writer_generation,
+    root: str | Path,
+    writer_id: str,
+) -> EventWriterFactory:
+    return register_event_writer_factory(
+        EventWriterFactory(
+            EventWriterAdapter(
+                registry,
+                binding=binding,
+                writer_generation=writer_generation,
+                root=root,
+                writer_id=writer_id,
+            )
+        )
+    )
+
+
 class NexusEventBus:
     """Persistent pub/sub with bidirectional signal injection."""
 
@@ -49,6 +275,7 @@ class NexusEventBus:
     _observer_lock = threading.RLock()
     _global_seq = 0
     _log_store = JsonlEventLogStore()
+    _writer_factory: EventWriterFactory | None = None
     _developer_feedback_store = DeveloperFeedbackDecisionStore()
     _signal_queue_svc = SignalQueueService()
     _observer_error_count = 0
@@ -66,14 +293,17 @@ class NexusEventBus:
         *,
         writer_generation: Optional[EventWriterGeneration] = None,
         enforce_generation: bool = False,
+        writer_factory: Optional[EventWriterFactory] = None,
     ) -> None:
         """初始化持久化路徑"""
         log_dir, event_log_path = cls._log_store.configure(
             project_root,
             writer_generation=writer_generation,
             enforce_generation=enforce_generation,
+            writer_factory=writer_factory,
         )
         cls._event_log_path = event_log_path
+        cls._writer_factory = writer_factory
         cls._developer_feedback_store.configure(project_root)
         with cls._sequence_lock:
             cls._attempt_sequences = {
@@ -117,8 +347,17 @@ class NexusEventBus:
 
             if cls._event_log_path:
                 if cls._log_store.event_log_path != cls._event_log_path:
+                    if cls._writer_factory is not None:
+                        raise GenerationError("EVENT_WRITER_PATH_MISMATCH")
                     cls._log_store.event_log_path = cls._event_log_path
-                cls._log_store.append_record(record)
+                if cls._writer_factory is None:
+                    cls._log_store.append_record(record)
+                else:
+                    with cls._writer_factory.for_operation(
+                        f"publish-{local_payload['_seq']}",
+                        transaction_id=f"event-{local_payload['_seq']}-{uuid.uuid4().hex}",
+                    ):
+                        cls._log_store.append_record(record)
 
         # 廣播（在鎖外執行以避免死鎖，但順序已由文件保證）
         with cls._subs_lock:

@@ -20,7 +20,7 @@ from nexus.learning.knowledge_index import KnowledgeIndex
 from nexus.learning.skill_registry import SkillRegistry
 from nexus.learning.skill_exchange import SkillExchange
 from nexus.learning.skill_store import SkillStore
-from nexus.events.transport import NexusEventBus
+from nexus.events.transport import NexusEventBus, lookup_event_writer_factory
 from nexus.events.store import EventStore
 from nexus.events.contracts import (
     NexusEvent,
@@ -404,7 +404,10 @@ class NexusPipeline(
             return self._run_pipeline_inner(task_id, trace_id, span_id, task_desc, task_type, context, tracer, **kwargs)
 
     def _init_pipeline_state(self, task_id: str, trace_id: str, span_id: str, task_desc: str, task_type: str, context: Optional[Dict], **kwargs) -> PipelineContext:
-        NexusEventBus.configure(self.engine.project_root)
+        NexusEventBus.configure(
+            self.engine.project_root,
+            writer_factory=lookup_event_writer_factory(self.engine.project_root),
+        )
         state = NexusState(task_id=task_id)
         state.trace_id = trace_id
         state.span_id = span_id

@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from nexus.core.event_bus import NexusEventBus
+from nexus.events.transport import lookup_event_writer_factory
 from nexus.research.flow.rlm_trace import safe_trace_slug
 from nexus.research.research_stack_contract import research_stack_contract, research_stack_source_projects
 
@@ -103,8 +104,13 @@ def governance_events_packet(
         }
     )
 
+    emitted_events: list[dict[str, Any]] = []
+    emission_error: str | None = None
     try:
-        NexusEventBus.configure(repo_root)
+        NexusEventBus.configure(
+            repo_root,
+            writer_factory=lookup_event_writer_factory(repo_root),
+        )
         for event in events:
             event_type = str(event.get("event_type") or "")
             if event_type == "evidence_accepted":
@@ -125,13 +131,26 @@ def governance_events_packet(
                     action=str(event.get("action") or ""),
                     reasons=list(event.get("reasons", []) or []),
                 )
-    except Exception:
-        pass
+            emitted_events.append(event)
+    except Exception as exc:
+        # Preserve the planned packet, but never report a failed or partial
+        # source-owned append as if all governance events were durable.  The
+        # first committed event remains durable; there is no rollback claim.
+        emission_error = f"{type(exc).__name__}: {exc}"
 
     return {
         "events": events,
         "summary": {
             "event_count": len(events),
             "event_types": sorted({str(item.get("event_type") or "") for item in events if item.get("event_type")}),
+            "emitted_count": len(emitted_events),
+            "emission_status": (
+                "emitted"
+                if len(emitted_events) == len(events)
+                else "partial"
+                if emitted_events
+                else "blocked"
+            ),
+            "emission_error": emission_error,
         },
     }

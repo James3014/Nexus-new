@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import logging
 import json
 import time
-from nexus.events.transport import NexusEventBus
+from nexus.events.transport import NexusEventBus, lookup_event_writer_factory
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,10 @@ class AsyncFeedbackRouter:
     def __init__(self, project_root):
         self.project_root = project_root
         self.event_bus = NexusEventBus()
-        self.event_bus.configure(self.project_root)
+        self.event_bus.configure(
+            self.project_root,
+            writer_factory=lookup_event_writer_factory(self.project_root),
+        )
 
     def handle_external_webhook(self, webhook_data: Dict[str, Any]):
         """處理 Mock Webhook 信號並注入路由"""
