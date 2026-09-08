@@ -754,6 +754,182 @@ class TaskStateWriterFactory:
     __call__ = for_operation
 
 
+class RuntimeWriterAdapter:
+    """Source-owned, operation-scoped binding for Runtime durable writes."""
+
+    def __init__(
+        self,
+        registry: "WriterRegistry",
+        *,
+        binding: Any,
+        writer_generation: Any,
+        root: str | Path,
+        writer_id: str,
+        loaded_identity: Callable[[str], WriterIdentity] | None = None,
+    ) -> None:
+        from nexus.events.state_owner_manifest import StateOwnerBinding
+        from nexus.events.writer_generation import EventWriterGeneration
+
+        if not isinstance(registry, WriterRegistry):
+            raise TypeError("registry is required")
+        if not isinstance(binding, StateOwnerBinding):
+            raise TypeError("source-owned state owner binding is required")
+        if not isinstance(writer_generation, EventWriterGeneration):
+            raise TypeError("source-owned writer generation is required")
+        canonical_root = _root(root)
+        if binding.root.resolve() != Path(canonical_root):
+            raise UnknownWriter("runtime writer root does not match owner binding")
+        if writer_generation.generation != binding.generation:
+            raise UnknownWriter("runtime writer generation does not match owner binding")
+        self.registry = registry
+        self.binding = binding
+        self.writer_generation = writer_generation
+        self.root = canonical_root
+        self.writer_id = _text(writer_id, "writer_id")
+        self._loaded_identity = loaded_identity
+        self._role_writer_ids: dict[str, str] = {}
+        for role in ("runtime_receipt", "effect_journal"):
+            role_writer_id = self.writer_id
+            self._role_writer_ids[role] = role_writer_id
+            key = (self.root, role, role_writer_id)
+            registered = registry._writers.get(key)
+            if registered is None:
+                raise UnknownWriter("runtime writer role is not loaded")
+            if registered.identity.generation != writer_generation.generation:
+                raise UnknownWriter("runtime writer generation is stale")
+
+    def _identity(self, role: str) -> WriterIdentity:
+        writer_id = self._role_writer_ids.get(role)
+        if writer_id is None:
+            raise WriterAdmissionDenied("runtime writer role is not registered")
+        item = self.registry._writers.get((self.root, role, writer_id))
+        if item is None:
+            raise UnknownWriter("runtime writer is unknown")
+        loaded = item.loaded_identity() if item.loaded_identity is not None else item.identity
+        if not isinstance(loaded, WriterIdentity) or loaded != item.identity:
+            raise UnknownWriter("loaded runtime writer identity changed")
+        return item.identity
+
+    @contextlib.contextmanager
+    def operation(
+        self,
+        task_id: str,
+        *,
+        role: str = "runtime_receipt",
+        path: str | Path | None = None,
+        operation_id: str | None = None,
+        transaction_id: str | None = None,
+    ) -> Any:
+        from nexus.events.state_owner_manifest import (
+            StateOwnerSelection,
+            commit_owner_transaction,
+            owner_transaction_guard,
+            read_manifest,
+        )
+        from nexus.events.writer_generation import event_store_lock
+
+        task = _text(task_id, "task_id")
+        if role not in {"runtime_receipt", "effect_journal"}:
+            raise WriterAdmissionDenied("unsupported runtime writer role")
+        destination = Path(path) if path is not None else (
+            Path(self.root) / ".nexus" / "events" / "effect_journal.v1.json"
+            if role == "effect_journal" else Path(self.root) / ".nexus" / "reports" / f"{task}.json"
+        )
+        destination = destination.resolve()
+        try:
+            relative = destination.relative_to(Path(self.root)).as_posix()
+        except ValueError as exc:
+            raise WriterAdmissionDenied("runtime path escapes registered root") from exc
+        if not relative or relative.startswith(".nexus/writer-quiescence"):
+            raise WriterAdmissionDenied("invalid runtime writer path")
+        identity = self._identity(role)
+        lease = self.registry.acquire(
+            root=self.root, role=role, writer_id=identity.writer_id,
+            operation_id=operation_id, transaction_id=transaction_id,
+            generation=self.writer_generation.generation,
+        )
+        prepared = False
+        try:
+            selection = StateOwnerSelection(f"runtime:{role}:{task}", role, relative)
+            operation_binding = replace(self.binding, transaction_id=lease.transaction_id)
+            with event_store_lock(Path(self.root)):
+                lease.validate()
+                previous = read_manifest(Path(self.root))
+                if previous is None or previous.state != "COMMITTED":
+                    raise WriterAdmissionDenied("runtime owner manifest is not committed")
+                prepared = True
+                with owner_transaction_guard(
+                    operation_binding,
+                    writer_generation=self.writer_generation,
+                    selections=(selection,),
+                    previous_manifest_sha256=previous.manifest_sha256,
+                ) as context:
+                    lease.validate()
+                    yield context
+                    lease.validate()
+                    outcome = commit_owner_transaction(context)
+                    committed = read_manifest(Path(self.root))
+                    if committed != outcome or committed.transaction_id != lease.transaction_id:
+                        raise WriterAdmissionDenied("runtime owner transaction readback mismatch")
+            lease.close("committed")
+        except BaseException:
+            if not lease._closed:
+                lease.close("unresolved" if prepared else "failed")
+            raise
+
+
+class RuntimeWriterFactory:
+    """Short-lived factory carried internally through the Runtime call chain."""
+
+    def __init__(self, adapter: RuntimeWriterAdapter):
+        if not isinstance(adapter, RuntimeWriterAdapter):
+            raise TypeError("runtime writer adapter is required")
+        self._adapter = adapter
+
+    def for_operation(self, task_id: str, **kwargs: Any):
+        return self._adapter.operation(task_id, **kwargs)
+
+    __call__ = for_operation
+
+
+_LOADED_RUNTIME_WRITER_FACTORIES: dict[str, RuntimeWriterFactory] = {}
+
+
+def register_runtime_writer_factory(factory: RuntimeWriterFactory) -> RuntimeWriterFactory:
+    """Register a factory owned by the loaded source instance."""
+    if not isinstance(factory, RuntimeWriterFactory):
+        raise TypeError("runtime writer factory is required")
+    _LOADED_RUNTIME_WRITER_FACTORIES[factory._adapter.root] = factory
+    return factory
+
+
+def lookup_runtime_writer_factory(project_root: str | Path) -> RuntimeWriterFactory | None:
+    """Return only an exact loaded source binding; never constructs a fallback."""
+    try:
+        root = _root(project_root)
+    except (TypeError, ValueError):
+        return None
+    return _LOADED_RUNTIME_WRITER_FACTORIES.get(root)
+
+
+def load_runtime_writer_factory(
+    registry: "WriterRegistry",
+    *,
+    binding: Any,
+    writer_generation: Any,
+    root: str | Path,
+    writer_id: str,
+) -> RuntimeWriterFactory:
+    """Construct a Runtime port from independently loaded role registrations."""
+    return register_runtime_writer_factory(RuntimeWriterFactory(RuntimeWriterAdapter(
+        registry,
+        binding=binding,
+        writer_generation=writer_generation,
+        root=root,
+        writer_id=writer_id,
+    )))
+
+
 @dataclass(slots=True)
 class WriterHold:
     registry: "WriterRegistry"

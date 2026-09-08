@@ -7,6 +7,7 @@ one planner invocation, stage ordering, and one fail-closed receipt.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -123,6 +124,34 @@ def _write_receipt_atomic(path: Path, payload: Mapping[str, Any]) -> None:
     finally:
         if os.path.exists(temporary_name):
             os.unlink(temporary_name)
+
+
+@contextlib.contextmanager
+def _runtime_write_context(
+    runtime_writer_factory: Any,
+    *,
+    task_id: str,
+    role: str,
+    path: Path,
+    owner_context: Any = None,
+):
+    """Enter a fresh source-owned lease only at the durable write boundary."""
+    if owner_context is not None:
+        yield owner_context
+        return
+    if runtime_writer_factory is not None:
+        with runtime_writer_factory.for_operation(task_id, role=role, path=path) as context:
+            yield context
+        return
+    # Activated roots must never silently fall back to an unbound write.
+    from nexus.events.state_owner_manifest import read_manifest
+    from nexus.events.writer_generation import read_generation
+    root = path.resolve().parent
+    while root != root.parent and not (read_manifest(root) is not None or read_generation(root) is not None):
+        root = root.parent
+    if read_manifest(root) is not None or read_generation(root) is not None:
+        raise ValueError("runtime_writer_factory_required")
+    yield None
 
 
 def _validate_runtime_effect_owner(owner_context: Any, effect_journal: Any) -> None:
@@ -2791,6 +2820,7 @@ class UnifiedRuntime:
         effect_reconcile: Callable[[Mapping[str, Any]], Any] | None = None,
         effect_fenced: bool = False,
         owner_context: Any = None,
+        runtime_writer_factory: Any = None,
     ) -> dict[str, Any]:
         return self._run_once(
             request=request,
@@ -2807,6 +2837,7 @@ class UnifiedRuntime:
             effect_reconcile=effect_reconcile,
             effect_fenced=effect_fenced,
             owner_context=owner_context,
+            runtime_writer_factory=runtime_writer_factory,
         )
 
     def run_replan(
@@ -2824,6 +2855,7 @@ class UnifiedRuntime:
         effect_reconcile: Callable[[Mapping[str, Any]], Any] | None = None,
         effect_fenced: bool = False,
         owner_context: Any = None,
+        runtime_writer_factory: Any = None,
     ) -> dict[str, Any]:
         _validate_workforce_route(request.route)
         res = validate_receipt_base(previous_receipt, mode="strict")
@@ -2950,6 +2982,7 @@ class UnifiedRuntime:
             effect_reconcile=effect_reconcile,
             effect_fenced=effect_fenced,
             owner_context=owner_context,
+            runtime_writer_factory=runtime_writer_factory,
         )
 
     def _run_once(
@@ -2969,6 +3002,7 @@ class UnifiedRuntime:
         effect_reconcile: Callable[[Mapping[str, Any]], Any] | None = None,
         effect_fenced: bool = False,
         owner_context: Any = None,
+        runtime_writer_factory: Any = None,
     ) -> dict[str, Any]:
         request.validate()
         _validate_runtime_owner_context(owner_context, receipt_path)
@@ -3393,9 +3427,10 @@ class UnifiedRuntime:
                 attach_r3_receipt_base(terminal_receipt)
                 if receipt_path is not None:
                     path = Path(receipt_path)
-                    _assert_runtime_receipt_owner(owner_context, path)
                     terminal_receipt["receipt_path"] = str(path)
-                    _write_receipt_atomic(path, terminal_receipt)
+                    with _runtime_write_context(runtime_writer_factory, task_id=request.task_id, role="runtime_receipt", path=path, owner_context=owner_context) as write_context:
+                        _assert_runtime_receipt_owner(write_context, path)
+                        _write_receipt_atomic(path, terminal_receipt)
                 return terminal_receipt
 
         capability_results: dict[str, dict[str, Any]] = {}
@@ -3691,9 +3726,10 @@ class UnifiedRuntime:
                 blocked_receipt["local_model_invocation_authority"] = local_model_invocation_authority
             if receipt_path is not None:
                 path = Path(receipt_path)
-                _assert_runtime_receipt_owner(owner_context, path)
                 blocked_receipt["receipt_path"] = str(path)
-                _write_receipt_atomic(path, blocked_receipt)
+                with _runtime_write_context(runtime_writer_factory, task_id=request.task_id, role="runtime_receipt", path=path, owner_context=owner_context) as write_context:
+                    _assert_runtime_receipt_owner(write_context, path)
+                    _write_receipt_atomic(path, blocked_receipt)
             return attach_failure_diagnostics(blocked_receipt)
 
         # Full read-only consumer view — same root bundle_hash for Local and Online.
@@ -4637,9 +4673,10 @@ class UnifiedRuntime:
         attach_r3_receipt_base(receipt)
         if receipt_path is not None:
             path = Path(receipt_path)
-            _assert_runtime_receipt_owner(owner_context, path)
             receipt["receipt_path"] = str(path)
-            _write_receipt_atomic(path, receipt)
+            with _runtime_write_context(runtime_writer_factory, task_id=request.task_id, role="runtime_receipt", path=path, owner_context=owner_context) as write_context:
+                _assert_runtime_receipt_owner(write_context, path)
+                _write_receipt_atomic(path, receipt)
         return receipt
 
     def finalize_receipt(
@@ -4825,9 +4862,10 @@ class UnifiedRuntime:
         target = receipt_path or finalized.get("receipt_path")
         if target is not None:
             path = Path(target)
-            _assert_runtime_receipt_owner(owner_context, path)
             finalized["receipt_path"] = str(path)
-            _write_receipt_atomic(path, finalized)
+            with _runtime_write_context(runtime_writer_factory, task_id=task_id, role="runtime_receipt", path=path, owner_context=owner_context) as write_context:
+                _assert_runtime_receipt_owner(write_context, path)
+                _write_receipt_atomic(path, finalized)
         return finalized
 
     def _run_local(

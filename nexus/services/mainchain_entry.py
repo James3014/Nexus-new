@@ -150,6 +150,7 @@ def run_mainchain(
     learning: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
     receipt_path: Any = None,
     with_nexus_armor: bool = True,
+    runtime_writer_factory: Any = None,
 ) -> dict[str, Any]:
     """Run UnifiedRuntime with mainchain route stamps + with_nexus Online armor."""
     if planner is not None:
@@ -211,6 +212,7 @@ def run_mainchain(
         verifier=verifier,
         learning=learning,
         receipt_path=receipt_path,
+        runtime_writer_factory=runtime_writer_factory,
     )
 
 
@@ -226,6 +228,7 @@ def run_mainchain_replan(
     learning: Callable[[Mapping[str, Any]], Mapping[str, Any]] | None = None,
     receipt_path: Any = None,
     with_nexus_armor: bool = True,
+    runtime_writer_factory: Any = None,
 ) -> dict[str, Any]:
     """Run UnifiedRuntime.run_replan with mainchain route stamps + with_nexus Online armor."""
     if planner is not None:
@@ -346,6 +349,7 @@ def run_mainchain_replan(
         verifier=verifier,
         learning=learning,
         receipt_path=receipt_path,
+        runtime_writer_factory=runtime_writer_factory,
     )
 
 

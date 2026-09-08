@@ -840,6 +840,14 @@ def execute_canonical_product_task(
         / "run"
         / f"{_safe_receipt_name(task_id)}.canonical_runtime.json"
     )
+    # Runtime writer selection is source-owned.  The canonical product API
+    # remains unchanged; it may only consume the already-loaded binding for
+    # this exact project root.  Legacy/unactivated roots intentionally return
+    # no factory and retain their existing behavior, while activated roots
+    # fail closed inside the adapter when the binding is absent or stale.
+    from nexus.orchestrator.writer_quiescence import lookup_runtime_writer_factory
+
+    runtime_writer_factory = lookup_runtime_writer_factory(root)
     request = UnifiedRuntimeRequest(
         task_id=task_id,
         workspace_revision=revision,
@@ -877,12 +885,16 @@ def execute_canonical_product_task(
     )
 
     gateway = BattlesuitGateway(project_root=root)
+    # Keep construction compatible with test/fixture gateway doubles while
+    # carrying the source-owned factory on the real Gateway instance.
+    gateway.runtime_writer_factory = runtime_writer_factory
     receipt = gateway.ask_unified(
         request,
         local_service=local_service,
         verifier=verifier,
         learning=_execution_learning_observer,
         receipt_path=receipt_path,
+        runtime_writer_factory=runtime_writer_factory,
     )
     receipt, readback_blockers = _readback_runtime_receipt(receipt_path, receipt)
     root_receipt = receipt.get("root_receipt")

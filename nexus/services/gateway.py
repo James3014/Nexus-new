@@ -117,6 +117,9 @@ class BattlesuitGateway:
     def __init__(self, bin_path=None, lock_file=None, project_root=None, **kwargs):
         self.lock_file = lock_file or os.getenv("NEXUS_LOCK_FILE", "/tmp/nexus_battlesuit.lock")
         self.project_root = Path(project_root or ".")
+        # Source-owned loaded registry port.  This is a carrier only; lookup
+        # and admission remain owned by writer_quiescence.
+        self.runtime_writer_factory = kwargs.get("runtime_writer_factory")
         
         # 🐝 Governed Micro-Swarm (受控微蜂群)
         self.swarm_trigger = MicroSwarmTrigger()
@@ -405,6 +408,7 @@ class BattlesuitGateway:
         learning: Any = None,
         receipt_path: Any = None,
         online_invoker: Any = None,
+        runtime_writer_factory: Any = None,
     ) -> dict[str, Any]:
         """Run a task through the canonical task-scoped runtime seam.
 
@@ -773,6 +777,8 @@ class BattlesuitGateway:
         try:
             from nexus.services.mainchain_entry import run_mainchain
 
+            if runtime_writer_factory is None:
+                runtime_writer_factory = self.runtime_writer_factory
             return run_mainchain(
                 request,
                 online_invoker=final_online,
@@ -781,6 +787,7 @@ class BattlesuitGateway:
                 verifier=verifier,
                 learning=learning,
                 receipt_path=receipt_path,
+                runtime_writer_factory=runtime_writer_factory,
                 with_nexus_armor=bool(armor_on),
             )
         finally:
