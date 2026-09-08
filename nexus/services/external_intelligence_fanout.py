@@ -111,7 +111,10 @@ def _safe_slug(value: Any, field: str) -> str:
 
 
 def _safe_relative_path(value: Any) -> str:
-    text = str(value or "").strip()
+    raw = str(value or "")
+    if any(ord(character) < 0x20 or ord(character) == 0x7F for character in raw):
+        raise FanoutError("INVALID_MUTATION_PATH")
+    text = raw.strip()
     try:
         path = PurePosixPath(text)
     except (TypeError, ValueError) as exc:
@@ -1118,10 +1121,7 @@ def _bootstrap_evidence_refs(unit: ExecutionUnit, envelope_text: str) -> tuple[s
     if not isinstance(task_card_ref, str) or not task_card_ref.strip():
         raise FanoutError("TASK_CARD_REF_REQUIRED")
     task_card_path = _workspace_virtual_path(task_card_ref, required_prefix="tasks")
-    target_paths = [
-        _workspace_virtual_path(mutation_path)
-        for mutation_path in unit.mutation_paths
-    ]
+    target_paths = [_workspace_virtual_path(mutation_path) for mutation_path in unit.mutation_paths]
     return task_card_path, target_paths
 
 
@@ -1161,7 +1161,7 @@ def build_worker_bootstrap(unit: ExecutionUnit, workspace: WorkspaceLease) -> st
         f"unit_id={unit.unit_id}",
         f"expected_base_sha={unit.expected_base_sha}",
         f"workspace_id={workspace.workspace_id}",
-        f"envelope_artifact_ref={unit.envelope_ref}",
+        f"envelope_artifact_ref={_canonical_json(unit.envelope_ref)}",
         f"envelope_sha256={unit.envelope_sha256}",
         "The full external_execution_envelope.v1 is embedded in Controller evidence above; use it as the authoritative task brief.",
         "envelope_artifact_ref is provenance/readback metadata only. Do not open envelope_artifact_ref through workspace tools.",
