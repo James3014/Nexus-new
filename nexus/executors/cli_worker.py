@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from enum import Enum
 import hashlib
 import os
-from pathlib import Path
-import signal
 import shutil
+import signal
 import subprocess
 import time
+from dataclasses import dataclass, field
+from enum import Enum
+from pathlib import Path
 from typing import Callable, Mapping, Optional, Tuple
+
+from nexus.services.agy_account_pool import GITHUB_CREDENTIAL_KEYS
 
 
 class CliWorkerStatus(str, Enum):
@@ -20,12 +22,39 @@ class CliWorkerStatus(str, Enum):
     START_FAILED = "START_FAILED"
 
 
-_FORBIDDEN_SUBCOMMANDS = {
+_FORBIDDEN_SUBCOMMANDS = (
     ("git", "commit"),
     ("git", "merge"),
     ("git", "push"),
     ("git", "rebase"),
-}
+    ("gh", "issue", "create"),
+    ("gh", "issue", "comment"),
+    ("gh", "issue", "close"),
+    ("gh", "issue", "edit"),
+    ("gh", "issue", "delete"),
+    ("gh", "issue", "lock"),
+    ("gh", "issue", "pin"),
+    ("gh", "issue", "reopen"),
+    ("gh", "issue", "unlock"),
+    ("gh", "issue", "unpin"),
+    ("gh", "issue", "transfer"),
+    ("gh", "pr", "create"),
+    ("gh", "pr", "comment"),
+    ("gh", "pr", "close"),
+    ("gh", "pr", "edit"),
+    ("gh", "pr", "lock"),
+    ("gh", "pr", "reopen"),
+    ("gh", "pr", "unlock"),
+    ("gh", "pr", "review"),
+    ("gh", "pr", "merge"),
+    ("gh", "pr", "ready"),
+    ("gh", "pr", "revert"),
+    ("gh", "pr", "update-branch"),
+    ("gh", "repo", "fork"),
+    ("gh", "api"),
+)
+
+_GLOBAL_FLAGS_WITH_VALUES = frozenset({"--config", "--hostname", "--repo", "-r", "-R"})
 
 _INHERITED_ENV_ALLOWLIST = frozenset({
     "HOME",
@@ -42,13 +71,15 @@ def bounded_environment_receipt(
     environment: Optional[Mapping[str, str]],
 ) -> Tuple[Tuple[str, str], ...]:
     """Bind task-scoped environment values without persisting secrets."""
-    return tuple(sorted(
-        (
-            str(key),
-            hashlib.sha256(str(value).encode("utf-8")).hexdigest(),
+    return tuple(
+        sorted(
+            (
+                str(key),
+                hashlib.sha256(str(value).encode("utf-8")).hexdigest(),
+            )
+            for key, value in (environment or {}).items()
         )
-        for key, value in (environment or {}).items()
-    ))
+    )
 
 
 def _resolve_executable(executable: str) -> str:
@@ -71,11 +102,47 @@ def _validate_worker_argv(argv: Tuple[str, ...]) -> None:
     if not argv:
         raise ValueError("argv must be non-empty")
     normalized = tuple(str(item).strip().lower() for item in argv)
-    for command, subcommand in _FORBIDDEN_SUBCOMMANDS:
-        if command in normalized:
-            index = normalized.index(command)
-            if normalized[index + 1 : index + 2] == (subcommand,):
-                raise ValueError(f"worker command cannot invoke git {subcommand}")
+    # Ignore global options and their values (e.g. `gh --repo org/repo issue
+    # comment`) before matching a forbidden verb sequence.  Options after the
+    # verb are naturally irrelevant because the verb sequence has already
+    # matched.
+    filtered_items = []
+    index = 0
+    while index < len(normalized):
+        item = normalized[index]
+        if item.startswith("-"):
+            if "=" not in item and item in _GLOBAL_FLAGS_WITH_VALUES:
+                index += 2
+            else:
+                index += 1
+            continue
+        filtered_items.append(item)
+        index += 1
+    filtered = tuple(filtered_items)
+    for block in _FORBIDDEN_SUBCOMMANDS:
+        block_tuple = tuple(block)
+        for index in range(len(filtered) - len(block_tuple) + 1):
+            if filtered[index : index + len(block_tuple)] == block_tuple:
+                raise ValueError(f"worker command cannot invoke {' '.join(block)}")
+
+
+# GitHub credentials (GH_TOKEN / GITHUB_TOKEN / GITHUB_PAT / ...) must never
+# enter a worker process namespace: a delegated worker could otherwise
+# interpret an inherited broad Owner GitHub credential as external-publication
+# authority.  The canonical key set is owned by
+# nexus.services.agy_account_pool.GITHUB_CREDENTIAL_KEYS.
+_GITHUB_CREDENTIAL_ENV_KEYS = frozenset(key.upper() for key in GITHUB_CREDENTIAL_KEYS)
+
+
+def _reject_github_credentials(environment: Optional[Mapping[str, str]]) -> None:
+    """Fail closed when a worker environment carries a GitHub credential key."""
+    if environment is None:
+        return
+    present = sorted(key for key in environment if str(key).upper() in _GITHUB_CREDENTIAL_ENV_KEYS)
+    if present:
+        raise ValueError(
+            "worker environment cannot carry GitHub credentials: " + ", ".join(present)
+        )
 
 
 def _hash_file(path: str) -> str:
@@ -100,6 +167,7 @@ class CliWorkerRequest:
         object.__setattr__(self, "cwd", str(target_cwd))
         if self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
+        _reject_github_credentials(self.env)
 
     @property
     def command(self) -> Tuple[str, ...]:
@@ -157,9 +225,12 @@ def run_cli_worker(
     # or target-root overrides.  Callers can still pass task-scoped values
     # explicitly through ``request.env``.
     environment = {
-        key: value for key, value in os.environ.items()
-        if key in _INHERITED_ENV_ALLOWLIST
+        key: value for key, value in os.environ.items() if key in _INHERITED_ENV_ALLOWLIST
     }
+    # Defensive second check: the request constructor already rejects GitHub
+    # credential keys, but the send path must also fail closed so a future
+    # env-supplying caller can never reintroduce a broad Owner credential.
+    _reject_github_credentials(request.env)
     if request.env is not None:
         environment.update({str(key): str(value) for key, value in request.env.items()})
     environment["PYTHONDONTWRITEBYTECODE"] = "1"
