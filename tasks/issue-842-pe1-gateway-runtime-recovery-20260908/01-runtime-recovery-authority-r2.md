@@ -6,7 +6,8 @@ attempt_id: ISSUE-842-PE1-GATEWAY-RUNTIME-RECOVERY-R2
 campaign_id: issue-842-pe1-gateway-runtime-recovery-20260908
 issue: 842
 repository: James3014/Nexus-new
-status: ACTIVE
+status: SUPERSEDED_BY_PREFLIGHT_BLOCK
+superseded_by: 02-runtime-recovery-manager-r3.md
 supersedes: 00-runtime-recovery-authority.md
 supersession_reason: MATERIAL_CURRENT_MAIN_DRIFT_BEFORE_ACCEPTANCE
 execution_lane: GOVERNED
@@ -21,10 +22,10 @@ allow_deletions: false
 claim_ceiling: CHATGPT_FACING_GATEWAY_PE1_RUNTIME_RECOVERY_ONLY
 ```
 
-## Preserved Owner authorization
+## Preserved Owner authorization at r2 entry
 
-The one-shot Owner response `繼續解除` remains unused: no receipt was merged or
-materialized and no recovery effect began. Its UTF-8 SHA-256 is
+At r2 entry, the one-shot Owner response `繼續解除` had not yet produced a
+merged/materialized receipt or recovery effect. Its UTF-8 SHA-256 is
 `bcb5fd10da6653b177ee744faa495f4be9a1f66bbdaed1680b7cac138659a13f`;
 source thread is `01a07ec9-ef56-73e0-943f-eb95269fcf82`.
 
@@ -32,6 +33,10 @@ This r2 Card preserves Card 00's exact Gateway-only authority and changes only
 the source target and receipt/request/fence identities after independent review
 returned `ACCEPTANCE_BLOCKED` for main drift. It grants no Open SWE, DevSpace,
 release, production, retry-after-effect, or follow-main authority.
+
+The later supersession record is controlling: r2 subsequently consumed only
+receipt issuance/materialization. Its manager call failed before any ledger or
+Gateway effect, so the one-shot replacement effect remained unused.
 
 ## Fresh physical binding
 
@@ -129,3 +134,13 @@ extra path/deletion, unknown effect, failed required check, unsafe mirror,
 or any DevSpace/Open SWE effect.
 
 `AUTO_CHAIN=false`.
+
+## Supersession record
+
+Receipt r2 was independently accepted, merged by PR #876, and materialized.
+The single manager call failed before any ledger append or launchd effect because
+the accepted installed manager's 65,536-byte store bound rejected the existing
+79,028-byte terminal ledger. Request/fence r2 has no ledger row and no external
+effect. Card `02-runtime-recovery-manager-r3.md` is the sole active successor;
+ledger truncation, archival substitution, and retrying manager `7af3760b...`
+are forbidden.
