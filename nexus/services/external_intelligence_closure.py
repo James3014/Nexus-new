@@ -518,6 +518,9 @@ def validate_worker_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
         raise ClosureError("WORKER_BACKEND_INVALID")
     diagnosis_status = str(receipt.get("diagnosis_status") or "")
     if worker_backend == "open_swe":
+        operation_id = receipt.get("operation_id")
+        if not isinstance(operation_id, str) or not _is_hex(operation_id, 64):
+            raise ClosureError("OPEN_SWE_OPERATION_ID_REQUIRED")
         diagnosis_sha256 = str(receipt.get("diagnosis_sha256") or "")
         evidence_paths = receipt.get("diagnosis_evidence_paths")
         repair_phase_count = receipt.get("repair_phase_count")
@@ -609,6 +612,7 @@ def validate_worker_receipt(receipt: Mapping[str, Any]) -> dict[str, Any]:
         if receipt.get("selected_worker")
         else None,
         "worker_backend": worker_backend,
+        "operation_id": str(receipt.get("operation_id") or ""),
     }
 
 

@@ -951,6 +951,43 @@ def test_validate_worker_receipt_selected_worker_support(tmp_path):
         validate_worker_receipt(r_bad_hash)
 
 
+def test_open_swe_operation_id_is_required_and_retained_after_receipt_rehash(tmp_path):
+    repo, base = make_repo(tmp_path)
+    receipt = make_receipt(repo, tmp_path, base, "open-swe", "a.py", "A = 1\n")
+    worker = {
+        "worker_id": "google/gemini-3.7-flash-medium",
+        "provider": "google",
+        "model": "google/gemini-3.7-flash-medium",
+        "role_ceiling": "bounded L3 implementation worker",
+        "admission_evidence_ref": "admission",
+        "admission_evidence_hash": "a" * 64,
+        "selection_evidence_ref": "selection",
+        "selection_evidence_hash": "b" * 64,
+    }
+    receipt.update({
+        "worker_backend": "open_swe",
+        "provider": "google",
+        "model": "google/gemini-3.7-flash-medium",
+        "provider_id": "google",
+        "model_id": "gemini-3.7-flash-medium",
+        "selected_worker": worker,
+        "diagnosis_status": "ROOT_CAUSE_SUPPORTED",
+        "diagnosis_sha256": "c" * 64,
+        "diagnosis_evidence_paths": ["a.py"],
+        "repair_admitted": True,
+        "repair_phase_count": 1,
+        "worker_identity_sha256": _sha256(_canonical_json(worker)),
+        "operation_id": "d" * 64,
+    })
+    receipt["receipt_id"] = _receipt_identity(receipt)
+    assert validate_worker_receipt(receipt)["operation_id"] == "d" * 64
+    for invalid in (None, "", "not-hex", "e" * 63, 123):
+        hostile = dict(receipt, operation_id=invalid)
+        hostile["receipt_id"] = _receipt_identity(hostile)
+        with pytest.raises(ClosureError, match="OPEN_SWE_OPERATION_ID_REQUIRED"):
+            validate_worker_receipt(hostile)
+
+
 def test_validate_repair_result_enforces_exact_parent_worker_identity(tmp_path):
     from nexus.services.external_intelligence_closure import _validate_repair_result
 
