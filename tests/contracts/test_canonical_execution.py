@@ -481,7 +481,8 @@ def test_real_capability_planner_produces_bound_canonical_projection():
     assert projection.decision_hash == decision.decision_hash
 
 
-def test_context_budget_accepts_policy_data_but_rejects_unknown_or_authority_keys():
+def test_context_budget_rejects_policy_or_memory_injection():
+    """Keep the Golden node identity while covering the evolved budget contract."""
     accepted = CanonicalTaskContext(
         task_id="task-policy-data",
         task_type="bugfix",
