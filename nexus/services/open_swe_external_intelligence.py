@@ -116,6 +116,20 @@ def _validate_runtime_identity(value: Mapping[str, Any], expected_hash: str) -> 
         raise OpenSWEExternalIntelligenceError("OPEN_SWE_RUNTIME_ARTIFACT_MISMATCH")
 
 
+def _semantic_attestation(value: Mapping[str, Any], field: str) -> str | None:
+    """Return an explicitly observed identity, never a configured default."""
+
+    observed = value.get(field)
+    if (
+        not isinstance(observed, str)
+        or not observed
+        or observed != observed.strip()
+        or "\x00" in observed
+    ):
+        return None
+    return observed
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -381,8 +395,16 @@ class OpenSWEExternalIntelligenceTransport:
                 started=started,
                 safe_argv=safe,
             )
-        provider = str(value.get("provider_id") or self.model_provider)
-        model = str(value.get("model_id") or self.model_id)
+        provider = _semantic_attestation(value, "provider_id")
+        model = _semantic_attestation(value, "model_id")
+        if provider is None or model is None:
+            return _semantic_failure(
+                "OPEN_SWE_MODEL_ATTESTATION_MISMATCH",
+                outcome_unknown=True,
+                retry_safe=False,
+                started=started,
+                safe_argv=safe,
+            )
         if provider != self.model_provider or model != self.model_id:
             return _semantic_failure(
                 "OPEN_SWE_MODEL_ATTESTATION_MISMATCH",
