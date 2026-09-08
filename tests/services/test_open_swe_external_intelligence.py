@@ -16,6 +16,7 @@ def _module():
 
 _RUNTIME_EXECUTABLE = "/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime"
 _RUNTIME_HASH = "a" * 64
+_MISSING = object()
 
 
 def test_nexus_adapter_is_thin_and_has_no_deepagents_or_langchain_imports():
@@ -170,6 +171,189 @@ def test_semantic_model_attestation_mismatch_fails_closed(tmp_path, monkeypatch)
 
     assert result.status == "OPEN_SWE_MODEL_ATTESTATION_MISMATCH"
     assert result.outcome_unknown is True
+
+
+@pytest.mark.parametrize(
+    ("operation", "field", "value"),
+    (
+        (operation, field, value)
+        for operation in ("semantic_run", "semantic_reconcile")
+        for field, value in (
+            ("provider_id", _MISSING),
+            ("provider_id", None),
+            ("provider_id", ""),
+            ("provider_id", "   "),
+            ("provider_id", {"provider": "google_genai"}),
+            ("provider_id", 42),
+            ("provider_id", False),
+            ("model_id", _MISSING),
+            ("model_id", None),
+            ("model_id", ""),
+            ("model_id", "   "),
+            ("model_id", ["gemini-test"]),
+            ("model_id", 42),
+            ("model_id", False),
+        )
+    ),
+)
+def test_semantic_missing_or_malformed_attestation_fails_closed_without_redispatch(
+    tmp_path, monkeypatch, operation, field, value
+):
+    module = _module()
+    calls = []
+
+    def runtime_call(*_args, **_kwargs):
+        payload = _args[1]
+        calls.append(payload["operation"])
+        if payload["operation"] == "identity":
+            return _identity(module, payload), "", False, ""
+        result = {
+            "schema": module.PROTOCOL_RESULT_SCHEMA,
+            "kind": "semantic",
+            "status": "INTELLIGENCE_COMPLETED",
+            "provider_id": "google_genai",
+            "model_id": "gemini-test",
+            "raw": "{}",
+        }
+        if value is _MISSING:
+            del result[field]
+        else:
+            result[field] = value
+        return result, "", True, ""
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEExternalIntelligenceTransport(
+        repository_root=tmp_path,
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable=_RUNTIME_EXECUTABLE,
+        expected_artifact_sha256=_RUNTIME_HASH,
+    )
+
+    result = (
+        transport.invoke("prompt") if operation == "semantic_run" else transport.reconcile("prompt")
+    )
+
+    assert result.status == "OPEN_SWE_MODEL_ATTESTATION_MISMATCH"
+    assert result.outcome_unknown is True
+    assert calls == ["identity", operation]
+
+
+@pytest.mark.parametrize(
+    ("operation", "field", "value"),
+    (
+        (operation, field, value)
+        for operation in ("semantic_run", "semantic_reconcile")
+        for field, value in (
+            ("provider_id", "other-provider"),
+            ("model_id", "other-model"),
+        )
+    ),
+)
+def test_semantic_single_identity_mismatch_fails_closed(
+    tmp_path, monkeypatch, operation, field, value
+):
+    module = _module()
+    calls = []
+
+    def runtime_call(*_args, **_kwargs):
+        payload = _args[1]
+        calls.append(payload["operation"])
+        if payload["operation"] == "identity":
+            return _identity(module, payload), "", False, ""
+        result = {
+            "schema": module.PROTOCOL_RESULT_SCHEMA,
+            "kind": "semantic",
+            "status": "INTELLIGENCE_COMPLETED",
+            "provider_id": "google_genai",
+            "model_id": "gemini-test",
+        }
+        result[field] = value
+        return result, "", True, ""
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEExternalIntelligenceTransport(
+        repository_root=tmp_path,
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable=_RUNTIME_EXECUTABLE,
+        expected_artifact_sha256=_RUNTIME_HASH,
+    )
+
+    result = (
+        transport.invoke("prompt") if operation == "semantic_run" else transport.reconcile("prompt")
+    )
+
+    assert result.status == "OPEN_SWE_MODEL_ATTESTATION_MISMATCH"
+    assert result.outcome_unknown is True
+    assert result.retry_safe is False
+    assert calls == ["identity", operation]
+
+
+def test_semantic_reconcile_accepts_valid_explicit_attestation(tmp_path, monkeypatch):
+    module = _module()
+
+    def runtime_call(*_args, **_kwargs):
+        payload = _args[1]
+        if payload["operation"] == "identity":
+            return _identity(module, payload), "", False, ""
+        return (
+            {
+                "schema": module.PROTOCOL_RESULT_SCHEMA,
+                "kind": "semantic",
+                "status": "INTELLIGENCE_COMPLETED",
+                "provider_id": "google_genai",
+                "model_id": "gemini-test",
+                "raw": "{}",
+            },
+            "",
+            True,
+            "",
+        )
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEExternalIntelligenceTransport(
+        repository_root=tmp_path,
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable=_RUNTIME_EXECUTABLE,
+        expected_artifact_sha256=_RUNTIME_HASH,
+    )
+
+    result = transport.reconcile("prompt")
+
+    assert result.status == "INTELLIGENCE_COMPLETED"
+    assert result.outcome_unknown is False
+
+
+def test_semantic_subprocess_json_missing_attestation_fails_closed(tmp_path):
+    module = _module()
+    script = tmp_path / "runtime.py"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, sys\n"
+        "request = json.load(sys.stdin)\n"
+        "if request['operation'] == 'identity':\n"
+        "    result = {'schema': 'nexus.open_swe_runtime.result.v1', 'kind': 'identity', 'status': 'IDENTIFIED', 'distribution_name': 'nexus-open-swe-runtime', 'distribution_version': 'test', 'runtime_protocol_version': 'nexus.open_swe_runtime.request.v1', 'authority_boundary': 'execution_runtime_only', 'process_started': False, 'outcome_unknown': False, 'retry_safe': True, 'artifact_identity': {'module_file': '/opt/runtime.py', 'module_sha256': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'deepagents_version': 'test'}}\n"
+        "else:\n"
+        "    result = {'schema': 'nexus.open_swe_runtime.result.v1', 'kind': 'semantic', 'status': 'INTELLIGENCE_COMPLETED', 'raw': '{}'}\n"
+        "print(json.dumps(result))\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    transport = module.OpenSWEExternalIntelligenceTransport(
+        repository_root=tmp_path,
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable=str(script),
+        expected_artifact_sha256=_RUNTIME_HASH,
+    )
+
+    result = transport.invoke("prompt")
+
+    assert result.status == "OPEN_SWE_MODEL_ATTESTATION_MISMATCH"
+    assert result.outcome_unknown is True
+    assert result.retry_safe is False
 
 
 def test_runtime_environment_passes_selected_provider_key_but_not_github_credentials(monkeypatch):
@@ -451,7 +635,13 @@ def test_runtime_identity_is_required_before_semantic_dispatch(tmp_path, monkeyp
         if payload["operation"] == "identity":
             return _identity(module, payload), "", False, ""
         return (
-            {"schema": module.PROTOCOL_RESULT_SCHEMA, "kind": "semantic", "status": "OK"},
+            {
+                "schema": module.PROTOCOL_RESULT_SCHEMA,
+                "kind": "semantic",
+                "status": "OK",
+                "provider_id": "google_genai",
+                "model_id": "gemini-test",
+            },
             "",
             True,
             "",
@@ -514,7 +704,13 @@ def test_runtime_identity_is_revalidated_after_runtime_change(tmp_path, monkeypa
                 "",
             )
         return (
-            {"schema": module.PROTOCOL_RESULT_SCHEMA, "kind": "semantic", "status": "OK"},
+            {
+                "schema": module.PROTOCOL_RESULT_SCHEMA,
+                "kind": "semantic",
+                "status": "OK",
+                "provider_id": "google_genai",
+                "model_id": "gemini-test",
+            },
             "",
             True,
             "",
@@ -546,7 +742,13 @@ def test_failed_reconcile_is_unknown_and_never_retry_safe(tmp_path, monkeypatch)
         if payload["operation"] == "semantic_reconcile":
             return None, "", True, "runtime_timeout"
         return (
-            {"schema": module.PROTOCOL_RESULT_SCHEMA, "kind": "semantic", "status": "OK"},
+            {
+                "schema": module.PROTOCOL_RESULT_SCHEMA,
+                "kind": "semantic",
+                "status": "OK",
+                "provider_id": "google_genai",
+                "model_id": "gemini-test",
+            },
             "",
             True,
             "",
