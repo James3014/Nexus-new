@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+import nexus.orchestrator.owner_representation as owner_publisher_module
 import nexus.orchestrator.owner_representation_store as owner_store_module
 from nexus.contracts.autonomy_goal import (
     AutonomyActionClass,
@@ -784,6 +785,77 @@ def test_operation_dir_durable_state_written_for_prepare(
     publisher.prepare(proposal, _grant())
     state_file = publisher._operation_path(proposal.operation_id)
     assert state_file.exists()
+
+
+def test_prepare_fsyncs_containing_operation_directory_after_replace(
+    publisher: OwnerRepresentationPublisher, remote: FakeRemote, monkeypatch
+):
+    """Atomic operation state must persist its rename across a crash."""
+    fsync_is_directory: list[bool] = []
+    real_fsync = os.fsync
+
+    def recording_fsync(fd: int) -> None:
+        fsync_is_directory.append(stat.S_ISDIR(os.fstat(fd).st_mode))
+        real_fsync(fd)
+
+    monkeypatch.setattr(owner_publisher_module.os, "fsync", recording_fsync)
+    publisher.prepare(_proposal(), _grant())
+    assert any(fsync_is_directory)
+
+
+def test_publish_rejects_prepared_proposal_identity_mismatch(
+    publisher: OwnerRepresentationPublisher,
+    remote: FakeRemote,
+    grant_store: OwnerRepresentationGrantStore,
+):
+    grant = _issue_grant(grant_store)
+    prepared = publisher.prepare(_proposal(), grant)
+    forged = PreparedPublication(
+        operation_id=prepared.operation_id,
+        proposal=_proposal(operation_id="op-forged"),
+        grant=prepared.grant,
+        kind=prepared.kind,
+        state=prepared.state,
+    )
+    with pytest.raises(OwnerRepresentationBlocked, match="OPERATION_CONFLICT"):
+        publisher.publish(forged)
+    assert remote.writes == []
+
+
+def test_publish_rejects_prepared_store_identity_mismatch(
+    publisher: OwnerRepresentationPublisher,
+    remote: FakeRemote,
+    grant_store: OwnerRepresentationGrantStore,
+    tmp_path: Path,
+):
+    grant = _issue_grant(grant_store)
+    prepared = publisher.prepare(_proposal(), grant)
+    other_store = OwnerRepresentationGrantStore(tmp_path / "other-authority")
+    other_publisher = OwnerRepresentationPublisher(
+        operation_root=publisher.operation_root,
+        write_transport=remote.write,
+        readback_transport=remote.readback,
+        grant_store=other_store,
+    )
+    with pytest.raises(OwnerRepresentationBlocked, match="OPERATION_CONFLICT"):
+        other_publisher.publish(prepared)
+    assert remote.writes == []
+
+
+def test_unknown_transport_status_parks_without_redispatch(
+    publisher: OwnerRepresentationPublisher,
+    remote: FakeRemote,
+    grant_store: OwnerRepresentationGrantStore,
+):
+    publisher.write_transport = lambda proposal: WriteOutcome(status="UNRECOGNIZED")
+    prepared = publisher.prepare(_proposal(), _issue_grant(grant_store))
+    with pytest.raises(OwnerRepresentationBlocked, match="RECONCILIATION_REQUIRED"):
+        publisher.publish(prepared)
+    assert remote.writes == []
+    operation = json.loads(
+        publisher._operation_path(prepared.operation_id).read_text(encoding="utf-8")
+    )
+    assert operation["state"] == "OUTCOME_UNKNOWN"
 
 
 # ---------------------------------------------------------------------------

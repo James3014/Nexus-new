@@ -92,6 +92,14 @@ def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(name, path)
+        # Persist the directory entry as well as the file contents.  Without
+        # this second barrier, a crash can lose the rename while leaving the
+        # caller with an apparently successful durable write.
+        parent_fd = os.open(str(path.parent), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
     finally:
         try:
             os.unlink(name)
@@ -294,6 +302,22 @@ class OwnerRepresentationPublisher:
         ):
             raise OwnerRepresentationBlocked(OwnerRepresentationReason.OPERATION_CONFLICT.value)
 
+    def _assert_prepared_binding(
+        self,
+        operation: Mapping[str, Any],
+        prepared: PreparedPublication,
+    ) -> None:
+        """Ensure the prepared value still names the recorded operation."""
+        expected_grant_hash = prepared.grant.grant_hash if prepared.grant is not None else None
+        if (
+            operation.get("operation_id") != prepared.operation_id
+            or operation.get("proposal_hash")
+            != canonical_autonomy_hash(prepared.proposal.model_dump(mode="json"))
+            or operation.get("grant_hash") != expected_grant_hash
+            or operation.get("grant_store_root") != str(self.grant_store.root.resolve())
+        ):
+            raise OwnerRepresentationBlocked(OwnerRepresentationReason.OPERATION_CONFLICT.value)
+
     def _authorize_grant(
         self,
         grant: OwnerRepresentationGrant,
@@ -368,6 +392,7 @@ class OwnerRepresentationPublisher:
             "operation_id": proposal.operation_id,
             "proposal_hash": canonical_autonomy_hash(proposal.model_dump(mode="json")),
             "grant_hash": grant.grant_hash if grant is not None else None,
+            "grant_store_root": str(self.grant_store.root.resolve()),
             "kind": kind.value,
             "state": state,
             "decision_hash": decision.decision_hash,
@@ -418,6 +443,8 @@ class OwnerRepresentationPublisher:
             if ledger is not None:
                 raise OwnerRepresentationBlocked(OwnerRepresentationReason.GRANT_REUSED.value)
 
+            self._assert_prepared_binding(operation, prepared)
+
             # Fresh store-backed authorization immediately before any effect.
             self._authorize_grant(prepared.grant, prepared.proposal, now)
 
@@ -452,7 +479,7 @@ class OwnerRepresentationPublisher:
                 OwnerRepresentationReason.RECONCILIATION_REQUIRED.value
             ) from exc
 
-        if outcome.status in {"OUTCOME_UNKNOWN", "FAILED"}:
+        if outcome.status != "ACK":
             self._mark_outcome_unknown(
                 prepared.operation_id,
                 now,
@@ -482,6 +509,7 @@ class OwnerRepresentationPublisher:
         operation = _load_json(self._operation_path(prepared.operation_id))
         if operation is None:
             return None
+        self._assert_prepared_binding(operation, prepared)
         if operation["state"] == "COMPLETED":
             return operation
         if operation["state"] not in {"DISPATCHING", "OUTCOME_UNKNOWN"}:

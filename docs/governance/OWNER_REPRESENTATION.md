@@ -63,8 +63,13 @@ are blocked with `PUSH_DENIED_IS_NOT_PUBLICATION_AUTHORITY` /
 4. The durable publisher persists `PREPARED -> DISPATCHING -> COMPLETED`
    (mirroring the proven EIA publication pattern) before any physical effect
    and refuses replay:
+   - Each atomic operation-record replacement fsyncs both the file and its
+     containing directory; any durability error fails closed before transport
+     dispatch.
    - A single-writer flock serializes the send critical section; the operation
      is re-read inside the lock and refused if it left `PREPARED`.
+   - The re-read record must match the prepared operation id, proposal hash,
+     grant hash, and grant-store identity; mismatches fail `OPERATION_CONFLICT`.
    - `DISPATCHING` persisted before the injected write transport runs.
    - Timeout/exception/lost-ACK after dispatch → `OUTCOME_UNKNOWN` →
      **readback-only reconciliation**, never blind redispatch.
@@ -186,5 +191,7 @@ permit minted under live Owner standing-grant authority:
   BLOCK (`GRANT_REUSED`); completed/in-flight op cannot be re-prepared.
 - Dispatch, then lost ACK/timeout → `OUTCOME_UNKNOWN`; reconcile reads back
   only; a second effect is never blindly issued.
+- Unknown or non-`ACK` transport outcomes park at `OUTCOME_UNKNOWN` and are
+  never treated as successful dispatches.
 - The publisher's transports are injected; the module itself is physically
   incapable of reaching a live third-party repo.
