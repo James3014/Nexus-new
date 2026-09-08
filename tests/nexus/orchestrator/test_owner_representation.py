@@ -7,7 +7,10 @@ or user is ever contacted.
 
 from __future__ import annotations
 
+import base64
+import json
 import re
+import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -27,6 +30,7 @@ from nexus.contracts.owner_representation import (
     ExternalPublicationEffect,
     ExternalPublicationProposal,
     InternalCollaborationBound,
+    OwnerExactPublicationAuthorizationSpec,
     OwnerRepresentationBlocked,
     OwnerRepresentationGrant,
     OwnerRepresentationGrantSpec,
@@ -81,7 +85,7 @@ def owner_issues_exact_publication_authorization(*args, **kwargs):
 @pytest.fixture(autouse=True)
 def fixture_owner_trust_root(monkeypatch, tmp_path):
     trust_root = tmp_path / "trusted-keys"
-    trust_root.mkdir(mode=0o700)
+    trust_root.mkdir(mode=0o700, exist_ok=True)
     key = trust_root / "owner-james--fixture.pem"
     key.write_text("fixture", encoding="utf-8")
     key.chmod(0o600)
@@ -1314,6 +1318,58 @@ def test_worker_cannot_substitute_persisted_owner_auth_a_for_grant_b(
             standing_grant_path=standing_grant_path,
             requested_at=NOW,
         )
+
+
+def test_real_rsa_owner_signature_accepts_and_rejects_tamper(
+    grant_store, standing_grant_path, monkeypatch, tmp_path
+):
+    """Use /usr/bin/openssl RSA-3072 signing; no verifier stubs involved."""
+    import nexus.orchestrator.owner_representation_store as store
+
+    trust_root = tmp_path / "trusted-keys"
+    trust_root.mkdir(mode=0o700, exist_ok=True)
+    private_key = tmp_path / "owner-private.pem"
+    public_key = trust_root / "owner-james--rsa.pem"
+    subprocess.run([store.OPENSSL_BINARY, "genrsa", "-out", str(private_key), "3072"], check=True)
+    subprocess.run([store.OPENSSL_BINARY, "rsa", "-in", str(private_key), "-pubout", "-out", str(public_key)], check=True)
+    private_key.chmod(0o600)
+    public_key.chmod(0o600)
+    real_lstat = Path.lstat
+    def trusted_lstat(path):
+        result = real_lstat(path)
+        if Path(path) in {trust_root, public_key}:
+            values = list(result)
+            values[4] = 0
+            return type(result)(values)
+        return result
+    monkeypatch.setattr(Path, "lstat", trusted_lstat)
+    monkeypatch.setattr(store, "OWNER_AUTHORIZATION_TRUST_ROOT", trust_root)
+    monkeypatch.setattr(store, "_verify_owner_signature", store._verify_owner_signature)
+    grant = _grant(grant_id="rsa-real")
+    spec = OwnerExactPublicationAuthorizationSpec.model_validate({
+        "schema": "nexus.owner_exact_publication_authorization.v1",
+        "authorization_id": f"auth-{grant.grant_hash}", "owner_id": grant.owner_id,
+        "coordinator_id": grant.coordinator_id, "destination": grant.destination,
+        "effect": grant.effect, "target": grant.target, "content_hash": grant.content_hash,
+        "purpose": grant.purpose, "actor": grant.actor, "transport": grant.transport,
+        "operation_id": grant.operation_id, "grant_hash": grant.grant_hash,
+        "owner_key_id": "rsa", "owner_signature": "placeholder", "issued_at": NOW,
+        "expires_at": grant.expires_at,
+    })
+    payload = json.dumps(spec.model_dump(mode="json", exclude={"owner_signature"}), sort_keys=True, separators=(",", ":")).encode()
+    payload_path = tmp_path / "payload"
+    signature_path = tmp_path / "signature"
+    payload_path.write_bytes(payload)
+    subprocess.run([store.OPENSSL_BINARY, "dgst", "-sha256", "-sign", str(private_key), "-out", str(signature_path), str(payload_path)], check=True)
+    auth = owner_issues_exact_publication_authorization(
+        grant, issued_at=NOW, authority_root=grant_store.root,
+        owner_key_id="rsa", owner_signature=base64.b64encode(signature_path.read_bytes()).decode(),
+    )
+    permit = consume_exact_owner_authorization(
+        grant, owner_authorization=auth, authority_root=grant_store.root,
+        standing_grant_path=standing_grant_path, requested_at=NOW,
+    )
+    assert permit["authorization_hash"] == auth.authorization_hash
 
 
 def test_mandatory_hostile_oracle_worker_cannot_mint_arbitrary_publication_without_owner_exact_authorization(

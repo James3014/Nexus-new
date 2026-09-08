@@ -496,6 +496,8 @@ def _verify_owner_signature(auth: OwnerExactPublicationAuthorization) -> None:
             OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REJECTED.value
         )
     if (
+        auth.owner_signature_algorithm != "RSA-SHA256"
+        or
         not stat.S_ISDIR(root_stat.st_mode)
         or stat.S_ISLNK(root_stat.st_mode)
         or root_stat.st_uid != 0
@@ -519,8 +521,16 @@ def _verify_owner_signature(auth: OwnerExactPublicationAuthorization) -> None:
             payload_path.write_bytes(encoded)
             signature_path.write_bytes(signature)
             result = subprocess.run(
-                [OPENSSL_BINARY, "pkeyutl", "-verify", "-pubin", "-inkey", str(key_path),
-                 "-rawin", "-in", str(payload_path), "-sigfile", str(signature_path)],
+                [OPENSSL_BINARY, "rsa", "-pubin", "-in", str(key_path), "-text", "-noout"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=2, check=False,
+            )
+            if result.returncode != 0 or b"3072 bit" not in result.stdout:
+                raise OwnerRepresentationGrantBlocked(
+                    OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REJECTED.value
+                )
+            result = subprocess.run(
+                [OPENSSL_BINARY, "dgst", "-sha256", "-verify", str(key_path),
+                 "-signature", str(signature_path), str(payload_path)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 timeout=2,
@@ -606,6 +616,7 @@ def owner_issues_exact_publication_authorization(
         "grant_hash": grant.grant_hash,
         "owner_key_id": owner_key_id,
         "owner_signature": owner_signature,
+        "owner_signature_algorithm": "RSA-SHA256",
         "replay_mode": "ONE_SHOT",
         "issued_at": effective_now,
         "expires_at": auth_expires,

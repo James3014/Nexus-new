@@ -369,6 +369,7 @@ class OwnerExactPublicationAuthorizationSpec(_FrozenModel):
     grant_hash: StrictStr
     owner_key_id: StrictStr
     owner_signature: StrictStr
+    owner_signature_algorithm: Literal["RSA-SHA256"] = "RSA-SHA256"
     replay_mode: Literal["ONE_SHOT"] = "ONE_SHOT"
     issued_at: AwareDatetime
     expires_at: AwareDatetime
