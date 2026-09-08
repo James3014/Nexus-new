@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 import inspect
 import json
 import subprocess
 import threading
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,6 +18,7 @@ from nexus.services.external_intelligence_fanout import (
     PROVIDER_ID,
     WORKER_RECEIPT_SCHEMA,
     AdaptiveDeepSeekFanoutRuntime,
+    AdaptiveWorkerFanoutRuntime,
     CapacityLease,
     ExecutionUnit,
     FanoutError,
@@ -380,7 +383,7 @@ def test_envelope_sha_scope_and_forbidden_paths_fail_closed(tmp_path):
     envelope_sha = make_envelope(envelope, base, allowed=["a.py"], forbidden=["forbidden"])
     allocator = GitWorktreeAllocator(tmp_path / "repo", tmp_path / "workspaces")
     store = FanoutStore(tmp_path / "state")
-    runtime = AdaptiveDeepSeekFanoutRuntime(
+    runtime = AdaptiveWorkerFanoutRuntime(
         allocator=allocator, store=store, transport=EditingTransport()
     )
 
@@ -742,7 +745,7 @@ def test_runtime_parallel_units_get_fresh_sessions_workspaces_and_candidate_rece
     marker = "NO_CONTROLLER_COPY_12345"
     envelope_sha = make_envelope(envelope, base, marker=marker)
     transport = EditingTransport()
-    runtime = AdaptiveDeepSeekFanoutRuntime(
+    runtime = AdaptiveWorkerFanoutRuntime(
         allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
         store=FanoutStore(tmp_path / "state"),
         transport=transport,
@@ -919,6 +922,74 @@ def test_runtime_outcome_unknown_requires_reconciliation_and_no_second_start(tmp
     attempt = json.loads(attempt_path.read_text())
     assert attempt["state"] == "OUTCOME_UNKNOWN"
     assert attempt["retry_safe"] is False
+
+
+def test_open_swe_presend_retry_safe_failure_is_preserved(tmp_path):
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py"])
+
+    class PreparedRetrySafeTransport:
+        provider_id = PROVIDER_ID
+        model_id = MODEL_ID
+
+        @staticmethod
+        def prepare_operation_id(*args, **kwargs):
+            return "a" * 64
+
+        def run_new(self, **kwargs):
+            return OpenCodeRunResult(
+                status="OPEN_SWE_RUNTIME_NOT_FOUND", retry_safe=True, operation_id=""
+            )
+
+    runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
+        store=FanoutStore(tmp_path / "state"),
+        transport=PreparedRetrySafeTransport(),
+    )
+    result = runtime.run(
+        [unit(base, envelope, envelope_sha, "ua", ["a.py"])], CapacityLease(1, 1, 1, 1)
+    )
+    assert result["errors"]["ua"] == "OPEN_SWE_RUNTIME_NOT_FOUND"
+    attempt = json.loads(next((tmp_path / "state" / "attempts").glob("*.json")).read_text())
+    assert attempt["state"] == "RETRY_SAFE"
+
+
+@pytest.mark.parametrize("observed", ["", "b" * 64, "a" * 64])
+def test_prepared_open_swe_completion_binds_observed_operation_before_capture(tmp_path, observed):
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py"])
+
+    class PreparedTransport:
+        provider_id = PROVIDER_ID
+        model_id = MODEL_ID
+
+        @staticmethod
+        def prepare_operation_id(*args, **kwargs):
+            return "a" * 64
+
+        def run_new(self, **kwargs):
+            Path(kwargs["workspace_path"], "a.py").write_text("VALUE = 2\n")
+            result = completed_result(
+                "task-1", "ua", "ses_open_swe_00000000", kwargs["workspace_path"]
+            )
+            return replace(result, operation_id=observed, worker_backend="open_swe")
+
+    runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
+        store=FanoutStore(tmp_path / "state"),
+        transport=PreparedTransport(),
+    )
+    result = runtime.run(
+        [unit(base, envelope, envelope_sha, "ua", ["a.py"])], CapacityLease(1, 1, 1, 1)
+    )
+    if observed == "a" * 64:
+        assert result["errors"] == {}
+        assert result["receipts"]["ua"]["operation_id"] == observed
+    else:
+        assert "OPERATION_ID" in result["errors"]["ua"]
+        assert result["receipts"] == {}
 
 
 def test_second_outcome_unknown_run_reconciles_without_new_provider_start(tmp_path):
@@ -1192,6 +1263,59 @@ def test_same_unit_repair_continues_exact_session_and_creates_child_candidate(tm
     assert child["candidate_commit"] != initial["candidate_commit"]
     assert child["parent_commit"] == initial["candidate_commit"]
     assert transport.continued == [("ua", initial["session_id"])]
+
+
+@pytest.mark.parametrize("returned", ["parent", "child"])
+def test_repair_operation_id_binds_child_effect_to_own_target(tmp_path, returned):
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py"])
+    parent_id, child_id = "a" * 64, "b" * 64
+
+    class BoundEditingTransport(EditingTransport):
+        def prepare_operation_id(self, *args, **kwargs):
+            return parent_id if args[0] == "worker_run" else child_id
+
+        def run_new(self, **kwargs):
+            return replace(
+                super().run_new(**kwargs), operation_id=parent_id, worker_backend="open_swe"
+            )
+
+        def continue_session(self, **kwargs):
+            kwargs.pop("operation_id", None)
+            result = super().continue_session(**kwargs)
+            return replace(
+                result,
+                operation_id=parent_id if returned == "parent" else child_id,
+                worker_backend="open_swe",
+            )
+
+    transport = BoundEditingTransport()
+    initial_runtime = AdaptiveDeepSeekFanoutRuntime(
+        allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
+        store=FanoutStore(tmp_path / "state"),
+        transport=EditingTransport(),
+    )
+    initial = initial_runtime.run(
+        [unit(base, envelope, envelope_sha, "ua", ["a.py"])], CapacityLease(1, 1, 1, 1)
+    )["receipts"]["ua"]
+    initial = dict(initial, operation_id=parent_id)
+    runtime = AdaptiveWorkerFanoutRuntime(
+        allocator=initial_runtime.allocator, store=initial_runtime.store, transport=transport
+    )
+    repair = tmp_path / "repair.json"
+    repair.write_text('{"schema":"repair_delta.v2"}\n')
+    repair_sha = hashlib.sha256(repair.read_bytes()).hexdigest()
+    if returned == "parent":
+        with pytest.raises(FanoutError, match="OPERATION_ID_MISMATCH"):
+            runtime.continue_repair(
+                initial, repair_id="r1", repair_ref=str(repair), repair_sha256=repair_sha
+            )
+    else:
+        child = runtime.continue_repair(
+            initial, repair_id="r1", repair_ref=str(repair), repair_sha256=repair_sha
+        )
+        assert child["operation_id"] == child_id
 
 
 def test_repair_session_cannot_be_rebound_to_another_unit(tmp_path):
