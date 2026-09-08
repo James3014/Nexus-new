@@ -268,6 +268,7 @@ class ExecutionReadinessRequest(BaseModel):
     task_campaign_goal_identity: StrictStr | None = None
     desired_deployment_identity: StrictStr | None = None
     worker_constraints: tuple[StrictStr, ...] = ()
+    workforce_dispatch_binding: dict[str, Any] | None = None
     required_completion_contract: RequiredCompletionContract | None = None
 
     @field_validator("intended_source_commit")
@@ -317,6 +318,21 @@ class ExecutionReadinessRequest(BaseModel):
                 raise ValueError("COMPLETION_CONTRACT_AUTHORITY_KIND_UNSUPPORTED")
             if self.execution_contract_kind != "FORMAL_COMPLETION_CERTIFICATION":
                 raise ValueError("COMPLETION_CONTRACT_NOT_MATERIAL_FOR_CONTRACT_KIND")
+        if self.workforce_dispatch_binding is not None:
+            required = {
+                "planner_output",
+                "workforce_demands",
+                "workforce_admission",
+                "canonical_dispatch_envelope",
+                "task_id",
+                "attempt_id",
+                "task_card_path",
+                "task_card_hash",
+            }
+            if not required.issubset(self.workforce_dispatch_binding):
+                raise ValueError("WORKFORCE_DISPATCH_BINDING_INCOMPLETE")
+            if not all(self.workforce_dispatch_binding.get(key) for key in required):
+                raise ValueError("WORKFORCE_DISPATCH_BINDING_INCOMPLETE")
         return self
 
     def request_hash(self) -> str:

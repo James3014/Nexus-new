@@ -354,6 +354,16 @@ def _in_process_readiness_plane_observations(
         env_var = _READINESS_ENV_STATUS_VARS[plane]
         raw = os.environ.get(env_var)
         if raw is None:
+            if plane is ExecutionReadinessPlane.WORKFORCE and request.workforce_dispatch_binding:
+                observations[plane] = (
+                    PlaneObservation(
+                        plane=plane,
+                        status=ExecutionReadinessStatus.PASSED,
+                        evidence_identities=("workforce_plane:canonical_binding_supplied",),
+                        workforce_dispatch_binding=request.workforce_dispatch_binding,
+                    ),
+                )
+                continue
             default_identity = _READINESS_DEFAULTED_PASSED_PLANES.get(plane)
             if default_identity is not None:
                 observations[plane] = (
@@ -387,6 +397,11 @@ def _in_process_readiness_plane_observations(
                     plane=plane,
                     status=ExecutionReadinessStatus.PASSED,
                     evidence_identities=(f"{env_var}=PASSED",),
+                    workforce_dispatch_binding=(
+                        request.workforce_dispatch_binding
+                        if plane is ExecutionReadinessPlane.WORKFORCE
+                        else None
+                    ),
                 ),
             )
             continue
@@ -2517,6 +2532,7 @@ class UnifiedMCPGateway:
             "binary_sha256": None,
             "cli_version": None,
             "authenticated": False,
+            "authentication_required": self._provider_requires_authentication(provider),
             "model_reachable": False,
             "probe_requested": bool(arguments.get("probe", False)),
             "probe_latency_ms": 0,
@@ -3552,6 +3568,25 @@ class UnifiedMCPGateway:
                             "items": {"type": "string", "maxLength": 256},
                             "maxItems": 8,
                         },
+                        "workforce_dispatch_binding": {
+                            "type": "object",
+                            "required": [
+                                "planner_output", "workforce_demands", "workforce_admission",
+                                "canonical_dispatch_envelope", "task_id", "attempt_id",
+                                "task_card_path", "task_card_hash",
+                            ],
+                            "properties": {
+                                "planner_output": {"type": "object"},
+                                "workforce_demands": {"type": "object"},
+                                "workforce_admission": {"type": "object"},
+                                "canonical_dispatch_envelope": {"type": "object"},
+                                "task_id": {"type": "string"},
+                                "attempt_id": {"type": "string"},
+                                "task_card_path": {"type": "string"},
+                                "task_card_hash": {"type": "string"},
+                            },
+                            "additionalProperties": False,
+                        },
                         "required_completion_contract": {
                             "type": "object",
                             "required": [
@@ -4241,6 +4276,7 @@ class UnifiedMCPGateway:
                 task_campaign_goal_identity=optionals.get("task_campaign_goal_identity"),
                 desired_deployment_identity=optionals.get("desired_deployment_identity"),
                 worker_constraints=worker_constraint_values,
+                workforce_dispatch_binding=arguments.get("workforce_dispatch_binding"),
                 required_completion_contract=completion_contract,
             )
         except ValueError as exc:
@@ -4280,6 +4316,10 @@ class UnifiedMCPGateway:
             request,
             plane_observations,
             completion_observation=completion_observation,
+            provider_preflight_observer=lambda provider, model: self._provider_preflight(
+                {"provider": provider, "model": model}
+            ),
+            provider_authentication_required_observer=self._provider_requires_authentication,
         )
         payload = result.model_dump(mode="json")
         payload["certification_fence"] = {

@@ -4,6 +4,9 @@ canonical routing, completion binding, and the no-fake-certification fence."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
+
+import pytest
 
 from nexus.contracts.execution_readiness import (
     CanonicalNextAction,
@@ -16,9 +19,177 @@ from nexus.contracts.execution_readiness import (
 )
 from nexus.orchestrator.execution_readiness import (
     CompletionAuthorityObservation,
+    GatewayReadinessObservation,
     PlaneObservation,
+    _canonical_provider_preflight_digest,
     evaluate_execution_readiness,
+    evaluate_source_binding,
 )
+
+
+def test_provider_preflight_digest_is_deterministic_and_tamper_sensitive() -> None:
+    preflight = _valid_preflight("agy", "model-1")
+    reordered = {key: preflight[key] for key in reversed(tuple(preflight))}
+    assert _canonical_provider_preflight_digest(preflight) == _canonical_provider_preflight_digest(
+        reordered
+    )
+    tampered = dict(preflight, probe_evidence_hash="e" * 64)
+    assert _canonical_provider_preflight_digest(preflight) != _canonical_provider_preflight_digest(
+        tampered
+    )
+
+
+def test_authenticated_preflight_summary_stays_within_evidence_budget(monkeypatch) -> None:
+    import nexus.orchestrator.self_hosted_task_service as task_service
+
+    monkeypatch.setattr(
+        task_service,
+        "validate_workforce_dispatch_binding",
+        lambda *_a, **_k: {
+            "worker_id": "worker-1",
+            "provider": "agy",
+            "model": "model-1",
+            "policy_hash": "p" * 64,
+            "binding_hash": "b" * 64,
+            "aggregate_binding_hash": "a" * 64,
+        },
+    )
+    preflight = _valid_preflight("agy", "model-1")
+    preflight.update(
+        authentication_required=True,
+        authenticated=True,
+        authentication_evidence="authenticated-exact-probe",
+    )
+    result = _evaluate(
+        _request(worker_constraints=("provider=agy",)),
+        {
+            ExecutionReadinessPlane.WORKFORCE: (
+                PlaneObservation(
+                    plane=ExecutionReadinessPlane.WORKFORCE,
+                    status=ExecutionReadinessStatus.PASSED,
+                    workforce_dispatch_binding=_workforce_binding(),
+                ),
+            )
+        },
+        provider_preflight_observer=lambda _p, _m: preflight,
+    )
+    workforce = result.plane_results[-1]
+    assert workforce.status is ExecutionReadinessStatus.PASSED
+    assert len(workforce.evidence_identities) == 16
+    assert (
+        "provider_preflight_auth=required:true,authenticated:true,evidence:authenticated-exact-probe"
+        in workforce.evidence_identities
+    )
+
+
+@pytest.mark.parametrize("observer_kind", ("missing", "raises", "malformed", "mismatch"))
+def test_provider_authentication_requirement_observer_fails_closed(
+    monkeypatch, observer_kind
+) -> None:
+    import nexus.orchestrator.self_hosted_task_service as task_service
+
+    monkeypatch.setattr(
+        task_service,
+        "validate_workforce_dispatch_binding",
+        lambda *_a, **_k: {
+            "worker_id": "worker-1",
+            "provider": "agy",
+            "model": "model-1",
+            "policy_hash": "p" * 64,
+            "binding_hash": "b" * 64,
+            "aggregate_binding_hash": "a" * 64,
+        },
+    )
+    preflight = _valid_preflight("agy", "model-1")
+    preflight.update(
+        authentication_required=True,
+        authenticated=True,
+        authentication_evidence="authenticated-exact-probe",
+    )
+    if observer_kind == "missing":
+        observer = None
+    elif observer_kind == "raises":
+
+        def observer(_provider):
+            raise RuntimeError("observer unavailable")
+
+    elif observer_kind == "malformed":
+
+        def observer(_provider):
+            return "true"
+
+    else:
+
+        def observer(_provider):
+            return False
+
+    result = (
+        _evaluate(
+            _request(worker_constraints=("provider=agy",)),
+            {
+                ExecutionReadinessPlane.WORKFORCE: (
+                    PlaneObservation(
+                        plane=ExecutionReadinessPlane.WORKFORCE,
+                        status=ExecutionReadinessStatus.PASSED,
+                        workforce_dispatch_binding=_workforce_binding(),
+                    ),
+                )
+            },
+            provider_preflight_observer=lambda _p, _m: preflight,
+            provider_authentication_required_observer=observer,
+        )
+        if observer_kind != "missing"
+        else evaluate_execution_readiness(
+            _request(worker_constraints=("provider=agy",)),
+            {
+                **_all_pass(),
+                ExecutionReadinessPlane.WORKFORCE: (
+                    PlaneObservation(
+                        plane=ExecutionReadinessPlane.WORKFORCE,
+                        status=ExecutionReadinessStatus.PASSED,
+                        workforce_dispatch_binding=_workforce_binding(),
+                    ),
+                ),
+            },
+            evaluated_at=datetime(2026, 9, 6, 12, 0, 0, tzinfo=timezone.utc),
+            provider_preflight_observer=lambda _p, _m: preflight,
+        )
+    )
+    assert result.primary_blocker is not None
+    assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
+
+
+def test_non_json_preflight_evidence_fails_closed(monkeypatch) -> None:
+    import nexus.orchestrator.self_hosted_task_service as task_service
+
+    monkeypatch.setattr(
+        task_service,
+        "validate_workforce_dispatch_binding",
+        lambda *_a, **_k: {
+            "worker_id": "worker-1",
+            "provider": "agy",
+            "model": "model-1",
+            "policy_hash": "p" * 64,
+            "binding_hash": "b" * 64,
+            "aggregate_binding_hash": "a" * 64,
+        },
+    )
+    preflight = _valid_preflight("agy", "model-1")
+    preflight["authentication_evidence"] = object()
+    result = _evaluate(
+        _request(worker_constraints=("provider=agy",)),
+        {
+            ExecutionReadinessPlane.WORKFORCE: (
+                PlaneObservation(
+                    plane=ExecutionReadinessPlane.WORKFORCE,
+                    status=ExecutionReadinessStatus.PASSED,
+                    workforce_dispatch_binding=_workforce_binding(),
+                ),
+            )
+        },
+        provider_preflight_observer=lambda _p, _m: preflight,
+    )
+    assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
 
 
 def _request(**overrides: object) -> ExecutionReadinessRequest:
@@ -65,6 +236,8 @@ def _evaluate(
     overrides: dict[ExecutionReadinessPlane, tuple[PlaneObservation, ...]] | None = None,
     *,
     completion_observation: CompletionAuthorityObservation | None = None,
+    provider_preflight_observer=None,
+    provider_authentication_required_observer=None,
 ):
     observations = _all_pass()
     if overrides:
@@ -74,7 +247,250 @@ def _evaluate(
         observations,
         completion_observation=completion_observation,
         evaluated_at=datetime(2026, 9, 6, 12, 0, 0, tzinfo=timezone.utc),
+        provider_preflight_observer=provider_preflight_observer,
+        provider_authentication_required_observer=(
+            provider_authentication_required_observer
+            or (lambda provider: str(provider).strip().lower() == "agy")
+        ),
     )
+
+
+def _workforce_binding() -> dict[str, object]:
+    demands = {"schema": "nexus.workforce_demands.v1", "demands": [{"demand_id": "d1"}]}
+    return {
+        "planner_output": {"plan_payload": {"signal_snapshot": {"workforce_demands": demands}}},
+        "workforce_demands": demands,
+        "workforce_admission": {"overall_decision": "ALLOW"},
+        "canonical_dispatch_envelope": {"schema": "nexus.canonical_dispatch.v1"},
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "task_card_path": "tasks/card.md",
+        "task_card_hash": "c" * 64,
+    }
+
+
+def _valid_preflight(provider: str, model: str) -> dict[str, object]:
+    authentication_required = provider == "agy"
+    return {
+        "schema": "nexus.provider_preflight.v1",
+        "status": "VERSION_VERIFIED",
+        "blocker": None,
+        "provider": provider,
+        "requested_model": model,
+        "resolved_model": model,
+        "execution_ready": True,
+        "readiness_status": "MODEL_VERIFIED",
+        "model_reachable": True,
+        "requested_model_verified": True,
+        "binary_found": True,
+        "binary_path": "/bin/agy",
+        "binary_sha256": "b" * 64,
+        "cli_version_sha256": "c" * 64,
+        "probe_evidence_hash": "d" * 64,
+        "probe_expires_at": "2099-01-01T00:00:00Z",
+        "authentication_required": authentication_required,
+        "authenticated": authentication_required,
+        "authentication_evidence": (
+            "successful_exact_model_probe" if authentication_required else None
+        ),
+    }
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "wrong_task",
+        "missing_attempt",
+        "missing_action",
+        "missing_request",
+        "missing_action_map",
+        "wrong_action_task",
+        "malformed_request_hash",
+        "nested_action_mismatch",
+        "nested_request_mismatch",
+        "nested_action_malformed",
+        "nested_request_malformed",
+        "not_found",
+        "invalid_state",
+    ),
+)
+def test_material_replay_identity_hostiles_block(monkeypatch, mutation):
+    import nexus.orchestrator.self_hosted_task_service as task_service
+
+    snapshot = {
+        "task_id": "goal-test",
+        "attempt_id": "attempt-1",
+        "action_id": "action-1",
+        "request_hash": "a" * 64,
+        "status": "READY",
+        "task_action": {
+            "task_id": "goal-test",
+            "action_id": "action-1",
+            "request_hash": "a" * 64,
+            "next_action": "none",
+        },
+        "found": True,
+        "state_valid": True,
+    }
+    if mutation == "wrong_task":
+        snapshot["task_id"] = "other"
+    elif mutation == "missing_attempt":
+        snapshot.pop("attempt_id")
+    elif mutation == "missing_action":
+        snapshot.pop("action_id")
+    elif mutation == "missing_request":
+        snapshot.pop("request_hash")
+    elif mutation == "missing_action_map":
+        snapshot.pop("task_action")
+    elif mutation == "wrong_action_task":
+        snapshot["task_action"]["task_id"] = "other"
+    elif mutation == "malformed_request_hash":
+        snapshot["request_hash"] = "R" * 64
+    elif mutation == "nested_action_mismatch":
+        snapshot["task_action"]["action_id"] = "action-other"
+    elif mutation == "nested_request_mismatch":
+        snapshot["task_action"]["request_hash"] = "e" * 64
+    elif mutation == "nested_action_malformed":
+        snapshot["task_action"]["action_id"] = 42
+    elif mutation == "nested_request_malformed":
+        snapshot["task_action"]["request_hash"] = "not-a-hash"
+    elif mutation == "not_found":
+        snapshot["found"] = False
+    else:
+        snapshot["state_valid"] = False
+    monkeypatch.setattr(
+        task_service,
+        "SelfHostedTaskService",
+        lambda: SimpleNamespace(get_task_snapshot=lambda *_a, **_k: snapshot),
+    )
+    from nexus.orchestrator.execution_readiness import _canonical_replay_observation
+
+    observation = _canonical_replay_observation(
+        _request(
+            task_campaign_goal_identity="goal-test", execution_contract_kind="TRACKED_TASK_CARD"
+        )
+    )
+    assert observation.blocker_code is ExecutionReadinessBlockerCode.SEMANTIC_REPLAY_FENCE
+
+
+def test_material_replay_valid_identity_passes(monkeypatch):
+    import nexus.orchestrator.self_hosted_task_service as task_service
+
+    snapshot = {
+        "task_id": "goal-test",
+        "attempt_id": "attempt-1",
+        "action_id": "action-1",
+        "request_hash": "a" * 64,
+        "status": "READY",
+        "task_action": {
+            "task_id": "goal-test",
+            "action_id": "action-1",
+            "request_hash": "a" * 64,
+            "next_action": "none",
+        },
+        "found": True,
+        "state_valid": True,
+    }
+    monkeypatch.setattr(
+        task_service,
+        "SelfHostedTaskService",
+        lambda: SimpleNamespace(get_task_snapshot=lambda *_a, **_k: snapshot),
+    )
+    from nexus.orchestrator.execution_readiness import _canonical_replay_observation
+
+    assert (
+        _canonical_replay_observation(
+            _request(
+                task_campaign_goal_identity="goal-test", execution_contract_kind="TRACKED_TASK_CARD"
+            )
+        ).status
+        is ExecutionReadinessStatus.PASSED
+    )
+
+
+def test_cline_requested_and_resolved_model_identities_pass(monkeypatch):
+    import nexus.orchestrator.self_hosted_task_service as task_service
+
+    monkeypatch.setattr(
+        task_service,
+        "validate_workforce_dispatch_binding",
+        lambda *_a, **_k: {
+            "worker_id": "worker-1",
+            "provider": "cline",
+            "model": "glm-5.2",
+            "policy_hash": "p" * 64,
+            "binding_hash": "b" * 64,
+            "aggregate_binding_hash": "a" * 64,
+        },
+    )
+    binding = _workforce_binding()
+    result = _evaluate(
+        _request(worker_constraints=("provider=cline",)),
+        {
+            ExecutionReadinessPlane.WORKFORCE: (
+                PlaneObservation(
+                    plane=ExecutionReadinessPlane.WORKFORCE,
+                    status=ExecutionReadinessStatus.PASSED,
+                    workforce_dispatch_binding=binding,
+                ),
+            )
+        },
+        provider_preflight_observer=lambda p, m: {
+            **_valid_preflight(p, m),
+            "requested_model": "glm-5.2",
+            "resolved_model": "cline-pass/glm-5.2",
+        },
+    )
+    assert result.plane_results[-1].status is ExecutionReadinessStatus.PASSED
+    evidence = result.plane_results[-1].evidence_identities
+    assert len(evidence) == 15
+    assert "provider_preflight_requested_model=glm-5.2" in evidence
+    assert "provider_preflight_resolved_model=cline-pass/glm-5.2" in evidence
+    assert any(item.startswith("provider_preflight_digest=") for item in evidence)
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"authentication_required": None},
+        {"authentication_required": "false"},
+        {"authenticated": "false"},
+        {"resolved_model": {"model": "model-1"}},
+        {"binary_path": {"path": "/bin/agy"}},
+    ],
+)
+def test_material_workforce_preflight_identity_types_fail(monkeypatch, override):
+    import nexus.orchestrator.self_hosted_task_service as task_service
+
+    monkeypatch.setattr(
+        task_service,
+        "validate_workforce_dispatch_binding",
+        lambda *_a, **_k: {
+            "worker_id": "worker-1",
+            "provider": "agy",
+            "model": "model-1",
+            "policy_hash": "p" * 64,
+            "binding_hash": "b" * 64,
+            "aggregate_binding_hash": "a" * 64,
+        },
+    )
+    result = _evaluate(
+        _request(worker_constraints=("provider=agy",)),
+        {
+            ExecutionReadinessPlane.WORKFORCE: (
+                PlaneObservation(
+                    plane=ExecutionReadinessPlane.WORKFORCE,
+                    status=ExecutionReadinessStatus.PASSED,
+                    workforce_dispatch_binding=_workforce_binding(),
+                ),
+            )
+        },
+        provider_preflight_observer=lambda p, m: {
+            **_valid_preflight(p, m),
+            **override,
+        },
+    )
+    assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
 
 
 def _completion_observation(**overrides: object) -> CompletionAuthorityObservation:
@@ -84,8 +500,8 @@ def _completion_observation(**overrides: object) -> CompletionAuthorityObservati
         "observed_artifact_identity": "git:4e4c911eb83ed2eeda14caf276d3a1bd6709c6aa",
         "observed_interface_revision": "nexus-core.completion.iface.v2",
         "observed_capabilities": (
-            "COMPLETION_VERDICT",
-            "EVIDENCE_VERIFY",
+            "EVIDENCE_VERIFICATION",
+            "COMPLETION_DECISION",
             "RECEIPT_BIND",
         ),
     }
@@ -562,3 +978,382 @@ class TestAuthorityNonLeakage:
         assert '"VERIFIED"' not in blob
         assert '"CERTIFIED"' not in blob
         assert '"COMPLETE"' not in blob
+
+
+class TestCorrectiveFalseGreenControls:
+    """Post-merge #807 F1-F4 hostile controls."""
+
+    @staticmethod
+    def _install_valid_authority(monkeypatch) -> None:
+        import nexus.orchestrator.standing_grant_store as grant_store
+
+        snapshot = {
+            "schema": "nexus.standing_grant_inspection.v1",
+            "status": "VALID",
+            "receipt_hash": "1" * 64,
+            "owner_id": "owner-james",
+            "coordinator_id": "coordinator-durable",
+            "repository_id": "James3014/Nexus-new",
+            "canonical_remote": "https://github.com/James3014/Nexus-new.git",
+            "goal_id": "goal-test",
+            "allowed_actions": ["TASK_SUBMIT"],
+            "expires_at": "2099-01-01T00:00:00+00:00",
+        }
+        monkeypatch.setattr(
+            grant_store,
+            "inspect_standing_grant_receipt",
+            lambda **_kwargs: dict(snapshot),
+        )
+        monkeypatch.setattr(
+            grant_store,
+            "evaluate_rehydrated_durable_standing_grant",
+            lambda **_kwargs: SimpleNamespace(
+                outcome=SimpleNamespace(value="GRANT_MATCH"),
+                mutation_authorized=True,
+                context_hash="2" * 64,
+                decision_hash="3" * 64,
+            ),
+        )
+
+    def test_governance_default_pass_cannot_hide_broken_canonical_observer(
+        self, monkeypatch
+    ) -> None:
+        import nexus.orchestrator.standing_grant_store as grant_store
+
+        def broken_observer(**_kwargs):
+            raise RuntimeError("governance unavailable")
+
+        monkeypatch.setattr(grant_store, "inspect_standing_grant_receipt", broken_observer)
+        result = _evaluate(_request())
+        assert result.outcome is ExecutionReadinessOutcome.BLOCKED
+        assert result.primary_blocker is not None
+        assert result.primary_blocker.code is (
+            ExecutionReadinessBlockerCode.GOVERNANCE_PLANE_RECOVERY_REQUIRED
+        )
+
+    def test_material_authority_synthetic_pass_fails_closed(self, monkeypatch) -> None:
+        import nexus.orchestrator.standing_grant_store as grant_store
+
+        monkeypatch.setattr(
+            grant_store,
+            "inspect_standing_grant_receipt",
+            lambda **_kwargs: {
+                "schema": "nexus.standing_grant_inspection.v1",
+                "status": "MISSING",
+            },
+        )
+        result = _evaluate(
+            _request(task_campaign_goal_identity="goal-test"),
+            {
+                ExecutionReadinessPlane.AUTHORITY: (
+                    _pass(
+                        ExecutionReadinessPlane.AUTHORITY,
+                        "authority_plane:in_process_caller_context",
+                    ),
+                ),
+            },
+        )
+        assert result.outcome is ExecutionReadinessOutcome.BLOCKED
+        assert result.primary_blocker is not None
+        assert result.primary_blocker.code is (ExecutionReadinessBlockerCode.TASK_AUTHORITY_MISSING)
+
+    def test_material_replay_reconcile_state_overrides_synthetic_pass(self, monkeypatch) -> None:
+        import nexus.orchestrator.self_hosted_task_service as task_service
+
+        self._install_valid_authority(monkeypatch)
+        monkeypatch.setattr(
+            task_service.SelfHostedTaskService,
+            "get_task_snapshot",
+            lambda _self, task_id, include_details=False: {
+                "task_id": task_id,
+                "attempt_id": "attempt-1",
+                "status": "UNKNOWN_REQUIRES_RECONCILE",
+                "reconciliation_required": True,
+                "task_action": {"next_action": "nexus_task_reconcile"},
+            },
+        )
+        result = _evaluate(
+            _request(
+                task_campaign_goal_identity="goal-test",
+                execution_contract_kind="TRACKED_TASK_CARD",
+            ),
+            {
+                ExecutionReadinessPlane.REPLAY_FENCE: (
+                    _pass(
+                        ExecutionReadinessPlane.REPLAY_FENCE,
+                        "replay_fence_plane:in_process_first_observation",
+                    ),
+                ),
+            },
+        )
+        assert result.outcome is ExecutionReadinessOutcome.BLOCKED
+        assert result.primary_blocker is not None
+        assert result.primary_blocker.code is (ExecutionReadinessBlockerCode.SEMANTIC_REPLAY_FENCE)
+
+    def test_material_workforce_env_pass_is_not_canonical_evidence(self) -> None:
+        result = _evaluate(
+            _request(worker_constraints=("provider=agy",)),
+            {
+                ExecutionReadinessPlane.WORKFORCE: (
+                    _pass(
+                        ExecutionReadinessPlane.WORKFORCE,
+                        "NEXUS_READINESS_WORKFORCE_STATUS=PASSED",
+                    ),
+                ),
+            },
+        )
+        assert result.outcome is ExecutionReadinessOutcome.BLOCKED
+        assert result.primary_blocker is not None
+        assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
+
+    def test_material_workforce_requires_semantic_canonical_binding(self, monkeypatch) -> None:
+        import nexus.orchestrator.self_hosted_task_service as task_service
+
+        demands = {"schema": "nexus.workforce_demands.v1", "demands": [{"demand_id": "d1"}]}
+        binding = {
+            "planner_output": {"plan_payload": {"signal_snapshot": {"workforce_demands": demands}}},
+            "workforce_demands": demands,
+            "workforce_admission": {"overall_decision": "ALLOW"},
+            "canonical_dispatch_envelope": {"schema": "nexus.canonical_dispatch.v1"},
+            "task_id": "task-1",
+            "attempt_id": "attempt-1",
+            "task_card_path": "tasks/card.md",
+            "task_card_hash": "c" * 64,
+        }
+        monkeypatch.setattr(
+            task_service,
+            "validate_workforce_dispatch_binding",
+            lambda request, require_binding=False: {
+                "worker_id": "worker-1",
+                "provider": "agy",
+                "model": "model-1",
+                "policy_hash": "p" * 64,
+                "binding_hash": "b" * 64,
+                "aggregate_binding_hash": "a" * 64,
+            },
+        )
+        result = _evaluate(
+            _request(worker_constraints=("provider=agy",)),
+            {
+                ExecutionReadinessPlane.WORKFORCE: (
+                    _pass(
+                        ExecutionReadinessPlane.WORKFORCE, "NEXUS_READINESS_WORKFORCE_STATUS=PASSED"
+                    ),
+                )
+            },
+        )
+        # The evaluator-only API has no typed binding channel on the legacy
+        # observation, so a status/hash witness remains blocked.
+        assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
+
+        result = _evaluate(
+            _request(worker_constraints=("provider=agy",)),
+            {
+                ExecutionReadinessPlane.WORKFORCE: (
+                    PlaneObservation(
+                        plane=ExecutionReadinessPlane.WORKFORCE,
+                        status=ExecutionReadinessStatus.PASSED,
+                        evidence_identities=("NEXUS_READINESS_WORKFORCE_STATUS=PASSED",),
+                        workforce_dispatch_binding=binding,
+                    ),
+                )
+            },
+            provider_preflight_observer=_valid_preflight,
+        )
+        assert result.plane_results[-1].status is ExecutionReadinessStatus.PASSED
+        assert any(
+            "workforce_policy_hash=" in item
+            for item in result.plane_results[-1].evidence_identities
+        )
+        assert all(
+            "NEXUS_READINESS_WORKFORCE_STATUS=PASSED" not in item
+            for item in result.plane_results[-1].evidence_identities
+        )
+
+    def test_material_workforce_hashes_alone_fail(self) -> None:
+        evidence = tuple(
+            f"{name}={'a' * 64}"
+            for name in (
+                "planner_decision_hash",
+                "workforce_admission_hash",
+                "provider_preflight_hash",
+            )
+        )
+        result = _evaluate(
+            _request(worker_constraints=("provider=agy",)),
+            {
+                ExecutionReadinessPlane.WORKFORCE: (
+                    _pass(ExecutionReadinessPlane.WORKFORCE, *evidence),
+                )
+            },
+        )
+        assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
+
+    def test_binding_lineage_and_validator_rejection_fail_closed(self, monkeypatch) -> None:
+        import nexus.orchestrator.self_hosted_task_service as task_service
+
+        binding = _workforce_binding()
+        binding.pop("canonical_dispatch_envelope")
+        called = []
+        monkeypatch.setattr(
+            task_service,
+            "validate_workforce_dispatch_binding",
+            lambda *args, **kwargs: called.append(args) or {},
+        )
+        result = _evaluate(
+            _request(worker_constraints=("worker_id=worker-1",)),
+            {
+                ExecutionReadinessPlane.WORKFORCE: (
+                    PlaneObservation(
+                        plane=ExecutionReadinessPlane.WORKFORCE,
+                        status=ExecutionReadinessStatus.PASSED,
+                        workforce_dispatch_binding=binding,
+                    ),
+                )
+            },
+        )
+        assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
+        assert not called
+
+        binding = _workforce_binding()
+        binding["workforce_demands"] = {"demands": [{"demand_id": "other"}]}
+        result = _evaluate(
+            _request(worker_constraints=("provider=agy",)),
+            {
+                ExecutionReadinessPlane.WORKFORCE: (
+                    PlaneObservation(
+                        plane=ExecutionReadinessPlane.WORKFORCE,
+                        status=ExecutionReadinessStatus.PASSED,
+                        workforce_dispatch_binding=binding,
+                    ),
+                )
+            },
+        )
+        assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
+        assert not called
+
+        binding = _workforce_binding()
+        monkeypatch.setattr(
+            task_service,
+            "validate_workforce_dispatch_binding",
+            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("stale/tampered")),
+        )
+        result = _evaluate(
+            _request(worker_constraints=("provider=agy",)),
+            {
+                ExecutionReadinessPlane.WORKFORCE: (
+                    PlaneObservation(
+                        plane=ExecutionReadinessPlane.WORKFORCE,
+                        status=ExecutionReadinessStatus.PASSED,
+                        workforce_dispatch_binding=binding,
+                    ),
+                )
+            },
+        )
+        assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
+
+    def test_worker_id_and_provider_constraints_are_bound(self, monkeypatch) -> None:
+        import nexus.orchestrator.self_hosted_task_service as task_service
+
+        captured = {}
+
+        def validate(request, *, require_binding=False):
+            captured.update(request)
+            assert require_binding is True
+            return {
+                "worker_id": "worker-1",
+                "provider": "agy",
+                "model": "model-1",
+                "policy_hash": "p" * 64,
+                "binding_hash": "b" * 64,
+                "aggregate_binding_hash": "a" * 64,
+            }
+
+        monkeypatch.setattr(task_service, "validate_workforce_dispatch_binding", validate)
+        binding = _workforce_binding()
+        for constraint in ("worker_id=worker-1", "provider=agy"):
+            result = _evaluate(
+                _request(worker_constraints=(constraint,)),
+                {
+                    ExecutionReadinessPlane.WORKFORCE: (
+                        PlaneObservation(
+                            plane=ExecutionReadinessPlane.WORKFORCE,
+                            status=ExecutionReadinessStatus.PASSED,
+                            workforce_dispatch_binding=binding,
+                        ),
+                    )
+                },
+                provider_preflight_observer=_valid_preflight,
+            )
+            assert result.plane_results[-1].status is ExecutionReadinessStatus.PASSED
+        result = _evaluate(
+            _request(worker_constraints=("worker_id=other",)),
+            {
+                ExecutionReadinessPlane.WORKFORCE: (
+                    PlaneObservation(
+                        plane=ExecutionReadinessPlane.WORKFORCE,
+                        status=ExecutionReadinessStatus.PASSED,
+                        workforce_dispatch_binding=binding,
+                    ),
+                )
+            },
+        )
+        assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
+        assert captured["canonical_dispatch_envelope"] == binding["canonical_dispatch_envelope"]
+        assert captured["task_id"] == "task-1"
+
+    def test_request_required_completion_capabilities_cannot_be_substituted(self) -> None:
+        result = _evaluate(
+            _request(
+                execution_contract_kind="FORMAL_COMPLETION_CERTIFICATION",
+                required_completion_contract=_required_contract(),
+            ),
+            completion_observation=_completion_observation(
+                observed_capabilities=(
+                    "COMPLETION_VERDICT",
+                    "EVIDENCE_VERIFY",
+                    "RECEIPT_BIND",
+                )
+            ),
+        )
+        assert result.outcome is ExecutionReadinessOutcome.BLOCKED
+        assert result.primary_blocker is not None
+        assert result.primary_blocker.code is (
+            ExecutionReadinessBlockerCode.COMPLETION_CONTRACT_BINDING_REQUIRED
+        )
+
+    def test_repository_owner_name_must_match_physical_repository(self, monkeypatch) -> None:
+        import nexus.orchestrator.execution_readiness as readiness_module
+
+        monkeypatch.setattr(
+            readiness_module,
+            "_physical_repository_id",
+            lambda: "James3014/Nexus-new",
+        )
+        observation = GatewayReadinessObservation(
+            gateway_instance_id="gateway-test",
+            observed_repo_head="a" * 40,
+            observed_repo_tree="b" * 40,
+            observed_runtime_sha256="c" * 64,
+            runtime_sha256_at_start="c" * 64,
+            tool_manifest_revision="manifest-test",
+            full_tool_schema_hash="d" * 64,
+            permission_policy_hash="e" * 64,
+            reload_required=False,
+        )
+        result = evaluate_source_binding(
+            _request(repository_owner="ForeignOwner"),
+            observation,
+        )
+        assert result.status is ExecutionReadinessStatus.BLOCKED
+        assert result.blocker_code is ExecutionReadinessBlockerCode.SOURCE_REALM_MISMATCH
+
+    def test_ready_result_replaces_legacy_default_evidence(self) -> None:
+        result = _evaluate(_request())
+        evidence = {
+            identity for item in result.plane_results for identity in item.evidence_identities
+        }
+        assert "governance_plane:default_no_open_recovery" not in evidence
+        assert "authority_plane:in_process_caller_context" not in evidence
+        assert "replay_fence_plane:in_process_first_observation" not in evidence
+        assert "NEXUS_READINESS_WORKFORCE_STATUS=PASSED" not in evidence
