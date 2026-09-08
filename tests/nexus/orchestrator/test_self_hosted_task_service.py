@@ -754,6 +754,8 @@ def test_admitted_agy_worker_registry_execution_persists_identity_and_receipt(tm
     )
     demands = internal["workforce_demands"]
     admission = internal["workforce_admission"]
+    expected_model = internal["binding"]["model"]
+    expected_worker_id = internal["binding"]["worker_id"]
     calls = []
 
     class FakeAgyAdapter:
@@ -786,7 +788,7 @@ def test_admitted_agy_worker_registry_execution_persists_identity_and_receipt(tm
     attempt_id = "a" * 32
     request = _request(
         tmp_path, task_id=task_id, worker="auto",
-        model="gemini-3.6-flash-high", execution_lane="ISOLATED_TARGET",
+        model=expected_model, execution_lane="ISOLATED_TARGET",
         workforce_demands=demands, workforce_admission=admission,
         planner_output=internal["planner_output"],
         task_card_path=card_path, task_card_hash=card_hash,
@@ -858,10 +860,10 @@ def test_admitted_agy_worker_registry_execution_persists_identity_and_receipt(tm
         )
 
     persisted = service._read_state(contract.task_id)
-    assert calls == [("agy", "gemini-3.6-flash-high", contract.task_id, str(tmp_path / "target"))]
-    assert persisted["selected_worker_id"] == "agy_flash"
+    assert calls == [("agy", expected_model, contract.task_id, str(tmp_path / "target"))]
+    assert persisted["selected_worker_id"] == expected_worker_id
     assert persisted["selected_provider"] == "agy"
-    assert persisted["selected_model"] == "gemini-3.6-flash-high"
+    assert persisted["selected_model"] == expected_model
     assert persisted["task_card_path"] == request["canonical_dispatch_envelope"]["task_card_path"]
     assert persisted["task_card_hash"] == request["canonical_dispatch_envelope"]["task_card_hash"]
     assert persisted["execution"]["provider"] == "agy"
@@ -896,11 +898,12 @@ def test_tracked_card_mutated_after_submit_fails_before_preflight_or_registry(
             task_card_hash=card_hash,
         ),
     )
+    expected_model = internal["binding"]["model"]
     request = _request(
         tmp_path,
         task_id=task_id,
         worker="auto",
-        model="gemini-3.6-flash-high",
+        model=expected_model,
         execution_lane="ISOLATED_TARGET",
         workforce_demands=internal["workforce_demands"],
         workforce_admission=internal["workforce_admission"],
@@ -1077,11 +1080,12 @@ def test_unadmitted_fallback_blocks_before_provider_side_work(
             task_card_hash=card_hash,
         ),
     )
+    expected_model = internal["binding"]["model"]
     request = _request(
         tmp_path,
         task_id=task_id,
         worker="auto",
-        model="gemini-3.6-flash-high",
+        model=expected_model,
         execution_lane="ISOLATED_TARGET",
         workforce_demands=internal["workforce_demands"],
         workforce_admission=internal["workforce_admission"],
@@ -4623,12 +4627,17 @@ def test_retry_integration_reuses_approved_binding_without_worker_retry(tmp_path
 
 
 def test_default_production_target_root_is_outside_disabled_worktree_namespace(monkeypatch):
-    monkeypatch.chdir("/Users/jameschen/Workspace/nexus")
+    import nexus.orchestrator.self_hosted_task_service as service_module
+
+    source_root = service_module.CANONICAL_SOURCE_ROOT
+    monkeypatch.chdir(source_root)
 
     root, target = resolve_canonical_target_roots("root-test")
 
-    assert str(root) == "/Users/jameschen/Workspace/nexus-runtime-targets"
-    assert str(target) == "/Users/jameschen/Workspace/nexus-runtime-targets/root-test"
+    expected_root = source_root.parent / "nexus-runtime-targets"
+    assert root == expected_root
+    assert target == expected_root / "root-test"
+    assert source_root not in root.parents
 
 
 def test_activation_root_derives_target_namespace_from_bound_source_root(monkeypatch, tmp_path):
