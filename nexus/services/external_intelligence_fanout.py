@@ -112,7 +112,7 @@ def _safe_slug(value: Any, field: str) -> str:
 
 def _safe_relative_path(value: Any) -> str:
     raw = str(value or "")
-    if any(ord(character) < 0x20 or ord(character) == 0x7F for character in raw):
+    if any(not character.isprintable() for character in raw):
         raise FanoutError("INVALID_MUTATION_PATH")
     text = raw.strip()
     try:
@@ -1161,7 +1161,7 @@ def build_worker_bootstrap(unit: ExecutionUnit, workspace: WorkspaceLease) -> st
         f"unit_id={unit.unit_id}",
         f"expected_base_sha={unit.expected_base_sha}",
         f"workspace_id={workspace.workspace_id}",
-        f"envelope_artifact_ref={_canonical_json(unit.envelope_ref)}",
+        f"envelope_artifact_ref={json.dumps(unit.envelope_ref, ensure_ascii=True)}",
         f"envelope_sha256={unit.envelope_sha256}",
         "The full external_execution_envelope.v1 is embedded in Controller evidence above; use it as the authoritative task brief.",
         "envelope_artifact_ref is provenance/readback metadata only. Do not open envelope_artifact_ref through workspace tools.",
