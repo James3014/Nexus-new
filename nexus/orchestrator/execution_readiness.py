@@ -140,24 +140,18 @@ _BLOCKER_MESSAGE: dict[ExecutionReadinessBlockerCode, str] = {
 }
 
 _UNTRUSTED_COMPATIBILITY_PASSES: dict[ExecutionReadinessPlane, frozenset[str]] = {
-    ExecutionReadinessPlane.GOVERNANCE: frozenset(
-        {
-            "governance_plane:default_no_open_recovery",
-            "NEXUS_READINESS_GOVERNANCE_STATUS=PASSED",
-        }
-    ),
-    ExecutionReadinessPlane.AUTHORITY: frozenset(
-        {
-            "authority_plane:in_process_caller_context",
-            "NEXUS_READINESS_AUTHORITY_STATUS=PASSED",
-        }
-    ),
-    ExecutionReadinessPlane.REPLAY_FENCE: frozenset(
-        {
-            "replay_fence_plane:in_process_first_observation",
-            "NEXUS_READINESS_REPLAY_FENCE_STATUS=PASSED",
-        }
-    ),
+    ExecutionReadinessPlane.GOVERNANCE: frozenset({
+        "governance_plane:default_no_open_recovery",
+        "NEXUS_READINESS_GOVERNANCE_STATUS=PASSED",
+    }),
+    ExecutionReadinessPlane.AUTHORITY: frozenset({
+        "authority_plane:in_process_caller_context",
+        "NEXUS_READINESS_AUTHORITY_STATUS=PASSED",
+    }),
+    ExecutionReadinessPlane.REPLAY_FENCE: frozenset({
+        "replay_fence_plane:in_process_first_observation",
+        "NEXUS_READINESS_REPLAY_FENCE_STATUS=PASSED",
+    }),
     ExecutionReadinessPlane.WORKFORCE: frozenset({"NEXUS_READINESS_WORKFORCE_STATUS=PASSED"}),
 }
 
@@ -659,6 +653,13 @@ def _evidence_map(observation: PlaneObservation) -> dict[str, str]:
     return values
 
 
+def _canonical_provider_preflight_digest(preflight: Mapping[str, Any]) -> str:
+    """Commit the complete provider-preflight witness without spending identities."""
+
+    payload = json.dumps(preflight, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def _canonical_workforce_observation(
     request: ExecutionReadinessRequest,
     supplied: Sequence[PlaneObservation],
@@ -787,6 +788,10 @@ def _canonical_workforce_observation(
             preflight.get("authentication_evidence"), str
         ):
             continue
+        try:
+            preflight_digest = _canonical_provider_preflight_digest(preflight)
+        except (TypeError, ValueError):
+            continue
         identity = {
             "worker": str(validated.get("worker_id") or "").strip().lower(),
             "worker_id": str(validated.get("worker_id") or "").strip().lower(),
@@ -809,6 +814,7 @@ def _canonical_workforce_observation(
                 item
                 for item in observation.evidence_identities
                 if item not in _UNTRUSTED_COMPATIBILITY_PASSES[ExecutionReadinessPlane.WORKFORCE]
+                and item != "workforce_plane:canonical_binding_supplied"
             ) + tuple(
                 f"workforce_{key}={validated[key]}"
                 for key in (
@@ -827,9 +833,6 @@ def _canonical_workforce_observation(
                     "provider",
                     "requested_model",
                     "resolved_model",
-                    "authentication_required",
-                    "authenticated",
-                    "binary_path",
                     "binary_sha256",
                     "cli_version_sha256",
                     "probe_evidence_hash",
@@ -837,6 +840,13 @@ def _canonical_workforce_observation(
                     "authentication_evidence",
                 )
                 if key in {"authentication_required", "authenticated"} or preflight.get(key)
+            )
+            evidence += (
+                "provider_preflight_auth="
+                f"required:{str(preflight['authentication_required']).lower()},"
+                f"authenticated:{str(preflight['authenticated']).lower()},"
+                f"evidence:{preflight.get('authentication_evidence') or 'none'}",
+                f"provider_preflight_digest={preflight_digest}",
             )
             return PlaneObservation(
                 plane=ExecutionReadinessPlane.WORKFORCE,

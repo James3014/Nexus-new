@@ -21,9 +21,98 @@ from nexus.orchestrator.execution_readiness import (
     CompletionAuthorityObservation,
     GatewayReadinessObservation,
     PlaneObservation,
+    _canonical_provider_preflight_digest,
     evaluate_execution_readiness,
     evaluate_source_binding,
 )
+
+
+def test_provider_preflight_digest_is_deterministic_and_tamper_sensitive() -> None:
+    preflight = _valid_preflight("agy", "model-1")
+    reordered = {key: preflight[key] for key in reversed(tuple(preflight))}
+    assert _canonical_provider_preflight_digest(preflight) == _canonical_provider_preflight_digest(
+        reordered
+    )
+    tampered = dict(preflight, probe_evidence_hash="e" * 64)
+    assert _canonical_provider_preflight_digest(preflight) != _canonical_provider_preflight_digest(
+        tampered
+    )
+
+
+def test_authenticated_preflight_summary_stays_within_evidence_budget(monkeypatch) -> None:
+    import nexus.orchestrator.self_hosted_task_service as task_service
+
+    monkeypatch.setattr(
+        task_service,
+        "validate_workforce_dispatch_binding",
+        lambda *_a, **_k: {
+            "worker_id": "worker-1",
+            "provider": "agy",
+            "model": "model-1",
+            "policy_hash": "p" * 64,
+            "binding_hash": "b" * 64,
+            "aggregate_binding_hash": "a" * 64,
+        },
+    )
+    preflight = _valid_preflight("agy", "model-1")
+    preflight.update(
+        authentication_required=True,
+        authenticated=True,
+        authentication_evidence="authenticated-exact-probe",
+    )
+    result = _evaluate(
+        _request(worker_constraints=("provider=agy",)),
+        {
+            ExecutionReadinessPlane.WORKFORCE: (
+                PlaneObservation(
+                    plane=ExecutionReadinessPlane.WORKFORCE,
+                    status=ExecutionReadinessStatus.PASSED,
+                    workforce_dispatch_binding=_workforce_binding(),
+                ),
+            )
+        },
+        provider_preflight_observer=lambda _p, _m: preflight,
+    )
+    workforce = result.plane_results[-1]
+    assert workforce.status is ExecutionReadinessStatus.PASSED
+    assert len(workforce.evidence_identities) == 16
+    assert (
+        "provider_preflight_auth=required:true,authenticated:true,evidence:authenticated-exact-probe"
+        in workforce.evidence_identities
+    )
+
+
+def test_non_json_preflight_evidence_fails_closed(monkeypatch) -> None:
+    import nexus.orchestrator.self_hosted_task_service as task_service
+
+    monkeypatch.setattr(
+        task_service,
+        "validate_workforce_dispatch_binding",
+        lambda *_a, **_k: {
+            "worker_id": "worker-1",
+            "provider": "agy",
+            "model": "model-1",
+            "policy_hash": "p" * 64,
+            "binding_hash": "b" * 64,
+            "aggregate_binding_hash": "a" * 64,
+        },
+    )
+    preflight = _valid_preflight("agy", "model-1")
+    preflight["authentication_evidence"] = object()
+    result = _evaluate(
+        _request(worker_constraints=("provider=agy",)),
+        {
+            ExecutionReadinessPlane.WORKFORCE: (
+                PlaneObservation(
+                    plane=ExecutionReadinessPlane.WORKFORCE,
+                    status=ExecutionReadinessStatus.PASSED,
+                    workforce_dispatch_binding=_workforce_binding(),
+                ),
+            )
+        },
+        provider_preflight_observer=lambda _p, _m: preflight,
+    )
+    assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
 
 
 def _request(**overrides: object) -> ExecutionReadinessRequest:
@@ -254,8 +343,10 @@ def test_cline_requested_and_resolved_model_identities_pass(monkeypatch):
     )
     assert result.plane_results[-1].status is ExecutionReadinessStatus.PASSED
     evidence = result.plane_results[-1].evidence_identities
+    assert len(evidence) == 15
     assert "provider_preflight_requested_model=glm-5.2" in evidence
     assert "provider_preflight_resolved_model=cline-pass/glm-5.2" in evidence
+    assert any(item.startswith("provider_preflight_digest=") for item in evidence)
 
 
 @pytest.mark.parametrize(
