@@ -45,6 +45,8 @@ Integrate the accepted Nexus consumer correction into current `James3014/Nexus-n
 - `tasks/open-swe-execution-productionization-v1/INDEX.md`
 - `tasks/open-swe-execution-productionization-v1/TASK-005.md`
 - `tasks/open-swe-execution-productionization-v1/TASK-006.md`
+- `tasks/open-swe-resident-five-repo-canary-20260908/INDEX.md`
+- `tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md`
 
 No other repository source file may change. No deletion is allowed.
 
