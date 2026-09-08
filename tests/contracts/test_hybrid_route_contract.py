@@ -42,6 +42,12 @@ def test_hybrid_route_default_values() -> None:
     assert receipt.public_claim_safe is False
     assert receipt.outcome_contributed is False
 
+    hostile = decision.to_dict()
+    hostile["authority"] = "fail_closed"
+    hostile["public_claim_allowed"] = True
+    with pytest.raises(ValueError):
+        hybrid_route_decision_from_payload(hostile)
+
 
 def test_gb013_default_payload_is_observational_and_non_claiming() -> None:
     test_hybrid_route_default_values()
