@@ -420,10 +420,14 @@ def test_recoverable_dispatching_state_resumes_pipeline(tmp_path, state):
     d = FakeD()
     automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
     item = IssueWorkItem("o/r", 7, "title", body, contract)
-    binding = automation._canonical_worker_binding(item, Path("tasks/x.md"), card.read_text(encoding="utf-8"))
+    binding = automation._canonical_worker_binding(
+        item, Path("tasks/x.md"), card.read_text(encoding="utf-8")
+    )
     automation._worker_binding = binding
     effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
-    automation.state_store.save(item, state, intelligence_effect_id=effect_id, worker_binding=binding)
+    automation.state_store.save(
+        item, state, intelligence_effect_id=effect_id, worker_binding=binding
+    )
 
     result = automation.run_issue("o/r", 7, "title", body)
 
@@ -441,10 +445,14 @@ def test_fanout_dispatching_fence_rejects_changed_issue_context_before_any_stage
     d = FakeD()
     automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
     item = IssueWorkItem("o/r", 805, "title", body, contract)
-    binding = automation._canonical_worker_binding(item, Path("tasks/x.md"), card.read_text(encoding="utf-8"))
+    binding = automation._canonical_worker_binding(
+        item, Path("tasks/x.md"), card.read_text(encoding="utf-8")
+    )
     automation._worker_binding = binding
     old_effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
-    automation.state_store.save(item, "FANOUT_DISPATCHING", intelligence_effect_id=old_effect_id, worker_binding=binding)
+    automation.state_store.save(
+        item, "FANOUT_DISPATCHING", intelligence_effect_id=old_effect_id, worker_binding=binding
+    )
 
     changed_body = _body(contract).replace("issue prose", "changed issue prose and context")
     result = automation.run_issue("o/r", 805, "title", changed_body)
@@ -478,7 +486,9 @@ def test_recoverable_reconciliation_required_resumes_from_fanout(tmp_path):
     d = FakeD()
     automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
     item = IssueWorkItem("o/r", 8, "title", body, contract)
-    binding = automation._canonical_worker_binding(item, Path("tasks/x.md"), card.read_text(encoding="utf-8"))
+    binding = automation._canonical_worker_binding(
+        item, Path("tasks/x.md"), card.read_text(encoding="utf-8")
+    )
     automation._worker_binding = binding
     effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
     automation.state_store.save(
@@ -503,10 +513,17 @@ def test_dispatching_fence_rejects_changed_issue_context_before_new_sidecar_invo
     sidecar = FakeSidecar(store)
     automation = _automation(tmp_path, repo, store, sidecar=sidecar)
     item = IssueWorkItem("o/r", 801, "title", body, contract)
-    binding = automation._canonical_worker_binding(item, Path("tasks/x.md"), card.read_text(encoding="utf-8"))
+    binding = automation._canonical_worker_binding(
+        item, Path("tasks/x.md"), card.read_text(encoding="utf-8")
+    )
     automation._worker_binding = binding
     old_effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
-    automation.state_store.save(item, "INTELLIGENCE_DISPATCHING", intelligence_effect_id=old_effect_id, worker_binding=binding)
+    automation.state_store.save(
+        item,
+        "INTELLIGENCE_DISPATCHING",
+        intelligence_effect_id=old_effect_id,
+        worker_binding=binding,
+    )
 
     changed_body = _body(contract).replace("issue prose", "changed issue prose and context")
     result = automation.run_issue("o/r", 801, "title", changed_body)
@@ -539,10 +556,14 @@ def test_same_persisted_effect_id_without_lower_attempt_allows_one_first_invoke(
     sidecar = FakeSidecar(store)
     automation = _automation(tmp_path, repo, store, sidecar=sidecar)
     item = IssueWorkItem("o/r", 803, "title", body, contract)
-    binding = automation._canonical_worker_binding(item, Path("tasks/x.md"), card.read_text(encoding="utf-8"))
+    binding = automation._canonical_worker_binding(
+        item, Path("tasks/x.md"), card.read_text(encoding="utf-8")
+    )
     automation._worker_binding = binding
     effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
-    automation.state_store.save(item, "INTELLIGENCE_DISPATCHING", intelligence_effect_id=effect_id, worker_binding=binding)
+    automation.state_store.save(
+        item, "INTELLIGENCE_DISPATCHING", intelligence_effect_id=effect_id, worker_binding=binding
+    )
 
     result = automation.run_issue("o/r", 803, "title", body)
 
@@ -555,7 +576,9 @@ def test_reconciliation_required_resumes_lower_intelligence_reconcile_without_in
     sidecar = FakeSidecar(store)
     automation = _automation(tmp_path, repo, store, sidecar=sidecar)
     item = IssueWorkItem("o/r", 804, "title", body, contract)
-    binding = automation._canonical_worker_binding(item, Path("tasks/x.md"), card.read_text(encoding="utf-8"))
+    binding = automation._canonical_worker_binding(
+        item, Path("tasks/x.md"), card.read_text(encoding="utf-8")
+    )
     automation._worker_binding = binding
     effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
     automation.state_store.save(
@@ -1504,7 +1527,16 @@ def _canonical_result(worker_id="canonical/worker"):
         "planner_output": {"decision_hash": "4" * 64, "planner": "canonical"},
         "workforce_admission": {
             "overall_decision": "ALLOW",
-            "records": [{"decision": {"decision": "ALLOW", "resolved_worker_id": worker_id, "resolved_provider": "canonical-provider", "resolved_model": "canonical-provider/model"}}],
+            "records": [
+                {
+                    "decision": {
+                        "decision": "ALLOW",
+                        "resolved_worker_id": worker_id,
+                        "resolved_provider": "canonical-provider",
+                        "resolved_model": "canonical-provider/model",
+                    }
+                }
+            ],
             "decision": "ALLOW",
             "admission": "canonical",
         },
@@ -1540,7 +1572,9 @@ def test_issue_workers_never_override_canonical_binding_in_sidecar_or_fanout(tmp
     monkeypatch.setattr(module, "build_canonical_planner_admission", lambda **_: canonical)
     sidecar = FakeSidecar(store)
     c = FakeC()
-    result = _automation(tmp_path, repo, store, sidecar=sidecar, c=c).run_issue("o/r", 901, "title", body)
+    result = _automation(tmp_path, repo, store, sidecar=sidecar, c=c).run_issue(
+        "o/r", 901, "title", body
+    )
     assert result["state"] == "COMPLETE"
     expected = result["worker_binding"]
     assert sidecar.worker_bindings == [expected]
@@ -1555,17 +1589,25 @@ def test_canonical_planner_failure_blocks_before_any_effect(tmp_path, monkeypatc
 
     repo, _, _, body, store = _setup(tmp_path)
     if failure == "exception":
+
         def planner(**_kwargs):
             raise RuntimeError("planner unavailable")
+
     elif failure == "malformed":
+
         def planner(**_kwargs):
             return {"binding": {}}
+
     else:
+
         def planner(**_kwargs):
             return {**_canonical_result(), "workforce_admission": {"decision": "BLOCK"}}
+
     monkeypatch.setattr(module, "build_canonical_planner_admission", planner)
     sidecar, c, d = FakeSidecar(store), FakeC(), FakeD()
-    result = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d).run_issue("o/r", 902, "title", body)
+    result = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d).run_issue(
+        "o/r", 902, "title", body
+    )
     assert result["state"] == "BLOCKED"
     assert sidecar.calls == [] and c.calls == [] and d.calls == []
 
@@ -1583,30 +1625,49 @@ def test_transport_binding_mismatch_blocks_before_sidecar(tmp_path, monkeypatch)
     import nexus.services.external_intelligence_automation as module
 
     repo, _, _, body, store = _setup(tmp_path)
-    monkeypatch.setattr(module, "build_canonical_planner_admission", lambda **_: _canonical_result())
+    monkeypatch.setattr(
+        module, "build_canonical_planner_admission", lambda **_: _canonical_result()
+    )
     sidecar, c = FakeSidecar(store), _TransportBackedC()
-    result = _automation(tmp_path, repo, store, sidecar=sidecar, c=c).run_issue("o/r", 903, "title", body)
+    result = _automation(tmp_path, repo, store, sidecar=sidecar, c=c).run_issue(
+        "o/r", 903, "title", body
+    )
     assert result["state"] == "BLOCKED"
     assert sidecar.calls == [] and c.calls == []
 
 
-@pytest.mark.parametrize("state", [
-    "INTELLIGENCE_DISPATCHING", "INTELLIGENCE_COMPLETED",
-    "FANOUT_DISPATCHING", "FANOUT_COMPLETED",
-])
+@pytest.mark.parametrize(
+    "state",
+    [
+        "INTELLIGENCE_DISPATCHING",
+        "INTELLIGENCE_COMPLETED",
+        "FANOUT_DISPATCHING",
+        "FANOUT_COMPLETED",
+    ],
+)
 @pytest.mark.parametrize("binding_case", ["missing", "drifted"])
-def test_effectful_state_binding_replay_is_reconcile_only(tmp_path, monkeypatch, state, binding_case):
+def test_effectful_state_binding_replay_is_reconcile_only(
+    tmp_path, monkeypatch, state, binding_case
+):
     import nexus.services.external_intelligence_automation as module
 
     repo, card, contract, body, store = _setup(tmp_path)
-    monkeypatch.setattr(module, "build_canonical_planner_admission", lambda **_: _canonical_result())
+    monkeypatch.setattr(
+        module, "build_canonical_planner_admission", lambda **_: _canonical_result()
+    )
     sidecar, c, d = FakeSidecar(store), FakeC(), FakeD()
     automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c, d=d)
     item = IssueWorkItem("o/r", 904, "title", body, contract)
     text = card.read_text(encoding="utf-8")
     effect_id = automation._intelligence_effect_id(item, text)
-    persisted = None if binding_case == "missing" else {**_canonical_result()["binding"], "worker_id": "drifted"}
-    automation.state_store.save(item, state, intelligence_effect_id=effect_id, worker_binding=persisted)
+    persisted = (
+        None
+        if binding_case == "missing"
+        else {**_canonical_result()["binding"], "worker_id": "drifted"}
+    )
+    automation.state_store.save(
+        item, state, intelligence_effect_id=effect_id, worker_binding=persisted
+    )
     result = automation.run_issue("o/r", 904, "title", body)
     assert result["state"] == "RECONCILIATION_REQUIRED"
     assert result["reconcile_only"] is True
@@ -1620,7 +1681,9 @@ def test_non_executable_intake_does_not_invoke_canonical_planner(tmp_path, monke
     calls = []
     monkeypatch.setattr(module, "build_canonical_planner_admission", lambda **_: calls.append(1))
     sidecar = FakeSidecar(store, non_dispatched=True)
-    result = _automation(tmp_path, repo, store, sidecar=sidecar).run_issue("o/r", 905, "title", _body(contract))
+    result = _automation(tmp_path, repo, store, sidecar=sidecar).run_issue(
+        "o/r", 905, "title", _body(contract)
+    )
     assert result["state"] == "BLOCKED"
     assert calls == []
 

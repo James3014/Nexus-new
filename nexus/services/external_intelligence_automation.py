@@ -697,7 +697,9 @@ class ExternalIntelligenceAutomation:
             Path(materialized.name).unlink(missing_ok=True)
             raise
         allowed_files = tuple(
-            dict.fromkeys(path for unit in item.contract["execution_units"] for path in unit["mutation_paths"])
+            dict.fromkeys(
+                path for unit in item.contract["execution_units"] for path in unit["mutation_paths"]
+            )
         )
         verifier_command = tuple(item.contract["whole_verifiers"][0]["argv"])
         identity = VerifiedTaskCardIdentity(
@@ -719,14 +721,24 @@ class ExternalIntelligenceAutomation:
         finally:
             Path(materialized.name).unlink(missing_ok=True)
         binding = result.get("binding") if isinstance(result, Mapping) else None
-        required = {"demand_id", "worker_id", "provider", "model", "policy_hash", "binding_hash", "aggregate_binding_hash"}
+        required = {
+            "demand_id",
+            "worker_id",
+            "provider",
+            "model",
+            "policy_hash",
+            "binding_hash",
+            "aggregate_binding_hash",
+        }
         if not isinstance(binding, Mapping) or set(binding) != required:
             raise AutomationError("CANONICAL_WORKFORCE_BINDING_MALFORMED")
         for key in required:
             if not isinstance(binding.get(key), str) or not str(binding[key]).strip():
                 raise AutomationError("CANONICAL_WORKFORCE_BINDING_MALFORMED")
         for key in ("policy_hash", "binding_hash", "aggregate_binding_hash"):
-            if len(binding[key]) != 64 or any(char not in "0123456789abcdef" for char in binding[key].lower()):
+            if len(binding[key]) != 64 or any(
+                char not in "0123456789abcdef" for char in binding[key].lower()
+            ):
                 raise AutomationError("CANONICAL_WORKFORCE_BINDING_EVIDENCE_INVALID")
         planner = result.get("planner_output")
         admission = result.get("workforce_admission")
@@ -771,7 +783,9 @@ class ExternalIntelligenceAutomation:
         demands = result.get("workforce_demands") or {}
         demand = (demands.get("demands") or [{}])[0]
         selection_hash = str(planner.get("decision_hash") or "").lower()
-        if len(selection_hash) != 64 or any(char not in "0123456789abcdef" for char in selection_hash):
+        if len(selection_hash) != 64 or any(
+            char not in "0123456789abcdef" for char in selection_hash
+        ):
             raise AutomationError("CANONICAL_WORKFORCE_SELECTION_EVIDENCE_INVALID")
         role_ceiling = str(demand.get("requested_role") or "").strip()
         if not role_ceiling:
@@ -919,7 +933,8 @@ class ExternalIntelligenceAutomation:
             } or (
                 previous is not None
                 and str(previous.get("state") or "") == "RECONCILIATION_REQUIRED"
-                and str(previous.get("prior_state") or "") in {
+                and str(previous.get("prior_state") or "")
+                in {
                     "INTELLIGENCE_DISPATCHING",
                     "INTELLIGENCE_COMPLETED",
                     "FANOUT_DISPATCHING",
@@ -991,7 +1006,10 @@ class ExternalIntelligenceAutomation:
             if intelligence_effect_id is not None:
                 dispatch_state["intelligence_effect_id"] = intelligence_effect_id
             self.state_store.save(
-                item, "INTELLIGENCE_DISPATCHING", worker_binding=self._worker_binding, **dispatch_state
+                item,
+                "INTELLIGENCE_DISPATCHING",
+                worker_binding=self._worker_binding,
+                **dispatch_state,
             )
             sidecar_kwargs = {}
             if self._worker_binding is not None:
@@ -1014,7 +1032,10 @@ class ExternalIntelligenceAutomation:
             if intelligence_effect_id is not None:
                 completed_state["intelligence_effect_id"] = intelligence_effect_id
             self.state_store.save(
-                item, "INTELLIGENCE_COMPLETED", worker_binding=self._worker_binding, **completed_state
+                item,
+                "INTELLIGENCE_COMPLETED",
+                worker_binding=self._worker_binding,
+                **completed_state,
             )
 
             units = self._c_units(item, intelligence)
