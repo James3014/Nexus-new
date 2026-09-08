@@ -532,6 +532,24 @@ class OpenSWEWorkerTransport:
             })
         )
 
+    def prepare_operation_id(
+        self,
+        operation: str,
+        *,
+        prompt: str,
+        artifact_path: str,
+        workspace_path: str,
+        session_id: str,
+    ) -> str:
+        operation_id = self._operation_id(
+            operation,
+            prompt=prompt,
+            artifact_path=artifact_path,
+            workspace_path=workspace_path,
+            session_id=session_id,
+        )
+        return operation_id
+
     def _local_failure(
         self,
         status: str,
@@ -565,9 +583,20 @@ class OpenSWEWorkerTransport:
         artifact_path: str = "",
         workspace_path: str,
         session_id: str = "",
+        operation_id: str = "",
     ) -> OpenCodeRunResult:
         if session_id and _SESSION_RE.fullmatch(session_id) is None:
             raise FanoutError("INVALID_SESSION_ID")
+        if operation == "worker_reconcile" and (
+            not isinstance(operation_id, str) or _SHA256_RE.fullmatch(operation_id) is None
+        ):
+            raise FanoutError("OPERATION_ID_REQUIRED")
+        if (
+            operation != "worker_reconcile"
+            and operation_id != ""
+            and (not isinstance(operation_id, str) or _SHA256_RE.fullmatch(operation_id) is None)
+        ):
+            raise FanoutError("OPERATION_ID_REQUIRED")
         workspace = Path(workspace_path).expanduser().resolve()
         if operation != "worker_reconcile":
             artifact = Path(artifact_path).expanduser().resolve()
@@ -586,13 +615,24 @@ class OpenSWEWorkerTransport:
                 outcome_unknown=operation == "worker_reconcile",
                 retry_safe=False,
             )
-        operation_id = self._operation_id(
-            operation,
-            prompt=prompt,
-            artifact_path=artifact_path,
-            workspace_path=str(workspace),
-            session_id=session_id,
-        )
+        if operation == "worker_reconcile":
+            pass
+        else:
+            computed_operation_id = self.prepare_operation_id(
+                operation,
+                prompt=prompt,
+                artifact_path=artifact_path,
+                workspace_path=str(workspace),
+                session_id=session_id,
+            )
+            if operation_id and operation_id != computed_operation_id:
+                return self._local_failure(
+                    "OPEN_SWE_OUTCOME_UNKNOWN",
+                    workspace_path=str(workspace),
+                    outcome_unknown=True,
+                    error="OPERATION_ID_MISMATCH",
+                )
+            operation_id = computed_operation_id
         payload = {
             "schema": PROTOCOL_REQUEST_SCHEMA,
             "operation": operation,
@@ -642,6 +682,16 @@ class OpenSWEWorkerTransport:
                 process_started=process_started,
                 outcome_unknown=True,
                 error="runtime_result_kind_mismatch",
+                argv_sha256=argv_sha256,
+            )
+        returned_operation_id = value.get("operation_id")
+        if not isinstance(returned_operation_id, str) or returned_operation_id != operation_id:
+            return self._local_failure(
+                "OPEN_SWE_OUTCOME_UNKNOWN",
+                workspace_path=str(workspace),
+                process_started=process_started,
+                outcome_unknown=True,
+                error="OPERATION_ID_MISMATCH",
                 argv_sha256=argv_sha256,
             )
         provider = str(value.get("provider_id") or "")
@@ -694,6 +744,7 @@ class OpenSWEWorkerTransport:
             repair_admitted=bool(value.get("repair_admitted")),
             repair_phase_count=int(value.get("repair_phase_count") or 0),
             worker_identity_sha256=worker_hash,
+            operation_id=operation_id,
         )
 
     def _ensure_runtime_identity(self) -> bool:
@@ -716,12 +767,15 @@ class OpenSWEWorkerTransport:
             return False
         return True
 
-    def run_new(self, *, prompt: str, artifact_path: str, workspace_path: str) -> OpenCodeRunResult:
+    def run_new(
+        self, *, prompt: str, artifact_path: str, workspace_path: str, operation_id: str = ""
+    ) -> OpenCodeRunResult:
         return self._request(
             "worker_run",
             prompt=prompt,
             artifact_path=artifact_path,
             workspace_path=workspace_path,
+            operation_id=operation_id,
         )
 
     def continue_session(
@@ -731,6 +785,7 @@ class OpenSWEWorkerTransport:
         prompt: str,
         artifact_path: str,
         workspace_path: str,
+        operation_id: str = "",
     ) -> OpenCodeRunResult:
         return self._request(
             "worker_continue",
@@ -738,10 +793,15 @@ class OpenSWEWorkerTransport:
             prompt=prompt,
             artifact_path=artifact_path,
             workspace_path=workspace_path,
+            operation_id=operation_id,
         )
 
-    def reconcile_workspace(self, *, workspace_path: str) -> OpenCodeRunResult:
-        return self._request("worker_reconcile", workspace_path=workspace_path)
+    def reconcile_workspace(
+        self, *, workspace_path: str, operation_id: str = ""
+    ) -> OpenCodeRunResult:
+        return self._request(
+            "worker_reconcile", workspace_path=workspace_path, operation_id=operation_id
+        )
 
 
 __all__ = [
