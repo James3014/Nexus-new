@@ -119,6 +119,8 @@ def test_worker_rejects_commit_merge_and_push_commands(tmp_path):
         ("gh", "pr", "close", "1"),
         ("gh", "--repo", "acme/demo", "pr", "review", "1", "--approve"),
         ("gh", "pr", "merge", "1"),
+        ("gh", "pr", "revert", "1"),
+        ("gh", "pr", "update-branch", "1"),
         ("gh", "repo", "fork", "acme/demo"),
     ],
 )

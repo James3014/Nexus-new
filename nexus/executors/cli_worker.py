@@ -48,6 +48,8 @@ _FORBIDDEN_SUBCOMMANDS = (
     ("gh", "pr", "review"),
     ("gh", "pr", "merge"),
     ("gh", "pr", "ready"),
+    ("gh", "pr", "revert"),
+    ("gh", "pr", "update-branch"),
     ("gh", "repo", "fork"),
     ("gh", "api"),
 )
