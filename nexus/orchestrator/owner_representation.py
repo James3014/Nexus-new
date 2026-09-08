@@ -56,6 +56,11 @@ from nexus.orchestrator.owner_representation_store import (
     OwnerRepresentationGrantStore,
     OwnerRepresentationGrantStoreError,
 )
+from nexus.security.owner_representation_transport_inventory import (
+    PublicationRouteState,
+    classify_transport_route,
+    route_for_transport,
+)
 
 
 class WriteOutcome:
@@ -241,6 +246,16 @@ class OwnerRepresentationPublisher:
         self.readback_transport = readback_transport
         self.grant_store = grant_store or OwnerRepresentationGrantStore()
 
+    def _assert_transport_admission(self, proposal: ExternalPublicationProposal) -> None:
+        route_id = route_for_transport(proposal.transport)
+        if route_id is None:
+            raise OwnerRepresentationBlocked("TRANSPORT_UNREGISTERED")
+        if (
+            classify_transport_route(route_id)
+            is not PublicationRouteState.EXTERNAL_PUBLICATION_AUTHORITY_ENFORCED
+        ):
+            raise OwnerRepresentationBlocked("TRANSPORT_ROUTE_BLOCKED")
+
     # -- durable paths -------------------------------------------------------
 
     def _operation_path(self, operation_id: str) -> Path:
@@ -365,6 +380,7 @@ class OwnerRepresentationPublisher:
                 state="INTERNAL_PASSTHROUGH",
             )
 
+        self._assert_transport_admission(proposal)
         decision = bind_external_publication(proposal, grant, boundary, now=now)
         if decision.outcome is not OwnerRepresentationOutcome.GRANT_MATCH:
             raise OwnerRepresentationBlocked(":".join(code.value for code in decision.reason_codes))
@@ -447,6 +463,7 @@ class OwnerRepresentationPublisher:
 
             # Fresh store-backed authorization immediately before any effect.
             self._authorize_grant(prepared.grant, prepared.proposal, now)
+            self._assert_transport_admission(prepared.proposal)
 
             _atomic_json(
                 self._ledger_path(prepared.grant.grant_hash),

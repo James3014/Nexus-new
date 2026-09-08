@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from types import MappingProxyType
 from typing import Any, Mapping
 
 
@@ -60,6 +61,12 @@ class PublicationRoute:
 
 
 NONE_KNOWN_EXTERNAL_PUBLICATION_WRITE = "none_known_external_publication_write"
+# These are concrete transport identities, not route IDs.  Keeping the
+# mapping explicit prevents a caller-controlled string from becoming an
+# implicitly trusted route merely because both happen to have the same name.
+CANONICAL_TRANSPORT_ROUTE_BINDINGS: Mapping[str, str] = MappingProxyType(
+    {"canonical_owner_representation": "owner_representation_seam"}
+)
 ALL: tuple[PublicationRoute, ...] = (
     PublicationRoute(
         route_id="github_orchestration",
@@ -98,18 +105,19 @@ ALL: tuple[PublicationRoute, ...] = (
         route_id="chatgpt_connector",
         capability_surface="ChatGPT connector UI (ask-before-write)",
         observed_write_seam="external component surfaced via nexus/orchestrator/unified_mcp_gateway.py owner_confirmation flags",
-        state=PublicationRouteState.OWNER_INTERACTIVE_GATED,
-        evidence="UI 'ask before write' is defense-in-depth only, not canonical "
-        "authority proof; any third-party write must be bound by an exact "
-        "one-shot Owner-representation grant through the canonical seam.",
+        state=PublicationRouteState.UNKNOWN_BLOCKED,
+        evidence="Source records UI 'ask before write' as defense-in-depth only; "
+        "no current external control-plane receipt proves live gating, so this "
+        "route is UNKNOWN_BLOCKED and cannot be used as publication authority.",
     ),
     PublicationRoute(
         route_id="codex_cli_pat",
         capability_surface="Codex CLI / GitHub PAT-backed paths",
         observed_write_seam="external interactive CLI; no nexus/ source call",
-        state=PublicationRouteState.OWNER_INTERACTIVE_GATED,
-        evidence="Interactive human/owner-driven only. Not autonomous Nexus "
-        "publication; owner-bound final write by design.",
+        state=PublicationRouteState.UNKNOWN_BLOCKED,
+        evidence="Interactive human/owner-driven behavior has no current "
+        "independent enforcement receipt in this inventory; fail closed as "
+        "UNKNOWN_BLOCKED rather than claim a live gate.",
     ),
     PublicationRoute(
         route_id="devspace_worker",
@@ -182,6 +190,18 @@ def classify_transport_route(route_id: str) -> PublicationRouteState:
         if route.route_id == route_id:
             return route.state
     return PublicationRouteState.UNKNOWN_BLOCKED
+
+
+def route_for_transport(
+    transport_identity: str,
+) -> str | None:
+    """Resolve a concrete signed transport identity to an inventoried route."""
+    route_id = CANONICAL_TRANSPORT_ROUTE_BINDINGS.get(transport_identity)
+    if route_id is None:
+        return None
+    if route_id not in {route.route_id for route in ALL}:
+        raise ValueError(f"transport binding names unknown route: {route_id}")
+    return route_id
 
 
 def assert_no_unknown_routes() -> None:
@@ -271,5 +291,6 @@ __all__ = [
     "classify_transport_route",
     "expected_write_seam_for",
     "physical_witnesses_for",
+    "route_for_transport",
     "transport_inventory_status",
 ]

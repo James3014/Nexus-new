@@ -96,6 +96,13 @@ def fixture_owner_trust_root(monkeypatch, tmp_path):
     key.chmod(0o600)
     monkeypatch.setattr(owner_store_module, "OWNER_AUTHORIZATION_TRUST_ROOT", trust_root)
     monkeypatch.setattr(owner_store_module, "_verify_owner_signature", lambda auth: None)
+    # Explicit test-only transport mapping; production has no fixture
+    # whitelist and uses the immutable canonical inventory mapping.
+    monkeypatch.setattr(
+        owner_publisher_module,
+        "route_for_transport",
+        lambda identity: "owner_representation_seam" if identity == "fixture" else None,
+    )
 THIRD_PARTY = ExternalDestination(
     host="github.com", owner_account="Waishnav", repository="devspace"
 )
@@ -904,7 +911,8 @@ def test_inventory_has_no_unknown_by_default():
     assert_no_unknown_routes()
     assert classify_transport_route("does_not_exist") is PublicationRouteState.UNKNOWN_BLOCKED
     status = transport_inventory_status()
-    assert status["chatgpt_connector"] == "OWNER_INTERACTIVE_GATED"
+    assert status["chatgpt_connector"] == "UNKNOWN_BLOCKED"
+    assert status["codex_cli_pat"] == "UNKNOWN_BLOCKED"
     assert status["governed_push"] == "BOUNDED_INTERNAL_ONLY"
 
 
@@ -1068,6 +1076,60 @@ def test_inventory_classifies_devspace_and_seam():
         == 1
     )
     assert PublicationRouteState.UNKNOWN_BLOCKED.value in set(status.values())
+
+
+def test_prepare_rejects_unregistered_transport_even_with_exact_owner_grant(
+    publisher: OwnerRepresentationPublisher,
+    grant_store: OwnerRepresentationGrantStore,
+    remote: FakeRemote,
+):
+    proposal = _proposal(transport="made_up_transport", operation_id="op-unregistered")
+    grant = _issue_grant(
+        grant_store, transport="made_up_transport", operation_id="op-unregistered"
+    )
+    with pytest.raises(OwnerRepresentationBlocked, match="TRANSPORT_UNREGISTERED"):
+        publisher.prepare(proposal, grant)
+    assert remote.writes == []
+
+
+def test_prepare_rejects_unknown_blocked_route_even_with_explicit_binding(
+    publisher: OwnerRepresentationPublisher,
+    grant_store: OwnerRepresentationGrantStore,
+    remote: FakeRemote,
+    monkeypatch,
+):
+    proposal = _proposal(transport="fixture", operation_id="op-unknown-route")
+    grant = _issue_grant(grant_store, operation_id="op-unknown-route")
+    monkeypatch.setattr(
+        owner_publisher_module,
+        "route_for_transport",
+        lambda identity: "devspace_worker" if identity == "fixture" else None,
+    )
+    blocked_publisher = OwnerRepresentationPublisher(
+        operation_root=publisher.operation_root / "blocked",
+        write_transport=remote.write,
+        readback_transport=remote.readback,
+        grant_store=grant_store,
+    )
+    with pytest.raises(OwnerRepresentationBlocked, match="TRANSPORT_ROUTE_BLOCKED"):
+        blocked_publisher.prepare(proposal, grant)
+    assert remote.writes == []
+
+
+def test_publish_revalidates_transport_before_consuming_grant_or_writing(
+    publisher: OwnerRepresentationPublisher,
+    grant_store: OwnerRepresentationGrantStore,
+    remote: FakeRemote,
+    monkeypatch,
+):
+    proposal = _proposal(transport="fixture", operation_id="op-route-revoked")
+    grant = _issue_grant(grant_store, operation_id="op-route-revoked")
+    prepared = publisher.prepare(proposal, grant)
+    monkeypatch.setattr(owner_publisher_module, "route_for_transport", lambda identity: None)
+    with pytest.raises(OwnerRepresentationBlocked, match="TRANSPORT_UNREGISTERED"):
+        publisher.publish(prepared)
+    assert remote.writes == []
+    assert not (publisher.operation_root / "consumed_grants" / f"{grant.grant_hash}.json").exists()
 
 
 def test_devspace_route_state_matches_physical_evidence(repo_root: Path):

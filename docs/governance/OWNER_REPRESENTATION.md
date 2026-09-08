@@ -60,6 +60,10 @@ are blocked with `PUSH_DENIED_IS_NOT_PUBLICATION_AUTHORITY` /
    `ACTOR_MISMATCH`, `TRANSPORT_MISMATCH`, `OPERATION_MISMATCH`).
    A grant valid only for `CREATE_ISSUE` never implies `COMMENT`/`EDIT`/
    `CLOSE`/`CREATE_PR`/`FORK`.
+   The concrete signed transport identity is separately resolved through an
+   explicit closed mapping to an inventoried route; equal-looking strings are
+   never implicitly trusted. Unregistered or `UNKNOWN_BLOCKED` routes fail
+   before prepare and are revalidated immediately before the physical write.
 4. The durable publisher persists `PREPARED -> DISPATCHING -> COMPLETED`
    (mirroring the proven EIA publication pattern) before any physical effect
    and refuses replay:
@@ -93,14 +97,17 @@ are blocked with `PUSH_DENIED_IS_NOT_PUBLICATION_AUTHORITY` /
 | `governed_push` | REPOSITORY_PUSH grant | BOUNDED_INTERNAL_ONLY |
 | `external_intelligence_service` | EIA/EI pipelines | BOUNDED_INTERNAL_ONLY |
 | `repository_contract_gate` | Collaboration boundary checks | INCAPABLE_OF_EXTERNAL_PUBLICATION |
-| `chatgpt_connector` | ChatGPT UI ask-before-write | OWNER_INTERACTIVE_GATED |
-| `codex_cli_pat` | Codex CLI / PAT | OWNER_INTERACTIVE_GATED |
+| `chatgpt_connector` | ChatGPT UI ask-before-write (unverified live gate) | UNKNOWN_BLOCKED |
+| `codex_cli_pat` | Codex CLI / PAT (unverified live gate) | UNKNOWN_BLOCKED |
 | `devspace_worker` | Delegated arbitrary shell | UNKNOWN_BLOCKED |
 | `morning_report_gh_guidance` | Rendered human guidance only | INCAPABLE_OF_EXTERNAL_PUBLICATION |
 | `owner_representation_seam` | Canonical publication seam | EXTERNAL_PUBLICATION_AUTHORITY_ENFORCED |
 
 UI "ask before write" (ChatGPT connector or otherwise) is **defense-in-depth
-only** — it is not proof of canonical authority. Third-party writes that are
+only** — it is not proof of canonical authority or live capability. Without a
+current external control-plane receipt, the interactive connector remains
+unverified and must not be treated as an enforced publication route. Third-party
+writes that are
 actually performed on the Owner's behalf must home their authority in a
 one-shot grant through the canonical seam. `assert_no_unknown_routes()` fails
 closed on any silent new publication channel, and `FORBIDDEN_PROGRAMMATIC_GITHUB_WRITE_PATTERNS`
