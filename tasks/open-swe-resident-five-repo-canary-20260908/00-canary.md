@@ -17,9 +17,11 @@
 
 Prove that the newly activated resident External Intelligence daemon autonomously discovers one eligible Issue, uses Open SWE through OpenCLI/ChatGPT Web, creates an isolated worktree, writes one harmless test, runs exact verifiers, and publishes a verified Candidate pending independent acceptance.
 
-## Allowed file
+## Allowed files
 
 - `tests/ops/test_open_swe_resident_five_repo_canary_20260908.py`
+
+## Forbidden scope
 
 No other file may change. No deletion is allowed.
 
@@ -39,9 +41,9 @@ Create the allowed test file with one deterministic test that asserts the ordere
 
 The test is an activation witness only. It must not inspect the host config, network, credentials, browser state, or another repository.
 
-## Verification
+## Verification commands
 
-```text
+```bash
 python3 -m pytest -q tests/ops/test_open_swe_resident_five_repo_canary_20260908.py
 git diff --check
 ```
