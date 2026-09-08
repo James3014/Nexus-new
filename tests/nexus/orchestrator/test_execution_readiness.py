@@ -80,6 +80,20 @@ def _evaluate(
     )
 
 
+def _workforce_binding() -> dict[str, object]:
+    demands = {"schema": "nexus.workforce_demands.v1", "demands": [{"demand_id": "d1"}]}
+    return {
+        "planner_output": {"plan_payload": {"signal_snapshot": {"workforce_demands": demands}}},
+        "workforce_demands": demands,
+        "workforce_admission": {"overall_decision": "ALLOW"},
+        "canonical_dispatch_envelope": {"schema": "nexus.canonical_dispatch.v1"},
+        "task_id": "task-1",
+        "attempt_id": "attempt-1",
+        "task_card_path": "tasks/card.md",
+        "task_card_hash": "c" * 64,
+    }
+
+
 def _completion_observation(**overrides: object) -> CompletionAuthorityObservation:
     base: dict[str, object] = {
         "observed_authority_kind": "NEXUS_CORE_COMPLETION",
@@ -566,6 +580,7 @@ class TestAuthorityNonLeakage:
         assert '"CERTIFIED"' not in blob
         assert '"COMPLETE"' not in blob
 
+
 class TestCorrectiveFalseGreenControls:
     """Post-merge #807 F1-F4 hostile controls."""
 
@@ -641,13 +656,9 @@ class TestCorrectiveFalseGreenControls:
         )
         assert result.outcome is ExecutionReadinessOutcome.BLOCKED
         assert result.primary_blocker is not None
-        assert result.primary_blocker.code is (
-            ExecutionReadinessBlockerCode.TASK_AUTHORITY_MISSING
-        )
+        assert result.primary_blocker.code is (ExecutionReadinessBlockerCode.TASK_AUTHORITY_MISSING)
 
-    def test_material_replay_reconcile_state_overrides_synthetic_pass(
-        self, monkeypatch
-    ) -> None:
+    def test_material_replay_reconcile_state_overrides_synthetic_pass(self, monkeypatch) -> None:
         import nexus.orchestrator.self_hosted_task_service as task_service
 
         self._install_valid_authority(monkeypatch)
@@ -678,9 +689,7 @@ class TestCorrectiveFalseGreenControls:
         )
         assert result.outcome is ExecutionReadinessOutcome.BLOCKED
         assert result.primary_blocker is not None
-        assert result.primary_blocker.code is (
-            ExecutionReadinessBlockerCode.SEMANTIC_REPLAY_FENCE
-        )
+        assert result.primary_blocker.code is (ExecutionReadinessBlockerCode.SEMANTIC_REPLAY_FENCE)
 
     def test_material_workforce_env_pass_is_not_canonical_evidence(self) -> None:
         result = _evaluate(
@@ -697,6 +706,200 @@ class TestCorrectiveFalseGreenControls:
         assert result.outcome is ExecutionReadinessOutcome.BLOCKED
         assert result.primary_blocker is not None
         assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
+
+    def test_material_workforce_requires_semantic_canonical_binding(self, monkeypatch) -> None:
+        import nexus.orchestrator.self_hosted_task_service as task_service
+
+        demands = {"schema": "nexus.workforce_demands.v1", "demands": [{"demand_id": "d1"}]}
+        binding = {
+            "planner_output": {"plan_payload": {"signal_snapshot": {"workforce_demands": demands}}},
+            "workforce_demands": demands,
+            "workforce_admission": {"overall_decision": "ALLOW"},
+            "canonical_dispatch_envelope": {"schema": "nexus.canonical_dispatch.v1"},
+            "task_id": "task-1",
+            "attempt_id": "attempt-1",
+            "task_card_path": "tasks/card.md",
+            "task_card_hash": "c" * 64,
+        }
+        monkeypatch.setattr(
+            task_service,
+            "validate_workforce_dispatch_binding",
+            lambda request, require_binding=False: {
+                "worker_id": "worker-1",
+                "provider": "agy",
+                "model": "model-1",
+                "policy_hash": "p" * 64,
+                "binding_hash": "b" * 64,
+                "aggregate_binding_hash": "a" * 64,
+            },
+        )
+        result = _evaluate(
+            _request(worker_constraints=("provider=agy",)),
+            {
+                ExecutionReadinessPlane.WORKFORCE: (
+                    _pass(
+                        ExecutionReadinessPlane.WORKFORCE, "NEXUS_READINESS_WORKFORCE_STATUS=PASSED"
+                    ),
+                )
+            },
+        )
+        # The evaluator-only API has no typed binding channel on the legacy
+        # observation, so a status/hash witness remains blocked.
+        assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
+
+        result = _evaluate(
+            _request(worker_constraints=("provider=agy",)),
+            {
+                ExecutionReadinessPlane.WORKFORCE: (
+                    PlaneObservation(
+                        plane=ExecutionReadinessPlane.WORKFORCE,
+                        status=ExecutionReadinessStatus.PASSED,
+                        evidence_identities=("NEXUS_READINESS_WORKFORCE_STATUS=PASSED",),
+                        workforce_dispatch_binding=binding,
+                    ),
+                )
+            },
+        )
+        assert result.plane_results[-1].status is ExecutionReadinessStatus.PASSED
+        assert any(
+            "workforce_policy_hash=" in item
+            for item in result.plane_results[-1].evidence_identities
+        )
+        assert all(
+            "NEXUS_READINESS_WORKFORCE_STATUS=PASSED" not in item
+            for item in result.plane_results[-1].evidence_identities
+        )
+
+    def test_material_workforce_hashes_alone_fail(self) -> None:
+        evidence = tuple(
+            f"{name}={'a' * 64}"
+            for name in (
+                "planner_decision_hash",
+                "workforce_admission_hash",
+                "provider_preflight_hash",
+            )
+        )
+        result = _evaluate(
+            _request(worker_constraints=("provider=agy",)),
+            {
+                ExecutionReadinessPlane.WORKFORCE: (
+                    _pass(ExecutionReadinessPlane.WORKFORCE, *evidence),
+                )
+            },
+        )
+        assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
+
+    def test_binding_lineage_and_validator_rejection_fail_closed(self, monkeypatch) -> None:
+        import nexus.orchestrator.self_hosted_task_service as task_service
+
+        binding = _workforce_binding()
+        binding.pop("canonical_dispatch_envelope")
+        called = []
+        monkeypatch.setattr(
+            task_service,
+            "validate_workforce_dispatch_binding",
+            lambda *args, **kwargs: called.append(args) or {},
+        )
+        result = _evaluate(
+            _request(worker_constraints=("worker_id=worker-1",)),
+            {
+                ExecutionReadinessPlane.WORKFORCE: (
+                    PlaneObservation(
+                        plane=ExecutionReadinessPlane.WORKFORCE,
+                        status=ExecutionReadinessStatus.PASSED,
+                        workforce_dispatch_binding=binding,
+                    ),
+                )
+            },
+        )
+        assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
+        assert not called
+
+        binding = _workforce_binding()
+        binding["workforce_demands"] = {"demands": [{"demand_id": "other"}]}
+        result = _evaluate(
+            _request(worker_constraints=("provider=agy",)),
+            {
+                ExecutionReadinessPlane.WORKFORCE: (
+                    PlaneObservation(
+                        plane=ExecutionReadinessPlane.WORKFORCE,
+                        status=ExecutionReadinessStatus.PASSED,
+                        workforce_dispatch_binding=binding,
+                    ),
+                )
+            },
+        )
+        assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
+        assert not called
+
+        binding = _workforce_binding()
+        monkeypatch.setattr(
+            task_service,
+            "validate_workforce_dispatch_binding",
+            lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("stale/tampered")),
+        )
+        result = _evaluate(
+            _request(worker_constraints=("provider=agy",)),
+            {
+                ExecutionReadinessPlane.WORKFORCE: (
+                    PlaneObservation(
+                        plane=ExecutionReadinessPlane.WORKFORCE,
+                        status=ExecutionReadinessStatus.PASSED,
+                        workforce_dispatch_binding=binding,
+                    ),
+                )
+            },
+        )
+        assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
+
+    def test_worker_id_and_provider_constraints_are_bound(self, monkeypatch) -> None:
+        import nexus.orchestrator.self_hosted_task_service as task_service
+
+        captured = {}
+
+        def validate(request, *, require_binding=False):
+            captured.update(request)
+            assert require_binding is True
+            return {
+                "worker_id": "worker-1",
+                "provider": "agy",
+                "model": "model-1",
+                "policy_hash": "p" * 64,
+                "binding_hash": "b" * 64,
+                "aggregate_binding_hash": "a" * 64,
+            }
+
+        monkeypatch.setattr(task_service, "validate_workforce_dispatch_binding", validate)
+        binding = _workforce_binding()
+        for constraint in ("worker_id=worker-1", "provider=agy"):
+            result = _evaluate(
+                _request(worker_constraints=(constraint,)),
+                {
+                    ExecutionReadinessPlane.WORKFORCE: (
+                        PlaneObservation(
+                            plane=ExecutionReadinessPlane.WORKFORCE,
+                            status=ExecutionReadinessStatus.PASSED,
+                            workforce_dispatch_binding=binding,
+                        ),
+                    )
+                },
+            )
+            assert result.plane_results[-1].status is ExecutionReadinessStatus.PASSED
+        result = _evaluate(
+            _request(worker_constraints=("worker_id=other",)),
+            {
+                ExecutionReadinessPlane.WORKFORCE: (
+                    PlaneObservation(
+                        plane=ExecutionReadinessPlane.WORKFORCE,
+                        status=ExecutionReadinessStatus.PASSED,
+                        workforce_dispatch_binding=binding,
+                    ),
+                )
+            },
+        )
+        assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
+        assert captured["canonical_dispatch_envelope"] == binding["canonical_dispatch_envelope"]
+        assert captured["task_id"] == "task-1"
 
     def test_request_required_completion_capabilities_cannot_be_substituted(self) -> None:
         result = _evaluate(
@@ -718,9 +921,7 @@ class TestCorrectiveFalseGreenControls:
             ExecutionReadinessBlockerCode.COMPLETION_CONTRACT_BINDING_REQUIRED
         )
 
-    def test_repository_owner_name_must_match_physical_repository(
-        self, monkeypatch
-    ) -> None:
+    def test_repository_owner_name_must_match_physical_repository(self, monkeypatch) -> None:
         import nexus.orchestrator.execution_readiness as readiness_module
 
         monkeypatch.setattr(
@@ -749,9 +950,7 @@ class TestCorrectiveFalseGreenControls:
     def test_ready_result_replaces_legacy_default_evidence(self) -> None:
         result = _evaluate(_request())
         evidence = {
-            identity
-            for item in result.plane_results
-            for identity in item.evidence_identities
+            identity for item in result.plane_results for identity in item.evidence_identities
         }
         assert "governance_plane:default_no_open_recovery" not in evidence
         assert "authority_plane:in_process_caller_context" not in evidence

@@ -3343,6 +3343,37 @@ def test_execution_readiness_tool_registered_in_manifest():
     assert schema["properties"]["intended_source_tree"]["pattern"] == "^[0-9a-f]{40}$"
     completion_schema = schema["properties"]["required_completion_contract"]
     assert completion_schema["additionalProperties"] is False
+    binding_schema = schema["properties"]["workforce_dispatch_binding"]
+    assert set(binding_schema["required"]) == {
+        "planner_output", "workforce_demands", "workforce_admission",
+        "canonical_dispatch_envelope", "task_id", "attempt_id",
+        "task_card_path", "task_card_hash",
+    }
+
+
+def test_execution_readiness_forwards_typed_workforce_binding(monkeypatch, readiness_env):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    captured = {}
+
+    def stub(request, observations, **kwargs):
+        captured["binding"] = request.workforce_dispatch_binding
+        return SimpleNamespace(
+            model_dump=lambda mode="json": {"outcome": "BLOCKED", "primary_blocker": None, "plane_results": [], "certification_fence": {}},
+            request_satisfies_certification_fence=lambda: False,
+        )
+
+    monkeypatch.setattr(gateway_module, "evaluate_execution_readiness", stub)
+    binding = {
+        "planner_output": {"plan": "p"}, "workforce_demands": {"demands": []},
+        "workforce_admission": {"overall_decision": "ALLOW"},
+        "canonical_dispatch_envelope": {"schema": "nexus.canonical_dispatch.v1"},
+        "task_id": "task-1", "attempt_id": "attempt-1",
+        "task_card_path": "tasks/card.md", "task_card_hash": "c" * 64,
+    }
+    gateway = UnifiedMCPGateway(service=FakeService())
+    _call_readiness(gateway, {"worker_constraints": ["provider=agy"], "workforce_dispatch_binding": binding})
+    assert captured["binding"] == binding
 
 
 def test_execution_readiness_ready_path_end_to_end(readiness_env):

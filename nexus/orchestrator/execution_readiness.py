@@ -25,7 +25,7 @@ import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from nexus.contracts.autonomy_goal import AutonomyActionClass, RepositoryIdentity
 from nexus.contracts.execution_readiness import (
@@ -140,27 +140,19 @@ _BLOCKER_MESSAGE: dict[ExecutionReadinessBlockerCode, str] = {
 }
 
 _UNTRUSTED_COMPATIBILITY_PASSES: dict[ExecutionReadinessPlane, frozenset[str]] = {
-    ExecutionReadinessPlane.GOVERNANCE: frozenset(
-        {
-            "governance_plane:default_no_open_recovery",
-            "NEXUS_READINESS_GOVERNANCE_STATUS=PASSED",
-        }
-    ),
-    ExecutionReadinessPlane.AUTHORITY: frozenset(
-        {
-            "authority_plane:in_process_caller_context",
-            "NEXUS_READINESS_AUTHORITY_STATUS=PASSED",
-        }
-    ),
-    ExecutionReadinessPlane.REPLAY_FENCE: frozenset(
-        {
-            "replay_fence_plane:in_process_first_observation",
-            "NEXUS_READINESS_REPLAY_FENCE_STATUS=PASSED",
-        }
-    ),
-    ExecutionReadinessPlane.WORKFORCE: frozenset(
-        {"NEXUS_READINESS_WORKFORCE_STATUS=PASSED"}
-    ),
+    ExecutionReadinessPlane.GOVERNANCE: frozenset({
+        "governance_plane:default_no_open_recovery",
+        "NEXUS_READINESS_GOVERNANCE_STATUS=PASSED",
+    }),
+    ExecutionReadinessPlane.AUTHORITY: frozenset({
+        "authority_plane:in_process_caller_context",
+        "NEXUS_READINESS_AUTHORITY_STATUS=PASSED",
+    }),
+    ExecutionReadinessPlane.REPLAY_FENCE: frozenset({
+        "replay_fence_plane:in_process_first_observation",
+        "NEXUS_READINESS_REPLAY_FENCE_STATUS=PASSED",
+    }),
+    ExecutionReadinessPlane.WORKFORCE: frozenset({"NEXUS_READINESS_WORKFORCE_STATUS=PASSED"}),
 }
 
 _AUTHORITY_ACTION_FAMILY: dict[str, AutonomyActionClass] = {
@@ -176,13 +168,6 @@ _AUTHORITY_ACTION_FAMILY: dict[str, AutonomyActionClass] = {
     "PRODUCTION_RELEASE": AutonomyActionClass.PRODUCTION_RELEASE,
 }
 
-_WORKFORCE_REQUIRED_EVIDENCE = (
-    "planner_decision_hash",
-    "workforce_admission_hash",
-    "provider_preflight_hash",
-)
-_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
-
 
 @dataclass(frozen=True)
 class PlaneObservation:
@@ -192,6 +177,10 @@ class PlaneObservation:
     status: ExecutionReadinessStatus
     blocker_code: ExecutionReadinessBlockerCode | None = None
     evidence_identities: tuple[str, ...] = ()
+    # Material Workforce callers must provide the canonical Planner output,
+    # demands, and admission receipt as typed data.  Hash strings alone are
+    # deliberately insufficient evidence.
+    workforce_dispatch_binding: Mapping[str, Any] | None = None
 
     def to_plane_result(self) -> ExecutionReadinessPlaneResult:
         return ExecutionReadinessPlaneResult(
@@ -545,7 +534,10 @@ def _canonical_authority_observation(
 
 
 def _replay_is_material(request: ExecutionReadinessRequest) -> bool:
-    return bool(request.task_campaign_goal_identity) and "TASK" in request.execution_contract_kind.upper()
+    return (
+        bool(request.task_campaign_goal_identity)
+        and "TASK" in request.execution_contract_kind.upper()
+    )
 
 
 def _canonical_replay_observation(request: ExecutionReadinessRequest) -> PlaneObservation:
@@ -555,9 +547,7 @@ def _canonical_replay_observation(request: ExecutionReadinessRequest) -> PlaneOb
         return PlaneObservation(
             plane=ExecutionReadinessPlane.REPLAY_FENCE,
             status=ExecutionReadinessStatus.PASSED,
-            evidence_identities=(
-                "replay_fence_plane:non_material:no_tracked_task_binding",
-            ),
+            evidence_identities=("replay_fence_plane:non_material:no_tracked_task_binding",),
         )
     task_id = str(request.task_campaign_goal_identity)
     try:
@@ -627,7 +617,7 @@ def _canonical_workforce_observation(
     request: ExecutionReadinessRequest,
     supplied: Sequence[PlaneObservation],
 ) -> PlaneObservation:
-    """Require exact Planner/Admission/provider identities when Workforce is material."""
+    """Revalidate the canonical Planner -> Admission binding for material work."""
 
     if not request.worker_constraints:
         return PlaneObservation(
@@ -638,12 +628,89 @@ def _canonical_workforce_observation(
     for observation in supplied:
         if observation.status is not ExecutionReadinessStatus.PASSED:
             continue
-        values = _evidence_map(observation)
-        if all(_SHA256_RE.fullmatch(values.get(key, "")) for key in _WORKFORCE_REQUIRED_EVIDENCE):
+        binding = observation.workforce_dispatch_binding
+        if not isinstance(binding, Mapping):
+            continue
+        required_binding_fields = (
+            "canonical_dispatch_envelope",
+            "task_id",
+            "attempt_id",
+            "task_card_path",
+            "task_card_hash",
+        )
+        if any(not binding.get(field) for field in required_binding_fields):
+            continue
+        demands = binding.get("workforce_demands")
+        admission = binding.get("workforce_admission")
+        planner = binding.get("planner_output")
+        if not isinstance(demands, Mapping) or not isinstance(admission, Mapping):
+            continue
+        # The admission validator is the sole policy authority.  The planner
+        # snapshot is checked only for lineage, never recomputed here.
+        if not isinstance(planner, Mapping):
+            continue
+        planned_demands = (
+            planner.get("plan_payload", {}).get("signal_snapshot", {}).get("workforce_demands")
+            if isinstance(planner.get("plan_payload"), Mapping)
+            else None
+        )
+        if planned_demands != demands:
+            continue
+        try:
+            from nexus.orchestrator.self_hosted_task_service import (
+                validate_workforce_dispatch_binding,
+            )
+
+            validated = validate_workforce_dispatch_binding(
+                {
+                    "planner_output": planner,
+                    "workforce_demands": demands,
+                    "workforce_admission": admission,
+                    "canonical_dispatch_envelope": binding.get("canonical_dispatch_envelope"),
+                    "task_id": binding.get("task_id", ""),
+                    "attempt_id": binding.get("attempt_id", ""),
+                    "task_card_path": binding.get("task_card_path", ""),
+                    "task_card_hash": binding.get("task_card_hash", ""),
+                },
+                require_binding=True,
+            )
+        except Exception:
+            continue
+        if not isinstance(validated, Mapping):
+            continue
+        identity = {
+            "worker": str(validated.get("worker_id") or "").strip().lower(),
+            "worker_id": str(validated.get("worker_id") or "").strip().lower(),
+            "provider": str(validated.get("provider") or "").strip().lower(),
+            "model": str(validated.get("model") or "").strip().lower(),
+        }
+        for raw_constraint in request.worker_constraints:
+            key, separator, value = str(raw_constraint).partition("=")
+            key, value = key.strip().lower(), value.strip().lower()
+            if separator and key in identity and identity[key] != value:
+                break
+        else:
+            evidence = tuple(
+                item
+                for item in observation.evidence_identities
+                if item not in _UNTRUSTED_COMPATIBILITY_PASSES[ExecutionReadinessPlane.WORKFORCE]
+            ) + tuple(
+                f"workforce_{key}={validated[key]}"
+                for key in (
+                    "worker_id",
+                    "provider",
+                    "model",
+                    "policy_hash",
+                    "binding_hash",
+                    "aggregate_binding_hash",
+                )
+                if isinstance(validated.get(key), str) and validated[key]
+            )
             return PlaneObservation(
                 plane=ExecutionReadinessPlane.WORKFORCE,
                 status=ExecutionReadinessStatus.PASSED,
-                evidence_identities=tuple(observation.evidence_identities),
+                evidence_identities=evidence,
+                workforce_dispatch_binding=binding,
             )
     return PlaneObservation(
         plane=ExecutionReadinessPlane.WORKFORCE,
@@ -706,7 +773,10 @@ def _aggregate_plane(
                 raise ReadinessEvidenceError("OBSERVATION_CODE_PLANE_MISMATCH", plane)
         elif observation.blocker_code is not None:
             raise ReadinessEvidenceError("NON_BLOCKED_OBSERVATION_MUST_NOT_CARRY_CODE", plane)
-        if observation.status is ExecutionReadinessStatus.UNPROVEN and observation.evidence_identities:
+        if (
+            observation.status is ExecutionReadinessStatus.UNPROVEN
+            and observation.evidence_identities
+        ):
             raise ReadinessEvidenceError("UNPROVEN_OBSERVATION_MUST_NOT_CARRY_EVIDENCE", plane)
     blocked = next(
         (item for item in observations if item.status is ExecutionReadinessStatus.BLOCKED),
@@ -764,7 +834,10 @@ def evaluate_execution_readiness(
                 evidence = _merge_evidence(evidence, completion_evidence)
             elif not completion_ok:
                 status = ExecutionReadinessStatus.BLOCKED
-                code = completion_code or ExecutionReadinessBlockerCode.COMPLETION_CONTRACT_BINDING_REQUIRED
+                code = (
+                    completion_code
+                    or ExecutionReadinessBlockerCode.COMPLETION_CONTRACT_BINDING_REQUIRED
+                )
                 evidence = _merge_evidence(evidence, completion_evidence)
         results.append(
             ExecutionReadinessPlaneResult(
