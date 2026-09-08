@@ -1504,7 +1504,7 @@ def _canonical_result(worker_id="canonical/worker"):
         "planner_output": {"decision_hash": "4" * 64, "planner": "canonical"},
         "workforce_admission": {
             "overall_decision": "ALLOW",
-            "records": [{"decision": "ALLOW"}],
+            "records": [{"decision": {"decision": "ALLOW", "resolved_worker_id": worker_id, "resolved_provider": "canonical-provider", "resolved_model": "canonical-provider/model"}}],
             "decision": "ALLOW",
             "admission": "canonical",
         },

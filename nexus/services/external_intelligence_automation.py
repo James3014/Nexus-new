@@ -732,6 +732,24 @@ class ExternalIntelligenceAutomation:
         admission = result.get("workforce_admission")
         if not isinstance(planner, Mapping) or not isinstance(admission, Mapping):
             raise AutomationError("CANONICAL_WORKFORCE_EVIDENCE_MISSING")
+        records = admission.get("records")
+        if (
+            admission.get("overall_decision") != "ALLOW"
+            or not isinstance(records, list)
+            or len(records) != 1
+            or not isinstance(records[0], Mapping)
+            or not isinstance(records[0].get("decision"), Mapping)
+            or records[0]["decision"].get("decision") != "ALLOW"
+        ):
+            raise AutomationError("CANONICAL_WORKFORCE_ADMISSION_NOT_SINGLE_ALLOW")
+        decision = records[0]["decision"]
+        for admission_key, binding_key in (
+            ("resolved_worker_id", "worker_id"),
+            ("resolved_provider", "provider"),
+            ("resolved_model", "model"),
+        ):
+            if decision.get(admission_key) != binding.get(binding_key):
+                raise AutomationError("CANONICAL_WORKFORCE_BINDING_ADMISSION_MISMATCH")
         evidence_root = self.state_store.root / "canonical-workforce-evidence"
         planner_hash = _sha256_json(planner)
         admission_hash = _sha256_json(admission)
