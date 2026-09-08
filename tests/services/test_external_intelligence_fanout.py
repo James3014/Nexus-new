@@ -273,7 +273,7 @@ def test_directory_boundaries_are_treated_as_mutation_overlap(tmp_path):
     assert len(decision["deferred_mutation_overlap"]) == 1
 
 
-def test_worker_bootstrap_contains_ref_hash_not_full_envelope_body(tmp_path):
+def test_worker_bootstrap_contains_ref_hash_without_duplicate_envelope_body(tmp_path):
     _, base = make_repo(tmp_path)
     envelope = tmp_path / "envelope.json"
     marker = "SHOULD_NOT_ENTER_SOL_CONTEXT_987654"
@@ -283,7 +283,49 @@ def test_worker_bootstrap_contains_ref_hash_not_full_envelope_body(tmp_path):
     assert str(envelope) in prompt
     assert envelope_sha in prompt
     assert marker not in prompt
+    assert "embedded in Controller evidence above" in prompt
+    assert "envelope_artifact_ref is provenance/readback metadata only" in prompt
     assert "authorized_mutation_paths" in prompt
+
+
+def test_worker_bootstrap_references_embedded_envelope_and_exposes_rooted_probes(tmp_path):
+    _, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["tests/ops"])
+    parsed = ExecutionUnit.from_mapping(
+        unit(base, envelope, envelope_sha, "ua", ["tests/ops/test_canary.py"])
+    )
+
+    prompt = build_worker_bootstrap(parsed, WorkspaceLease("ws-1", "/tmp/ws-1", base))
+
+    assert "The full external_execution_envelope.v1 is embedded in Controller evidence above" in prompt
+    assert envelope.read_text(encoding="utf-8") not in prompt
+    assert "envelope_artifact_ref is provenance/readback metadata only" in prompt
+    assert "Do not open envelope_artifact_ref through workspace tools" in prompt
+    assert "task_card_workspace_path=/tasks/example/00-task.md" in prompt
+    assert 'allowed_target_probe_paths=["/tests/ops/test_canary.py"]' in prompt
+    assert "Do not use broad glob discovery" in prompt
+    assert "Do not modify any path outside authorized_mutation_paths" in prompt
+
+
+@pytest.mark.parametrize(
+    "task_card_ref", ["../outside.md", "/tmp/host.md", "tasks/../outside.md", "card.md"]
+)
+def test_worker_bootstrap_rejects_unrootable_task_card_ref(tmp_path, task_card_ref):
+    _, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    make_envelope(envelope, base)
+    payload = json.loads(envelope.read_text(encoding="utf-8"))
+    payload["binding"]["task_card_ref"] = task_card_ref
+    envelope.write_text(json.dumps(payload, sort_keys=True, indent=2), encoding="utf-8")
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    parsed = ExecutionUnit.from_mapping(
+        unit(base, envelope, hashlib.sha256(canonical.encode("utf-8")).hexdigest(), "ua", ["a.py"])
+    )
+
+    expected_error = "TASK_CARD_REF_REQUIRED" if task_card_ref == "card.md" else "INVALID_MUTATION_PATH"
+    with pytest.raises(FanoutError, match=expected_error):
+        build_worker_bootstrap(parsed, WorkspaceLease("ws-1", "/tmp/ws-1", base))
 
 
 def test_worker_bootstrap_identifies_deepseek_l2_and_model_adaptation_without_envelope_body(
@@ -307,6 +349,7 @@ def test_worker_bootstrap_identifies_deepseek_l2_and_model_adaptation_without_en
     assert "one evidence-guided same-unit repair and no blind retry or auto-chain" in prompt
     assert marker not in prompt
     assert envelope.read_text(encoding="utf-8") not in prompt
+    assert 'allowed_target_probe_paths=["/a.py"]' in prompt
 
 
 def test_export_attestation_accepts_truncated_large_session_after_complete_info(
