@@ -983,7 +983,7 @@ def test_critical_regression_eia_unattended_freshness_end_to_end(tmp_path):
             self.store = store
             self.calls = []
 
-        def analyze(self, record, sources):
+        def analyze(self, record, sources, selected_worker=None):
             self.calls.append((record, list(sources)))
             envelope = {"schema": "external_execution_envelope.v1", "x": 1}
             req_sha = "b" * 64

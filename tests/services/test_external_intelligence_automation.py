@@ -119,7 +119,7 @@ class FakeSidecar:
         self.calls = []
         self.non_dispatched = non_dispatched
 
-    def analyze(self, record, sources):
+    def analyze(self, record, sources, selected_worker=None):
         self.calls.append((record, list(sources)))
         if self.non_dispatched:
             return {"status": "NOT_DISPATCHED", "intake": {"disposition": "BLOCKED"}}
@@ -592,7 +592,7 @@ def test_process_started_uncertainty_remains_reconcile_only_on_repoll(tmp_path):
             super().__init__(store)
             self.attempts = 0
 
-        def analyze(self, record, sources):
+        def analyze(self, record, sources, selected_worker=None):
             self.attempts += 1
             if self.attempts == 1:
                 self.calls.append((record, list(sources)))
