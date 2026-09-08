@@ -238,14 +238,25 @@ def test_semantic_missing_or_malformed_attestation_fails_closed_without_redispat
 
 
 @pytest.mark.parametrize(
-    ("field", "value"),
-    (("provider_id", "other-provider"), ("model_id", "other-model")),
+    ("operation", "field", "value"),
+    (
+        (operation, field, value)
+        for operation in ("semantic_run", "semantic_reconcile")
+        for field, value in (
+            ("provider_id", "other-provider"),
+            ("model_id", "other-model"),
+        )
+    ),
 )
-def test_semantic_single_identity_mismatch_fails_closed(tmp_path, monkeypatch, field, value):
+def test_semantic_single_identity_mismatch_fails_closed(
+    tmp_path, monkeypatch, operation, field, value
+):
     module = _module()
+    calls = []
 
     def runtime_call(*_args, **_kwargs):
         payload = _args[1]
+        calls.append(payload["operation"])
         if payload["operation"] == "identity":
             return _identity(module, payload), "", False, ""
         result = {
@@ -267,11 +278,12 @@ def test_semantic_single_identity_mismatch_fails_closed(tmp_path, monkeypatch, f
         expected_artifact_sha256=_RUNTIME_HASH,
     )
 
-    result = transport.reconcile("prompt")
+    result = transport.invoke("prompt") if operation == "semantic_run" else transport.reconcile("prompt")
 
     assert result.status == "OPEN_SWE_MODEL_ATTESTATION_MISMATCH"
     assert result.outcome_unknown is True
     assert result.retry_safe is False
+    assert calls == ["identity", operation]
 
 
 def test_semantic_reconcile_accepts_valid_explicit_attestation(tmp_path, monkeypatch):
