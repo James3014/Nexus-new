@@ -8,7 +8,7 @@ import hashlib
 import os
 import shutil
 import subprocess
-import sys
+import sysconfig
 import venv
 from pathlib import Path
 
@@ -40,10 +40,17 @@ def action_fixture(tmp_path: Path) -> dict[str, Path]:
     venv.EnvBuilder(with_pip=False, clear=True, symlinks=False).create(venv_dir)
     # The managed macOS Python binary resolves libpython relative to the venv
     # executable; provide that runtime library in this disposable fixture.
-    runtime_lib = Path(sys.executable).resolve().parent.parent / "lib/libpython3.14.dylib"
-    fixture_lib = venv_dir / "lib/libpython3.14.dylib"
-    if runtime_lib.exists() and not fixture_lib.exists():
-        fixture_lib.symlink_to(runtime_lib)
+    runtime_lib_name = sysconfig.get_config_var("LDLIBRARY")
+    runtime_lib_dir = sysconfig.get_config_var("LIBDIR")
+    runtime_lib = (
+        Path(runtime_lib_dir) / str(runtime_lib_name)
+        if runtime_lib_dir and runtime_lib_name
+        else None
+    )
+    if runtime_lib and runtime_lib.is_file():
+        fixture_lib = venv_dir / "lib" / runtime_lib.name
+        if not fixture_lib.exists():
+            fixture_lib.symlink_to(runtime_lib)
     python = venv_dir / "bin/python"
     site = next((venv_dir / "lib").glob("python*/site-packages"))
     source_product = Path(__file__).parents[2] / "product"

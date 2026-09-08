@@ -3,14 +3,23 @@
 驗證 Phase 健康指標計算邏輯與 v22 分數權重。
 """
 
-import pytest
-import pandas as pd
 import json
-from unittest.mock import MagicMock, patch
+from datetime import datetime, timezone
 from pathlib import Path
-from datetime import datetime, timezone, timedelta
+from unittest.mock import MagicMock, patch
+
+import pandas as pd
+import pytest
 
 from nexus.services.health_analyzer import compute_phase_health
+
+
+class FrozenDateTime(datetime):
+    @classmethod
+    def now(cls, tz=None):
+        fixed = cls(2026, 4, 15, 12, 0, tzinfo=timezone.utc)
+        return fixed.astimezone(tz) if tz else fixed.replace(tzinfo=None)
+
 
 @pytest.fixture
 def mock_lancedb_hits():
@@ -44,6 +53,8 @@ def mock_lancedb_hits():
     })
     return df
 
+
+@patch("nexus.services.health_analyzer.datetime", FrozenDateTime)
 @patch("nexus.services.health_analyzer.connect_memory_db")
 def test_compute_phase_health_logic(mock_connect, mock_lancedb_hits):
     """驗證健康指標計算與 v22 權重 0.8 / 0.2"""
