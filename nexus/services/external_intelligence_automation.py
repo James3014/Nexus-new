@@ -772,6 +772,19 @@ class ExternalIntelligenceAutomation:
             units.append(unit_data)
         return units
 
+    def _validate_worker_transport_binding(self) -> None:
+        """Reject a planner binding incompatible with the configured worker before effect."""
+        if self._worker_binding is None:
+            return
+        transport = getattr(self.c_runtime, "transport", None)
+        bind_worker = getattr(transport, "bind_worker", None)
+        if not callable(bind_worker):
+            return
+        try:
+            bind_worker(dict(self._worker_binding))
+        except Exception as exc:
+            raise AutomationError(f"CANONICAL_WORKER_TRANSPORT_BINDING_INVALID:{exc}") from exc
+
     @staticmethod
     def _valid_receipts(run: Mapping[str, Any], expected_ids: set[str]) -> list[Mapping[str, Any]]:
         errors = run.get("errors") or {}
@@ -843,6 +856,7 @@ class ExternalIntelligenceAutomation:
                 self._worker_binding = self._canonical_worker_binding(
                     item, task_card_path, task_card_text
                 )
+                self._validate_worker_transport_binding()
             prior_dispatch_state = resume_from in {
                 "INTELLIGENCE_DISPATCHING",
                 "INTELLIGENCE_COMPLETED",
@@ -1036,6 +1050,7 @@ class ExternalIntelligenceAutomation:
                     "RECONCILIATION_REQUIRED",
                     prior_state=current.get("state"),
                     intelligence_effect_id=current.get("intelligence_effect_id"),
+                    worker_binding=self._worker_binding or current.get("worker_binding"),
                     error=type(exc).__name__,
                     reconcile_only=True,
                     semantic_dispatched=dispatched,
