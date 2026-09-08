@@ -845,9 +845,35 @@ def execute_canonical_product_task(
     # this exact project root.  Legacy/unactivated roots intentionally return
     # no factory and retain their existing behavior, while activated roots
     # fail closed inside the adapter when the binding is absent or stale.
-    from nexus.orchestrator.writer_quiescence import lookup_runtime_writer_factory
+    from nexus.orchestrator.writer_quiescence import (
+        WriterAdmissionDenied,
+        lookup_runtime_writer_factory,
+    )
 
     runtime_writer_factory = lookup_runtime_writer_factory(root)
+    from nexus.services.unified_runtime import _validate_runtime_writer_entry
+
+    # Gateway construction can create report directories. Fence the selected
+    # destination before constructing it, as well as at the Runtime boundary.
+    _validate_runtime_writer_entry(
+        runtime_writer_factory, owner_context=None,
+        receipt_path=receipt_path, effect_journal=None,
+    )
+    effect_ports = {}
+    if runtime_writer_factory is not None:
+        effect_binding = runtime_writer_factory.effect_binding()
+        if effect_binding is None:
+            raise WriterAdmissionDenied("canonical_runtime_effect_binding_required")
+        _validate_runtime_writer_entry(
+            runtime_writer_factory, owner_context=None,
+            receipt_path=receipt_path, effect_journal=effect_binding.journal,
+        )
+        effect_ports = {
+            "effect_journal": effect_binding.journal,
+            "effect_dispatch": effect_binding.dispatch,
+            "effect_reconcile": effect_binding.reconcile,
+            "effect_fenced": True,
+        }
     request = UnifiedRuntimeRequest(
         task_id=task_id,
         workspace_revision=revision,
@@ -885,9 +911,6 @@ def execute_canonical_product_task(
     )
 
     gateway = BattlesuitGateway(project_root=root)
-    # Keep construction compatible with test/fixture gateway doubles while
-    # carrying the source-owned factory on the real Gateway instance.
-    gateway.runtime_writer_factory = runtime_writer_factory
     receipt = gateway.ask_unified(
         request,
         local_service=local_service,
@@ -895,6 +918,7 @@ def execute_canonical_product_task(
         learning=_execution_learning_observer,
         receipt_path=receipt_path,
         runtime_writer_factory=runtime_writer_factory,
+        **effect_ports,
     )
     receipt, readback_blockers = _readback_runtime_receipt(receipt_path, receipt)
     root_receipt = receipt.get("root_receipt")

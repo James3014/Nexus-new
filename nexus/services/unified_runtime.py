@@ -136,22 +136,32 @@ def _runtime_write_context(
     owner_context: Any = None,
 ):
     """Enter a fresh source-owned lease only at the durable write boundary."""
+    if owner_context is not None and runtime_writer_factory is not None:
+        raise ValueError("runtime_owner_context_and_factory_conflict")
     if owner_context is not None:
         yield owner_context
         return
     if runtime_writer_factory is not None:
+        from nexus.orchestrator.writer_quiescence import RuntimeWriterFactory
+        if not isinstance(runtime_writer_factory, RuntimeWriterFactory):
+            raise ValueError("runtime_writer_factory_invalid")
+        runtime_writer_factory.validate_entry(path=path, role=role)
         with runtime_writer_factory.for_operation(task_id, role=role, path=path) as context:
             yield context
         return
-    # Activated roots must never silently fall back to an unbound write.
-    from nexus.events.state_owner_manifest import read_manifest
-    from nexus.events.writer_generation import read_generation
-    root = path.resolve().parent
-    while root != root.parent and not (read_manifest(root) is not None or read_generation(root) is not None):
-        root = root.parent
-    if read_manifest(root) is not None or read_generation(root) is not None:
-        raise ValueError("runtime_writer_factory_required")
+    _validate_runtime_writer_entry(
+        None,
+        owner_context=None,
+        receipt_path=path if role == "runtime_receipt" else None,
+        effect_journal=None,
+        selected_effect_path=path if role == "effect_journal" else None,
+    )
     yield None
+
+
+def _assert_runtime_context_active(factory: Any, context: Any) -> None:
+    if factory is not None:
+        factory.assert_context(context)
 
 
 def _validate_runtime_effect_owner(owner_context: Any, effect_journal: Any) -> None:
@@ -178,6 +188,56 @@ def _validate_runtime_effect_owner(owner_context: Any, effect_journal: Any) -> N
         if str(exc).startswith("runtime_effect_owner_"):
             raise
         raise ValueError("runtime_effect_owner_binding_invalid") from exc
+
+
+def _validate_runtime_writer_entry(
+    runtime_writer_factory: Any,
+    *,
+    owner_context: Any,
+    receipt_path: str | Path | None,
+    effect_journal: Any,
+    selected_effect_path: Path | None = None,
+) -> None:
+    """Fail closed before Planner/model/effect work for an activated root."""
+    if runtime_writer_factory is not None:
+        from nexus.orchestrator.writer_quiescence import RuntimeWriterFactory
+        if not isinstance(runtime_writer_factory, RuntimeWriterFactory):
+            raise ValueError("runtime_writer_factory_invalid")
+        if owner_context is not None:
+            raise ValueError("runtime_owner_context_and_factory_conflict")
+        if receipt_path is not None:
+            runtime_writer_factory.validate_entry(path=receipt_path, role="runtime_receipt")
+        if effect_journal is not None:
+            runtime_writer_factory.validate_entry(path=effect_journal.path, role="effect_journal")
+        return
+    if owner_context is not None:
+        return
+    candidates: list[Path] = []
+    if receipt_path is not None:
+        candidates.append(Path(receipt_path))
+    if effect_journal is not None and hasattr(effect_journal, "project_root"):
+        candidates.append(Path(effect_journal.project_root))
+    if selected_effect_path is not None:
+        candidates.append(selected_effect_path)
+    if not candidates:
+        return
+    candidates = [variant for path in candidates for variant in (path.absolute(), path.resolve())]
+    from nexus.events.state_owner_manifest import read_manifest
+    from nexus.events.writer_generation import read_generation
+    receipt_mode = receipt_path is not None
+    for candidate in candidates:
+        root = candidate if candidate.is_dir() else candidate.parent
+        while True:
+            marker = root / ".nexus" / "writer-quiescence-hold.json"
+            try:
+                held = marker.is_symlink() or marker.exists()
+            except OSError:
+                held = True
+            if held or read_manifest(root) is not None or (receipt_mode and read_generation(root) is not None):
+                raise ValueError("runtime_writer_factory_required")
+            if root == root.parent:
+                break
+            root = root.parent
 
 
 def build_execution_replan_request(
@@ -2874,6 +2934,12 @@ class UnifiedRuntime:
         if effect_journal is not None:
             from nexus.events.effect_journal import EffectJournal
             if not isinstance(effect_journal, EffectJournal): raise ValueError("canonical_effect_journal_required")
+        _validate_runtime_writer_entry(
+            runtime_writer_factory,
+            owner_context=owner_context,
+            receipt_path=receipt_path or previous_receipt.get("receipt_path"),
+            effect_journal=effect_journal,
+        )
         _validate_runtime_owner_context(owner_context, receipt_path or previous_receipt.get("receipt_path"))
         _validate_runtime_effect_owner(owner_context, effect_journal)
         if previous_receipt.get("effect_journal_bindings") and effect_journal is None:
@@ -3005,6 +3071,12 @@ class UnifiedRuntime:
         runtime_writer_factory: Any = None,
     ) -> dict[str, Any]:
         request.validate()
+        _validate_runtime_writer_entry(
+            runtime_writer_factory,
+            owner_context=owner_context,
+            receipt_path=receipt_path,
+            effect_journal=effect_journal,
+        )
         _validate_runtime_owner_context(owner_context, receipt_path)
         _validate_runtime_effect_owner(owner_context, effect_journal)
         fenced = effect_fenced or bool(request.route.get("effect_fenced", False))
@@ -3429,6 +3501,7 @@ class UnifiedRuntime:
                     path = Path(receipt_path)
                     terminal_receipt["receipt_path"] = str(path)
                     with _runtime_write_context(runtime_writer_factory, task_id=request.task_id, role="runtime_receipt", path=path, owner_context=owner_context) as write_context:
+                        _assert_runtime_context_active(runtime_writer_factory, write_context)
                         _assert_runtime_receipt_owner(write_context, path)
                         _write_receipt_atomic(path, terminal_receipt)
                 return terminal_receipt
@@ -3504,13 +3577,15 @@ class UnifiedRuntime:
                         }
                         from nexus.events.effect_journal import deterministic_effect_id, operation_digest
                         effect_journal_bindings.append({"effect_id": deterministic_effect_id(identity), "operation_id": operation_digest(identity), "action": identity["action"], "request_digest": request_digest, "project_root": str(effect_journal.project_root)})
-                        result = effect_journal.execute(
-                            identity=identity,
-                            subject=request.task_id,
-                            request_digest=request_digest,
-                            dispatch=lambda: effect_dispatch.dispatch(lambda: invoker(capability_context)),
-                            reconcile=lambda record: effect_reconcile.reconcile(record),
-                        )
+                        with _runtime_write_context(runtime_writer_factory, task_id=request.task_id, role="effect_journal", path=effect_journal.path, owner_context=owner_context) as effect_context:
+                            _assert_runtime_context_active(runtime_writer_factory, effect_context)
+                            result = effect_journal.execute(
+                                identity=identity,
+                                subject=request.task_id,
+                                request_digest=request_digest,
+                                dispatch=lambda: effect_dispatch.dispatch(lambda: invoker(capability_context)),
+                                reconcile=lambda record: effect_reconcile.reconcile(record),
+                            )
                         saved = effect_journal.get(deterministic_effect_id(identity)) or {}
                         effect_journal_bindings[-1].update({"generation": saved.get("generation"), "state": saved.get("state"), "result_digest": saved.get("result_digest", ""), "project_root": str(effect_journal.project_root)})
                     else:
@@ -3728,6 +3803,7 @@ class UnifiedRuntime:
                 path = Path(receipt_path)
                 blocked_receipt["receipt_path"] = str(path)
                 with _runtime_write_context(runtime_writer_factory, task_id=request.task_id, role="runtime_receipt", path=path, owner_context=owner_context) as write_context:
+                    _assert_runtime_context_active(runtime_writer_factory, write_context)
                     _assert_runtime_receipt_owner(write_context, path)
                     _write_receipt_atomic(path, blocked_receipt)
             return attach_failure_diagnostics(blocked_receipt)
@@ -3783,6 +3859,8 @@ class UnifiedRuntime:
             planner_decision_id=planner_decision_id,
             attempt_number=attempt_number,
             effect_journal_bindings=effect_journal_bindings,
+            runtime_writer_factory=runtime_writer_factory,
+            owner_context=owner_context,
         )
         if request.local_enabled:
             stages["local"] = local_stage
@@ -3902,7 +3980,9 @@ class UnifiedRuntime:
                     return effect_dispatch.dispatch(lambda: original_online_invoker(context))
                 from nexus.events.effect_journal import deterministic_effect_id, operation_digest
                 effect_journal_bindings.append({"effect_id": deterministic_effect_id(identity), "operation_id": operation_digest(identity), "action": identity["action"], "request_digest": req_digest, "project_root": str(effect_journal.project_root)})
-                result = effect_journal.execute(identity=identity, subject=request.task_id, request_digest=req_digest, dispatch=dispatch, reconcile=lambda record: effect_reconcile.reconcile(record))
+                with _runtime_write_context(runtime_writer_factory, task_id=request.task_id, role="effect_journal", path=effect_journal.path, owner_context=owner_context) as effect_context:
+                    _assert_runtime_context_active(runtime_writer_factory, effect_context)
+                    result = effect_journal.execute(identity=identity, subject=request.task_id, request_digest=req_digest, dispatch=dispatch, reconcile=lambda record: effect_reconcile.reconcile(record))
                 if effect_journal_bindings:
                     saved = effect_journal.get(deterministic_effect_id(identity)) or {}
                     effect_journal_bindings[-1].update({"generation": saved.get("generation"), "state": saved.get("state"), "result_digest": saved.get("result_digest", ""), "project_root": str(effect_journal.project_root)})
@@ -4675,6 +4755,7 @@ class UnifiedRuntime:
             path = Path(receipt_path)
             receipt["receipt_path"] = str(path)
             with _runtime_write_context(runtime_writer_factory, task_id=request.task_id, role="runtime_receipt", path=path, owner_context=owner_context) as write_context:
+                _assert_runtime_context_active(runtime_writer_factory, write_context)
                 _assert_runtime_receipt_owner(write_context, path)
                 _write_receipt_atomic(path, receipt)
         return receipt
@@ -4689,6 +4770,7 @@ class UnifiedRuntime:
         receipt_path: str | Path | None = None,
         effect_journal: Any = None,
         owner_context: Any = None,
+        runtime_writer_factory: Any = None,
     ) -> dict[str, Any]:
         """Attach final verifier/learning evidence to an existing task receipt.
 
@@ -4702,7 +4784,13 @@ class UnifiedRuntime:
         if effect_journal is not None:
             from nexus.events.effect_journal import EffectJournal
             if not isinstance(effect_journal, EffectJournal): raise ValueError("canonical_effect_journal_required")
-        if owner_context is not None and receipt.get("effect_journal_bindings") and effect_journal is None:
+        _validate_runtime_writer_entry(
+            runtime_writer_factory,
+            owner_context=owner_context,
+            receipt_path=receipt_path or receipt.get("receipt_path"),
+            effect_journal=effect_journal,
+        )
+        if (owner_context is not None or runtime_writer_factory is not None) and receipt.get("effect_journal_bindings") and effect_journal is None:
             raise ValueError("runtime_effect_journal_required_for_owner_receipt")
         _validate_runtime_owner_context(owner_context, receipt_path or receipt.get("receipt_path"))
         _validate_runtime_effect_owner(owner_context, effect_journal)
@@ -4864,6 +4952,7 @@ class UnifiedRuntime:
             path = Path(target)
             finalized["receipt_path"] = str(path)
             with _runtime_write_context(runtime_writer_factory, task_id=task_id, role="runtime_receipt", path=path, owner_context=owner_context) as write_context:
+                _assert_runtime_context_active(runtime_writer_factory, write_context)
                 _assert_runtime_receipt_owner(write_context, path)
                 _write_receipt_atomic(path, finalized)
         return finalized
@@ -4880,6 +4969,8 @@ class UnifiedRuntime:
         planner_decision_id: str = "",
         attempt_number: int = 1,
         effect_journal_bindings: list[dict[str, Any]] | None = None,
+        runtime_writer_factory: Any = None,
+        owner_context: Any = None,
     ) -> dict[str, Any]:
         if not request.local_enabled:
             return _stage("local", status="NOT_REQUESTED", reason="local_route_disabled")
@@ -5019,7 +5110,9 @@ class UnifiedRuntime:
                     if callable(self._local_service):
                         return self._local_service(local_request)
                     raise TypeError("local_service_not_callable")
-                response = effect_journal.execute(identity=local_identity, subject=request.task_id, request_digest=request_digest, dispatch=lambda: effect_dispatch.dispatch(_local_dispatch), reconcile=lambda record: effect_reconcile.reconcile(record))
+                with _runtime_write_context(runtime_writer_factory, task_id=request.task_id, role="effect_journal", path=effect_journal.path, owner_context=owner_context) as effect_context:
+                    _assert_runtime_context_active(runtime_writer_factory, effect_context)
+                    response = effect_journal.execute(identity=local_identity, subject=request.task_id, request_digest=request_digest, dispatch=lambda: effect_dispatch.dispatch(_local_dispatch), reconcile=lambda record: effect_reconcile.reconcile(record))
                 from nexus.events.effect_journal import deterministic_effect_id, operation_digest
                 binding = {"effect_id": deterministic_effect_id(local_identity), "operation_id": operation_digest(local_identity), "action": local_identity["action"], "request_digest": request_digest}
                 saved = effect_journal.get(binding["effect_id"]) or {}

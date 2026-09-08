@@ -151,6 +151,11 @@ def run_mainchain(
     receipt_path: Any = None,
     with_nexus_armor: bool = True,
     runtime_writer_factory: Any = None,
+    owner_context: Any = None,
+    effect_journal: Any = None,
+    effect_dispatch: Any = None,
+    effect_reconcile: Any = None,
+    effect_fenced: bool = False,
 ) -> dict[str, Any]:
     """Run UnifiedRuntime with mainchain route stamps + with_nexus Online armor."""
     if planner is not None:
@@ -213,6 +218,11 @@ def run_mainchain(
         learning=learning,
         receipt_path=receipt_path,
         runtime_writer_factory=runtime_writer_factory,
+        owner_context=owner_context,
+        effect_journal=effect_journal,
+        effect_dispatch=effect_dispatch,
+        effect_reconcile=effect_reconcile,
+        effect_fenced=effect_fenced,
     )
 
 
@@ -229,6 +239,11 @@ def run_mainchain_replan(
     receipt_path: Any = None,
     with_nexus_armor: bool = True,
     runtime_writer_factory: Any = None,
+    owner_context: Any = None,
+    effect_journal: Any = None,
+    effect_dispatch: Any = None,
+    effect_reconcile: Any = None,
+    effect_fenced: bool = False,
 ) -> dict[str, Any]:
     """Run UnifiedRuntime.run_replan with mainchain route stamps + with_nexus Online armor."""
     if planner is not None:
@@ -350,6 +365,11 @@ def run_mainchain_replan(
         learning=learning,
         receipt_path=receipt_path,
         runtime_writer_factory=runtime_writer_factory,
+        owner_context=owner_context,
+        effect_journal=effect_journal,
+        effect_dispatch=effect_dispatch,
+        effect_reconcile=effect_reconcile,
+        effect_fenced=effect_fenced,
     )
 
 

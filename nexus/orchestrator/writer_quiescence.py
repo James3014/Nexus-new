@@ -785,9 +785,13 @@ class RuntimeWriterAdapter:
         self.binding = binding
         self.writer_generation = writer_generation
         self.root = canonical_root
+        root_stat = Path(canonical_root).stat()
+        self._root_identity = (root_stat.st_dev, root_stat.st_ino)
         self.writer_id = _text(writer_id, "writer_id")
         self._loaded_identity = loaded_identity
         self._role_writer_ids: dict[str, str] = {}
+        self._active_contexts: dict[int, WriterLease] = {}
+        self._active_paths: dict[int, Path] = {}
         for role in ("runtime_receipt", "effect_journal"):
             role_writer_id = self.writer_id
             self._role_writer_ids[role] = role_writer_id
@@ -805,10 +809,43 @@ class RuntimeWriterAdapter:
         item = self.registry._writers.get((self.root, role, writer_id))
         if item is None:
             raise UnknownWriter("runtime writer is unknown")
-        loaded = item.loaded_identity() if item.loaded_identity is not None else item.identity
+        if item.loaded_identity is None:
+            raise UnknownWriter("runtime writer loaded identity is unavailable")
+        loaded = item.loaded_identity()
         if not isinstance(loaded, WriterIdentity) or loaded != item.identity:
             raise UnknownWriter("loaded runtime writer identity changed")
         return item.identity
+
+    def validate_path(self, path: str | Path) -> str:
+        """Check lexical selection and the loaded physical root without mutation."""
+        root = Path(self.root)
+        candidate = Path(path)
+        if not candidate.is_absolute() or ".." in candidate.parts:
+            raise WriterAdmissionDenied("runtime path must be absolute without traversal")
+        try:
+            root_stat = root.stat()
+            if root.is_symlink() or root.resolve(strict=True) != root or (root_stat.st_dev, root_stat.st_ino) != self._root_identity:
+                raise WriterAdmissionDenied("loaded runtime root physical identity changed")
+            relative = candidate.relative_to(root)
+        except (OSError, ValueError) as exc:
+            raise WriterAdmissionDenied("runtime writer path root mismatch") from exc
+        if not relative.parts or relative.as_posix().startswith(".nexus/writer-quiescence"):
+            raise WriterAdmissionDenied("invalid runtime writer path")
+        cursor = root
+        for index, part in enumerate(relative.parts):
+            cursor = cursor / part
+            if cursor.is_symlink():
+                raise WriterAdmissionDenied("runtime writer path is symlinked")
+            if cursor.exists() and index < len(relative.parts) - 1 and not cursor.is_dir():
+                raise WriterAdmissionDenied("runtime writer parent is not a directory")
+        return relative.as_posix()
+
+    def assert_context(self, context: Any) -> None:
+        lease = self._active_contexts.get(id(context))
+        if lease is None:
+            raise WriterAdmissionDenied("runtime context has no active source-owned lease")
+        lease.validate()
+        self.validate_path(self._active_paths[id(context)])
 
     @contextlib.contextmanager
     def operation(
@@ -835,13 +872,7 @@ class RuntimeWriterAdapter:
             Path(self.root) / ".nexus" / "events" / "effect_journal.v1.json"
             if role == "effect_journal" else Path(self.root) / ".nexus" / "reports" / f"{task}.json"
         )
-        destination = destination.resolve()
-        try:
-            relative = destination.relative_to(Path(self.root)).as_posix()
-        except ValueError as exc:
-            raise WriterAdmissionDenied("runtime path escapes registered root") from exc
-        if not relative or relative.startswith(".nexus/writer-quiescence"):
-            raise WriterAdmissionDenied("invalid runtime writer path")
+        relative = self.validate_path(destination)
         identity = self._identity(role)
         lease = self.registry.acquire(
             root=self.root, role=role, writer_id=identity.writer_id,
@@ -865,12 +896,19 @@ class RuntimeWriterAdapter:
                     previous_manifest_sha256=previous.manifest_sha256,
                 ) as context:
                     lease.validate()
-                    yield context
-                    lease.validate()
-                    outcome = commit_owner_transaction(context)
-                    committed = read_manifest(Path(self.root))
-                    if committed != outcome or committed.transaction_id != lease.transaction_id:
-                        raise WriterAdmissionDenied("runtime owner transaction readback mismatch")
+                    self._active_contexts[id(context)] = lease
+                    self._active_paths[id(context)] = destination
+                    try:
+                        yield context
+                        self.assert_context(context)
+                        outcome = commit_owner_transaction(context)
+                        committed = read_manifest(Path(self.root))
+                        if committed != outcome or committed.transaction_id != lease.transaction_id:
+                            raise WriterAdmissionDenied("runtime owner transaction readback mismatch")
+                        self.assert_context(context)
+                    finally:
+                        self._active_contexts.pop(id(context), None)
+                        self._active_paths.pop(id(context), None)
             lease.close("committed")
         except BaseException:
             if not lease._closed:
@@ -878,16 +916,85 @@ class RuntimeWriterAdapter:
             raise
 
 
+@dataclass(frozen=True, slots=True)
+class RuntimeEffectBinding:
+    journal: Any
+    dispatch: Any
+    reconcile: Any
+
+
 class RuntimeWriterFactory:
     """Short-lived factory carried internally through the Runtime call chain."""
 
-    def __init__(self, adapter: RuntimeWriterAdapter):
+    def __init__(self, adapter: RuntimeWriterAdapter, *, effect_journal: Any = None, effect_dispatch: Any = None, effect_reconcile: Any = None):
         if not isinstance(adapter, RuntimeWriterAdapter):
             raise TypeError("runtime writer adapter is required")
+        supplied = (effect_journal, effect_dispatch, effect_reconcile)
+        if any(value is not None for value in supplied) and not all(value is not None for value in supplied):
+            raise ValueError("effect_binding_incomplete")
+        self._effect_binding = None
+        if all(value is not None for value in supplied):
+            from nexus.events.effect_journal import (
+                EffectDispatchPort,
+                EffectJournal,
+                EffectReconcilePort,
+            )
+            if not isinstance(effect_journal, EffectJournal) or not isinstance(effect_dispatch, EffectDispatchPort) or not isinstance(effect_reconcile, EffectReconcilePort):
+                raise TypeError("effect_binding_types_invalid")
+            if Path(effect_journal.project_root).resolve() != Path(adapter.root) or effect_journal.generation != adapter.writer_generation:
+                raise UnknownWriter("effect_binding_root_or_generation_mismatch")
+            self._effect_binding = RuntimeEffectBinding(effect_journal, effect_dispatch, effect_reconcile)
         self._adapter = adapter
 
     def for_operation(self, task_id: str, **kwargs: Any):
         return self._adapter.operation(task_id, **kwargs)
+
+    def assert_context(self, context: Any) -> None:
+        self._adapter.assert_context(context)
+
+    def effect_binding(self) -> RuntimeEffectBinding | None:
+        binding = self._effect_binding
+        if binding is None:
+            return None
+        from nexus.events.effect_journal import (
+            EffectDispatchPort,
+            EffectJournal,
+            EffectReconcilePort,
+        )
+        if not isinstance(binding.journal, EffectJournal) or not isinstance(binding.dispatch, EffectDispatchPort) or not isinstance(binding.reconcile, EffectReconcilePort):
+            raise UnknownWriter("effect binding types changed")
+        if Path(binding.journal.project_root).resolve() != Path(self._adapter.root) or binding.journal.generation != self._adapter.writer_generation:
+            raise UnknownWriter("effect binding root or generation changed")
+        return binding
+
+    def validate_entry(self, *, path: str | Path | None = None, role: str = "runtime_receipt") -> None:
+        adapter = self._adapter
+        if os.getpid() != adapter.registry._pid:
+            raise UnknownWriter("runtime writer factory belongs to another process")
+        if adapter.root in adapter.registry._held_roots:
+            raise WriterAdmissionDenied("runtime writer root is held")
+        marker = Path(adapter.root) / ".nexus" / "writer-quiescence-hold.json"
+        try:
+            marker_info = marker.lstat()
+        except FileNotFoundError:
+            marker_info = None
+        if marker_info is not None:
+            import stat
+            if stat.S_ISLNK(marker_info.st_mode) or not stat.S_ISREG(marker_info.st_mode):
+                raise WriterAdmissionDenied("runtime writer hold marker is unsafe")
+            raise WriterAdmissionDenied("runtime writer root is held")
+        from nexus.events.state_owner_manifest import read_manifest
+        from nexus.events.writer_generation import read_generation
+        manifest = read_manifest(Path(adapter.root))
+        generation = read_generation(Path(adapter.root))
+        if manifest is None or manifest.state != "COMMITTED" or manifest.owner_id != adapter.binding.owner_id:
+            raise UnknownWriter("runtime owner manifest is unavailable")
+        if generation is None or generation.generation != adapter.writer_generation.generation or generation.writer_id != adapter.writer_generation.writer_id:
+            raise UnknownWriter("runtime writer generation is stale")
+        if manifest.generation != adapter.writer_generation.generation or manifest.writer_id != adapter.writer_generation.writer_id:
+            raise UnknownWriter("runtime owner manifest binding mismatch")
+        adapter._identity(role)
+        adapter.validate_path(path if path is not None else Path(adapter.root) / "entry.json")
 
     __call__ = for_operation
 
@@ -899,7 +1006,15 @@ def register_runtime_writer_factory(factory: RuntimeWriterFactory) -> RuntimeWri
     """Register a factory owned by the loaded source instance."""
     if not isinstance(factory, RuntimeWriterFactory):
         raise TypeError("runtime writer factory is required")
-    _LOADED_RUNTIME_WRITER_FACTORIES[factory._adapter.root] = factory
+    root = factory._adapter.root
+    existing = _LOADED_RUNTIME_WRITER_FACTORIES.get(root)
+    if existing is not None and existing is not factory:
+        raise WriterAdmissionDenied("runtime writer factory already loaded for root")
+    if os.getpid() != factory._adapter.registry._pid:
+        raise UnknownWriter("runtime writer factory belongs to another process")
+    if root in factory._adapter.registry._held_roots:
+        raise WriterAdmissionDenied("runtime writer factory cannot load under hold")
+    _LOADED_RUNTIME_WRITER_FACTORIES[root] = factory
     return factory
 
 
@@ -919,6 +1034,9 @@ def load_runtime_writer_factory(
     writer_generation: Any,
     root: str | Path,
     writer_id: str,
+    effect_journal: Any = None,
+    effect_dispatch: Any = None,
+    effect_reconcile: Any = None,
 ) -> RuntimeWriterFactory:
     """Construct a Runtime port from independently loaded role registrations."""
     return register_runtime_writer_factory(RuntimeWriterFactory(RuntimeWriterAdapter(
@@ -927,7 +1045,7 @@ def load_runtime_writer_factory(
         writer_generation=writer_generation,
         root=root,
         writer_id=writer_id,
-    )))
+    ), effect_journal=effect_journal, effect_dispatch=effect_dispatch, effect_reconcile=effect_reconcile))
 
 
 @dataclass(slots=True)

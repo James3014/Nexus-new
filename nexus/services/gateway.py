@@ -409,6 +409,11 @@ class BattlesuitGateway:
         receipt_path: Any = None,
         online_invoker: Any = None,
         runtime_writer_factory: Any = None,
+        owner_context: Any = None,
+        effect_journal: Any = None,
+        effect_dispatch: Any = None,
+        effect_reconcile: Any = None,
+        effect_fenced: bool = False,
     ) -> dict[str, Any]:
         """Run a task through the canonical task-scoped runtime seam.
 
@@ -423,9 +428,17 @@ class BattlesuitGateway:
         )
         from nexus.services.unified_runtime import (
             _capability_evidence_summary,
+            _validate_runtime_writer_entry,
             build_registered_online_invoker,
             normalize_online_invoker_payload,
             resolve_online_transport_binding,
+        )
+
+        if runtime_writer_factory is None:
+            runtime_writer_factory = self.runtime_writer_factory
+        _validate_runtime_writer_entry(
+            runtime_writer_factory, owner_context=owner_context,
+            receipt_path=receipt_path, effect_journal=effect_journal,
         )
 
         route = getattr(request, "route", {})
@@ -777,8 +790,6 @@ class BattlesuitGateway:
         try:
             from nexus.services.mainchain_entry import run_mainchain
 
-            if runtime_writer_factory is None:
-                runtime_writer_factory = self.runtime_writer_factory
             return run_mainchain(
                 request,
                 online_invoker=final_online,
@@ -788,6 +799,11 @@ class BattlesuitGateway:
                 learning=learning,
                 receipt_path=receipt_path,
                 runtime_writer_factory=runtime_writer_factory,
+                owner_context=owner_context,
+                effect_journal=effect_journal,
+                effect_dispatch=effect_dispatch,
+                effect_reconcile=effect_reconcile,
+                effect_fenced=effect_fenced,
                 with_nexus_armor=bool(armor_on),
             )
         finally:
