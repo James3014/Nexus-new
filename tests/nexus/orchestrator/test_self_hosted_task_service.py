@@ -786,7 +786,7 @@ def test_admitted_agy_worker_registry_execution_persists_identity_and_receipt(tm
     attempt_id = "a" * 32
     request = _request(
         tmp_path, task_id=task_id, worker="auto",
-        model="gemini-3.6-flash-high", execution_lane="ISOLATED_TARGET",
+        model=internal["binding"]["model"], execution_lane="ISOLATED_TARGET",
         workforce_demands=demands, workforce_admission=admission,
         planner_output=internal["planner_output"],
         task_card_path=card_path, task_card_hash=card_hash,
@@ -858,10 +858,10 @@ def test_admitted_agy_worker_registry_execution_persists_identity_and_receipt(tm
         )
 
     persisted = service._read_state(contract.task_id)
-    assert calls == [("agy", "gemini-3.6-flash-high", contract.task_id, str(tmp_path / "target"))]
-    assert persisted["selected_worker_id"] == "agy_flash"
+    assert calls == [("agy", internal["binding"]["model"], contract.task_id, str(tmp_path / "target"))]
+    assert persisted["selected_worker_id"] == internal["binding"]["worker_id"]
     assert persisted["selected_provider"] == "agy"
-    assert persisted["selected_model"] == "gemini-3.6-flash-high"
+    assert persisted["selected_model"] == internal["binding"]["model"]
     assert persisted["task_card_path"] == request["canonical_dispatch_envelope"]["task_card_path"]
     assert persisted["task_card_hash"] == request["canonical_dispatch_envelope"]["task_card_hash"]
     assert persisted["execution"]["provider"] == "agy"
@@ -900,7 +900,7 @@ def test_tracked_card_mutated_after_submit_fails_before_preflight_or_registry(
         tmp_path,
         task_id=task_id,
         worker="auto",
-        model="gemini-3.6-flash-high",
+        model=internal["binding"]["model"],
         execution_lane="ISOLATED_TARGET",
         workforce_demands=internal["workforce_demands"],
         workforce_admission=internal["workforce_admission"],
@@ -1081,7 +1081,7 @@ def test_unadmitted_fallback_blocks_before_provider_side_work(
         tmp_path,
         task_id=task_id,
         worker="auto",
-        model="gemini-3.6-flash-high",
+        model=internal["binding"]["model"],
         execution_lane="ISOLATED_TARGET",
         workforce_demands=internal["workforce_demands"],
         workforce_admission=internal["workforce_admission"],
