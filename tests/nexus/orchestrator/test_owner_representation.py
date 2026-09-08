@@ -193,12 +193,10 @@ def _grant(**overrides) -> OwnerRepresentationGrant:
     }
     values.update(overrides)
     spec = OwnerRepresentationGrantSpec.model_validate(values)
-    return OwnerRepresentationGrant.model_validate(
-        {
-            **spec.model_dump(mode="json"),
-            "grant_hash": canonical_autonomy_hash(spec.model_dump(mode="json")),
-        }
-    )
+    return OwnerRepresentationGrant.model_validate({
+        **spec.model_dump(mode="json"),
+        "grant_hash": canonical_autonomy_hash(spec.model_dump(mode="json")),
+    })
 
 
 def _issue_grant(
@@ -281,18 +279,16 @@ class FakeRemote:
             raise TransportDispatchedButUnacknowledged()
         self.issue_id_ctr += 1
         marker = str(self.issue_id_ctr)
-        self.writes.append(
-            {
-                "marker": marker,
-                "op": proposal.operation_id,
-                "effect": proposal.effect.value,
-                "destination": proposal.destination.repository_id,
-                "title": proposal.title,
-                "body": proposal.body,
-                "purpose": proposal.purpose,
-                "actor": proposal.actor,
-            }
-        )
+        self.writes.append({
+            "marker": marker,
+            "op": proposal.operation_id,
+            "effect": proposal.effect.value,
+            "destination": proposal.destination.repository_id,
+            "title": proposal.title,
+            "body": proposal.body,
+            "purpose": proposal.purpose,
+            "actor": proposal.actor,
+        })
         return WriteOutcome(status="ACK", remote_marker=marker)
 
     def readback(self, proposal: ExternalPublicationProposal) -> str | None:
@@ -1498,27 +1494,25 @@ def test_real_rsa_owner_signature_accepts_and_rejects_tamper(
     monkeypatch.setattr(store, "OWNER_AUTHORIZATION_TRUST_ROOT", trust_root)
     monkeypatch.setattr(store, "_verify_owner_signature", _production_verify_owner_signature)
     grant = _grant(grant_id="rsa-real")
-    spec = OwnerExactPublicationAuthorizationSpec.model_validate(
-        {
-            "schema": "nexus.owner_exact_publication_authorization.v1",
-            "authorization_id": f"auth-{grant.grant_hash}",
-            "owner_id": grant.owner_id,
-            "coordinator_id": grant.coordinator_id,
-            "destination": grant.destination,
-            "effect": grant.effect,
-            "target": grant.target,
-            "content_hash": grant.content_hash,
-            "purpose": grant.purpose,
-            "actor": grant.actor,
-            "transport": grant.transport,
-            "operation_id": grant.operation_id,
-            "grant_hash": grant.grant_hash,
-            "owner_key_id": "rsa",
-            "owner_signature": "placeholder",
-            "issued_at": NOW,
-            "expires_at": grant.expires_at,
-        }
-    )
+    spec = OwnerExactPublicationAuthorizationSpec.model_validate({
+        "schema": "nexus.owner_exact_publication_authorization.v1",
+        "authorization_id": f"auth-{grant.grant_hash}",
+        "owner_id": grant.owner_id,
+        "coordinator_id": grant.coordinator_id,
+        "destination": grant.destination,
+        "effect": grant.effect,
+        "target": grant.target,
+        "content_hash": grant.content_hash,
+        "purpose": grant.purpose,
+        "actor": grant.actor,
+        "transport": grant.transport,
+        "operation_id": grant.operation_id,
+        "grant_hash": grant.grant_hash,
+        "owner_key_id": "rsa",
+        "owner_signature": "placeholder",
+        "issued_at": NOW,
+        "expires_at": grant.expires_at,
+    })
     payload = json.dumps(
         spec.model_dump(mode="json", exclude={"owner_signature"}),
         sort_keys=True,

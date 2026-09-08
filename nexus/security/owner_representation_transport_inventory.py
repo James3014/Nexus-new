@@ -64,9 +64,9 @@ NONE_KNOWN_EXTERNAL_PUBLICATION_WRITE = "none_known_external_publication_write"
 # These are concrete transport identities, not route IDs.  Keeping the
 # mapping explicit prevents a caller-controlled string from becoming an
 # implicitly trusted route merely because both happen to have the same name.
-CANONICAL_TRANSPORT_ROUTE_BINDINGS: Mapping[str, str] = MappingProxyType(
-    {"canonical_owner_representation": "owner_representation_seam"}
-)
+CANONICAL_TRANSPORT_ROUTE_BINDINGS: Mapping[str, str] = MappingProxyType({
+    "canonical_owner_representation": "owner_representation_seam"
+})
 ALL: tuple[PublicationRoute, ...] = (
     PublicationRoute(
         route_id="github_orchestration",

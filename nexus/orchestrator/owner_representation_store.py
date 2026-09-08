@@ -292,12 +292,10 @@ def _blocked_decision(
         "proposal_hash": canonical_autonomy_hash(proposal.model_dump(mode="json")),
         "claim_ceiling": "OWNER_REPRESENTATION_EXACT_ONE_SHOT_ONLY",
     }
-    return OwnerRepresentationDecision.model_validate(
-        {
-            **payload,
-            "decision_hash": canonical_autonomy_hash(payload),
-        }
-    )
+    return OwnerRepresentationDecision.model_validate({
+        **payload,
+        "decision_hash": canonical_autonomy_hash(payload),
+    })
 
 
 def owner_representation_issuance_effect(grant: OwnerRepresentationGrant) -> dict[str, Any]:
@@ -627,32 +625,30 @@ def owner_issues_exact_publication_authorization(
         raise OwnerRepresentationGrantBlocked(
             OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REQUIRED.value
         )
-    spec = OwnerExactPublicationAuthorizationSpec.model_validate(
-        {
-            "schema": _AUTHORIZATION_SCHEMA,
-            "authorization_id": auth_id,
-            "owner_id": grant.owner_id,
-            "coordinator_id": grant.coordinator_id,
-            "destination": grant.destination,
-            "effect": grant.effect,
-            "target": grant.target,
-            "content_hash": grant.content_hash,
-            "purpose": grant.purpose,
-            "actor": grant.actor,
-            "transport": grant.transport,
-            "operation_id": grant.operation_id,
-            "grant_hash": grant.grant_hash,
-            "owner_key_id": owner_key_id,
-            "owner_signature": owner_signature,
-            "owner_signature_algorithm": "RSA-SHA256",
-            "replay_mode": "ONE_SHOT",
-            "issued_at": effective_now,
-            "expires_at": auth_expires,
-            "revoked_at": grant.revoked_at,
-            "revocation_reason": grant.revocation_reason,
-            "superseded_by": grant.superseded_by,
-        }
-    )
+    spec = OwnerExactPublicationAuthorizationSpec.model_validate({
+        "schema": _AUTHORIZATION_SCHEMA,
+        "authorization_id": auth_id,
+        "owner_id": grant.owner_id,
+        "coordinator_id": grant.coordinator_id,
+        "destination": grant.destination,
+        "effect": grant.effect,
+        "target": grant.target,
+        "content_hash": grant.content_hash,
+        "purpose": grant.purpose,
+        "actor": grant.actor,
+        "transport": grant.transport,
+        "operation_id": grant.operation_id,
+        "grant_hash": grant.grant_hash,
+        "owner_key_id": owner_key_id,
+        "owner_signature": owner_signature,
+        "owner_signature_algorithm": "RSA-SHA256",
+        "replay_mode": "ONE_SHOT",
+        "issued_at": effective_now,
+        "expires_at": auth_expires,
+        "revoked_at": grant.revoked_at,
+        "revocation_reason": grant.revocation_reason,
+        "superseded_by": grant.superseded_by,
+    })
     payload = spec.model_dump(mode="json")
     record = {
         **payload,
