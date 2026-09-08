@@ -953,12 +953,10 @@ def test_open_swe_optional_dependency_contract_is_exactly_pinned():
 def test_real_deepagents_toolnode_is_physically_read_only_when_optional_extra_installed(tmp_path):
     pytest.importorskip("deepagents")
     runtime = _external_runtime_module()
-    assert runtime.SEMANTIC_TOOLS == frozenset(
-        {
-            "glob",
-            "grep",
-            "ls",
-            "read_file",
-            "record_finding",
-        }
-    )
+    assert runtime.SEMANTIC_TOOLS == frozenset({
+        "glob",
+        "grep",
+        "ls",
+        "read_file",
+        "record_finding",
+    })
