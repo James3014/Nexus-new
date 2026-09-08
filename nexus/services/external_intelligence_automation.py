@@ -728,9 +728,30 @@ class ExternalIntelligenceAutomation:
         for key in ("policy_hash", "binding_hash", "aggregate_binding_hash"):
             if len(binding[key]) != 64 or any(char not in "0123456789abcdef" for char in binding[key].lower()):
                 raise AutomationError("CANONICAL_WORKFORCE_BINDING_EVIDENCE_INVALID")
+        planner = result.get("planner_output")
+        admission = result.get("workforce_admission")
+        if not isinstance(planner, Mapping) or not isinstance(admission, Mapping):
+            raise AutomationError("CANONICAL_WORKFORCE_EVIDENCE_MISSING")
+        evidence_root = self.state_store.root / "canonical-workforce-evidence"
+        planner_hash = _sha256_json(planner)
+        admission_hash = _sha256_json(admission)
+        artifacts = (("planner", planner_hash, planner), ("admission", admission_hash, admission))
+        try:
+            for kind, digest, payload in artifacts:
+                path = evidence_root / f"{kind}-{digest}.json"
+                if path.exists():
+                    existing = json.loads(path.read_text(encoding="utf-8"))
+                    if _sha256_json(existing) != digest or existing != dict(payload):
+                        raise AutomationError("CANONICAL_WORKFORCE_EVIDENCE_COLLISION")
+                else:
+                    _atomic_json(path, payload)
+                readback = json.loads(path.read_text(encoding="utf-8"))
+                if _sha256_json(readback) != digest or readback != dict(payload):
+                    raise AutomationError("CANONICAL_WORKFORCE_EVIDENCE_READBACK_MISMATCH")
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            raise AutomationError("CANONICAL_WORKFORCE_EVIDENCE_PERSIST_FAILED") from exc
         demands = result.get("workforce_demands") or {}
         demand = (demands.get("demands") or [{}])[0]
-        planner = result.get("planner_output") or {}
         selection_hash = str(planner.get("decision_hash") or "").lower()
         if len(selection_hash) != 64 or any(char not in "0123456789abcdef" for char in selection_hash):
             raise AutomationError("CANONICAL_WORKFORCE_SELECTION_EVIDENCE_INVALID")
@@ -742,10 +763,10 @@ class ExternalIntelligenceAutomation:
             "provider": str(binding["provider"]),
             "model": str(binding["model"]),
             "role_ceiling": role_ceiling,
-            "admission_evidence_ref": f"canonical://workforce-admission/{binding['binding_hash']}",
-            "admission_evidence_hash": str(binding["binding_hash"]).lower(),
-            "selection_evidence_ref": f"canonical://planner-selection/{selection_hash}",
-            "selection_evidence_hash": selection_hash,
+            "admission_evidence_ref": str(evidence_root / f"admission-{admission_hash}.json"),
+            "admission_evidence_hash": admission_hash,
+            "selection_evidence_ref": str(evidence_root / f"planner-{planner_hash}.json"),
+            "selection_evidence_hash": planner_hash,
         }
         try:
             return validate_selected_worker(worker)
