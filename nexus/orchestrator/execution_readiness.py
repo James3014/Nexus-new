@@ -1,30 +1,33 @@
 """Execution readiness convergence evaluator for issue #807 (G1 gate).
 
-Pure, in-process evaluator over typed plane observations.  It consumes
-evidence gathered by callers (the gateway host or a direct in-process
-preflight) and produces the one typed result defined by
-``nexus.contracts.execution_readiness``:
+Typed callers may gather plane observations, but compatibility observations are
+not authority.  The evaluator rebinds planes that have canonical durable owners
+before it can produce ``READY_TO_EXECUTE``:
 
-- every material plane compatible -> ``READY_TO_EXECUTE``;
-- otherwise -> ``BLOCKED`` with exactly one primary blocker, the
-  highest-precedence failing plane, plus one canonical next action routing to
-  the existing authority owner (#806 recovery, #526 rebind/reload, exact
-  source binding, normal authority gates, replay-fence reconciliation,
-  Planner/Workforce Admission preflight).
+- source identity is bound to the physical repository remote plus commit/tree;
+- governance health is proved by the canonical standing-grant inspector;
+- material authority is re-evaluated through the #515 durable standing grant;
+- material replay state is re-read from the durable task service;
+- material Workforce PASS requires Planner/Admission/provider evidence hashes;
+- optional Completion compatibility uses the request's required capabilities.
 
-This module is a convergence gate only.  It never performs repair, never
-triggers Gateway reload, never selects routes or workers, never grants
-authority, and never asserts post-execution truth.
+The gate never repairs, reloads, selects routes/workers, grants authority, or
+asserts post-execution truth.  A compatibility env/default PASS may trigger a
+canonical observation, but can never itself be readiness evidence.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import re
+import subprocess
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Mapping, Sequence
 
+from nexus.contracts.autonomy_goal import AutonomyActionClass, RepositoryIdentity
 from nexus.contracts.execution_readiness import (
     COMPLETION_AUTHORITY_KIND,
     OUTCOME_EVIDENCE_MAX_IDENTITIES,
@@ -43,6 +46,9 @@ from nexus.contracts.execution_readiness import (
 GATEWAY_OBSERVATION_SCHEMA = "nexus.gateway.execution_readiness_observation.v1"
 COMPLETION_INTERFACE_REVISION = "nexus-core.completion.v1"
 COMPLETION_REPOSITORY = "James3014/nexus-core"
+# Compatibility export for the current Gateway completion observation helper.
+# This tuple is not used to decide request compatibility; the request's own
+# required_capabilities is the authority for that comparison.
 _COMPLETION_REQUIRED_CAPABILITIES = (
     "COMPLETION_VERDICT",
     "EVIDENCE_VERIFY",
@@ -133,16 +139,54 @@ _BLOCKER_MESSAGE: dict[ExecutionReadinessBlockerCode, str] = {
     ),
 }
 
+_UNTRUSTED_COMPATIBILITY_PASSES: dict[ExecutionReadinessPlane, frozenset[str]] = {
+    ExecutionReadinessPlane.GOVERNANCE: frozenset(
+        {
+            "governance_plane:default_no_open_recovery",
+            "NEXUS_READINESS_GOVERNANCE_STATUS=PASSED",
+        }
+    ),
+    ExecutionReadinessPlane.AUTHORITY: frozenset(
+        {
+            "authority_plane:in_process_caller_context",
+            "NEXUS_READINESS_AUTHORITY_STATUS=PASSED",
+        }
+    ),
+    ExecutionReadinessPlane.REPLAY_FENCE: frozenset(
+        {
+            "replay_fence_plane:in_process_first_observation",
+            "NEXUS_READINESS_REPLAY_FENCE_STATUS=PASSED",
+        }
+    ),
+    ExecutionReadinessPlane.WORKFORCE: frozenset(
+        {"NEXUS_READINESS_WORKFORCE_STATUS=PASSED"}
+    ),
+}
+
+_AUTHORITY_ACTION_FAMILY: dict[str, AutonomyActionClass] = {
+    "MUTATE_BOUNDED": AutonomyActionClass.TASK_SUBMIT,
+    "TASK_SUBMIT": AutonomyActionClass.TASK_SUBMIT,
+    "TASK_RETRY": AutonomyActionClass.TASK_RETRY,
+    "CANDIDATE_VERIFY": AutonomyActionClass.CANDIDATE_VERIFY,
+    "CANDIDATE_APPROVE": AutonomyActionClass.CANDIDATE_APPROVE,
+    "CANDIDATE_INTEGRATE": AutonomyActionClass.CANDIDATE_INTEGRATE,
+    "REPOSITORY_PUSH": AutonomyActionClass.REPOSITORY_PUSH,
+    "GITHUB_MERGE": AutonomyActionClass.GITHUB_MERGE,
+    "RUNTIME_ACTIVATE": AutonomyActionClass.RUNTIME_ACTIVATE,
+    "PRODUCTION_RELEASE": AutonomyActionClass.PRODUCTION_RELEASE,
+}
+
+_WORKFORCE_REQUIRED_EVIDENCE = (
+    "planner_decision_hash",
+    "workforce_admission_hash",
+    "provider_preflight_hash",
+)
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
 
 @dataclass(frozen=True)
 class PlaneObservation:
-    """Typed evidence for one plane, gathered by the caller (never by this gate).
-
-    ``status`` is the caller's observed verdict for this plane:
-    ``PASSED`` (compatible, with evidence identities), ``BLOCKED`` (failing,
-    with the frozen blocker code), or ``UNPROVEN`` (no evidence gathered).
-    Lower-precedence planes stay ``UNPROVEN`` while a higher plane fails.
-    """
+    """Typed evidence for one plane, gathered by a caller."""
 
     plane: ExecutionReadinessPlane
     status: ExecutionReadinessStatus
@@ -160,15 +204,7 @@ class PlaneObservation:
 
 @dataclass(frozen=True)
 class GatewayReadinessObservation:
-    """In-process gateway-plane observation mirroring ``nexus_gateway_status``.
-
-    ``observed_runtime_sha256`` must be computed with the same
-    ``_hash_source_paths(RUNTIME_SOURCE_PATHS)`` primitive that
-    ``nexus_gateway_status`` uses, and ``observed_repo_head`` with
-    ``git rev-parse HEAD``.  ``reload_required`` mirrors the gateway's own
-    freshness semantics so the readiness gate and the status tool can never
-    disagree about the running instance.
-    """
+    """In-process Gateway observation mirroring ``nexus_gateway_status``."""
 
     gateway_instance_id: str
     observed_repo_head: str
@@ -195,18 +231,40 @@ class GatewayReadinessObservation:
         }
 
 
+def _physical_repository_id() -> str:
+    """Derive owner/name from the canonical checkout's physical origin remote."""
+
+    root = Path(__file__).resolve().parents[2]
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "config", "--get", "remote.origin.url"],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    if result.returncode != 0:
+        return ""
+    remote = result.stdout.strip()
+    match = re.search(r"github\.com(?::|/)([^/\s]+)/([^/\s]+)$", remote)
+    if match is None:
+        return ""
+    owner, repository = match.groups()
+    if repository.endswith(".git"):
+        repository = repository[:-4]
+    return f"{owner}/{repository}" if owner and repository else ""
+
+
 def evaluate_source_binding(
     request: ExecutionReadinessRequest,
     observation: GatewayReadinessObservation,
 ) -> PlaneObservation:
-    """Bind the requested source identity to the physically observed Git identity.
+    """Bind request repository + source to the physical canonical checkout."""
 
-    The desired commit/tree come only from the typed request.  The observed
-    commit/tree come only from the canonical checkout.  Missing or malformed
-    observed identity fails closed; any exact mismatch is a source-realm
-    blocker rather than a gateway-freshness result.
-    """
-
+    observed_repository = _physical_repository_id()
+    requested_repository = f"{request.repository_owner}/{request.repository_name}"
     observed_commit = observation.observed_repo_head.strip().lower()
     observed_tree = observation.observed_repo_tree.strip().lower()
     observed_valid = (
@@ -216,16 +274,25 @@ def evaluate_source_binding(
         and all(char in "0123456789abcdef" for char in observed_tree)
     )
     evidence = (
+        f"source_requested_repository={requested_repository}",
+        f"source_observed_repository={observed_repository or '<missing>'}",
         f"source_desired_commit={request.intended_source_commit}",
         f"source_desired_tree={request.intended_source_tree}",
         f"source_observed_commit={observed_commit or '<missing>'}",
         f"source_observed_tree={observed_tree or '<missing>'}",
     )
-    if not observed_valid:
+    if not observed_repository or not observed_valid:
         return PlaneObservation(
             plane=ExecutionReadinessPlane.SOURCE,
             status=ExecutionReadinessStatus.BLOCKED,
             blocker_code=ExecutionReadinessBlockerCode.SOURCE_BINDING_REQUIRED,
+            evidence_identities=evidence,
+        )
+    if requested_repository != observed_repository:
+        return PlaneObservation(
+            plane=ExecutionReadinessPlane.SOURCE,
+            status=ExecutionReadinessStatus.BLOCKED,
+            blocker_code=ExecutionReadinessBlockerCode.SOURCE_REALM_MISMATCH,
             evidence_identities=evidence,
         )
     if (
@@ -247,13 +314,7 @@ def evaluate_source_binding(
 
 @dataclass(frozen=True)
 class CompletionAuthorityObservation:
-    """Observed completion-authority identity (material-only plane 5 input).
-
-    Callers gather this only when the request carries
-    ``required_completion_contract``.  ``artifact_or_source_identity`` must be
-    the actually installed/available artifact identity — never a GitHub ``main``
-    ref substituted for the runtime artifact.
-    """
+    """Observed completion-authority identity (material-only plane-5 input)."""
 
     observed_authority_kind: str
     observed_repository: str
@@ -262,7 +323,6 @@ class CompletionAuthorityObservation:
     observed_capabilities: tuple[str, ...] = ()
 
     def to_observation_payload(self) -> dict[str, str | tuple[str, ...]]:
-        """Bounded identity-fact surface; carries no authority verbs."""
         return {
             "completion_observed_authority_kind": self.observed_authority_kind,
             "completion_observed_repository": self.observed_repository,
@@ -272,7 +332,6 @@ class CompletionAuthorityObservation:
         }
 
     def identity_digest(self) -> str:
-        """Canonical sha256 over the observed identity facts, for tamper checks."""
         return hashlib.sha256(
             json.dumps(
                 self.to_observation_payload(),
@@ -287,11 +346,7 @@ def evaluate_completion_contract(
     required: object,
     observation: CompletionAuthorityObservation | None,
 ) -> tuple[bool, ExecutionReadinessBlockerCode | None, tuple[str, ...]]:
-    """Compare the required completion contract to the observed identity.
-
-    Fail-closed: stale, substituted, unavailable, or incompatible identities
-    block with ``COMPLETION_CONTRACT_BINDING_REQUIRED`` (plane 5 subtype).
-    """
+    """Compare the exact required Completion contract to observed identity."""
 
     evidence = (
         "completion_contract:required",
@@ -317,17 +372,14 @@ def evaluate_completion_contract(
         return False, ExecutionReadinessBlockerCode.COMPLETION_CONTRACT_BINDING_REQUIRED, evidence
     if observation.observed_interface_revision != required.interface_revision:
         return False, ExecutionReadinessBlockerCode.COMPLETION_CONTRACT_BINDING_REQUIRED, evidence
-    if not set(_COMPLETION_REQUIRED_CAPABILITIES).issubset(set(observation.observed_capabilities)):
+    required_capabilities = set(required.required_capabilities)
+    if not required_capabilities.issubset(set(observation.observed_capabilities)):
         return False, ExecutionReadinessBlockerCode.COMPLETION_CONTRACT_BINDING_REQUIRED, evidence
     return True, None, evidence
 
 
 class ReadinessEvidenceError(ValueError):
-    """Raised when caller-supplied evidence cannot produce a decisive result.
-
-    This gate never fabricates a verdict: incomplete or indisciplined evidence
-    is an error, not a ``READY`` and not a synthetic blocker.
-    """
+    """Raised when caller evidence cannot produce a decisive safe result."""
 
     def __init__(self, reason: str, plane: ExecutionReadinessPlane | None = None) -> None:
         super().__init__(reason)
@@ -344,6 +396,300 @@ def _merge_evidence(*chunks: Sequence[str]) -> tuple[str, ...]:
     return tuple(merged)
 
 
+def _canonical_governance_observation(moment: datetime) -> PlaneObservation:
+    """Prove the normal authority observer is operational; do not infer grant validity."""
+
+    try:
+        from nexus.orchestrator.standing_grant_store import inspect_standing_grant_receipt
+
+        snapshot = inspect_standing_grant_receipt(now=moment)
+        schema = str(snapshot.get("schema") or "")
+        status = str(snapshot.get("status") or "")
+        if not schema or not status:
+            raise ValueError("standing grant inspection returned no schema/status")
+    except Exception as exc:
+        return PlaneObservation(
+            plane=ExecutionReadinessPlane.GOVERNANCE,
+            status=ExecutionReadinessStatus.BLOCKED,
+            blocker_code=ExecutionReadinessBlockerCode.GOVERNANCE_PLANE_RECOVERY_REQUIRED,
+            evidence_identities=(
+                "governance_observer=standing_grant_store.inspect_standing_grant_receipt",
+                f"governance_observer_error={exc.__class__.__name__}",
+            ),
+        )
+    return PlaneObservation(
+        plane=ExecutionReadinessPlane.GOVERNANCE,
+        status=ExecutionReadinessStatus.PASSED,
+        evidence_identities=(
+            "governance_observer=standing_grant_store.inspect_standing_grant_receipt",
+            f"governance_snapshot_schema={schema}",
+            f"governance_authority_snapshot_status={status}",
+        ),
+    )
+
+
+def _authority_action(request: ExecutionReadinessRequest) -> AutonomyActionClass | None:
+    raw = request.required_action_family.strip().upper()
+    try:
+        return AutonomyActionClass(raw)
+    except ValueError:
+        return _AUTHORITY_ACTION_FAMILY.get(raw)
+
+
+def _canonical_authority_observation(
+    request: ExecutionReadinessRequest,
+    moment: datetime,
+) -> PlaneObservation:
+    """Re-evaluate a material Goal/action through the canonical #515 grant."""
+
+    goal_id = request.task_campaign_goal_identity
+    if not goal_id:
+        return PlaneObservation(
+            plane=ExecutionReadinessPlane.AUTHORITY,
+            status=ExecutionReadinessStatus.PASSED,
+            evidence_identities=(
+                "authority_plane:non_material:no_task_campaign_goal_identity",
+                f"authority_action_family={request.required_action_family}",
+            ),
+        )
+    action = _authority_action(request)
+    if action is None:
+        return PlaneObservation(
+            plane=ExecutionReadinessPlane.AUTHORITY,
+            status=ExecutionReadinessStatus.BLOCKED,
+            blocker_code=ExecutionReadinessBlockerCode.AUTHORITY_OUT_OF_SCOPE,
+            evidence_identities=(
+                f"authority_goal_id={goal_id}",
+                f"authority_action_family_unmapped={request.required_action_family}",
+            ),
+        )
+    try:
+        from nexus.orchestrator.standing_grant_store import (
+            evaluate_rehydrated_durable_standing_grant,
+            inspect_standing_grant_receipt,
+        )
+
+        snapshot = inspect_standing_grant_receipt(now=moment)
+    except Exception as exc:
+        return PlaneObservation(
+            plane=ExecutionReadinessPlane.AUTHORITY,
+            status=ExecutionReadinessStatus.BLOCKED,
+            blocker_code=ExecutionReadinessBlockerCode.TASK_AUTHORITY_MISSING,
+            evidence_identities=(
+                f"authority_goal_id={goal_id}",
+                f"authority_action={action.value}",
+                f"authority_observer_error={exc.__class__.__name__}",
+            ),
+        )
+    snapshot_status = str(snapshot.get("status") or "UNKNOWN")
+    evidence = (
+        f"authority_receipt_status={snapshot_status}",
+        f"authority_receipt_hash={snapshot.get('receipt_hash') or '<missing>'}",
+        f"authority_owner_id={snapshot.get('owner_id') or '<missing>'}",
+        f"authority_coordinator_id={snapshot.get('coordinator_id') or '<missing>'}",
+        f"authority_repository_id={snapshot.get('repository_id') or '<missing>'}",
+        f"authority_goal_id={goal_id}",
+        f"authority_action={action.value}",
+        f"authority_expires_at={snapshot.get('expires_at') or '<missing>'}",
+    )
+    if snapshot_status != "VALID":
+        return PlaneObservation(
+            plane=ExecutionReadinessPlane.AUTHORITY,
+            status=ExecutionReadinessStatus.BLOCKED,
+            blocker_code=ExecutionReadinessBlockerCode.TASK_AUTHORITY_MISSING,
+            evidence_identities=evidence,
+        )
+    try:
+        canonical_remote = str(snapshot.get("canonical_remote") or "").strip()
+        decision = evaluate_rehydrated_durable_standing_grant(
+            requested_owner_id=str(snapshot.get("owner_id") or ""),
+            requested_coordinator_id=str(snapshot.get("coordinator_id") or ""),
+            repository=RepositoryIdentity(
+                repository_id=f"{request.repository_owner}/{request.repository_name}",
+                canonical_remote=canonical_remote,
+            ),
+            goal_id=goal_id,
+            action=action,
+            requested_at=moment,
+        )
+    except Exception as exc:
+        return PlaneObservation(
+            plane=ExecutionReadinessPlane.AUTHORITY,
+            status=ExecutionReadinessStatus.BLOCKED,
+            blocker_code=ExecutionReadinessBlockerCode.TASK_AUTHORITY_MISSING,
+            evidence_identities=evidence + (f"authority_evaluator_error={exc.__class__.__name__}",),
+        )
+    outcome = getattr(decision.outcome, "value", str(decision.outcome))
+    decision_evidence = evidence + (
+        f"authority_context_hash={decision.context_hash}",
+        f"authority_decision_hash={decision.decision_hash}",
+        f"authority_outcome={outcome}",
+    )
+    if outcome == "GRANT_MATCH" and decision.mutation_authorized is True:
+        return PlaneObservation(
+            plane=ExecutionReadinessPlane.AUTHORITY,
+            status=ExecutionReadinessStatus.PASSED,
+            evidence_identities=decision_evidence,
+        )
+    code = (
+        ExecutionReadinessBlockerCode.TASK_AUTHORITY_MISSING
+        if outcome == "INVALID"
+        else ExecutionReadinessBlockerCode.AUTHORITY_OUT_OF_SCOPE
+    )
+    return PlaneObservation(
+        plane=ExecutionReadinessPlane.AUTHORITY,
+        status=ExecutionReadinessStatus.BLOCKED,
+        blocker_code=code,
+        evidence_identities=decision_evidence,
+    )
+
+
+def _replay_is_material(request: ExecutionReadinessRequest) -> bool:
+    return bool(request.task_campaign_goal_identity) and "TASK" in request.execution_contract_kind.upper()
+
+
+def _canonical_replay_observation(request: ExecutionReadinessRequest) -> PlaneObservation:
+    """Read durable task/reconcile state when the execution contract binds a task."""
+
+    if not _replay_is_material(request):
+        return PlaneObservation(
+            plane=ExecutionReadinessPlane.REPLAY_FENCE,
+            status=ExecutionReadinessStatus.PASSED,
+            evidence_identities=(
+                "replay_fence_plane:non_material:no_tracked_task_binding",
+            ),
+        )
+    task_id = str(request.task_campaign_goal_identity)
+    try:
+        from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+
+        snapshot = SelfHostedTaskService().get_task_snapshot(task_id, include_details=True)
+    except Exception as exc:
+        return PlaneObservation(
+            plane=ExecutionReadinessPlane.REPLAY_FENCE,
+            status=ExecutionReadinessStatus.BLOCKED,
+            blocker_code=ExecutionReadinessBlockerCode.SEMANTIC_REPLAY_FENCE,
+            evidence_identities=(
+                f"replay_task_id={task_id}",
+                f"replay_observer_error={exc.__class__.__name__}",
+            ),
+        )
+    if not isinstance(snapshot, Mapping):
+        return PlaneObservation(
+            plane=ExecutionReadinessPlane.REPLAY_FENCE,
+            status=ExecutionReadinessStatus.BLOCKED,
+            blocker_code=ExecutionReadinessBlockerCode.SEMANTIC_REPLAY_FENCE,
+            evidence_identities=(f"replay_task_id={task_id}", "replay_snapshot=missing"),
+        )
+    task_action = snapshot.get("task_action")
+    action = task_action if isinstance(task_action, Mapping) else {}
+    status = str(snapshot.get("status") or "UNKNOWN")
+    next_action = str(action.get("next_action") or snapshot.get("next_action") or "")
+    evidence = (
+        f"replay_task_id={task_id}",
+        f"replay_attempt_id={snapshot.get('attempt_id') or '<missing>'}",
+        f"replay_status={status}",
+        f"replay_next_action={next_action or '<none>'}",
+        f"replay_action_id={snapshot.get('action_id') or '<missing>'}",
+        f"replay_request_hash={snapshot.get('request_hash') or '<missing>'}",
+    )
+    reconciliation_required = bool(
+        snapshot.get("reconciliation_required")
+        or snapshot.get("uncertain_mutation")
+        or next_action == "nexus_task_reconcile"
+        or status == "UNKNOWN_REQUIRES_RECONCILE"
+    )
+    if reconciliation_required:
+        return PlaneObservation(
+            plane=ExecutionReadinessPlane.REPLAY_FENCE,
+            status=ExecutionReadinessStatus.BLOCKED,
+            blocker_code=ExecutionReadinessBlockerCode.SEMANTIC_REPLAY_FENCE,
+            evidence_identities=evidence,
+        )
+    return PlaneObservation(
+        plane=ExecutionReadinessPlane.REPLAY_FENCE,
+        status=ExecutionReadinessStatus.PASSED,
+        evidence_identities=evidence,
+    )
+
+
+def _evidence_map(observation: PlaneObservation) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for identity in observation.evidence_identities:
+        if "=" not in identity:
+            continue
+        key, value = identity.split("=", 1)
+        values[key] = value
+    return values
+
+
+def _canonical_workforce_observation(
+    request: ExecutionReadinessRequest,
+    supplied: Sequence[PlaneObservation],
+) -> PlaneObservation:
+    """Require exact Planner/Admission/provider identities when Workforce is material."""
+
+    if not request.worker_constraints:
+        return PlaneObservation(
+            plane=ExecutionReadinessPlane.WORKFORCE,
+            status=ExecutionReadinessStatus.PASSED,
+            evidence_identities=("workforce_plane:non_material:no_worker_constraints",),
+        )
+    for observation in supplied:
+        if observation.status is not ExecutionReadinessStatus.PASSED:
+            continue
+        values = _evidence_map(observation)
+        if all(_SHA256_RE.fullmatch(values.get(key, "")) for key in _WORKFORCE_REQUIRED_EVIDENCE):
+            return PlaneObservation(
+                plane=ExecutionReadinessPlane.WORKFORCE,
+                status=ExecutionReadinessStatus.PASSED,
+                evidence_identities=tuple(observation.evidence_identities),
+            )
+    return PlaneObservation(
+        plane=ExecutionReadinessPlane.WORKFORCE,
+        status=ExecutionReadinessStatus.BLOCKED,
+        blocker_code=ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY,
+        evidence_identities=(
+            "workforce_plane:canonical_planner_admission_provider_evidence_required",
+            *tuple(f"workforce_constraint={item}" for item in request.worker_constraints[:4]),
+        ),
+    )
+
+
+def _has_explicit_block(observations: Sequence[PlaneObservation]) -> bool:
+    return any(item.status is ExecutionReadinessStatus.BLOCKED for item in observations)
+
+
+def _normalize_canonical_planes(
+    request: ExecutionReadinessRequest,
+    plane_observations: Mapping[ExecutionReadinessPlane, Sequence[PlaneObservation]],
+    moment: datetime,
+) -> dict[ExecutionReadinessPlane, tuple[PlaneObservation, ...]]:
+    """Replace compatibility PASS observations with canonical/typed evidence."""
+
+    normalized = {plane: tuple(values) for plane, values in plane_observations.items()}
+    for plane in (
+        ExecutionReadinessPlane.GOVERNANCE,
+        ExecutionReadinessPlane.AUTHORITY,
+        ExecutionReadinessPlane.REPLAY_FENCE,
+        ExecutionReadinessPlane.WORKFORCE,
+    ):
+        supplied = tuple(normalized.get(plane, ()))
+        if not supplied or _has_explicit_block(supplied):
+            continue
+        if not any(item.status is ExecutionReadinessStatus.PASSED for item in supplied):
+            continue
+        if plane is ExecutionReadinessPlane.GOVERNANCE:
+            normalized[plane] = (_canonical_governance_observation(moment),)
+        elif plane is ExecutionReadinessPlane.AUTHORITY:
+            normalized[plane] = (_canonical_authority_observation(request, moment),)
+        elif plane is ExecutionReadinessPlane.REPLAY_FENCE:
+            normalized[plane] = (_canonical_replay_observation(request),)
+        else:
+            normalized[plane] = (_canonical_workforce_observation(request, supplied),)
+    return normalized
+
+
 def _aggregate_plane(
     plane: ExecutionReadinessPlane,
     observations: Sequence[PlaneObservation],
@@ -358,34 +704,26 @@ def _aggregate_plane(
                 raise ReadinessEvidenceError("BLOCKED_OBSERVATION_REQUIRES_CODE", plane)
             if blocker_plane(observation.blocker_code) is not plane:
                 raise ReadinessEvidenceError("OBSERVATION_CODE_PLANE_MISMATCH", plane)
-        else:
-            if observation.blocker_code is not None:
-                raise ReadinessEvidenceError("NON_BLOCKED_OBSERVATION_MUST_NOT_CARRY_CODE", plane)
-        if (
-            observation.status is ExecutionReadinessStatus.UNPROVEN
-            and observation.evidence_identities
-        ):
+        elif observation.blocker_code is not None:
+            raise ReadinessEvidenceError("NON_BLOCKED_OBSERVATION_MUST_NOT_CARRY_CODE", plane)
+        if observation.status is ExecutionReadinessStatus.UNPROVEN and observation.evidence_identities:
             raise ReadinessEvidenceError("UNPROVEN_OBSERVATION_MUST_NOT_CARRY_EVIDENCE", plane)
     blocked = next(
-        (
-            observation
-            for observation in observations
-            if observation.status is ExecutionReadinessStatus.BLOCKED
-        ),
+        (item for item in observations if item.status is ExecutionReadinessStatus.BLOCKED),
         None,
     )
     if blocked is not None:
         return (
             ExecutionReadinessStatus.BLOCKED,
             blocked.blocker_code,
-            _merge_evidence(*(observation.evidence_identities for observation in observations)),
+            _merge_evidence(*(item.evidence_identities for item in observations)),
         )
-    if any(observation.status is ExecutionReadinessStatus.UNPROVEN for observation in observations):
+    if any(item.status is ExecutionReadinessStatus.UNPROVEN for item in observations):
         return ExecutionReadinessStatus.UNPROVEN, None, ()
     return (
         ExecutionReadinessStatus.PASSED,
         None,
-        _merge_evidence(*(observation.evidence_identities for observation in observations)),
+        _merge_evidence(*(item.evidence_identities for item in observations)),
     )
 
 
@@ -396,27 +734,19 @@ def evaluate_execution_readiness(
     completion_observation: CompletionAuthorityObservation | None = None,
     evaluated_at: datetime | None = None,
 ) -> ExecutionReadinessResult:
-    """Aggregate typed plane evidence into the one typed readiness result.
-
-    Deterministic G0 precedence: the primary blocker is always the failing
-    plane with the lowest precedence rank (1 = highest).  Every plane that is
-    not the primary blocker and not higher-precedence-passed is ``UNPROVEN``.
-
-    ``completion_observation`` is material only when the request carries
-    ``required_completion_contract``; it is then compared fail-closed and its
-    verdict folds into the plane-5 (ACTION_SURFACE) result.
-    """
+    """Converge evidence after re-binding canonical planes at one watermark."""
 
     moment = evaluated_at or datetime.now(timezone.utc)
     if moment.tzinfo is None:
         raise ReadinessEvidenceError("EVALUATED_AT_MUST_BE_TIMEZONE_AWARE")
 
+    canonical_observations = _normalize_canonical_planes(request, plane_observations, moment)
     aggregated: dict[
         ExecutionReadinessPlane,
         tuple[ExecutionReadinessStatus, ExecutionReadinessBlockerCode | None, tuple[str, ...]],
     ] = {}
     for plane in ExecutionReadinessPlane:
-        aggregated[plane] = _aggregate_plane(plane, plane_observations.get(plane, ()))
+        aggregated[plane] = _aggregate_plane(plane, canonical_observations.get(plane, ()))
 
     completion_ok: bool | None = None
     completion_code: ExecutionReadinessBlockerCode | None = None
@@ -434,10 +764,7 @@ def evaluate_execution_readiness(
                 evidence = _merge_evidence(evidence, completion_evidence)
             elif not completion_ok:
                 status = ExecutionReadinessStatus.BLOCKED
-                code = (
-                    completion_code
-                    or ExecutionReadinessBlockerCode.COMPLETION_CONTRACT_BINDING_REQUIRED
-                )
+                code = completion_code or ExecutionReadinessBlockerCode.COMPLETION_CONTRACT_BINDING_REQUIRED
                 evidence = _merge_evidence(evidence, completion_evidence)
         results.append(
             ExecutionReadinessPlaneResult(
@@ -448,31 +775,22 @@ def evaluate_execution_readiness(
             )
         )
 
-    blocked = [result for result in results if result.status is ExecutionReadinessStatus.BLOCKED]
+    blocked = [item for item in results if item.status is ExecutionReadinessStatus.BLOCKED]
     if blocked:
-        # G0 determinism: the primary blocker is the highest-precedence
-        # failing plane.  Every plane ranked after it collapses to UNPROVEN
-        # (never READY, never a second blocker, evidence dropped per the
-        # plane-result contract) so post-repair re-preflight re-evaluates it.
-        primary = min(blocked, key=lambda result: result.plane.precedence)
+        primary = min(blocked, key=lambda item: item.plane.precedence)
         primary_rank = primary.plane.precedence
         results = [
             (
-                result
-                if result.plane.precedence <= primary_rank
+                item
+                if item.plane.precedence <= primary_rank
                 else ExecutionReadinessPlaneResult(
-                    plane=result.plane, status=ExecutionReadinessStatus.UNPROVEN
+                    plane=item.plane, status=ExecutionReadinessStatus.UNPROVEN
                 )
             )
-            for result in results
+            for item in results
         ]
-        blocked = [
-            result for result in results if result.status is ExecutionReadinessStatus.BLOCKED
-        ]
-        primary = min(blocked, key=lambda result: result.plane.precedence)
-        # Deterministic capacity bound: keep the first plane evidence
-        # identities so the blocker always fits the outcome evidence cap with
-        # the request hash and precedence rank appended last.
+        blocked = [item for item in results if item.status is ExecutionReadinessStatus.BLOCKED]
+        primary = min(blocked, key=lambda item: item.plane.precedence)
         plane_evidence = _merge_evidence(primary.evidence_identities)[
             : OUTCOME_EVIDENCE_MAX_IDENTITIES - 1
         ]
@@ -493,15 +811,13 @@ def evaluate_execution_readiness(
             request_hash=request.request_hash(),
             evaluated_at=moment,
             ready_planes=tuple(
-                result.plane
-                for result in results
-                if result.status is ExecutionReadinessStatus.PASSED
+                item.plane for item in results if item.status is ExecutionReadinessStatus.PASSED
             ),
             plane_results=tuple(results),
             primary_blocker=blocker,
         )
 
-    unproven = [result for result in results if result.status is ExecutionReadinessStatus.UNPROVEN]
+    unproven = [item for item in results if item.status is ExecutionReadinessStatus.UNPROVEN]
     if unproven:
         raise ReadinessEvidenceError("NO_BLOCKER_BUT_UNPROVEN_PLANES", unproven[0].plane)
 

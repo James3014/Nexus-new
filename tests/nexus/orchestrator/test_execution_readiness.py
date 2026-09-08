@@ -4,6 +4,7 @@ canonical routing, completion binding, and the no-fake-certification fence."""
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from nexus.contracts.execution_readiness import (
     CanonicalNextAction,
@@ -16,8 +17,10 @@ from nexus.contracts.execution_readiness import (
 )
 from nexus.orchestrator.execution_readiness import (
     CompletionAuthorityObservation,
+    GatewayReadinessObservation,
     PlaneObservation,
     evaluate_execution_readiness,
+    evaluate_source_binding,
 )
 
 
@@ -84,8 +87,8 @@ def _completion_observation(**overrides: object) -> CompletionAuthorityObservati
         "observed_artifact_identity": "git:4e4c911eb83ed2eeda14caf276d3a1bd6709c6aa",
         "observed_interface_revision": "nexus-core.completion.iface.v2",
         "observed_capabilities": (
-            "COMPLETION_VERDICT",
-            "EVIDENCE_VERIFY",
+            "EVIDENCE_VERIFICATION",
+            "COMPLETION_DECISION",
             "RECEIPT_BIND",
         ),
     }
@@ -562,3 +565,195 @@ class TestAuthorityNonLeakage:
         assert '"VERIFIED"' not in blob
         assert '"CERTIFIED"' not in blob
         assert '"COMPLETE"' not in blob
+
+class TestCorrectiveFalseGreenControls:
+    """Post-merge #807 F1-F4 hostile controls."""
+
+    @staticmethod
+    def _install_valid_authority(monkeypatch) -> None:
+        import nexus.orchestrator.standing_grant_store as grant_store
+
+        snapshot = {
+            "schema": "nexus.standing_grant_inspection.v1",
+            "status": "VALID",
+            "receipt_hash": "1" * 64,
+            "owner_id": "owner-james",
+            "coordinator_id": "coordinator-durable",
+            "repository_id": "James3014/Nexus-new",
+            "canonical_remote": "https://github.com/James3014/Nexus-new.git",
+            "goal_id": "goal-test",
+            "allowed_actions": ["TASK_SUBMIT"],
+            "expires_at": "2099-01-01T00:00:00+00:00",
+        }
+        monkeypatch.setattr(
+            grant_store,
+            "inspect_standing_grant_receipt",
+            lambda **_kwargs: dict(snapshot),
+        )
+        monkeypatch.setattr(
+            grant_store,
+            "evaluate_rehydrated_durable_standing_grant",
+            lambda **_kwargs: SimpleNamespace(
+                outcome=SimpleNamespace(value="GRANT_MATCH"),
+                mutation_authorized=True,
+                context_hash="2" * 64,
+                decision_hash="3" * 64,
+            ),
+        )
+
+    def test_governance_default_pass_cannot_hide_broken_canonical_observer(
+        self, monkeypatch
+    ) -> None:
+        import nexus.orchestrator.standing_grant_store as grant_store
+
+        def broken_observer(**_kwargs):
+            raise RuntimeError("governance unavailable")
+
+        monkeypatch.setattr(grant_store, "inspect_standing_grant_receipt", broken_observer)
+        result = _evaluate(_request())
+        assert result.outcome is ExecutionReadinessOutcome.BLOCKED
+        assert result.primary_blocker is not None
+        assert result.primary_blocker.code is (
+            ExecutionReadinessBlockerCode.GOVERNANCE_PLANE_RECOVERY_REQUIRED
+        )
+
+    def test_material_authority_synthetic_pass_fails_closed(self, monkeypatch) -> None:
+        import nexus.orchestrator.standing_grant_store as grant_store
+
+        monkeypatch.setattr(
+            grant_store,
+            "inspect_standing_grant_receipt",
+            lambda **_kwargs: {
+                "schema": "nexus.standing_grant_inspection.v1",
+                "status": "MISSING",
+            },
+        )
+        result = _evaluate(
+            _request(task_campaign_goal_identity="goal-test"),
+            {
+                ExecutionReadinessPlane.AUTHORITY: (
+                    _pass(
+                        ExecutionReadinessPlane.AUTHORITY,
+                        "authority_plane:in_process_caller_context",
+                    ),
+                ),
+            },
+        )
+        assert result.outcome is ExecutionReadinessOutcome.BLOCKED
+        assert result.primary_blocker is not None
+        assert result.primary_blocker.code is (
+            ExecutionReadinessBlockerCode.TASK_AUTHORITY_MISSING
+        )
+
+    def test_material_replay_reconcile_state_overrides_synthetic_pass(
+        self, monkeypatch
+    ) -> None:
+        import nexus.orchestrator.self_hosted_task_service as task_service
+
+        self._install_valid_authority(monkeypatch)
+        monkeypatch.setattr(
+            task_service.SelfHostedTaskService,
+            "get_task_snapshot",
+            lambda _self, task_id, include_details=False: {
+                "task_id": task_id,
+                "attempt_id": "attempt-1",
+                "status": "UNKNOWN_REQUIRES_RECONCILE",
+                "reconciliation_required": True,
+                "task_action": {"next_action": "nexus_task_reconcile"},
+            },
+        )
+        result = _evaluate(
+            _request(
+                task_campaign_goal_identity="goal-test",
+                execution_contract_kind="TRACKED_TASK_CARD",
+            ),
+            {
+                ExecutionReadinessPlane.REPLAY_FENCE: (
+                    _pass(
+                        ExecutionReadinessPlane.REPLAY_FENCE,
+                        "replay_fence_plane:in_process_first_observation",
+                    ),
+                ),
+            },
+        )
+        assert result.outcome is ExecutionReadinessOutcome.BLOCKED
+        assert result.primary_blocker is not None
+        assert result.primary_blocker.code is (
+            ExecutionReadinessBlockerCode.SEMANTIC_REPLAY_FENCE
+        )
+
+    def test_material_workforce_env_pass_is_not_canonical_evidence(self) -> None:
+        result = _evaluate(
+            _request(worker_constraints=("provider=agy",)),
+            {
+                ExecutionReadinessPlane.WORKFORCE: (
+                    _pass(
+                        ExecutionReadinessPlane.WORKFORCE,
+                        "NEXUS_READINESS_WORKFORCE_STATUS=PASSED",
+                    ),
+                ),
+            },
+        )
+        assert result.outcome is ExecutionReadinessOutcome.BLOCKED
+        assert result.primary_blocker is not None
+        assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
+
+    def test_request_required_completion_capabilities_cannot_be_substituted(self) -> None:
+        result = _evaluate(
+            _request(
+                execution_contract_kind="FORMAL_COMPLETION_CERTIFICATION",
+                required_completion_contract=_required_contract(),
+            ),
+            completion_observation=_completion_observation(
+                observed_capabilities=(
+                    "COMPLETION_VERDICT",
+                    "EVIDENCE_VERIFY",
+                    "RECEIPT_BIND",
+                )
+            ),
+        )
+        assert result.outcome is ExecutionReadinessOutcome.BLOCKED
+        assert result.primary_blocker is not None
+        assert result.primary_blocker.code is (
+            ExecutionReadinessBlockerCode.COMPLETION_CONTRACT_BINDING_REQUIRED
+        )
+
+    def test_repository_owner_name_must_match_physical_repository(
+        self, monkeypatch
+    ) -> None:
+        import nexus.orchestrator.execution_readiness as readiness_module
+
+        monkeypatch.setattr(
+            readiness_module,
+            "_physical_repository_id",
+            lambda: "James3014/Nexus-new",
+        )
+        observation = GatewayReadinessObservation(
+            gateway_instance_id="gateway-test",
+            observed_repo_head="a" * 40,
+            observed_repo_tree="b" * 40,
+            observed_runtime_sha256="c" * 64,
+            runtime_sha256_at_start="c" * 64,
+            tool_manifest_revision="manifest-test",
+            full_tool_schema_hash="d" * 64,
+            permission_policy_hash="e" * 64,
+            reload_required=False,
+        )
+        result = evaluate_source_binding(
+            _request(repository_owner="ForeignOwner"),
+            observation,
+        )
+        assert result.status is ExecutionReadinessStatus.BLOCKED
+        assert result.blocker_code is ExecutionReadinessBlockerCode.SOURCE_REALM_MISMATCH
+
+    def test_ready_result_replaces_legacy_default_evidence(self) -> None:
+        result = _evaluate(_request())
+        evidence = {
+            identity
+            for item in result.plane_results
+            for identity in item.evidence_identities
+        }
+        assert "governance_plane:default_no_open_recovery" not in evidence
+        assert "authority_plane:in_process_caller_context" not in evidence
+        assert "replay_fence_plane:in_process_first_observation" not in evidence
+        assert "NEXUS_READINESS_WORKFORCE_STATUS=PASSED" not in evidence
