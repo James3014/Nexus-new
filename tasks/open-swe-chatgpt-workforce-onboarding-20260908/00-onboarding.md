@@ -30,6 +30,7 @@ Register `opencli_chatgpt_balanced_web` as a conditional L1 bounded Candidate ge
 - `tests/contracts/test_model_workforce_policy.py`
 - `tests/nexus/orchestrator/test_unified_mcp_gateway.py`
 - `tests/services/test_external_intelligence_automation.py`
+- `tests/services/test_model_workforce_policy_loader.py`
 - `tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md`
 - `tasks/open-swe-chatgpt-workforce-onboarding-20260908/INDEX.md`
 - `tasks/open-swe-chatgpt-workforce-onboarding-20260908/00-onboarding.md`
@@ -48,7 +49,7 @@ No deletion is allowed.
 ## Verification
 
 ```bash
-uv run pytest -q tests/contracts/test_model_workforce_policy.py tests/nexus/orchestrator/test_unified_mcp_gateway.py tests/services/test_external_intelligence_automation.py tests/services/test_external_intelligence_service.py tests/services/test_open_swe_worker_transport.py
+uv run pytest -q tests/contracts/test_model_workforce_policy.py tests/nexus/orchestrator/test_unified_mcp_gateway.py tests/services/test_external_intelligence_automation.py tests/services/test_external_intelligence_service.py tests/services/test_open_swe_worker_transport.py tests/services/test_model_workforce_policy_loader.py
 uv run ruff check nexus/engine/canonical_task_seam.py tests/contracts/test_model_workforce_policy.py tests/nexus/orchestrator/test_unified_mcp_gateway.py tests/services/test_external_intelligence_automation.py
 git diff --check
 ```
