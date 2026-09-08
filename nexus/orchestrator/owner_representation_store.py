@@ -61,6 +61,7 @@ import pwd
 import re
 import stat
 import subprocess
+import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -115,7 +116,12 @@ _AUTHORIZATION_SCHEMA = "nexus.owner_exact_publication_authorization.v1"
 _AUTHORIZATION_CONSUMED_SCHEMA = "nexus.owner_exact_publication_authorization_consumed.v1"
 # Deployment-owned trust root.  This is deliberately not derived from the
 # caller's authority_root or from fields in an authorization record.
-OWNER_AUTHORIZATION_TRUST_ROOT = Path("/etc/nexus/owner-representation/trusted-keys")
+# ``/etc`` is a symlink to ``/private/etc`` on macOS.  Pin the canonical
+# platform path so the lstat boundary can reject symlinks without making the
+# real deployment path unusable.  This is fixed process configuration: callers
+# and authorization records cannot select a trust root.
+_TRUST_ETC_ROOT = Path("/private/etc") if sys.platform == "darwin" else Path("/etc")
+OWNER_AUTHORIZATION_TRUST_ROOT = _TRUST_ETC_ROOT / "nexus/owner-representation/trusted-keys"
 OPENSSL_BINARY = "/usr/bin/openssl"
 
 
@@ -511,6 +517,7 @@ def _verify_owner_signature(auth: OwnerExactPublicationAuthorization) -> None:
         or any(
             stat.S_ISLNK(item.st_mode)
             or not stat.S_ISDIR(item.st_mode)
+            or item.st_uid != 0
             or stat.S_IMODE(item.st_mode) & 0o022
             for item in ancestor_stats
         )

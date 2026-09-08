@@ -138,8 +138,10 @@ permit minted under live Owner standing-grant authority:
   attempt.
   The exact authorization also carries an Owner signature and deployment-bound
   key id. Verification uses a fixed, deployment-owned public-key trust root
-  (not `authority_root`, authorization fields, or worker-selected paths) and a
-  fixed OpenSSL verifier. Missing/unreadable/unsafe keys, unavailable verifier,
+  (canonical `/private/etc/nexus/owner-representation/trusted-keys` on macOS,
+  `/etc/nexus/owner-representation/trusted-keys` elsewhere; never
+  `authority_root`, authorization fields, or worker-selected paths) and a fixed
+  OpenSSL verifier. Missing/unreadable/unsafe keys, unavailable verifier,
   malformed signatures, and verification failures all fail closed. Production
   never provisions or exposes the corresponding private key; test keys remain
   confined to explicit test fixtures.

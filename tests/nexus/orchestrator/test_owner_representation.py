@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
+import stat
 import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1339,12 +1341,14 @@ def test_real_rsa_owner_signature_accepts_and_rejects_tamper(
     real_lstat = Path.lstat
     def trusted_lstat(path):
         result = real_lstat(path)
-        if Path(path) in {trust_root, public_key} or trust_root in Path(path).parents:
+        if Path(path) in {trust_root, public_key} or Path(path) in trust_root.parents:
             values = list(result)
             values[4] = 0
-            if Path(path) != public_key:
-                values[0] = (values[0] & ~0o170000) | 0o040000
-                values[3] = (values[3] & ~0o777) | 0o700
+            # Preserve symlink metadata so the production lstat boundary is
+            # exercised, while making only this test fixture's real
+            # directories look like deployment-owned root directories.
+            if Path(path) != public_key and not stat.S_ISLNK(result.st_mode):
+                values[0] = (values[0] & ~0o17777) | stat.S_IFDIR | 0o700
             return type(result)(values)
         return result
     monkeypatch.setattr(Path, "lstat", trusted_lstat)
@@ -1399,6 +1403,22 @@ def test_real_rsa_owner_signature_accepts_and_rejects_tamper(
             owner_key_id="rsa", owner_signature=base64.b64encode(b"wrong").decode(),
         )
     assert not (grant_store.root / "authorizations" / f"{bad_grant.grant_hash}.json").exists()
+
+    # Every fixed trust-root ancestor is part of the security boundary.  A
+    # writable ancestor owned by a non-root user must fail closed even when
+    # the key and signature themselves are valid.
+    def non_root_ancestor_lstat(path):
+        result = trusted_lstat(path)
+        if Path(path) == trust_root.parent:
+            values = list(result)
+            values[4] = os.geteuid() or 501
+            values[0] = (values[0] & ~0o17777) | stat.S_IFDIR | 0o700
+            return type(result)(values)
+        return result
+
+    monkeypatch.setattr(Path, "lstat", non_root_ancestor_lstat)
+    with pytest.raises(OwnerRepresentationGrantBlocked, match="EXACT_OWNER_AUTHORIZATION_REJECTED"):
+        store._verify_owner_signature(auth)
 
 
 def test_mandatory_hostile_oracle_worker_cannot_mint_arbitrary_publication_without_owner_exact_authorization(
