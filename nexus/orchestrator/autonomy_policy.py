@@ -850,3 +850,28 @@ def project_autonomy_submission(state: Mapping[str, Any]) -> dict[str, Any]:
         "binding_hash": binding.binding_hash,
         "reason_codes": [] if matching else ["SUBMISSION_BINDING_DRIFT"],
     }
+
+
+def evaluate_writer_transition_authority(handle: Any, *, operation_digest: str) -> tuple[bool, str]:
+    """Separate typed evaluator for Card A handles; never grants authority."""
+    if not isinstance(operation_digest, str) or len(operation_digest) != 64:
+        return False, "WRITER_TRANSITION_OPERATION_DIGEST_INVALID"
+    try:
+        from nexus.orchestrator.state_owner_transition_authority import is_registered_authority
+
+        registered = is_registered_authority(handle)
+    except Exception:
+        registered = False
+    if not registered:
+        return False, "WRITER_TRANSITION_AUTHORITY_UNREGISTERED"
+    if getattr(handle, "authorization_intent_digest", "") != operation_digest:
+        return False, "WRITER_TRANSITION_OPERATION_DIGEST_MISMATCH"
+    try:
+        from datetime import datetime, timezone
+
+        expiry = datetime.fromisoformat(str(handle.expires_at).replace("Z", "+00:00"))
+        if expiry <= datetime.now(timezone.utc):
+            return False, "WRITER_TRANSITION_AUTHORITY_EXPIRED"
+    except (AttributeError, TypeError, ValueError):
+        return False, "WRITER_TRANSITION_AUTHORITY_EXPIRY_INVALID"
+    return True, "WRITER_TRANSITION_AUTHORITY_VERIFIED"

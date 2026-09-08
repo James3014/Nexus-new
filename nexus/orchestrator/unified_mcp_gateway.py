@@ -37,6 +37,11 @@ from nexus.contracts.lifecycle_action import (
     PermissionProfile,
     build_action_envelope,
 )
+from nexus.contracts.state_owner_transition import (
+    Operation,
+    TransitionValidationError,
+    WriterTransitionRequest,
+)
 from nexus.contracts.target_integration_lifecycle import ExternalAcceptanceReceipt
 from nexus.engine.canonical_task_seam import (
     VerifiedTaskCardIdentity,
@@ -116,6 +121,23 @@ GITHUB_REPOSITORY = RepositoryIdentity(
     repository_id="James3014/Nexus-new",
     canonical_remote="https://github.com/James3014/Nexus-new.git",
 )
+
+def build_source_owned_transition_service(
+    service: SelfHostedTaskService | None = None,
+) -> Any:
+    """Delegate to the service-owned source/root registry factory.
+
+    Gateway exposes this narrow seam so MCP ingress cannot construct a service
+    from request-selected paths.  The registry and source identity remain
+    owned by the service worker (Card B dependency).
+    """
+    try:
+        from nexus.orchestrator.state_owner_transition_service import (
+            build_source_owned_transition_service as factory,
+        )
+    except ImportError as exc:
+        raise GatewayInputError("WRITER_TRANSITION_FACTORY_UNAVAILABLE") from exc
+    return factory(service=service)
 
 # Populated from ``UnifiedMCPGateway.tool_specs()`` after the class definition.
 # There must be one public manifest truth; status, health, recovery validation,
@@ -950,6 +972,30 @@ class UnifiedMCPGateway:
         self._calibration_planner = CalibrationPlanner(self._lineage_registry)
         self._assist_processes: dict[str, subprocess.Popen[str]] = {}
         self._assist_lock = threading.RLock()
+
+    def writer_transition_ingress(self, payload: Mapping[str, Any]) -> dict[str, Any]:
+        """Inspect or execute one strictly typed, source-owned transition.
+
+        The method deliberately has no fixture selector or path override.  A
+        test may replace the factory at the module boundary, while production
+        always derives source identity and the root registry from the loaded
+        task service.
+        """
+        if not isinstance(payload, Mapping):
+            raise GatewayInputError("WRITER_TRANSITION_REQUEST_INVALID")
+        try:
+            request = WriterTransitionRequest.from_mapping(payload)
+        except (TransitionValidationError, TypeError, ValueError) as exc:
+            raise GatewayInputError(f"WRITER_TRANSITION_REQUEST_INVALID:{exc}") from exc
+        # Keep construction separate from request parsing: request fields can
+        # identify an expected source, but cannot choose the source or roots.
+        service = build_source_owned_transition_service(self.service)
+        operation = {
+            Operation.PREFLIGHT: service.preflight,
+            Operation.APPLY: service.apply,
+            Operation.RECONCILE: service.reconcile,
+        }[request.operation]
+        return operation(request).to_dict()
 
     @staticmethod
     def _utc_now() -> str:
@@ -3645,6 +3691,50 @@ class UnifiedMCPGateway:
                 "description": "Dispose a pending Candidate as REJECTED or SUPERSEDED through cleanup authority.",
                 "inputSchema": {"type": "object", "required": ["task_id", "disposition"], "properties": {"task_id": {"type": "string"}, "disposition": {"type": "string", "enum": ["REJECTED", "SUPERSEDED"]}, "superseded_by": {"type": "string"}}},
             },
+            {
+                "name": "nexus_writer_transition",
+                "description": "Inspect or execute one source-owned same-owner writer transition; APPLY and RECONCILE remain explicit request operations.",
+                "inputSchema": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "schema", "operation", "request_id", "transaction_id", "idempotency_key", "task_id",
+                        "card_path", "card_sha256", "expected_source_head", "expected_source_tree", "accepted_source_receipt",
+                        "root_id", "expected_root_identity", "expected_owner_id", "expected_generation", "expected_writer_id",
+                        "expected_manifest_sha256", "next_generation", "next_writer_id", "selections", "authority_receipt_id",
+                        "authority_receipt_hash", "drain_receipt_id", "drain_receipt_hash", "snapshot_receipt_id",
+                        "snapshot_receipt_hash", "rollback_receipt_id", "rollback_receipt_hash", "loaded_writer_plan_id",
+                        "loaded_writer_plan_hash",
+                    ],
+                    "properties": {
+                        "schema": {"type": "string", "const": "nexus.state_owner_transition_request.v1"},
+                        "operation": {"type": "string", "enum": ["PREFLIGHT", "APPLY", "RECONCILE"]},
+                        "request_id": {"type": "string"}, "transaction_id": {"type": "string"},
+                        "idempotency_key": {"type": "string"}, "task_id": {"type": "string"},
+                        "card_path": {"type": "string"}, "card_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "expected_source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "expected_source_tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+                        "accepted_source_receipt": {"type": "string"},
+                        "accepted_source_receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "root_id": {"type": "string"}, "expected_root_identity": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "expected_owner_id": {"type": "string"}, "expected_generation": {"type": ["integer", "null"], "minimum": 1},
+                        "expected_writer_id": {"type": "string"}, "expected_manifest_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+                        "next_generation": {"type": "integer", "minimum": 1}, "next_writer_id": {"type": "string"},
+                        "selections": {
+                            "type": "array", "minItems": 1,
+                            "items": {"type": "object", "additionalProperties": False, "required": ["entry_id", "role", "relative_path", "expected_sha256", "size"], "properties": {
+                                "entry_id": {"type": "string"}, "role": {"type": "string", "enum": ["task_state", "runtime_receipt", "event_log", "effect_journal"]},
+                                "relative_path": {"type": "string"}, "expected_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "size": {"type": "integer", "minimum": 0},
+                            }},
+                        },
+                        "authority_receipt_id": {"type": "string"}, "authority_receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "drain_receipt_id": {"type": "string"}, "drain_receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "snapshot_receipt_id": {"type": "string"}, "snapshot_receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "rollback_receipt_id": {"type": "string"}, "rollback_receipt_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "loaded_writer_plan_id": {"type": "string"}, "loaded_writer_plan_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                    },
+                },
+            },
         ]
 
     @staticmethod
@@ -4801,6 +4891,8 @@ class UnifiedMCPGateway:
         raise GatewayInputError("execution_lane is unsupported")
 
     def _call_tool(self, name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        if name == "nexus_writer_transition":
+            return self.writer_transition_ingress(arguments)
         if name == "nexus_gateway_status":
             return self._gateway_status()
         if name == "nexus_workspace_snapshot":
