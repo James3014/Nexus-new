@@ -500,12 +500,37 @@ def test_real_capability_planner_produces_bound_canonical_projection():
 
 
 def test_context_budget_rejects_policy_or_memory_injection():
-    with pytest.raises(ValueError, match="canonical_context_budget_key_forbidden:learning_policy"):
+    """Keep the Golden node identity while covering the evolved budget contract."""
+    accepted = CanonicalTaskContext(
+        task_id="task-policy-data",
+        task_type="bugfix",
+        task_desc="Carry governed policy evidence as planner input.",
+        budget={
+            "learning_policy": {"promoted_capabilities": ["memory"]},
+            "policy_overlay": {"source": "governed-evidence"},
+        },
+    )
+    assert accepted.budget["learning_policy"]["promoted_capabilities"] == ("memory",)
+    assert accepted.budget["policy_overlay"]["source"] == "governed-evidence"
+
+    for forbidden_key, error in (
+        ("memory", "canonical_context_budget_key_forbidden:memory"),
+        ("route_override", "canonical_context_route_override_forbidden:budget.route_override"),
+    ):
+        with pytest.raises(ValueError, match=error):
+            CanonicalTaskContext(
+                task_id="task-1",
+                task_type="bugfix",
+                task_desc="Reject an unknown or authority-bearing budget key.",
+                budget={forbidden_key: {"promoted_capabilities": ["swarm"]}},
+            )
+
+    with pytest.raises(ValueError, match="canonical_context_route_override_forbidden:budget.execution_topology"):
         CanonicalTaskContext(
             task_id="task-1",
             task_type="bugfix",
             task_desc="Fix a bounded parser defect.",
-            budget={"learning_policy": {"promoted_capabilities": ["swarm"]}},
+            budget={"execution_topology": "alternate"},
         )
 
 

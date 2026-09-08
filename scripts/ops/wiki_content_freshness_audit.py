@@ -14,12 +14,10 @@ import hashlib
 import json
 import re
 import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 
 import yaml
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VAULT_ROOT = REPO_ROOT / "nexus_wiki_vault"
@@ -176,13 +174,26 @@ def _python_symbols(path: Path) -> set[str]:
     except (OSError, UnicodeDecodeError, SyntaxError):
         return set()
     symbols = {"__module__"}
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            symbols.add(node.name)
-            if isinstance(node, ast.ClassDef):
-                for child in node.body:
-                    if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        symbols.add(f"{node.name}.{child.name}")
+
+    def visit_module_statements(statements: list[ast.stmt]) -> None:
+        for node in statements:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                symbols.add(node.name)
+                if isinstance(node, ast.ClassDef):
+                    for child in node.body:
+                        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                            symbols.add(f"{node.name}.{child.name}")
+            elif isinstance(node, ast.If):
+                visit_module_statements(node.body)
+                visit_module_statements(node.orelse)
+            elif isinstance(node, ast.Try):
+                visit_module_statements(node.body)
+                for handler in node.handlers:
+                    visit_module_statements(handler.body)
+                visit_module_statements(node.orelse)
+                visit_module_statements(node.finalbody)
+
+    visit_module_statements(tree.body)
     return symbols
 
 
