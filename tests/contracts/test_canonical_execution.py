@@ -275,6 +275,21 @@ def test_canonical_context_requires_workforce_demands_for_available_execution_ch
             allowed_files=("x.py",),
             verifier_command=(),
         )
+    with pytest.raises(ValueError, match="canonical_workforce_demand_conflict:local"):
+        _resolve_policy_workforce_bindings(
+            {
+                "signal_snapshot": {
+                    "workforce_demands": {
+                        "demands": [
+                            {"execution_channel": "local", "requested_role": "bounded_code_candidate"},
+                            {"execution_channel": "local", "requested_role": "compact_diagnosis"},
+                        ]
+                    }
+                }
+            },
+            allowed_files=("x.py",),
+            verifier_command=(),
+        )
 
 
 def test_canonical_replan_builds_one_fresh_bundle_from_explicit_authorization(monkeypatch):
