@@ -273,7 +273,7 @@ def test_directory_boundaries_are_treated_as_mutation_overlap(tmp_path):
     assert len(decision["deferred_mutation_overlap"]) == 1
 
 
-def test_worker_bootstrap_contains_ref_hash_without_duplicate_envelope_body(tmp_path):
+def test_worker_bootstrap_contains_ref_hash_not_full_envelope_body(tmp_path):
     _, base = make_repo(tmp_path)
     envelope = tmp_path / "envelope.json"
     marker = "SHOULD_NOT_ENTER_SOL_CONTEXT_987654"
