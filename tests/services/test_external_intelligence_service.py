@@ -289,8 +289,8 @@ def test_open_swe_activation_overlay_merges_with_host_and_binds_both_consumers(
         "timeout_seconds": 180,
     }
     assert calls[0][1]["transport_config"] == calls[1][1]["transport_config"] == expected_transport
-    assert calls[0][1]["timeout"] == 600.0
-    assert calls[1][1]["timeout"] == 1200.0
+    assert calls[0][1]["timeout"] == 1200.0
+    assert calls[1][1]["timeout"] == 2400.0
     assert (
         calls[0][1]["runtime_state_root"]
         == calls[1][1]["runtime_state_root"]
