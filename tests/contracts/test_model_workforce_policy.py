@@ -616,7 +616,9 @@ def test_campaign_route_resolution_open_swe_resident_canary() -> None:
         )
         == "opencli_chatgpt_balanced_web"
     )
-    assert loader.resolve_route("fast_bounded_implementation", campaign_id="") == "agy_flash_37_medium"
+    assert (
+        loader.resolve_route("fast_bounded_implementation", campaign_id="") == "agy_flash_37_medium"
+    )
     assert (
         loader.resolve_route(
             "fast_bounded_implementation",

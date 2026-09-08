@@ -1828,9 +1828,7 @@ def _setup_canary_repo(tmp_path: Path, **contract_overrides):
         "execution_units": [
             {
                 "unit_id": "u1",
-                "mutation_paths": [
-                    "tests/ops/test_open_swe_resident_five_repo_canary_20260908.py"
-                ],
+                "mutation_paths": ["tests/ops/test_open_swe_resident_five_repo_canary_20260908.py"],
             }
         ],
         "unit_verifiers": {
@@ -1884,9 +1882,7 @@ def test_opencli_chatgpt_canary_binding_caller_independent(tmp_path: Path) -> No
         execution_units=[
             {
                 "unit_id": "u1",
-                "mutation_paths": [
-                    "tests/ops/test_open_swe_resident_five_repo_canary_20260908.py"
-                ],
+                "mutation_paths": ["tests/ops/test_open_swe_resident_five_repo_canary_20260908.py"],
                 "selected_worker": forged_worker,
             }
         ],
