@@ -29,12 +29,17 @@ Integrate the accepted Nexus consumer correction into current `James3014/Nexus-n
 - OpenCLI: `1.8.7`
 - Browser Bridge: `1.0.24`
 - per-call timeout: `180`
-- semantic operation timeout: `600`
-- worker operation timeout: `1200`
+- semantic operation timeout: `1200`
+- worker operation timeout: `2400`
 - window: foreground
 - runtime state: existing External Intelligence state root
 
 `persistent` and `very-high` from the earlier TASK-005 qualification contract are not activation defaults. Actual bounded Web evidence selected `ephemeral` and `balanced`; this change is bound to Owner Issue #850 and preserves TASK-005 as historical hardening context.
+
+The earlier `600/1200` operation budgets were superseded after resident canary
+revision r2 crossed model selection, created a real ChatGPT conversation, and
+then reached the 600-second semantic deadline without a terminal result. That
+attempt remains `OUTCOME_UNKNOWN`, `retry_safe=false`, and was not resent.
 
 ## Repository source scope
 
