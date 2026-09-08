@@ -24,6 +24,7 @@ from nexus.events.writer_generation import (
     manifest_path,
     read_generation,
 )
+from nexus.events.state_owner_manifest import OwnerWriteContext, assert_owner_write
 
 
 class JsonlEventLogStore:
@@ -37,6 +38,7 @@ class JsonlEventLogStore:
         self._writer_generation: Optional[EventWriterGeneration] = None
         self._enforce_generation = False
         self._generation_manifest_path: Optional[Path] = None
+        self._owner_context: Optional[OwnerWriteContext] = None
 
     def configure(
         self,
@@ -44,14 +46,38 @@ class JsonlEventLogStore:
         *,
         writer_generation: Optional[EventWriterGeneration] = None,
         enforce_generation: bool = False,
+        owner_context: Optional[OwnerWriteContext] = None,
     ) -> Tuple[Path, Path]:
-        log_dir = project_root / ".nexus" / "events"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        event_log_path = log_dir / "event_log.jsonl"
-        lock_path = log_dir / "event_log.lock"
-        generation_manifest_path = manifest_path(project_root)
+        if owner_context is not None:
+            # Validate the opaque context before inspecting any of its fields.
+            # This rejects forged/malformed values without a dereference path.
+            assert_owner_write(owner_context, role="event_log", relative_path=".nexus/events/event_log.jsonl")
+            if project_root.resolve() != owner_context.binding.root.resolve():
+                raise GenerationError("OWNER_CONTEXT_ROOT_MISMATCH")
         with self._lock:
+            effective_owner_context = owner_context if owner_context is not None else self._owner_context
+            if effective_owner_context is not None:
+                assert_owner_write(effective_owner_context, role="event_log", relative_path=".nexus/events/event_log.jsonl")
+                if project_root.resolve() != effective_owner_context.binding.root.resolve():
+                    raise GenerationError("OWNER_CONTEXT_ROOT_MISMATCH")
+                if writer_generation is not None and writer_generation != effective_owner_context.writer_generation:
+                    raise GenerationError("OWNER_CONTEXT_TOKEN_MISMATCH")
+            log_dir = project_root / ".nexus" / "events"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            event_log_path = log_dir / "event_log.jsonl"
+            lock_path = log_dir / "event_log.lock"
+            generation_manifest_path = manifest_path(project_root)
             with event_store_lock(project_root):
+                # Re-read after lock acquisition: a same-thread reentrant
+                # callback may install an owner context between preflight and
+                # this lock boundary.
+                effective_owner_context = owner_context if owner_context is not None else self._owner_context
+                if effective_owner_context is not None:
+                    assert_owner_write(effective_owner_context, role="event_log", relative_path=".nexus/events/event_log.jsonl")
+                    if project_root.resolve() != effective_owner_context.binding.root.resolve():
+                        raise GenerationError("OWNER_CONTEXT_ROOT_MISMATCH")
+                    if writer_generation is not None and writer_generation != effective_owner_context.writer_generation:
+                        raise GenerationError("OWNER_CONTEXT_TOKEN_MISMATCH")
                 installed = read_generation(project_root)
                 if installed is not None and writer_generation is None:
                     raise GenerationError("GENERATION_REQUIRED")
@@ -67,6 +93,7 @@ class JsonlEventLogStore:
                     self._writer_generation,
                     self._enforce_generation,
                     self._attempt_tails,
+                    self._owner_context,
                 )
                 try:
                     self.event_log_path = event_log_path
@@ -74,6 +101,7 @@ class JsonlEventLogStore:
                     self._generation_manifest_path = generation_manifest_path
                     self._writer_generation = writer_generation
                     self._enforce_generation = bool(enforce_generation or installed is not None)
+                    self._owner_context = effective_owner_context
                     self._attempt_tails = self._scan_attempt_tails()
                 except Exception:
                     (
@@ -83,17 +111,30 @@ class JsonlEventLogStore:
                         self._writer_generation,
                         self._enforce_generation,
                         self._attempt_tails,
+                        self._owner_context,
                     ) = previous
                     raise
         return log_dir, self.event_log_path
 
-    def append_record(self, record: Dict[str, Any]) -> None:
+    def append_record(self, record: Dict[str, Any], *, owner_context: Optional[OwnerWriteContext] = None) -> None:
         if not self.event_log_path:
             return
+        context = self._owner_context if owner_context is None else owner_context
+        if context is not None:
+            # Fast rejection preserves the no-side-effect boundary.  The same
+            # check is repeated below while the instance lock is held.
+            assert_owner_write(context, role="event_log", relative_path=".nexus/events/event_log.jsonl")
+            if context.binding.root.resolve() != self.event_log_path.parents[2].resolve():
+                raise GenerationError("OWNER_CONTEXT_ROOT_MISMATCH")
         with self._lock:
             if not self.lock_path:
                 raise RuntimeError("event store is not configured")
             with event_store_lock(self.lock_path.parents[2]):
+                active_context = self._owner_context if owner_context is None else owner_context
+                if active_context is not None:
+                    assert_owner_write(active_context, role="event_log", relative_path=".nexus/events/event_log.jsonl")
+                    if active_context.binding.root.resolve() != self.event_log_path.parents[2].resolve():
+                        raise GenerationError("OWNER_CONTEXT_ROOT_MISMATCH")
                 self._check_generation_locked(record)
                 self._attempt_tails = self._scan_attempt_tails()
                 key = self._attempt_key(record)

@@ -1140,6 +1140,7 @@ class SelfHostedTaskService:
         auto_reconcile: bool = True,
         worker_registry: Optional[WorkerRegistry] = None,
         ephemeral: bool = False,
+        owner_context: Any | None = None,
     ):
         canonical = self.canonical_state_dir()
         raw_state_dir = Path(state_dir).expanduser() if state_dir is not None else canonical
@@ -1152,6 +1153,7 @@ class SelfHostedTaskService:
         if runner is not None and not self.ephemeral:
             raise RuntimeError("CUSTOM_RUNNER_REQUIRES_EPHEMERAL_STATE")
         self._custom_runner = runner
+        self._owner_context = owner_context
         self.runner = runner or self._run_default
         self.stale_after_seconds = stale_after_seconds
         self.worker_registry = worker_registry or WorkerRegistry.default()
@@ -1762,7 +1764,29 @@ class SelfHostedTaskService:
             finally:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
-    def _write_state_locked(self, task_id: str, state: dict[str, Any]) -> dict[str, Any]:
+    def _assert_owner_state_write_context(
+        self, task_id: str, owner_context: Any | None
+    ) -> None:
+        if owner_context is None:
+            owner_context = getattr(self, "_owner_context", None)
+        if owner_context is None:
+            return
+        from nexus.events.state_owner_manifest import OwnerConflict, assert_owner_write
+
+        destination = self._state_path(task_id)
+        try:
+            owner_root = owner_context.binding.root
+            relative_path = destination.relative_to(owner_root).as_posix()
+        except AttributeError as exc:
+            raise OwnerConflict("owner write context is malformed") from exc
+        except ValueError as exc:
+            raise OwnerConflict("STATE_OWNER_ROOT_MISMATCH") from exc
+        assert_owner_write(owner_context, role="task_state", relative_path=relative_path)
+
+    def _write_state_locked(
+        self, task_id: str, state: dict[str, Any], *, owner_context: Any | None = None
+    ) -> dict[str, Any]:
+        self._assert_owner_state_write_context(task_id, owner_context)
         normalized = _jsonable(state)
         normalized["task_action"] = self._task_action_envelope(normalized)
         destination = self._state_path(task_id)
@@ -1776,15 +1800,28 @@ class SelfHostedTaskService:
         ) as handle:
             json.dump(normalized, handle, sort_keys=True, indent=2)
             handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
             temporary = Path(handle.name)
         temporary.replace(destination)
+        directory_fd = os.open(self.state_dir, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
         return normalized
 
-    def _write_state(self, task_id: str, state: dict[str, Any]) -> dict[str, Any]:
+    def _write_state(
+        self, task_id: str, state: dict[str, Any], *, owner_context: Any | None = None
+    ) -> dict[str, Any]:
+        self._assert_owner_state_write_context(task_id, owner_context)
         with self._state_lock():
-            return self._write_state_locked(task_id, state)
+            return self._write_state_locked(task_id, state, owner_context=owner_context)
 
-    def _create_state(self, task_id: str, state: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    def _create_state(
+        self, task_id: str, state: dict[str, Any], *, owner_context: Any | None = None
+    ) -> tuple[dict[str, Any], bool]:
+        self._assert_owner_state_write_context(task_id, owner_context)
         with self._state_lock():
             destination = self._state_path(task_id)
             if destination.exists():
@@ -1794,7 +1831,7 @@ class SelfHostedTaskService:
             _, archived = self._latest_archived_state(task_id)
             if archived is not None:
                 return archived, False
-            return self._write_state_locked(task_id, state), True
+            return self._write_state_locked(task_id, state, owner_context=owner_context), True
 
     def _read_state(self, task_id: str) -> Optional[dict[str, Any]]:
         path = self._state_path(task_id)
@@ -2051,14 +2088,17 @@ class SelfHostedTaskService:
                 raise RuntimeError("archived task receipt disappeared before retry")
             return self._write_state_locked(task_id, state)
 
-    def _mutate_state(self, task_id: str, mutator: Callable[[dict[str, Any]], None]) -> Optional[dict[str, Any]]:
+    def _mutate_state(
+        self, task_id: str, mutator: Callable[[dict[str, Any]], None], *, owner_context: Any | None = None
+    ) -> Optional[dict[str, Any]]:
+        self._assert_owner_state_write_context(task_id, owner_context)
         with self._state_lock():
             path = self._state_path(task_id)
             if not path.exists():
                 return None
             state = json.loads(path.read_text(encoding="utf-8"))
             mutator(state)
-            return self._write_state_locked(task_id, state)
+            return self._write_state_locked(task_id, state, owner_context=owner_context)
 
     # Issue #129: the claim is deliberately a subrecord of the existing task
     # receipt.  The state lock above is the sole serialization point.
@@ -2132,11 +2172,14 @@ class SelfHostedTaskService:
             raise RuntimeError("WORK_CLAIM_STALE_FENCE")
         return record
 
-    def acquire_work_claim(self, request: Mapping[str, Any]) -> dict[str, Any]:
+    def acquire_work_claim(
+        self, request: Mapping[str, Any], *, owner_context: Any | None = None
+    ) -> dict[str, Any]:
         candidate = self._claim_request(request)
         task_id = candidate["identity"]["task_id"]
         if not task_id:
             return {"status": "BLOCKED", "reason": "TASK_ID_REQUIRED"}
+        self._assert_owner_state_write_context(task_id, owner_context)
         with self._state_lock():
             path = self._state_path(task_id)
             if not path.exists():
@@ -2153,7 +2196,7 @@ class SelfHostedTaskService:
             candidate["status"] = "CLAIMED"
             candidate["claimed_at"] = _utc_now()
             state["work_claim"] = candidate
-            self._write_state_locked(task_id, state)
+            self._write_state_locked(task_id, state, owner_context=owner_context)
             return {"status": "CLAIMED", "claim": candidate}
 
     claim_work = acquire_work_claim
@@ -2168,17 +2211,23 @@ class SelfHostedTaskService:
             record = self._validate_claim_locked(state, request)
             return {"status": "CLAIMED", "claim": record}
 
-    def release_work_claim(self, request: Mapping[str, Any]) -> dict[str, Any]:
+    def release_work_claim(
+        self, request: Mapping[str, Any], *, owner_context: Any | None = None
+    ) -> dict[str, Any]:
         task_id = str(request["task_id"])
+        self._assert_owner_state_write_context(task_id, owner_context)
         with self._state_lock():
             state = json.loads(self._state_path(task_id).read_text(encoding="utf-8"))
             self._validate_claim_locked(state, request)
             state.pop("work_claim", None)
-            self._write_state_locked(task_id, state)
+            self._write_state_locked(task_id, state, owner_context=owner_context)
         return {"status": "RELEASED", "task_id": task_id}
 
-    def recover_work_claim(self, request: Mapping[str, Any], *, reason: str = "RECOVERY") -> dict[str, Any]:
+    def recover_work_claim(
+        self, request: Mapping[str, Any], *, reason: str = "RECOVERY", owner_context: Any | None = None
+    ) -> dict[str, Any]:
         task_id = str(request["task_id"])
+        self._assert_owner_state_write_context(task_id, owner_context)
         with self._state_lock():
             state = json.loads(self._state_path(task_id).read_text(encoding="utf-8"))
             record = self._validate_claim_locked(state, request)
@@ -2187,7 +2236,7 @@ class SelfHostedTaskService:
             record["fencing_token"] = f"{record['claim_id']}:{generation}"
             record["recovery_reason"] = _bounded_failure_text(reason)
             record["recovered_at"] = _utc_now()
-            self._write_state_locked(task_id, state)
+            self._write_state_locked(task_id, state, owner_context=owner_context)
             return {"status": "CLAIMED", "claim": record}
 
     renew_work_claim = validate_work_claim

@@ -12,7 +12,9 @@ import json
 import os
 import shlex
 import shutil
+import stat
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
@@ -55,6 +57,93 @@ LOCAL_MODEL_INVOCATION_AUTHORITY_SCHEMA = "nexus.local_model_invocation_authorit
 RUNTIME_WORKFORCE_ADMISSION_SCHEMA = "nexus.runtime_workforce_admission.v1"
 RUNTIME_WORKFORCE_ADMISSION_RECORD_SCHEMA = "nexus.runtime_workforce_admission_record.v1"
 WORKFORCE_ADMISSION_DECISION_SCHEMA = "nexus.workforce_admission_decision.v1"
+
+
+def _assert_runtime_receipt_owner(owner_context: Any, path: Path) -> None:
+    """Validate an opted-in receipt write through the shared owner context.
+
+    Runtime keeps its legacy receipt path when no context is supplied.  When
+    an owner transaction is supplied, the shared state-owner adapter is the
+    authority for the exact role/path and must reject before any parent
+    directory creation or receipt bytes.
+    """
+    if owner_context is None:
+        return
+    from nexus.events.state_owner_manifest import assert_owner_write
+
+    try:
+        root = owner_context.binding.root.resolve(strict=True)
+        if not path.is_absolute():
+            raise ValueError("receipt path must be absolute for an owner write")
+        relative_path = path.relative_to(root).as_posix()
+        cursor = root
+        for part in Path(relative_path).parts[:-1]:
+            cursor = cursor / part
+            if cursor.exists() or cursor.is_symlink():
+                info = cursor.lstat()
+                if not cursor.is_dir() or cursor.is_symlink():
+                    raise ValueError("runtime receipt parent is unsafe")
+        if path.exists() or path.is_symlink():
+            info = path.lstat()
+            if path.is_symlink() or not path.is_file() or not stat.S_ISREG(info.st_mode):
+                raise ValueError("runtime receipt target is unsafe")
+    except (AttributeError, OSError, ValueError) as exc:
+        raise ValueError("runtime_receipt_owner_path_invalid") from exc
+    assert_owner_write(owner_context, role="runtime_receipt", relative_path=relative_path)
+
+
+def _validate_runtime_owner_context(owner_context: Any, receipt_path: str | Path | None) -> None:
+    if owner_context is None:
+        return
+    if receipt_path is None:
+        raise ValueError("runtime_receipt_path_required")
+    _assert_runtime_receipt_owner(owner_context, Path(receipt_path))
+
+
+def _write_receipt_atomic(path: Path, payload: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, ensure_ascii=False)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_name, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        if os.path.exists(temporary_name):
+            os.unlink(temporary_name)
+
+
+def _validate_runtime_effect_owner(owner_context: Any, effect_journal: Any) -> None:
+    if owner_context is None or effect_journal is None:
+        return
+    from nexus.events.effect_journal import EffectJournal
+    from nexus.events.state_owner_manifest import assert_owner_write
+
+    if not isinstance(effect_journal, EffectJournal):
+        return
+    try:
+        binding_root = owner_context.binding.root.resolve(strict=True)
+        journal_root = effect_journal.project_root.resolve(strict=True)
+        if journal_root != binding_root:
+            raise ValueError("runtime_effect_owner_root_mismatch")
+        if effect_journal.generation != owner_context.writer_generation:
+            raise ValueError("runtime_effect_owner_generation_mismatch")
+        assert_owner_write(
+            owner_context,
+            role="effect_journal",
+            relative_path=".nexus/events/effect_journal.v1.json",
+        )
+    except (AttributeError, OSError, ValueError) as exc:
+        if str(exc).startswith("runtime_effect_owner_"):
+            raise
+        raise ValueError("runtime_effect_owner_binding_invalid") from exc
 
 
 def build_execution_replan_request(
@@ -2792,6 +2881,7 @@ class UnifiedRuntime:
         effect_dispatch: Any = None,
         effect_reconcile: Callable[[Mapping[str, Any]], Any] | None = None,
         effect_fenced: bool = False,
+        owner_context: Any = None,
     ) -> dict[str, Any]:
         return self._run_once(
             request=request,
@@ -2807,6 +2897,7 @@ class UnifiedRuntime:
             effect_dispatch=effect_dispatch,
             effect_reconcile=effect_reconcile,
             effect_fenced=effect_fenced,
+            owner_context=owner_context,
         )
 
     def run_replan(
@@ -2823,6 +2914,7 @@ class UnifiedRuntime:
         effect_dispatch: Any = None,
         effect_reconcile: Callable[[Mapping[str, Any]], Any] | None = None,
         effect_fenced: bool = False,
+        owner_context: Any = None,
     ) -> dict[str, Any]:
         _validate_workforce_route(request.route)
         res = validate_receipt_base(previous_receipt, mode="strict")
@@ -2841,6 +2933,8 @@ class UnifiedRuntime:
         if effect_journal is not None:
             from nexus.events.effect_journal import EffectJournal
             if not isinstance(effect_journal, EffectJournal): raise ValueError("canonical_effect_journal_required")
+        _validate_runtime_owner_context(owner_context, receipt_path or previous_receipt.get("receipt_path"))
+        _validate_runtime_effect_owner(owner_context, effect_journal)
         if previous_receipt.get("effect_journal_bindings") and effect_journal is None:
             raise ValueError("replan_effect_journal_required")
         for binding in previous_receipt.get("effect_journal_bindings", []) or []:
@@ -2946,6 +3040,7 @@ class UnifiedRuntime:
             effect_dispatch=effect_dispatch,
             effect_reconcile=effect_reconcile,
             effect_fenced=effect_fenced,
+            owner_context=owner_context,
         )
 
     def _run_once(
@@ -2964,8 +3059,11 @@ class UnifiedRuntime:
         effect_dispatch: Any = None,
         effect_reconcile: Callable[[Mapping[str, Any]], Any] | None = None,
         effect_fenced: bool = False,
+        owner_context: Any = None,
     ) -> dict[str, Any]:
         request.validate()
+        _validate_runtime_owner_context(owner_context, receipt_path)
+        _validate_runtime_effect_owner(owner_context, effect_journal)
         fenced = effect_fenced or bool(request.route.get("effect_fenced", False))
         from nexus.events.effect_journal import EffectDispatchPort, EffectJournal, EffectReconcilePort
         if effect_journal is not None:
@@ -3386,12 +3484,9 @@ class UnifiedRuntime:
                 attach_r3_receipt_base(terminal_receipt)
                 if receipt_path is not None:
                     path = Path(receipt_path)
-                    path.parent.mkdir(parents=True, exist_ok=True)
+                    _assert_runtime_receipt_owner(owner_context, path)
                     terminal_receipt["receipt_path"] = str(path)
-                    path.write_text(
-                        json.dumps(terminal_receipt, indent=2, ensure_ascii=False),
-                        encoding="utf-8",
-                    )
+                    _write_receipt_atomic(path, terminal_receipt)
                 return terminal_receipt
 
         capability_results: dict[str, dict[str, Any]] = {}
@@ -3687,12 +3782,9 @@ class UnifiedRuntime:
                 blocked_receipt["local_model_invocation_authority"] = local_model_invocation_authority
             if receipt_path is not None:
                 path = Path(receipt_path)
-                path.parent.mkdir(parents=True, exist_ok=True)
+                _assert_runtime_receipt_owner(owner_context, path)
                 blocked_receipt["receipt_path"] = str(path)
-                path.write_text(
-                    json.dumps(blocked_receipt, indent=2, ensure_ascii=False),
-                    encoding="utf-8",
-                )
+                _write_receipt_atomic(path, blocked_receipt)
             return attach_failure_diagnostics(blocked_receipt)
 
         # Full read-only consumer view — same root bundle_hash for Local and Online.
@@ -4636,9 +4728,9 @@ class UnifiedRuntime:
         attach_r3_receipt_base(receipt)
         if receipt_path is not None:
             path = Path(receipt_path)
-            path.parent.mkdir(parents=True, exist_ok=True)
+            _assert_runtime_receipt_owner(owner_context, path)
             receipt["receipt_path"] = str(path)
-            path.write_text(json.dumps(receipt, indent=2, ensure_ascii=False), encoding="utf-8")
+            _write_receipt_atomic(path, receipt)
         return receipt
 
     def finalize_receipt(
@@ -4650,6 +4742,7 @@ class UnifiedRuntime:
         outcome: Mapping[str, Any] | None = None,
         receipt_path: str | Path | None = None,
         effect_journal: Any = None,
+        owner_context: Any = None,
     ) -> dict[str, Any]:
         """Attach final verifier/learning evidence to an existing task receipt.
 
@@ -4663,6 +4756,10 @@ class UnifiedRuntime:
         if effect_journal is not None:
             from nexus.events.effect_journal import EffectJournal
             if not isinstance(effect_journal, EffectJournal): raise ValueError("canonical_effect_journal_required")
+        if owner_context is not None and receipt.get("effect_journal_bindings") and effect_journal is None:
+            raise ValueError("runtime_effect_journal_required_for_owner_receipt")
+        _validate_runtime_owner_context(owner_context, receipt_path or receipt.get("receipt_path"))
+        _validate_runtime_effect_owner(owner_context, effect_journal)
 
         finalized = dict(receipt)
 
@@ -4819,9 +4916,9 @@ class UnifiedRuntime:
         target = receipt_path or finalized.get("receipt_path")
         if target is not None:
             path = Path(target)
-            path.parent.mkdir(parents=True, exist_ok=True)
+            _assert_runtime_receipt_owner(owner_context, path)
             finalized["receipt_path"] = str(path)
-            path.write_text(json.dumps(finalized, indent=2, ensure_ascii=False), encoding="utf-8")
+            _write_receipt_atomic(path, finalized)
         return finalized
 
     def _run_local(

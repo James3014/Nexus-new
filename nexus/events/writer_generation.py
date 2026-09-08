@@ -9,6 +9,7 @@ import os
 import stat
 import tempfile
 import time
+import threading
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,6 +27,41 @@ class GenerationError(RuntimeError):
 
 class GenerationConflict(GenerationError):
     """The requested CAS predecessor is not the current generation."""
+
+
+@dataclass
+class _HeldStoreLock:
+    fd: int
+    depth: int
+    pid: int
+    thread_id: int
+    path: Path
+
+
+_HELD_LOCKS: dict[Path, _HeldStoreLock] = {}
+_HELD_LOCKS_GUARD = threading.RLock()
+
+
+def _after_fork_child() -> None:
+    """Discard inherited lock handles and trust records in a fork child.
+
+    The parent retains the original open-file descriptions.  The child must
+    reacquire a fresh descriptor after the parent releases its guard; it never
+    reuses the parent's registry entry or descriptor.
+    """
+    global _HELD_LOCKS_GUARD
+    inherited = list(_HELD_LOCKS.values())
+    _HELD_LOCKS.clear()
+    _HELD_LOCKS_GUARD = threading.RLock()
+    for held in inherited:
+        try:
+            os.close(held.fd)
+        except OSError:
+            pass
+
+
+if hasattr(os, "register_at_fork"):
+    os.register_at_fork(after_in_child=_after_fork_child)
 
 
 @dataclass(frozen=True)
@@ -106,7 +142,31 @@ def read_generation(project_root: Path) -> EventWriterGeneration | None:
 
 @contextmanager
 def event_store_lock(project_root: Path, *, timeout: float = 5.0) -> Iterator[None]:
-    lock_path = Path(project_root) / ".nexus" / "events" / "event_log.lock"
+    # Do not resolve the final lock component: lstat below must reject a
+    # symlink rather than silently acquiring a lock outside the project root.
+    lock_path = Path(project_root).absolute() / ".nexus" / "events" / "event_log.lock"
+    pid = os.getpid()
+    thread_id = threading.get_ident()
+    with _HELD_LOCKS_GUARD:
+        held = _HELD_LOCKS.get(lock_path)
+        if held is not None and held.pid == pid and held.thread_id == thread_id:
+            held.depth += 1
+            reentrant = True
+        else:
+            reentrant = False
+    if reentrant:
+        try:
+            yield
+        finally:
+            with _HELD_LOCKS_GUARD:
+                held = _HELD_LOCKS.get(lock_path)
+                if held is not None and held.pid == pid and held.thread_id == thread_id:
+                    held.depth -= 1
+                    if held.depth == 0:
+                        _HELD_LOCKS.pop(lock_path, None)
+                        fcntl.flock(held.fd, fcntl.LOCK_UN)
+                        os.close(held.fd)
+        return
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         lock_stat = os.lstat(lock_path)
@@ -122,20 +182,30 @@ def event_store_lock(project_root: Path, *, timeout: float = 5.0) -> Iterator[No
     except Exception:
         os.close(fd)
         raise
-    with os.fdopen(fd, "a+", encoding="utf-8") as lock:
-        deadline = time.monotonic() + float(timeout)
-        while True:
-            try:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except BlockingIOError:
-                if time.monotonic() >= deadline:
-                    raise GenerationError("GENERATION_LOCK_TIMEOUT")
-                time.sleep(0.01)
+    deadline = time.monotonic() + float(timeout)
+    while True:
         try:
-            yield
-        finally:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                os.close(fd)
+                raise GenerationError("GENERATION_LOCK_TIMEOUT")
+            time.sleep(0.01)
+    with _HELD_LOCKS_GUARD:
+        _HELD_LOCKS[lock_path] = _HeldStoreLock(fd, 1, pid, thread_id, lock_path)
+    try:
+        yield
+    finally:
+        with _HELD_LOCKS_GUARD:
+            held = _HELD_LOCKS.get(lock_path)
+            if held is not None and held.pid == pid and held.thread_id == thread_id:
+                _HELD_LOCKS.pop(lock_path, None)
+                fcntl.flock(fd, fcntl.LOCK_UN)
+                os.close(fd)
+
+
+event_store_guard = event_store_lock
 
 
 def install_generation(project_root: Path, generation: EventWriterGeneration, *, expected_generation: int | None = None) -> EventWriterGeneration:
