@@ -40,7 +40,10 @@ hash to semantic and worker consumers and derives their shared runtime state as
 bound the overall deadline for their respective OpenSWE task operations. They
 default to 180 and 300 seconds for older host configurations and accept integer
 values from 30 through 3600. These are task deadlines, not per-turn guarantees;
-the existing tool-turn and no-resend rules remain unchanged.
+the existing tool-turn and no-resend rules remain unchanged. The resident Web
+configuration uses 1200 seconds for semantic work and 2400 seconds for worker
+work because a production-shaped semantic packet exceeded the earlier
+600-second synthetic qualification budget without reaching a terminal result.
 
 The overlay does not enable or reload a service, start a daemon, or contain a
 temporary acceptance virtualenv path. Rollback keeps the overlay's
