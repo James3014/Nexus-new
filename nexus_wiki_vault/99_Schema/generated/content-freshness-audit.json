@@ -2,7 +2,7 @@
   "schema": "nexus.wiki.content-freshness.v1",
   "authority": "derived_non_authoritative",
   "status": "PASS",
-  "source_commit": "5d704a4fc8022782482c319828591ed40581b990be35afe98775193e1b69333a",
+  "source_commit": "4efc6d9f45a7d341903c3655074e7c3e37586ab8ca2de7fbf14eec08374a759d",
   "source_commits": [
     "084403a64101ed1bb89718e143582db5d73940f7",
     "0ea262de4144c78c2b72549fd1ece85822025068",
@@ -11,12 +11,12 @@
     "1b9dfb1e6a8312f8e87ca73e5b90f66add9ef31d",
     "27833e2e909a80d39b34bba0db9a701d5ffda4db",
     "3fc4fd0d9a3424e5ff729eafbfd84b39fab80aeb",
+    "49f8844ddf3d4d20e429be1afc6d8aac231b4d7b",
     "53fe9d0f2bb6e6f9a9c6b60b7dd6f17f431b5f03",
     "7bcb611322d290cb974405434930db2437d8eab3",
     "854c1c0a5da04e8e171b26bcd1abad7a20a68ce1",
     "85d0001b527a6fc0c8fd832712f8e43c240c38d4",
     "9d5565370b90f4f0b321d90d87ce380b3b6629b9",
-    "b2f7b26c8845c4fe06b0f7238c01e8c9e3b060f8",
     "c46780d326bed62f9dc10f0435c037b3f19463ae",
     "cbc6cc5ccc94f77925ee4fe880c413f7b6b92e35",
     "ce9ad1fcac384fac8e94cc1be4586205a895a2b1",
@@ -84,7 +84,7 @@
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "b2f7b26c8845c4fe06b0f7238c01e8c9e3b060f8"
+          "source_commit": "49f8844ddf3d4d20e429be1afc6d8aac231b4d7b"
         },
         {
           "path": "scripts/engine/nexus_cli.py",
@@ -119,7 +119,7 @@
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "b2f7b26c8845c4fe06b0f7238c01e8c9e3b060f8"
+          "source_commit": "49f8844ddf3d4d20e429be1afc6d8aac231b4d7b"
         },
         {
           "path": "scripts/engine/nexus_cli.py",
@@ -190,7 +190,7 @@
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "b2f7b26c8845c4fe06b0f7238c01e8c9e3b060f8"
+          "source_commit": "49f8844ddf3d4d20e429be1afc6d8aac231b4d7b"
         }
       ],
       "errors": []
@@ -225,7 +225,7 @@
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "b2f7b26c8845c4fe06b0f7238c01e8c9e3b060f8"
+          "source_commit": "49f8844ddf3d4d20e429be1afc6d8aac231b4d7b"
         }
       ],
       "errors": []
@@ -247,7 +247,7 @@
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "b2f7b26c8845c4fe06b0f7238c01e8c9e3b060f8"
+          "source_commit": "49f8844ddf3d4d20e429be1afc6d8aac231b4d7b"
         },
         {
           "path": "scripts/engine/nexus_cli.py",
@@ -360,7 +360,7 @@
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "b2f7b26c8845c4fe06b0f7238c01e8c9e3b060f8"
+          "source_commit": "49f8844ddf3d4d20e429be1afc6d8aac231b4d7b"
         },
         {
           "path": "src/governance/transition_engine.rs",
@@ -392,7 +392,7 @@
           "path": "nexus/services/",
           "exists": true,
           "kind": "directory",
-          "source_commit": "b2f7b26c8845c4fe06b0f7238c01e8c9e3b060f8"
+          "source_commit": "49f8844ddf3d4d20e429be1afc6d8aac231b4d7b"
         },
         {
           "path": "scripts/engine/nexus_cli.py",
@@ -931,5 +931,5 @@
     "lifecycle_error_count": 0,
     "error_count": 0
   },
-  "source_fingerprint": "c4e86d86362cecc313173b5e6f3cd79afebf8f76eac7b77a9efe6034159cbf2d"
+  "source_fingerprint": "5540c26a52678611d9eadd95252810b1317ac6ff6e384adaf1d1e9edd77d41af"
 }
