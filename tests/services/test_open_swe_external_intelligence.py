@@ -16,6 +16,7 @@ def _module():
 
 _RUNTIME_EXECUTABLE = "/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime"
 _RUNTIME_HASH = "a" * 64
+_MISSING = object()
 
 
 def test_nexus_adapter_is_thin_and_has_no_deepagents_or_langchain_imports():
@@ -170,6 +171,66 @@ def test_semantic_model_attestation_mismatch_fails_closed(tmp_path, monkeypatch)
 
     assert result.status == "OPEN_SWE_MODEL_ATTESTATION_MISMATCH"
     assert result.outcome_unknown is True
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("provider_id", _MISSING),
+        ("provider_id", None),
+        ("provider_id", ""),
+        ("provider_id", "   "),
+        ("provider_id", {"provider": "google_genai"}),
+        ("provider_id", 42),
+        ("provider_id", False),
+        ("model_id", _MISSING),
+        ("model_id", None),
+        ("model_id", ""),
+        ("model_id", "   "),
+        ("model_id", ["gemini-test"]),
+        ("model_id", 42),
+        ("model_id", False),
+    ),
+)
+def test_semantic_missing_or_malformed_attestation_fails_closed_without_redispatch(
+    tmp_path, monkeypatch, field, value
+):
+    module = _module()
+    calls = []
+
+    def runtime_call(*_args, **_kwargs):
+        payload = _args[1]
+        calls.append(payload["operation"])
+        if payload["operation"] == "identity":
+            return _identity(module, payload), "", False, ""
+        result = {
+            "schema": module.PROTOCOL_RESULT_SCHEMA,
+            "kind": "semantic",
+            "status": "INTELLIGENCE_COMPLETED",
+            "provider_id": "google_genai",
+            "model_id": "gemini-test",
+            "raw": "{}",
+        }
+        if value is _MISSING:
+            del result[field]
+        else:
+            result[field] = value
+        return result, "", True, ""
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEExternalIntelligenceTransport(
+        repository_root=tmp_path,
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable=_RUNTIME_EXECUTABLE,
+        expected_artifact_sha256=_RUNTIME_HASH,
+    )
+
+    result = transport.invoke("prompt")
+
+    assert result.status == "OPEN_SWE_MODEL_ATTESTATION_MISMATCH"
+    assert result.outcome_unknown is True
+    assert calls == ["identity", "semantic_run"]
 
 
 def test_runtime_environment_passes_selected_provider_key_but_not_github_credentials(monkeypatch):
@@ -451,7 +512,13 @@ def test_runtime_identity_is_required_before_semantic_dispatch(tmp_path, monkeyp
         if payload["operation"] == "identity":
             return _identity(module, payload), "", False, ""
         return (
-            {"schema": module.PROTOCOL_RESULT_SCHEMA, "kind": "semantic", "status": "OK"},
+            {
+                "schema": module.PROTOCOL_RESULT_SCHEMA,
+                "kind": "semantic",
+                "status": "OK",
+                "provider_id": "google_genai",
+                "model_id": "gemini-test",
+            },
             "",
             True,
             "",
@@ -514,7 +581,13 @@ def test_runtime_identity_is_revalidated_after_runtime_change(tmp_path, monkeypa
                 "",
             )
         return (
-            {"schema": module.PROTOCOL_RESULT_SCHEMA, "kind": "semantic", "status": "OK"},
+            {
+                "schema": module.PROTOCOL_RESULT_SCHEMA,
+                "kind": "semantic",
+                "status": "OK",
+                "provider_id": "google_genai",
+                "model_id": "gemini-test",
+            },
             "",
             True,
             "",
@@ -546,7 +619,13 @@ def test_failed_reconcile_is_unknown_and_never_retry_safe(tmp_path, monkeypatch)
         if payload["operation"] == "semantic_reconcile":
             return None, "", True, "runtime_timeout"
         return (
-            {"schema": module.PROTOCOL_RESULT_SCHEMA, "kind": "semantic", "status": "OK"},
+            {
+                "schema": module.PROTOCOL_RESULT_SCHEMA,
+                "kind": "semantic",
+                "status": "OK",
+                "provider_id": "google_genai",
+                "model_id": "gemini-test",
+            },
             "",
             True,
             "",
