@@ -596,6 +596,8 @@ def _canonical_replay_observation(request: ExecutionReadinessRequest) -> PlaneOb
     attempt_id = snapshot.get("attempt_id")
     action_id = snapshot.get("action_id")
     request_hash = snapshot.get("request_hash")
+    nested_action_id = action.get("action_id")
+    nested_request_hash = action.get("request_hash")
     if (
         not isinstance(attempt_id, str)
         or not attempt_id
@@ -605,6 +607,22 @@ def _canonical_replay_observation(request: ExecutionReadinessRequest) -> PlaneOb
         or not re.fullmatch(r"[0-9a-f]{64}", request_hash)
         or not isinstance(action.get("task_id"), str)
         or action.get("task_id") != task_id
+        or (
+            "action_id" in action
+            and (
+                not isinstance(nested_action_id, str)
+                or not nested_action_id
+                or nested_action_id != action_id
+            )
+        )
+        or (
+            "request_hash" in action
+            and (
+                not isinstance(nested_request_hash, str)
+                or not re.fullmatch(r"[0-9a-f]{64}", nested_request_hash)
+                or nested_request_hash != request_hash
+            )
+        )
     ):
         return PlaneObservation(
             plane=ExecutionReadinessPlane.REPLAY_FENCE,
@@ -664,6 +682,7 @@ def _canonical_workforce_observation(
     request: ExecutionReadinessRequest,
     supplied: Sequence[PlaneObservation],
     provider_preflight_observer: Callable[[str, str], Mapping[str, Any]] | None = None,
+    provider_authentication_required_observer: Callable[[str], bool] | None = None,
     moment: datetime | None = None,
 ) -> PlaneObservation:
     """Revalidate the canonical Planner -> Admission binding for material work."""
@@ -705,7 +724,7 @@ def _canonical_workforce_observation(
         )
         if planned_demands != demands:
             continue
-        if provider_preflight_observer is None:
+        if provider_preflight_observer is None or provider_authentication_required_observer is None:
             continue
         try:
             from nexus.orchestrator.self_hosted_task_service import (
@@ -740,8 +759,18 @@ def _canonical_workforce_observation(
             )
         except Exception:
             continue
+        try:
+            canonical_authentication_required = provider_authentication_required_observer(
+                str(validated.get("provider") or "")
+            )
+        except Exception:
+            continue
+        if not isinstance(canonical_authentication_required, bool):
+            continue
         if not isinstance(preflight, Mapping) or not (
             preflight.get("schema") == "nexus.provider_preflight.v1"
+            and preflight.get("status") == "VERSION_VERIFIED"
+            and preflight.get("blocker") in (None, "")
             and isinstance(preflight.get("provider"), str)
             and preflight.get("provider") == validated.get("provider")
             and isinstance(preflight.get("requested_model"), str)
@@ -778,16 +807,17 @@ def _canonical_workforce_observation(
             continue
         if not isinstance(preflight.get("authentication_required"), bool):
             continue
+        if preflight.get("authentication_required") is not canonical_authentication_required:
+            continue
         if not isinstance(preflight.get("authenticated"), bool):
             continue
-        if preflight.get("authentication_required") is True and not (
-            preflight.get("authenticated") is True and preflight.get("authentication_evidence")
-        ):
-            continue
-        if preflight.get("authentication_required") is True and not isinstance(
-            preflight.get("authentication_evidence"), str
-        ):
-            continue
+        if canonical_authentication_required:
+            if (
+                preflight.get("authenticated") is not True
+                or not isinstance(preflight.get("authentication_evidence"), str)
+                or not preflight.get("authentication_evidence")
+            ):
+                continue
         try:
             preflight_digest = _canonical_provider_preflight_digest(preflight)
         except (TypeError, ValueError):
@@ -874,6 +904,7 @@ def _normalize_canonical_planes(
     plane_observations: Mapping[ExecutionReadinessPlane, Sequence[PlaneObservation]],
     moment: datetime,
     provider_preflight_observer: Callable[[str, str], Mapping[str, Any]] | None = None,
+    provider_authentication_required_observer: Callable[[str], bool] | None = None,
 ) -> dict[ExecutionReadinessPlane, tuple[PlaneObservation, ...]]:
     """Replace compatibility PASS observations with canonical/typed evidence."""
 
@@ -898,7 +929,11 @@ def _normalize_canonical_planes(
         else:
             normalized[plane] = (
                 _canonical_workforce_observation(
-                    request, supplied, provider_preflight_observer, moment
+                    request,
+                    supplied,
+                    provider_preflight_observer,
+                    provider_authentication_required_observer,
+                    moment,
                 ),
             )
     return normalized
@@ -951,6 +986,7 @@ def evaluate_execution_readiness(
     completion_observation: CompletionAuthorityObservation | None = None,
     evaluated_at: datetime | None = None,
     provider_preflight_observer: Callable[[str, str], Mapping[str, Any]] | None = None,
+    provider_authentication_required_observer: Callable[[str], bool] | None = None,
 ) -> ExecutionReadinessResult:
     """Converge evidence after re-binding canonical planes at one watermark."""
 
@@ -959,7 +995,11 @@ def evaluate_execution_readiness(
         raise ReadinessEvidenceError("EVALUATED_AT_MUST_BE_TIMEZONE_AWARE")
 
     canonical_observations = _normalize_canonical_planes(
-        request, plane_observations, moment, provider_preflight_observer
+        request,
+        plane_observations,
+        moment,
+        provider_preflight_observer,
+        provider_authentication_required_observer,
     )
     aggregated: dict[
         ExecutionReadinessPlane,

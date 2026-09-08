@@ -82,6 +82,83 @@ def test_authenticated_preflight_summary_stays_within_evidence_budget(monkeypatc
     )
 
 
+@pytest.mark.parametrize("observer_kind", ("missing", "raises", "malformed", "mismatch"))
+def test_provider_authentication_requirement_observer_fails_closed(
+    monkeypatch, observer_kind
+) -> None:
+    import nexus.orchestrator.self_hosted_task_service as task_service
+
+    monkeypatch.setattr(
+        task_service,
+        "validate_workforce_dispatch_binding",
+        lambda *_a, **_k: {
+            "worker_id": "worker-1",
+            "provider": "agy",
+            "model": "model-1",
+            "policy_hash": "p" * 64,
+            "binding_hash": "b" * 64,
+            "aggregate_binding_hash": "a" * 64,
+        },
+    )
+    preflight = _valid_preflight("agy", "model-1")
+    preflight.update(
+        authentication_required=True,
+        authenticated=True,
+        authentication_evidence="authenticated-exact-probe",
+    )
+    if observer_kind == "missing":
+        observer = None
+    elif observer_kind == "raises":
+
+        def observer(_provider):
+            raise RuntimeError("observer unavailable")
+
+    elif observer_kind == "malformed":
+
+        def observer(_provider):
+            return "true"
+
+    else:
+
+        def observer(_provider):
+            return False
+
+    result = (
+        _evaluate(
+            _request(worker_constraints=("provider=agy",)),
+            {
+                ExecutionReadinessPlane.WORKFORCE: (
+                    PlaneObservation(
+                        plane=ExecutionReadinessPlane.WORKFORCE,
+                        status=ExecutionReadinessStatus.PASSED,
+                        workforce_dispatch_binding=_workforce_binding(),
+                    ),
+                )
+            },
+            provider_preflight_observer=lambda _p, _m: preflight,
+            provider_authentication_required_observer=observer,
+        )
+        if observer_kind != "missing"
+        else evaluate_execution_readiness(
+            _request(worker_constraints=("provider=agy",)),
+            {
+                **_all_pass(),
+                ExecutionReadinessPlane.WORKFORCE: (
+                    PlaneObservation(
+                        plane=ExecutionReadinessPlane.WORKFORCE,
+                        status=ExecutionReadinessStatus.PASSED,
+                        workforce_dispatch_binding=_workforce_binding(),
+                    ),
+                ),
+            },
+            evaluated_at=datetime(2026, 9, 6, 12, 0, 0, tzinfo=timezone.utc),
+            provider_preflight_observer=lambda _p, _m: preflight,
+        )
+    )
+    assert result.primary_blocker is not None
+    assert result.primary_blocker.code is ExecutionReadinessBlockerCode.WORKFORCE_NOT_READY
+
+
 def test_non_json_preflight_evidence_fails_closed(monkeypatch) -> None:
     import nexus.orchestrator.self_hosted_task_service as task_service
 
@@ -160,6 +237,7 @@ def _evaluate(
     *,
     completion_observation: CompletionAuthorityObservation | None = None,
     provider_preflight_observer=None,
+    provider_authentication_required_observer=None,
 ):
     observations = _all_pass()
     if overrides:
@@ -170,6 +248,10 @@ def _evaluate(
         completion_observation=completion_observation,
         evaluated_at=datetime(2026, 9, 6, 12, 0, 0, tzinfo=timezone.utc),
         provider_preflight_observer=provider_preflight_observer,
+        provider_authentication_required_observer=(
+            provider_authentication_required_observer
+            or (lambda provider: str(provider).strip().lower() == "agy")
+        ),
     )
 
 
@@ -188,8 +270,11 @@ def _workforce_binding() -> dict[str, object]:
 
 
 def _valid_preflight(provider: str, model: str) -> dict[str, object]:
+    authentication_required = provider == "agy"
     return {
         "schema": "nexus.provider_preflight.v1",
+        "status": "VERSION_VERIFIED",
+        "blocker": None,
         "provider": provider,
         "requested_model": model,
         "resolved_model": model,
@@ -203,8 +288,11 @@ def _valid_preflight(provider: str, model: str) -> dict[str, object]:
         "cli_version_sha256": "c" * 64,
         "probe_evidence_hash": "d" * 64,
         "probe_expires_at": "2099-01-01T00:00:00Z",
-        "authentication_required": False,
-        "authenticated": False,
+        "authentication_required": authentication_required,
+        "authenticated": authentication_required,
+        "authentication_evidence": (
+            "successful_exact_model_probe" if authentication_required else None
+        ),
     }
 
 
@@ -218,6 +306,10 @@ def _valid_preflight(provider: str, model: str) -> dict[str, object]:
         "missing_action_map",
         "wrong_action_task",
         "malformed_request_hash",
+        "nested_action_mismatch",
+        "nested_request_mismatch",
+        "nested_action_malformed",
+        "nested_request_malformed",
         "not_found",
         "invalid_state",
     ),
@@ -229,7 +321,7 @@ def test_material_replay_identity_hostiles_block(monkeypatch, mutation):
         "task_id": "goal-test",
         "attempt_id": "attempt-1",
         "action_id": "action-1",
-        "request_hash": "r" * 64,
+        "request_hash": "a" * 64,
         "status": "READY",
         "task_action": {
             "task_id": "goal-test",
@@ -254,6 +346,14 @@ def test_material_replay_identity_hostiles_block(monkeypatch, mutation):
         snapshot["task_action"]["task_id"] = "other"
     elif mutation == "malformed_request_hash":
         snapshot["request_hash"] = "R" * 64
+    elif mutation == "nested_action_mismatch":
+        snapshot["task_action"]["action_id"] = "action-other"
+    elif mutation == "nested_request_mismatch":
+        snapshot["task_action"]["request_hash"] = "e" * 64
+    elif mutation == "nested_action_malformed":
+        snapshot["task_action"]["action_id"] = 42
+    elif mutation == "nested_request_malformed":
+        snapshot["task_action"]["request_hash"] = "not-a-hash"
     elif mutation == "not_found":
         snapshot["found"] = False
     else:
@@ -285,7 +385,7 @@ def test_material_replay_valid_identity_passes(monkeypatch):
         "task_action": {
             "task_id": "goal-test",
             "action_id": "action-1",
-            "request_hash": "r" * 64,
+            "request_hash": "a" * 64,
             "next_action": "none",
         },
         "found": True,

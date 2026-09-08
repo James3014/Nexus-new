@@ -3408,6 +3408,8 @@ def _public_replay_snapshot(task_id):
 def _public_preflight(**overrides):
     result = {
         "schema": "nexus.provider_preflight.v1",
+        "status": "VERSION_VERIFIED",
+        "blocker": None,
         "provider": "agy",
         "requested_model": "model-1",
         "resolved_model": "model-1",
@@ -3421,9 +3423,9 @@ def _public_preflight(**overrides):
         "cli_version_sha256": "b" * 64,
         "probe_evidence_hash": "c" * 64,
         "probe_expires_at": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
-        "authentication_required": False,
-        "authenticated": False,
-        "authentication_evidence": None,
+        "authentication_required": True,
+        "authenticated": True,
+        "authentication_evidence": "successful_exact_model_probe",
     }
     result.update(overrides)
     return result
@@ -3489,13 +3491,17 @@ def test_execution_readiness_public_workforce_callback_reaches_ready_without_env
         {"binary_sha256": "bad"}, {"cli_version_sha256": "bad"},
         {"probe_evidence_hash": "bad"}, {"execution_ready": False},
         {"model_reachable": False}, {"requested_model_verified": False},
+        {"status": "BLOCKED"},
+        {"blocker": "PROVIDER_AUTHENTICATION_REQUIRED"},
+        {"authentication_required": False, "authenticated": False, "authentication_evidence": None},
         {"authentication_required": True, "authenticated": False},
         {"authentication_required": True, "authenticated": True, "authentication_evidence": None},
     ],
     ids=[
         "non_mapping", "raises", "expired", "naive", "wrong_provider", "wrong_model",
         "bad_binary_hash", "bad_cli_hash", "bad_probe_hash", "execution_not_ready",
-        "model_unreachable", "model_unverified", "auth_false", "auth_evidence_missing",
+        "model_unreachable", "model_unverified", "status_blocked", "blocker_present",
+        "auth_requirement_false", "auth_false", "auth_evidence_missing",
     ],
 )
 def test_execution_readiness_public_workforce_preflight_fail_closed(monkeypatch, readiness_env, override):

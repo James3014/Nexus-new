@@ -4319,6 +4319,7 @@ class UnifiedMCPGateway:
             provider_preflight_observer=lambda provider, model: self._provider_preflight(
                 {"provider": provider, "model": model}
             ),
+            provider_authentication_required_observer=self._provider_requires_authentication,
         )
         payload = result.model_dump(mode="json")
         payload["certification_fence"] = {
