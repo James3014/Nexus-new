@@ -14,7 +14,7 @@
 
 ## Objective
 
-Register `opencli_chatgpt_balanced_web` as a conditional L1 bounded candidate worker and route only the exact `open-swe-resident-five-repo-canary-20260908` campaign to it. Preserve the global Agy/Gemini default and reject caller-supplied or forged worker identity.
+Register `opencli_chatgpt_balanced_web` as a conditional L1 bounded Candidate generator and route only the exact `open-swe-resident-five-repo-canary-20260908` campaign's `bounded_candidate_generation` demand to it. Preserve the global Agy/Gemini implementation default and reject caller-supplied or forged worker identity.
 
 ## Owner-approved evidence interpretation
 
@@ -38,10 +38,10 @@ No deletion is allowed.
 
 ## Required behavior
 
-1. Add worker `opencli_chatgpt_balanced_web` with provider `opencli_chatgpt`, model `opencli_chatgpt/balanced`, state `REGISTERED_CONDITIONAL`, availability `AVAILABLE`, autonomy `L1`, role `fast_bounded_implementation`, and `default_route: false`.
-2. Add only one campaign override: `open-swe-resident-five-repo-canary-20260908.fast_bounded_implementation -> opencli_chatgpt_balanced_web`.
+1. Add worker `opencli_chatgpt_balanced_web` with provider `opencli_chatgpt`, model `opencli_chatgpt/balanced`, state `REGISTERED_CONDITIONAL`, availability `AVAILABLE`, autonomy `L1`, role `bounded_candidate_generation`, and `default_route: false`.
+2. Add only one campaign override: `open-swe-resident-five-repo-canary-20260908.bounded_candidate_generation -> opencli_chatgpt_balanced_web`.
 3. Preserve global `fast_bounded_implementation -> agy_flash_37_medium`.
-4. Derive the canary campaign only from the exact verified Task Card bytes/hash. Blank, unrelated, prefixed, forged, or hash-mismatched identities must use the global route or fail closed.
+4. Derive both canary campaign identity and candidate-only topology only from the exact verified Task Card bytes/hash. The exact canary produces `bounded_candidate_generation / L1`; blank, unrelated, prefixed, forged, or hash-mismatched identities must use the ordinary global route or fail closed.
 5. Canonical Workforce Admission must return one ALLOW binding for `opencli_chatgpt/balanced`, and External Intelligence must reject transport provider/model substitution before semantic dispatch.
 6. Existing r1-r7 operations remain immutable and are never resent.
 
@@ -55,5 +55,5 @@ git diff --check
 
 ## Exit
 
-- PASS: exact campaign route produces a canonical single-ALLOW `opencli_chatgpt/balanced` binding; global route remains Agy; all verifiers pass; independent coordinator accepts exact Candidate.
+- PASS: exact campaign route produces a canonical `bounded_candidate_generation / L1` single-ALLOW `opencli_chatgpt/balanced` binding; ordinary global implementation route remains Agy/L2; all verifiers pass; independent coordinator accepts exact Candidate.
 - BLOCK: identity, evidence, campaign, role, transport, scope, verifier, or global-default drift.

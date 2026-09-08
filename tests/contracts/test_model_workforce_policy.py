@@ -536,7 +536,7 @@ def test_campaign_37_medium_worker_advertises_role() -> None:
     w = manifest["workers"]["agy_flash_37_medium"]
     assert w["provider"] == "agy"
     assert w["model"] == "gemini-3.7-flash-medium"
-    assert "fast_bounded_implementation" in w["roles"]
+    assert "bounded_candidate_generation" in w["roles"]
     assert w["availability"] == "AVAILABLE"
     assert w["state"] == "REGISTERED_CONDITIONAL"
     assert w["autonomy"] == "L3"
@@ -603,7 +603,7 @@ def test_campaign_route_resolution_open_swe_resident_canary() -> None:
     assert "open-swe-resident-five-repo-canary-20260908" in campaign_routing
     assert (
         campaign_routing["open-swe-resident-five-repo-canary-20260908"][
-            "fast_bounded_implementation"
+            "bounded_candidate_generation"
         ]
         == "opencli_chatgpt_balanced_web"
     )
@@ -611,7 +611,7 @@ def test_campaign_route_resolution_open_swe_resident_canary() -> None:
     loader = WorkforcePolicyLoader()
     assert (
         loader.resolve_route(
-            "fast_bounded_implementation",
+            "bounded_candidate_generation",
             campaign_id="open-swe-resident-five-repo-canary-20260908",
         )
         == "opencli_chatgpt_balanced_web"
