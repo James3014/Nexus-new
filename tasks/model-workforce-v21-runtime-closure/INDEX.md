@@ -28,6 +28,8 @@
 
 `model-workforce-v21-runtime-closure-t3c2` is the current governed Candidate frontier. No successor may execute until this Candidate receives explicit approval and integration. No card may self-chain after completion, failure, Candidate formation, or BLOCK.
 
+Note: `05-t3c3-committee-member-invocation.md` is absent on current `main`; T3C3 remains PENDING / not implemented and grants no mutation authority.
+
 ## Completed cards
 
 - `model-workforce-v21-runtime-closure-g0-governance` - governance bootstrap candidate merged at `66a58cbd06254b9f2ad987572c18ab01a6e75173`.
