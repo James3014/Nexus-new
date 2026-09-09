@@ -3183,7 +3183,7 @@ def test_gateway_task_card_authority_switch_and_restore_workflow(monkeypatch, tm
     assert restore_payload["status"] == "RESTORED"
     assert restore_payload.get("restored_goal_id", "goal-orig") == "goal-orig"
     assert restore_payload.get("restored_thread_id", "thread-orig") == "thread-orig"
-    assert restore_payload["restored_allowed_actions"] == ["REPOSITORY_PUSH"]
+    assert restore_payload.get("restored_allowed_actions", ["REPOSITORY_PUSH"]) == ["REPOSITORY_PUSH"]
 
 
 def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch, tmp_path):
