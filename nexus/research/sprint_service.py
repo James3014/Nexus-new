@@ -14,6 +14,7 @@ from typing import Any, Optional
 
 from nexus.core.outcome_schema import SprintOutcome
 from nexus.engine.autoreason_service import AutoreasonService
+from nexus.engine.canonical_task_seam import DayShiftAdmissionContext
 from nexus.engine.ddtree_adapter import DDTreeAdapter
 from nexus.engine.learning_policy_loader import route_cost_controls_from_env
 from nexus.engine.policies.research_policy import ResearchPolicy
@@ -126,6 +127,10 @@ class SprintConfig:
     enable_ddtree_executor: bool | None = None
     ddtree_max_candidates: int = 2
     distant_scout_plan: dict[str, Any] = field(default_factory=dict)
+    day_shift_admission_context: DayShiftAdmissionContext | None = None
+    admission_context: DayShiftAdmissionContext | None = None
+    online_invoker: Any = None
+    day_shift_online_invoker: Any = None
 
 
 @dataclass
@@ -198,12 +203,14 @@ class SprintResult:
 class LLMCandidateGenerator:
     source = "llm"
 
-    def __init__(self, project_root: Path, safe_mode: bool, target_file: str = ""):
+    def __init__(self, project_root: Path, safe_mode: bool, target_file: str = "", admission_context=None, online_invoker=None):
         from nexus.services.gateway import BattlesuitGateway
         self.project_root = Path(project_root).resolve()
         self.gateway = BattlesuitGateway(project_root=self.project_root)
         self.safe_mode = safe_mode
         self.target_file = str(target_file or "").strip()
+        self.admission_context = admission_context
+        self.online_invoker = online_invoker
         self.local_service = None
         if os.environ.get("NEXUS_ONLINE_LOCAL_ASSIST", "").strip().lower() in {"1", "true", "yes"}:
             from nexus.services.local_assist_service import LocalAssistService
@@ -233,6 +240,33 @@ class LLMCandidateGenerator:
         attempt: int,
         model: str,
     ) -> tuple[dict[str, Any], str, dict[str, Any]]:
+        if self.admission_context is not None:
+            from nexus.engine.canonical_task_seam import _is_issued_day_shift_context
+
+            if not _is_issued_day_shift_context(self.admission_context):
+                return {"status": "FAIL", "summary": "dayshift_context_not_issued"}, "", {}
+            if self.project_root != self.admission_context.repository_root:
+                return {"status": "FAIL", "summary": "dayshift_repository_mismatch"}, "", {}
+            try:
+                card_hash = hashlib.sha256(
+                    Path(self.admission_context.task_card_identity.canonical_task_card_path).read_bytes()
+                ).hexdigest()
+            except OSError:
+                return {"status": "FAIL", "summary": "dayshift_card_unreadable"}, "", {}
+            if card_hash != self.admission_context.task_card_identity.task_card_hash:
+                return {"status": "FAIL", "summary": "dayshift_card_stale"}, "", {}
+            current_revision = self._workspace_revision()
+            if current_revision and current_revision != self.admission_context.workspace_revision:
+                return {"status": "FAIL", "summary": "dayshift_workspace_revision_mismatch"}, "", {}
+            if not self.target_file or self.target_file not in self.admission_context.allowed_files:
+                return {"status": "FAIL", "summary": "dayshift_target_out_of_scope"}, "", {}
+            try:
+                (self.project_root / self.target_file).resolve().relative_to(self.project_root)
+            except ValueError:
+                return {"status": "FAIL", "summary": "dayshift_target_out_of_scope"}, "", {}
+            if self.admission_context.task_text and self.admission_context.task_text != task:
+                return {"status": "FAIL", "summary": "dayshift_task_mismatch"}, "", {}
+
         from nexus.services.unified_runtime import UnifiedRuntimeRequest
 
         output_schema = {
@@ -251,9 +285,11 @@ class LLMCandidateGenerator:
             f"sprint-{hashlib.sha256(task.encode('utf-8')).hexdigest()[:12]}"
             f"-s{seed}-a{attempt}"
         )
+        if self.admission_context is not None:
+            task_id = self.admission_context.task_id
         local_request = None
         if self.local_service is not None and self.target_file and not Path(self.target_file).is_absolute():
-            from nexus.services.local_assist_service import LocalAssistRequest, REQUEST_SCHEMA
+            from nexus.services.local_assist_service import REQUEST_SCHEMA, LocalAssistRequest
 
             local_request = LocalAssistRequest(
                 schema=REQUEST_SCHEMA,
@@ -262,7 +298,7 @@ class LLMCandidateGenerator:
                 workspace_root=str(self.project_root),
                 workspace_revision=revision,
                 task_statement=task,
-                action="advisor",
+                action="candidate",
                 allowed_files=(self.target_file,),
                 target_file=self.target_file,
                 target_symbol="",
@@ -285,16 +321,30 @@ class LLMCandidateGenerator:
             }
 
         gateway_provider = str(getattr(self.gateway, "oauth_provider", "") or "").strip().lower()
+        if self.admission_context is not None:
+            binding = self.admission_context.admission["binding"]
+            gateway_provider = str(binding["provider"])
+            model = str(binding["model"])
+        route = build_online_route(
+            recommended_flow="hybrid" if local_request is not None else "direct",
+            gateway_provider=gateway_provider,
+            local_enabled=local_request is not None,
+        )
+        if self.admission_context is not None:
+            route = dict(route)
+            route.update(
+                {
+                    "workforce_admission_enabled": True,
+                    "workforce_bindings": self.admission_context.admission["workforce_bindings"],
+                    "workspace_root": str(self.admission_context.repository_root),
+                }
+            )
         request = UnifiedRuntimeRequest(
             task_id=task_id,
             workspace_revision=revision,
             task_statement=task,
             task_type="repair",
-            route=build_online_route(
-                recommended_flow="hybrid" if local_request is not None else "direct",
-                gateway_provider=gateway_provider,
-                local_enabled=local_request is not None,
-            ),
+            route=route,
             online_prompt=prompt,
             online_payload=payload,
             online_phase="R",
@@ -311,8 +361,9 @@ class LLMCandidateGenerator:
                 local_service=self.local_service if local_request is not None else None,
                 verifier=response_contract,
                 receipt_path=receipt_path,
+                online_invoker=self.online_invoker,
             )
-        else:
+        elif self.admission_context is None:
             from nexus.services.mainchain_entry import run_mainchain
             from nexus.services.unified_runtime import build_structured_online_invoker
 
@@ -323,13 +374,18 @@ class LLMCandidateGenerator:
                     phase="R",
                     model_name=model,
                     output_schema=output_schema,
-                    provider="fixture_gateway",
+                    provider=gateway_provider or "fixture_gateway",
                 ),
                 local_service=self.local_service if local_request is not None else None,
                 verifier=response_contract,
                 receipt_path=receipt_path,
                 with_nexus_armor=True,
             )
+        else:
+            return {
+                "status": "FAIL",
+                "summary": "dayshift_gateway_unavailable",
+            }, "", {"task_id": task_id, "online": {"status": "FAILED"}}
         self.last_unified_runtime_receipt = dict(receipt)
         online_stage = receipt.get("online", {}) if isinstance(receipt.get("online"), dict) else {}
         provider_response, raw_response, _payload = extract_online_stage_payload(online_stage)
@@ -943,7 +999,13 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
         learn_slo_guard["reason"] = f"learn_slo_read_error:{exc}"
 
     llm_generator: Optional[LLMCandidateGenerator] = (
-        LLMCandidateGenerator(repo_root, config.safe_mode, target_file=config.target_file)
+        LLMCandidateGenerator(
+            repo_root,
+            config.safe_mode,
+            target_file=config.target_file,
+            admission_context=config.admission_context,
+            online_invoker=config.online_invoker,
+        )
         if llm_mode_effective
         else None
     )
@@ -1991,9 +2053,10 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
     final_score = best.score
     final_patch = best.candidate_code or source_code
     final_reason = "stage1_pass"
+    dayshift_context = config.day_shift_admission_context or config.admission_context
     disable_dayshift = os.environ.get("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "").strip().lower() in {"1", "true", "yes"}
     # Stage 2 is optional enhancement only. Core success must not depend on external quota.
-    if llm_mode_effective and "quota" not in error_codes and not disable_dayshift:
+    if llm_mode_effective and "quota" not in error_codes and not disable_dayshift and dayshift_context is not None:
         swarm_dir = SwarmBroker(repo_root).acquire(timeout_sec=config.timeout_sec)
         if swarm_dir:
             try:
@@ -2009,6 +2072,8 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     min_round_delay_sec=1.5 if config.safe_mode else 0.2,
                     model_name="gemini-3-flash-preview" if config.safe_mode else "gemini-3.1-pro-preview",
                     fallback_model_name="gemini-3.1-pro-preview" if config.safe_mode else "gemini-3-flash-preview",
+                    admission_context=dayshift_context,
+                    online_invoker=config.day_shift_online_invoker,
                 )
                 result = optimizer.optimize()
                 unified_runtime_receipts.extend(
@@ -2022,6 +2087,9 @@ def run_hyper_sprint(*, repo_root: Path, config: SprintConfig) -> SprintResult:
                     final_reason = "dayshift_no_improve"
             finally:
                 SwarmBroker(repo_root).release(swarm_dir)
+    elif llm_mode_effective and dayshift_context is None:
+        final_reason = "dayshift_skipped_due_missing_admission_context"
+        error_codes.append("dayshift_admission_denied")
     elif llm_mode_effective and "quota" in error_codes:
         final_reason = "dayshift_skipped_due_quota_fallback"
     elif llm_mode_effective and disable_dayshift:

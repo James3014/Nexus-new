@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Mapping
 
+from nexus.contracts.autonomy_goal import RepositoryIdentity
 from nexus.contracts.state_owner_transition import (
     Operation,
     ReceiptState,
@@ -309,6 +310,7 @@ class StateOwnerTransitionService:
         source: LoadedSourceIdentity,
         source_root: Path | None = None,
         service: Any = None,
+        use_keyed_grant: bool = False,
     ):
         self._roots = {
             key: value.resolve() if isinstance(value, Path) else value
@@ -319,6 +321,7 @@ class StateOwnerTransitionService:
         self._grant_result: Mapping[str, Any] = {}
         self._service = service
         self._authority_handle = None
+        self._use_keyed_grant = use_keyed_grant
 
     def loaded_root_transition(self, request: WriterTransitionRequest) -> LoadedRootTransition:
         """Bind one exact loaded A request for a multi-root coordinator.
@@ -598,13 +601,16 @@ class StateOwnerTransitionService:
     def _grant(self, req: WriterTransitionRequest) -> None:
         from nexus.contracts.autonomy_goal import (
             AutonomyActionClass,
-            RepositoryIdentity,
             canonical_autonomy_hash,
         )
         from nexus.orchestrator.standing_grant_store import (
+            StandingGrantKey,
             StandingGrantReceiptError,
             authorize_durable_standing_grant_effect,
+            authorize_keyed_standing_grant_effect,
+            load_keyed_standing_grant_receipt,
             load_standing_grant_receipt,
+            load_standing_grant_scope,
         )
 
         # The grant effect excludes only the authority locator/hash so the
@@ -614,18 +620,54 @@ class StateOwnerTransitionService:
         effect.pop("authority_receipt_hash", None)
         effect["operation_digest"] = req.authorization_intent_digest
         try:
-            durable = load_standing_grant_receipt()
-            if durable is None or durable.context.thread_id != self._authority_handle.thread_id:
-                raise TransitionServiceError("CANONICAL_GRANT_THREAD_MISMATCH")
-            result = authorize_durable_standing_grant_effect(
-                repository=RepositoryIdentity(
-                    repository_id=self._source.repository,
-                    canonical_remote="https://github.com/James3014/Nexus-new.git",
-                ),
-                action=AutonomyActionClass.RUNTIME_ACTIVATE,
-                effect=effect,
+            repository = RepositoryIdentity(
+                repository_id=self._source.repository,
+                canonical_remote="https://github.com/James3014/Nexus-new.git",
             )
-            if result.get("grant_receipt_hash") != durable.receipt_hash:
+            if self._use_keyed_grant:
+                handle = self._authority_handle
+                required = (
+                    "repository",
+                    "goal_id",
+                    "thread_id",
+                    "owner_id",
+                    "coordinator_id",
+                    "grant_receipt_hash",
+                )
+                if any(not getattr(handle, name, "") for name in required):
+                    raise TransitionServiceError("KEYED_GRANT_HANDLE_INCOMPLETE")
+                if handle.repository != self._source.repository:
+                    raise TransitionServiceError("KEYED_GRANT_REPOSITORY_MISMATCH")
+                key = StandingGrantKey(
+                    repository=repository,
+                    goal_id=handle.goal_id,
+                    coordinator_thread=handle.thread_id,
+                )
+                if load_keyed_standing_grant_receipt(key) is None:
+                    raise TransitionServiceError("KEYED_GRANT_MISSING")
+                scope = load_standing_grant_scope(
+                    key,
+                    expected_receipt_hash=handle.grant_receipt_hash,
+                    expected_owner_id=handle.owner_id,
+                    expected_coordinator_id=handle.coordinator_id,
+                )
+                result = authorize_keyed_standing_grant_effect(
+                    scope,
+                    repository=repository,
+                    action=AutonomyActionClass.RUNTIME_ACTIVATE,
+                    effect=effect,
+                )
+                durable = load_keyed_standing_grant_receipt(key)
+            else:
+                durable = load_standing_grant_receipt()
+                if durable is None or durable.context.thread_id != self._authority_handle.thread_id:
+                    raise TransitionServiceError("CANONICAL_GRANT_THREAD_MISMATCH")
+                result = authorize_durable_standing_grant_effect(
+                    repository=repository,
+                    action=AutonomyActionClass.RUNTIME_ACTIVATE,
+                    effect=effect,
+                )
+            if durable is None or result.get("grant_receipt_hash") != durable.receipt_hash:
                 raise TransitionServiceError("CANONICAL_GRANT_CHANGED")
             expected_effect_hash = canonical_autonomy_hash(effect)
             if (

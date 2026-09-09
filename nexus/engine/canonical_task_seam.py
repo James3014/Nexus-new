@@ -6,10 +6,12 @@ import re
 import shlex
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
+from types import MappingProxyType
 from typing import Any, Mapping
 
 _FEATURE_INTENT_TOKENS = frozenset({"build", "create", "add", "implement", "feature"})
 _FEATURE_INTENT_TOKEN_RE = re.compile(r"(?<!\w)([A-Za-z]+)(?!\w)")
+_DAYSHIFT_CONTEXT_TOKEN = object()
 
 
 def infer_task_kind(task_text: str) -> str:
@@ -168,6 +170,128 @@ class VerifiedCampaignIdentity:
             raise ValueError("verified_campaign_binding_invalid")
         if self.contract_kind != "TRACKED_TASK_CARD":
             raise ValueError("verified_campaign_contract_kind_invalid")
+
+
+@dataclass(frozen=True)
+class DayShiftAdmissionContext:
+    """Planner admission bound to one tracked card and one workspace."""
+
+    task_card_identity: VerifiedTaskCardIdentity
+    repository_root: Path
+    workspace_revision: str
+    allowed_files: tuple[str, ...]
+    verifier_command: tuple[str, ...]
+    admission: Mapping[str, Any]
+    campaign_identity: VerifiedCampaignIdentity | None = None
+    task_text: str = ""
+    source_token: object | None = None
+
+    def __post_init__(self) -> None:
+        if self.source_token is not _DAYSHIFT_CONTEXT_TOKEN:
+            raise ValueError("dayshift_context_not_source_owned")
+        if not isinstance(self.task_card_identity, VerifiedTaskCardIdentity):
+            raise ValueError("dayshift_task_card_identity_unverified")
+        if self.campaign_identity is not None and not isinstance(
+            self.campaign_identity, VerifiedCampaignIdentity
+        ):
+            raise ValueError("dayshift_campaign_identity_unverified")
+        if not self.workspace_revision.strip():
+            raise ValueError("dayshift_workspace_revision_missing")
+        if not self.allowed_files or any(
+            not item or Path(item).is_absolute() or ".." in PurePosixPath(item).parts
+            for item in self.allowed_files
+        ):
+            raise ValueError("dayshift_allowed_files_missing_or_invalid")
+        if not self.verifier_command or any(not str(item).strip() for item in self.verifier_command):
+            raise ValueError("dayshift_verifier_command_missing")
+        object.__setattr__(self, "allowed_files", tuple(self.allowed_files))
+        object.__setattr__(self, "verifier_command", tuple(self.verifier_command))
+        if not isinstance(self.admission, Mapping):
+            raise ValueError("dayshift_admission_missing")
+        object.__setattr__(self, "admission", _freeze_dayshift_mapping(self.admission))
+        admission = self.admission
+        workforce_admission = admission.get("workforce_admission", admission)
+        if not isinstance(workforce_admission, Mapping) or workforce_admission.get("overall_decision") != "ALLOW":
+            raise ValueError("dayshift_admission_not_allowed")
+        binding = admission.get("binding")
+        if not isinstance(binding, Mapping) or any(
+            not str(binding.get(key) or "").strip() for key in ("worker_id", "provider", "model", "binding_hash")
+        ):
+            raise ValueError("dayshift_admission_binding_missing")
+        records = workforce_admission.get("records", ())
+        record = next(
+            (item for item in records if isinstance(item, Mapping) and item.get("demand", {}).get("execution_channel") == "online"),
+            records[0] if isinstance(records, (list, tuple)) and records else {},
+        )
+        decision = record.get("decision", {}) if isinstance(record, Mapping) else {}
+        if isinstance(decision, Mapping) and any(
+            binding.get(key) != decision.get(source_key)
+            for key, source_key in (
+                ("worker_id", "resolved_worker_id"),
+                ("provider", "resolved_provider"),
+                ("model", "resolved_model"),
+            )
+        ):
+            raise ValueError("dayshift_admission_binding_conflict")
+
+    @property
+    def task_id(self) -> str:
+        return self.task_card_identity.task_id
+
+
+_DAYSHIFT_ISSUED_CONTEXTS: dict[int, DayShiftAdmissionContext] = {}
+
+
+def _is_issued_day_shift_context(context: object) -> bool:
+    return _DAYSHIFT_ISSUED_CONTEXTS.get(id(context)) is context
+
+
+def _freeze_dayshift_mapping(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType({str(key): _freeze_dayshift_mapping(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_dayshift_mapping(item) for item in value)
+    return value
+
+
+def build_day_shift_admission_context(
+    *,
+    task_text: str,
+    task_card_identity: VerifiedTaskCardIdentity,
+    repository_root: Path,
+    workspace_revision: str,
+    allowed_files: tuple[str, ...],
+    verifier_command: tuple[str, ...],
+    campaign_identity: VerifiedCampaignIdentity | None = None,
+    execution_channels: tuple[str, ...] = ("online",),
+) -> DayShiftAdmissionContext:
+    """Create the only supported Stage2 context from canonical admission."""
+    if not isinstance(task_card_identity, VerifiedTaskCardIdentity):
+        raise ValueError("dayshift_task_card_identity_unverified")
+    if not str(task_text).strip():
+        raise ValueError("dayshift_task_text_missing")
+    admission = build_canonical_planner_admission(
+        task_id=task_card_identity.task_id,
+        task_text=task_text,
+        allowed_files=tuple(allowed_files),
+        verifier_command=tuple(verifier_command),
+        task_card_identity=task_card_identity,
+        campaign_identity=campaign_identity,
+        execution_channels=tuple(execution_channels),
+    )
+    context = DayShiftAdmissionContext(
+        task_card_identity=task_card_identity,
+        repository_root=Path(repository_root).resolve(),
+        workspace_revision=str(workspace_revision).strip(),
+        allowed_files=tuple(allowed_files),
+        verifier_command=tuple(verifier_command),
+        admission=admission,
+        campaign_identity=campaign_identity,
+        task_text=str(task_text),
+        source_token=_DAYSHIFT_CONTEXT_TOKEN,
+    )
+    _DAYSHIFT_ISSUED_CONTEXTS[id(context)] = context
+    return context
 
 
 @dataclass(frozen=True)
@@ -488,6 +612,7 @@ def build_canonical_planner_admission(
     verifier_command: tuple[str, ...],
     task_card_identity: VerifiedTaskCardIdentity,
     campaign_identity: VerifiedCampaignIdentity | None = None,
+    execution_channels: tuple[str, ...] = ("online",),
 ) -> dict[str, Any]:
     """Run the sole planner and current Workforce Admission for one gateway task."""
     from nexus.contracts.canonical_execution import CanonicalTaskContext
@@ -505,7 +630,7 @@ def build_canonical_planner_admission(
         task_desc=str(task_text),
         execution_world="product_runtime",
         transport_ingress="mcp",
-        execution_channels=("online",),
+        execution_channels=tuple(execution_channels),
         task_facts={
             "mutation_requested": bool(allowed_files),
             "candidate_required": True,
@@ -573,13 +698,30 @@ def build_canonical_planner_admission(
         policy,
     ).to_dict()
     records = admission.get("records")
-    if admission.get("overall_decision") != "ALLOW" or not isinstance(records, list) or len(records) != 1:
+    if admission.get("overall_decision") != "ALLOW" or not isinstance(records, list) or not records:
         raise ValueError("canonical_workforce_admission_not_single_allow")
-    record = records[0]
+    if any(
+        not isinstance(item, Mapping)
+        or not isinstance(item.get("decision"), Mapping)
+        or item["decision"].get("decision") != "ALLOW"
+        for item in records
+    ):
+        raise ValueError("canonical_workforce_admission_not_single_allow")
+    record = next(
+        item for item in records
+        if item.get("demand", {}).get("execution_channel") == "online"
+    ) if any(
+        isinstance(item, Mapping)
+        and item.get("demand", {}).get("execution_channel") == "online"
+        for item in records
+    ) else records[0]
     decision = record.get("decision") if isinstance(record, Mapping) else None
     if not isinstance(decision, Mapping) or decision.get("decision") != "ALLOW":
         raise ValueError("canonical_workforce_admission_not_single_allow")
-    demand = demands["demands"][0]
+    demand = next(
+        item for item in demands["demands"] if item.get("execution_channel") == "online"
+    )
+    binding_identity = runtime_bindings.get("online") or runtime_bindings["local"]
     policy_identity = admission.get("policy_identity")
     if not isinstance(policy_identity, Mapping):
         policy_identity = {}
@@ -587,11 +729,12 @@ def build_canonical_planner_admission(
         "planner_output": planner_output,
         "workforce_demands": demands,
         "workforce_admission": admission,
+        "workforce_bindings": runtime_bindings,
         "binding": {
             "demand_id": str(demand.get("demand_id") or ""),
-            "worker_id": str(decision.get("resolved_worker_id") or ""),
-            "provider": str(decision.get("resolved_provider") or ""),
-            "model": str(decision.get("resolved_model") or ""),
+            "worker_id": str(binding_identity.get("worker_id") or ""),
+            "provider": str(binding_identity.get("provider") or ""),
+            "model": str(binding_identity.get("model") or ""),
             "policy_hash": str(policy_identity.get("policy_hash") or ""),
             "binding_hash": str(record.get("binding_hash") or ""),
             "aggregate_binding_hash": str(admission.get("aggregate_binding_hash") or ""),

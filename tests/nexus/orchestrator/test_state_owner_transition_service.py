@@ -278,6 +278,63 @@ def test_initial_apply_uses_real_p6c_and_fresh_process_replays(tmp_path, monkeyp
     )
 
 
+def test_keyed_grant_mode_uses_verified_handle_scope(tmp_path, monkeypatch):
+    root, source_root, source, raw = _setup(tmp_path, monkeypatch)
+    from nexus.orchestrator import standing_grant_store as grants
+
+    legacy = grants.load_standing_grant_receipt()
+    assert legacy is not None
+    grants.write_keyed_standing_grant_receipt(legacy)
+    result = StateOwnerTransitionService(
+        roots={"root": root}, source=source, source_root=source_root, use_keyed_grant=True
+    ).apply(raw)
+    assert result.state is ReceiptState.COMMITTED
+
+
+def test_keyed_grants_for_two_goals_coexist_and_select_verified_goal(tmp_path, monkeypatch):
+    root, source_root, source, raw = _setup(tmp_path, monkeypatch)
+    from nexus.orchestrator import standing_grant_store as grants
+
+    first = grants.load_standing_grant_receipt()
+    assert first is not None
+    grants.write_keyed_standing_grant_receipt(first)
+    from nexus.contracts.autonomy_goal import StandingGrantContext
+
+    context_values = first.context.model_dump()
+    context_values.pop("context_hash", None)
+    context_values["goal_id"] = "goal-two"
+    second_context = StandingGrantContext.issue(**context_values)
+    second = grants.StandingGrantReceipt.issue(grant_id="grant-two", context=second_context)
+    grants.write_keyed_standing_grant_receipt(second)
+    assert grants.load_keyed_standing_grant_receipt(grants.standing_grant_key(first)) == first
+    assert grants.load_keyed_standing_grant_receipt(grants.standing_grant_key(second)) == second
+    result = StateOwnerTransitionService(
+        roots={"root": root}, source=source, source_root=source_root, use_keyed_grant=True
+    ).apply(raw)
+    assert result.state is ReceiptState.COMMITTED and result.grant_hash == first.receipt_hash
+
+
+def test_keyed_missing_denies_even_when_valid_legacy_exists(tmp_path, monkeypatch):
+    root, source_root, source, raw = _setup(tmp_path, monkeypatch)
+    result = StateOwnerTransitionService(
+        roots={"root": root}, source=source, source_root=source_root, use_keyed_grant=True
+    ).apply(raw)
+    assert result.state is ReceiptState.DENIED
+    assert "KEYED_GRANT_MISSING" in result.error
+    assert not (root / ".nexus").exists()
+
+
+def test_foreign_verified_handle_denies_before_writes(tmp_path, monkeypatch):
+    root, source_root, source, raw = _setup(
+        tmp_path, monkeypatch, authority_overrides={"goal_id": "foreign-goal"}
+    )
+    result = StateOwnerTransitionService(
+        roots={"root": root}, source=source, source_root=source_root, use_keyed_grant=True
+    ).apply(raw)
+    assert result.state is ReceiptState.DENIED
+    assert not (root / ".nexus").exists()
+
+
 def test_reconcile_reads_committed_transaction_without_writes(tmp_path, monkeypatch):
     root, source_root, source, raw = _setup(tmp_path, monkeypatch)
     assert (

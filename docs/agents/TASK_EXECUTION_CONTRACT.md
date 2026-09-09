@@ -323,3 +323,28 @@ disposition bound to the same current-main revision. The machine consumer is
 refs/remotes/nexus-new/main`; it validates this contract but does not fetch or
 store Issue state, create follow-ups, approve Candidates, or create a second
 completion authority.
+
+### Keyed standing-grant store (Issue #888)
+
+The v1 standing-grant receipt remains the compatibility format and canonical
+legacy path for scopes that have not migrated. A migrated receipt is addressed
+by the SHA-256 canonical key of its repository identity, Goal, and durable
+coordinator thread under the authority directory's `standing-grants/` tree.
+
+Keyed loads and inspections are read-only. A mutation must first obtain a
+process-bound registered scope pinned to the exact receipt hash, Owner, and
+coordinator; stale, forged, expired, revoked, cross-repository, and
+cross-Goal scopes fail closed. Keyed replacement uses the same predecessor
+hash CAS rule as v1, with one physical lock per key so unrelated keys can
+progress concurrently.
+
+Legacy migration writes an intent fence before copying bytes and a completion
+fence after readback and directory fsync. The legacy path is denied as soon as
+an intent exists, including after a crash; recovery may complete the exact
+keyed copy but never falls back to the legacy path or resurrects it.
+
+A migration replay remains idempotent only while the original keyed receipt is
+still present and current. Once that keyed scope is renewed or revoked, the
+legacy copy cannot be replayed to replace it; a completed fence is terminal for
+legacy recovery, while normal keyed CAS continues to govern an existing keyed
+receipt.

@@ -22,6 +22,7 @@ import re
 import stat
 import tempfile
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Mapping
@@ -51,6 +52,7 @@ DEFAULT_RECEIPT_PATH = Path(_HOME) / ".local/state/nexus/authority/standing-gran
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 _SHA64_HEX = re.compile(r"^[0-9a-f]{64}$")
 _MAX_RECEIPT_BYTES = 16 * 1024
+_MAX_FENCE_BYTES = 8 * 1024
 
 
 class StandingGrantReceiptError(Exception):
@@ -287,9 +289,12 @@ def _write_bytes(
     supersedes_grant_hash: str | None,
     destination: Path,
     expected: str | None,
+    guard: Any | None = None,
 ) -> None:
     _assert_dir_chain_safe(destination.parent, create=True)
     with _coordination_lock(destination.parent):
+        if guard is not None:
+            guard()
         present = os.path.lexists(destination)
         if present:
             # Replacing an existing receipt requires exact predecessor binding.
@@ -346,10 +351,16 @@ def write_standing_grant_receipt(
     """
     if not isinstance(receipt, StandingGrantReceipt):
         raise TypeError("receipt must be a validated StandingGrantReceipt")
+    if _migration_fenced(receipt):
+        raise StandingGrantReceiptError("MIGRATION_FENCED")
     payload = receipt.model_dump(mode="json")
     canonical = _canonical_json(payload)
     _write_bytes(
-        canonical, receipt.supersedes_grant_hash, DEFAULT_RECEIPT_PATH, expected_receipt_hash
+        canonical,
+        receipt.supersedes_grant_hash,
+        DEFAULT_RECEIPT_PATH,
+        expected_receipt_hash,
+        guard=lambda: _assert_unmigrated(receipt),
     )
     return DEFAULT_RECEIPT_PATH
 
@@ -550,7 +561,10 @@ def load_standing_grant_receipt(*, now: datetime | None = None) -> StandingGrant
     if stat.S_ISLNK(st.st_mode):
         raise StandingGrantReceiptError("NOT_REGULAR_FILE")
     _assert_dir_chain_safe(DEFAULT_RECEIPT_PATH.parent, create=False)
-    return _load_receipt_at(DEFAULT_RECEIPT_PATH, now=now)
+    receipt = _load_receipt_at(DEFAULT_RECEIPT_PATH, now=now)
+    if _migration_fenced(receipt):
+        raise StandingGrantReceiptError("MIGRATION_FENCED")
+    return receipt
 
 
 def rehydrate_durable_standing_grant_request(
@@ -799,3 +813,362 @@ def _evaluate_durable_standing_grant_at(
         )
     except Exception:
         return evaluate_standing_grant_decision({}, {})
+
+
+# Issue #888 keyed authority extension.  These objects deliberately sit on top
+# of the v1 receipt; the v1 bytes and evaluator remain the compatibility path.
+@dataclass(frozen=True, slots=True)
+class StandingGrantKey:
+    repository: RepositoryIdentity
+    goal_id: str
+    coordinator_thread: str
+
+    @property
+    def digest(self) -> str:
+        return canonical_autonomy_hash({
+            "schema": "nexus.standing_grant_key.v1",
+            "repository": self.repository.model_dump(mode="json"),
+            "goal_id": self.goal_id,
+            "coordinator_thread": self.coordinator_thread,
+        })
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedStandingGrantScope:
+    key: StandingGrantKey
+    receipt_hash: str
+    owner_id: str
+    coordinator_id: str
+    process_id: int
+    _registration: object
+
+
+_REGISTERED_SCOPES: dict[int, LoadedStandingGrantScope] = {}
+
+
+def standing_grant_key(value: StandingGrantReceipt | StandingGrantContext) -> StandingGrantKey:
+    """Return the immutable, repository/Goal/session-bound keyed scope."""
+    if isinstance(value, StandingGrantReceipt):
+        context = value.context
+    elif isinstance(value, StandingGrantContext):
+        context = value
+    else:
+        raise TypeError("value must be a validated standing-grant receipt or context")
+    return StandingGrantKey(
+        repository=context.repository,
+        goal_id=context.goal_id,
+        coordinator_thread=context.thread_id,
+    )
+
+
+def _keyed_directory(key: StandingGrantKey) -> Path:
+    return DEFAULT_RECEIPT_PATH.parent / "standing-grants" / key.digest
+
+
+def _keyed_receipt_path(key: StandingGrantKey) -> Path:
+    return _keyed_directory(key) / "receipt.json"
+
+
+def _fence_path(key: StandingGrantKey, name: str) -> Path:
+    return _keyed_directory(key) / name
+
+
+def _atomic_fence(path: Path, payload: Mapping[str, Any]) -> None:
+    _assert_dir_chain_safe(path.parent, create=True)
+    encoded = _canonical_json(dict(payload)).encode("utf-8") + b"\n"
+    if len(encoded) > _MAX_FENCE_BYTES:
+        raise StandingGrantReceiptError("MIGRATION_FENCE_TOO_LARGE")
+    with _coordination_lock(path.parent):
+        fd, temporary = tempfile.mkstemp(prefix=".migration-", dir=str(path.parent))
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+            os.chmod(path, 0o600)
+            directory_fd = os.open(str(path.parent), os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except BaseException:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+            raise
+
+
+def _read_fence(path: Path) -> dict[str, Any] | None:
+    try:
+        fd = _open_receipt_fd(path)
+    except StandingGrantReceiptError as exc:
+        if str(exc) == "RECEIPT_MISSING":
+            return None
+        raise
+    try:
+        st = os.fstat(fd)
+        if st.st_size > _MAX_FENCE_BYTES or stat.S_IMODE(st.st_mode) != 0o600:
+            raise StandingGrantReceiptError("MIGRATION_FENCE_UNSAFE")
+        raw = _read_all_fd(fd, _MAX_FENCE_BYTES + 1)
+    finally:
+        os.close(fd)
+    try:
+        text = raw.decode("utf-8")
+        if text.endswith("\n"):
+            text = text[:-1]
+        value = json.loads(text, object_pairs_hook=_reject_duplicates)
+        if "\n" in text or _canonical_json(value) != text:
+            raise ValueError("NONCANONICAL_FENCE")
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise StandingGrantReceiptError("MIGRATION_FENCE_INVALID") from exc
+    if not isinstance(value, dict):
+        raise StandingGrantReceiptError("MIGRATION_FENCE_INVALID")
+    return value
+
+
+def _migration_fenced(receipt: StandingGrantReceipt) -> bool:
+    key = standing_grant_key(receipt)
+    intent = _read_fence(_fence_path(key, ".migration-intent.json"))
+    complete = _read_fence(_fence_path(key, ".migration-complete.json"))
+    if complete is not None and intent is None:
+        raise StandingGrantReceiptError("MIGRATION_FENCE_INVALID")
+    if intent is not None:
+        _validate_migration_fences(key, intent, complete)
+    return intent is not None
+
+
+def _assert_unmigrated(receipt: StandingGrantReceipt) -> None:
+    if _migration_fenced(receipt):
+        raise StandingGrantReceiptError("MIGRATION_FENCED")
+
+
+def _validate_migration_fences(
+    key: StandingGrantKey,
+    intent: dict[str, Any],
+    complete: dict[str, Any] | None,
+) -> None:
+    if (
+        intent.get("schema") != "nexus.standing_grant_migration_intent.v1"
+        or intent.get("key") != key.digest
+        or not isinstance(intent.get("legacy_hash"), str)
+        or not _SHA64_HEX.fullmatch(intent.get("legacy_hash", ""))
+        or not isinstance(intent.get("target_hash"), str)
+        or not _SHA64_HEX.fullmatch(intent.get("target_hash", ""))
+    ):
+        raise StandingGrantReceiptError("MIGRATION_FENCE_INVALID")
+    if complete is not None and (
+        complete.get("schema") != "nexus.standing_grant_migration_complete.v1"
+        or complete.get("key") != key.digest
+        or complete.get("target_hash") != intent.get("target_hash")
+    ):
+        raise StandingGrantReceiptError("MIGRATION_FENCE_INVALID")
+
+
+def _ensure_key_matches(receipt: StandingGrantReceipt, key: StandingGrantKey) -> None:
+    if standing_grant_key(receipt) != key:
+        raise StandingGrantReceiptError("KEY_SCOPE_MISMATCH")
+
+
+def write_keyed_standing_grant_receipt(
+    receipt: StandingGrantReceipt,
+    *,
+    expected_receipt_hash: str | None = None,
+) -> Path:
+    if not isinstance(receipt, StandingGrantReceipt):
+        raise TypeError("receipt must be a validated StandingGrantReceipt")
+    key = standing_grant_key(receipt)
+    intent = _read_fence(_fence_path(key, ".migration-intent.json"))
+    complete = _read_fence(_fence_path(key, ".migration-complete.json"))
+    if complete is not None and intent is None:
+        raise StandingGrantReceiptError("MIGRATION_FENCE_INVALID")
+    if intent is not None:
+        _validate_migration_fences(key, intent, complete)
+        if complete is None:
+            raise StandingGrantReceiptError("MIGRATION_FENCED")
+        if not _keyed_receipt_path(key).exists():
+            raise StandingGrantReceiptError("MIGRATION_TARGET_MISSING_AFTER_COMPLETION")
+    destination = _keyed_receipt_path(key)
+    _write_bytes(
+        _canonical_json(receipt.model_dump(mode="json")),
+        receipt.supersedes_grant_hash,
+        destination,
+        expected_receipt_hash,
+    )
+    return destination
+
+
+def load_keyed_standing_grant_receipt(
+    key: StandingGrantKey, *, now: datetime | None = None
+) -> StandingGrantReceipt | None:
+    if not isinstance(key, StandingGrantKey):
+        raise TypeError("key must be a StandingGrantKey")
+    directory = _keyed_directory(key)
+    if not directory.exists():
+        return None
+    _assert_dir_chain_safe(directory, create=False)
+    intent = _read_fence(_fence_path(key, ".migration-intent.json"))
+    complete = _read_fence(_fence_path(key, ".migration-complete.json"))
+    if complete is not None and intent is None:
+        raise StandingGrantReceiptError("MIGRATION_FENCE_INVALID")
+    if intent is not None:
+        _validate_migration_fences(key, intent, complete)
+        if complete is None:
+            raise StandingGrantReceiptError("MIGRATION_INCOMPLETE")
+    try:
+        receipt = _load_receipt_at(_keyed_receipt_path(key), now=now)
+    except StandingGrantReceiptError as exc:
+        if str(exc) == "RECEIPT_MISSING":
+            return None
+        raise
+    _ensure_key_matches(receipt, key)
+    return receipt
+
+
+def inspect_keyed_standing_grant_receipt(
+    key: StandingGrantKey, *, now: datetime | None = None
+) -> dict[str, Any]:
+    if not isinstance(key, StandingGrantKey):
+        raise TypeError("key must be a StandingGrantKey")
+    try:
+        receipt = load_keyed_standing_grant_receipt(key, now=now)
+    except StandingGrantReceiptError as exc:
+        return {
+            "schema": "nexus.keyed_standing_grant_inspection.v1",
+            "status": "INVALID",
+            "reason": str(exc),
+            "key": key.digest,
+        }
+    if receipt is None:
+        return {
+            "schema": "nexus.keyed_standing_grant_inspection.v1",
+            "status": "MISSING",
+            "key": key.digest,
+        }
+    context = receipt.context
+    effective_now = now or datetime.now(timezone.utc)
+    status = "VALID"
+    if context.revoked_at is not None:
+        status = "REVOKED"
+    elif effective_now < context.issued_at:
+        status = "NOT_YET_VALID"
+    elif effective_now >= context.expires_at:
+        status = "EXPIRED"
+    return {
+        "schema": "nexus.keyed_standing_grant_inspection.v1",
+        "status": status,
+        "key": key.digest,
+        "receipt_hash": receipt.receipt_hash,
+        "owner_id": context.owner_id,
+        "coordinator_id": context.coordinator_id,
+    }
+
+
+def load_standing_grant_scope(
+    key: StandingGrantKey,
+    *,
+    expected_receipt_hash: str,
+    expected_owner_id: str,
+    expected_coordinator_id: str,
+) -> LoadedStandingGrantScope:
+    receipt = load_keyed_standing_grant_receipt(key)
+    if receipt is None:
+        raise StandingGrantReceiptError("RECEIPT_MISSING")
+    context = receipt.context
+    if receipt.receipt_hash != expected_receipt_hash:
+        raise StandingGrantReceiptError("SCOPE_HASH_MISMATCH")
+    if context.owner_id != expected_owner_id or context.coordinator_id != expected_coordinator_id:
+        raise StandingGrantReceiptError("SCOPE_IDENTITY_MISMATCH")
+    token = object()
+    scope = LoadedStandingGrantScope(
+        key, receipt.receipt_hash, context.owner_id, context.coordinator_id, os.getpid(), token
+    )
+    _REGISTERED_SCOPES[id(token)] = scope
+    return scope
+
+
+def authorize_keyed_standing_grant_effect(
+    scope: LoadedStandingGrantScope,
+    *,
+    repository: RepositoryIdentity,
+    action: AutonomyActionClass,
+    effect: Mapping[str, Any],
+    requested_at: datetime | None = None,
+) -> dict[str, Any]:
+    if (
+        not isinstance(scope, LoadedStandingGrantScope)
+        or scope.process_id != os.getpid()
+        or _REGISTERED_SCOPES.get(id(scope._registration)) is not scope
+    ):
+        raise StandingGrantReceiptError("SCOPE_NOT_REGISTERED")
+    receipt = load_keyed_standing_grant_receipt(scope.key, now=requested_at)
+    if receipt is None or receipt.receipt_hash != scope.receipt_hash:
+        raise StandingGrantReceiptError("SCOPE_STALE")
+    if (
+        receipt.context.owner_id != scope.owner_id
+        or receipt.context.coordinator_id != scope.coordinator_id
+    ):
+        raise StandingGrantReceiptError("SCOPE_IDENTITY_MISMATCH")
+    return _authorize_effect_from_receipt(
+        receipt,
+        repository=repository,
+        action=action,
+        effect=effect,
+        requested_at=requested_at or datetime.now(timezone.utc),
+    )
+
+
+def migrate_legacy_standing_grant_receipt(*, expected_receipt_hash: str) -> Path:
+    """Copy the v1 receipt into its keyed slot behind durable crash fences."""
+    _assert_dir_chain_safe(DEFAULT_RECEIPT_PATH.parent, create=False)
+    with _coordination_lock(DEFAULT_RECEIPT_PATH.parent):
+        receipt = _load_receipt_structural_at(DEFAULT_RECEIPT_PATH)
+        if receipt.receipt_hash != expected_receipt_hash:
+            raise StandingGrantReceiptError("MIGRATION_HASH_MISMATCH")
+        key = standing_grant_key(receipt)
+        target = _keyed_receipt_path(key)
+        target_hash = receipt.receipt_hash
+        intent = _read_fence(_fence_path(key, ".migration-intent.json"))
+        complete = _read_fence(_fence_path(key, ".migration-complete.json"))
+        if complete is not None:
+            if intent is None:
+                raise StandingGrantReceiptError("MIGRATION_FENCE_INVALID")
+            _validate_migration_fences(key, intent, complete)
+            if not target.exists():
+                raise StandingGrantReceiptError("MIGRATION_TARGET_MISSING_AFTER_COMPLETION")
+            if _read_current_hash_nofollow(target) != target_hash:
+                raise StandingGrantReceiptError("MIGRATION_TARGET_MISMATCH")
+            return target
+        if intent is None:
+            _atomic_fence(
+                _fence_path(key, ".migration-intent.json"),
+                {
+                    "schema": "nexus.standing_grant_migration_intent.v1",
+                    "legacy_hash": expected_receipt_hash,
+                    "target_hash": target_hash,
+                    "key": key.digest,
+                },
+            )
+            _write_bytes(_canonical_json(receipt.model_dump(mode="json")), None, target, None)
+        else:
+            _validate_migration_fences(key, intent, None)
+            if (
+                intent.get("legacy_hash") != expected_receipt_hash
+                or intent.get("target_hash") != target_hash
+            ):
+                raise StandingGrantReceiptError("MIGRATION_FENCE_MISMATCH")
+            if not target.exists():
+                _write_bytes(_canonical_json(receipt.model_dump(mode="json")), None, target, None)
+        if _read_current_hash_nofollow(target) != target_hash:
+            raise StandingGrantReceiptError("MIGRATION_TARGET_MISMATCH")
+        _atomic_fence(
+            _fence_path(key, ".migration-complete.json"),
+            {
+                "schema": "nexus.standing_grant_migration_complete.v1",
+                "target_hash": target_hash,
+                "key": key.digest,
+            },
+        )
+        return target

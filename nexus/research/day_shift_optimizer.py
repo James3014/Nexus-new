@@ -27,6 +27,8 @@ class DayShiftOptimizer:
         test_timeout_sec: int = 60,
         use_llm_scoring: bool = False,
         min_round_delay_sec: float = 1.5,
+        admission_context=None,
+        online_invoker=None,
     ):
         self.project_root = project_root.resolve()
         self.swarm_dir = swarm_dir.resolve()
@@ -39,6 +41,8 @@ class DayShiftOptimizer:
         self.test_timeout_sec = test_timeout_sec
         self.use_llm_scoring = use_llm_scoring
         self.min_round_delay_sec = min_round_delay_sec
+        self.admission_context = admission_context
+        self.online_invoker = online_invoker
         
         from nexus.services.gateway import BattlesuitGateway
         self.gateway = BattlesuitGateway(project_root=self.project_root)
@@ -50,6 +54,10 @@ class DayShiftOptimizer:
         self.unified_runtime_receipts: list[dict[str, Any]] = []
         
     def _get_candidate_models(self) -> list[str]:
+        if self.admission_context is not None:
+            binding = self.admission_context.admission.get("binding", {})
+            admitted_model = str(binding.get("model") or "").strip()
+            return [admitted_model] if admitted_model and admitted_model not in self.exhausted_models else []
         return [m for m in (self.model_name, self.fallback_model_name) if m not in self.exhausted_models]
 
     def _workspace_revision(self) -> str:
@@ -75,19 +83,49 @@ class DayShiftOptimizer:
         output_schema: Mapping[str, Any],
         task_kind: str,
     ) -> tuple[dict[str, Any], str, dict[str, Any]]:
+        from nexus.engine.canonical_task_seam import _is_issued_day_shift_context
         from nexus.services.unified_runtime import UnifiedRuntimeRequest
 
-        ask_unified = getattr(self.gateway, "ask_unified", None)
+        # Legacy direct helper calls retain their fixture transport semantics;
+        # admitted Stage2 uses the loaded Gateway runtime entry.
+        ask_unified = getattr(self.gateway, "ask_unified", None) if self.admission_context is not None else None
         revision = self._workspace_revision()
         if not revision:
             revision = f"fixture-{hashlib.sha256(str(self.swarm_dir).encode()).hexdigest()[:12]}"
 
-        task_id = (
-            f"dayshift-{hashlib.sha256(task_statement.encode('utf-8')).hexdigest()[:12]}"
-            f"-r{round_id}-a{attempt}-{task_kind}"
-        )
+        if self.admission_context is not None:
+            validation_error = self._validate_admission_operation(_is_issued_day_shift_context)
+            if validation_error:
+                return (
+                    {"status": "FAIL", "summary": validation_error},
+                    "",
+                    {"task_id": self.admission_context.task_id, "online": {"status": "FAILED"}},
+                )
+            task_id = self.admission_context.task_id
+            revision = self.admission_context.workspace_revision
+            binding = self.admission_context.admission.get("binding", {})
+            model = str(binding.get("model") or model)
+        else:
+            task_id = (
+                f"dayshift-{hashlib.sha256(task_statement.encode('utf-8')).hexdigest()[:12]}"
+                f"-r{round_id}-a{attempt}-{task_kind}"
+            )
 
         from nexus.services.unified_runtime import build_online_route, extract_online_stage_payload
+
+        route = build_online_route(
+            recommended_flow="direct",
+            gateway_provider="",
+        )
+        if self.admission_context is not None:
+            route = dict(route)
+            route.update(
+                {
+                    "workforce_admission_enabled": True,
+                    "workforce_bindings": self.admission_context.admission["workforce_bindings"],
+                    "workspace_root": str(self.admission_context.repository_root),
+                }
+            )
 
         def response_contract(context: Mapping[str, Any]) -> dict[str, Any]:
             online = context.get("online", {})
@@ -99,29 +137,43 @@ class DayShiftOptimizer:
                 "task_id": task_id,
                 "status": "pass" if delivered else "fail",
                 "evidence": "online_payload_present" if delivered else "online_payload_missing",
-                "evidence_refs": [f"verifier:{task_id}:response_contract"],
+                "evidence_refs": [f"verifier:{task_id}:r{round_id}:a{attempt}:response_contract"],
             }
 
-        gateway_provider = str(getattr(self.gateway, "oauth_provider", "") or "").strip().lower()
         request = UnifiedRuntimeRequest(
             task_id=task_id,
             workspace_revision=revision,
             task_statement=task_statement,
             task_type="repair" if task_kind == "generation" else "evaluation",
-            route=build_online_route(
-                recommended_flow="direct",
-                gateway_provider=gateway_provider,
-            ),
+            route=route,
             online_prompt=prompt,
             online_payload=payload,
             online_phase="R",
             online_model_name=model,
             online_output_schema=dict(output_schema),
-            evidence_refs=(f"dayshift:{task_id}:request",),
+            phase_trace={"dayshift_round": round_id, "dayshift_attempt": attempt},
+            evidence_refs=(f"dayshift:{task_id}:r{round_id}:a{attempt}:request",),
         )
-        receipt_path = self.swarm_dir / ".nexus" / "reports" / "unified_runtime" / f"{task_id}.json"
+        receipt_path = self.swarm_dir / ".nexus" / "reports" / "unified_runtime" / f"{task_id}-r{round_id}-a{attempt}.json"
+        if self.admission_context is None:
+            return (
+                {"status": "FAIL", "summary": "dayshift_admission_context_missing"},
+                "",
+                {"task_id": task_id, "receipt_path": str(receipt_path), "online": {"status": "FAILED"}},
+            )
+        if self.admission_context is not None and not callable(ask_unified):
+            return (
+                {"status": "FAIL", "summary": "dayshift_gateway_unavailable"},
+                "",
+                {"task_id": task_id, "receipt_path": str(receipt_path), "online": {"status": "FAILED"}},
+            )
         if callable(ask_unified):
-            receipt = ask_unified(request, verifier=response_contract, receipt_path=receipt_path)
+            receipt = ask_unified(
+                request,
+                verifier=response_contract,
+                receipt_path=receipt_path,
+                online_invoker=self.online_invoker,
+            )
         else:
             from nexus.services.mainchain_entry import run_mainchain
             from nexus.services.unified_runtime import build_structured_online_invoker
@@ -146,6 +198,34 @@ class DayShiftOptimizer:
             return dict(provider_response), raw_response, receipt
         return {"status": "APPROVED" if online_stage.get("status") == "SUCCEEDED" else "FAIL", "patch": str(provider_response or "")}, raw_response, receipt
 
+    def _validate_admission_operation(self, context_issued) -> str:
+        """Revalidate mutable external state immediately before transport."""
+        context = self.admission_context
+        if context is None or not context_issued(context):
+            return "dayshift_context_not_issued"
+        if self.project_root != context.repository_root:
+            return "dayshift_repository_mismatch"
+        try:
+            card_hash = hashlib.sha256(
+                Path(context.task_card_identity.canonical_task_card_path).read_bytes()
+            ).hexdigest()
+        except OSError:
+            return "dayshift_card_unreadable"
+        if card_hash != context.task_card_identity.task_card_hash:
+            return "dayshift_card_stale"
+        if self._workspace_revision() != context.workspace_revision:
+            return "dayshift_workspace_revision_mismatch"
+        if self.target_file not in context.allowed_files:
+            return "dayshift_target_out_of_scope"
+        if context.task_text and context.task_text != self.task_desc:
+            return "dayshift_task_mismatch"
+        target_path = (self.swarm_dir / self.target_file).resolve()
+        try:
+            target_path.relative_to(self.swarm_dir)
+        except ValueError:
+            return "dayshift_target_out_of_scope"
+        return ""
+
     def _is_quota_error(self, text: str) -> bool:
         t = text.lower()
         return any(p in t for p in ["quota", "429", "rate limit", "resource exhausted", "capacity"])
@@ -153,8 +233,13 @@ class DayShiftOptimizer:
     def _run_tests(self) -> Tuple[int, str]:
         """Runs tests in the swarm directory."""
         try:
+            command = (
+                list(self.admission_context.verifier_command)
+                if self.admission_context is not None
+                else ["uv", "run", "pytest", "-q", "--maxfail=1"]
+            )
             res = subprocess.run(
-                ["uv", "run", "pytest", "-q", "--maxfail=1"],
+                command,
                 capture_output=True,
                 text=True,
                 cwd=self.swarm_dir,
@@ -234,9 +319,71 @@ class DayShiftOptimizer:
         self.unified_runtime_receipts = finalized_receipts
 
     def optimize(self) -> Dict[str, Any]:
+        from nexus.engine.canonical_task_seam import (
+            DayShiftAdmissionContext,
+            _is_issued_day_shift_context,
+        )
+
+        if not isinstance(self.admission_context, DayShiftAdmissionContext):
+            return {
+                "status": "FAILED",
+                "reason": "dayshift_admission_context_missing",
+                "stage2_admitted": False,
+            }
+        if not _is_issued_day_shift_context(self.admission_context):
+            return {
+                "status": "FAILED",
+                "reason": "dayshift_context_not_issued",
+                "stage2_admitted": False,
+            }
+        if self.project_root != self.admission_context.repository_root:
+            return {"status": "FAILED", "reason": "dayshift_repository_mismatch", "stage2_admitted": False}
+        try:
+            workspace_top = Path(
+                subprocess.check_output(
+                    ["git", "rev-parse", "--show-toplevel"],
+                    cwd=str(self.swarm_dir),
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                ).strip()
+            ).resolve()
+            common_dir = Path(
+                subprocess.check_output(
+                    ["git", "rev-parse", "--git-common-dir"],
+                    cwd=str(self.swarm_dir),
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                ).strip()
+            )
+            if not common_dir.is_absolute():
+                common_dir = (workspace_top / common_dir).resolve()
+            expected_git_dir = (self.admission_context.repository_root / ".git").resolve()
+            if common_dir != expected_git_dir:
+                return {"status": "FAILED", "reason": "dayshift_repository_mismatch", "stage2_admitted": False}
+        except (OSError, subprocess.CalledProcessError):
+            if self.admission_context.repository_root != self.project_root:
+                return {"status": "FAILED", "reason": "dayshift_repository_unreadable", "stage2_admitted": False}
+        try:
+            card_hash = hashlib.sha256(
+                Path(self.admission_context.task_card_identity.canonical_task_card_path).read_bytes()
+            ).hexdigest()
+        except OSError:
+            return {"status": "FAILED", "reason": "dayshift_card_unreadable", "stage2_admitted": False}
+        if card_hash != self.admission_context.task_card_identity.task_card_hash:
+            return {"status": "FAILED", "reason": "dayshift_card_stale", "stage2_admitted": False}
+        if self._workspace_revision() != self.admission_context.workspace_revision:
+            return {"status": "FAILED", "reason": "dayshift_workspace_revision_mismatch", "stage2_admitted": False}
+        if self.target_file not in self.admission_context.allowed_files:
+            return {"status": "FAILED", "reason": "dayshift_target_out_of_scope", "stage2_admitted": False}
+        if self.admission_context.task_text and self.admission_context.task_text != self.task_desc:
+            return {"status": "FAILED", "reason": "dayshift_task_mismatch", "stage2_admitted": False}
         target_path = self.swarm_dir / self.target_file
         if not target_path.exists():
             return {"status": "FAILED", "reason": "target_file_not_found"}
+        try:
+            target_path.resolve().relative_to(self.swarm_dir)
+        except ValueError:
+            return {"status": "FAILED", "reason": "dayshift_target_out_of_scope", "stage2_admitted": False}
 
         current_code = target_path.read_text(encoding="utf-8")
         

@@ -1,5 +1,15 @@
+import hashlib
+import json
+import socket
+import subprocess
 from pathlib import Path
 
+import pytest
+
+from nexus.engine.canonical_task_seam import (
+    VerifiedTaskCardIdentity,
+    build_day_shift_admission_context,
+)
 from nexus.research.local_sprint_mutator import generate_local_candidate
 from nexus.research.sprint_service import (
     CandidateEval,
@@ -23,6 +33,101 @@ def _write_ready_learn_slo(tmp_path: Path) -> None:
         '{"phase_slo_pass": true, "global": {"required_done_ratio": 1.0}}',
         encoding="utf-8",
     )
+
+
+def _admission(
+    tmp_path: Path,
+    task: str = "fix normalize",
+    execution_channels=("online",),
+    verifier_command=("pytest", "-q"),
+    workspace_revision="fixture-revision",
+):
+    card_file = tmp_path / "card.md"
+    card_file.write_text("task_id: `sprint-test`\nAUTO_CHAIN: false\n", encoding="utf-8")
+    card = VerifiedTaskCardIdentity(
+        task_id="sprint-test",
+        task_card_path="tasks/test/sprint-test.md",
+        canonical_task_card_path=str(card_file),
+        task_card_hash=hashlib.sha256(card_file.read_bytes()).hexdigest(),
+    )
+    return build_day_shift_admission_context(
+        task_text=task,
+        task_card_identity=card,
+        repository_root=tmp_path,
+        workspace_revision=workspace_revision,
+        allowed_files=("demo.py",),
+        verifier_command=verifier_command,
+        execution_channels=execution_channels,
+    )
+
+
+def _online_fixture(monkeypatch, tmp_path, response, *, task="fix", captured=None):
+    """Real gateway/admission with a declared, nonphysical provider transport."""
+    monkeypatch.setenv("NEXUS_OAUTH_PROVIDER", "agy")
+    monkeypatch.setenv("NEXUS_FINDINGS_LANCEDB_SYNC", "0")
+
+    def deny_network(*_args, **_kwargs):
+        pytest.fail("positive Sprint fixture attempted network access")
+
+    monkeypatch.setattr(socket, "create_connection", deny_network)
+    monkeypatch.setattr(socket, "getaddrinfo", deny_network)
+    monkeypatch.setattr(socket.socket, "connect", deny_network)
+    monkeypatch.setattr(socket.socket, "connect_ex", deny_network)
+    monkeypatch.setattr(socket.socket, "sendto", deny_network)
+    monkeypatch.setenv("NEXUS_ONLINE_LOCAL_ASSIST", "0")
+    monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
+    # Explicit workspace policy permits the simulated online path only in this repo.
+    policy = tmp_path / ".nexus" / "online_execution_policy.json"
+    policy.parent.mkdir(parents=True, exist_ok=True)
+    policy.write_text(json.dumps({"default_online_policy": "auto"}), encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.invalid"], cwd=tmp_path, check=True
+    )
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "demo.py"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=tmp_path, check=True)
+    revision = subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True
+    ).strip()
+    calls = captured if captured is not None else {}
+
+    def simulated_invoker(context):
+        calls.update(context)
+        return {
+            "provider": "agy",
+            "task_id": context["task_id"],
+            "invoked": True,
+            "output_delivered": True,
+            "gate_passed": True,
+            "provider_call_count": 1,
+            "response": response,
+            "raw_response": json.dumps(response),
+            "usage": {},
+            "error": "",
+            "evidence_refs": ["simulated:transport"],
+        }
+
+    simulated_invoker.provider = "agy"
+    simulated_invoker.online_invoker_provider = "agy"
+    simulated_invoker.physical_provider_transport = False
+    return _admission(tmp_path, task=task, workspace_revision=revision), simulated_invoker, calls
+
+
+def _assert_online_fixture_receipt(tmp_path, admission, captured):
+    receipt = json.loads(
+        (tmp_path / ".nexus" / "reports" / "unified_runtime" / "sprint-test.json").read_text()
+    )
+    assert captured["task_id"] == admission.task_id
+    assert receipt["workspace_revision"] == admission.workspace_revision
+    assert receipt["workforce_admission"]["overall_decision"] == "ALLOW"
+    assert receipt["gateway_invocation_authority"]["status"] == "ALLOW"
+    assert (
+        receipt["gateway_invocation_authority"]["resolved_model"]
+        == admission.admission["binding"]["model"]
+    )
+    assert receipt["online"]["invoked"] is True
+    assert receipt["claim_boundary"]["public_claim_allowed"] is False
 
 
 def test_select_candidate_with_routing_layers_uses_autoreason_and_ddtree(monkeypatch):
@@ -946,26 +1051,16 @@ def test_llm_generator_applies_edit_protocol(monkeypatch, tmp_path: Path):
     target.write_text("def normalize(text):\n    return text\n", encoding="utf-8")
     captured = {}
 
-    class FakeGateway:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        def ask_structured(self, **kwargs):
-            captured["payload"] = kwargs["payload"]
-            captured["schema"] = kwargs["output_schema"]
-            return (
-                {
-                    "status": "APPROVED",
-                    "operation": "replace",
-                    "target_snippet": "return text",
-                    "replacement": "return text.strip().lower()",
-                    "tokens_used": 55,
-                    "token_capture_status": "measured",
-                    "gateway_stats_present": True,
-                    "gateway_token_source": "stats",
-                },
-                "{}",
-            )
+    response = {
+        "status": "APPROVED",
+        "operation": "replace",
+        "target_snippet": "return text",
+        "replacement": "return text.strip().lower()",
+        "tokens_used": 55,
+        "token_capture_status": "measured",
+        "gateway_stats_present": True,
+        "gateway_token_source": "stats",
+    }
 
     class FakeExecutor:
         def __init__(self, *_args, **_kwargs):
@@ -973,51 +1068,68 @@ def test_llm_generator_applies_edit_protocol(monkeypatch, tmp_path: Path):
 
         def evaluate_candidate(self, **kwargs):
             assert kwargs["code"] == "def normalize(text):\n    return text.strip().lower()\n"
-            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code=kwargs["code"], source=kwargs["source"])
+            return CandidateEval(
+                seed=kwargs["seed"],
+                score=1.0,
+                candidate_code=kwargs["code"],
+                source=kwargs["source"],
+            )
 
-    monkeypatch.setattr("nexus.services.gateway.BattlesuitGateway", FakeGateway)
     monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
-
-    cfg = SprintConfig(task="fix normalize", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    admission, invoker, captured = _online_fixture(
+        monkeypatch, tmp_path, response, task="fix normalize", captured=captured
+    )
+    cfg = SprintConfig(
+        task="fix normalize",
+        target_file="demo.py",
+        candidate_count=1,
+        llm_mode=True,
+        safe_mode=True,
+        admission_context=admission,
+        online_invoker=invoker,
+    )
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+    _assert_online_fixture_receipt(tmp_path, admission, captured)
 
     assert res.status == "SUCCESS"
     assert res.model_patch_generated is True
     assert res.gateway_token_source == "stats"
-    assert "one small edit" in captured["payload"]
-    assert "target_snippet" in captured["schema"]
+    assert "one small edit" in captured["online_payload"]
+    assert "target_snippet" in captured["online_output_schema"]
 
 
 def test_llm_generator_uses_unified_runtime_on_revisioned_workspace(monkeypatch, tmp_path: Path):
-    generator = LLMCandidateGenerator(tmp_path, safe_mode=True)
-    monkeypatch.setattr(generator, "_workspace_revision", lambda: "revision-001")
-    monkeypatch.setattr(
-        generator.gateway,
-        "ask_structured",
-        lambda *_args, **_kwargs: (
-            {
-                "status": "APPROVED",
-                "operation": "replace",
-                "target_snippet": "return text",
-                "replacement": "return text.strip()",
-            },
-            "raw-candidate",
-        ),
-    )
-
-    code, metadata = generator.generate(
-        source_code="def normalize(text):\n    return text\n",
+    source = "def normalize(text):\n    return text\n"
+    (tmp_path / "demo.py").write_text(source, encoding="utf-8")
+    admission, invoker, calls = _online_fixture(
+        monkeypatch,
+        tmp_path,
+        {
+            "status": "APPROVED",
+            "operation": "replace",
+            "target_snippet": "return text",
+            "replacement": "return text.strip()",
+        },
         task="fix normalize",
-        mutation_hint="strip whitespace",
-        seed=7,
     )
-
+    generator = LLMCandidateGenerator(
+        tmp_path,
+        safe_mode=True,
+        target_file="demo.py",
+        admission_context=admission,
+        online_invoker=invoker,
+    )
+    code, metadata = generator.generate(
+        source_code=source, task="fix normalize", mutation_hint="strip whitespace", seed=7
+    )
     receipt = metadata["unified_runtime_receipt"]
     assert code == "def normalize(text):\n    return text.strip()\n"
     assert receipt["schema"] == "nexus.unified_runtime.receipt.v1"
     assert receipt["task_id"].startswith("sprint-")
-    assert receipt["workspace_revision"] == "revision-001"
+    assert receipt["workspace_revision"] == admission.workspace_revision
     assert receipt["receipt_complete"] is False
+    assert receipt["online"]["status"] == "SUCCEEDED"
+    assert calls["task_id"] == admission.task_id
     assert receipt["claim_boundary"]["public_claim_allowed"] is False
 
 
@@ -1026,10 +1138,33 @@ def test_llm_generator_can_route_local_assist_into_online_context(monkeypatch, t
     from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
 
     monkeypatch.setenv("NEXUS_ONLINE_LOCAL_ASSIST", "1")
-    generator = LLMCandidateGenerator(tmp_path, safe_mode=True, target_file="demo.py")
+    durable_root = Path.home() / ".cache" / "nexus-test-artifacts" / "dayshift"
+    durable_root.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("NEXUS_ARMOR_ARTIFACT_ROOT", str(durable_root))
+    (tmp_path / "demo.py").write_text("value = 1\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "demo.py"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=tmp_path, check=True)
+    generator = LLMCandidateGenerator(
+        tmp_path,
+        safe_mode=True,
+        target_file="demo.py",
+        admission_context=_admission(
+            tmp_path,
+            execution_channels=("local", "online"),
+            verifier_command=("python", "-m", "py_compile", "demo.py"),
+            workspace_revision="revision-hybrid-001",
+        ),
+    )
     generator._workspace_revision = lambda: "revision-hybrid-001"
     generator.local_service = LocalAssistService(
-        provider=InjectedLocalModelProvider(lambda _request: "local diagnosis: prefer strip")
+        provider=InjectedLocalModelProvider(
+            lambda _request: "--- a/demo.py\n+++ b/demo.py\n@@ -1 +1 @@\n-value = 1\n+value = 2\n",
+            provider_identity="ollama",
+            model_identity="qwen2.5-coder:7b-instruct",
+        )
     )
     online_calls: list[tuple[tuple, dict]] = []
 
@@ -1046,6 +1181,24 @@ def test_llm_generator_can_route_local_assist_into_online_context(monkeypatch, t
         )
 
     monkeypatch.setattr(generator.gateway, "ask_structured", _online_call)
+    def _simulated_invoker(context):
+        online_calls.append(((), {"context": context}))
+        return {
+            "provider": "agy",
+            "task_id": context["task_id"],
+            "invoked": True,
+            "output_delivered": True,
+            "gate_passed": True,
+            "provider_call_count": 1,
+            "response": {"status": "APPROVED", "operation": "replace", "target_snippet": "return text", "replacement": "return text.strip()"},
+            "raw_response": "simulated",
+            "usage": {},
+            "error": "",
+            "evidence_refs": ["simulated:transport"],
+        }
+    _simulated_invoker.provider = "agy"
+    _simulated_invoker.online_invoker_provider = "agy"
+    generator.online_invoker = _simulated_invoker
     code, metadata = generator.generate(
         source_code="def normalize(text):\n    return text\n",
         task="fix normalize",
@@ -1057,7 +1210,11 @@ def test_llm_generator_can_route_local_assist_into_online_context(monkeypatch, t
     assert code.endswith("return text.strip()\n")
     assert receipt["local"]["status"] == "SUCCEEDED"
     assert receipt["online"]["status"] == "SUCCEEDED"
-    assert "local diagnosis: prefer strip" in online_calls[0][0][0]
+    assert online_calls
+    transport_context = online_calls[0][1]["context"]
+    assert transport_context["task_id"] == "sprint-test"
+    assert transport_context.get("local", {}).get("status") == "SUCCEEDED"
+    assert transport_context["local"]["response"]["output_delivered"] is True
     assert receipt["claim_boundary"]["local_online_continuation"] is True
     assert receipt["claim_boundary"]["public_claim_allowed"] is False
 
@@ -1067,40 +1224,47 @@ def test_llm_mode_estimates_tokens_when_gateway_stats_missing(monkeypatch, tmp_p
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")
 
-    class FakeGateway:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        def ask_structured(self, **_kwargs):
-            return (
-                {
-                    "status": "APPROVED",
-                    "patch": "print('ok')\n",
-                    "tokens_used": 0,
-                    "token_capture_status": "unknown",
-                    "gateway_stats_present": False,
-                    "gateway_usage_metadata_present": False,
-                    "gateway_token_source": "missing",
-                    "gateway_prompt_chars": 11,
-                    "gateway_payload_chars": 22,
-                    "gateway_total_chars": 33,
-                    "gateway_timeout_sec": 7,
-                },
-                "print('ok')\n",
-            )
+    response = {
+        "status": "APPROVED",
+        "patch": "print('ok')\n",
+        "tokens_used": 0,
+        "token_capture_status": "unknown",
+        "gateway_stats_present": False,
+        "gateway_usage_metadata_present": False,
+        "gateway_token_source": "missing",
+        "gateway_prompt_chars": 11,
+        "gateway_payload_chars": 22,
+        "gateway_total_chars": 33,
+        "gateway_timeout_sec": 7,
+    }
 
     class FakeExecutor:
         def __init__(self, *_args, **_kwargs):
             pass
 
         def evaluate_candidate(self, **kwargs):
-            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+            return CandidateEval(
+                seed=kwargs["seed"],
+                score=1.0,
+                candidate_code="print('ok')\n",
+                source=kwargs["source"],
+            )
 
-    monkeypatch.setattr("nexus.services.gateway.BattlesuitGateway", FakeGateway)
     monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
 
-    cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
+    admission, invoker, captured = _online_fixture(monkeypatch, tmp_path, response)
+    cfg = SprintConfig(
+        task="fix",
+        target_file="demo.py",
+        candidate_count=1,
+        llm_mode=True,
+        safe_mode=True,
+        admission_context=admission,
+        online_invoker=invoker,
+    )
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+    _assert_online_fixture_receipt(tmp_path, admission, captured)
     assert res.status == "SUCCESS"
     assert res.model_calls == 1
     assert res.total_tokens > 0
@@ -1115,40 +1279,47 @@ def test_llm_failure_preserves_gateway_token_source(monkeypatch, tmp_path: Path)
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")
 
-    class FakeGateway:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        def ask_structured(self, **_kwargs):
-            return (
-                {
-                    "status": "FAIL",
-                    "summary": "no patch",
-                    "tokens_used": 333,
-                    "token_capture_status": "measured",
-                    "gateway_stats_present": True,
-                    "gateway_usage_metadata_present": False,
-                    "gateway_token_source": "stats",
-                    "gateway_prompt_chars": 44,
-                    "gateway_payload_chars": 55,
-                    "gateway_total_chars": 99,
-                    "gateway_timeout_sec": 12,
-                },
-                "{}",
-            )
+    response = {
+        "status": "FAIL",
+        "summary": "no patch",
+        "tokens_used": 333,
+        "token_capture_status": "measured",
+        "gateway_stats_present": True,
+        "gateway_usage_metadata_present": False,
+        "gateway_token_source": "stats",
+        "gateway_prompt_chars": 44,
+        "gateway_payload_chars": 55,
+        "gateway_total_chars": 99,
+        "gateway_timeout_sec": 12,
+    }
 
     class FakeExecutor:
         def __init__(self, *_args, **_kwargs):
             pass
 
         def evaluate_candidate(self, **kwargs):
-            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+            return CandidateEval(
+                seed=kwargs["seed"],
+                score=1.0,
+                candidate_code="print('ok')\n",
+                source=kwargs["source"],
+            )
 
-    monkeypatch.setattr("nexus.services.gateway.BattlesuitGateway", FakeGateway)
     monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
 
-    cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
+    admission, invoker, captured = _online_fixture(monkeypatch, tmp_path, response)
+    cfg = SprintConfig(
+        task="fix",
+        target_file="demo.py",
+        candidate_count=1,
+        llm_mode=True,
+        safe_mode=True,
+        admission_context=admission,
+        online_invoker=invoker,
+    )
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+    _assert_online_fixture_receipt(tmp_path, admission, captured)
     assert res.status == "SUCCESS"
     assert res.model_calls == 1
     assert res.total_tokens == 333
@@ -1164,35 +1335,67 @@ def test_llm_model_name_can_be_overridden(monkeypatch, tmp_path: Path):
     _write_ready_learn_slo(tmp_path)
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")
-    captured = {}
 
-    class FakeGateway:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        def ask_structured(self, **kwargs):
-            captured["model_name"] = kwargs["model_name"]
-            return (
-                {"status": "APPROVED", "patch": "print('ok')\n", "tokens_used": 5, "token_capture_status": "measured"},
-                "print('ok')\n",
-            )
+    response = {
+        "status": "APPROVED",
+        "patch": "print('ok')\n",
+        "tokens_used": 5,
+        "token_capture_status": "measured",
+    }
 
     class FakeExecutor:
         def __init__(self, *_args, **_kwargs):
             pass
 
         def evaluate_candidate(self, **kwargs):
-            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+            return CandidateEval(
+                seed=kwargs["seed"],
+                score=1.0,
+                candidate_code="print('ok')\n",
+                source=kwargs["source"],
+            )
 
     monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", "gemini-3.1-pro-preview")
-    monkeypatch.setattr("nexus.services.gateway.BattlesuitGateway", FakeGateway)
     monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
 
-    cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    monkeypatch.setenv("NEXUS_DISABLE_DAYSHIFT_OPTIMIZER", "1")
+    admission, invoker, captured = _online_fixture(monkeypatch, tmp_path, response)
+    # Legacy model-chain selection is still configurable, but runtime dispatch
+    # must use the source-issued admission identity.
+    generator = LLMCandidateGenerator(
+        tmp_path,
+        safe_mode=True,
+        target_file="demo.py",
+        admission_context=admission,
+        online_invoker=invoker,
+    )
+    assert generator.model_chain[0] == "gemini-3.1-pro-preview"
+    code, metadata = generator.generate(
+        source_code=target.read_text(), task="fix", mutation_hint="", seed=0
+    )
+    assert code == "print('ok')\n"
+    admitted_model = admission.admission["binding"]["model"]
+    assert captured["online_model_name"] == admitted_model
+    assert captured["online_model_name"] != "gemini-3.1-pro-preview"
+    assert (
+        metadata["unified_runtime_receipt"]["gateway_invocation_authority"]["resolved_model"]
+        == admitted_model
+    )
+    monkeypatch.setenv("NEXUS_GEMINI_MODEL_NAME", admitted_model)
+    cfg = SprintConfig(
+        task="fix",
+        target_file="demo.py",
+        candidate_count=1,
+        llm_mode=True,
+        safe_mode=True,
+        admission_context=admission,
+        online_invoker=invoker,
+    )
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+    _assert_online_fixture_receipt(tmp_path, admission, captured)
 
-    assert captured["model_name"] == "gemini-3.1-pro-preview"
-    assert res.model_name == "gemini-3.1-pro-preview"
+    assert captured["online_model_name"] == admitted_model
+    assert res.model_name == admitted_model
     assert res.model_patch_generated is True
 
 
@@ -1201,15 +1404,11 @@ def test_llm_gateway_fail_payload_falls_back_to_local(monkeypatch, tmp_path: Pat
     target = tmp_path / "demo.py"
     target.write_text("print('x')\n", encoding="utf-8")
 
-    class FakeGateway:
-        def __init__(self, *_args, **_kwargs):
-            pass
-
-        def ask_structured(self, **_kwargs):
-            return (
-                {"status": "FAIL", "summary": "Gateway Exhausted: TIMEOUT", "error_category": "timeout"},
-                "TIMEOUT",
-            )
+    response = {
+        "status": "FAIL",
+        "summary": "Gateway Exhausted: TIMEOUT",
+        "error_category": "timeout",
+    }
 
     class FakeLocalGenerator:
         source = "local"
@@ -1222,14 +1421,28 @@ def test_llm_gateway_fail_payload_falls_back_to_local(monkeypatch, tmp_path: Pat
             pass
 
         def evaluate_candidate(self, **kwargs):
-            return CandidateEval(seed=kwargs["seed"], score=1.0, candidate_code="print('ok')\n", source=kwargs["source"])
+            return CandidateEval(
+                seed=kwargs["seed"],
+                score=1.0,
+                candidate_code="print('ok')\n",
+                source=kwargs["source"],
+            )
 
-    monkeypatch.setattr("nexus.services.gateway.BattlesuitGateway", FakeGateway)
     monkeypatch.setattr("nexus.research.sprint_service.LocalCandidateGenerator", FakeLocalGenerator)
     monkeypatch.setattr("nexus.research.sprint_service.SprintExecutor", FakeExecutor)
 
-    cfg = SprintConfig(task="fix", target_file="demo.py", candidate_count=1, llm_mode=True, safe_mode=True)
+    admission, invoker, captured = _online_fixture(monkeypatch, tmp_path, response)
+    cfg = SprintConfig(
+        task="fix",
+        target_file="demo.py",
+        candidate_count=1,
+        llm_mode=True,
+        safe_mode=True,
+        admission_context=admission,
+        online_invoker=invoker,
+    )
     res = run_hyper_sprint(repo_root=tmp_path, config=cfg)
+    _assert_online_fixture_receipt(tmp_path, admission, captured)
 
     assert res.status == "SUCCESS"
     assert res.model_calls == 1
