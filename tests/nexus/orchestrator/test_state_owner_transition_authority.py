@@ -289,3 +289,97 @@ def test_remote_freshness_transport_changed_missing_unknown(monkeypatch):
     )
     with pytest.raises(mod.WriterAuthorityError, match="REMOTE_MAIN_UNKNOWN"):
         mod._remote_main_head()
+
+
+def test_indexed_publications_select_distinct_fixed_pairs_through_loader(monkeypatch):
+    from dataclasses import replace
+    from pathlib import Path
+
+    publications = {
+        root_id: mod.AuthorityPublication(
+            Path("tasks") / f"authority-{root_id}.json",
+            Path(f"/tmp/authority-{root_id}.json"),
+        )
+        for root_id in ("task", "runtime", "event")
+    }
+    monkeypatch.setattr(mod, "PUBLICATION_INVENTORY", publications)
+    payloads = {}
+    for root_id, publication in publications.items():
+        request = replace(req(), root_id=root_id)
+        effect = mod._effect_hash(request)
+        value = json.loads(receipt(effect))
+        value.update(
+            root_id=root_id,
+            authorization_intent_digest=request.authorization_intent_digest,
+            operation_digest=request.authorization_intent_digest,
+        )
+        payloads[root_id] = json.dumps(value).encode()
+
+    monkeypatch.setattr(
+        mod,
+        "_mirror_identity",
+        lambda publication=None: ("1" * 40, "b" * 40, "e" * 64),
+    )
+    monkeypatch.setattr(mod, "_git", lambda *args: "b" * 40)
+    monkeypatch.setattr(mod.subprocess, "check_call", lambda *args, **kwargs: 0)
+    current_payload = [b""]
+    monkeypatch.setattr(mod, "_regular", lambda _path: current_payload[0])
+    for root_id in publications:
+        request = replace(req(), root_id=root_id)
+        current_payload[0] = payloads[root_id]
+        value = mod.load_verified_writer_transition_authority(
+            request=request, loaded_source_identity=source()
+        )
+        assert value.publication_root_id == root_id
+
+
+def test_unindexed_root_denies_before_publication_read(monkeypatch):
+    from dataclasses import replace
+    from pathlib import Path
+
+    monkeypatch.setattr(
+        mod,
+        "PUBLICATION_INVENTORY",
+        {"task": mod.AuthorityPublication(Path("task.json"), Path("/tmp/task.json"))},
+    )
+    monkeypatch.setattr(mod, "_mirror_identity", lambda: pytest.fail("must not read"))
+    with pytest.raises(mod.WriterAuthorityError, match="PUBLICATION_NOT_INDEXED"):
+        mod.load_verified_writer_transition_authority(
+            request=replace(req(), root_id="foreign"), loaded_source_identity=source()
+        )
+
+
+def test_indexed_publication_rejects_source_and_receipt_hash_drift(monkeypatch):
+    from dataclasses import replace
+
+    effect = mod._effect_hash(req())
+    setup(monkeypatch, receipt(effect))
+    with pytest.raises(mod.WriterAuthorityError, match="SOURCE_TREE"):
+        mod.load_verified_writer_transition_authority(
+            request=req(),
+            loaded_source_identity=replace(source(), source_tree="c" * 40),
+        )
+
+    setup(monkeypatch, receipt(effect))
+    with pytest.raises(mod.WriterAuthorityError, match="BLOB_HASH"):
+        mod.load_verified_writer_transition_authority(
+            request=replace(req(), authority_receipt_hash="0" * 64),
+            loaded_source_identity=source(),
+        )
+
+
+def test_single_publication_compatibility_accepts_any_bound_root_id(monkeypatch):
+    from dataclasses import replace
+
+    request = replace(req(), root_id="legacy-root-1")
+    value = json.loads(receipt(mod._effect_hash(request)))
+    value.update(
+        root_id=request.root_id,
+        authorization_intent_digest=request.authorization_intent_digest,
+        operation_digest=request.authorization_intent_digest,
+    )
+    setup(monkeypatch, json.dumps(value).encode())
+    loaded = mod.load_verified_writer_transition_authority(
+        request=request, loaded_source_identity=source()
+    )
+    assert loaded.publication_root_id == request.root_id
