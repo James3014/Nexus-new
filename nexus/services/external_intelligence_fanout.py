@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
@@ -9,6 +10,7 @@ import subprocess
 import tempfile
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Mapping, Sequence
@@ -30,6 +32,7 @@ MODEL = "opencode-go/deepseek-v4-flash"
 PROVIDER_ID = "opencode-go"
 MODEL_ID = "deepseek-v4-flash"
 CLAIM_CEILING = "CANDIDATE_READY_FOR_VERIFICATION"
+EFFECT_RECOVERY_STATUS = "EFFECT_RECOVERED_PENDING_VERIFICATION"
 _SESSION_RE = re.compile(r"^ses_[A-Za-z0-9_-]{8,}$")
 _SHA1_RE = re.compile(r"^[0-9a-f]{40}$")
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -307,6 +310,7 @@ class OpenCodeRunResult:
     repair_phase_count: int = 0
     worker_identity_sha256: str = ""
     operation_id: str = ""
+    effect_recovery: Mapping[str, Any] | None = None
 
 
 def plan_fanout(
@@ -442,6 +446,17 @@ class FanoutStore:
 
     def _session_path(self, session_id: str) -> Path:
         return self.sessions / f"{_sha256(session_id)}.json"
+
+    @contextmanager
+    def _attempt_lock(self, task_id: str, unit_id: str):
+        lock_path = self._attempt_path(task_id, unit_id).with_suffix(".lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+") as stream:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
     def existing_initial_attempt(self, unit: ExecutionUnit) -> dict[str, Any] | None:
         path = self._attempt_path(unit.task_id, unit.unit_id)
@@ -663,8 +678,121 @@ class FanoutStore:
 
     def write_receipt(self, receipt: Mapping[str, Any], *, suffix: str = "initial") -> Path:
         path = self._receipt_path(str(receipt["task_id"]), str(receipt["unit_id"]), suffix)
+        if path.exists():
+            try:
+                existing = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                raise FanoutError("FANOUT_RECEIPT_IDENTITY_MISMATCH") from exc
+            if existing.get("receipt_id") != receipt.get("receipt_id"):
+                raise FanoutError("FANOUT_RECEIPT_IDENTITY_MISMATCH")
+            return path
         _atomic_json(path, receipt)
         return path
+
+    def begin_effect_recovery(
+        self,
+        attempt: Mapping[str, Any],
+        *,
+        evidence: Mapping[str, Any],
+        expected_head: str,
+        result: OpenCodeRunResult | None = None,
+    ) -> dict[str, Any]:
+        path = self._attempt_path(str(attempt["task_id"]), str(attempt["unit_id"]))
+        with self._attempt_lock(str(attempt["task_id"]), str(attempt["unit_id"])):
+            current = json.loads(path.read_text(encoding="utf-8"))
+            if current.get("attempt_id") != attempt.get("attempt_id"):
+                raise FanoutError("FANOUT_ATTEMPT_CAS_CONFLICT")
+            if current.get("state") == "EFFECT_RECOVERY_PREPARED":
+                return current
+            if current.get("state") != "OUTCOME_UNKNOWN":
+                raise FanoutError("FANOUT_EFFECT_RECOVERY_CAS_CONFLICT")
+            material = {
+                **dict(evidence),
+                "operation_id": evidence.get("operation_id"),
+                "effect_id": evidence.get("effect_id"),
+                "base_sha": expected_head,
+                "path": evidence.get("path"),
+                "postimage_sha256": evidence.get("postimage_sha256"),
+            }
+            value = dict(current)
+            value.update({
+                "state": "EFFECT_RECOVERY_PREPARED",
+                "retry_safe": False,
+                "transport_status": EFFECT_RECOVERY_STATUS,
+                "effect_recovery_intent": {
+                    **material,
+                    "intent_id": _sha256(_canonical_json(material)),
+                    "result": {
+                        key: getattr(result, key)
+                        for key in (
+                            "status",
+                            "worker_backend",
+                            "session_id",
+                            "provider_id",
+                            "model_id",
+                            "directory",
+                            "version",
+                            "argv_sha256",
+                            "stdout_sha256",
+                            "stderr_sha256",
+                            "export_sha256",
+                            "diagnosis_status",
+                            "diagnosis_sha256",
+                            "diagnosis_evidence_paths",
+                            "repair_admitted",
+                            "repair_phase_count",
+                            "worker_identity_sha256",
+                            "operation_id",
+                            "outcome_unknown",
+                            "process_started",
+                        )
+                        if result is not None
+                    },
+                },
+            })
+            _atomic_json(path, value)
+        return value
+
+    def mark_effect_recovery_committed(
+        self, attempt: Mapping[str, Any], *, candidate: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        path = self._attempt_path(str(attempt["task_id"]), str(attempt["unit_id"]))
+        with self._attempt_lock(str(attempt["task_id"]), str(attempt["unit_id"])):
+            current = json.loads(path.read_text(encoding="utf-8"))
+            if current.get("attempt_id") != attempt.get("attempt_id"):
+                raise FanoutError("FANOUT_ATTEMPT_CAS_CONFLICT")
+            if current.get("state") == "EFFECT_RECOVERY_COMMITTED":
+                return current
+            if current.get("state") != "EFFECT_RECOVERY_PREPARED":
+                raise FanoutError("FANOUT_EFFECT_RECOVERY_CAS_CONFLICT")
+            value = dict(current)
+            value.update({
+                "state": "EFFECT_RECOVERY_COMMITTED",
+                "retry_safe": False,
+                "effect_recovery_candidate": dict(candidate),
+            })
+            _atomic_json(path, value)
+        return value
+
+    def complete_effect_recovery(
+        self, attempt: Mapping[str, Any], receipt: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        path = self._attempt_path(str(attempt["task_id"]), str(attempt["unit_id"]))
+        with self._attempt_lock(str(attempt["task_id"]), str(attempt["unit_id"])):
+            current = json.loads(path.read_text(encoding="utf-8"))
+            if current.get("state") == "COMPLETED":
+                return current
+            if current.get("state") != "EFFECT_RECOVERY_COMMITTED":
+                raise FanoutError("FANOUT_EFFECT_RECOVERY_CAS_CONFLICT")
+            value = dict(current)
+            value.update({
+                "state": "COMPLETED",
+                "retry_safe": False,
+                "transport_status": EFFECT_RECOVERY_STATUS,
+                "receipt_id": receipt.get("receipt_id"),
+            })
+            _atomic_json(path, value)
+        return value
 
 
 class OpenCodeWorkerTransport:
@@ -1432,6 +1560,8 @@ class AdaptiveWorkerFanoutRuntime:
                     "DISPATCHING",
                     "RETRY_SAFE",
                     "OUTCOME_UNKNOWN",
+                    "EFFECT_RECOVERY_PREPARED",
+                    "EFFECT_RECOVERY_COMMITTED",
                 }:
                     errors[unit.unit_id] = "FANOUT_REPLAY_FORBIDDEN"
                     continue
@@ -1553,8 +1683,57 @@ class AdaptiveWorkerFanoutRuntime:
         _verify_envelope_scope(unit)
         transport = self._transport_for_unit(unit)
         attempt = self.store.existing_initial_attempt(unit)
-        if attempt is None or attempt.get("state") not in {"DISPATCHING", "OUTCOME_UNKNOWN"}:
+        if attempt is None or attempt.get("state") not in {
+            "DISPATCHING",
+            "OUTCOME_UNKNOWN",
+            "EFFECT_RECOVERY_PREPARED",
+            "EFFECT_RECOVERY_COMMITTED",
+        }:
             raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
+        if attempt.get("state") == "EFFECT_RECOVERY_COMMITTED":
+            receipt = self.store.existing_initial_receipt(unit)
+            if receipt is None:
+                intent = attempt.get("effect_recovery_intent")
+                saved = intent.get("result") if isinstance(intent, Mapping) else None
+                candidate = attempt.get("effect_recovery_candidate")
+                if (
+                    not isinstance(intent, Mapping)
+                    or not isinstance(saved, Mapping)
+                    or not isinstance(candidate, Mapping)
+                ):
+                    raise FanoutError("FANOUT_EFFECT_RECOVERY_INTENT_INVALID")
+                evidence = dict(intent)
+                evidence.pop("intent_id", None)
+                evidence.pop("result", None)
+                result = OpenCodeRunResult(effect_recovery=evidence, **saved)
+                worker = {
+                    "status": EFFECT_RECOVERY_STATUS,
+                    "summary": "Host-verified durable effect; model terminal response unavailable",
+                }
+                receipt = self._build_receipt(
+                    unit=unit,
+                    workspace=workspace,
+                    attempt=attempt,
+                    result=result,
+                    worker=worker,
+                    candidate=candidate,
+                    status="CANDIDATE_READY_FOR_VERIFICATION",
+                    effect_recovery=evidence,
+                )
+                self.store.write_receipt(receipt)
+            self.store.complete_effect_recovery(attempt, receipt)
+            return receipt
+        if attempt.get("state") == "EFFECT_RECOVERY_PREPARED":
+            intent = attempt.get("effect_recovery_intent")
+            saved = intent.get("result") if isinstance(intent, Mapping) else None
+            evidence = dict(intent) if isinstance(intent, Mapping) else None
+            if isinstance(evidence, Mapping):
+                evidence.pop("intent_id", None)
+                evidence.pop("result", None)
+            if not isinstance(saved, Mapping) or not isinstance(evidence, Mapping):
+                raise FanoutError("FANOUT_EFFECT_RECOVERY_INTENT_INVALID")
+            result = OpenCodeRunResult(effect_recovery=evidence, **saved)
+            return self._finalize_effect_recovery(unit, workspace, attempt, result)
         operation_id = attempt.get("operation_id")
         if hasattr(transport, "prepare_operation_id"):
             if not isinstance(operation_id, str) or _SHA256_RE.fullmatch(operation_id) is None:
@@ -1576,6 +1755,16 @@ class AdaptiveWorkerFanoutRuntime:
     ) -> dict[str, Any]:
         active_transport = transport or self._transport_for_unit(unit)
         if result.status != "COMPLETED":
+            if result.effect_recovery is not None:
+                if attempt.get("state") not in {
+                    "OUTCOME_UNKNOWN",
+                    "EFFECT_RECOVERY_PREPARED",
+                    "EFFECT_RECOVERY_COMMITTED",
+                }:
+                    attempt = self.store.finish_attempt(
+                        attempt, state="OUTCOME_UNKNOWN", transport_status=result.status
+                    )
+                return self._finalize_effect_recovery(unit, workspace, attempt, result)
             if result.outcome_unknown or result.process_started:
                 state = "OUTCOME_UNKNOWN"
             elif result.retry_safe:
@@ -1694,6 +1883,71 @@ class AdaptiveWorkerFanoutRuntime:
         )
         self.store.write_receipt(receipt)
         self.store.finish_attempt(attempt, state="COMPLETED", transport_status=result.status)
+        return receipt
+
+    def _finalize_effect_recovery(
+        self,
+        unit: ExecutionUnit,
+        workspace: WorkspaceLease,
+        attempt: Mapping[str, Any],
+        result: OpenCodeRunResult,
+    ) -> dict[str, Any]:
+        evidence = result.effect_recovery
+        if (
+            not isinstance(evidence, Mapping)
+            or evidence.get("status") != "EFFECT_RECOVERED_PENDING_VERIFICATION"
+        ):
+            raise FanoutError("FANOUT_EFFECT_RECOVERY_INVALID")
+        if (
+            evidence.get("operation_id") != attempt.get("operation_id")
+            or result.operation_id != attempt.get("operation_id")
+            or not result.provider_id
+            or not result.model_id
+            or str(Path(result.directory).resolve()) != str(Path(workspace.path).resolve())
+        ):
+            raise FanoutError("FANOUT_EFFECT_RECOVERY_BINDING_MISMATCH")
+        changed = _changed_paths(Path(workspace.path), unit.expected_base_sha)
+        deleted = _deleted_paths(Path(workspace.path), unit.expected_base_sha)
+        effect_path = str(evidence.get("path") or "")
+        if len(changed) != 1 or changed[0] != effect_path or deleted:
+            raise FanoutError("FANOUT_EFFECT_RECOVERY_DIFF_INVALID")
+        if effect_path not in unit.mutation_paths:
+            raise FanoutError("FANOUT_EFFECT_RECOVERY_SCOPE_INVALID")
+        target = Path(workspace.path) / effect_path
+        if not target.is_file() or target.is_symlink():
+            raise FanoutError("FANOUT_EFFECT_RECOVERY_POSTIMAGE_INVALID")
+        if _sha256(target.read_bytes()) != evidence.get("postimage_sha256"):
+            raise FanoutError("FANOUT_EFFECT_RECOVERY_POSTIMAGE_INVALID")
+        if not re.fullmatch(r"effect_[0-9a-f]{64}", str(evidence.get("effect_id") or "")):
+            raise FanoutError("FANOUT_EFFECT_RECOVERY_ID_INVALID")
+        intent_evidence = {
+            **dict(evidence),
+            "planned_changed_paths": list(changed),
+            "planned_deleted_paths": list(deleted),
+        }
+        prepared = self.store.begin_effect_recovery(
+            attempt, evidence=intent_evidence, expected_head=unit.expected_base_sha, result=result
+        )
+        committed = prepared.get("state") == "EFFECT_RECOVERY_COMMITTED"
+        candidate = prepared.get("effect_recovery_candidate") if committed else None
+        if candidate is None:
+            candidate = _capture_candidate(unit, workspace, expected_head=unit.expected_base_sha)
+            self.store.mark_effect_recovery_committed(prepared, candidate=candidate)
+        receipt = self._build_receipt(
+            unit=unit,
+            workspace=workspace,
+            attempt=attempt,
+            result=result,
+            worker={
+                "status": EFFECT_RECOVERY_STATUS,
+                "summary": "Host-verified durable effect; model terminal response unavailable",
+            },
+            candidate=candidate,
+            status="CANDIDATE_READY_FOR_VERIFICATION",
+            effect_recovery=dict(evidence),
+        )
+        self.store.write_receipt(receipt)
+        self.store.complete_effect_recovery(prepared, receipt)
         return receipt
 
     def continue_repair(
@@ -1888,6 +2142,7 @@ class AdaptiveWorkerFanoutRuntime:
         status: str,
         parent_receipt_id: str = "",
         repair_id: str = "",
+        effect_recovery: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         receipt = {
             "schema": WORKER_RECEIPT_SCHEMA,
@@ -1939,6 +2194,8 @@ class AdaptiveWorkerFanoutRuntime:
             receipt["selected_worker"] = dict(unit.selected_worker)
         if candidate is not None:
             receipt.update(candidate)
+        if effect_recovery is not None:
+            receipt["effect_recovery"] = dict(effect_recovery)
         material = dict(receipt)
         receipt["receipt_id"] = _sha256(_canonical_json(material))
         return receipt

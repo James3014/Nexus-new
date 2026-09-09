@@ -18,6 +18,7 @@ from nexus.services.external_intelligence_fanout import (
     GitWorktreeAllocator,
     OpenCodeRunResult,
 )
+from nexus.services.open_swe_external_intelligence import _inspect_effect_recovery
 
 
 @pytest.fixture(autouse=True)
@@ -875,3 +876,165 @@ def test_real_deepagents_worker_graphs_have_exact_physical_surfaces(tmp_path):
         "record_worker_result",
         "write_file",
     })
+
+
+def test_effect_recovery_exact_r23_projection_is_host_verified(tmp_path):
+    from nexus.services.open_swe_external_intelligence import _canonical_json, _sha256
+
+    root = tmp_path / "runtime"
+    workspace = tmp_path / "workspace"
+    for path in (
+        root,
+        root / "operations",
+        root / "recovery",
+        root / "recovery" / "operations",
+        root / "recovery" / "effects",
+        workspace,
+    ):
+        path.mkdir()
+        path.chmod(0o700)
+    target = workspace / "a.py"
+    postimage = "VALUE = 2\n"
+    target.write_text(postimage, encoding="utf-8")
+    operation_id = "a" * 64
+    turn_id = "b" * 32
+    protocol_turn = "c" * 32
+    provider_id = "opencli_chatgpt"
+    model_id = "gpt-test"
+    worker_hash = "d" * 64
+    response = json.dumps(
+        {
+            "type": "tool_call",
+            "name": "write_file",
+            "arguments": {"file_path": str(target), "content": postimage},
+        },
+        separators=(",", ":"),
+    )
+    call_id = (
+        "opencli_"
+        + _sha256(
+            _canonical_json({
+                "name": "write_file",
+                "arguments": {"file_path": str(target), "content": postimage},
+                "raw": response,
+            })
+        )[:24]
+    )
+    effect_id = "effect_" + _sha256(
+        _canonical_json({
+            "operation_id": operation_id,
+            "turn_id": protocol_turn,
+            "tool_call_id": call_id,
+            "tool_name": "write_file",
+            "arguments": {"file_path": "a.py", "content": postimage},
+        })
+    )
+
+    def write(path, value):
+        path.write_text(json.dumps(value), encoding="utf-8")
+        path.chmod(0o600)
+
+    write(
+        root / "operations" / f"{operation_id}.json",
+        {
+            "operation_id": operation_id,
+            "status": "OPEN_SWE_OUTCOME_UNKNOWN",
+            "outcome_unknown": True,
+            "directory": str(workspace),
+            "provider_id": provider_id,
+            "model_id": model_id,
+            "worker_identity_sha256": worker_hash,
+        },
+    )
+    write(
+        root / "recovery" / "operations" / f"{operation_id}.json",
+        {
+            "status": "ASK_DISPATCHING",
+            "turn_id": turn_id,
+            "protocol_repair_turn_id": protocol_turn,
+            "protocol_repair_status": "RECOVERED",
+            "recovered_response": response,
+            "identity": {
+                "operation_id": operation_id,
+                "workspace": str(workspace),
+                "provider_id": provider_id,
+                "model_id": model_id,
+                "worker_identity_sha256": worker_hash,
+                "allowed_paths": ["a.py"],
+            },
+        },
+    )
+    write(
+        root / "recovery" / "effects" / f"{effect_id}.json",
+        {
+            "effect_id": effect_id,
+            "operation_id": operation_id,
+            "turn_id": protocol_turn,
+            "tool_call_id": call_id,
+            "tool_name": "write_file",
+            "status": "RESULT",
+            "path": str(target),
+            "arguments": {"file_path": "a.py", "content": postimage},
+            "postimage": postimage,
+            "postimage_sha256": _sha256(postimage),
+        },
+    )
+    evidence = _inspect_effect_recovery(
+        runtime_state_root=root,
+        operation_id=operation_id,
+        workspace_path=workspace,
+        provider_id=provider_id,
+        model_id=model_id,
+        worker_identity_sha256=worker_hash,
+    )
+    assert evidence is not None
+    assert evidence["status"] == "EFFECT_RECOVERED_PENDING_VERIFICATION"
+    assert evidence["effect_id"] == effect_id
+
+
+def test_effect_recovery_rejects_corrupt_or_symlinked_journal(tmp_path):
+    from nexus.services.open_swe_external_intelligence import _inspect_effect_recovery
+
+    root = tmp_path / "runtime"
+    workspace = tmp_path / "workspace"
+    for path in (
+        root,
+        root / "operations",
+        root / "recovery",
+        root / "recovery" / "operations",
+        root / "recovery" / "effects",
+        workspace,
+    ):
+        path.mkdir()
+        path.chmod(0o700)
+    operation_id = "a" * 64
+    operation = root / "operations" / f"{operation_id}.json"
+    operation.write_text("{}", encoding="utf-8")
+    operation.chmod(0o600)
+    journal = root / "recovery" / "operations" / f"{operation_id}.json"
+    journal.write_text('{"status":"ASK_DISPATCHING",}', encoding="utf-8")
+    journal.chmod(0o600)
+    assert (
+        _inspect_effect_recovery(
+            runtime_state_root=root,
+            operation_id=operation_id,
+            workspace_path=workspace,
+            provider_id="p",
+            model_id="m",
+            worker_identity_sha256="",
+        )
+        is None
+    )
+    journal.unlink()
+    journal.symlink_to(operation)
+    assert (
+        _inspect_effect_recovery(
+            runtime_state_root=root,
+            operation_id=operation_id,
+            workspace_path=workspace,
+            provider_id="p",
+            model_id="m",
+            worker_identity_sha256="",
+        )
+        is None
+    )

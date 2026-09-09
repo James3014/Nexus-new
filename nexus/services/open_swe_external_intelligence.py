@@ -68,6 +68,8 @@ _PROVIDER_ENV_ALLOWLIST = {
     "anthropic": ("ANTHROPIC_API_KEY",),
 }
 
+EFFECT_RECOVERY_STATUS = "EFFECT_RECOVERED_PENDING_VERIFICATION"
+
 
 class OpenSWEExternalIntelligenceError(RuntimeError):
     """Fail-closed external Open SWE transport error."""
@@ -143,6 +145,15 @@ def _sha256(value: bytes | str) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _strict_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("duplicate JSON key")
+        value[key] = item
+    return value
+
+
 def _default_runtime_state_root() -> Path:
     return Path.home() / ".local" / "state" / "nexus" / "open_swe_runtime"
 
@@ -156,6 +167,222 @@ def _runtime_env(provider_id: str) -> dict[str, str]:
 
     allowed = [*_SYSTEM_ENV_ALLOWLIST, *_PROVIDER_ENV_ALLOWLIST.get(provider_id, ())]
     return {name: os.environ[name] for name in allowed if name in os.environ}
+
+
+def _safe_state_file(path: Path) -> dict[str, Any] | None:
+    """Read one owner-only runtime record without following symlinks."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            stat = os.fstat(fd)
+            if not stat or stat.st_uid != os.getuid() or stat.st_mode & 0o022:
+                return None
+            if stat.st_size > 1_048_576:
+                return None
+            value = json.loads(os.read(fd, stat.st_size).decode("utf-8"))
+        finally:
+            os.close(fd)
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return dict(value) if isinstance(value, Mapping) else None
+
+
+def _safe_journal_file(root: Path, relative: str) -> dict[str, Any] | None:
+    path = root / relative
+    try:
+        ancestors = []
+        current = path.parent
+        while True:
+            ancestors.append(current)
+            if current == root:
+                break
+            if root not in current.parents:
+                return None
+            current = current.parent
+        for parent in (root, *ancestors):
+            if parent.is_symlink() or not parent.is_dir():
+                return None
+            stat = parent.stat()
+            if stat.st_uid != os.getuid() or stat.st_mode & 0o022:
+                return None
+        if path.is_symlink():
+            return None
+        return _safe_state_file(path)
+    except (OSError, ValueError):
+        return None
+
+
+def _inspect_effect_recovery(
+    *,
+    runtime_state_root: Path,
+    operation_id: str,
+    workspace_path: Path,
+    provider_id: str,
+    model_id: str,
+    worker_identity_sha256: str,
+) -> dict[str, Any] | None:
+    """Return host-derived evidence for one already-applied Open SWE effect."""
+    root = runtime_state_root.expanduser()
+    workspace = workspace_path.expanduser()
+    if not root.is_absolute():
+        root = Path(os.path.abspath(root))
+    if not workspace.is_absolute():
+        workspace = Path(os.path.abspath(workspace))
+    try:
+        for directory in (
+            root,
+            root / "operations",
+            root / "recovery",
+            root / "recovery" / "operations",
+            root / "recovery" / "effects",
+            workspace,
+        ):
+            if directory.is_symlink() or not directory.is_dir():
+                return None
+            stat = directory.stat()
+            if stat.st_uid != os.getuid() or stat.st_mode & 0o022:
+                return None
+    except OSError:
+        return None
+    operation = _safe_journal_file(root, f"operations/{operation_id}.json")
+    if operation is None or operation.get("operation_id") != operation_id:
+        return None
+    if (
+        operation.get("status") != "OPEN_SWE_OUTCOME_UNKNOWN"
+        or operation.get("outcome_unknown") is not True
+    ):
+        return None
+    if str(Path(str(operation.get("directory") or "")).expanduser()) != str(workspace):
+        return None
+    if operation.get("provider_id") != provider_id or operation.get("model_id") != model_id:
+        return None
+    if worker_identity_sha256 and operation.get("worker_identity_sha256") != worker_identity_sha256:
+        return None
+    journal = _safe_journal_file(root, f"recovery/operations/{operation_id}.json")
+    if journal is None:
+        return None
+    journal_identity = journal.get("identity")
+    if not isinstance(journal_identity, Mapping):
+        return None
+    if (
+        journal.get("status") != "ASK_DISPATCHING"
+        or not journal.get("turn_id")
+        or journal.get("turn_id") == journal.get("protocol_repair_turn_id")
+        or journal_identity.get("operation_id") != operation_id
+        or str(Path(str(journal_identity.get("workspace") or "")).expanduser()) != str(workspace)
+        or journal_identity.get("provider_id") != provider_id
+        or journal_identity.get("model_id") != model_id
+        or (
+            worker_identity_sha256
+            and journal_identity.get("worker_identity_sha256") != worker_identity_sha256
+        )
+        or journal.get("protocol_repair_status") != "RECOVERED"
+    ):
+        return None
+    allowed_paths = journal_identity.get("allowed_paths")
+    if (
+        not isinstance(allowed_paths, list)
+        or not allowed_paths
+        or any(
+            not isinstance(value, str) or not value or Path(value).is_absolute()
+            for value in allowed_paths
+        )
+    ):
+        return None
+    recovered_raw = journal.get("recovered_response")
+    if not isinstance(recovered_raw, str):
+        return None
+    try:
+        recovered = json.loads(recovered_raw, object_pairs_hook=_strict_object)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(recovered, Mapping):
+        return None
+    name = recovered.get("name")
+    arguments = recovered.get("arguments")
+    if set(recovered) != {"type", "name", "arguments"} or recovered.get("type") != "tool_call":
+        return None
+    raw = recovered_raw
+    if not isinstance(name, str) or not isinstance(arguments, Mapping):
+        return None
+    original_arguments = dict(arguments)
+    normalized_arguments = dict(arguments)
+    if isinstance(normalized_arguments.get("file_path"), str):
+        candidate_path = Path(normalized_arguments["file_path"]).expanduser()
+        if candidate_path.is_absolute():
+            try:
+                normalized_arguments["file_path"] = candidate_path.relative_to(workspace).as_posix()
+            except ValueError:
+                normalized_arguments["file_path"] = candidate_path.as_posix().lstrip("/")
+    tool_call_canonical = _canonical_json({
+        "name": name,
+        "arguments": original_arguments,
+        "raw": raw,
+    })
+    tool_call_id = "opencli_" + _sha256(tool_call_canonical)[:24]
+    effect_canonical = _canonical_json({
+        "operation_id": operation_id,
+        "turn_id": journal.get("protocol_repair_turn_id"),
+        "tool_call_id": tool_call_id,
+        "tool_name": name,
+        "arguments": normalized_arguments,
+    })
+    effect_id = "effect_" + _sha256(effect_canonical)
+    effect = _safe_journal_file(root, f"recovery/effects/{effect_id}.json")
+    if effect is None:
+        return None
+    if (
+        effect.get("status") != "RESULT"
+        or effect.get("tool_name") not in {"write_file", "edit_file"}
+        or effect.get("effect_id") != effect_id
+        or effect.get("tool_call_id") != tool_call_id
+        or effect.get("turn_id") != journal.get("protocol_repair_turn_id")
+        or not effect.get("tool_call_id")
+    ):
+        return None
+    raw_path = effect.get("path")
+    effect_arguments = effect.get("arguments")
+    postimage = effect.get("postimage")
+    if (
+        not isinstance(raw_path, str)
+        or not isinstance(effect_arguments, Mapping)
+        or not isinstance(postimage, str)
+    ):
+        return None
+    path = Path(raw_path).expanduser()
+    if path.is_symlink() or not path.is_file():
+        return None
+    try:
+        current = path.parent
+        while current != workspace:
+            if current.is_symlink() or workspace not in current.parents:
+                return None
+            current = current.parent
+        relative = path.relative_to(workspace).as_posix()
+        actual = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError, ValueError):
+        return None
+    if (
+        effect_arguments.get("file_path") != relative
+        or effect_arguments.get("content") != postimage
+    ):
+        return None
+    if relative not in allowed_paths:
+        return None
+    if _sha256(actual) != str(effect.get("postimage_sha256") or ""):
+        return None
+    if _sha256(postimage) != str(effect.get("postimage_sha256") or ""):
+        return None
+    return {
+        "status": EFFECT_RECOVERY_STATUS,
+        "effect_id": str(effect.get("effect_id") or ""),
+        "operation_id": operation_id,
+        "turn_id": str(effect.get("turn_id") or ""),
+        "tool_call_id": str(effect.get("tool_call_id") or ""),
+        "tool_name": str(effect.get("tool_name") or ""),
+        "path": relative,
+        "postimage_sha256": str(effect.get("postimage_sha256") or ""),
+    }
 
 
 def _normalize_transport_config(
@@ -721,6 +948,19 @@ class OpenSWEWorkerTransport:
             if isinstance(evidence_paths_raw, list)
             else ()
         )
+        effect_recovery = None
+        if (
+            operation == "worker_reconcile"
+            and str(value.get("status") or "") == "OPEN_SWE_OUTCOME_UNKNOWN"
+        ):
+            effect_recovery = _inspect_effect_recovery(
+                runtime_state_root=self.runtime_state_root,
+                operation_id=operation_id,
+                workspace_path=workspace,
+                provider_id=provider,
+                model_id=model,
+                worker_identity_sha256=worker_hash,
+            )
         return OpenCodeRunResult(
             status=str(value.get("status") or "OPEN_SWE_OUTCOME_UNKNOWN"),
             worker_backend="open_swe",
@@ -745,6 +985,7 @@ class OpenSWEWorkerTransport:
             repair_phase_count=int(value.get("repair_phase_count") or 0),
             worker_identity_sha256=worker_hash,
             operation_id=operation_id,
+            effect_recovery=effect_recovery,
         )
 
     def _ensure_runtime_identity(self) -> bool:

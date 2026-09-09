@@ -771,6 +771,47 @@ def test_d_gets_exact_verifiers_and_compact_publication(tmp_path):
     assert "raw_prompt" not in rendered
 
 
+def test_effect_recovered_candidate_reaches_existing_closure_once_and_reuses_poll(tmp_path):
+    repo, _, contract, body, store = _setup(tmp_path)
+
+    class RecoveryC(FakeC):
+        def run(self, units, lease):
+            result = super().run(units, lease)
+            receipt = result["receipts"]["u1"]
+            receipt.update({
+                "schema": "external_intelligence_worker_receipt.v1",
+                "task_id": "task-1",
+                "unit_id": "u1",
+                "envelope_sha256": "e" * 64,
+                "base_sha": contract["main_sha"],
+                "mutation_paths": ["nexus/a.py"],
+                "worker_backend": "open_swe",
+                "provider_id": "opencli_chatgpt",
+                "model_id": "gpt-test",
+                "diagnosis_status": "DIAGNOSED",
+                "diagnosis_sha256": "f" * 64,
+                "diagnosis_evidence_paths": [],
+                "repair_admitted": True,
+                "repair_phase_count": 1,
+                "effect_recovery": {
+                    "status": "EFFECT_RECOVERED_PENDING_VERIFICATION",
+                    "effect_id": "effect_" + "a" * 64,
+                    "operation_id": "b" * 64,
+                    "path": "nexus/a.py",
+                    "postimage_sha256": "c" * 64,
+                },
+            })
+            return result
+
+    d = FakeD()
+    automation = _automation(tmp_path, repo, store, c=RecoveryC(), d=d)
+    first = automation.run_issue("o/r", 55, "title", body)
+    second = automation.run_issue("o/r", 55, "title", body)
+    assert first["state"] == "COMPLETE"
+    assert second["reuse"] is True
+    assert len(d.calls) == 1
+
+
 def test_complete_identity_reuses_without_external_calls(tmp_path):
     repo, _, contract, body, store = _setup(tmp_path)
     sidecar = FakeSidecar(store)

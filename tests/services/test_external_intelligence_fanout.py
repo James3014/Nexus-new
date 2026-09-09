@@ -531,6 +531,63 @@ def test_store_journals_before_dispatch_and_blocks_blind_replay(tmp_path):
         store.prepare_initial(parsed, workspace)
 
 
+def test_effect_recovery_attempt_is_absorbing_and_receipt_write_is_idempotent(tmp_path):
+    repo, base = make_repo(tmp_path)
+    envelope = tmp_path / "envelope.json"
+    envelope_sha = make_envelope(envelope, base, allowed=["a.py"])
+    parsed = ExecutionUnit.from_mapping(unit(base, envelope, envelope_sha, "ua", ["a.py"]))
+    workspace = GitWorktreeAllocator(repo, tmp_path / "workspaces").allocate(parsed)
+    store = FanoutStore(tmp_path / "state")
+    attempt = store.prepare_initial(parsed, workspace)
+    attempt = store.mark_dispatching(attempt)
+    attempt = store.finish_attempt(
+        attempt, state="OUTCOME_UNKNOWN", transport_status="OPEN_SWE_OUTCOME_UNKNOWN"
+    )
+    evidence = {
+        "status": "EFFECT_RECOVERED_PENDING_VERIFICATION",
+        "effect_id": "effect_" + "a" * 64,
+        "operation_id": "b" * 64,
+        "turn_id": "turn-effect",
+        "tool_call_id": "opencli_" + "c" * 24,
+        "tool_name": "write_file",
+        "path": "a.py",
+        "postimage_sha256": "d" * 64,
+    }
+    prepared = store.begin_effect_recovery(attempt, evidence=evidence, expected_head=base)
+    assert prepared["state"] == "EFFECT_RECOVERY_PREPARED"
+    assert (
+        store.begin_effect_recovery(prepared, evidence=evidence, expected_head=base)["state"]
+        == "EFFECT_RECOVERY_PREPARED"
+    )
+    candidate = {
+        "candidate_commit": "e" * 40,
+        "candidate_tree": "f" * 40,
+        "candidate_diff_sha256": "1" * 64,
+        "changed_paths": ["a.py"],
+        "deleted_paths": [],
+        "parent_commit": base,
+    }
+    committed = store.mark_effect_recovery_committed(prepared, candidate=candidate)
+    assert (
+        store.mark_effect_recovery_committed(committed, candidate=candidate)["state"]
+        == "EFFECT_RECOVERY_COMMITTED"
+    )
+    receipt = {
+        "schema": WORKER_RECEIPT_SCHEMA,
+        "task_id": parsed.task_id,
+        "unit_id": parsed.unit_id,
+        "envelope_sha256": parsed.envelope_sha256,
+        "base_sha": base,
+        "mutation_paths": ["a.py"],
+        "receipt_id": "receipt-1",
+    }
+    store.write_receipt(receipt)
+    store.write_receipt(receipt)
+    completed = store.complete_effect_recovery(committed, receipt)
+    assert completed["state"] == "COMPLETED"
+    assert store.complete_effect_recovery(completed, receipt)["state"] == "COMPLETED"
+
+
 def test_fanout_dispatching_fence_rejects_changed_unit_binding_without_provider_call(tmp_path):
     repo, base = make_repo(tmp_path)
     envelope = tmp_path / "envelope.json"
