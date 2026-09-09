@@ -57,6 +57,29 @@ def build_runtime_context_hub(
     return RuntimeContextHub(deps=deps, strict_deps=True)
 
 
+def build_legacy_learning_writer(project_root: str | Path, run_dir: str | Path | None = None) -> Callable[..., Any]:
+    """Adapt the historical FindingsMemoryStore lesson writer to runtime."""
+    from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
+
+    def write(*, failure_signature: str, root_cause: str, lesson: str, metadata: dict[str, Any] | None = None) -> Any:
+        metadata = dict(metadata or {})
+        card = FindingsCard(
+            task_id=metadata.get("task_id", failure_signature),
+            kind="episodes",
+            title=f"Failure: {failure_signature}",
+            scope="task",
+            tags=["failure-analysis", failure_signature.split(":")[0]],
+            stage="unknown",
+            confidence="high",
+            body=f"Root Cause: {root_cause}\nLesson: {lesson}",
+            evidence_paths=[str(run_dir)] if run_dir else [],
+            extra=metadata,
+        )
+        return FindingsMemoryStore(project_root).write(card)
+
+    return write
+
+
 def _build_compactor(project_root: str | Path, state_reader: Callable[[], Any]) -> Callable[..., dict[str, Any]]:
     def compact(value: dict[str, Any], confidence: float = 0.5) -> dict[str, Any]:
         del value

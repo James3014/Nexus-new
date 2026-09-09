@@ -9,7 +9,7 @@ from nexus.contracts.context_budget import ContextBudgetSource, build_context_bu
 from nexus.core.context_budget_sources import build_context_budget_sources, estimate_context_tokens
 from nexus.core.context_runtime_adapter import StatelessContextCoordinator
 from nexus.core.context_text_store import ContextTextStore
-from nexus.core.context_runtime_bridge import build_runtime_context_hub
+from nexus.core.context_runtime_bridge import build_legacy_learning_writer, build_runtime_context_hub
 from nexus.core.context_view import ContextDependencies, StateView
 from nexus.core.state_contracts import NexusDiagnosis, NexusResearch, NexusState
 from nexus.core.state_io import StateIO
@@ -113,7 +113,7 @@ class ContextHub:
                 state, aggression=aggression
             ),
             dialogue_pruner=prune_dialogue,
-            compactor=lambda value, confidence=0.5: value,
+            learning_writer=build_legacy_learning_writer(self.project_root, self.run_dir),
         )
 
     def load_program_rules(self, md_path: str = "program.md") -> str:
@@ -613,27 +613,9 @@ class ContextHub:
         lesson: str,
         metadata: Optional[Dict] = None,
     ):
-        """💾 Phase 1+: 記錄結構化 FindingsCard (DeepScientist Spec)。"""
-        from nexus.research.findings_memory import FindingsCard, FindingsMemoryStore
-        
-        store = FindingsMemoryStore(self.project_root)
-        
-        # 建立結構化記憶卡
-        card = FindingsCard(
-            task_id=(metadata or {}).get("task_id", failure_signature),
-            kind="episodes",
-            title=f"Failure: {failure_signature}",
-            scope="task",
-            tags=["failure-analysis", failure_signature.split(":")[0]],
-            stage="unknown", 
-            confidence="high",
-            body=f"Root Cause: {root_cause}\nLesson: {lesson}",
-            evidence_paths=[str(self.run_dir)] if self.run_dir else [],
-            extra=metadata or {}
+        return self.runtime_hub.record_crystal_lesson(
+            failure_signature, root_cause, lesson, metadata
         )
-        
-        path = store.write(card)
-        logger.info(f"🧠 [DeepScientist:Memory] Structured Lesson recorded: {path}")
 
     # Runtime-owned assembly operations. Legacy constructor/services above are
     # retained solely as the compatibility adapter surface.
