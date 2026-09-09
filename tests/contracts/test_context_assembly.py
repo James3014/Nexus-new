@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from nexus.contracts.context_assembly import (
     CONTEXT_ASSEMBLY_CONTRACT_SCHEMA,
     build_context_assembly_contract,
@@ -16,6 +18,16 @@ def _sources():
     ]
 
 
+def _source_ref():
+    return {
+        "repository": "James3014/Nexus-new",
+        "revision": "a" * 40,
+        "path": "nexus/contracts/context_assembly.py",
+        "ranges": ["1-40"],
+        "content_hash": "b" * 64,
+    }
+
+
 def test_context_assembly_contract_preserves_required_context_under_budget() -> None:
     payload = build_context_assembly_contract(
         task_id="ctx-001",
@@ -28,6 +40,12 @@ def test_context_assembly_contract_preserves_required_context_under_budget() -> 
     assert payload["preserved_L0_L1"] is True
     assert payload["kept_source_count"] == 3
     assert payload["dropped_source_count"] == 1
+    assert payload["planner_binding_status"] == "NOT_APPLICABLE"
+    assert payload["source_mode"] == "NO_SOURCE"
+    assert payload["serialization_state"] == "NOT_BOUND"
+    assert payload["physical_consumption_state"] == "NOT_PROVEN"
+    assert payload["outcome_contribution_state"] == "NOT_PROVEN"
+    assert len(payload["package_hash"]) == 64
     assert payload["blockers"] == []
 
 
@@ -75,3 +93,114 @@ def test_context_assembly_blocks_quarantined_skill_sources() -> None:
 
     assert payload["status"] == "RETURN"
     assert "quarantined_skill_context:candidate-skill-from-external/SKILL.md" in payload["blockers"]
+
+
+def test_planner_bound_context_materializes_without_claiming_consumption() -> None:
+    payload = build_context_assembly_contract(
+        task_id="ctx-472-g1",
+        attempt_id="attempt-1",
+        sources=_sources(),
+        token_budget=500,
+        planner_decision_id="planner-decision-472",
+        planner_plan_hash="c" * 64,
+        selected_capability_ids=("prompt_compression", "repository_intelligence"),
+        source_mode="DIRECT_SLICE",
+        source_provenance_refs=(_source_ref(),),
+        consumer_role="main_engineer",
+        consumer_channel="online",
+        worker_binding={
+            "worker_id": "codex_luna",
+            "provider": "codex",
+            "model": "gpt-5.6-luna",
+        },
+    )
+
+    assert payload["status"] == "PASS"
+    assert payload["planner_binding_status"] == "BOUND"
+    assert payload["selection_state"] == "SELECTED"
+    assert payload["materialization_state"] == "MATERIALIZED"
+    assert payload["selected_capability_ids"] == ["prompt_compression", "repository_intelligence"]
+    assert payload["serialization_state"] == "NOT_BOUND"
+    assert payload["physical_consumption_state"] == "NOT_PROVEN"
+    assert payload["outcome_contribution_state"] == "NOT_PROVEN"
+    assert payload["blockers"] == []
+
+
+def test_selected_context_requires_complete_planner_binding() -> None:
+    payload = build_context_assembly_contract(
+        task_id="ctx-472-g1",
+        sources=_sources(),
+        token_budget=500,
+        selected_capability_ids=("prompt_compression",),
+    )
+
+    assert payload["status"] == "RETURN"
+    assert payload["planner_binding_status"] == "INCOMPLETE"
+    assert payload["blockers"] == [
+        "selected_context_missing_planner_decision_id",
+        "selected_context_missing_planner_plan_hash",
+    ]
+
+
+def test_source_materialization_requires_bound_provenance() -> None:
+    payload = build_context_assembly_contract(
+        task_id="ctx-472-g1",
+        sources=_sources(),
+        token_budget=500,
+        source_mode="REDUCED_CAPSULE",
+    )
+
+    assert payload["status"] == "RETURN"
+    assert "source_mode_missing_provenance_refs" in payload["blockers"]
+
+    no_source_with_ref = build_context_assembly_contract(
+        task_id="ctx-472-g1",
+        sources=_sources(),
+        token_budget=500,
+        source_mode="NO_SOURCE",
+        source_provenance_refs=(_source_ref(),),
+    )
+    assert no_source_with_ref["status"] == "RETURN"
+    assert "source_refs_with_no_source_mode" in no_source_with_ref["blockers"]
+
+
+def test_context_package_hash_is_deterministic_and_detects_drift() -> None:
+    kwargs = {
+        "task_id": "ctx-472-g1",
+        "attempt_id": "attempt-1",
+        "sources": _sources(),
+        "token_budget": 500,
+        "planner_decision_id": "planner-decision-472",
+        "planner_plan_hash": "c" * 64,
+        "selected_capability_ids": ("repository_intelligence", "prompt_compression"),
+        "source_mode": "DIRECT_SLICE",
+        "source_provenance_refs": (_source_ref(),),
+        "consumer_role": "main_engineer",
+        "consumer_channel": "online",
+    }
+    first = build_context_assembly_contract(**kwargs)
+    second = build_context_assembly_contract(**kwargs)
+
+    assert first["package_hash"] == second["package_hash"]
+
+    tampered = dict(first)
+    tampered["consumer_channel"] = "worker_registry"
+    assert "context_package_hash_mismatch" in validate_context_assembly_contract(tampered)
+
+
+def test_selected_capability_ids_fail_closed_when_not_a_sequence() -> None:
+    with pytest.raises(ValueError, match="invalid_selected_capability_ids"):
+        build_context_assembly_contract(
+            task_id="ctx-472-g1",
+            sources=_sources(),
+            token_budget=500,
+            selected_capability_ids="prompt_compression",
+        )
+
+    payload = build_context_assembly_contract(
+        task_id="ctx-472-g1",
+        sources=_sources(),
+        token_budget=500,
+    )
+    payload["selected_capability_ids"] = "prompt_compression"
+    assert "invalid_selected_capability_ids" in validate_context_assembly_contract(payload)
