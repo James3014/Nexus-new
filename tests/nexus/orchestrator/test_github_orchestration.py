@@ -25,8 +25,8 @@ from nexus.orchestrator.github_orchestration import (
     revalidate_merge_intent,
 )
 from nexus.orchestrator.standing_grant_store import (
-    _write_standing_grant_receipt_at,
     StandingGrantReceipt,
+    _write_standing_grant_receipt_at,
     standing_grant_key,
     write_keyed_standing_grant_receipt,
 )
