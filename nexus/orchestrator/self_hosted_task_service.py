@@ -1162,6 +1162,16 @@ class SelfHostedTaskService:
         # Compatibility contexts must be supplied explicitly per operation.
         # Set only by the source-owned Gateway bootstrap.  It is deliberately
         # an operation factory, never a long-lived OwnerWriteContext.
+        if (
+            writer_factory is not None
+            and consumer_ports is not None
+            and writer_factory is not getattr(consumer_ports, "task_writer_factory", None)
+        ):
+            raise ValueError("task_writer_factory_override_denied")
+        task_factory = getattr(consumer_ports, "task_writer_factory", None)
+        task_adapter = getattr(task_factory, "_adapter", None)
+        if task_adapter is not None and Path(task_adapter.root).resolve() != self.state_dir:
+            raise ValueError("task_writer_factory_root_mismatch")
         self._consumer_ports = consumer_ports
         if consumer_ports is not None:
             consumer_ports.bind_service(self)
@@ -2469,7 +2479,8 @@ class SelfHostedTaskService:
     ) -> None:
         try:
             if not self.ephemeral:
-                self._event_bus.ensure_configured(self.canonical_state_dir(), production=True)
+                event_root = getattr(self._consumer_ports, "event_root", self.canonical_state_dir())
+                self._event_bus.ensure_configured(event_root, production=True)
             self._emit_attempt_transition(result, task_id, event_bus=self._event_bus)
         except Exception as exc:
             self._record_event_append_failure(task_id, exc)
@@ -2677,7 +2688,7 @@ class SelfHostedTaskService:
                 self.read_canonical_attempt_events(
                     task_id,
                     str(target_attempt_id),
-                    project_root=self.canonical_state_dir(),
+                    project_root=getattr(self._consumer_ports, "event_root", self.canonical_state_dir()),
                     event_bus=self._event_bus,
                     event_store=self._event_store,
                 ),
