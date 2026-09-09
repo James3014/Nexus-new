@@ -28,6 +28,7 @@ def _source_ref():
         "path": "nexus/contracts/context_assembly.py",
         "ranges": ["1-40"],
         "content_hash": "b" * 64,
+        "claim_ceiling": "CONTEXT_ASSIST_ONLY",
     }
 
 
@@ -159,7 +160,7 @@ def test_selected_context_requires_complete_planner_binding() -> None:
     ]
 
 
-def test_source_materialization_requires_bound_provenance() -> None:
+def test_source_materialization_requires_bound_provenance_and_planner() -> None:
     payload = build_context_assembly_contract(
         task_id="ctx-472-g1",
         sources=_sources(),
@@ -169,6 +170,8 @@ def test_source_materialization_requires_bound_provenance() -> None:
 
     assert payload["status"] == "RETURN"
     assert "source_mode_missing_provenance_refs" in payload["blockers"]
+    assert "selected_context_missing_planner_decision_id" in payload["blockers"]
+    assert "selected_context_missing_planner_plan_hash" in payload["blockers"]
 
     no_source_with_ref = build_context_assembly_contract(
         task_id="ctx-472-g1",
@@ -179,6 +182,48 @@ def test_source_materialization_requires_bound_provenance() -> None:
     )
     assert no_source_with_ref["status"] == "RETURN"
     assert "source_refs_with_no_source_mode" in no_source_with_ref["blockers"]
+
+    source_only = build_context_assembly_contract(
+        task_id="ctx-472-g1",
+        sources=_sources(),
+        token_budget=500,
+        source_mode="DIRECT_SLICE",
+        source_provenance_refs=(_source_ref(),),
+    )
+    assert source_only["status"] == "RETURN"
+    assert source_only["planner_binding_status"] == "INCOMPLETE"
+    assert "selected_context_missing_planner_decision_id" in source_only["blockers"]
+    assert "selected_context_missing_planner_plan_hash" in source_only["blockers"]
+
+
+def test_source_provenance_requires_existing_claim_ceiling_and_string_identity() -> None:
+    missing_ceiling = _source_ref()
+    missing_ceiling.pop("claim_ceiling")
+    payload = build_context_assembly_contract(
+        task_id="ctx-472-g1",
+        sources=_sources(),
+        token_budget=500,
+        planner_decision_id="planner-decision-472",
+        planner_plan_hash="c" * 64,
+        source_mode="DIRECT_SLICE",
+        source_provenance_refs=(missing_ceiling,),
+    )
+    assert payload["status"] == "RETURN"
+    assert "source_provenance_ref_missing_claim_ceiling:0" in payload["blockers"]
+
+    malformed_ref = _source_ref()
+    malformed_ref["repository"] = 123
+    malformed = build_context_assembly_contract(
+        task_id="ctx-472-g1",
+        sources=_sources(),
+        token_budget=500,
+        planner_decision_id="planner-decision-472",
+        planner_plan_hash="c" * 64,
+        source_mode="DIRECT_SLICE",
+        source_provenance_refs=(malformed_ref,),
+    )
+    assert malformed["status"] == "RETURN"
+    assert "source_provenance_ref_missing_repository:0" in malformed["blockers"]
 
 
 def test_semantic_package_hash_is_consumer_neutral() -> None:
@@ -284,6 +329,26 @@ def test_serialized_context_requires_complete_consumer_binding() -> None:
     assert "serialized_context_missing_consumer_binding" in payload["blockers"]
 
 
+def test_new_identity_fields_fail_closed_on_non_strings() -> None:
+    malformed_cases: tuple[tuple[str, Any, str], ...] = (
+        ("attempt_id", 123, "invalid_attempt_id"),
+        ("planner_decision_id", 123, "invalid_planner_decision_id"),
+        ("planner_plan_hash", 123, "invalid_planner_plan_hash"),
+        ("source_mode", 123, "invalid_source_materialization_mode"),
+        ("consumer_role", 123, "invalid_consumer_role"),
+        ("consumer_channel", 123, "invalid_consumer_channel"),
+    )
+    for key, value, blocker in malformed_cases:
+        kwargs: dict[str, Any] = {
+            "task_id": "ctx-472-g1",
+            "sources": _sources(),
+            "token_budget": 500,
+            key: value,
+        }
+        with pytest.raises(ValueError, match=blocker):
+            build_context_assembly_contract(**kwargs)
+
+
 def test_selected_capability_ids_fail_closed_when_malformed() -> None:
     malformed_values: tuple[Any, ...] = ("prompt_compression", (None,), ("",))
     for malformed in malformed_values:
@@ -322,8 +387,8 @@ def test_legacy_positional_schema_constructor_remains_compatible() -> None:
     assert legacy["status"] == "PASS"
 
 
-def test_worker_binding_does_not_stringify_missing_identity() -> None:
-    payload = build_context_assembly_contract(
+def test_worker_binding_requires_string_identity() -> None:
+    missing = build_context_assembly_contract(
         task_id="ctx-472-g1",
         sources=_sources(),
         token_budget=500,
@@ -335,6 +400,20 @@ def test_worker_binding_does_not_stringify_missing_identity() -> None:
             "model": "model-1",
         },
     )
+    assert missing["status"] == "RETURN"
+    assert "incomplete_worker_binding:provider" in missing["blockers"]
 
-    assert payload["status"] == "RETURN"
-    assert "incomplete_worker_binding:provider" in payload["blockers"]
+    non_string = build_context_assembly_contract(
+        task_id="ctx-472-g1",
+        sources=_sources(),
+        token_budget=500,
+        consumer_role="main_engineer",
+        consumer_channel="online",
+        worker_binding={
+            "worker_id": "worker-1",
+            "provider": 123,
+            "model": "model-1",
+        },
+    )
+    assert non_string["status"] == "RETURN"
+    assert "incomplete_worker_binding:provider" in non_string["blockers"]
