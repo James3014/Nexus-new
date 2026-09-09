@@ -672,6 +672,7 @@ def _authorize_effect_from_receipt(
     action: AutonomyActionClass,
     effect: Mapping[str, Any],
     requested_at: datetime,
+    key: StandingGrantKey | None = None,
 ) -> dict[str, Any]:
     """Bind one exact effect to the canonical durable Owner standing grant.
 
@@ -717,6 +718,7 @@ def _authorize_effect_from_receipt(
         "decision_hash": decision.decision_hash,
         "mutation_authorized": True,
         "claim_ceiling": decision.claim_ceiling,
+        "standing_grant_key": key.digest if key is not None else None,
     }
     payload["authorization_hash"] = canonical_autonomy_hash(payload)
     return payload
@@ -728,10 +730,14 @@ def authorize_durable_standing_grant_effect(
     action: AutonomyActionClass,
     effect: Mapping[str, Any],
     requested_at: datetime | None = None,
+    key: StandingGrantKey | None = None,
 ) -> dict[str, Any]:
-    """Authorize one request-bound effect from the single canonical receipt."""
+    """Authorize one request-bound effect from its exact durable key."""
     effective_now = requested_at or datetime.now(timezone.utc)
-    receipt = load_standing_grant_receipt(now=effective_now)
+    if key is not None:
+        if not isinstance(key, StandingGrantKey) or key.repository != repository:
+            raise StandingGrantReceiptError("KEY_SCOPE_MISMATCH")
+    receipt = load_standing_grant_receipt(now=effective_now, key=key)
     if receipt is None:
         raise StandingGrantReceiptError("RECEIPT_MISSING")
     return _authorize_effect_from_receipt(
@@ -740,6 +746,7 @@ def authorize_durable_standing_grant_effect(
         action=action,
         effect=effect,
         requested_at=effective_now,
+        key=key,
     )
 
 
@@ -759,6 +766,7 @@ def _authorize_durable_standing_grant_effect_at(
         action=action,
         effect=effect,
         requested_at=requested_at,
+        key=None,
     )
 
 

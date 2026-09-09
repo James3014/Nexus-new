@@ -21,6 +21,7 @@ from pydantic import ValidationError
 
 import nexus.orchestrator.owner_representation as owner_publisher_module
 import nexus.orchestrator.owner_representation_store as owner_store_module
+import nexus.orchestrator.standing_grant_store as standing_store_module
 from nexus.contracts.autonomy_goal import (
     AutonomyActionClass,
     RepositoryIdentity,
@@ -60,6 +61,7 @@ from nexus.orchestrator.owner_representation_store import (
     owner_issues_exact_publication_authorization,
 )
 from nexus.orchestrator.standing_grant_store import (
+    StandingGrantKey,
     StandingGrantReceipt,
     _load_receipt_at,
     _write_standing_grant_receipt_at,
@@ -617,6 +619,14 @@ def test_happy_path_publishes_exactly_once_and_completes(
     result = publisher.publish(prepared)
     assert result["state"] == "COMPLETED"
     assert len(remote.writes) == 1
+
+
+def test_production_owner_issuance_requires_exact_key(tmp_path):
+    grant = _grant()
+    with pytest.raises(OwnerRepresentationGrantBlocked):
+        owner_store_module.authorize_owner_representation_grant_issuance(
+            grant, requested_at=NOW, standing_grant_path=None, standing_grant_key=None
+        )
 
 
 def test_completed_one_shot_cannot_be_replayed(
@@ -1806,3 +1816,132 @@ def test_positive_control_exact_owner_authorization_allows_a_once(
         publisher.publish(prepared)
     assert OwnerRepresentationReason.REPLAY_FORBIDDEN.value in str(exc.value)
     assert len(remote.writes) == 1
+
+
+def test_keyed_authority_rejects_simultaneous_path_and_key(grant_store, standing_grant_path):
+    """A keyed caller cannot fall back to an independently supplied path."""
+    from nexus.orchestrator.standing_grant_store import StandingGrantKey
+
+    grant = _grant(grant_id="key-selector", operation_id="op-key-selector")
+    now = datetime.now(timezone.utc)
+    owner_issues_exact_publication_authorization(
+        grant, issued_at=now, authority_root=grant_store.root
+    )
+    key = StandingGrantKey(OWNER_REPRESENTATION_STANDING_REPOSITORY, "goal-827", "thread-coord-1")
+    with pytest.raises(OwnerRepresentationGrantBlocked, match="AMBIGUOUS_AUTHORITY_SELECTOR"):
+        mint_owner_representation_publication_issuance_permit(
+            grant,
+            authority_root=grant_store.root,
+            standing_grant_path=standing_grant_path,
+            standing_grant_key=key,
+            requested_at=now,
+        )
+
+
+def _keyed_receipt(
+    *, repository: RepositoryIdentity, goal_id: str, thread_id: str, grant_id: str
+) -> tuple[StandingGrantKey, StandingGrantReceipt]:
+    context = StandingGrantContext.issue(
+        owner_id="owner-james",
+        coordinator_id="coordinator-codex",
+        repository=repository,
+        thread_id=thread_id,
+        goal_id=goal_id,
+        allowed_actions=(AutonomyActionClass.OWNER_REPRESENTATION_GRANT_ISSUE,),
+        issued_at=NOW - timedelta(hours=1),
+        expires_at=NOW + timedelta(hours=1),
+    )
+    receipt = StandingGrantReceipt.issue(grant_id=grant_id, context=context)
+    return standing_store_module.standing_grant_key(receipt), receipt
+
+
+def _write_keyed_receipt(monkeypatch, root: Path, receipt: StandingGrantReceipt) -> Path:
+    monkeypatch.setattr(standing_store_module, "DEFAULT_RECEIPT_PATH", root / "standing-grant.json")
+    standing_store_module.write_keyed_standing_grant_receipt(receipt)
+    return standing_store_module._keyed_receipt_path(
+        standing_store_module.standing_grant_key(receipt)
+    )
+
+
+def test_keyed_owner_representation_full_chain_revalidates_exact_key_at_publication(
+    grant_store, publisher, monkeypatch
+):
+    root = grant_store.root / "standing-authority"
+    key_a, receipt_a = _keyed_receipt(
+        repository=OWNER_REPRESENTATION_STANDING_REPOSITORY,
+        goal_id="goal-key-a",
+        thread_id="thread-key-a",
+        grant_id="standing-key-a",
+    )
+    _write_keyed_receipt(monkeypatch, root, receipt_a)
+    keyed_store = OwnerRepresentationGrantStore(root=grant_store.root, standing_grant_key=key_a)
+    grant = _grant(grant_id="keyed-full-chain", operation_id="op-keyed-full-chain")
+    now = datetime.now(timezone.utc)
+    auth = owner_issues_exact_publication_authorization(
+        grant, issued_at=now, authority_root=grant_store.root
+    )
+    permit = consume_exact_owner_authorization(
+        grant,
+        owner_authorization=auth,
+        authority_root=grant_store.root,
+        standing_grant_key=key_a,
+        requested_at=now,
+    )
+    keyed_store.issue(grant, issuance_permit=permit, requested_at=now)
+    permit_path = grant_store.root / "permits" / f"{permit['grant_receipt_hash']}.json"
+    record = json.loads(permit_path.read_text(encoding="utf-8"))
+    assert record["standing_grant_key"] == key_a.digest
+    assert record["permit_hash"] == canonical_autonomy_hash({
+        key: value for key, value in record.items() if key != "permit_hash"
+    })
+    decision = keyed_store.authorize(
+        grant.grant_hash,
+        _proposal(operation_id=grant.operation_id),
+        now=now + timedelta(minutes=1),
+    )
+    assert decision.publication_authorized is True
+
+
+def test_keyed_owner_representation_rejects_key_substitution_and_ignores_corrupt_sibling(
+    grant_store, monkeypatch
+):
+    root = grant_store.root / "standing-authority"
+    key_a, receipt_a = _keyed_receipt(
+        repository=OWNER_REPRESENTATION_STANDING_REPOSITORY,
+        goal_id="goal-key-a2",
+        thread_id="thread-key-a2",
+        grant_id="standing-key-a2",
+    )
+    key_b, receipt_b = _keyed_receipt(
+        repository=OWNER_REPRESENTATION_STANDING_REPOSITORY,
+        goal_id="goal-key-b2",
+        thread_id="thread-key-b2",
+        grant_id="standing-key-b2",
+    )
+    _write_keyed_receipt(monkeypatch, root, receipt_a)
+    _write_keyed_receipt(monkeypatch, root, receipt_b)
+    grant = _grant(grant_id="keyed-substitution", operation_id="op-keyed-substitution")
+    now = datetime.now(timezone.utc)
+    auth = owner_issues_exact_publication_authorization(
+        grant, issued_at=now, authority_root=grant_store.root
+    )
+    permit = consume_exact_owner_authorization(
+        grant,
+        owner_authorization=auth,
+        authority_root=grant_store.root,
+        standing_grant_key=key_a,
+        requested_at=now,
+    )
+    store_b = OwnerRepresentationGrantStore(root=grant_store.root, standing_grant_key=key_b)
+    with pytest.raises(OwnerRepresentationGrantBlocked):
+        store_b.issue(grant, issuance_permit=permit, requested_at=now)
+    store_a = OwnerRepresentationGrantStore(root=grant_store.root, standing_grant_key=key_a)
+    store_a.issue(grant, issuance_permit=permit, requested_at=now)
+    sibling = standing_store_module._keyed_receipt_path(key_b)
+    sibling.write_text("corrupt", encoding="utf-8")
+    decision = store_a.authorize(
+        grant.grant_hash,
+        _proposal(operation_id=grant.operation_id),
+        now=now + timedelta(minutes=1),
+    )
+    assert decision.publication_authorized is True

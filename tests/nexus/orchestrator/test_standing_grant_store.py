@@ -25,6 +25,7 @@ from nexus.orchestrator.standing_grant_store import (
     _restore_task_card_authority_at,
     _switch_task_card_authority_at,
     _write_standing_grant_receipt_at,
+    authorize_durable_standing_grant_effect,
     load_standing_grant_receipt,
     restore_task_card_authority,
     switch_task_card_authority,
@@ -378,6 +379,78 @@ def test_keyed_batch2_cas_isolation_and_stale_failure(tmp_path, monkeypatch):
         )
         == successor
     )
+
+
+def test_exact_key_authorizes_only_its_goal_and_no_key_fails_ambiguous(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    a = StandingGrantReceipt.issue(
+        grant_id="caller-a",
+        context=_make_context(goal_id="caller-goal-a", thread_id="caller-thread-a"),
+    )
+    b = StandingGrantReceipt.issue(
+        grant_id="caller-b",
+        context=_make_context(goal_id="caller-goal-b", thread_id="caller-thread-b"),
+    )
+    standing_grant_store.write_standing_grant_receipt(a)
+    standing_grant_store.write_standing_grant_receipt(b)
+    key_a = standing_grant_store.standing_grant_key(a)
+    authority = authorize_durable_standing_grant_effect(
+        repository=_repository(),
+        action=AutonomyActionClass.REPOSITORY_PUSH,
+        effect={"goal_id": "caller-goal-a"},
+        requested_at=NOW,
+        key=key_a,
+    )
+    assert authority["grant_id"] == a.grant_id
+    with pytest.raises(StandingGrantReceiptError, match="AMBIGUOUS_GRANT_KEY"):
+        authorize_durable_standing_grant_effect(
+            repository=_repository(),
+            action=AutonomyActionClass.REPOSITORY_PUSH,
+            effect={},
+            requested_at=NOW,
+        )
+
+
+def test_exact_key_ignores_corrupt_unrelated_sibling_and_rejects_substitution(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    a = StandingGrantReceipt.issue(grant_id="stable-a", context=_make_context(goal_id="stable-a"))
+    b = StandingGrantReceipt.issue(grant_id="broken-b", context=_make_context(goal_id="broken-b"))
+    standing_grant_store.write_standing_grant_receipt(a)
+    standing_grant_store.write_standing_grant_receipt(b)
+    b_path = standing_grant_store._keyed_receipt_path(standing_grant_store.standing_grant_key(b))
+    b_path.write_text("{corrupt", encoding="utf-8")
+    assert (
+        standing_grant_store.load_keyed_standing_grant_receipt(
+            standing_grant_store.standing_grant_key(a), now=NOW
+        )
+        == a
+    )
+    wrong = standing_grant_store.StandingGrantKey(_repository(), "missing-goal", "missing-thread")
+    with pytest.raises(StandingGrantReceiptError, match="RECEIPT_MISSING"):
+        authorize_durable_standing_grant_effect(
+            repository=_repository(),
+            action=AutonomyActionClass.REPOSITORY_PUSH,
+            effect={},
+            requested_at=NOW,
+            key=wrong,
+        )
+    other_repo = RepositoryIdentity(
+        repository_id="other/repo", canonical_remote="https://github.com/other/repo.git"
+    )
+    with pytest.raises(StandingGrantReceiptError, match="KEY_SCOPE_MISMATCH"):
+        authorize_durable_standing_grant_effect(
+            repository=other_repo,
+            action=AutonomyActionClass.REPOSITORY_PUSH,
+            effect={},
+            requested_at=NOW,
+            key=standing_grant_store.standing_grant_key(a),
+        )
 
 
 def test_keyed_batch2_wrong_digest_symlinks_permissions_and_tamper_fail_closed(

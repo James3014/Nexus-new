@@ -86,6 +86,7 @@ from nexus.contracts.owner_representation import (
     evaluate_owner_representation,
 )
 from nexus.orchestrator.standing_grant_store import (
+    StandingGrantKey,
     StandingGrantReceiptError,
     _authorize_durable_standing_grant_effect_at,
     _canonical_json,
@@ -323,6 +324,7 @@ def authorize_owner_representation_grant_issuance(
     *,
     standing_grant_path: Path | None = None,
     requested_at: datetime | None = None,
+    standing_grant_key: StandingGrantKey | None = None,
 ) -> dict[str, Any]:
     """Bind one exact Owner-representation grant issuance to the canonical
     durable Owner standing grant (``OWNER_REPRESENTATION_GRANT_ISSUE``).
@@ -339,14 +341,24 @@ def authorize_owner_representation_grant_issuance(
     effective_now = requested_at if requested_at is not None else datetime.now(timezone.utc)
     if not isinstance(effective_now, datetime) or effective_now.tzinfo is None:
         raise OwnerRepresentationGrantBlocked("EXACT_TIMEZONE_REQUIRED")
+    # A caller must choose exactly one durable authority selector.  Silently
+    # preferring the explicit path would let a keyed caller substitute a
+    # different standing-grant record and leave the permit key unbound.
+    if standing_grant_path is not None and standing_grant_key is not None:
+        raise OwnerRepresentationGrantBlocked("AMBIGUOUS_AUTHORITY_SELECTOR")
     repository = _repository_identity_for_destination(grant.destination)
     effect = owner_representation_issuance_effect(grant)
     if standing_grant_path is None:
+        if not isinstance(standing_grant_key, StandingGrantKey):
+            raise OwnerRepresentationGrantBlocked(
+                OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REQUIRED.value
+            )
         return authorize_durable_standing_grant_effect(
             repository=repository,
             action=AutonomyActionClass.OWNER_REPRESENTATION_GRANT_ISSUE,
             effect=effect,
             requested_at=effective_now,
+            key=standing_grant_key,
         )
     return _authorize_durable_standing_grant_effect_at(
         Path(standing_grant_path),
@@ -804,6 +816,7 @@ def consume_exact_owner_authorization(
     standing_grant_path: Path | None = None,
     requested_at: datetime | None = None,
     expires_at: datetime | None = None,
+    standing_grant_key: StandingGrantKey | None = None,
 ) -> dict[str, Any]:
     """Consume one exact Owner authorization to mint a sealed issuance permit."""
     root = (
@@ -818,6 +831,7 @@ def consume_exact_owner_authorization(
         requested_at=requested_at,
         expires_at=expires_at,
         owner_authorization=owner_authorization,
+        standing_grant_key=standing_grant_key,
     )
 
 
@@ -829,6 +843,7 @@ def mint_owner_representation_publication_issuance_permit(
     requested_at: datetime | None = None,
     expires_at: datetime | None = None,
     owner_authorization: OwnerExactPublicationAuthorization | Mapping[str, Any] | None = None,
+    standing_grant_key: StandingGrantKey | None = None,
 ) -> dict[str, Any]:
     """Mint the exact sealed one-shot issuance permit for one owned grant."""
     if not isinstance(grant, OwnerRepresentationGrant):
@@ -864,6 +879,7 @@ def mint_owner_representation_publication_issuance_permit(
             grant,
             standing_grant_path=standing_grant_path,
             requested_at=effective_now,
+            standing_grant_key=standing_grant_key,
         )
     except OwnerRepresentationGrantStoreError:
         raise
@@ -889,6 +905,9 @@ def mint_owner_representation_publication_issuance_permit(
         "repository": allowed.get("repository"),
         "requested_at": effective_now.isoformat(),
         "expires_at": permit_expires.isoformat(),
+        "standing_grant_key": (
+            standing_grant_key.digest if standing_grant_key is not None else None
+        ),
     }
     record = {
         **payload,
@@ -954,6 +973,7 @@ def _authorize_at(
     proposal: ExternalPublicationProposal,
     now: datetime | None,
     standing_grant_path: Path | None = None,
+    standing_grant_key: StandingGrantKey | None = None,
 ) -> OwnerRepresentationDecision:
     """Revalidate one issued grant against one exact proposal right now.
 
@@ -977,6 +997,8 @@ def _authorize_at(
     evaluator.
     """
     record = _require_issued(root, grant_hash)
+    if standing_grant_path is not None and standing_grant_key is not None:
+        raise OwnerRepresentationGrantStoreError("AMBIGUOUS_AUTHORITY_SELECTOR")
     if _has_revocation(root, grant_hash):
         return _blocked_decision(
             proposal, OwnerRepresentationReason.GRANT_REVOKED, grant_hash=grant_hash
@@ -1054,6 +1076,7 @@ def _authorize_at(
             grant,
             standing_grant_path=standing_grant_path,
             requested_at=effective_now,
+            standing_grant_key=standing_grant_key,
         )
     except OwnerRepresentationGrantStoreError:
         raise
@@ -1066,6 +1089,7 @@ def _authorize_at(
         "repository",
         "effect_hash",
         "action",
+        "standing_grant_key",
     )
     for key in invariant_fields:
         if fresh.get(key) != permit.get(key):
@@ -1092,11 +1116,13 @@ class OwnerRepresentationGrantStore:
         root: Path | None = None,
         *,
         standing_grant_path: Path | None = None,
+        standing_grant_key: StandingGrantKey | None = None,
     ) -> None:
         self.root = Path(root) if root is not None else DEFAULT_OWNER_REPRESENTATION_AUTHORITY_ROOT
         self.standing_grant_path = (
             Path(standing_grant_path) if standing_grant_path is not None else None
         )
+        self.standing_grant_key = standing_grant_key
 
     def issue(
         self,
@@ -1193,6 +1219,7 @@ class OwnerRepresentationGrantStore:
                 grant,
                 standing_grant_path=self.standing_grant_path,
                 requested_at=now,
+                standing_grant_key=self.standing_grant_key,
             )
         except OwnerRepresentationGrantBlocked:
             raise
@@ -1339,6 +1366,7 @@ class OwnerRepresentationGrantStore:
             proposal,
             now,
             standing_grant_path=self.standing_grant_path,
+            standing_grant_key=self.standing_grant_key,
         )
 
     def inspect_grant(self, grant_hash: str) -> Mapping[str, Any]:
@@ -1386,6 +1414,7 @@ def issue_owner_representation_grant(
     requested_at: datetime | None = None,
     supersedes_grant_hash: str | None = None,
     owner_authorization: OwnerExactPublicationAuthorization | Mapping[str, Any] | None = None,
+    standing_grant_key: StandingGrantKey | None = None,
 ) -> Path:
     """Persist one one-shot Owner-representation grant to the canonical root.
 
@@ -1402,8 +1431,9 @@ def issue_owner_representation_grant(
         owner_authorization=owner_authorization,
         authority_root=DEFAULT_OWNER_REPRESENTATION_AUTHORITY_ROOT,
         requested_at=now,
+        standing_grant_key=standing_grant_key,
     )
-    return OwnerRepresentationGrantStore().issue(
+    return OwnerRepresentationGrantStore(standing_grant_key=standing_grant_key).issue(
         grant,
         issuance_permit=permit,
         requested_at=now,
