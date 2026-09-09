@@ -1324,8 +1324,13 @@ def test_public_switch_and_restore_use_canonical_path_and_reject_receipt_path(
     )
     orig_receipt = StandingGrantReceipt.issue(grant_id="grant-pub", context=context)
     _write_standing_grant_receipt_at(orig_receipt, canonical_path)
+    predecessor_key = StandingGrantKey(_repository(), "goal-pub", "thread-pub")
+    predecessor_path = standing_grant_store._keyed_receipt_path(predecessor_key)
+    write_keyed_standing_grant_receipt(orig_receipt)
+    predecessor_bytes = predecessor_path.read_bytes()
+    legacy_bytes = canonical_path.read_bytes()
 
-    # Public APIs reject arbitrary receipt_path argument
+    # Public APIs require an exact key and reject arbitrary receipt_path args.
     with pytest.raises(TypeError):
         switch_task_card_authority(  # type: ignore[call-arg]
             attempt_key="attempt-pub-1",
@@ -1347,8 +1352,8 @@ def test_public_switch_and_restore_use_canonical_path_and_reject_receipt_path(
             receipt_path=canonical_path,
         )
 
-    # Public API operates correctly on canonical DEFAULT_RECEIPT_PATH
     switched = switch_task_card_authority(
+        current_key=predecessor_key,
         attempt_key="attempt-pub-switch",
         expected_current_receipt_hash=orig_receipt.receipt_hash,
         expected_current_goal_id="goal-pub",
@@ -1363,6 +1368,7 @@ def test_public_switch_and_restore_use_canonical_path_and_reject_receipt_path(
     op_id = switched["switch_operation_id"]
 
     restored = restore_task_card_authority(
+        current_key=predecessor_key,
         attempt_key="attempt-pub-restore",
         switch_operation_id=op_id,
         expected_temporary_receipt_hash=temp_hash,
@@ -1370,7 +1376,11 @@ def test_public_switch_and_restore_use_canonical_path_and_reject_receipt_path(
         now=NOW,
     )
     assert restored["status"] == "RESTORED"
-    assert restored["restored_goal_id"] == "goal-pub"
+    assert predecessor_path.read_bytes() == predecessor_bytes
+    assert canonical_path.read_bytes() == legacy_bytes
+    temporary_key = StandingGrantKey(_repository(), "goal-succ", "thread-succ")
+    with pytest.raises(StandingGrantReceiptError, match="REVOKED"):
+        load_keyed_standing_grant_receipt(temporary_key, now=NOW)
 
 
 def test_switch_crash_before_cas_replay_succeeds(tmp_path, monkeypatch):
