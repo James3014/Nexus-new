@@ -40,7 +40,14 @@ def _held_runtime(tmp_path, *, historical=False):
     )
     registry.register(effect, snapshot=lambda: b"", process_state=lambda: "idle", pending=lambda: ())
     if historical:
-        registry.acquire(root=root,role="runtime_receipt",writer_id="writer-0",generation=0,operation_id="historical-operation",transaction_id="historical-tx").close("failed")
+        def previous_operation():
+            registry.acquire(root=root,role="runtime_receipt",writer_id="writer-0",generation=0,operation_id="historical-operation",transaction_id="historical-tx").close("failed")
+        if historical == "thread":
+            worker = threading.Thread(target=previous_operation)
+            worker.start()
+            worker.join()
+        else:
+            previous_operation()
     hold = registry.begin_hold((root,), cohort_id="cold-start")
     for item in hold.selected:
         hold.acknowledge(item.identity.writer_id, root=root, role=item.identity.role, generation=0)
@@ -513,9 +520,10 @@ def test_released_history_session_membership_requires_receipt_chain(tmp_path):
         registry._history_validate_rows(data,recover=True)
 
 
-def test_b_terminal_reconciliation_uses_issued_proof_without_host_module(tmp_path,monkeypatch):
+@pytest.mark.parametrize("historical", [True, "thread"])
+def test_b_terminal_reconciliation_uses_issued_proof_without_host_module(tmp_path,monkeypatch,historical):
     import builtins
-    registry,prepare,payload,save,_ = _recovery(tmp_path,historical=True)
+    registry,prepare,payload,save,_ = _recovery(tmp_path,historical=historical)
     proof = prepare()
     successor = save(dict(payload,prior_digest=payload["receipt_sha256"],process_start_identity=registry.process_start_identity,server_identity=registry.server_identity))
     registry.adopt_recovered_hold(proof,expected_successor_sha256=successor["receipt_sha256"])

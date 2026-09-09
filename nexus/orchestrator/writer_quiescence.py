@@ -2060,11 +2060,13 @@ class WriterRegistry:
             drain = WriterQuiescenceReceipt.from_bytes(raw).verify()
             if _hash(raw) != original["bytes_sha256"] or drain.drain_state != DRAINED or drain.cohort_id != proof._cohort_id or drain.hold_epoch != facts.hold.epoch or drain.ordered_roots != proof._roots or drain.source_identity != self.source_identity:
                 raise WriterAdmissionDenied("original terminal history drain mismatch")
-            selected = {x.identity for x in drain.observations}
+            def writer_binding(identity):
+                return (identity.root, identity.role, identity.source_identity, identity.process_start_identity, identity.generation, identity.writer_id)
+            selected = {writer_binding(x.identity) for x in drain.observations}
             qualified = {}
             producers = set()
             for lease in drain.leases:
-                if lease.identity not in selected or lease.exited_at is None or lease.expires_at is None or lease.durable_outcome not in {"committed", "failed"} or not lease.entered_at <= lease.exited_at <= lease.expires_at:
+                if writer_binding(lease.identity) not in selected or lease.exited_at is None or lease.expires_at is None or lease.durable_outcome not in {"committed", "failed"} or not lease.entered_at <= lease.exited_at <= lease.expires_at:
                     raise WriterAdmissionDenied("original terminal history identity invalid")
                 path = self._lease_path(lease.identity.root, lease.operation_id)
                 expected = _json_bytes(lease.to_dict())

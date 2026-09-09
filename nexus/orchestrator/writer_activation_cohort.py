@@ -719,9 +719,15 @@ class WriterActivationCohort:
             if drain.drain_state != DRAINED:
                 raise WriterActivationError("COLLECTOR_NOT_DRAINED")
             existing_transitions = list(self._last.transitions) if self._last else []
+            resumed_state = "HOLDING" if self._last is None else self._last.state
+            if resumed_state == "REACQUIRING":
+                # A prior process's observed vector is not current admission
+                # evidence. Reconcile A under the unchanged hold before
+                # observing and committing the complete loaded vector again.
+                resumed_state = "PARTIAL_UNKNOWN"
             current = self._save(
                 self._receipt(
-                    "HOLDING" if self._last is None else self._last.state,
+                    resumed_state,
                     drain=drain,
                     transitions=existing_transitions,
                     prior=prior,

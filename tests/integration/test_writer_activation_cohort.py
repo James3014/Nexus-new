@@ -1311,7 +1311,7 @@ def test_generation_zero_three_root_full_activation_and_four_role_writes(tmp_pat
         assert read_manifest(Path(root.root)).state == "COMMITTED"
 
 
-@pytest.mark.parametrize("boundary", ["APPLYING:1", "ACTIVE:3", "ACTIVE:3:retry", "ACTIVE:3:release_ack"])
+@pytest.mark.parametrize("boundary", ["APPLYING:1", "REACQUIRING:3", "ACTIVE:3", "ACTIVE:3:retry", "ACTIVE:3:release_ack"])
 def test_generation_zero_child_crash_recovers_original_hold(tmp_path, boundary, monkeypatch):
     import subprocess
     import sys
