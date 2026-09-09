@@ -21,6 +21,13 @@ from nexus.core.context_compression import ToonRenderer, ContextScorer
 
 logger = logging.getLogger("nexus.context_hub")
 
+
+def _runtime_policy(project_root: Path) -> dict[str, Any]:
+    from nexus.core.policy_loader import PolicyLoader
+
+    policy = PolicyLoader.load(str(project_root))
+    return {"global_nas_aggression": float(getattr(policy, "global_nas_aggression", 0.0))}
+
 class ContextHub:
     """
     🧠 Nexus Context Hub
@@ -114,7 +121,7 @@ class ContextHub:
             ),
             dialogue_pruner=prune_dialogue,
             learning_writer=build_legacy_learning_writer(self.project_root, self.run_dir),
-            policy_reader=lambda: __import__("nexus.core.policy_loader", fromlist=["PolicyLoader"]).PolicyLoader.load(str(self.project_root)),
+            policy_reader=lambda: _runtime_policy(self.project_root),
             handoff_reader=self._load_last_handoff,
         )
 
