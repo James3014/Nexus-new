@@ -5,7 +5,10 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Mapping, Sequence
 
-from nexus.contracts.context_budget import build_context_budget_receipt, validate_context_budget_receipt
+from nexus.contracts.context_budget import (
+    build_context_budget_receipt,
+    validate_context_budget_receipt,
+)
 
 
 CONTEXT_ASSEMBLY_CONTRACT_SCHEMA = "nexus.context_assembly_contract.v1"
@@ -40,6 +43,7 @@ class ContextAssemblyContract:
     task_id: str
     receipt: Mapping[str, Any]
     context_policy: str = "preserve_l0_l1_hard_budget"
+    schema: str = CONTEXT_ASSEMBLY_CONTRACT_SCHEMA
     attempt_id: str = ""
     planner_decision_id: str = ""
     planner_plan_hash: str = ""
@@ -48,13 +52,12 @@ class ContextAssemblyContract:
     source_provenance_refs: tuple[Mapping[str, Any], ...] = ()
     consumer_role: str = ""
     consumer_channel: str = ""
-    worker_binding: Mapping[str, str] = field(default_factory=dict)
-    schema: str = CONTEXT_ASSEMBLY_CONTRACT_SCHEMA
+    worker_binding: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         selected_capability_ids = _normalize_ids(self.selected_capability_ids)
         source_provenance_refs = [dict(item) for item in self.source_provenance_refs]
-        worker_binding = {str(key): str(value) for key, value in self.worker_binding.items()}
+        worker_binding = {str(key): value for key, value in self.worker_binding.items()}
         payload: dict[str, Any] = {
             "schema": self.schema,
             "task_id": self.task_id,
@@ -117,9 +120,15 @@ def build_context_assembly_contract(
     source_provenance_refs: Sequence[Mapping[str, Any]] = (),
     consumer_role: str = "",
     consumer_channel: str = "",
-    worker_binding: Mapping[str, str] | None = None,
+    worker_binding: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if isinstance(selected_capability_ids, (str, bytes)):
+        raise ValueError("invalid_selected_capability_ids")
+    normalized_selected_capability_ids = tuple(selected_capability_ids)
+    if any(
+        not isinstance(item, str) or not item.strip()
+        for item in normalized_selected_capability_ids
+    ):
         raise ValueError("invalid_selected_capability_ids")
     receipt = build_context_budget_receipt(sources, token_budget=token_budget).to_dict()
     return ContextAssemblyContract(
@@ -129,7 +138,7 @@ def build_context_assembly_contract(
         attempt_id=attempt_id,
         planner_decision_id=planner_decision_id,
         planner_plan_hash=planner_plan_hash,
-        selected_capability_ids=tuple(selected_capability_ids),
+        selected_capability_ids=normalized_selected_capability_ids,
         source_mode=source_mode,
         source_provenance_refs=tuple(source_provenance_refs),
         consumer_role=consumer_role,
@@ -154,7 +163,10 @@ def validate_context_assembly_contract(payload: Mapping[str, Any]) -> list[str]:
         blockers.append("receipt_not_pass")
 
     raw_selected_capability_ids = payload.get("selected_capability_ids", ()) or ()
-    if not isinstance(raw_selected_capability_ids, (list, tuple)):
+    if not isinstance(raw_selected_capability_ids, (list, tuple)) or any(
+        not isinstance(item, str) or not item.strip()
+        for item in raw_selected_capability_ids
+    ):
         blockers.append("invalid_selected_capability_ids")
         selected_capability_ids: list[str] = []
     else:
@@ -233,8 +245,8 @@ def _receipt_source_ids(receipt: Mapping[str, Any], *, key: str) -> list[str]:
     )
 
 
-def _normalize_ids(values: Sequence[Any]) -> list[str]:
-    return sorted({str(value).strip() for value in values if str(value).strip()})
+def _normalize_ids(values: Sequence[str]) -> list[str]:
+    return sorted({value.strip() for value in values if value.strip()})
 
 
 def _planner_binding_status(payload: Mapping[str, Any]) -> str:
@@ -248,11 +260,13 @@ def _planner_binding_status(payload: Mapping[str, Any]) -> str:
 
 
 def _context_package_hash(payload: Mapping[str, Any]) -> str:
-    basis = {
-        key: _canonical_json_value(payload.get(key))
-        for key in _PACKAGE_HASH_FIELDS
-    }
-    encoded = json.dumps(basis, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    basis = {key: _canonical_json_value(payload.get(key)) for key in _PACKAGE_HASH_FIELDS}
+    encoded = json.dumps(
+        basis,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
 
