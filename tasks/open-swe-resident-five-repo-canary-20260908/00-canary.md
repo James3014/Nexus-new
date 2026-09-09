@@ -66,8 +66,8 @@ The canary reached the recorded bounded Candidate state with these exact binding
 - Unit Candidate `2d41308d27999f210627981a933f8f0da95e54f0`; Task Candidate `c5979ffbc664e019f6790bc5f6c84210749fa43c`; tree `a85cd07d4dc2d17f7551869565fcbc2fcf6512f3`
 - Task Card hash `d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1`
 - Whole-task verification `512530748d61ea0537f5019956bbf07bbbec33a9e724a0790bdeb15cd47d3c6d` (`PASS`)
-- Five-mount receipt `b893c704f2b8e2632d94c203f44a25a87f32dc9e9758ab5f9ac2d1ec0fb4d2b1`
-- Final rollback/restored-final capsule `ec02d8d07d681b88751ba20b7e1fbb8afdf1e103882554926fd5a4d6511a7694`
+- Worker receipt `b893c704f2b8e2632d94c203f44a25a87f32dc9e9758ab5f9ac2d1ec0fb4d2b1`; five-mount receipt SHA `89d36c80399c15a4fe306c28318f4108d4b64cd90a1c94c643e8892bf4576f53`
+- Final rollback/restore receipt SHA `1b7ce771a8b4aa14e94045a36b0a9aeeabcd9ed09b4a986ce1d87b1326907888`; closure capsule `ec02d8d07d681b88751ba20b7e1fbb8afdf1e103882554926fd5a4d6511a7694`
 - Resident final READY run `0eb9a96de9f64454b21362a141a7d41a`
 
-The acceptance packet remains `TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE` with gate `PENDING_INDEPENDENT_ACCEPTANCE`. `AUTO_CHAIN=false` remains in force. This canary closeout does not authorize approval, merge, push, release, production readiness, or mutation of the other mounted repositories.
+The original acceptance packet records `TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE` with gate `PENDING_INDEPENDENT_ACCEPTANCE`; controller acceptance receipt `9638ef72801a31ca84560b8b7d3d99bd512925b593f7b535b993b762b5860cf6` later records `CANDIDATE_ACCEPTED_FOR_R28_ACTIVATION_WITNESS`. `AUTO_CHAIN=false` remains in force. This canary closeout does not authorize approval, merge, push, release, production readiness, or mutation of the other mounted repositories.

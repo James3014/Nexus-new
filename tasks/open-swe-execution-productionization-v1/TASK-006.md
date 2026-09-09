@@ -176,7 +176,7 @@ Additionally verify all five `origin` identities and fetched main SHAs, config a
 
 ## Exit
 
-- **PASS:** r28 source/runtime/config/PID-bound evidence, five-mount witness, rollback/restored-final evidence, and one harmless unattended canary reach the recorded verified Candidate boundary; acceptance remains pending.
+- **PASS:** r28 source/runtime/config/PID-bound evidence, five-mount witness, rollback/restored-final evidence, and one harmless unattended canary reaches the recorded independently accepted Candidate boundary.
 - **BLOCK:** any identity drift, missing canonical clone, stale readiness, Web hard block, unknown operation, verifier failure, or rollback uncertainty.
 
 The r28 closeout is documentation-only and does not claim source merge, independent acceptance, release, production readiness, or mutation readiness across all five repositories.
@@ -196,8 +196,10 @@ TASK-006 closes at its existing bounded claim ceiling against the following exac
 - Task Card hash: `d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1`
 - Whole-task verification: `512530748d61ea0537f5019956bbf07bbbec33a9e724a0790bdeb15cd47d3c6d` (`PASS`)
 - Acceptance packet: `1b089e62d2077fbc18e96e37952128155c63cec4d07d86b798075a9fef555b93`
-- Five-mount worker receipt: `b893c704f2b8e2632d94c203f44a25a87f32dc9e9758ab5f9ac2d1ec0fb4d2b1`
-- Final rollback/restored-final closeout capsule: `ec02d8d07d681b88751ba20b7e1fbb8afdf1e103882554926fd5a4d6511a7694`
+- Worker receipt: `b893c704f2b8e2632d94c203f44a25a87f32dc9e9758ab5f9ac2d1ec0fb4d2b1`
+- Five-mount receipt SHA: `89d36c80399c15a4fe306c28318f4108d4b64cd90a1c94c643e8892bf4576f53`
+- Final rollback/restore receipt SHA: `1b7ce771a8b4aa14e94045a36b0a9aeeabcd9ed09b4a986ce1d87b1326907888`
+- Closure capsule: `ec02d8d07d681b88751ba20b7e1fbb8afdf1e103882554926fd5a4d6511a7694`
 - Resident final READY run: `0eb9a96de9f64454b21362a141a7d41a`
 
-The acceptance packet and closure capsule both remain `TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE` with gate `PENDING_INDEPENDENT_ACCEPTANCE`. This closeout preserves r21-r27 historical fail-closed evidence, `AUTO_CHAIN=false`, and all no-approval, no-merge, no-push, no-release, and no-production boundaries. It does not claim that all five repositories are mutation-ready; each future job still requires its own Task Card, exact Issue contract, verifiers, and independent Candidate acceptance.
+The original acceptance packet and closure capsule record `TASK_CANDIDATE_VERIFIED_PENDING_INDEPENDENT_ACCEPTANCE` with gate `PENDING_INDEPENDENT_ACCEPTANCE` as historical artifact state; controller receipt `9638ef72801a31ca84560b8b7d3d99bd512925b593f7b535b993b762b5860cf6` records independent acceptance. This closeout preserves r21-r27 historical fail-closed evidence, `AUTO_CHAIN=false`, and all no-approval, no-merge, no-push, no-release, and no-production boundaries. It does not claim that all five repositories are mutation-ready; each future job still requires its own Task Card, exact Issue contract, verifiers, and independent Candidate acceptance.
