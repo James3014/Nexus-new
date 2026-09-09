@@ -63,7 +63,8 @@ class ContextAssemblyContract:
                 "preserved_L0_L1": bool(self.receipt.get("preserved_L0_L1", False)),
                 "blockers": blockers,
                 "claim_boundary": [
-                    "Context assembly materializes already-selected bounded context under budget only.",
+                    "Context assembly contracts select context under budget only.",
+                    "Materialization is limited to already-selected bounded context; it does not create route or selection authority.",
                     "It does not select capabilities, route, provider, model, verifier, or claim authority.",
                     "selected, materialized, serialized, physically_consumed, and outcome_contributed remain distinct states.",
                 ],
