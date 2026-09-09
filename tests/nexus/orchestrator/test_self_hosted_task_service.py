@@ -8720,6 +8720,50 @@ def test_canonical_continuity_read_preserves_event_store_integrity_error(monkeyp
         SelfHostedTaskService.read_canonical_attempt_events("task-1", "attempt-1")
 
 
+def test_production_checkpoint_bootstraps_canonical_event_stream_without_manual_configure(
+    tmp_path, monkeypatch
+):
+    """The public service owns first-write EventBus initialization."""
+    canonical_state = tmp_path / "canonical-state"
+    monkeypatch.setenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", str(canonical_state))
+    monkeypatch.setattr(NexusEventBus, "_event_log_path", None)
+    monkeypatch.setattr(NexusEventBus, "_production_event_root", None, raising=False)
+    monkeypatch.setattr(NexusEventBus, "_configured_event_root", None, raising=False)
+    monkeypatch.setattr(NexusEventBus, "_event_bind_mode", None, raising=False)
+    monkeypatch.setattr(NexusEventBus._log_store, "event_log_path", None)
+    monkeypatch.setattr(NexusEventBus._log_store, "lock_path", None)
+    service = SelfHostedTaskService(auto_reconcile=False)
+    task_id, attempt_id = "production-bootstrap", "attempt-1"
+    service._write_state(
+        task_id, {"task_id": task_id, "attempt_id": attempt_id, "status": "CREATED"}
+    )
+
+    service._checkpoint(task_id, "WORKER_RUNNING", attempt_id=attempt_id)
+
+    assert (canonical_state / ".nexus" / "events" / "event_log.jsonl").exists()
+    assert service.rehydrate_task_continuation(task_id, attempt_id)["task_identity"] == {
+        "task_id": task_id,
+        "attempt_id": attempt_id,
+    }
+
+
+def test_production_read_only_rehydration_does_not_create_event_store(tmp_path, monkeypatch):
+    canonical_state = tmp_path / "canonical-state"
+    monkeypatch.setenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", str(canonical_state))
+    monkeypatch.setattr(NexusEventBus, "_event_log_path", None)
+    monkeypatch.setattr(NexusEventBus, "_production_event_root", None, raising=False)
+    monkeypatch.setattr(NexusEventBus, "_configured_event_root", None, raising=False)
+    monkeypatch.setattr(NexusEventBus, "_event_bind_mode", None, raising=False)
+    service = SelfHostedTaskService(auto_reconcile=False)
+    service._write_state(
+        "readonly-bootstrap",
+        {"task_id": "readonly-bootstrap", "attempt_id": "a1", "status": "FINAL_BLOCK"},
+    )
+    with pytest.raises(ValueError, match="attempt continuity stream is empty"):
+        service.rehydrate_task_continuation("readonly-bootstrap", "a1")
+    assert not (canonical_state / ".nexus" / "events").exists()
+
+
 def test_rehydrate_task_continuation_restart_from_disk_and_read_only(tmp_path):
     NexusEventBus.configure(tmp_path)
     state_dir = tmp_path / "state"
