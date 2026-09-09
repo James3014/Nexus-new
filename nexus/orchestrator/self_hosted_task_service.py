@@ -4755,6 +4755,25 @@ class SelfHostedTaskService:
             )
         return states
 
+    def find_tasks_by_repository_issue(
+        self, repository: str, issue_number: int
+    ) -> list[dict[str, Any]]:
+        """Read tasks whose persisted request binds exactly to repository and issue."""
+        repository = str(repository).strip()
+        issue = str(issue_number).strip()
+        matches: list[dict[str, Any]] = []
+        for state in self._workspace_task_states().values():
+            request = state.get("request") if isinstance(state.get("request"), Mapping) else {}
+            bound_repository = str(
+                request.get("repository") or state.get("repository") or ""
+            ).strip()
+            bound_issue = str(
+                request.get("issue") or request.get("issue_number") or state.get("issue") or ""
+            ).strip()
+            if bound_repository == repository and bound_issue == issue:
+                matches.append(state)
+        return matches
+
     def workspace_inventory(
         self,
         *,

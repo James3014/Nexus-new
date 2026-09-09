@@ -532,6 +532,53 @@ def _git(*args: str, timeout: float = 3.0) -> str:
     return result.stdout
 
 
+def observe_github_issue(repository: str, issue_number: int) -> dict[str, Any]:
+    """Fresh, bounded GitHub observation; never writes or infers missing state."""
+    try:
+        result = subprocess.run(
+            [
+                "gh", "issue", "view", str(issue_number), "--repo", repository,
+                "--json", "number,state,updatedAt,url",
+            ],
+            cwd=CANONICAL_SOURCE_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {
+            "ok": False,
+            "blocker": "GITHUB_ISSUE_OBSERVER_UNAVAILABLE",
+            "detail": str(exc),
+        }
+    if result.returncode != 0:
+        return {
+            "ok": False,
+            "blocker": "GITHUB_ISSUE_OBSERVER_UNAVAILABLE",
+            "detail": result.stderr.strip(),
+        }
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        return {
+            "ok": False,
+            "blocker": "GITHUB_ISSUE_OBSERVER_UNAVAILABLE",
+            "detail": str(exc),
+        }
+    if not isinstance(payload, Mapping) or str(payload.get("number")) != str(issue_number):
+        return {
+            "ok": False,
+            "blocker": "GITHUB_ISSUE_OBSERVER_UNAVAILABLE",
+            "detail": "issue identity mismatch",
+        }
+    return {
+        "ok": True,
+        "issue": dict(payload),
+        "observed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def _bounded_text(value: str, field: str) -> str:
     if len(value.encode("utf-8")) > MAX_RESULT_BYTES:
         raise RuntimeError(f"{field} exceeds {MAX_RESULT_BYTES} bytes")
@@ -1202,7 +1249,14 @@ def _evaluate_freshness(
 class UnifiedMCPGateway:
     """JSON-RPC MCP server with one public identity and bounded tools."""
 
-    def __init__(self, service: Optional[SelfHostedTaskService] = None, *, model_runner: Any = None, apply_runner: Any = None):
+    def __init__(
+        self,
+        service: Optional[SelfHostedTaskService] = None,
+        *,
+        model_runner: Any = None,
+        apply_runner: Any = None,
+        github_issue_observer: Any = None,
+    ):
         self.service = service or SelfHostedTaskService()
         # These kwargs remain accepted for compatibility with older callers,
         # but neither runner is a gateway authority.  Assisted jobs are
@@ -1216,6 +1270,7 @@ class UnifiedMCPGateway:
         self._calibration_planner = CalibrationPlanner(self._lineage_registry)
         self._assist_processes: dict[str, subprocess.Popen[str]] = {}
         self._assist_lock = threading.RLock()
+        self._github_issue_observer = github_issue_observer or observe_github_issue
 
     @staticmethod
     def _utc_now() -> str:
@@ -3600,6 +3655,23 @@ class UnifiedMCPGateway:
                 "inputSchema": {"type": "object", "properties": {}},
             },
             {
+                "name": "nexus_project_entry",
+                "description": (
+                    "Freshly observe one GitHub Issue and rehydrate only its exact "
+                    "canonical task binding; observe-only."
+                ),
+                "inputSchema": {
+                    "type": "object",
+                    "required": ["repository_owner", "repository_name", "issue_number"],
+                    "properties": {
+                        "repository_owner": {"type": "string", "maxLength": 128},
+                        "repository_name": {"type": "string", "maxLength": 128},
+                        "issue_number": {"type": "integer", "minimum": 1},
+                    },
+                    "additionalProperties": False,
+                },
+            },
+            {
                 "name": "nexus_execution_readiness",
                 "description": (
                     "Evaluate the pre-execution readiness convergence gate: exactly one typed "
@@ -4417,6 +4489,84 @@ class UnifiedMCPGateway:
             "satisfied": result.request_satisfies_certification_fence(),
         }
         return payload
+
+    def _project_entry(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        owner = _text(arguments.get("repository_owner"), "repository_owner", max_length=128)
+        name = _text(arguments.get("repository_name"), "repository_name", max_length=128)
+        raw_issue = arguments.get("issue_number")
+        if isinstance(raw_issue, bool) or not isinstance(raw_issue, int) or raw_issue <= 0:
+            raise GatewayInputError("issue_number must be a positive integer")
+        repository = f"{owner}/{name}"
+        if repository != GITHUB_REPOSITORY.repository_id:
+            raise GatewayInputError("PROJECT_ENTRY_REPOSITORY_MISMATCH")
+        try:
+            origin = _git("config", "--get", "remote.origin.url").strip()
+            head = _git("rev-parse", "HEAD").strip()
+            tree = _git("rev-parse", "HEAD^{tree}").strip()
+        except RuntimeError as exc:
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_SOURCE_OBSERVER_FAILED", str(exc))
+        if not _SHA_RE.fullmatch(head) or not _SHA_RE.fullmatch(tree):
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_SOURCE_OBSERVER_FAILED", "invalid source identity")
+        normalized_origin = origin.removesuffix(".git").rstrip("/")
+        if normalized_origin.startswith("git@github.com:"):
+            normalized_origin = "github.com/" + normalized_origin.split(":", 1)[1]
+        else:
+            normalized_origin = normalized_origin.split("://")[-1]
+        if normalized_origin.lower().endswith("github.com/" + repository.lower()) is False:
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_REPOSITORY_MISMATCH", origin)
+        observation = self._github_issue_observer(repository, raw_issue)
+        if not isinstance(observation, Mapping) or observation.get("ok") is not True:
+            detail = observation.get("detail", "observer unavailable") if isinstance(observation, Mapping) else "observer unavailable"
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_GITHUB_OBSERVER_FAILED", str(detail))
+        issue = observation.get("issue")
+        if not isinstance(issue, Mapping) or str(issue.get("number")) != str(raw_issue):
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_GITHUB_OBSERVER_FAILED", "issue identity mismatch")
+        try:
+            matches = self.service.find_tasks_by_repository_issue(repository, raw_issue)
+        except Exception as exc:
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_TASK_RESOLUTION_FAILED", str(exc))
+        if len(matches) > 1:
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_AMBIGUOUS_TASK_BINDING", "multiple exact task bindings")
+        readiness_args = {
+            "repository_owner": owner, "repository_name": name,
+            "intended_source_commit": head, "intended_source_tree": tree,
+            "execution_realm": "in_process_preflight",
+            "required_action_family": "project_entry_observe",
+            "execution_contract_kind": "observe_only",
+        }
+        if not matches:
+            readiness = self._gateway_execution_readiness(readiness_args)
+            return {"schema": "nexus.project_entry.v1", "status": "NO_TASK", "repository": repository,
+                    "issue": dict(issue), "source": {"commit": head, "tree": tree},
+                    "issue_observation": dict(observation), "task_resolution": {"status": "NO_EXACT_TASK"},
+                    "readiness_request": readiness_args, "readiness_result": readiness,
+                    "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS",
+                    "claim_ceiling_excludes": ["execution", "verification", "acceptance", "merge", "release", "production"]}
+        state = matches[0]
+        task_id = str(state.get("task_id") or "")
+        try:
+            projection = self.service.rehydrate_task_continuation(task_id, state.get("attempt_id"))
+        except Exception as exc:
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_CONTINUATION_INVALID", str(exc), task_id=task_id)
+        readiness_args["task_campaign_goal_identity"] = task_id
+        readiness = self._gateway_execution_readiness(readiness_args)
+        return {"schema": "nexus.project_entry.v1", "status": "TASK_REHYDRATED", "repository": repository,
+                "issue": dict(issue), "source": {"commit": head, "tree": tree},
+                "issue_observation": dict(observation), "task_resolution": {"status": "EXACT_TASK", "task_id": task_id},
+                "continuation": projection, "readiness_request": readiness_args, "readiness_result": readiness,
+                "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS",
+                "claim_ceiling_excludes": ["execution", "verification", "acceptance", "merge", "release", "production"]}
+
+    @staticmethod
+    def _project_entry_blocker(repository: str, issue: int, code: str, detail: str, *, task_id: str | None = None) -> dict[str, Any]:
+        result = {"schema": "nexus.project_entry.v1", "status": "BLOCKED", "repository": repository,
+                  "issue_number": issue, "task_resolution": {"status": "NOT_RESOLVED"},
+                  "blocker": {"code": code, "detail": detail[:512]},
+                  "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS",
+                  "claim_ceiling_excludes": ["execution", "verification", "acceptance", "merge", "release", "production"]}
+        if task_id:
+            result["task_resolution"] = {"status": "INVALID_CONTINUATION", "task_id": task_id}
+        return result
 
     @staticmethod
     def _recovery_payload(state: Mapping[str, Any], *, operation: str = "status", include_state: bool = False) -> dict[str, Any]:
@@ -5482,6 +5632,8 @@ class UnifiedMCPGateway:
             return self._gateway_status()
         if name == EXECUTION_READINESS_TOOL_NAME:
             return self._gateway_execution_readiness(arguments)
+        if name == "nexus_project_entry":
+            return self._project_entry(arguments)
         if name == "nexus_workspace_snapshot":
             return self._workspace_snapshot()
         if name == "nexus_read":

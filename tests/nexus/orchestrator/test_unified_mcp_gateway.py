@@ -3440,6 +3440,13 @@ def test_execution_readiness_tool_registered_in_manifest():
     }
 
 
+def test_project_entry_tool_is_registered_and_observe_only():
+    specs = {spec["name"]: spec for spec in UnifiedMCPGateway.tool_specs()}
+    schema = specs["nexus_project_entry"]["inputSchema"]
+    assert set(schema["required"]) == {"repository_owner", "repository_name", "issue_number"}
+    assert schema["additionalProperties"] is False
+
+
 def test_execution_readiness_schema_exposes_durable_identity_inputs():
     specs = {spec["name"]: spec for spec in UnifiedMCPGateway.tool_specs()}
     properties = specs["nexus_execution_readiness"]["inputSchema"]["properties"]
