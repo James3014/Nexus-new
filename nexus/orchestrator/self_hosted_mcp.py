@@ -223,10 +223,12 @@ class NexusSelfHostedMCPServer:
                 "description": "Push an integrated winner only after server-side durable Owner authorization to an allowlisted remote and nexus/integration branch.",
                 "inputSchema": {
                     "type": "object",
-                    "required": ["competition_id", "remote"],
+                    "required": ["competition_id", "remote", "authority_goal_id", "authority_coordination_scope_id"],
                     "properties": {
                         "competition_id": {"type": "string"},
                         "remote": {"type": "string"},
+                        "authority_goal_id": {"type": "string"},
+                        "authority_coordination_scope_id": {"type": "string"},
                     },
                     "additionalProperties": False,
                 },
@@ -436,6 +438,8 @@ class NexusSelfHostedMCPServer:
             return self.competition.push_winner(
                 str(arguments["competition_id"]),
                 remote=str(arguments["remote"]),
+                authority_goal_id=str(arguments["authority_goal_id"]),
+                authority_coordination_scope_id=str(arguments["authority_coordination_scope_id"]),
             )
         task_id = str(arguments.get("task_id", ""))
         if name == "nexus_self_hosted_get_task":

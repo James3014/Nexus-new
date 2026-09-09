@@ -6,6 +6,11 @@ import pytest
 import nexus.orchestrator.governed_push as governed_push_module
 from nexus.contracts.autonomy_goal import AutonomyActionClass, canonical_autonomy_hash
 from nexus.orchestrator.governed_push import GovernedPushManager
+from nexus.orchestrator.standing_grant_store import StandingGrantKey
+
+
+def _key():
+    return StandingGrantKey(governed_push_module._GITHUB_REPOSITORY, "goal", "scope")
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -76,6 +81,7 @@ def test_governed_push_requires_authorization_and_allowlisted_integration_branch
             remote="origin",
             branch="nexus/integration",
             expected_sha=expected,
+            authority_key=_key(),
         )
     assert _git(repo, "ls-remote", "--heads", "origin", "refs/heads/nexus/integration") == ""
 
@@ -96,6 +102,7 @@ def test_governed_push_requires_authorization_and_allowlisted_integration_branch
         remote="origin",
         branch="nexus/integration",
         expected_sha=expected,
+        authority_key=_key(),
     )
     assert receipt.push_performed is True
     assert receipt.push_attempted is True
@@ -120,6 +127,7 @@ def test_governed_push_rejects_main(monkeypatch, tmp_path):
             remote="origin",
             branch="main",
             expected_sha="a" * 40,
+            authority_key=_key(),
         )
     assert called is False
 
@@ -145,6 +153,7 @@ def test_governed_push_rejects_effect_substitution_before_git_push(monkeypatch, 
             remote="origin",
             branch="nexus/integration",
             expected_sha=expected,
+            authority_key=_key(),
         )
     assert _git(repo, "ls-remote", "--heads", "origin", "refs/heads/nexus/integration") == ""
 
@@ -170,6 +179,7 @@ def test_governed_push_reconciles_preexisting_effect_without_repush(monkeypatch,
         remote="origin",
         branch="nexus/integration",
         expected_sha=expected,
+        authority_key=_key(),
     )
     assert receipt.push_performed is False
     assert receipt.push_attempted is False
@@ -209,6 +219,7 @@ def test_governed_push_uncertain_ack_reconciles_remote_before_return(monkeypatch
         remote="origin",
         branch="nexus/integration",
         expected_sha=expected,
+        authority_key=_key(),
     )
     assert push_seen is True
     assert receipt.push_performed is False

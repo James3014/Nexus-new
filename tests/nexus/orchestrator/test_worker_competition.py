@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 import nexus.orchestrator.worker_competition as competition_module
+from nexus.orchestrator.standing_grant_store import StandingGrantKey
 from nexus.orchestrator.worker_competition import (
     WorkerCompetitionCoordinator,
     select_deterministic_winner,
@@ -168,7 +169,12 @@ def test_push_winner_passes_exact_effect_identity_to_governed_push_sink(monkeypa
     monkeypatch.setenv("NEXUS_GOVERNED_PUSH_REMOTES", "origin")
     monkeypatch.setattr(competition_module.GovernedPushManager, "push", push)
 
-    result = coordinator.push_winner("push-competition", remote="origin")
+    result = coordinator.push_winner(
+        "push-competition",
+        remote="origin",
+        authority_goal_id="goal",
+        authority_coordination_scope_id="scope",
+    )
 
     assert observed["push"] == {
         "competition_id": "push-competition",
@@ -176,6 +182,9 @@ def test_push_winner_passes_exact_effect_identity_to_governed_push_sink(monkeypa
         "remote": "origin",
         "branch": "nexus/integration/main",
         "expected_sha": "a" * 40,
+        "authority_key": StandingGrantKey(
+            competition_module._GITHUB_REPOSITORY, "goal", "scope"
+        ),
         "integration_receipt": {
             "integration_branch": "nexus/integration/main",
             "integration_commit_sha": "a" * 40,
@@ -218,7 +227,12 @@ def test_push_winner_sink_authority_failure_preserves_integrated_state(monkeypat
     monkeypatch.setattr(competition_module.GovernedPushManager, "push", push)
 
     with pytest.raises(PermissionError, match="durable Owner authorization"):
-        coordinator.push_winner("blocked-push", remote="origin")
+        coordinator.push_winner(
+            "blocked-push",
+            remote="origin",
+            authority_goal_id="goal",
+            authority_coordination_scope_id="scope",
+        )
 
     assert coordinator._read("blocked-push")["status"] == "INTEGRATED"
 

@@ -14,8 +14,8 @@ from uuid import uuid4
 
 from nexus.executors.worker_contract import SUPPORTED_WORKER_PROVIDERS
 from nexus.orchestrator.governed_integration import ControlledIntegrationManager
-from nexus.orchestrator.governed_push import GovernedPushManager
-
+from nexus.orchestrator.governed_push import _GITHUB_REPOSITORY, GovernedPushManager
+from nexus.orchestrator.standing_grant_store import StandingGrantKey
 
 TERMINAL_TASK_STATUSES = frozenset({"CANDIDATE_COMMITTED", "FINAL_BLOCK"})
 _SAFE_ID = re.compile(r"[^A-Za-z0-9._-]+")
@@ -187,6 +187,8 @@ class WorkerCompetitionCoordinator:
         competition_id: str,
         *,
         remote: str,
+        authority_goal_id: str,
+        authority_coordination_scope_id: str,
     ) -> dict[str, Any]:
         state = self.get(competition_id)
         if state is None:
@@ -206,6 +208,11 @@ class WorkerCompetitionCoordinator:
         )
         branch = str(integration.get("integration_branch", ""))
         expected_sha = str(integration.get("integration_commit_sha", ""))
+        authority_key = StandingGrantKey(
+            _GITHUB_REPOSITORY,
+            authority_goal_id,
+            authority_coordination_scope_id,
+        )
         receipt = GovernedPushManager(
             repo_root=str(contract.get("controller_repo_root", "")),
             allowed_remotes=configured_remotes,
@@ -215,6 +222,7 @@ class WorkerCompetitionCoordinator:
             remote=remote,
             branch=branch,
             expected_sha=expected_sha,
+            authority_key=authority_key,
             integration_receipt=integration,
         )
         state["status"] = "PUSHED"

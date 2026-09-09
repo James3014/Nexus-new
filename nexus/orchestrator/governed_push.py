@@ -14,6 +14,7 @@ from nexus.contracts.autonomy_goal import (
     canonical_autonomy_hash,
 )
 from nexus.orchestrator.standing_grant_store import (
+    StandingGrantKey,
     StandingGrantReceiptError,
     authorize_durable_standing_grant_effect,
 )
@@ -118,6 +119,7 @@ class GovernedPushManager:
         remote: str,
         branch: str,
         expected_sha: str,
+        authority_key: StandingGrantKey,
         integration_receipt: Optional[Mapping[str, object]] = None,
     ) -> PushReceipt:
         if remote not in self.allowed_remotes:
@@ -150,6 +152,7 @@ class GovernedPushManager:
                 repository=_GITHUB_REPOSITORY,
                 action=AutonomyActionClass.REPOSITORY_PUSH,
                 effect=effect,
+                key=authority_key,
             )
         except StandingGrantReceiptError as exc:
             raise PermissionError(f"governed push requires durable Owner authorization: {exc}") from exc

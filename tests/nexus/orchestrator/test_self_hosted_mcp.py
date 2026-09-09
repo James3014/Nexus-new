@@ -7,7 +7,7 @@ if repo_root in sys.path:
     sys.path.remove(repo_root)
 sys.path.insert(0, repo_root)
 
-from nexus.orchestrator.self_hosted_mcp import NexusSelfHostedMCPServer
+from nexus.orchestrator.self_hosted_mcp import NexusSelfHostedMCPServer  # noqa: E402
 
 
 class FakeService:
@@ -142,7 +142,9 @@ def test_tools_list_exposes_governed_self_hosted_surface():
     compete_properties = specs["nexus_self_hosted_compete_task"]["inputSchema"]["properties"]
     campaign_properties = specs["nexus_self_hosted_create_refactor_campaign"]["inputSchema"]["properties"]
     push_schema = specs["nexus_self_hosted_push_competition"]["inputSchema"]
-    assert set(push_schema["required"]) == {"competition_id", "remote"}
+    assert set(push_schema["required"]) == {
+        "competition_id", "remote", "authority_goal_id", "authority_coordination_scope_id"
+    }
     assert "authorized" not in push_schema["properties"]
     assert push_schema["additionalProperties"] is False
     assert "agy" in submit_properties["worker"]["enum"]
