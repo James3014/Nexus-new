@@ -115,6 +115,58 @@ def test_rehydration_uses_durable_coordination_scope_not_ephemeral_session(monke
     )
 
 
+def test_fresh_session_rehydrates_unique_key_and_explicit_scope(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    receipt = _receipt(tmp_path / "unused")
+    standing_grant_store.write_standing_grant_receipt(receipt)
+    loaded, request = rehydrate_durable_standing_grant_request(
+        requested_owner_id="James3014",
+        requested_coordinator_id="primary-codex-coordinator",
+        repository=_repository(),
+        goal_id="goal-all-issues",
+        action=AutonomyActionClass.TASK_SUBMIT,
+        requested_at=NOW,
+    )
+    assert loaded == receipt and request.thread_id == "durable-coordination-scope"
+    assert (
+        evaluate_rehydrated_durable_standing_grant(
+            requested_owner_id="James3014",
+            requested_coordinator_id="primary-codex-coordinator",
+            repository=_repository(),
+            goal_id="goal-all-issues",
+            coordination_scope_id="durable-coordination-scope",
+            action=AutonomyActionClass.TASK_SUBMIT,
+            requested_at=NOW,
+        ).outcome
+        is StandingGrantOutcome.GRANT_MATCH
+    )
+
+
+def test_fresh_session_two_threads_is_invalid_and_does_not_mutate(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    first = _receipt(path=tmp_path / "unused", thread_id="thread-one")
+    second = _receipt(path=tmp_path / "unused2", thread_id="thread-two")
+    standing_grant_store.write_standing_grant_receipt(first)
+    standing_grant_store.write_standing_grant_receipt(second)
+    before = sorted(
+        (p, p.read_bytes()) for p in (tmp_path / "authority" / "standing-grants").glob("*/*.json")
+    )
+    decision = evaluate_rehydrated_durable_standing_grant(
+        requested_owner_id="James3014",
+        requested_coordinator_id="primary-codex-coordinator",
+        repository=_repository(),
+        goal_id="goal-all-issues",
+        action=AutonomyActionClass.TASK_SUBMIT,
+        requested_at=NOW,
+    )
+    assert decision.outcome is StandingGrantOutcome.GRANT_INVALID
+    assert before == sorted((p, p.read_bytes()) for p, _ in before)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -208,7 +260,22 @@ def test_cli_inspect_is_non_mutating(monkeypatch, tmp_path, capsys):
     path, _receipt_value = _bind_default(monkeypatch, tmp_path)
     before = path.read_bytes()
 
-    assert standing_grant_cli.main(["inspect", "--requested-at", NOW.isoformat()]) == 0
+    assert (
+        standing_grant_cli.main([
+            "inspect",
+            "--repository-id",
+            "James3014/Nexus-new",
+            "--canonical-remote",
+            "https://github.com/James3014/Nexus-new.git",
+            "--coordination-scope-id",
+            "durable-coordination-scope",
+            "--goal-id",
+            "goal-all-issues",
+            "--requested-at",
+            NOW.isoformat(),
+        ])
+        == 0
+    )
     result = json.loads(capsys.readouterr().out)
 
     assert result["status"] == "VALID"
@@ -262,6 +329,14 @@ def test_cli_issue_renew_revoke_preserves_scope_and_actions(monkeypatch, tmp_pat
             "renew",
             "--grant-id",
             "grant-renew",
+            "--repository-id",
+            "James3014/Nexus-new",
+            "--canonical-remote",
+            "https://github.com/James3014/Nexus-new.git",
+            "--coordination-scope-id",
+            "durable-coordination-scope",
+            "--goal-id",
+            "goal-all-issues",
             "--requested-at",
             NOW.isoformat(),
             "--issued-at",
@@ -288,6 +363,14 @@ def test_cli_issue_renew_revoke_preserves_scope_and_actions(monkeypatch, tmp_pat
             "revoke",
             "--grant-id",
             "grant-revoke",
+            "--repository-id",
+            "James3014/Nexus-new",
+            "--canonical-remote",
+            "https://github.com/James3014/Nexus-new.git",
+            "--coordination-scope-id",
+            "durable-coordination-scope",
+            "--goal-id",
+            "goal-all-issues",
             "--requested-at",
             (NOW + timedelta(minutes=1)).isoformat(),
             "--revoked-at",
@@ -304,7 +387,10 @@ def test_cli_issue_renew_revoke_preserves_scope_and_actions(monkeypatch, tmp_pat
     with pytest.raises(StandingGrantReceiptError, match="REVOKED"):
         load_standing_grant_receipt(now=NOW + timedelta(minutes=2))
 
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    keyed_path = standing_grant_store._keyed_receipt_path(
+        standing_grant_store.standing_grant_key(renewed)
+    )
+    raw = json.loads(keyed_path.read_text(encoding="utf-8"))
     assert raw["supersedes_grant_hash"] == renewed_hash
 
 

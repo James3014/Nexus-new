@@ -231,9 +231,13 @@ def test_standing_grant_receipt_path_is_machine_local_and_loader_is_required():
     agents = (ROOT / "AGENTS.md").read_text(encoding="utf-8")
     store = (ROOT / "nexus/orchestrator/standing_grant_store.py").read_text(encoding="utf-8")
 
-    assert ".local/state/nexus/authority/standing-grant.json" in contract
+    assert ".local/state/nexus/authority/standing-grants/" in contract
+    assert "independent lock/CAS" in contract
+    assert "read-only compatibility" in contract
     assert "durable" in agents
     assert "load_standing_grant_receipt" in store
+    assert "write_standing_grant_receipt" in store
+    assert "StandingGrantKey" in store
     assert "Atomic durable write" in store
 
 
