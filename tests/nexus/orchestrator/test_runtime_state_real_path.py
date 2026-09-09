@@ -6,7 +6,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-SCENARIO = "import json\nfrom pathlib import Path\nfrom tempfile import TemporaryDirectory\nfrom nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService\nwith TemporaryDirectory() as directory:\n    root = Path(directory).resolve()/'state'\n    service = SelfHostedTaskService(root, ephemeral=True, auto_reconcile=False)\n    results = []\n    results.append(service._write_state('t', {'task_id':'t','status':'FAILED_EXECUTION','value':('relative',)}))\n    results.append(service._mutate_state('t', lambda state: state.update(value=('changed',))))\n    restarted = SelfHostedTaskService(root, ephemeral=True, auto_reconcile=False)\n    results.append(restarted._read_state('t'))\n    archive = root.parent/'nexus-state-archive'\n    archive.mkdir()\n    (root/'t.json').replace(archive/'t--attempt-a.json')\n    results.append(restarted._read_state_snapshot('t'))\n    results.append(restarted._mutate_state('t', lambda state: state.update(status='FAILED_EXECUTION')))\n    results.append(restarted._create_state('t', {'task_id':'t','status':'FAILED_EXECUTION'}))\n    for payload in ['{','[]','{\"task_id\":\"wrong\",\"status\":\"FAILED\"}']:\n        (root/'t.json').write_text(payload)\n        results.append(restarted._read_state('t'))\n    print('PARITY='+json.dumps(results, sort_keys=True, default=str).replace(str(root.parent), '<ROOT>'))\n"
+SCENARIO = "import json\nfrom pathlib import Path\nfrom tempfile import TemporaryDirectory\nfrom nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService\nwith TemporaryDirectory() as directory:\n    root = Path(directory).resolve()/'state'\n    service = SelfHostedTaskService(root, ephemeral=True, auto_reconcile=False)\n    results = []\n    results.append(service._write_state('t', {'task_id':'t','status':'FINAL_BLOCK','value':('relative',)}))\n    results.append(service._mutate_state('t', lambda state: state.update(value=('changed',))))\n    restarted = SelfHostedTaskService(root, ephemeral=True, auto_reconcile=False)\n    results.append(restarted._read_state('t'))\n    archive = root.parent/'nexus-state-archive'\n    archive.mkdir()\n    (root/'t.json').replace(archive/'t--attempt-a.json')\n    results.append(restarted._read_state_snapshot('t'))\n    results.append(restarted._mutate_state('t', lambda state: state.update(status='FINAL_BLOCK')))\n    results.append(restarted._create_state('t', {'task_id':'t','status':'FINAL_BLOCK'}))\n    for payload in ['{','[]','{\"task_id\":\"wrong\",\"status\":\"FAILED\"}']:\n        (root/'t.json').write_text(payload)\n        results.append(restarted._read_state('t'))\n    print('PARITY='+json.dumps(results, sort_keys=True, default=str).replace(str(root.parent), '<ROOT>'))\n"
 
 
 def _run(repo):
@@ -27,6 +27,9 @@ def _run(repo):
 def test_real_service_state_roundtrip_deadlock_and_error_receipts():
     result = _run(Path(__file__).resolve().parents[3])
     assert result[1]["value"] == ["changed"]
+    assert result[2]["status"] == "FINAL_BLOCK"
+    assert result[2]["value"] == ["changed"]
+    assert result[3] == result[2]
     assert result[4] is None
     assert result[5][1] is False
     assert [item["blocker"]["code"] for item in result[-3:]] == [
