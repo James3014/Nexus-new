@@ -1175,7 +1175,9 @@ class SelfHostedTaskService:
             raise ValueError("task_writer_factory_root_mismatch")
         self._consumer_ports = consumer_ports
         self._runtime_state_bridge = RuntimeStateBridge(
-            self.state_dir, validator=self._validate_state_payload
+            self.state_dir, validator=self._validate_state_payload,
+            error_receipt=self._state_error_receipt,
+            before_write=lambda task_id, value: self._normalize_state_write(value)
         )
         if consumer_ports is not None:
             consumer_ports.bind_service(self)
@@ -1309,10 +1311,7 @@ class SelfHostedTaskService:
         return self._archive_root() / f"{task_id}.json"
 
     def _archive_state_candidates(self, task_id: str) -> list[Path]:
-        root = self._archive_root()
-        candidates = [self._archive_state_path(task_id)]
-        candidates.extend(sorted(root.glob(f"{task_id}--attempt-*.json")) if root.exists() else [])
-        return [path for path in candidates if path.exists()]
+        return self._runtime_state_bridge.store.archive_candidates(task_id)
 
     @staticmethod
     def _candidate_commit(state: Mapping[str, Any]) -> Optional[str]:
@@ -1773,35 +1772,25 @@ class SelfHostedTaskService:
 
     @classmethod
     def _load_state_path(cls, path: Path, task_id: str) -> Optional[dict[str, Any]]:
-        try:
-            payload = path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return None
-        except OSError as exc:
-            return cls._invalid_state_status(
-                task_id,
-                code="STATE_READ_FAILED",
-                detail=f"state file could not be read: {type(exc).__name__}",
-                source_path=path,
-            )
-        try:
-            decoded = json.loads(payload)
-        except json.JSONDecodeError as exc:
-            return cls._invalid_state_status(
-                task_id,
-                code="STATE_JSON_INVALID",
-                detail=f"state JSON is invalid at line {exc.lineno} column {exc.colno}",
-                source_path=path,
-            )
-        if not isinstance(decoded, Mapping):
-            return cls._invalid_state_status(
-                task_id,
-                code="STATE_NOT_OBJECT",
-                detail="state JSON must decode to an object",
-                source_path=path,
-            )
+        from nexus_runtime.execution_state import ExecutionStateStore
+        return ExecutionStateStore(path.parent, validator=cls._validate_state_payload,
+                                   error_receipt=cls._state_error_receipt).load_path(path, task_id)
 
-        return cls._validate_state_payload(task_id, decoded, path)
+    @classmethod
+    def _state_error_receipt(cls, task_id: str, path: Path, error: Exception) -> dict[str, Any]:
+        if isinstance(error, json.JSONDecodeError):
+            code, detail = "STATE_JSON_INVALID", f"state JSON is invalid at line {error.lineno} column {error.colno}"
+        elif isinstance(error, OSError):
+            code, detail = "STATE_READ_FAILED", f"state file could not be read: {type(error).__name__}"
+        else:
+            code, detail = "STATE_NOT_OBJECT", "state JSON must decode to an object"
+        return cls._invalid_state_status(task_id, code=code, detail=detail, source_path=path)
+
+    @classmethod
+    def _normalize_state_write(cls, state: Mapping[str, Any]) -> dict[str, Any]:
+        normalized = _jsonable(state)
+        normalized["task_action"] = cls._task_action_envelope(normalized)
+        return normalized
 
     @classmethod
     def _validate_state_payload(
@@ -1866,17 +1855,7 @@ class SelfHostedTaskService:
         return cls._with_task_action(state)
 
     def _latest_archived_state(self, task_id: str) -> tuple[Optional[Path], Optional[dict[str, Any]]]:
-        latest_path: Optional[Path] = None
-        latest_state: Optional[dict[str, Any]] = None
-        latest_key: tuple[str, int] = ("", -1)
-        for path in self._archive_state_candidates(task_id):
-            state = self._load_state_path(path, task_id)
-            if state is None:
-                continue
-            key = (str(state.get("updated_at") or ""), path.stat().st_mtime_ns)
-            if latest_state is None or key > latest_key:
-                latest_path, latest_state, latest_key = path, state, key
-        return latest_path, latest_state
+        return self._runtime_state_bridge.store.latest_archive(task_id)
 
     def _lock_path(self) -> Path:
         return self.state_dir / ".state.lock"
@@ -1905,13 +1884,8 @@ class SelfHostedTaskService:
         if self._activated_state_root():
             from nexus.orchestrator.writer_quiescence import WriterAdmissionDenied
             raise WriterAdmissionDenied("activated task root forbids the legacy state lock")
-        self.state_dir.mkdir(parents=True, exist_ok=True)
-        with self._lock_path().open("a+", encoding="utf-8") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        with self._runtime_state_bridge.store.lock():
+            yield
 
     @contextmanager
     def _task_operation_guard(self, task_id: str, owner_context: Any | None = None) -> Iterator[Any]:
@@ -1956,7 +1930,7 @@ class SelfHostedTaskService:
         self._assert_owner_state_write_context(task_id, owner_context)
         normalized = _jsonable(state)
         normalized["task_action"] = self._task_action_envelope(normalized)
-        return dict(self._runtime_state_bridge.store.write(task_id, normalized))
+        return dict(self._runtime_state_bridge.store.write_locked(task_id, normalized))
 
     def _write_state(
         self, task_id: str, state: dict[str, Any], *, owner_context: Any | None = None
@@ -2011,22 +1985,19 @@ class SelfHostedTaskService:
             return self._write_state_locked(task_id, state, owner_context=owner_context), True
 
     def _read_state(self, task_id: str) -> Optional[dict[str, Any]]:
-        value = self._runtime_state_bridge.read(task_id)
-        return dict(value) if value is not None else None
+        if self._activated_state_root():
+            return self._read_state_snapshot(task_id)
+        path = self._state_path(task_id)
+        if not path.exists():
+            _, archived = self._latest_archived_state(task_id)
+            return archived
+        with self._state_lock():
+            if not path.exists():
+                return None
+            return self._load_state_path(path, task_id)
 
     def _read_state_snapshot(self, task_id: str) -> Optional[dict[str, Any]]:
-        """Read a durable snapshot without creating or acquiring the state lock.
-
-        Read-only status and workspace inventory surfaces must not mutate the
-        lifecycle store. State writes use atomic ``replace`` semantics, so a
-        direct read observes either the previous complete JSON or the next
-        complete JSON; a concurrent disappearance is treated as absent.
-        """
-        state = self._load_state_path(self._state_path(task_id), task_id)
-        if state is not None:
-            return state
-        _, archived = self._latest_archived_state(task_id)
-        return archived
+        return self._runtime_state_bridge.read(task_id)
 
     def record_operator_outcome(
         self,
@@ -2255,14 +2226,14 @@ class SelfHostedTaskService:
             with self._writer_factory.for_operation(task_id) as context:
                 path = self._state_path(task_id)
                 if path.exists():
-                    return self._with_task_action(json.loads(path.read_text(encoding="utf-8")))
+                    return self._with_task_action(self._runtime_state_bridge.store.read_raw(task_id))
                 if not self._archive_state_candidates(task_id):
                     raise RuntimeError("archived task receipt disappeared before retry")
                 return self._write_state_locked(task_id, state, owner_context=context)
         with self._state_lock():
             path = self._state_path(task_id)
             if path.exists():
-                return self._with_task_action(json.loads(path.read_text(encoding="utf-8")))
+                return self._with_task_action(self._runtime_state_bridge.store.read_raw(task_id))
             if not self._archive_state_candidates(task_id):
                 raise RuntimeError("archived task receipt disappeared before retry")
             return self._write_state_locked(task_id, state)
@@ -2279,6 +2250,7 @@ class SelfHostedTaskService:
                 return self._runtime_state_bridge.mutate(
                     task_id,
                     mutator,
+                    already_locked=True,
                     authorize=lambda: self._assert_owner_state_write_context(task_id, context),
                 )
         if owner_context is not None:
@@ -2289,6 +2261,7 @@ class SelfHostedTaskService:
             return self._runtime_state_bridge.mutate(
                 task_id,
                 mutator,
+                already_locked=True,
                 authorize=lambda: self._assert_owner_state_write_context(task_id, owner_context),
             )
         self._assert_owner_state_write_context(task_id, owner_context)
@@ -2299,6 +2272,7 @@ class SelfHostedTaskService:
             return self._runtime_state_bridge.mutate(
                 task_id,
                 mutator,
+                already_locked=True,
                 authorize=lambda: self._assert_owner_state_write_context(task_id, owner_context),
             )
 
