@@ -18,7 +18,11 @@ class _Contract:
     def maximum_attempts(self, request):
         return int(getattr(self.owner.build_contract(request), "maximum_attempts_per_task", 1) or 1)
     def build_retry_request(self, state):
-        return self.owner._retry_request(state)
+        callback = getattr(self.owner, "_retry_request", None)
+        if callable(callback):
+            return callback(state)
+        from . import self_hosted_task_service as module
+        return module._retry_request(state)
 
 
 class _Dispatch:
@@ -31,7 +35,15 @@ class _Dispatch:
         return module._recover_pre_provider_cli_envelope_drift(state, request, failure)
     def validate_predecessor(self, request, state):
         from . import self_hosted_task_service as module
-        return module.validate_workforce_dispatch_binding(request, require_binding=True)
+        bound = dict(request)
+        bound.update(
+            task_id=str(state.get("task_id") or ""),
+            attempt_id=str(state.get("attempt_id") or ""),
+            task_card_path=str(state.get("task_card_path") or request.get("task_card_path") or ""),
+            task_card_hash=str(state.get("task_card_hash") or request.get("task_card_hash") or ""),
+            canonical_dispatch_envelope=state.get("canonical_dispatch_envelope"),
+        )
+        return module.validate_workforce_dispatch_binding(bound, require_binding=True)
     def rebind_fresh_attempt(self, request, dispatch):
         from . import self_hosted_task_service as module
         envelope = module.build_canonical_dispatch_envelope(
