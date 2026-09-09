@@ -1,12 +1,22 @@
 ---
 id: 01-repair-six-skill-descriptors
 campaign_id: github-issue-152-skill-descriptor-repair
-status: active
+status: COMPLETE
 source_issue: https://github.com/James3014/Nexus-new/issues/152
 baseline_main: 70fd467ab0d29f4373616a5e98d85b014efcd4de
-block_class: RECOVERABLE_BLOCK
+historical_baseline: 70fd467ab0d29f4373616a5e98d85b014efcd4de
+merge_base: 96f2c8a19a2f3d208a106fa1850bee7ce5a4e863
+historical_reconciled_main: cdf2570ede5ae218f36f886b696c8da45458043a
+reconciled_main: 71ae533ec9f795477131645f96cea1c93b4f4d40
+current_main: 71ae533ec9f795477131645f96cea1c93b4f4d40
+frontier_status: TERMINAL_RECONCILIATION
+terminal_marker: SIX_SKILL_DESCRIPTOR_CONTRACTS_REPAIRED
+claim_ceiling: SIX_SKILL_DESCRIPTOR_CONTRACTS_REPAIRED_ONLY
+block_class: NONE
 AUTO_CHAIN: false
 ---
+
+Historical source-PR current-main binding: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`; retained as historical evidence after the Issue #428 active rebind.
 
 # Issue 152 — bounded descriptor repair
 
@@ -49,8 +59,22 @@ release, or production changes.
 - Run exact six-path descriptor validation, `git diff --check`, and scope /
   deletion audit.
 
-## Exit / claim ceiling
+## Physical evidence and terminal boundary
 
-Candidate only: `SIX_SKILL_DESCRIPTOR_CONTRACTS_REPAIRED_CANDIDATE_ONLY`.
-No runtime eligibility, catalog promotion, integration, release, or
-production claim.
+- Historical card baseline: `70fd467ab0d29f4373616a5e98d85b014efcd4de`.
+- PR #154 head: `971c2e99d211f263dfdb1e590025ab404d6ab6f1`.
+- PR #154 merge: `0b97df90bbebbd90d0811d46ba73c47e46fe1878`.
+- Exact scope: the six descriptor paths above plus this card and INDEX.
+- Exact-head workflows: Pytest, Pyright, Bandit, Ruff, and Wiki governance completed
+  successfully.
+- Owner receipt: `SIX_SKILL_DESCRIPTOR_CONTRACTS_REPAIRED`.
+- Historical reconciled current main: `cdf2570ede5ae218f36f886b696c8da45458043a`
+  (earlier historical `12ff821a3aedfa4c5ee3f6f89b2780ccbc0fc601`).
+- Reconciled current main: `71ae533ec9f795477131645f96cea1c93b4f4d40`
+  (prior reconciled main `cdf2570ede5ae218f36f886b696c8da45458043a`).
+
+The GitHub review surface for PR #154 is empty, so this reconciliation does not claim a
+recorded GitHub independent review. `SIX_SKILL_DESCRIPTOR_CONTRACTS_REPAIRED` is
+limited to descriptor frontmatter validity, unchanged bodies, and Yang's stable id. No
+runtime eligibility, catalog promotion, selector/workflow change, approval, integration,
+merge, release, or production claim follows. `AUTO_CHAIN=false`.

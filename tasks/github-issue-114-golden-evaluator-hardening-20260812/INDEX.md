@@ -1,17 +1,49 @@
 ---
 artifact_authority: current
 owner: James Chen
-status: active
+status: COMPLETE / TERMINAL_RECONCILIATION
 purpose: Govern Issue #114 Golden evaluator evidence hardening on fresh GitHub main.
 ---
+
+Historical source-PR current-main binding: `46e21858d3a3d8ba1c0cb377fbaa61aa2ed45f3c`; retained as historical evidence after the Issue #428 active rebind.
 
 # Issue 114 Golden Evaluator Hardening
 
 - Issue: `#114`
-- Baseline: `c450c75cedbe7679f564d4eaddb7aa351b8aa0ee`
+- Historical baseline: `c450c75cedbe7679f564d4eaddb7aa351b8aa0ee`
+- Reconciled main: `71ae533ec9f795477131645f96cea1c93b4f4d40`
+- Current main: `71ae533ec9f795477131645f96cea1c93b4f4d40`
 - AUTO_CHAIN: `false`
-- Active card: `00-golden-evaluator-hardening.md`
-- Worker guidance: Agy `agy_flash_medium / gemini-3.6-flash-medium` may provide bounded candidate analysis only; coordinator materializes the exact governed diff through typed workspace edits and independently verifies it.
-- Claim ceiling: `GOLDEN_EVALUATOR_EVIDENCE_HARDENING_CANDIDATE`
+- Completed card: `00-golden-evaluator-hardening.md`
+- Terminal marker: `GOLDEN_EVALUATOR_EVIDENCE_HARDENING_PROVEN`
+- Claim ceiling: `GOLDEN_EVALUATOR_EVIDENCE_HARDENING_PROVEN_ONLY`
+
+## Implementation evidence
+
+- PR #198 base `c450c75cedbe7679f564d4eaddb7aa351b8aa0ee`; head
+  `2008bba49d024b39c037483889646a6841e51f64`; merge
+  `5e2e4f9b651582d51df5d02c270fec712d241124` (ancestor of current main).
+- PR #198 scope: exactly 5 files, +397/-38
+  (`scripts/ops/run_golden_behavior_eval.py`,
+  `.github/workflows/pytest.yml`, `tests/ops/test_golden_behavior_eval.py`, and
+  the campaign INDEX/card pair).
+- Owner terminal receipt: Issue #114 comment `5264607384` records the
+  independent review and physical merge `5e2e4f9b`.
+- Post-merge backstop proof: push-triggered Nexus Pytest run `31580745921`
+  reached the `Run Golden Behavior gate on exact PR or main-push head` step on
+  the physical main merge SHA and completed `success`.
+- Current-main readback: exact node collection validation, provenance with
+  source tree/clean-state binding, and the push-to-main Golden backstop are
+  present in source/workflow.
+
+Prior readback binding `cdf2570ede5ae218f36f886b696c8da45458043a`
+(2026-08-15) is retained as historical only.
+
+## Boundaries
 
 The frozen `tests/golden_behavior/corpus.py` and `tests/golden_behavior/test_corpus.py` surfaces remain owned by #65 and are forbidden here.
+
+This reconciliation adds no #116 / PR #229 trusted-verifier authority, no
+evaluator/corpus/findings semantic change, and no runtime, route, Planner,
+Workforce, lifecycle, acceptance, integration, approval, merge, release, or
+production authority.
