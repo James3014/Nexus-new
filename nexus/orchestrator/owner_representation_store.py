@@ -341,6 +341,11 @@ def authorize_owner_representation_grant_issuance(
     effective_now = requested_at if requested_at is not None else datetime.now(timezone.utc)
     if not isinstance(effective_now, datetime) or effective_now.tzinfo is None:
         raise OwnerRepresentationGrantBlocked("EXACT_TIMEZONE_REQUIRED")
+    # A caller must choose exactly one durable authority selector.  Silently
+    # preferring the explicit path would let a keyed caller substitute a
+    # different standing-grant record and leave the permit key unbound.
+    if standing_grant_path is not None and standing_grant_key is not None:
+        raise OwnerRepresentationGrantBlocked("AMBIGUOUS_AUTHORITY_SELECTOR")
     repository = _repository_identity_for_destination(grant.destination)
     effect = owner_representation_issuance_effect(grant)
     if standing_grant_path is None:

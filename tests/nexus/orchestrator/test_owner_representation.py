@@ -1820,3 +1820,27 @@ def test_positive_control_exact_owner_authorization_allows_a_once(
         publisher.publish(prepared)
     assert OwnerRepresentationReason.REPLAY_FORBIDDEN.value in str(exc.value)
     assert len(remote.writes) == 1
+
+
+def test_keyed_authority_rejects_simultaneous_path_and_key(
+    grant_store, standing_grant_path
+):
+    """A keyed caller cannot fall back to an independently supplied path."""
+    from nexus.orchestrator.standing_grant_store import StandingGrantKey
+
+    grant = _grant(grant_id="key-selector", operation_id="op-key-selector")
+    now = datetime.now(timezone.utc)
+    owner_issues_exact_publication_authorization(
+        grant, issued_at=now, authority_root=grant_store.root
+    )
+    key = StandingGrantKey(
+        OWNER_REPRESENTATION_STANDING_REPOSITORY, "goal-827", "thread-coord-1"
+    )
+    with pytest.raises(OwnerRepresentationGrantBlocked, match="AMBIGUOUS_AUTHORITY_SELECTOR"):
+        mint_owner_representation_publication_issuance_permit(
+            grant,
+            authority_root=grant_store.root,
+            standing_grant_path=standing_grant_path,
+            standing_grant_key=key,
+            requested_at=now,
+        )
