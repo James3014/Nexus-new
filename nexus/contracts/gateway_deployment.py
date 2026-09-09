@@ -664,8 +664,8 @@ class RecoveryAuthorityReceipt(StrictRecord):
     owner_activation_id: str
     owner_activation_sha256: str
     source_thread: str
-    standing_grant_id: str
-    standing_grant_receipt_sha256: str
+    standing_grant_id: str | None
+    standing_grant_receipt_sha256: str | None
     repository: str
     host_card_path: str
     accepted_source_merge: str
@@ -2175,14 +2175,33 @@ def validate_recovery_authority(
         "issuer_id": "owner-james",
         "coordinator_id": "coordinator-codex",
         "authorized_actor_id": "coordinator-codex",
-        "standing_grant_id": STANDING_GRANT_ID,
-        "standing_grant_receipt_sha256": STANDING_GRANT_RECEIPT_SHA256,
         "repository": REPOSITORY,
         "host_card_path": RECOVERY_CARD_PATH,
     }
     for name, expected in exact.items():
         if getattr(receipt, name) != expected:
             raise ContractError(f"R1 recovery authority {name} mismatch")
+    has_grant_id = receipt.standing_grant_id is not None
+    has_grant_hash = receipt.standing_grant_receipt_sha256 is not None
+    if has_grant_id != has_grant_hash:
+        raise ContractError("R1 recovery authority standing-grant provenance mismatch")
+    if has_grant_id:
+        if (
+            receipt.standing_grant_id != STANDING_GRANT_ID
+            or receipt.standing_grant_receipt_sha256 != STANDING_GRANT_RECEIPT_SHA256
+        ):
+            raise ContractError("R1 recovery authority standing-grant provenance mismatch")
+    else:
+        if (
+            recovery_activation_authority_class(receipt)
+            != RECOVERY_AUTHORITY_FUTURE_TRACKED_PROVENANCE_REQUIRED
+        ):
+            raise ContractError("R1 external-bootstrap provenance must be future tracked")
+        _id(receipt.owner_activation_id, "external-bootstrap activation id")
+        if not receipt.owner_activation_id.startswith("BREAK_GLASS_"):
+            raise ContractError("R1 external-bootstrap activation prefix mismatch")
+        _hash(receipt.owner_activation_sha256, "external-bootstrap activation", 64)
+        _id(receipt.source_thread, "external-bootstrap source thread")
     _validate_recovery_activation_lineage(receipt)
     for value, name, length in (
         (receipt.receipt_hash, "recovery receipt", 64),

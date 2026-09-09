@@ -1025,6 +1025,81 @@ def test_r1_future_activation_is_structurally_valid_without_code_constants():
     assert validate_recovery_authority(receipt) == receipt
 
 
+def test_r1_external_bootstrap_without_standing_grant_is_structurally_valid():
+    from nexus.contracts.gateway_deployment import (
+        RecoveryAuthorityReceipt,
+        canonical_hash,
+        validate_recovery_authority,
+    )
+
+    receipt = _r1_future_authority_fixture()
+    values = {
+        **receipt.model_dump(),
+        "owner_activation_id": "BREAK_GLASS_BG_842_GATEWAY_R5_A1",
+        "source_thread": "01a07ec9-ef56-73e0-943f-eb95269fcf82",
+        "standing_grant_id": None,
+        "standing_grant_receipt_sha256": None,
+    }
+    values["receipt_hash"] = canonical_hash({
+        k: v for k, v in values.items() if k != "receipt_hash"
+    })
+    external = RecoveryAuthorityReceipt.model_validate(values)
+    assert validate_recovery_authority(external) == external
+
+
+def test_r1_null_standing_grant_requires_break_glass_activation():
+    from nexus.contracts.gateway_deployment import (
+        RecoveryAuthorityReceipt,
+        canonical_hash,
+        validate_recovery_authority,
+    )
+
+    receipt = _r1_future_authority_fixture()
+    values = {
+        **receipt.model_dump(),
+        "standing_grant_id": None,
+        "standing_grant_receipt_sha256": None,
+    }
+    values["receipt_hash"] = canonical_hash({
+        k: v for k, v in values.items() if k != "receipt_hash"
+    })
+    with pytest.raises(ContractError, match="external-bootstrap activation"):
+        validate_recovery_authority(RecoveryAuthorityReceipt.model_validate(values))
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"standing_grant_id": None},
+        {"standing_grant_receipt_sha256": None},
+        {"owner_activation_id": ""},
+        {"owner_activation_sha256": ""},
+        {"source_thread": ""},
+    ],
+)
+def test_r1_external_bootstrap_mixed_or_empty_provenance_fails_closed(changes):
+    from nexus.contracts.gateway_deployment import (
+        RecoveryAuthorityReceipt,
+        canonical_hash,
+        validate_recovery_authority,
+    )
+
+    receipt = _r1_future_authority_fixture()
+    values = {**receipt.model_dump(), **changes}
+    if (
+        "owner_activation_id" in changes
+        or "owner_activation_sha256" in changes
+        or "source_thread" in changes
+    ):
+        values["standing_grant_id"] = None
+        values["standing_grant_receipt_sha256"] = None
+    values["receipt_hash"] = canonical_hash({
+        k: v for k, v in values.items() if k != "receipt_hash"
+    })
+    with pytest.raises(ContractError):
+        validate_recovery_authority(RecoveryAuthorityReceipt.model_validate(values))
+
+
 def test_r1_future_activation_is_not_authority_without_tracked_provenance():
     from nexus.contracts.gateway_deployment import recovery_activation_authority_class
 
