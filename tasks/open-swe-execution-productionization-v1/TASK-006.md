@@ -104,6 +104,21 @@ absorbing attempt/Candidate receipt prevents delayed provider output or later
 polls from reopening the operation, repeating the physical effect, sending a
 new Web turn, or creating a second commit.
 
+The inspector is limited to the configured local runtime state root and the
+exact operation. It may read only the declared recovery-operation record and a
+bounded effect-file set, using the frozen local schemas without importing the
+runtime package. The root, parent directories, records, and physical target
+must be owner-controlled, non-symlink, and not group/world writable. Unbounded
+enumeration, malformed JSON, unknown schema, or more than one matching effect
+fails closed.
+
+Before committing, fanout must CAS an absorbing recovery intent bound to the
+attempt, operation, effect, expected base, planned Candidate tree material, and
+receipt identity. Replay at pre-commit, post-commit/pre-receipt, or
+post-receipt/pre-attempt-complete cuts must converge to the same Candidate and
+receipt, or fail closed. None of these cuts may issue another Web request,
+repeat the physical write, or create a second commit.
+
 ## Deployment-owned paths
 
 - `/Users/jameschen/.config/nexus-external-intelligence/config.json`
@@ -133,7 +148,8 @@ These are deployment state, not Git Candidate files. Back up exact prior bytes b
 5. Stop the old LaunchAgent once, confirm unload, install from the clean deployment checkout, then bootstrap once.
 6. Require a new receipt bound to the new PID, source hash, config hash, runtime identity, and at least three consecutive successful 60-second polls spanning at least 120 seconds with no error.
 7. Run one harmless unattended Issue canary under an existing repository-local Task Card; reconcile the same operation and verify Candidate evidence.
-8. If any activation gate fails, restore the immediately prior known-good config/plist/runtime generation, prove a new rollback PID/run reaches `READY`, then restore the final generation and repeat the three-poll, 120-second readiness gate.
+8. After the final generation first passes, run an intentional rollback drill: restore the immediately prior known-good config/plist/runtime generation, prove a new rollback PID/run reaches `READY`, restore the final generation, and repeat the three-poll, 120-second readiness gate.
+9. On any unexpected activation, readiness, rollback, or restore failure, remain on the last proven known-good generation and stop; never redeploy the generation that just failed.
 
 ## Verification
 
