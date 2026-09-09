@@ -6,13 +6,6 @@ from typing import Any
 
 from nexus_runtime.task_retry import RetryService
 
-from .self_hosted_task_service import (
-    _recover_pre_provider_cli_envelope_drift,
-    _workforce_dispatch_inputs,
-    build_canonical_dispatch_envelope,
-    validate_workforce_dispatch_binding,
-)
-
 
 class _State:
     def __init__(self, owner): self.owner = owner
@@ -30,13 +23,18 @@ class _Contract:
 
 class _Dispatch:
     def __init__(self, owner): self.owner = owner
-    def workforce_inputs(self, request): return _workforce_dispatch_inputs(request)
+    def workforce_inputs(self, request):
+        from . import self_hosted_task_service as module
+        return module._workforce_dispatch_inputs(request)
     def recover_predecessor(self, state, request, failure):
-        return _recover_pre_provider_cli_envelope_drift(state, request, failure)
+        from . import self_hosted_task_service as module
+        return module._recover_pre_provider_cli_envelope_drift(state, request, failure)
     def validate_predecessor(self, request, state):
-        return validate_workforce_dispatch_binding(request, require_binding=True)
+        from . import self_hosted_task_service as module
+        return module.validate_workforce_dispatch_binding(request, require_binding=True)
     def rebind_fresh_attempt(self, request, dispatch):
-        envelope = build_canonical_dispatch_envelope(
+        from . import self_hosted_task_service as module
+        envelope = module.build_canonical_dispatch_envelope(
             request.get("planner_output"), dispatch,
             task_id=str(request.get("task_id") or ""),
             attempt_id=str(request.get("attempt_id") or ""),
@@ -47,7 +45,8 @@ class _Dispatch:
         result.update({"canonical_dispatch_envelope": envelope})
         return result
     def validate_fresh(self, request, state):
-        return validate_workforce_dispatch_binding(request, require_binding=True)
+        from . import self_hosted_task_service as module
+        return module.validate_workforce_dispatch_binding(request, require_binding=True)
 
 
 class _Submission:
