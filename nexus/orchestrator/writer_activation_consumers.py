@@ -35,7 +35,9 @@ class LoadedWriterConsumerPorts:
         if configured is not None and Path(configured).resolve() != root:
             raise ConsumerPortBindingError("event_root_singleton_mismatch")
         event_factory = getattr(self.event_bus, "_writer_factory", None)
-        if event_factory is None or event_factory is not getattr(self.event_store, "_writer_factory", None):
+        if event_factory is None or event_factory is not getattr(
+            self.event_store, "_writer_factory", None
+        ):
             raise ConsumerPortBindingError("event_writer_factory_singleton_mismatch")
         event_adapter = getattr(event_factory, "_adapter", None)
         if event_adapter is None or Path(event_adapter.root).resolve() != root:

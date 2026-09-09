@@ -5,12 +5,12 @@ from types import SimpleNamespace
 
 import pytest
 
+from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 from nexus.orchestrator.writer_activation_consumers import (
     ConsumerPortBindingError,
     LoadedWriterConsumerPorts,
 )
 from nexus.orchestrator.writer_quiescence import WriterAdmissionDenied
-from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
 
 
 def _ports(tmp_path):
@@ -79,8 +79,8 @@ def test_real_cohort_consumers_write_readback_and_hold_denial(tmp_path):
     """Exercise the actual A/F factories returned by the cohort fixture."""
     from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
     from nexus.services.unified_runtime import UnifiedRuntime
-    from tests.services.test_unified_runtime import _Planner, _online, _request
     from tests.integration.test_writer_activation_cohort import _real_cohort
+    from tests.services.test_unified_runtime import _online, _Planner, _request
 
     cohort, roots = _real_cohort(tmp_path)
     active = cohort.activate()
@@ -101,7 +101,9 @@ def test_real_cohort_consumers_write_readback_and_hold_denial(tmp_path):
     service = SelfHostedTaskService(
         state_dir=task_root.root, ephemeral=True, auto_reconcile=False, consumer_ports=ports
     )
-    service._write_state("consumer-port-task", {"task_id": "consumer-port-task", "status": "SUBMITTED"})
+    service._write_state(
+        "consumer-port-task", {"task_id": "consumer-port-task", "status": "SUBMITTED"}
+    )
     service._emit_bound_attempt_transition(
         {
             "task_id": "consumer-port-task",
@@ -154,12 +156,14 @@ def test_real_cohort_consumers_write_readback_and_hold_denial(tmp_path):
     assert before_task == Path(task_root.root, "consumer-port-task.json").read_bytes()
     assert before_event == event_root.event_store.event_log_path.read_bytes()
     assert before_receipt == Path(runtime_root.root, "consumer.json").read_bytes()
-    assert before_effects == Path(runtime_root.root, ".nexus/events/effect_journal.v1.json").read_bytes()
+    assert (
+        before_effects
+        == Path(runtime_root.root, ".nexus/events/effect_journal.v1.json").read_bytes()
+    )
     assert not Path(runtime_root.root, "held-runtime.json").exists()
 
 
 def test_production_service_uses_bound_event_root_for_continuity(tmp_path, monkeypatch):
-    from nexus.events.transport import NexusEventBus
     from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
     from tests.integration.test_writer_activation_cohort import _real_cohort
 
