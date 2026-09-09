@@ -12,6 +12,7 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Mapping
 
 from nexus.contracts.state_owner_transition import WriterTransitionRequest
@@ -27,6 +28,32 @@ EXPECTED_REMOTE = "https://github.com/James3014/Nexus-new.git"
 EXPECTED_REF = "refs/heads/main"
 EXPECTED_OWNER = "James3014"
 EXPECTED_COORDINATOR = "primary-codex-coordinator"
+
+
+@dataclass(frozen=True, slots=True)
+class AuthorityPublication:
+    """One source-owned tracked/durable publication pair."""
+
+    tracked_relative: Path
+    durable_path: Path
+
+    def __post_init__(self) -> None:
+        tracked = Path(self.tracked_relative)
+        durable = Path(self.durable_path)
+        if tracked.is_absolute() or any(part in {"", ".", ".."} for part in tracked.parts):
+            raise ValueError("AUTHORITY_PUBLICATION_TRACKED_PATH_INVALID")
+        if not durable.is_absolute():
+            raise ValueError("AUTHORITY_PUBLICATION_DURABLE_PATH_INVALID")
+        object.__setattr__(self, "tracked_relative", tracked)
+        object.__setattr__(self, "durable_path", durable)
+
+
+# The default entry preserves the original single-root publication contract.
+# Additional root entries are installed by the owner-controlled source package;
+# callers may select only with the already-bound request.root_id.
+PUBLICATION_INVENTORY: Mapping[str, AuthorityPublication] = MappingProxyType(
+    {"root": AuthorityPublication(TRACKED_RELATIVE, DURABLE_PATH)}
+)
 
 
 class WriterAuthorityError(RuntimeError):
@@ -65,6 +92,7 @@ class VerifiedWriterTransitionAuthority:
     effect_hash: str = ""
     grant_receipt_hash: str = ""
     grant_context_hash: str = ""
+    publication_root_id: str = ""
 
 
 _REGISTERED: dict[int, VerifiedWriterTransitionAuthority] = {}
@@ -171,7 +199,9 @@ def _remote_main_head() -> str:
     return next(iter(shas))
 
 
-def _mirror_identity() -> tuple[str, str, str]:
+def _mirror_identity(
+    publication: AuthorityPublication | None = None,
+) -> tuple[str, str, str]:
     """Read publication commit/blob provenance from the fixed clean mirror."""
     head = _git("rev-parse", "HEAD")
     origin = _git("rev-parse", "refs/remotes/origin/main")
@@ -188,7 +218,8 @@ def _mirror_identity() -> tuple[str, str, str]:
         or remote.rstrip("/") != EXPECTED_REMOTE.rstrip("/")
     ):
         raise WriterAuthorityError("AUTHORITY_MIRROR_NOT_FRESH_CLEAN_MAIN")
-    tracked = str(TRACKED_RELATIVE)
+    publication = publication or AuthorityPublication(TRACKED_RELATIVE, DURABLE_PATH)
+    tracked = str(publication.tracked_relative)
     try:
         _git("rev-parse", f"HEAD:{tracked}")
         tracked_bytes = subprocess.check_output(
@@ -198,6 +229,20 @@ def _mirror_identity() -> tuple[str, str, str]:
         raise WriterAuthorityError("AUTHORITY_TRACKED_BLOB_MISSING") from exc
     # Blob identity is the git object hash; the durable file is compared byte-for-byte later.
     return head, tree, hashlib.sha256(tracked_bytes).hexdigest()
+
+
+def _publication_for_request(request: WriterTransitionRequest) -> AuthorityPublication:
+    """Resolve a fixed publication; never accept a caller-provided path."""
+    if request.root_id == "root":
+        # Keep legacy test/host overrides of the two original constants
+        # observable without making either path request-selectable.
+        return AuthorityPublication(TRACKED_RELATIVE, DURABLE_PATH)
+    publication = PUBLICATION_INVENTORY.get(request.root_id)
+    if publication is None:
+        raise WriterAuthorityError("AUTHORITY_PUBLICATION_NOT_INDEXED")
+    if not isinstance(publication, AuthorityPublication):
+        raise WriterAuthorityError("AUTHORITY_PUBLICATION_INVENTORY_INVALID")
+    return publication
 
 
 def _authorization_intent_digest(request: WriterTransitionRequest) -> str:
@@ -235,7 +280,14 @@ def load_verified_writer_transition_authority(
         loaded_source_identity, LoadedSourceIdentity
     ):
         raise WriterAuthorityError("AUTHORITY_INPUT_INVALID")
-    mirror_head, mirror_tree, tracked_hash = _mirror_identity()
+    publication = _publication_for_request(request)
+    default_publication = AuthorityPublication(TRACKED_RELATIVE, DURABLE_PATH)
+    if publication == default_publication:
+        mirror_head, mirror_tree, tracked_hash = _mirror_identity()
+        tracked_path = MIRROR_ROOT / TRACKED_RELATIVE
+    else:
+        mirror_head, mirror_tree, tracked_hash = _mirror_identity(publication)
+        tracked_path = MIRROR_ROOT / publication.tracked_relative
     try:
         source_tree = _git("rev-parse", f"{loaded_source_identity.source_head}^{{tree}}")
         subprocess.check_call(
@@ -255,9 +307,8 @@ def load_verified_writer_transition_authority(
         raise WriterAuthorityError("AUTHORITY_SOURCE_LINEAGE_MISMATCH") from exc
     if source_tree != loaded_source_identity.source_tree:
         raise WriterAuthorityError("AUTHORITY_SOURCE_TREE_MISMATCH")
-    tracked = MIRROR_ROOT / TRACKED_RELATIVE
-    tracked_bytes = _regular(tracked)
-    durable_bytes = _regular(DURABLE_PATH)
+    tracked_bytes = _regular(tracked_path)
+    durable_bytes = _regular(publication.durable_path)
     if tracked_bytes != durable_bytes:
         raise WriterAuthorityError("AUTHORITY_PUBLICATION_BYTES_MISMATCH")
     if tracked_hash != request.authority_receipt_hash:
@@ -344,6 +395,7 @@ def load_verified_writer_transition_authority(
         data["effect_hash"],
         data["grant_receipt_hash"],
         data["grant_context_hash"],
+        request.root_id,
     )
     _REGISTERED[id(value)] = value
     return value
