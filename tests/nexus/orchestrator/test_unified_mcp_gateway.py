@@ -221,6 +221,25 @@ def test_candidate_adopt_external_public_schema_is_closed_and_registered():
     assert "action" in spec["inputSchema"]["required"]
 
 
+def test_durable_owner_effect_schemas_require_explicit_authority_selectors():
+    specs = {spec["name"]: spec["inputSchema"] for spec in UnifiedMCPGateway.tool_specs()}
+    for name in (
+        "nexus_task_card_create",
+        "nexus_task_card_commit",
+        "nexus_candidate_adopt_external",
+        "nexus_candidate_dispose",
+    ):
+        schema = specs[name]
+        assert {"authority_goal_id", "authority_coordination_scope_id"}.issubset(
+            schema["required"]
+        )
+        assert schema["additionalProperties"] is False
+
+    assert "expectedCurrentThreadId" in specs["nexus_task_card_authority_switch"]["required"]
+    assert "expectedCurrentGoalId" in specs["nexus_task_card_authority_restore"]["required"]
+    assert "expectedCurrentThreadId" in specs["nexus_task_card_authority_restore"]["required"]
+
+
 def test_candidate_adopt_external_rejects_unknown_field_without_service_call(monkeypatch):
     service = FakeService()
     calls = []

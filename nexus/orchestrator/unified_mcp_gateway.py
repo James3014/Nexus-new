@@ -82,6 +82,7 @@ from nexus.orchestrator.self_hosted_task_service import (
     validate_task_card_binding,
 )
 from nexus.orchestrator.standing_grant_store import (
+    StandingGrantKey,
     StandingGrantReceiptError,
     authorize_durable_standing_grant_effect,
     restore_task_card_authority,
@@ -1211,15 +1212,39 @@ class UnifiedMCPGateway:
     def _require_owner_effect_authority(
         action: AutonomyActionClass,
         effect: Mapping[str, Any],
+        *,
+        key: StandingGrantKey,
     ) -> dict[str, Any]:
         try:
             return authorize_durable_standing_grant_effect(
                 repository=GITHUB_REPOSITORY,
                 action=action,
                 effect=effect,
+                key=key,
             )
         except StandingGrantReceiptError as exc:
             raise GatewayInputError(f"OWNER_AUTHORITY_REQUIRED:{exc}") from exc
+
+    @staticmethod
+    def _owner_effect_key(arguments: Mapping[str, Any]) -> StandingGrantKey:
+        """Resolve the explicit Goal/coordination scope for durable effects."""
+        try:
+            goal_id = _text(arguments.get("authority_goal_id"), "authority_goal_id", max_length=128)
+            scope_id = _text(
+                arguments.get("authority_coordination_scope_id"),
+                "authority_coordination_scope_id",
+                max_length=128,
+            )
+            return StandingGrantKey(GITHUB_REPOSITORY, goal_id, scope_id)
+        except (GatewayInputError, TypeError, ValueError) as exc:
+            raise GatewayInputError(f"OWNER_AUTHORITY_KEY_REQUIRED:{exc}") from exc
+
+    @staticmethod
+    def _standing_key(goal_id: str, thread_id: str) -> StandingGrantKey:
+        try:
+            return StandingGrantKey(GITHUB_REPOSITORY, goal_id, thread_id)
+        except (TypeError, ValueError) as exc:
+            raise GatewayInputError(f"OWNER_AUTHORITY_KEY_REQUIRED:{exc}") from exc
 
     def _assist_root(self) -> Path:
         configured = getattr(self.service, "state_dir", None)
@@ -2607,6 +2632,7 @@ class UnifiedMCPGateway:
     def _task_card_create(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         if arguments.get("owner_confirmation") is not True:
             raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
+        owner_key = self._owner_effect_key(arguments)
         campaign = self._safe_slug(arguments.get("campaign_id"), "campaign_id")
         task_id = self._safe_slug(arguments.get("task_id"), "task_id")
         objective = _text(arguments.get("objective"), "objective", max_length=4000)
@@ -2629,6 +2655,7 @@ class UnifiedMCPGateway:
                 "verifier_commands": verifiers,
                 "objective_sha256": hashlib.sha256(objective.encode("utf-8")).hexdigest(),
             },
+            key=owner_key,
         )
         campaign_root = CANONICAL_SOURCE_ROOT / "tasks" / campaign
         index_path = campaign_root / "INDEX.md"
@@ -2694,6 +2721,7 @@ class UnifiedMCPGateway:
     def _task_card_commit(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
         if arguments.get("owner_confirmation") is not True:
             raise GatewayInputError("OWNER_CONFIRMATION_REQUIRED")
+        owner_key = self._owner_effect_key(arguments)
         campaign = self._safe_slug(arguments.get("campaign_id"), "campaign_id")
         task_id = self._safe_slug(arguments.get("task_id"), "task_id")
         expected_head = str(arguments.get("expected_head") or "").strip().lower()
@@ -2744,6 +2772,7 @@ class UnifiedMCPGateway:
                 "card_hash": expected_card_hash,
                 "index_hash": expected_index_hash,
             },
+            key=owner_key,
         )
         branch = subprocess.run(
             ["git", "symbolic-ref", "-q", "--short", "HEAD"],
@@ -2849,6 +2878,7 @@ class UnifiedMCPGateway:
             "attemptKey",
             "expectedCurrentReceiptHash",
             "expectedCurrentGoalId",
+            "expectedCurrentThreadId",
             "successorGoalId",
             "successorThreadId",
             "ttlMinutes",
@@ -2872,6 +2902,11 @@ class UnifiedMCPGateway:
             "expectedCurrentGoalId",
             max_length=128,
         )
+        expected_current_thread_id = _text(
+            arguments.get("expectedCurrentThreadId"),
+            "expectedCurrentThreadId",
+            max_length=128,
+        )
         successor_goal_id = _text(
             arguments.get("successorGoalId"),
             "successorGoalId",
@@ -2891,6 +2926,7 @@ class UnifiedMCPGateway:
 
         try:
             return switch_task_card_authority(
+                current_key=self._standing_key(expected_current_goal_id, expected_current_thread_id),
                 attempt_key=attempt_key,
                 expected_current_receipt_hash=expected_current_receipt_hash,
                 expected_current_goal_id=expected_current_goal_id,
@@ -2908,6 +2944,8 @@ class UnifiedMCPGateway:
             "attemptKey",
             "switchOperationId",
             "expectedTemporaryReceiptHash",
+            "expectedCurrentGoalId",
+            "expectedCurrentThreadId",
         }
         unknown_keys = set(arguments.keys()) - allowed_keys
         if unknown_keys:
@@ -2926,11 +2964,18 @@ class UnifiedMCPGateway:
             "expectedTemporaryReceiptHash",
             max_length=64,
         ).lower()
+        expected_current_goal_id = _text(
+            arguments.get("expectedCurrentGoalId"), "expectedCurrentGoalId", max_length=128
+        )
+        expected_current_thread_id = _text(
+            arguments.get("expectedCurrentThreadId"), "expectedCurrentThreadId", max_length=128
+        )
         if not _SHA64_RE.fullmatch(expected_temporary_receipt_hash):
             raise GatewayInputError("expectedTemporaryReceiptHash must be a lowercase 64-hex SHA-256")
 
         try:
             return restore_task_card_authority(
+                current_key=self._standing_key(expected_current_goal_id, expected_current_thread_id),
                 attempt_key=attempt_key,
                 switch_operation_id=switch_operation_id,
                 expected_temporary_receipt_hash=expected_temporary_receipt_hash,
@@ -3810,7 +3855,8 @@ class UnifiedMCPGateway:
                 "description": "Create exactly one new governed campaign INDEX and Task Card after explicit owner confirmation.",
                 "inputSchema": {
                     "type": "object",
-                    "required": ["owner_confirmation", "campaign_id", "task_id", "objective", "allowed_files", "verifier_commands"],
+                    "additionalProperties": False,
+                    "required": ["owner_confirmation", "campaign_id", "task_id", "objective", "allowed_files", "verifier_commands", "authority_goal_id", "authority_coordination_scope_id"],
                     "properties": {
                         "owner_confirmation": {"type": "boolean"},
                         "campaign_id": {"type": "string"},
@@ -3818,6 +3864,8 @@ class UnifiedMCPGateway:
                         "objective": {"type": "string"},
                         "allowed_files": {"type": "array", "items": {"type": "string"}, "maxItems": 10},
                         "verifier_commands": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+                        "authority_goal_id": {"type": "string", "maxLength": 128},
+                        "authority_coordination_scope_id": {"type": "string", "maxLength": 128},
                     },
                 },
             },
@@ -3826,7 +3874,7 @@ class UnifiedMCPGateway:
                 "description": "Commit exactly one pending Task Card and INDEX on a detached clean Controller after explicit owner confirmation.",
                 "inputSchema": {
                     "type": "object",
-                    "required": ["owner_confirmation", "campaign_id", "task_id", "expected_head", "card_hash", "index_hash"],
+                    "required": ["owner_confirmation", "campaign_id", "task_id", "expected_head", "card_hash", "index_hash", "authority_goal_id", "authority_coordination_scope_id"],
                     "additionalProperties": False,
                     "properties": {
                         "owner_confirmation": {"type": "boolean"},
@@ -3835,6 +3883,8 @@ class UnifiedMCPGateway:
                         "expected_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
                         "card_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                         "index_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "authority_goal_id": {"type": "string", "maxLength": 128},
+                        "authority_coordination_scope_id": {"type": "string", "maxLength": 128},
                     },
                 },
             },
@@ -3849,6 +3899,7 @@ class UnifiedMCPGateway:
                         "attemptKey",
                         "expectedCurrentReceiptHash",
                         "expectedCurrentGoalId",
+                        "expectedCurrentThreadId",
                         "successorGoalId",
                         "successorThreadId",
                         "ttlMinutes",
@@ -3858,6 +3909,7 @@ class UnifiedMCPGateway:
                         "attemptKey": {"type": "string", "maxLength": 128},
                         "expectedCurrentReceiptHash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
                         "expectedCurrentGoalId": {"type": "string", "maxLength": 128},
+                        "expectedCurrentThreadId": {"type": "string", "maxLength": 128},
                         "successorGoalId": {"type": "string", "maxLength": 128},
                         "successorThreadId": {"type": "string", "maxLength": 128},
                         "ttlMinutes": {"type": "integer", "minimum": 1, "maximum": 30},
@@ -3875,12 +3927,16 @@ class UnifiedMCPGateway:
                         "attemptKey",
                         "switchOperationId",
                         "expectedTemporaryReceiptHash",
+                        "expectedCurrentGoalId",
+                        "expectedCurrentThreadId",
                     ],
                     "properties": {
                         "ownerConfirmation": {"type": "boolean", "const": True},
                         "attemptKey": {"type": "string", "maxLength": 128},
                         "switchOperationId": {"type": "string", "maxLength": 128},
                         "expectedTemporaryReceiptHash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                        "expectedCurrentGoalId": {"type": "string", "maxLength": 128},
+                        "expectedCurrentThreadId": {"type": "string", "maxLength": 128},
                     },
                 },
             },
@@ -3951,6 +4007,7 @@ class UnifiedMCPGateway:
                         "acceptance_receipt_sha256", "validation_receipt_b64", "acceptance_receipt_b64",
                         "allowed_files", "forbidden_files", "authorized_deletions",
                         "verifier_commands", "protected_contracts", "action",
+                        "authority_goal_id", "authority_coordination_scope_id",
                     ],
                     "additionalProperties": False,
                     "properties": {
@@ -3981,6 +4038,8 @@ class UnifiedMCPGateway:
                         "authorized_deletions": {"type": "array", "items": {"type": "string"}},
                         "verifier_commands": {"type": "array", "items": {"type": "string"}},
                         "protected_contracts": {"type": "array", "items": {"type": "string"}},
+                        "authority_goal_id": {"type": "string", "maxLength": 128},
+                        "authority_coordination_scope_id": {"type": "string", "maxLength": 128},
                         "action": {
                             "type": "object", "additionalProperties": False,
                             "required": ["schema", "task_id", "attempt_id", "action_id", "idempotency_key", "action_type", "task_card_path", "task_card_hash", "contract_kind", "expected_head", "allowed_paths", "permission_profile", "approval_scope", "mutation_domain", "tool_manifest_hash", "request_hash", "mutation"],
@@ -4115,7 +4174,7 @@ class UnifiedMCPGateway:
             {
                 "name": "nexus_candidate_dispose",
                 "description": "Dispose a pending Candidate as REJECTED or SUPERSEDED through cleanup authority.",
-                "inputSchema": {"type": "object", "required": ["task_id", "disposition"], "properties": {"task_id": {"type": "string"}, "disposition": {"type": "string", "enum": ["REJECTED", "SUPERSEDED"]}, "superseded_by": {"type": "string"}}},
+                "inputSchema": {"type": "object", "additionalProperties": False, "required": ["task_id", "disposition", "authority_goal_id", "authority_coordination_scope_id"], "properties": {"task_id": {"type": "string"}, "disposition": {"type": "string", "enum": ["REJECTED", "SUPERSEDED"]}, "superseded_by": {"type": "string"}, "authority_goal_id": {"type": "string", "maxLength": 128}, "authority_coordination_scope_id": {"type": "string", "maxLength": 128}}},
             },
         ]
 
@@ -4543,6 +4602,7 @@ class UnifiedMCPGateway:
             "server_instance_id", "lifecycle_revision", "full_tool_schema_hash",
             "permission_policy_hash", "controller_repo_root", "controller_branch",
             "controller_head", "campaign_id", "spec_id", "spec_sha256",
+            "authority_goal_id", "authority_coordination_scope_id",
         }
         request_fields = set(ExternalCandidateAdoptionRequest.model_fields)
         unknown = set(arguments) - request_fields - runtime_fields
@@ -4622,6 +4682,7 @@ class UnifiedMCPGateway:
         }
         owner_authority = self._require_owner_effect_authority(
             AutonomyActionClass.CANDIDATE_ADOPT_EXTERNAL, effect,
+            key=self._owner_effect_key(arguments),
         )
         rebound_root = Path(str(arguments["controller_repo_root"])).expanduser().resolve()
         rebound_branch = _git("branch", "--show-current").strip()
@@ -4951,6 +5012,14 @@ class UnifiedMCPGateway:
         return payload
 
     def _candidate_dispose(self, arguments: Mapping[str, Any]) -> dict[str, Any]:
+        allowed_keys = {
+            "task_id", "disposition", "superseded_by",
+            "authority_goal_id", "authority_coordination_scope_id",
+        }
+        unknown_keys = set(arguments) - allowed_keys
+        if unknown_keys:
+            raise GatewayInputError(f"unknown arguments: {', '.join(sorted(unknown_keys))}")
+        owner_key = self._owner_effect_key(arguments)
         task_id = _text(arguments.get("task_id"), "task_id")
         disposition = str(arguments.get("disposition") or "").strip().upper()
         if disposition not in {"REJECTED", "SUPERSEDED"}:
@@ -4999,6 +5068,7 @@ class UnifiedMCPGateway:
                 "superseded_by": superseded_by,
                 **candidate_binding,
             },
+            key=owner_key,
         )
         action_request = {**dict(arguments), "source_attempt_id": state.get("attempt_id"), "candidate_binding": {
             "candidate_commit_sha": packet.get("candidate_commit_sha") or state.get("candidate_commit_sha"),
