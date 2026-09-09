@@ -20,12 +20,15 @@ from nexus.orchestrator.github_orchestration import (
     evaluate_action,
     prepare_merge_intent,
     requalify_main_movement,
+    resolve_durable_merge_authorization,
     resolve_merge_authorization,
     revalidate_merge_intent,
 )
 from nexus.orchestrator.standing_grant_store import (
-    StandingGrantReceipt,
     _write_standing_grant_receipt_at,
+    StandingGrantReceipt,
+    standing_grant_key,
+    write_keyed_standing_grant_receipt,
 )
 from tests.contracts.test_github_orchestration import NOW, evidence
 
@@ -65,6 +68,74 @@ def request(ctx, **overrides):
     )
     values.update(overrides)
     return StandingGrantRequest(**values)
+
+
+def test_durable_merge_authorization_selects_exact_keyed_goal_and_thread(tmp_path, monkeypatch):
+    """Same-repository keyed receipts never cross goal/thread boundaries."""
+    import nexus.orchestrator.standing_grant_store as store
+
+    monkeypatch.setattr(
+        store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    repo = RepositoryIdentity(
+        repository_id="James3014/Nexus-new",
+        canonical_remote="https://github.com/James3014/Nexus-new.git",
+    )
+    contexts = [
+        context(
+            repository=repo,
+            goal_id="goal-merge-a",
+            thread_id="thread-merge-a",
+            allowed_actions=(AutonomyActionClass.GITHUB_MERGE,),
+        ),
+        context(
+            repository=repo,
+            goal_id="goal-merge-b",
+            thread_id="thread-merge-b",
+            allowed_actions=(AutonomyActionClass.GITHUB_MERGE,),
+        ),
+    ]
+    receipts = []
+    for index, ctx in enumerate(contexts):
+        receipt = StandingGrantReceipt.issue(grant_id=f"merge-key-{index}", context=ctx)
+        write_keyed_standing_grant_receipt(receipt)
+        receipts.append(receipt)
+    ev = evidence()
+
+    def resolve(ctx):
+        req = request(ctx, action=AutonomyActionClass.GITHUB_MERGE)
+        intent = prepare_merge_intent(ctx, req, ev, now=NOW)
+        return resolve_durable_merge_authorization(intent, req, ev, now=NOW)
+
+    decision_a = resolve(contexts[0])
+    decision_b = resolve(contexts[1])
+    assert decision_a.outcome is StandingGrantOutcome.GRANT_MATCH
+    assert decision_b.outcome is StandingGrantOutcome.GRANT_MATCH
+    assert decision_a.context_hash == contexts[0].context_hash
+    assert decision_b.context_hash == contexts[1].context_hash
+
+    wrong_goal = request(
+        contexts[0], action=AutonomyActionClass.GITHUB_MERGE, goal_id="goal-merge-b"
+    )
+    wrong_intent = prepare_merge_intent(
+        contexts[0], request(contexts[0], action=AutonomyActionClass.GITHUB_MERGE), ev, now=NOW
+    )
+    wrong = resolve_durable_merge_authorization(wrong_intent, wrong_goal, ev, now=NOW)
+    assert wrong.outcome in {StandingGrantOutcome.INVALID, StandingGrantOutcome.OUT_OF_SCOPE}
+    wrong_thread = request(
+        contexts[0], action=AutonomyActionClass.GITHUB_MERGE, thread_id="thread-merge-b"
+    )
+    wrong_thread_result = resolve_durable_merge_authorization(
+        wrong_intent, wrong_thread, ev, now=NOW
+    )
+    assert wrong_thread_result.outcome in {
+        StandingGrantOutcome.INVALID,
+        StandingGrantOutcome.OUT_OF_SCOPE,
+    }
+
+    sibling = store._keyed_receipt_path(standing_grant_key(receipts[1]))
+    sibling.write_text("corrupt", encoding="utf-8")
+    assert resolve(contexts[0]).outcome is StandingGrantOutcome.GRANT_MATCH
 
 
 def test_valid_evidence_and_grant_produce_intent():
