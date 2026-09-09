@@ -1076,6 +1076,8 @@ class TestCorrectiveFalseGreenControls:
             _request(
                 task_campaign_goal_identity="goal-test",
                 execution_contract_kind="TRACKED_TASK_CARD",
+                durable_coordination_scope_id="scope-test",
+                durable_repository_canonical_remote="https://github.com/James3014/Nexus-new.git",
             ),
             {
                 ExecutionReadinessPlane.REPLAY_FENCE: (

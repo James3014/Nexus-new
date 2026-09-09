@@ -508,7 +508,7 @@ def _canonical_authority_observation(
             evidence_identities=evidence,
         )
     try:
-            decision = evaluate_rehydrated_durable_standing_grant(
+        decision = evaluate_rehydrated_durable_standing_grant(
             requested_owner_id=str(snapshot.get("owner_id") or ""),
             requested_coordinator_id=str(snapshot.get("coordinator_id") or ""),
             repository=authority_repository,

@@ -209,3 +209,22 @@ def test_workforce_binding_requires_full_canonical_identity() -> None:
                 "workforce_admission": {},
             },
         )
+
+
+@pytest.mark.parametrize(
+    "field",
+    ("durable_coordination_scope_id", "durable_repository_canonical_remote"),
+)
+def test_material_durable_authority_identity_fields_reject_whitespace(field: str) -> None:
+    values = {
+        "repository_owner": "James3014",
+        "repository_name": "Nexus-new",
+        "intended_source_commit": "a" * 40,
+        "intended_source_tree": "b" * 40,
+        "execution_realm": "in_process_preflight",
+        "required_action_family": "MUTATE_BOUNDED",
+        "execution_contract_kind": "TRACKED_TASK_CARD",
+        field: "   ",
+    }
+    with pytest.raises(ValidationError):
+        ExecutionReadinessRequest(**values)
