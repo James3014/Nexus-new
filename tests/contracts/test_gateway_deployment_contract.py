@@ -1025,6 +1025,81 @@ def test_r1_future_activation_is_structurally_valid_without_code_constants():
     assert validate_recovery_authority(receipt) == receipt
 
 
+def test_r1_external_bootstrap_without_standing_grant_is_structurally_valid():
+    from nexus.contracts.gateway_deployment import (
+        RecoveryAuthorityReceipt,
+        canonical_hash,
+        validate_recovery_authority,
+    )
+
+    receipt = _r1_future_authority_fixture()
+    values = {
+        **receipt.model_dump(),
+        "owner_activation_id": "BREAK_GLASS_BG_842_GATEWAY_R5_A1",
+        "source_thread": "01a07ec9-ef56-73e0-943f-eb95269fcf82",
+        "standing_grant_id": None,
+        "standing_grant_receipt_sha256": None,
+    }
+    values["receipt_hash"] = canonical_hash({
+        k: v for k, v in values.items() if k != "receipt_hash"
+    })
+    external = RecoveryAuthorityReceipt.model_validate(values)
+    assert validate_recovery_authority(external) == external
+
+
+def test_r1_null_standing_grant_requires_break_glass_activation():
+    from nexus.contracts.gateway_deployment import (
+        RecoveryAuthorityReceipt,
+        canonical_hash,
+        validate_recovery_authority,
+    )
+
+    receipt = _r1_future_authority_fixture()
+    values = {
+        **receipt.model_dump(),
+        "standing_grant_id": None,
+        "standing_grant_receipt_sha256": None,
+    }
+    values["receipt_hash"] = canonical_hash({
+        k: v for k, v in values.items() if k != "receipt_hash"
+    })
+    with pytest.raises(ContractError, match="external-bootstrap activation"):
+        validate_recovery_authority(RecoveryAuthorityReceipt.model_validate(values))
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"standing_grant_id": None},
+        {"standing_grant_receipt_sha256": None},
+        {"owner_activation_id": ""},
+        {"owner_activation_sha256": ""},
+        {"source_thread": ""},
+    ],
+)
+def test_r1_external_bootstrap_mixed_or_empty_provenance_fails_closed(changes):
+    from nexus.contracts.gateway_deployment import (
+        RecoveryAuthorityReceipt,
+        canonical_hash,
+        validate_recovery_authority,
+    )
+
+    receipt = _r1_future_authority_fixture()
+    values = {**receipt.model_dump(), **changes}
+    if (
+        "owner_activation_id" in changes
+        or "owner_activation_sha256" in changes
+        or "source_thread" in changes
+    ):
+        values["standing_grant_id"] = None
+        values["standing_grant_receipt_sha256"] = None
+    values["receipt_hash"] = canonical_hash({
+        k: v for k, v in values.items() if k != "receipt_hash"
+    })
+    with pytest.raises(ContractError):
+        validate_recovery_authority(RecoveryAuthorityReceipt.model_validate(values))
+
+
 def test_r1_future_activation_is_not_authority_without_tracked_provenance():
     from nexus.contracts.gateway_deployment import recovery_activation_authority_class
 
@@ -1108,6 +1183,146 @@ def test_r1_stale_manager_binding_fails_closed():
     })
     with pytest.raises(ContractError, match="invalid final manager"):
         validate_recovery_authority(forged)
+
+
+def _r1_continuation_authority_fixture():
+    from nexus.contracts.gateway_deployment import (
+        RecoveryContinuationAuthorityReceipt,
+    )
+
+    receipt = _r1_authority_fixture()
+    request = _r1_request_fixture(receipt)
+    values = {
+        "schema": RecoveryContinuationAuthorityReceipt.SCHEMA,
+        "authority_version": 1,
+        "authority_id": "continuation-r1-v6",
+        "repository": REPOSITORY,
+        "historical_receipt_id": receipt.receipt_id,
+        "historical_receipt_hash": receipt.receipt_hash,
+        "request_id": request.request_id,
+        "request_hash": request.request_hash,
+        "idempotency_fence": request.idempotency_fence,
+        "old_manager_sha256": receipt.final_manager_sha256,
+        "successor_manager_sha256": "1" * 64,
+        "desired_manifest_id": receipt.desired_manifest_id,
+        "desired_manifest_sha256": receipt.desired_manifest_sha256,
+        "predecessor_manifest_id": receipt.predecessor_manifest_id,
+        "predecessor_manifest_sha256": receipt.predecessor_manifest_sha256,
+        "accepted_successor_source_merge": "2" * 40,
+        "accepted_successor_source_tree": "3" * 40,
+        "independent_acceptance_receipt_hash": "4" * 64,
+        "standing_grant_id": "OWNER_G5_SUCCESSOR_CONTINUATION_20260905",
+        "standing_grant_receipt_sha256": "5" * 64,
+        "owner_id": "owner-james",
+        "coordinator_id": "coordinator-codex",
+        "issued_at": "2026-08-24T00:00:00Z",
+        "expires_at": "2026-08-27T00:00:00Z",
+        "revocation_state": "NOT_REVOKED",
+        "revoked_at": None,
+        "revocation_reason": None,
+    }
+    authority = RecoveryContinuationAuthorityReceipt(
+        **values, authority_hash=canonical_hash(values)
+    )
+    return receipt, request, authority
+
+
+def test_r1_successor_continuation_authority_binds_exact_historical_operation():
+    from nexus.contracts.gateway_deployment import (
+        validate_recovery_continuation_authority,
+    )
+
+    receipt, request, authority = _r1_continuation_authority_fixture()
+    assert (
+        validate_recovery_continuation_authority(
+            authority,
+            request=request,
+            historical_receipt=receipt,
+            successor_manager_sha256=authority.successor_manager_sha256,
+            now="2026-08-25T00:00:00Z",
+        )
+        == authority
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement", "message"),
+    [
+        ("historical_receipt_hash", "6" * 64, "historical_receipt_hash mismatch"),
+        ("request_hash", "7" * 64, "request_hash mismatch"),
+        ("idempotency_fence", "other-fence", "idempotency_fence mismatch"),
+        ("old_manager_sha256", "8" * 64, "old_manager_sha256 mismatch"),
+        ("desired_manifest_sha256", "9" * 64, "desired_manifest_sha256 mismatch"),
+    ],
+)
+def test_r1_successor_continuation_authority_rejects_rehashed_lineage_substitution(
+    field, replacement, message
+):
+    from nexus.contracts.gateway_deployment import (
+        RecoveryContinuationAuthorityReceipt,
+        validate_recovery_continuation_authority,
+    )
+
+    receipt, request, authority = _r1_continuation_authority_fixture()
+    values = {**authority.__dict__, field: replacement}
+    values["authority_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key != "authority_hash"
+    })
+    forged = RecoveryContinuationAuthorityReceipt(**values)
+    with pytest.raises(ContractError, match=message):
+        validate_recovery_continuation_authority(
+            forged,
+            request=request,
+            historical_receipt=receipt,
+            successor_manager_sha256=authority.successor_manager_sha256,
+        )
+
+
+def test_r1_successor_continuation_authority_rejects_same_manager_and_stale_or_revoked():
+    from nexus.contracts.gateway_deployment import (
+        RecoveryContinuationAuthorityReceipt,
+        validate_recovery_continuation_authority,
+    )
+
+    receipt, request, authority = _r1_continuation_authority_fixture()
+    values = {
+        **authority.__dict__,
+        "successor_manager_sha256": receipt.final_manager_sha256,
+    }
+    values["authority_hash"] = canonical_hash({
+        key: value for key, value in values.items() if key != "authority_hash"
+    })
+    with pytest.raises(ContractError, match="distinct successor manager"):
+        validate_recovery_continuation_authority(
+            RecoveryContinuationAuthorityReceipt(**values),
+            request=request,
+            historical_receipt=receipt,
+            successor_manager_sha256=receipt.final_manager_sha256,
+        )
+    with pytest.raises(ContractError, match="stale"):
+        validate_recovery_continuation_authority(
+            authority,
+            request=request,
+            historical_receipt=receipt,
+            successor_manager_sha256=authority.successor_manager_sha256,
+            now="2099-01-01T00:00:00Z",
+        )
+    revoked_values = {
+        **authority.__dict__,
+        "revocation_state": "REVOKED",
+        "revoked_at": "2026-08-25T00:00:00Z",
+        "revocation_reason": "owner-revoked",
+    }
+    revoked_values["authority_hash"] = canonical_hash({
+        key: value for key, value in revoked_values.items() if key != "authority_hash"
+    })
+    with pytest.raises(ContractError, match="revoked"):
+        validate_recovery_continuation_authority(
+            RecoveryContinuationAuthorityReceipt(**revoked_values),
+            request=request,
+            historical_receipt=receipt,
+            successor_manager_sha256=authority.successor_manager_sha256,
+        )
 
 
 @pytest.mark.parametrize(

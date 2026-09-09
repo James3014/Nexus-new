@@ -3,7 +3,9 @@
 import copy
 import hashlib
 import json
+import shutil
 import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -25,6 +27,23 @@ from nexus.orchestrator.writer_activation_producer import (
     WriterActivationProducer,
     build_loaded_writer_collector_plan,
 )
+
+
+def _bind_real_source_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give the installed payload a real, isolated Git source identity."""
+    import nexus
+    from nexus.orchestrator import unified_mcp_gateway as gateway_module
+
+    source_root = tmp_path / "source-fixture"
+    shutil.copytree(Path(nexus.__file__).resolve().parent, source_root / "nexus")
+    subprocess.check_call(["git", "-C", str(source_root), "init", "-b", "main"])
+    subprocess.check_call(["git", "-C", str(source_root), "config", "user.name", "Test"])
+    subprocess.check_call(
+        ["git", "-C", str(source_root), "config", "user.email", "test@example.invalid"]
+    )
+    subprocess.check_call(["git", "-C", str(source_root), "add", "nexus"])
+    subprocess.check_call(["git", "-C", str(source_root), "commit", "-m", "source"])
+    monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", source_root)
 
 
 def test_real_loaded_transition_preflights_after_gateway_hold(tmp_path, monkeypatch):
@@ -173,7 +192,8 @@ def test_real_loaded_transition_preflights_after_gateway_hold(tmp_path, monkeypa
         store.append_record({"event_type": "test_event", "payload": {}})
 
 
-def test_empty_root_holds_generation_zero_until_a_and_materialization(tmp_path):
+def test_empty_root_holds_generation_zero_until_a_and_materialization(tmp_path, monkeypatch):
+    _bind_real_source_fixture(tmp_path, monkeypatch)
     service = SelfHostedTaskService(tmp_path, ephemeral=True, auto_reconcile=False)
     token = EventWriterGeneration(1, "initial-writer")
     transaction = "initial-transaction"
@@ -248,7 +268,8 @@ def test_empty_root_holds_generation_zero_until_a_and_materialization(tmp_path):
     assert observed["held_during_materialize"]
 
 
-def test_generation_zero_observer_cannot_acquire_a_write_lease(tmp_path):
+def test_generation_zero_observer_cannot_acquire_a_write_lease(tmp_path, monkeypatch):
+    _bind_real_source_fixture(tmp_path, monkeypatch)
     service = SelfHostedTaskService(tmp_path, ephemeral=True, auto_reconcile=False)
     gateway = UnifiedMCPGateway(service=service)
     assert gateway.bootstrap_writer_admission() == "HELD"

@@ -1147,7 +1147,11 @@ class SelfHostedTaskService:
         raw_state_dir = Path(state_dir).expanduser() if state_dir is not None else canonical
         self.state_dir = raw_state_dir.resolve()
         temporary_roots = _temporary_state_roots()
-        is_temporary = any(root in self.state_dir.parents for root in temporary_roots)
+        # An explicitly configured canonical root remains production even when
+        # tests place it below the system temporary directory.
+        is_temporary = self.state_dir != canonical and any(
+            root in self.state_dir.parents for root in temporary_roots
+        )
         if self.state_dir != canonical and not ephemeral and not is_temporary:
             raise ValueError(f"production tasks must use canonical state root: {canonical}")
         self.ephemeral = ephemeral or is_temporary
@@ -2458,6 +2462,8 @@ class SelfHostedTaskService:
         self, result: Optional[Mapping[str, Any]], task_id: str
     ) -> None:
         try:
+            if not self.ephemeral:
+                NexusEventBus.ensure_configured(self.canonical_state_dir(), production=True)
             self._emit_attempt_transition(result, task_id)
         except Exception as exc:
             self._record_event_append_failure(task_id, exc)
@@ -2514,31 +2520,88 @@ class SelfHostedTaskService:
                 raise ValueError(f"{name} must contain non-empty strings")
             return tuple(value)
 
+        contract = result.get("contract") if isinstance(result.get("contract"), Mapping) else {}
+
+        def identity_value(
+            explicit: str,
+            durable: str,
+            structured: tuple[str, ...],
+            request_fields: tuple[str, ...],
+        ) -> str:
+            for value in (
+                result.get(explicit),
+                result.get(durable),
+                *(contract.get(field) for field in structured),
+                *(request.get(field) for field in request_fields),
+            ):
+                if value is not None and str(value).strip():
+                    return str(value)
+            return "unknown"
+
         action = str(result.get("action") or request.get("action") or "")
         observation = str(result.get("observation") or request.get("observation") or "")
-        NexusEventBus.emit_attempt_transition(build_attempt_transition_event(
-            task_id=str(result.get("task_id") or task_id),
-            attempt_id=str(result.get("attempt_id")), sequence=sequence,
-            state=status, reason=str(result.get("error") or result.get("reason") or ""),
-            action=action, observation=observation,
-            continuity_event_type=continuity_event_type,
-            strategy_delta=str(result.get("strategy_delta") or request.get("strategy_delta") or ""),
-            do_not_repeat=continuity_list("do_not_repeat", "rejected_strategies"),
-            unresolved_risks=continuity_list("unresolved_risks"),
-            unknowns=continuity_list("unknowns"),
-            next_action=str(result.get("next_action") or request.get("next_action") or ""),
-            claim_ceiling=str(result.get("claim_ceiling") or request.get("claim_ceiling") or ""),
-            candidate_refs=candidate_refs, evidence_refs=evidence_refs,
-            source_revision=str(result.get("source_revision") or request.get("controller_revision") or "unknown"),
-            contract_revision=str(result.get("contract_revision") or request.get("contract_hash") or "unknown"),
-        ))
+        NexusEventBus.emit_attempt_transition(
+            build_attempt_transition_event(
+                task_id=str(result.get("task_id") or task_id),
+                attempt_id=str(result.get("attempt_id")),
+                sequence=sequence,
+                state=status,
+                reason=str(result.get("error") or result.get("reason") or ""),
+                action=action,
+                observation=observation,
+                continuity_event_type=continuity_event_type,
+                strategy_delta=str(
+                    result.get("strategy_delta") or request.get("strategy_delta") or ""
+                ),
+                do_not_repeat=continuity_list("do_not_repeat", "rejected_strategies"),
+                unresolved_risks=continuity_list("unresolved_risks"),
+                unknowns=continuity_list("unknowns"),
+                next_action=str(result.get("next_action") or request.get("next_action") or ""),
+                claim_ceiling=str(
+                    result.get("claim_ceiling") or request.get("claim_ceiling") or ""
+                ),
+                candidate_refs=candidate_refs,
+                evidence_refs=evidence_refs,
+                source_revision=identity_value(
+                    "source_revision",
+                    "controller_revision",
+                    ("source_revision", "controller_revision", "current_source_revision"),
+                    ("source_revision", "controller_revision"),
+                ),
+                contract_revision=identity_value(
+                    "contract_revision",
+                    "contract_hash",
+                    (
+                        "contract_revision",
+                        "contract_hash",
+                        "current_contract_revision",
+                        "current_contract_hash",
+                    ),
+                    ("contract_revision", "contract_hash"),
+                ),
+            )
+        )
 
     @staticmethod
-    def read_canonical_attempt_events(task_id: str, attempt_id: str) -> list[dict[str, Any]]:
+    def read_canonical_attempt_events(
+        task_id: str, attempt_id: str, *, project_root: Optional[Path] = None
+    ) -> list[dict[str, Any]]:
         """Read attempt events from the canonical EventBus log, without mutation."""
         # Read the validated canonical store directly.  The EventBus observer
         # facade intentionally serves best-effort dashboards and swallows
         # integrity failures; continuity recovery must preserve those errors.
+        if project_root is not None:
+            # A continuity read must not reconfigure an already loaded
+            # same-root writer binding.  That rebind breaks the legitimate
+            # read path (and is rejected by the writer fence). Bind a missing
+            # root read-only, but leave an existing writer or read-only bind
+            # untouched.
+            root = Path(project_root).expanduser().resolve()
+            if (
+                NexusEventBus._configured_event_root != root
+                or NexusEventBus._event_log_path is None
+            ):
+                NexusEventBus.configure(root, create=False, production=True)
         if NexusEventBus._log_store.event_log_path != NexusEventBus._event_log_path:
             NexusEventBus._log_store.event_log_path = NexusEventBus._event_log_path
         records = NexusEventBus._log_store.read_recent(event_type="attempt_transition", limit=10_000)
@@ -2595,7 +2658,16 @@ class SelfHostedTaskService:
         target_attempt_id = attempt_id or state.get("attempt_id")
         if not target_attempt_id:
             raise ValueError("REHYDRATION_ATTEMPT_ID_REQUIRED")
-        events = self.read_canonical_attempt_continuity(task_id, str(target_attempt_id))
+        if not self.ephemeral:
+            events = events_from_attempt_records(
+                self.read_canonical_attempt_events(
+                    task_id, str(target_attempt_id), project_root=self.canonical_state_dir()
+                ),
+                task_id=task_id,
+                attempt_id=str(target_attempt_id),
+            )
+        else:
+            events = self.read_canonical_attempt_continuity(task_id, str(target_attempt_id))
         snapshot = project(events)
         task_action = self._task_action_envelope(state)
         projection = build_rehydration_projection(

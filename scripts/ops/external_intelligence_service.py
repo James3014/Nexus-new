@@ -85,11 +85,14 @@ class ServiceConfig:
     semantic_backend: str = "opencli"
     open_swe_model_provider: str = ""
     open_swe_model: str = ""
-    open_swe_executable: str = "nexus-open-swe-runtime"
+    open_swe_executable: str = ""
+    open_swe_runtime_artifact_sha256: str = ""
     open_swe_opencli_executable: str = "opencli"
     open_swe_opencli_profile: str = ""
     open_swe_opencli_site_session: str = "ephemeral"
     open_swe_opencli_timeout_seconds: int = 120
+    open_swe_semantic_timeout_seconds: int = 180
+    open_swe_worker_timeout_seconds: int = 300
     worker_backend: str = "opencode"
     opencode_executable: str = "opencode"
     publication_enabled: bool = True
@@ -445,10 +448,13 @@ def load_config(path: str | os.PathLike[str]) -> ServiceConfig:
         "open_swe_model_provider",
         "open_swe_model",
         "open_swe_executable",
+        "open_swe_runtime_artifact_sha256",
         "open_swe_opencli_executable",
         "open_swe_opencli_profile",
         "open_swe_opencli_site_session",
         "open_swe_opencli_timeout_seconds",
+        "open_swe_semantic_timeout_seconds",
+        "open_swe_worker_timeout_seconds",
         "worker_backend",
         "opencode_executable",
         "publication_enabled",
@@ -468,7 +474,18 @@ def load_config(path: str | os.PathLike[str]) -> ServiceConfig:
         raise ServiceError("CONFIG_WORKER_BACKEND_INVALID")
     open_swe_provider = raw.get("open_swe_model_provider", "")
     open_swe_model = raw.get("open_swe_model", "")
-    open_swe_executable = raw.get("open_swe_executable", "nexus-open-swe-runtime")
+    open_swe_executable = raw.get("open_swe_executable", "")
+    open_swe_runtime_artifact_sha256 = raw.get("open_swe_runtime_artifact_sha256", "")
+    for timeout_key in ("open_swe_semantic_timeout_seconds", "open_swe_worker_timeout_seconds"):
+        timeout_value = raw.get(
+            timeout_key, 180 if timeout_key.endswith("semantic_timeout_seconds") else 300
+        )
+        if (
+            not isinstance(timeout_value, int)
+            or isinstance(timeout_value, bool)
+            or not 30 <= timeout_value <= 3600
+        ):
+            raise ServiceError("CONFIG_OPEN_SWE_TIMEOUT_INVALID")
     if (
         not isinstance(open_swe_provider, str)
         or not isinstance(open_swe_model, str)
@@ -478,8 +495,6 @@ def load_config(path: str | os.PathLike[str]) -> ServiceConfig:
         )
     ):
         raise ServiceError("CONFIG_OPEN_SWE_MODEL_BINDING_REQUIRED")
-    if not isinstance(open_swe_executable, str) or not open_swe_executable.strip():
-        raise ServiceError("CONFIG_OPEN_SWE_EXECUTABLE_REQUIRED")
     opencli_transport_keys = {
         "open_swe_opencli_executable",
         "open_swe_opencli_profile",
@@ -507,6 +522,16 @@ def load_config(path: str | os.PathLike[str]) -> ServiceConfig:
             or not 30 <= opencli_timeout_seconds <= 900
         ):
             raise ServiceError("CONFIG_OPEN_SWE_TRANSPORT_INVALID")
+    if semantic_backend == "open_swe" or worker_backend == "open_swe":
+        if not isinstance(open_swe_executable, str) or not open_swe_executable.strip():
+            raise ServiceError("CONFIG_OPEN_SWE_EXECUTABLE_REQUIRED")
+        if not Path(open_swe_executable.strip()).is_absolute():
+            raise ServiceError("CONFIG_OPEN_SWE_EXECUTABLE_ABSOLUTE_REQUIRED")
+    if (semantic_backend == "open_swe" or worker_backend == "open_swe") and (
+        not isinstance(open_swe_runtime_artifact_sha256, str)
+        or _SHA256_RE.fullmatch(open_swe_runtime_artifact_sha256.strip().lower()) is None
+    ):
+        raise ServiceError("CONFIG_OPEN_SWE_EXPECTED_ARTIFACT_HASH_REQUIRED")
     repos = raw.get("repositories")
     roots = raw.get("repository_roots")
     if (
@@ -642,7 +667,9 @@ def build_automation(config: ServiceConfig, repository: str) -> ExternalIntellig
                 model_provider=config.open_swe_model_provider,
                 model_id=config.open_swe_model,
                 executable=config.open_swe_executable,
+                expected_artifact_sha256=config.open_swe_runtime_artifact_sha256,
                 runtime_state_root=config.state_root / "open_swe_runtime",
+                timeout=config.open_swe_semantic_timeout_seconds,
                 transport_config=_open_swe_transport_config(config),
             )
         except OpenSWEExternalIntelligenceError as exc:
@@ -659,7 +686,9 @@ def build_automation(config: ServiceConfig, repository: str) -> ExternalIntellig
                 model_provider=config.open_swe_model_provider,
                 model_id=config.open_swe_model,
                 executable=config.open_swe_executable,
+                expected_artifact_sha256=config.open_swe_runtime_artifact_sha256,
                 runtime_state_root=config.state_root / "open_swe_runtime",
+                timeout=config.open_swe_worker_timeout_seconds,
                 require_worker_binding=True,
                 transport_config=_open_swe_transport_config(config),
             )

@@ -1,6 +1,7 @@
 """Cold-start registration of a provisional runtime writer factory."""
 
 import copy
+import importlib
 import threading
 
 import pytest
@@ -20,6 +21,11 @@ from nexus.orchestrator.writer_quiescence import (
     WriterIdentity,
     WriterRegistry,
 )
+
+
+def _registry_module(registry):
+    """Patch the module that defines the loaded registry implementation."""
+    return importlib.import_module(type(registry).__module__)
 
 
 def _held_runtime(tmp_path, *, historical=False):
@@ -418,8 +424,8 @@ def test_released_history_terminal_intent_reconciles_exact_final_bytes(tmp_path,
 
 
 def test_released_history_unentered_intent_is_cancelled_but_entered_is_unresolved(tmp_path,monkeypatch):
-    import nexus.orchestrator.writer_quiescence as module
     registry,path = _released_registry(tmp_path)
+    module = _registry_module(registry)
     atomic = module._atomic_bytes
     def fail_lease(path, raw, **kwargs):
         if path.parent == registry._lease_dir(str(tmp_path)):
@@ -440,8 +446,8 @@ def test_released_history_unentered_intent_is_cancelled_but_entered_is_unresolve
 
 
 def test_released_history_terminal_intent_replays_only_exact_active_bytes(tmp_path,monkeypatch):
-    import nexus.orchestrator.writer_quiescence as module
     registry,path = _released_registry(tmp_path)
+    module = _registry_module(registry)
     lease = _history_lease(registry,tmp_path)
     lease_path = registry._lease_path(str(tmp_path),lease.operation_id)
     original = lease_path.read_bytes()
@@ -488,8 +494,8 @@ def test_released_history_physical_index_mutation_denies_next_admission(tmp_path
 
 
 def test_terminal_intent_recovery_validates_entire_inventory_before_writing(tmp_path,monkeypatch):
-    import nexus.orchestrator.writer_quiescence as module
     registry,path = _released_registry(tmp_path)
+    module = _registry_module(registry)
     lease = _history_lease(registry,tmp_path)
     lease_path = registry._lease_path(str(tmp_path),lease.operation_id)
     original = lease_path.read_bytes()

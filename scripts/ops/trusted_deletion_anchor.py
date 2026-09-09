@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA_VERSION = "trusted-deletion-anchor.v3"
-RUNTIME_SCHEMA_VERSION = "trusted-deletion-runtime.v1"
+RUNTIME_SCHEMA_VERSION = "trusted-deletion-runtime.v2"
 WORKFLOW_PATH = ".github/workflows/trusted-deletion-anchor.yml"
 SHA_LENGTH = 40
 BASE_REF = "refs/trusted-anchor/base"
@@ -34,6 +34,15 @@ WORKFLOW_REF = "refs/trusted-anchor/workflow"
 RUNTIME_FILENAMES = ("runtime.tar", "runtime-metadata.json", "requirements.txt")
 GOLDEN_EVALUATOR_PATH = "scripts/ops/run_golden_behavior_eval.py"
 PYTEST_PLUGINS = ["pytest", "pytest_asyncio", "pytest_timeout"]
+TRUSTED_RUNTIME_DEPENDENCY_GROUPS: tuple[str, ...] = ("dev", "trusted-anchor")
+TRUSTED_EXTERNAL_RUNTIME_PACKAGES: tuple[tuple[str, str, str, str], ...] = (
+    (
+        "nexus-learning",
+        "nexus_learning",
+        "https://github.com/James3014/nexus-learning.git",
+        "3b8ece75fac4d2554245c29590748a84c5c671d5",
+    ),
+)
 UV_VERSION = "uv 0.9.2"
 # Historical one-use, four-way binding for the Owner-approved TASK-001 Open SWE
 # optional-dependency transition. The corrective external-runtime architecture
@@ -49,7 +58,29 @@ RETIRED_TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION = (
         "cb5ecbb7fcce287f9bcdbb17f65a3b931f13613b6fd1608b428e1c19c5f6965a",
     ),
 )
-TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] | None = None
+# Historical exact one-use, four-way binding for Owner-approved PR #811
+# (legacy distribution rename from nexus-core to nexus-legacy with lockfile
+# alignment). Retained as inactive provenance after the transition advanced.
+RETIRED_CORE_V1_TG6_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] = (
+    811,
+    (
+        "95dc46753fa8d630ad5abcc00f0fc9bfd62e6767a8d943b027a56cddddb74bae",
+        "1ca1b7f706c9202ab6cd8df8d86f0051a6769d6fe525c954bdb326971fb65111",
+        "261ea0f2a2ffe179615d48acfa02ef89ed617e7970635ce39d70d8bede276b05",
+        "5933bdf1497f6d0e852fc26730dd4eec7985d72512e0ff061fc2ab7f59842961",
+    ),
+)
+# Exact one-use, four-way binding for Owner-approved PR #833 (Core namespace
+# and duplicate script retirement).
+TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION: tuple[int, tuple[str, str, str, str]] | None = (
+    833,
+    (
+        "261ea0f2a2ffe179615d48acfa02ef89ed617e7970635ce39d70d8bede276b05",
+        "5933bdf1497f6d0e852fc26730dd4eec7985d72512e0ff061fc2ab7f59842961",
+        "382f05ca47059a15465515ab704d2d54b8a2a95ae83318b3f98617cd982029c3",
+        "5933bdf1497f6d0e852fc26730dd4eec7985d72512e0ff061fc2ab7f59842961",
+    ),
+)
 REQUIRED_EVIDENCE_KEYS = {
     "schema_version",
     "status",
@@ -229,6 +260,76 @@ def _runtime_subprocess_env(home: Path) -> dict[str, str]:
     return environment
 
 
+def _trusted_external_package_contract() -> list[dict[str, str]]:
+    return [
+        {
+            "distribution": distribution,
+            "package": package,
+            "repository": repository,
+            "commit": commit,
+        }
+        for distribution, package, repository, commit in TRUSTED_EXTERNAL_RUNTIME_PACKAGES
+    ]
+
+
+def _trusted_external_package_contract_with_provenance(value: Any) -> list[dict[str, str]]:
+    expected = _trusted_external_package_contract()
+    if not isinstance(value, list) or len(value) != len(expected):
+        raise ValueError("trusted external runtime package metadata mismatch")
+    normalized: list[dict[str, str]] = []
+    for actual, contract in zip(value, expected, strict=True):
+        if not isinstance(actual, dict) or set(actual) != {*contract, "direct_url_sha256"}:
+            raise ValueError("trusted external runtime package metadata mismatch")
+        if any(actual.get(key) != expected_value for key, expected_value in contract.items()):
+            raise ValueError("trusted external runtime package identity mismatch")
+        direct_url_sha256 = actual.get("direct_url_sha256")
+        if (
+            not isinstance(direct_url_sha256, str)
+            or len(direct_url_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in direct_url_sha256)
+        ):
+            raise ValueError("trusted external runtime package provenance digest mismatch")
+        normalized.append({**contract, "direct_url_sha256": direct_url_sha256})
+    return normalized
+
+
+def _verify_external_runtime_packages(site_packages: Path) -> list[dict[str, str]]:
+    verified: list[dict[str, str]] = []
+    for distribution, package, repository, commit in TRUSTED_EXTERNAL_RUNTIME_PACKAGES:
+        package_dir = site_packages / package
+        direct_urls = sorted(site_packages.glob(f"{package}-*.dist-info/direct_url.json"))
+        metadata_files = sorted(site_packages.glob(f"{package}-*.dist-info/METADATA"))
+        if not package_dir.is_dir() or len(direct_urls) != 1 or len(metadata_files) != 1:
+            raise ValueError(f"trusted external package install is incomplete: {distribution}")
+        direct_url_bytes = direct_urls[0].read_bytes()
+        try:
+            direct_url = json.loads(direct_url_bytes)
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise ValueError(
+                f"trusted external package provenance is malformed: {distribution}"
+            ) from exc
+        vcs_info = direct_url.get("vcs_info")
+        if (
+            direct_url.get("url") != repository
+            or not isinstance(vcs_info, dict)
+            or vcs_info.get("vcs") != "git"
+            or vcs_info.get("commit_id") != commit
+            or vcs_info.get("requested_revision") != commit
+        ):
+            raise ValueError(f"trusted external package provenance mismatch: {distribution}")
+        metadata_text = metadata_files[0].read_text(encoding="utf-8")
+        if f"Name: {distribution}\n" not in metadata_text:
+            raise ValueError(f"trusted external package distribution mismatch: {distribution}")
+        verified.append({
+            "distribution": distribution,
+            "package": package,
+            "repository": repository,
+            "commit": commit,
+            "direct_url_sha256": _sha(direct_url_bytes),
+        })
+    return verified
+
+
 def _archive_runtime(site_packages: Path) -> bytes:
     if not site_packages.is_dir():
         raise ValueError("runtime site-packages is missing")
@@ -277,20 +378,25 @@ def _build_runtime(args: argparse.Namespace) -> None:
         (contract / "uv.lock").write_bytes(uv_lock)
         requirements_path = build_root / "requirements.txt"
         environment = _runtime_subprocess_env(build_root / "home")
-        subprocess.run(
+        export_args = [
+            args.uv_executable,
+            "export",
+            "--frozen",
+            "--no-default-groups",
+        ]
+        for group in TRUSTED_RUNTIME_DEPENDENCY_GROUPS:
+            export_args.extend(["--group", group])
+        export_args.extend(
             [
-                args.uv_executable,
-                "export",
-                "--frozen",
-                "--no-default-groups",
-                "--group",
-                "dev",
                 "--no-emit-project",
                 "--no-emit-workspace",
                 "--no-emit-local",
                 "--output-file",
                 str(requirements_path),
-            ],
+            ]
+        )
+        subprocess.run(
+            export_args,
             cwd=contract,
             env=environment,
             check=True,
@@ -320,6 +426,27 @@ def _build_runtime(args: argparse.Namespace) -> None:
             check=True,
             capture_output=True,
         )
+        for distribution, _package, repository, commit in TRUSTED_EXTERNAL_RUNTIME_PACKAGES:
+            subprocess.run(
+                [
+                    args.uv_executable,
+                    "pip",
+                    "install",
+                    "--target",
+                    str(site_packages),
+                    "--no-cache",
+                    "--no-deps",
+                    "--no-python-downloads",
+                    "--python",
+                    sys.executable,
+                    f"{distribution} @ git+{repository}@{commit}",
+                ],
+                cwd=contract,
+                env=environment,
+                check=True,
+                capture_output=True,
+            )
+        external_packages = _verify_external_runtime_packages(site_packages)
         uv_version = subprocess.run(
             [args.uv_executable, "--version"],
             env=environment,
@@ -338,6 +465,8 @@ def _build_runtime(args: argparse.Namespace) -> None:
         "uv_lock_sha256": _sha(uv_lock),
         "requirements_sha256": _sha(requirements),
         "pytest_plugins": PYTEST_PLUGINS,
+        "dependency_groups": list(TRUSTED_RUNTIME_DEPENDENCY_GROUPS),
+        "external_packages": external_packages,
     }
     (output / "runtime.tar").write_bytes(runtime_archive)
     (output / "runtime-metadata.json").write_bytes(_json(metadata) + b"\n")
@@ -627,6 +756,10 @@ def verify_evidence(
             if (
                 metadata.get("schema_version") != RUNTIME_SCHEMA_VERSION
                 or metadata.get("pytest_plugins") != PYTEST_PLUGINS
+                or metadata.get("dependency_groups") != list(TRUSTED_RUNTIME_DEPENDENCY_GROUPS)
+                or metadata.get("external_packages") != _trusted_external_package_contract_with_provenance(
+                    metadata.get("external_packages")
+                )
                 or metadata.get("builder") != {"uv_version": UV_VERSION}
             ):
                 raise ValueError("runtime contract mismatch")
@@ -798,6 +931,10 @@ def _controller(args: argparse.Namespace) -> None:
         or runtime_identity.get("requirements_sha256") != _sha(requirements)
         or runtime_identity.get("runtime_probe") != _runtime_probe()
         or runtime_identity.get("pytest_plugins") != PYTEST_PLUGINS
+        or runtime_identity.get("dependency_groups") != list(TRUSTED_RUNTIME_DEPENDENCY_GROUPS)
+        or runtime_identity.get("external_packages") != _trusted_external_package_contract_with_provenance(
+            runtime_identity.get("external_packages")
+        )
         or runtime_identity.get("builder") != {"uv_version": UV_VERSION}
     ):
         raise ValueError("runtime metadata does not match trusted contract")
@@ -865,6 +1002,10 @@ def _executor(args: argparse.Namespace) -> None:
         or runtime_metadata != manifest.get("runtime_identity")
         or runtime_metadata.get("runtime_probe") != _runtime_probe()
         or runtime_metadata.get("pytest_plugins") != PYTEST_PLUGINS
+        or runtime_metadata.get("dependency_groups") != list(TRUSTED_RUNTIME_DEPENDENCY_GROUPS)
+        or runtime_metadata.get("external_packages") != _trusted_external_package_contract_with_provenance(
+            runtime_metadata.get("external_packages")
+        )
         or runtime_metadata.get("builder") != {"uv_version": UV_VERSION}
     ):
         raise ValueError("offline runtime identity mismatch")
@@ -875,6 +1016,10 @@ def _executor(args: argparse.Namespace) -> None:
     site_packages = (runtime / "site-packages").resolve()
     if not site_packages.is_dir():
         raise ValueError("offline runtime site-packages is missing")
+    if _verify_external_runtime_packages(site_packages) != runtime_metadata.get(
+        "external_packages"
+    ):
+        raise ValueError("offline external runtime package identity mismatch")
     executor_home = runtime / "home"
     executor_home.mkdir()
     environment = {

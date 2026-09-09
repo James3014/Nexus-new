@@ -389,3 +389,119 @@ def test_malformed_resume_intent_denies_without_mutation(tmp_path):
         store.migrate_legacy_standing_grant_receipt(expected_receipt_hash=receipt.receipt_hash)
     assert legacy.read_bytes() == before
     assert not store._keyed_receipt_path(key).exists()
+
+
+@pytest.mark.parametrize("operation", ["switch", "restore"])
+@pytest.mark.parametrize("completed", [False, True])
+def test_legacy_transitions_deny_migrated_current_scope(
+    tmp_path, monkeypatch, operation, completed
+):
+    legacy = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(store, "DEFAULT_RECEIPT_PATH", legacy)
+    receipt = _receipt()
+    store.write_standing_grant_receipt(receipt)
+    switch_args = dict(
+        attempt_key="switch-migration",
+        expected_current_receipt_hash=receipt.receipt_hash,
+        expected_current_goal_id=receipt.context.goal_id,
+        successor_goal_id="goal-temporary",
+        successor_thread_id="thread-temporary",
+        ttl_minutes=10,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    if operation == "restore":
+        switched = store.switch_task_card_authority(**switch_args)
+        current = store.load_standing_grant_receipt(now=NOW)
+        invoke = lambda: store.restore_task_card_authority(
+            attempt_key="restore-migration",
+            switch_operation_id=switched["switch_operation_id"],
+            expected_temporary_receipt_hash=current.receipt_hash,
+            owner_confirmation=True,
+            now=NOW,
+        )
+    else:
+        current = receipt
+        invoke = lambda: store.switch_task_card_authority(**switch_args)
+    if completed:
+        store.migrate_legacy_standing_grant_receipt(expected_receipt_hash=current.receipt_hash)
+    else:
+        original = store._write_bytes
+
+        def crash_copy(*args, **kwargs):
+            raise RuntimeError("MIGRATION_COPY_INTERRUPTED")
+
+        monkeypatch.setattr(store, "_write_bytes", crash_copy)
+        with pytest.raises(RuntimeError, match="MIGRATION_COPY_INTERRUPTED"):
+            store.migrate_legacy_standing_grant_receipt(
+                expected_receipt_hash=current.receipt_hash
+            )
+        monkeypatch.setattr(store, "_write_bytes", original)
+    before = {str(p): p.read_bytes() for p in legacy.parent.rglob("*") if p.is_file()}
+    with pytest.raises(store.StandingGrantReceiptError, match="MIGRATION_FENCED"):
+        invoke()
+    after = {str(p): p.read_bytes() for p in legacy.parent.rglob("*") if p.is_file()}
+    assert after == before
+
+
+def test_unmigrated_public_switch_restore_preserves_predecessor_context(tmp_path, monkeypatch):
+    legacy = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(store, "DEFAULT_RECEIPT_PATH", legacy)
+    receipt = _receipt()
+    store.write_standing_grant_receipt(receipt)
+    switched = store.switch_task_card_authority(
+        attempt_key="switch-unmigrated",
+        expected_current_receipt_hash=receipt.receipt_hash,
+        expected_current_goal_id=receipt.context.goal_id,
+        successor_goal_id="goal-temporary",
+        successor_thread_id="thread-temporary",
+        ttl_minutes=10,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    temporary = store.load_standing_grant_receipt(now=NOW)
+    assert temporary.context.allowed_actions == (
+        AutonomyActionClass.TASK_CARD_COMMIT, AutonomyActionClass.TASK_CARD_CREATE
+    )
+    assert temporary.context.expires_at <= receipt.context.expires_at
+    restored = store.restore_task_card_authority(
+        attempt_key="restore-unmigrated",
+        switch_operation_id=switched["switch_operation_id"],
+        expected_temporary_receipt_hash=temporary.receipt_hash,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    actual = store.load_standing_grant_receipt(now=NOW)
+    assert actual.receipt_hash == restored["restored_receipt_hash"]
+    assert actual.context == receipt.context
+    assert actual.supersedes_grant_hash == temporary.receipt_hash
+
+
+def test_switch_cannot_enter_previously_migrated_successor_scope(tmp_path, monkeypatch):
+    authority = tmp_path / "authority"
+    monkeypatch.setattr(store, "DEFAULT_RECEIPT_PATH", authority / "old-legacy.json")
+    migrated = _receipt(goal_id="goal-migrated", thread_id="thread-migrated")
+    store.write_standing_grant_receipt(migrated)
+    target = store.migrate_legacy_standing_grant_receipt(
+        expected_receipt_hash=migrated.receipt_hash
+    )
+    # A different legacy slot in the same authority directory may carry a
+    # different unmigrated scope; it cannot re-enter the fenced keyed scope.
+    legacy = authority / "standing-grant.json"
+    monkeypatch.setattr(store, "DEFAULT_RECEIPT_PATH", legacy)
+    current = _receipt()
+    store.write_standing_grant_receipt(current)
+    before = legacy.read_bytes(), target.read_bytes()
+    with pytest.raises(store.StandingGrantReceiptError, match="MIGRATION_FENCED"):
+        store.switch_task_card_authority(
+            attempt_key="switch-into-migrated",
+            expected_current_receipt_hash=current.receipt_hash,
+            expected_current_goal_id=current.context.goal_id,
+            successor_goal_id=migrated.context.goal_id,
+            successor_thread_id=migrated.context.thread_id,
+            ttl_minutes=10,
+            owner_confirmation=True,
+            now=NOW,
+        )
+    assert (legacy.read_bytes(), target.read_bytes()) == before
+    assert store.load_standing_grant_receipt(now=NOW) == current

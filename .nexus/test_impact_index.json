@@ -1,0 +1,12 @@
+{
+  "schema": "nexus.test_impact_index.v1",
+  "mappings": {
+    ".nexus/test_impact_index.json": [
+      "tests/ops/test_select_tests.py"
+    ],
+    "requirements/canonical-learning.txt": [
+      "tests/learning/test_canonical_learning_cutover.py",
+      "tests/learning"
+    ]
+  }
+}

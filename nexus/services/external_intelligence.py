@@ -201,6 +201,12 @@ def _atomic_json(path: Path, value: Mapping[str, Any]) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
+        if os.name == "posix":
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
     finally:
         try:
             os.unlink(temporary)

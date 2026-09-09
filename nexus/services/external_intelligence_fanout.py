@@ -111,7 +111,10 @@ def _safe_slug(value: Any, field: str) -> str:
 
 
 def _safe_relative_path(value: Any) -> str:
-    text = str(value or "").strip()
+    raw = str(value or "")
+    if any(not character.isprintable() for character in raw):
+        raise FanoutError("INVALID_MUTATION_PATH")
+    text = raw.strip()
     try:
         path = PurePosixPath(text)
     except (TypeError, ValueError) as exc:
@@ -303,6 +306,7 @@ class OpenCodeRunResult:
     repair_admitted: bool = False
     repair_phase_count: int = 0
     worker_identity_sha256: str = ""
+    operation_id: str = ""
 
 
 def plan_fanout(
@@ -556,6 +560,16 @@ class FanoutStore:
     ) -> dict[str, Any]:
         value = dict(attempt)
         value.update({"state": "DISPATCHING", "retry_safe": False})
+        _atomic_json(self._attempt_path(value["task_id"], value["unit_id"], suffix), value)
+        return value
+
+    def bind_operation_id(
+        self, attempt: Mapping[str, Any], operation_id: str, *, suffix: str = "initial"
+    ) -> dict[str, Any]:
+        if not isinstance(operation_id, str) or _SHA256_RE.fullmatch(operation_id) is None:
+            raise FanoutError("OPERATION_ID_REQUIRED")
+        value = dict(attempt)
+        value["operation_id"] = operation_id
         _atomic_json(self._attempt_path(value["task_id"], value["unit_id"], suffix), value)
         return value
 
@@ -1087,8 +1101,35 @@ def _verify_envelope_scope(unit: ExecutionUnit) -> Path:
     return path
 
 
+def _workspace_virtual_path(relative_ref: Any, *, required_prefix: str | None = None) -> str:
+    """Map a validated repository-relative ref into the worker's virtual root."""
+    safe = _safe_relative_path(relative_ref)
+    if required_prefix and not safe.startswith(required_prefix.rstrip("/") + "/"):
+        raise FanoutError("TASK_CARD_REF_REQUIRED")
+    return "/" + safe
+
+
+def _bootstrap_evidence_refs(unit: ExecutionUnit, envelope_text: str) -> tuple[str, list[str]]:
+    try:
+        envelope = parse_external_execution_envelope(envelope_text)
+    except ExternalIntelligenceError as exc:
+        raise FanoutError("ENVELOPE_CONTRACT_INVALID") from exc
+    binding = envelope.get("binding")
+    if not isinstance(binding, Mapping):
+        raise FanoutError("ENVELOPE_CONTRACT_INVALID")
+    task_card_ref = binding.get("task_card_ref")
+    if not isinstance(task_card_ref, str) or not task_card_ref.strip():
+        raise FanoutError("TASK_CARD_REF_REQUIRED")
+    task_card_path = _workspace_virtual_path(task_card_ref, required_prefix="tasks")
+    target_paths = [_workspace_virtual_path(mutation_path) for mutation_path in unit.mutation_paths]
+    return task_card_path, target_paths
+
+
 def build_worker_bootstrap(unit: ExecutionUnit, workspace: WorkspaceLease) -> str:
-    """Compact controller-to-worker bootstrap. The envelope body is never embedded."""
+    """Build a self-contained handoff with provenance-only artifact metadata."""
+    artifact = _verify_envelope_scope(unit)
+    envelope_text = artifact.read_text(encoding="utf-8")
+    task_card_path, target_paths = _bootstrap_evidence_refs(unit, envelope_text)
     if unit.selected_worker:
         worker_name = (
             unit.selected_worker.get("worker_id")
@@ -1098,7 +1139,7 @@ def build_worker_bootstrap(unit: ExecutionUnit, workspace: WorkspaceLease) -> st
         role = unit.selected_worker.get("role_ceiling") or "bounded task execution"
         header = f"You are {worker_name}, the {role} for exactly one Nexus execution unit."
         model_adapt_line = (
-            "Read and follow the model_adaptation / task brief inside the attached envelope."
+            "Read and follow the model_adaptation / task brief inside the embedded envelope above."
         )
         guard_line = "Apply only the task-relevant failure guards; encode one evidence-guided same-unit repair and no blind retry or auto-chain."
     elif unit.model != MODEL:
@@ -1106,12 +1147,12 @@ def build_worker_bootstrap(unit: ExecutionUnit, workspace: WorkspaceLease) -> st
             f"You are {unit.model}, the bounded task engineer for exactly one Nexus execution unit."
         )
         model_adapt_line = (
-            "Read and follow the model_adaptation / task brief inside the attached envelope."
+            "Read and follow the model_adaptation / task brief inside the embedded envelope above."
         )
         guard_line = "Apply only the task-relevant failure guards; encode one evidence-guided same-unit repair and no blind retry or auto-chain."
     else:
         header = "You are DeepSeek V4 Flash, the bounded L2 Task Engineer for exactly one Nexus execution unit."
-        model_adapt_line = "Read and follow the model_adaptation brief inside the attached envelope: role_contract, task_local_invariants, known_failure_guards, execution_strategy, forbidden_inferences, repair_policy."
+        model_adapt_line = "Read and follow the model_adaptation brief inside the embedded envelope above: role_contract, task_local_invariants, known_failure_guards, execution_strategy, forbidden_inferences, repair_policy."
         guard_line = "Apply only the task-relevant known_failure_guards; encode one evidence-guided same-unit repair and no blind retry or auto-chain."
 
     return "\n".join([
@@ -1120,15 +1161,17 @@ def build_worker_bootstrap(unit: ExecutionUnit, workspace: WorkspaceLease) -> st
         f"unit_id={unit.unit_id}",
         f"expected_base_sha={unit.expected_base_sha}",
         f"workspace_id={workspace.workspace_id}",
-        f"envelope_artifact_ref={unit.envelope_ref}",
+        f"envelope_artifact_ref={json.dumps(unit.envelope_ref, ensure_ascii=True)}",
         f"envelope_sha256={unit.envelope_sha256}",
-        "The full external_execution_envelope.v1 is attached as a file. Read it before editing and do not ask the controller to restate it."
-        if not unit.selected_worker
-        else "The full envelope is attached as a file. Read it before editing and do not ask the controller to restate it.",
+        "The full external_execution_envelope.v1 is embedded in Controller evidence above; use it as the authoritative task brief.",
+        "envelope_artifact_ref is provenance/readback metadata only. Do not open envelope_artifact_ref through workspace tools.",
+        f"task_card_workspace_path={task_card_path}",
+        f"allowed_target_probe_paths={_canonical_json(target_paths)}",
+        "Probe only the exact workspace-virtual Task Card and allowed target paths above. Do not use broad glob discovery.",
         model_adapt_line,
         f"authorized_mutation_paths={_canonical_json(list(unit.mutation_paths))}",
         "Do not modify any path outside authorized_mutation_paths. Do not commit, push, merge, approve, integrate, or spawn a replacement model.",
-        "Use the attached envelope as semantic guidance but never widen the Task Card authority.",
+        "Use the embedded envelope as semantic guidance but never widen the Task Card authority.",
         guard_line,
         "When finished, return exactly one JSON object and no markdown/prose:",
         _canonical_json({
@@ -1476,12 +1519,29 @@ class AdaptiveWorkerFanoutRuntime:
         prompt = build_worker_bootstrap(unit, workspace)
         if artifact.read_text(encoding="utf-8") in prompt:
             raise FanoutError("FULL_ENVELOPE_IN_CONTROLLER_PROMPT")
+        if hasattr(transport, "prepare_operation_id"):
+            operation_id = transport.prepare_operation_id(
+                "worker_run",
+                prompt=prompt,
+                artifact_path=str(artifact),
+                workspace_path=workspace.path,
+                session_id="",
+            )
+            attempt = self.store.bind_operation_id(attempt, operation_id)
         attempt = self.store.mark_dispatching(attempt)
-        result: OpenCodeRunResult = transport.run_new(
-            prompt=prompt,
-            artifact_path=str(artifact),
-            workspace_path=workspace.path,
-        )
+        if hasattr(transport, "prepare_operation_id"):
+            result: OpenCodeRunResult = transport.run_new(
+                prompt=prompt,
+                artifact_path=str(artifact),
+                workspace_path=workspace.path,
+                operation_id=operation_id,
+            )
+        else:
+            result = transport.run_new(
+                prompt=prompt,
+                artifact_path=str(artifact),
+                workspace_path=workspace.path,
+            )
         return self._finalize_initial(unit, workspace, attempt, result, transport=transport)
 
     def _reconcile_initial(
@@ -1495,7 +1555,15 @@ class AdaptiveWorkerFanoutRuntime:
         attempt = self.store.existing_initial_attempt(unit)
         if attempt is None or attempt.get("state") not in {"DISPATCHING", "OUTCOME_UNKNOWN"}:
             raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
-        result: OpenCodeRunResult = transport.reconcile_workspace(workspace_path=workspace.path)
+        operation_id = attempt.get("operation_id")
+        if hasattr(transport, "prepare_operation_id"):
+            if not isinstance(operation_id, str) or _SHA256_RE.fullmatch(operation_id) is None:
+                raise FanoutError("OPERATION_ID_REQUIRED")
+            result: OpenCodeRunResult = transport.reconcile_workspace(
+                workspace_path=workspace.path, operation_id=operation_id
+            )
+        else:
+            result = transport.reconcile_workspace(workspace_path=workspace.path)
         return self._finalize_initial(unit, workspace, attempt, result, transport=transport)
 
     def _finalize_initial(
@@ -1518,6 +1586,21 @@ class AdaptiveWorkerFanoutRuntime:
             if state == "OUTCOME_UNKNOWN":
                 raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
             raise FanoutError(result.status)
+        expected_operation_id = attempt.get("operation_id")
+        if hasattr(active_transport, "prepare_operation_id"):
+            if (
+                not isinstance(expected_operation_id, str)
+                or _SHA256_RE.fullmatch(expected_operation_id) is None
+            ):
+                self.store.finish_attempt(
+                    attempt, state="OUTCOME_UNKNOWN", transport_status="OPERATION_ID_REQUIRED"
+                )
+                raise FanoutError("OPERATION_ID_REQUIRED")
+            if result.operation_id != expected_operation_id:
+                self.store.finish_attempt(
+                    attempt, state="OUTCOME_UNKNOWN", transport_status="OPERATION_ID_MISMATCH"
+                )
+                raise FanoutError("OPERATION_ID_MISMATCH")
         expected_provider_id = getattr(active_transport, "provider_id", PROVIDER_ID)
         expected_model_id = getattr(active_transport, "model_id", MODEL_ID)
         if result.provider_id != expected_provider_id or result.model_id != expected_model_id:
@@ -1663,19 +1746,37 @@ class AdaptiveWorkerFanoutRuntime:
             repair_ref=str(repair_path),
             repair_sha256=repair_sha256,
         )
-        attempt = self.store.mark_dispatching(attempt, suffix=suffix)
         prompt = build_repair_bootstrap(
             previous_receipt,
             repair_id=repair_id,
             repair_ref=str(repair_path),
             repair_sha256=repair_sha256,
         )
-        result: OpenCodeRunResult = transport.continue_session(
-            session_id=str(previous_receipt["session_id"]),
-            prompt=prompt,
-            artifact_path=str(repair_path),
-            workspace_path=workspace.path,
-        )
+        if hasattr(transport, "prepare_operation_id"):
+            operation_id = transport.prepare_operation_id(
+                "worker_continue",
+                prompt=prompt,
+                artifact_path=str(repair_path),
+                workspace_path=workspace.path,
+                session_id=str(previous_receipt["session_id"]),
+            )
+            attempt = self.store.bind_operation_id(attempt, operation_id, suffix=suffix)
+        attempt = self.store.mark_dispatching(attempt, suffix=suffix)
+        if hasattr(transport, "prepare_operation_id"):
+            result: OpenCodeRunResult = transport.continue_session(
+                session_id=str(previous_receipt["session_id"]),
+                prompt=prompt,
+                artifact_path=str(repair_path),
+                workspace_path=workspace.path,
+                operation_id=operation_id,
+            )
+        else:
+            result = transport.continue_session(
+                session_id=str(previous_receipt["session_id"]),
+                prompt=prompt,
+                artifact_path=str(repair_path),
+                workspace_path=workspace.path,
+            )
         if result.status != "COMPLETED" or result.session_id != previous_receipt["session_id"]:
             self.store.finish_attempt(
                 attempt,
@@ -1684,6 +1785,27 @@ class AdaptiveWorkerFanoutRuntime:
                 suffix=suffix,
             )
             raise FanoutError("FANOUT_RECONCILIATION_REQUIRED")
+        expected_operation_id = attempt.get("operation_id")
+        if hasattr(transport, "prepare_operation_id"):
+            if (
+                not isinstance(expected_operation_id, str)
+                or _SHA256_RE.fullmatch(expected_operation_id) is None
+            ):
+                self.store.finish_attempt(
+                    attempt,
+                    state="OUTCOME_UNKNOWN",
+                    transport_status="OPERATION_ID_REQUIRED",
+                    suffix=suffix,
+                )
+                raise FanoutError("OPERATION_ID_REQUIRED")
+            if result.operation_id != expected_operation_id:
+                self.store.finish_attempt(
+                    attempt,
+                    state="OUTCOME_UNKNOWN",
+                    transport_status="OPERATION_ID_MISMATCH",
+                    suffix=suffix,
+                )
+                raise FanoutError("OPERATION_ID_MISMATCH")
         if result.provider_id != transport_provider_id or result.model_id != transport_model_id:
             self.store.finish_attempt(
                 attempt,
@@ -1798,6 +1920,7 @@ class AdaptiveWorkerFanoutRuntime:
             "repair_admitted": result.repair_admitted,
             "repair_phase_count": result.repair_phase_count,
             "worker_identity_sha256": result.worker_identity_sha256,
+            "operation_id": result.operation_id,
             "parent_receipt_id": parent_receipt_id,
             "repair_id": repair_id,
             "claim_ceiling": CLAIM_CEILING,

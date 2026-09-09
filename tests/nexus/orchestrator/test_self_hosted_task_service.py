@@ -754,6 +754,8 @@ def test_admitted_agy_worker_registry_execution_persists_identity_and_receipt(tm
     )
     demands = internal["workforce_demands"]
     admission = internal["workforce_admission"]
+    expected_model = internal["binding"]["model"]
+    expected_worker_id = internal["binding"]["worker_id"]
     calls = []
 
     class FakeAgyAdapter:
@@ -786,7 +788,7 @@ def test_admitted_agy_worker_registry_execution_persists_identity_and_receipt(tm
     attempt_id = "a" * 32
     request = _request(
         tmp_path, task_id=task_id, worker="auto",
-        model=internal["binding"]["model"], execution_lane="ISOLATED_TARGET",
+        model=expected_model, execution_lane="ISOLATED_TARGET",
         workforce_demands=demands, workforce_admission=admission,
         planner_output=internal["planner_output"],
         task_card_path=card_path, task_card_hash=card_hash,
@@ -858,10 +860,10 @@ def test_admitted_agy_worker_registry_execution_persists_identity_and_receipt(tm
         )
 
     persisted = service._read_state(contract.task_id)
-    assert calls == [("agy", internal["binding"]["model"], contract.task_id, str(tmp_path / "target"))]
-    assert persisted["selected_worker_id"] == internal["binding"]["worker_id"]
+    assert calls == [("agy", expected_model, contract.task_id, str(tmp_path / "target"))]
+    assert persisted["selected_worker_id"] == expected_worker_id
     assert persisted["selected_provider"] == "agy"
-    assert persisted["selected_model"] == internal["binding"]["model"]
+    assert persisted["selected_model"] == expected_model
     assert persisted["task_card_path"] == request["canonical_dispatch_envelope"]["task_card_path"]
     assert persisted["task_card_hash"] == request["canonical_dispatch_envelope"]["task_card_hash"]
     assert persisted["execution"]["provider"] == "agy"
@@ -896,11 +898,12 @@ def test_tracked_card_mutated_after_submit_fails_before_preflight_or_registry(
             task_card_hash=card_hash,
         ),
     )
+    expected_model = internal["binding"]["model"]
     request = _request(
         tmp_path,
         task_id=task_id,
         worker="auto",
-        model=internal["binding"]["model"],
+        model=expected_model,
         execution_lane="ISOLATED_TARGET",
         workforce_demands=internal["workforce_demands"],
         workforce_admission=internal["workforce_admission"],
@@ -1077,11 +1080,12 @@ def test_unadmitted_fallback_blocks_before_provider_side_work(
             task_card_hash=card_hash,
         ),
     )
+    expected_model = internal["binding"]["model"]
     request = _request(
         tmp_path,
         task_id=task_id,
         worker="auto",
-        model=internal["binding"]["model"],
+        model=expected_model,
         execution_lane="ISOLATED_TARGET",
         workforce_demands=internal["workforce_demands"],
         workforce_admission=internal["workforce_admission"],
@@ -2283,6 +2287,16 @@ def test_approval_is_hash_bound_and_does_not_merge(tmp_path):
     assert approved["promotion_status"] == "APPROVED"
     assert approved["merge_performed"] is False
     assert approved["push_performed"] is False
+
+    invalid = service.approve_promotion(
+        request["task_id"],
+        candidate_commit_sha="c" * 40,
+        candidate_tree_sha="0" * 40,
+        candidate_state_hash="e" * 64,
+        verified_receipt_hash="f" * 64,
+    )
+    assert invalid["status"] == "APPROVAL_INVALIDATED"
+    assert invalid["task_action"]["action_state"] == "ACTION_REQUIRED"
 
 
 def test_marked_authority_approval_requires_exact_nested_ack_and_persists(tmp_path):
@@ -4623,12 +4637,17 @@ def test_retry_integration_reuses_approved_binding_without_worker_retry(tmp_path
 
 
 def test_default_production_target_root_is_outside_disabled_worktree_namespace(monkeypatch):
-    monkeypatch.chdir("/Users/jameschen/Workspace/nexus")
+    import nexus.orchestrator.self_hosted_task_service as service_module
+
+    source_root = service_module.CANONICAL_SOURCE_ROOT
+    monkeypatch.chdir(source_root)
 
     root, target = resolve_canonical_target_roots("root-test")
 
-    assert str(root) == "/Users/jameschen/Workspace/nexus-runtime-targets"
-    assert str(target) == "/Users/jameschen/Workspace/nexus-runtime-targets/root-test"
+    expected_root = source_root.parent / "nexus-runtime-targets"
+    assert root == expected_root
+    assert target == expected_root / "root-test"
+    assert source_root not in root.parents
 
 
 def test_activation_root_derives_target_namespace_from_bound_source_root(monkeypatch, tmp_path):
@@ -8701,6 +8720,50 @@ def test_canonical_continuity_read_preserves_event_store_integrity_error(monkeyp
         SelfHostedTaskService.read_canonical_attempt_events("task-1", "attempt-1")
 
 
+def test_production_checkpoint_bootstraps_canonical_event_stream_without_manual_configure(
+    tmp_path, monkeypatch
+):
+    """The public service owns first-write EventBus initialization."""
+    canonical_state = tmp_path / "canonical-state"
+    monkeypatch.setenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", str(canonical_state))
+    monkeypatch.setattr(NexusEventBus, "_event_log_path", None)
+    monkeypatch.setattr(NexusEventBus, "_production_event_root", None, raising=False)
+    monkeypatch.setattr(NexusEventBus, "_configured_event_root", None, raising=False)
+    monkeypatch.setattr(NexusEventBus, "_event_bind_mode", None, raising=False)
+    monkeypatch.setattr(NexusEventBus._log_store, "event_log_path", None)
+    monkeypatch.setattr(NexusEventBus._log_store, "lock_path", None)
+    service = SelfHostedTaskService(auto_reconcile=False)
+    task_id, attempt_id = "production-bootstrap", "attempt-1"
+    service._write_state(
+        task_id, {"task_id": task_id, "attempt_id": attempt_id, "status": "CREATED"}
+    )
+
+    service._checkpoint(task_id, "WORKER_RUNNING", attempt_id=attempt_id)
+
+    assert (canonical_state / ".nexus" / "events" / "event_log.jsonl").exists()
+    assert service.rehydrate_task_continuation(task_id, attempt_id)["task_identity"] == {
+        "task_id": task_id,
+        "attempt_id": attempt_id,
+    }
+
+
+def test_production_read_only_rehydration_does_not_create_event_store(tmp_path, monkeypatch):
+    canonical_state = tmp_path / "canonical-state"
+    monkeypatch.setenv("NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR", str(canonical_state))
+    monkeypatch.setattr(NexusEventBus, "_event_log_path", None)
+    monkeypatch.setattr(NexusEventBus, "_production_event_root", None, raising=False)
+    monkeypatch.setattr(NexusEventBus, "_configured_event_root", None, raising=False)
+    monkeypatch.setattr(NexusEventBus, "_event_bind_mode", None, raising=False)
+    service = SelfHostedTaskService(auto_reconcile=False)
+    service._write_state(
+        "readonly-bootstrap",
+        {"task_id": "readonly-bootstrap", "attempt_id": "a1", "status": "FINAL_BLOCK"},
+    )
+    with pytest.raises(ValueError, match="attempt continuity stream is empty"):
+        service.rehydrate_task_continuation("readonly-bootstrap", "a1")
+    assert not (canonical_state / ".nexus" / "events").exists()
+
+
 def test_rehydrate_task_continuation_restart_from_disk_and_read_only(tmp_path):
     NexusEventBus.configure(tmp_path)
     state_dir = tmp_path / "state"
@@ -8886,6 +8949,185 @@ def test_rehydrate_task_continuation_missing_facts_stay_missing(tmp_path):
     assert "phase_receipts" in proj["missing_durable_bindings"]
     assert proj["candidate_binding"] is None
     assert proj["work_claim_binding"] is None
+
+
+def test_checkpoint_attempt_transition_uses_durable_top_level_identity(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+    task_id = "task-durable-event-identity"
+    attempt_id = "attempt-durable-event-identity"
+    service._create_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": "SUBMITTED",
+            "controller_revision": "durable-source",
+            "contract_hash": "durable-contract",
+            "request": {
+                "controller_revision": "request-source",
+                "contract_hash": "request-contract",
+            },
+        },
+    )
+
+    service._checkpoint(task_id, "WORKER_RUNNING", attempt_id=attempt_id)
+
+    event = NexusEventBus.get_recent_events(event_type="attempt_transition", limit=1)[0]
+    assert event["payload"]["source_revision"] == "durable-source"
+    assert event["payload"]["contract_revision"] == "durable-contract"
+
+
+def test_attempt_transition_identity_precedence_is_explicit_then_durable_then_contract(
+    tmp_path,
+):
+    NexusEventBus.configure(tmp_path)
+    SelfHostedTaskService._emit_attempt_transition(
+        {
+            "task_id": "identity-precedence",
+            "attempt_id": "attempt-1",
+            "status": "RUNNING",
+            "source_revision": "explicit-source",
+            "contract_revision": "explicit-contract",
+            "controller_revision": "durable-source",
+            "contract_hash": "durable-contract",
+            "contract": {
+                "controller_revision": "structured-source",
+                "contract_hash": "structured-contract",
+            },
+            "request": {
+                "source_revision": "request-source",
+                "contract_revision": "request-contract",
+            },
+        },
+        "identity-precedence",
+    )
+    payload = NexusEventBus.get_recent_events(event_type="attempt_transition", limit=1)[0][
+        "payload"
+    ]
+    assert payload["source_revision"] == "explicit-source"
+    assert payload["contract_revision"] == "explicit-contract"
+
+
+def test_attempt_transition_identity_durable_overrides_request_and_uses_structured_fallback(
+    tmp_path,
+):
+    NexusEventBus.configure(tmp_path)
+    SelfHostedTaskService._emit_attempt_transition(
+        {
+            "task_id": "identity-fallback",
+            "attempt_id": "attempt-1",
+            "status": "RUNNING",
+            "controller_revision": "durable-source",
+            "contract_hash": "durable-contract",
+            "contract": {
+                "controller_revision": "structured-source",
+                "contract_hash": "structured-contract",
+            },
+            "request": {
+                "controller_revision": "request-source",
+                "contract_hash": "request-contract",
+            },
+        },
+        "identity-fallback",
+    )
+    payload = NexusEventBus.get_recent_events(event_type="attempt_transition", limit=1)[0][
+        "payload"
+    ]
+    assert payload["source_revision"] == "durable-source"
+    assert payload["contract_revision"] == "durable-contract"
+
+    SelfHostedTaskService._emit_attempt_transition(
+        {
+            "task_id": "identity-structured",
+            "attempt_id": "attempt-1",
+            "status": "RUNNING",
+            "contract": {
+                "controller_revision": "structured-source",
+                "contract_hash": "structured-contract",
+            },
+        },
+        "identity-structured",
+    )
+    payload = NexusEventBus.get_recent_events(event_type="attempt_transition", limit=1)[0][
+        "payload"
+    ]
+    assert payload["source_revision"] == "structured-source"
+    assert payload["contract_revision"] == "structured-contract"
+
+
+def test_attempt_transition_identity_missing_stays_unknown(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    SelfHostedTaskService._emit_attempt_transition(
+        {"task_id": "identity-missing", "attempt_id": "attempt-1", "status": "RUNNING"},
+        "identity-missing",
+    )
+    payload = NexusEventBus.get_recent_events(event_type="attempt_transition", limit=1)[0][
+        "payload"
+    ]
+    assert payload["source_revision"] == "unknown"
+    assert payload["contract_revision"] == "unknown"
+
+
+def test_rehydrate_rejects_stale_attempt_transition_identity(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+    task_id = "identity-stale"
+    attempt_id = "attempt-stale"
+    service._create_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": "SUBMITTED",
+            "controller_revision": "current-source",
+            "contract_hash": "current-contract",
+        },
+    )
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            sequence=1,
+            state="SUBMITTED",
+            source_revision="stale-source",
+            contract_revision="stale-contract",
+        )
+    )
+    with pytest.raises(ValueError, match="REHYDRATION_SOURCE_REVISION_MISMATCH"):
+        service.rehydrate_task_continuation(task_id, attempt_id)
+
+
+def test_rehydrate_rejects_stale_attempt_transition_contract_identity(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+    task_id = "identity-stale-contract"
+    attempt_id = "attempt-stale-contract"
+    service._create_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": "SUBMITTED",
+            "controller_revision": "current-source",
+            "contract_hash": "current-contract",
+        },
+    )
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            sequence=1,
+            state="SUBMITTED",
+            source_revision="current-source",
+            contract_revision="stale-contract",
+        )
+    )
+    with pytest.raises(ValueError, match="REHYDRATION_CONTRACT_REVISION_MISMATCH"):
+        service.rehydrate_task_continuation(task_id, attempt_id)
 
 
 def test_rehydrate_task_continuation_attempt_mismatch_fails_closed(tmp_path):

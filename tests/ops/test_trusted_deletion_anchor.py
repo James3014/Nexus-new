@@ -179,7 +179,6 @@ def test_trusted_dependency_snapshot_transition_preserves_product_file_guard(mon
 
 
 def test_open_swe_dependency_snapshot_transition_is_retired_but_preserved_as_history() -> None:
-    assert trusted_anchor.TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION is None
     assert trusted_anchor.RETIRED_TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION == (
         669,
         (
@@ -195,10 +194,13 @@ def test_open_swe_dependency_snapshot_transition_is_retired_but_preserved_as_his
     trusted_lock = b"trusted lock\n"
     head_pyproject = b"open swe pyproject\n"
     head_lock = b"open swe lock\n"
-    assert tuple(
-        trusted_anchor._sha(value)
-        for value in (trusted_pyproject, trusted_lock, head_pyproject, head_lock)
-    ) != hashes
+    assert (
+        tuple(
+            trusted_anchor._sha(value)
+            for value in (trusted_pyproject, trusted_lock, head_pyproject, head_lock)
+        )
+        != hashes
+    )
 
     with pytest.raises(ValueError, match="PR dependency contract drifts from trusted default"):
         trusted_anchor._validate_trusted_dependency_contract(
@@ -214,7 +216,6 @@ def test_open_swe_dependency_snapshot_transition_is_retired_but_preserved_as_his
 # Historical #683 exact-base node: retain the exact reverse-transition hashes as
 # evidence while proving that no active one-use transition remains authoritative.
 def test_open_swe_dependency_snapshot_transition_hashes_are_exact() -> None:
-    assert trusted_anchor.TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION is None
     retired_pr, retired_hashes = trusted_anchor.RETIRED_TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION
     assert retired_pr == 669
     assert (*retired_hashes[2:], *retired_hashes[:2]) == (
@@ -222,6 +223,31 @@ def test_open_swe_dependency_snapshot_transition_hashes_are_exact() -> None:
         "cb5ecbb7fcce287f9bcdbb17f65a3b931f13613b6fd1608b428e1c19c5f6965a",
         "c7d84dd5cbc4e533db65445ebb5691296f732d49f2fb39c6028745b18ca1d412",
         "3e753af334885a2f434a94d40fc8860abd151516950e7f1e3647971f2e0dfc51",
+    )
+
+
+def test_core_v1_tg6_dependency_snapshot_transition_hashes_are_exact() -> None:
+    # Keep the historical test node stable while advancing the active one-use binding.
+    assert trusted_anchor.RETIRED_CORE_V1_TG6_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        811,
+        (
+            "95dc46753fa8d630ad5abcc00f0fc9bfd62e6767a8d943b027a56cddddb74bae",
+            "1ca1b7f706c9202ab6cd8df8d86f0051a6769d6fe525c954bdb326971fb65111",
+            "261ea0f2a2ffe179615d48acfa02ef89ed617e7970635ce39d70d8bede276b05",
+            "5933bdf1497f6d0e852fc26730dd4eec7985d72512e0ff061fc2ab7f59842961",
+        ),
+    )
+
+
+def test_core_namespace_retirement_transition_hashes_are_exact() -> None:
+    assert trusted_anchor.TRUSTED_DEPENDENCY_SNAPSHOT_TRANSITION == (
+        833,
+        (
+            "261ea0f2a2ffe179615d48acfa02ef89ed617e7970635ce39d70d8bede276b05",
+            "5933bdf1497f6d0e852fc26730dd4eec7985d72512e0ff061fc2ab7f59842961",
+            "382f05ca47059a15465515ab704d2d54b8a2a95ae83318b3f98617cd982029c3",
+            "5933bdf1497f6d0e852fc26730dd4eec7985d72512e0ff061fc2ab7f59842961",
+        ),
     )
 
 
@@ -401,6 +427,11 @@ def _manifest() -> dict[str, object]:
         "uv_lock_sha256": hashlib.sha256(b"").hexdigest(),
         "requirements_sha256": hashlib.sha256(b"").hexdigest(),
         "pytest_plugins": trusted_anchor.PYTEST_PLUGINS,
+        "dependency_groups": list(trusted_anchor.TRUSTED_RUNTIME_DEPENDENCY_GROUPS),
+        "external_packages": [
+            {**contract, "direct_url_sha256": "d" * 64}
+            for contract in trusted_anchor._trusted_external_package_contract()
+        ],
     }
     runtime_metadata = _json(runtime_identity) + b"\n"
     return build_manifest(
@@ -563,6 +594,15 @@ def _synthetic_runtime(
             b"Path('.executor-env.json').write_text(json.dumps(sorted(os.environ)))\n"
         )
     )
+    external_contract = trusted_anchor._trusted_external_package_contract()[0]
+    external_direct_url = _json({
+        "url": external_contract["repository"],
+        "vcs_info": {
+            "vcs": "git",
+            "commit_id": external_contract["commit"],
+            "requested_revision": external_contract["commit"],
+        },
+    })
     files = {
         "site-packages/pytest/__init__.py": b"",
         "site-packages/pytest/__main__.py": test_driver,
@@ -571,6 +611,11 @@ def _synthetic_runtime(
         ),
         "site-packages/pytest_asyncio.py": b"",
         "site-packages/pytest_timeout.py": b"",
+        "site-packages/nexus_learning/__init__.py": b"",
+        "site-packages/nexus_learning-0.1.0.dist-info/METADATA": (
+            b"Metadata-Version: 2.1\nName: nexus-learning\nVersion: 0.1.0\n"
+        ),
+        "site-packages/nexus_learning-0.1.0.dist-info/direct_url.json": external_direct_url,
     }
     stream = BytesIO()
     with tarfile.open(fileobj=stream, mode="w") as archive:
@@ -587,6 +632,13 @@ def _synthetic_runtime(
         "uv_lock_sha256": hashlib.sha256(uv_lock).hexdigest(),
         "requirements_sha256": hashlib.sha256(requirements).hexdigest(),
         "pytest_plugins": trusted_anchor.PYTEST_PLUGINS,
+        "dependency_groups": list(trusted_anchor.TRUSTED_RUNTIME_DEPENDENCY_GROUPS),
+        "external_packages": [
+            {
+                **external_contract,
+                "direct_url_sha256": trusted_anchor._sha(external_direct_url),
+            }
+        ],
     }
     (runtime_dir / "runtime.tar").write_bytes(stream.getvalue())
     (runtime_dir / "runtime-metadata.json").write_bytes(_json(metadata) + b"\n")
@@ -927,6 +979,37 @@ def test_verifier_does_not_substitute_its_runner_runtime_for_executor_identity(
     assert _verify(manifest, evidence) == "PASS"
 
 
+def test_global_conftest_stub_installation_does_not_require_optional_ml_or_legacy_deps(
+    tmp_path: Path,
+):
+    blocker = tmp_path / "sitecustomize.py"
+    blocker.write_text(
+        "import builtins\n"
+        "_real_import = builtins.__import__\n"
+        "def _blocked_import(name, globals=None, locals=None, fromlist=(), level=0):\n"
+        "    if name.split('.', 1)[0] in {'numpy', 'pandas'}:\n"
+        "        raise ModuleNotFoundError(f'blocked optional dependency: {name}')\n"
+        "    return _real_import(name, globals, locals, fromlist, level)\n"
+        "builtins.__import__ = _blocked_import\n",
+        encoding="utf-8",
+    )
+    environment = os.environ.copy()
+    environment["PYTHONPATH"] = os.pathsep.join((str(tmp_path), str(ROOT)))
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import runpy; runpy.run_path('tests/conftest.py', run_name='__nexus_conftest_probe__')",
+        ],
+        cwd=ROOT,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
 def test_runtime_builder_uses_frozen_hash_bound_binary_only_contract(tmp_path: Path):
     repo = tmp_path / "repo"
     subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
@@ -939,6 +1022,7 @@ def test_runtime_builder_uses_frozen_hash_bound_binary_only_contract(tmp_path: P
     workflow_sha = _run_git(repo, "rev-parse", "HEAD")
     fake_uv = tmp_path / "uv"
     log = tmp_path / "uv.log"
+    external = trusted_anchor._trusted_external_package_contract()[0]
     fake_uv.write_text(
         f"#!{sys.executable}\n"
         "import json,os,sys\n"
@@ -949,9 +1033,14 @@ def test_runtime_builder_uses_frozen_hash_bound_binary_only_contract(tmp_path: P
         "if args[0] == 'export':\n"
         " Path(args[args.index('--output-file')+1]).write_text('pytest==9 --hash=sha256:abc\\n'); raise SystemExit\n"
         "if args[:2] == ['pip','install']:\n"
-        " target=Path(args[args.index('--target')+1]); (target/'pytest').mkdir(parents=True)\n"
-        " (target/'pytest/__init__.py').write_text(''); (target/'pytest/__main__.py').write_text('')\n"
-        " (target/'pytest_asyncio.py').write_text(''); (target/'pytest_timeout.py').write_text('')\n"
+        " target=Path(args[args.index('--target')+1])\n"
+        " if '--requirements' in args:\n"
+        "  (target/'pytest').mkdir(parents=True); (target/'pytest/__init__.py').write_text(''); (target/'pytest/__main__.py').write_text('')\n"
+        "  (target/'pytest_asyncio.py').write_text(''); (target/'pytest_timeout.py').write_text(''); raise SystemExit\n"
+        " (target/'nexus_learning').mkdir(parents=True); (target/'nexus_learning/__init__.py').write_text('')\n"
+        " info=target/'nexus_learning-0.1.0.dist-info'; info.mkdir()\n"
+        " (info/'METADATA').write_text('Metadata-Version: 2.1\\nName: nexus-learning\\nVersion: 0.1.0\\n')\n"
+        f" (info/'direct_url.json').write_text(json.dumps({{'url': {external['repository']!r}, 'vcs_info': {{'vcs': 'git', 'commit_id': {external['commit']!r}, 'requested_revision': {external['commit']!r}}}}}, sort_keys=True, separators=(',',':')))\n"
         " raise SystemExit\n"
         "raise SystemExit(2)\n"
     )
@@ -967,20 +1056,120 @@ def test_runtime_builder_uses_frozen_hash_bound_binary_only_contract(tmp_path: P
     )
     calls = [json.loads(line) for line in log.read_text().splitlines()]
     export = next(call for call in calls if call and call[0] == "export")
-    install = next(call for call in calls if call[:2] == ["pip", "install"])
+    installs = [call for call in calls if call[:2] == ["pip", "install"]]
+    install = next(call for call in installs if "--requirements" in call)
+    external_install = next(call for call in installs if "--requirements" not in call)
     assert {
         "--frozen",
         "--no-default-groups",
-        "--group",
-        "dev",
         "--no-emit-project",
         "--no-emit-workspace",
         "--no-emit-local",
     } <= set(export)
+    group_flags = [export[i + 1] for i, token in enumerate(export) if token == "--group"]
+    assert group_flags == list(trusted_anchor.TRUSTED_RUNTIME_DEPENDENCY_GROUPS)
     assert {"--require-hashes", "--only-binary", "--no-cache", "--no-python-downloads"} <= set(
         install
     )
+    assert {"--no-cache", "--no-deps", "--no-python-downloads"} <= set(external_install)
+    assert external_install[-1] == (
+        f"{external['distribution']} @ git+{external['repository']}@{external['commit']}"
+    )
     assert all((output / name).is_file() for name in trusted_anchor.RUNTIME_FILENAMES)
+    metadata = json.loads((output / "runtime-metadata.json").read_text(encoding="utf-8"))
+    assert metadata["dependency_groups"] == list(trusted_anchor.TRUSTED_RUNTIME_DEPENDENCY_GROUPS)
+    assert metadata["external_packages"][0] == {
+        **external,
+        "direct_url_sha256": metadata["external_packages"][0]["direct_url_sha256"],
+    }
+
+
+@pytest.mark.parametrize(
+    "tampered_groups",
+    [
+        None,  # missing key
+        [],
+        ["dev"],
+        ["trusted-anchor"],
+        ["trusted-anchor", "dev"],  # reordered
+        ["dev", "trusted-anchor", "extra"],
+        ["dev", "hostile"],
+    ],
+)
+def test_runtime_metadata_dependency_groups_drift_fails_closed(
+    tampered_groups: list[str] | None,
+) -> None:
+    manifest = _manifest()
+    metadata = dict(manifest["runtime_identity"])  # type: ignore[arg-type]
+    if tampered_groups is None:
+        metadata.pop("dependency_groups", None)
+    else:
+        metadata["dependency_groups"] = tampered_groups
+    tampered_metadata = _json(metadata) + b"\n"
+    evidence = _evidence(manifest)
+    assert _verify(manifest, evidence, runtime_metadata=tampered_metadata) == "IMPACT_UNKNOWN"
+    manifest_tampered = dict(manifest)
+    manifest_tampered["runtime_identity"] = metadata
+    manifest_tampered["runtime_metadata_sha256"] = trusted_anchor._sha(tampered_metadata)
+    evidence_tampered = _evidence(manifest_tampered)
+    assert (
+        _verify(manifest_tampered, evidence_tampered, runtime_metadata=tampered_metadata)
+        == "IMPACT_UNKNOWN"
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("repository", "https://github.com/James3014/hostile.git"),
+        ("commit", "f" * 40),
+        ("distribution", "hostile-learning"),
+        ("package", "hostile_learning"),
+        ("direct_url_sha256", "f" * 64),
+    ],
+)
+def test_runtime_metadata_external_package_identity_drift_fails_closed(
+    field: str, replacement: str
+) -> None:
+    manifest = _manifest()
+    metadata = dict(manifest["runtime_identity"])  # type: ignore[arg-type]
+    packages = [dict(item) for item in metadata["external_packages"]]  # type: ignore[index]
+    packages[0][field] = replacement
+    metadata["external_packages"] = packages
+    tampered_metadata = _json(metadata) + b"\n"
+    manifest_tampered = dict(manifest)
+    manifest_tampered["runtime_identity"] = metadata
+    manifest_tampered["runtime_metadata_sha256"] = trusted_anchor._sha(tampered_metadata)
+    evidence_tampered = _evidence(manifest_tampered)
+    assert (
+        _verify(manifest_tampered, evidence_tampered, runtime_metadata=tampered_metadata)
+        == "IMPACT_UNKNOWN"
+    )
+
+
+def test_external_runtime_package_provenance_rejects_wrong_commit(tmp_path: Path) -> None:
+    site_packages = tmp_path / "site-packages"
+    package = site_packages / "nexus_learning"
+    dist_info = site_packages / "nexus_learning-0.1.0.dist-info"
+    package.mkdir(parents=True)
+    dist_info.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    (dist_info / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: nexus-learning\nVersion: 0.1.0\n", encoding="utf-8"
+    )
+    contract = trusted_anchor._trusted_external_package_contract()[0]
+    (dist_info / "direct_url.json").write_bytes(
+        _json({
+            "url": contract["repository"],
+            "vcs_info": {
+                "vcs": "git",
+                "commit_id": "f" * 40,
+                "requested_revision": contract["commit"],
+            },
+        })
+    )
+    with pytest.raises(ValueError, match="provenance mismatch"):
+        trusted_anchor._verify_external_runtime_packages(site_packages)
 
 
 def test_controller_executor_verifier_path_from_non_repository_cwd():

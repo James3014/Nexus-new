@@ -1,11 +1,14 @@
 """Small, deterministic trust-boundary for verifier evidence submissions."""
 
 import hashlib
+import json
 import re
 import weakref
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
+from typing import Mapping, Protocol, runtime_checkable
 
 from product.evidence import (
     AcceptanceContract,
@@ -76,6 +79,1183 @@ class TrustRole(str, Enum):
 class TrustDecision(str, Enum):
     ALLOW = "ALLOW"
     DENY = "DENY"
+
+
+IDENTITY_ENVELOPE_SCHEMA = "nexus.evidence.identity-envelope.v1"
+EXTERNAL_VERIFICATION_STATUSES = frozenset({"VERIFIED", "INVALID", "REVOKED"})
+EXTERNAL_SIGNATURE_PAYLOAD_SCHEMA = "nexus.external-signature-payload.v1"
+
+
+def _native_sha(value: object, field: str, *, git: bool = False) -> None:
+    if type(value) is not str:
+        raise ValueError(f"{field} must be a string")
+    if git:
+        valid = len(value) == 40 and all(c in "0123456789abcdef" for c in value)
+    else:
+        valid = (
+            value.startswith("sha256:")
+            and len(value) == 71
+            and all(c in "0123456789abcdef" for c in value[7:])
+        )
+    if not value or value != value.strip() or not valid:
+        raise ValueError(f"{field} has an invalid digest")
+
+
+def _native_text(value: object, field: str) -> None:
+    if (
+        type(value) is not str
+        or not value
+        or len(value) > MAX_CONTENT_BYTES
+        or value != value.strip()
+        or "\x00" in value
+    ):
+        raise ValueError(f"{field} must be a normalized string")
+
+
+def _native_junit_counts(data: bytes, exit_code: int) -> tuple[int, int, int]:
+    if not data or b"<!DOCTYPE" in data or b"<!ENTITY" in data:
+        raise ValueError("missing or unsafe junit oracle")
+    try:
+        root = ET.fromstring(data)
+        suites = list(root) if root.tag == "testsuites" else [root]
+        counts = tuple(
+            sum(int(s.attrib.get(name, "0")) for s in suites)
+            for name in ("tests", "failures", "errors")
+        )
+    except (ET.ParseError, TypeError, ValueError) as exc:
+        raise ValueError("malformed junit oracle") from exc
+    tests, failures, errors = counts
+    if (
+        tests <= 0
+        or failures < 0
+        or errors < 0
+        or failures + errors > tests
+        or (exit_code == 0 and failures + errors)
+    ):
+        raise ValueError("inadequate junit oracle")
+    return counts
+
+
+def _native_normalized_junit(data: bytes) -> object:
+    root = ET.fromstring(data)
+
+    def normalize(item):
+        attrs = {
+            k: v
+            for k, v in sorted(item.attrib.items())
+            if k not in {"timestamp", "hostname", "time"}
+        }
+        text = (item.text or "").replace("/private/tmp/", "<tmp>/").replace("/tmp/", "<tmp>/")
+        return [item.tag, attrs, text.strip(), [normalize(child) for child in item]]
+
+    return normalize(root)
+
+
+@dataclass(frozen=True)
+class GitHubAcquisitionReceipt:
+    """Evidence-core-owned, portable TG1 receipt; no acquisition dependency."""
+
+    repository_owner: str
+    repository_name: str
+    pr_number: int
+    base_sha: str
+    head_sha: str
+    base_tree_sha: str
+    head_tree_sha: str
+    merge_base_policy: str
+    diff_bytes: bytes
+    diff_hash: str
+    changed_paths: tuple[str, ...]
+    deleted_paths: tuple[str, ...]
+    checks: tuple[tuple[str, str], ...]
+    pagination_complete: bool
+    observed_at: str
+    freshness_cas: str
+    locator_hash: str
+
+    def __post_init__(self) -> None:
+        for name in ("repository_owner", "repository_name", "observed_at"):
+            _native_text(getattr(self, name), name)
+        if type(self.pr_number) is not int or self.pr_number <= 0:
+            raise ValueError("pr_number must be positive")
+        for name in ("base_sha", "head_sha", "base_tree_sha", "head_tree_sha"):
+            _native_sha(getattr(self, name), name, git=True)
+        if self.base_sha == self.head_sha or self.merge_base_policy != "base_sha_exact":
+            raise ValueError("invalid acquisition identity")
+        if type(self.diff_bytes) is not bytes or _raw_hash(self.diff_bytes) != self.diff_hash:
+            raise ValueError("diff_hash does not match diff_bytes")
+        _native_sha(self.diff_hash, "diff_hash")
+        for name in ("changed_paths", "deleted_paths"):
+            values = getattr(self, name)
+            if (
+                type(values) is not tuple
+                or values != tuple(sorted(values))
+                or len(values) != len(set(values))
+            ):
+                raise ValueError(f"{name} must be sorted unique tuple")
+            if any(
+                type(x) is not str
+                or not x
+                or x.startswith("/")
+                or "\\" in x
+                or any(part in {"", ".", ".."} for part in x.split("/"))
+                for x in values
+            ):
+                raise ValueError(f"{name} contains invalid path")
+        if not set(self.deleted_paths).issubset(self.changed_paths):
+            raise ValueError("deleted paths must be changed paths")
+        if (
+            type(self.checks) is not tuple
+            or self.checks != tuple(sorted(self.checks))
+            or len({item[0] for item in self.checks if type(item) is tuple and len(item) == 2})
+            != len(self.checks)
+        ):
+            raise ValueError("checks must be sorted tuple")
+        for item in self.checks:
+            if type(item) is not tuple or len(item) != 2:
+                raise ValueError("checks must be identity/digest pairs")
+            _native_text(item[0], "check identity")
+            _native_sha(item[1], "check digest")
+        if self.pagination_complete is not True:
+            raise ValueError("pagination must be complete")
+        try:
+            parsed = datetime.fromisoformat(self.observed_at[:-1])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("observed_at must be UTC RFC3339") from exc
+        if not self.observed_at.endswith("Z") or parsed.tzinfo is not None:
+            raise ValueError("observed_at must be UTC RFC3339")
+        freshness_subject = {
+            "repository_owner": self.repository_owner.lower(),
+            "repository_name": self.repository_name.lower(),
+            "pr_number": self.pr_number,
+            "base_sha": self.base_sha,
+            "head_sha": self.head_sha,
+            "base_tree_sha": self.base_tree_sha,
+            "head_tree_sha": self.head_tree_sha,
+            "merge_base_policy": self.merge_base_policy,
+            "diff_hash": self.diff_hash,
+            "changed_paths": list(self.changed_paths),
+            "deleted_paths": list(self.deleted_paths),
+            "checks": [list(item) for item in self.checks],
+        }
+        expected_cas = _raw_hash(
+            json.dumps(freshness_subject, sort_keys=True, separators=(",", ":")).encode()
+        )
+        if self.freshness_cas != expected_cas:
+            raise ValueError("freshness_cas does not match acquisition identity")
+        expected_locator = _raw_hash(
+            json.dumps(
+                [self.repository_owner.lower(), self.repository_name.lower(), self.pr_number],
+                separators=(",", ":"),
+            ).encode()
+        )
+        if self.locator_hash != expected_locator:
+            raise ValueError("locator_hash does not match acquisition identity")
+        _native_sha(self.freshness_cas, "freshness_cas")
+        _native_sha(self.locator_hash, "locator_hash")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "repository_owner": self.repository_owner,
+            "repository_name": self.repository_name,
+            "pr_number": self.pr_number,
+            "base_sha": self.base_sha,
+            "head_sha": self.head_sha,
+            "base_tree_sha": self.base_tree_sha,
+            "head_tree_sha": self.head_tree_sha,
+            "merge_base_policy": self.merge_base_policy,
+            "diff_bytes": self.diff_bytes.hex(),
+            "diff_hash": self.diff_hash,
+            "changed_paths": list(self.changed_paths),
+            "deleted_paths": list(self.deleted_paths),
+            "checks": [list(x) for x in self.checks],
+            "pagination_complete": self.pagination_complete,
+            "observed_at": self.observed_at,
+            "freshness_cas": self.freshness_cas,
+            "locator_hash": self.locator_hash,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Mapping[str, object]) -> "GitHubAcquisitionReceipt":
+        if type(value) is not dict:
+            raise TypeError("acquisition receipt must be a dict")
+        data = dict(value)
+        try:
+            data["diff_bytes"] = bytes.fromhex(data["diff_bytes"])
+            data["changed_paths"] = tuple(data["changed_paths"])
+            data["deleted_paths"] = tuple(data["deleted_paths"])
+            data["checks"] = tuple(tuple(x) for x in data["checks"])
+            return cls(**data)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("malformed acquisition receipt") from exc
+
+
+@dataclass(frozen=True)
+class PythonExecutionAttemptReceipt:
+    attempt_id: str
+    execution_id: str
+    source_revision: str
+    source_tree: str
+    contract_hash: str
+    plan_hash: str
+    environment_hash: str
+    argv: tuple[str, ...]
+    stdout: bytes
+    stderr: bytes
+    exit_code: int
+    junit: bytes
+    artifact_hash: str
+    junit_tests: int
+    junit_failures: int
+    junit_errors: int
+    outcome_hash: str
+
+    def __post_init__(self) -> None:
+        for name in ("attempt_id", "execution_id"):
+            _native_text(getattr(self, name), name)
+        for name in ("source_revision", "source_tree"):
+            _native_sha(getattr(self, name), name, git=True)
+        for name in (
+            "contract_hash",
+            "plan_hash",
+            "environment_hash",
+            "artifact_hash",
+            "outcome_hash",
+        ):
+            _native_sha(getattr(self, name), name)
+        if (
+            type(self.argv) is not tuple
+            or not self.argv
+            or any(type(x) is not str or not x for x in self.argv)
+        ):
+            raise ValueError("argv must be a non-empty tuple")
+        if any(x in {"sh", "bash", "-c", "--command"} for x in self.argv):
+            raise ValueError("shell invocation is forbidden")
+        for name in ("stdout", "stderr", "junit"):
+            if (
+                type(getattr(self, name)) is not bytes
+                or len(getattr(self, name)) > MAX_CONTENT_BYTES
+            ):
+                raise ValueError(f"{name} must be bytes")
+        if type(self.exit_code) is not int or isinstance(self.exit_code, bool):
+            raise ValueError("exit_code must be int")
+        for name in ("junit_tests", "junit_failures", "junit_errors"):
+            if (
+                type(getattr(self, name)) is not int
+                or isinstance(getattr(self, name), bool)
+                or getattr(self, name) < 0
+            ):
+                raise ValueError(f"{name} must be a non-negative int")
+        tests, failures, errors = _native_junit_counts(self.junit, self.exit_code)
+        if (tests, failures, errors) != (self.junit_tests, self.junit_failures, self.junit_errors):
+            raise ValueError("junit semantic counts do not match")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "attempt_id": self.attempt_id,
+            "execution_id": self.execution_id,
+            "source_revision": self.source_revision,
+            "source_tree": self.source_tree,
+            "contract_hash": self.contract_hash,
+            "plan_hash": self.plan_hash,
+            "environment_hash": self.environment_hash,
+            "argv": list(self.argv),
+            "stdout": self.stdout.hex(),
+            "stderr": self.stderr.hex(),
+            "exit_code": self.exit_code,
+            "junit": self.junit.hex(),
+            "artifact_hash": self.artifact_hash,
+            "junit_tests": self.junit_tests,
+            "junit_failures": self.junit_failures,
+            "junit_errors": self.junit_errors,
+            "outcome_hash": self.outcome_hash,
+        }
+
+
+@dataclass(frozen=True)
+class PythonRunnerProfileReceipt:
+    profile_id: str
+    image: str
+    image_digest: str
+    lock_digest: str
+    dependency_artifacts_hash: str
+    network: str
+    rootfs: str
+    command: tuple[str, ...]
+    timeout_seconds: int
+    memory_bytes: int
+    cpu_seconds: int
+
+    def __post_init__(self) -> None:
+        for name in ("profile_id", "image", "network", "rootfs"):
+            _native_text(getattr(self, name), name)
+        for name in ("image_digest", "lock_digest", "dependency_artifacts_hash"):
+            _native_sha(getattr(self, name), name)
+        if self.network != "none" or self.rootfs != "read-only":
+            raise ValueError("runner profile must be offline/read-only")
+        if (
+            type(self.command) is not tuple
+            or not self.command
+            or any(type(x) is not str or not x for x in self.command)
+        ):
+            raise ValueError("profile command must be argv tuple")
+        if any(x in {"sh", "bash", "-c", "--command"} for x in self.command):
+            raise ValueError("shell invocation is forbidden")
+        for name in ("timeout_seconds", "memory_bytes", "cpu_seconds"):
+            if (
+                type(getattr(self, name)) is not int
+                or isinstance(getattr(self, name), bool)
+                or getattr(self, name) <= 0
+            ):
+                raise ValueError(f"{name} must be positive")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            **{
+                name: getattr(self, name)
+                for name in (
+                    "profile_id",
+                    "image",
+                    "image_digest",
+                    "lock_digest",
+                    "dependency_artifacts_hash",
+                    "network",
+                    "rootfs",
+                    "timeout_seconds",
+                    "memory_bytes",
+                    "cpu_seconds",
+                )
+            },
+            "command": list(self.command),
+        }
+
+
+@dataclass(frozen=True)
+class PythonRunnerReceipt:
+    """Evidence-core-owned, portable TG2 receipt; execution remains injected."""
+
+    status: str
+    reason_codes: tuple[str, ...]
+    profile_hash: str
+    attempt_ids: tuple[str, ...]
+    artifact_hashes: tuple[str, ...]
+    attempts: tuple[PythonExecutionAttemptReceipt, ...]
+    profile: PythonRunnerProfileReceipt
+
+    def __post_init__(self) -> None:
+        if self.status not in {"VERIFIED", "FAILED_VERIFICATION", "UNVERIFIABLE"}:
+            raise ValueError("invalid runner status")
+        if type(self.reason_codes) is not tuple or any(
+            type(x) is not str for x in self.reason_codes
+        ):
+            raise ValueError("reason_codes must be tuple[str,...]")
+        _native_sha(self.profile_hash, "profile_hash")
+        if type(self.profile) is not PythonRunnerProfileReceipt:
+            raise TypeError("native runner profile is required")
+        if self.profile_hash != _raw_hash(
+            json.dumps(self.profile.to_dict(), sort_keys=True, separators=(",", ":")).encode()
+        ):
+            raise ValueError("profile_hash does not match runner profile")
+        if type(self.attempts) is not tuple or any(
+            type(x) is not PythonExecutionAttemptReceipt for x in self.attempts
+        ):
+            raise TypeError("native execution attempts are required")
+        if type(self.attempt_ids) is not tuple or type(self.artifact_hashes) is not tuple:
+            raise ValueError("runner summaries must be tuples")
+        for value in self.artifact_hashes:
+            _native_sha(value, "artifact_hash")
+        if self.status in {"VERIFIED", "FAILED_VERIFICATION"} and len(self.attempts) != 2:
+            raise ValueError("runner receipt requires two attempts")
+        if self.status == "VERIFIED" and self.reason_codes != ():
+            raise ValueError("verified runner receipt must have empty reasons")
+        if self.status == "FAILED_VERIFICATION" and self.reason_codes != ("TEST_FAILURE",):
+            raise ValueError("failed runner receipt must have TEST_FAILURE reason")
+        if self.status == "UNVERIFIABLE" and len(self.attempts) not in {0, 2}:
+            raise ValueError("unverifiable runner receipt requires zero or two attempts")
+        if self.status != "UNVERIFIABLE" and len({x.execution_id for x in self.attempts}) != len(
+            self.attempts
+        ):
+            raise ValueError("duplicate execution identity")
+        if len(self.attempts) == 2:
+            same_outcome = self.attempts[0].outcome_hash == self.attempts[1].outcome_hash
+            if self.status == "VERIFIED" and (
+                not same_outcome
+                or any(
+                    a.exit_code != 0 or a.junit_failures + a.junit_errors != 0
+                    for a in self.attempts
+                )
+            ):
+                raise ValueError("verified runner truth table mismatch")
+            if self.status == "FAILED_VERIFICATION" and (
+                not same_outcome
+                or any(
+                    a.exit_code != 1 or a.junit_failures + a.junit_errors <= 0
+                    for a in self.attempts
+                )
+            ):
+                raise ValueError("failed runner truth table mismatch")
+            if self.status == "UNVERIFIABLE":
+                duplicate = self.attempts[0].execution_id == self.attempts[1].execution_id
+                expected = (
+                    ("DUPLICATE_EXECUTION_ID",)
+                    if duplicate
+                    else ("NONDETERMINISTIC",)
+                    if not same_outcome
+                    else ("UNKNOWN_EXECUTION_OUTCOME",)
+                )
+                if self.reason_codes != expected:
+                    raise ValueError("unverifiable runner truth table mismatch")
+        elif self.status == "UNVERIFIABLE" and self.reason_codes not in {
+            ("MISSING_BINDING",),
+            ("MALFORMED_REQUEST",),
+            ("MALFORMED_OR_UNAVAILABLE",),
+        }:
+            raise ValueError("unverifiable zero-attempt reason is not allowed")
+        for attempt in self.attempts:
+            expected_identity = (
+                json.dumps(
+                    {
+                        "source_revision": attempt.source_revision,
+                        "source_tree": attempt.source_tree,
+                        "contract_hash": attempt.contract_hash,
+                        "plan_hash": attempt.plan_hash,
+                        "environment_hash": attempt.environment_hash,
+                        "profile_id": self.profile.profile_id,
+                        "image": self.profile.image,
+                        "image_digest": self.profile.image_digest,
+                        "lock_digest": self.profile.lock_digest,
+                        "network": self.profile.network,
+                        "rootfs": self.profile.rootfs,
+                        "timeout_seconds": self.profile.timeout_seconds,
+                        "memory_bytes": self.profile.memory_bytes,
+                        "cpu_seconds": self.profile.cpu_seconds,
+                        "argv": list(attempt.argv),
+                        "junit": [
+                            attempt.junit_tests,
+                            attempt.junit_failures,
+                            attempt.junit_errors,
+                        ],
+                        "exit_code": attempt.exit_code,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+                + self.profile.dependency_artifacts_hash.encode()
+            )
+            expected_artifact = _raw_hash(
+                b"\0".join((expected_identity, attempt.stdout, attempt.stderr, attempt.junit))
+            )
+            if expected_artifact != attempt.artifact_hash:
+                raise ValueError("artifact_hash does not match runner evidence")
+            expected_outcome = _raw_hash(
+                json.dumps(
+                    [
+                        attempt.source_revision,
+                        attempt.source_tree,
+                        attempt.contract_hash,
+                        attempt.plan_hash,
+                        attempt.environment_hash,
+                        list(attempt.argv),
+                        attempt.exit_code,
+                        _native_normalized_junit(attempt.junit),
+                    ],
+                    separators=(",", ":"),
+                ).encode()
+            )
+            if expected_outcome != attempt.outcome_hash:
+                raise ValueError("outcome_hash does not match runner evidence")
+        if self.attempt_ids != tuple(
+            x.attempt_id for x in self.attempts
+        ) or self.artifact_hashes != tuple(x.artifact_hash for x in self.attempts):
+            raise ValueError("runner summary does not match attempts")
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "status": self.status,
+            "reason_codes": list(self.reason_codes),
+            "profile_hash": self.profile_hash,
+            "attempt_ids": list(self.attempt_ids),
+            "artifact_hashes": list(self.artifact_hashes),
+            "attempts": [x.to_dict() for x in self.attempts],
+            "profile": self.profile.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(
+        cls, value: Mapping[str, object], *, profile: Mapping[str, object] | None = None
+    ) -> "PythonRunnerReceipt":
+        if type(value) is not dict:
+            raise TypeError("runner receipt must be a dict")
+        try:
+            required = {
+                "status",
+                "reason_codes",
+                "profile_hash",
+                "attempt_ids",
+                "artifact_hashes",
+                "attempts",
+                "profile",
+            }
+            if set(value) != required:
+                raise ValueError("runner receipt schema keys mismatch")
+            profile_data = profile if profile is not None else value["profile"]
+            if type(profile_data) is not dict or set(profile_data) != {
+                "profile_id",
+                "image",
+                "image_digest",
+                "lock_digest",
+                "dependency_artifacts_hash",
+                "network",
+                "rootfs",
+                "command",
+                "timeout_seconds",
+                "memory_bytes",
+                "cpu_seconds",
+            }:
+                raise ValueError("runner profile schema keys mismatch")
+            profile_obj = PythonRunnerProfileReceipt(**{
+                **profile_data,
+                "command": tuple(profile_data["command"]),
+            })
+            attempt_keys = {
+                "attempt_id",
+                "execution_id",
+                "source_revision",
+                "source_tree",
+                "contract_hash",
+                "plan_hash",
+                "environment_hash",
+                "argv",
+                "stdout",
+                "stderr",
+                "exit_code",
+                "junit",
+                "artifact_hash",
+                "junit_tests",
+                "junit_failures",
+                "junit_errors",
+                "outcome_hash",
+            }
+            if type(value["attempts"]) is not list or any(
+                type(item) is not dict or set(item) != attempt_keys for item in value["attempts"]
+            ):
+                raise ValueError("runner attempt schema keys mismatch")
+            attempts = tuple(
+                PythonExecutionAttemptReceipt(**{
+                    **item,
+                    "argv": tuple(item["argv"]),
+                    "stdout": bytes.fromhex(item["stdout"]),
+                    "stderr": bytes.fromhex(item["stderr"]),
+                    "junit": bytes.fromhex(item["junit"]),
+                })
+                for item in value["attempts"]
+            )
+            return cls(
+                value["status"],
+                tuple(value["reason_codes"]),
+                value["profile_hash"],
+                tuple(value["attempt_ids"]),
+                tuple(value["artifact_hashes"]),
+                attempts,
+                profile_obj,
+            )
+        except (KeyError, TypeError) as exc:
+            raise ValueError("malformed runner receipt") from exc
+
+
+@dataclass(frozen=True)
+class EvidenceIdentityEnvelope:
+    """Portable trust identity; it contains no live-object capability."""
+
+    context_hash: str
+    profile_hash: str
+    bundle_hash: str
+    ingestion_receipt_hash: str
+    subject_hash: str
+    execution_id: str
+    attempt_id: str
+    generation: str
+    producer_id: str
+    issuer_id: str
+    acquisition_snapshot_hash: str
+    runner_result_hash: str
+    verification_receipt_hash: str
+    external_receipt_hashes: tuple[str, ...]
+    identity_hash: str
+
+    def __post_init__(self):
+        for name in (
+            "context_hash",
+            "profile_hash",
+            "bundle_hash",
+            "ingestion_receipt_hash",
+            "subject_hash",
+            "execution_id",
+            "attempt_id",
+            "generation",
+            "producer_id",
+            "issuer_id",
+        ):
+            _text(getattr(self, name), name)
+        for name in (
+            "context_hash",
+            "profile_hash",
+            "bundle_hash",
+            "ingestion_receipt_hash",
+            "subject_hash",
+        ):
+            _hash_value(getattr(self, name), name)
+        for name in (
+            "acquisition_snapshot_hash",
+            "runner_result_hash",
+            "verification_receipt_hash",
+        ):
+            _hash_value(getattr(self, name), name)
+        _tuple_text(self.external_receipt_hashes, "external_receipt_hashes", nonempty=False)
+        for value in self.external_receipt_hashes:
+            _hash_value(value, "external_receipt_hash")
+        _hash_value(self.identity_hash, "identity_hash")
+        if self.identity_hash != _identity_hash(self):
+            raise ValueError("identity_hash does not match envelope")
+
+    @property
+    def hash(self):
+        return self.identity_hash
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "schema": IDENTITY_ENVELOPE_SCHEMA,
+            "context_hash": self.context_hash,
+            "profile_hash": self.profile_hash,
+            "bundle_hash": self.bundle_hash,
+            "ingestion_receipt_hash": self.ingestion_receipt_hash,
+            "subject_hash": self.subject_hash,
+            "execution_id": self.execution_id,
+            "attempt_id": self.attempt_id,
+            "generation": self.generation,
+            "producer_id": self.producer_id,
+            "issuer_id": self.issuer_id,
+            "acquisition_snapshot_hash": self.acquisition_snapshot_hash,
+            "runner_result_hash": self.runner_result_hash,
+            "verification_receipt_hash": self.verification_receipt_hash,
+            "external_receipt_hashes": list(self.external_receipt_hashes),
+            "identity_hash": self.identity_hash,
+        }
+
+
+def _identity_hash(envelope: EvidenceIdentityEnvelope) -> str:
+    body = {
+        "schema": IDENTITY_ENVELOPE_SCHEMA,
+        **{
+            name: getattr(envelope, name)
+            for name in EvidenceIdentityEnvelope.__dataclass_fields__
+            if name not in {"identity_hash"}
+        },
+        "external_receipt_hashes": list(envelope.external_receipt_hashes),
+    }
+    return (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(body, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+    )
+
+
+def _native_receipt_hash(receipt: GitHubAcquisitionReceipt | PythonRunnerReceipt) -> str:
+    return _raw_hash(json.dumps(receipt.to_dict(), sort_keys=True, separators=(",", ":")).encode())
+
+
+def make_identity_envelope(
+    context: "TrustedIngestionContext",
+    ingestion: "IngestionResult",
+    *,
+    acquisition_snapshot: object,
+    runner_result: object,
+    verification_receipt: object,
+    trust_reference: object = None,
+    verifier: object = None,
+    payload: bytes | None = None,
+    signature: bytes | None = None,
+    observed_at: str | None = None,
+    external_receipt_hashes: tuple[str, ...] = (),
+) -> EvidenceIdentityEnvelope:
+    """Build an identity using only accepted, exact upstream evidence."""
+    if not is_trusted_ingestion_result(context, ingestion) or ingestion.bundle is None:
+        raise ValueError("UNTRUSTED_INGESTION")
+    if (
+        type(acquisition_snapshot) is not GitHubAcquisitionReceipt
+        or type(runner_result) is not PythonRunnerReceipt
+    ):
+        raise TypeError("TG1/TG2 receipt types are required")
+    if runner_result.status != "VERIFIED" or len(runner_result.attempts) != 2:
+        raise ValueError("TG2 receipt has no attempts")
+    req = context.requirements[0] if len(context.requirements) == 1 else None
+    if req is None:
+        raise ValueError("identity requires one bound requirement")
+    attempt = next((a for a in runner_result.attempts if a.attempt_id == req.attempt_id), None)
+    if attempt is None:
+        raise ValueError("TG2 attempt is not bound to requirement")
+    if (
+        acquisition_snapshot.base_sha != context.change_set.source_revision
+        or acquisition_snapshot.head_sha != context.change_set.target_revision
+        or acquisition_snapshot.base_tree_sha != context.source_tree
+        or acquisition_snapshot.head_tree_sha != context.target_tree
+        or acquisition_snapshot.diff_hash != context.change_set.diff_hash
+        or acquisition_snapshot.repository_owner + "/" + acquisition_snapshot.repository_name
+        != context.repository_id
+        or acquisition_snapshot.changed_paths != context.change_set.paths
+        or attempt.source_revision != context.change_set.target_revision
+        or attempt.source_tree != context.target_tree
+        or attempt.contract_hash != context.contract.hash
+        or attempt.plan_hash != context.plan.hash
+        or attempt.environment_hash != req.environment_hash
+        or attempt.execution_id != req.execution_id
+        or attempt.attempt_id != req.attempt_id
+    ):
+        raise ValueError("CROSS_BOUND:TG1_TG2")
+    if req.producer_id not in {grant.producer_id for grant in context.profile.producers}:
+        raise ValueError("CROSS_BOUND:producer")
+    if type(verification_receipt) is not ExternalVerificationReceipt:
+        raise TypeError("verified external receipt is required")
+    verification_receipt.__post_init__()
+    issuer_id = verification_receipt.issuer_id
+    if verification_receipt.status != "VERIFIED" or verification_receipt.revoked:
+        raise ValueError("UNTRUSTED_EXTERNAL_RECEIPT")
+    if tuple(external_receipt_hashes) != (verification_receipt.external_receipt_hash,):
+        raise ValueError("CROSS_BOUND:external_receipt")
+    if (
+        type(trust_reference) is not TrustReference
+        or verifier is None
+        or payload is None
+        or signature is None
+        or observed_at is None
+    ):
+        raise ValueError("EXTERNAL_REFERENCE_REQUIRED")
+    if trust_reference.issuer_id != issuer_id or trust_reference.action != context.required_action:
+        raise ValueError("CROSS_BOUND:issuer_action")
+    grant = next((g for g in context.profile.issuers if g.issuer_id == issuer_id), None)
+    if grant is None or trust_reference.role not in grant.roles:
+        raise ValueError("CROSS_BOUND:issuer_role")
+    if (
+        context.required_action not in grant.actions
+        or trust_reference.action != context.required_action
+        or trust_reference.verification_method not in grant.verification_methods
+    ):
+        raise ValueError("CROSS_BOUND:issuer_action")
+    if trust_reference.decision is not TrustDecision.ALLOW:
+        raise ValueError("CROSS_BOUND:issuer_decision")
+    expected_subject = _hash((
+        "nexus.trusted_prerequisite_subject.v1-experimental",
+        context.hash,
+        ingestion.bundle.hash,
+    ))
+    if trust_reference.subject_hash != expected_subject:
+        raise ValueError("CROSS_BOUND:issuer_subject")
+    if trust_reference.payload_hash != dict(context.prerequisite_payload_hashes).get(
+        trust_reference.role
+    ):
+        raise ValueError("CROSS_BOUND:issuer_payload")
+    acquisition_hash = _native_receipt_hash(acquisition_snapshot)
+    runner_hash = _native_receipt_hash(runner_result)
+    try:
+        signed_payload = parse_external_signature_payload(payload)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("UNVERIFIED_EXTERNAL_RECEIPT") from exc
+    if (
+        signed_payload["acquisition_snapshot_hash"] != acquisition_hash
+        or signed_payload["runner_result_hash"] != runner_hash
+    ):
+        raise ValueError("CROSS_BOUND:TG1_TG2")
+    if not verify_trust_reference_signature(
+        trust_reference,
+        verifier,
+        expected_issuer_id=issuer_id,
+        key_id=verification_receipt.key_id,
+        payload=payload,
+        signature=signature,
+        verification_receipt=verification_receipt,
+        observed_at=observed_at,
+    ):
+        raise ValueError("UNVERIFIED_EXTERNAL_RECEIPT")
+    execution_id, attempt_id, generation, producer_id = (
+        attempt.execution_id,
+        attempt.attempt_id,
+        req.generation.value,
+        req.producer_id,
+    )
+    _tuple_text(external_receipt_hashes, "external_receipt_hashes", nonempty=False)
+    if external_receipt_hashes != tuple(sorted(external_receipt_hashes)):
+        raise ValueError("external_receipt_hashes must be sorted")
+    provisional = EvidenceIdentityEnvelope.__new__(EvidenceIdentityEnvelope)
+    values = (
+        context.hash,
+        context.profile.hash,
+        ingestion.bundle.hash,
+        ingestion.receipt.hash,
+        _hash(("nexus.evidence.identity-subject.v1", context.hash, ingestion.bundle.hash)),
+        execution_id,
+        attempt_id,
+        generation,
+        producer_id,
+        issuer_id,
+        acquisition_hash,
+        runner_hash,
+        verification_receipt.receipt_hash,
+        tuple(sorted(external_receipt_hashes)),
+        "sha256:" + "0" * 64,
+    )
+    for field, value in zip(EvidenceIdentityEnvelope.__dataclass_fields__, values):
+        object.__setattr__(provisional, field, value)
+    object.__setattr__(provisional, "identity_hash", _identity_hash(provisional))
+    provisional.__post_init__()
+    return provisional
+
+
+def serialize_identity_envelope(envelope: EvidenceIdentityEnvelope) -> dict[str, object]:
+    if type(envelope) is not EvidenceIdentityEnvelope:
+        raise TypeError("envelope must be EvidenceIdentityEnvelope")
+    envelope.__post_init__()
+    return envelope.to_dict()
+
+
+def load_identity_envelope(payload: Mapping[str, object]) -> EvidenceIdentityEnvelope:
+    if not isinstance(payload, Mapping):
+        raise TypeError("payload must be a mapping")
+    required = {
+        "schema",
+        "context_hash",
+        "profile_hash",
+        "bundle_hash",
+        "ingestion_receipt_hash",
+        "subject_hash",
+        "execution_id",
+        "attempt_id",
+        "generation",
+        "producer_id",
+        "issuer_id",
+        "acquisition_snapshot_hash",
+        "runner_result_hash",
+        "verification_receipt_hash",
+        "external_receipt_hashes",
+        "identity_hash",
+    }
+    if set(payload) != required or payload.get("schema") != IDENTITY_ENVELOPE_SCHEMA:
+        raise ValueError("malformed identity envelope")
+    hashes = payload["external_receipt_hashes"]
+    if type(hashes) is not list:
+        raise ValueError("external_receipt_hashes must be a list")
+    if hashes != sorted(hashes) or len(hashes) != len(set(hashes)):
+        raise ValueError("external_receipt_hashes must be sorted and unique")
+    return EvidenceIdentityEnvelope(**{
+        key: (tuple(payload[key]) if key == "external_receipt_hashes" else payload[key])
+        for key in required
+        if key != "schema"
+    })
+
+
+@runtime_checkable
+class ExternalEd25519VerifierPort(Protocol):
+    """Injected verifier; implementations expose public verification only."""
+
+    def verify(
+        self, *, issuer_id: str, key_id: str, algorithm: str, payload: bytes, signature: bytes
+    ) -> bool: ...
+
+
+def build_external_signature_payload(
+    *,
+    issuer_id,
+    key_id,
+    evidence_id,
+    subject_hash,
+    action,
+    decision,
+    external_receipt_hash,
+    acquisition_snapshot_hash,
+    runner_result_hash,
+):
+    values = {
+        "schema": EXTERNAL_SIGNATURE_PAYLOAD_SCHEMA,
+        "issuer_id": issuer_id,
+        "key_id": key_id,
+        "evidence_id": evidence_id,
+        "subject_hash": subject_hash,
+        "action": action,
+        "decision": decision,
+        "external_receipt_hash": external_receipt_hash,
+        "acquisition_snapshot_hash": acquisition_snapshot_hash,
+        "runner_result_hash": runner_result_hash,
+    }
+    _text(issuer_id, "issuer_id")
+    _text(key_id, "key_id")
+    _text(evidence_id, "evidence_id")
+    _hash_value(subject_hash, "subject_hash")
+    _text(action, "action")
+    _text(decision, "decision")
+    _hash_value(external_receipt_hash, "external_receipt_hash")
+    _hash_value(acquisition_snapshot_hash, "acquisition_snapshot_hash")
+    _hash_value(runner_result_hash, "runner_result_hash")
+    return json.dumps(values, sort_keys=True, separators=(",", ":")).encode()
+
+
+def parse_external_signature_payload(payload: bytes) -> dict[str, str]:
+    if type(payload) is not bytes:
+        raise ValueError("payload must be bytes")
+    try:
+        value = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("malformed external signature payload") from exc
+    required = {
+        "schema",
+        "issuer_id",
+        "key_id",
+        "evidence_id",
+        "subject_hash",
+        "action",
+        "decision",
+        "external_receipt_hash",
+        "acquisition_snapshot_hash",
+        "runner_result_hash",
+    }
+    if (
+        type(value) is not dict
+        or set(value) != required
+        or value.get("schema") != EXTERNAL_SIGNATURE_PAYLOAD_SCHEMA
+    ):
+        raise ValueError("external signature payload schema mismatch")
+    canonical = build_external_signature_payload(**{k: value[k] for k in required if k != "schema"})
+    if canonical != payload:
+        raise ValueError("external signature payload is not canonical")
+    return value
+
+
+@dataclass(frozen=True)
+class ExternalVerificationReceipt:
+    issuer_id: str
+    algorithm: str
+    key_id: str
+    payload_hash: str
+    signature_hash: str
+    external_receipt_hash: str
+    revoked: bool
+    status: str
+    receipt_hash: str
+
+    def __post_init__(self):
+        for name in ("issuer_id", "algorithm", "key_id", "status"):
+            _text(getattr(self, name), name)
+        if self.algorithm != "Ed25519":
+            raise ValueError("algorithm must be Ed25519")
+        for name in ("payload_hash", "signature_hash", "external_receipt_hash", "receipt_hash"):
+            _hash_value(getattr(self, name), name)
+        if type(self.revoked) is not bool:
+            raise TypeError("revoked must be bool")
+        if self.status not in EXTERNAL_VERIFICATION_STATUSES:
+            raise ValueError("invalid external verification status")
+        if (self.revoked and self.status != "REVOKED") or (
+            not self.revoked and self.status == "REVOKED"
+        ):
+            raise ValueError("revoked/status mismatch")
+        expected = _hash((
+            "nexus.external-verification-receipt.v1",
+            self.issuer_id,
+            self.algorithm,
+            self.key_id,
+            self.payload_hash,
+            self.signature_hash,
+            self.external_receipt_hash,
+            self.revoked,
+            self.status,
+        ))
+        if expected != self.receipt_hash:
+            raise ValueError("receipt_hash does not match verification receipt")
+
+    def to_dict(self):
+        return {
+            "schema": "nexus.external-verification-receipt.v1",
+            **{f: getattr(self, f) for f in self.__dataclass_fields__},
+        }
+
+
+def load_external_verification_receipt(
+    payload: Mapping[str, object],
+) -> ExternalVerificationReceipt:
+    if (
+        not isinstance(payload, Mapping)
+        or payload.get("schema") != "nexus.external-verification-receipt.v1"
+    ):
+        raise ValueError("malformed external verification receipt")
+    fields = set(ExternalVerificationReceipt.__dataclass_fields__)
+    if set(payload) != fields | {"schema"}:
+        raise ValueError("malformed external verification receipt")
+    return ExternalVerificationReceipt(**{key: payload[key] for key in fields})
+
+
+def verify_external_ed25519(
+    verifier: ExternalEd25519VerifierPort,
+    *,
+    issuer_id: str,
+    key_id: str,
+    payload: bytes,
+    signature: bytes,
+) -> bool:
+    """Verify an issuer signature without importing keys or crypto transports."""
+    if not isinstance(verifier, ExternalEd25519VerifierPort):
+        raise TypeError("verifier must implement ExternalEd25519VerifierPort")
+    if (
+        type(payload) is not bytes
+        or not payload
+        or type(signature) is not bytes
+        or len(signature) != 64
+    ):
+        return False
+    try:
+        _text(issuer_id, "issuer_id")
+        _text(key_id, "key_id")
+        return (
+            verifier.verify(
+                issuer_id=issuer_id,
+                key_id=key_id,
+                algorithm="Ed25519",
+                payload=payload,
+                signature=signature,
+            )
+            is True
+        )
+    except (TypeError, ValueError, OSError):
+        return False
+
+
+def verify_external_ed25519_receipt(
+    verifier: ExternalEd25519VerifierPort,
+    *,
+    issuer_id: str,
+    key_id: str,
+    payload: bytes,
+    signature: bytes,
+    external_receipt: bytes,
+    revoked: bool = False,
+) -> ExternalVerificationReceipt:
+    """Return a durable, hash-bound result for an injected Ed25519 check."""
+    payload_hash = _raw_hash(payload) if type(payload) is bytes else "sha256:" + "0" * 64
+    signature_hash = _raw_hash(signature) if type(signature) is bytes else "sha256:" + "0" * 64
+    receipt_hash = (
+        _raw_hash(external_receipt)
+        if type(external_receipt) is bytes and external_receipt
+        else "sha256:" + "0" * 64
+    )
+    valid_shape = (
+        type(signature) is bytes
+        and len(signature) == 64
+        and type(external_receipt) is bytes
+        and bool(external_receipt)
+    )
+    verified = (
+        valid_shape
+        and not revoked
+        and verify_external_ed25519(
+            verifier, issuer_id=issuer_id, key_id=key_id, payload=payload, signature=signature
+        )
+    )
+    status = "REVOKED" if revoked else "VERIFIED" if verified else "INVALID"
+    body = (
+        "nexus.external-verification-receipt.v1",
+        issuer_id,
+        "Ed25519",
+        key_id,
+        payload_hash,
+        signature_hash,
+        receipt_hash,
+        revoked,
+        status,
+    )
+    return ExternalVerificationReceipt(
+        issuer_id,
+        "Ed25519",
+        key_id,
+        payload_hash,
+        signature_hash,
+        receipt_hash,
+        revoked,
+        status,
+        _hash(body),
+    )
+
+
+def verify_trust_reference_signature(
+    reference: "TrustReference",
+    verifier: ExternalEd25519VerifierPort,
+    *,
+    expected_issuer_id: str,
+    key_id: str,
+    payload: bytes,
+    signature: bytes,
+    verification_receipt: ExternalVerificationReceipt | None = None,
+    observed_at: str | None = None,
+) -> bool:
+    """Bind an external signature to a trusted reference before verifying it."""
+    if type(reference) is not TrustReference:
+        return False
+    try:
+        reference.__post_init__()
+        signed = parse_external_signature_payload(payload)
+        _text(expected_issuer_id, "expected_issuer_id")
+        if reference.issuer_id != expected_issuer_id or reference.revoked_at is not None:
+            return False
+        if any(
+            signed[k] != expected
+            for k, expected in (
+                ("issuer_id", reference.issuer_id),
+                ("key_id", key_id),
+                ("evidence_id", reference.evidence_id),
+                ("subject_hash", reference.subject_hash),
+                ("action", reference.action),
+                ("decision", reference.decision.value),
+                ("external_receipt_hash", reference.external_verification_receipt_hash),
+            )
+        ):
+            return False
+        if type(verification_receipt) is not ExternalVerificationReceipt:
+            return False
+        verification_receipt.__post_init__()
+        if (
+            verification_receipt.status != "VERIFIED"
+            or verification_receipt.revoked
+            or verification_receipt.issuer_id != reference.issuer_id
+            or verification_receipt.key_id != key_id
+            or verification_receipt.payload_hash != _raw_hash(payload)
+            or verification_receipt.signature_hash != _raw_hash(signature)
+            or verification_receipt.external_receipt_hash
+            != reference.external_verification_receipt_hash
+        ):
+            return False
+        if observed_at is None:
+            return False
+        if observed_at is not None:
+            observed = _parse_time(observed_at)
+            issued = _parse_time(reference.issued_at)
+            expires = _parse_time(reference.expires_at)
+            if (
+                observed is None
+                or issued is None
+                or expires is None
+                or not (issued <= observed < expires)
+            ):
+                return False
+        if type(payload) is not bytes or not payload:
+            return False
+        payload_hash = _raw_hash(payload)
+        if reference.signed_payload_hash != payload_hash:
+            return False
+        return verify_external_ed25519(
+            verifier,
+            issuer_id=expected_issuer_id,
+            key_id=key_id,
+            payload=payload,
+            signature=signature,
+        )
+    except (TypeError, ValueError, AttributeError):
+        return False
 
 
 def _text(value, name):

@@ -51,6 +51,7 @@ from nexus.contracts.gateway_deployment import (
     HostEffectAuthorityReceipt,
     PostflightIdentity,
     RecoveryAuthorityReceipt,
+    RecoveryContinuationAuthorityReceipt,
     RecoveryEffectAck,
     RecoveryEffectPlan,
     RecoveryEntrypointIdentity,
@@ -72,6 +73,7 @@ from nexus.contracts.gateway_deployment import (
     validate_receipt_freshness,
     validate_reconcile_outcome,
     validate_recovery_authority,
+    validate_recovery_continuation_authority,
     validate_recovery_effect_ack,
     validate_recovery_effect_plan,
     validate_recovery_ledger_record,
@@ -316,6 +318,13 @@ GATEWAY_PREDECESSOR_ARTIFACT_ROOT = GATEWAY_STATE_ROOT / "predecessor-artifacts"
 GATEWAY_REPOSITORY = GATEWAY_STATE_ROOT / "repository.git"
 GATEWAY_RECOVERY_AUTHORITY_STORE = GATEWAY_STATE_ROOT / "recovery-authority.json"
 RECOVERY_AUTHORITY_SOURCE_PATH = RECOVERY_RECEIPT_PATH
+RECOVERY_CONTINUATION_AUTHORITY_SOURCE_PATH = (
+    "tasks/github-issue-526-g20-r1-source-contract-delta-20260903/"
+    "04-v6-successor-manager-continuation-authority.json"
+)
+GATEWAY_RECOVERY_CONTINUATION_AUTHORITY_STORE = (
+    GATEWAY_STATE_ROOT / "recovery-continuation-authority.json"
+)
 GATEWAY_LEDGER = GATEWAY_STATE_ROOT / "ledger.jsonl"
 GATEWAY_LOCK = GATEWAY_STATE_ROOT / "ledger.lock"
 GATEWAY_ARTIFACT = GATEWAY_STATE_ROOT / "manager.py"
@@ -337,8 +346,70 @@ HOST_AUTHORITY_UID = 501
 HOST_AUTHORITY_SOURCE_PATH = (
     "tasks/github-issue-526-host-authority-and-canary-20260823/02-host-effect-authority-receipt.json"
 )
-MAX_LEDGER_BYTES = 64 * 1024
-MAX_LEDGER_RECORDS = 256
+# Dedicated Gateway-ledger capacity contract, kept separate from the generic
+# 64 KiB gateway store bound (used by the small request/receipt/evidence files).
+# The contract is derived, not arbitrary, from three explainable quantities:
+#
+#   * MAX_GATEWAY_LEDGER_RECORD_BYTES  — 2x the largest encoded record observed in
+#     the authoritative canonical ledger (max observed 3921 bytes → 8192), so a
+#     single record is deterministically bounded and parsing never over-reads.
+#   * MAX_GATEWAY_LEDGER_STATES_PER_OPERATION — worst-case distinct durable states a
+#     single negotiated recovery/rollback can emit (REQUESTED..VERIFIED plus
+#     UNCERTAIN_EFFECT/RUNBACK detours).
+#   * MAX_GATEWAY_LEDGER_OPERATIONS — how many independent recovery operations the
+#     ledger is allowed to retain before a retention review is required.
+#
+#   total records = states-per-operation  *  operations-budget
+#   total bytes    = total records          * per-record bound
+#
+# This comfortably contains the current canonical ledger (68,303 bytes / 37 rows)
+# while remaining a small, deterministic, bounded parsing window.
+MAX_GATEWAY_LEDGER_RECORD_BYTES = 8 * 1024
+MAX_GATEWAY_LEDGER_STATES_PER_OPERATION = 12
+# 22 operations × 12 states = 264 record floor ≥ the old fixed ceiling of 256
+# records, preserving backward-compatible ledger capacity while remaining fully
+# derived and bounded.
+MAX_GATEWAY_LEDGER_OPERATIONS = 22
+MAX_GATEWAY_LEDGER_RECORDS = (
+    MAX_GATEWAY_LEDGER_STATES_PER_OPERATION * MAX_GATEWAY_LEDGER_OPERATIONS
+)
+MAX_GATEWAY_LEDGER_BYTES = MAX_GATEWAY_LEDGER_RECORDS * MAX_GATEWAY_LEDGER_RECORD_BYTES
+# Worst-case durable rows a recovery still needs once an external effect is about
+# to fire (EFFECT_STARTED itself + SERVICE_OBSERVED/IDENTITY_VERIFIED/
+# CLIENT_BOUND/VERIFIED, with headroom for UNCERTAIN_EFFECT detours). This is the
+# mandatory pre-effect capacity reserve.
+POST_EFFECT_LEDGER_RESERVE_SLOTS = 10
+POST_EFFECT_LEDGER_RESERVE_BYTES = POST_EFFECT_LEDGER_RESERVE_SLOTS * MAX_GATEWAY_LEDGER_RECORD_BYTES
+# Once an external recovery effect may have occurred, these state-specific slots
+# are permanently protected from unrelated ledger appends until that request
+# reaches a terminal state.  They are the minimum legal fail-closed path:
+# most post-effect states need UNCERTAIN_EFFECT -> BLOCKED; UNCERTAIN_EFFECT
+# itself needs only BLOCKED.
+POST_EFFECT_TERMINAL_RESERVE_SLOTS = {
+    DeploymentState.EFFECT_STARTED.value: 2,
+    DeploymentState.SERVICE_OBSERVED.value: 2,
+    DeploymentState.IDENTITY_VERIFIED.value: 2,
+    DeploymentState.CLIENT_BOUND.value: 2,
+    DeploymentState.UNCERTAIN_EFFECT.value: 1,
+}
+# Before a replay performs more nonterminal reconciliation work, require enough
+# capacity to finish one whole attempt while still retaining a terminal path.
+# These counts include the terminal row(s), not the current row.
+POST_EFFECT_RECONCILE_ATTEMPT_SLOTS = {
+    # Include the next persisted intermediate state *and* the terminal reserve
+    # that must still survive a crash immediately after that state is written.
+    # Example: from UNCERTAIN_EFFECT, SERVICE_OBSERVED + IDENTITY_VERIFIED +
+    # CLIENT_BOUND consumes three rows, and a crash at CLIENT_BOUND still needs
+    # UNCERTAIN_EFFECT -> BLOCKED (two more rows), so five slots are required.
+    DeploymentState.EFFECT_STARTED.value: 5,
+    DeploymentState.UNCERTAIN_EFFECT.value: 5,
+    DeploymentState.SERVICE_OBSERVED.value: 4,
+    DeploymentState.IDENTITY_VERIFIED.value: 3,
+    DeploymentState.CLIENT_BOUND.value: 2,
+}
+# Legacy aliases preserved for internal callers and the existing tests.
+MAX_LEDGER_BYTES = MAX_GATEWAY_LEDGER_BYTES
+MAX_LEDGER_RECORDS = MAX_GATEWAY_LEDGER_RECORDS
 MAX_GATEWAY_STORE_BYTES = 64 * 1024
 HOST_UID = 501
 HOST_GID = 20
@@ -384,9 +455,20 @@ def _gateway_error(message: str, exc: BaseException | None = None) -> GatewayCon
 
 
 def _safe_store_path(
-    path: Path, *, leaf_mode: int = 0o600, create: bool = False, require_owner: bool = True
+    path: Path,
+    *,
+    leaf_mode: int = 0o600,
+    create: bool = False,
+    require_owner: bool = True,
+    size_bound: int = MAX_GATEWAY_STORE_BYTES,
 ) -> Path:
-    """Reject symlink/non-directory ancestry and unsafe writable parents."""
+    """Reject symlink/non-directory ancestry and unsafe writable parents.
+
+    ``size_bound`` lets callers (notably the Gateway ledger) opt into a larger
+    per-file size ceiling than the generic 64 KiB store bound while keeping the
+    same ancestry/ownership/mode safety checks.  The bound is still enforced:
+    this never removes size protection, it only makes it configurable.
+    """
     path = Path(path)
     if not path.is_absolute() or ".git" in path.parts or path == Path("/"):
         raise _gateway_error("unsafe gateway store path")
@@ -436,7 +518,7 @@ def _safe_store_path(
             raise _gateway_error("gateway store mode mismatch")
         if require_owner and info.st_uid != HOST_UID:
             raise _gateway_error("gateway store owner mismatch")
-        if info.st_size > MAX_GATEWAY_STORE_BYTES:
+        if info.st_size > size_bound:
             raise _gateway_error("gateway store exceeds size bound")
     return path
 
@@ -1399,6 +1481,41 @@ def _persist_or_load_recovery_evidence(
     return current
 
 
+def _load_persisted_recovery_evidence(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+) -> SourceBundleEvidence:
+    """Load immutable historical source evidence without rebinding it to fresh main."""
+    path = _safe_store_path(_recovery_evidence_path(request), leaf_mode=0o600)
+    try:
+        if not path.exists() or path.is_symlink():
+            raise _gateway_error("persisted recovery bundle evidence missing")
+        info = path.stat()
+        if (
+            info.st_uid != HOST_UID
+            or info.st_gid != HOST_GID
+            or stat.S_IMODE(info.st_mode) != 0o600
+        ):
+            raise _gateway_error("persisted recovery bundle evidence permissions invalid")
+        persisted = SourceBundleEvidence.model_validate(
+            json.loads(path.read_text(), object_pairs_hook=_unique_pairs)
+        )
+        validate_source_bundle_evidence(
+            persisted,
+            request=request,
+            receipt=receipt,
+            source_set=receipt.source_set,
+            expected_fresh_main_commit=persisted.observed_fresh_main_commit,
+            expected_fresh_main_tree=persisted.observed_fresh_main_tree,
+            expected_bare_store=persisted.bare_store,
+        )
+    except (OSError, ValueError, ContractError) as exc:
+        if isinstance(exc, GatewayContractError):
+            raise
+        raise _gateway_error("persisted recovery bundle evidence invalid", exc) from exc
+    return persisted
+
+
 def _prepare_recovery_source(
     request: GatewayRecoveryRequest,
     receipt: RecoveryAuthorityReceipt,
@@ -1483,8 +1600,9 @@ def _resolve_manifest_source(manifest: DeploymentManifest) -> Path:
     return target / manifest.entrypoint
 
 
-def _require_recovery_authority(request: GatewayRecoveryRequest) -> RecoveryAuthorityReceipt:
-    path = _safe_store_path(GATEWAY_RECOVERY_AUTHORITY_STORE)
+def _load_recovery_authority(request: GatewayRecoveryRequest) -> RecoveryAuthorityReceipt:
+    """Load the immutable historical recovery receipt without granting an effect."""
+    path = _safe_store_path(GATEWAY_RECOVERY_AUTHORITY_STORE, leaf_mode=0o600)
     if not path.exists() or path.stat().st_uid != HOST_UID or path.stat().st_gid != HOST_GID:
         raise _gateway_error("R1 recovery authority store invalid")
     try:
@@ -1496,10 +1614,74 @@ def _require_recovery_authority(request: GatewayRecoveryRequest) -> RecoveryAuth
         )
     except (OSError, UnicodeError, ValueError, ContractError) as exc:
         raise _gateway_error("R1 recovery authority rejected", exc) from exc
-    if hashlib.sha256(Path(__file__).read_bytes()).hexdigest() != receipt.final_manager_sha256:
-        raise _gateway_error("R1 recovery manager hash mismatch")
     _r1_local_receipt(receipt)
     return receipt
+
+
+def _current_manager_sha256() -> str:
+    return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+
+
+def _require_recovery_authority(request: GatewayRecoveryRequest) -> RecoveryAuthorityReceipt:
+    """Normal/pre-effect authority: the historical final manager must still match."""
+    receipt = _load_recovery_authority(request)
+    if _current_manager_sha256() != receipt.final_manager_sha256:
+        raise _gateway_error("R1 recovery manager hash mismatch")
+    return receipt
+
+
+def _require_recovery_continuation_authority(
+    request: GatewayRecoveryRequest,
+    historical_receipt: RecoveryAuthorityReceipt,
+) -> RecoveryContinuationAuthorityReceipt:
+    """Authorize only a successor manager continuing an already-started effect."""
+    manager_sha256 = _current_manager_sha256()
+    path = _safe_store_path(
+        GATEWAY_RECOVERY_CONTINUATION_AUTHORITY_STORE, leaf_mode=0o600
+    )
+    if not path.exists() or path.stat().st_uid != HOST_UID or path.stat().st_gid != HOST_GID:
+        raise _gateway_error("R1 recovery continuation authority store invalid")
+    try:
+        raw = path.read_bytes()
+        authority = RecoveryContinuationAuthorityReceipt.model_validate(
+            json.loads(raw.decode("utf-8"), object_pairs_hook=_unique_pairs)
+        )
+        validate_recovery_continuation_authority(
+            authority,
+            request=request,
+            historical_receipt=historical_receipt,
+            successor_manager_sha256=manager_sha256,
+            now=_current_observation_time(),
+        )
+        fresh_main, _fresh_tree = _r1_mirror_fresh_main()
+        root = str(HOST_AUTHORITY_SOURCE_ROOT)
+        if _r1_run(
+            "git", "-C", root, "merge-base", "--is-ancestor",
+            authority.accepted_successor_source_merge, fresh_main,
+        ) != "":
+            raise _gateway_error("R1 recovery continuation source is outside fresh main")
+        if _r1_run(
+            "git", "-C", root, "rev-parse",
+            f"{authority.accepted_successor_source_merge}^{{tree}}",
+        ) != authority.accepted_successor_source_tree:
+            raise _gateway_error("R1 recovery continuation source tree mismatch")
+        manager_bytes = _r1_run(
+            "git", "-C", root, "show",
+            f"{authority.accepted_successor_source_merge}:scripts/ops/mcp_gateway_durable.py",
+            bytes_output=True,
+        )
+        if hashlib.sha256(bytes(manager_bytes)).hexdigest() != manager_sha256:
+            raise _gateway_error("R1 recovery continuation manager/source mismatch")
+        tracked = _r1_run(
+            "git", "-C", root, "show",
+            f"{fresh_main}:{RECOVERY_CONTINUATION_AUTHORITY_SOURCE_PATH}",
+            bytes_output=True,
+        )
+        if bytes(tracked) != raw:
+            raise _gateway_error("R1 recovery continuation remote/local byte mismatch")
+    except (OSError, UnicodeError, ValueError, ContractError) as exc:
+        raise _gateway_error("R1 recovery continuation authority rejected", exc) from exc
+    return authority
 
 
 def _resolve_manifest_reference(
@@ -1638,6 +1820,151 @@ def _record_hash(record: Mapping[str, Any]) -> str:
     return canonical_hash({key: value for key, value in record.items() if key != "record_hash"})
 
 
+def _post_effect_reserved_slots_by_request(
+    rows: list[Mapping[str, Any]],
+) -> dict[str, int]:
+    """Derive each active recovery's still-owned post-effect capacity budget.
+
+    ``POST_EFFECT_LEDGER_RESERVE_SLOTS`` is reserved before ``EFFECT_STARTED``.
+    The ``EFFECT_STARTED`` row itself consumes one slot, and each later durable
+    row for that same request consumes another.  While the request remains
+    nonterminal, unrelated operations may not consume the unspent remainder.
+    The remainder can shrink only when this same request appends its next row.
+
+    A minimum legal fail-closed path is retained even after the original budget
+    is exhausted, so old/historical active ledgers cannot be made unclosable.
+    Terminal rows release the reservation entirely.
+    """
+    latest: dict[str, str] = {}
+    post_effect_rows: dict[str, int] = {}
+    effect_started: set[str] = set()
+    for row in rows:
+        if (
+            row.get("schema") != "nexus.gateway.ledger.v2"
+            or row.get("operation") != "gateway-recover"
+            or not isinstance(row.get("request_id"), str)
+        ):
+            continue
+        request_id = row["request_id"]
+        state = row.get("state")
+        if isinstance(state, DeploymentState):
+            state = state.value
+        if not isinstance(state, str):
+            continue
+        latest[request_id] = state
+        if state == DeploymentState.EFFECT_STARTED.value:
+            effect_started.add(request_id)
+            post_effect_rows[request_id] = post_effect_rows.get(request_id, 0) + 1
+        elif request_id in effect_started:
+            post_effect_rows[request_id] = post_effect_rows.get(request_id, 0) + 1
+
+    reserved: dict[str, int] = {}
+    for request_id, state in latest.items():
+        terminal_minimum = POST_EFFECT_TERMINAL_RESERVE_SLOTS.get(state)
+        if terminal_minimum is None:
+            continue
+        consumed = post_effect_rows.get(request_id, 0)
+        remaining_budget = max(POST_EFFECT_LEDGER_RESERVE_SLOTS - consumed, 0)
+        reserved[request_id] = max(remaining_budget, terminal_minimum)
+    return reserved
+
+
+def _post_effect_terminal_reserve(
+    rows: list[Mapping[str, Any]],
+) -> tuple[int, int]:
+    """Return total post-effect capacity still owned by active recoveries."""
+    slots = sum(_post_effect_reserved_slots_by_request(rows).values())
+    return slots, slots * MAX_GATEWAY_LEDGER_RECORD_BYTES
+
+
+def _validate_prospective_ledger_append(
+    rows: list[Mapping[str, Any]],
+    encoded: bytes,
+    current_size: int,
+    *,
+    candidate_row: Mapping[str, Any] | None = None,
+) -> None:
+    """Fail closed BEFORE a ledger append if the next record would break any of the
+    ledger capacity invariants.  Besides the physical byte/record ceilings, an
+    actual manager append must preserve terminal closure capacity for every
+    already-effectful recovery operation.
+    """
+    if len(encoded) > MAX_GATEWAY_LEDGER_RECORD_BYTES:
+        raise LedgerCorruption("ledger record exceeds per-record bound")
+    if current_size + len(encoded) > MAX_GATEWAY_LEDGER_BYTES:
+        raise LedgerCorruption("ledger append exceeds total size bound")
+    if len(rows) + 1 > MAX_GATEWAY_LEDGER_RECORDS:
+        raise LedgerCorruption("ledger append exceeds record-count bound")
+    if candidate_row is not None:
+        prospective_rows = [*rows, candidate_row]
+        reserve_slots, reserve_bytes = _post_effect_terminal_reserve(prospective_rows)
+        if len(prospective_rows) + reserve_slots > MAX_GATEWAY_LEDGER_RECORDS:
+            raise LedgerCorruption("ledger append would consume post-effect terminal reserve")
+        if current_size + len(encoded) + reserve_bytes > MAX_GATEWAY_LEDGER_BYTES:
+            raise LedgerCorruption("ledger append would consume post-effect terminal reserve")
+
+
+def _reserve_post_effect_ledger_capacity(
+    ledger: "GatewayLedger", rows: list[Mapping[str, Any]]
+) -> None:
+    """Before any external recovery effect fires, prove the ledger still has enough
+    record slots and byte capacity to durably record the worst-case post-effect
+    closure.  The reserve covers the rows a recovery may still need after
+    ``EFFECT_STARTED``: ``SERVICE_OBSERVED``, ``IDENTITY_VERIFIED``,
+    ``CLIENT_BOUND``, ``VERIFIED`` (or a fail-closed ``BLOCKED``/``ROLLED_BACK``
+    terminal), with headroom for ``UNCERTAIN_EFFECT`` detours.
+
+    Raises ``GatewayContractError`` (not ``LedgerCorruption``) when the reserve
+    cannot be satisfied, so the caller can fail-closed by recording a terminal
+    ``BLOCKED`` row and returning WITHOUT ever invoking the external effect.
+    """
+    current_bytes = ledger.path.stat().st_size if ledger.path.exists() else 0
+    active_slots, active_bytes = _post_effect_terminal_reserve(rows)
+    if (
+        len(rows) + active_slots + POST_EFFECT_LEDGER_RESERVE_SLOTS
+        > MAX_GATEWAY_LEDGER_RECORDS
+    ):
+        raise GatewayContractError("recovery post-effect ledger capacity reserve exhausted")
+    if (
+        current_bytes + active_bytes + POST_EFFECT_LEDGER_RESERVE_BYTES
+        > MAX_GATEWAY_LEDGER_BYTES
+    ):
+        raise GatewayContractError("recovery post-effect ledger capacity reserve exhausted")
+
+
+def _reserve_post_effect_reconcile_attempt(
+    ledger: "GatewayLedger",
+    rows: list[Mapping[str, Any]],
+    request_id: str,
+    state: DeploymentState,
+) -> None:
+    """Prove one replay attempt fits inside this request's remaining budget.
+
+    Unrelated active recoveries keep their full derived reservations.  The
+    current request may spend only its own remaining reserve.  If that reserve
+    is smaller than one crash-safe reconciliation attempt, the caller must use
+    the protected legal terminal path instead of starting a partial replay.
+    """
+    required_slots = POST_EFFECT_RECONCILE_ATTEMPT_SLOTS.get(state.value)
+    if required_slots is None:
+        return
+    reserved_by_request = _post_effect_reserved_slots_by_request(rows)
+    current_reserved = reserved_by_request.get(request_id, 0)
+    if current_reserved < required_slots:
+        raise GatewayContractError("recovery replay would consume terminal ledger reserve")
+    other_slots = sum(reserved_by_request.values()) - current_reserved
+    other_bytes = other_slots * MAX_GATEWAY_LEDGER_RECORD_BYTES
+    current_bytes = ledger.path.stat().st_size if ledger.path.exists() else 0
+    required_bytes = required_slots * MAX_GATEWAY_LEDGER_RECORD_BYTES
+    if len(rows) + other_slots + required_slots > MAX_GATEWAY_LEDGER_RECORDS:
+        raise GatewayContractError("recovery replay would consume terminal ledger reserve")
+    if current_bytes + other_bytes + required_bytes > MAX_GATEWAY_LEDGER_BYTES:
+        raise GatewayContractError("recovery replay would consume terminal ledger reserve")
+
+
+
+
+
 class GatewayLedger:
     """Bounded JSONL state ledger with sequence, parent, self-hash, and CAS."""
 
@@ -1650,12 +1977,12 @@ class GatewayLedger:
             raise LedgerCorruption("ledger symlink rejected")
         if not self.path.exists():
             return []
-        self.path = _safe_store_path(self.path)
+        self.path = _safe_store_path(self.path, size_bound=MAX_GATEWAY_LEDGER_BYTES)
         info = os.stat(self.path)
         if info.st_uid != HOST_UID or stat.S_IMODE(info.st_mode) != 0o600:
             raise LedgerCorruption("ledger ownership/mode invalid")
         raw = self.path.read_bytes()
-        if not raw or len(raw) > MAX_LEDGER_BYTES:
+        if not raw or len(raw) > MAX_GATEWAY_LEDGER_BYTES:
             raise LedgerCorruption("ledger missing or exceeds size bound")
         rows: list[dict[str, Any]] = []
         last_state: dict[str, str] = {}
@@ -1663,6 +1990,8 @@ class GatewayLedger:
         fences: dict[str, str] = {}
         requests: dict[str, tuple[str, str]] = {}
         for line in raw.splitlines(keepends=True):
+            if len(line) > MAX_GATEWAY_LEDGER_RECORD_BYTES:
+                raise LedgerCorruption("ledger record exceeds per-record bound")
             if not line.endswith(b"\n"):
                 raise LedgerCorruption("ledger is not newline terminated")
             try:
@@ -1800,7 +2129,7 @@ class GatewayLedger:
             rows.append(row)
             last_state[row["request_id"]] = row["state"]
             last_schema[row["request_id"]] = row["schema"]
-            if len(rows) > MAX_LEDGER_RECORDS:
+            if len(rows) > MAX_GATEWAY_LEDGER_RECORDS:
                 raise LedgerCorruption("ledger record limit exceeded")
         return rows
 
@@ -1911,6 +2240,13 @@ class GatewayLedger:
                 ensure_ascii=True,
             ).encode()
             + b"\n"
+        )
+        current_size = self.path.stat().st_size if self.path.exists() else 0
+        _validate_prospective_ledger_append(
+            rows,
+            encoded,
+            current_size,
+            candidate_row=record.model_dump(),
         )
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         if self.path.exists():
@@ -2037,6 +2373,12 @@ class GatewayLedger:
             row["record_hash"] = _record_hash(row)
             encoded = (json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n").encode()
             previous = self.path.read_bytes() if self.path.exists() else b""
+            _validate_prospective_ledger_append(
+                rows,
+                encoded,
+                current_size=len(previous),
+                candidate_row=row,
+            )
             self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             if previous:
                 with self.path.open("ab") as handle:
@@ -2383,6 +2725,50 @@ def _terminal_recovery_outcome(
     } and isinstance(payload, Mapping):
         return GatewayReconcileOutcome.model_validate(payload)
     return None
+
+
+def _block_post_effect_recovery_for_capacity_unlocked(
+    ledger: GatewayLedger,
+    rows: list[dict[str, Any]],
+    records: list[RecoveryLedgerRecord],
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    evidence: SourceBundleEvidence,
+) -> GatewayReconcileOutcome:
+    """Consume only the protected legal terminal path when replay capacity is low."""
+    state = records[-1].state
+    if state is not DeploymentState.UNCERTAIN_EFFECT:
+        _append_recovery_state_unlocked(
+            ledger,
+            rows,
+            request,
+            receipt,
+            evidence,
+            DeploymentState.UNCERTAIN_EFFECT,
+            observed_identity={
+                "reason": "post-effect ledger terminal reserve protected",
+            },
+        )
+    blocked = _recovery_outcome(
+        request,
+        receipt,
+        result=ResultClass.BLOCKED,
+        effect_started=True,
+        observation={
+            "state": "BLOCKED",
+            "reason": "post-effect ledger terminal reserve protected",
+        },
+    )
+    _append_recovery_state_unlocked(
+        ledger,
+        rows,
+        request,
+        receipt,
+        evidence,
+        DeploymentState.BLOCKED,
+        observed_identity={"outcome": blocked.model_dump()},
+    )
+    return blocked
 
 
 def _validate_recovery_postflight(
@@ -2865,7 +3251,12 @@ def _gateway_recover_live(
         validate_recovery_request(typed)
     except ContractError as exc:
         raise _gateway_error("R1 live recovery request rejected", exc) from exc
-    receipt = _require_recovery_authority(typed)
+    # Load the immutable historical authority first, but defer the manager-mode
+    # decision to the durable recovery state machine below. The normal/pre-effect
+    # path still requires the historical final manager hash because any distinct
+    # manager enters successor_mode and is rejected unless this exact V6 ledger
+    # already contains EFFECT_STARTED plus a valid continuation authority.
+    receipt = _load_recovery_authority(typed)
     return _gateway_recover_with_adapters(
         typed,
         adapters=_production_recovery_adapters(receipt),
@@ -2895,12 +3286,35 @@ def _revalidate_recovery_artifacts(
     )
 
 
+def _reuse_historical_recovery_artifacts(
+    request: GatewayRecoveryRequest,
+    receipt: RecoveryAuthorityReceipt,
+    *,
+    expected_bundle_evidence_hash: str,
+) -> _R1PreparedSource:
+    """Reuse the V6 evidence/worktrees without deriving authority from later main."""
+    evidence = _load_persisted_recovery_evidence(request, receipt)
+    if evidence.evidence_hash != expected_bundle_evidence_hash:
+        raise GatewayContractError("historical recovery bundle evidence mismatch")
+    desired = Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.desired_manifest_id
+    predecessor = Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.predecessor_manifest_id
+    _r1_verify_worktree(desired, receipt.desired_manifest)
+    _r1_verify_worktree(predecessor, receipt.predecessor_manifest)
+    return _R1PreparedSource(
+        desired_manifest=receipt.desired_manifest,
+        predecessor_manifest=receipt.predecessor_manifest,
+        bundle_evidence=evidence,
+    )
+
+
 def _validate_terminal_recovery_replay(
     terminal: GatewayReconcileOutcome,
     records: list[RecoveryLedgerRecord],
     request: GatewayRecoveryRequest,
     receipt: RecoveryAuthorityReceipt,
     adapters: _RecoveryAdapters,
+    *,
+    successor_mode: bool = False,
 ) -> GatewayReconcileOutcome:
     if terminal.result is ResultClass.BLOCKED:
         return terminal
@@ -2911,11 +3325,18 @@ def _validate_terminal_recovery_replay(
     }
     if len(evidence_hashes) != 1:
         raise GatewayContractError("terminal recovery evidence binding invalid")
-    _revalidate_recovery_artifacts(
-        request,
-        receipt,
-        expected_bundle_evidence_hash=next(iter(evidence_hashes)),
-    )
+    if successor_mode:
+        _reuse_historical_recovery_artifacts(
+            request,
+            receipt,
+            expected_bundle_evidence_hash=next(iter(evidence_hashes)),
+        )
+    else:
+        _revalidate_recovery_artifacts(
+            request,
+            receipt,
+            expected_bundle_evidence_hash=next(iter(evidence_hashes)),
+        )
     plan = _recovery_plan(request, receipt)
     identity = adapters.observe(plan)
     classification = _gateway_reconcile_physical(request, receipt, identity)
@@ -2943,7 +3364,9 @@ def _gateway_recover_with_adapters(
         validate_recovery_request(typed)
     except ContractError as exc:
         raise _gateway_error("R1 B2 recovery request rejected", exc) from exc
-    receipt = _require_recovery_authority(typed)
+    receipt = _load_recovery_authority(typed)
+    current_manager_sha256 = _current_manager_sha256()
+    successor_mode = current_manager_sha256 != receipt.final_manager_sha256
     prepared: _R1PreparedSource | None = None
     evidence: SourceBundleEvidence | None = None
     plan = _recovery_plan(typed, receipt)
@@ -2959,11 +3382,29 @@ def _gateway_recover_with_adapters(
                 and prior["request_id"] != typed.request_id
             ):
                 raise GatewayContractError("recovery idempotency fence conflict")
-        records = _recovery_typed_rows(rows, typed.request_id)
+        records = ledger.recovery_rows(
+            typed.request_id,
+            request=typed,
+            receipt=receipt,
+            source_bundle_evidence=None,
+        )
+        if successor_mode:
+            if not any(
+                record.state is DeploymentState.EFFECT_STARTED for record in records
+            ):
+                raise _gateway_error(
+                    "R1 successor manager requires historical EFFECT_STARTED"
+                )
+            _require_recovery_continuation_authority(typed, receipt)
         terminal = _terminal_recovery_outcome(records)
         if terminal is not None:
             return _validate_terminal_recovery_replay(
-                terminal, records, typed, receipt, adapters
+                terminal,
+                records,
+                typed,
+                receipt,
+                adapters,
+                successor_mode=successor_mode,
             )
         if not records:
             _append_recovery_state_unlocked(
@@ -2988,18 +3429,25 @@ def _gateway_recover_with_adapters(
             if len(evidence_hashes) != 1:
                 raise GatewayContractError("recovery evidence binding missing")
             evidence_hash = next(iter(evidence_hashes))
-            prepared = _prepare_recovery_source(typed, receipt)
+            if successor_mode:
+                prepared = _reuse_historical_recovery_artifacts(
+                    typed,
+                    receipt,
+                    expected_bundle_evidence_hash=evidence_hash,
+                )
+            else:
+                prepared = _prepare_recovery_source(typed, receipt)
+                if prepared.bundle_evidence.evidence_hash != evidence_hash:
+                    raise GatewayContractError("recovery evidence changed")
+                _r1_verify_worktree(
+                    Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.desired_manifest_id,
+                    receipt.desired_manifest,
+                )
+                _r1_verify_worktree(
+                    Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.predecessor_manifest_id,
+                    receipt.predecessor_manifest,
+                )
             evidence = prepared.bundle_evidence
-            if evidence.evidence_hash != evidence_hash:
-                raise GatewayContractError("recovery evidence changed")
-            _r1_verify_worktree(
-                Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.desired_manifest_id,
-                receipt.desired_manifest,
-            )
-            _r1_verify_worktree(
-                Path(GATEWAY_DEPLOYMENTS_ROOT) / receipt.predecessor_manifest_id,
-                receipt.predecessor_manifest,
-            )
             owner_pid = records[-1].pre_effect_identity.get("effect_owner_pid")
             owner_start = records[-1].pre_effect_identity.get("effect_owner_start")
             if (
@@ -3068,6 +3516,31 @@ def _gateway_recover_with_adapters(
             state = DeploymentState.ROLLBACK_READY
             adapters.crash_hook("after_rollback_ready")
         if state is DeploymentState.ROLLBACK_READY:
+            try:
+                _reserve_post_effect_ledger_capacity(ledger, rows)
+            except GatewayContractError:
+                # Cannot durably record the post-effect closure: fail closed
+                # BEFORE any external effect, recording a terminal BLOCKED row.
+                blocked = _recovery_outcome(
+                    typed,
+                    receipt,
+                    result=ResultClass.BLOCKED,
+                    effect_started=False,
+                    observation={
+                        "state": "BLOCKED",
+                        "reason": "post-effect ledger capacity reserve exhausted",
+                    },
+                )
+                _append_recovery_state_unlocked(
+                    ledger,
+                    rows,
+                    typed,
+                    receipt,
+                    evidence,
+                    DeploymentState.BLOCKED,
+                    observed_identity={"outcome": blocked.model_dump()},
+                )
+                return blocked
             owner_start = _current_recovery_process_start()
             _record_recovery_owner(os.getpid(), owner_start)
             _append_recovery_state_unlocked(
@@ -3086,6 +3559,8 @@ def _gateway_recover_with_adapters(
             state = DeploymentState.EFFECT_STARTED
             invoke_effect = True
             adapters.crash_hook("after_effect_started_before_call")
+    if successor_mode and invoke_effect:
+        raise GatewayContractError("successor recovery continuation cannot invoke effect")
     if wait_for_owner is not None:
         owner_pid, owner_start = wait_for_owner
         deadline = time.monotonic() + RECOVERY_OWNER_COMPLETION_SECONDS
@@ -3101,7 +3576,12 @@ def _gateway_recover_with_adapters(
                 terminal = _terminal_recovery_outcome(current_records)
                 if terminal is not None:
                     return _validate_terminal_recovery_replay(
-                        terminal, current_records, typed, receipt, adapters
+                        terminal,
+                        current_records,
+                        typed,
+                        receipt,
+                        adapters,
+                        successor_mode=successor_mode,
                     )
             owner_live = _recovery_owner_is_live(owner_pid, owner_start)
             now = time.monotonic()
@@ -3117,7 +3597,12 @@ def _gateway_recover_with_adapters(
             terminal = _terminal_recovery_outcome(current_records)
             if terminal is not None:
                 return _validate_terminal_recovery_replay(
-                    terminal, current_records, typed, receipt, adapters
+                    terminal,
+                    current_records,
+                    typed,
+                    receipt,
+                    adapters,
+                    successor_mode=successor_mode,
                 )
         if owner_live and _recovery_owner_is_live(owner_pid, owner_start):
             return _recovery_outcome(
@@ -3127,6 +3612,49 @@ def _gateway_recover_with_adapters(
                 effect_started=True,
                 observation={"state": "EFFECT_STARTED", "owner_live": True},
             )
+    if not invoke_effect:
+        # A replay is allowed to consume capacity only when one complete
+        # reconciliation attempt still fits alongside every active operation's
+        # protected terminal path.  Otherwise terminate this same request/fence
+        # before another nonterminal replay can exhaust the ledger.
+        with InterProcessLock(
+            ledger.lock_path, timeout=RECOVERY_LEDGER_LOCK_TIMEOUT_SECONDS
+        ):
+            rows = ledger._scan_unlocked()
+            records = _recovery_typed_rows(rows, typed.request_id)
+            terminal = _terminal_recovery_outcome(records)
+            if terminal is not None:
+                return _validate_terminal_recovery_replay(
+                    terminal,
+                    records,
+                    typed,
+                    receipt,
+                    adapters,
+                    successor_mode=successor_mode,
+                )
+            state = records[-1].state
+            if state in {
+                DeploymentState.EFFECT_STARTED,
+                DeploymentState.SERVICE_OBSERVED,
+                DeploymentState.IDENTITY_VERIFIED,
+                DeploymentState.CLIENT_BOUND,
+                DeploymentState.UNCERTAIN_EFFECT,
+            }:
+                try:
+                    _reserve_post_effect_reconcile_attempt(
+                        ledger, rows, typed.request_id, state
+                    )
+                except GatewayContractError:
+                    if evidence is None:
+                        raise GatewayContractError("recovery evidence binding missing")
+                    return _block_post_effect_recovery_for_capacity_unlocked(
+                        ledger,
+                        rows,
+                        records,
+                        typed,
+                        receipt,
+                        evidence,
+                    )
     ack: RecoveryEffectAck | None = None
     if invoke_effect:
         try:
@@ -3167,7 +3695,12 @@ def _gateway_recover_with_adapters(
         terminal = _terminal_recovery_outcome(records)
         if terminal is not None:
             return _validate_terminal_recovery_replay(
-                terminal, records, typed, receipt, adapters
+                terminal,
+                records,
+                typed,
+                receipt,
+                adapters,
+                successor_mode=successor_mode,
             )
         state = records[-1].state
         if classification == "predecessor":
@@ -3325,7 +3858,12 @@ def _gateway_recover_with_adapters(
         terminal = _terminal_recovery_outcome(records)
         if terminal is not None:
             return _validate_terminal_recovery_replay(
-                terminal, records, typed, receipt, adapters
+                terminal,
+                records,
+                typed,
+                receipt,
+                adapters,
+                successor_mode=successor_mode,
             )
         state = records[-1].state
         if state is DeploymentState.IDENTITY_VERIFIED:

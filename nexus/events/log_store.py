@@ -8,7 +8,7 @@ import re
 import stat
 import threading
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -69,12 +69,14 @@ class JsonlEventLogStore:
         self,
         project_root: Path,
         *,
+        create: bool = True,
         writer_generation: Optional[EventWriterGeneration] = None,
         enforce_generation: bool = False,
         owner_context: Optional[OwnerWriteContext] = None,
         writer_factory: Any = None,
         initial_handle: Any = None,
     ) -> Tuple[Path, Path]:
+        project_root = Path(project_root).expanduser().resolve()
         initial_attach = initial_handle is not None
         if initial_attach:
             from nexus.orchestrator.writer_quiescence import InitialWriterAttachment
@@ -169,13 +171,14 @@ class JsonlEventLogStore:
             if writer_factory is not None and not initial_attach:
                 validate_entry()
             log_dir = project_root / ".nexus" / "events"
-            log_dir.mkdir(parents=True, exist_ok=True)
+            if create:
+                log_dir.mkdir(parents=True, exist_ok=True)
             event_log_path = log_dir / "event_log.jsonl"
             lock_path = log_dir / "event_log.lock"
             generation_manifest_path = manifest_path(project_root)
             if writer_factory is not None:
                 self._assert_selected_paths(root=Path(writer_factory._adapter.root), actual=(event_log_path, lock_path, generation_manifest_path))
-            with event_store_lock(project_root):
+            with (event_store_lock(project_root) if create else nullcontext()):
                 # Re-read after lock acquisition: a same-thread reentrant
                 # callback may install an owner context between preflight and
                 # this lock boundary.

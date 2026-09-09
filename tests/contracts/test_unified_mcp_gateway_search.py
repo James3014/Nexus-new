@@ -76,7 +76,7 @@ def test_search_uses_ripgrep_backend_when_rg_is_available(monkeypatch):
     assert all(not line.startswith("/") for line in payload["matches"])
 
 
-def test_search_uses_python_fallback_when_rg_is_missing(monkeypatch):
+def test_search_uses_python_fallback_when_rg_is_missing(monkeypatch, tmp_path):
     monkeypatch.setattr(gateway_module.shutil, "which", lambda name: None)
     payload = _gateway()._search({"pattern": "def _search", "path": "nexus/orchestrator/unified_mcp_gateway.py"})
     assert payload["schema"] == "nexus.workspace_search.v1"
@@ -84,6 +84,12 @@ def test_search_uses_python_fallback_when_rg_is_missing(monkeypatch):
     assert payload["matches"]
     assert payload["truncated"] is False
     assert all(not line.startswith("/") for line in payload["matches"])
+    fake = tmp_path / "failing-rg"
+    fake.write_text("#!/bin/sh\necho 'rg exploded' >&2\nexit 2\n", encoding="utf-8")
+    fake.chmod(0o755)
+    monkeypatch.setattr(gateway_module.shutil, "which", lambda name: str(fake) if name == "rg" else None)
+    with pytest.raises(RuntimeError, match="rg exploded"):
+        _gateway()._search({"pattern": "needle", "path": "nexus/orchestrator/unified_mcp_gateway.py"})
 
 
 def test_search_fallback_is_not_used_for_general_rg_failure(monkeypatch):

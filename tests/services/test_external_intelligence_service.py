@@ -72,6 +72,8 @@ def _config(tmp_path, **overrides):
         workspace_root=tmp_path / "workspaces",
         opencli_profile="test-profile",
         opencode_executable="/tmp/opencode",
+        open_swe_executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        open_swe_runtime_artifact_sha256="a" * 64,
     )
     values.update(overrides)
     return ServiceConfig(**values)
@@ -212,8 +214,10 @@ def test_build_automation_selects_open_swe_worker_only_when_explicit(tmp_path, m
         {
             "model_provider": "google_genai",
             "model_id": "gemini-test",
-            "executable": "nexus-open-swe-runtime",
+            "executable": "/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+            "expected_artifact_sha256": "a" * 64,
             "runtime_state_root": tmp_path / "state" / "open_swe_runtime",
+            "timeout": 300.0,
             "require_worker_binding": True,
             "transport_config": {},
         }
@@ -227,6 +231,8 @@ def test_load_config_binds_open_swe_provider_and_model(tmp_path):
         semantic_backend="open_swe",
         open_swe_model_provider="google_genai",
         open_swe_model="gemini-test",
+        open_swe_executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        open_swe_runtime_artifact_sha256="a" * 64,
     )
     config_path.write_text(json.dumps(raw), encoding="utf-8")
 
@@ -235,7 +241,81 @@ def test_load_config_binds_open_swe_provider_and_model(tmp_path):
     assert loaded.semantic_backend == "open_swe"
     assert loaded.open_swe_model_provider == "google_genai"
     assert loaded.open_swe_model == "gemini-test"
-    assert loaded.open_swe_executable == "nexus-open-swe-runtime"
+    assert loaded.open_swe_executable == "/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime"
+    assert loaded.open_swe_runtime_artifact_sha256 == "a" * 64
+
+
+def test_open_swe_activation_overlay_merges_with_host_and_binds_both_consumers(
+    tmp_path, monkeypatch
+):
+    overlay = json.loads(
+        Path("scripts/ops/configs/external_intelligence_open_swe_activation_v1.json").read_text()
+    )
+    overlay["open_swe_executable"] = str(tmp_path / "runtime" / "bin" / "nexus-open-swe-runtime")
+    overlay["open_swe_runtime_artifact_sha256"] = "b" * 64
+    host = {
+        "repositories": ["o/r"],
+        "repository_roots": {"o/r": str(tmp_path / "repo")},
+        "state_root": str(tmp_path / "state"),
+        "workspace_root": str(tmp_path / "workspaces"),
+    }
+    config_path = tmp_path / "merged.json"
+    config_path.write_text(json.dumps({**host, **overlay}), encoding="utf-8")
+    loaded = load_config(config_path)
+    assert loaded.state_root == (tmp_path / "state").resolve()
+    calls = []
+
+    class FakeSemantic:
+        def __init__(self, **kwargs):
+            calls.append(("semantic", kwargs))
+
+    class FakeWorker:
+        def __init__(self, **kwargs):
+            calls.append(("worker", kwargs))
+
+    monkeypatch.setattr(service_module, "OpenSWEExternalIntelligenceTransport", FakeSemantic)
+    monkeypatch.setattr(service_module, "OpenSWEWorkerTransport", FakeWorker)
+    build_automation(loaded, "o/r")
+    assert calls[0][1]["executable"] == calls[1][1]["executable"]
+    assert calls[0][1]["executable"] == overlay["open_swe_executable"]
+    assert calls[0][1]["expected_artifact_sha256"] == calls[1][1]["expected_artifact_sha256"]
+    assert calls[0][1]["expected_artifact_sha256"] == overlay["open_swe_runtime_artifact_sha256"]
+    assert calls[0][1]["model_provider"] == calls[1][1]["model_provider"] == "opencli_chatgpt"
+    assert calls[0][1]["model_id"] == calls[1][1]["model_id"] == "balanced"
+    expected_transport = {
+        "executable": overlay["open_swe_opencli_executable"],
+        "profile": overlay["open_swe_opencli_profile"],
+        "site_session": "ephemeral",
+        "timeout_seconds": 180,
+    }
+    assert calls[0][1]["transport_config"] == calls[1][1]["transport_config"] == expected_transport
+    assert calls[0][1]["timeout"] == 1200.0
+    assert calls[1][1]["timeout"] == 2400.0
+    assert (
+        calls[0][1]["runtime_state_root"]
+        == calls[1][1]["runtime_state_root"]
+        == tmp_path / "state" / "open_swe_runtime"
+    )
+
+
+def test_open_swe_activation_overlay_placeholders_fail_closed(tmp_path):
+    overlay = json.loads(
+        Path("scripts/ops/configs/external_intelligence_open_swe_activation_v1.json").read_text()
+    )
+    host = {
+        "repositories": ["o/r"],
+        "repository_roots": {"o/r": str(tmp_path / "repo")},
+        "state_root": str(tmp_path / "state"),
+        "workspace_root": str(tmp_path / "workspaces"),
+    }
+    config_path = tmp_path / "merged.json"
+    config_path.write_text(json.dumps({**host, **overlay}), encoding="utf-8")
+    with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_EXECUTABLE_ABSOLUTE_REQUIRED"):
+        load_config(config_path)
+    overlay["open_swe_executable"] = str(tmp_path / "runtime" / "bin" / "nexus-open-swe-runtime")
+    config_path.write_text(json.dumps({**host, **overlay}), encoding="utf-8")
+    with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_EXPECTED_ARTIFACT_HASH_REQUIRED"):
+        load_config(config_path)
 
 
 def test_load_config_rejects_open_swe_without_complete_model_binding(tmp_path):
@@ -284,8 +364,10 @@ def test_build_automation_selects_open_swe_only_when_explicit(tmp_path, monkeypa
             "repository_root": (tmp_path / "repo").resolve(),
             "model_provider": "google_genai",
             "model_id": "gemini-test",
-            "executable": "nexus-open-swe-runtime",
+            "executable": "/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+            "expected_artifact_sha256": "a" * 64,
             "runtime_state_root": tmp_path / "state" / "open_swe_runtime",
+            "timeout": 180.0,
             "transport_config": {},
         }
     ]
@@ -361,6 +443,28 @@ def test_load_config_rejects_opencli_transport_fields_for_other_provider(tmp_pat
         load_config(config_path)
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("open_swe_semantic_timeout_seconds", 29),
+        ("open_swe_worker_timeout_seconds", 3601),
+        ("open_swe_semantic_timeout_seconds", True),
+    ],
+)
+def test_load_config_rejects_invalid_open_swe_consumer_timeout(tmp_path, field, value):
+    config_path = _config_file(tmp_path)
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    raw.update(
+        semantic_backend="open_swe",
+        open_swe_model_provider="google_genai",
+        open_swe_model="gemini-test",
+        **{field: value},
+    )
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_TIMEOUT_INVALID"):
+        load_config(config_path)
+
+
 def test_load_config_rejects_empty_open_swe_external_executable(tmp_path):
     config_path = _config_file(tmp_path)
     raw = json.loads(config_path.read_text(encoding="utf-8"))
@@ -374,6 +478,31 @@ def test_load_config_rejects_empty_open_swe_external_executable(tmp_path):
 
     with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_EXECUTABLE_REQUIRED"):
         load_config(config_path)
+
+
+def test_load_config_requires_absolute_runtime_and_independent_artifact_hash(tmp_path):
+    config_path = _config_file(tmp_path)
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    raw.update(
+        semantic_backend="open_swe",
+        open_swe_model_provider="google_genai",
+        open_swe_model="gemini-test",
+        open_swe_executable="relative-runtime",
+        open_swe_runtime_artifact_sha256="a" * 64,
+    )
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_EXECUTABLE_ABSOLUTE_REQUIRED"):
+        load_config(config_path)
+    raw["open_swe_executable"] = "/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime"
+    raw.pop("open_swe_runtime_artifact_sha256")
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(ServiceError, match="CONFIG_OPEN_SWE_EXPECTED_ARTIFACT_HASH_REQUIRED"):
+        load_config(config_path)
+    raw["open_swe_runtime_artifact_sha256"] = "a" * 64
+    config_path.write_text(json.dumps(raw), encoding="utf-8")
+    loaded = load_config(config_path)
+    assert loaded.open_swe_executable.startswith("/opt/")
+    assert loaded.open_swe_runtime_artifact_sha256 == "a" * 64
 
 
 # Historical exact-base node retained across the in-process -> external-runtime
@@ -854,7 +983,7 @@ def test_critical_regression_eia_unattended_freshness_end_to_end(tmp_path):
             self.store = store
             self.calls = []
 
-        def analyze(self, record, sources):
+        def analyze(self, record, sources, selected_worker=None):
             self.calls.append((record, list(sources)))
             envelope = {"schema": "external_execution_envelope.v1", "x": 1}
             req_sha = "b" * 64

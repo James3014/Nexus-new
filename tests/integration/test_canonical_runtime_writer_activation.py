@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -69,12 +71,10 @@ def _loaded_runtime(root, *, effects=True):
     return factory, registry, generation
 
 
-def _witness(monkeypatch, registry, root):
-    import nexus.services.unified_runtime as runtime_module
-
+def _witness(monkeypatch, registry, root, *, receipt_destinations):
     events = []
-    write = runtime_module._write_receipt_atomic
     release = registry._release
+    destinations = {Path(path).resolve() for path in receipt_destinations}
 
     def active(role):
         assert len(registry._leases) == 1
@@ -91,10 +91,13 @@ def _witness(monkeypatch, registry, root):
         assert not registry._mutex._is_owned()
         return lease
 
-    def write_witness(path, payload):
-        active("runtime_receipt")
-        events.append("receipt")
-        return write(path, payload)
+    original_replace = os.replace
+
+    def replace_witness(source, destination):
+        if Path(destination).resolve() in destinations:
+            active("runtime_receipt")
+            events.append("receipt")
+        return original_replace(source, destination)
 
     def release_witness(lease, outcome):
         assert outcome == "committed"
@@ -104,7 +107,7 @@ def _witness(monkeypatch, registry, root):
         events.append("close:" + lease.observation.identity.role)
         return release(lease, outcome)
 
-    monkeypatch.setattr(runtime_module, "_write_receipt_atomic", write_witness)
+    monkeypatch.setattr(os, "replace", replace_witness)
     monkeypatch.setattr(registry, "_release", release_witness)
     return active, events
 
@@ -123,7 +126,10 @@ def test_real_canonical_chain_commits_receipt_with_live_lease(monkeypatch, tmp_p
     from nexus.engine.canonical_task_seam import execute_canonical_product_task
 
     factory, registry, _ = _loaded_runtime(tmp_path)
-    active, events = _witness(monkeypatch, registry, tmp_path)
+    path = tmp_path / ".nexus/reports/run/canonical-proof.canonical_runtime.json"
+    active, events = _witness(
+        monkeypatch, registry, tmp_path, receipt_destinations=(path,)
+    )
     binding = factory.effect_binding()
 
     def dispatch(operation):
@@ -143,7 +149,6 @@ def test_real_canonical_chain_commits_receipt_with_live_lease(monkeypatch, tmp_p
             "online_policy": "auto",
         },
     )
-    path = tmp_path / ".nexus/reports/run/canonical-proof.canonical_runtime.json"
     receipt = json.loads(path.read_text())
     assert receipt["canonical_execution"]["execution_decision_authority"] == "CapabilityPlanner"
     assert events == ["effect", "close:effect_journal", "receipt", "close:runtime_receipt"]
@@ -192,7 +197,10 @@ def test_gateway_mainchain_effect_replan_and_finalize_keep_real_binding(monkeypa
     from tests.services.test_unified_runtime import _learning, _request, _verifier
 
     factory, registry, generation = _loaded_runtime(tmp_path)
-    active, events = _witness(monkeypatch, registry, tmp_path)
+    path = tmp_path / ".nexus/reports/run/effect-chain.json"
+    active, events = _witness(
+        monkeypatch, registry, tmp_path, receipt_destinations=(path,)
+    )
     journal = EffectJournal(tmp_path, generation)
     dispatches = []
 
@@ -230,8 +238,6 @@ def test_gateway_mainchain_effect_replan_and_finalize_keep_real_binding(monkeypa
     request = replace(
         request, route={**request.route, "online_policy": "auto", "with_nexus_armor": True}
     )
-    path = tmp_path / ".nexus/reports/run/effect-chain.json"
-
     def failed_verifier(context):
         return {**_verifier(context), "gate_passed": False, "status": "FAILED"}
 

@@ -13,16 +13,25 @@ from nexus.services.external_intelligence_closure import ClosureError, validate_
 from nexus.services.external_intelligence_fanout import (
     AdaptiveWorkerFanoutRuntime,
     CapacityLease,
+    FanoutError,
     FanoutStore,
     GitWorktreeAllocator,
     OpenCodeRunResult,
 )
 
 
+@pytest.fixture(autouse=True)
+def _runtime_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+
 def _prompt() -> str:
-    return "\n".join(
-        ["task_id=task-1", "unit_id=u1", 'authorized_mutation_paths=["a.py"]', "bounded task"]
-    )
+    return "\n".join([
+        "task_id=task-1",
+        "unit_id=u1",
+        'authorized_mutation_paths=["a.py"]',
+        "bounded task",
+    ])
 
 
 def _worker():
@@ -48,6 +57,24 @@ def _artifact_and_workspace(tmp_path: Path):
 
 
 def _completed(module, payload, *, response_status="IMPLEMENTATION_COMPLETED"):
+    if payload["operation"] == "identity":
+        return {
+            "schema": module.PROTOCOL_RESULT_SCHEMA,
+            "kind": "identity",
+            "status": "IDENTIFIED",
+            "distribution_name": "nexus-open-swe-runtime",
+            "distribution_version": "0.1.0",
+            "runtime_protocol_version": module.PROTOCOL_REQUEST_SCHEMA,
+            "artifact_identity": {
+                "module_file": "/opt/nexus-open-swe-runtime/cli.py",
+                "module_sha256": "a" * 64,
+                "deepagents_version": "0.7.6",
+            },
+            "authority_boundary": "execution_runtime_only",
+            "process_started": False,
+            "outcome_unknown": False,
+            "retry_safe": True,
+        }
     response = json.dumps(
         {
             "schema": "external_intelligence_worker_result.v1",
@@ -62,6 +89,7 @@ def _completed(module, payload, *, response_status="IMPLEMENTATION_COMPLETED"):
     return {
         "schema": module.PROTOCOL_RESULT_SCHEMA,
         "kind": "worker",
+        "operation_id": payload["operation_id"],
         "status": "COMPLETED",
         "session_id": "ses_open_swe_1234567890abcdef1234",
         "response_text": response,
@@ -96,7 +124,11 @@ def test_worker_external_protocol_maps_completed_result(tmp_path, monkeypatch):
 
     monkeypatch.setattr(module, "_runtime_call", runtime_call)
     transport = module.OpenSWEWorkerTransport(
-        model_provider="google_genai", model_id="gemini-test", require_worker_binding=True
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        expected_artifact_sha256="a" * 64,
+        require_worker_binding=True,
     ).bind_worker(_worker())
 
     result = transport.run_new(
@@ -110,8 +142,130 @@ def test_worker_external_protocol_maps_completed_result(tmp_path, monkeypatch):
     assert result.model_id == "gemini-test"
     assert result.diagnosis_status == "ROOT_CAUSE_SUPPORTED"
     assert result.repair_admitted is True
-    assert calls[0]["operation"] == "worker_run"
-    assert calls[0]["worker_identity"] == _worker()
+    assert calls[0]["operation"] == "identity"
+    assert calls[1]["operation"] == "worker_run"
+    assert calls[1]["worker_identity"] == _worker()
+
+
+def test_worker_result_must_bind_to_requested_operation_id(tmp_path, monkeypatch):
+    import nexus.services.open_swe_external_intelligence as module
+
+    workspace, artifact = _artifact_and_workspace(tmp_path)
+
+    def runtime_call(_executable, payload, **_kwargs):
+        result = _completed(module, payload)
+        if payload["operation"] == "worker_run":
+            result["operation_id"] = "foreign-operation"
+        return result, "", True, ""
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEWorkerTransport(
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        expected_artifact_sha256="a" * 64,
+    )
+
+    result = transport.run_new(
+        prompt=_prompt(), artifact_path=str(artifact), workspace_path=str(workspace)
+    )
+
+    assert result.status == "OPEN_SWE_OUTCOME_UNKNOWN"
+    assert result.error == "OPERATION_ID_MISMATCH"
+
+
+def test_reconcile_requires_original_operation_id_and_reuses_it(tmp_path, monkeypatch):
+    import nexus.services.open_swe_external_intelligence as module
+
+    workspace, artifact = _artifact_and_workspace(tmp_path)
+    calls = []
+
+    def runtime_call(_executable, payload, **_kwargs):
+        calls.append(dict(payload))
+        result = _completed(module, payload)
+        if payload["operation"] == "worker_run":
+            result["operation_id"] = payload["operation_id"]
+        return result, "", True, ""
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEWorkerTransport(
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        expected_artifact_sha256="a" * 64,
+    )
+    first = transport.run_new(
+        prompt=_prompt(), artifact_path=str(artifact), workspace_path=str(workspace)
+    )
+    reconciled = transport.reconcile_workspace(
+        workspace_path=str(workspace), operation_id=first.operation_id
+    )
+
+    assert reconciled.operation_id == first.operation_id
+    assert calls[-1]["operation"] == "worker_reconcile"
+    assert calls[-1]["operation_id"] == first.operation_id
+
+
+def test_prepared_operation_id_rejects_artifact_drift_before_worker_send(tmp_path, monkeypatch):
+    import nexus.services.open_swe_external_intelligence as module
+
+    workspace, artifact = _artifact_and_workspace(tmp_path)
+    calls = []
+
+    def runtime_call(_executable, payload, **_kwargs):
+        calls.append(payload["operation"])
+        if payload["operation"] == "identity":
+            return _completed(module, payload), "", False, ""
+        raise AssertionError("worker dispatch must be rejected before send")
+
+    monkeypatch.setattr(module, "_runtime_call", runtime_call)
+    transport = module.OpenSWEWorkerTransport(
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        expected_artifact_sha256="a" * 64,
+    )
+    prepared = transport.prepare_operation_id(
+        "worker_run",
+        prompt=_prompt(),
+        artifact_path=str(artifact),
+        workspace_path=str(workspace),
+        session_id="",
+    )
+    artifact.write_text('{"failure":"changed"}\n', encoding="utf-8")
+    result = transport.run_new(
+        prompt=_prompt(),
+        artifact_path=str(artifact),
+        workspace_path=str(workspace),
+        operation_id=prepared,
+    )
+    assert result.error == "OPERATION_ID_MISMATCH"
+    assert calls == ["identity"]
+
+
+@pytest.mark.parametrize("malformed", [None, False, 0, "bad"])
+def test_malformed_supplied_operation_id_rejected_before_identity_probe(
+    tmp_path, monkeypatch, malformed
+):
+    import nexus.services.open_swe_external_intelligence as module
+
+    workspace, artifact = _artifact_and_workspace(tmp_path)
+    calls = []
+    monkeypatch.setattr(module, "_runtime_call", lambda *args, **kwargs: calls.append(args))
+    transport = module.OpenSWEWorkerTransport(
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        expected_artifact_sha256="a" * 64,
+    )
+    with pytest.raises(FanoutError, match="OPERATION_ID_REQUIRED"):
+        transport.run_new(
+            prompt=_prompt(),
+            artifact_path=str(artifact),
+            workspace_path=str(workspace),
+            operation_id=malformed,
+        )
+    assert calls == []
 
 
 def test_worker_timeout_is_unknown_and_reconcile_is_distinct_read_only_call(tmp_path, monkeypatch):
@@ -122,6 +276,8 @@ def test_worker_timeout_is_unknown_and_reconcile_is_distinct_read_only_call(tmp_
 
     def runtime_call(_executable, payload, **_kwargs):
         operations.append(payload["operation"])
+        if payload["operation"] == "identity":
+            return _completed(module, payload), "", False, ""
         if payload["operation"] == "worker_run":
             return None, "", True, "runtime_timeout"
         return (
@@ -144,19 +300,31 @@ def test_worker_timeout_is_unknown_and_reconcile_is_distinct_read_only_call(tmp_
 
     monkeypatch.setattr(module, "_runtime_call", runtime_call)
     transport = module.OpenSWEWorkerTransport(
-        model_provider="google_genai", model_id="gemini-test"
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        expected_artifact_sha256="a" * 64,
     ).bind_worker(_worker())
 
     first = transport.run_new(
         prompt=_prompt(), artifact_path=str(artifact), workspace_path=str(workspace)
     )
-    reconciled = transport.reconcile_workspace(workspace_path=str(workspace))
+    reconciled = transport.reconcile_workspace(
+        workspace_path=str(workspace),
+        operation_id=transport.prepare_operation_id(
+            "worker_run",
+            prompt=_prompt(),
+            artifact_path=str(artifact),
+            workspace_path=str(workspace),
+            session_id="",
+        ),
+    )
 
     assert first.status == "OPEN_SWE_OUTCOME_UNKNOWN"
     assert first.outcome_unknown is True
     assert first.retry_safe is False
     assert reconciled.outcome_unknown is True
-    assert operations == ["worker_run", "worker_reconcile"]
+    assert operations == ["identity", "worker_run", "identity", "worker_reconcile"]
 
 
 def test_continue_session_binds_exact_session(tmp_path, monkeypatch):
@@ -170,7 +338,12 @@ def test_continue_session_binds_exact_session(tmp_path, monkeypatch):
         return _completed(module, payload), "", True, ""
 
     monkeypatch.setattr(module, "_runtime_call", runtime_call)
-    transport = module.OpenSWEWorkerTransport(model_provider="google_genai", model_id="gemini-test")
+    transport = module.OpenSWEWorkerTransport(
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        expected_artifact_sha256="a" * 64,
+    )
     session = "ses_open_swe_1234567890abcdef1234"
     result = transport.continue_session(
         session_id=session,
@@ -179,12 +352,38 @@ def test_continue_session_binds_exact_session(tmp_path, monkeypatch):
         workspace_path=str(workspace),
     )
     assert result.status == "COMPLETED"
-    assert seen[0]["operation"] == "worker_continue"
-    assert seen[0]["session_id"] == session
+    assert seen[0]["operation"] == "identity"
+    assert seen[1]["operation"] == "worker_continue"
+    assert seen[1]["session_id"] == session
     with pytest.raises(Exception, match="INVALID_SESSION_ID"):
         transport.continue_session(
-            session_id="bad", prompt=_prompt(), artifact_path=str(artifact), workspace_path=str(workspace)
+            session_id="bad",
+            prompt=_prompt(),
+            artifact_path=str(artifact),
+            workspace_path=str(workspace),
         )
+
+
+def test_invalid_session_is_rejected_before_identity_probe(tmp_path, monkeypatch):
+    import nexus.services.open_swe_external_intelligence as module
+
+    workspace, artifact = _artifact_and_workspace(tmp_path)
+    calls = []
+    monkeypatch.setattr(module, "_runtime_call", lambda *args, **kwargs: calls.append(args))
+    transport = module.OpenSWEWorkerTransport(
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        expected_artifact_sha256="a" * 64,
+    )
+    with pytest.raises(Exception, match="INVALID_SESSION_ID"):
+        transport.continue_session(
+            session_id="invalid",
+            prompt=_prompt(),
+            artifact_path=str(artifact),
+            workspace_path=str(workspace),
+        )
+    assert calls == []
 
 
 def test_full_worker_identity_is_bound_and_substitution_is_rejected():
@@ -192,7 +391,11 @@ def test_full_worker_identity_is_bound_and_substitution_is_rejected():
 
     worker = _worker()
     transport = OpenSWEWorkerTransport(
-        model_provider="google_genai", model_id="gemini-test", require_worker_binding=True
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        expected_artifact_sha256="a" * 64,
+        require_worker_binding=True,
     )
     assert transport.bind_worker(worker) is transport
     with pytest.raises(Exception, match="WORKER_IDENTITY_SUBSTITUTION_FORBIDDEN"):
@@ -211,7 +414,10 @@ def test_worker_attestation_mismatch_fails_closed(tmp_path, monkeypatch):
 
     monkeypatch.setattr(module, "_runtime_call", runtime_call)
     transport = module.OpenSWEWorkerTransport(
-        model_provider="google_genai", model_id="gemini-test"
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        expected_artifact_sha256="a" * 64,
     ).bind_worker(_worker())
     result = transport.run_new(
         prompt=_prompt(), artifact_path=str(artifact), workspace_path=str(workspace)
@@ -307,13 +513,18 @@ def test_fanout_captures_external_open_swe_candidate_and_stops_before_acceptance
     repo, base, envelope, envelope_sha = _repo_and_envelope(tmp_path)
 
     def runtime_call(_executable, payload, **_kwargs):
+        if payload["operation"] == "identity":
+            return _completed(module, payload), "", False, ""
         workspace = Path(payload["workspace_path"])
         (workspace / "a.py").write_text("VALUE = 2\n", encoding="utf-8")
         return _completed(module, payload), "", True, ""
 
     monkeypatch.setattr(module, "_runtime_call", runtime_call)
     transport = module.OpenSWEWorkerTransport(
-        model_provider="google_genai", model_id="gemini-test"
+        model_provider="google_genai",
+        model_id="gemini-test",
+        executable="/opt/nexus-open-swe-runtime/bin/nexus-open-swe-runtime",
+        expected_artifact_sha256="a" * 64,
     )
     runtime = AdaptiveWorkerFanoutRuntime(
         allocator=GitWorktreeAllocator(repo, tmp_path / "workspaces"),
@@ -648,9 +859,19 @@ def test_fanout_captures_open_swe_candidate_and_stops_before_acceptance(tmp_path
 def test_real_deepagents_worker_graphs_have_exact_physical_surfaces(tmp_path):
     pytest.importorskip("deepagents")
     runtime = _external_runtime_module()
-    assert runtime.DIAGNOSIS_TOOLS == frozenset(
-        {"glob", "grep", "ls", "read_file", "record_diagnosis"}
-    )
-    assert runtime.REPAIR_TOOLS == frozenset(
-        {"edit_file", "glob", "grep", "ls", "read_file", "record_worker_result", "write_file"}
-    )
+    assert runtime.DIAGNOSIS_TOOLS == frozenset({
+        "glob",
+        "grep",
+        "ls",
+        "read_file",
+        "record_diagnosis",
+    })
+    assert runtime.REPAIR_TOOLS == frozenset({
+        "edit_file",
+        "glob",
+        "grep",
+        "ls",
+        "read_file",
+        "record_worker_result",
+        "write_file",
+    })

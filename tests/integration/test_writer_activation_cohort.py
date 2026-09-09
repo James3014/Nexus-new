@@ -377,13 +377,16 @@ def _real_cohort(tmp_path, roles=("task_state", "event_log", "runtime_receipt"),
 
 def _watch_domain_locks(monkeypatch):
     from contextlib import contextmanager
+    import importlib
+    import sys
 
     import nexus.events.effect_journal as effect_module
     import nexus.events.log_store as log_module
     import nexus.events.state_owner_manifest as manifest_module
     import nexus.events.writer_generation as generation_module
 
-    original = generation_module.event_store_lock
+    lock_impl_module = importlib.import_module(generation_module.event_store_lock.__module__)
+    original = lock_impl_module.event_store_lock
     held, seen = [], []
 
     @contextmanager
@@ -398,9 +401,20 @@ def _watch_domain_locks(monkeypatch):
             finally:
                 assert held.pop() == actual
 
+    modules = {lock_impl_module}
     for module in (generation_module, manifest_module, log_module, effect_module):
-        monkeypatch.setattr(module, "event_store_lock", checked)
-    monkeypatch.setattr(generation_module, "event_store_guard", checked)
+        modules.add(importlib.import_module(module.event_store_lock.__module__))
+    # Installed wheels may import the primitive into a package alias; patch
+    # every loaded module that holds this exact function object.
+    modules.update(
+        module for module in tuple(sys.modules.values())
+        if module is not None and getattr(module, "event_store_lock", None) is original
+    )
+    for module in modules:
+        if getattr(module, "event_store_lock", None) is not None:
+            monkeypatch.setattr(module, "event_store_lock", checked)
+        if getattr(module, "event_store_guard", None) is not None:
+            monkeypatch.setattr(module, "event_store_guard", checked)
     return seen
 
 
@@ -463,15 +477,17 @@ def test_actual_three_root_activation_rebind_release_and_writes(tmp_path, monkey
         return append(*args, **kwargs)
 
     monkeypatch.setattr(roots[1].event_store, "append_record", checked_event)
-    import nexus.services.unified_runtime as runtime_module
+    import os
 
-    receipt_write = runtime_module._write_receipt_atomic
+    original_replace = os.replace
+    runtime_destination = (Path(roots[2].root) / "runtime.json").resolve()
 
-    def checked_receipt(*args, **kwargs):
-        active("runtime_receipt")
-        return receipt_write(*args, **kwargs)
+    def checked_replace(source, destination):
+        if Path(destination).resolve() == runtime_destination:
+            active("runtime_receipt")
+        return original_replace(source, destination)
 
-    monkeypatch.setattr(runtime_module, "_write_receipt_atomic", checked_receipt)
+    monkeypatch.setattr(os, "replace", checked_replace)
     effect_dispatch = roots[2].factory.effect_binding().dispatch
     dispatch = effect_dispatch.dispatch
 
