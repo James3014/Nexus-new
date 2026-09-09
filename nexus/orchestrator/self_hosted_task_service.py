@@ -91,6 +91,7 @@ from nexus.orchestrator.lifecycle_guards import (
 from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
 from nexus.orchestrator.self_hosted_controller import SelfHostedDevelopmentController
 from nexus.orchestrator.target_integration_lifecycle import TargetIntegrationLifecycle
+from nexus.orchestrator.runtime_state_bridge import RuntimeStateBridge
 from nexus.orchestrator.task_contract import (
     AcceptanceProfile,
     ArchitectTaskContract,
@@ -1173,6 +1174,9 @@ class SelfHostedTaskService:
         if task_adapter is not None and Path(task_adapter.root).resolve() != self.state_dir:
             raise ValueError("task_writer_factory_root_mismatch")
         self._consumer_ports = consumer_ports
+        self._runtime_state_bridge = RuntimeStateBridge(
+            self.state_dir, validator=self._validate_state_payload
+        )
         if consumer_ports is not None:
             consumer_ports.bind_service(self)
         self._writer_factory = writer_factory or getattr(consumer_ports, "task_writer_factory", None)
@@ -1797,6 +1801,12 @@ class SelfHostedTaskService:
                 source_path=path,
             )
 
+        return cls._validate_state_payload(task_id, decoded, path)
+
+    @classmethod
+    def _validate_state_payload(
+        cls, task_id: str, decoded: Mapping[str, Any], path: Path
+    ) -> Optional[dict[str, Any]]:
         state = dict(decoded)
         state_task_id = state.get("task_id")
         status = state.get("status")
@@ -1944,30 +1954,9 @@ class SelfHostedTaskService:
         self, task_id: str, state: dict[str, Any], *, owner_context: Any | None = None
     ) -> dict[str, Any]:
         self._assert_owner_state_write_context(task_id, owner_context)
-        self.state_dir.mkdir(parents=True, exist_ok=True)
         normalized = _jsonable(state)
         normalized["task_action"] = self._task_action_envelope(normalized)
-        destination = self._state_path(task_id)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=self.state_dir,
-            prefix=f".{task_id}.",
-            suffix=".tmp",
-            delete=False,
-        ) as handle:
-            json.dump(normalized, handle, sort_keys=True, indent=2)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-            temporary = Path(handle.name)
-        temporary.replace(destination)
-        directory_fd = os.open(self.state_dir, os.O_RDONLY)
-        try:
-            os.fsync(directory_fd)
-        finally:
-            os.close(directory_fd)
-        return normalized
+        return dict(self._runtime_state_bridge.store.write(task_id, normalized))
 
     def _write_state(
         self, task_id: str, state: dict[str, Any], *, owner_context: Any | None = None
@@ -2022,16 +2011,8 @@ class SelfHostedTaskService:
             return self._write_state_locked(task_id, state, owner_context=owner_context), True
 
     def _read_state(self, task_id: str) -> Optional[dict[str, Any]]:
-        if self._activated_state_root():
-            return self._read_state_snapshot(task_id)
-        path = self._state_path(task_id)
-        if not path.exists():
-            _, archived = self._latest_archived_state(task_id)
-            return archived
-        with self._state_lock():
-            if not path.exists():
-                return None
-            return self._load_state_path(path, task_id)
+        value = self._runtime_state_bridge.read(task_id)
+        return dict(value) if value is not None else None
 
     def _read_state_snapshot(self, task_id: str) -> Optional[dict[str, Any]]:
         """Read a durable snapshot without creating or acquiring the state lock.
@@ -2295,25 +2276,31 @@ class SelfHostedTaskService:
                 path = self._state_path(task_id)
                 if not path.exists():
                     return None
-                state = json.loads(path.read_text(encoding="utf-8"))
-                mutator(state)
-                return self._write_state_locked(task_id, state, owner_context=context)
+                return self._runtime_state_bridge.mutate(
+                    task_id,
+                    mutator,
+                    authorize=lambda: self._assert_owner_state_write_context(task_id, context),
+                )
         if owner_context is not None:
             self._assert_owner_state_write_context(task_id, owner_context)
             path = self._state_path(task_id)
             if not path.exists():
                 return None
-            state = json.loads(path.read_text(encoding="utf-8"))
-            mutator(state)
-            return self._write_state_locked(task_id, state, owner_context=owner_context)
+            return self._runtime_state_bridge.mutate(
+                task_id,
+                mutator,
+                authorize=lambda: self._assert_owner_state_write_context(task_id, owner_context),
+            )
         self._assert_owner_state_write_context(task_id, owner_context)
         with self._state_lock():
             path = self._state_path(task_id)
             if not path.exists():
                 return None
-            state = json.loads(path.read_text(encoding="utf-8"))
-            mutator(state)
-            return self._write_state_locked(task_id, state, owner_context=owner_context)
+            return self._runtime_state_bridge.mutate(
+                task_id,
+                mutator,
+                authorize=lambda: self._assert_owner_state_write_context(task_id, owner_context),
+            )
 
     # Issue #129: the claim is deliberately a subrecord of the existing task
     # receipt.  The state lock above is the sole serialization point.

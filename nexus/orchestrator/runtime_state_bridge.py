@@ -22,7 +22,10 @@ class RuntimeStateBridge:
         | None = None,
     ) -> None:
         self.store = ExecutionStateStore(
-            Path(state_dir), validator=validator, before_write=before_write
+            Path(state_dir),
+            validator=validator,
+            before_write=before_write,
+            validate_writes=False,
         )
 
     def read(self, task_id: str) -> Mapping[str, Any] | None:
