@@ -44,6 +44,9 @@ class _Dispatch:
             canonical_dispatch_envelope=state.get("canonical_dispatch_envelope"),
         )
         return module.validate_workforce_dispatch_binding(bound, require_binding=True)
+    def validate_repair(self, request):
+        from . import self_hosted_task_service as module
+        return module.validate_workforce_dispatch_binding(dict(request), require_binding=True)
     def rebind_fresh_attempt(self, request, dispatch):
         from . import self_hosted_task_service as module
         envelope = module.build_canonical_dispatch_envelope(
