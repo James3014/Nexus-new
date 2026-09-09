@@ -4,6 +4,7 @@ import json
 import os
 import stat
 import subprocess
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -23,6 +24,7 @@ from nexus.orchestrator.standing_grant_store import (
     _authorize_durable_standing_grant_effect_at,
     _check_dir,
     _load_receipt_at,
+    _load_receipt_structural_at,
     _restore_task_card_authority_at,
     _switch_task_card_authority_at,
     _write_standing_grant_receipt_at,
@@ -157,6 +159,90 @@ def test_keyed_restore_rejects_changed_predecessor(monkeypatch, tmp_path):
         load_keyed_standing_grant_receipt(temporary_key, now=NOW).receipt_hash
         == switched["temporary_receipt_hash"]
     )
+
+
+def test_keyed_switch_races_normal_successor_writer_without_overwrite(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    predecessor = StandingGrantReceipt.issue(
+        grant_id="race-predecessor",
+        context=_make_context(goal_id="race-goal", thread_id="race-thread"),
+    )
+    predecessor_key = StandingGrantKey(_repository(), "race-goal", "race-thread")
+    write_keyed_standing_grant_receipt(predecessor)
+    predecessor_path = standing_grant_store._keyed_receipt_path(predecessor_key)
+    predecessor_bytes = predecessor_path.read_bytes()
+    successor_key = StandingGrantKey(_repository(), "race-successor", "race-successor-thread")
+    normal_receipt = StandingGrantReceipt.issue(
+        grant_id="normal-winner",
+        context=_make_context(goal_id="race-successor", thread_id="race-successor-thread"),
+    )
+    successor_path = standing_grant_store._keyed_receipt_path(successor_key)
+    entered = threading.Event()
+    release = threading.Event()
+    original_write = standing_grant_store._write_bytes_locked
+
+    def hooked_write(canonical, supersedes, destination, expected):
+        if Path(destination) == successor_path and not entered.is_set():
+            entered.set()
+            assert release.wait(timeout=5)
+        return original_write(canonical, supersedes, destination, expected)
+
+    monkeypatch.setattr(standing_grant_store, "_write_bytes_locked", hooked_write)
+    normal_result = {}
+    switch_result = {}
+
+    def normal_writer():
+        try:
+            normal_result["receipt"] = write_keyed_standing_grant_receipt(normal_receipt)
+        except Exception as exc:  # pragma: no cover - asserted below
+            normal_result["error"] = exc
+
+    def switch_writer():
+        try:
+            switch_result["result"] = switch_task_card_authority(
+                current_key=predecessor_key,
+                attempt_key="race-switch",
+                expected_current_receipt_hash=predecessor.receipt_hash,
+                expected_current_goal_id="race-goal",
+                successor_goal_id="race-successor",
+                successor_thread_id="race-successor-thread",
+                ttl_minutes=5,
+                owner_confirmation=True,
+                now=NOW,
+            )
+        except Exception as exc:  # pragma: no cover - asserted below
+            switch_result["error"] = exc
+
+    normal_thread = threading.Thread(target=normal_writer)
+    switch_thread = threading.Thread(target=switch_writer)
+    normal_thread.start()
+    assert entered.wait(timeout=5)
+    switch_thread.start()
+    release.set()
+    normal_thread.join(timeout=5)
+    switch_thread.join(timeout=5)
+    assert not normal_thread.is_alive() and not switch_thread.is_alive()
+    assert ("receipt" in normal_result) ^ ("result" in switch_result)
+    loser = switch_result.get("error") or normal_result.get("error")
+    assert isinstance(loser, StandingGrantReceiptError)
+    assert str(loser) in {"SUCCESSOR_KEY_OCCUPIED", "STALE_WRITER_CAS_MISMATCH"}
+    final = _load_receipt_structural_at(successor_path)
+    winning_receipt = (
+        normal_receipt
+        if "receipt" in normal_result
+        else StandingGrantReceipt.model_validate(
+            standing_grant_store._read_transition_file(
+                standing_grant_store._transition_root().parent
+                / "transitions"
+                / f"keyed_op_{switch_result['result']['switch_operation_id']}.json"
+            )["temporary_receipt"]
+        )
+    )
+    assert final.receipt_hash == winning_receipt.receipt_hash
+    assert predecessor_path.read_bytes() == predecessor_bytes
+    assert standing_grant_store.standing_grant_key(final) == successor_key
 
 
 def _repository() -> RepositoryIdentity:
