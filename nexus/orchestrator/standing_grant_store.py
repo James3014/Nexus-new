@@ -22,6 +22,7 @@ import re
 import stat
 import tempfile
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal, Mapping
@@ -355,12 +356,7 @@ def write_standing_grant_receipt(
     """
     if not isinstance(receipt, StandingGrantReceipt):
         raise TypeError("receipt must be a validated StandingGrantReceipt")
-    payload = receipt.model_dump(mode="json")
-    canonical = _canonical_json(payload)
-    _write_bytes(
-        canonical, receipt.supersedes_grant_hash, DEFAULT_RECEIPT_PATH, expected_receipt_hash
-    )
-    return DEFAULT_RECEIPT_PATH
+    return write_keyed_standing_grant_receipt(receipt, expected_receipt_hash=expected_receipt_hash)
 
 
 def _write_standing_grant_receipt_at(
@@ -480,32 +476,30 @@ def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def inspect_standing_grant_receipt(*, now: datetime | None = None) -> dict[str, Any]:
-    """Return a non-authorizing status projection for the canonical receipt.
-
-    The projection never substitutes for :func:`load_standing_grant_receipt` or
-    the semantic evaluator.  It exposes only bounded grant metadata needed by a
-    fresh coordinator/operator to understand whether durable authority can be
-    rehydrated.
-    """
-    effective_now = now if now is not None else datetime.now(timezone.utc)
-    if not isinstance(effective_now, datetime) or effective_now.tzinfo is None:
-        raise StandingGrantReceiptError("EXACT_TIMEZONE_REQUIRED")
-    try:
-        st = DEFAULT_RECEIPT_PATH.lstat()
-    except FileNotFoundError:
-        return {"schema": "nexus.standing_grant_inspection.v1", "status": "MISSING"}
-    except OSError:
+def inspect_standing_grant_receipt(
+    *,
+    now: datetime | None = None,
+    key: StandingGrantKey | None = None,
+    repository: RepositoryIdentity | None = None,
+    goal_id: str | None = None,
+    thread_id: str | None = None,
+) -> dict[str, Any]:
+    effective = now or datetime.now(timezone.utc)
+    if effective.tzinfo is None:
         return {
             "schema": "nexus.standing_grant_inspection.v1",
             "status": "INVALID",
-            "reason": "RECEIPT_READ_FAILED",
+            "reason": "EXACT_TIMEZONE_REQUIRED",
         }
     try:
-        if stat.S_ISLNK(st.st_mode):
-            raise StandingGrantReceiptError("NOT_REGULAR_FILE")
-        _assert_dir_chain_safe(DEFAULT_RECEIPT_PATH.parent, create=False)
-        receipt = _load_receipt_structural_at(DEFAULT_RECEIPT_PATH)
+        if key is not None:
+            repository, goal_id, thread_id = key.repository, key.goal_id, key.coordinator_thread
+        selected = _select_structural_entry(
+            repository=repository, goal_id=goal_id, thread_id=thread_id
+        )
+        if selected is None:
+            return {"schema": "nexus.standing_grant_inspection.v1", "status": "MISSING"}
+        return _inspection_projection(selected[2], now=effective)
     except StandingGrantReceiptError as exc:
         return {
             "schema": "nexus.standing_grant_inspection.v1",
@@ -513,53 +507,27 @@ def inspect_standing_grant_receipt(*, now: datetime | None = None) -> dict[str, 
             "reason": str(exc),
         }
 
-    context = receipt.context
-    if context.revoked_at is not None:
-        status = "REVOKED"
-    elif effective_now < context.issued_at:
-        status = "NOT_YET_VALID"
-    elif effective_now >= context.expires_at:
-        status = "EXPIRED"
-    else:
-        status = "VALID"
-    return {
-        "schema": "nexus.standing_grant_inspection.v1",
-        "status": status,
-        "grant_id": receipt.grant_id,
-        "receipt_hash": receipt.receipt_hash,
-        "owner_id": context.owner_id,
-        "coordinator_id": context.coordinator_id,
-        "repository_id": context.repository.repository_id,
-        "canonical_remote": context.repository.canonical_remote,
-        "coordination_scope_id": context.thread_id,
-        "goal_id": context.goal_id,
-        "allowed_actions": [action.value for action in context.allowed_actions],
-        "issued_at": context.issued_at.isoformat(),
-        "expires_at": context.expires_at.isoformat(),
-        "revoked_at": context.revoked_at.isoformat() if context.revoked_at else None,
-        "revocation_reason": context.revocation_reason,
-    }
 
-
-def load_standing_grant_receipt(*, now: datetime | None = None) -> StandingGrantReceipt | None:
+def load_standing_grant_receipt(
+    *,
+    now: datetime | None = None,
+    key: StandingGrantKey | None = None,
+    repository: RepositoryIdentity | None = None,
+    goal_id: str | None = None,
+    thread_id: str | None = None,
+) -> StandingGrantReceipt | None:
     """Load and validate the single canonical receipt, or fail closed.
 
     Returns ``None`` when no receipt exists at the canonical path. Any
     malformed, tampered, unsafe, expired, or revoked receipt raises
     :class:`StandingGrantReceiptError` rather than returning partial evidence.
     """
-    try:
-        # Use a no-follow lstat so a dangling symlink is a typed unsafe error,
-        # never silently treated as "no receipt".
-        st = DEFAULT_RECEIPT_PATH.lstat()
-    except FileNotFoundError:
-        return None
-    except OSError as exc:
-        raise StandingGrantReceiptError("RECEIPT_READ_FAILED") from exc
-    if stat.S_ISLNK(st.st_mode):
-        raise StandingGrantReceiptError("NOT_REGULAR_FILE")
-    _assert_dir_chain_safe(DEFAULT_RECEIPT_PATH.parent, create=False)
-    return _load_receipt_at(DEFAULT_RECEIPT_PATH, now=now)
+    if key is not None:
+        repository, goal_id, thread_id = key.repository, key.goal_id, key.coordinator_thread
+    selected = _select_structural_entry(repository=repository, goal_id=goal_id, thread_id=thread_id)
+    if selected is not None:
+        return _load_receipt_at(selected[0], now=now)
+    return None
 
 
 def rehydrate_durable_standing_grant_request(
@@ -570,6 +538,7 @@ def rehydrate_durable_standing_grant_request(
     goal_id: str,
     action: AutonomyActionClass,
     requested_at: datetime,
+    coordination_scope_id: str | None = None,
 ) -> tuple[StandingGrantReceipt, StandingGrantRequest]:
     """Bind a fresh coordinator session to the receipt's durable scope.
 
@@ -579,7 +548,18 @@ def rehydrate_durable_standing_grant_request(
     be substituted for that authority identifier.  All other identity, action,
     validity, and hash checks remain enforced by the canonical loader/evaluator.
     """
-    receipt = load_standing_grant_receipt(now=requested_at)
+    receipt = load_standing_grant_receipt(
+        now=requested_at,
+        repository=repository,
+        goal_id=goal_id,
+        thread_id=coordination_scope_id,
+    )
+    if receipt is None:
+        # Preserve the existing semantic OUT_OF_SCOPE result for a unique
+        # receipt whose requested goal is wrong; ambiguity still fails closed.
+        receipt = load_standing_grant_receipt(now=requested_at, repository=repository)
+    if receipt is None:
+        receipt = load_standing_grant_receipt(now=requested_at)
     if receipt is None:
         raise StandingGrantReceiptError("RECEIPT_MISSING")
     context = receipt.context
@@ -608,6 +588,7 @@ def evaluate_rehydrated_durable_standing_grant(
     action: AutonomyActionClass,
     requested_at: datetime,
     platform_approval_required: bool = False,
+    coordination_scope_id: str | None = None,
 ) -> StandingGrantDecision:
     """Evaluate a durable grant after rehydrating its coordination scope."""
     try:
@@ -618,6 +599,7 @@ def evaluate_rehydrated_durable_standing_grant(
             goal_id=goal_id,
             action=action,
             requested_at=requested_at,
+            coordination_scope_id=coordination_scope_id,
         )
     except StandingGrantReceiptError:
         return evaluate_standing_grant_decision({}, {})
@@ -649,7 +631,15 @@ def evaluate_durable_standing_grant(
     state. Uses the canonical path only.
     """
     try:
-        receipt = load_standing_grant_receipt(now=requested_at)
+        receipt = load_standing_grant_receipt(
+            now=requested_at, repository=repository, goal_id=goal_id, thread_id=thread_id
+        )
+        if receipt is None:
+            receipt = load_standing_grant_receipt(
+                now=requested_at, repository=repository, goal_id=goal_id
+            )
+            if receipt is None:
+                receipt = load_standing_grant_receipt(now=requested_at)
     except StandingGrantReceiptError:
         return evaluate_standing_grant_decision({}, {})
     if receipt is None:
@@ -1367,3 +1357,233 @@ def restore_task_card_authority(
         owner_confirmation=owner_confirmation,
         now=now,
     )
+
+
+# Issue #893 keyed authority extension.  These objects deliberately sit on top
+# of the v1 receipt; the v1 bytes and evaluator remain the compatibility path.
+@dataclass(frozen=True, slots=True)
+class StandingGrantKey:
+    repository: RepositoryIdentity
+    goal_id: str
+    coordinator_thread: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.repository, RepositoryIdentity):
+            raise TypeError("repository must be a RepositoryIdentity")
+        for name, value in (
+            ("goal_id", self.goal_id),
+            ("coordinator_thread", self.coordinator_thread),
+        ):
+            if (
+                not isinstance(value, str)
+                or value != value.strip()
+                or not _SAFE_ID.fullmatch(value)
+            ):
+                raise ValueError(f"{name.upper()}_INVALID")
+
+    @property
+    def digest(self) -> str:
+        return canonical_autonomy_hash({
+            "schema": "nexus.standing_grant_key.v1",
+            "repository": self.repository.model_dump(mode="json"),
+            "goal_id": self.goal_id,
+            "coordinator_thread": self.coordinator_thread,
+        })
+
+    @property
+    def key_hash(self) -> str:
+        return self.digest
+
+
+def standing_grant_key(value: StandingGrantReceipt | StandingGrantContext) -> StandingGrantKey:
+    """Return the immutable repository/Goal/durable-thread key."""
+    if isinstance(value, StandingGrantReceipt):
+        context = value.context
+    elif isinstance(value, StandingGrantContext):
+        context = value
+    else:
+        raise TypeError("value must be a validated standing-grant receipt or context")
+    return StandingGrantKey(
+        repository=context.repository,
+        goal_id=context.goal_id,
+        coordinator_thread=context.thread_id,
+    )
+
+
+def _keyed_directory(key: StandingGrantKey) -> Path:
+    return DEFAULT_RECEIPT_PATH.parent / "standing-grants" / key.digest
+
+
+def _keyed_receipt_path(key: StandingGrantKey) -> Path:
+    return _keyed_directory(key) / f"{key.digest}.json"
+
+
+def _structural_entries() -> list[tuple[Path, StandingGrantKey, StandingGrantReceipt]]:
+    """Read every authority entry structurally before applying selectors."""
+    entries: list[tuple[Path, StandingGrantKey, StandingGrantReceipt]] = []
+    legacy = DEFAULT_RECEIPT_PATH
+    if os.path.lexists(legacy):
+        _assert_dir_chain_safe(legacy.parent, create=False)
+        receipt = _load_receipt_structural_at(legacy)
+        entries.append((legacy, standing_grant_key(receipt), receipt))
+    root = legacy.parent / "standing-grants"
+    if os.path.lexists(root):
+        if root.is_symlink():
+            raise StandingGrantReceiptError("KEYED_DIRECTORY_UNSAFE")
+        _assert_dir_chain_safe(root, create=False)
+        for directory in sorted(root.iterdir(), key=lambda item: item.name):
+            if directory.is_symlink() or not directory.is_dir():
+                raise StandingGrantReceiptError("KEYED_DIRECTORY_UNSAFE")
+            if not _SHA64_HEX.fullmatch(directory.name):
+                raise StandingGrantReceiptError("KEYED_DIRECTORY_INVALID")
+            leaf = directory / f"{directory.name}.json"
+            if not os.path.lexists(leaf) or leaf.is_symlink():
+                raise StandingGrantReceiptError("KEYED_LEAF_UNSAFE")
+            receipt = _load_receipt_structural_at(leaf)
+            key = standing_grant_key(receipt)
+            if key.digest != directory.name or leaf.name != f"{key.digest}.json":
+                raise StandingGrantReceiptError("KEY_PATH_MISMATCH")
+            entries.append((leaf, key, receipt))
+    return entries
+
+
+def _select_structural_entry(
+    *,
+    repository: RepositoryIdentity | None = None,
+    goal_id: str | None = None,
+    thread_id: str | None = None,
+) -> tuple[Path, StandingGrantKey, StandingGrantReceipt] | None:
+    if repository is not None and goal_id is not None and thread_id is not None:
+        key = StandingGrantKey(repository, goal_id, thread_id)
+        matches: list[tuple[Path, StandingGrantKey, StandingGrantReceipt]] = []
+        legacy = DEFAULT_RECEIPT_PATH
+        if os.path.lexists(legacy):
+            _assert_dir_chain_safe(legacy.parent, create=False)
+            receipt = _load_receipt_structural_at(legacy)
+            if standing_grant_key(receipt) == key:
+                matches.append((legacy, key, receipt))
+        directory = _keyed_directory(key)
+        if os.path.lexists(directory):
+            if directory.is_symlink() or not directory.is_dir():
+                raise StandingGrantReceiptError("KEYED_DIRECTORY_UNSAFE")
+            _assert_dir_chain_safe(directory, create=False)
+            leaf = _keyed_receipt_path(key)
+            if not os.path.lexists(leaf) or leaf.is_symlink():
+                raise StandingGrantReceiptError("KEYED_LEAF_UNSAFE")
+            receipt = _load_receipt_structural_at(leaf)
+            if standing_grant_key(receipt) != key:
+                raise StandingGrantReceiptError("KEY_PATH_MISMATCH")
+            matches.append((leaf, key, receipt))
+        if len(matches) > 1:
+            raise StandingGrantReceiptError("DUPLICATE_GRANT_KEY")
+        return matches[0] if matches else None
+    if all(value is None for value in (repository, goal_id, thread_id)):
+        selectors = None
+    else:
+        selectors = (repository, goal_id, thread_id)
+    entries = _structural_entries()
+    matches = [
+        entry
+        for entry in entries
+        if selectors is None
+        or (
+            (repository is None or entry[1].repository == repository)
+            and (goal_id is None or entry[1].goal_id == goal_id)
+            and (thread_id is None or entry[1].coordinator_thread == thread_id)
+        )
+    ]
+    if len(matches) > 1:
+        same_key = len({item[1] for item in matches}) == 1
+        raise StandingGrantReceiptError(
+            "DUPLICATE_GRANT_KEY" if same_key else "AMBIGUOUS_GRANT_KEY"
+        )
+    return matches[0] if matches else None
+
+
+def _inspection_projection(
+    receipt: StandingGrantReceipt, *, now: datetime | None = None
+) -> dict[str, Any]:
+    context = receipt.context
+    effective = now or datetime.now(timezone.utc)
+    status = (
+        "REVOKED"
+        if context.revoked_at
+        else "EXPIRED"
+        if effective >= context.expires_at
+        else "NOT_YET_VALID"
+        if effective < context.issued_at
+        else "VALID"
+    )
+    return {
+        "schema": "nexus.standing_grant_inspection.v1",
+        "status": status,
+        "grant_id": receipt.grant_id,
+        "receipt_hash": receipt.receipt_hash,
+        "owner_id": context.owner_id,
+        "coordinator_id": context.coordinator_id,
+        "repository_id": context.repository.repository_id,
+        "canonical_remote": context.repository.canonical_remote,
+        "coordination_scope_id": context.thread_id,
+        "goal_id": context.goal_id,
+        "allowed_actions": [action.value for action in context.allowed_actions],
+        "issued_at": context.issued_at.isoformat(),
+        "expires_at": context.expires_at.isoformat(),
+        "revoked_at": context.revoked_at.isoformat() if context.revoked_at else None,
+        "revocation_reason": context.revocation_reason,
+    }
+
+
+def discover_keyed_standing_grant_receipt(
+    *,
+    repository: RepositoryIdentity | None = None,
+    goal_id: str | None = None,
+    thread_id: str | None = None,
+    now: datetime | None = None,
+) -> StandingGrantReceipt | None:
+    selected = _select_structural_entry(repository=repository, goal_id=goal_id, thread_id=thread_id)
+    return None if selected is None else _load_receipt_at(selected[0], now=now)
+
+
+def _ensure_key_matches(receipt: StandingGrantReceipt, key: StandingGrantKey) -> None:
+    if standing_grant_key(receipt) != key:
+        raise StandingGrantReceiptError("KEY_SCOPE_MISMATCH")
+
+
+def write_keyed_standing_grant_receipt(
+    receipt: StandingGrantReceipt,
+    *,
+    expected_receipt_hash: str | None = None,
+) -> Path:
+    if not isinstance(receipt, StandingGrantReceipt):
+        raise TypeError("receipt must be a validated StandingGrantReceipt")
+    key = standing_grant_key(receipt)
+    destination = _keyed_receipt_path(key)
+    _write_bytes(
+        _canonical_json(receipt.model_dump(mode="json")),
+        receipt.supersedes_grant_hash,
+        destination,
+        expected_receipt_hash,
+    )
+    return destination
+
+
+def load_keyed_standing_grant_receipt(
+    key: StandingGrantKey, *, now: datetime | None = None
+) -> StandingGrantReceipt | None:
+    if not isinstance(key, StandingGrantKey):
+        raise TypeError("key must be a StandingGrantKey")
+    selected = _select_structural_entry(
+        repository=key.repository, goal_id=key.goal_id, thread_id=key.coordinator_thread
+    )
+    if selected is None:
+        return None
+    return _load_receipt_at(selected[0], now=now)
+
+
+def inspect_keyed_standing_grant_receipt(
+    key: StandingGrantKey, *, now: datetime | None = None
+) -> dict[str, Any]:
+    if not isinstance(key, StandingGrantKey):
+        raise TypeError("key must be a StandingGrantKey")
+    result = inspect_standing_grant_receipt(key=key, now=now)
+    return {**result, "schema": "nexus.keyed_standing_grant_inspection.v1", "key": key.digest}

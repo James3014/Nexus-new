@@ -209,9 +209,11 @@ receipt is current, the primary Codex coordinator may create and commit a
 missing Task Card/INDEX for an already Ready Issue after freezing the effective
 Issue contract, current baseline, overlap, Workforce receipt, verification,
 and claim ceiling. The canonical active machine-local receipt is read from the
-single durable path `.local/state/nexus/authority/standing-grant.json` (the
-`nexus.orchestrator.standing_grant_store` loader); there is no
-environment-selected second authority root. A missing, malformed, tampered,
+deterministic keyed directory `.local/state/nexus/authority/standing-grants/`
+derived only from exact repository identity, Goal, and durable coordination
+thread; each key has independent lock/CAS. The legacy single file remains
+read-only compatibility input, and there is no environment-selected authority
+root. A missing, malformed, tampered,
 unsafe-permission, expired, or revoked receipt fails closed. Delegated workers cannot create or widen their own
 authority; they begin only after the card is physically committed and its hash
 is read back. The grant does not authorize local runtime/lifecycle actions,

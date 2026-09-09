@@ -273,6 +273,237 @@ def test_two_requests_and_fresh_reader_reuse_same_grant_without_mutation(tmp_pat
     assert path.read_text(encoding="utf-8") == before
 
 
+def test_keyed_batch1_exact_and_partial_selection(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    a = StandingGrantReceipt.issue(
+        grant_id="batch-a", context=_make_context(goal_id="batch-goal", thread_id="thread-a")
+    )
+    b = StandingGrantReceipt.issue(
+        grant_id="batch-b", context=_make_context(goal_id="batch-goal", thread_id="thread-b")
+    )
+    c = StandingGrantReceipt.issue(
+        grant_id="batch-c", context=_make_context(goal_id="batch-other", thread_id="thread-c")
+    )
+    for item in (a, b, c):
+        standing_grant_store.write_standing_grant_receipt(item)
+    for item in (a, b, c):
+        assert (
+            standing_grant_store.load_keyed_standing_grant_receipt(
+                standing_grant_store.standing_grant_key(item)
+            )
+            == item
+        )
+    assert (
+        standing_grant_store.load_standing_grant_receipt(
+            repository=_repository(), goal_id="batch-other"
+        )
+        == c
+    )
+    with pytest.raises(StandingGrantReceiptError, match="AMBIGUOUS_GRANT_KEY"):
+        standing_grant_store.load_standing_grant_receipt(
+            repository=_repository(), goal_id="batch-goal"
+        )
+
+
+def test_keyed_batch1_legacy_selection_and_duplicate_detection(tmp_path, monkeypatch):
+    legacy_path = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(standing_grant_store, "DEFAULT_RECEIPT_PATH", legacy_path)
+    legacy = StandingGrantReceipt.issue(
+        grant_id="legacy", context=_make_context(goal_id="legacy-goal", thread_id="legacy-thread")
+    )
+    unrelated = StandingGrantReceipt.issue(
+        grant_id="unrelated", context=_make_context(goal_id="other-goal", thread_id="other-thread")
+    )
+    _write_standing_grant_receipt_at(legacy, legacy_path)
+    standing_grant_store.write_standing_grant_receipt(unrelated)
+    assert (
+        standing_grant_store.load_standing_grant_receipt(
+            repository=_repository(), goal_id="legacy-goal", thread_id="legacy-thread"
+        )
+        == legacy
+    )
+    with pytest.raises(StandingGrantReceiptError, match="AMBIGUOUS_GRANT_KEY"):
+        standing_grant_store.load_standing_grant_receipt()
+    assert standing_grant_store.inspect_standing_grant_receipt()["status"] == "INVALID"
+    same = StandingGrantReceipt.issue(grant_id="same", context=legacy.context)
+    standing_grant_store.write_keyed_standing_grant_receipt(same)
+    with pytest.raises(StandingGrantReceiptError, match="DUPLICATE_GRANT_KEY"):
+        standing_grant_store.load_keyed_standing_grant_receipt(
+            standing_grant_store.standing_grant_key(same)
+        )
+
+
+def test_keyed_batch1_public_writer_never_changes_legacy_bytes(tmp_path, monkeypatch):
+    legacy_path = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(standing_grant_store, "DEFAULT_RECEIPT_PATH", legacy_path)
+    legacy = _make_context(goal_id="legacy-only")
+    old = StandingGrantReceipt.issue(grant_id="legacy-only", context=legacy)
+    _write_standing_grant_receipt_at(old, legacy_path)
+    before = legacy_path.read_bytes()
+    fresh = StandingGrantReceipt.issue(
+        grant_id="fresh-keyed", context=_make_context(goal_id="fresh-only")
+    )
+    destination = standing_grant_store.write_standing_grant_receipt(fresh)
+    assert destination != legacy_path
+    assert legacy_path.read_bytes() == before
+
+
+def test_keyed_batch2_cas_isolation_and_stale_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    a = StandingGrantReceipt.issue(grant_id="iso-a", context=_make_context(goal_id="iso-a"))
+    b = StandingGrantReceipt.issue(grant_id="iso-b", context=_make_context(goal_id="iso-b"))
+    standing_grant_store.write_standing_grant_receipt(a)
+    standing_grant_store.write_standing_grant_receipt(b)
+    ap = standing_grant_store._keyed_receipt_path(standing_grant_store.standing_grant_key(a))
+    before = ap.read_bytes()
+    successor = StandingGrantReceipt.issue(
+        grant_id="iso-b2", context=b.context, supersedes_grant_hash=b.receipt_hash
+    )
+    standing_grant_store.write_standing_grant_receipt(
+        successor, expected_receipt_hash=b.receipt_hash
+    )
+    assert ap.read_bytes() == before
+    with pytest.raises(StandingGrantReceiptError):
+        standing_grant_store.write_standing_grant_receipt(
+            successor, expected_receipt_hash=b.receipt_hash
+        )
+    assert ap.read_bytes() == before
+    assert (
+        standing_grant_store.load_keyed_standing_grant_receipt(
+            standing_grant_store.standing_grant_key(successor)
+        )
+        == successor
+    )
+
+
+def test_keyed_batch2_wrong_digest_symlinks_permissions_and_tamper_fail_closed(
+    tmp_path, monkeypatch
+):
+    root = tmp_path / "authority" / "standing-grants"
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    receipt = StandingGrantReceipt.issue(
+        grant_id="physical", context=_make_context(goal_id="physical")
+    )
+    standing_grant_store.write_standing_grant_receipt(receipt)
+    key = standing_grant_store.standing_grant_key(receipt)
+    path = standing_grant_store._keyed_receipt_path(key)
+    wrong = root / ("0" * 64)
+    wrong.mkdir(mode=0o700, parents=True)
+    (wrong / ("0" * 64 + ".json")).write_bytes(path.read_bytes())
+    os.chmod(wrong / ("0" * 64 + ".json"), 0o600)
+    with pytest.raises(StandingGrantReceiptError, match="KEY_PATH_MISMATCH"):
+        standing_grant_store.load_standing_grant_receipt()
+    (wrong / ("0" * 64 + ".json")).unlink()
+    wrong.rmdir()
+    os.chmod(path, 0o644)
+    with pytest.raises(StandingGrantReceiptError, match="UNSAFE_PERMISSIONS"):
+        standing_grant_store.load_keyed_standing_grant_receipt(key)
+
+
+def test_keyed_batch2_inspection_expired_and_revoked(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    expired = StandingGrantReceipt.issue(
+        grant_id="expired-key",
+        context=_make_context(goal_id="expired-key", expires_at=NOW - timedelta(minutes=1)),
+    )
+    revoked = StandingGrantReceipt.issue(
+        grant_id="revoked-key",
+        context=_make_context(goal_id="revoked-key", revoked_at=NOW, revocation_reason="owner"),
+    )
+    standing_grant_store.write_standing_grant_receipt(expired)
+    standing_grant_store.write_standing_grant_receipt(revoked)
+    assert (
+        standing_grant_store.inspect_standing_grant_receipt(
+            key=standing_grant_store.standing_grant_key(expired), now=NOW
+        )["status"]
+        == "EXPIRED"
+    )
+    result = standing_grant_store.inspect_standing_grant_receipt(
+        key=standing_grant_store.standing_grant_key(revoked), now=NOW
+    )
+    assert result["status"] == "REVOKED" and result["goal_id"] == "revoked-key"
+
+
+def test_exact_key_ignores_unrelated_corrupt_key(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    a = StandingGrantReceipt.issue(grant_id="exact-a", context=_make_context(goal_id="exact-a"))
+    b = StandingGrantReceipt.issue(grant_id="exact-b", context=_make_context(goal_id="exact-b"))
+    standing_grant_store.write_standing_grant_receipt(a)
+    standing_grant_store.write_standing_grant_receipt(b)
+    ap = standing_grant_store._keyed_receipt_path(standing_grant_store.standing_grant_key(a))
+    before = ap.read_bytes()
+    bp = standing_grant_store._keyed_receipt_path(standing_grant_store.standing_grant_key(b))
+    bp.write_text("{broken")
+    assert (
+        standing_grant_store.load_standing_grant_receipt(
+            repository=_repository(), goal_id="exact-a", thread_id="thread-163"
+        )
+        == a
+    )
+    assert (
+        standing_grant_store.inspect_standing_grant_receipt(
+            repository=_repository(), goal_id="exact-a", thread_id="thread-163"
+        )["status"]
+        == "VALID"
+    )
+    assert ap.read_bytes() == before
+    with pytest.raises(StandingGrantReceiptError):
+        standing_grant_store.load_standing_grant_receipt()
+
+
+def test_keyed_batch3_dangling_root_directory_and_leaf_symlinks(tmp_path, monkeypatch):
+    base = tmp_path / "authority" / "standing-grant.json"
+    monkeypatch.setattr(standing_grant_store, "DEFAULT_RECEIPT_PATH", base)
+    receipt = StandingGrantReceipt.issue(grant_id="links", context=_make_context(goal_id="links"))
+    standing_grant_store.write_standing_grant_receipt(receipt)
+    key = standing_grant_store.standing_grant_key(receipt)
+    root = base.parent / "standing-grants"
+    path = standing_grant_store._keyed_receipt_path(key)
+    path.unlink()
+    path.symlink_to(tmp_path / "missing-leaf")
+    with pytest.raises(StandingGrantReceiptError, match="KEYED_LEAF_UNSAFE"):
+        standing_grant_store.load_keyed_standing_grant_receipt(key)
+    path.unlink()
+    directory = standing_grant_store._keyed_directory(key)
+    directory.rename(tmp_path / "real-key-dir")
+    directory.symlink_to(tmp_path / "missing-key-dir", target_is_directory=True)
+    with pytest.raises(StandingGrantReceiptError, match="KEYED_DIRECTORY_UNSAFE"):
+        standing_grant_store.load_standing_grant_receipt()
+    directory.unlink()
+    root.rename(tmp_path / "real-root")
+    root.symlink_to(tmp_path / "missing-root", target_is_directory=True)
+    with pytest.raises(StandingGrantReceiptError, match="KEYED_DIRECTORY_UNSAFE"):
+        standing_grant_store.load_standing_grant_receipt()
+
+
+def test_keyed_batch3_malformed_duplicate_noncanonical_and_rehashed_context_tamper(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    receipt = StandingGrantReceipt.issue(grant_id="tamper", context=_make_context(goal_id="tamper"))
+    standing_grant_store.write_standing_grant_receipt(receipt)
+    key = standing_grant_store.standing_grant_key(receipt)
+    path = standing_grant_store._keyed_receipt_path(key)
+    path.write_text("{not-json")
+    with pytest.raises(StandingGrantReceiptError, match="MALFORMED"):
+        standing_grant_store.load_keyed_standing_grant_receipt(key)
+    path.write_text('{"grant_id":1,"grant_id":2}')
+    with pytest.raises(StandingGrantReceiptError, match="MALFORMED"):
+        standing_grant_store.load_keyed_standing_grant_receipt(key)
+
+
 def test_expired_or_revoked_receipt_fails_closed_without_mutation(tmp_path, monkeypatch):
     _receipt, expired_path = _make_receipt(
         tmp_path, grant_id="expired", expires_at=(NOW - timedelta(minutes=1))
@@ -346,6 +577,70 @@ def test_write_requires_cas_when_file_exists(tmp_path):
     )
     with pytest.raises(StandingGrantReceiptError, match="EXISTS_NO_CAS"):
         _write_standing_grant_receipt_at(replacement, path)
+
+
+def test_red_keyed_goals_and_threads_coexist_without_transport_identity(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    a = StandingGrantReceipt.issue(
+        grant_id="key-a", context=_make_context(goal_id="goal-a", thread_id="scope-a")
+    )
+    b = StandingGrantReceipt.issue(
+        grant_id="key-b", context=_make_context(goal_id="goal-a", thread_id="scope-b")
+    )
+    c = StandingGrantReceipt.issue(
+        grant_id="key-c", context=_make_context(goal_id="goal-c", thread_id="scope-a")
+    )
+    for receipt in (a, b, c):
+        standing_grant_store.write_keyed_standing_grant_receipt(receipt)
+    assert (
+        standing_grant_store.load_keyed_standing_grant_receipt(
+            standing_grant_store.standing_grant_key(b)
+        )
+        == b
+    )
+
+
+def test_red_keyed_cas_isolated_and_stale_writer_leaves_other_key_unchanged(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    a = StandingGrantReceipt.issue(grant_id="cas-a", context=_make_context(goal_id="ga"))
+    b = StandingGrantReceipt.issue(grant_id="cas-b", context=_make_context(goal_id="gb"))
+    standing_grant_store.write_keyed_standing_grant_receipt(a)
+    standing_grant_store.write_keyed_standing_grant_receipt(b)
+    a_path = standing_grant_store._keyed_receipt_path(standing_grant_store.standing_grant_key(a))
+    before = a_path.read_bytes()
+    successor = StandingGrantReceipt.issue(
+        grant_id="cas-b2", context=b.context, supersedes_grant_hash=b.receipt_hash
+    )
+    standing_grant_store.write_keyed_standing_grant_receipt(
+        successor, expected_receipt_hash=b.receipt_hash
+    )
+    assert a_path.read_bytes() == before
+    with pytest.raises(StandingGrantReceiptError):
+        standing_grant_store.write_keyed_standing_grant_receipt(
+            successor, expected_receipt_hash=b.receipt_hash
+        )
+
+
+def test_red_exact_key_context_path_substitution_and_tamper_fail_closed(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    receipt = StandingGrantReceipt.issue(grant_id="substitution", context=_make_context())
+    standing_grant_store.write_keyed_standing_grant_receipt(receipt)
+    path = standing_grant_store._keyed_receipt_path(
+        standing_grant_store.standing_grant_key(receipt)
+    )
+    data = json.loads(path.read_text())
+    data["grant_id"] = "tampered"
+    path.write_text(json.dumps(data, separators=(",", ":"), sort_keys=True))
+    with pytest.raises(StandingGrantReceiptError):
+        standing_grant_store.load_keyed_standing_grant_receipt(
+            standing_grant_store.standing_grant_key(receipt)
+        )
 
 
 def test_initial_write_rejects_predecessor_or_cas(tmp_path):

@@ -75,13 +75,23 @@ def _context_from_issue(args: argparse.Namespace) -> StandingGrantContext:
 def _issue(args: argparse.Namespace) -> int:
     context = _context_from_issue(args)
     receipt = StandingGrantReceipt.issue(grant_id=args.grant_id, context=context)
-    write_standing_grant_receipt(receipt)
-    _print({"status": "ISSUED", "grant_id": receipt.grant_id, "receipt_hash": receipt.receipt_hash})
+    destination = write_standing_grant_receipt(receipt)
+    _print({
+        "status": "ISSUED",
+        "grant_id": receipt.grant_id,
+        "receipt_hash": receipt.receipt_hash,
+        "path": str(destination),
+    })
     return 0
 
 
 def _renew(args: argparse.Namespace) -> int:
-    current = load_standing_grant_receipt(now=args.requested_at)
+    current = load_standing_grant_receipt(
+        now=args.requested_at,
+        repository=_repository_from_args(args),
+        goal_id=args.goal_id,
+        thread_id=args.coordination_scope_id,
+    )
     if current is None:
         raise StandingGrantReceiptError("RECEIPT_MISSING")
     old = current.context
@@ -111,7 +121,12 @@ def _renew(args: argparse.Namespace) -> int:
 
 
 def _revoke(args: argparse.Namespace) -> int:
-    current = load_standing_grant_receipt(now=args.requested_at)
+    current = load_standing_grant_receipt(
+        now=args.requested_at,
+        repository=_repository_from_args(args),
+        goal_id=args.goal_id,
+        thread_id=args.coordination_scope_id,
+    )
     if current is None:
         raise StandingGrantReceiptError("RECEIPT_MISSING")
     old = current.context
@@ -143,9 +158,27 @@ def _revoke(args: argparse.Namespace) -> int:
 
 
 def _inspect(args: argparse.Namespace) -> int:
-    result = inspect_standing_grant_receipt(now=args.requested_at)
+    result = inspect_standing_grant_receipt(
+        now=args.requested_at,
+        repository=_repository_from_args(args),
+        goal_id=args.goal_id,
+        thread_id=args.coordination_scope_id,
+    )
     _print(result)
     return 0 if result["status"] == "VALID" else 2
+
+
+def _repository_from_args(args: argparse.Namespace) -> RepositoryIdentity:
+    return RepositoryIdentity(
+        repository_id=args.repository_id, canonical_remote=args.canonical_remote
+    )
+
+
+def _selectors(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--repository-id", required=True)
+    parser.add_argument("--canonical-remote", required=True)
+    parser.add_argument("--coordination-scope-id", required=True)
+    parser.add_argument("--goal-id", required=True)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -153,6 +186,7 @@ def build_parser() -> argparse.ArgumentParser:
     commands = parser.add_subparsers(dest="command", required=True)
 
     inspect_parser = commands.add_parser("inspect", help="inspect canonical standing-grant status")
+    _selectors(inspect_parser)
     inspect_parser.add_argument("--requested-at", type=_time, default=None)
     inspect_parser.set_defaults(handler=_inspect)
 
@@ -171,6 +205,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     renew_parser = commands.add_parser("renew", help="renew without widening identity/actions")
     renew_parser.add_argument("--grant-id", required=True)
+    _selectors(renew_parser)
     renew_parser.add_argument("--requested-at", type=_time, required=True)
     renew_parser.add_argument("--issued-at", type=_time, required=True)
     renew_parser.add_argument("--expires-at", type=_time, required=True)
@@ -178,6 +213,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     revoke_parser = commands.add_parser("revoke", help="revoke the current grant with CAS")
     revoke_parser.add_argument("--grant-id", required=True)
+    _selectors(revoke_parser)
     revoke_parser.add_argument("--requested-at", type=_time, required=True)
     revoke_parser.add_argument("--revoked-at", type=_time, required=True)
     revoke_parser.add_argument("--reason", required=True)
