@@ -160,9 +160,7 @@ def test_context_assembly_rejects_nested_source_tamper_and_consumption_claims() 
         source_materialization=_source_materialization(),
     )
     tampered = deepcopy(payload)
-    tampered["source_materialization"]["selected_sources"][0]["content_hash"] = (
-        "sha256:substituted"
-    )
+    tampered["source_materialization"]["selected_sources"][0]["content_hash"] = "sha256:substituted"
     tampered["physically_consumed"] = True
     tampered["outcome_contributed"] = True
 
