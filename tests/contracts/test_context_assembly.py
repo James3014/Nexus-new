@@ -100,6 +100,7 @@ def test_context_assembly_materializes_planner_lineage_without_claiming_consumpt
                 "path": "nexus/services/example.py",
                 "ranges": [[10, 30]],
                 "content_hash": "b" * 64,
+                "claim_ceiling": "SOURCE_BOUNDED_ONLY",
             },
         ),
         consumer_role="primary_implementer",
@@ -118,6 +119,7 @@ def test_context_assembly_materializes_planner_lineage_without_claiming_consumpt
     assert payload["selected_capability_ids"] == ["cap:retrieval", "cap:local_evidence"]
     assert payload["materialized_context_ids"] == ["evidence:packet-1"]
     assert payload["serialized_context_ids"] == ["evidence:packet-1"]
+    assert payload["source_references"][0]["claim_ceiling"] == "SOURCE_BOUNDED_ONLY"
     assert payload["worker_binding"]["model"] == "gemini-3.7-flash-medium"
     assert "physically_consumed" not in payload
     assert "outcome_contributed" not in payload
@@ -160,7 +162,7 @@ def test_context_assembly_source_mode_fails_closed_on_missing_or_unexpected_refe
         sources=_sources(),
         token_budget=500,
         source_mode="NO_SOURCE",
-        source_references=({"path": "should-not-be-here.py"},),
+        source_references=({"path": "should-not-be-here.py", "claim_ceiling": "UNVERIFIED"},),
     )
     assert no_source_with_reference["status"] == "RETURN"
     assert "no_source_mode_must_not_carry_source_references" in no_source_with_reference["blockers"]
@@ -176,3 +178,26 @@ def test_context_assembly_rejects_duplicate_lineage_identities() -> None:
 
     assert payload["status"] == "RETURN"
     assert "duplicate_selected_capability_ids" in payload["blockers"]
+
+
+def test_context_assembly_source_reference_requires_bounded_identity_and_claim_ceiling() -> None:
+    payload = build_context_assembly_contract(
+        task_id="ctx-007",
+        sources=_sources(),
+        token_budget=500,
+        source_mode="DIRECT_SLICE",
+        source_references=(
+            {
+                "path": "nexus/services/example.py",
+                "revision": "not-a-sha",
+                "ranges": [[0, 5]],
+                "content_hash": "not-a-hash",
+            },
+        ),
+    )
+
+    assert payload["status"] == "RETURN"
+    assert "source_reference[0]:missing_claim_ceiling" in payload["blockers"]
+    assert "source_reference[0]:invalid_revision" in payload["blockers"]
+    assert "source_reference[0]:invalid_content_hash" in payload["blockers"]
+    assert "source_reference[0]:invalid_range" in payload["blockers"]
