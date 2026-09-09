@@ -71,7 +71,11 @@ def stamp_mainchain_route(
     out["route_freeze"] = True
     out["mainchain_route_version"] = MAINCHAIN_ROUTE_VERSION
     out[ROUTE_FLAG_WITH_NEXUS] = bool(with_nexus_armor)
-    out.setdefault("workforce_admission_enabled", True)
+    # Mainchain historically supplied a canonical planning bundle on every
+    # request.  Runtime admission therefore remained mandatory even when a
+    # caller supplied an explicit false route flag; preserve that contract
+    # until the runtime package exposes canonical bundle construction.
+    out["workforce_admission_enabled"] = True
 
     raw_prod = out.get("product_entry") or product_entry
     prod = str(raw_prod or "mainchain").strip()
