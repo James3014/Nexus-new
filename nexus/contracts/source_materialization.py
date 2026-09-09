@@ -4,7 +4,6 @@ import hashlib
 import json
 from typing import Any, Mapping
 
-
 SOURCE_MATERIALIZATION_SCHEMA = "nexus.source_materialization_projection.v1"
 SOURCE_MATERIALIZATION_CLAIM_CEILING = "CONTEXT_ASSIST_ONLY"
 
@@ -13,9 +12,12 @@ REDUCED_CAPSULE = "REDUCED_CAPSULE"
 RAW_SOURCE = "RAW_SOURCE"
 NO_SOURCE = "NO_SOURCE"
 
-SOURCE_MATERIALIZATION_STRATEGIES = frozenset(
-    {DIRECT_SLICE, REDUCED_CAPSULE, RAW_SOURCE, NO_SOURCE}
-)
+SOURCE_MATERIALIZATION_STRATEGIES = frozenset({
+    DIRECT_SLICE,
+    REDUCED_CAPSULE,
+    RAW_SOURCE,
+    NO_SOURCE,
+})
 
 
 def build_source_materialization_projection(
@@ -116,9 +118,7 @@ def validate_source_materialization_projection(payload: Mapping[str, Any]) -> li
                 blockers.append(f"selected_source_missing_ranges:{index}")
             for range_index, item in enumerate(ranges):
                 if not _valid_range(item):
-                    blockers.append(
-                        f"selected_source_range_malformed:{index}:{range_index}"
-                    )
+                    blockers.append(f"selected_source_range_malformed:{index}:{range_index}")
 
     reduction = _mapping(payload.get("reduction"))
     if strategy == REDUCED_CAPSULE:
@@ -127,9 +127,10 @@ def validate_source_materialization_projection(payload: Mapping[str, Any]) -> li
         blockers.append("reduction_requires_reduced_capsule_strategy")
 
     escalation = _mapping(payload.get("escalation"))
-    if bool(escalation.get("raw_source_required", False)) and not str(
-        escalation.get("reason") or ""
-    ).strip():
+    if (
+        bool(escalation.get("raw_source_required", False))
+        and not str(escalation.get("reason") or "").strip()
+    ):
         blockers.append("raw_source_escalation_reason_missing")
 
     expected_hash = _hash_projection(payload)
@@ -169,8 +170,7 @@ def _normalize_source(source: Mapping[str, Any]) -> dict[str, Any]:
     raw_ranges = source.get("ranges") if isinstance(source, Mapping) else None
     if isinstance(raw_ranges, list):
         ranges: Any = [
-            [int(item[0]), int(item[1])] if _valid_range(item) else None
-            for item in raw_ranges
+            [int(item[0]), int(item[1])] if _valid_range(item) else None for item in raw_ranges
         ]
     else:
         ranges = None
@@ -200,14 +200,10 @@ def _normalize_reduction(reduction: Mapping[str, Any] | None) -> dict[str, Any]:
         "original_tokens": _int_or_zero(value.get("original_tokens")),
         "reduced_tokens": _int_or_zero(value.get("reduced_tokens")),
         "uncertainties": (
-            [str(item) for item in uncertainties]
-            if isinstance(uncertainties, list)
-            else None
+            [str(item) for item in uncertainties] if isinstance(uncertainties, list) else None
         ),
         "omitted_regions": (
-            [str(item) for item in omitted_regions]
-            if isinstance(omitted_regions, list)
-            else None
+            [str(item) for item in omitted_regions] if isinstance(omitted_regions, list) else None
         ),
     }
 
