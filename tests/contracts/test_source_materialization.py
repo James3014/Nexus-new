@@ -189,3 +189,56 @@ def test_source_identity_and_raw_escalation_reason_are_required_when_applicable(
     assert "missing_source_identity:revision" in payload["blockers"]
     assert "missing_source_identity:source_hash" in payload["blockers"]
     assert "raw_source_escalation_reason_missing" in payload["blockers"]
+
+
+def test_direct_slice_fails_closed_on_empty_or_malformed_ranges() -> None:
+    empty_ranges = _selected_source()
+    empty_ranges["ranges"] = []
+    empty_payload = build_source_materialization_projection(
+        strategy=DIRECT_SLICE,
+        selected_sources=[empty_ranges],
+        **_identity(),
+    )
+    assert empty_payload["status"] == "RETURN"
+    assert "selected_source_missing_ranges:0" in empty_payload["blockers"]
+
+    malformed_ranges = _selected_source()
+    malformed_ranges["ranges"] = [["430", 510]]
+    malformed_payload = build_source_materialization_projection(
+        strategy=DIRECT_SLICE,
+        selected_sources=[malformed_ranges],
+        **_identity(),
+    )
+    assert malformed_payload["status"] == "RETURN"
+    assert "selected_source_range_malformed:0:0" in malformed_payload["blockers"]
+
+    malformed_container = _selected_source()
+    malformed_container["ranges"] = "430:510"
+    container_payload = build_source_materialization_projection(
+        strategy=DIRECT_SLICE,
+        selected_sources=[malformed_container],
+        **_identity(),
+    )
+    assert container_payload["status"] == "RETURN"
+    assert "selected_source_ranges_malformed:0" in container_payload["blockers"]
+
+
+def test_reduced_capsule_fails_closed_on_malformed_uncertainty_lists() -> None:
+    payload = build_source_materialization_projection(
+        strategy=REDUCED_CAPSULE,
+        selected_sources=[_selected_source()],
+        reduction={
+            "reducer_operation_id": "reduce-op-001",
+            "input_hash": "sha256:input",
+            "output_hash": "sha256:output",
+            "original_chars": 100,
+            "reduced_chars": 50,
+            "uncertainties": "missing cross-file evidence",
+            "omitted_regions": {"path": "helper.py"},
+        },
+        **_identity(),
+    )
+
+    assert payload["status"] == "RETURN"
+    assert "reduction_invalid:uncertainties" in payload["blockers"]
+    assert "reduction_invalid:omitted_regions" in payload["blockers"]
