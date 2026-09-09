@@ -17,12 +17,17 @@ def test_context_hub_assembly_delegates_to_runtime_hub(tmp_path):
 
 
 def test_context_hub_runtime_lesson_writer_persists_physical_card(tmp_path):
+    import json
+
     hub = ContextHub(str(tmp_path), deps=ContextDependencies(), strict_deps=True)
     result = hub.record_crystal_lesson(
         "sig:runtime", "root cause", "lesson", {"task_id": "task-runtime"}
     )
     assert result is not None
-    assert list(tmp_path.rglob("*task-runtime*")) or list((tmp_path / ".nexus").rglob("*"))
+    payload = json.loads(open(result, encoding="utf-8").read())
+    assert payload["task_id"] == "task-runtime"
+    assert payload["body"] == "Root Cause: root cause\nLesson: lesson"
+    assert payload["extra"]["task_id"] == "task-runtime"
 
 
 def test_context_hub_runtime_context_uses_bound_compactor(tmp_path):
