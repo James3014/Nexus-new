@@ -51,9 +51,9 @@ class AuthorityPublication:
 # The default entry preserves the original single-root publication contract.
 # Additional root entries are installed by the owner-controlled source package;
 # callers may select only with the already-bound request.root_id.
-PUBLICATION_INVENTORY: Mapping[str, AuthorityPublication] = MappingProxyType(
-    {"root": AuthorityPublication(TRACKED_RELATIVE, DURABLE_PATH)}
-)
+PUBLICATION_INVENTORY: Mapping[str, AuthorityPublication] = MappingProxyType({
+    "root": AuthorityPublication(TRACKED_RELATIVE, DURABLE_PATH)
+})
 
 
 class WriterAuthorityError(RuntimeError):
