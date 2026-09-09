@@ -24,6 +24,14 @@ class Knowledge:
     def recommend_skills(self, summary, hotspots): return ["skill:parser"]
     def inject_wisdom_prior(self, summary, hotspots): return "prior"
 
+class Diagnosis:
+    summary = "parser failure"
+    pseudo_flows = ["inspect", "repair"]
+    hotspots = ["parser.py"]
+
+class Research:
+    key_findings = ["fixture finding"]
+
 
 def test_runtime_context_hub_matches_donor_core_packs(tmp_path: Path, monkeypatch):
     state = State()
@@ -54,13 +62,17 @@ s=importlib.util.spec_from_file_location("donor",p); m=importlib.util.module_fro
 class S:
  task_id="task-1"; metadata={"task_description":"parser repair","chat_history":["one","two"]}; steps_history=[SimpleNamespace(summary="researched",phase="X",status="completed")]; tdd_status="green"; superpowers_plan={}
  def get_conversation_metadata(self): return {"conversation_id":"conv-1","user_goal":"repair parser","current_question":"how?","needs_research":False}
-class K:
- def recommend_skills(self,s,h): return ["skill:parser"]
- def inject_wisdom_prior(self,s,h): return "prior"
+    class K:
+     def recommend_skills(self,s,h): return ["skill:parser"]
+     def inject_wisdom_prior(self,s,h): return "prior"
+    class Diagnosis:
+     summary="parser failure"; pseudo_flows=["inspect","repair"]; hotspots=["parser.py"]
+    class Research:
+     key_findings=["fixture finding"]
 state=S(); memory={"reminders":["phase"],"total_sources":1}; wiki={"context":"wiki:parser failure","selected_sources":[]}; k=K()
 d=m.ContextHub.__new__(m.ContextHub); d.state_io=SimpleNamespace(load_global_state=lambda:state); d._text_store=SimpleNamespace(load_program_rules=lambda n="program.md":"rules:program.md"); d.memory_service=SimpleNamespace(cached_search=lambda _key:memory, aggregate_memory=lambda:memory); d.nexus_fs=None; d.knowledge_injector=k; d.wiki_knowledge_agent=None; d.belief_engine=None; d.run_dir=None
 d._retrieve_wiki_context=lambda q,max_results=3:wiki; d._inject_memory_reminders=lambda phase:memory; d.load_program_rules=lambda md_path="program.md":"rules:program.md"; m.ToonRenderer=SimpleNamespace(render=lambda st,aggression=0.0:"toon-summary"); m.prune_dialogue=lambda h:"pruned-history"
-out={"feature":d.assemble_feature_pack({"steps":["inspect"]}),"diag":d.assemble_diag_pack([{"file":"parser.py","message":"bad"}],"parser failure"),"research":d.assemble_research_pack("parser",[{"fact":1}])}
+out={"feature":d.assemble_feature_pack({"steps":["inspect"]}),"diag":d.assemble_diag_pack([{"file":"parser.py","message":"bad"}],"parser failure"),"research":d.assemble_research_pack("parser",[{"fact":1}]),"conversation":d.assemble_conversation_pack(),"repair":d.assemble_repair_pack(Diagnosis(),[{"reflection":1},{"reflection":2},{"reflection":3}],Research())}
 print(json.dumps(out,sort_keys=True,default=str))
 '''
     env = {"PYTHONPATH": "/private/tmp/astra-production-integrated-20260909"}
@@ -74,3 +86,5 @@ print(json.dumps(out,sort_keys=True,default=str))
     assert normalized(hub.assemble_feature_pack({"steps": ["inspect"]})) == normalized(donor["feature"])
     assert hub.assemble_diag_pack([{"file": "parser.py", "message": "bad"}], "parser failure") == donor["diag"]
     assert hub.assemble_research_pack("parser", [{"fact": 1}]) == donor["research"]
+    assert normalized(hub.assemble_conversation_pack()) == normalized(donor["conversation"])
+    assert hub.assemble_repair_pack(Diagnosis(), [{"reflection": 1}, {"reflection": 2}, {"reflection": 3}], Research()) == donor["repair"]
