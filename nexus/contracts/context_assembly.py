@@ -141,6 +141,8 @@ def validate_context_assembly_contract(payload: Mapping[str, Any]) -> list[str]:
         blockers.append("no_source_mode_must_not_carry_source_references")
     if source_mode != "NO_SOURCE" and not source_references:
         blockers.append("source_materialization_requires_source_reference")
+    for index, reference in enumerate(source_references):
+        blockers.extend(_validate_source_reference(index, reference))
 
     for field_name in (
         "selected_capability_ids",
@@ -191,6 +193,39 @@ def _validate_identity_sequence(field_name: str, values: Any) -> list[str]:
         blockers.append(f"empty_{field_name}")
     if len(normalized) != len(set(normalized)):
         blockers.append(f"duplicate_{field_name}")
+    return blockers
+
+
+def _validate_source_reference(index: int, reference: Any) -> list[str]:
+    prefix = f"source_reference[{index}]"
+    if not isinstance(reference, Mapping):
+        return [f"{prefix}:invalid_mapping"]
+    blockers: list[str] = []
+    if not str(reference.get("path") or "").strip():
+        blockers.append(f"{prefix}:missing_path")
+    if not str(reference.get("claim_ceiling") or "").strip():
+        blockers.append(f"{prefix}:missing_claim_ceiling")
+    revision = str(reference.get("revision") or "").strip()
+    if revision and (len(revision) != 40 or any(ch not in "0123456789abcdefABCDEF" for ch in revision)):
+        blockers.append(f"{prefix}:invalid_revision")
+    content_hash = str(reference.get("content_hash") or "").strip()
+    if content_hash and (len(content_hash) != 64 or any(ch not in "0123456789abcdefABCDEF" for ch in content_hash)):
+        blockers.append(f"{prefix}:invalid_content_hash")
+    ranges = reference.get("ranges", []) or []
+    if not isinstance(ranges, (list, tuple)):
+        blockers.append(f"{prefix}:invalid_ranges")
+    else:
+        for item in ranges:
+            if not isinstance(item, (list, tuple)) or len(item) != 2:
+                blockers.append(f"{prefix}:invalid_range")
+                continue
+            try:
+                start, end = int(item[0]), int(item[1])
+            except (TypeError, ValueError):
+                blockers.append(f"{prefix}:invalid_range")
+                continue
+            if start <= 0 or end < start:
+                blockers.append(f"{prefix}:invalid_range")
     return blockers
 
 
