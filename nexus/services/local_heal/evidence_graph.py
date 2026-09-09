@@ -5,11 +5,10 @@ Computes real source hashes and extracts bounded graph nodes/edges from source.
 """
 from __future__ import annotations
 
-import ast
-import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from nexus_runtime_support_candidate.local_ast import RuntimeASTExtractor
 
 
 @dataclass
@@ -88,156 +87,6 @@ class EvidenceGraph:
             "evidence_confidence": self.evidence_confidence,
             "graph_summary": self.graph_summary,
         }
-
-
-class RuntimeASTExtractor:
-    """Extracts bounded graph nodes and edges from Python source using AST."""
-
-    MAX_NODES = 50
-    MAX_EDGES = 100
-
-    @staticmethod
-    def compute_source_hash(file_path: str) -> str:
-        """Compute real SHA256 hash from file contents."""
-        try:
-            path = Path(file_path)
-            if path.exists():
-                content = path.read_bytes()
-                return hashlib.sha256(content).hexdigest()[:16]
-        except (OSError, IOError):
-            pass
-        return ""
-
-    @staticmethod
-    def extract_from_file(file_path: str) -> tuple[list[dict], list[dict], list[str]]:
-        """Extract nodes and edges from a Python file using AST.
-
-        Returns:
-            (nodes, edges, missing_context_risks)
-        """
-        nodes = []
-        edges = []
-        risks = []
-
-        try:
-            path = Path(file_path)
-            if not path.exists():
-                risks.append(f"file_not_found:{file_path}")
-                return nodes, edges, risks
-
-            source = path.read_text(encoding="utf-8", errors="replace")
-            tree = ast.parse(source, filename=file_path)
-            source_hash = RuntimeASTExtractor.compute_source_hash(file_path)
-
-            node_counter = 0
-
-            for node in ast.walk(tree):
-                if node_counter >= RuntimeASTExtractor.MAX_NODES:
-                    risks.append("node_budget_exceeded")
-                    break
-
-                if isinstance(node, ast.FunctionDef) or isinstance(node, ast.AsyncFunctionDef):
-                    node_id = f"n{node_counter}"
-                    nodes.append({
-                        "node_id": node_id,
-                        "type": "function",
-                        "name": node.name,
-                        "file_path": file_path,
-                        "line_span": [node.lineno, node.end_lineno or node.lineno],
-                        "source_hash": source_hash,
-                        "provenance": "local_ast_analysis",
-                        "confidence_score": 1.0,
-                    })
-                    node_counter += 1
-
-                    # Extract callsites within this function
-                    for child in ast.walk(node):
-                        if isinstance(child, ast.Call) and node_counter < RuntimeASTExtractor.MAX_NODES:
-                            call_name = RuntimeASTExtractor._get_call_name(child)
-                            if call_name:
-                                call_id = f"n{node_counter}"
-                                nodes.append({
-                                    "node_id": call_id,
-                                    "type": "callsite",
-                                    "name": call_name,
-                                    "file_path": file_path,
-                                    "line_span": [child.lineno, child.lineno],
-                                    "source_hash": source_hash,
-                                    "provenance": "local_ast_analysis",
-                                    "confidence_score": 0.8,
-                                })
-                                edges.append({
-                                    "edge_id": f"e{len(edges)}",
-                                    "source_node_id": node_id,
-                                    "target_node_id": call_id,
-                                    "relation": "calls",
-                                    "provenance": "local_ast_call_graph",
-                                    "confidence_score": 0.8,
-                                })
-                                node_counter += 1
-
-                elif isinstance(node, ast.ClassDef):
-                    node_id = f"n{node_counter}"
-                    nodes.append({
-                        "node_id": node_id,
-                        "type": "class",
-                        "name": node.name,
-                        "file_path": file_path,
-                        "line_span": [node.lineno, node.end_lineno or node.lineno],
-                        "source_hash": source_hash,
-                        "provenance": "local_ast_analysis",
-                        "confidence_score": 1.0,
-                    })
-                    node_counter += 1
-
-                elif isinstance(node, ast.Import) or isinstance(node, ast.ImportFrom):
-                    if node_counter < RuntimeASTExtractor.MAX_NODES:
-                        module_name = RuntimeASTExtractor._get_import_name(node)
-                        if module_name:
-                            node_id = f"n{node_counter}"
-                            nodes.append({
-                                "node_id": node_id,
-                                "type": "import",
-                                "name": module_name,
-                                "file_path": file_path,
-                                "line_span": [node.lineno, node.lineno],
-                                "source_hash": source_hash,
-                                "provenance": "local_ast_analysis",
-                                "confidence_score": 1.0,
-                            })
-                            node_counter += 1
-
-        except (SyntaxError, ValueError, TypeError) as exc:
-            risks.append(f"ast_parse_error:{type(exc).__name__}")
-
-        return nodes, edges, risks
-
-    @staticmethod
-    def _get_call_name(node: ast.Call) -> str | None:
-        """Extract call name from AST Call node."""
-        if isinstance(node.func, ast.Name):
-            return node.func.id
-        elif isinstance(node.func, ast.Attribute):
-            parts = []
-            current = node.func
-            while isinstance(current, ast.Attribute):
-                parts.append(current.attr)
-                current = current.value
-            if isinstance(current, ast.Name):
-                parts.append(current.id)
-            return ".".join(reversed(parts))
-        return None
-
-    @staticmethod
-    def _get_import_name(node: ast.AST) -> str | None:
-        """Extract import name from AST Import/ImportFrom node."""
-        if isinstance(node, ast.Import):
-            return ", ".join(alias.name for alias in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            names = ", ".join(alias.name for alias in node.names)
-            return f"{module}.{names}" if module else names
-        return None
 
 
 class EvidenceGraphBuilder:
