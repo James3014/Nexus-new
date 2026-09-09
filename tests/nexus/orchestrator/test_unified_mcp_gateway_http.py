@@ -80,7 +80,9 @@ def test_health_exposes_one_gateway_identity():
         assert payload["permission_policy_hash"]
         assert "pending_actions" in payload
     finally:
-        server.shutdown(); server.server_close(); thread.join(timeout=3)
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
 
 
 def test_mcp_requires_bearer_and_forwards_jsonrpc():
@@ -96,7 +98,9 @@ def test_mcp_requires_bearer_and_forwards_jsonrpc():
         payload = json.loads(response.read())
         assert len(payload["result"]["tools"]) == len(UnifiedMCPGateway.tool_specs())
     finally:
-        server.shutdown(); server.server_close(); thread.join(timeout=3)
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
 
 
 def test_tools_list_exposes_exact_canonical_task_schema_and_rejects_route_override():
@@ -118,7 +122,9 @@ def test_tools_list_exposes_exact_canonical_task_schema_and_rejects_route_overri
         assert payload["result"]["isError"] is True
         assert payload["result"]["structuredContent"]["error"] == "CALLER_ROUTE_OVERRIDE_FORBIDDEN:execution_lane"
     finally:
-        server.shutdown(); server.server_close(); thread.join(timeout=3)
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
 
 
 def test_non_post_mcp_is_rejected():
@@ -132,7 +138,9 @@ def test_non_post_mcp_is_rejected():
         else:
             raise AssertionError("GET /mcp must fail")
     finally:
-        server.shutdown(); server.server_close(); thread.join(timeout=3)
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
 
 
 def test_runtime_identity_function_is_deterministic():
