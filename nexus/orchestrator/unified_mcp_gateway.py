@@ -2926,7 +2926,9 @@ class UnifiedMCPGateway:
 
         try:
             return switch_task_card_authority(
-                current_key=self._standing_key(expected_current_goal_id, expected_current_thread_id),
+                current_key=self._standing_key(
+                    expected_current_goal_id, expected_current_thread_id
+                ),
                 attempt_key=attempt_key,
                 expected_current_receipt_hash=expected_current_receipt_hash,
                 expected_current_goal_id=expected_current_goal_id,
@@ -2971,11 +2973,15 @@ class UnifiedMCPGateway:
             arguments.get("expectedCurrentThreadId"), "expectedCurrentThreadId", max_length=128
         )
         if not _SHA64_RE.fullmatch(expected_temporary_receipt_hash):
-            raise GatewayInputError("expectedTemporaryReceiptHash must be a lowercase 64-hex SHA-256")
+            raise GatewayInputError(
+                "expectedTemporaryReceiptHash must be a lowercase 64-hex SHA-256"
+            )
 
         try:
             return restore_task_card_authority(
-                current_key=self._standing_key(expected_current_goal_id, expected_current_thread_id),
+                current_key=self._standing_key(
+                    expected_current_goal_id, expected_current_thread_id
+                ),
                 attempt_key=attempt_key,
                 switch_operation_id=switch_operation_id,
                 expected_temporary_receipt_hash=expected_temporary_receipt_hash,
