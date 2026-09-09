@@ -45,6 +45,7 @@ def test_runtime_context_hub_matches_donor_core_packs(tmp_path: Path, monkeypatc
     monkeypatch.setattr("nexus.core.state_io.StateIO.load_global_state", lambda _self: state)
     monkeypatch.setattr("nexus.core.context_text_store.ContextTextStore.load_program_rules", lambda _self, _name="program.md": "rules:program.md")
     monkeypatch.setattr("nexus.core.context_hub.ToonRenderer.render", staticmethod(lambda _state, aggression=0.0: "toon-summary"))
+    monkeypatch.setattr("nexus.core.context_hub.prune_dialogue", lambda _history: "pruned-history")
     hub = ContextHub(
         str(tmp_path),
         deps=ContextDependencies(memory_service=Memory(), knowledge_injector=knowledge, wiki_knowledge_agent=Wiki()),
@@ -62,13 +63,13 @@ s=importlib.util.spec_from_file_location("donor",p); m=importlib.util.module_fro
 class S:
  task_id="task-1"; metadata={"task_description":"parser repair","chat_history":["one","two"]}; steps_history=[SimpleNamespace(summary="researched",phase="X",status="completed")]; tdd_status="green"; superpowers_plan={}
  def get_conversation_metadata(self): return {"conversation_id":"conv-1","user_goal":"repair parser","current_question":"how?","needs_research":False}
-    class K:
-     def recommend_skills(self,s,h): return ["skill:parser"]
-     def inject_wisdom_prior(self,s,h): return "prior"
-    class Diagnosis:
-     summary="parser failure"; pseudo_flows=["inspect","repair"]; hotspots=["parser.py"]
-    class Research:
-     key_findings=["fixture finding"]
+class K:
+ def recommend_skills(self,s,h): return ["skill:parser"]
+ def inject_wisdom_prior(self,s,h): return "prior"
+class Diagnosis:
+ summary="parser failure"; pseudo_flows=["inspect","repair"]; hotspots=["parser.py"]
+class Research:
+ key_findings=["fixture finding"]
 state=S(); memory={"reminders":["phase"],"total_sources":1}; wiki={"context":"wiki:parser failure","selected_sources":[]}; k=K()
 d=m.ContextHub.__new__(m.ContextHub); d.state_io=SimpleNamespace(load_global_state=lambda:state); d._text_store=SimpleNamespace(load_program_rules=lambda n="program.md":"rules:program.md"); d.memory_service=SimpleNamespace(cached_search=lambda _key:memory, aggregate_memory=lambda:memory); d.nexus_fs=None; d.knowledge_injector=k; d.wiki_knowledge_agent=None; d.belief_engine=None; d.run_dir=None
 d._retrieve_wiki_context=lambda q,max_results=3:wiki; d._inject_memory_reminders=lambda phase:memory; d.load_program_rules=lambda md_path="program.md":"rules:program.md"; m.ToonRenderer=SimpleNamespace(render=lambda st,aggression=0.0:"toon-summary"); m.prune_dialogue=lambda h:"pruned-history"
