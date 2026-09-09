@@ -4,7 +4,7 @@ task_id: `TASK-006`
 
 - **Campaign:** `CAMPAIGN-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1`
 - **Status:** `ACTIVE`
-- **Authority:** explicit current Owner request plus Ready GitHub Issue #850
+- **Authority:** explicit current Owner request plus Ready GitHub Issues #850 and #895; #895 is limited to the r21 same-operation reconciliation amendment below
 - **Auto-chain:** `false`
 - **Maximum claim:** `RESIDENT_OPEN_SWE_AUTOMATION_READY_FOR_FIVE_MOUNTED_REPOSITORIES`
 - **Task type:** `INTEGRATION_ACTIVATION`
@@ -43,6 +43,8 @@ attempt remains `OUTCOME_UNKNOWN`, `retry_safe=false`, and was not resent.
 
 ## Repository source scope
 
+- `nexus/services/external_intelligence_automation.py`
+- `tests/services/test_external_intelligence_automation.py`
 - `docs/ops/OPEN_SWE_STANDALONE_CONSUMER.md`
 - `scripts/ops/configs/external_intelligence_open_swe_activation_v1.json`
 - `scripts/ops/external_intelligence_service.py`
@@ -54,6 +56,28 @@ attempt remains `OUTCOME_UNKNOWN`, `retry_safe=false`, and was not resent.
 - `tasks/open-swe-resident-five-repo-canary-20260908/00-canary.md`
 
 No other repository source file may change. No deletion is allowed.
+
+## r21 same-operation reconciliation amendment
+
+Issue #895 extends TASK-006 only far enough to preserve the existing fanout
+operation after a recoverable unknown outcome. When every admitted unit reports
+exactly `FANOUT_RECONCILIATION_REQUIRED`, automation state must remain
+`RECONCILIATION_REQUIRED` with `prior_state=FANOUT_DISPATCHING`, the exact
+intelligence effect, canonical worker binding, workspace, attempt, and operation
+identity. A later resident poll must enter fanout reconciliation without a new
+workspace, attempt, worker dispatch, or operation ID.
+
+The already-observed r21 compatibility path may recover its legacy
+`BLOCKED/FANOUT_INCOMPLETE` automation projection only when the current
+Issue/main/Task Card identity is unchanged and every current unit has an exact
+matching `OUTCOME_UNKNOWN` or `DISPATCHING` fanout attempt whose
+`unit_identity_sha256`, workspace, and base match the reconstructed unit. The
+canonical worker binding and intelligence effect must be recomputed from the
+current authoritative Issue, Task Card, Planner/admission and source inputs;
+FanoutStore identity and the existing runtime operation identity remain
+mandatory. Missing, malformed, mixed, terminal, or identity-drifted state
+remains fail closed. This amendment does not weaken truly terminal `BLOCKED`
+reuse and does not authorize hand edits to runtime or automation state.
 
 ## Deployment-owned paths
 
@@ -89,8 +113,8 @@ These are deployment state, not Git Candidate files. Back up exact prior bytes b
 ## Verification
 
 ```text
-python -m pytest -q tests/services/test_external_intelligence_service.py tests/services/test_open_swe_external_intelligence.py tests/services/test_open_swe_worker_transport.py
-ruff check scripts/ops/external_intelligence_service.py tests/services/test_external_intelligence_service.py
+python -m pytest -q tests/services/test_external_intelligence_automation.py tests/services/test_external_intelligence_fanout.py tests/services/test_external_intelligence_service.py tests/services/test_open_swe_external_intelligence.py tests/services/test_open_swe_worker_transport.py
+ruff check nexus/services/external_intelligence_automation.py scripts/ops/external_intelligence_service.py tests/services/test_external_intelligence_automation.py tests/services/test_external_intelligence_service.py
 git diff --check
 nexus-open-swe-runtime --identity
 opencli doctor
