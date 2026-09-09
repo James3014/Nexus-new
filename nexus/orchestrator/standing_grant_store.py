@@ -1108,31 +1108,6 @@ def _switch_task_card_authority_at(
         return result
 
 
-def switch_task_card_authority(
-    *,
-    attempt_key: str,
-    expected_current_receipt_hash: str,
-    expected_current_goal_id: str,
-    successor_goal_id: str,
-    successor_thread_id: str,
-    ttl_minutes: int,
-    owner_confirmation: bool,
-    now: datetime | None = None,
-) -> dict[str, Any]:
-    """Switch canonical standing grant to a bounded temporary task-card authority scope."""
-    return _switch_task_card_authority_at(
-        DEFAULT_RECEIPT_PATH,
-        attempt_key=attempt_key,
-        expected_current_receipt_hash=expected_current_receipt_hash,
-        expected_current_goal_id=expected_current_goal_id,
-        successor_goal_id=successor_goal_id,
-        successor_thread_id=successor_thread_id,
-        ttl_minutes=ttl_minutes,
-        owner_confirmation=owner_confirmation,
-        now=now,
-    )
-
-
 def _restore_task_card_authority_at(
     target_path: Path,
     *,
@@ -1346,25 +1321,6 @@ def _restore_task_card_authority_at(
         _write_transition_file(attempt_path, attempt_record)
 
         return result
-
-
-def restore_task_card_authority(
-    *,
-    attempt_key: str,
-    switch_operation_id: str,
-    expected_temporary_receipt_hash: str,
-    owner_confirmation: bool,
-    now: datetime | None = None,
-) -> dict[str, Any]:
-    """Restore canonical standing grant from a temporary task-card authority scope to exact predecessor."""
-    return _restore_task_card_authority_at(
-        DEFAULT_RECEIPT_PATH,
-        attempt_key=attempt_key,
-        switch_operation_id=switch_operation_id,
-        expected_temporary_receipt_hash=expected_temporary_receipt_hash,
-        owner_confirmation=owner_confirmation,
-        now=now,
-    )
 
 
 # Issue #893 keyed authority extension.  These objects deliberately sit on top
@@ -1604,7 +1560,9 @@ def _transition_root() -> Path:
     return DEFAULT_RECEIPT_PATH.parent / "standing-grants"
 
 
-def _exact_keyed_receipt(key: StandingGrantKey, *, now: datetime | None = None) -> StandingGrantReceipt:
+def _exact_keyed_receipt(
+    key: StandingGrantKey, *, now: datetime | None = None
+) -> StandingGrantReceipt:
     path = _keyed_receipt_path(key)
     if not os.path.lexists(path):
         raise StandingGrantReceiptError("RECEIPT_MISSING")
@@ -1664,12 +1622,17 @@ def switch_task_card_authority(
     if effective_now.tzinfo is None:
         raise StandingGrantReceiptError("EXACT_TIMEZONE_REQUIRED")
     successor_key = StandingGrantKey(current_key.repository, successor_goal_id, successor_thread_id)
-    request = {"operation": "SWITCH", "attempt_key": attempt_key,
-               "current_key": current_key.digest, "successor_key": successor_key.digest,
-               "expected_current_receipt_hash": expected_current_receipt_hash,
-               "expected_current_goal_id": expected_current_goal_id,
-               "successor_goal_id": successor_goal_id, "successor_thread_id": successor_thread_id,
-               "ttl_minutes": ttl_minutes}
+    request = {
+        "operation": "SWITCH",
+        "attempt_key": attempt_key,
+        "current_key": current_key.digest,
+        "successor_key": successor_key.digest,
+        "expected_current_receipt_hash": expected_current_receipt_hash,
+        "expected_current_goal_id": expected_current_goal_id,
+        "successor_goal_id": successor_goal_id,
+        "successor_thread_id": successor_thread_id,
+        "ttl_minutes": ttl_minutes,
+    }
     request_hash = canonical_autonomy_hash(request)
     root = _transition_root()
     attempt_path = root.parent / "transitions" / f"keyed_attempt_{attempt_key}.json"
@@ -1686,14 +1649,20 @@ def switch_task_card_authority(
             if not isinstance(temporary_dict, dict):
                 raise StandingGrantReceiptError("TRANSITION_RECORD_INCONSISTENT")
             temporary = StandingGrantReceipt.model_validate(temporary_dict)
-            destination = _keyed_receipt_path(StandingGrantKey(current_key.repository, successor_goal_id, successor_thread_id))
+            destination = _keyed_receipt_path(
+                StandingGrantKey(current_key.repository, successor_goal_id, successor_thread_id)
+            )
             if not os.path.lexists(destination):
                 _assert_dir_chain_safe(destination.parent, create=True)
-                _write_bytes_locked(_canonical_json(temporary.model_dump(mode="json")), None, destination, None)
+                _write_bytes_locked(
+                    _canonical_json(temporary.model_dump(mode="json")), None, destination, None
+                )
             elif _load_receipt_structural_at(destination).receipt_hash != temporary.receipt_hash:
                 raise StandingGrantReceiptError("SUCCESSOR_KEY_OCCUPIED")
-            op["status"] = "ACTIVE"; _write_transition_file(op_path, op)
-            prior["status"] = "COMMITTED"; _write_transition_file(attempt_path, prior)
+            op["status"] = "ACTIVE"
+            _write_transition_file(op_path, op)
+            prior["status"] = "COMMITTED"
+            _write_transition_file(attempt_path, prior)
             return dict(prior["result"])
         predecessor = _exact_keyed_receipt(current_key, now=effective_now)
         if predecessor.receipt_hash != expected_current_receipt_hash:
@@ -1704,44 +1673,82 @@ def switch_task_card_authority(
         if os.path.lexists(destination):
             raise StandingGrantReceiptError("SUCCESSOR_KEY_OCCUPIED")
         context = StandingGrantContext.issue(
-            owner_id=predecessor.context.owner_id, coordinator_id=predecessor.context.coordinator_id,
-            repository=current_key.repository, thread_id=successor_thread_id, goal_id=successor_goal_id,
-            allowed_actions=(AutonomyActionClass.TASK_CARD_COMMIT, AutonomyActionClass.TASK_CARD_CREATE),
+            owner_id=predecessor.context.owner_id,
+            coordinator_id=predecessor.context.coordinator_id,
+            repository=current_key.repository,
+            thread_id=successor_thread_id,
+            goal_id=successor_goal_id,
+            allowed_actions=(
+                AutonomyActionClass.TASK_CARD_COMMIT,
+                AutonomyActionClass.TASK_CARD_CREATE,
+            ),
             issued_at=effective_now,
-            expires_at=min(effective_now + timedelta(minutes=ttl_minutes), predecessor.context.expires_at),
+            expires_at=min(
+                effective_now + timedelta(minutes=ttl_minutes), predecessor.context.expires_at
+            ),
         )
         temporary = StandingGrantReceipt.issue(
             grant_id=f"{predecessor.grant_id}-switch-{uuid4().hex[:8]}", context=context
         )
         operation_id = f"switch_{uuid4().hex}"
-        result = {"schema": "nexus.task_card_authority_switch.v2", "status": "SWITCHED",
-                  "switch_operation_id": operation_id, "attempt_key": attempt_key,
-                  "predecessor_key": current_key.digest, "predecessor_receipt_hash": predecessor.receipt_hash,
-                  "temporary_key": successor_key.digest, "temporary_receipt_hash": temporary.receipt_hash,
-                  "temporary_goal_id": successor_goal_id, "temporary_thread_id": successor_thread_id,
-                  "allowed_actions": [a.value for a in context.allowed_actions],
-                  "expires_at": context.expires_at.isoformat(), "owner_confirmation": True}
-        op = {"schema": "nexus.task_card_authority_switch_record.v2", "status": "PREPARED",
-              "switch_operation_id": operation_id, "attempt_key": attempt_key,
-              "predecessor_key": current_key.digest, "temporary_key": successor_key.digest,
-              "predecessor_receipt_hash": predecessor.receipt_hash, "temporary_receipt_hash": temporary.receipt_hash,
-              "predecessor_receipt": predecessor.model_dump(mode="json"),
-              "temporary_receipt": temporary.model_dump(mode="json"), "created_at": effective_now.isoformat()}
+        result = {
+            "schema": "nexus.task_card_authority_switch.v2",
+            "status": "SWITCHED",
+            "switch_operation_id": operation_id,
+            "attempt_key": attempt_key,
+            "predecessor_key": current_key.digest,
+            "predecessor_receipt_hash": predecessor.receipt_hash,
+            "temporary_key": successor_key.digest,
+            "temporary_receipt_hash": temporary.receipt_hash,
+            "temporary_goal_id": successor_goal_id,
+            "temporary_thread_id": successor_thread_id,
+            "allowed_actions": [a.value for a in context.allowed_actions],
+            "expires_at": context.expires_at.isoformat(),
+            "owner_confirmation": True,
+        }
+        op = {
+            "schema": "nexus.task_card_authority_switch_record.v2",
+            "status": "PREPARED",
+            "switch_operation_id": operation_id,
+            "attempt_key": attempt_key,
+            "predecessor_key": current_key.digest,
+            "temporary_key": successor_key.digest,
+            "predecessor_receipt_hash": predecessor.receipt_hash,
+            "temporary_receipt_hash": temporary.receipt_hash,
+            "predecessor_receipt": predecessor.model_dump(mode="json"),
+            "temporary_receipt": temporary.model_dump(mode="json"),
+            "created_at": effective_now.isoformat(),
+        }
         _write_transition_file(root.parent / "transitions" / f"keyed_op_{operation_id}.json", op)
-        attempt = {"schema": "nexus.task_card_authority_transition_attempt.v2", "status": "PREPARED",
-                   "operation_type": "SWITCH", "attempt_key": attempt_key, "request": request,
-                   "request_hash": request_hash, "switch_operation_id": operation_id, "result": result}
+        attempt = {
+            "schema": "nexus.task_card_authority_transition_attempt.v2",
+            "status": "PREPARED",
+            "operation_type": "SWITCH",
+            "attempt_key": attempt_key,
+            "request": request,
+            "request_hash": request_hash,
+            "switch_operation_id": operation_id,
+            "result": result,
+        }
         _write_transition_file(attempt_path, attempt)
         _assert_dir_chain_safe(destination.parent, create=True)
-        _write_bytes_locked(_canonical_json(temporary.model_dump(mode="json")), None, destination, None)
-        op["status"] = "ACTIVE"; _write_transition_file(root.parent / "transitions" / f"keyed_op_{operation_id}.json", op)
-        attempt["status"] = "COMMITTED"; _write_transition_file(attempt_path, attempt)
+        _write_bytes_locked(
+            _canonical_json(temporary.model_dump(mode="json")), None, destination, None
+        )
+        op["status"] = "ACTIVE"
+        _write_transition_file(root.parent / "transitions" / f"keyed_op_{operation_id}.json", op)
+        attempt["status"] = "COMMITTED"
+        _write_transition_file(attempt_path, attempt)
         return result
 
 
 def restore_task_card_authority(
-    *, current_key: StandingGrantKey, attempt_key: str, switch_operation_id: str,
-    expected_temporary_receipt_hash: str, owner_confirmation: bool,
+    *,
+    current_key: StandingGrantKey,
+    attempt_key: str,
+    switch_operation_id: str,
+    expected_temporary_receipt_hash: str,
+    owner_confirmation: bool,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Revoke the exact temporary keyed receipt while preserving its predecessor."""
@@ -1754,19 +1761,30 @@ def restore_task_card_authority(
     if not _SHA64_HEX.fullmatch(expected_temporary_receipt_hash):
         raise StandingGrantReceiptError("RECEIPT_HASH_INVALID")
     effective_now = now or datetime.now(timezone.utc)
-    root = _transition_root(); transitions = root.parent / "transitions"
+    root = _transition_root()
+    transitions = root.parent / "transitions"
     attempt_path = transitions / f"keyed_attempt_{attempt_key}.json"
     op_path = transitions / f"keyed_op_{switch_operation_id}.json"
     _assert_dir_chain_safe(root, create=True)
     with _coordination_lock(root):
         if os.path.lexists(attempt_path):
             record = _read_transition_file(attempt_path)
-            if record.get("operation_type") != "RESTORE" or record.get("switch_operation_id") != switch_operation_id:
+            if (
+                record.get("operation_type") != "RESTORE"
+                or record.get("switch_operation_id") != switch_operation_id
+            ):
                 raise StandingGrantReceiptError("ATTEMPT_KEY_CONFLICT")
-            expected_request_hash = canonical_autonomy_hash({"operation":"RESTORE","attempt_key":attempt_key,"switch_operation_id":switch_operation_id,"expected_temporary_receipt_hash":expected_temporary_receipt_hash,"current_key":current_key.digest})
+            expected_request_hash = canonical_autonomy_hash({
+                "operation": "RESTORE",
+                "attempt_key": attempt_key,
+                "switch_operation_id": switch_operation_id,
+                "expected_temporary_receipt_hash": expected_temporary_receipt_hash,
+                "current_key": current_key.digest,
+            })
             if record.get("request_hash") != expected_request_hash:
                 raise StandingGrantReceiptError("ATTEMPT_KEY_CONFLICT")
-            if record.get("status") == "COMMITTED": return dict(record["result"])
+            if record.get("status") == "COMMITTED":
+                return dict(record["result"])
             # Reconcile a crash after the temporary CAS but before sealing the
             # operation/attempt records.
             if record.get("status") == "PREPARED" and os.path.lexists(op_path):
@@ -1776,20 +1794,40 @@ def restore_task_card_authority(
                     revoked_hash = pending_revoked.get("receipt_hash")
                     temporary_key_data = pending_op.get("temporary_receipt", {}).get("context", {})
                     if isinstance(revoked_hash, str) and isinstance(temporary_key_data, dict):
-                        pending_key = StandingGrantKey(current_key.repository, str(temporary_key_data.get("goal_id")), str(temporary_key_data.get("thread_id")))
-                        if _load_receipt_structural_at(_keyed_receipt_path(pending_key)).receipt_hash == revoked_hash:
-                            pending_op["status"] = "RESTORED"; pending_op["restored_receipt_hash"] = revoked_hash
+                        pending_key = StandingGrantKey(
+                            current_key.repository,
+                            str(temporary_key_data.get("goal_id")),
+                            str(temporary_key_data.get("thread_id")),
+                        )
+                        if (
+                            _load_receipt_structural_at(
+                                _keyed_receipt_path(pending_key)
+                            ).receipt_hash
+                            == revoked_hash
+                        ):
+                            pending_op["status"] = "RESTORED"
+                            pending_op["restored_receipt_hash"] = revoked_hash
                             _write_transition_file(op_path, pending_op)
-                            record["status"] = "COMMITTED"; _write_transition_file(attempt_path, record)
+                            record["status"] = "COMMITTED"
+                            _write_transition_file(attempt_path, record)
                             return dict(record["result"])
-        if not os.path.lexists(op_path): raise StandingGrantReceiptError("SWITCH_OPERATION_NOT_FOUND")
+        if not os.path.lexists(op_path):
+            raise StandingGrantReceiptError("SWITCH_OPERATION_NOT_FOUND")
         op = _read_transition_file(op_path)
-        if op.get("predecessor_key") != current_key.digest or op.get("temporary_receipt_hash") != expected_temporary_receipt_hash:
+        if (
+            op.get("predecessor_key") != current_key.digest
+            or op.get("temporary_receipt_hash") != expected_temporary_receipt_hash
+        ):
             raise StandingGrantReceiptError("TRANSITION_RECORD_INCONSISTENT")
-        temporary_key = StandingGrantKey(current_key.repository, str(op["temporary_receipt"]["context"]["goal_id"]), str(op["temporary_receipt"]["context"]["thread_id"]))
+        temporary_key = StandingGrantKey(
+            current_key.repository,
+            str(op["temporary_receipt"]["context"]["goal_id"]),
+            str(op["temporary_receipt"]["context"]["thread_id"]),
+        )
         temporary = _load_receipt_structural_at(_keyed_receipt_path(temporary_key))
         _ensure_key_matches(temporary, temporary_key)
-        if temporary.receipt_hash != expected_temporary_receipt_hash: raise StandingGrantReceiptError("CURRENT_RECEIPT_HASH_MISMATCH")
+        if temporary.receipt_hash != expected_temporary_receipt_hash:
+            raise StandingGrantReceiptError("CURRENT_RECEIPT_HASH_MISMATCH")
         predecessor = _load_receipt_structural_at(_keyed_receipt_path(current_key))
         _ensure_key_matches(predecessor, current_key)
         revoked_context = StandingGrantContext.issue(
@@ -1804,13 +1842,54 @@ def restore_task_card_authority(
             revoked_at=effective_now,
             revocation_reason="TASK_CARD_AUTHORITY_RESTORED",
         )
-        revoked = StandingGrantReceipt.issue(grant_id=temporary.grant_id, context=revoked_context, supersedes_grant_hash=temporary.receipt_hash)
-        result = {"schema": "nexus.task_card_authority_restore.v2", "status": "RESTORED", "switch_operation_id": switch_operation_id, "attempt_key": attempt_key, "temporary_receipt_hash": expected_temporary_receipt_hash, "temporary_key": temporary_key.digest, "predecessor_key": current_key.digest, "predecessor_receipt_hash": predecessor.receipt_hash, "restored_receipt_hash": revoked.receipt_hash, "owner_confirmation": True}
-        request_hash = canonical_autonomy_hash({"operation":"RESTORE","attempt_key":attempt_key,"switch_operation_id":switch_operation_id,"expected_temporary_receipt_hash":expected_temporary_receipt_hash,"current_key":current_key.digest})
+        revoked = StandingGrantReceipt.issue(
+            grant_id=temporary.grant_id,
+            context=revoked_context,
+            supersedes_grant_hash=temporary.receipt_hash,
+        )
+        result = {
+            "schema": "nexus.task_card_authority_restore.v2",
+            "status": "RESTORED",
+            "switch_operation_id": switch_operation_id,
+            "attempt_key": attempt_key,
+            "temporary_receipt_hash": expected_temporary_receipt_hash,
+            "temporary_key": temporary_key.digest,
+            "predecessor_key": current_key.digest,
+            "predecessor_receipt_hash": predecessor.receipt_hash,
+            "restored_receipt_hash": revoked.receipt_hash,
+            "owner_confirmation": True,
+        }
+        request_hash = canonical_autonomy_hash({
+            "operation": "RESTORE",
+            "attempt_key": attempt_key,
+            "switch_operation_id": switch_operation_id,
+            "expected_temporary_receipt_hash": expected_temporary_receipt_hash,
+            "current_key": current_key.digest,
+        })
         op["revoked_receipt"] = revoked.model_dump(mode="json")
         _write_transition_file(op_path, op)
-        _write_transition_file(attempt_path, {"schema":"nexus.task_card_authority_transition_attempt.v2","status":"PREPARED","operation_type":"RESTORE","attempt_key":attempt_key,"switch_operation_id":switch_operation_id,"request_hash":request_hash,"result":result})
-        _write_bytes_locked(_canonical_json(revoked.model_dump(mode="json")), temporary.receipt_hash, _keyed_receipt_path(temporary_key), temporary.receipt_hash)
-        op["status"] = "RESTORED"; op["restored_receipt_hash"] = revoked.receipt_hash; _write_transition_file(op_path, op)
-        _write_transition_file(attempt_path, {**_read_transition_file(attempt_path), "status":"COMMITTED"})
+        _write_transition_file(
+            attempt_path,
+            {
+                "schema": "nexus.task_card_authority_transition_attempt.v2",
+                "status": "PREPARED",
+                "operation_type": "RESTORE",
+                "attempt_key": attempt_key,
+                "switch_operation_id": switch_operation_id,
+                "request_hash": request_hash,
+                "result": result,
+            },
+        )
+        _write_bytes_locked(
+            _canonical_json(revoked.model_dump(mode="json")),
+            temporary.receipt_hash,
+            _keyed_receipt_path(temporary_key),
+            temporary.receipt_hash,
+        )
+        op["status"] = "RESTORED"
+        op["restored_receipt_hash"] = revoked.receipt_hash
+        _write_transition_file(op_path, op)
+        _write_transition_file(
+            attempt_path, {**_read_transition_file(attempt_path), "status": "COMMITTED"}
+        )
         return result

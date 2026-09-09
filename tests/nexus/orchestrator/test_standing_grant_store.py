@@ -17,9 +17,9 @@ from nexus.contracts.autonomy_goal import (
 )
 from nexus.orchestrator.standing_grant_store import (
     DEFAULT_RECEIPT_PATH,
+    StandingGrantKey,
     StandingGrantReceipt,
     StandingGrantReceiptError,
-    StandingGrantKey,
     _authorize_durable_standing_grant_effect_at,
     _check_dir,
     _load_receipt_at,
@@ -27,11 +27,12 @@ from nexus.orchestrator.standing_grant_store import (
     _switch_task_card_authority_at,
     _write_standing_grant_receipt_at,
     authorize_durable_standing_grant_effect,
+    load_keyed_standing_grant_receipt,
     load_standing_grant_receipt,
     restore_task_card_authority,
     switch_task_card_authority,
-    write_standing_grant_receipt,
     write_keyed_standing_grant_receipt,
+    write_standing_grant_receipt,
 )
 
 NOW = datetime.now(timezone.utc)
@@ -40,7 +41,9 @@ NOW = datetime.now(timezone.utc)
 def test_keyed_task_card_switch_preserves_predecessor_and_restore_revokes_temp(
     monkeypatch, tmp_path
 ):
-    monkeypatch.setattr(standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json")
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
     predecessor = StandingGrantReceipt.issue(
         grant_id="keyed-predecessor",
         context=_make_context(goal_id="keyed-goal", thread_id="keyed-thread"),
@@ -48,24 +51,69 @@ def test_keyed_task_card_switch_preserves_predecessor_and_restore_revokes_temp(
     predecessor_key = StandingGrantKey(_repository(), "keyed-goal", "keyed-thread")
     write_keyed_standing_grant_receipt(predecessor)
     result = switch_task_card_authority(
-        current_key=predecessor_key, attempt_key="keyed-switch",
+        current_key=predecessor_key,
+        attempt_key="keyed-switch",
         expected_current_receipt_hash=predecessor.receipt_hash,
-        expected_current_goal_id="keyed-goal", successor_goal_id="keyed-successor",
-        successor_thread_id="keyed-successor-thread", ttl_minutes=5,
-        owner_confirmation=True, now=NOW,
+        expected_current_goal_id="keyed-goal",
+        successor_goal_id="keyed-successor",
+        successor_thread_id="keyed-successor-thread",
+        ttl_minutes=5,
+        owner_confirmation=True,
+        now=NOW,
     )
     assert result["predecessor_key"] == predecessor_key.digest
     assert load_keyed_standing_grant_receipt(predecessor_key, now=NOW) == predecessor
     restored = restore_task_card_authority(
-        current_key=predecessor_key, attempt_key="keyed-restore",
+        current_key=predecessor_key,
+        attempt_key="keyed-restore",
         switch_operation_id=result["switch_operation_id"],
         expected_temporary_receipt_hash=result["temporary_receipt_hash"],
-        owner_confirmation=True, now=NOW,
+        owner_confirmation=True,
+        now=NOW,
     )
     assert restored["predecessor_receipt_hash"] == predecessor.receipt_hash
     temporary_key = StandingGrantKey(_repository(), "keyed-successor", "keyed-successor-thread")
     with pytest.raises(StandingGrantReceiptError, match="REVOKED"):
         load_keyed_standing_grant_receipt(temporary_key, now=NOW)
+
+
+def test_keyed_switch_retry_conflict_and_occupied_successor(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    predecessor = StandingGrantReceipt.issue(
+        grant_id="keyed-retry",
+        context=_make_context(goal_id="retry-goal", thread_id="retry-thread"),
+    )
+    key = StandingGrantKey(_repository(), "retry-goal", "retry-thread")
+    write_keyed_standing_grant_receipt(predecessor)
+    kwargs = dict(
+        current_key=key,
+        attempt_key="retry-attempt",
+        expected_current_receipt_hash=predecessor.receipt_hash,
+        expected_current_goal_id="retry-goal",
+        successor_goal_id="retry-successor",
+        successor_thread_id="retry-successor-thread",
+        ttl_minutes=5,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    first = switch_task_card_authority(**kwargs)
+    assert switch_task_card_authority(**kwargs) == first
+    with pytest.raises(StandingGrantReceiptError, match="ATTEMPT_KEY_CONFLICT"):
+        switch_task_card_authority(**{**kwargs, "successor_goal_id": "other-successor"})
+    occupied = StandingGrantReceipt.issue(
+        grant_id="occupied",
+        context=_make_context(goal_id="occupied-goal", thread_id="occupied-thread"),
+    )
+    write_keyed_standing_grant_receipt(occupied)
+    with pytest.raises(StandingGrantReceiptError, match="SUCCESSOR_KEY_OCCUPIED"):
+        switch_task_card_authority(**{
+            **kwargs,
+            "attempt_key": "occupied-attempt",
+            "successor_goal_id": "occupied-goal",
+            "successor_thread_id": "occupied-thread",
+        })
 
 
 def _repository() -> RepositoryIdentity:
