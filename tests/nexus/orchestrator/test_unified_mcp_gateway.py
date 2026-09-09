@@ -4066,8 +4066,10 @@ def _project_entry_gateway(monkeypatch, observer, *, service=None, readiness=Non
         ("rev-parse", "HEAD"): "a" * 40,
         ("rev-parse", "HEAD^{tree}"): "b" * 40,
     }[tuple(args)])
-    gateway = UnifiedMCPGateway(service=service or FakeService(), github_issue_observer=observer)
-    gateway.service.find_tasks_by_repository_issue = lambda *_: []
+    selected_service = service or FakeService()
+    gateway = UnifiedMCPGateway(service=selected_service, github_issue_observer=observer)
+    if service is None:
+        gateway.service.find_tasks_by_repository_issue = lambda *_: []
     if readiness is not None:
         monkeypatch.setattr(gateway, "_gateway_execution_readiness", readiness)
     return gateway
@@ -4107,3 +4109,77 @@ def test_project_entry_rejects_lookalike_origin_hosts(monkeypatch, origin):
     result = gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})
     assert result["status"] == "BLOCKED"
     assert result["blocker"]["code"] == "PROJECT_ENTRY_REPOSITORY_MISMATCH"
+
+
+def test_project_entry_no_task_ready_without_state_fabrication(tmp_path, monkeypatch):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    gateway = _project_entry_gateway(monkeypatch, lambda *_: {"ok": True, "issue": {"number": 842, "state": "OPEN", "updatedAt": "u"}}, service=service, readiness=lambda _: {"outcome": "READY_TO_EXECUTE"})
+    before = sorted((p.name, hashlib.sha256(p.read_bytes()).hexdigest()) for p in (tmp_path / "state").glob("*") if p.is_file())
+    result = gateway._call_tool("nexus_project_entry", {"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})
+    after = sorted((p.name, hashlib.sha256(p.read_bytes()).hexdigest()) for p in (tmp_path / "state").glob("*") if p.is_file())
+    assert result["status"] == "NO_TASK" and result["readiness_scope"] == "PROJECT_ENTRY_OBSERVATION_ONLY" and result["readiness_result"]["outcome"] == "READY_TO_EXECUTE"
+    assert before == after == []
+
+
+def test_project_entry_exact_task_rehydrates_exact_attempt(monkeypatch):
+    class Service:
+        def find_tasks_by_repository_issue(self, *_): return [{"task_id": "t842", "attempt_id": "a1"}]
+        def rehydrate_task_continuation(self, task_id, attempt_id): self.called = (task_id, attempt_id); return {"projection": "exact"}
+    service = Service(); readiness_calls = []
+    gateway = _project_entry_gateway(monkeypatch, lambda *_: {"ok": True, "issue": {"number": 842, "state": "OPEN"}}, service=service, readiness=lambda args: readiness_calls.append(args) or {"outcome": "READY_TO_EXECUTE"})
+    result = gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})
+    assert service.called == ("t842", "a1") and result["continuation"] == {"projection": "exact"}
+    assert all("task_campaign_goal_identity" not in call for call in readiness_calls)
+
+
+def test_project_entry_ambiguous_task_blocks_before_continuation_or_readiness(monkeypatch):
+    class Service:
+        def find_tasks_by_repository_issue(self, *_): return [{"task_id": "a"}, {"task_id": "b"}]
+        def rehydrate_task_continuation(self, *_): raise AssertionError("rehydrate")
+    gateway = _project_entry_gateway(monkeypatch, lambda *_: {"ok": True, "issue": {"number": 842, "state": "OPEN"}}, service=Service(), readiness=lambda _: (_ for _ in ()).throw(AssertionError("readiness")))
+    assert gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})["blocker"]["code"] == "PROJECT_ENTRY_AMBIGUOUS_TASK_BINDING"
+
+
+def test_project_entry_invalid_continuation_blocks_before_readiness(monkeypatch):
+    class Service:
+        def find_tasks_by_repository_issue(self, *_): return [{"task_id": "a", "attempt_id": "x"}]
+        def rehydrate_task_continuation(self, *_): raise ValueError("tampered")
+    gateway = _project_entry_gateway(monkeypatch, lambda *_: {"ok": True, "issue": {"number": 842, "state": "OPEN"}}, service=Service(), readiness=lambda _: (_ for _ in ()).throw(AssertionError("readiness")))
+    assert gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})["blocker"]["code"] == "PROJECT_ENTRY_CONTINUATION_INVALID"
+
+
+@pytest.mark.parametrize("observer", [lambda *_: {"ok": False}, lambda *_: [], lambda *_: {"ok": True, "issue": {"number": 7, "state": "OPEN"}}])
+def test_project_entry_observer_failure_and_identity_mismatch_fail_closed(monkeypatch, observer):
+    gateway = _project_entry_gateway(monkeypatch, observer, readiness=lambda _: (_ for _ in ()).throw(AssertionError("readiness")))
+    assert gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})["status"] == "BLOCKED"
+
+
+def test_project_entry_issue_switch_has_no_cross_issue_leakage(monkeypatch):
+    observer = lambda _, issue: {"ok": True, "issue": {"number": issue, "state": "OPEN"}}
+    gateway = _project_entry_gateway(monkeypatch, observer, readiness=lambda _: {"outcome": "READY_TO_EXECUTE"})
+    a = gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 1})
+    b = gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 2})
+    assert a["project_binding_hash"] != b["project_binding_hash"] and b["issue"]["number"] == 2 and "1" not in json.dumps(b["issue"])
+
+
+def test_project_entry_claim_ceiling_never_positive_downstream(monkeypatch):
+    result = _project_entry_gateway(monkeypatch, lambda *_: {"ok": True, "issue": {"number": 842, "state": "OPEN"}}, readiness=lambda _: {"outcome": "READY_TO_EXECUTE"})._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})
+    assert set(result["claim_ceiling_excludes"]) == {"execution", "verification", "acceptance", "merge", "release", "production"}
+    assert not any(result.get(key) is True for key in ("execution", "verification", "acceptance", "merge", "release", "production"))
+
+
+def test_project_entry_binding_hash_covers_stable_identity_matrix():
+    base = {"repository": "James3014/Nexus-new", "issue_number": 842, "issue": {"state": "OPEN", "updatedAt": "u"}, "source": {"commit": "a" * 40, "tree": "b" * 40, "canonical_remote": "https://github.com/James3014/Nexus-new.git"}, "task_resolution": {"status": "NO_TASK"}, "readiness_request": {"request_hash": "r1"}, "readiness_result": {"outcome": "READY_TO_EXECUTE"}, "claim_ceiling": "c"}
+    original = UnifiedMCPGateway._project_entry_binding_hash(base)
+    for path, value in ((("issue", "updatedAt"), "v"), (("source", "commit"), "c" * 40), (("source", "tree"), "d" * 40), (("source", "canonical_remote"), "https://github.com/James3014/Other.git"), (("task_resolution", "status"), "EXACT_TASK"), (("readiness_request", "request_hash"), "r2"), (("readiness_result", "outcome"), "BLOCKED"), (("claim_ceiling",), "other")):
+        candidate = json.loads(json.dumps(base)); cursor = candidate
+        for key in path[:-1]: cursor = cursor[key]
+        cursor[path[-1]] = value
+        assert UnifiedMCPGateway._project_entry_binding_hash(candidate) != original
+
+
+@pytest.mark.parametrize("issue", [0, True])
+def test_project_entry_invalid_issue_number_is_public_input_error(issue):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    response = gateway.handle({"jsonrpc": "2.0", "id": 8422, "method": "tools/call", "params": {"name": "nexus_project_entry", "arguments": {"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": issue}}})
+    assert response["result"]["isError"] is True
