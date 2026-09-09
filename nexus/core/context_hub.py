@@ -9,6 +9,7 @@ from nexus.contracts.context_budget import ContextBudgetSource, build_context_bu
 from nexus.core.context_budget_sources import build_context_budget_sources, estimate_context_tokens
 from nexus.core.context_runtime_adapter import StatelessContextCoordinator
 from nexus.core.context_text_store import ContextTextStore
+from nexus.core.context_runtime_bridge import build_runtime_context_hub
 from nexus.core.context_view import ContextDependencies, StateView
 from nexus.core.state_contracts import NexusDiagnosis, NexusResearch, NexusState
 from nexus.core.state_io import StateIO
@@ -99,6 +100,20 @@ class ContextHub:
         else:
             from nexus.services.wiki_knowledge_agent import WikiKnowledgeAgent
             self.wiki_knowledge_agent = WikiKnowledgeAgent(self.project_root)
+
+        self.runtime_hub = build_runtime_context_hub(
+            state_reader=self.state_io.load_global_state,
+            text_reader=self._text_store.load_program_rules,
+            memory_service=self.memory_service,
+            nexus_fs=self.nexus_fs,
+            wiki_knowledge_agent=self.wiki_knowledge_agent,
+            knowledge_reader=self.knowledge_injector,
+            renderer=lambda state, aggression=0.0: ToonRenderer().render(
+                state, aggression=aggression
+            ),
+            dialogue_pruner=prune_dialogue,
+            compactor=lambda value, confidence=0.5: value,
+        )
 
     def load_program_rules(self, md_path: str = "program.md") -> str:
         """讀取 AutoResearch 規則文件。"""
