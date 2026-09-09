@@ -209,7 +209,9 @@ def _verify_host_manifest(
     path: Path, source: LoadedSourceIdentity, module_root: Path, expected_sha256: str
 ) -> None:
     """Verify the installed host payload before accepting its source identity."""
-    manifest = _regular_bytes(path, owner_only=True)
+    # Installed package manifests are wheel payloads (normally 0644); their
+    # integrity comes from the inventory pin and stable physical hashing.
+    manifest = _regular_bytes(path)
     if hashlib.sha256(manifest).hexdigest() != expected_sha256:
         raise PreholdInventoryError("INVENTORY_HOST_MANIFEST_HASH_MISMATCH")
     data = _object(manifest)
