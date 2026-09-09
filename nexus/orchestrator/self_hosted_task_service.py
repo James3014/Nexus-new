@@ -1145,7 +1145,11 @@ class SelfHostedTaskService:
         raw_state_dir = Path(state_dir).expanduser() if state_dir is not None else canonical
         self.state_dir = raw_state_dir.resolve()
         temporary_roots = _temporary_state_roots()
-        is_temporary = any(root in self.state_dir.parents for root in temporary_roots)
+        # An explicitly configured canonical root remains production even when
+        # tests place it below the system temporary directory.
+        is_temporary = self.state_dir != canonical and any(
+            root in self.state_dir.parents for root in temporary_roots
+        )
         if self.state_dir != canonical and not ephemeral and not is_temporary:
             raise ValueError(f"production tasks must use canonical state root: {canonical}")
         self.ephemeral = ephemeral or is_temporary
@@ -2212,6 +2216,8 @@ class SelfHostedTaskService:
         self, result: Optional[Mapping[str, Any]], task_id: str
     ) -> None:
         try:
+            if not self.ephemeral:
+                NexusEventBus.ensure_configured(self.canonical_state_dir(), production=True)
             self._emit_attempt_transition(result, task_id)
         except Exception as exc:
             self._record_event_append_failure(task_id, exc)
@@ -2288,11 +2294,15 @@ class SelfHostedTaskService:
         ))
 
     @staticmethod
-    def read_canonical_attempt_events(task_id: str, attempt_id: str) -> list[dict[str, Any]]:
+    def read_canonical_attempt_events(
+        task_id: str, attempt_id: str, *, project_root: Optional[Path] = None
+    ) -> list[dict[str, Any]]:
         """Read attempt events from the canonical EventBus log, without mutation."""
         # Read the validated canonical store directly.  The EventBus observer
         # facade intentionally serves best-effort dashboards and swallows
         # integrity failures; continuity recovery must preserve those errors.
+        if project_root is not None:
+            NexusEventBus.configure(project_root, create=False, production=True)
         if NexusEventBus._log_store.event_log_path != NexusEventBus._event_log_path:
             NexusEventBus._log_store.event_log_path = NexusEventBus._event_log_path
         records = NexusEventBus._log_store.read_recent(event_type="attempt_transition", limit=10_000)
@@ -2349,7 +2359,16 @@ class SelfHostedTaskService:
         target_attempt_id = attempt_id or state.get("attempt_id")
         if not target_attempt_id:
             raise ValueError("REHYDRATION_ATTEMPT_ID_REQUIRED")
-        events = self.read_canonical_attempt_continuity(task_id, str(target_attempt_id))
+        if not self.ephemeral:
+            events = events_from_attempt_records(
+                self.read_canonical_attempt_events(
+                    task_id, str(target_attempt_id), project_root=self.canonical_state_dir()
+                ),
+                task_id=task_id,
+                attempt_id=str(target_attempt_id),
+            )
+        else:
+            events = self.read_canonical_attempt_continuity(task_id, str(target_attempt_id))
         snapshot = project(events)
         task_action = self._task_action_envelope(state)
         projection = build_rehydration_projection(

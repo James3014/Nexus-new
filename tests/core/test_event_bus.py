@@ -28,12 +28,55 @@ def cleanup_bus():
     NexusEventBus._observer_error_count = 0
     NexusEventBus._last_observer_error = None
     NexusEventBus._event_log_path = None
+    NexusEventBus._production_event_root = None
+    NexusEventBus._configured_event_root = None
+    NexusEventBus._event_bind_mode = None
     NexusEventBus._log_store = JsonlEventLogStore()
     NexusEventBus._attempt_sequences = {}
     yield
     NexusEventBus._event_log_path = None
+    NexusEventBus._production_event_root = None
+    NexusEventBus._configured_event_root = None
+    NexusEventBus._event_bind_mode = None
     NexusEventBus._log_store = JsonlEventLogStore()
     NexusEventBus._attempt_sequences = {}
+
+
+def test_read_bind_does_not_create_event_store(tmp_path):
+    root = tmp_path / "missing"
+    NexusEventBus.configure(root, create=False, production=True)
+    assert not (root / ".nexus" / "events").exists()
+
+
+def test_production_root_conflict_fails_closed_for_nonproduction_bind(tmp_path):
+    first, second = tmp_path / "first", tmp_path / "second"
+    NexusEventBus.configure(first, production=True)
+    NexusEventBus.publish("test_event", {"value": 1})
+    with pytest.raises(RuntimeError, match="conflicting production event root"):
+        NexusEventBus.configure(second)
+    NexusEventBus.publish("test_event", {"value": 2})
+    assert (first / ".nexus" / "events" / "event_log.jsonl").read_text().count("test_event") == 2
+    assert not (second / ".nexus" / "events" / "event_log.jsonl").exists()
+
+
+def test_read_bind_upgrades_to_write_once_for_first_mutation(tmp_path, monkeypatch):
+    root = tmp_path / "canonical"
+    event_dir = root / ".nexus" / "events"
+    event_dir.mkdir(parents=True)
+    (event_dir / "event_log.jsonl").write_text("")
+    NexusEventBus.configure(root, create=False, production=True)
+    assert NexusEventBus._event_bind_mode == "read"
+    original = NexusEventBus._log_store.configure
+    calls = []
+    monkeypatch.setattr(
+        NexusEventBus._log_store,
+        "configure",
+        lambda *args, **kwargs: (calls.append(kwargs.get("create")), original(*args, **kwargs))[1],
+    )
+    NexusEventBus.ensure_configured(root, production=True)
+    NexusEventBus.ensure_configured(root, production=True)
+    assert calls == [True]
+    assert NexusEventBus._event_bind_mode == "write"
 
 def test_event_bus_publish_subscribe():
     """驗證基本的發布與訂閱流程。"""
