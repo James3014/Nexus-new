@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Callable
 
 from nexus_runtime import ContextHub as RuntimeContextHub
 from nexus_runtime import ContextHubDependencies as RuntimeContextHubDependencies
+from nexus.core.context_compactor import ContextCompactor
 
 
 def build_runtime_context_hub(
     *,
+    project_root: str | Path = ".",
     state_reader: Callable[[], Any],
     text_reader: Callable[..., str],
     memory_service: Any = None,
@@ -46,9 +49,18 @@ def build_runtime_context_hub(
         wiki_reader=wiki_reader,
         renderer=renderer or (lambda _state, aggression=0.0: ""),
         dialogue_pruner=dialogue_pruner or (lambda history: history),
-        compactor=compactor or (lambda value, confidence=0.5: dict(value)),
+        compactor=compactor or _build_compactor(project_root, state_reader),
         knowledge_reader=knowledge_reader,
         learning_writer=learning_writer,
         clock=clock,
     )
     return RuntimeContextHub(deps=deps, strict_deps=True)
+
+
+def _build_compactor(project_root: str | Path, state_reader: Callable[[], Any]) -> Callable[..., dict[str, Any]]:
+    def compact(value: dict[str, Any], confidence: float = 0.5) -> dict[str, Any]:
+        del value
+        state = state_reader()
+        return ContextCompactor(Path(project_root)).compact(vars(state), confidence=confidence)
+
+    return compact

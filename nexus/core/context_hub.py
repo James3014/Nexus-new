@@ -102,6 +102,7 @@ class ContextHub:
             self.wiki_knowledge_agent = WikiKnowledgeAgent(self.project_root)
 
         self.runtime_hub = build_runtime_context_hub(
+            project_root=self.project_root,
             state_reader=self.state_io.load_global_state,
             text_reader=self._text_store.load_program_rules,
             memory_service=self.memory_service,
@@ -653,6 +654,3 @@ class ContextHub:
 
     def assemble_context(self, task_id: str, layers: List[int], budget: int = 4000, bayesian_params: Optional[Dict[str, Any]] = None) -> str:
         return self.runtime_hub.assemble_context(task_id, layers, budget, bayesian_params)
-
-    def record_crystal_lesson(self, failure_signature: str, root_cause: str, lesson: str, metadata: Optional[Dict] = None):
-        return self.runtime_hub.record_crystal_lesson(failure_signature, root_cause, lesson, metadata)
