@@ -3314,6 +3314,15 @@ class SelfHostedTaskService:
         task_id: str,
         attempt_id: str,
     ) -> dict[str, Any]:
+        from nexus.orchestrator.runtime_coordination_bridge import RuntimeCoordinationBridge
+        return RuntimeCoordinationBridge(self).execute(
+            task_id,
+            attempt_id,
+            contract=contract,
+            request=request,
+            update=update,
+        )
+
         state = self._read_state(task_id) or {}
         deadline = _task_deadline(contract, state.get("submitted_at"))
         if deadline is not None and time.time() >= deadline:
@@ -3930,6 +3939,15 @@ class SelfHostedTaskService:
         return False
 
     def _launch_worker(self, task_id: str, attempt_id: str) -> Optional[dict[str, Any]]:
+        from nexus.orchestrator.runtime_coordination_bridge import RuntimeCoordinationBridge
+        return RuntimeCoordinationBridge(self).launch(
+            task_id,
+            attempt_id,
+            custom_runner=self._custom_runner,
+            state_dir=str(self.state_dir),
+            source_root=str(Path(__file__).resolve().parents[2]),
+        )
+
         state = self._read_state(task_id)
         if state is None or state.get("attempt_id") != attempt_id:
             return state
