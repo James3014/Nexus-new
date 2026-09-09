@@ -23,6 +23,7 @@ from nexus.contracts.execution_readiness import (
     ExecutionReadinessStatus,
     RequiredCompletionContract,
 )
+from nexus.orchestrator import standing_grant_store
 from nexus.orchestrator.execution_readiness import (
     CompletionAuthorityObservation,
     GatewayReadinessObservation,
@@ -32,7 +33,6 @@ from nexus.orchestrator.execution_readiness import (
     evaluate_execution_readiness,
     evaluate_source_binding,
 )
-from nexus.orchestrator import standing_grant_store
 from nexus.orchestrator.standing_grant_store import StandingGrantReceipt
 
 
