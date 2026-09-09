@@ -394,18 +394,26 @@ def validate_context_assembly_contract(payload: Mapping[str, Any]) -> list[str]:
             if not isinstance(value, str) or not value.strip():
                 blockers.append(f"incomplete_worker_binding:{key}")
 
+    package_hash_required = bool(planner_context_present or consumer_bound or worker_binding)
+    projection_hash_required = bool(serialization_present or consumer_bound or worker_binding)
+
     observed_package_hash = payload.get("package_hash")
-    if observed_package_hash is not None:
-        if not isinstance(observed_package_hash, str) or not observed_package_hash.strip():
-            blockers.append("invalid_context_package_hash")
-        elif observed_package_hash != _semantic_package_hash(payload):
-            blockers.append("context_package_hash_mismatch")
+    if observed_package_hash is None:
+        if package_hash_required:
+            blockers.append("missing_context_package_hash")
+    elif not isinstance(observed_package_hash, str) or not observed_package_hash.strip():
+        blockers.append("invalid_context_package_hash")
+    elif observed_package_hash != _semantic_package_hash(payload):
+        blockers.append("context_package_hash_mismatch")
+
     observed_projection_hash = payload.get("consumer_projection_hash")
-    if observed_projection_hash is not None:
-        if not isinstance(observed_projection_hash, str) or not observed_projection_hash.strip():
-            blockers.append("invalid_consumer_projection_hash")
-        elif observed_projection_hash != _consumer_projection_hash(payload):
-            blockers.append("consumer_projection_hash_mismatch")
+    if observed_projection_hash is None:
+        if projection_hash_required:
+            blockers.append("missing_consumer_projection_hash")
+    elif not isinstance(observed_projection_hash, str) or not observed_projection_hash.strip():
+        blockers.append("invalid_consumer_projection_hash")
+    elif observed_projection_hash != _consumer_projection_hash(payload):
+        blockers.append("consumer_projection_hash_mismatch")
 
     for source in _receipt_sources(receipt):
         tier = str(source.get("metadata", {}).get("skill_tier") or "").strip().lower()
