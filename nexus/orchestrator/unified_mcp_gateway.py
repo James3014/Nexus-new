@@ -22,6 +22,7 @@ import sys
 import tempfile
 import threading
 import time
+from urllib.parse import urlsplit
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
@@ -577,6 +578,21 @@ def observe_github_issue(repository: str, issue_number: int) -> dict[str, Any]:
         "issue": dict(payload),
         "observed_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+def _canonical_remote_matches(origin: str, repository: str) -> bool:
+    value = str(origin).strip()
+    if value.startswith("git@"):
+        host_path = value[4:]
+        host, sep, path = host_path.partition(":")
+        return sep == ":" and host.lower() == "github.com" and path.removesuffix(".git") == repository
+    parsed = urlsplit(value)
+    return (
+        parsed.scheme.lower() == "https" and parsed.hostname
+        and parsed.hostname.lower() == "github.com" and not parsed.username
+        and not parsed.password and not parsed.query and not parsed.fragment
+        and parsed.path.removesuffix("/").removesuffix(".git").lstrip("/") == repository
+    )
 
 
 def _bounded_text(value: str, field: str) -> str:
@@ -4507,12 +4523,7 @@ class UnifiedMCPGateway:
             return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_SOURCE_OBSERVER_FAILED", str(exc))
         if not _SHA_RE.fullmatch(head) or not _SHA_RE.fullmatch(tree):
             return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_SOURCE_OBSERVER_FAILED", "invalid source identity")
-        normalized_origin = origin.removesuffix(".git").rstrip("/")
-        if normalized_origin.startswith("git@github.com:"):
-            normalized_origin = "github.com/" + normalized_origin.split(":", 1)[1]
-        else:
-            normalized_origin = normalized_origin.split("://")[-1]
-        if normalized_origin.lower().endswith("github.com/" + repository.lower()) is False:
+        if not _canonical_remote_matches(origin, repository):
             return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_REPOSITORY_MISMATCH", "origin identity mismatch")
         canonical_remote = GITHUB_REPOSITORY.canonical_remote
         observation = self._github_issue_observer(repository, raw_issue)

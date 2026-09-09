@@ -4091,3 +4091,19 @@ def test_project_entry_public_call_rejects_closed_or_missing_issue_state(monkeyp
     result = gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})
     assert result["status"] == "BLOCKED"
     assert result["blocker"]["code"] in {"PROJECT_ENTRY_ISSUE_NOT_OPEN", "PROJECT_ENTRY_GITHUB_OBSERVER_FAILED"}
+
+
+@pytest.mark.parametrize("origin", [
+    "https://evilgithub.com/James3014/Nexus-new.git",
+    "https://github.com.evil/James3014/Nexus-new.git",
+])
+def test_project_entry_rejects_lookalike_origin_hosts(monkeypatch, origin):
+    import nexus.orchestrator.unified_mcp_gateway as module
+    monkeypatch.setattr(module, "_git", lambda *args, **kwargs: {
+        ("config", "--get", "remote.origin.url"): origin,
+        ("rev-parse", "HEAD"): "a" * 40, ("rev-parse", "HEAD^{tree}"): "b" * 40,
+    }[tuple(args)])
+    gateway = UnifiedMCPGateway(service=FakeService(), github_issue_observer=lambda *_: {"ok": True})
+    result = gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})
+    assert result["status"] == "BLOCKED"
+    assert result["blocker"]["code"] == "PROJECT_ENTRY_REPOSITORY_MISMATCH"
