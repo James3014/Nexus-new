@@ -54,6 +54,7 @@ from nexus.orchestrator.owner_representation import (
 from nexus.orchestrator.owner_representation_store import (
     OwnerRepresentationGrantBlocked,
     OwnerRepresentationGrantStore,
+    authorize_owner_representation_grant_issuance,
     consume_exact_owner_authorization,
     exact_owner_publication_authorization_exists,
     mint_owner_representation_publication_issuance_permit,
@@ -61,8 +62,10 @@ from nexus.orchestrator.owner_representation_store import (
 )
 from nexus.orchestrator.standing_grant_store import (
     StandingGrantReceipt,
+    StandingGrantKey,
     _load_receipt_at,
     _write_standing_grant_receipt_at,
+    authorize_durable_standing_grant_effect,
 )
 from nexus.security.owner_representation_transport_inventory import (
     PublicationRouteState,
@@ -617,6 +620,14 @@ def test_happy_path_publishes_exactly_once_and_completes(
     result = publisher.publish(prepared)
     assert result["state"] == "COMPLETED"
     assert len(remote.writes) == 1
+
+
+def test_production_owner_issuance_requires_exact_key(tmp_path):
+    grant = _grant()
+    with pytest.raises(OwnerRepresentationGrantBlocked):
+        owner_store_module.authorize_owner_representation_grant_issuance(
+            grant, requested_at=NOW, standing_grant_path=None, standing_grant_key=None
+        )
 
 
 def test_completed_one_shot_cannot_be_replayed(
