@@ -19,6 +19,7 @@ from nexus.orchestrator.standing_grant_store import (
     DEFAULT_RECEIPT_PATH,
     StandingGrantReceipt,
     StandingGrantReceiptError,
+    StandingGrantKey,
     _authorize_durable_standing_grant_effect_at,
     _check_dir,
     _load_receipt_at,
@@ -30,9 +31,41 @@ from nexus.orchestrator.standing_grant_store import (
     restore_task_card_authority,
     switch_task_card_authority,
     write_standing_grant_receipt,
+    write_keyed_standing_grant_receipt,
 )
 
 NOW = datetime.now(timezone.utc)
+
+
+def test_keyed_task_card_switch_preserves_predecessor_and_restore_revokes_temp(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json")
+    predecessor = StandingGrantReceipt.issue(
+        grant_id="keyed-predecessor",
+        context=_make_context(goal_id="keyed-goal", thread_id="keyed-thread"),
+    )
+    predecessor_key = StandingGrantKey(_repository(), "keyed-goal", "keyed-thread")
+    write_keyed_standing_grant_receipt(predecessor)
+    result = switch_task_card_authority(
+        current_key=predecessor_key, attempt_key="keyed-switch",
+        expected_current_receipt_hash=predecessor.receipt_hash,
+        expected_current_goal_id="keyed-goal", successor_goal_id="keyed-successor",
+        successor_thread_id="keyed-successor-thread", ttl_minutes=5,
+        owner_confirmation=True, now=NOW,
+    )
+    assert result["predecessor_key"] == predecessor_key.digest
+    assert load_keyed_standing_grant_receipt(predecessor_key, now=NOW) == predecessor
+    restored = restore_task_card_authority(
+        current_key=predecessor_key, attempt_key="keyed-restore",
+        switch_operation_id=result["switch_operation_id"],
+        expected_temporary_receipt_hash=result["temporary_receipt_hash"],
+        owner_confirmation=True, now=NOW,
+    )
+    assert restored["predecessor_receipt_hash"] == predecessor.receipt_hash
+    temporary_key = StandingGrantKey(_repository(), "keyed-successor", "keyed-successor-thread")
+    with pytest.raises(StandingGrantReceiptError, match="REVOKED"):
+        load_keyed_standing_grant_receipt(temporary_key, now=NOW)
 
 
 def _repository() -> RepositoryIdentity:

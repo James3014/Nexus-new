@@ -220,6 +220,16 @@ is read back. The grant does not authorize local runtime/lifecycle actions,
 direct protected-main push, force-push, ref deletion, successor work outside
 the active Goal, release, or production/public claims.
 
+Task-card authority handoff is a keyed, non-destructive transition. A switch
+loads the exact predecessor key, leaves its bytes and path unchanged, and
+creates a temporary receipt at the deterministic successor key. The sealed
+transition record binds both key digests and receipt hashes; the temporary
+receipt does not supersede or revoke its predecessor. Restore is an exact
+CAS transition that terminalizes only the temporary key and proves the
+predecessor remains loadable and unchanged. Transition attempts are
+idempotent and conflicting, occupied, corrupt, or unsafe paths fail closed;
+receipt and transition references are never deleted.
+
 Only the primary coordinator under the current grant may create and commit a
 missing card once, then read back its hash. A delegated worker, reviewer, or
 launcher must not create, widen, or recursively bootstrap the card that would
