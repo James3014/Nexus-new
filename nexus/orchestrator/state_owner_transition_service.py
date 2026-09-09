@@ -322,15 +322,20 @@ class StateOwnerTransitionService:
         self._service = service
         self._authority_handle = None
         self._collector_port = None
+        self._use_keyed_grant = use_keyed_grant
 
     def bind_collector_port(self, port: Any) -> None:
         """Bind the loaded gateway collector to direct A calls."""
-        if not callable(port):
-            raise TypeError("typed collector port is required")
+        if not callable(port) or getattr(port, "__self__", None) is None:
+            raise TypeError("source-owned collector port is required")
+        gateway = port.__self__
+        if self._service is None or getattr(gateway, "service", None) is not self._service:
+            raise TransitionServiceError("COLLECTOR_PORT_SERVICE_MISMATCH")
+        if getattr(gateway, "_writer_quiescence_registry", None) is None:
+            raise TransitionServiceError("COLLECTOR_PORT_REGISTRY_REQUIRED")
         if self._collector_port is not None and self._collector_port is not port:
             raise TransitionServiceError("COLLECTOR_PORT_ALREADY_BOUND")
         self._collector_port = port
-        self._use_keyed_grant = use_keyed_grant
 
     def loaded_root_transition(self, request: WriterTransitionRequest) -> LoadedRootTransition:
         """Bind one exact loaded A request for a multi-root coordinator.
