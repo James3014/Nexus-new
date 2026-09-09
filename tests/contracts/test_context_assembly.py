@@ -31,6 +31,18 @@ def _source_ref():
     }
 
 
+def _planner_kwargs():
+    return {
+        "planner_decision_id": "planner-decision-472",
+        "planner_plan_hash": "c" * 64,
+        "selected_capability_ids": ("prompt_compression", "repository_intelligence"),
+        "materialized_evidence_ids": ("evidence:ri",),
+        "evidence_bundle_ids": ("bundle:context",),
+        "source_mode": "DIRECT_SLICE",
+        "source_provenance_refs": (_source_ref(),),
+    }
+
+
 def test_context_assembly_contract_preserves_required_context_under_budget() -> None:
     payload = build_context_assembly_contract(
         task_id="ctx-001",
@@ -45,10 +57,12 @@ def test_context_assembly_contract_preserves_required_context_under_budget() -> 
     assert payload["dropped_source_count"] == 1
     assert payload["planner_binding_status"] == "NOT_APPLICABLE"
     assert payload["source_mode"] == "NO_SOURCE"
-    assert payload["serialization_state"] == "NOT_BOUND"
+    assert payload["serialization_state"] == "NOT_SERIALIZED"
+    assert payload["consumer_projection_state"] == "NOT_BOUND"
     assert payload["physical_consumption_state"] == "NOT_PROVEN"
     assert payload["outcome_contribution_state"] == "NOT_PROVEN"
     assert len(payload["package_hash"]) == 64
+    assert len(payload["consumer_projection_hash"]) == 64
     assert payload["blockers"] == []
 
 
@@ -98,17 +112,16 @@ def test_context_assembly_blocks_quarantined_skill_sources() -> None:
     assert "quarantined_skill_context:candidate-skill-from-external/SKILL.md" in payload["blockers"]
 
 
-def test_planner_bound_context_materializes_without_claiming_consumption() -> None:
+def test_planner_bound_context_serializes_without_claiming_consumption() -> None:
     payload = build_context_assembly_contract(
         task_id="ctx-472-g1",
         attempt_id="attempt-1",
         sources=_sources(),
         token_budget=500,
-        planner_decision_id="planner-decision-472",
-        planner_plan_hash="c" * 64,
-        selected_capability_ids=("prompt_compression", "repository_intelligence"),
-        source_mode="DIRECT_SLICE",
-        source_provenance_refs=(_source_ref(),),
+        **_planner_kwargs(),
+        serialized_capability_ids=("prompt_compression",),
+        serialized_evidence_ids=("evidence:ri",),
+        serialized_bundle_ids=("bundle:context",),
         consumer_role="main_engineer",
         consumer_channel="online",
         worker_binding={
@@ -122,8 +135,9 @@ def test_planner_bound_context_materializes_without_claiming_consumption() -> No
     assert payload["planner_binding_status"] == "BOUND"
     assert payload["selection_state"] == "SELECTED"
     assert payload["materialization_state"] == "MATERIALIZED"
-    assert payload["selected_capability_ids"] == ["prompt_compression", "repository_intelligence"]
-    assert payload["serialization_state"] == "NOT_BOUND"
+    assert payload["serialization_state"] == "SERIALIZED"
+    assert payload["consumer_projection_state"] == "BOUND"
+    assert payload["serialized_capability_ids"] == ["prompt_compression"]
     assert payload["physical_consumption_state"] == "NOT_PROVEN"
     assert payload["outcome_contribution_state"] == "NOT_PROVEN"
     assert payload["blockers"] == []
@@ -167,28 +181,107 @@ def test_source_materialization_requires_bound_provenance() -> None:
     assert "source_refs_with_no_source_mode" in no_source_with_ref["blockers"]
 
 
-def test_context_package_hash_is_deterministic_and_detects_drift() -> None:
-    kwargs = {
+def test_semantic_package_hash_is_consumer_neutral() -> None:
+    shared = {
         "task_id": "ctx-472-g1",
         "attempt_id": "attempt-1",
         "sources": _sources(),
         "token_budget": 500,
-        "planner_decision_id": "planner-decision-472",
-        "planner_plan_hash": "c" * 64,
-        "selected_capability_ids": ("repository_intelligence", "prompt_compression"),
-        "source_mode": "DIRECT_SLICE",
-        "source_provenance_refs": (_source_ref(),),
-        "consumer_role": "main_engineer",
-        "consumer_channel": "online",
+        **_planner_kwargs(),
+        "serialized_capability_ids": ("prompt_compression",),
+        "serialized_evidence_ids": ("evidence:ri",),
+        "serialized_bundle_ids": ("bundle:context",),
     }
-    first = build_context_assembly_contract(**kwargs)
-    second = build_context_assembly_contract(**kwargs)
+    online = build_context_assembly_contract(
+        **shared,
+        consumer_role="main_engineer",
+        consumer_channel="online",
+        worker_binding={
+            "worker_id": "codex_luna",
+            "provider": "codex",
+            "model": "gpt-5.6-luna",
+        },
+    )
+    worker = build_context_assembly_contract(
+        **shared,
+        consumer_role="task_engineer",
+        consumer_channel="worker_registry",
+        worker_binding={
+            "worker_id": "agy_flash_37_medium",
+            "provider": "agy",
+            "model": "gemini-3.7-flash-medium",
+        },
+    )
 
-    assert first["package_hash"] == second["package_hash"]
+    assert online["package_hash"] == worker["package_hash"]
+    assert online["consumer_projection_hash"] != worker["consumer_projection_hash"]
 
-    tampered = dict(first)
-    tampered["consumer_channel"] = "worker_registry"
-    assert "context_package_hash_mismatch" in validate_context_assembly_contract(tampered)
+
+def test_package_and_projection_hashes_detect_their_own_drift() -> None:
+    payload = build_context_assembly_contract(
+        task_id="ctx-472-g1",
+        sources=_sources(),
+        token_budget=500,
+        **_planner_kwargs(),
+        serialized_capability_ids=("prompt_compression",),
+        consumer_role="main_engineer",
+        consumer_channel="online",
+    )
+
+    semantic_tamper = dict(payload)
+    semantic_tamper["planner_plan_hash"] = "d" * 64
+    assert "context_package_hash_mismatch" in validate_context_assembly_contract(semantic_tamper)
+
+    projection_tamper = dict(payload)
+    projection_tamper["consumer_channel"] = "worker_registry"
+    projection_blockers = validate_context_assembly_contract(projection_tamper)
+    assert "consumer_projection_hash_mismatch" in projection_blockers
+    assert "context_package_hash_mismatch" not in projection_blockers
+
+
+def test_serialized_capability_cannot_exceed_planner_selection() -> None:
+    payload = build_context_assembly_contract(
+        task_id="ctx-472-g1",
+        sources=_sources(),
+        token_budget=500,
+        **_planner_kwargs(),
+        serialized_capability_ids=("unselected_capability",),
+        consumer_role="main_engineer",
+        consumer_channel="online",
+    )
+
+    assert payload["status"] == "RETURN"
+    assert "serialized_capability_not_selected:unselected_capability" in payload["blockers"]
+
+
+def test_serialized_evidence_and_bundle_must_be_materialized() -> None:
+    payload = build_context_assembly_contract(
+        task_id="ctx-472-g1",
+        sources=_sources(),
+        token_budget=500,
+        **_planner_kwargs(),
+        serialized_evidence_ids=("evidence:invented",),
+        serialized_bundle_ids=("bundle:invented",),
+        consumer_role="main_engineer",
+        consumer_channel="online",
+    )
+
+    assert payload["status"] == "RETURN"
+    assert "serialized_evidence_not_materialized:evidence:invented" in payload["blockers"]
+    assert "serialized_bundle_not_materialized:bundle:invented" in payload["blockers"]
+
+
+def test_serialized_context_requires_complete_consumer_binding() -> None:
+    payload = build_context_assembly_contract(
+        task_id="ctx-472-g1",
+        sources=_sources(),
+        token_budget=500,
+        **_planner_kwargs(),
+        serialized_capability_ids=("prompt_compression",),
+    )
+
+    assert payload["status"] == "RETURN"
+    assert "serialized_context_missing_consumer_binding" in payload["blockers"]
 
 
 def test_selected_capability_ids_fail_closed_when_malformed() -> None:
@@ -234,6 +327,8 @@ def test_worker_binding_does_not_stringify_missing_identity() -> None:
         task_id="ctx-472-g1",
         sources=_sources(),
         token_budget=500,
+        consumer_role="main_engineer",
+        consumer_channel="online",
         worker_binding={
             "worker_id": "worker-1",
             "provider": None,
