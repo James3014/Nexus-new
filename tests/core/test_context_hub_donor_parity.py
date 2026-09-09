@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,24 +25,26 @@ class Knowledge:
     def inject_wisdom_prior(self, summary, hotspots): return "prior"
 
 
-def test_runtime_context_hub_matches_donor_core_packs(tmp_path: Path):
+def test_runtime_context_hub_matches_donor_core_packs(tmp_path: Path, monkeypatch):
     state = State()
     memory = {"reminders": ["phase"], "total_sources": 1}
     wiki = {"context": "wiki:parser failure", "selected_sources": []}
     knowledge = Knowledge()
-    hub = ContextHub(str(tmp_path), deps=ContextDependencies(), strict_deps=True)
-    deps = replace(
-        hub.runtime_hub.deps,
-        state_reader=lambda: state,
-        text_reader=lambda _name="program.md": "rules:program.md",
-        memory_reader=lambda _phase: memory,
-        wiki_reader=lambda _query, max_results=3: wiki,
-        knowledge_reader=knowledge,
-        renderer=lambda _state, aggression=0.0: "toon-summary",
-        dialogue_pruner=lambda _history: "pruned-history",
-        clock=lambda: "fixed",
+    class Memory:
+        def cached_search(self, _key): return memory
+    class Wiki:
+        def retrieve(self, _query, max_results=3): return wiki
+    monkeypatch.setattr("nexus.core.state_io.StateIO.load_global_state", lambda _self: state)
+    monkeypatch.setattr("nexus.core.context_text_store.ContextTextStore.load_program_rules", lambda _self, _name="program.md": "rules:program.md")
+    monkeypatch.setattr("nexus.core.context_hub.ToonRenderer.render", staticmethod(lambda _state, aggression=0.0: "toon-summary"))
+    hub = ContextHub(
+        str(tmp_path),
+        deps=ContextDependencies(memory_service=Memory(), knowledge_injector=knowledge, wiki_knowledge_agent=Wiki()),
+        strict_deps=True,
     )
-    hub.runtime_hub.deps = deps
+    hub.runtime_hub.deps = hub.runtime_hub.deps.__class__(
+        **{**hub.runtime_hub.deps.__dict__, "clock": lambda: "fixed"}
+    )
     donor_script = r'''
 import importlib.util, json
 from pathlib import Path
