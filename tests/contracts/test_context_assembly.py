@@ -4,6 +4,7 @@ import pytest
 
 from nexus.contracts.context_assembly import (
     CONTEXT_ASSEMBLY_CONTRACT_SCHEMA,
+    ContextAssemblyContract,
     build_context_assembly_contract,
     validate_context_assembly_contract,
 )
@@ -188,14 +189,15 @@ def test_context_package_hash_is_deterministic_and_detects_drift() -> None:
     assert "context_package_hash_mismatch" in validate_context_assembly_contract(tampered)
 
 
-def test_selected_capability_ids_fail_closed_when_not_a_sequence() -> None:
-    with pytest.raises(ValueError, match="invalid_selected_capability_ids"):
-        build_context_assembly_contract(
-            task_id="ctx-472-g1",
-            sources=_sources(),
-            token_budget=500,
-            selected_capability_ids="prompt_compression",
-        )
+def test_selected_capability_ids_fail_closed_when_malformed() -> None:
+    for malformed in ("prompt_compression", (None,), ("",)):
+        with pytest.raises(ValueError, match="invalid_selected_capability_ids"):
+            build_context_assembly_contract(
+                task_id="ctx-472-g1",
+                sources=_sources(),
+                token_budget=500,
+                selected_capability_ids=malformed,
+            )
 
     payload = build_context_assembly_contract(
         task_id="ctx-472-g1",
@@ -204,3 +206,37 @@ def test_selected_capability_ids_fail_closed_when_not_a_sequence() -> None:
     )
     payload["selected_capability_ids"] = "prompt_compression"
     assert "invalid_selected_capability_ids" in validate_context_assembly_contract(payload)
+
+
+def test_legacy_positional_schema_constructor_remains_compatible() -> None:
+    payload = build_context_assembly_contract(
+        task_id="ctx-legacy",
+        sources=_sources(),
+        token_budget=500,
+    )
+    legacy = ContextAssemblyContract(
+        "ctx-legacy",
+        payload["receipt"],
+        "preserve_l0_l1_hard_budget",
+        CONTEXT_ASSEMBLY_CONTRACT_SCHEMA,
+    ).to_dict()
+
+    assert legacy["schema"] == CONTEXT_ASSEMBLY_CONTRACT_SCHEMA
+    assert legacy["attempt_id"] == ""
+    assert legacy["status"] == "PASS"
+
+
+def test_worker_binding_does_not_stringify_missing_identity() -> None:
+    payload = build_context_assembly_contract(
+        task_id="ctx-472-g1",
+        sources=_sources(),
+        token_budget=500,
+        worker_binding={
+            "worker_id": "worker-1",
+            "provider": None,
+            "model": "model-1",
+        },
+    )
+
+    assert payload["status"] == "RETURN"
+    assert "incomplete_worker_binding:provider" in payload["blockers"]
