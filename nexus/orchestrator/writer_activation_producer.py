@@ -175,11 +175,28 @@ def build_loaded_writer_collector_plan(
     if registry is None or not isinstance(hold, WriterHold):
         raise InitialActivationError("INITIAL_COLLECTOR_REGISTRY_REQUIRED")
     finalized = registry.load_finalized(hold.cohort_id)
-    root = Path(gateway.service.state_dir).resolve()
+    roots = getattr(gateway.service, "writer_roots", None)
+    if roots is not None:
+        if not isinstance(roots, Mapping) or request.root_id not in roots:
+            raise InitialActivationError("INITIAL_COLLECTOR_ROOT_NOT_LOADED")
+        root = Path(roots[request.root_id]).resolve()
+    else:
+        root = Path(gateway.service.state_dir).resolve()
     identities = [
         item.identity for item in registry._writers.values() if item.identity.root == str(root)
     ]
-    if len(identities) != 1 or finalized.drain_state != DRAINED:
+    expected_roles = {item.role for item in request.selections}
+    if (
+        root.as_posix() not in hold.roots
+        or finalized.drain_state != DRAINED
+        or len(identities) != len(expected_roles)
+        or {item.role for item in identities} != expected_roles
+        or any(item.generation != identities[0].generation
+               or item.writer_id != identities[0].writer_id for item in identities)
+        or not identities
+        or request.transaction_id != hold.cohort_id
+        or request.expected_writer_id != identities[0].writer_id
+    ):
         raise InitialActivationError("INITIAL_COLLECTOR_HOLD_INVALID")
     identity = identities[0]
     return LoadedWriterCollectorPlan(

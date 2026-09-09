@@ -1562,9 +1562,15 @@ class UnifiedMCPGateway:
         registry = self._writer_quiescence_registry
         if not plans or any(not isinstance(item, LoadedWriterCollectorPlan) for item in plans) or registry is None:
             raise MissingDependency("MISSING_LOADED_WRITER_COLLECTOR_PLAN")
+        if (len({p.request_digest for p in plans}) != len(plans)
+                or len({p.root for p in plans}) != len(plans)
+                or len({p.root_id for p in plans}) != len(plans)
+                or len({p.cohort_id for p in plans}) != 1):
+            raise MissingDependency("LOADED_WRITER_COLLECTOR_VECTOR_MISMATCH")
         for plan in plans:
             receipt = registry.load_finalized(plan.cohort_id)
-            if (str(plan.root.resolve()) not in receipt.ordered_roots or receipt.source_identity != f"{GITHUB_REPOSITORY.repository_id}@{plan.source_head}:{plan.source_tree}"):
+            if (tuple(str(p.root.resolve()) for p in plans) != receipt.ordered_roots
+                    or receipt.source_identity != f"{GITHUB_REPOSITORY.repository_id}@{plan.source_head}:{plan.source_tree}"):
                 raise MissingDependency("LOADED_WRITER_COLLECTOR_PLAN_MISMATCH")
         with self._writer_collector_binding_lock:
             if self._writer_collector_plans and tuple(self._writer_collector_plans.values()) != plans:
@@ -1580,7 +1586,7 @@ class UnifiedMCPGateway:
         if registry is None:
             raise MissingDependency("MISSING_LOADED_WRITER_REGISTRY")
         plan = self._writer_collector_plans.get(request.request_digest)
-        if plan is None:
+        if plan is None and not self._writer_collector_plans:
             plan = self._writer_collector_plan
         if plan is None:
             raise MissingDependency("MISSING_LOADED_WRITER_COLLECTOR_PLAN")
@@ -1638,27 +1644,33 @@ class UnifiedMCPGateway:
             or request.expected_writer_id != plan.writer_id
         ):
             raise MissingDependency("LOADED_WRITER_COLLECTOR_PLAN_MISMATCH")
-        if any(item.identity.role != "task_state" for item in observations):
-            raise MissingDependency("MISSING_ROLE_SPECIFIC_COLLECTOR_OBSERVER")
-        if any(
-            self.service.writer_quiescence_process_state(item.identity.thread_id)
-            not in {"alive", "idle"}
-            for item in observations
-        ):
-            raise MissingDependency("LOADED_COLLECTOR_PROCESS_OBSERVATION_CHANGED")
-        current_snapshot = (
-            self.service.writer_quiescence_snapshot_bytes() + self._writer_assist_snapshot_bytes()
-        )
-        if (
-            any(
-                item.snapshot_sha256 != hashlib.sha256(current_snapshot).hexdigest()
-                for item in observations
-                if item.identity.role == "task_state"
-            )
-            or self.service.writer_quiescence_pending_work()
-            or self._writer_assist_pending_work()
-        ):
-            raise MissingDependency("LOADED_COLLECTOR_OBSERVATION_CHANGED")
+        # B captured the exact loaded callback objects before the hold.  Re-read
+        # those role-specific observers rather than treating runtime/event roots
+        # as task stores. Neither request fields nor a port caller supply them.
+        for observation in observations:
+            identity = observation.identity
+            registered = registry._writers.get(identity.key())
+            if registered is None or registered.identity != identity:
+                raise MissingDependency("LOADED_COLLECTOR_WRITER_IDENTITY_CHANGED")
+            current, issues = registry._observation(registered)
+            if (issues or current.identity != identity
+                    or current.snapshot_sha256 != observation.snapshot_sha256
+                    or current.process_state not in {"alive", "idle"}
+                    or current.pending_work
+                    or current.acknowledged_epoch != receipt.hold_epoch):
+                raise MissingDependency("LOADED_COLLECTOR_OBSERVATION_CHANGED")
+        # Task admission additionally owns assist jobs, including legacy callers
+        # whose registry callback did not include that separate producer domain.
+        if any(item.identity.role == "task_state" for item in observations):
+            if root != Path(self.service.state_dir).resolve():
+                raise MissingDependency("LOADED_COLLECTOR_TASK_ROOT_MISMATCH")
+            current_snapshot = (self.service.writer_quiescence_snapshot_bytes()
+                                + self._writer_assist_snapshot_bytes())
+            if (any(item.snapshot_sha256 != hashlib.sha256(current_snapshot).hexdigest()
+                    for item in observations if item.identity.role == "task_state")
+                    or self.service.writer_quiescence_pending_work()
+                    or self._writer_assist_pending_work()):
+                raise MissingDependency("LOADED_COLLECTOR_OBSERVATION_CHANGED")
         # Read source-owned immutable evidence files, never request locators.
         read = SelfHostedTaskService.writer_quiescence_file_bytes
         evidence: dict[str, Any] = {

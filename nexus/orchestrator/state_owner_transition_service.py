@@ -326,14 +326,20 @@ class StateOwnerTransitionService:
 
     def bind_collector_port(self, port: Any) -> None:
         """Bind the loaded gateway collector to direct A calls."""
-        if not callable(port) or getattr(port, "__self__", None) is None:
+        from nexus.orchestrator.unified_mcp_gateway import UnifiedMCPGateway
+
+        gateway = getattr(port, "__self__", None)
+        if (not isinstance(gateway, UnifiedMCPGateway)
+                or getattr(port, "__func__", None) is not UnifiedMCPGateway._writer_transition_collector):
             raise TypeError("source-owned collector port is required")
-        gateway = port.__self__
-        if self._service is None or getattr(gateway, "service", None) is not self._service:
+        if self._service is None or gateway.service is not self._service:
             raise TransitionServiceError("COLLECTOR_PORT_SERVICE_MISMATCH")
-        if getattr(gateway, "_writer_quiescence_registry", None) is None:
+        if gateway._writer_quiescence_registry is None:
             raise TransitionServiceError("COLLECTOR_PORT_REGISTRY_REQUIRED")
-        if self._collector_port is not None and self._collector_port is not port:
+        if self._collector_port is not None and (
+            self._collector_port.__self__ is not gateway
+            or self._collector_port.__func__ is not port.__func__
+        ):
             raise TransitionServiceError("COLLECTOR_PORT_ALREADY_BOUND")
         self._collector_port = port
 
