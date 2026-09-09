@@ -258,52 +258,6 @@ class ContextHub:
                 "blockers": ["wiki_runtime_exception"],
             }
 
-    def assemble_diag_pack(
-        self, violations: List[Dict], summary: str
-    ) -> Dict[str, Any]:
-        """組裝診斷階段所需的 Context Pack。"""
-        state = self.state_io.load_global_state()
-        
-        hotspots = list(set([
-            str(v.get("file") if isinstance(v, dict) else getattr(v, "file", ""))
-            for v in violations
-        ]))
-        hotspots = [h for h in hotspots if h and h != "None"]
-        
-        pack = {
-            "task_id": state.task_id,
-            "failure_summary": summary,
-            "violations": violations[:10],  # 截斷以保持 token 效率
-            "hotspots": hotspots,
-            "history_summary": [steps.summary for steps in state.steps_history[-3:]],
-            "contract_version": "1.5.2",
-            "memory_reminders": self._inject_memory_reminders("D"),
-        }
-        wiki_retrieval = self._retrieve_wiki_context(summary, max_results=3)
-        pack["wiki_context"] = wiki_retrieval.get("context", "")
-        pack["wiki_retrieval"] = wiki_retrieval
-        pack["recommended_skills"] = self.knowledge_injector.recommend_skills(summary, hotspots[:5]) if self.knowledge_injector else []
-        pack["wisdom_prior"] = self.knowledge_injector.inject_wisdom_prior(summary, hotspots[:5]) if self.knowledge_injector else ""
-        
-        # [NEW: D-2] Inject Claims Diag Pack
-        try:
-            from nexus.research.learn_mode import LearnModeService
-            from pathlib import Path
-            root = getattr(self, "project_root", getattr(state, "project_root", "."))
-            svc = LearnModeService(Path(root))
-            diag_hints = svc.ask(topic="health-diagnostics", question=summary, top_k=3)
-            if diag_hints.get("citations"):
-                pack["claims_diag_hints"] = [c["claim"] for c in diag_hints["citations"]]
-        except Exception:
-            pass
-
-        # 🟢 [Fix-1] Injects specific Audit Failure Beliefs into ContextHub Output
-        if hasattr(self, "belief_engine") and self.belief_engine:
-            task_belief = self.belief_engine.get_confidence(f"AUDIT_FAILURE_1")
-            if task_belief < 0.5:
-                pack["belief_warning"] = "⚠️ 低落的系統信心！之前的修復被稽核員駁回，請改變策略。"
-                
-        return pack
 
     def _get_l0_rules(self) -> str:
         """[L0] 治理根層：摘要化授權邊界與禁止行為"""
@@ -439,130 +393,9 @@ class ContextHub:
     def _estimate_context_tokens(self, value: Any) -> int:
         return estimate_context_tokens(value)
 
-    def assemble_context(self, task_id: str, layers: List[int], budget: int = 4000, bayesian_params: Optional[Dict[str, Any]] = None) -> str:
-        """
-        🚀 19-layer Context Assembly Engine (v24.2 Hierarchical Hardened).
-        """
-        # 🧪 [v24.2] 優先從政策讀取全局元參數
-        from nexus.core.policy_loader import PolicyLoader
-        policy = PolicyLoader.load(str(self.project_root))
-        
-        nas_aggression = (bayesian_params or {}).get("nas_aggression")
-        if nas_aggression is None:
-            nas_aggression = policy.global_nas_aggression # 物理對接最高憲法
-            
-        l0 = self._get_l0_rules()
-        l1 = self._get_l1_index()
-        
-        state = self.state_io.load_global_state()
-        history = state.metadata.get("chat_history", [])
-        
-        # 🧪 [Bayesian-Guided Retrieval]
-        memory_limit = 3 if nas_aggression > 0.8 else 10
-        
-        # 🧪 [TOON-2.0 Rendering]
-        toon_summary = ToonRenderer.render(state, aggression=nas_aggression)
 
-        # 🧪 [v25.0 Context-Compactor Integration]
-        from nexus.core.context_compactor import ContextCompactor
-        compactor = ContextCompactor(self.project_root)
-        confidence = (bayesian_params or {}).get("confidence", 0.5)
-        state_dict = vars(state)
-        structured_summary = compactor.compact(state_dict, confidence=confidence)
 
-        # 🧪 [Entropy Prediction] (AOS-131.5)
-        # Estimate tokens using a more accurate heuristic for code-heavy contexts
-        def predict_tokens(txt_list):
-            return sum(len(str(t)) for t in txt_list) // 3.8
 
-        estimated_total = predict_tokens([l0, l1, history, toon_summary, json.dumps(structured_summary)])
-        threshold = budget * (1.0 - (nas_aggression * 0.2))
-
-        if estimated_total > threshold:
-            logger.info(f"✂️ [ContextHub:TOON-2.0] Predicted {estimated_total:.0f} tokens exceed {threshold:.0f}. Compacting...")
-            compact_history = prune_dialogue(history)
-            context_parts = [
-                l0, l1,
-                "--- STRUCTURED CONTEXT (L5-Addressable) ---",
-                json.dumps(structured_summary, indent=2),
-                "--- TOON-2.0 SUMMARY ---",
-                toon_summary,
-                "--- COMPACT HISTORY ---",
-                compact_history
-            ]
-        else:
-            context_parts = [
-                l0, l1,
-                "--- STRUCTURED CONTEXT (L5-Addressable) ---",
-                json.dumps(structured_summary, indent=2),
-                "--- TOON-2.0 SUMMARY ---",
-                toon_summary
-            ]
-            if history:
-                context_parts.append(str(history[-5:])) # Balanced history depth
-
-        logger.info(f"🛠️ [ContextHub:v25.0] Hybrid Context Assembled | Compactor: ACTIVE | Aggression: {nas_aggression:.2f}")
-        return "\n".join(context_parts)
-
-    def assemble_research_pack(self, query: str, results: List[Dict]) -> Dict[str, Any]:
-        """組裝研究階段所需的 Context Pack。"""
-        return {
-            "query": query,
-            "results": results,
-            "fact_count": len(results),
-            "relevance_gate": True,
-            "memory_reminders": self._inject_memory_reminders(
-                "X"
-            ),  # Added memory for research phase
-        }
-
-    def assemble_feature_pack(self, plan: Optional[Dict] = None) -> Dict[str, Any]:
-        """🧬 Phase 1: 為新功能建置組裝上下文 (含 TOON 壓縮)。"""
-        state = self.state_io.load_global_state()
-        memory = self.memory_service.aggregate_memory() if self.memory_service else {}
-        
-        # 🧪 TOON 語義壓縮生效
-        toon_view = ToonRenderer.render(state)
-
-        wiki_query = str(state.metadata.get("task_description") or state.task_id or "")
-        wiki_retrieval = self._retrieve_wiki_context(wiki_query, max_results=3)
-        return {
-            "task": state.task_id,
-            "plan": plan or {},
-            "TOON_SUMMARY": toon_view,
-            "memory": memory,
-            "rules": self.load_program_rules(),
-            "wiki_context": wiki_retrieval.get("context", ""),
-            "wiki_retrieval": wiki_retrieval,
-            "timestamp": datetime.now().isoformat(),
-        }
-
-    def assemble_conversation_pack(self, audit_mode: bool = False) -> Dict[str, Any]:
-        """組裝對話專用 Context Pack (v0.7 Spec)。"""
-        state = self.state_io.load_global_state()
-        conv_meta = state.get_conversation_metadata()
-        
-        pack = {
-            "conversation_id": conv_meta.get("conversation_id"),
-            "user_goal": conv_meta.get("user_goal"),
-            "current_question": conv_meta.get("current_question"),
-            "confirmed_constraints": conv_meta.get("confirmed_constraints", []),
-            "key_context_facts": conv_meta.get("key_context_facts", {}),
-            "user_corrections": conv_meta.get("user_corrections", []),
-            "unresolved_points": conv_meta.get("unresolved_points", []),
-            "answer_draft_status": conv_meta.get("answer_draft_status"),
-            "steps_history_summary": self._summarize_steps_history(state, audit_mode),
-            # 🧬 P2: 對話熵減 (v22 De-Entropy)
-            "pruned_history": prune_dialogue(state.metadata.get("chat_history", [])),
-            "memory_reminders": self._inject_memory_reminders("conversation"),
-            "timestamp": datetime.now().isoformat(),
-        }
-
-        if "last_audit_feedback" in state.metadata:
-            pack["prior_audit_feedback"] = state.metadata["last_audit_feedback"]
-
-        self._inject_research_findings(state, conv_meta, pack, audit_mode)
-        return pack
 
     def _summarize_steps_history(self, state: NexusState, audit_mode: bool) -> List:
         if audit_mode:
@@ -576,33 +409,6 @@ class ContextHub:
                     pack["research_findings"] = step.metadata.get("findings", [])
                     break
 
-    def assemble_repair_pack(
-        self,
-        diagnosis: NexusDiagnosis,
-        reflections: List[Dict],
-        research: Optional[NexusResearch] = None,
-    ) -> Dict[str, Any]:
-        """組裝修復階段所需的 Context Pack (整合 Superpowers v5.0.2)。"""
-        state = self.state_io.load_global_state()
-
-        # --- Context Compact: 壓縮 reflection 與歷史以提高 token 效率 (1.2x tokens) ---
-        compact_reflections = reflections[-2:]  # 只保留最近 2 輪以防冗餘
-
-        pack = {
-            "root_cause": diagnosis.summary,
-            "repair_strategy": diagnosis.pseudo_flows,
-            "target_files": diagnosis.hotspots,
-            "recent_reflections": compact_reflections,
-            "external_research": research.key_findings if research else [],
-            # Superpowers 擴展
-            "superpowers_plan": getattr(state, "superpowers_plan", {}),
-            "tdd_status": state.tdd_status,
-            "worktree_uuid": state.metadata.get("worktree_uuid", "main-branch"),
-            "memory_reminders": self._inject_memory_reminders("R"),
-        }
-        pack["recommended_skills"] = self.knowledge_injector.recommend_skills(diagnosis.summary, diagnosis.hotspots) if self.knowledge_injector else []
-        pack["wisdom_prior"] = self.knowledge_injector.inject_wisdom_prior(diagnosis.summary, diagnosis.hotspots) if self.knowledge_injector else ""
-        return pack
 
 
 
