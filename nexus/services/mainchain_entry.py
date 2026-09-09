@@ -21,6 +21,7 @@ from nexus.services.runtime_compat import (
     UnifiedRuntimeRequest,
     build_canonical_runtime_context,
     normalize_online_invoker_payload,
+    plan_canonical_task_bundle,
 )
 
 ROUTE_FLAG_WITH_NEXUS = "with_nexus_armor"
@@ -71,11 +72,6 @@ def stamp_mainchain_route(
     out["route_freeze"] = True
     out["mainchain_route_version"] = MAINCHAIN_ROUTE_VERSION
     out[ROUTE_FLAG_WITH_NEXUS] = bool(with_nexus_armor)
-    # Mainchain historically supplied a canonical planning bundle on every
-    # request.  Runtime admission therefore remained mandatory even when a
-    # caller supplied an explicit false route flag; preserve that contract
-    # until the runtime package exposes canonical bundle construction.
-    out["workforce_admission_enabled"] = True
 
     raw_prod = out.get("product_entry") or product_entry
     prod = str(raw_prod or "mainchain").strip()
@@ -174,10 +170,11 @@ def run_mainchain(
         )
         or "mainchain",
     )
-    # Runtime owns canonical context and planning identities.  Leave bundle
-    # construction to UnifiedRuntime so no Nexus-new contract duplicate is
-    # passed into the package-owned planner.
     canonical_bundle = request.canonical_planning_bundle
+    if canonical_bundle is None:
+        canonical_bundle = plan_canonical_task_bundle(
+            build_canonical_runtime_context(request)
+        )
     # Frozen dataclass — rebuild request with stamped route.
     fields = {
         "task_id": request.task_id,
