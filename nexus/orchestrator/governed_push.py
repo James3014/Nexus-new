@@ -14,6 +14,7 @@ from nexus.contracts.autonomy_goal import (
     canonical_autonomy_hash,
 )
 from nexus.orchestrator.standing_grant_store import (
+    StandingGrantKey,
     StandingGrantReceiptError,
     authorize_durable_standing_grant_effect,
 )
@@ -118,6 +119,7 @@ class GovernedPushManager:
         remote: str,
         branch: str,
         expected_sha: str,
+        authority_key: StandingGrantKey,
         integration_receipt: Optional[Mapping[str, object]] = None,
     ) -> PushReceipt:
         if remote not in self.allowed_remotes:
@@ -137,6 +139,11 @@ class GovernedPushManager:
                 raise ValueError("integration receipt is not merge-proven")
             if integration_receipt.get("push_performed") is True:
                 raise ValueError("integration receipt already records a push")
+        if (
+            not isinstance(authority_key, StandingGrantKey)
+            or authority_key.repository != _GITHUB_REPOSITORY
+        ):
+            raise PermissionError("governed push requires an exact repository authority key")
 
         effect = {
             "competition_id": str(competition_id),
@@ -150,6 +157,7 @@ class GovernedPushManager:
                 repository=_GITHUB_REPOSITORY,
                 action=AutonomyActionClass.REPOSITORY_PUSH,
                 effect=effect,
+                key=authority_key,
             )
         except StandingGrantReceiptError as exc:
             raise PermissionError(f"governed push requires durable Owner authorization: {exc}") from exc

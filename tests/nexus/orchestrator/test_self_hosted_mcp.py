@@ -7,7 +7,7 @@ if repo_root in sys.path:
     sys.path.remove(repo_root)
 sys.path.insert(0, repo_root)
 
-from nexus.orchestrator.self_hosted_mcp import NexusSelfHostedMCPServer
+from nexus.orchestrator.self_hosted_mcp import NexusSelfHostedMCPServer  # noqa: E402
 
 
 class FakeService:
@@ -142,7 +142,16 @@ def test_tools_list_exposes_governed_self_hosted_surface():
     compete_properties = specs["nexus_self_hosted_compete_task"]["inputSchema"]["properties"]
     campaign_properties = specs["nexus_self_hosted_create_refactor_campaign"]["inputSchema"]["properties"]
     push_schema = specs["nexus_self_hosted_push_competition"]["inputSchema"]
-    assert set(push_schema["required"]) == {"competition_id", "remote"}
+    compete_schema = specs["nexus_self_hosted_compete_task"]["inputSchema"]
+    assert {"authority_goal_id", "authority_coordination_scope_id"} <= set(
+        compete_schema["required"]
+    )
+    assert set(push_schema["required"]) == {
+        "competition_id",
+        "remote",
+        "authority_goal_id",
+        "authority_coordination_scope_id",
+    }
     assert "authorized" not in push_schema["properties"]
     assert push_schema["additionalProperties"] is False
     assert "agy" in submit_properties["worker"]["enum"]
@@ -151,6 +160,25 @@ def test_tools_list_exposes_governed_self_hosted_surface():
     assert submit_properties["execution_lane"]["enum"] == ["DIRECT_CANONICAL", "ISOLATED_TARGET"]
     assert "agy" in compete_properties["workers"]["items"]["enum"]
     assert "agy" in campaign_properties["workers"]["items"]["enum"]
+
+
+def test_compete_task_missing_authority_binding_is_zero_dispatch():
+    class CountingService(FakeService):
+        def __init__(self):
+            self.calls = 0
+
+        def submit_task(self, arguments):
+            self.calls += 1
+            return super().submit_task(arguments)
+
+    service = CountingService()
+    server = NexusSelfHostedMCPServer(service=service)
+    response = server.handle({
+        "jsonrpc": "2.0", "id": 25, "method": "tools/call",
+        "params": {"name": "nexus_self_hosted_compete_task", "arguments": {"workers": ["codex", "opencode"]}},
+    })
+    assert response["result"]["isError"] is True
+    assert service.calls == 0
 
 
 def test_wait_and_actionable_tools_call_service_methods():

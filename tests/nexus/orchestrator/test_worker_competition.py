@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 import nexus.orchestrator.worker_competition as competition_module
+from nexus.orchestrator.standing_grant_store import StandingGrantKey
 from nexus.orchestrator.worker_competition import (
     WorkerCompetitionCoordinator,
     select_deterministic_winner,
@@ -71,6 +72,8 @@ def test_submit_creates_distinct_target_candidates_in_parallel(tmp_path):
     request = {
         "task_id": "refactor-001",
         "competition_id": "refactor-competition",
+        "authority_goal_id": "goal",
+        "authority_coordination_scope_id": "scope",
         "target_repo_root": str(tmp_path / "targets"),
         "target_worktree_root": str(tmp_path / "targets"),
     }
@@ -103,6 +106,8 @@ def test_get_persists_winner_after_all_candidates_finish(tmp_path):
     request = {
         "task_id": "refactor-002",
         "competition_id": "refactor-competition-002",
+        "authority_goal_id": "goal",
+        "authority_coordination_scope_id": "scope",
         "target_repo_root": str(tmp_path / "targets"),
         "target_worktree_root": str(tmp_path / "targets"),
     }
@@ -133,6 +138,8 @@ def test_push_winner_passes_exact_effect_identity_to_governed_push_sink(monkeypa
         "schema": "nexus.worker_competition_state.v1",
         "competition_id": "push-competition",
         "status": "INTEGRATED",
+        "authority_goal_id": "goal",
+        "authority_coordination_scope_id": "scope",
         "winner": {"winner_task_id": "winner-task"},
         "integration": {
             "integration_branch": "nexus/integration/main",
@@ -168,7 +175,12 @@ def test_push_winner_passes_exact_effect_identity_to_governed_push_sink(monkeypa
     monkeypatch.setenv("NEXUS_GOVERNED_PUSH_REMOTES", "origin")
     monkeypatch.setattr(competition_module.GovernedPushManager, "push", push)
 
-    result = coordinator.push_winner("push-competition", remote="origin")
+    result = coordinator.push_winner(
+        "push-competition",
+        remote="origin",
+        authority_goal_id="goal",
+        authority_coordination_scope_id="scope",
+    )
 
     assert observed["push"] == {
         "competition_id": "push-competition",
@@ -176,6 +188,9 @@ def test_push_winner_passes_exact_effect_identity_to_governed_push_sink(monkeypa
         "remote": "origin",
         "branch": "nexus/integration/main",
         "expected_sha": "a" * 40,
+        "authority_key": StandingGrantKey(
+            competition_module._GITHUB_REPOSITORY, "goal", "scope"
+        ),
         "integration_receipt": {
             "integration_branch": "nexus/integration/main",
             "integration_commit_sha": "a" * 40,
@@ -202,6 +217,8 @@ def test_push_winner_sink_authority_failure_preserves_integrated_state(monkeypat
         "schema": "nexus.worker_competition_state.v1",
         "competition_id": "blocked-push",
         "status": "INTEGRATED",
+        "authority_goal_id": "goal",
+        "authority_coordination_scope_id": "scope",
         "winner": {"winner_task_id": "winner-task"},
         "integration": {
             "integration_branch": "nexus/integration/main",
@@ -218,9 +235,55 @@ def test_push_winner_sink_authority_failure_preserves_integrated_state(monkeypat
     monkeypatch.setattr(competition_module.GovernedPushManager, "push", push)
 
     with pytest.raises(PermissionError, match="durable Owner authorization"):
-        coordinator.push_winner("blocked-push", remote="origin")
+        coordinator.push_winner(
+            "blocked-push",
+            remote="origin",
+            authority_goal_id="goal",
+            authority_coordination_scope_id="scope",
+        )
 
     assert coordinator._read("blocked-push")["status"] == "INTEGRATED"
+
+
+def test_competition_bound_key_rejects_valid_other_goal_before_push_sink(monkeypatch, tmp_path):
+    class FakeService:
+        state_dir = tmp_path / "service-state"
+
+        def get_task(self, task_id):
+            return {
+                "task_id": task_id,
+                "contract": {"controller_repo_root": str(tmp_path / "repo")},
+            }
+
+    coordinator = WorkerCompetitionCoordinator(FakeService())
+    coordinator._write({
+        "schema": "nexus.worker_competition_state.v1",
+        "competition_id": "bound-competition",
+        "status": "INTEGRATED",
+        "authority_goal_id": "goal-a",
+        "authority_coordination_scope_id": "scope-a",
+        "winner": {"winner_task_id": "winner-task"},
+        "integration": {
+            "integration_branch": "nexus/integration/main",
+            "integration_commit_sha": "a" * 40,
+            "merge_performed": True,
+            "push_performed": False,
+        },
+        "candidates": [],
+    })
+    calls = []
+    monkeypatch.setattr(
+        competition_module.GovernedPushManager, "push", lambda *_a, **_k: calls.append(1)
+    )
+    with pytest.raises(PermissionError, match="COMPETITION_AUTHORITY_KEY_MISMATCH"):
+        coordinator.push_winner(
+            "bound-competition",
+            remote="origin",
+            authority_goal_id="goal-b",
+            authority_coordination_scope_id="scope-b",
+        )
+    assert calls == []
+    assert coordinator._read("bound-competition")["status"] == "INTEGRATED"
 
 
 def test_get_preserves_integrated_and_pushed_terminal_status_on_refresh(tmp_path):
@@ -242,6 +305,8 @@ def test_get_preserves_integrated_and_pushed_terminal_status_on_refresh(tmp_path
     request = {
         "task_id": "refactor-003",
         "competition_id": "refactor-competition-003",
+        "authority_goal_id": "goal",
+        "authority_coordination_scope_id": "scope",
         "target_repo_root": str(tmp_path / "targets"),
         "target_worktree_root": str(tmp_path / "targets"),
     }

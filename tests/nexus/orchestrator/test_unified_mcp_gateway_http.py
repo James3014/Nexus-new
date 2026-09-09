@@ -12,14 +12,14 @@ if repo_root in sys.path:
     sys.path.remove(repo_root)
 sys.path.insert(0, repo_root)
 
+import nexus.orchestrator.standing_grant_store as sg_store  # noqa: E402
 from nexus.contracts.autonomy_goal import (  # noqa: E402
     AutonomyActionClass,
     StandingGrantContext,
 )
 from nexus.orchestrator.standing_grant_store import (  # noqa: E402
     StandingGrantReceipt,
-    _authorize_durable_standing_grant_effect_at,
-    _write_standing_grant_receipt_at,
+    write_keyed_standing_grant_receipt,
 )
 from nexus.orchestrator.unified_mcp_gateway import UnifiedMCPGateway  # noqa: E402
 from scripts.ops.nexus_mcp_gateway_http import (  # noqa: E402
@@ -80,7 +80,9 @@ def test_health_exposes_one_gateway_identity():
         assert payload["permission_policy_hash"]
         assert "pending_actions" in payload
     finally:
-        server.shutdown(); server.server_close(); thread.join(timeout=3)
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
 
 
 def test_mcp_requires_bearer_and_forwards_jsonrpc():
@@ -96,7 +98,9 @@ def test_mcp_requires_bearer_and_forwards_jsonrpc():
         payload = json.loads(response.read())
         assert len(payload["result"]["tools"]) == len(UnifiedMCPGateway.tool_specs())
     finally:
-        server.shutdown(); server.server_close(); thread.join(timeout=3)
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
 
 
 def test_tools_list_exposes_exact_canonical_task_schema_and_rejects_route_override():
@@ -118,7 +122,9 @@ def test_tools_list_exposes_exact_canonical_task_schema_and_rejects_route_overri
         assert payload["result"]["isError"] is True
         assert payload["result"]["structuredContent"]["error"] == "CALLER_ROUTE_OVERRIDE_FORBIDDEN:execution_lane"
     finally:
-        server.shutdown(); server.server_close(); thread.join(timeout=3)
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
 
 
 def test_non_post_mcp_is_rejected():
@@ -132,7 +138,9 @@ def test_non_post_mcp_is_rejected():
         else:
             raise AssertionError("GET /mcp must fail")
     finally:
-        server.shutdown(); server.server_close(); thread.join(timeout=3)
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=3)
 
 
 def test_runtime_identity_function_is_deterministic():
@@ -211,6 +219,7 @@ def test_http_external_candidate_adoption_canary_is_pending_physical_idempotent_
     monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", controller)
 
     authority_path = tmp_path / "standing-grant" / "standing-grant.json"
+    monkeypatch.setattr(sg_store, "DEFAULT_RECEIPT_PATH", authority_path)
     now = datetime.now(timezone.utc)
     context = StandingGrantContext.issue(
         owner_id="owner-http-canary",
@@ -223,22 +232,7 @@ def test_http_external_candidate_adoption_canary_is_pending_physical_idempotent_
         expires_at=now + timedelta(hours=1),
     )
     receipt = StandingGrantReceipt.issue(grant_id="grant-http-canary", context=context)
-    _write_standing_grant_receipt_at(receipt, authority_path)
-
-    def authorize(action, effect):
-        return _authorize_durable_standing_grant_effect_at(
-            authority_path,
-            repository=repository,
-            action=action,
-            effect=effect,
-            requested_at=now,
-        )
-
-    monkeypatch.setattr(
-        UnifiedMCPGateway,
-        "_require_owner_effect_authority",
-        staticmethod(authorize),
-    )
+    write_keyed_standing_grant_receipt(receipt)
 
     arguments = {
         **request.model_dump(mode="json"),
@@ -252,6 +246,8 @@ def test_http_external_candidate_adoption_canary_is_pending_physical_idempotent_
         "lifecycle_revision": gateway_module.LIFECYCLE_REVISION,
         "full_tool_schema_hash": gateway_module.FULL_TOOL_SCHEMA_HASH,
         "permission_policy_hash": gateway_module.PERMISSION_POLICY_HASH,
+        "authority_goal_id": "goal-http-canary",
+        "authority_coordination_scope_id": "thread-http-canary",
     }
     payload = {
         "jsonrpc": "2.0",

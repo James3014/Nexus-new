@@ -14,8 +14,8 @@ from uuid import uuid4
 
 from nexus.executors.worker_contract import SUPPORTED_WORKER_PROVIDERS
 from nexus.orchestrator.governed_integration import ControlledIntegrationManager
-from nexus.orchestrator.governed_push import GovernedPushManager
-
+from nexus.orchestrator.governed_push import _GITHUB_REPOSITORY, GovernedPushManager
+from nexus.orchestrator.standing_grant_store import StandingGrantKey
 
 TERMINAL_TASK_STATUSES = frozenset({"CANDIDATE_COMMITTED", "FINAL_BLOCK"})
 _SAFE_ID = re.compile(r"[^A-Za-z0-9._-]+")
@@ -146,6 +146,14 @@ class WorkerCompetitionCoordinator:
         )
 
     def submit(self, request: Mapping[str, Any], providers: Sequence[str]) -> dict[str, Any]:
+        try:
+            authority_goal_id = request["authority_goal_id"]
+            authority_scope_id = request["authority_coordination_scope_id"]
+            StandingGrantKey(_GITHUB_REPOSITORY, authority_goal_id, authority_scope_id)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                "competition requires valid authority goal and coordination scope"
+            ) from exc
         normalized = tuple(str(provider).strip().lower() for provider in providers)
         if len(normalized) < 2 or len(set(normalized)) != len(normalized):
             raise ValueError("competition requires at least two distinct workers")
@@ -156,7 +164,13 @@ class WorkerCompetitionCoordinator:
         competition_id = _SAFE_ID.sub("-", base_id).strip("-")
         if not competition_id:
             raise ValueError("competition_id must contain a safe identifier")
-        if self._read(competition_id) is not None:
+        existing = self._read(competition_id)
+        if existing is not None:
+            if (
+                existing.get("authority_goal_id") != authority_goal_id
+                or existing.get("authority_coordination_scope_id") != authority_scope_id
+            ):
+                raise ValueError("COMPETITION_AUTHORITY_KEY_MISMATCH")
             return self.get(competition_id)
 
         prepared = [self._candidate_request(request, competition_id, provider) for provider in normalized]
@@ -169,6 +183,8 @@ class WorkerCompetitionCoordinator:
             "competition_id": competition_id,
             "status": "SUBMITTED",
             "provider_order": list(normalized),
+            "authority_goal_id": authority_goal_id,
+            "authority_coordination_scope_id": authority_scope_id,
             "candidates": [
                 {
                     "candidate_id": candidate.candidate_id,
@@ -187,10 +203,21 @@ class WorkerCompetitionCoordinator:
         competition_id: str,
         *,
         remote: str,
+        authority_goal_id: str,
+        authority_coordination_scope_id: str,
     ) -> dict[str, Any]:
         state = self.get(competition_id)
         if state is None:
             raise KeyError(f"unknown competition_id: {competition_id}")
+        stored_goal_id = state.get("authority_goal_id")
+        stored_scope_id = state.get("authority_coordination_scope_id")
+        if stored_goal_id is None or stored_scope_id is None:
+            raise PermissionError("COMPETITION_AUTHORITY_KEY_MISSING")
+        if (
+            authority_goal_id != stored_goal_id
+            or authority_coordination_scope_id != stored_scope_id
+        ):
+            raise PermissionError("COMPETITION_AUTHORITY_KEY_MISMATCH")
         if state.get("status") != "INTEGRATED":
             raise RuntimeError("only an integrated winner can be pushed")
         integration = state.get("integration") or {}
@@ -206,6 +233,11 @@ class WorkerCompetitionCoordinator:
         )
         branch = str(integration.get("integration_branch", ""))
         expected_sha = str(integration.get("integration_commit_sha", ""))
+        authority_key = StandingGrantKey(
+            _GITHUB_REPOSITORY,
+            authority_goal_id,
+            authority_coordination_scope_id,
+        )
         receipt = GovernedPushManager(
             repo_root=str(contract.get("controller_repo_root", "")),
             allowed_remotes=configured_remotes,
@@ -215,6 +247,7 @@ class WorkerCompetitionCoordinator:
             remote=remote,
             branch=branch,
             expected_sha=expected_sha,
+            authority_key=authority_key,
             integration_receipt=integration,
         )
         state["status"] = "PUSHED"
