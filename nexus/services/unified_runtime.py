@@ -5487,3 +5487,32 @@ class UnifiedRuntime:
             reason=f"{name}_task_id_mismatch" if not task_identity_valid else "",
             response=payload,
         )
+
+
+# Compatibility names resolve to the installed runtime implementation.  The
+# legacy definitions above remain available to historical tooling, but actual
+# callers use these package-owned identities after the runtime dependency is
+# installed.
+from nexus.services.runtime_compat import _RUNTIME as _PACKAGE_RUNTIME
+
+for _runtime_name in (
+    "UnifiedRuntime",
+    "UnifiedRuntimeRequest",
+    "build_canonical_runtime_context",
+    "build_online_route",
+    "build_registered_online_invoker",
+    "build_structured_online_invoker",
+    "build_subprocess_online_invoker",
+    "extract_online_stage_payload",
+    "normalize_online_invoker_payload",
+    "resolve_online_transport_binding",
+    "resolve_registered_online_cli_spec",
+    "resolve_registered_provider_executable",
+    "build_local_ast_capability_invoker",
+    "build_local_memory_capability_invoker",
+    "build_local_search_ranking_capability_invoker",
+    "build_prompt_compression_capability_invoker",
+    "canonical_execution_identity",
+):
+    if _runtime_name in _PACKAGE_RUNTIME.names():
+        globals()[_runtime_name] = getattr(_PACKAGE_RUNTIME, _runtime_name)

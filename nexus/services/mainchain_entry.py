@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import Any, Callable, Mapping
 
-from nexus.engine.canonical_execution import plan_canonical_task_bundle
 from nexus.services.capability_registry import (
     build_default_mainchain_invokers,
     ensure_selected_coverage_invokers,
@@ -170,9 +169,10 @@ def run_mainchain(
         )
         or "mainchain",
     )
+    # Runtime owns canonical context and planning identities.  Leave bundle
+    # construction to UnifiedRuntime so no Nexus-new contract duplicate is
+    # passed into the package-owned planner.
     canonical_bundle = request.canonical_planning_bundle
-    if canonical_bundle is None:
-        canonical_bundle = plan_canonical_task_bundle(build_canonical_runtime_context(request))
     # Frozen dataclass — rebuild request with stamped route.
     fields = {
         "task_id": request.task_id,
