@@ -3707,9 +3707,10 @@ def test_execution_readiness_ready_path_end_to_end(readiness_env):
     assert "COMPLETE" not in serialized
 
 
-def test_execution_readiness_does_not_require_workforce_env_for_non_material_request(
+def test_execution_readiness_requires_all_env_declared_planes(
     readiness_env,
 ):
+    # Preserve the historical node id while asserting the revised canonical behavior.
     gateway = UnifiedMCPGateway(service=FakeService())
     payload = _call_readiness(gateway, {})
     assert payload["outcome"] == "READY_TO_EXECUTE"
