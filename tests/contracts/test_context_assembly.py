@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from nexus.contracts.context_assembly import (
     CONTEXT_ASSEMBLY_CONTRACT_SCHEMA,
     build_context_assembly_contract,
@@ -184,3 +186,21 @@ def test_context_package_hash_is_deterministic_and_detects_drift() -> None:
     tampered = dict(first)
     tampered["consumer_channel"] = "worker_registry"
     assert "context_package_hash_mismatch" in validate_context_assembly_contract(tampered)
+
+
+def test_selected_capability_ids_fail_closed_when_not_a_sequence() -> None:
+    with pytest.raises(ValueError, match="invalid_selected_capability_ids"):
+        build_context_assembly_contract(
+            task_id="ctx-472-g1",
+            sources=_sources(),
+            token_budget=500,
+            selected_capability_ids="prompt_compression",
+        )
+
+    payload = build_context_assembly_contract(
+        task_id="ctx-472-g1",
+        sources=_sources(),
+        token_budget=500,
+    )
+    payload["selected_capability_ids"] = "prompt_compression"
+    assert "invalid_selected_capability_ids" in validate_context_assembly_contract(payload)
