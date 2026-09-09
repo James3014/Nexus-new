@@ -119,6 +119,8 @@ def build_context_assembly_contract(
     consumer_channel: str = "",
     worker_binding: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
+    if isinstance(selected_capability_ids, (str, bytes)):
+        raise ValueError("invalid_selected_capability_ids")
     receipt = build_context_budget_receipt(sources, token_budget=token_budget).to_dict()
     return ContextAssemblyContract(
         task_id=task_id,
@@ -151,7 +153,12 @@ def validate_context_assembly_contract(payload: Mapping[str, Any]) -> list[str]:
     if str(receipt.get("status") or "").upper() != "PASS":
         blockers.append("receipt_not_pass")
 
-    selected_capability_ids = _normalize_ids(payload.get("selected_capability_ids", ()) or ())
+    raw_selected_capability_ids = payload.get("selected_capability_ids", ()) or ()
+    if not isinstance(raw_selected_capability_ids, (list, tuple)):
+        blockers.append("invalid_selected_capability_ids")
+        selected_capability_ids: list[str] = []
+    else:
+        selected_capability_ids = _normalize_ids(raw_selected_capability_ids)
     planner_decision_id = str(payload.get("planner_decision_id") or "").strip()
     planner_plan_hash = str(payload.get("planner_plan_hash") or "").strip()
     if selected_capability_ids and not planner_decision_id:
