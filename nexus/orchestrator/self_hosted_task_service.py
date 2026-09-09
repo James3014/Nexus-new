@@ -100,7 +100,6 @@ from nexus.orchestrator.task_contract import (
     HumanApprovalPolicy,
     MutationMode,
 )
-from nexus.orchestrator.worker_escalation import WorkerEscalationPolicy
 from nexus.orchestrator.worktree_manager import (
     TargetWorktreeLease,
     WorktreeManager,
@@ -3127,47 +3126,8 @@ class SelfHostedTaskService:
         except (TypeError, ValueError):
             return None
 
-    @staticmethod
-    def _escalation_policy(contract: ArchitectTaskContract) -> Optional[WorkerEscalationPolicy]:
-        if not contract.preferred_provider or not contract.fallback_provider:
-            return None
-        return WorkerEscalationPolicy(
-            cheap_provider=contract.preferred_provider,
-            strong_provider=contract.fallback_provider,
-            provider_order=tuple(contract.provider_order or (contract.preferred_provider, contract.fallback_provider)),
-        )
 
-    def _select_initial_provider(
-        self,
-        contract: ArchitectTaskContract,
-        *,
-        before_preflight: Callable[[str], None],
-    ) -> tuple[str, Any]:
-        providers = list(contract.provider_order or [str(contract.preferred_provider or "codex")])
-        failures: list[str] = []
-        for provider in providers:
-            before_preflight(provider)
-            preflight = self.worker_registry.preflight(provider)
-            if preflight.ready:
-                return provider, preflight
-            failures.append(f"{provider}: {preflight.reason}")
-        raise RuntimeError("worker preflight failed: " + "; ".join(failures))
 
-    def _next_ready_provider(
-        self,
-        policy: WorkerEscalationPolicy,
-        attempts: Sequence[WorkerExecutionReceipt],
-        *,
-        before_preflight: Callable[[str], None],
-    ) -> Optional[str]:
-        attempted = {attempt.provider for attempt in attempts}
-        for provider in policy.provider_order or (policy.strong_provider,):
-            if provider in attempted:
-                continue
-            before_preflight(provider)
-            if self.worker_registry.preflight(provider).ready:
-                return provider
-        return None
 
     @staticmethod
     def _assert_persisted_workforce_dispatch(
@@ -3323,327 +3283,11 @@ class SelfHostedTaskService:
             update=update,
         )
 
-        state = self._read_state(task_id) or {}
-        deadline = _task_deadline(contract, state.get("submitted_at"))
-        if deadline is not None and time.time() >= deadline:
-            raise RuntimeError("WALL_TIME_BUDGET_EXHAUSTED")
-        status = str(state.get("status"))
-        dispatch_binding = validate_workforce_dispatch_binding(
-            request,
-            require_binding=_tracked_dispatch_required(request, state),
-        )
-        self._assert_persisted_workforce_dispatch(state, request, dispatch_binding)
-        self._revalidate_tracked_dispatch_task_card(
-            contract,
-            request,
-            state,
-            dispatch_binding,
-        )
+
+    def _finalize_runtime_candidate(self, contract, request, lease, state, attempts, update, *, execution, status):
+        task_id = contract.task_id
         manager = WorktreeManager(root_dir=contract.target_worktree_root)
         controller = SelfHostedDevelopmentController(worktree_manager=manager)
-        policy = self._escalation_policy(contract)
-        attempts = [
-            receipt
-            for raw in state.get("executions") or []
-            if (receipt := self._receipt_from_state(raw)) is not None
-        ]
-        maximum_attempts = int(getattr(contract, "maximum_attempts_per_task", 1) or 1)
-        if len(state.get("attempts") or ()) > maximum_attempts:
-            raise RuntimeError("ATTEMPT_BUDGET_EXHAUSTED")
-        is_fast_lane = check_fast_lane_eligible(contract, request)
-        fast_lane_values = {
-            "execution_lane": "FAST_LANE" if is_fast_lane else "STANDARD",
-            "fast_lane_eligible": is_fast_lane,
-            "maximum_provider_calls": 1 if is_fast_lane else contract.maximum_provider_calls,
-            "maximum_replans": 0 if is_fast_lane else 3,
-            "fallback_disabled": is_fast_lane,
-        }
-
-        if status == "SUBMITTED":
-            self._assert_persisted_workforce_dispatch(state, request, dispatch_binding)
-            self._revalidate_tracked_dispatch_task_card(
-                contract,
-                request,
-                state,
-                dispatch_binding,
-            )
-            provider, preflight = self._select_initial_provider(
-                contract,
-                before_preflight=lambda provider: self._revalidate_provider_boundary(
-                    contract,
-                    request,
-                    task_id,
-                    dispatch_binding,
-                    active_provider=provider,
-                ),
-            )
-            worktree_started = time.perf_counter()
-            # Snapshot durable ownership immediately before leasing.  The
-            # manager uses this to distinguish passive retained evidence from
-            # a live mutation Target; missing/unknown ownership fails closed.
-            task_states = self._workspace_task_states()
-            prepare_task = controller.prepare_task
-            if "task_states" in inspect.signature(prepare_task).parameters:
-                lease = prepare_task(contract, task_states=task_states)
-            else:
-                # Keep narrow test/double compatibility; the production
-                # controller always accepts and forwards the snapshot.
-                lease = prepare_task(contract)
-            worktree_time_ms = max(0, int((time.perf_counter() - worktree_started) * 1000))
-            update(
-                "TARGET_LEASED",
-                {
-                    "lease": lease,
-                    "worker_preflight": preflight,
-                    "active_provider": provider,
-                    "telemetry": {"worktree_time_ms": worktree_time_ms},
-                    **fast_lane_values,
-                },
-            )
-            update("WORKER_RUNNING", {"active_provider": provider, **fast_lane_values})
-            state = self._read_state(task_id) or {}
-            status = "WORKER_RUNNING"
-        elif status == "WORKER_ESCALATING":
-            if is_fast_lane:
-                raise RuntimeError("Fast Lane escalation is forbidden")
-            lease = self._lease_from_state(state)
-            provider = str(state.get("next_provider") or "")
-            if not provider:
-                raise RuntimeError("escalation state is missing next_provider")
-            self._assert_persisted_workforce_dispatch(
-                state, request, dispatch_binding, active_provider=provider
-            )
-            self._revalidate_tracked_dispatch_task_card(
-                contract,
-                request,
-                state,
-                dispatch_binding,
-            )
-            lease = self._replace_failed_target(
-                manager,
-                controller,
-                contract,
-                lease,
-                task_states=self._workspace_task_states(),
-            )
-            self._revalidate_provider_boundary(
-                contract,
-                request,
-                task_id,
-                dispatch_binding,
-                active_provider=provider,
-            )
-            preflight = self.worker_registry.preflight(provider)
-            if not preflight.ready:
-                raise RuntimeError(f"worker preflight failed: {preflight.reason}")
-            update(
-                "TARGET_LEASED",
-                {
-                    "lease": lease,
-                    "worker_preflight": preflight,
-                    "active_provider": provider,
-                    "next_provider": None,
-                },
-            )
-            update("WORKER_RUNNING", {"active_provider": provider})
-            state = self._read_state(task_id) or {}
-            status = "WORKER_RUNNING"
-        elif status == "TARGET_LEASED":
-            raise RuntimeError("worker lost before execution receipt; recovery is fail-closed")
-        else:
-            lease = self._lease_from_state(state)
-
-        # Pure contract/verifier validation must complete before the first
-        # provider invocation.  This also catches unmatched shlex quotes and
-        # malformed manifests without consuming provider budget.
-        static_validator = getattr(CandidateVerifier, "validate_static_contract", None)
-        if static_validator is not None:
-            static_validator(contract, lease.target_worktree)
-
-        execution = state.get("execution")
-        while status in {"WORKER_RUNNING", "WORKER_COMPLETED"}:
-            if status == "WORKER_RUNNING":
-                def on_process_group(pgid: Optional[int]) -> None:
-                    self._set_child_pgid(task_id, attempt_id, pgid)
-
-                provider = str(
-                    state.get("active_provider")
-                    or contract.preferred_provider
-                    or "codex"
-                )
-                self._assert_persisted_workforce_dispatch(
-                    state, request, dispatch_binding, active_provider=provider
-                )
-                self._revalidate_tracked_dispatch_task_card(
-                    contract,
-                    request,
-                    state,
-                    dispatch_binding,
-                )
-                consumed_calls = sum(max(0, int(item.provider_calls or 0)) for item in attempts)
-                consumed_attempts = sum(
-                    max(0, int(item.provider_attempt_count or 0))
-                    for item in attempts
-                )
-                configured_budget = int(fast_lane_values["maximum_provider_calls"])
-                remaining_calls = configured_budget - consumed_calls
-                # Provider attempts are a distinct aggregate ceiling from
-                # provider calls.  The task-level attempt budget is the
-                # durable cap and is intentionally measured across retained
-                # execution receipts from every retry/fallback.
-                attempt_ceiling = int(
-                    getattr(contract, "maximum_attempts_per_task", 1) or 1
-                )
-                remaining_attempts = attempt_ceiling - consumed_attempts
-                if remaining_calls <= 0:
-                    raise RuntimeError("maximum_provider_calls aggregate budget exhausted")
-                if remaining_attempts <= 0:
-                    raise RuntimeError("maximum_provider_attempts aggregate budget exhausted")
-                if deadline is not None and time.time() >= deadline:
-                    raise RuntimeError("WALL_TIME_BUDGET_EXHAUSTED")
-                invoke_contract = contract
-                if remaining_calls != configured_budget and hasattr(contract, "model_copy"):
-                    invoke_contract = contract.model_copy(update={"maximum_provider_calls": remaining_calls})
-                self._revalidate_provider_boundary(
-                    contract,
-                    request,
-                    task_id,
-                    dispatch_binding,
-                    active_provider=provider,
-                )
-                configured_timeout = float(request.get("timeout_seconds", 900.0))
-                remaining_timeout = (
-                    max(0.0, deadline - time.time()) if deadline is not None else configured_timeout
-                )
-                if remaining_timeout <= 0:
-                    raise RuntimeError("WALL_TIME_BUDGET_EXHAUSTED")
-                execution_receipt = self.worker_registry.invoke(
-                    provider,
-                    invoke_contract,
-                    lease,
-                    prompt=self._prompt(contract),
-                    model=(
-                        str(
-                            (dispatch_binding.get("canonical_dispatch_envelope") or {}).get(
-                                "model", dispatch_binding["model"]
-                            )
-                        )
-                        if dispatch_binding is not None
-                        else str(request.get("model") or "").strip() or None
-                    ),
-                    timeout_seconds=min(configured_timeout, remaining_timeout),
-                    on_process_group=on_process_group,
-                )
-                if deadline is not None and time.time() >= deadline:
-                    raise RuntimeError("WALL_TIME_BUDGET_EXHAUSTED")
-                reported_calls = int(execution_receipt.provider_calls)
-                reported_attempts = execution_receipt.provider_attempt_count
-                if reported_calls < 0 or reported_calls > remaining_calls:
-                    raise RuntimeError("provider execution receipt exceeded aggregate call budget")
-                if reported_attempts is not None and (
-                    int(reported_attempts) < 0
-                    or int(reported_attempts) > remaining_attempts
-                ):
-                    raise RuntimeError("provider execution receipt exceeded aggregate attempt budget")
-                attempts.append(execution_receipt)
-                execution = execution_receipt
-                update(
-                    "WORKER_COMPLETED",
-                    {
-                        "execution": execution_receipt,
-                        "executions": attempts,
-                        "active_provider": provider,
-                        **fast_lane_values,
-                    },
-                )
-                state = self._read_state(task_id) or {}
-                status = "WORKER_COMPLETED"
-                continue
-
-            latest = attempts[-1] if attempts else self._receipt_from_state(execution)
-            if latest is None:
-                raise RuntimeError("worker execution receipt is missing common outcome evidence")
-            if latest.outcome == WorkerOutcome.EXECUTION_COMPLETED.value and latest.evidence_complete:
-                break
-
-            if is_fast_lane:
-                raise RuntimeError(latest.failure_reason or f"Fast Lane provider execution failed with outcome {latest.outcome}; escalation/fallback disabled")
-
-            decision = policy.decide(attempts) if policy else None
-            if decision is not None and decision.action in ("VERIFY", "ACCEPT"):
-                break
-            if decision is None or decision.action != "ESCALATE" or not decision.next_provider:
-                raise RuntimeError(
-                    latest.failure_reason or f"worker execution did not complete: {latest.outcome}"
-                )
-            if policy is None:
-                raise RuntimeError("worker escalation policy is missing")
-            next_provider = self._next_ready_provider(
-                policy,
-                attempts,
-                before_preflight=lambda provider: self._revalidate_provider_boundary(
-                    contract,
-                    request,
-                    task_id,
-                    dispatch_binding,
-                    active_provider=provider,
-                ),
-            )
-            if not next_provider:
-                raise RuntimeError("no unattempted ready provider remains for escalation")
-            update(
-                "WORKER_ESCALATING",
-                {
-                    "executions": attempts,
-                    "next_provider": next_provider,
-                    "escalation_reason": decision.reason,
-                    "fallback_lineage": list(state.get("fallback_lineage") or []) + [{
-                        "from_provider": str(latest.provider),
-                        "to_provider": next_provider,
-                        "reason": decision.reason,
-                        "admission_binding_hash": (
-                            dispatch_binding.get("binding_hash") if dispatch_binding else None
-                        ),
-                    }],
-                },
-            )
-            self._revalidate_provider_boundary(
-                contract,
-                request,
-                task_id,
-                dispatch_binding,
-                active_provider=next_provider,
-            )
-            lease = self._replace_failed_target(
-                manager,
-                controller,
-                contract,
-                lease,
-                task_states=self._workspace_task_states(),
-            )
-            self._revalidate_provider_boundary(
-                contract,
-                request,
-                task_id,
-                dispatch_binding,
-                active_provider=next_provider,
-            )
-            preflight = self.worker_registry.preflight(next_provider)
-            if not preflight.ready:
-                raise RuntimeError(f"worker preflight failed: {preflight.reason}")
-            update(
-                "TARGET_LEASED",
-                {
-                    "lease": lease,
-                    "worker_preflight": preflight,
-                    "active_provider": next_provider,
-                    "next_provider": None,
-                },
-            )
-            update("WORKER_RUNNING", {"active_provider": next_provider})
-            state = self._read_state(task_id) or {}
-            status = "WORKER_RUNNING"
-
         if status == "WORKER_COMPLETED":
             candidate = self._capture_resumed_candidate(contract, controller, lease, state)
             update("CANDIDATE_CAPTURED", {"candidate": candidate})
@@ -3791,141 +3435,108 @@ class SelfHostedTaskService:
         )
 
     def _run_owned_task(self, task_id: str, attempt_id: str) -> None:
-        state = self._read_state(task_id)
-        if state is None or state.get("attempt_id") != attempt_id:
-            return
-        owner_pid = os.getpid()
-        if state.get("worker_pid") not in (None, owner_pid):
-            return
-        stop = threading.Event()
-        heartbeat = threading.Thread(target=self._heartbeat, args=(task_id, attempt_id, stop), daemon=True)
-        heartbeat.start()
+        from nexus.orchestrator.runtime_coordination_bridge import RuntimeCoordinationBridge
+        return RuntimeCoordinationBridge(self).run_owned_attempt(task_id, attempt_id, self._custom_runner)
 
-        def update(status: str, values: dict[str, Any]) -> None:
-            if self._custom_runner is not None:
-                values = self._bound_custom_runner_values(values)
-            self._checkpoint(task_id, status, values, attempt_id=attempt_id)
+    def _finalize_runtime_failure(self, task_id, attempt_id, exc):
+        current = self._read_state(task_id) or {}
+        verified_rcpt = current.get("verified_receipt") or {}
+        attempt_res = current.get("attempt_resolution") or {}
+        is_verified = bool(verified_rcpt.get("verified")) and attempt_res.get("verdict") == "PROVEN"
 
-        try:
-            contract = self.build_contract(state["request"])
-            if self._custom_runner is None:
-                result = self._run_default_resumable(
-                    contract,
-                    state["request"],
-                    update,
-                    task_id=task_id,
-                    attempt_id=attempt_id,
-                )
-            else:
-                result = self._custom_runner(contract, state["request"], update)
-                result = self._bound_custom_runner_values(result)
-            current = self._read_state(task_id) or {}
-            if current.get("status") not in TERMINAL_STATUSES:
-                final_status = "PENDING_HUMAN_APPROVAL" if result.get("promotion_status") == "PENDING_HUMAN_APPROVAL" else "CANDIDATE_COMMITTED"
-                self._checkpoint(task_id, final_status, result, attempt_id=attempt_id)
-        except Exception as exc:
-            self._terminate_owned_processes(task_id, exclude_pid=owner_pid)
-            current = self._read_state(task_id) or {}
-            verified_rcpt = current.get("verified_receipt") or {}
-            attempt_res = current.get("attempt_resolution") or {}
-            is_verified = bool(verified_rcpt.get("verified")) and attempt_res.get("verdict") == "PROVEN"
-
-            if is_verified:
-                self._checkpoint(
-                    task_id,
-                    "RETAINED_FOR_REVIEW",
-                    {
-                        "error": str(exc),
-                        "promotion_status": "NOT_CREATED",
-                        "terminal_status": "RETAINED_FOR_REVIEW",
-                        "state_retention_status": "ACTIVE",
-                        "recovery_action": "recover_verified_uncommitted_candidate",
-                        "cleanup_eligible": False,
-                        "cleanup_performed": False,
-                        "cleanup_decision": "PRESERVED_FOR_REVIEW",
-                    },
-                    attempt_id=attempt_id,
-                )
-            else:
-                cleanup_values: dict[str, Any] = {
-                    "cleanup_decision": "ALREADY_REMOVED",
-                    "cleanup_blocker": None,
+        if is_verified:
+            self._checkpoint(
+                task_id,
+                "RETAINED_FOR_REVIEW",
+                {
+                    "error": str(exc),
+                    "promotion_status": "NOT_CREATED",
+                    "terminal_status": "RETAINED_FOR_REVIEW",
+                    "state_retention_status": "ACTIVE",
+                    "recovery_action": "recover_verified_uncommitted_candidate",
+                    "cleanup_eligible": False,
                     "cleanup_performed": False,
-                    "terminal_status": "FINAL_BLOCK",
-                    "state_retention_status": "TERMINAL",
-                }
-                if current.get("lease"):
-                    try:
-                        contract = self.build_contract(current["request"])
-                        lease = self._lease_from_state(current)
-                        manager = WorktreeManager(root_dir=contract.target_worktree_root)
-                        cleanup = manager.cleanup_terminal_target(contract, lease)
-                        cleanup_values.update({
-                            "cleanup_decision": cleanup.decision,
-                            "cleanup_blocker": cleanup.blocker,
-                            "cleanup_performed": cleanup.performed,
-                            "cleanup_performed_at": _utc_now() if cleanup.performed else None,
-                        })
-                        cleanup_values["cleanup_eligible"] = cleanup.eligible
-                        if cleanup.decision == "BLOCKED_BY_UNSAVED_CHANGES":
-                            cleanup_values["terminal_status"] = "RETAINED_FOR_REVIEW"
-                            try:
-                                salvage = manager.create_salvage_snapshot(contract, lease, attempt_id)
-                                salvage_commit = str(salvage.get("salvage_commit_sha", "") or "")
-                                salvage_ref = str(salvage.get("salvage_ref", "") or "")
-                                cleanup = manager.cleanup_terminal_target(
-                                    contract, lease,
-                                    salvage_commit=salvage_commit,
-                                    salvage_ref=salvage_ref,
-                                )
-                                cleanup_values.update({
-                                    "cleanup_decision": cleanup.decision,
-                                    "cleanup_blocker": cleanup.blocker,
-                                    "cleanup_performed": cleanup.performed,
-                                    "cleanup_performed_at": _utc_now() if cleanup.performed else None,
-                                    **salvage,
-                                })
-                                if cleanup.decision in {"REMOVED", "ALREADY_REMOVED"} and salvage_commit and salvage_ref:
-                                    try:
-                                        restore_result = manager.restore_task_branch_for_retry(
-                                            contract, lease, salvage_commit, salvage_ref,
-                                        )
-                                        cleanup_values.update({
-                                            "task_branch_restore_decision": restore_result["decision"],
-                                            "task_branch_restored_to": restore_result["restored_to"],
-                                            "task_branch_restore_performed": True,
-                                            "task_branch_restore_verified": True,
-                                            "terminal_status": "FINAL_BLOCK",
-                                            "state_retention_status": "TERMINAL",
-                                        })
-                                    except Exception as restore_exc:
-                                        cleanup_values.update({
-                                            "task_branch_restore_decision": "RESTORE_BLOCKED",
-                                            "task_branch_restore_performed": False,
-                                            "task_branch_restore_verified": False,
-                                            "terminal_status": "RETAINED_FOR_REVIEW",
-                                        })
-                            except Exception as salvage_exc:
-                                cleanup_values.update({
-                                    "cleanup_decision": "CLEANUP_BLOCKED",
-                                    "cleanup_blocker": str(salvage_exc),
-                                    "cleanup_performed": False,
-                                    "cleanup_eligible": False,
-                                })
-                    except Exception as cleanup_exc:
-                        cleanup_values.update({
-                            "cleanup_decision": "CLEANUP_BLOCKED",
-                            "cleanup_blocker": str(cleanup_exc),
-                        })
-                self._checkpoint(
-                    task_id,
-                    str(cleanup_values["terminal_status"]),
-                    {"error": str(exc), "promotion_status": "NOT_CREATED", **cleanup_values},
-                    attempt_id=attempt_id,
-                )
-        finally:
-            stop.set()
-            heartbeat.join(timeout=2.0)
+                    "cleanup_decision": "PRESERVED_FOR_REVIEW",
+                },
+                attempt_id=attempt_id,
+            )
+        else:
+            cleanup_values: dict[str, Any] = {
+                "cleanup_decision": "ALREADY_REMOVED",
+                "cleanup_blocker": None,
+                "cleanup_performed": False,
+                "terminal_status": "FINAL_BLOCK",
+                "state_retention_status": "TERMINAL",
+            }
+            if current.get("lease"):
+                try:
+                    contract = self.build_contract(current["request"])
+                    lease = self._lease_from_state(current)
+                    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+                    cleanup = manager.cleanup_terminal_target(contract, lease)
+                    cleanup_values.update({
+                        "cleanup_decision": cleanup.decision,
+                        "cleanup_blocker": cleanup.blocker,
+                        "cleanup_performed": cleanup.performed,
+                        "cleanup_performed_at": _utc_now() if cleanup.performed else None,
+                    })
+                    cleanup_values["cleanup_eligible"] = cleanup.eligible
+                    if cleanup.decision == "BLOCKED_BY_UNSAVED_CHANGES":
+                        cleanup_values["terminal_status"] = "RETAINED_FOR_REVIEW"
+                        try:
+                            salvage = manager.create_salvage_snapshot(contract, lease, attempt_id)
+                            salvage_commit = str(salvage.get("salvage_commit_sha", "") or "")
+                            salvage_ref = str(salvage.get("salvage_ref", "") or "")
+                            cleanup = manager.cleanup_terminal_target(
+                                contract, lease,
+                                salvage_commit=salvage_commit,
+                                salvage_ref=salvage_ref,
+                            )
+                            cleanup_values.update({
+                                "cleanup_decision": cleanup.decision,
+                                "cleanup_blocker": cleanup.blocker,
+                                "cleanup_performed": cleanup.performed,
+                                "cleanup_performed_at": _utc_now() if cleanup.performed else None,
+                                **salvage,
+                            })
+                            if cleanup.decision in {"REMOVED", "ALREADY_REMOVED"} and salvage_commit and salvage_ref:
+                                try:
+                                    restore_result = manager.restore_task_branch_for_retry(
+                                        contract, lease, salvage_commit, salvage_ref,
+                                    )
+                                    cleanup_values.update({
+                                        "task_branch_restore_decision": restore_result["decision"],
+                                        "task_branch_restored_to": restore_result["restored_to"],
+                                        "task_branch_restore_performed": True,
+                                        "task_branch_restore_verified": True,
+                                        "terminal_status": "FINAL_BLOCK",
+                                        "state_retention_status": "TERMINAL",
+                                    })
+                                except Exception as restore_exc:
+                                    cleanup_values.update({
+                                        "task_branch_restore_decision": "RESTORE_BLOCKED",
+                                        "task_branch_restore_performed": False,
+                                        "task_branch_restore_verified": False,
+                                        "terminal_status": "RETAINED_FOR_REVIEW",
+                                    })
+                        except Exception as salvage_exc:
+                            cleanup_values.update({
+                                "cleanup_decision": "CLEANUP_BLOCKED",
+                                "cleanup_blocker": str(salvage_exc),
+                                "cleanup_performed": False,
+                                "cleanup_eligible": False,
+                            })
+                except Exception as cleanup_exc:
+                    cleanup_values.update({
+                        "cleanup_decision": "CLEANUP_BLOCKED",
+                        "cleanup_blocker": str(cleanup_exc),
+                    })
+            self._checkpoint(
+                task_id,
+                str(cleanup_values["terminal_status"]),
+                {"error": str(exc), "promotion_status": "NOT_CREATED", **cleanup_values},
+                attempt_id=attempt_id,
+            )
 
     def _wait_for_owner(self, task_id: str, attempt_id: str, pid: int) -> bool:
         deadline = time.monotonic() + 10.0
@@ -3948,60 +3559,6 @@ class SelfHostedTaskService:
             source_root=str(Path(__file__).resolve().parents[2]),
         )
 
-        state = self._read_state(task_id)
-        if state is None or state.get("attempt_id") != attempt_id:
-            return state
-        if state.get("worker_pid") and self._pid_alive(int(state["worker_pid"])):
-            return state
-        if self._custom_runner is not None:
-            thread = threading.Thread(target=self._run_owned_task, args=(task_id, attempt_id), daemon=True)
-            self._threads[task_id] = thread
-            self._mutate_state(
-                task_id,
-                lambda current: current.update({
-                    "worker_pid": os.getpid(),
-                    "worker_pgid": os.getpgrp(),
-                    "worker_mode": "thread",
-                    "worker_started_at": _utc_now(),
-                    "heartbeat_at": _utc_now(),
-                }),
-            )
-            thread.start()
-            return self._read_state(task_id)
-        command = [
-            sys.executable,
-            "-m",
-            "nexus.orchestrator.self_hosted_task_worker",
-            "--state-dir",
-            str(self.state_dir),
-            "--task-id",
-            task_id,
-            "--attempt-id",
-            attempt_id,
-        ]
-        env = os.environ.copy()
-        source_root = str(Path(__file__).resolve().parents[2])
-        env["PYTHONPATH"] = source_root + os.pathsep + env.get("PYTHONPATH", "")
-        process = subprocess.Popen(
-            command,
-            cwd=source_root,
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        pgid = os.getpgid(process.pid)
-        return self._mutate_state(
-            task_id,
-            lambda current: current.update({
-                "worker_pid": process.pid,
-                "worker_pgid": pgid,
-                "worker_mode": "process",
-                "worker_started_at": _utc_now(),
-                "heartbeat_at": _utc_now(),
-            }),
-        )
 
     @staticmethod
     def _pid_alive(pid: int) -> bool:
