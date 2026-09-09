@@ -263,9 +263,7 @@ def test_governed_push_exact_key_authorizes_preexisting_remote_without_push(monk
     key_a = StandingGrantKey(governed_push_module._GITHUB_REPOSITORY, "goal-a", "scope-a")
     key_b = StandingGrantKey(governed_push_module._GITHUB_REPOSITORY, "goal-b", "scope-b")
     keyed_dir = tmp_path / "keyed"
-    monkeypatch.setattr(
-        standing_grant_store, "_keyed_directory", lambda key: keyed_dir / key.digest
-    )
+    monkeypatch.setattr(standing_grant_store, "_keyed_directory", lambda key: keyed_dir / key.digest)
     monkeypatch.setattr(
         standing_grant_store,
         "_keyed_receipt_path",
@@ -277,20 +275,14 @@ def test_governed_push_exact_key_authorizes_preexisting_remote_without_push(monk
         (keyed_dir / key.digest).mkdir(parents=True)
         os.chmod(keyed_dir / key.digest, 0o700)
         (keyed_dir / key.digest / f"{key.digest}.json").write_text(
-            json.dumps(
-                receipt.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
-            ),
+            json.dumps(receipt.model_dump(mode="json"), sort_keys=True, separators=(",", ":")),
             encoding="utf-8",
         )
         os.chmod(keyed_dir / key.digest / f"{key.digest}.json", 0o600)
     manager = GovernedPushManager(repo_root=repo, allowed_remotes={"origin"})
     result = manager.push(
-        competition_id="competition-1",
-        winner_task_id="winner-1",
-        remote="origin",
-        branch="nexus/integration",
-        expected_sha=expected,
-        authority_key=key_a,
+        competition_id="competition-1", winner_task_id="winner-1", remote="origin",
+        branch="nexus/integration", expected_sha=expected, authority_key=key_a,
     )
     assert result.authorized is True
     assert result.preexisting_effect is True

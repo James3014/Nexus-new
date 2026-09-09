@@ -165,12 +165,7 @@ class NexusSelfHostedMCPServer:
                         "authority_goal_id": {"type": "string"},
                         "authority_coordination_scope_id": {"type": "string"},
                     },
-                    "required": [
-                        "what", "why", "workers", "authority_goal_id",
-                        "authority_coordination_scope_id", "controller_revision",
-                        "target_base_revision", "controller_repo_root", "target_repo_root",
-                        "target_worktree_root", "allowed_files",
-                    ],
+                    "required": ["what", "why", "workers", "authority_goal_id", "authority_coordination_scope_id", "controller_revision", "target_base_revision", "controller_repo_root", "target_repo_root", "target_worktree_root", "allowed_files"],
                     "additionalProperties": True,
                 },
             },
@@ -230,10 +225,7 @@ class NexusSelfHostedMCPServer:
                 "description": "Push an integrated winner only after server-side durable Owner authorization to an allowlisted remote and nexus/integration branch.",
                 "inputSchema": {
                     "type": "object",
-                    "required": [
-                        "competition_id", "remote", "authority_goal_id",
-                        "authority_coordination_scope_id",
-                    ],
+                    "required": ["competition_id", "remote", "authority_goal_id", "authority_coordination_scope_id"],
                     "properties": {
                         "competition_id": {"type": "string"},
                         "remote": {"type": "string"},
