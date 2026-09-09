@@ -1324,6 +1324,7 @@ class UnifiedMCPGateway:
         # Source-owned registry belongs to this loaded Gateway instance.
         self._writer_quiescence_registry = self._build_writer_quiescence_registry()
         self._writer_collector_plan: LoadedWriterCollectorPlan | None = None
+        self._writer_collector_plans: dict[str, LoadedWriterCollectorPlan] = {}
         self._writer_collector_binding_lock = threading.RLock()
         self._writer_bootstrap_done = False
         if owns_service:
@@ -1555,21 +1556,21 @@ class UnifiedMCPGateway:
         """
         from nexus.orchestrator.state_owner_transition_service import MissingDependency
 
+        loaded = getattr(self.service, "loaded_writer_collector_plans", None)
         plan = getattr(self.service, "loaded_writer_collector_plan", None)
+        plans = tuple(loaded) if loaded is not None else ((plan,) if plan is not None else ())
         registry = self._writer_quiescence_registry
-        if not isinstance(plan, LoadedWriterCollectorPlan) or registry is None:
+        if not plans or any(not isinstance(item, LoadedWriterCollectorPlan) for item in plans) or registry is None:
             raise MissingDependency("MISSING_LOADED_WRITER_COLLECTOR_PLAN")
-        receipt = registry.load_finalized(plan.cohort_id)
-        if (
-            str(plan.root.resolve()) not in receipt.ordered_roots
-            or receipt.source_identity
-            != f"{GITHUB_REPOSITORY.repository_id}@{plan.source_head}:{plan.source_tree}"
-        ):
-            raise MissingDependency("LOADED_WRITER_COLLECTOR_PLAN_MISMATCH")
+        for plan in plans:
+            receipt = registry.load_finalized(plan.cohort_id)
+            if (str(plan.root.resolve()) not in receipt.ordered_roots or receipt.source_identity != f"{GITHUB_REPOSITORY.repository_id}@{plan.source_head}:{plan.source_tree}"):
+                raise MissingDependency("LOADED_WRITER_COLLECTOR_PLAN_MISMATCH")
         with self._writer_collector_binding_lock:
-            if self._writer_collector_plan is not None and self._writer_collector_plan != plan:
+            if self._writer_collector_plans and tuple(self._writer_collector_plans.values()) != plans:
                 raise MissingDependency("LOADED_WRITER_COLLECTOR_PLAN_ALREADY_BOUND")
-            self._writer_collector_plan = plan
+            self._writer_collector_plans = {item.request_digest: item for item in plans}
+            self._writer_collector_plan = plans[0]
 
     def _writer_transition_collector(self, request: WriterTransitionRequest) -> Mapping[str, Any]:
         """Load finalized evidence only, including when inspecting APPLY."""
@@ -1578,7 +1579,9 @@ class UnifiedMCPGateway:
         registry = self._writer_quiescence_registry
         if registry is None:
             raise MissingDependency("MISSING_LOADED_WRITER_REGISTRY")
-        plan = self._writer_collector_plan
+        plan = self._writer_collector_plans.get(request.request_digest)
+        if plan is None:
+            plan = self._writer_collector_plan
         if plan is None:
             raise MissingDependency("MISSING_LOADED_WRITER_COLLECTOR_PLAN")
         receipt = registry.load_finalized(plan.cohort_id)

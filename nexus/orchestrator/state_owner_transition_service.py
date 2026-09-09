@@ -321,6 +321,15 @@ class StateOwnerTransitionService:
         self._grant_result: Mapping[str, Any] = {}
         self._service = service
         self._authority_handle = None
+        self._collector_port = None
+
+    def bind_collector_port(self, port: Any) -> None:
+        """Bind the loaded gateway collector to direct A calls."""
+        if not callable(port):
+            raise TypeError("typed collector port is required")
+        if self._collector_port is not None and self._collector_port is not port:
+            raise TransitionServiceError("COLLECTOR_PORT_ALREADY_BOUND")
+        self._collector_port = port
         self._use_keyed_grant = use_keyed_grant
 
     def loaded_root_transition(self, request: WriterTransitionRequest) -> LoadedRootTransition:
@@ -545,9 +554,10 @@ class StateOwnerTransitionService:
             raise TransitionServiceError(str(exc)) from exc
 
     def _collector(self, req: WriterTransitionRequest) -> Mapping[str, Any]:
-        if _COLLECTOR_LOADER is None:
+        loader = self._collector_port or _COLLECTOR_LOADER
+        if loader is None:
             raise MissingDependency("MISSING_WRITER_TRANSITION_COLLECTOR")
-        evidence = _COLLECTOR_LOADER(req)
+        evidence = loader(req)
         if isinstance(evidence, _VerifiedCollectorEvidence):
             evidence = evidence.payload
         if not isinstance(evidence, Mapping):
