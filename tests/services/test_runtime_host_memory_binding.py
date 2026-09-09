@@ -14,7 +14,7 @@ from tests.services.test_unified_runtime import _Planner, _request
 
 
 def run_memory(root=None, *, query="needle", overrides=None):
-    request = _request(local_enabled=False, online_enabled=False)
+    request = _request(local_enabled=False, online_enabled=True)
     route = dict(request.route)
     if root is not None:
         route["workspace_root"] = str(root)
