@@ -335,7 +335,13 @@ def test_indexed_publications_select_distinct_fixed_pairs_through_loader(monkeyp
 
 def test_unindexed_root_denies_before_publication_read(monkeypatch):
     from dataclasses import replace
+    from pathlib import Path
 
+    monkeypatch.setattr(
+        mod,
+        "PUBLICATION_INVENTORY",
+        {"task": mod.AuthorityPublication(Path("task.json"), Path("/tmp/task.json"))},
+    )
     monkeypatch.setattr(mod, "_mirror_identity", lambda: pytest.fail("must not read"))
     with pytest.raises(mod.WriterAuthorityError, match="PUBLICATION_NOT_INDEXED"):
         mod.load_verified_writer_transition_authority(
@@ -360,3 +366,20 @@ def test_indexed_publication_rejects_source_and_receipt_hash_drift(monkeypatch):
             request=replace(req(), authority_receipt_hash="0" * 64),
             loaded_source_identity=source(),
         )
+
+
+def test_single_publication_compatibility_accepts_any_bound_root_id(monkeypatch):
+    from dataclasses import replace
+
+    request = replace(req(), root_id="legacy-root-1")
+    value = json.loads(receipt(mod._effect_hash(request)))
+    value.update(
+        root_id=request.root_id,
+        authorization_intent_digest=request.authorization_intent_digest,
+        operation_digest=request.authorization_intent_digest,
+    )
+    setup(monkeypatch, json.dumps(value).encode())
+    loaded = mod.load_verified_writer_transition_authority(
+        request=request, loaded_source_identity=source()
+    )
+    assert loaded.publication_root_id == request.root_id

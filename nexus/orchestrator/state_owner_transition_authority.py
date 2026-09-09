@@ -233,9 +233,11 @@ def _mirror_identity(
 
 def _publication_for_request(request: WriterTransitionRequest) -> AuthorityPublication:
     """Resolve a fixed publication; never accept a caller-provided path."""
-    if request.root_id == "root":
+    vector_mode = any(root_id != "root" for root_id in PUBLICATION_INVENTORY)
+    if not vector_mode:
         # Keep legacy test/host overrides of the two original constants
-        # observable without making either path request-selectable.
+        # observable without making either path request-selectable.  The
+        # single publication remains bound to the exact receipt root_id.
         return AuthorityPublication(TRACKED_RELATIVE, DURABLE_PATH)
     publication = PUBLICATION_INVENTORY.get(request.root_id)
     if publication is None:
