@@ -112,6 +112,8 @@ def validate_source_materialization_projection(payload: Mapping[str, Any]) -> li
         if not isinstance(ranges, list):
             blockers.append(f"selected_source_ranges_malformed:{index}")
         else:
+            if strategy == DIRECT_SLICE and not ranges:
+                blockers.append(f"selected_source_missing_ranges:{index}")
             for range_index, item in enumerate(ranges):
                 if not _valid_range(item):
                     blockers.append(
@@ -164,12 +166,14 @@ def _validate_reduction(reduction: Mapping[str, Any]) -> list[str]:
 
 
 def _normalize_source(source: Mapping[str, Any]) -> dict[str, Any]:
-    ranges: list[list[int]] = []
-    raw_ranges = source.get("ranges") if isinstance(source, Mapping) else []
+    raw_ranges = source.get("ranges") if isinstance(source, Mapping) else None
     if isinstance(raw_ranges, list):
-        for item in raw_ranges:
-            if _valid_range(item):
-                ranges.append([int(item[0]), int(item[1])])
+        ranges: Any = [
+            [int(item[0]), int(item[1])] if _valid_range(item) else None
+            for item in raw_ranges
+        ]
+    else:
+        ranges = None
     return {
         "path": str(source.get("path") or "").strip(),
         "symbol": str(source.get("symbol") or "").strip(),
@@ -182,6 +186,8 @@ def _normalize_reduction(reduction: Mapping[str, Any] | None) -> dict[str, Any]:
     value = _mapping(reduction)
     if not value:
         return {}
+    uncertainties = value.get("uncertainties")
+    omitted_regions = value.get("omitted_regions")
     return {
         "reducer_operation_id": str(value.get("reducer_operation_id") or "").strip(),
         "reducer_worker": str(value.get("reducer_worker") or "").strip(),
@@ -193,8 +199,16 @@ def _normalize_reduction(reduction: Mapping[str, Any] | None) -> dict[str, Any]:
         "reduced_chars": _int_or_zero(value.get("reduced_chars")),
         "original_tokens": _int_or_zero(value.get("original_tokens")),
         "reduced_tokens": _int_or_zero(value.get("reduced_tokens")),
-        "uncertainties": [str(item) for item in (value.get("uncertainties") or [])],
-        "omitted_regions": [str(item) for item in (value.get("omitted_regions") or [])],
+        "uncertainties": (
+            [str(item) for item in uncertainties]
+            if isinstance(uncertainties, list)
+            else None
+        ),
+        "omitted_regions": (
+            [str(item) for item in omitted_regions]
+            if isinstance(omitted_regions, list)
+            else None
+        ),
     }
 
 
