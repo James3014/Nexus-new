@@ -4513,14 +4513,16 @@ class UnifiedMCPGateway:
         else:
             normalized_origin = normalized_origin.split("://")[-1]
         if normalized_origin.lower().endswith("github.com/" + repository.lower()) is False:
-            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_REPOSITORY_MISMATCH", origin)
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_REPOSITORY_MISMATCH", "origin identity mismatch")
+        canonical_remote = GITHUB_REPOSITORY.canonical_remote
         observation = self._github_issue_observer(repository, raw_issue)
         if not isinstance(observation, Mapping) or observation.get("ok") is not True:
-            detail = observation.get("detail", "observer unavailable") if isinstance(observation, Mapping) else "observer unavailable"
-            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_GITHUB_OBSERVER_FAILED", str(detail))
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_GITHUB_OBSERVER_FAILED", "fresh Issue observation unavailable")
         issue = observation.get("issue")
-        if not isinstance(issue, Mapping) or str(issue.get("number")) != str(raw_issue):
-            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_GITHUB_OBSERVER_FAILED", "issue identity mismatch")
+        if not isinstance(issue, Mapping) or str(issue.get("number")) != str(raw_issue) or not issue.get("state"):
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_GITHUB_OBSERVER_FAILED", "fresh Issue identity/state unavailable")
+        if str(issue.get("state")).upper() != "OPEN":
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_ISSUE_NOT_OPEN", "Issue is not open")
         try:
             matches = self.service.find_tasks_by_repository_issue(repository, raw_issue)
         except Exception as exc:
@@ -4537,9 +4539,10 @@ class UnifiedMCPGateway:
         if not matches:
             readiness = self._gateway_execution_readiness(readiness_args)
             result = {"schema": "nexus.project_entry.v1", "status": "NO_TASK", "repository": repository,
-                    "issue": dict(issue), "source": {"commit": head, "tree": tree},
+                    "issue": dict(issue), "source": {"commit": head, "tree": tree, "canonical_remote": canonical_remote},
                     "issue_observation": dict(observation), "task_resolution": {"status": "NO_EXACT_TASK"},
                     "readiness_request": readiness_args, "readiness_result": readiness,
+                    "readiness_scope": "PROJECT_ENTRY_OBSERVATION_ONLY",
                     "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS",
                     "claim_ceiling_excludes": ["execution", "verification", "acceptance", "merge", "release", "production"]}
             result["project_binding_hash"] = self._project_entry_binding_hash(result)
@@ -4550,12 +4553,12 @@ class UnifiedMCPGateway:
             projection = self.service.rehydrate_task_continuation(task_id, state.get("attempt_id"))
         except Exception as exc:
             return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_CONTINUATION_INVALID", str(exc), task_id=task_id)
-        readiness_args["task_campaign_goal_identity"] = task_id
         readiness = self._gateway_execution_readiness(readiness_args)
         result = {"schema": "nexus.project_entry.v1", "status": "TASK_REHYDRATED", "repository": repository,
-                "issue": dict(issue), "source": {"commit": head, "tree": tree},
+                "issue": dict(issue), "source": {"commit": head, "tree": tree, "canonical_remote": canonical_remote},
                 "issue_observation": dict(observation), "task_resolution": {"status": "EXACT_TASK", "task_id": task_id},
                 "continuation": projection, "readiness_request": readiness_args, "readiness_result": readiness,
+                "readiness_scope": "PROJECT_ENTRY_OBSERVATION_ONLY",
                 "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS",
                 "claim_ceiling_excludes": ["execution", "verification", "acceptance", "merge", "release", "production"]}
         result["project_binding_hash"] = self._project_entry_binding_hash(result)
@@ -4563,19 +4566,22 @@ class UnifiedMCPGateway:
 
     @staticmethod
     def _project_entry_binding_hash(payload: Mapping[str, Any]) -> str:
-        stable = json.loads(json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str))
-        stable.pop("project_binding_hash", None)
-        observation = stable.get("issue_observation")
-        if isinstance(observation, dict):
-            observation.pop("observed_at", None)
-            observation.pop("detail", None)
+        volatile = {"evaluated_at", "observed_at", "timestamp", "created_at", "updated_at_runtime"}
+        def scrub(value: Any) -> Any:
+            if isinstance(value, Mapping):
+                return {str(k): scrub(v) for k, v in value.items() if k not in volatile and k != "project_binding_hash"}
+            if isinstance(value, list):
+                return [scrub(item) for item in value]
+            return value
+        stable = scrub(json.loads(json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)))
         return hashlib.sha256(json.dumps(stable, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
 
     @staticmethod
     def _project_entry_blocker(repository: str, issue: int, code: str, detail: str, *, task_id: str | None = None) -> dict[str, Any]:
+        safe_detail = f"diagnostic_class={code}; diagnostic_sha256={hashlib.sha256(str(detail).encode()).hexdigest()}"
         result = {"schema": "nexus.project_entry.v1", "status": "BLOCKED", "repository": repository,
                   "issue_number": issue, "task_resolution": {"status": "NOT_RESOLVED"},
-                  "blocker": {"code": code, "detail": detail[:512]},
+                  "blocker": {"code": code, "detail": safe_detail},
                   "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS",
                   "claim_ceiling_excludes": ["execution", "verification", "acceptance", "merge", "release", "production"]}
         if task_id:

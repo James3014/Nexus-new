@@ -4057,3 +4057,37 @@ def test_project_entry_binding_hash_is_deterministic_and_bound():
     assert first == UnifiedMCPGateway._project_entry_binding_hash(dict(base))
     changed = dict(base, source_tree="c" * 40)
     assert first != UnifiedMCPGateway._project_entry_binding_hash(changed)
+
+
+def _project_entry_gateway(monkeypatch, observer, *, service=None, readiness=None):
+    import nexus.orchestrator.unified_mcp_gateway as module
+    monkeypatch.setattr(module, "_git", lambda *args, **kwargs: {
+        ("config", "--get", "remote.origin.url"): "https://github.com/James3014/Nexus-new.git",
+        ("rev-parse", "HEAD"): "a" * 40,
+        ("rev-parse", "HEAD^{tree}"): "b" * 40,
+    }[tuple(args)])
+    gateway = UnifiedMCPGateway(service=service or FakeService(), github_issue_observer=observer)
+    gateway.service.find_tasks_by_repository_issue = lambda *_: []
+    if readiness is not None:
+        monkeypatch.setattr(gateway, "_gateway_execution_readiness", readiness)
+    return gateway
+
+
+def test_project_entry_public_call_hash_is_stable_and_binds_origin(monkeypatch):
+    gateway = _project_entry_gateway(monkeypatch, lambda *_: {
+        "ok": True, "issue": {"number": 842, "state": "OPEN", "updatedAt": "2026-09-09T00:00:00Z"},
+        "observed_at": "different",
+    }, readiness=lambda args: {"outcome": "READY_TO_EXECUTE", "evaluated_at": "volatile"})
+    args = {"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842}
+    first = gateway._project_entry(args)
+    second = gateway._project_entry(args)
+    assert first["project_binding_hash"] == second["project_binding_hash"]
+    assert first["source"]["canonical_remote"] == "https://github.com/James3014/Nexus-new.git"
+
+
+@pytest.mark.parametrize("issue", [{"number": 842, "state": "CLOSED"}, {"number": 842}])
+def test_project_entry_public_call_rejects_closed_or_missing_issue_state(monkeypatch, issue):
+    gateway = _project_entry_gateway(monkeypatch, lambda *_: {"ok": True, "issue": issue})
+    result = gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})
+    assert result["status"] == "BLOCKED"
+    assert result["blocker"]["code"] in {"PROJECT_ENTRY_ISSUE_NOT_OPEN", "PROJECT_ENTRY_GITHUB_OBSERVER_FAILED"}
