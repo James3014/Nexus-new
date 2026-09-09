@@ -633,3 +633,26 @@ class ContextHub:
         
         path = store.write(card)
         logger.info(f"🧠 [DeepScientist:Memory] Structured Lesson recorded: {path}")
+
+    # Runtime-owned assembly operations. Legacy constructor/services above are
+    # retained solely as the compatibility adapter surface.
+    def assemble_feature_pack(self, plan: Optional[Dict] = None) -> Dict[str, Any]:
+        return self.runtime_hub.assemble_feature_pack(plan)
+
+    def assemble_diag_pack(self, violations: list[dict[str, Any]], summary: str) -> Dict[str, Any]:
+        return self.runtime_hub.assemble_diag_pack(violations, summary)
+
+    def assemble_research_pack(self, query: str, results: List[Dict]) -> Dict[str, Any]:
+        return self.runtime_hub.assemble_research_pack(query, results)
+
+    def assemble_conversation_pack(self, audit_mode: bool = False) -> Dict[str, Any]:
+        return self.runtime_hub.assemble_conversation_pack(audit_mode)
+
+    def assemble_repair_pack(self, diagnosis: Any, reflections: List[Dict], research: Any, audit_mode: bool = False) -> Dict[str, Any]:
+        return self.runtime_hub.assemble_repair_pack(diagnosis, reflections, research, audit_mode)
+
+    def assemble_context(self, task_id: str, layers: List[int], budget: int = 4000, bayesian_params: Optional[Dict[str, Any]] = None) -> str:
+        return self.runtime_hub.assemble_context(task_id, layers, budget, bayesian_params)
+
+    def record_crystal_lesson(self, failure_signature: str, root_cause: str, lesson: str, metadata: Optional[Dict] = None):
+        return self.runtime_hub.record_crystal_lesson(failure_signature, root_cause, lesson, metadata)
