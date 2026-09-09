@@ -242,3 +242,21 @@ def test_reduced_capsule_fails_closed_on_malformed_uncertainty_lists() -> None:
     assert payload["status"] == "RETURN"
     assert "reduction_invalid:uncertainties" in payload["blockers"]
     assert "reduction_invalid:omitted_regions" in payload["blockers"]
+
+
+def test_selected_sources_fail_closed_before_normalization_can_raise() -> None:
+    malformed_item = build_source_materialization_projection(
+        strategy=DIRECT_SLICE,
+        selected_sources=["not-a-source"],  # type: ignore[list-item]
+        **_identity(),
+    )
+    assert malformed_item["status"] == "RETURN"
+    assert "selected_source_malformed:0" in malformed_item["blockers"]
+
+    malformed_container = build_source_materialization_projection(
+        strategy=DIRECT_SLICE,
+        selected_sources="not-a-list",  # type: ignore[arg-type]
+        **_identity(),
+    )
+    assert malformed_container["status"] == "RETURN"
+    assert "selected_sources_malformed" in malformed_container["blockers"]
