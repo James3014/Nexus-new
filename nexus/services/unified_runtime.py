@@ -2866,13 +2866,29 @@ class UnifiedRuntime:
         self._workforce_policy_loader = (
             workforce_policy_loader if workforce_policy_loader is not None else WorkforcePolicyLoader()
         )
-        self._consumer_ports = consumer_ports
+        self._consumer_ports = None
+        if consumer_ports is not None:
+            self.bind_consumer_ports(consumer_ports)
 
     def bind_consumer_ports(self, consumer_ports: Any) -> None:
         """Bind immutable assembly-owned runtime writer/effect ports."""
         if consumer_ports is None or not hasattr(consumer_ports, "runtime_kwargs"):
             raise ValueError("loaded_writer_consumer_ports_required")
+        if self._consumer_ports is not None and self._consumer_ports is not consumer_ports:
+            raise ValueError("loaded_writer_consumer_ports_rebind_denied")
         self._consumer_ports = consumer_ports
+
+    def _consumer_runtime_kwargs(self, supplied: dict[str, Any]) -> dict[str, Any]:
+        if self._consumer_ports is None:
+            return supplied
+        defaults = self._consumer_ports.runtime_kwargs()
+        for name in ("runtime_writer_factory", "effect_journal", "effect_dispatch", "effect_reconcile"):
+            value = supplied.get(name)
+            if value is not None and value is not defaults[name]:
+                raise ValueError(f"loaded_writer_{name}_override_denied")
+            supplied[name] = defaults[name]
+        supplied["effect_fenced"] = bool(supplied.get("effect_fenced") or defaults["effect_fenced"])
+        return supplied
 
     def run(
         self,
@@ -2890,13 +2906,18 @@ class UnifiedRuntime:
         owner_context: Any = None,
         runtime_writer_factory: Any = None,
     ) -> dict[str, Any]:
-        if self._consumer_ports is not None:
-            defaults = self._consumer_ports.runtime_kwargs()
-            runtime_writer_factory = runtime_writer_factory or defaults["runtime_writer_factory"]
-            effect_journal = effect_journal or defaults["effect_journal"]
-            effect_dispatch = effect_dispatch or defaults["effect_dispatch"]
-            effect_reconcile = effect_reconcile or defaults["effect_reconcile"]
-            effect_fenced = effect_fenced or defaults["effect_fenced"]
+        values = self._consumer_runtime_kwargs({
+            "runtime_writer_factory": runtime_writer_factory,
+            "effect_journal": effect_journal,
+            "effect_dispatch": effect_dispatch,
+            "effect_reconcile": effect_reconcile,
+            "effect_fenced": effect_fenced,
+        })
+        runtime_writer_factory = values["runtime_writer_factory"]
+        effect_journal = values["effect_journal"]
+        effect_dispatch = values["effect_dispatch"]
+        effect_reconcile = values["effect_reconcile"]
+        effect_fenced = values["effect_fenced"]
         return self._run_once(
             request=request,
             online_invoker=online_invoker,
@@ -2932,13 +2953,18 @@ class UnifiedRuntime:
         owner_context: Any = None,
         runtime_writer_factory: Any = None,
     ) -> dict[str, Any]:
-        if self._consumer_ports is not None:
-            defaults = self._consumer_ports.runtime_kwargs()
-            runtime_writer_factory = runtime_writer_factory or defaults["runtime_writer_factory"]
-            effect_journal = effect_journal or defaults["effect_journal"]
-            effect_dispatch = effect_dispatch or defaults["effect_dispatch"]
-            effect_reconcile = effect_reconcile or defaults["effect_reconcile"]
-            effect_fenced = effect_fenced or defaults["effect_fenced"]
+        values = self._consumer_runtime_kwargs({
+            "runtime_writer_factory": runtime_writer_factory,
+            "effect_journal": effect_journal,
+            "effect_dispatch": effect_dispatch,
+            "effect_reconcile": effect_reconcile,
+            "effect_fenced": effect_fenced,
+        })
+        runtime_writer_factory = values["runtime_writer_factory"]
+        effect_journal = values["effect_journal"]
+        effect_dispatch = values["effect_dispatch"]
+        effect_reconcile = values["effect_reconcile"]
+        effect_fenced = values["effect_fenced"]
         _validate_workforce_route(request.route)
         res = validate_receipt_base(previous_receipt, mode="strict")
         if not res.get("ok"):

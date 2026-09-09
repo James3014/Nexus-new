@@ -72,3 +72,72 @@ def test_loaded_ports_reject_singleton_or_root_drift(tmp_path, field):
         values[field] = SimpleNamespace(project_root=tmp_path / "foreign")
     with pytest.raises(ConsumerPortBindingError):
         LoadedWriterConsumerPorts(**values)
+
+
+def test_real_cohort_consumers_write_readback_and_hold_denial(tmp_path):
+    """Exercise the actual A/F factories returned by the cohort fixture."""
+    from nexus.events.transport import NexusEventBus
+    from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+    from nexus.services.unified_runtime import UnifiedRuntime
+    from tests.services.test_unified_runtime import _Planner, _online, _request
+    from tests.integration.test_writer_activation_cohort import _real_cohort
+
+    cohort, roots = _real_cohort(tmp_path)
+    active = cohort.activate()
+    assert active.state == "ACTIVE"
+    cohort.release(active)
+    task_root, event_root, runtime_root = roots
+    effects = runtime_root.factory.effect_binding()
+    ports = LoadedWriterConsumerPorts(
+        task_writer_factory=task_root.factory,
+        event_bus=event_root.event_bus,
+        event_store=event_root.event_store,
+        event_root=event_root.root,
+        runtime_writer_factory=runtime_root.factory,
+        effect_journal=effects.journal,
+        effect_dispatch=effects.dispatch,
+        effect_reconcile=effects.reconcile,
+    )
+    service = SelfHostedTaskService(
+        state_dir=task_root.root, ephemeral=True, auto_reconcile=False, consumer_ports=ports
+    )
+    service._write_state("consumer-port-task", {"task_id": "consumer-port-task", "status": "SUBMITTED"})
+    service._emit_bound_attempt_transition(
+        {
+            "task_id": "consumer-port-task",
+            "attempt_id": "attempt-1",
+            "status": "RUNNING",
+            "source_revision": "source",
+            "contract_revision": "contract",
+        },
+        "consumer-port-task",
+    )
+    records = service.read_canonical_attempt_events(
+        "consumer-port-task",
+        "attempt-1",
+        project_root=event_root.root,
+        event_bus=ports.event_bus,
+        event_store=ports.event_store,
+    )
+    assert records[0]["payload"]["task_id"] == "consumer-port-task"
+    runtime = UnifiedRuntime(planner=_Planner(), consumer_ports=ports)
+    with pytest.raises(ValueError, match="loaded_writer_runtime_writer_factory_override_denied"):
+        runtime.run(
+            _request(),
+            online_invoker=_online,
+            runtime_writer_factory=object(),
+            receipt_path=Path(runtime_root.root) / "foreign.json",
+        )
+    output = runtime.run(
+        _request(), online_invoker=_online, receipt_path=Path(runtime_root.root) / "consumer.json"
+    )
+    assert output["effect_journal_bindings"]
+    assert (Path(runtime_root.root) / "consumer.json").read_bytes()
+    assert (Path(runtime_root.root) / ".nexus/events/effect_journal.v1.json").read_bytes()
+
+    cohort.registry.begin_hold(tuple(root.root for root in roots), cohort_id="consumer-port-hold")
+    with pytest.raises(Exception):
+        service._write_state("held-task", {"task_id": "held-task", "status": "SUBMITTED"})
+    with pytest.raises(Exception):
+        event_root.event_bus.publish("held-event", {"task_id": "consumer-port-task"})
+    assert not (Path(task_root.root) / "held-task.json").exists()
