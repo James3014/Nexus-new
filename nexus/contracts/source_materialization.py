@@ -46,7 +46,7 @@ def build_source_materialization_projection(
             "tree": str(tree or "").strip(),
             "source_hash": str(source_hash or "").strip(),
         },
-        "selected_sources": [_normalize_source(item) for item in (selected_sources or [])],
+        "selected_sources": _normalize_selected_sources(selected_sources),
         "reduction": _normalize_reduction(reduction),
         "escalation": _normalize_escalation(escalation),
         "claim_ceiling": SOURCE_MATERIALIZATION_CLAIM_CEILING,
@@ -166,8 +166,16 @@ def _validate_reduction(reduction: Mapping[str, Any]) -> list[str]:
     return blockers
 
 
+def _normalize_selected_sources(value: Any) -> Any:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        return value
+    return [_normalize_source(item) if isinstance(item, Mapping) else item for item in value]
+
+
 def _normalize_source(source: Mapping[str, Any]) -> dict[str, Any]:
-    raw_ranges = source.get("ranges") if isinstance(source, Mapping) else None
+    raw_ranges = source.get("ranges")
     if isinstance(raw_ranges, list):
         ranges: Any = [
             [int(item[0]), int(item[1])] if _valid_range(item) else None for item in raw_ranges
