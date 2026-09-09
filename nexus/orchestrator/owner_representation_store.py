@@ -86,6 +86,7 @@ from nexus.contracts.owner_representation import (
     evaluate_owner_representation,
 )
 from nexus.orchestrator.standing_grant_store import (
+    StandingGrantKey,
     StandingGrantReceiptError,
     _authorize_durable_standing_grant_effect_at,
     _canonical_json,
@@ -323,6 +324,7 @@ def authorize_owner_representation_grant_issuance(
     *,
     standing_grant_path: Path | None = None,
     requested_at: datetime | None = None,
+    standing_grant_key: StandingGrantKey | None = None,
 ) -> dict[str, Any]:
     """Bind one exact Owner-representation grant issuance to the canonical
     durable Owner standing grant (``OWNER_REPRESENTATION_GRANT_ISSUE``).
@@ -342,11 +344,16 @@ def authorize_owner_representation_grant_issuance(
     repository = _repository_identity_for_destination(grant.destination)
     effect = owner_representation_issuance_effect(grant)
     if standing_grant_path is None:
+        if not isinstance(standing_grant_key, StandingGrantKey):
+            raise OwnerRepresentationGrantBlocked(
+                OwnerRepresentationReason.EXACT_OWNER_AUTHORIZATION_REQUIRED.value
+            )
         return authorize_durable_standing_grant_effect(
             repository=repository,
             action=AutonomyActionClass.OWNER_REPRESENTATION_GRANT_ISSUE,
             effect=effect,
             requested_at=effective_now,
+            key=standing_grant_key,
         )
     return _authorize_durable_standing_grant_effect_at(
         Path(standing_grant_path),

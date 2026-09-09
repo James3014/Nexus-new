@@ -266,6 +266,7 @@ class ExecutionReadinessRequest(BaseModel):
     required_action_family: StrictStr
     execution_contract_kind: StrictStr
     task_campaign_goal_identity: StrictStr | None = None
+    durable_coordination_scope_id: StrictStr | None = None
     desired_deployment_identity: StrictStr | None = None
     worker_constraints: tuple[StrictStr, ...] = ()
     workforce_dispatch_binding: dict[str, Any] | None = None
@@ -308,6 +309,11 @@ class ExecutionReadinessRequest(BaseModel):
             and not self.task_campaign_goal_identity.strip()
         ):
             raise ValueError("TASK_CAMPAIGN_GOAL_IDENTITY_EMPTY")
+        if (
+            self.durable_coordination_scope_id is not None
+            and not self.durable_coordination_scope_id.strip()
+        ):
+            raise ValueError("DURABLE_COORDINATION_SCOPE_ID_EMPTY")
         if (
             self.desired_deployment_identity is not None
             and not self.desired_deployment_identity.strip()

@@ -728,10 +728,14 @@ def authorize_durable_standing_grant_effect(
     action: AutonomyActionClass,
     effect: Mapping[str, Any],
     requested_at: datetime | None = None,
+    key: StandingGrantKey | None = None,
 ) -> dict[str, Any]:
-    """Authorize one request-bound effect from the single canonical receipt."""
+    """Authorize one request-bound effect from its exact durable key."""
     effective_now = requested_at or datetime.now(timezone.utc)
-    receipt = load_standing_grant_receipt(now=effective_now)
+    if key is not None:
+        if not isinstance(key, StandingGrantKey) or key.repository != repository:
+            raise StandingGrantReceiptError("KEY_SCOPE_MISMATCH")
+    receipt = load_standing_grant_receipt(now=effective_now, key=key)
     if receipt is None:
         raise StandingGrantReceiptError("RECEIPT_MISSING")
     return _authorize_effect_from_receipt(

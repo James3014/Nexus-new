@@ -306,7 +306,12 @@ def resolve_durable_merge_authorization(
     safe_request = _safe(request, StandingGrantRequest)
     effective_now = now or datetime.now(timezone.utc)
     try:
-        receipt = load_standing_grant_receipt(now=effective_now)
+        receipt = load_standing_grant_receipt(
+            now=effective_now,
+            repository=safe_request.repository,
+            goal_id=safe_request.goal_id,
+            thread_id=safe_request.thread_id,
+        )
     except StandingGrantReceiptError:
         return evaluate_action({}, {}, platform_approval_required=platform_approval_required)
     if receipt is None:

@@ -441,6 +441,16 @@ def _canonical_authority_observation(
                 f"authority_action_family={request.required_action_family}",
             ),
         )
+    if not request.durable_coordination_scope_id:
+        return PlaneObservation(
+            plane=ExecutionReadinessPlane.AUTHORITY,
+            status=ExecutionReadinessStatus.BLOCKED,
+            blocker_code=ExecutionReadinessBlockerCode.TASK_AUTHORITY_MISSING,
+            evidence_identities=(
+                f"authority_goal_id={goal_id}",
+                "authority_durable_coordination_scope_id_missing",
+            ),
+        )
     action = _authority_action(request)
     if action is None:
         return PlaneObservation(
@@ -458,7 +468,11 @@ def _canonical_authority_observation(
             inspect_standing_grant_receipt,
         )
 
-        snapshot = inspect_standing_grant_receipt(now=moment)
+        snapshot = inspect_standing_grant_receipt(
+            now=moment,
+            goal_id=goal_id,
+            thread_id=request.durable_coordination_scope_id,
+        )
     except Exception as exc:
         return PlaneObservation(
             plane=ExecutionReadinessPlane.AUTHORITY,
@@ -500,6 +514,7 @@ def _canonical_authority_observation(
             goal_id=goal_id,
             action=action,
             requested_at=moment,
+            coordination_scope_id=request.durable_coordination_scope_id,
         )
     except Exception as exc:
         return PlaneObservation(
