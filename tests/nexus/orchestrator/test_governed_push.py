@@ -1,16 +1,44 @@
+import json
+import os
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 import nexus.orchestrator.governed_push as governed_push_module
-from nexus.contracts.autonomy_goal import AutonomyActionClass, canonical_autonomy_hash
+import nexus.orchestrator.standing_grant_store as standing_grant_store
+from nexus.contracts.autonomy_goal import (
+    AutonomyActionClass,
+    StandingGrantContext,
+    canonical_autonomy_hash,
+)
 from nexus.orchestrator.governed_push import GovernedPushManager
-from nexus.orchestrator.standing_grant_store import StandingGrantKey
+from nexus.orchestrator.standing_grant_store import StandingGrantKey, StandingGrantReceipt
 
 
 def _key():
     return StandingGrantKey(governed_push_module._GITHUB_REPOSITORY, "goal", "scope")
+
+
+def _physical_keyed_receipt(tmp_path, key, grant_id):
+    context = StandingGrantContext.issue(
+        owner_id="owner",
+        coordinator_id="coordinator",
+        repository=key.repository,
+        thread_id=key.coordinator_thread,
+        goal_id=key.goal_id,
+        allowed_actions=(AutonomyActionClass.REPOSITORY_PUSH,),
+        issued_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    receipt = StandingGrantReceipt.issue(grant_id=grant_id, context=context)
+    path = tmp_path / f"{grant_id}.json"
+    path.write_text(
+        json.dumps(receipt.model_dump(mode="json"), sort_keys=True, separators=(",", ":")),
+        encoding="utf-8",
+    )
+    return receipt
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -227,3 +255,49 @@ def test_governed_push_uncertain_ack_reconciles_remote_before_return(monkeypatch
     assert receipt.push_acknowledged is False
     assert receipt.reconciled_after_uncertain_ack is True
     assert receipt.effect_present is True
+
+
+def test_governed_push_exact_key_authorizes_preexisting_remote_without_push(monkeypatch, tmp_path):
+    repo, _remote, expected = _repo_with_remote(tmp_path)
+    _git(repo, "push", "origin", f"{expected}:refs/heads/nexus/integration")
+    key_a = StandingGrantKey(governed_push_module._GITHUB_REPOSITORY, "goal-a", "scope-a")
+    key_b = StandingGrantKey(governed_push_module._GITHUB_REPOSITORY, "goal-b", "scope-b")
+    keyed_dir = tmp_path / "keyed"
+    monkeypatch.setattr(standing_grant_store, "_keyed_directory", lambda key: keyed_dir / key.digest)
+    monkeypatch.setattr(
+        standing_grant_store,
+        "_keyed_receipt_path",
+        lambda key: keyed_dir / key.digest / f"{key.digest}.json",
+    )
+    receipt_a = _physical_keyed_receipt(tmp_path, key_a, "grant-a")
+    receipt_b = _physical_keyed_receipt(tmp_path, key_b, "grant-b")
+    for key, receipt in ((key_a, receipt_a), (key_b, receipt_b)):
+        (keyed_dir / key.digest).mkdir(parents=True)
+        os.chmod(keyed_dir / key.digest, 0o700)
+        (keyed_dir / key.digest / f"{key.digest}.json").write_text(
+            json.dumps(receipt.model_dump(mode="json"), sort_keys=True, separators=(",", ":")),
+            encoding="utf-8",
+        )
+        os.chmod(keyed_dir / key.digest / f"{key.digest}.json", 0o600)
+    manager = GovernedPushManager(repo_root=repo, allowed_remotes={"origin"})
+    result = manager.push(
+        competition_id="competition-1", winner_task_id="winner-1", remote="origin",
+        branch="nexus/integration", expected_sha=expected, authority_key=key_a,
+    )
+    assert result.authorized is True
+    assert result.preexisting_effect is True
+    assert result.push_performed is False
+    assert result.authorization_grant_receipt_hash == receipt_a.receipt_hash
+
+
+def test_governed_push_wrong_key_type_is_zero_git_calls(monkeypatch, tmp_path):
+    repo, _remote, expected = _repo_with_remote(tmp_path)
+    manager = GovernedPushManager(repo_root=repo, allowed_remotes={"origin"})
+    calls = []
+    monkeypatch.setattr(manager, "_git", lambda args: calls.append(args) or expected)
+    with pytest.raises(PermissionError, match="exact repository authority key"):
+        manager.push(
+            competition_id="competition-1", winner_task_id="winner-1", remote="origin",
+            branch="nexus/integration", expected_sha=expected, authority_key="wrong",
+        )
+    assert calls == []

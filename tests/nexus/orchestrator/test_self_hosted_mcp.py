@@ -157,6 +157,25 @@ def test_tools_list_exposes_governed_self_hosted_surface():
     assert "agy" in campaign_properties["workers"]["items"]["enum"]
 
 
+def test_compete_task_missing_authority_binding_is_zero_dispatch():
+    class CountingService(FakeService):
+        def __init__(self):
+            self.calls = 0
+
+        def submit_task(self, arguments):
+            self.calls += 1
+            return super().submit_task(arguments)
+
+    service = CountingService()
+    server = NexusSelfHostedMCPServer(service=service)
+    response = server.handle({
+        "jsonrpc": "2.0", "id": 25, "method": "tools/call",
+        "params": {"name": "nexus_self_hosted_compete_task", "arguments": {"workers": ["codex", "opencode"]}},
+    })
+    assert response["result"]["isError"] is True
+    assert service.calls == 0
+
+
 def test_wait_and_actionable_tools_call_service_methods():
     server = NexusSelfHostedMCPServer(service=FakeService())
 
