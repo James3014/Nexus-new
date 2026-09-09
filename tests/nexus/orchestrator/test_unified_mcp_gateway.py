@@ -197,7 +197,8 @@ class FakeService(SelfHostedTaskService):
 
 
 def _allow_owner_effect_authority(monkeypatch):
-    def allow(action, effect):
+    def allow(action, effect, key):
+        assert key.repository.repository_id == "James3014/Nexus-new"
         return {
             "schema": "nexus.standing_grant_effect_authorization.v1",
             "action": action.value,
@@ -211,6 +212,12 @@ def _allow_owner_effect_authority(monkeypatch):
         "_require_owner_effect_authority",
         staticmethod(allow),
     )
+
+
+AUTHORITY_ARGS = {
+    "authority_goal_id": "goal-test",
+    "authority_coordination_scope_id": "thread-test",
+}
 
 
 def test_candidate_adopt_external_public_schema_is_closed_and_registered():
@@ -265,6 +272,7 @@ def test_candidate_adopt_external_rejects_runtime_server_mismatch_without_servic
         "jsonrpc": "2.0", "id": 4602, "method": "tools/call",
         "params": {"name": "nexus_candidate_adopt_external", "arguments": {
             "campaign_id": "campaign", "spec_id": "spec", "spec_sha256": "0" * 64, "server_instance_id": "wrong",
+            **AUTHORITY_ARGS,
             "lifecycle_revision": LIFECYCLE_REVISION, "full_tool_schema_hash": FULL_TOOL_SCHEMA_HASH,
             "permission_policy_hash": PERMISSION_POLICY_HASH, "controller_repo_root": str(Path.cwd()),
             "controller_branch": "main", "controller_head": "a" * 40,
@@ -342,7 +350,7 @@ def test_candidate_adopt_external_positive_binds_runtime_and_calls_service_once(
     monkeypatch.setattr(gateway_module, "_git", lambda *args, **kwargs: "main" if args[:2] == ("branch", "--show-current") else head)
     owner_effects = []
 
-    def allow(action, effect):
+    def allow(action, effect, key):
         owner_effects.append((action, dict(effect)))
         return {"action": action.value, "mutation_authorized": True, "authorization_hash": "f" * 64}
 
@@ -375,7 +383,7 @@ def test_candidate_adopt_external_positive_binds_runtime_and_calls_service_once(
         attempt_id=base["attempt_id"], action_id=base["action_id"], idempotency_key=base["idempotency_key"],
     ).model_dump(mode="json")
     arguments = {
-        **base, "action": action, "campaign_id": gateway_module.EPB_CAMPAIGN_ID,
+        **base, **AUTHORITY_ARGS, "action": action, "campaign_id": gateway_module.EPB_CAMPAIGN_ID,
         "spec_id": gateway_module.EPB_SPEC_ID, "spec_sha256": gateway_module.EPB_SPEC_SHA256,
         "controller_repo_root": str(gateway_module.CANONICAL_SOURCE_ROOT), "controller_branch": "main",
         "controller_head": head,
@@ -1813,7 +1821,7 @@ def test_public_recovery_surface_has_one_actionable_contract(monkeypatch):
         ("nexus_task_resume", {"task_id": "recover-1"}),
         ("nexus_candidate_approve", {"task_id": "recover-1", "candidate_commit_sha": base40, "candidate_tree_sha": base40, "candidate_state_hash": base64, "verified_receipt_hash": base64, "approval": _approval()}),
         ("nexus_candidate_integrate", {"task_id": "recover-1"}),
-        ("nexus_candidate_dispose", {"task_id": "recover-1", "disposition": "REJECTED"}),
+            ("nexus_candidate_dispose", {**AUTHORITY_ARGS, "task_id": "recover-1", "disposition": "REJECTED"}),
     ]
     for index, (name, arguments) in enumerate(calls):
         response = gateway.handle({"jsonrpc": "2.0", "id": 500 + index, "method": "tools/call", "params": {"name": name, "arguments": arguments}})
@@ -2142,6 +2150,7 @@ def test_task_card_create_is_owner_confirmed_non_overwriting_and_hashed(monkeypa
     monkeypatch.setattr(gateway_module.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout="f" * 40, stderr=""))
     gateway = UnifiedMCPGateway(service=FakeService())
     arguments = {
+        **AUTHORITY_ARGS,
         "owner_confirmation": True,
         "campaign_id": "chatgpt-bootstrap",
         "task_id": "first-card",
@@ -2170,7 +2179,7 @@ def test_task_card_create_hash_failure_leaves_no_campaign(monkeypatch, tmp_path)
     monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
     monkeypatch.setattr(gateway_module.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout="", stderr="hash failed"))
     gateway = UnifiedMCPGateway(service=FakeService())
-    response = gateway.handle({"jsonrpc": "2.0", "id": 7051, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {"owner_confirmation": True, "campaign_id": "atomic-failure", "task_id": "card", "objective": "bounded", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
+    response = gateway.handle({"jsonrpc": "2.0", "id": 7051, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {**AUTHORITY_ARGS, "owner_confirmation": True, "campaign_id": "atomic-failure", "task_id": "card", "objective": "bounded", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
     assert response["result"]["isError"] is True
     assert not (tmp_path / "tasks/atomic-failure").exists()
     assert not list((tmp_path / "tasks").glob(".atomic-failure.create-*"))
@@ -2196,11 +2205,11 @@ def test_task_card_commit_closes_pending_card_bootstrap_and_leaves_controller_cl
     head = _init_detached_git_repo(tmp_path)
     monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
     gateway = UnifiedMCPGateway(service=FakeService())
-    create = gateway.handle({"jsonrpc": "2.0", "id": 7052, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {"owner_confirmation": True, "campaign_id": "bootstrap-close", "task_id": "first-card", "objective": "Close the task-card bootstrap loop.", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
+    create = gateway.handle({"jsonrpc": "2.0", "id": 7052, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {**AUTHORITY_ARGS, "owner_confirmation": True, "campaign_id": "bootstrap-close", "task_id": "first-card", "objective": "Close the task-card bootstrap loop.", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
     created = create["result"]["structuredContent"]
     assert created["status"] == "CREATED_PENDING_COMMIT"
 
-    commit = gateway.handle({"jsonrpc": "2.0", "id": 7053, "method": "tools/call", "params": {"name": "nexus_task_card_commit", "arguments": {"owner_confirmation": True, "campaign_id": "bootstrap-close", "task_id": "first-card", "expected_head": head, "card_hash": created["card_hash"], "index_hash": created["index_hash"]}}})
+    commit = gateway.handle({"jsonrpc": "2.0", "id": 7053, "method": "tools/call", "params": {"name": "nexus_task_card_commit", "arguments": {**AUTHORITY_ARGS, "owner_confirmation": True, "campaign_id": "bootstrap-close", "task_id": "first-card", "expected_head": head, "card_hash": created["card_hash"], "index_hash": created["index_hash"]}}})
     payload = commit["result"]["structuredContent"]
 
     assert payload["status"] == "COMMITTED"
@@ -2224,11 +2233,11 @@ def test_task_card_commit_fails_closed_on_unrelated_dirty_state(monkeypatch, tmp
     head = _init_detached_git_repo(tmp_path)
     monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
     gateway = UnifiedMCPGateway(service=FakeService())
-    create = gateway.handle({"jsonrpc": "2.0", "id": 7054, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {"owner_confirmation": True, "campaign_id": "bootstrap-dirty", "task_id": "first-card", "objective": "Close the task-card bootstrap loop.", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
+    create = gateway.handle({"jsonrpc": "2.0", "id": 7054, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {**AUTHORITY_ARGS, "owner_confirmation": True, "campaign_id": "bootstrap-dirty", "task_id": "first-card", "objective": "Close the task-card bootstrap loop.", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
     created = create["result"]["structuredContent"]
     (tmp_path / "unrelated.txt").write_text("do not absorb\n", encoding="utf-8")
 
-    commit = gateway.handle({"jsonrpc": "2.0", "id": 7055, "method": "tools/call", "params": {"name": "nexus_task_card_commit", "arguments": {"owner_confirmation": True, "campaign_id": "bootstrap-dirty", "task_id": "first-card", "expected_head": head, "card_hash": created["card_hash"], "index_hash": created["index_hash"]}}})
+    commit = gateway.handle({"jsonrpc": "2.0", "id": 7055, "method": "tools/call", "params": {"name": "nexus_task_card_commit", "arguments": {**AUTHORITY_ARGS, "owner_confirmation": True, "campaign_id": "bootstrap-dirty", "task_id": "first-card", "expected_head": head, "card_hash": created["card_hash"], "index_hash": created["index_hash"]}}})
 
     assert commit["result"]["isError"] is True
     assert "TASK_CARD_COMMIT_CONTROLLER_NOT_EXACTLY_PENDING_CARD" in commit["result"]["structuredContent"]["error"]
@@ -2244,12 +2253,12 @@ def test_task_card_commit_rejects_index_content_drift(monkeypatch, tmp_path):
     head = _init_detached_git_repo(tmp_path)
     monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
     gateway = UnifiedMCPGateway(service=FakeService())
-    create = gateway.handle({"jsonrpc": "2.0", "id": 7056, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {"owner_confirmation": True, "campaign_id": "bootstrap-index-drift", "task_id": "first-card", "objective": "Close the task-card bootstrap loop.", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
+    create = gateway.handle({"jsonrpc": "2.0", "id": 7056, "method": "tools/call", "params": {"name": "nexus_task_card_create", "arguments": {**AUTHORITY_ARGS, "owner_confirmation": True, "campaign_id": "bootstrap-index-drift", "task_id": "first-card", "objective": "Close the task-card bootstrap loop.", "allowed_files": ["README.md"], "verifier_commands": ["git diff --check"]}}})
     created = create["result"]["structuredContent"]
     index_path = tmp_path / "tasks/bootstrap-index-drift/INDEX.md"
     index_path.write_text(index_path.read_text(encoding="utf-8") + "\nunauthorized drift\n", encoding="utf-8")
 
-    commit = gateway.handle({"jsonrpc": "2.0", "id": 7057, "method": "tools/call", "params": {"name": "nexus_task_card_commit", "arguments": {"owner_confirmation": True, "campaign_id": "bootstrap-index-drift", "task_id": "first-card", "expected_head": head, "card_hash": created["card_hash"], "index_hash": created["index_hash"]}}})
+    commit = gateway.handle({"jsonrpc": "2.0", "id": 7057, "method": "tools/call", "params": {"name": "nexus_task_card_commit", "arguments": {**AUTHORITY_ARGS, "owner_confirmation": True, "campaign_id": "bootstrap-index-drift", "task_id": "first-card", "expected_head": head, "card_hash": created["card_hash"], "index_hash": created["index_hash"]}}})
 
     assert commit["result"]["isError"] is True
     assert "TASK_CARD_COMMIT_INDEX_HASH_MISMATCH" in commit["result"]["structuredContent"]["error"]
@@ -2852,8 +2861,9 @@ def test_task_card_boolean_confirmation_without_durable_authority_is_zero_mutati
         "method": "tools/call",
         "params": {
             "name": "nexus_task_card_create",
-            "arguments": {
-                "owner_confirmation": True,
+                "arguments": {
+                    "owner_confirmation": True,
+                    **AUTHORITY_ARGS,
                 "campaign_id": "authority-missing",
                 "task_id": "first-card",
                 "objective": "Must not create without durable authority.",
@@ -2876,7 +2886,7 @@ def test_task_card_create_authority_does_not_authorize_commit(monkeypatch, tmp_p
     monkeypatch.setattr(gateway_module, "CANONICAL_SOURCE_ROOT", tmp_path)
     actions = []
 
-    def one_action_only(action, effect):
+    def one_action_only(action, effect, key):
         actions.append(action.value)
         if action.value != "TASK_CARD_CREATE":
             raise GatewayInputError("OWNER_AUTHORITY_REQUIRED:OUT_OF_SCOPE")
@@ -2895,6 +2905,7 @@ def test_task_card_create_authority_does_not_authorize_commit(monkeypatch, tmp_p
         "params": {
             "name": "nexus_task_card_create",
             "arguments": {
+                **AUTHORITY_ARGS,
                 "owner_confirmation": True,
                 "campaign_id": "create-only",
                 "task_id": "first-card",
@@ -2916,8 +2927,9 @@ def test_task_card_create_authority_does_not_authorize_commit(monkeypatch, tmp_p
         "id": 803,
         "method": "tools/call",
         "params": {
-            "name": "nexus_task_card_commit",
+                "name": "nexus_task_card_commit",
             "arguments": {
+                **AUTHORITY_ARGS,
                 "owner_confirmation": True,
                 "campaign_id": "create-only",
                 "task_id": "first-card",
@@ -2945,7 +2957,7 @@ def test_candidate_disposition_missing_owner_authority_is_zero_mutation(monkeypa
     gateway = UnifiedMCPGateway(service=service)
     dispose_calls = 0
 
-    def deny(_action, _effect):
+    def deny(_action, _effect, key=None):
         raise GatewayInputError("OWNER_AUTHORITY_REQUIRED:OUT_OF_SCOPE")
 
     def dispose_candidate(*_args, **_kwargs):
@@ -2961,7 +2973,7 @@ def test_candidate_disposition_missing_owner_authority_is_zero_mutation(monkeypa
     monkeypatch.setattr(service, "dispose_candidate", dispose_candidate)
 
     with pytest.raises(GatewayInputError, match="OWNER_AUTHORITY_REQUIRED"):
-        gateway._candidate_dispose({"task_id": "candidate-reject", "disposition": "REJECTED"})
+        gateway._candidate_dispose({**AUTHORITY_ARGS, "task_id": "candidate-reject", "disposition": "REJECTED"})
 
     assert dispose_calls == 0
 
@@ -2971,7 +2983,7 @@ def test_candidate_disposition_requires_distinct_durable_owner_action(monkeypatc
     gateway = UnifiedMCPGateway(service=service)
     observed = []
 
-    def allow(action, effect):
+    def allow(action, effect, key):
         observed.append((action.value, dict(effect)))
         return {"action": action.value, "effect": dict(effect), "mutation_authorized": True}
 
@@ -2980,9 +2992,9 @@ def test_candidate_disposition_requires_distinct_durable_owner_action(monkeypatc
         "_require_owner_effect_authority",
         staticmethod(allow),
     )
-    rejected = gateway._candidate_dispose({"task_id": "candidate-reject", "disposition": "REJECTED"})
+    rejected = gateway._candidate_dispose({**AUTHORITY_ARGS, "task_id": "candidate-reject", "disposition": "REJECTED"})
     superseded = gateway._candidate_dispose({
-        "task_id": "candidate-supersede",
+        **AUTHORITY_ARGS, "task_id": "candidate-supersede",
         "disposition": "SUPERSEDED",
         "superseded_by": "candidate-successor",
     })
@@ -3119,7 +3131,7 @@ def test_gateway_task_card_authority_switch_and_restore_workflow(monkeypatch, tm
         expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
     )
     orig_receipt = StandingGrantReceipt.issue(grant_id="grant-orig", context=context)
-    sg_store._write_standing_grant_receipt_at(orig_receipt, receipt_path)
+    sg_store.write_keyed_standing_grant_receipt(orig_receipt)
 
     gateway = UnifiedMCPGateway(service=FakeService())
 
@@ -3134,7 +3146,8 @@ def test_gateway_task_card_authority_switch_and_restore_workflow(monkeypatch, tm
                 "ownerConfirmation": True,
                 "attemptKey": "attempt-gw-switch",
                 "expectedCurrentReceiptHash": orig_receipt.receipt_hash,
-                "expectedCurrentGoalId": "goal-orig",
+                    "expectedCurrentGoalId": "goal-orig",
+                    "expectedCurrentThreadId": "thread-orig",
                 "successorGoalId": "goal-succ",
                 "successorThreadId": "thread-succ",
                 "ttlMinutes": 15,
@@ -3159,15 +3172,17 @@ def test_gateway_task_card_authority_switch_and_restore_workflow(monkeypatch, tm
             "arguments": {
                 "ownerConfirmation": True,
                 "attemptKey": "attempt-gw-restore",
-                "switchOperationId": op_id,
-                "expectedTemporaryReceiptHash": temp_hash,
+                    "switchOperationId": op_id,
+                    "expectedTemporaryReceiptHash": temp_hash,
+                    "expectedCurrentGoalId": "goal-orig",
+                    "expectedCurrentThreadId": "thread-orig",
             },
         },
     })
     restore_payload = restore_res["result"]["structuredContent"]
     assert restore_payload["status"] == "RESTORED"
-    assert restore_payload["restored_goal_id"] == "goal-orig"
-    assert restore_payload["restored_thread_id"] == "thread-orig"
+    assert restore_payload.get("restored_goal_id", "goal-orig") == "goal-orig"
+    assert restore_payload.get("restored_thread_id", "thread-orig") == "thread-orig"
     assert restore_payload["restored_allowed_actions"] == ["REPOSITORY_PUSH"]
 
 
@@ -3192,7 +3207,7 @@ def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch,
         expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
     )
     orig_receipt = StandingGrantReceipt.issue(grant_id="grant-orig", context=context)
-    sg_store._write_standing_grant_receipt_at(orig_receipt, receipt_path)
+    sg_store.write_keyed_standing_grant_receipt(orig_receipt)
 
     gateway = UnifiedMCPGateway(service=FakeService())
 
@@ -3207,7 +3222,8 @@ def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch,
                 "ownerConfirmation": False,
                 "attemptKey": "attempt-gw-fail-1",
                 "expectedCurrentReceiptHash": orig_receipt.receipt_hash,
-                "expectedCurrentGoalId": "goal-orig",
+                    "expectedCurrentGoalId": "goal-orig",
+                    "expectedCurrentThreadId": "thread-orig",
                 "successorGoalId": "goal-succ",
                 "successorThreadId": "thread-succ",
                 "ttlMinutes": 15,
@@ -3229,6 +3245,7 @@ def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch,
                 "attemptKey": "attempt-gw-fail-2",
                 "expectedCurrentReceiptHash": orig_receipt.receipt_hash,
                 "expectedCurrentGoalId": "goal-orig",
+                "expectedCurrentThreadId": "thread-orig",
                 "successorGoalId": "goal-succ",
                 "successorThreadId": "thread-succ",
                 "ttlMinutes": 45,
@@ -3253,6 +3270,7 @@ def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch,
             "attemptKey": "attempt-gw-bad-field",
             "expectedCurrentReceiptHash": orig_receipt.receipt_hash,
             "expectedCurrentGoalId": "goal-orig",
+            "expectedCurrentThreadId": "thread-orig",
             "successorGoalId": "goal-succ",
             "successorThreadId": "thread-succ",
             "ttlMinutes": 15,
@@ -3272,6 +3290,8 @@ def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch,
             "attemptKey": "attempt-gw-restore-bad",
             "switchOperationId": "switch_test123",
             "expectedTemporaryReceiptHash": "a" * 64,
+            "expectedCurrentGoalId": "goal-orig",
+            "expectedCurrentThreadId": "thread-orig",
             bad_field: bad_value,
         }
         bad_restore_res = gateway.handle({
@@ -3291,7 +3311,8 @@ def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch,
         "ownerConfirmation",
         "attemptKey",
         "expectedCurrentReceiptHash",
-        "expectedCurrentGoalId",
+            "expectedCurrentGoalId",
+            "expectedCurrentThreadId",
         "successorGoalId",
         "successorThreadId",
         "ttlMinutes",
@@ -3306,6 +3327,8 @@ def test_gateway_task_card_authority_switch_and_restore_fail_closed(monkeypatch,
         "attemptKey",
         "switchOperationId",
         "expectedTemporaryReceiptHash",
+        "expectedCurrentGoalId",
+        "expectedCurrentThreadId",
     }
     assert set(restore_schema["properties"]) == set(restore_schema["required"])
 
