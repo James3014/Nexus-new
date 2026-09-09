@@ -179,7 +179,7 @@ Additionally verify all five `origin` identities and fetched main SHAs, config a
 - **PASS:** r28 source/runtime/config/PID-bound evidence, five-mount witness, rollback/restored-final evidence, and one harmless unattended canary reaches the recorded independently accepted Candidate boundary.
 - **BLOCK:** any identity drift, missing canonical clone, stale readiness, Web hard block, unknown operation, verifier failure, or rollback uncertainty.
 
-The r28 closeout is documentation-only and does not claim source merge, independent acceptance, release, production readiness, or mutation readiness across all five repositories.
+The r28 closeout is documentation-only and does not itself create independent acceptance; it binds the existing controller acceptance receipt and does not claim source merge, release, production readiness, or mutation readiness across all five repositories.
 
 
 ## r28 bounded completion record
@@ -189,7 +189,7 @@ TASK-006 closes at its existing bounded claim ceiling against the following exac
 - Nexus-new base: `a59b8ab23a91ae4470300a34b4691567255c12af`
 - Runtime main: `3eb673bfcfd874043a70743e34761784fda39c10`
 - r28 operation: `96b83c02de43ff8e6bc37d49e0efabd3f113ac60135ea214c367094b24806574`
-- Durable effect: `ef0802c64e2a8e8f8a65ccb696adf1b0d9d50b21a06348e10d931a038d88af68`
+- Durable effect: `effect_ef0802c64e2a8e8f8a65ccb696adf1b0d9d50b21a06348e10d931a038d88af68`
 - Unit Candidate: `2d41308d27999f210627981a933f8f0da95e54f0`
 - Task Candidate: `c5979ffbc664e019f6790bc5f6c84210749fa43c`
 - Candidate tree: `a85cd07d4dc2d17f7551869565fcbc2fcf6512f3`

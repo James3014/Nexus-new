@@ -62,7 +62,7 @@ The canary reached the recorded bounded Candidate state with these exact binding
 - Nexus-new base `a59b8ab23a91ae4470300a34b4691567255c12af`
 - Runtime main `3eb673bfcfd874043a70743e34761784fda39c10`
 - Operation `96b83c02de43ff8e6bc37d49e0efabd3f113ac60135ea214c367094b24806574`
-- Durable effect `ef0802c64e2a8e8f8a65ccb696adf1b0d9d50b21a06348e10d931a038d88af68`
+- Durable effect `effect_ef0802c64e2a8e8f8a65ccb696adf1b0d9d50b21a06348e10d931a038d88af68`
 - Unit Candidate `2d41308d27999f210627981a933f8f0da95e54f0`; Task Candidate `c5979ffbc664e019f6790bc5f6c84210749fa43c`; tree `a85cd07d4dc2d17f7551869565fcbc2fcf6512f3`
 - Task Card hash `d39a297583ebf37cdfbd0efa09a8c16f3ecf11ec7b9ced8a43dcc07d18d31fb1`
 - Whole-task verification `512530748d61ea0537f5019956bbf07bbbec33a9e724a0790bdeb15cd47d3c6d` (`PASS`)
