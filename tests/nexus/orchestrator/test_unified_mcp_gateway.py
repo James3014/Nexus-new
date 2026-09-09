@@ -4030,3 +4030,30 @@ def test_execution_readiness_via_handle_jsonrpc_roundtrip(readiness_env):
         }
     )
     assert error_response["result"]["isError"] is True
+
+
+def test_project_entry_foreign_repository_is_typed_blocker():
+    gateway = UnifiedMCPGateway(service=FakeService(), github_issue_observer=lambda *_: {"ok": True})
+    response = gateway.handle({
+        "jsonrpc": "2.0", "id": 8421, "method": "tools/call",
+        "params": {"name": "nexus_project_entry", "arguments": {
+            "repository_owner": "other", "repository_name": "repo", "issue_number": 842,
+        }},
+    })
+    payload = response["result"]["structuredContent"]
+    assert payload["schema"] == "nexus.project_entry.v1"
+    assert payload["status"] == "BLOCKED"
+    assert payload["blocker"]["code"] == "PROJECT_ENTRY_REPOSITORY_MISMATCH"
+
+
+def test_project_entry_binding_hash_is_deterministic_and_bound():
+    base = {"repository": "James3014/Nexus-new", "issue_number": 842,
+            "issue_state": "OPEN", "issue_updated_at": "2026-09-09T00:00:00Z",
+            "source_commit": "a" * 40, "source_tree": "b" * 40,
+            "origin": "https://github.com/James3014/Nexus-new.git",
+            "task": {"status": "NO_TASK"}, "readiness": {"outcome": "READY_TO_EXECUTE"},
+            "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS"}
+    first = UnifiedMCPGateway._project_entry_binding_hash(base)
+    assert first == UnifiedMCPGateway._project_entry_binding_hash(dict(base))
+    changed = dict(base, source_tree="c" * 40)
+    assert first != UnifiedMCPGateway._project_entry_binding_hash(changed)

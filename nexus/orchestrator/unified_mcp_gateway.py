@@ -4498,7 +4498,7 @@ class UnifiedMCPGateway:
             raise GatewayInputError("issue_number must be a positive integer")
         repository = f"{owner}/{name}"
         if repository != GITHUB_REPOSITORY.repository_id:
-            raise GatewayInputError("PROJECT_ENTRY_REPOSITORY_MISMATCH")
+            return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_REPOSITORY_MISMATCH", "repository is outside canonical scope")
         try:
             origin = _git("config", "--get", "remote.origin.url").strip()
             head = _git("rev-parse", "HEAD").strip()
@@ -4536,12 +4536,14 @@ class UnifiedMCPGateway:
         }
         if not matches:
             readiness = self._gateway_execution_readiness(readiness_args)
-            return {"schema": "nexus.project_entry.v1", "status": "NO_TASK", "repository": repository,
+            result = {"schema": "nexus.project_entry.v1", "status": "NO_TASK", "repository": repository,
                     "issue": dict(issue), "source": {"commit": head, "tree": tree},
                     "issue_observation": dict(observation), "task_resolution": {"status": "NO_EXACT_TASK"},
                     "readiness_request": readiness_args, "readiness_result": readiness,
                     "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS",
                     "claim_ceiling_excludes": ["execution", "verification", "acceptance", "merge", "release", "production"]}
+            result["project_binding_hash"] = self._project_entry_binding_hash(result)
+            return result
         state = matches[0]
         task_id = str(state.get("task_id") or "")
         try:
@@ -4550,12 +4552,24 @@ class UnifiedMCPGateway:
             return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_CONTINUATION_INVALID", str(exc), task_id=task_id)
         readiness_args["task_campaign_goal_identity"] = task_id
         readiness = self._gateway_execution_readiness(readiness_args)
-        return {"schema": "nexus.project_entry.v1", "status": "TASK_REHYDRATED", "repository": repository,
+        result = {"schema": "nexus.project_entry.v1", "status": "TASK_REHYDRATED", "repository": repository,
                 "issue": dict(issue), "source": {"commit": head, "tree": tree},
                 "issue_observation": dict(observation), "task_resolution": {"status": "EXACT_TASK", "task_id": task_id},
                 "continuation": projection, "readiness_request": readiness_args, "readiness_result": readiness,
                 "claim_ceiling": "PROJECT_ENTRY_OBSERVE_ONLY_NO_DOWNSTREAM_EFFECTS",
                 "claim_ceiling_excludes": ["execution", "verification", "acceptance", "merge", "release", "production"]}
+        result["project_binding_hash"] = self._project_entry_binding_hash(result)
+        return result
+
+    @staticmethod
+    def _project_entry_binding_hash(payload: Mapping[str, Any]) -> str:
+        stable = json.loads(json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str))
+        stable.pop("project_binding_hash", None)
+        observation = stable.get("issue_observation")
+        if isinstance(observation, dict):
+            observation.pop("observed_at", None)
+            observation.pop("detail", None)
+        return hashlib.sha256(json.dumps(stable, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
 
     @staticmethod
     def _project_entry_blocker(repository: str, issue: int, code: str, detail: str, *, task_id: str | None = None) -> dict[str, Any]:
@@ -4566,6 +4580,7 @@ class UnifiedMCPGateway:
                   "claim_ceiling_excludes": ["execution", "verification", "acceptance", "merge", "release", "production"]}
         if task_id:
             result["task_resolution"] = {"status": "INVALID_CONTINUATION", "task_id": task_id}
+        result["project_binding_hash"] = UnifiedMCPGateway._project_entry_binding_hash(result)
         return result
 
     @staticmethod

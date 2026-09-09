@@ -4764,12 +4764,16 @@ class SelfHostedTaskService:
         matches: list[dict[str, Any]] = []
         for state in self._workspace_task_states().values():
             request = state.get("request") if isinstance(state.get("request"), Mapping) else {}
-            bound_repository = str(
-                request.get("repository") or state.get("repository") or ""
-            ).strip()
-            bound_issue = str(
-                request.get("issue") or request.get("issue_number") or state.get("issue") or ""
-            ).strip()
+            request_repository = str(request.get("repository") or "").strip()
+            state_repository = str(state.get("repository") or "").strip()
+            request_issue = str(request.get("issue") or request.get("issue_number") or "").strip()
+            state_issue = str(state.get("issue") or "").strip()
+            if request_repository and state_repository and request_repository != state_repository:
+                continue
+            if request_issue and state_issue and request_issue != state_issue:
+                continue
+            bound_repository = request_repository or state_repository
+            bound_issue = request_issue or state_issue
             if bound_repository == repository and bound_issue == issue:
                 matches.append(state)
         return matches
