@@ -195,12 +195,10 @@ def _grant(**overrides) -> OwnerRepresentationGrant:
     }
     values.update(overrides)
     spec = OwnerRepresentationGrantSpec.model_validate(values)
-    return OwnerRepresentationGrant.model_validate(
-        {
-            **spec.model_dump(mode="json"),
-            "grant_hash": canonical_autonomy_hash(spec.model_dump(mode="json")),
-        }
-    )
+    return OwnerRepresentationGrant.model_validate({
+        **spec.model_dump(mode="json"),
+        "grant_hash": canonical_autonomy_hash(spec.model_dump(mode="json")),
+    })
 
 
 def _issue_grant(
@@ -283,18 +281,16 @@ class FakeRemote:
             raise TransportDispatchedButUnacknowledged()
         self.issue_id_ctr += 1
         marker = str(self.issue_id_ctr)
-        self.writes.append(
-            {
-                "marker": marker,
-                "op": proposal.operation_id,
-                "effect": proposal.effect.value,
-                "destination": proposal.destination.repository_id,
-                "title": proposal.title,
-                "body": proposal.body,
-                "purpose": proposal.purpose,
-                "actor": proposal.actor,
-            }
-        )
+        self.writes.append({
+            "marker": marker,
+            "op": proposal.operation_id,
+            "effect": proposal.effect.value,
+            "destination": proposal.destination.repository_id,
+            "title": proposal.title,
+            "body": proposal.body,
+            "purpose": proposal.purpose,
+            "actor": proposal.actor,
+        })
         return WriteOutcome(status="ACK", remote_marker=marker)
 
     def readback(self, proposal: ExternalPublicationProposal) -> str | None:
@@ -1508,27 +1504,25 @@ def test_real_rsa_owner_signature_accepts_and_rejects_tamper(
     monkeypatch.setattr(store, "OWNER_AUTHORIZATION_TRUST_ROOT", trust_root)
     monkeypatch.setattr(store, "_verify_owner_signature", _production_verify_owner_signature)
     grant = _grant(grant_id="rsa-real")
-    spec = OwnerExactPublicationAuthorizationSpec.model_validate(
-        {
-            "schema": "nexus.owner_exact_publication_authorization.v1",
-            "authorization_id": f"auth-{grant.grant_hash}",
-            "owner_id": grant.owner_id,
-            "coordinator_id": grant.coordinator_id,
-            "destination": grant.destination,
-            "effect": grant.effect,
-            "target": grant.target,
-            "content_hash": grant.content_hash,
-            "purpose": grant.purpose,
-            "actor": grant.actor,
-            "transport": grant.transport,
-            "operation_id": grant.operation_id,
-            "grant_hash": grant.grant_hash,
-            "owner_key_id": "rsa",
-            "owner_signature": "placeholder",
-            "issued_at": NOW,
-            "expires_at": grant.expires_at,
-        }
-    )
+    spec = OwnerExactPublicationAuthorizationSpec.model_validate({
+        "schema": "nexus.owner_exact_publication_authorization.v1",
+        "authorization_id": f"auth-{grant.grant_hash}",
+        "owner_id": grant.owner_id,
+        "coordinator_id": grant.coordinator_id,
+        "destination": grant.destination,
+        "effect": grant.effect,
+        "target": grant.target,
+        "content_hash": grant.content_hash,
+        "purpose": grant.purpose,
+        "actor": grant.actor,
+        "transport": grant.transport,
+        "operation_id": grant.operation_id,
+        "grant_hash": grant.grant_hash,
+        "owner_key_id": "rsa",
+        "owner_signature": "placeholder",
+        "issued_at": NOW,
+        "expires_at": grant.expires_at,
+    })
     payload = json.dumps(
         spec.model_dump(mode="json", exclude={"owner_signature"}),
         sort_keys=True,
@@ -1824,9 +1818,7 @@ def test_positive_control_exact_owner_authorization_allows_a_once(
     assert len(remote.writes) == 1
 
 
-def test_keyed_authority_rejects_simultaneous_path_and_key(
-    grant_store, standing_grant_path
-):
+def test_keyed_authority_rejects_simultaneous_path_and_key(grant_store, standing_grant_path):
     """A keyed caller cannot fall back to an independently supplied path."""
     from nexus.orchestrator.standing_grant_store import StandingGrantKey
 
@@ -1835,9 +1827,7 @@ def test_keyed_authority_rejects_simultaneous_path_and_key(
     owner_issues_exact_publication_authorization(
         grant, issued_at=now, authority_root=grant_store.root
     )
-    key = StandingGrantKey(
-        OWNER_REPRESENTATION_STANDING_REPOSITORY, "goal-827", "thread-coord-1"
-    )
+    key = StandingGrantKey(OWNER_REPRESENTATION_STANDING_REPOSITORY, "goal-827", "thread-coord-1")
     with pytest.raises(OwnerRepresentationGrantBlocked, match="AMBIGUOUS_AUTHORITY_SELECTOR"):
         mint_owner_representation_publication_issuance_permit(
             grant,
@@ -1885,9 +1875,7 @@ def test_keyed_owner_representation_full_chain_revalidates_exact_key_at_publicat
     )
     _write_keyed_receipt(monkeypatch, root, receipt_a)
     keyed_store = OwnerRepresentationGrantStore(root=grant_store.root, standing_grant_key=key_a)
-    grant = _grant(
-        grant_id="keyed-full-chain", operation_id="op-keyed-full-chain"
-    )
+    grant = _grant(grant_id="keyed-full-chain", operation_id="op-keyed-full-chain")
     now = datetime.now(timezone.utc)
     auth = owner_issues_exact_publication_authorization(
         grant, issued_at=now, authority_root=grant_store.root
@@ -1903,9 +1891,9 @@ def test_keyed_owner_representation_full_chain_revalidates_exact_key_at_publicat
     permit_path = grant_store.root / "permits" / f"{permit['grant_receipt_hash']}.json"
     record = json.loads(permit_path.read_text(encoding="utf-8"))
     assert record["standing_grant_key"] == key_a.digest
-    assert record["permit_hash"] == canonical_autonomy_hash(
-        {key: value for key, value in record.items() if key != "permit_hash"}
-    )
+    assert record["permit_hash"] == canonical_autonomy_hash({
+        key: value for key, value in record.items() if key != "permit_hash"
+    })
     decision = keyed_store.authorize(
         grant.grant_hash,
         _proposal(operation_id=grant.operation_id),
