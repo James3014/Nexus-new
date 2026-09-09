@@ -900,6 +900,9 @@ def mint_owner_representation_publication_issuance_permit(
         "repository": allowed.get("repository"),
         "requested_at": effective_now.isoformat(),
         "expires_at": permit_expires.isoformat(),
+        "standing_grant_key": (
+            standing_grant_key.digest if standing_grant_key is not None else None
+        ),
     }
     record = {
         **payload,
@@ -965,6 +968,7 @@ def _authorize_at(
     proposal: ExternalPublicationProposal,
     now: datetime | None,
     standing_grant_path: Path | None = None,
+    standing_grant_key: StandingGrantKey | None = None,
 ) -> OwnerRepresentationDecision:
     """Revalidate one issued grant against one exact proposal right now.
 
@@ -988,6 +992,8 @@ def _authorize_at(
     evaluator.
     """
     record = _require_issued(root, grant_hash)
+    if standing_grant_path is not None and standing_grant_key is not None:
+        raise OwnerRepresentationGrantStoreError("AMBIGUOUS_AUTHORITY_SELECTOR")
     if _has_revocation(root, grant_hash):
         return _blocked_decision(
             proposal, OwnerRepresentationReason.GRANT_REVOKED, grant_hash=grant_hash
@@ -1065,6 +1071,7 @@ def _authorize_at(
             grant,
             standing_grant_path=standing_grant_path,
             requested_at=effective_now,
+            standing_grant_key=standing_grant_key,
         )
     except OwnerRepresentationGrantStoreError:
         raise
@@ -1077,6 +1084,7 @@ def _authorize_at(
         "repository",
         "effect_hash",
         "action",
+        "standing_grant_key",
     )
     for key in invariant_fields:
         if fresh.get(key) != permit.get(key):
@@ -1353,6 +1361,7 @@ class OwnerRepresentationGrantStore:
             proposal,
             now,
             standing_grant_path=self.standing_grant_path,
+            standing_grant_key=self.standing_grant_key,
         )
 
     def inspect_grant(self, grant_hash: str) -> Mapping[str, Any]:
