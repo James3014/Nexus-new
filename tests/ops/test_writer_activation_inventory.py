@@ -19,6 +19,7 @@ def _write_inventory(tmp_path, **changes):
     card = source_root / "README.md"
     receipt = tmp_path / "accepted-source.json"
     receipt.write_bytes(b"accepted source receipt\n")
+    receipt.chmod(0o600)
     roots = []
     for root_id, roles in (
         ("task", ("task_state",)),
@@ -77,6 +78,7 @@ def _write_inventory(tmp_path, **changes):
     path.write_bytes(
         json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
     )
+    path.chmod(0o600)
     return path
 
 
@@ -124,3 +126,10 @@ def test_inventory_rejects_symlink_root_and_foreign_loaded_provenance(tmp_path):
     valid = _write_inventory(tmp_path / "foreign")
     with pytest.raises(PreholdInventoryError, match="HOST_PROVENANCE_MISSING"):
         _load_installed_prehold_inventory(valid, loaded_module_root=tmp_path / "foreign-host")
+
+
+def test_inventory_requires_owner_only_inventory_and_source_receipt(tmp_path):
+    path = _write_inventory(tmp_path)
+    path.chmod(0o644)
+    with pytest.raises(PreholdInventoryError, match="NOT_OWNER_ONLY"):
+        _load_installed_prehold_inventory(path)

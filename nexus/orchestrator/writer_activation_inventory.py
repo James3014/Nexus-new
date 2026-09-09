@@ -27,7 +27,7 @@ class PreholdInventoryError(RuntimeError):
     pass
 
 
-def _regular_bytes(path: Path) -> bytes:
+def _regular_bytes(path: Path, *, owner_only: bool = False) -> bytes:
     path = Path(path)
     try:
         info = path.lstat()
@@ -35,6 +35,8 @@ def _regular_bytes(path: Path) -> bytes:
         raise PreholdInventoryError("INVENTORY_READ_FAILED") from exc
     if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
         raise PreholdInventoryError("INVENTORY_FILE_UNSAFE")
+    if owner_only and (info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077):
+        raise PreholdInventoryError("INVENTORY_FILE_NOT_OWNER_ONLY")
     try:
         fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
         try:
@@ -146,6 +148,7 @@ class LoadedPreholdInventory:
     accepted_source_receipt_sha256: str
     raw_bytes: bytes = b""
     source_root_identity: tuple[int, int] = (0, 0)
+    host_manifest_sha256: str = ""
 
     def __post_init__(self) -> None:
         source_root = _root(self.source_root, "source_root")
@@ -185,6 +188,8 @@ class LoadedPreholdInventory:
             raise PreholdInventoryError("INVENTORY_SOURCE_RECEIPT_PATH_INVALID")
         if len(self.accepted_source_receipt_sha256) != 64:
             raise PreholdInventoryError("INVENTORY_SOURCE_RECEIPT_HASH_INVALID")
+        if self.host_manifest_sha256 and len(self.host_manifest_sha256) != 64:
+            raise PreholdInventoryError("INVENTORY_HOST_MANIFEST_HASH_INVALID")
 
 
 def _git_identity(root: Path) -> tuple[str, str]:
@@ -200,21 +205,27 @@ def _git_identity(root: Path) -> tuple[str, str]:
     return head, tree
 
 
-def _verify_host_manifest(path: Path, source: LoadedSourceIdentity, module_root: Path) -> None:
+def _verify_host_manifest(
+    path: Path, source: LoadedSourceIdentity, module_root: Path, expected_sha256: str
+) -> None:
     """Verify the installed host payload before accepting its source identity."""
-    manifest = _regular_bytes(path)
+    manifest = _regular_bytes(path, owner_only=True)
+    if hashlib.sha256(manifest).hexdigest() != expected_sha256:
+        raise PreholdInventoryError("INVENTORY_HOST_MANIFEST_HASH_MISMATCH")
     data = _object(manifest)
+    if data.get("schema") != "astra.installed_host.provenance.v1" or data.get("version") != 1:
+        raise PreholdInventoryError("INVENTORY_HOST_PROVENANCE_SCHEMA_INVALID")
     if (
-        data.get("source_head") != source.source_head
+        data.get("source_repository") != source.repository
+        or data.get("source_head") != source.source_head
         or data.get("source_tree") != source.source_tree
-        or data.get("repository") != source.repository
     ):
         raise PreholdInventoryError("INVENTORY_HOST_PROVENANCE_MISMATCH")
     payloads = data.get("payload_python_sha256")
     runtime = data.get("runtime")
     if not isinstance(runtime, Mapping):
         runtime = data
-    runtime_payloads = runtime.get("runtime_payload_sha256")
+    runtime_payloads = runtime.get("payload_sha256")
     required = ("distribution_name", "version", "wheel_sha256", "manifest_sha256")
     if (
         not isinstance(payloads, Mapping)
@@ -236,20 +247,6 @@ def _verify_host_manifest(path: Path, source: LoadedSourceIdentity, module_root:
     for key in ("wheel_sha256", "manifest_sha256"):
         if len(runtime[key]) != 64 or any(char not in "0123456789abcdef" for char in runtime[key]):
             raise PreholdInventoryError("INVENTORY_HOST_PROVENANCE_HASH_INVALID")
-    unsigned = dict(data)
-    if "runtime" in unsigned and isinstance(unsigned["runtime"], Mapping):
-        nested = dict(unsigned["runtime"])
-        nested.pop("manifest_sha256", None)
-        unsigned["runtime"] = nested
-    else:
-        unsigned.pop("manifest_sha256", None)
-    if (
-        hashlib.sha256(
-            json.dumps(unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
-        ).hexdigest()
-        != runtime["manifest_sha256"]
-    ):
-        raise PreholdInventoryError("INVENTORY_HOST_MANIFEST_HASH_MISMATCH")
     for relative, expected in tuple(payloads.items()) + tuple(runtime_payloads.items()):
         candidate = Path(relative)
         if (
@@ -266,7 +263,7 @@ def _verify_host_manifest(path: Path, source: LoadedSourceIdentity, module_root:
 
 
 def _load(path: Path, *, loaded_module_root: Path | None = None) -> LoadedPreholdInventory:
-    raw = _regular_bytes(path)
+    raw = _regular_bytes(path, owner_only=True)
     data = _object(raw)
     if data.get("schema") != "nexus.writer_activation_prehold_inventory.v1":
         raise PreholdInventoryError("INVENTORY_SCHEMA_INVALID")
@@ -306,7 +303,10 @@ def _load(path: Path, *, loaded_module_root: Path | None = None) -> LoadedPrehol
         manifest = module_root / "nexus" / "_host_artifact_manifest.json"
         if not manifest.is_file():
             raise PreholdInventoryError("INVENTORY_HOST_PROVENANCE_MISSING")
-        _verify_host_manifest(manifest, source, module_root)
+        host_manifest_sha = _text(data.get("host_manifest_sha256"), "host_manifest_sha256")
+        _verify_host_manifest(manifest, source, module_root, host_manifest_sha)
+    else:
+        host_manifest_sha = ""
     roots_data = data.get("roots")
     if not isinstance(roots_data, list):
         raise PreholdInventoryError("INVENTORY_ROOTS_MISSING")
@@ -329,11 +329,15 @@ def _load(path: Path, *, loaded_module_root: Path | None = None) -> LoadedPrehol
             raise PreholdInventoryError("INVENTORY_AUTHORITY_PUBLICATION_MISSING")
         tracked = Path(_text(publication.get("tracked_relative"), "tracked_relative"))
         durable = Path(_text(publication.get("durable_path"), "durable_path"))
+        durable_resolved = durable.resolve()
         if (
             tracked.is_absolute()
             or ".." in tracked.parts
+            or not tracked.parts
+            or tracked.parts[0] != "tasks"
             or not durable.is_absolute()
-            or path.parent not in durable.parents
+            or path.parent.resolve() not in durable_resolved.parents
+            or any(part.is_symlink() for part in durable_resolved.parents if part.exists())
         ):
             raise PreholdInventoryError("INVENTORY_AUTHORITY_PUBLICATION_PATH_INVALID")
         roots.append(
@@ -353,7 +357,10 @@ def _load(path: Path, *, loaded_module_root: Path | None = None) -> LoadedPrehol
     )
     if not source_receipt.is_absolute() or source_receipt.parent.resolve() != path.parent.resolve():
         raise PreholdInventoryError("INVENTORY_SOURCE_RECEIPT_PATH_INVALID")
-    if hashlib.sha256(_regular_bytes(source_receipt)).hexdigest() != source_receipt_sha:
+    if (
+        hashlib.sha256(_regular_bytes(source_receipt, owner_only=True)).hexdigest()
+        != source_receipt_sha
+    ):
         raise PreholdInventoryError("INVENTORY_SOURCE_RECEIPT_HASH_MISMATCH")
     return LoadedPreholdInventory(
         source_root,
@@ -366,6 +373,7 @@ def _load(path: Path, *, loaded_module_root: Path | None = None) -> LoadedPrehol
         source_receipt_sha,
         raw,
         (info.st_dev, info.st_ino),
+        host_manifest_sha,
     )
 
 
