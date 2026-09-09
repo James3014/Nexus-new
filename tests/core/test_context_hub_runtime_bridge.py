@@ -44,3 +44,16 @@ def test_context_hub_runtime_context_uses_bound_compactor(tmp_path):
     hub.runtime_hub.deps = replace(hub.runtime_hub.deps, compactor=spy)
     hub.assemble_context("task-runtime", [0, 1], budget=4000)
     assert calls
+
+
+def test_context_hub_public_operations_delegate_to_runtime(tmp_path):
+    hub = ContextHub(str(tmp_path), deps=ContextDependencies(), strict_deps=True)
+    for name, args, expected in (
+        ("assemble_diag_pack", ([{"file": "x.py"}], "bad"), {"source": "runtime"}),
+        ("assemble_research_pack", ("q", []), {"source": "runtime"}),
+        ("assemble_conversation_pack", (), {"source": "runtime"}),
+        ("assemble_repair_pack", (type("D", (), {"summary": "s", "pseudo_flows": [], "hotspots": []})(), [], None), {"source": "runtime"}),
+        ("assemble_context", ("task", [0, 1]), "runtime"),
+    ):
+        setattr(hub.runtime_hub, name, lambda *args, _value=expected, **kwargs: _value)
+        assert getattr(hub, name)(*args) == expected
