@@ -70,6 +70,6 @@ print(json.dumps(out,sort_keys=True,default=str))
         value.pop("timestamp", None)
         return value
 
-    assert normalized(hub.runtime_hub.assemble_feature_pack({"steps": ["inspect"]})) == normalized(donor["feature"])
-    assert hub.runtime_hub.assemble_diag_pack([{"file": "parser.py", "message": "bad"}], "parser failure") == donor["diag"]
-    assert hub.runtime_hub.assemble_research_pack("parser", [{"fact": 1}]) == donor["research"]
+    assert normalized(hub.assemble_feature_pack({"steps": ["inspect"]})) == normalized(donor["feature"])
+    assert hub.assemble_diag_pack([{"file": "parser.py", "message": "bad"}], "parser failure") == donor["diag"]
+    assert hub.assemble_research_pack("parser", [{"fact": 1}]) == donor["research"]
