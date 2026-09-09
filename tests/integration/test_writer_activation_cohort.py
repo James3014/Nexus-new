@@ -635,13 +635,16 @@ def _reload_task_cohort(base, *, capture=None):
         source_identity="cohort-fixture-source", server_identity="fixture-server"
     )
     loaded = []
+    state_path = (base / "root-0/root/.nexus/writer-quiescence/activation-cohorts"
+                  / f"{hashlib.sha256(b'fixture-cohort').hexdigest()}.json")
+    released = WriterActivationCohort.load_durable(state_path).state == "RELEASED"
     for fixture in sorted(base.glob("root-*")):
         raw = json.loads((fixture / "request.json").read_bytes())
         request = WriterTransitionRequest.from_mapping(raw)
         root = fixture / "root"
         generation = read_generation(root)
         manifest = read_manifest(root)
-        cold = request.expected_generation is None
+        cold = request.expected_generation is None and not released
         binding = (None if cold else StateOwnerBinding(
             manifest.owner_id, root.resolve(), generation.generation, "reload"
         ))
@@ -663,9 +666,11 @@ def _reload_task_cohort(base, *, capture=None):
                 pending=lambda: tuple(registry._leases),
                 loaded_identity=lambda identity=identity: identity,
             )
-        task = SelfHostedTaskService(state_dir=root, ephemeral=True, auto_reconcile=False)
+        task = (SelfHostedTaskService(state_dir=root, ephemeral=True, auto_reconcile=False)
+                if roles == ("task_state",) else None)
         adapter = factory = None
-        if not cold:
+        extra = {}
+        if not cold and roles == ("task_state",):
             adapter = TaskStateWriterAdapter(
                 registry,
                 binding=binding,
@@ -677,6 +682,31 @@ def _reload_task_cohort(base, *, capture=None):
             )
             factory = TaskStateWriterFactory(adapter)
             task._writer_factory = factory
+            extra = dict(factory=factory, task_service=task)
+        elif not cold and roles == ("event_log",):
+            from nexus.events.transport import NexusEventBus, load_event_writer_factory
+            from nexus.events.log_store import JsonlEventLogStore
+            factory = load_event_writer_factory(registry, binding=binding,
+                writer_generation=generation, root=root, writer_id=generation.writer_id)
+            class ReleasedBus(NexusEventBus):
+                _log_store = JsonlEventLogStore()
+                _event_log_path = None
+                _writer_factory = None
+                _subscribers = {}
+                _attempt_sequences = {}
+            ReleasedBus.configure(root, writer_factory=factory)
+            adapter = factory._adapter
+            extra = dict(factory=factory, event_store=ReleasedBus._log_store, event_bus=ReleasedBus)
+        elif not cold:
+            from nexus.events.effect_journal import EffectDispatchPort, EffectJournal, EffectReconcilePort
+            from nexus.orchestrator.writer_quiescence import load_runtime_writer_factory
+            factory = load_runtime_writer_factory(registry, binding=binding,
+                writer_generation=generation, root=root, writer_id=generation.writer_id,
+                effect_journal=EffectJournal(root, generation),
+                effect_dispatch=EffectDispatchPort(lambda operation: operation()),
+                effect_reconcile=EffectReconcilePort(lambda record: None))
+            adapter = factory._adapter
+            extra = dict(factory=factory)
         source = LoadedSourceIdentity(
             "James3014/Nexus-new",
             request.expected_source_head,
@@ -691,7 +721,6 @@ def _reload_task_cohort(base, *, capture=None):
         service._fixture_registry = registry
         service._fixture_restarted = True
         transition = _IsolatedTransition(service, request)
-        extra = dict(factory=factory, task_service=task)
         if cold:
             if roles == ("task_state",):
                 owner = InitialTaskOwner(task)
@@ -788,6 +817,10 @@ def _crash_child(base, boundary, *, cold=False):
     active = cohort.activate()
     assert active.state == "ACTIVE", active
     cohort.release(active)
+    if boundary == "post-release-writes":
+        _write_four_roles(cohort, "released-first")
+        _write_four_roles(cohort, "released-second")
+        os._exit(71)
     raise AssertionError("crash boundary was never reached")
 
 
@@ -1403,3 +1436,96 @@ def test_cold_cached_factory_physical_drift_keeps_original_admission_held(tmp_pa
     assert {item.identity.generation for item in cohort.hold.selected} == {0}
     assert [cohort.registry._marker_path(root.root).read_bytes() for root in descriptors] == markers
     assert cohort.registry._lease_history == []
+
+
+
+def _write_four_roles(cohort, label):
+    import json
+    from nexus.services.unified_runtime import UnifiedRuntime
+    from tests.services.test_unified_runtime import _online, _Planner, _request
+
+    roots = cohort.roots
+    roots[0].task_service._write_state(label, {"task_id": label, "status": "SUBMITTED"})
+    roots[1].event_bus.publish(label, {"task_id": label})
+    effects = roots[2].factory.effect_binding()
+    result = UnifiedRuntime(planner=_Planner()).run(
+        replace(_request(), task_id=label), online_invoker=_online,
+        receipt_path=Path(roots[2].root) / f"{label}.json",
+        runtime_writer_factory=roots[2].factory,
+        effect_journal=effects.journal, effect_dispatch=effects.dispatch,
+        effect_reconcile=effects.reconcile, effect_fenced=True)
+    assert result["effect_journal_bindings"]
+    assert json.loads((Path(roots[0].root) / f"{label}.json").read_bytes())["task_id"] == label
+    assert label.encode() in roots[1].event_store.event_log_path.read_bytes()
+    assert (Path(roots[2].root) / f"{label}.json").read_bytes()
+    assert json.loads((Path(roots[2].root) / ".nexus/events/effect_journal.v1.json").read_bytes())["records"]
+
+
+@pytest.mark.parametrize("tamper", [None, "missing_index", "missing_older_lease", "mutated_lease", "unindexed_lease", "rehashed_wrong_index", "forged_session"])
+def test_released_three_root_history_recovers_after_two_writes_per_role(tmp_path, tamper):
+    import subprocess
+    import sys
+    from nexus.events.state_owner_manifest import read_manifest
+
+    script = (
+        "from pathlib import Path; import sys; "
+        "from tests.integration.test_writer_activation_cohort import _crash_child; "
+        "_crash_child(Path(sys.argv[1]), 'post-release-writes', cold=True)"
+    )
+    child = subprocess.run([sys.executable, "-B", "-c", script, str(tmp_path)],
+                           capture_output=True, text=True, timeout=60)
+    assert child.returncode == 71, child.stderr
+    for index in range(3):
+        root = tmp_path / f"root-{index}/root"
+        assert not (root / ".nexus/writer-quiescence-hold.json").exists()
+        assert read_manifest(root).transaction_id != f"tx-root-{index}"
+    import json
+    history_path = (tmp_path / "root-0/root/.nexus/writer-quiescence/released-history"
+                    / f"{hashlib.sha256(b'fixture-cohort').hexdigest()}.json")
+    history = json.loads(history_path.read_bytes())
+    rows = list(history["operations"].values())
+    for role in ("task_state", "event_log", "runtime_receipt", "effect_journal"):
+        assert sum(row["active"]["role"] == role
+                   and row["phase"] == "TERMINAL"
+                   and row["terminal"]["durable_outcome"] == "committed"
+                   for row in rows) >= 2
+    oldest = min(rows, key=lambda row: row["active"]["entered_at"])
+    canonical = lambda data: json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    if tamper == "missing_index":
+        history_path.unlink()
+    elif tamper == "missing_older_lease":
+        Path(oldest["path"]).unlink()
+    elif tamper == "mutated_lease":
+        Path(oldest["path"]).write_bytes(b"{}")
+    elif tamper == "unindexed_lease":
+        extra = dict(oldest["terminal"], operation_id="unindexed-postrelease-operation")
+        extra_path = Path(oldest["path"]).parent / f"{hashlib.sha256(extra['operation_id'].encode()).hexdigest()}.json"
+        extra_path.write_bytes(canonical(extra))
+    elif tamper == "forged_session":
+        forged = dict(history["sessions"][-1])
+        forged["prior_digest"] = forged.pop("receipt_sha256")
+        forged["process_start_identity"] = "pid:2147483647:start:Wed Sep  9 00:00:00 2026"
+        forged["receipt_sha256"] = hashlib.sha256(canonical(forged)).hexdigest()
+        history["sessions"].append(forged)
+        history.pop("receipt_sha256")
+        history["receipt_sha256"] = hashlib.sha256(canonical(history)).hexdigest()
+        history_path.write_bytes(canonical(history))
+    elif tamper == "rehashed_wrong_index":
+        oldest["terminal"]["writer_id"] = "foreign"
+        oldest["terminal_sha256"] = hashlib.sha256(canonical(oldest["terminal"])).hexdigest()
+        history.pop("receipt_sha256")
+        history["receipt_sha256"] = hashlib.sha256(canonical(history)).hexdigest()
+        history_path.write_bytes(canonical(history))
+    if tamper:
+        from nexus.orchestrator.writer_quiescence import WriterAdmissionDenied
+        with pytest.raises((WriterAdmissionDenied, WriterActivationError, FileNotFoundError)):
+            _reload_task_cohort(tmp_path)
+        assert not (tmp_path / "root-0/root/recovered-after-release.json").exists()
+        return
+    cohort, roots = _reload_task_cohort(tmp_path)
+    assert cohort.status().state == "RELEASED"
+    assert cohort.hold.released
+    assert all(root.initial_spec is None for root in roots)
+    _write_four_roles(cohort, "recovered-after-release")
+    assert {item.identity.role for item in cohort.registry._lease_history} == {
+        "task_state", "event_log", "runtime_receipt", "effect_journal"}

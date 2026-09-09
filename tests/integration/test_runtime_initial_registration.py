@@ -22,7 +22,7 @@ from nexus.orchestrator.writer_quiescence import (
 )
 
 
-def _held_runtime(tmp_path):
+def _held_runtime(tmp_path, *, historical=False):
     root = tmp_path.resolve()
     (root / ".nexus" / "events").mkdir(parents=True)
     (root / ".nexus" / "reports").mkdir()
@@ -39,6 +39,8 @@ def _held_runtime(tmp_path):
         registry.process_start_identity, identity.thread_id, 0, "writer-0"
     )
     registry.register(effect, snapshot=lambda: b"", process_state=lambda: "idle", pending=lambda: ())
+    if historical:
+        registry.acquire(root=root,role="runtime_receipt",writer_id="writer-0",generation=0,operation_id="historical-operation",transaction_id="historical-tx").close("failed")
     hold = registry.begin_hold((root,), cohort_id="cold-start")
     for item in hold.selected:
         hold.acknowledge(item.identity.writer_id, root=root, role=item.identity.role, generation=0)
@@ -103,18 +105,20 @@ def test_recovery_proof_is_registry_opaque(tmp_path):
         registry._verify_recovery_proof(copy.copy(forged))
 
 
-def _recovery(tmp_path):
+def _recovery(tmp_path, *, historical=False):
     import hashlib
     import json
     from dataclasses import replace
     from nexus.orchestrator.writer_quiescence import WriterQuiescenceReceipt
 
-    old_registry, hold, _, _ = _held_runtime(tmp_path)
+    old_registry, hold, _, _ = _held_runtime(tmp_path,historical=historical)
     dead = "pid:99999999:start:deceased"
     drain = old_registry.load_finalized(hold.cohort_id)
     drain = replace(drain, process_start_identity=dead, observations=tuple(
         replace(x, identity=replace(x.identity, process_start_identity=dead)) for x in drain.observations
-    ), receipt_sha256="")
+    ), leases=tuple(replace(x,identity=replace(x.identity,process_start_identity=dead)) for x in drain.leases), receipt_sha256="")
+    for lease in drain.leases:
+        old_registry._lease_path(lease.identity.root,lease.operation_id).write_bytes(json.dumps(lease.to_dict(),sort_keys=True,separators=(",", ":")).encode())
     drain_path = old_registry._finalized[hold.cohort_id][1]
     drain_path.write_bytes(drain.to_bytes())
     marker_path = old_registry._marker_path(str(tmp_path))
@@ -274,6 +278,15 @@ def test_recovery_reacquisition_requires_complete_physical_vector(tmp_path):
     registry.confirm_recovered_reacquisition(proof,receipt)
     registry._verify_recovery_proof(proof)
     registry.confirm_recovered_reacquisition(proof,receipt)
+    contract = payload["root_contracts"][0]
+    transition = dict(schema="nexus.state_owner_transition_receipt.v1",state="COMMITTED",root_id=contract["root_id"],request_digest=contract["request_digest"],transaction_id=contract["transaction_id"],next_generation=contract["generation"],next_writer_id=contract["writer_id"],expected_root_identity=contract["root_identity"],drain_receipt_hash=contract["drain_receipt_hash"])
+    transition["receipt_digest"] = hashlib.sha256(json.dumps(transition,sort_keys=True,separators=(",", ":")).encode()).hexdigest()
+    active = save(dict(reacquiring,state="ACTIVE",transitions=[transition],prior_digest=reacquiring["receipt_sha256"]))
+    registry.advance_recovered_hold(proof,expected_predecessor_sha256=reacquiring["receipt_sha256"],expected_successor_sha256=active["receipt_sha256"])
+    registry.confirm_recovered_reacquisition(proof,receipt)
+    altered = replace(receipt,observations=(replace(receipt.observations[0],manifest_sha256="0"*64), *receipt.observations[1:]))
+    with pytest.raises(WriterAdmissionDenied,match="historical durable result"):
+        registry.confirm_recovered_reacquisition(proof,altered)
 
 
 @pytest.mark.parametrize("damage", ["missing_reacquisition", "drain_hash", "release_state", "transition_hash"])
@@ -299,3 +312,226 @@ def test_recovery_advance_rejects_nested_evidence_tampering(tmp_path, damage):
     damaged = save(altered)
     with pytest.raises(WriterAdmissionDenied):
         registry.advance_recovered_hold(proof,expected_predecessor_sha256=successor["receipt_sha256"],expected_successor_sha256=damaged["receipt_sha256"])
+
+
+def _released_registry(tmp_path):
+    import hashlib
+    import json
+    from dataclasses import replace
+    from nexus.events.state_owner_manifest import read_manifest
+    from nexus.orchestrator.writer_quiescence import WriterReacquisitionObservation, WriterReacquisitionReceipt
+    registry, hold, _, _ = _held_runtime(tmp_path)
+    drain = registry.load_finalized(hold.cohort_id)
+    manifest = read_manifest(tmp_path)
+    marker_path = registry._marker_path(str(tmp_path))
+    marker = json.loads(marker_path.read_bytes())
+    observations = []
+    for item in hold.selected:
+        old = item.identity
+        loaded = replace(old,generation=1,writer_id="writer-1")
+        observations.append(WriterReacquisitionObservation(old,loaded,manifest.manifest_sha256,1,"writer-1","MATCHED"))
+        registry._writers.pop(old.key())
+        item.identity = loaded
+        item.loaded_identity = lambda loaded=loaded: loaded
+        registry._writers[loaded.key()] = item
+    reacquired = WriterReacquisitionReceipt(hold.cohort_id,hold.epoch,hold.roots,tuple(observations),())
+    contract = dict(root=str(tmp_path),root_id="root",request_digest="a"*64,drain_receipt_hash=drain.receipt_sha256,transaction_id=manifest.transaction_id,generation=1,writer_id="writer-1",root_identity="c"*64)
+    transition = dict(schema="nexus.state_owner_transition_receipt.v1",state="COMMITTED",root_id="root",request_digest="a"*64,transaction_id=manifest.transaction_id,next_generation=1,next_writer_id="writer-1",expected_root_identity="c"*64,drain_receipt_hash=drain.receipt_sha256)
+    transition["receipt_digest"] = hashlib.sha256(json.dumps(transition,sort_keys=True,separators=(",", ":")).encode()).hexdigest()
+    wrapped_drain = dict(payload=json.loads(drain.to_bytes()),bytes_sha256=hashlib.sha256(drain.to_bytes()).hexdigest())
+    intent = dict(schema="writer-activation-cohort/v1",cohort_id=hold.cohort_id,hold_epoch=hold.epoch,ordered_roots=list(hold.roots),source_identity=registry.source_identity,server_identity=registry.server_identity,process_start_identity=registry.process_start_identity,state="RELEASE_INTENT",release_state="RELEASE_PENDING",root_contracts=[contract],hold_markers=[marker],original_drain=wrapped_drain,drain=wrapped_drain,transitions=[transition],reacquisition=dict(payload=json.loads(reacquired.to_bytes()),bytes_sha256=hashlib.sha256(reacquired.to_bytes()).hexdigest()),prior_digest="d"*64)
+    receipt_path = registry._cohort_receipt_path(hold.roots,hold.cohort_id)
+    receipt_path.parent.mkdir(parents=True)
+    def save(payload):
+        payload = dict(payload)
+        payload.pop("receipt_sha256",None)
+        payload["receipt_sha256"] = hashlib.sha256(json.dumps(payload,sort_keys=True,separators=(",", ":")).encode()).hexdigest()
+        receipt_path.write_text(json.dumps(payload,sort_keys=True,separators=(",", ":")))
+        return payload
+    intent = save(intent)
+    anchor = registry.prepare_released_history(hold,expected_intent_sha256=intent["receipt_sha256"])
+    marker_path.unlink()
+    released = save(dict(intent,state="RELEASED",release_state="RELEASED",prior_digest=intent["receipt_sha256"]))
+    registry.bind_released_history(anchor,expected_released_sha256=released["receipt_sha256"])
+    registry._held_roots.clear()
+    hold.released = True
+    return registry, registry._cohort_history_path(hold.roots,hold.cohort_id)
+
+
+def _history_lease(registry, root, operation="operation"):
+    return registry.acquire(root=root,role="runtime_receipt",writer_id="writer-1",generation=1,operation_id=operation,transaction_id="tx-"+operation)
+
+
+def test_released_history_records_admission_and_exact_terminal_replay_fence(tmp_path):
+    registry,path = _released_registry(tmp_path)
+    lease = _history_lease(registry,tmp_path)
+    data,_ = registry._history_read(path)
+    assert data["operations"]["operation"]["phase"] == "ADMITTED"
+    lease.close("committed")
+    data,_ = registry._history_read(path)
+    row = data["operations"]["operation"]
+    assert row["phase"] == "TERMINAL"
+    assert registry._history_validate_rows(data,recover=True) == {row["path"]:row["terminal_sha256"]}
+    with pytest.raises(WriterAdmissionDenied):
+        _history_lease(registry,tmp_path)
+    from pathlib import Path
+    Path(row["path"]).unlink()
+    with pytest.raises(WriterAdmissionDenied):
+        registry._history_validate_rows(data,recover=True)
+
+
+@pytest.mark.parametrize("damage",["role","generation","process","outcome","terminal_hash"])
+def test_released_history_rejects_indexed_identity_or_terminal_drift(tmp_path,damage):
+    registry,path = _released_registry(tmp_path)
+    _history_lease(registry,tmp_path).close("committed")
+    data,_ = registry._history_read(path)
+    row = data["operations"]["operation"]
+    if damage == "role": row["active"]["role"] = "gateway_assist"
+    elif damage == "generation": row["active"]["generation"] = 77
+    elif damage == "process": row["active"]["process_start_identity"] = "pid:1:start:forged"
+    elif damage == "outcome": row["terminal"]["durable_outcome"] = "unresolved"
+    else: row["terminal_sha256"] = "0"*64
+    with pytest.raises(WriterAdmissionDenied):
+        registry._history_validate_rows(data,recover=True)
+
+
+def test_released_history_terminal_intent_reconciles_exact_final_bytes(tmp_path,monkeypatch):
+    registry,path = _released_registry(tmp_path)
+    lease = _history_lease(registry,tmp_path)
+    real_closed = registry._history_closed
+    monkeypatch.setattr(registry,"_history_closed",lambda result: (_ for _ in ()).throw(OSError("lost index commit")))
+    with pytest.raises(OSError): lease.close("committed")
+    data,raw = registry._history_read(path)
+    assert data["operations"]["operation"]["phase"] == "TERMINAL_INTENT"
+    pins = registry._history_validate_rows(data,recover=True)
+    assert pins and data["operations"]["operation"]["phase"] == "TERMINAL"
+    registry._history_write(path,data,raw)
+    monkeypatch.setattr(registry,"_history_closed",real_closed)
+    lease.close("committed")
+
+
+def test_released_history_unentered_intent_is_cancelled_but_entered_is_unresolved(tmp_path,monkeypatch):
+    import nexus.orchestrator.writer_quiescence as module
+    registry,path = _released_registry(tmp_path)
+    atomic = module._atomic_bytes
+    def fail_lease(path, raw, **kwargs):
+        if path.parent == registry._lease_dir(str(tmp_path)):
+            raise OSError("before lease publication")
+        return atomic(path,raw,**kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(module,"_atomic_bytes",fail_lease)
+        with pytest.raises(OSError): _history_lease(registry,tmp_path)
+    data,raw = registry._history_read(path)
+    registry._history_validate_rows(data,recover=True)
+    assert data["operations"]["operation"]["phase"] == "CANCELLED_BEFORE_ENTRY"
+    registry._history_write(path,data,raw)
+    with pytest.raises(WriterAdmissionDenied): _history_lease(registry,tmp_path)
+    _history_lease(registry,tmp_path,"entered")
+    data,_ = registry._history_read(path)
+    with pytest.raises(WriterAdmissionDenied,match="unresolved"):
+        registry._history_validate_rows(data,recover=True)
+
+
+def test_released_history_terminal_intent_replays_only_exact_active_bytes(tmp_path,monkeypatch):
+    import nexus.orchestrator.writer_quiescence as module
+    registry,path = _released_registry(tmp_path)
+    lease = _history_lease(registry,tmp_path)
+    lease_path = registry._lease_path(str(tmp_path),lease.operation_id)
+    original = lease_path.read_bytes()
+    atomic = module._atomic_bytes
+    def fail_terminal(path, raw, **kwargs):
+        if path == lease_path:
+            raise OSError("after terminal intent before lease CAS")
+        return atomic(path,raw,**kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(module,"_atomic_bytes",fail_terminal)
+        with pytest.raises(OSError): lease.close("committed")
+    assert lease_path.read_bytes() == original
+    data,raw = registry._history_read(path)
+    assert data["operations"]["operation"]["phase"] == "TERMINAL_INTENT"
+    pins = registry._history_validate_rows(data,recover=True)
+    assert lease_path.read_bytes() != original
+    assert pins and data["operations"]["operation"]["phase"] == "TERMINAL"
+    registry._history_write(path,data,raw)
+    lease.close("committed")
+
+
+def test_unentered_published_lease_is_cancelled_without_fabricating_terminal(tmp_path,monkeypatch):
+    registry,path = _released_registry(tmp_path)
+    with monkeypatch.context() as patch:
+        patch.setattr(registry,"_history_admitted",lambda observation: (_ for _ in ()).throw(OSError("before admitted fsync")))
+        with pytest.raises(OSError): _history_lease(registry,tmp_path)
+    lease_path = registry._lease_path(str(tmp_path),"operation")
+    original = lease_path.read_bytes()
+    data,raw = registry._history_read(path)
+    assert registry._history_validate_rows(data,recover=True) == {}
+    registry._history_write(path,data,raw)
+    assert lease_path.read_bytes() == original
+    assert registry._durable_leases(str(tmp_path)) == ([],[])
+    with pytest.raises(WriterAdmissionDenied): _history_lease(registry,tmp_path)
+    _history_lease(registry,tmp_path,"next-operation").close("committed")
+
+
+def test_released_history_physical_index_mutation_denies_next_admission(tmp_path):
+    registry,path = _released_registry(tmp_path)
+    _history_lease(registry,tmp_path).close("committed")
+    path.write_bytes(path.read_bytes()+b"\n")
+    with pytest.raises(WriterAdmissionDenied):
+        _history_lease(registry,tmp_path,"next-operation")
+
+
+def test_terminal_intent_recovery_validates_entire_inventory_before_writing(tmp_path,monkeypatch):
+    import nexus.orchestrator.writer_quiescence as module
+    registry,path = _released_registry(tmp_path)
+    lease = _history_lease(registry,tmp_path)
+    lease_path = registry._lease_path(str(tmp_path),lease.operation_id)
+    original = lease_path.read_bytes()
+    atomic = module._atomic_bytes
+    with monkeypatch.context() as patch:
+        def fail_terminal(path,raw,**kwargs):
+            if path == lease_path: raise OSError("terminal write crash")
+            return atomic(path,raw,**kwargs)
+        patch.setattr(module,"_atomic_bytes",fail_terminal)
+        with pytest.raises(OSError): lease.close("committed")
+    data,_ = registry._history_read(path)
+    extra = registry._lease_path(str(tmp_path),"unindexed")
+    extra.write_bytes(original)
+    with pytest.raises(WriterAdmissionDenied,match="unindexed"):
+        registry._history_validate_rows(data,recover=True)
+    assert lease_path.read_bytes() == original
+
+
+def test_released_history_session_membership_requires_receipt_chain(tmp_path):
+    registry,path = _released_registry(tmp_path)
+    data,_ = registry._history_read(path)
+    data["sessions"].append("pid:99999999:start:forged")
+    with pytest.raises(WriterAdmissionDenied):
+        registry._history_validate_rows(data,recover=True)
+    data,_ = registry._history_read(path)
+    data["released"]["prior_digest"] = "0"*64
+    with pytest.raises(WriterAdmissionDenied):
+        registry._history_validate_rows(data,recover=True)
+
+
+def test_b_terminal_reconciliation_uses_issued_proof_without_host_module(tmp_path,monkeypatch):
+    import builtins
+    registry,prepare,payload,save,_ = _recovery(tmp_path,historical=True)
+    proof = prepare()
+    successor = save(dict(payload,prior_digest=payload["receipt_sha256"],process_start_identity=registry.process_start_identity,server_identity=registry.server_identity))
+    registry.adopt_recovered_hold(proof,expected_successor_sha256=successor["receipt_sha256"])
+    real_import = builtins.__import__
+    def no_host(name,*args,**kwargs):
+        if "writer_activation_cohort" in name:
+            raise ImportError("host package intentionally unavailable")
+        return real_import(name,*args,**kwargs)
+    with monkeypatch.context() as patch:
+        patch.setattr(builtins,"__import__",no_host)
+        assert registry.reconcile_terminal_history(proof) == 1
+        assert registry.reconcile_terminal_history(proof) == 1
+    assert registry._durable_leases(str(tmp_path))[1] == []
+    with pytest.raises(WriterAdmissionDenied):
+        registry.reconcile_terminal_history(copy.copy(proof))
+    historical = registry._lease_path(str(tmp_path),"historical-operation")
+    historical.write_bytes(historical.read_bytes()+b"\n")
+    with pytest.raises(WriterAdmissionDenied):
+        registry.reconcile_terminal_history(proof)

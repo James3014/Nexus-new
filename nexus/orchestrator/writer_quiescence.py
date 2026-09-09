@@ -74,6 +74,14 @@ class _RecoveryFacts:
 
 
 
+class ReleasedHistoryAnchor:
+    """Opaque source-issued handle; authority remains in registry issuance facts."""
+    __slots__ = ("_nonce",)
+
+    def __init__(self):
+        self._nonce = object()
+
+
 class InitialWriterAttachment:
     """Opaque capability for attaching a writer while its activation hold remains."""
     __slots__ = ("_registry", "_hold", "root", "generation", "writer_id", "manifest_sha256", "transaction_id", "_marker_sha256", "_recovery_proof", "_nonce")
@@ -1279,6 +1287,11 @@ class WriterRegistry:
         self._reconciled_terminal_records: dict[str, str] = {}
         self._initial_attachments: dict[int, tuple[InitialWriterAttachment, tuple[Any, ...]]] = {}
         self._recovery_proofs: dict[int, _RecoveryFacts] = {}
+        self._history_anchors = {}
+        self._history_roots = {}
+        self._history_pins = {}
+        self._history_recovery = {}
+
 
     def _check_process(self) -> None:
         if os.getpid() != self._pid:
@@ -1472,6 +1485,8 @@ class WriterRegistry:
     def _recovery_receipt(raw):
         try:
             receipt = json.loads(raw, object_pairs_hook=_unique_object)
+            if not isinstance(receipt, dict):
+                raise ValueError("receipt must be an object")
             digest = receipt.pop("receipt_sha256")
             if _hash(_json_bytes(receipt)) != _digest(digest):
                 raise ValueError("digest mismatch")
@@ -1576,7 +1591,13 @@ class WriterRegistry:
                 for observation in receipt.observations:
                     row = historical_rows.get((observation.previous_identity.root, observation.previous_identity.role))
                     loaded = observation.loaded_identity
-                    if row is None or loaded is None or (row["manifest_sha256"], row["observed_generation"], row["observed_writer_id"]) != (observation.manifest_sha256, loaded.generation, loaded.writer_id):
+                    expected_manifest = row["manifest_sha256"] if row else None
+                    history_path = self._history_recovery.get(id(proof))
+                    if current["state"] == "RELEASED" and history_path is not None:
+                        history, _ = self._history_read(history_path)
+                        self._history_validate_rows(history, recover=True)
+                        expected_manifest = history["latest_manifest"][observation.previous_identity.root]
+                    if row is None or loaded is None or (expected_manifest, row["observed_generation"], row["observed_writer_id"]) != (observation.manifest_sha256, loaded.generation, loaded.writer_id):
                         raise WriterAdmissionDenied("recovery current vector differs from historical durable result")
             original = tuple(WriterIdentity(**row) for row in proof._predecessor["hold_markers"][0]["selected_writers"])
             if len(receipt.observations) != len(original) or {x.previous_identity for x in receipt.observations} != set(original):
@@ -1719,65 +1740,379 @@ class WriterRegistry:
     def _lease_path(self, root: str, operation_id: str) -> Path:
         return self._lease_dir(root) / f"{_hash(operation_id.encode())}.json"
 
-    def reconcile_terminal_history(self, coordinator: Any) -> int:
-        """Qualify immutable prior-process terminal records through F only.
+    def _cohort_history_path(self, roots, cohort_id):
+        base = self.hold_store or (Path(roots[0]) / ".nexus" / "writer-quiescence")
+        return base / "released-history" / f"{_hash(cohort_id.encode())}.json"
 
-        This does not adopt a hold, change a lease, or release admission. The
-        fixed verifier observes the actual loaded cohort and dead producer;
-        request data and callbacks cannot supply the qualification.
-        """
-        self._check_process()
-        from nexus.orchestrator.writer_activation_cohort import (
-            verify_loaded_cohort_terminal_history,
-        )
+    def _cohort_receipt_path(self, roots, cohort_id):
+        base = self.hold_store or (Path(roots[0]) / ".nexus" / "writer-quiescence")
+        return base / "activation-cohorts" / f"{_hash(cohort_id.encode())}.json"
 
-        pins = verify_loaded_cohort_terminal_history(self, coordinator)
-        if not isinstance(pins, tuple):
-            raise WriterAdmissionDenied("terminal history proof is not typed")
-        qualified: dict[str, str] = {}
-        roots: set[str] = set()
-        for pin in pins:
-            if not isinstance(pin, tuple) or len(pin) != 2:
-                raise WriterAdmissionDenied("terminal history pin is malformed")
-            locator, digest = pin
-            if not isinstance(locator, str) or not Path(locator).is_absolute():
-                raise WriterAdmissionDenied("terminal history path is not absolute")
-            _digest(digest)
-            data = _safe_bytes(Path(locator))
-            if _hash(data) != digest:
-                raise WriterAdmissionDenied("terminal history bytes changed")
-            raw = json.loads(data, object_pairs_hook=_unique_object)
-            root = _root(raw["root"])
-            if (Path(locator) != self._lease_path(root, raw["operation_id"])
-                or raw.get("durable_outcome") not in {"committed", "failed"}
-                or type(raw.get("entered_at")) not in (int, float)
-                or type(raw.get("exited_at")) not in (int, float)
-                or type(raw.get("expires_at")) not in (int, float)
-                or not raw["entered_at"] <= raw["exited_at"] <= raw["expires_at"]
-                or raw.get("source_identity") != self.source_identity):
-                raise WriterAdmissionDenied("terminal history record is invalid")
-            if locator in qualified:
-                raise WriterAdmissionDenied("terminal history pin is duplicated")
-            qualified[locator] = digest
-            roots.add(root)
+    @staticmethod
+    def _history_contract(receipt):
+        return {key: receipt[key] for key in ("cohort_id", "hold_epoch", "ordered_roots", "source_identity", "root_contracts", "hold_markers", "original_drain")}
+
+    def _history_read(self, path, *, pinned=True):
+        raw = _safe_bytes(path)
+        if pinned and self._history_pins.get(str(path)) != raw:
+            raise WriterAdmissionDenied("released history physical CAS changed")
+        data = self._recovery_receipt(raw)
+        if data.get("schema") != "writer-released-history/v1":
+            raise WriterAdmissionDenied("released history schema invalid")
+        return data, raw
+
+    def _history_write(self, path, data, expected):
+        import fcntl
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock = path.with_suffix(".lock")
+        _parents(lock)
+        fd = os.open(lock, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise WriterAdmissionDenied("history lock unsafe")
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            actual = _safe_bytes(path) if _exists(path) else None
+            if actual != expected:
+                raise WriterAdmissionDenied("released history CAS conflict")
+            payload = dict(data)
+            payload.pop("receipt_sha256", None)
+            payload["receipt_sha256"] = _hash(_json_bytes(payload))
+            raw = _json_bytes(payload)
+            _atomic_bytes(path, raw, exclusive=expected is None)
+            if _safe_bytes(path) != raw:
+                raise WriterAdmissionDenied("released history readback failed")
+            self._history_pins[str(path)] = raw
+            return payload, raw
+        finally:
+            os.close(fd)
+
+    def prepare_released_history(self, hold, *, expected_intent_sha256):
         with self._mutex:
             self._check_process()
-            if any(root not in self._held_roots for root in roots) or self._leases_for(tuple(roots)):
-                raise WriterAdmissionDenied("terminal history requires a drained held root")
-            for locator, digest in qualified.items():
-                previous = self._reconciled_terminal_records.get(locator)
+            if hold.registry is not self or hold.released or any(self._held_roots.get(root) is not hold for root in hold.roots) or self._leases_for(hold.roots):
+                raise WriterAdmissionDenied("release history requires exact held vector")
+            receipt_path = self._cohort_receipt_path(hold.roots, hold.cohort_id)
+            raw = _safe_bytes(receipt_path)
+            intent = self._recovery_receipt(raw)
+            self._validate_recovery_nested(intent)
+            if intent["state"] != "RELEASE_INTENT" or intent["receipt_sha256"] != expected_intent_sha256 or intent["hold_epoch"] != hold.epoch or tuple(intent["ordered_roots"]) != hold.roots or intent["source_identity"] != self.source_identity or intent["process_start_identity"] != self.process_start_identity:
+                raise WriterAdmissionDenied("release history intent mismatch")
+            path = self._cohort_history_path(hold.roots, hold.cohort_id)
+            if _exists(path):
+                data, existing = self._history_read(path, pinned=False)
+                if data["contract"] != self._history_contract(intent):
+                    raise WriterAdmissionDenied("release history anchor conflict")
+                self._history_pins[str(path)] = existing
+            else:
+                from nexus.events.state_owner_manifest import read_manifest
+                latest = {root: read_manifest(Path(root)).manifest_sha256 for root in hold.roots}
+                data = dict(schema="writer-released-history/v1", contract=self._history_contract(intent), intent=intent, released=None, sessions=[], operations={}, latest_manifest=latest)
+                self._history_write(path, data, None)
+            anchor = ReleasedHistoryAnchor()
+            self._history_anchors[id(anchor)] = (anchor, anchor._nonce, hold, path, raw)
+            return anchor
+
+    def bind_released_history(self, anchor, *, expected_released_sha256):
+        with self._mutex:
+            self._check_process()
+            record = self._history_anchors.get(id(anchor))
+            if record is None or record[0] is not anchor or record[1] is not anchor._nonce:
+                raise WriterAdmissionDenied("release history anchor not issued")
+            _, _, hold, path, intent_raw = record
+            if hold.released or any(self._held_roots.get(root) is not hold for root in hold.roots):
+                raise WriterAdmissionDenied("release history admission already open")
+            released_raw = _safe_bytes(self._cohort_receipt_path(hold.roots, hold.cohort_id))
+            released = self._recovery_receipt(released_raw)
+            intent = self._recovery_receipt(intent_raw)
+            self._validate_recovery_nested(released)
+            if released["state"] != "RELEASED" or released["receipt_sha256"] != expected_released_sha256 or released["prior_digest"] != intent["receipt_sha256"] or self._history_contract(released) != self._history_contract(intent) or any(_exists(self._marker_path(root)) for root in hold.roots):
+                raise WriterAdmissionDenied("release history binding CAS mismatch")
+            data, raw = self._history_read(path)
+            if data["released"] is not None and data["released"] != released:
+                raise WriterAdmissionDenied("release history already bound elsewhere")
+            data["intent"] = intent
+            data["released"] = released
+            if not data["sessions"]:
+                data["sessions"].append(released)
+            self._history_write(path, data, raw)
+            self._history_roots.update({root: path for root in hold.roots})
+
+    def _history_sessions(self, data):
+        intent = self._recovery_receipt(_json_bytes(data["intent"]))
+        released = self._recovery_receipt(_json_bytes(data["released"]))
+        self._validate_recovery_nested(intent)
+        self._validate_recovery_nested(released)
+        if intent["state"] != "RELEASE_INTENT" or released["state"] != "RELEASED" or released["prior_digest"] != intent["receipt_sha256"] or self._history_contract(released) != data["contract"] or self._history_contract(intent) != data["contract"]:
+            raise WriterAdmissionDenied("released history anchor chain invalid")
+        sessions = data["sessions"]
+        if not sessions or sessions[0] != released:
+            raise WriterAdmissionDenied("released history session origin invalid")
+        processes = set()
+        previous = None
+        for receipt in sessions:
+            receipt = self._recovery_receipt(_json_bytes(receipt))
+            self._validate_recovery_nested(receipt)
+            if receipt["state"] != "RELEASED" or self._history_contract(receipt) != data["contract"] or receipt["process_start_identity"] in processes:
+                raise WriterAdmissionDenied("released history session identity invalid")
+            if previous is not None:
+                mutable = {"receipt_sha256", "prior_digest", "process_start_identity", "server_identity"}
+                if receipt["prior_digest"] != previous["receipt_sha256"] or {k:v for k,v in receipt.items() if k not in mutable} != {k:v for k,v in previous.items() if k not in mutable}:
+                    raise WriterAdmissionDenied("released history session adoption chain invalid")
+            processes.add(receipt["process_start_identity"])
+            previous = receipt
+        return processes
+
+    def _history_validate_rows(self, data, *, recover=False):
+        try:
+            return self._history_validate_rows_checked(data, recover=recover)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise WriterAdmissionDenied("released operation index malformed") from exc
+
+    def _history_validate_rows_checked(self, data, *, recover=False):
+        pins = {}
+        replay = []
+        processes = self._history_sessions(data)
+        contracts = {x["root"]: x for x in data["contract"]["root_contracts"]}
+        roles = {(x["root"], x["role"]) for x in data["contract"]["hold_markers"][0]["selected_writers"]}
+        operations = data["operations"]
+        if not isinstance(operations, dict) or data["released"] is None:
+            raise WriterAdmissionDenied("release history unbound")
+        for operation_id, row in operations.items():
+            active = row["active"]
+            root = active["root"]
+            contract = contracts.get(root)
+            if contract is None or (root, active["role"]) not in roles or active["operation_id"] != operation_id or active["source_identity"] != self.source_identity or active["process_start_identity"] not in processes or (active["generation"], active["writer_id"]) != (contract["generation"], contract["writer_id"]) or active["exited_at"] is not None or active["durable_outcome"] is not None:
+                raise WriterAdmissionDenied("released operation identity invalid")
+            path = self._lease_path(root, operation_id)
+            if row["path"] != str(path) or row["active_sha256"] != _hash(_json_bytes(active)):
+                raise WriterAdmissionDenied("released operation index binding invalid")
+            actual = _safe_bytes(path) if _exists(path) else None
+            phase = row["phase"]
+            if phase == "CANCELLED_BEFORE_ENTRY":
+                if actual is not None and actual != _json_bytes(active):
+                    raise WriterAdmissionDenied("cancelled operation changed")
+                continue
+            if phase == "ADMISSION_INTENT":
+                if actual is not None and actual != _json_bytes(active):
+                    raise WriterAdmissionDenied("unentered operation changed")
+                if recover:
+                    row["phase"] = "CANCELLED_BEFORE_ENTRY"
+                continue
+            if phase == "ADMITTED":
+                if actual != _json_bytes(active) or recover:
+                    raise WriterAdmissionDenied("released admitted operation unresolved")
+                continue
+            if phase not in {"TERMINAL_INTENT", "TERMINAL"}:
+                raise WriterAdmissionDenied("released operation phase invalid")
+            terminal = row["terminal"]
+            if any(terminal.get(key) != value for key, value in active.items() if key not in {"exited_at", "durable_outcome"}) or terminal["durable_outcome"] not in {"committed", "failed"} or not active["entered_at"] <= terminal["exited_at"] <= active["expires_at"] or row["terminal_sha256"] != _hash(_json_bytes(terminal)):
+                raise WriterAdmissionDenied("released terminal operation invalid")
+            final_bytes = _json_bytes(terminal)
+            if phase == "TERMINAL_INTENT" and recover and actual == _json_bytes(active):
+                replay.append((path, actual, final_bytes))
+            elif actual != final_bytes:
+                raise WriterAdmissionDenied("released terminal replay fence changed")
+            if phase == "TERMINAL_INTENT" and recover:
+                row["phase"] = "TERMINAL"
+                data["latest_manifest"][root] = row["manifest_sha256"]
+            pins[str(path)] = row["terminal_sha256"]
+        original = data["contract"]["original_drain"]["payload"]["leases"]
+        allowed = {str(self._lease_path(x["root"], x["operation_id"])) for x in original} | {row["path"] for row in operations.values()}
+        for root in data["contract"]["ordered_roots"]:
+            directory = self._lease_dir(root)
+            if _exists(directory):
+                for candidate in directory.iterdir():
+                    if not candidate.name.startswith(".") and str(candidate) not in allowed:
+                        raise WriterAdmissionDenied("unindexed released operation")
+        # Complete inventory and all expected byte comparisons precede replay.
+        for path, expected, final_bytes in replay:
+            if _safe_bytes(path) != expected:
+                raise WriterAdmissionDenied("terminal intent replay CAS changed")
+        for path, expected, final_bytes in replay:
+            _atomic_bytes(path, final_bytes)
+            if _safe_bytes(path) != final_bytes:
+                raise WriterAdmissionDenied("terminal intent replay readback failed")
+        return pins
+
+    def recover_released_history(self, proof):
+        with self._mutex:
+            facts = self._recovery_facts(proof)
+            self._verify_recovery_proof(proof)
+            current = self._recovery_receipt(facts.raw)
+            if current["state"] != "RELEASED" or facts.hold is None:
+                raise WriterAdmissionDenied("released history requires adopted RELEASED proof")
+            path = self._cohort_history_path(proof._roots, proof._cohort_id)
+            data, raw = self._history_read(path, pinned=str(path) in self._history_pins)
+            if data["contract"] != self._history_contract(current) or data["released"] is None or self._history_contract(data["released"]) != data["contract"]:
+                raise WriterAdmissionDenied("released history original anchor mismatch")
+            processes = self._history_sessions(data)
+            tail = data["sessions"][-1]["receipt_sha256"]
+            predecessor = proof._predecessor
+            if tail != current["receipt_sha256"]:
+                if tail != predecessor["receipt_sha256"]:
+                    if predecessor["prior_digest"] != tail:
+                        raise WriterAdmissionDenied("released history session tail is not pinned predecessor")
+                    data["sessions"].append(predecessor)
+                data["sessions"].append(current)
+                processes = self._history_sessions(data)
+            for process in processes:
+                if process != self.process_start_identity and not self._process_absent(process):
+                    raise WriterAdmissionDenied("released history producer still alive")
+            pins = self._history_validate_rows(data, recover=True)
+            # Inventory validation is independent of directory scanning: every row
+            # above must exist. Scanning only rejects additional unindexed files.
+            original = current["original_drain"]["payload"]["leases"]
+            original_paths = {str(self._lease_path(x["root"], x["operation_id"])) for x in original}
+            indexed = {row["path"] for row in data["operations"].values()}
+            for root in proof._roots:
+                directory = self._lease_dir(root)
+                if _exists(directory):
+                    for candidate in directory.iterdir():
+                        if not candidate.name.startswith(".") and str(candidate) not in indexed | original_paths:
+                            raise WriterAdmissionDenied("unindexed released operation")
+            self._history_write(path, data, raw)
+            self._history_recovery[id(proof)] = path
+            self._history_roots.update({root: path for root in proof._roots})
+            self._reconciled_terminal_records.update(pins)
+            return tuple(sorted(pins.items()))
+
+    def rebind_history_process(self, proof):
+        with self._mutex:
+            self._verify_recovery_proof(proof)
+            path = self._history_recovery.get(id(proof))
+            if path is None:
+                raise WriterAdmissionDenied("released history recovery not qualified")
+            data, raw = self._history_read(path)
+            self._history_validate_rows(data, recover=True)
+            if data["sessions"][-1]["receipt_sha256"] != self._recovery_receipt(_safe_bytes(proof._path))["receipt_sha256"] or data["sessions"][-1]["process_start_identity"] != self.process_start_identity:
+                raise WriterAdmissionDenied("released history process rebind CAS changed")
+            self._history_write(path, data, raw)
+            self._history_roots.update({root: path for root in proof._roots})
+
+    def _history_admit(self, observation):
+        path = self._history_roots.get(observation.identity.root)
+        if path is None:
+            return
+        data, raw = self._history_read(path)
+        self._history_validate_rows(data)
+        if observation.operation_id in data["operations"]:
+            raise WriterAdmissionDenied("released operation replay denied")
+        active = observation.to_dict()
+        data["operations"][observation.operation_id] = dict(phase="ADMISSION_INTENT", path=str(self._lease_path(observation.identity.root, observation.operation_id)), active=active, active_sha256=_hash(_json_bytes(active)))
+        self._history_validate_rows(data)
+        self._history_write(path, data, raw)
+
+    def _history_admitted(self, observation):
+        path = self._history_roots.get(observation.identity.root)
+        if path is None:
+            return
+        data, raw = self._history_read(path)
+        row = data["operations"][observation.operation_id]
+        if row["phase"] != "ADMISSION_INTENT" or _safe_bytes(Path(row["path"])) != _json_bytes(row["active"]):
+            raise WriterAdmissionDenied("released admission readback mismatch")
+        row["phase"] = "ADMITTED"
+        self._history_write(path, data, raw)
+
+    def _history_close(self, lease, outcome):
+        path = self._history_roots.get(lease.observation.identity.root)
+        if path is None:
+            return None
+        data, raw = self._history_read(path)
+        row = data["operations"][lease.operation_id]
+        if row["phase"] in {"TERMINAL_INTENT", "TERMINAL"}:
+            terminal = row["terminal"]
+            if terminal["durable_outcome"] != outcome:
+                raise WriterAdmissionDenied("released terminal retry outcome changed")
+            return replace(lease.observation, exited_at=terminal["exited_at"], durable_outcome=outcome)
+        if row["phase"] != "ADMITTED" or _safe_bytes(Path(row["path"])) != _json_bytes(row["active"]):
+            raise WriterAdmissionDenied("released terminal active CAS changed")
+        from nexus.events.state_owner_manifest import read_manifest
+        manifest = read_manifest(Path(lease.observation.identity.root))
+        if manifest is None or manifest.state != "COMMITTED":
+            raise WriterAdmissionDenied("released terminal physical manifest unavailable")
+        result = replace(lease.observation, exited_at=time.time(), durable_outcome=outcome)
+        row.update(phase="TERMINAL_INTENT", terminal=result.to_dict(), terminal_sha256=_hash(_json_bytes(result.to_dict())), manifest_sha256=manifest.manifest_sha256)
+        self._history_write(path, data, raw)
+        return result
+
+    def _history_closed(self, result):
+        path = self._history_roots.get(result.identity.root)
+        if path is None:
+            return
+        data, raw = self._history_read(path)
+        row = data["operations"][result.operation_id]
+        if row["terminal"] != result.to_dict() or _safe_bytes(Path(row["path"])) != _json_bytes(result.to_dict()):
+            raise WriterAdmissionDenied("released terminal readback mismatch")
+        row["phase"] = "TERMINAL"
+        data["latest_manifest"][result.identity.root] = row["manifest_sha256"]
+        self._history_write(path, data, raw)
+
+    def reconcile_terminal_history(self, proof: RecoveryHoldProof) -> int:
+        """Qualify exact original and indexed history using only B-owned proof."""
+        with self._mutex:
+            self._check_process()
+            facts = self._recovery_facts(proof)
+            self._verify_recovery_proof(proof)
+            if facts.hold is None or self._leases_for(proof._roots):
+                raise WriterAdmissionDenied("terminal history requires adopted drained hold")
+            original = proof._predecessor["original_drain"]
+            raw = _json_bytes(original["payload"])
+            drain = WriterQuiescenceReceipt.from_bytes(raw).verify()
+            if _hash(raw) != original["bytes_sha256"] or drain.drain_state != DRAINED or drain.cohort_id != proof._cohort_id or drain.hold_epoch != facts.hold.epoch or drain.ordered_roots != proof._roots or drain.source_identity != self.source_identity:
+                raise WriterAdmissionDenied("original terminal history drain mismatch")
+            selected = {x.identity for x in drain.observations}
+            qualified = {}
+            producers = set()
+            for lease in drain.leases:
+                if lease.identity not in selected or lease.exited_at is None or lease.expires_at is None or lease.durable_outcome not in {"committed", "failed"} or not lease.entered_at <= lease.exited_at <= lease.expires_at:
+                    raise WriterAdmissionDenied("original terminal history identity invalid")
+                path = self._lease_path(lease.identity.root, lease.operation_id)
+                expected = _json_bytes(lease.to_dict())
+                if _safe_bytes(path) != expected or str(path) in qualified:
+                    raise WriterAdmissionDenied("original terminal replay fence changed")
+                producers.add(lease.identity.process_start_identity)
+                qualified[str(path)] = _hash(expected)
+            for process in producers:
+                if process == self.process_start_identity or not self._process_absent(process):
+                    raise WriterAdmissionDenied("original terminal producer is not absent")
+            current = self._recovery_receipt(facts.raw)
+            if current["state"] == "RELEASED":
+                qualified.update(dict(self.recover_released_history(proof)))
+            allowed = set(qualified)
+            history_path = self._history_recovery.get(id(proof))
+            if history_path is not None:
+                history, _ = self._history_read(history_path)
+                allowed.update(row["path"] for row in history["operations"].values() if row["phase"] == "CANCELLED_BEFORE_ENTRY")
+            for root in proof._roots:
+                directory = self._lease_dir(root)
+                if _exists(directory):
+                    for path in directory.iterdir():
+                        if not path.name.startswith(".") and str(path) not in allowed:
+                            raise WriterAdmissionDenied("terminal history record is not qualified")
+            self._verify_recovery_proof(proof)
+            for path, digest in qualified.items():
+                if _hash(_safe_bytes(Path(path))) != digest:
+                    raise WriterAdmissionDenied("terminal history physical bytes changed")
+                previous = self._reconciled_terminal_records.get(path)
                 if previous is not None and previous != digest:
-                    raise WriterAdmissionDenied("terminal history pin conflicts")
-                if _hash(_safe_bytes(Path(locator))) != digest:
-                    raise WriterAdmissionDenied("terminal history bytes changed")
+                    raise WriterAdmissionDenied("terminal history pin conflict")
             self._reconciled_terminal_records.update(qualified)
-        return len(qualified)
+            return len(qualified)
 
     def _durable_leases(self, root: str) -> tuple[list[LeaseObservation], list[str]]:
         directory = self._lease_dir(root)
         _parents(directory / "probe")
         pinned = {path: digest for path, digest in self._reconciled_terminal_records.items()
                   if Path(path).parent == directory}
+        cancelled = set()
+        history_path = self._history_roots.get(root)
+        if history_path is not None:
+            try:
+                history, _ = self._history_read(history_path)
+                self._history_validate_rows(history)
+                cancelled = {operation_id for operation_id, row in history["operations"].items() if row["phase"] == "CANCELLED_BEFORE_ENTRY"}
+            except (OSError, KeyError, TypeError, ValueError, WriterQuiescenceError) as exc:
+                return [], [f"leases:released-history-invalid:{type(exc).__name__}"]
         if not _exists(directory):
             return [], ([f"leases:reconciled-history-missing:{root}"] if pinned else [])
         leases, issues = [], []
@@ -1815,6 +2150,8 @@ class WriterRegistry:
                 )
                 if identity.root != root or path != self._lease_path(root, lease.operation_id):
                     raise ValueError("foreign operation record")
+                if lease.operation_id in cancelled:
+                    continue
                 leases.append(lease)
                 if lease.exited_at is None or lease.durable_outcome not in {"committed", "failed"}:
                     issues.append(f"lease:unresolved:{lease.operation_id}")
@@ -1881,10 +2218,12 @@ class WriterRegistry:
                 time.time(),
                 expires_at=time.time() + self.lease_lifetime_seconds,
             )
+            self._history_admit(observation)
             try:
                 _atomic_bytes(path, _json_bytes(observation.to_dict()), exclusive=True)
             except FileExistsError as exc:
                 raise WriterAdmissionDenied("operation already exists") from exc
+            self._history_admitted(observation)
             lease = WriterLease(self, item, observation)
             self._leases[operation_id] = lease
             # A different process can publish a hold between the first check
@@ -1903,11 +2242,15 @@ class WriterRegistry:
         with self._mutex:
             if self._leases.get(lease.operation_id) is not lease:
                 raise WriterAdmissionDenied("lease identity is not current")
-            result = replace(lease.observation, exited_at=time.time(), durable_outcome=outcome)
+            result = self._history_close(lease, outcome) or replace(lease.observation, exited_at=time.time(), durable_outcome=outcome)
+            lease_path = self._lease_path(result.identity.root, result.operation_id)
+            if _safe_bytes(lease_path) not in {_json_bytes(lease.observation.to_dict()), _json_bytes(result.to_dict())}:
+                raise WriterAdmissionDenied("terminal lease CAS changed")
             _atomic_bytes(
                 self._lease_path(result.identity.root, result.operation_id),
                 _json_bytes(result.to_dict()),
             )
+            self._history_closed(result)
             del self._leases[lease.operation_id]
             self._lease_history.append(result)
             return result

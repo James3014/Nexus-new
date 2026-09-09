@@ -530,6 +530,8 @@ class WriterActivationCohort:
         self._initial_recovery_successor = None
         self._initial_recovery_adopted = False
         self._pending_recovery_receipt = None
+        self._released_history_anchor = None
+        self._released_history_pins = ()
         self._initial_specs = tuple(initial_specs) or tuple(
             x.initial_spec for x in roots if x.initial_spec is not None
         )
@@ -1075,7 +1077,8 @@ class WriterActivationCohort:
                 present_seen = True
                 if raw != _json(payload):
                     raise CohortConflict("RECOVERY_HOLD_MARKER_CHANGED")
-        _qualified_terminal_records(registry, durable)
+        if durable.state != "RELEASED":
+            _qualified_terminal_records(registry, durable)
 
         hold = WriterHold(registry, cohort_id, ordered, durable.hold_epoch, selected)
         # Construct without requiring absent release-prefix markers to reappear.
@@ -1085,24 +1088,21 @@ class WriterActivationCohort:
         obj._initial_specs = tuple(x.initial_spec for x in roots if x.initial_spec is not None)
         obj._initial_materialized = {}
         obj._initial_factories = {}
-        obj._initial_recovery_proof = (registry.prepare_hold_recovery(
+        obj._initial_recovery_proof = registry.prepare_hold_recovery(
             cohort_id=cohort_id, ordered_roots=ordered,
             expected_receipt_sha256=durable.receipt_sha256,
-        ) if obj._initial_specs else None)
+        )
         obj._initial_recovery_successor = None
         obj._initial_recovery_adopted = False
         obj._pending_recovery_receipt = None
+        obj._released_history_anchor = None
+        obj._released_history_pins = ()
         obj.state_path, obj._last = path, durable
         obj._mutation_lock, obj._recovering = threading.RLock(), True
         obj._recovery_ready = False
         obj._marker_payloads = tuple(durable.hold_markers)
         if obj._contracts() != durable.root_contracts:
             raise CohortConflict("RECOVERY_REQUEST_VECTOR_MISMATCH")
-        if obj._initial_recovery_proof is None:
-            registry._held_roots.update({root: hold for root in ordered})
-            registry._epoch = max(registry._epoch, hold.epoch)
-            for item in selected:
-                item.acknowledged_epoch = hold.epoch
         _LOADED_COHORTS[(id(registry), cohort_id)] = obj
         # Preserve historical drain/markers and record the new observed process
         # with a prior-digest CAS. No filesystem generation is rolled backward.
@@ -1137,12 +1137,16 @@ class WriterActivationCohort:
                     expected_successor_sha256=self._initial_recovery_successor or current.receipt_sha256,
                 )
                 self._initial_recovery_adopted = True
-            pins = _qualified_terminal_records(self.registry, current)
+            if current.state == "RELEASED":
+                self._released_history_pins = self.registry.recover_released_history(
+                    self._initial_recovery_proof)
+            pins = _qualified_terminal_records(self.registry, current,
+                                               released_pins=self._released_history_pins)
             if pins:
                 reconcile_history = getattr(self.registry, "reconcile_terminal_history", None)
                 if reconcile_history is None:
                     raise CohortConflict("TERMINAL_HISTORY_RECONCILIATION_REQUIRED")
-                reconcile_history(self)
+                reconcile_history(self._initial_recovery_proof)
             if current.state in {"ACTIVE", "RELEASE_INTENT", "RELEASED"}:
                 if self._initial_specs:
                     self._materialize_initial_roots()
@@ -1153,6 +1157,7 @@ class WriterActivationCohort:
                 )
                 self._verify_active_physical(allow_missing=missing)
                 if current.state == "RELEASED":
+                    self.registry.rebind_history_process(self._initial_recovery_proof)
                     with self.registry._mutex:
                         for root in self.hold.roots:
                             self.registry._held_roots.pop(root, None)
@@ -1342,6 +1347,8 @@ class WriterActivationCohort:
             )
         )
         try:
+            self._released_history_anchor = self.registry.prepare_released_history(
+                self.hold, expected_intent_sha256=intent.receipt_sha256)
             with self.registry._mutex:
                 self._check_f_hold()
                 for root in self.hold.roots:
@@ -1365,6 +1372,8 @@ class WriterActivationCohort:
                     receipt_sha256="",
                 )
             )
+            self.registry.bind_released_history(self._released_history_anchor,
+                                                expected_released_sha256=released.receipt_sha256)
             self._finish_release_admission()
             return released
         except Exception:
@@ -1568,12 +1577,19 @@ class WriterActivationCohort:
         """Complete an existing release intent after a lost acknowledgement."""
         current = self.status()
         if current.state == "RELEASED":
-            self._finish_release_admission()
+            if not self.hold.released:
+                if self._released_history_anchor is None:
+                    raise WriterActivationError("RELEASE_HISTORY_ANCHOR_REQUIRED")
+                self.registry.bind_released_history(self._released_history_anchor,
+                                                    expected_released_sha256=current.receipt_sha256)
+                self._finish_release_admission()
             return current
         if current.state != "RELEASE_INTENT":
             raise WriterActivationError("RELEASE_INTENT_REQUIRED")
         self.registry._check_process()
         self._verify_active_physical(allow_missing=True)
+        self._released_history_anchor = self.registry.prepare_released_history(
+            self.hold, expected_intent_sha256=current.receipt_sha256)
         with self.registry._mutex:
             self._check_f_hold(allow_missing=True)
             if self.registry._leases_for(self.hold.roots):
@@ -1603,6 +1619,8 @@ class WriterActivationCohort:
             )
         )
 
+        self.registry.bind_released_history(self._released_history_anchor,
+                                            expected_released_sha256=released.receipt_sha256)
         self._finish_release_admission()
         return released
 
@@ -1651,7 +1669,8 @@ def _prove_process_absent(identity: str) -> None:
     raise CohortConflict("PREVIOUS_PROCESS_STILL_EXISTS")
 
 
-def _qualified_terminal_records(registry: WriterRegistry, receipt: ActivationCohortReceipt):
+def _qualified_terminal_records(registry: WriterRegistry, receipt: ActivationCohortReceipt,
+                                *, released_pins=()):
     """Qualify original replay-fence bytes; never rewrite or remove history."""
     from nexus.orchestrator.writer_quiescence import WriterQuiescenceReceipt
 
@@ -1682,6 +1701,10 @@ def _qualified_terminal_records(registry: WriterRegistry, receipt: ActivationCoh
         path = registry._lease_path(lease.identity.root, lease.operation_id)
         if _safe_read(path) != _json(lease.to_dict()):
             raise CohortConflict("ORIGINAL_TERMINAL_REPLAY_FENCE_CHANGED")
+    released = dict(released_pins)
+    if len(released) != len(released_pins):
+        raise CohortConflict("RELEASED_HISTORY_DUPLICATE_PIN")
+    seen_released = set()
     pins = []
     proved = set()
     for root in receipt.ordered_roots:
@@ -1693,7 +1716,7 @@ def _qualified_terminal_records(registry: WriterRegistry, receipt: ActivationCoh
                 continue
             expected = frozen.get(lease.operation_id)
             if (
-                expected != lease
+                (expected is not None and expected != lease)
                 or lease.exited_at is None
                 or lease.durable_outcome not in {"committed", "failed"}
                 or lease.expires_at is None
@@ -1702,12 +1725,18 @@ def _qualified_terminal_records(registry: WriterRegistry, receipt: ActivationCoh
                 raise CohortConflict("RECOVERY_FOREIGN_LEASE_NOT_IN_DRAIN")
             path = registry._lease_path(root, lease.operation_id)
             data = _safe_read(path)
-            if data != _json(expected.to_dict()):
+            if expected is None:
+                if released.get(str(path)) != _sha(data):
+                    raise CohortConflict("RECOVERY_FOREIGN_LEASE_NOT_IN_DRAIN")
+                seen_released.add(str(path))
+            if data != _json(lease.to_dict()):
                 raise CohortConflict("RECOVERY_TERMINAL_LEASE_BYTES_MISMATCH")
             if lease.identity.process_start_identity not in proved:
                 _prove_process_absent(lease.identity.process_start_identity)
                 proved.add(lease.identity.process_start_identity)
             pins.append((str(path), _sha(data)))
+    if seen_released != set(released):
+        raise CohortConflict("RELEASED_HISTORY_PIN_VECTOR_MISMATCH")
     return tuple(pins)
 
 
@@ -1734,7 +1763,12 @@ def verify_loaded_cohort_terminal_history(
     ):
         raise CohortConflict("RECOVERY_RECEIPT_CHANGED")
     coordinator._check_f_hold(allow_missing=current.state in {"RELEASE_INTENT", "RELEASED"})
-    return _qualified_terminal_records(registry, current)
+    released_pins = ()
+    if current.state == "RELEASED":
+        released_pins = registry.recover_released_history(coordinator._initial_recovery_proof)
+        if tuple(released_pins) != tuple(coordinator._released_history_pins):
+            raise CohortConflict("RELEASED_HISTORY_CHANGED")
+    return _qualified_terminal_records(registry, current, released_pins=released_pins)
 
 
 def status_loaded_cohort(coordinator: WriterActivationCohort) -> ActivationCohortReceipt:
