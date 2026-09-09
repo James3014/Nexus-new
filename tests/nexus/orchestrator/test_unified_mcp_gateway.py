@@ -4123,9 +4123,13 @@ def test_project_entry_no_task_ready_without_state_fabrication(tmp_path, monkeyp
 
 def test_project_entry_exact_task_rehydrates_exact_attempt(monkeypatch):
     class Service:
-        def find_tasks_by_repository_issue(self, *_): return [{"task_id": "t842", "attempt_id": "a1"}]
-        def rehydrate_task_continuation(self, task_id, attempt_id): self.called = (task_id, attempt_id); return {"projection": "exact"}
-    service = Service(); readiness_calls = []
+        def find_tasks_by_repository_issue(self, *_):
+            return [{"task_id": "t842", "attempt_id": "a1"}]
+        def rehydrate_task_continuation(self, task_id, attempt_id):
+            self.called = (task_id, attempt_id)
+            return {"projection": "exact"}
+    service = Service()
+    readiness_calls = []
     gateway = _project_entry_gateway(monkeypatch, lambda *_: {"ok": True, "issue": {"number": 842, "state": "OPEN"}}, service=service, readiness=lambda args: readiness_calls.append(args) or {"outcome": "READY_TO_EXECUTE"})
     result = gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 842})
     assert service.called == ("t842", "a1") and result["continuation"] == {"projection": "exact"}
@@ -4155,7 +4159,8 @@ def test_project_entry_observer_failure_and_identity_mismatch_fail_closed(monkey
 
 
 def test_project_entry_issue_switch_has_no_cross_issue_leakage(monkeypatch):
-    observer = lambda _, issue: {"ok": True, "issue": {"number": issue, "state": "OPEN"}}
+    def observer(_, issue):
+        return {"ok": True, "issue": {"number": issue, "state": "OPEN"}}
     gateway = _project_entry_gateway(monkeypatch, observer, readiness=lambda _: {"outcome": "READY_TO_EXECUTE"})
     a = gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 1})
     b = gateway._project_entry({"repository_owner": "James3014", "repository_name": "Nexus-new", "issue_number": 2})
@@ -4172,8 +4177,10 @@ def test_project_entry_binding_hash_covers_stable_identity_matrix():
     base = {"repository": "James3014/Nexus-new", "issue_number": 842, "issue": {"state": "OPEN", "updatedAt": "u"}, "source": {"commit": "a" * 40, "tree": "b" * 40, "canonical_remote": "https://github.com/James3014/Nexus-new.git"}, "task_resolution": {"status": "NO_TASK"}, "readiness_request": {"request_hash": "r1"}, "readiness_result": {"outcome": "READY_TO_EXECUTE"}, "claim_ceiling": "c"}
     original = UnifiedMCPGateway._project_entry_binding_hash(base)
     for path, value in ((("issue", "updatedAt"), "v"), (("source", "commit"), "c" * 40), (("source", "tree"), "d" * 40), (("source", "canonical_remote"), "https://github.com/James3014/Other.git"), (("task_resolution", "status"), "EXACT_TASK"), (("readiness_request", "request_hash"), "r2"), (("readiness_result", "outcome"), "BLOCKED"), (("claim_ceiling",), "other")):
-        candidate = json.loads(json.dumps(base)); cursor = candidate
-        for key in path[:-1]: cursor = cursor[key]
+        candidate = json.loads(json.dumps(base))
+        cursor = candidate
+        for key in path[:-1]:
+            cursor = cursor[key]
         cursor[path[-1]] = value
         assert UnifiedMCPGateway._project_entry_binding_hash(candidate) != original
 

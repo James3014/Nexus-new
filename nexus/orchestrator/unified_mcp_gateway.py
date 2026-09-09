@@ -22,10 +22,10 @@ import sys
 import tempfile
 import threading
 import time
-from urllib.parse import urlsplit
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Mapping, Optional
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from nexus.contracts.autonomy_goal import AutonomyActionClass, RepositoryIdentity
