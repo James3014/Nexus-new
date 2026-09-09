@@ -24,6 +24,8 @@ def build_runtime_context_hub(
     compactor: Callable[..., dict[str, Any]] | None = None,
     learning_writer: Callable[..., Any] | None = None,
     clock: Callable[[], Any] | None = None,
+    policy_reader: Callable[[], Any] | None = None,
+    handoff_reader: Callable[[], Any] | None = None,
 ) -> RuntimeContextHub:
     """Adapt legacy service objects into the runtime's explicit callable ports."""
 
@@ -53,6 +55,8 @@ def build_runtime_context_hub(
         knowledge_reader=knowledge_reader,
         learning_writer=learning_writer,
         clock=clock,
+        policy_reader=policy_reader,
+        handoff_reader=handoff_reader,
     )
     return RuntimeContextHub(deps=deps, strict_deps=True)
 
@@ -82,8 +86,6 @@ def build_legacy_learning_writer(project_root: str | Path, run_dir: str | Path |
 
 def _build_compactor(project_root: str | Path, state_reader: Callable[[], Any]) -> Callable[..., dict[str, Any]]:
     def compact(value: dict[str, Any], confidence: float = 0.5) -> dict[str, Any]:
-        del value
-        state = state_reader()
-        return ContextCompactor(Path(project_root)).compact(vars(state), confidence=confidence)
+        return ContextCompactor(Path(project_root)).compact(value, confidence=confidence)
 
     return compact

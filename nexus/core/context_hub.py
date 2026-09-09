@@ -114,6 +114,8 @@ class ContextHub:
             ),
             dialogue_pruner=prune_dialogue,
             learning_writer=build_legacy_learning_writer(self.project_root, self.run_dir),
+            policy_reader=lambda: __import__("nexus.core.policy_loader", fromlist=["PolicyLoader"]).PolicyLoader.load(str(self.project_root)),
+            handoff_reader=self._load_last_handoff,
         )
 
     def load_program_rules(self, md_path: str = "program.md") -> str:
