@@ -1287,6 +1287,8 @@ class WriterRegistry:
         self._reconciled_terminal_records: dict[str, str] = {}
         self._initial_attachments: dict[int, tuple[InitialWriterAttachment, tuple[Any, ...]]] = {}
         self._recovery_proofs: dict[int, _RecoveryFacts] = {}
+        self._pre_activation_proofs = {}
+        self._pre_activation_holds = {}
         self._history_anchors = {}
         self._history_roots = {}
         self._history_pins = {}
@@ -1328,6 +1330,402 @@ class WriterRegistry:
             capability = InitialWriterAttachment(self, hold, root=canonical, generation=generation, writer_id=writer_id, manifest_sha256=manifest_sha256, transaction_id=manifest.transaction_id, marker_sha256=_hash(marker), recovery_proof=recovery_proof)
             self._initial_attachments[id(capability)] = (capability, (canonical, generation, writer_id, manifest_sha256, capability.transaction_id, capability._marker_sha256, hold.epoch, self._pid, id(recovery_proof), id(hold)))
             return capability
+
+    def _pre_activation_path(self, roots, cohort_id):
+        return (
+            Path(roots[0])
+            / ".nexus"
+            / "writer-quiescence"
+            / "preparations"
+            / f"{_hash(_text(cohort_id, 'cohort_id').encode())}.json"
+        )
+
+    @staticmethod
+    def _pre_activation_physical(root):
+        from nexus.events.state_owner_manifest import read_manifest
+        from nexus.events.writer_generation import read_generation
+
+        path = Path(root)
+        info = path.stat()
+        generation = read_generation(path)
+        manifest = read_manifest(path)
+        if (generation is None) != (manifest is None) or (
+            manifest is not None
+            and (
+                manifest.state != "COMMITTED"
+                or manifest.root_identity != _hash(root.encode())
+                or (manifest.generation, manifest.writer_id)
+                != (generation.generation, generation.writer_id)
+            )
+        ):
+            raise WriterAdmissionDenied("pre-activation physical binding is incomplete")
+        return {
+            "root": root,
+            "root_identity": [info.st_dev, info.st_ino],
+            "generation": generation.generation if generation else 0,
+            "writer_id": generation.writer_id if generation else None,
+            "manifest_sha256": manifest.manifest_sha256 if manifest else None,
+        }
+
+    def persist_pre_activation_preparation(
+        self, hold, *, installed_inventory_sha256, root_intents, phase="DRAINED"
+    ):
+        """Persist a real finalized B hold; intent data grants no A/F authority.
+
+        root_intents pins the installed owner, old/next binding, and selected files.
+        It is evidence intent only, never a transition request or authority.
+        PREPARING/partial-marker adoption is deliberately unsupported: retain holds.
+        """
+        with self._mutex:
+            self._check_hold(hold)
+            drain = self.load_finalized(hold.cohort_id)
+            if phase not in {"DRAINED", "AUTHORITY_WAITING"}:
+                raise WriterAdmissionDenied("pre-activation early prefix requires reconciliation")
+            roots = hold.roots
+            if any(Path(a) in Path(b).parents for a in roots for b in roots if a != b):
+                raise WriterAdmissionDenied("pre-activation roots overlap")
+            intents = json.loads(_json_bytes(root_intents))
+            self._pre_activation_intents(roots, intents, tuple(x.identity for x in hold.selected))
+            record = {
+                "schema": "nexus.writer_activation_preparation.v1",
+                "phase": phase,
+                "cohort_id": hold.cohort_id,
+                "installed_inventory_sha256": _digest(installed_inventory_sha256),
+                "source_identity": self.source_identity,
+                "process_start_identity": self.process_start_identity,
+                "server_identity": self.server_identity,
+                "ordered_roots": list(roots),
+                "hold_epoch": hold.epoch,
+                "hold_markers": [
+                    json.loads(_safe_bytes(self._marker_path(root))) for root in roots
+                ],
+                "original_drain": {
+                    "payload": json.loads(drain.to_bytes()),
+                    "bytes_sha256": _hash(drain.to_bytes()),
+                },
+                "root_states": [self._pre_activation_physical(root) for root in roots],
+                "root_intents": intents,
+                "prior_digest": None,
+            }
+            self._validate_pre_activation(record, roots, hold.cohort_id)
+            record["receipt_sha256"] = _hash(_json_bytes(record))
+            _atomic_bytes(
+                self._pre_activation_path(roots, hold.cohort_id),
+                _json_bytes(record),
+                exclusive=True,
+            )
+            return record
+
+    @staticmethod
+    def _pre_activation_intents(roots, intents, identities):
+        if not isinstance(intents, list) or len(intents) != len(roots):
+            raise WriterAdmissionDenied("pre-activation intent vector mismatch")
+        for root, intent in zip(roots, intents):
+            if (
+                not isinstance(intent, dict)
+                or set(intent)
+                != {
+                    "root_id",
+                    "root",
+                    "root_identity",
+                    "owner_id",
+                    "roles",
+                    "selections",
+                    "expected_generation",
+                    "expected_writer_id",
+                    "expected_manifest_sha256",
+                    "next_generation",
+                    "next_writer_id",
+                }
+                or intent["root"] != root
+            ):
+                raise WriterAdmissionDenied("pre-activation intent contract mismatch")
+            old = [x for x in identities if x.root == root]
+            if (
+                not old
+                or type(intent["next_generation"]) is not int
+                or intent["next_generation"] != old[0].generation + 1
+            ):
+                raise WriterAdmissionDenied("pre-activation next generation mismatch")
+            _text(intent["next_writer_id"], "next writer")
+            _text(intent["root_id"], "root id")
+            _text(intent["owner_id"], "owner id")
+            if (
+                intent["root_identity"] != _hash(root.encode())
+                or intent["expected_generation"] != (old[0].generation or None)
+                or any(
+                    x.writer_id != intent["expected_writer_id"] or x.generation != old[0].generation
+                    for x in old
+                )
+                or intent["roles"] != [x.role for x in old]
+            ):
+                raise WriterAdmissionDenied("pre-activation owner/old binding mismatch")
+            physical = WriterRegistry._pre_activation_physical(root)
+            if intent["expected_manifest_sha256"] != physical["manifest_sha256"]:
+                raise WriterAdmissionDenied("pre-activation expected manifest mismatch")
+            files = intent["selections"]
+            if not isinstance(files, list) or not files:
+                raise WriterAdmissionDenied("pre-activation selected files missing")
+            paths = set()
+            for row in files:
+                if not isinstance(row, dict) or set(row) != {"entry_id", "role", "relative_path"}:
+                    raise WriterAdmissionDenied("pre-activation selected file malformed")
+                _text(row["entry_id"], "entry id")
+                relative = Path(_text(row["relative_path"], "relative path"))
+                if (
+                    relative.is_absolute()
+                    or ".." in relative.parts
+                    or str(relative) != row["relative_path"]
+                    or row["relative_path"] in paths
+                ):
+                    raise WriterAdmissionDenied("pre-activation selected path invalid")
+                paths.add(row["relative_path"])
+            if {x["role"] for x in files} != {x.role for x in old}:
+                raise WriterAdmissionDenied("pre-activation selected roles mismatch")
+
+    def _validate_pre_activation(self, record, roots, cohort_id):
+        if (
+            record.get("schema") != "nexus.writer_activation_preparation.v1"
+            or record.get("phase") not in {"DRAINED", "AUTHORITY_WAITING"}
+            or record.get("cohort_id") != cohort_id
+            or record.get("ordered_roots") != list(roots)
+            or record.get("source_identity") != self.source_identity
+            or type(record.get("hold_epoch")) is not int
+            or record["hold_epoch"] <= 0
+        ):
+            raise WriterAdmissionDenied(
+                "pre-activation identity/phase mismatch; early prefix retained"
+            )
+        _digest(record["installed_inventory_sha256"])
+        if any(Path(a) in Path(b).parents for a in roots for b in roots if a != b):
+            raise WriterAdmissionDenied("pre-activation roots overlap")
+        original = record["original_drain"]
+        drain_raw = _json_bytes(original["payload"])
+        drain = WriterQuiescenceReceipt.from_bytes(drain_raw).verify()
+        drain_path = (
+            self._marker_path(roots[0]).parent
+            / "writer-quiescence-receipts"
+            / f"{_hash(cohort_id.encode())}.json"
+        )
+        if (
+            _safe_bytes(drain_path) != drain_raw
+            or _hash(drain_raw) != original["bytes_sha256"]
+            or drain.drain_state != DRAINED
+            or (drain.cohort_id, drain.hold_epoch, drain.ordered_roots, drain.source_identity)
+            != (cohort_id, record["hold_epoch"], roots, self.source_identity)
+        ):
+            raise WriterAdmissionDenied("pre-activation original drain changed")
+        old = tuple(x.identity for x in drain.observations)
+        roles = {(x.root, x.role) for x in old}
+        if len(roles) != len(old) or {x.root for x in old} != set(roots):
+            raise WriterAdmissionDenied("pre-activation writer vector incomplete")
+        self._pre_activation_intents(roots, record["root_intents"], old)
+        if record["root_states"] != [self._pre_activation_physical(root) for root in roots]:
+            raise WriterAdmissionDenied("pre-activation physical state changed")
+        markers = record["hold_markers"]
+        if not isinstance(markers, list) or len(markers) != len(roots):
+            raise WriterAdmissionDenied("pre-activation marker vector incomplete")
+        for root, marker, physical in zip(roots, markers, record["root_states"]):
+            expected = {
+                "schema": "writer-quiescence-hold/v1",
+                "cohort_id": cohort_id,
+                "hold_epoch": drain.hold_epoch,
+                "root": root,
+                "ordered_roots": list(roots),
+                "source_identity": self.source_identity,
+                "server_identity": drain.server_identity,
+                "process_start_identity": drain.process_start_identity,
+                "selected_writers": [x.to_dict() for x in old],
+            }
+            if marker != expected or _safe_bytes(self._marker_path(root)) != _json_bytes(expected):
+                raise WriterAdmissionDenied("pre-activation marker changed")
+            if any(
+                x.generation != physical["generation"]
+                or (physical["writer_id"] is not None and x.writer_id != physical["writer_id"])
+                for x in old
+                if x.root == root
+            ):
+                raise WriterAdmissionDenied("pre-activation old physical binding mismatch")
+        selected = tuple(
+            sorted(
+                (x for x in self._writers.values() if x.identity.root in roots),
+                key=lambda x: (roots.index(x.identity.root), x.identity.key()),
+            )
+        )
+        if (
+            len(selected) != len(old)
+            or {(x.identity.root, x.identity.role) for x in selected} != roles
+        ):
+            raise WriterAdmissionDenied("pre-activation registered vector mismatch")
+        for item in selected:
+            identity = item.identity
+            previous = next(x for x in old if (x.root, x.role) == (identity.root, identity.role))
+            try:
+                loaded = item.loaded_identity() if item.loaded_identity else None
+            except Exception as exc:
+                raise WriterAdmissionDenied("pre-activation loaded identity unavailable") from exc
+            if (
+                identity.source_identity != self.source_identity
+                or identity.process_start_identity != self.process_start_identity
+                or identity.thread_id != str(threading.get_ident())
+                or (identity.generation, identity.writer_id)
+                != (previous.generation, previous.writer_id)
+                or not isinstance(loaded, WriterIdentity)
+                or loaded != identity
+            ):
+                raise WriterAdmissionDenied("pre-activation loaded writer identity mismatch")
+            observation, issues = self._observation(item)
+            previous_observation = next(x for x in drain.observations if x.identity == previous)
+            if issues or observation.snapshot_sha256 != previous_observation.snapshot_sha256:
+                raise WriterAdmissionDenied("pre-activation loaded observation unknown or changed")
+        # No unqualified prior-process operations are silently accepted here.
+        if any(self._durable_leases(root)[1] for root in roots) or self._leases_for(roots):
+            raise WriterAdmissionDenied("pre-activation durable operations require reconciliation")
+        return selected
+
+    def prepare_pre_activation_hold_recovery(
+        self, *, cohort_id, ordered_roots, expected_preparation_sha256
+    ):
+        self._check_process()
+        roots = tuple(_root(x) for x in ordered_roots)
+        if not roots or len(set(roots)) != len(roots):
+            raise WriterAdmissionDenied("pre-activation root vector invalid")
+        with self._mutex:
+            path = self._pre_activation_path(roots, cohort_id)
+            if _exists(self._cohort_receipt_path(roots, cohort_id)):
+                raise WriterAdmissionDenied("pre-activation already handed off; use cohort recovery")
+            raw = _safe_bytes(path)
+            record = self._recovery_receipt(raw)
+            if (
+                raw != _json_bytes(record)
+                or record["receipt_sha256"] != expected_preparation_sha256
+            ):
+                raise WriterAdmissionDenied("pre-activation preparation CAS mismatch")
+            if record.get("phase") not in {"DRAINED", "AUTHORITY_WAITING"}:
+                raise WriterAdmissionDenied(
+                    "pre-activation early prefix retained; reconciliation required"
+                )
+            if not isinstance(record.get("original_drain"), dict) or not isinstance(
+                record["original_drain"].get("payload"), dict
+            ):
+                raise WriterAdmissionDenied("pre-activation original drain malformed")
+            for process in {
+                record.get("process_start_identity"),
+                record.get("original_drain", {}).get("payload", {}).get("process_start_identity"),
+            }:
+                if (
+                    not isinstance(process, str)
+                    or process == self.process_start_identity
+                    or not self._process_absent(process)
+                ):
+                    raise WriterAdmissionDenied("pre-activation predecessor process is not absent")
+            selected = self._validate_pre_activation(record, roots, cohort_id)
+            if self._held_roots:
+                raise WriterAdmissionDenied("pre-activation registry already held")
+            proof = RecoveryHoldProof(
+                self,
+                cohort_id=cohort_id,
+                roots=roots,
+                path=path,
+                predecessor=record,
+                predecessor_sha=expected_preparation_sha256,
+                markers=[_json_bytes(x) for x in record["hold_markers"]],
+                selected=selected,
+            )
+            self._pre_activation_proofs[id(proof)] = _RecoveryFacts(
+                proof, self._proof_snapshot(proof), raw, tuple((x, x.identity) for x in selected)
+            )
+            return proof
+
+    def _pre_activation_facts(self, proof):
+        self._check_process()
+        facts = self._pre_activation_proofs.get(id(proof))
+        if (
+            facts is None
+            or facts.proof is not proof
+            or self._proof_snapshot(proof) != facts.snapshot
+        ):
+            raise WriterAdmissionDenied("pre-activation proof issuance facts changed")
+        selected = self._validate_pre_activation(proof._predecessor, proof._roots, proof._cohort_id)
+        if tuple((id(x), x.identity) for x in selected) != tuple(
+            (id(x), identity) for x, identity in facts.selected
+        ):
+            raise WriterAdmissionDenied("pre-activation registered writers changed")
+        return facts
+
+    def persist_pre_activation_hold_successor(self, proof):
+        """B-owned serialized raw-byte CAS; returns only non-authorizing evidence."""
+        import fcntl
+
+        with self._mutex:
+            facts = self._pre_activation_facts(proof)
+            if facts.hold is not None:
+                raise WriterAdmissionDenied("pre-activation proof already consumed")
+            lock = proof._path.with_suffix(".lock")
+            _parents(lock)
+            fd = os.open(lock, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+            try:
+                if not stat.S_ISREG(os.fstat(fd).st_mode):
+                    raise WriterAdmissionDenied("pre-activation CAS lock unsafe")
+                fcntl.flock(fd, fcntl.LOCK_EX)
+                if _exists(self._cohort_receipt_path(proof._roots, proof._cohort_id)):
+                    raise WriterAdmissionDenied("pre-activation already handed off")
+                if _safe_bytes(proof._path) != facts.raw:
+                    raise WriterAdmissionDenied("pre-activation predecessor physical CAS changed")
+                successor = dict(proof._predecessor)
+                successor.update(
+                    process_start_identity=self.process_start_identity,
+                    server_identity=self.server_identity,
+                    prior_digest=proof._predecessor_sha,
+                )
+                successor.pop("receipt_sha256")
+                successor["receipt_sha256"] = _hash(_json_bytes(successor))
+                _atomic_bytes(proof._path, _json_bytes(successor))
+                self._pre_activation_proofs[id(proof)] = replace(facts, raw=_json_bytes(successor))
+                return successor
+            finally:
+                os.close(fd)
+
+    def adopt_pre_activation_hold(self, proof, *, expected_successor_sha256):
+        with self._mutex:
+            facts = self._pre_activation_facts(proof)
+            successor = self._recovery_receipt(facts.raw)
+            if _exists(self._cohort_receipt_path(proof._roots, proof._cohort_id)):
+                raise WriterAdmissionDenied("pre-activation already handed off")
+            if (
+                facts.hold is not None
+                or _safe_bytes(proof._path) != facts.raw
+                or successor["receipt_sha256"] != expected_successor_sha256
+                or successor["prior_digest"] != proof._predecessor_sha
+                or successor["process_start_identity"] != self.process_start_identity
+                or successor["server_identity"] != self.server_identity
+                or self._held_roots
+            ):
+                raise WriterAdmissionDenied("pre-activation successor CAS/one-use mismatch")
+            hold = WriterHold(
+                self,
+                proof._cohort_id,
+                proof._roots,
+                proof._predecessor["hold_epoch"],
+                proof._selected,
+            )
+            self._held_roots.update({root: hold for root in hold.roots})
+            self._epoch = max(self._epoch, hold.epoch)
+            for item in hold.selected:
+                item.acknowledged_epoch = hold.epoch
+            self._pre_activation_proofs[id(proof)] = replace(facts, hold=hold)
+            self._pre_activation_holds[id(hold)] = proof
+            drain_path = (
+                self._marker_path(hold.roots[0]).parent
+                / "writer-quiescence-receipts"
+                / f"{_hash(hold.cohort_id.encode())}.json"
+            )
+            self._finalized[hold.cohort_id] = (
+                hold,
+                drain_path,
+                proof._predecessor["original_drain"]["bytes_sha256"],
+            )
+            return hold
 
     def prepare_hold_recovery(self, *, cohort_id: str, ordered_roots: Sequence[str | Path], expected_receipt_sha256: str) -> RecoveryHoldProof:
         """Pin the exact durable F predecessor before its adoption CAS."""
@@ -2326,11 +2724,25 @@ class WriterRegistry:
             or any(self._held_roots.get(root) is not hold for root in hold.roots)
         ):
             raise HoldConflict("hold is not current")
+        preparation = self._pre_activation_holds.get(id(hold))
+        if preparation is not None:
+            facts = self._pre_activation_proofs.get(id(preparation))
+            if (
+                facts is None
+                or facts.proof is not preparation
+                or facts.hold is not hold
+                or self._proof_snapshot(preparation) != facts.snapshot
+                or _safe_bytes(preparation._path) != facts.raw
+            ):
+                raise HoldConflict("pre-activation adopted hold evidence changed")
         for root in hold.roots:
             try:
-                if _safe_bytes(self._marker_path(root)) != _json_bytes(
-                    self._hold_payload(root, hold)
-                ):
+                expected = (
+                    preparation._markers[hold.roots.index(root)]
+                    if preparation is not None
+                    else _json_bytes(self._hold_payload(root, hold))
+                )
+                if _safe_bytes(self._marker_path(root)) != expected:
                     raise HoldConflict("durable hold differs from registered hold")
             except OSError as exc:
                 raise HoldConflict("durable hold is missing or unreadable") from exc
@@ -2541,6 +2953,10 @@ class WriterRegistry:
             if _hash(data) != expected_bytes_hash:
                 raise WriterAdmissionDenied("FINALIZED_WRITER_QUIESCENCE_RECEIPT_CHANGED")
             receipt = WriterQuiescenceReceipt.from_bytes(data)
+            preparation = self._pre_activation_holds.get(id(hold))
+            if preparation is not None:
+                self._pre_activation_facts(preparation)
+                return receipt.verify()
             if (
                 receipt.drain_state != DRAINED
                 or receipt.cohort_id != hold.cohort_id
