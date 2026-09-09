@@ -4,7 +4,7 @@ task_id: `TASK-006`
 
 - **Campaign:** `CAMPAIGN-OPEN-SWE-EXECUTION-PRODUCTIONIZATION-V1`
 - **Status:** `ACTIVE`
-- **Authority:** explicit current Owner request plus Ready GitHub Issues #850 and #895; #895 is limited to the r21 same-operation reconciliation amendment below
+- **Authority:** explicit current Owner request plus Ready GitHub Issues #850, #895, and #906; #895 is limited to the r21 same-operation reconciliation amendment and #906 to the r23 effect-verified Candidate recovery below
 - **Auto-chain:** `false`
 - **Maximum claim:** `RESIDENT_OPEN_SWE_AUTOMATION_READY_FOR_FIVE_MOUNTED_REPOSITORIES`
 - **Task type:** `INTEGRATION_ACTIVATION`
@@ -44,7 +44,11 @@ attempt remains `OUTCOME_UNKNOWN`, `retry_safe=false`, and was not resent.
 ## Repository source scope
 
 - `nexus/services/external_intelligence_automation.py`
+- `nexus/services/external_intelligence_fanout.py`
+- `nexus/services/open_swe_external_intelligence.py`
 - `tests/services/test_external_intelligence_automation.py`
+- `tests/services/test_external_intelligence_fanout.py`
+- `tests/services/test_open_swe_worker_transport.py`
 - `docs/ops/OPEN_SWE_STANDALONE_CONSUMER.md`
 - `scripts/ops/configs/external_intelligence_open_swe_activation_v1.json`
 - `scripts/ops/external_intelligence_service.py`
@@ -79,6 +83,42 @@ mandatory. Missing, malformed, mixed, terminal, or identity-drifted state
 remains fail closed. This amendment does not weaken truly terminal `BLOCKED`
 reuse and does not authorize hand edits to runtime or automation state.
 
+## r23 effect-verified Candidate recovery amendment
+
+Issue #906 permits one narrow recovery when an Open SWE worker has already
+closed exactly one authorized durable mutation but its post-effect terminal Web
+turn remains outcome-unknown. The fanout controller may create only a
+`CANDIDATE_READY_FOR_VERIFICATION` receipt when the existing attempt, runtime
+recovery identity, operation, workspace, provider/model, worker identity,
+allowed path, effect turn/call/arguments, physical postimage, expected base,
+and exact one-file/no-deletion diff all match. The effect must be the only
+effect for the operation and already be `RESULT`; `INTENT`, multiple effects,
+another changed path, third-state bytes, stale identity, or an unexecuted
+mutation stays `RECONCILIATION_REQUIRED`.
+
+This recovery does not synthesize a model completion or accept the Candidate.
+It emits an explicit host-derived `EFFECT_RECOVERED_PENDING_VERIFICATION`
+receipt, after which the existing closure must execute the Issue-declared unit
+and whole verifiers. Only verifier success may publish the Candidate. The
+absorbing attempt/Candidate receipt prevents delayed provider output or later
+polls from reopening the operation, repeating the physical effect, sending a
+new Web turn, or creating a second commit.
+
+The inspector is limited to the configured local runtime state root and the
+exact operation. It may read only the declared recovery-operation record and a
+bounded effect-file set, using the frozen local schemas without importing the
+runtime package. The root, parent directories, records, and physical target
+must be owner-controlled, non-symlink, and not group/world writable. Unbounded
+enumeration, malformed JSON, unknown schema, or more than one matching effect
+fails closed.
+
+Before committing, fanout must CAS an absorbing recovery intent bound to the
+attempt, operation, effect, expected base, planned Candidate tree material, and
+receipt identity. Replay at pre-commit, post-commit/pre-receipt, or
+post-receipt/pre-attempt-complete cuts must converge to the same Candidate and
+receipt, or fail closed. None of these cuts may issue another Web request,
+repeat the physical write, or create a second commit.
+
 ## Deployment-owned paths
 
 - `/Users/jameschen/.config/nexus-external-intelligence/config.json`
@@ -106,9 +146,10 @@ These are deployment state, not Git Candidate files. Back up exact prior bytes b
 3. Create or refresh five clean automation worktrees at their current remote main revisions.
 4. Materialize host configuration with exact absolute paths and back it up.
 5. Stop the old LaunchAgent once, confirm unload, install from the clean deployment checkout, then bootstrap once.
-6. Require a new receipt bound to the new PID, source hash, config hash, runtime identity, and at least the configured readiness success threshold.
+6. Require a new receipt bound to the new PID, source hash, config hash, runtime identity, and at least three consecutive successful 60-second polls spanning at least 120 seconds with no error.
 7. Run one harmless unattended Issue canary under an existing repository-local Task Card; reconcile the same operation and verify Candidate evidence.
-8. If any activation gate fails, restore prior config/plist and service generation, then report the exact blocked state.
+8. After the final generation first passes, run an intentional rollback drill: restore the immediately prior known-good config/plist/runtime generation, prove a new rollback PID/run reaches `READY`, restore the final generation, and repeat the three-poll, 120-second readiness gate.
+9. On any unexpected activation, readiness, rollback, or restore failure, remain on the last proven known-good generation and stop; never redeploy the generation that just failed.
 
 ## Verification
 
