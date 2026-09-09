@@ -75,7 +75,10 @@ class ContextAssemblyContract:
         serialized_capability_ids = _normalize_ids(self.serialized_capability_ids)
         serialized_evidence_ids = _normalize_ids(self.serialized_evidence_ids)
         serialized_bundle_ids = _normalize_ids(self.serialized_bundle_ids)
-        source_provenance_refs = [dict(item) for item in self.source_provenance_refs]
+        source_provenance_refs = [
+            dict(item) if isinstance(item, Mapping) else item
+            for item in self.source_provenance_refs
+        ]
         worker_binding = {str(key): value for key, value in self.worker_binding.items()}
         payload: dict[str, Any] = {
             "schema": self.schema,
@@ -106,7 +109,9 @@ class ContextAssemblyContract:
         serialization_present = bool(
             serialized_capability_ids or serialized_evidence_ids or serialized_bundle_ids
         )
-        consumer_bound = bool(self.consumer_role.strip() and self.consumer_channel.strip())
+        consumer_bound = _is_nonempty_string(self.consumer_role) and _is_nonempty_string(
+            self.consumer_channel
+        )
         materialization_present = bool(
             materialized_source_ids or materialized_evidence_ids or evidence_bundle_ids
         )
@@ -161,6 +166,24 @@ def build_context_assembly_contract(
     consumer_channel: str = "",
     worker_binding: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    attempt_id = _require_optional_string(attempt_id, blocker="invalid_attempt_id")
+    planner_decision_id = _require_optional_string(
+        planner_decision_id,
+        blocker="invalid_planner_decision_id",
+    )
+    planner_plan_hash = _require_optional_string(
+        planner_plan_hash,
+        blocker="invalid_planner_plan_hash",
+    )
+    source_mode = _require_optional_string(
+        source_mode,
+        blocker="invalid_source_materialization_mode",
+    ) or "NO_SOURCE"
+    consumer_role = _require_optional_string(consumer_role, blocker="invalid_consumer_role")
+    consumer_channel = _require_optional_string(
+        consumer_channel,
+        blocker="invalid_consumer_channel",
+    )
     selected_capability_ids = _require_id_sequence(
         selected_capability_ids,
         blocker="invalid_selected_capability_ids",
@@ -222,6 +245,26 @@ def validate_context_assembly_contract(payload: Mapping[str, Any]) -> list[str]:
     if str(receipt.get("status") or "").upper() != "PASS":
         blockers.append("receipt_not_pass")
 
+    attempt_id = _validated_optional_string(
+        payload,
+        key="attempt_id",
+        blocker="invalid_attempt_id",
+        blockers=blockers,
+    )
+    planner_decision_id = _validated_optional_string(
+        payload,
+        key="planner_decision_id",
+        blocker="invalid_planner_decision_id",
+        blockers=blockers,
+    )
+    planner_plan_hash = _validated_optional_string(
+        payload,
+        key="planner_plan_hash",
+        blocker="invalid_planner_plan_hash",
+        blockers=blockers,
+    )
+    del attempt_id
+
     selected_capability_ids = _validated_id_list(
         payload,
         key="selected_capability_ids",
@@ -259,11 +302,27 @@ def validate_context_assembly_contract(payload: Mapping[str, Any]) -> list[str]:
         blockers=blockers,
     )
 
-    planner_decision_id = str(payload.get("planner_decision_id") or "").strip()
-    planner_plan_hash = str(payload.get("planner_plan_hash") or "").strip()
-    if selected_capability_ids and not planner_decision_id:
+    source_mode_value = payload.get("source_mode", "NO_SOURCE")
+    if not isinstance(source_mode_value, str):
+        blockers.append("invalid_source_materialization_mode")
+        source_mode = ""
+    else:
+        source_mode = source_mode_value.strip().upper() or "NO_SOURCE"
+    if source_mode not in SOURCE_MATERIALIZATION_MODES:
+        blockers.append("invalid_source_materialization_mode")
+
+    planner_context_present = bool(
+        selected_capability_ids
+        or materialized_evidence_ids
+        or evidence_bundle_ids
+        or serialized_capability_ids
+        or serialized_evidence_ids
+        or serialized_bundle_ids
+        or source_mode not in {"", "NO_SOURCE"}
+    )
+    if planner_context_present and not planner_decision_id:
         blockers.append("selected_context_missing_planner_decision_id")
-    if selected_capability_ids and not planner_plan_hash:
+    if planner_context_present and not planner_plan_hash:
         blockers.append("selected_context_missing_planner_plan_hash")
 
     unselected_capabilities = sorted(set(serialized_capability_ids) - set(selected_capability_ids))
@@ -286,9 +345,6 @@ def validate_context_assembly_contract(payload: Mapping[str, Any]) -> list[str]:
         for bundle_id in unknown_serialized_bundles
     )
 
-    source_mode = str(payload.get("source_mode") or "NO_SOURCE").strip().upper()
-    if source_mode not in SOURCE_MATERIALIZATION_MODES:
-        blockers.append("invalid_source_materialization_mode")
     source_refs = payload.get("source_provenance_refs", ()) or ()
     if not isinstance(source_refs, (list, tuple)):
         blockers.append("invalid_source_provenance_refs")
@@ -301,12 +357,23 @@ def validate_context_assembly_contract(payload: Mapping[str, Any]) -> list[str]:
         if not isinstance(reference, Mapping):
             blockers.append(f"invalid_source_provenance_ref:{index}")
             continue
-        for key in ("repository", "revision", "path"):
-            if not str(reference.get(key) or "").strip():
+        for key in ("repository", "revision", "path", "claim_ceiling"):
+            value = reference.get(key)
+            if not isinstance(value, str) or not value.strip():
                 blockers.append(f"source_provenance_ref_missing_{key}:{index}")
 
-    consumer_role = str(payload.get("consumer_role") or "").strip()
-    consumer_channel = str(payload.get("consumer_channel") or "").strip()
+    consumer_role = _validated_optional_string(
+        payload,
+        key="consumer_role",
+        blocker="invalid_consumer_role",
+        blockers=blockers,
+    )
+    consumer_channel = _validated_optional_string(
+        payload,
+        key="consumer_channel",
+        blocker="invalid_consumer_channel",
+        blockers=blockers,
+    )
     consumer_bound = bool(consumer_role and consumer_channel)
     if bool(consumer_role) != bool(consumer_channel):
         blockers.append("incomplete_consumer_binding")
@@ -323,15 +390,22 @@ def validate_context_assembly_contract(payload: Mapping[str, Any]) -> list[str]:
         if not consumer_bound:
             blockers.append("worker_binding_missing_consumer_binding")
         for key in ("worker_id", "provider", "model"):
-            if not str(worker_binding.get(key) or "").strip():
+            value = worker_binding.get(key)
+            if not isinstance(value, str) or not value.strip():
                 blockers.append(f"incomplete_worker_binding:{key}")
 
-    observed_package_hash = str(payload.get("package_hash") or "").strip()
-    if observed_package_hash and observed_package_hash != _semantic_package_hash(payload):
-        blockers.append("context_package_hash_mismatch")
-    observed_projection_hash = str(payload.get("consumer_projection_hash") or "").strip()
-    if observed_projection_hash and observed_projection_hash != _consumer_projection_hash(payload):
-        blockers.append("consumer_projection_hash_mismatch")
+    observed_package_hash = payload.get("package_hash")
+    if observed_package_hash is not None:
+        if not isinstance(observed_package_hash, str) or not observed_package_hash.strip():
+            blockers.append("invalid_context_package_hash")
+        elif observed_package_hash != _semantic_package_hash(payload):
+            blockers.append("context_package_hash_mismatch")
+    observed_projection_hash = payload.get("consumer_projection_hash")
+    if observed_projection_hash is not None:
+        if not isinstance(observed_projection_hash, str) or not observed_projection_hash.strip():
+            blockers.append("invalid_consumer_projection_hash")
+        elif observed_projection_hash != _consumer_projection_hash(payload):
+            blockers.append("consumer_projection_hash_mismatch")
 
     for source in _receipt_sources(receipt):
         tier = str(source.get("metadata", {}).get("skill_tier") or "").strip().lower()
@@ -364,6 +438,30 @@ def _receipt_source_ids(receipt: Mapping[str, Any], *, key: str) -> list[str]:
     )
 
 
+def _require_optional_string(value: Any, *, blocker: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(blocker)
+    return value.strip()
+
+
+def _validated_optional_string(
+    payload: Mapping[str, Any],
+    *,
+    key: str,
+    blocker: str,
+    blockers: list[str],
+) -> str:
+    value = payload.get(key, "")
+    if not isinstance(value, str):
+        blockers.append(blocker)
+        return ""
+    return value.strip()
+
+
+def _is_nonempty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
 def _require_id_sequence(values: Sequence[str], *, blocker: str) -> tuple[str, ...]:
     if isinstance(values, (str, bytes)):
         raise ValueError(blocker)
@@ -394,13 +492,28 @@ def _normalize_ids(values: Sequence[str]) -> list[str]:
 
 
 def _planner_binding_status(payload: Mapping[str, Any]) -> str:
-    decision_id = str(payload.get("planner_decision_id") or "").strip()
-    plan_hash = str(payload.get("planner_plan_hash") or "").strip()
-    if decision_id and plan_hash:
+    decision_id = payload.get("planner_decision_id")
+    plan_hash = payload.get("planner_plan_hash")
+    decision_bound = _is_nonempty_string(decision_id)
+    plan_bound = _is_nonempty_string(plan_hash)
+    if decision_bound and plan_bound:
         return "BOUND"
-    if decision_id or plan_hash or payload.get("selected_capability_ids"):
+    if decision_bound or plan_bound or _planner_context_present(payload):
         return "INCOMPLETE"
     return "NOT_APPLICABLE"
+
+
+def _planner_context_present(payload: Mapping[str, Any]) -> bool:
+    source_mode = payload.get("source_mode")
+    return bool(
+        payload.get("selected_capability_ids")
+        or payload.get("materialized_evidence_ids")
+        or payload.get("evidence_bundle_ids")
+        or payload.get("serialized_capability_ids")
+        or payload.get("serialized_evidence_ids")
+        or payload.get("serialized_bundle_ids")
+        or (isinstance(source_mode, str) and source_mode.strip().upper() not in {"", "NO_SOURCE"})
+    )
 
 
 def _semantic_package_hash(payload: Mapping[str, Any]) -> str:
