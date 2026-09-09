@@ -1640,6 +1640,8 @@ def switch_task_card_authority(
     with _coordination_lock(root):
         prior = _transition_idempotent(attempt_path, request_hash)
         if isinstance(prior, dict):
+            if prior.get("schema") == "nexus.task_card_authority_switch.v2":
+                return dict(prior)
             if prior.get("status") == "COMMITTED":
                 return dict(prior["result"])
             op_id = prior.get("switch_operation_id")
@@ -1769,6 +1771,8 @@ def restore_task_card_authority(
     with _coordination_lock(root):
         if os.path.lexists(attempt_path):
             record = _read_transition_file(attempt_path)
+            if record.get("schema") == "nexus.task_card_authority_restore.v2":
+                return dict(record)
             if (
                 record.get("operation_type") != "RESTORE"
                 or record.get("switch_operation_id") != switch_operation_id
