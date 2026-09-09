@@ -220,7 +220,9 @@ def test_material_authority_selects_exact_repository_with_same_goal_and_scope(
 ) -> None:
     """Physical keyed receipts are selected by the complete repository key."""
     receipt_root = tmp_path / "authority"
-    monkeypatch.setattr(standing_grant_store, "DEFAULT_RECEIPT_PATH", receipt_root / "standing-grant.json")
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", receipt_root / "standing-grant.json"
+    )
     common = dict(goal_id="goal-readiness-keyed", thread_id="scope-readiness-keyed")
     repo_a = RepositoryIdentity(
         repository_id="Owner/repo-a", canonical_remote="https://github.com/Owner/repo-a.git"
