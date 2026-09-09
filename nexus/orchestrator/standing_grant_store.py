@@ -1656,9 +1656,14 @@ def switch_task_card_authority(
             )
             if not os.path.lexists(destination):
                 _assert_dir_chain_safe(destination.parent, create=True)
-                _write_bytes_locked(
-                    _canonical_json(temporary.model_dump(mode="json")), None, destination, None
-                )
+                with _coordination_lock(destination.parent):
+                    if not os.path.lexists(destination):
+                        _write_bytes_locked(
+                            _canonical_json(temporary.model_dump(mode="json")),
+                            None,
+                            destination,
+                            None,
+                        )
             elif _load_receipt_structural_at(destination).receipt_hash != temporary.receipt_hash:
                 raise StandingGrantReceiptError("SUCCESSOR_KEY_OCCUPIED")
             op["status"] = "ACTIVE"
@@ -1734,9 +1739,15 @@ def switch_task_card_authority(
         }
         _write_transition_file(attempt_path, attempt)
         _assert_dir_chain_safe(destination.parent, create=True)
-        _write_bytes_locked(
-            _canonical_json(temporary.model_dump(mode="json")), None, destination, None
-        )
+        with _coordination_lock(destination.parent):
+            if os.path.lexists(destination):
+                raise StandingGrantReceiptError("SUCCESSOR_KEY_OCCUPIED")
+            _write_bytes_locked(
+                _canonical_json(temporary.model_dump(mode="json")),
+                None,
+                destination,
+                None,
+            )
         op["status"] = "ACTIVE"
         _write_transition_file(root.parent / "transitions" / f"keyed_op_{operation_id}.json", op)
         attempt["status"] = "COMMITTED"
@@ -1834,6 +1845,8 @@ def restore_task_card_authority(
             raise StandingGrantReceiptError("CURRENT_RECEIPT_HASH_MISMATCH")
         predecessor = _load_receipt_structural_at(_keyed_receipt_path(current_key))
         _ensure_key_matches(predecessor, current_key)
+        if predecessor.receipt_hash != op.get("predecessor_receipt_hash"):
+            raise StandingGrantReceiptError("PREDECESSOR_RECEIPT_CHANGED")
         revoked_context = StandingGrantContext.issue(
             owner_id=temporary.context.owner_id,
             coordinator_id=temporary.context.coordinator_id,
@@ -1884,12 +1897,14 @@ def restore_task_card_authority(
                 "result": result,
             },
         )
-        _write_bytes_locked(
-            _canonical_json(revoked.model_dump(mode="json")),
-            temporary.receipt_hash,
-            _keyed_receipt_path(temporary_key),
-            temporary.receipt_hash,
-        )
+        temporary_path = _keyed_receipt_path(temporary_key)
+        with _coordination_lock(temporary_path.parent):
+            _write_bytes_locked(
+                _canonical_json(revoked.model_dump(mode="json")),
+                temporary.receipt_hash,
+                temporary_path,
+                temporary.receipt_hash,
+            )
         op["status"] = "RESTORED"
         op["restored_receipt_hash"] = revoked.receipt_hash
         _write_transition_file(op_path, op)

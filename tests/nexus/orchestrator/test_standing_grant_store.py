@@ -116,6 +116,49 @@ def test_keyed_switch_retry_conflict_and_occupied_successor(monkeypatch, tmp_pat
         })
 
 
+def test_keyed_restore_rejects_changed_predecessor(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        standing_grant_store, "DEFAULT_RECEIPT_PATH", tmp_path / "authority" / "standing-grant.json"
+    )
+    predecessor = StandingGrantReceipt.issue(
+        grant_id="changed-predecessor",
+        context=_make_context(goal_id="changed-goal", thread_id="changed-thread"),
+    )
+    key = StandingGrantKey(_repository(), "changed-goal", "changed-thread")
+    write_keyed_standing_grant_receipt(predecessor)
+    switched = switch_task_card_authority(
+        current_key=key,
+        attempt_key="changed-switch",
+        expected_current_receipt_hash=predecessor.receipt_hash,
+        expected_current_goal_id="changed-goal",
+        successor_goal_id="changed-successor",
+        successor_thread_id="changed-successor-thread",
+        ttl_minutes=5,
+        owner_confirmation=True,
+        now=NOW,
+    )
+    changed = StandingGrantReceipt.issue(
+        grant_id="renewed-predecessor",
+        context=_make_context(goal_id="changed-goal", thread_id="changed-thread"),
+        supersedes_grant_hash=predecessor.receipt_hash,
+    )
+    write_keyed_standing_grant_receipt(changed, expected_receipt_hash=predecessor.receipt_hash)
+    with pytest.raises(StandingGrantReceiptError, match="PREDECESSOR_RECEIPT_CHANGED"):
+        restore_task_card_authority(
+            current_key=key,
+            attempt_key="changed-restore",
+            switch_operation_id=switched["switch_operation_id"],
+            expected_temporary_receipt_hash=switched["temporary_receipt_hash"],
+            owner_confirmation=True,
+            now=NOW,
+        )
+    temporary_key = StandingGrantKey(_repository(), "changed-successor", "changed-successor-thread")
+    assert (
+        load_keyed_standing_grant_receipt(temporary_key, now=NOW).receipt_hash
+        == switched["temporary_receipt_hash"]
+    )
+
+
 def _repository() -> RepositoryIdentity:
     return RepositoryIdentity(
         repository_id="James3014/Nexus-new",
