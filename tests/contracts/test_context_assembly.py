@@ -80,6 +80,7 @@ def test_context_assembly_validator_rejects_runtime_or_public_unlock_attempts() 
     assert validate_context_assembly_contract(payload) == [
         "context_assembly_must_not_unlock_public_benchmark",
         "context_assembly_must_not_update_runtime",
+        "context_assembly_package_hash_mismatch",
     ]
 
 
@@ -124,9 +125,10 @@ def test_context_assembly_binds_planner_source_and_serialized_lineage() -> None:
         "evidence:codeintel:1",
         "evidence:memory:1",
     ]
-    assert payload["source_materialization"]["materialization_hash"] == source_materialization[
-        "materialization_hash"
-    ]
+    assert (
+        payload["source_materialization"]["materialization_hash"]
+        == source_materialization["materialization_hash"]
+    )
     assert payload["materialized_source_count"] == 1
     assert payload["serialized_evidence_count"] == 2
     assert payload["package_hash"]
