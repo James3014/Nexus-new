@@ -10,7 +10,14 @@ from __future__ import annotations
 from nexus_runtime import build_runtime_exports
 
 
-_RUNTIME = build_runtime_exports()
+# ProjectMemoryManager remains a host capability. Supply its existing physical
+# executor explicitly; the independent runtime never imports this host module.
+from nexus.services.capability_registry import build_real_executor_invoker
+
+_MEMORY_INVOKER = build_real_executor_invoker("memory")
+_RUNTIME = build_runtime_exports(
+    default_capability_invokers=({"memory": _MEMORY_INVOKER} if _MEMORY_INVOKER is not None else {})
+)
 
 
 def __getattr__(name: str):
