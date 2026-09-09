@@ -38,6 +38,11 @@ class LoadedWriterAssembly:
             raise WriterAssemblyError("ASSEMBLY_ROOTS_NOT_UNIQUE")
         if len({request.root_id for request in self.requests}) != len(self.requests):
             raise WriterAssemblyError("ASSEMBLY_ROOT_IDS_NOT_UNIQUE")
+        if len({request.request_digest for request in self.requests}) != len(self.requests):
+            raise WriterAssemblyError("ASSEMBLY_REQUEST_DIGESTS_NOT_UNIQUE")
+        cohorts = {plan.cohort_id for plan in self.plans}
+        if len(cohorts) != 1:
+            raise WriterAssemblyError("ASSEMBLY_COHORTS_NOT_SHARED")
         for plan, request in zip(self.plans, self.requests):
             if not isinstance(plan, LoadedWriterCollectorPlan) or not isinstance(request, WriterTransitionRequest):
                 raise WriterAssemblyError("ASSEMBLY_TYPED_INPUT_REQUIRED")
@@ -49,6 +54,7 @@ class LoadedWriterAssembly:
                 or plan.source_tree != self.source_tree
                 or request.expected_source_head != self.source_head
                 or request.expected_source_tree != self.source_tree
+                or plan.root_id != request.root_id
             ):
                 raise WriterAssemblyError("ASSEMBLY_PLAN_REQUEST_MISMATCH")
 

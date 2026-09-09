@@ -19,9 +19,6 @@ from nexus.orchestrator.writer_activation_assembly import (
     WriterAssemblyError,
     load_writer_assembly,
 )
-from tests.integration.test_writer_activation_initial_bootstrap import (
-    test_real_loaded_transition_preflights_after_gateway_hold,
-)
 from tests.nexus.orchestrator.test_state_owner_transition_service import _setup
 
 
@@ -136,11 +133,6 @@ def test_transition_binds_real_gateway_collector_port(tmp_path, monkeypatch):
     )
     transition_service.bind_collector_port(gateway._writer_transition_collector)
     assert transition_service._collector_port.__self__ is gateway
-
-
-def test_loaded_assembly_regression_runs_real_a_preflight_and_apply(tmp_path, monkeypatch):
-    """Keep the complete finalized-B to A path covered by this seam's tests."""
-    test_real_loaded_transition_preflights_after_gateway_hold(tmp_path, monkeypatch)
 
 
 def test_transition_rejects_wrong_service_and_arbitrary_callback(tmp_path, monkeypatch):
