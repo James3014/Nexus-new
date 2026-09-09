@@ -17,7 +17,7 @@ from nexus.services.online_nexus_context import (
     make_with_nexus_online_invoker,
     prompt_has_with_nexus_sections,
 )
-from nexus.services.unified_runtime import (
+from nexus.services.runtime_compat import (
     UnifiedRuntime,
     UnifiedRuntimeRequest,
     build_canonical_runtime_context,
