@@ -250,7 +250,10 @@ def test_competition_bound_key_rejects_valid_other_goal_before_push_sink(monkeyp
         state_dir = tmp_path / "service-state"
 
         def get_task(self, task_id):
-            return {"task_id": task_id, "contract": {"controller_repo_root": str(tmp_path / "repo")}}
+            return {
+                "task_id": task_id,
+                "contract": {"controller_repo_root": str(tmp_path / "repo")},
+            }
 
     coordinator = WorkerCompetitionCoordinator(FakeService())
     coordinator._write({
@@ -260,14 +263,24 @@ def test_competition_bound_key_rejects_valid_other_goal_before_push_sink(monkeyp
         "authority_goal_id": "goal-a",
         "authority_coordination_scope_id": "scope-a",
         "winner": {"winner_task_id": "winner-task"},
-        "integration": {"integration_branch": "nexus/integration/main", "integration_commit_sha": "a" * 40, "merge_performed": True, "push_performed": False},
+        "integration": {
+            "integration_branch": "nexus/integration/main",
+            "integration_commit_sha": "a" * 40,
+            "merge_performed": True,
+            "push_performed": False,
+        },
         "candidates": [],
     })
     calls = []
-    monkeypatch.setattr(competition_module.GovernedPushManager, "push", lambda *_a, **_k: calls.append(1))
+    monkeypatch.setattr(
+        competition_module.GovernedPushManager, "push", lambda *_a, **_k: calls.append(1)
+    )
     with pytest.raises(PermissionError, match="COMPETITION_AUTHORITY_KEY_MISMATCH"):
         coordinator.push_winner(
-            "bound-competition", remote="origin", authority_goal_id="goal-b", authority_coordination_scope_id="scope-b"
+            "bound-competition",
+            remote="origin",
+            authority_goal_id="goal-b",
+            authority_coordination_scope_id="scope-b",
         )
     assert calls == []
     assert coordinator._read("bound-competition")["status"] == "INTEGRATED"

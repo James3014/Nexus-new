@@ -151,7 +151,9 @@ class WorkerCompetitionCoordinator:
             authority_scope_id = request["authority_coordination_scope_id"]
             StandingGrantKey(_GITHUB_REPOSITORY, authority_goal_id, authority_scope_id)
         except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError("competition requires valid authority goal and coordination scope") from exc
+            raise ValueError(
+                "competition requires valid authority goal and coordination scope"
+            ) from exc
         normalized = tuple(str(provider).strip().lower() for provider in providers)
         if len(normalized) < 2 or len(set(normalized)) != len(normalized):
             raise ValueError("competition requires at least two distinct workers")

@@ -139,7 +139,10 @@ class GovernedPushManager:
                 raise ValueError("integration receipt is not merge-proven")
             if integration_receipt.get("push_performed") is True:
                 raise ValueError("integration receipt already records a push")
-        if not isinstance(authority_key, StandingGrantKey) or authority_key.repository != _GITHUB_REPOSITORY:
+        if (
+            not isinstance(authority_key, StandingGrantKey)
+            or authority_key.repository != _GITHUB_REPOSITORY
+        ):
             raise PermissionError("governed push requires an exact repository authority key")
 
         effect = {
