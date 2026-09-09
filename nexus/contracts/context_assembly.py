@@ -56,6 +56,7 @@ class ContextAssemblyContract:
             "serialized_evidence_count": len(self.serialized_evidence_ids),
             "blockers": blockers,
             "claim_boundary": [
+                "Context assembly contracts select context under budget only.",
                 "Context assembly records bounded selected/materialized/serialized context only.",
                 "Physical consumption and outcome contribution require downstream evidence.",
                 "Context assembly does not decide route, provider, model, runtime promotion, or public readiness.",
