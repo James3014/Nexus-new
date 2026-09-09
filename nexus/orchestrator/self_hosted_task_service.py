@@ -2274,24 +2274,67 @@ class SelfHostedTaskService:
                 raise ValueError(f"{name} must contain non-empty strings")
             return tuple(value)
 
+        contract = result.get("contract") if isinstance(result.get("contract"), Mapping) else {}
+
+        def identity_value(
+            explicit: str,
+            durable: str,
+            structured: tuple[str, ...],
+            request_fields: tuple[str, ...],
+        ) -> str:
+            for value in (
+                result.get(explicit),
+                result.get(durable),
+                *(contract.get(field) for field in structured),
+                *(request.get(field) for field in request_fields),
+            ):
+                if value is not None and str(value).strip():
+                    return str(value)
+            return "unknown"
+
         action = str(result.get("action") or request.get("action") or "")
         observation = str(result.get("observation") or request.get("observation") or "")
-        NexusEventBus.emit_attempt_transition(build_attempt_transition_event(
-            task_id=str(result.get("task_id") or task_id),
-            attempt_id=str(result.get("attempt_id")), sequence=sequence,
-            state=status, reason=str(result.get("error") or result.get("reason") or ""),
-            action=action, observation=observation,
-            continuity_event_type=continuity_event_type,
-            strategy_delta=str(result.get("strategy_delta") or request.get("strategy_delta") or ""),
-            do_not_repeat=continuity_list("do_not_repeat", "rejected_strategies"),
-            unresolved_risks=continuity_list("unresolved_risks"),
-            unknowns=continuity_list("unknowns"),
-            next_action=str(result.get("next_action") or request.get("next_action") or ""),
-            claim_ceiling=str(result.get("claim_ceiling") or request.get("claim_ceiling") or ""),
-            candidate_refs=candidate_refs, evidence_refs=evidence_refs,
-            source_revision=str(result.get("source_revision") or request.get("controller_revision") or "unknown"),
-            contract_revision=str(result.get("contract_revision") or request.get("contract_hash") or "unknown"),
-        ))
+        NexusEventBus.emit_attempt_transition(
+            build_attempt_transition_event(
+                task_id=str(result.get("task_id") or task_id),
+                attempt_id=str(result.get("attempt_id")),
+                sequence=sequence,
+                state=status,
+                reason=str(result.get("error") or result.get("reason") or ""),
+                action=action,
+                observation=observation,
+                continuity_event_type=continuity_event_type,
+                strategy_delta=str(
+                    result.get("strategy_delta") or request.get("strategy_delta") or ""
+                ),
+                do_not_repeat=continuity_list("do_not_repeat", "rejected_strategies"),
+                unresolved_risks=continuity_list("unresolved_risks"),
+                unknowns=continuity_list("unknowns"),
+                next_action=str(result.get("next_action") or request.get("next_action") or ""),
+                claim_ceiling=str(
+                    result.get("claim_ceiling") or request.get("claim_ceiling") or ""
+                ),
+                candidate_refs=candidate_refs,
+                evidence_refs=evidence_refs,
+                source_revision=identity_value(
+                    "source_revision",
+                    "controller_revision",
+                    ("source_revision", "controller_revision", "current_source_revision"),
+                    ("source_revision", "controller_revision"),
+                ),
+                contract_revision=identity_value(
+                    "contract_revision",
+                    "contract_hash",
+                    (
+                        "contract_revision",
+                        "contract_hash",
+                        "current_contract_revision",
+                        "current_contract_hash",
+                    ),
+                    ("contract_revision", "contract_hash"),
+                ),
+            )
+        )
 
     @staticmethod
     def read_canonical_attempt_events(

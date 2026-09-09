@@ -8951,6 +8951,185 @@ def test_rehydrate_task_continuation_missing_facts_stay_missing(tmp_path):
     assert proj["work_claim_binding"] is None
 
 
+def test_checkpoint_attempt_transition_uses_durable_top_level_identity(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+    task_id = "task-durable-event-identity"
+    attempt_id = "attempt-durable-event-identity"
+    service._create_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": "SUBMITTED",
+            "controller_revision": "durable-source",
+            "contract_hash": "durable-contract",
+            "request": {
+                "controller_revision": "request-source",
+                "contract_hash": "request-contract",
+            },
+        },
+    )
+
+    service._checkpoint(task_id, "WORKER_RUNNING", attempt_id=attempt_id)
+
+    event = NexusEventBus.get_recent_events(event_type="attempt_transition", limit=1)[0]
+    assert event["payload"]["source_revision"] == "durable-source"
+    assert event["payload"]["contract_revision"] == "durable-contract"
+
+
+def test_attempt_transition_identity_precedence_is_explicit_then_durable_then_contract(
+    tmp_path,
+):
+    NexusEventBus.configure(tmp_path)
+    SelfHostedTaskService._emit_attempt_transition(
+        {
+            "task_id": "identity-precedence",
+            "attempt_id": "attempt-1",
+            "status": "RUNNING",
+            "source_revision": "explicit-source",
+            "contract_revision": "explicit-contract",
+            "controller_revision": "durable-source",
+            "contract_hash": "durable-contract",
+            "contract": {
+                "controller_revision": "structured-source",
+                "contract_hash": "structured-contract",
+            },
+            "request": {
+                "source_revision": "request-source",
+                "contract_revision": "request-contract",
+            },
+        },
+        "identity-precedence",
+    )
+    payload = NexusEventBus.get_recent_events(event_type="attempt_transition", limit=1)[0][
+        "payload"
+    ]
+    assert payload["source_revision"] == "explicit-source"
+    assert payload["contract_revision"] == "explicit-contract"
+
+
+def test_attempt_transition_identity_durable_overrides_request_and_uses_structured_fallback(
+    tmp_path,
+):
+    NexusEventBus.configure(tmp_path)
+    SelfHostedTaskService._emit_attempt_transition(
+        {
+            "task_id": "identity-fallback",
+            "attempt_id": "attempt-1",
+            "status": "RUNNING",
+            "controller_revision": "durable-source",
+            "contract_hash": "durable-contract",
+            "contract": {
+                "controller_revision": "structured-source",
+                "contract_hash": "structured-contract",
+            },
+            "request": {
+                "controller_revision": "request-source",
+                "contract_hash": "request-contract",
+            },
+        },
+        "identity-fallback",
+    )
+    payload = NexusEventBus.get_recent_events(event_type="attempt_transition", limit=1)[0][
+        "payload"
+    ]
+    assert payload["source_revision"] == "durable-source"
+    assert payload["contract_revision"] == "durable-contract"
+
+    SelfHostedTaskService._emit_attempt_transition(
+        {
+            "task_id": "identity-structured",
+            "attempt_id": "attempt-1",
+            "status": "RUNNING",
+            "contract": {
+                "controller_revision": "structured-source",
+                "contract_hash": "structured-contract",
+            },
+        },
+        "identity-structured",
+    )
+    payload = NexusEventBus.get_recent_events(event_type="attempt_transition", limit=1)[0][
+        "payload"
+    ]
+    assert payload["source_revision"] == "structured-source"
+    assert payload["contract_revision"] == "structured-contract"
+
+
+def test_attempt_transition_identity_missing_stays_unknown(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    SelfHostedTaskService._emit_attempt_transition(
+        {"task_id": "identity-missing", "attempt_id": "attempt-1", "status": "RUNNING"},
+        "identity-missing",
+    )
+    payload = NexusEventBus.get_recent_events(event_type="attempt_transition", limit=1)[0][
+        "payload"
+    ]
+    assert payload["source_revision"] == "unknown"
+    assert payload["contract_revision"] == "unknown"
+
+
+def test_rehydrate_rejects_stale_attempt_transition_identity(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+    task_id = "identity-stale"
+    attempt_id = "attempt-stale"
+    service._create_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": "SUBMITTED",
+            "controller_revision": "current-source",
+            "contract_hash": "current-contract",
+        },
+    )
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            sequence=1,
+            state="SUBMITTED",
+            source_revision="stale-source",
+            contract_revision="stale-contract",
+        )
+    )
+    with pytest.raises(ValueError, match="REHYDRATION_SOURCE_REVISION_MISMATCH"):
+        service.rehydrate_task_continuation(task_id, attempt_id)
+
+
+def test_rehydrate_rejects_stale_attempt_transition_contract_identity(tmp_path):
+    NexusEventBus.configure(tmp_path)
+    state_dir = tmp_path / "state"
+    service = SelfHostedTaskService(state_dir=state_dir, ephemeral=True)
+    task_id = "identity-stale-contract"
+    attempt_id = "attempt-stale-contract"
+    service._create_state(
+        task_id,
+        {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "status": "SUBMITTED",
+            "controller_revision": "current-source",
+            "contract_hash": "current-contract",
+        },
+    )
+    NexusEventBus.emit_attempt_transition(
+        build_attempt_transition_event(
+            task_id=task_id,
+            attempt_id=attempt_id,
+            sequence=1,
+            state="SUBMITTED",
+            source_revision="current-source",
+            contract_revision="stale-contract",
+        )
+    )
+    with pytest.raises(ValueError, match="REHYDRATION_CONTRACT_REVISION_MISMATCH"):
+        service.rehydrate_task_continuation(task_id, attempt_id)
+
+
 def test_rehydrate_task_continuation_attempt_mismatch_fails_closed(tmp_path):
     NexusEventBus.configure(tmp_path)
     state_dir = tmp_path / "state"
