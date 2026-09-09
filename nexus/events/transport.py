@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import os
 import stat
@@ -7,7 +9,7 @@ import uuid
 from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from nexus.events.contracts import AttemptTransitionEvent
 from nexus.events.log_store import (
@@ -20,6 +22,9 @@ from nexus.events.writer_generation import EventWriterGeneration, GenerationErro
 from nexus.feedback.contracts import DeveloperFeedbackDecision
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from nexus.orchestrator.writer_quiescence import InitialWriterAttachment
 
 SEMANTIC_EVENT_TYPES = frozenset(
     {
@@ -48,7 +53,7 @@ RAW_EVENT_TYPES = frozenset(
 class EventWriterAdapter:
     """Operation-scoped event-log binding over an already loaded registry."""
 
-    def __init__(self, registry, *, binding, writer_generation, root, writer_id):
+    def __init__(self, registry, *, binding, writer_generation, root, writer_id, initial_attachment=None):
         from nexus.events.state_owner_manifest import StateOwnerBinding
         from nexus.events.writer_generation import EventWriterGeneration
         from nexus.orchestrator.writer_quiescence import UnknownWriter, WriterRegistry, _root
@@ -71,6 +76,11 @@ class EventWriterAdapter:
         self.writer_id = writer_id
         self._root_identity = self._physical_identity()
         self._active_contexts = {}
+        self._initial_attachment = initial_attachment
+        if initial_attachment is not None:
+            initial_attachment.verify(registry, root=canonical, generation=writer_generation,
+                                      writer_id=writer_id, manifest_sha256=initial_attachment.manifest_sha256)
+            registry.register_initial_writer(initial_attachment, role="event_log", writer_id=writer_id)
         self._identity()
 
     def _physical_identity(self):
@@ -81,10 +91,21 @@ class EventWriterAdapter:
         return info.st_dev, info.st_ino
 
     def _identity(self):
-        from nexus.orchestrator.writer_quiescence import UnknownWriter
+        from nexus.orchestrator.writer_quiescence import UnknownWriter, WriterIdentity
 
         item = self.registry._writers.get((self.root, "event_log", self.writer_id))
         if item is None or item.identity.generation != self.writer_generation.generation:
+            if self._initial_attachment is not None:
+                self._initial_attachment.verify(
+                    self.registry, root=self.root, generation=self.writer_generation,
+                    writer_id=self.writer_id,
+                    manifest_sha256=self._initial_attachment.manifest_sha256,
+                )
+                return WriterIdentity(
+                    self.root, "event_log", self.registry.source_identity,
+                    self.registry.process_start_identity, str(threading.get_ident()),
+                    self.writer_generation.generation, self.writer_id,
+                )
             raise UnknownWriter("event writer is unknown or stale")
         if item.loaded_identity is None:
             raise UnknownWriter("event writer loaded identity is unavailable")
@@ -249,6 +270,7 @@ def load_event_writer_factory(
     writer_generation,
     root: str | Path,
     writer_id: str,
+    initial_attachment=None,
 ) -> EventWriterFactory:
     return register_event_writer_factory(
         EventWriterFactory(
@@ -258,6 +280,7 @@ def load_event_writer_factory(
                 writer_generation=writer_generation,
                 root=root,
                 writer_id=writer_id,
+                initial_attachment=initial_attachment,
             )
         )
     )
@@ -294,6 +317,7 @@ class NexusEventBus:
         writer_generation: Optional[EventWriterGeneration] = None,
         enforce_generation: bool = False,
         writer_factory: Optional[EventWriterFactory] = None,
+        initial_handle: InitialWriterAttachment | None = None,
     ) -> None:
         """初始化持久化路徑"""
         log_dir, event_log_path = cls._log_store.configure(
@@ -301,6 +325,7 @@ class NexusEventBus:
             writer_generation=writer_generation,
             enforce_generation=enforce_generation,
             writer_factory=writer_factory,
+            initial_handle=initial_handle,
         )
         cls._event_log_path = event_log_path
         cls._writer_factory = writer_factory

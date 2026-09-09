@@ -47,6 +47,97 @@ class UnknownWriter(WriterAdmissionDenied):
     """The supplied writer identity is absent or no longer current."""
 
 
+class RecoveryHoldProof:
+    """Opaque B-owned proof for adopting one F recovery hold."""
+    __slots__ = ("_registry", "_cohort_id", "_roots", "_path", "_predecessor", "_predecessor_sha", "_current_sha", "_markers", "_selected", "_nonce")
+
+    def __init__(self, registry, *, cohort_id, roots, path, predecessor, predecessor_sha, markers, selected):
+        self._registry = registry
+        self._cohort_id = cohort_id
+        self._roots = tuple(roots)
+        self._path = path
+        self._predecessor = predecessor
+        self._predecessor_sha = predecessor_sha
+        self._current_sha = predecessor_sha
+        self._markers = tuple(markers)
+        self._selected = tuple(selected)
+        self._nonce = object()
+
+
+@dataclass(frozen=True)
+class _RecoveryFacts:
+    proof: RecoveryHoldProof
+    snapshot: tuple
+    raw: bytes
+    selected: tuple
+    hold: Any = None
+
+
+
+class InitialWriterAttachment:
+    """Opaque capability for attaching a writer while its activation hold remains."""
+    __slots__ = ("_registry", "_hold", "root", "generation", "writer_id", "manifest_sha256", "transaction_id", "_marker_sha256", "_recovery_proof", "_nonce")
+
+    def __init__(self, registry, hold, *, root, generation, writer_id, manifest_sha256, transaction_id, marker_sha256, recovery_proof=None):
+        self._registry = registry
+        self._hold = hold
+        self.root = _root(root)
+        self.generation = generation
+        self.writer_id = writer_id
+        self.manifest_sha256 = manifest_sha256
+        self.transaction_id = transaction_id
+        self._marker_sha256 = marker_sha256
+        self._recovery_proof = recovery_proof
+        self._nonce = object()
+
+    def verify(self, registry, *, root, generation, writer_id, manifest_sha256):
+        generation = getattr(generation, "generation", generation)
+        if self._registry is not registry or self._hold.registry is not registry:
+            raise WriterAdmissionDenied("initial attachment registry mismatch")
+        record = registry._initial_attachments.get(id(self))
+        if record is None or record[0] is not self:
+            raise WriterAdmissionDenied("initial attachment capability is not registered")
+        if record[1] != (self.root, self.generation, self.writer_id, self.manifest_sha256, self.transaction_id, self._marker_sha256, self._hold.epoch, registry._pid, id(self._recovery_proof), id(self._hold)):
+            raise WriterAdmissionDenied("initial attachment issuance facts changed")
+        if self._hold.released or self._hold.epoch <= 0 or self.root != _root(root):
+            raise WriterAdmissionDenied("initial attachment hold mismatch")
+        if registry._held_roots.get(self.root) is not self._hold:
+            raise WriterAdmissionDenied("initial attachment hold is not current")
+        if generation != self.generation or writer_id != self.writer_id or manifest_sha256 != self.manifest_sha256:
+            raise WriterAdmissionDenied("initial attachment binding mismatch")
+        if os.getpid() != registry._pid:
+            raise UnknownWriter("initial attachment process mismatch")
+        if self._recovery_proof is None:
+            registry._check_hold(self._hold)
+        else:
+            registry._verify_recovery_proof(self._recovery_proof)
+        try:
+            marker = _safe_bytes(registry._marker_path(self.root))
+        except FileNotFoundError:
+            if self._recovery_proof is None or self._recovery_proof._markers[self._recovery_proof._roots.index(self.root)] is not None:
+                raise HoldConflict("initial attachment hold marker changed")
+            marker = None
+        if marker is not None and _hash(marker) != self._marker_sha256:
+            raise HoldConflict("initial attachment hold marker changed")
+        from nexus.events.state_owner_manifest import read_manifest
+        from nexus.events.writer_generation import read_generation
+        manifest = read_manifest(Path(self.root))
+        installed = read_generation(Path(self.root))
+        if (
+            manifest is None
+            or manifest.state != "COMMITTED"
+            or installed is None
+            or installed.generation != self.generation
+            or installed.writer_id != self.writer_id
+            or manifest.generation != self.generation
+            or manifest.writer_id != self.writer_id
+            or manifest.transaction_id != self.transaction_id
+            or manifest.manifest_sha256 != self.manifest_sha256
+        ):
+            raise WriterAdmissionDenied("initial attachment physical state changed")
+        return self
+
+
 class HoldConflict(WriterQuiescenceError):
     """A duplicate or overlapping logical hold was requested."""
 
@@ -616,6 +707,7 @@ class TaskStateWriterAdapter:
         path_for_task: Callable[[str], Path],
         loaded_identity: Callable[[], WriterIdentity] | None = None,
         selection_entry_id: str = "task-state",
+        initial_attachment: InitialWriterAttachment | None = None,
     ) -> None:
         from nexus.events.state_owner_manifest import StateOwnerBinding
         from nexus.events.writer_generation import EventWriterGeneration
@@ -639,6 +731,12 @@ class TaskStateWriterAdapter:
         self._path_for_task = path_for_task
         self._loaded_identity = loaded_identity
         self._selection_entry_id = _text(selection_entry_id, "selection_entry_id")
+        if initial_attachment is not None:
+            if writer_id != initial_attachment.writer_id:
+                raise UnknownWriter("held task writer identity mismatch")
+            if binding.transaction_id != initial_attachment.transaction_id:
+                raise UnknownWriter("held task transaction identity mismatch")
+            initial_attachment.verify(registry, root=canonical_root, generation=writer_generation, writer_id=writer_id, manifest_sha256=initial_attachment.manifest_sha256)
         self._active_contexts: dict[int, tuple[Any, WriterLease]] = {}
 
     def assert_context(self, context: Any) -> None:
@@ -766,6 +864,7 @@ class RuntimeWriterAdapter:
         root: str | Path,
         writer_id: str,
         loaded_identity: Callable[[str], WriterIdentity] | None = None,
+        initial_attachment: InitialWriterAttachment | None = None,
     ) -> None:
         from nexus.events.state_owner_manifest import StateOwnerBinding
         from nexus.events.writer_generation import EventWriterGeneration
@@ -789,6 +888,12 @@ class RuntimeWriterAdapter:
         self._root_identity = (root_stat.st_dev, root_stat.st_ino)
         self.writer_id = _text(writer_id, "writer_id")
         self._loaded_identity = loaded_identity
+        if initial_attachment is not None:
+            if writer_id != initial_attachment.writer_id:
+                raise UnknownWriter("held runtime writer identity mismatch")
+            if binding.transaction_id != initial_attachment.transaction_id:
+                raise UnknownWriter("held runtime transaction identity mismatch")
+            initial_attachment.verify(registry, root=canonical_root, generation=writer_generation, writer_id=writer_id, manifest_sha256=initial_attachment.manifest_sha256)
         self._role_writer_ids: dict[str, str] = {}
         self._active_contexts: dict[int, WriterLease] = {}
         self._active_paths: dict[int, Path] = {}
@@ -797,6 +902,8 @@ class RuntimeWriterAdapter:
             self._role_writer_ids[role] = role_writer_id
             key = (self.root, role, role_writer_id)
             registered = registry._writers.get(key)
+            if registered is None and initial_attachment is not None:
+                continue
             if registered is None:
                 raise UnknownWriter("runtime writer role is not loaded")
             if registered.identity.generation != writer_generation.generation:
@@ -1002,17 +1109,42 @@ class RuntimeWriterFactory:
 _LOADED_RUNTIME_WRITER_FACTORIES: dict[str, RuntimeWriterFactory] = {}
 
 
-def register_runtime_writer_factory(factory: RuntimeWriterFactory) -> RuntimeWriterFactory:
-    """Register a factory owned by the loaded source instance."""
+def register_runtime_writer_factory(
+    factory: RuntimeWriterFactory,
+    *,
+    initial_attachment: InitialWriterAttachment | None = None,
+) -> RuntimeWriterFactory:
+    """Register a factory owned by the loaded source instance.
+
+    A factory may be registered while its root is held only with the exact
+    source-issued attachment for that held, physically committed binding.  It
+    remains provisional until the hold is released: normal operation paths
+    continue to reject writes while the root is held.
+    """
     if not isinstance(factory, RuntimeWriterFactory):
         raise TypeError("runtime writer factory is required")
+    if initial_attachment is not None and not isinstance(
+        initial_attachment, InitialWriterAttachment
+    ):
+        raise TypeError("initial attachment capability is required")
     root = factory._adapter.root
+    if initial_attachment is not None:
+        adapter = factory._adapter
+        if adapter.binding.transaction_id != initial_attachment.transaction_id:
+            raise WriterAdmissionDenied("initial attachment transaction mismatch")
+        initial_attachment.verify(
+            adapter.registry,
+            root=adapter.root,
+            generation=adapter.writer_generation,
+            writer_id=adapter.writer_id,
+            manifest_sha256=initial_attachment.manifest_sha256,
+        )
     existing = _LOADED_RUNTIME_WRITER_FACTORIES.get(root)
     if existing is not None and existing is not factory:
         raise WriterAdmissionDenied("runtime writer factory already loaded for root")
     if os.getpid() != factory._adapter.registry._pid:
         raise UnknownWriter("runtime writer factory belongs to another process")
-    if root in factory._adapter.registry._held_roots:
+    if root in factory._adapter.registry._held_roots and initial_attachment is None:
         raise WriterAdmissionDenied("runtime writer factory cannot load under hold")
     _LOADED_RUNTIME_WRITER_FACTORIES[root] = factory
     return factory
@@ -1037,6 +1169,7 @@ def load_runtime_writer_factory(
     effect_journal: Any = None,
     effect_dispatch: Any = None,
     effect_reconcile: Any = None,
+    initial_attachment: InitialWriterAttachment | None = None,
 ) -> RuntimeWriterFactory:
     """Construct a Runtime port from independently loaded role registrations."""
     return register_runtime_writer_factory(RuntimeWriterFactory(RuntimeWriterAdapter(
@@ -1045,7 +1178,10 @@ def load_runtime_writer_factory(
         writer_generation=writer_generation,
         root=root,
         writer_id=writer_id,
-    ), effect_journal=effect_journal, effect_dispatch=effect_dispatch, effect_reconcile=effect_reconcile))
+        initial_attachment=initial_attachment,
+    ), effect_journal=effect_journal, effect_dispatch=effect_dispatch, effect_reconcile=effect_reconcile),
+        initial_attachment=initial_attachment,
+    )
 
 
 @dataclass(slots=True)
@@ -1141,10 +1277,400 @@ class WriterRegistry:
         # Original admission records remain in place as durable replay fences.
         # Pins only qualify exact terminal bytes from a verified F recovery.
         self._reconciled_terminal_records: dict[str, str] = {}
+        self._initial_attachments: dict[int, tuple[InitialWriterAttachment, tuple[Any, ...]]] = {}
+        self._recovery_proofs: dict[int, _RecoveryFacts] = {}
 
     def _check_process(self) -> None:
         if os.getpid() != self._pid:
             raise UnknownWriter("registry belongs to a different process instance")
+
+    def issue_initial_attachment(self, hold: WriterHold, *, root: str, generation: int, writer_id: str, manifest_sha256: str, recovery_proof: RecoveryHoldProof | None = None) -> InitialWriterAttachment:
+        self._check_process()
+        canonical = _root(root)
+        with self._mutex:
+            if recovery_proof is None:
+                self._check_hold(hold)
+            else:
+                self._verify_recovery_proof(recovery_proof)
+                if recovery_proof._registry is not self or recovery_proof._cohort_id != hold.cohort_id or recovery_proof._roots != hold.roots or self._held_roots.get(canonical) is not hold:
+                    raise WriterAdmissionDenied("recovery hold mismatch")
+            if hold.released or canonical not in hold.roots or self._held_roots.get(canonical) is not hold:
+                raise WriterAdmissionDenied("initial attachment requires current hold")
+            receipt = self._finalized.get(hold.cohort_id)
+            if recovery_proof is None and (receipt is None or receipt[0] is not hold or receipt[2] == ""):
+                raise WriterAdmissionDenied("initial attachment requires finalized drain")
+            from nexus.events.state_owner_manifest import read_manifest
+            from nexus.events.writer_generation import read_generation
+            manifest = read_manifest(Path(canonical))
+            installed = read_generation(Path(canonical))
+            if manifest is None or manifest.state != "COMMITTED" or installed is None:
+                raise WriterAdmissionDenied("initial attachment requires committed physical state")
+            if installed.generation != generation or installed.writer_id != writer_id or manifest.manifest_sha256 != manifest_sha256:
+                raise WriterAdmissionDenied("initial attachment physical binding mismatch")
+            marker = _safe_bytes(self._marker_path(canonical))
+            if recovery_proof is None:
+                self._check_hold(hold)
+            else:
+                self._verify_recovery_proof(recovery_proof)
+            capability = InitialWriterAttachment(self, hold, root=canonical, generation=generation, writer_id=writer_id, manifest_sha256=manifest_sha256, transaction_id=manifest.transaction_id, marker_sha256=_hash(marker), recovery_proof=recovery_proof)
+            self._initial_attachments[id(capability)] = (capability, (canonical, generation, writer_id, manifest_sha256, capability.transaction_id, capability._marker_sha256, hold.epoch, self._pid, id(recovery_proof), id(hold)))
+            return capability
+
+    def prepare_hold_recovery(self, *, cohort_id: str, ordered_roots: Sequence[str | Path], expected_receipt_sha256: str) -> RecoveryHoldProof:
+        """Pin the exact durable F predecessor before its adoption CAS."""
+        self._check_process()
+        roots = tuple(_root(x) for x in ordered_roots)
+        if not roots or len(set(roots)) != len(roots) or not isinstance(expected_receipt_sha256, str):
+            raise WriterAdmissionDenied("recovery proof inputs are invalid")
+        base = self.hold_store or (Path(roots[0]) / ".nexus" / "writer-quiescence")
+        path = base / "activation-cohorts" / f"{_hash(_text(cohort_id, 'cohort_id').encode())}.json"
+        raw = _safe_bytes(path)
+        try:
+            predecessor = json.loads(raw, object_pairs_hook=_unique_object)
+        except (TypeError, ValueError) as exc:
+            raise WriterAdmissionDenied("recovery predecessor is malformed") from exc
+        if not isinstance(predecessor, dict) or predecessor.get("cohort_id") != cohort_id or tuple(predecessor.get("ordered_roots", ())) != roots:
+            raise WriterAdmissionDenied("recovery predecessor vector mismatch")
+        digest = predecessor.pop("receipt_sha256", None)
+        if digest != expected_receipt_sha256 or _hash(_json_bytes(predecessor)) != expected_receipt_sha256:
+            raise WriterAdmissionDenied("recovery predecessor self-hash mismatch")
+        predecessor["receipt_sha256"] = digest
+        self._validate_recovery_nested(predecessor)
+        if predecessor.get("source_identity") != self.source_identity or predecessor.get("state") not in {"HOLDING", "APPLYING", "PARTIAL_UNKNOWN", "REACQUIRING", "ACTIVE", "RELEASE_INTENT", "RELEASED"}:
+            raise WriterAdmissionDenied("recovery predecessor identity or state mismatch")
+        old_process = predecessor.get("process_start_identity")
+        if not isinstance(old_process, str) or old_process == self.process_start_identity or not self._process_absent(old_process):
+            raise WriterAdmissionDenied("recovery predecessor process is not absent")
+        marker_payloads = predecessor.get("hold_markers")
+        if not isinstance(marker_payloads, list) or len(marker_payloads) != len(roots):
+            raise WriterAdmissionDenied("recovery marker vector malformed")
+        markers = []
+        for root, payload in zip(roots, marker_payloads):
+            if not isinstance(payload, dict) or payload.get("root") != root or tuple(payload.get("ordered_roots", ())) != roots:
+                raise WriterAdmissionDenied("recovery marker contract mismatch")
+            marker = self._marker_path(root)
+            try:
+                marker_bytes = _safe_bytes(marker)
+            except FileNotFoundError:
+                marker_bytes = None
+            if marker_bytes is not None and marker_bytes != _json_bytes(payload):
+                raise WriterAdmissionDenied("recovery hold marker changed")
+            markers.append(marker_bytes)
+        state = predecessor["state"]
+        if state == "RELEASED" and any(marker is not None for marker in markers):
+            raise WriterAdmissionDenied("released recovery markers remain")
+        if state == "RELEASE_INTENT":
+            seen_present = False
+            for marker in markers:
+                if marker is None and seen_present:
+                    raise WriterAdmissionDenied("recovery marker absence is not an ordered prefix")
+                seen_present |= marker is not None
+        elif state != "RELEASED" and any(marker is None for marker in markers):
+            raise WriterAdmissionDenied("recovery marker is missing")
+        rows = marker_payloads[0].get("selected_writers")
+        if not isinstance(rows, list) or not rows:
+            raise WriterAdmissionDenied("recovery writer vector missing")
+        old = tuple(WriterIdentity(**row) for row in rows)
+        roles = [(x.root, x.role) for x in old]
+        if len(set(roles)) != len(roles) or {x.root for x in old} != set(roots):
+            raise WriterAdmissionDenied("recovery writer vector incomplete or duplicate")
+        for payload in marker_payloads:
+            if (payload.get("schema") != "writer-quiescence-hold/v1"
+                or payload.get("cohort_id") != cohort_id
+                or payload.get("hold_epoch") != predecessor.get("hold_epoch")
+                or payload.get("source_identity") != self.source_identity
+                or payload.get("selected_writers") != rows):
+                raise WriterAdmissionDenied("recovery marker identity mismatch")
+        selected = tuple(sorted((x for x in self._writers.values() if x.identity.root in roots), key=lambda x: (roots.index(x.identity.root), x.identity.key())))
+        if {(x.identity.root, x.identity.role) for x in selected} != set(roles) or len(selected) != len(old):
+            raise WriterAdmissionDenied("recovery selected vector mismatch")
+        for item in selected:
+            identity = item.identity
+            if identity.source_identity != self.source_identity or identity.process_start_identity != self.process_start_identity:
+                raise WriterAdmissionDenied("recovery selected identity mismatch")
+            previous = next(x for x in old if (x.root, x.role) == (identity.root, identity.role))
+            if (identity.generation, identity.writer_id) != (previous.generation, previous.writer_id):
+                from nexus.events.state_owner_manifest import read_manifest
+                from nexus.events.writer_generation import read_generation
+                installed = read_generation(Path(identity.root))
+                manifest = read_manifest(Path(identity.root))
+                if installed is None or manifest is None or manifest.state != "COMMITTED" or (identity.generation, identity.writer_id) != (installed.generation, installed.writer_id) or (manifest.generation, manifest.writer_id) != (identity.generation, identity.writer_id):
+                    raise WriterAdmissionDenied("recovery selected generation mismatch")
+        original = predecessor.get("original_drain")
+        try:
+            drain_bytes = _json_bytes(original["payload"])
+            drain = WriterQuiescenceReceipt.from_bytes(drain_bytes).verify()
+            drain_path = self._marker_path(roots[0]).parent / "writer-quiescence-receipts" / f"{_hash(cohort_id.encode())}.json"
+            if (_safe_bytes(drain_path) != drain_bytes or _hash(drain_bytes) != original["bytes_sha256"]
+                or drain.drain_state != DRAINED or drain.cohort_id != cohort_id
+                or drain.hold_epoch != predecessor["hold_epoch"] or drain.ordered_roots != roots
+                or drain.source_identity != self.source_identity
+                or tuple(x.identity for x in drain.observations) != old
+                or any(payload.get("process_start_identity") != drain.process_start_identity or payload.get("server_identity") != drain.server_identity for payload in marker_payloads)):
+                raise ValueError("original drain binding mismatch")
+        except (KeyError, TypeError, ValueError, OSError) as exc:
+            raise WriterAdmissionDenied("recovery original drain invalid") from exc
+        proof = RecoveryHoldProof(self, cohort_id=cohort_id, roots=roots, path=path, predecessor=predecessor, predecessor_sha=expected_receipt_sha256, markers=markers, selected=selected)
+        self._recovery_proofs[id(proof)] = _RecoveryFacts(proof, self._proof_snapshot(proof), raw, tuple((x, x.identity) for x in selected))
+        return proof
+
+    def _process_absent(self, identity: str) -> bool:
+        import re
+        match = re.fullmatch(r"pid:([0-9]+):start:(.+)", identity)
+        if match is None:
+            return False
+        try:
+            observed = subprocess.run(["ps", "-o", "lstart=", "-p", match.group(1)], check=False, text=True, capture_output=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return observed.returncode in (0, 1) and not observed.stdout.strip()
+
+    @staticmethod
+    def _proof_snapshot(proof):
+        return (id(proof._registry), proof._cohort_id, proof._roots, str(proof._path),
+                _json_bytes(proof._predecessor), proof._predecessor_sha, proof._current_sha,
+                proof._markers, tuple(id(x) for x in proof._selected), id(proof._nonce))
+
+    def _recovery_facts(self, proof):
+        self._check_process()
+        facts = self._recovery_proofs.get(id(proof))
+        if facts is None or facts.proof is not proof or self._proof_snapshot(proof) != facts.snapshot:
+            raise WriterAdmissionDenied("recovery proof issuance facts changed")
+        current_selected = tuple(x for x in self._writers.values() if x.identity.root in proof._roots)
+        if {id(x) for x in current_selected} != {id(x) for x, _ in facts.selected}:
+            raise WriterAdmissionDenied("recovery selected vector changed")
+        drain_path = self._marker_path(proof._roots[0]).parent / "writer-quiescence-receipts" / f"{_hash(proof._cohort_id.encode())}.json"
+        if _safe_bytes(drain_path) != _json_bytes(proof._predecessor["original_drain"]["payload"]):
+            raise WriterAdmissionDenied("recovery original drain changed")
+        for item, identity in facts.selected:
+            if self._writers.get(identity.key()) is not item or item.identity != identity:
+                raise WriterAdmissionDenied("recovery selected writer changed")
+        if facts.hold is not None and (facts.hold.registry is not self or facts.hold.cohort_id != proof._cohort_id or facts.hold.roots != proof._roots or facts.hold.epoch != proof._predecessor["hold_epoch"] or facts.hold.released or any(self._held_roots.get(root) is not facts.hold for root in proof._roots)):
+            raise WriterAdmissionDenied("recovery hold changed")
+        return facts
+
+    def _recovery_markers(self, proof, state):
+        present = False
+        for root, payload in zip(proof._roots, proof._predecessor["hold_markers"]):
+            try:
+                actual = _safe_bytes(self._marker_path(root))
+            except FileNotFoundError:
+                actual = None
+            if actual is not None and actual != _json_bytes(payload):
+                raise WriterAdmissionDenied("recovery marker changed")
+            if state == "RELEASED":
+                valid = actual is None
+            elif state == "RELEASE_INTENT":
+                valid = actual is not None or not present
+            else:
+                valid = actual is not None
+            if not valid:
+                raise WriterAdmissionDenied("recovery marker phase mismatch")
+            present |= actual is not None
+
+    @staticmethod
+    def _recovery_receipt(raw):
+        try:
+            receipt = json.loads(raw, object_pairs_hook=_unique_object)
+            digest = receipt.pop("receipt_sha256")
+            if _hash(_json_bytes(receipt)) != _digest(digest):
+                raise ValueError("digest mismatch")
+            receipt["receipt_sha256"] = digest
+            return receipt
+        except (TypeError, KeyError, ValueError) as exc:
+            raise WriterAdmissionDenied("recovery receipt malformed") from exc
+
+    def _verify_recovery_proof(self, proof):
+        facts = self._recovery_facts(proof)
+        if _safe_bytes(proof._path) != facts.raw:
+            raise WriterAdmissionDenied("recovery receipt physical CAS changed")
+        current = self._recovery_receipt(facts.raw)
+        self._recovery_markers(proof, current["state"])
+
+    def _validate_recovery_nested(self, current):
+        """Validate B-consumed receipt envelopes without importing the F host."""
+        try:
+            roots = tuple(current["ordered_roots"])
+            contracts = current["root_contracts"]
+            if len(contracts) != len(roots) or tuple(x["root"] for x in contracts) != roots:
+                raise ValueError("root contracts incomplete")
+            state = current["state"]
+            expected_release = "RELEASED" if state == "RELEASED" else "RELEASE_PENDING" if state == "RELEASE_INTENT" else "HELD"
+            if current["release_state"] != expected_release:
+                raise ValueError("release phase mismatch")
+            wrapper = current["drain"]
+            raw = _json_bytes(wrapper["payload"])
+            drain = WriterQuiescenceReceipt.from_bytes(raw)
+            if _hash(raw) != wrapper["bytes_sha256"] or (drain.cohort_id, drain.hold_epoch, drain.ordered_roots, drain.source_identity) != (current["cohort_id"], current["hold_epoch"], roots, current["source_identity"]):
+                raise ValueError("drain binding mismatch")
+            transitions = current["transitions"]
+            if not isinstance(transitions, list) or len(transitions) > len(roots):
+                raise ValueError("transition vector malformed")
+            for transition, contract in zip(transitions, contracts):
+                unsigned = dict(transition)
+                digest = unsigned.pop("receipt_digest")
+                if digest != _hash(_json_bytes(unsigned)) or transition["schema"] != "nexus.state_owner_transition_receipt.v1":
+                    raise ValueError("transition digest mismatch")
+                for receipt_key, contract_key in (("root_id", "root_id"), ("request_digest", "request_digest"), ("transaction_id", "transaction_id"), ("next_generation", "generation"), ("next_writer_id", "writer_id"), ("expected_root_identity", "root_identity"), ("drain_receipt_hash", "drain_receipt_hash")):
+                    if transition[receipt_key] != contract[contract_key]:
+                        raise ValueError("transition contract mismatch")
+            active = state in {"ACTIVE", "RELEASE_INTENT", "RELEASED"}
+            if active and (len(transitions) != len(roots) or any(x["state"] not in {"COMMITTED", "RECONCILED"} for x in transitions) or drain.drain_state != DRAINED):
+                raise ValueError("active transition evidence incomplete")
+            wrapper = current.get("reacquisition")
+            if wrapper is None:
+                if active:
+                    raise ValueError("active reacquisition missing")
+                return None
+            raw = _json_bytes(wrapper["payload"])
+            evidence = self._recovery_receipt(raw)
+            if _hash(raw) != wrapper["bytes_sha256"] or evidence["schema"] != "writer-reacquisition/v1" or (evidence["cohort_id"], evidence["hold_epoch"], tuple(evidence["ordered_roots"])) != (current["cohort_id"], current["hold_epoch"], roots):
+                raise ValueError("reacquisition digest or contract mismatch")
+            old = tuple(WriterIdentity(**row) for row in current["hold_markers"][0]["selected_writers"])
+            observations = evidence["observations"]
+            if len(observations) != len(old) or {WriterIdentity(**x["previous_identity"]) for x in observations} != set(old):
+                raise ValueError("reacquisition original vector incomplete")
+            if active and (evidence["state"] != "REACQUIRED" or evidence["unknowns"]):
+                raise ValueError("active reacquisition unknown")
+            for row in observations:
+                if row["state"] != "MATCHED":
+                    if active:
+                        raise ValueError("active unmatched writer")
+                    continue
+                previous = WriterIdentity(**row["previous_identity"])
+                loaded = WriterIdentity(**row["loaded_identity"])
+                contract = contracts[roots.index(previous.root)]
+                if (loaded.root, loaded.role, loaded.source_identity) != (previous.root, previous.role, current["source_identity"]) or (loaded.generation, loaded.writer_id) != (contract["generation"], contract["writer_id"]) or (row["observed_generation"], row["observed_writer_id"]) != (loaded.generation, loaded.writer_id):
+                    raise ValueError("reacquisition loaded contract mismatch")
+                _digest(row["manifest_sha256"])
+            return evidence
+        except (KeyError, TypeError, ValueError) as exc:
+            raise WriterAdmissionDenied("recovery nested evidence invalid") from exc
+
+    def confirm_recovered_reacquisition(self, proof, receipt: WriterReacquisitionReceipt):
+        """Observe F's complete physical rebind; never change B registrations."""
+        with self._mutex:
+            self._check_process()
+            facts = self._recovery_proofs.get(id(proof))
+            if facts is None or facts.proof is not proof or self._proof_snapshot(proof) != facts.snapshot or facts.hold is None:
+                raise WriterAdmissionDenied("recovery proof not adopted")
+            if _safe_bytes(proof._path) != facts.raw:
+                raise WriterAdmissionDenied("recovery reacquisition physical CAS changed")
+            current = self._recovery_receipt(facts.raw)
+            if current["state"] not in {"REACQUIRING", "ACTIVE", "RELEASE_INTENT", "RELEASED"}:
+                raise WriterAdmissionDenied("recovery reacquisition phase mismatch")
+            self._recovery_markers(proof, current["state"])
+            if not isinstance(receipt, WriterReacquisitionReceipt) or receipt.state != "REACQUIRED" or receipt.cohort_id != proof._cohort_id or receipt.hold_epoch != facts.hold.epoch or receipt.ordered_roots != proof._roots:
+                raise WriterAdmissionDenied("recovery reacquisition receipt mismatch")
+            historical = self._validate_recovery_nested(current)
+            if historical is None:
+                raise WriterAdmissionDenied("recovery historical reacquisition missing")
+            if current["state"] == "REACQUIRING":
+                embedded = current.get("reacquisition", {})
+                if embedded.get("bytes_sha256") != _hash(receipt.to_bytes()) or embedded.get("payload") != json.loads(receipt.to_bytes()):
+                    raise WriterAdmissionDenied("recovery reacquisition durable evidence mismatch")
+            else:
+                # Current-process observations may change process/thread identity,
+                # but must reproduce the exact historical physical result vector.
+                historical_rows = {(x["previous_identity"]["root"], x["previous_identity"]["role"]): x for x in historical["observations"]}
+                for observation in receipt.observations:
+                    row = historical_rows.get((observation.previous_identity.root, observation.previous_identity.role))
+                    loaded = observation.loaded_identity
+                    if row is None or loaded is None or (row["manifest_sha256"], row["observed_generation"], row["observed_writer_id"]) != (observation.manifest_sha256, loaded.generation, loaded.writer_id):
+                        raise WriterAdmissionDenied("recovery current vector differs from historical durable result")
+            original = tuple(WriterIdentity(**row) for row in proof._predecessor["hold_markers"][0]["selected_writers"])
+            if len(receipt.observations) != len(original) or {x.previous_identity for x in receipt.observations} != set(original):
+                raise WriterAdmissionDenied("recovery reacquisition original vector mismatch")
+            selected = tuple(x for x in self._writers.values() if x.identity.root in proof._roots)
+            if {id(x) for x in selected} != {id(x) for x, _ in facts.selected}:
+                raise WriterAdmissionDenied("recovery reacquisition object vector changed")
+            from nexus.events.state_owner_manifest import read_manifest
+            from nexus.events.writer_generation import read_generation
+            for observation in receipt.observations:
+                loaded = observation.loaded_identity
+                old = observation.previous_identity
+                if loaded is None or (loaded.root, loaded.role, loaded.source_identity, loaded.process_start_identity) != (old.root, old.role, self.source_identity, self.process_start_identity) or loaded.generation <= old.generation:
+                    raise WriterAdmissionDenied("recovery reacquisition loaded identity mismatch")
+                item = next(x for x, prior in facts.selected if (prior.root, prior.role) == (old.root, old.role))
+                manifest = read_manifest(Path(old.root))
+                generation = read_generation(Path(old.root))
+                if (self._writers.get(loaded.key()) is not item or item.identity != loaded or item.loaded_identity is None or item.loaded_identity() != loaded
+                    or manifest is None or manifest.state != "COMMITTED" or generation is None
+                    or (manifest.generation, manifest.writer_id, manifest.manifest_sha256) != (loaded.generation, loaded.writer_id, observation.manifest_sha256)
+                    or (generation.generation, generation.writer_id) != (loaded.generation, loaded.writer_id)
+                    or (observation.observed_generation, observation.observed_writer_id) != (loaded.generation, loaded.writer_id)):
+                    raise WriterAdmissionDenied("recovery reacquisition physical identity mismatch")
+            updated = replace(facts, selected=tuple((item, item.identity) for item, _ in facts.selected))
+            self._recovery_proofs[id(proof)] = updated
+            try:
+                self._recovery_facts(proof)
+            except BaseException:
+                self._recovery_proofs[id(proof)] = facts
+                raise
+
+    def advance_recovered_hold(self, proof, *, expected_predecessor_sha256, expected_successor_sha256):
+        with self._mutex:
+            facts = self._recovery_facts(proof)
+            if facts.hold is None:
+                raise WriterAdmissionDenied("recovery hold not adopted")
+            previous = self._recovery_receipt(facts.raw)
+            raw = _safe_bytes(proof._path)
+            successor = self._recovery_receipt(raw)
+            if facts.raw == raw and successor["receipt_sha256"] == expected_successor_sha256 and successor["prior_digest"] == expected_predecessor_sha256:
+                self._recovery_markers(proof, successor["state"])
+                return
+            if previous["receipt_sha256"] != expected_predecessor_sha256 or successor["prior_digest"] != expected_predecessor_sha256 or successor["receipt_sha256"] != expected_successor_sha256:
+                raise WriterAdmissionDenied("recovery progression CAS mismatch")
+            edges = {"HOLDING": {"HOLDING", "APPLYING", "PARTIAL_UNKNOWN"}, "APPLYING": {"APPLYING", "REACQUIRING", "PARTIAL_UNKNOWN"}, "PARTIAL_UNKNOWN": {"PARTIAL_UNKNOWN", "APPLYING", "HOLDING"}, "REACQUIRING": {"REACQUIRING", "ACTIVE", "PARTIAL_UNKNOWN"}, "ACTIVE": {"ACTIVE", "RELEASE_INTENT", "PARTIAL_UNKNOWN"}, "RELEASE_INTENT": {"RELEASE_INTENT", "RELEASED"}, "RELEASED": {"RELEASED"}}
+            if successor["state"] not in edges.get(previous["state"], set()):
+                raise WriterAdmissionDenied("recovery progression phase mismatch")
+            for key in ("schema", "cohort_id", "hold_epoch", "ordered_roots", "source_identity", "server_identity", "process_start_identity", "root_contracts", "hold_markers", "original_drain"):
+                if successor.get(key) != previous.get(key):
+                    raise WriterAdmissionDenied("recovery progression contract changed")
+            if len(successor["transitions"]) < len(previous["transitions"]):
+                raise WriterAdmissionDenied("recovery transition history removed")
+            for before, after in zip(previous["transitions"], successor["transitions"]):
+                if before.get("state") in {"COMMITTED", "RECONCILED"} and after.get("state") not in {"COMMITTED", "RECONCILED"}:
+                    raise WriterAdmissionDenied("recovery terminal transition regressed")
+            self._validate_recovery_nested(successor)
+            self._recovery_markers(proof, successor["state"])
+            self._recovery_proofs[id(proof)] = replace(facts, raw=raw)
+
+    def adopt_recovered_hold(self, proof, *, expected_successor_sha256):
+        with self._mutex:
+            facts = self._recovery_facts(proof)
+            if facts.hold is not None:
+                self._verify_recovery_proof(proof)
+                if self._recovery_receipt(facts.raw)["receipt_sha256"] != expected_successor_sha256:
+                    raise WriterAdmissionDenied("recovery idempotent CAS mismatch")
+                return facts.hold
+            raw = _safe_bytes(proof._path)
+            successor = self._recovery_receipt(raw)
+            predecessor = self._recovery_receipt(facts.raw)
+            if successor["receipt_sha256"] != expected_successor_sha256 or successor.get("prior_digest") != predecessor["receipt_sha256"] or successor.get("process_start_identity") != self.process_start_identity or successor.get("server_identity") != self.server_identity:
+                raise WriterAdmissionDenied("recovery successor CAS mismatch")
+            allowed = {"receipt_sha256", "prior_digest", "process_start_identity", "server_identity"}
+            if {k:v for k,v in successor.items() if k not in allowed} != {k:v for k,v in predecessor.items() if k not in allowed}:
+                raise WriterAdmissionDenied("recovery successor contract changed")
+            self._recovery_markers(proof, successor["state"])
+            if self._held_roots or self._leases_for(proof._roots):
+                raise WriterAdmissionDenied("recovery registry already active")
+            hold = WriterHold(self, proof._cohort_id, proof._roots, predecessor["hold_epoch"], proof._selected)
+            self._held_roots.update({root: hold for root in proof._roots})
+            self._epoch = max(self._epoch, hold.epoch)
+            for item in hold.selected:
+                item.acknowledged_epoch = hold.epoch
+            self._recovery_proofs[id(proof)] = replace(facts, raw=raw, hold=hold)
+            return hold
+
+    def register_initial_writer(self, attachment: InitialWriterAttachment, *, role: str, writer_id: str, loaded_identity=None) -> WriterIdentity:
+        attachment.verify(self, root=attachment.root, generation=attachment.generation, writer_id=attachment.writer_id, manifest_sha256=attachment.manifest_sha256)
+        identity = WriterIdentity(attachment.root, role, self.source_identity, self.process_start_identity, str(threading.get_ident()), attachment.generation, writer_id)
+        with self._mutex:
+            record = self._initial_attachments.get(id(attachment))
+            if record is None or record[0] is not attachment:
+                raise WriterAdmissionDenied("initial attachment capability is not registered")
+        return identity
 
     def register(
         self,
@@ -1725,6 +2251,8 @@ __all__ = [
     "UNKNOWN",
     "UNRESOLVED",
     "ROLES",
+    "InitialWriterAttachment",
+    "RecoveryHoldProof",
     "HoldConflict",
     "UnknownWriter",
     "WriterAdmissionDenied",

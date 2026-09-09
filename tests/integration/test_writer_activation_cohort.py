@@ -21,6 +21,10 @@ from nexus.orchestrator.state_owner_transition_service import (
 )
 from nexus.orchestrator.writer_activation_cohort import (
     ActivationRoot,
+    InitialActivationRootSpec,
+    InitialTaskOwner,
+    InitialRuntimeOwner,
+    InitialEventOwner,
     WriterActivationCohort,
     WriterActivationError,
 )
@@ -113,7 +117,7 @@ class _IsolatedTransition(LoadedRootTransition):
         return self._invoke("reconcile")
 
 
-def _real_cohort(tmp_path, roles=("task_state", "event_log", "runtime_receipt")):
+def _real_cohort(tmp_path, roles=("task_state", "event_log", "runtime_receipt"), *, cold=False):
     import json
     import subprocess
 
@@ -160,19 +164,21 @@ def _real_cohort(tmp_path, roles=("task_state", "event_log", "runtime_receipt"))
             path.write_bytes(data)
             selections.append(StateOwnerSelection(selected_role, selected_role, relative))
         generation = EventWriterGeneration(1, "old-" + name)
-        install_generation(root, generation)
-        binding = StateOwnerBinding("owner", root.resolve(), 1, "bootstrap-" + name)
-        with owner_transaction_guard(
-            binding, writer_generation=generation, selections=tuple(selections)
-        ) as context:
-            before = commit_owner_transaction(context)
+        before = None
+        if not cold:
+            install_generation(root, generation)
+            binding = StateOwnerBinding("owner", root.resolve(), 1, "bootstrap-" + name)
+            with owner_transaction_guard(
+                binding, writer_generation=generation, selections=tuple(selections)
+            ) as context:
+                before = commit_owner_transaction(context)
         raw.update(
             root_id=name,
-            expected_generation=1,
-            next_generation=2,
+            expected_generation=None if cold else 1,
+            next_generation=1 if cold else 2,
             expected_writer_id=generation.writer_id,
             next_writer_id="new-" + name,
-            expected_manifest_sha256=before.manifest_sha256,
+            expected_manifest_sha256=None if cold else before.manifest_sha256,
             transaction_id="tx-" + name,
             request_id="request-" + name,
             idempotency_key="idempotency-" + name,
@@ -195,12 +201,12 @@ def _real_cohort(tmp_path, roles=("task_state", "event_log", "runtime_receipt"))
                 registry.source_identity,
                 current_process_start_identity(),
                 str(threading.get_ident()),
-                1,
+                0 if cold else 1,
                 generation.writer_id,
             )
             registry.register(
                 identity,
-                snapshot=lambda root=root: (root / MANIFEST_NAME).read_bytes(),
+                snapshot=lambda root=root: (root / MANIFEST_NAME).read_bytes() if (root / MANIFEST_NAME).exists() else b"initial",
                 process_state=lambda: (
                     "alive" if threading.current_thread().is_alive() else "unknown"
                 ),
@@ -209,55 +215,73 @@ def _real_cohort(tmp_path, roles=("task_state", "event_log", "runtime_receipt"))
             )
             identities.append(identity)
         extra = {}
-        if role == "task_state":
-            task_service = SelfHostedTaskService(
-                state_dir=root, ephemeral=True, auto_reconcile=False
-            )
-            adapter = TaskStateWriterAdapter(
-                registry,
-                binding=binding,
-                writer_generation=generation,
-                root=root,
-                writer_id=generation.writer_id,
-                path_for_task=task_service._state_path,
-                loaded_identity=lambda identity=identities[0]: identity,
-            )
-            factory = TaskStateWriterFactory(adapter)
-            task_service._writer_factory = factory
-            extra = dict(factory=factory, task_service=task_service)
-        elif role == "event_log":
-            factory = load_event_writer_factory(
-                registry,
-                binding=binding,
-                writer_generation=generation,
-                root=root,
-                writer_id=generation.writer_id,
-            )
-
-            class FixtureBus(NexusEventBus):
-                _log_store = JsonlEventLogStore()
-                _event_log_path = None
-                _writer_factory = None
-                _subscribers = {}
-                _attempt_sequences = {}
-
-            FixtureBus.configure(root, writer_factory=factory)
-            adapter = factory._adapter
-            extra = dict(factory=factory, event_store=FixtureBus._log_store, event_bus=FixtureBus)
+        if cold:
+            adapter = None
+            if role == "task_state":
+                owner = InitialTaskOwner(SelfHostedTaskService(
+                    state_dir=root, ephemeral=True, auto_reconcile=False))
+            elif role == "runtime_receipt":
+                owner = InitialRuntimeOwner(EffectDispatchPort(lambda operation: operation()),
+                                            EffectReconcilePort(lambda record: None))
+            else:
+                class ColdBus(NexusEventBus):
+                    _log_store = JsonlEventLogStore()
+                    _event_log_path = None
+                    _writer_factory = None
+                    _subscribers = {}
+                    _attempt_sequences = {}
+                owner = InitialEventOwner(ColdBus._log_store, ColdBus)
+            extra = dict(cold_owner=owner)
         else:
-            factory = load_runtime_writer_factory(
-                registry,
-                binding=binding,
-                writer_generation=generation,
-                root=root,
-                writer_id=generation.writer_id,
-                effect_journal=EffectJournal(root, generation),
-                effect_dispatch=EffectDispatchPort(lambda operation: operation()),
-                effect_reconcile=EffectReconcilePort(lambda record: None),
-            )
-            adapter = factory._adapter
-            extra = dict(factory=factory)
-        if role == "task_state":
+            if role == "task_state":
+                task_service = SelfHostedTaskService(
+                    state_dir=root, ephemeral=True, auto_reconcile=False
+                )
+                adapter = TaskStateWriterAdapter(
+                    registry,
+                    binding=binding,
+                    writer_generation=generation,
+                    root=root,
+                    writer_id=generation.writer_id,
+                    path_for_task=task_service._state_path,
+                    loaded_identity=lambda identity=identities[0]: identity,
+                )
+                factory = TaskStateWriterFactory(adapter)
+                task_service._writer_factory = factory
+                extra = dict(factory=factory, task_service=task_service)
+            elif role == "event_log":
+                factory = load_event_writer_factory(
+                    registry,
+                    binding=binding,
+                    writer_generation=generation,
+                    root=root,
+                    writer_id=generation.writer_id,
+                )
+
+                class FixtureBus(NexusEventBus):
+                    _log_store = JsonlEventLogStore()
+                    _event_log_path = None
+                    _writer_factory = None
+                    _subscribers = {}
+                    _attempt_sequences = {}
+
+                FixtureBus.configure(root, writer_factory=factory)
+                adapter = factory._adapter
+                extra = dict(factory=factory, event_store=FixtureBus._log_store, event_bus=FixtureBus)
+            else:
+                factory = load_runtime_writer_factory(
+                    registry,
+                    binding=binding,
+                    writer_generation=generation,
+                    root=root,
+                    writer_id=generation.writer_id,
+                    effect_journal=EffectJournal(root, generation),
+                    effect_dispatch=EffectDispatchPort(lambda operation: operation()),
+                    effect_reconcile=EffectReconcilePort(lambda record: None),
+                )
+                adapter = factory._adapter
+                extra = dict(factory=factory)
+        if role == "task_state" and not cold:
             # Real C write creates an actual committed durable B lease before
             # the hold; restart must reconcile this history, not an empty file set.
             task_service._write_state("state", {"task_id": "state", "status": "SUBMITTED"})
@@ -291,7 +315,7 @@ def _real_cohort(tmp_path, roles=("task_state", "event_log", "runtime_receipt"))
     hold = registry.begin_hold(tuple(item[1] for item in specs), cohort_id="fixture-cohort")
     for item in registry._writers.values():
         identity = item.identity
-        hold.acknowledge(identity.writer_id, root=identity.root, role=identity.role, generation=1)
+        hold.acknowledge(identity.writer_id, root=identity.root, role=identity.role, generation=identity.generation)
     drain = registry.persist_finalized(hold)
     (tmp_path / "original-drain.json").write_bytes(drain.to_bytes())
     loaded = []
@@ -330,6 +354,11 @@ def _real_cohort(tmp_path, roles=("task_state", "event_log", "runtime_receipt"))
         service._fixture_registry = registry
         service._fixture_hold = hold
         transition = _IsolatedTransition(service, request)
+        if cold:
+            initial = InitialActivationRootSpec(str(root), paths[0][0], transition,
+                request.expected_root_identity, request.next_generation,
+                request.next_writer_id, extra.pop("cold_owner"))
+            extra["initial_spec"] = initial
         loaded.append(
             ActivationRoot(
                 str(root),
@@ -337,7 +366,7 @@ def _real_cohort(tmp_path, roles=("task_state", "event_log", "runtime_receipt"))
                 transition,
                 adapter,
                 request.expected_root_identity,
-                2,
+                request.next_generation,
                 request.next_writer_id,
                 request.expected_manifest_sha256,
                 **extra,
@@ -612,37 +641,42 @@ def _reload_task_cohort(base, *, capture=None):
         root = fixture / "root"
         generation = read_generation(root)
         manifest = read_manifest(root)
-        binding = StateOwnerBinding(
+        cold = request.expected_generation is None
+        binding = (None if cold else StateOwnerBinding(
             manifest.owner_id, root.resolve(), generation.generation, "reload"
-        )
-        identity = WriterIdentity(
-            str(root.resolve()),
-            "task_state",
-            registry.source_identity,
-            current_process_start_identity(),
-            str(threading.get_ident()),
-            generation.generation,
-            generation.writer_id,
-        )
-        registry.register(
-            identity,
-            snapshot=lambda root=root: (root / MANIFEST_NAME).read_bytes(),
-            process_state=lambda: "alive" if threading.current_thread().is_alive() else "unknown",
-            pending=lambda: tuple(registry._leases),
-            loaded_identity=lambda identity=identity: identity,
-        )
+        ))
+        roles = tuple(dict.fromkeys(item.role for item in request.selections))
+        for role in roles:
+            identity = WriterIdentity(
+                str(root.resolve()),
+                role,
+                registry.source_identity,
+                current_process_start_identity(),
+                str(threading.get_ident()),
+                0 if cold else generation.generation,
+                request.expected_writer_id if cold else generation.writer_id,
+            )
+            registry.register(
+                identity,
+                snapshot=lambda root=root: (root / MANIFEST_NAME).read_bytes() if (root / MANIFEST_NAME).exists() else b"initial",
+                process_state=lambda: "alive" if threading.current_thread().is_alive() else "unknown",
+                pending=lambda: tuple(registry._leases),
+                loaded_identity=lambda identity=identity: identity,
+            )
         task = SelfHostedTaskService(state_dir=root, ephemeral=True, auto_reconcile=False)
-        adapter = TaskStateWriterAdapter(
-            registry,
-            binding=binding,
-            writer_generation=generation,
-            root=root,
-            writer_id=generation.writer_id,
-            path_for_task=task._state_path,
-            loaded_identity=lambda identity=identity: identity,
-        )
-        factory = TaskStateWriterFactory(adapter)
-        task._writer_factory = factory
+        adapter = factory = None
+        if not cold:
+            adapter = TaskStateWriterAdapter(
+                registry,
+                binding=binding,
+                writer_generation=generation,
+                root=root,
+                writer_id=generation.writer_id,
+                path_for_task=task._state_path,
+                loaded_identity=lambda identity=identity: identity,
+            )
+            factory = TaskStateWriterFactory(adapter)
+            task._writer_factory = factory
         source = LoadedSourceIdentity(
             "James3014/Nexus-new",
             request.expected_source_head,
@@ -656,18 +690,39 @@ def _reload_task_cohort(base, *, capture=None):
         service._fixture = fixture
         service._fixture_registry = registry
         service._fixture_restarted = True
+        transition = _IsolatedTransition(service, request)
+        extra = dict(factory=factory, task_service=task)
+        if cold:
+            if roles == ("task_state",):
+                owner = InitialTaskOwner(task)
+            elif roles == ("event_log",):
+                from nexus.events.transport import NexusEventBus
+                from nexus.events.log_store import JsonlEventLogStore
+                class ReloadBus(NexusEventBus):
+                    _log_store = JsonlEventLogStore()
+                    _event_log_path = None
+                    _writer_factory = None
+                    _subscribers = {}
+                    _attempt_sequences = {}
+                owner = InitialEventOwner(ReloadBus._log_store, ReloadBus)
+            else:
+                from nexus.events.effect_journal import EffectDispatchPort, EffectReconcilePort
+                owner = InitialRuntimeOwner(EffectDispatchPort(lambda operation: operation()),
+                                            EffectReconcilePort(lambda record: None))
+            extra = dict(initial_spec=InitialActivationRootSpec(
+                str(root), roles[0], transition, request.expected_root_identity,
+                request.next_generation, request.next_writer_id, owner))
         loaded.append(
             ActivationRoot(
                 str(root),
-                "task_state",
-                _IsolatedTransition(service, request),
+                roles[0],
+                transition,
                 adapter,
                 request.expected_root_identity,
                 request.next_generation,
                 request.next_writer_id,
                 request.expected_manifest_sha256,
-                factory=factory,
-                task_service=task,
+                **extra,
             )
         )
     if capture is not None:
@@ -679,12 +734,12 @@ def _reload_task_cohort(base, *, capture=None):
     return cohort, loaded
 
 
-def _crash_child(base, boundary):
+def _crash_child(base, boundary, *, cold=False):
     import os
 
     from nexus.events.state_owner_manifest import read_manifest
 
-    cohort, roots = _real_cohort(base, ("task_state", "task_state"))
+    cohort, roots = _real_cohort(base, ("task_state", "event_log", "runtime_receipt") if cold else ("task_state", "task_state"), cold=cold)
     if boundary == "RELEASED:2":
         for index, root in enumerate(roots):
             (base / f"original-marker-{index}.json").write_bytes(
@@ -1079,3 +1134,272 @@ def test_fresh_recovery_rejects_restored_marker_after_durable_released(tmp_path)
     assert marker.read_bytes() == original
     # Rejected recovery must not publish a new process-adoption CAS.
     assert state_path.read_bytes() == before
+
+
+def test_cold_start_spec_is_typed_and_rejects_nonempty_request(tmp_path):
+    """The cold-start seam cannot be used to re-materialize an existing generation."""
+    from types import SimpleNamespace
+
+    class _Transition(LoadedRootTransition):
+        def __init__(self):
+            service = SimpleNamespace(_roots={"root": tmp_path})
+            object.__setattr__(self, "service", service)
+            object.__setattr__(self, "request", SimpleNamespace(
+                root_id="root", expected_generation=1,
+                expected_root_identity="a" * 64,
+            ))
+
+    with pytest.raises(WriterActivationError, match="INITIAL_REQUEST_EXPECTS_GENERATION_ZERO"):
+        InitialActivationRootSpec(
+            str(tmp_path), "task_state", _Transition(), "a" * 64,
+            owner=InitialTaskOwner(object()),
+        )
+
+
+@pytest.mark.parametrize("failure_prefix", [None, "after_first_A", "after_event_configure", "after_runtime_register"])
+def test_generation_zero_three_root_full_activation_and_four_role_writes(tmp_path, monkeypatch, failure_prefix):
+    from nexus.events.state_owner_manifest import read_manifest
+    from nexus.events.writer_generation import read_generation
+    from nexus.services.unified_runtime import UnifiedRuntime
+    from tests.services.test_unified_runtime import _online, _Planner, _request
+
+    cohort, descriptors = _real_cohort(tmp_path, cold=True)
+    original_epoch = cohort.hold.epoch
+    failures = []
+    save = cohort._save
+    def checked_save(receipt):
+        import sys
+        if receipt.state == "PARTIAL_UNKNOWN":
+            failures.append(repr(sys.exception()))
+        return save(receipt)
+    monkeypatch.setattr(cohort, "_save", checked_save)
+    markers = [cohort.registry._marker_path(root.root).read_bytes() for root in descriptors]
+    assert all(read_generation(Path(root.root)) is None for root in descriptors)
+    assert all(read_manifest(Path(root.root)) is None for root in descriptors)
+    assert {item.identity.generation for item in cohort.hold.selected} == {0}
+    assert cohort.registry.load_finalized(cohort.cohort_id).drain_state == "DRAINED"
+    commit = cohort._commit_reacquisition
+    commits = []
+
+    def checked_commit(receipt, **kwargs):
+        assert {item.identity.generation for item in cohort.hold.selected} == {0}
+        assert len(receipt.observations) == 4
+        assert all(item.state == "MATCHED" for item in receipt.observations)
+        assert cohort.hold.epoch == original_epoch
+        commits.append(receipt)
+        return commit(receipt, **kwargs)
+
+    monkeypatch.setattr(cohort, "_commit_reacquisition", checked_commit)
+    failed_factory = None
+    if failure_prefix == "after_first_A":
+        preflight = descriptors[1].transition.preflight
+        attempts = []
+        def interrupted_preflight():
+            if not attempts:
+                attempts.append(True)
+                raise RuntimeError("injected after first committed A")
+            return preflight()
+        monkeypatch.setattr(descriptors[1].transition, "preflight", interrupted_preflight)
+    elif failure_prefix == "after_event_configure":
+        bus = descriptors[1].initial_spec.owner.event_bus
+        configure = bus.configure
+        attempts = []
+        def interrupted_configure(*args, **kwargs):
+            result = configure(*args, **kwargs)
+            if not attempts:
+                attempts.append(True)
+                raise RuntimeError("injected after event store and bus configured")
+            return result
+        monkeypatch.setattr(bus, "configure", interrupted_configure)
+    elif failure_prefix == "after_runtime_register":
+        import nexus.orchestrator.writer_quiescence as writer_module
+        register = writer_module.register_runtime_writer_factory
+        attempts = []
+        def interrupted_register(*args, **kwargs):
+            result = register(*args, **kwargs)
+            if not attempts:
+                attempts.append(True)
+                raise RuntimeError("injected after runtime global factory registration")
+            return result
+        monkeypatch.setattr(writer_module, "register_runtime_writer_factory", interrupted_register)
+    result = cohort.activate()
+    if failure_prefix:
+        assert result.state == "PARTIAL_UNKNOWN"
+        assert not commits
+        assert {item.identity.generation for item in cohort.hold.selected} == {0}
+        assert [cohort.registry._marker_path(root.root).read_bytes() for root in descriptors] == markers
+        if failure_prefix == "after_first_A":
+            assert read_manifest(Path(descriptors[0].root)).state == "COMMITTED"
+            assert read_manifest(Path(descriptors[1].root)) is None
+            assert cohort._initial_materialized == {}
+        elif failure_prefix == "after_event_configure":
+            failed_factory = descriptors[1].initial_spec.owner.event_store._writer_factory
+            assert failed_factory is not None
+        else:
+            failed_factory = cohort._initial_factories[descriptors[2].root]
+        result = cohort.activate()
+    assert result.state == "ACTIVE", (result, failures)
+    assert not failures or failure_prefix, failures
+    assert len(commits) == 1
+    if failed_factory is not None:
+        assert cohort.roots[2 if failure_prefix == "after_runtime_register" else 1].factory is failed_factory
+    assert result.release_state == "HELD"
+    assert cohort.hold.epoch == original_epoch
+    assert [cohort.registry._marker_path(root.root).read_bytes() for root in descriptors] == markers
+    roots = cohort.roots
+    assert all(root.adapter is not None for root in roots)
+    assert {item.identity.generation for item in cohort.hold.selected} == {1}
+    for root in roots:
+        root.check_handles(cohort.registry)
+        assert read_manifest(Path(root.root)).state == "COMMITTED"
+        with pytest.raises(Exception):
+            cohort.registry.acquire(root=root.root, role=root.role,
+                writer_id=root.expected_writer_id, generation=1)
+    cohort.release(result)
+    roots[0].task_service._write_state("after", {"task_id": "after", "status": "SUBMITTED"})
+    roots[1].event_bus.publish("after", {"task_id": "after"})
+    factory = roots[2].factory
+    effects = factory.effect_binding()
+    output = UnifiedRuntime(planner=_Planner()).run(
+        _request(), online_invoker=_online,
+        receipt_path=Path(roots[2].root) / "runtime.json",
+        runtime_writer_factory=factory, effect_journal=effects.journal,
+        effect_dispatch=effects.dispatch, effect_reconcile=effects.reconcile,
+        effect_fenced=True)
+    assert output["effect_journal_bindings"]
+    import json
+    assert json.loads((Path(roots[2].root) / ".nexus/events/effect_journal.v1.json").read_bytes())["records"]
+    assert b'after' in (Path(roots[0].root) / "after.json").read_bytes()
+    assert b'after' in roots[1].event_store.event_log_path.read_bytes()
+    assert (Path(roots[2].root) / "runtime.json").read_bytes()
+    assert {item.identity.role for item in cohort.registry._lease_history} == {
+        "task_state", "event_log", "runtime_receipt", "effect_journal"}
+    for root in roots:
+        assert read_manifest(Path(root.root)).state == "COMMITTED"
+
+
+@pytest.mark.parametrize("boundary", ["APPLYING:1", "ACTIVE:3", "ACTIVE:3:retry", "ACTIVE:3:release_ack"])
+def test_generation_zero_child_crash_recovers_original_hold(tmp_path, boundary, monkeypatch):
+    import subprocess
+    import sys
+    from nexus.events.state_owner_manifest import read_manifest
+
+    script = (
+        "from pathlib import Path; import sys; "
+        "from tests.integration.test_writer_activation_cohort import _crash_child; "
+        "_crash_child(Path(sys.argv[1]), sys.argv[2], cold=True)"
+    )
+    child = subprocess.run([sys.executable, "-B", "-c", script, str(tmp_path), boundary.removesuffix(":retry").removesuffix(":release_ack")],
+                           capture_output=True, text=True, timeout=40)
+    assert child.returncode == 71, child.stderr
+    markers = [(tmp_path / f"root-{i}/root/.nexus/writer-quiescence-hold.json").read_bytes()
+               for i in range(3)]
+    committed_before = {f"root-{i}" for i in range(3)
+                        if read_manifest(tmp_path / f"root-{i}/root") is not None}
+    apply = _IsolatedTransition.apply
+    def checked_apply(self):
+        assert self.request.root_id not in committed_before, "committed A was reapplied"
+        return apply(self)
+    monkeypatch.setattr(_IsolatedTransition, "apply", checked_apply)
+    if boundary.endswith(":retry"):
+        verify = WriterActivationCohort._verify_active_physical
+        attempts = []
+        def interrupted_verify(self, *args, **kwargs):
+            if not attempts:
+                attempts.append(True)
+                assert all(root.adapter is not None for root in self.roots)
+                raise RuntimeError("injected after recovered root swap")
+            return verify(self, *args, **kwargs)
+        monkeypatch.setattr(WriterActivationCohort, "_verify_active_physical", interrupted_verify)
+        captured = {}
+        with pytest.raises(RuntimeError, match="recovered root swap"):
+            _reload_task_cohort(tmp_path, capture=captured)
+        cohort = WriterActivationCohort.recover(captured["registry"], captured["roots"],
+                                               cohort_id="fixture-cohort")
+        for root in cohort.roots:
+            root.transition.service._fixture_hold = cohort.hold
+            root.transition.service._fixture_cohort = cohort
+    else:
+        cohort, _ = _reload_task_cohort(tmp_path)
+    active = cohort.activate()
+    assert active.state == "ACTIVE", active
+    assert [(Path(root.root) / ".nexus/writer-quiescence-hold.json").read_bytes()
+            for root in cohort.roots] == markers
+    assert cohort.hold.epoch == active.hold_epoch == 1
+    if boundary.endswith(":release_ack"):
+        save = cohort._save
+        attempts = []
+        def lost_release_ack(receipt):
+            result = save(receipt)
+            if result.state == "RELEASED" and not attempts:
+                attempts.append(True)
+                raise RuntimeError("injected after durable RELEASED")
+            return result
+        monkeypatch.setattr(cohort, "_save", lost_release_ack)
+        with pytest.raises(RuntimeError, match="durable RELEASED"):
+            cohort.release(active)
+        assert not cohort.hold.released
+        assert all(cohort.registry._held_roots[root.root] is cohort.hold for root in cohort.roots)
+        cohort.resume_release()
+    else:
+        cohort.release(active)
+    roots = cohort.roots
+    roots[0].task_service._write_state("recovered", {"task_id": "recovered"})
+    roots[1].event_bus.publish("recovered", {"task_id": "recovered"})
+    from nexus.services.unified_runtime import UnifiedRuntime
+    from tests.services.test_unified_runtime import _online, _Planner, _request
+    effects = roots[2].factory.effect_binding()
+    output = UnifiedRuntime(planner=_Planner()).run(
+        _request(), online_invoker=_online,
+        receipt_path=Path(roots[2].root) / "recovered.json",
+        runtime_writer_factory=roots[2].factory, effect_journal=effects.journal,
+        effect_dispatch=effects.dispatch, effect_reconcile=effects.reconcile,
+        effect_fenced=True)
+    assert output["effect_journal_bindings"]
+    import json
+    assert json.loads((Path(roots[2].root) / ".nexus/events/effect_journal.v1.json").read_bytes())["records"]
+    assert (Path(roots[0].root) / "recovered.json").read_bytes()
+    assert b"recovered" in roots[1].event_store.event_log_path.read_bytes()
+    assert (Path(roots[2].root) / "recovered.json").read_bytes()
+    for root in roots:
+        assert read_manifest(Path(root.root)).state == "COMMITTED"
+
+
+def test_initial_descriptors_reject_owner_role_and_request_drift(tmp_path):
+    cohort, roots = _real_cohort(tmp_path, cold=True)
+    initial = roots[0].initial_spec
+    with pytest.raises(ValueError, match="task owner root or role"):
+        replace(initial, role="event_log")
+    with pytest.raises(ValueError, match="task owner root or role"):
+        replace(initial, owner=InitialTaskOwner(roots[1].initial_spec.owner.event_store))
+    with pytest.raises(ValueError, match="initial descriptor"):
+        replace(roots[0], role="event_log")
+    with pytest.raises(ValueError, match="expected manifest"):
+        replace(roots[0], expected_manifest_sha256="a" * 64)
+    with pytest.raises(ValueError, match="initial descriptor"):
+        replace(roots[0], expected_writer_id="foreign")
+    assert {item.identity.generation for item in cohort.hold.selected} == {0}
+    from nexus.events.state_owner_manifest import read_manifest
+    assert all(read_manifest(Path(root.root)) is None for root in roots)
+
+
+def test_cold_cached_factory_physical_drift_keeps_original_admission_held(tmp_path, monkeypatch):
+    import nexus.orchestrator.writer_quiescence as writer_module
+
+    cohort, descriptors = _real_cohort(tmp_path, cold=True)
+    markers = [cohort.registry._marker_path(root.root).read_bytes() for root in descriptors]
+    register = writer_module.register_runtime_writer_factory
+    def interrupted_register(*args, **kwargs):
+        register(*args, **kwargs)
+        raise RuntimeError("injected before complete factory vector")
+    monkeypatch.setattr(writer_module, "register_runtime_writer_factory", interrupted_register)
+    assert cohort.activate().state == "PARTIAL_UNKNOWN"
+    cached = dict(cohort._initial_factories)
+    install_generation(Path(descriptors[1].root), EventWriterGeneration(2, "foreign"),
+                       expected_generation=1)
+    monkeypatch.setattr(writer_module, "register_runtime_writer_factory", register)
+    assert cohort.activate().state == "PARTIAL_UNKNOWN"
+    assert cohort._initial_factories == cached
+    assert {item.identity.generation for item in cohort.hold.selected} == {0}
+    assert [cohort.registry._marker_path(root.root).read_bytes() for root in descriptors] == markers
+    assert cohort.registry._lease_history == []

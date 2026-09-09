@@ -2,10 +2,11 @@
 
 The state-owner transition service advances one physical root at a time.  This
 module supplies the missing cohort boundary: a B hold is kept until every
-root has a committed A receipt and every already-loaded writer has been
-reacquired against that receipt.  It intentionally accepts loaded objects
-from the coordinator; it never constructs a registry or selects roots from a
-request.
+root has a committed A receipt and every writer has been reacquired against
+that receipt. Existing writers are supplied as loaded objects; generation-zero
+roots supply typed owners from which provisional factories are constructed
+under the original hold. It never constructs a registry or selects roots from
+a request.
 """
 
 from __future__ import annotations
@@ -41,6 +42,92 @@ class WriterActivationError(RuntimeError):
 
 class CohortConflict(WriterActivationError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class InitialTaskOwner:
+    """Typed source owner used to construct a task writer after A."""
+
+    service: Any
+
+
+@dataclass(frozen=True, slots=True)
+class InitialRuntimeOwner:
+    """Typed runtime effect ports used to construct a runtime writer after A."""
+
+    effect_dispatch: Any
+    effect_reconcile: Any
+
+
+@dataclass(frozen=True, slots=True)
+class InitialEventOwner:
+    """Typed event store owner, with an optional source-owned event bus."""
+
+    event_store: Any
+    event_bus: Any = None
+
+
+@dataclass(frozen=True, slots=True)
+class InitialActivationRootSpec:
+    """Cold-start A contract; no arbitrary materialization callback is accepted."""
+
+    root: str
+    role: str
+    transition: LoadedRootTransition
+    expected_root_identity: str
+    expected_generation: int = 1
+    expected_writer_id: str = ""
+    owner: InitialTaskOwner | InitialRuntimeOwner | InitialEventOwner | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "root", _root(self.root))
+        if not isinstance(self.transition, LoadedRootTransition):
+            raise TypeError("typed loaded A transition required")
+        request = self.transition.request
+        if request.expected_generation is not None:
+            raise WriterActivationError("INITIAL_REQUEST_EXPECTS_GENERATION_ZERO")
+        if not isinstance(self.role, str) or not self.role.strip():
+            raise ValueError("role is required")
+        physical = self.transition.service._roots.get(request.root_id)
+        if physical is None or _root(physical) != self.root:
+            raise ValueError("transition root does not match initial root")
+        if not isinstance(self.expected_root_identity, str) or len(self.expected_root_identity) != 64:
+            raise ValueError("expected root identity is required")
+        if request.expected_root_identity != self.expected_root_identity:
+            raise ValueError("expected root identity does not match A request")
+        if request.next_generation != self.expected_generation or request.next_writer_id != self.expected_writer_id:
+            raise ValueError("expected next binding does not match A request")
+        if type(self.expected_generation) is not int or self.expected_generation < 1:
+            raise ValueError("expected generation is required")
+        if not isinstance(self.expected_writer_id, str) or not self.expected_writer_id:
+            raise ValueError("expected writer id is required")
+        from nexus.events.effect_journal import EffectDispatchPort, EffectReconcilePort
+        from nexus.events.log_store import JsonlEventLogStore
+        from nexus.events.transport import NexusEventBus
+        from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+
+        if isinstance(self.owner, InitialTaskOwner):
+            if (self.role != "task_state"
+                    or not isinstance(self.owner.service, SelfHostedTaskService)
+                    or self.owner.service.state_dir.resolve() != Path(self.root)
+                    or self.owner.service._writer_factory is not None):
+                raise ValueError("initial task owner root or role mismatch")
+        elif isinstance(self.owner, InitialRuntimeOwner):
+            if (self.role not in {"runtime_receipt", "effect_journal"}
+                    or not isinstance(self.owner.effect_dispatch, EffectDispatchPort)
+                    or not isinstance(self.owner.effect_reconcile, EffectReconcilePort)):
+                raise ValueError("initial runtime owner or role mismatch")
+        elif isinstance(self.owner, InitialEventOwner):
+            if (self.role != "event_log"
+                    or not isinstance(self.owner.event_store, JsonlEventLogStore)
+                    or self.owner.event_store._writer_factory is not None
+                    or (self.owner.event_bus is not None and (
+                        not isinstance(self.owner.event_bus, type)
+                        or not issubclass(self.owner.event_bus, NexusEventBus)
+                        or self.owner.event_bus._log_store is not self.owner.event_store))):
+                raise ValueError("initial event owner or role mismatch")
+        else:
+            raise TypeError("typed initial owner required")
 
 
 _LOADED_COHORTS: dict[tuple[int, str], "WriterActivationCohort"] = {}
@@ -137,6 +224,7 @@ class ActivationRoot:
     task_service: Any = None
     event_store: Any = None
     event_bus: Any = None
+    initial_spec: InitialActivationRootSpec | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "root", _root(self.root))
@@ -150,10 +238,21 @@ class ActivationRoot:
             TaskStateWriterAdapter,
         )
 
-        if not isinstance(
+        if self.adapter is None and self.initial_spec is None:
+            raise TypeError("loaded typed writer adapter required")
+        if self.adapter is not None and not isinstance(
             self.adapter, (TaskStateWriterAdapter, RuntimeWriterAdapter, EventWriterAdapter)
         ):
             raise TypeError("loaded typed writer adapter required")
+        if self.initial_spec is not None:
+            if self.initial_spec.root != self.root or self.initial_spec.transition is not self.transition:
+                raise ValueError("initial spec does not match activation root")
+            if (self.role != self.initial_spec.role
+                    or self.expected_root_identity != self.initial_spec.expected_root_identity
+                    or self.expected_generation != self.initial_spec.expected_generation
+                    or self.expected_writer_id != self.initial_spec.expected_writer_id
+                    or self.adapter is not None):
+                raise ValueError("initial descriptor binding mismatch")
         request = self.transition.request
         physical = self.transition.service._roots.get(request.root_id)
         if physical is None or _root(physical) != self.root:
@@ -412,6 +511,7 @@ class WriterActivationCohort:
         roots: Sequence[ActivationRoot],
         *,
         state_path: str | Path | None = None,
+        initial_specs: Sequence[InitialActivationRootSpec] = (),
     ) -> None:
         if not isinstance(registry, WriterRegistry) or not isinstance(hold, WriterHold):
             raise TypeError("cohort requires the actual loaded registry and hold")
@@ -423,7 +523,32 @@ class WriterActivationCohort:
         if ordered != hold.roots or len(set(ordered)) != len(ordered):
             raise CohortConflict("root vector does not exactly match B hold")
         self.registry, self.hold, self.roots = registry, hold, tuple(roots)
-        if any(root.adapter.registry is not registry for root in roots):
+        self._initial_descriptors = tuple(roots)
+        self._initial_materialized: dict[str, ActivationRoot] = {}
+        self._initial_factories: dict[str, Any] = {}
+        self._initial_recovery_proof = None
+        self._initial_recovery_successor = None
+        self._initial_recovery_adopted = False
+        self._pending_recovery_receipt = None
+        self._initial_specs = tuple(initial_specs) or tuple(
+            x.initial_spec for x in roots if x.initial_spec is not None
+        )
+        if initial_specs and tuple(initial_specs) != tuple(x.initial_spec for x in roots):
+            raise CohortConflict("INITIAL_DESCRIPTOR_VECTOR_MISMATCH")
+        if self._initial_specs and len(self._initial_specs) != len(roots):
+            raise CohortConflict("INITIAL_SPEC_VECTOR_MISMATCH")
+        if self._initial_specs and tuple(x.root for x in self._initial_specs) != ordered:
+            raise CohortConflict("INITIAL_SPEC_ORDER_MISMATCH")
+        for spec in self._initial_specs:
+            expected_roles = ({"task_state"} if isinstance(spec.owner, InitialTaskOwner)
+                              else {"event_log"} if isinstance(spec.owner, InitialEventOwner)
+                              else {"runtime_receipt", "effect_journal"})
+            selected = [item.identity for item in hold.selected if item.identity.root == spec.root]
+            if (len(selected) != len(expected_roles)
+                    or {item.role for item in selected} != expected_roles
+                    or any(item.generation != 0 for item in selected)):
+                raise CohortConflict("INITIAL_OBSERVER_VECTOR_MISMATCH")
+        if any(root.adapter is not None and root.adapter.registry is not registry for root in roots):
             raise CohortConflict("ADAPTER_REGISTRY_MISMATCH")
         base = self._default_state_path()
         if state_path is not None and Path(state_path).absolute() != base:
@@ -478,6 +603,7 @@ class WriterActivationCohort:
         )
 
     def _save(self, receipt: ActivationCohortReceipt) -> ActivationCohortReceipt:
+        self._advance_pending_recovery_receipt()
         if receipt.root_contracts != self._contracts():
             raise CohortConflict("COHORT_REQUEST_VECTOR_MISMATCH")
         _safe_parents(self.state_path)
@@ -509,8 +635,26 @@ class WriterActivationCohort:
         data = _safe_read(self.state_path)
         if data.rstrip(b"\n") != _json(saved.to_dict()):
             raise WriterActivationError("COHORT_STATE_READBACK_FAILED")
-        self._last = saved
+        if self._initial_recovery_adopted:
+            self._pending_recovery_receipt = (self._last.receipt_sha256, saved)
+            self._advance_pending_recovery_receipt()
+        else:
+            self._last = saved
         return saved
+
+    def _advance_pending_recovery_receipt(self) -> None:
+        with self._mutation_lock:
+            pending = self._pending_recovery_receipt
+            if pending is None:
+                return
+            predecessor, saved = pending
+            self.registry.advance_recovered_hold(
+                self._initial_recovery_proof,
+                expected_predecessor_sha256=predecessor,
+                expected_successor_sha256=saved.receipt_sha256,
+            )
+            self._last = saved
+            self._pending_recovery_receipt = None
 
     def _receipt(
         self,
@@ -548,6 +692,7 @@ class WriterActivationCohort:
     def _activate(self) -> ActivationCohortReceipt:
         """Advance the same held cohort; every incomplete path retains the hold."""
         self.registry._check_process()
+        self._advance_pending_recovery_receipt()
         if self._recovering and not self._recovery_ready:
             self._finish_recovery()
         if self._last is None and self.state_path.exists():
@@ -637,6 +782,8 @@ class WriterActivationCohort:
                         prior=current.receipt_sha256,
                     )
                 )
+            if self._initial_specs:
+                self._materialize_initial_roots()
             self._prepare_reacquisition()
             reacquired = (
                 self._observe_recovery()
@@ -678,6 +825,95 @@ class WriterActivationCohort:
                 )
             except Exception:
                 raise WriterActivationError(str(exc)) from exc
+
+    def _materialize_initial_roots(self) -> None:
+        """Construct the real C/D/E writers under the unchanged B hold."""
+        from nexus.events.effect_journal import EffectJournal, EffectDispatchPort, EffectReconcilePort
+        from nexus.events.log_store import JsonlEventLogStore
+        from nexus.events.state_owner_manifest import StateOwnerBinding, read_manifest
+        from nexus.events.transport import EventWriterAdapter, EventWriterFactory, register_event_writer_factory
+        from nexus.events.writer_generation import EventWriterGeneration, read_generation
+        from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+        from nexus.orchestrator.writer_quiescence import (
+            RuntimeWriterAdapter, RuntimeWriterFactory, TaskStateWriterAdapter,
+            TaskStateWriterFactory, register_runtime_writer_factory,
+        )
+
+        actual: list[ActivationRoot] = []
+        for spec in self._initial_specs:
+            cached = self._initial_materialized.get(spec.root)
+            if cached is not None:
+                cached.check_handles(self.registry, quiescent=True)
+                actual.append(cached)
+                continue
+            manifest = read_manifest(Path(spec.root))
+            token = read_generation(Path(spec.root))
+            req = spec.transition.request
+            if (manifest is None or manifest.state != "COMMITTED" or token is None
+                    or token.generation != spec.expected_generation
+                    or token.writer_id != spec.expected_writer_id
+                    or manifest.root_identity != spec.expected_root_identity
+                    or manifest.transaction_id != req.transaction_id):
+                raise WriterActivationError("INITIAL_COMMITTED_READBACK_FAILED")
+            attachment = self.registry.issue_initial_attachment(
+                self.hold, root=spec.root, generation=token.generation,
+                writer_id=token.writer_id, manifest_sha256=manifest.manifest_sha256,
+                recovery_proof=self._initial_recovery_proof,
+            )
+            binding = StateOwnerBinding(req.expected_owner_id, Path(spec.root), token.generation, req.transaction_id)
+            factory = task_service = event_store = event_bus = None
+            if isinstance(spec.owner, InitialTaskOwner):
+                service = spec.owner.service
+                if not isinstance(service, SelfHostedTaskService):
+                    raise TypeError("initial task owner requires SelfHostedTaskService")
+                adapter = TaskStateWriterAdapter(
+                    self.registry, binding=binding, writer_generation=token, root=spec.root,
+                    writer_id=token.writer_id, path_for_task=service._state_path,
+                    initial_attachment=attachment,
+                )
+                factory = TaskStateWriterFactory(adapter)
+                service._writer_factory = factory
+                task_service = service
+            elif isinstance(spec.owner, InitialRuntimeOwner):
+                if not isinstance(spec.owner.effect_dispatch, EffectDispatchPort) or not isinstance(spec.owner.effect_reconcile, EffectReconcilePort):
+                    raise TypeError("initial runtime owner requires typed effect ports")
+                factory = self._initial_factories.get(spec.root)
+                if factory is None:
+                    journal = EffectJournal(Path(spec.root), token)
+                    factory = RuntimeWriterFactory(
+                        RuntimeWriterAdapter(self.registry, binding=binding, writer_generation=token,
+                            root=spec.root, writer_id=token.writer_id, initial_attachment=attachment),
+                        effect_journal=journal, effect_dispatch=spec.owner.effect_dispatch,
+                        effect_reconcile=spec.owner.effect_reconcile,
+                    )
+                    self._initial_factories[spec.root] = factory
+                register_runtime_writer_factory(factory, initial_attachment=attachment)
+            else:
+                if not isinstance(spec.owner.event_store, JsonlEventLogStore):
+                    raise TypeError("initial event owner requires JsonlEventLogStore")
+                adapter = EventWriterAdapter(self.registry, binding=binding, writer_generation=token,
+                    root=spec.root, writer_id=token.writer_id, initial_attachment=attachment)
+                factory = self._initial_factories.get(spec.root)
+                if factory is None:
+                    factory = EventWriterFactory(adapter)
+                    self._initial_factories[spec.root] = factory
+                register_event_writer_factory(factory)
+                event_store = spec.owner.event_store
+                event_store.configure(Path(spec.root), writer_generation=token,
+                    enforce_generation=True, writer_factory=factory, initial_handle=attachment)
+                event_bus = spec.owner.event_bus
+                if event_bus is not None:
+                    event_bus.configure(Path(spec.root), writer_generation=token,
+                        enforce_generation=True, writer_factory=factory, initial_handle=attachment)
+            adapter = factory._adapter
+            actual.append(ActivationRoot(spec.root, spec.role, spec.transition, adapter,
+                spec.expected_root_identity, spec.expected_generation, spec.expected_writer_id,
+                req.expected_manifest_sha256, factory=factory, task_service=task_service,
+                event_store=event_store, event_bus=event_bus))
+            self._initial_materialized[spec.root] = actual[-1]
+        for root in actual:
+            root.check_handles(self.registry, quiescent=True)
+        self.roots = tuple(actual)
 
     def _check_f_hold(self, *, allow_missing: bool = False, require_absent: bool = False) -> None:
         """Validate frozen B markers separately from reloaded admission fields."""
@@ -785,7 +1021,9 @@ class WriterActivationCohort:
             raise TypeError("actual loaded registry and roots required")
         existing = _LOADED_COHORTS.get((id(registry), cohort_id))
         if existing is not None:
-            if tuple(roots) != existing.roots or not existing._recovering:
+            same_roots = any(len(roots) == len(saved) and all(a is b for a, b in zip(roots, saved))
+                             for saved in (existing.roots, existing._initial_descriptors))
+            if not same_roots or not existing._recovering:
                 raise CohortConflict("RECOVERY_LOADED_OBJECT_MISMATCH")
             existing._finish_recovery()
             return existing
@@ -843,16 +1081,28 @@ class WriterActivationCohort:
         # Construct without requiring absent release-prefix markers to reappear.
         obj = cls.__new__(cls)
         obj.registry, obj.hold, obj.roots = registry, hold, tuple(roots)
+        obj._initial_descriptors = tuple(roots)
+        obj._initial_specs = tuple(x.initial_spec for x in roots if x.initial_spec is not None)
+        obj._initial_materialized = {}
+        obj._initial_factories = {}
+        obj._initial_recovery_proof = (registry.prepare_hold_recovery(
+            cohort_id=cohort_id, ordered_roots=ordered,
+            expected_receipt_sha256=durable.receipt_sha256,
+        ) if obj._initial_specs else None)
+        obj._initial_recovery_successor = None
+        obj._initial_recovery_adopted = False
+        obj._pending_recovery_receipt = None
         obj.state_path, obj._last = path, durable
         obj._mutation_lock, obj._recovering = threading.RLock(), True
         obj._recovery_ready = False
         obj._marker_payloads = tuple(durable.hold_markers)
         if obj._contracts() != durable.root_contracts:
             raise CohortConflict("RECOVERY_REQUEST_VECTOR_MISMATCH")
-        registry._held_roots.update({root: hold for root in ordered})
-        registry._epoch = max(registry._epoch, hold.epoch)
-        for item in selected:
-            item.acknowledged_epoch = hold.epoch
+        if obj._initial_recovery_proof is None:
+            registry._held_roots.update({root: hold for root in ordered})
+            registry._epoch = max(registry._epoch, hold.epoch)
+            for item in selected:
+                item.acknowledged_epoch = hold.epoch
         _LOADED_COHORTS[(id(registry), cohort_id)] = obj
         # Preserve historical drain/markers and record the new observed process
         # with a prior-digest CAS. No filesystem generation is rolled backward.
@@ -865,6 +1115,7 @@ class WriterActivationCohort:
                 receipt_sha256="",
             )
         )
+        obj._initial_recovery_successor = obj._last.receipt_sha256
         obj._finish_recovery()
         return obj
 
@@ -873,12 +1124,19 @@ class WriterActivationCohort:
         with self._mutation_lock:
             if self._recovery_ready:
                 return
+            self._advance_pending_recovery_receipt()
             current = self.load_durable(self.state_path)
             if (
                 current.process_start_identity != self.registry.process_start_identity
                 or current.receipt_sha256 != self._last.receipt_sha256
             ):
                 raise CohortConflict("RECOVERY_ADOPTION_DRIFT")
+            if self._initial_recovery_proof is not None:
+                self.hold = self.registry.adopt_recovered_hold(
+                    self._initial_recovery_proof,
+                    expected_successor_sha256=self._initial_recovery_successor or current.receipt_sha256,
+                )
+                self._initial_recovery_adopted = True
             pins = _qualified_terminal_records(self.registry, current)
             if pins:
                 reconcile_history = getattr(self.registry, "reconcile_terminal_history", None)
@@ -886,6 +1144,8 @@ class WriterActivationCohort:
                     raise CohortConflict("TERMINAL_HISTORY_RECONCILIATION_REQUIRED")
                 reconcile_history(self)
             if current.state in {"ACTIVE", "RELEASE_INTENT", "RELEASED"}:
+                if self._initial_specs:
+                    self._materialize_initial_roots()
                 missing = current.state != "ACTIVE"
                 self._prepare_reacquisition(allow_missing=missing)
                 self._commit_reacquisition(
@@ -1011,6 +1271,8 @@ class WriterActivationCohort:
                 item.identity = loaded
                 self.registry._writers[loaded.key()] = item
             self._check_f_hold(allow_missing=allow_missing)
+            if self._initial_recovery_proof is not None:
+                self.registry.confirm_recovered_reacquisition(self._initial_recovery_proof, receipt)
 
     def _verify_active_physical(self, *, allow_missing: bool = False) -> None:
         """Recheck new physical bindings before removing any hold marker."""
@@ -1094,10 +1356,7 @@ class WriterActivationCohort:
                         os.fsync(dfd)
                     finally:
                         os.close(dfd)
-                for root in self.hold.roots:
-                    self.registry._held_roots.pop(root, None)
-                self.hold.released = True
-            return self._save(
+            released = self._save(
                 replace(
                     intent,
                     state="RELEASED",
@@ -1106,9 +1365,11 @@ class WriterActivationCohort:
                     receipt_sha256="",
                 )
             )
+            self._finish_release_admission()
+            return released
         except Exception:
-            # The durable RELEASE_INTENT is deliberately retained and the
-            # in-process hold remains authoritative for restart reconciliation.
+            # Preserve the latest durable release phase and keep admission
+            # held until its exact readback/proof advancement succeeds.
             raise
 
     @classmethod
@@ -1260,6 +1521,7 @@ class WriterActivationCohort:
 
     def status(self) -> ActivationCohortReceipt:
         """Return current same-process evidence, or fail closed on drift."""
+        self._advance_pending_recovery_receipt()
         receipt = self.load_durable(self.state_path)
         if self._last is not None and receipt.receipt_sha256 != self._last.receipt_sha256:
             raise CohortConflict("COHORT_DURABLE_STATE_CHANGED")
@@ -1305,6 +1567,9 @@ class WriterActivationCohort:
     def _resume_release(self) -> ActivationCohortReceipt:
         """Complete an existing release intent after a lost acknowledgement."""
         current = self.status()
+        if current.state == "RELEASED":
+            self._finish_release_admission()
+            return current
         if current.state != "RELEASE_INTENT":
             raise WriterActivationError("RELEASE_INTENT_REQUIRED")
         self.registry._check_process()
@@ -1328,10 +1593,7 @@ class WriterActivationCohort:
                         os.fsync(dfd)
                     finally:
                         os.close(dfd)
-            for root in self.hold.roots:
-                self.registry._held_roots.pop(root, None)
-            self.hold.released = True
-        return self._save(
+        released = self._save(
             replace(
                 current,
                 state="RELEASED",
@@ -1341,9 +1603,26 @@ class WriterActivationCohort:
             )
         )
 
+        self._finish_release_admission()
+        return released
+
     def reconcile_read_only(self) -> ActivationCohortReceipt:
         """Explicit name for the non-mutating operational bridge."""
         return self.reconcile()
+
+    def _finish_release_admission(self) -> None:
+        """Drop admission only after the complete RELEASED receipt is durable."""
+        if self._last is None or self._last.state != "RELEASED":
+            raise WriterActivationError("RELEASED_RECEIPT_REQUIRED")
+        with self.registry._mutex:
+            self._check_f_hold(allow_missing=True, require_absent=True)
+            if self.hold.released:
+                return
+            if self.registry._leases_for(self.hold.roots):
+                raise WriterActivationError("RELEASE_HAS_LEASES")
+            for root in self.hold.roots:
+                self.registry._held_roots.pop(root)
+            self.hold.released = True
 
 
 def _prove_process_absent(identity: str) -> None:
@@ -1529,6 +1808,10 @@ def release_hold_after_active(
 __all__ = [
     "ActivationCohortReceipt",
     "ActivationRoot",
+    "InitialActivationRootSpec",
+    "InitialTaskOwner",
+    "InitialRuntimeOwner",
+    "InitialEventOwner",
     "CohortConflict",
     "WriterActivationCohort",
     "WriterActivationError",

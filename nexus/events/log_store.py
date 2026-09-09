@@ -73,7 +73,33 @@ class JsonlEventLogStore:
         enforce_generation: bool = False,
         owner_context: Optional[OwnerWriteContext] = None,
         writer_factory: Any = None,
+        initial_handle: Any = None,
     ) -> Tuple[Path, Path]:
+        initial_attach = initial_handle is not None
+        if initial_attach:
+            from nexus.orchestrator.writer_quiescence import InitialWriterAttachment
+            if not isinstance(initial_handle, InitialWriterAttachment):
+                raise GenerationError("INITIAL_ATTACHMENT_HANDLE_INVALID")
+            if writer_factory is None or getattr(writer_generation, "generation", writer_generation) != initial_handle.generation:
+                raise GenerationError("INITIAL_ATTACHMENT_BINDING_MISMATCH")
+            if project_root.resolve() != Path(initial_handle.root).resolve():
+                raise GenerationError("INITIAL_ATTACHMENT_ROOT_MISMATCH")
+            try:
+                initial_handle.verify(
+                    writer_factory._adapter.registry,
+                    root=project_root,
+                    generation=writer_generation,
+                    writer_id=writer_generation.writer_id,
+                    manifest_sha256=initial_handle.manifest_sha256,
+                )
+            except Exception as exc:
+                raise GenerationError("INITIAL_ATTACHMENT_NOT_REGISTERED") from exc
+            if read_generation(project_root) != writer_generation:
+                raise GenerationError("INITIAL_ATTACHMENT_GENERATION_MISMATCH")
+            from nexus.events.state_owner_manifest import read_manifest
+            manifest = read_manifest(project_root)
+            if manifest is None or manifest.state != "COMMITTED" or manifest.manifest_sha256 != initial_handle.manifest_sha256:
+                raise GenerationError("INITIAL_ATTACHMENT_MANIFEST_MISMATCH")
         if self._writer_factory is not None and writer_factory is not self._writer_factory:
             raise GenerationError("EVENT_WRITER_RECONFIGURATION_DENIED")
         if writer_factory is not None and owner_context is not None:
@@ -99,7 +125,8 @@ class JsonlEventLogStore:
             validate_entry = writer_factory.validate_entry
             # This must run before creating .nexus/events.  A loaded binding
             # owns the root selection; configure cannot become a bootstrap.
-            validate_entry()
+            if not initial_attach:
+                validate_entry()
         # Inspect existing activation state and path components before any
         # mkdir.  A configured root is source-owned even when a caller omits
         # the optional generation argument.
@@ -123,7 +150,7 @@ class JsonlEventLogStore:
             hold_info = hold.lstat()
         except FileNotFoundError:
             hold_info = None
-        if hold_info is not None:
+        if hold_info is not None and not initial_attach:
             raise GenerationError("EVENT_WRITER_ROOT_HELD")
         if owner_context is not None:
             # Validate the opaque context before inspecting any of its fields.
@@ -139,7 +166,7 @@ class JsonlEventLogStore:
                     raise GenerationError("OWNER_CONTEXT_ROOT_MISMATCH")
                 if writer_generation is not None and writer_generation != effective_owner_context.writer_generation:
                     raise GenerationError("OWNER_CONTEXT_TOKEN_MISMATCH")
-            if writer_factory is not None:
+            if writer_factory is not None and not initial_attach:
                 validate_entry()
             log_dir = project_root / ".nexus" / "events"
             log_dir.mkdir(parents=True, exist_ok=True)
@@ -152,6 +179,26 @@ class JsonlEventLogStore:
                 # Re-read after lock acquisition: a same-thread reentrant
                 # callback may install an owner context between preflight and
                 # this lock boundary.
+                if initial_attach:
+                    try:
+                        initial_handle.verify(
+                            writer_factory._adapter.registry,
+                            root=project_root,
+                            generation=writer_generation,
+                            writer_id=writer_generation.writer_id,
+                            manifest_sha256=initial_handle.manifest_sha256,
+                        )
+                    except Exception as exc:
+                        raise GenerationError("INITIAL_ATTACHMENT_NOT_REGISTERED") from exc
+                    from nexus.events.state_owner_manifest import read_manifest
+                    locked_manifest = read_manifest(project_root)
+                    if (
+                        locked_manifest is None
+                        or locked_manifest.state != "COMMITTED"
+                        or locked_manifest.manifest_sha256 != initial_handle.manifest_sha256
+                        or read_generation(project_root) != writer_generation
+                    ):
+                        raise GenerationError("INITIAL_ATTACHMENT_PHYSICAL_DRIFT")
                 effective_owner_context = owner_context if owner_context is not None else self._owner_context
                 if effective_owner_context is not None:
                     assert_owner_write(effective_owner_context, role="event_log", relative_path=".nexus/events/event_log.jsonl")

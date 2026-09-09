@@ -1085,6 +1085,20 @@ class UnifiedMCPGateway:
         source_head = str(getattr(source, "source_head", "") or "")
         source_tree = str(getattr(source, "source_tree", "") or "")
         if not source_head or not source_tree:
+            try:
+                source_head = subprocess.check_output(
+                    ["git", "-C", str(CANONICAL_SOURCE_ROOT), "rev-parse", "HEAD"],
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                ).strip()
+                source_tree = subprocess.check_output(
+                    ["git", "-C", str(CANONICAL_SOURCE_ROOT), "rev-parse", "HEAD^{tree}"],
+                    text=True,
+                    stderr=subprocess.DEVNULL,
+                ).strip()
+            except (OSError, subprocess.CalledProcessError):
+                source_head = source_tree = ""
+        if not source_head or not source_tree:
             return None
         source_identity = f"{GITHUB_REPOSITORY.repository_id}@{source_head}:{source_tree}"
         registry = WriterRegistry(
@@ -1170,9 +1184,65 @@ class UnifiedMCPGateway:
         if registry is None or not isinstance(binding_spec, LoadedTaskWriterBinding):
             if activated:
                 raise RuntimeError("MISSING_ACTIVATED_TASK_WRITER_PLAN")
-            self.service.reconcile_tasks()
+            # An empty root is observationally registered at generation zero.
+            # It must be held before legacy reconciliation; generation zero is
+            # never a writable binding and the initial A producer owns the
+            # transition to a positive generation.
+            from nexus.orchestrator.writer_quiescence import WriterIdentity
+
+            if registry is None:
+                source = getattr(self.service, "loaded_source_identity", None)
+                source_head = str(getattr(source, "source_head", "") or "")
+                source_tree = str(getattr(source, "source_tree", "") or "")
+                if not source_head or not source_tree:
+                    source_head = subprocess.check_output(
+                        ["git", "-C", str(CANONICAL_SOURCE_ROOT), "rev-parse", "HEAD"],
+                        text=True,
+                        stderr=subprocess.DEVNULL,
+                    ).strip()
+                    source_tree = subprocess.check_output(
+                        ["git", "-C", str(CANONICAL_SOURCE_ROOT), "rev-parse", "HEAD^{tree}"],
+                        text=True,
+                        stderr=subprocess.DEVNULL,
+                    ).strip()
+                source_identity = f"{GITHUB_REPOSITORY.repository_id}@{source_head}:{source_tree}"
+                registry = WriterRegistry(
+                    source_identity=source_identity,
+                    process_start_identity=current_process_start_identity(),
+                    server_identity=SERVER_INSTANCE_ID,
+                )
+                self._writer_quiescence_registry = registry
+            root = str(physical_root)
+            identity = WriterIdentity(
+                root=root,
+                role="task_state",
+                source_identity=registry.source_identity,
+                process_start_identity=registry.process_start_identity,
+                thread_id=str(threading.get_ident()),
+                generation=0,
+                writer_id=f"legacy-observer:{hashlib.sha256(root.encode()).hexdigest()[:16]}",
+            )
+            registry.register(
+                identity,
+                snapshot=lambda: (
+                    self.service.writer_quiescence_snapshot_bytes()
+                    + self._writer_assist_snapshot_bytes()
+                ),
+                process_state=lambda: self.service.writer_quiescence_process_state(str(threading.get_ident())),
+                pending=lambda: (
+                    *self.service.writer_quiescence_pending_work(),
+                    *self._writer_assist_pending_work(),
+                ),
+                loaded_identity=lambda identity=identity: identity,
+            )
+            hold = registry.begin_hold((root,), cohort_id=f"initial:{hashlib.sha256(root.encode()).hexdigest()}")
+            hold.acknowledge(identity.writer_id, root=root, role=identity.role, generation=0)
+            drained = registry.persist_finalized(hold)
+            if drained.drain_state != "DRAINED":
+                raise RuntimeError("INITIAL_WRITER_DRAIN_FAILED")
+            self.service._writer_admission_held = True
             self._writer_bootstrap_done = True
-            return "LEGACY_UNACTIVATED"
+            return "HELD"
 
         from nexus.events.state_owner_manifest import StateOwnerBinding
         from nexus.events.writer_generation import EventWriterGeneration
