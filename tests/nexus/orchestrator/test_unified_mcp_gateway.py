@@ -3440,6 +3440,83 @@ def test_execution_readiness_tool_registered_in_manifest():
     }
 
 
+def test_execution_readiness_schema_exposes_durable_identity_inputs():
+    specs = {spec["name"]: spec for spec in UnifiedMCPGateway.tool_specs()}
+    properties = specs["nexus_execution_readiness"]["inputSchema"]["properties"]
+    assert properties["durable_coordination_scope_id"] == {
+        "type": "string", "maxLength": 4096,
+    }
+    assert properties["durable_repository_canonical_remote"] == {
+        "type": "string", "maxLength": 4096,
+    }
+
+
+def test_execution_readiness_forwards_durable_identities_to_typed_request(
+    monkeypatch, readiness_env
+):
+    import nexus.orchestrator.unified_mcp_gateway as gateway_module
+
+    captured = {}
+
+    def stub(request, observations, **kwargs):
+        captured["request"] = request
+        return SimpleNamespace(
+            model_dump=lambda mode="json": {
+                "outcome": "BLOCKED", "primary_blocker": None,
+                "plane_results": [], "certification_fence": {},
+            },
+            request_satisfies_certification_fence=lambda: False,
+        )
+
+    monkeypatch.setattr(gateway_module, "evaluate_execution_readiness", stub)
+    gateway = UnifiedMCPGateway(service=FakeService())
+    _call_readiness(gateway, {
+        "durable_coordination_scope_id": "scope-pe3-exact",
+        "durable_repository_canonical_remote": "github.com/James3014/Nexus-new",
+    })
+    assert captured["request"].durable_coordination_scope_id == "scope-pe3-exact"
+    assert (
+        captured["request"].durable_repository_canonical_remote
+        == "github.com/James3014/Nexus-new"
+    )
+
+
+def test_execution_readiness_without_workforce_env_is_ready_when_non_material(
+    readiness_env,
+):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    payload = _call_readiness(gateway, {})
+    assert payload["outcome"] == "READY_TO_EXECUTE"
+    workforce = next(
+        item for item in payload["plane_results"] if item["plane"] == "WORKFORCE_PLANE"
+    )
+    assert workforce["status"] == "PASSED"
+    assert "workforce_plane:non_material:no_worker_constraints" in workforce[
+        "evidence_identities"
+    ]
+
+
+def test_execution_readiness_without_workforce_env_blocks_material_constraints(
+    readiness_env,
+):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    payload = _call_readiness(gateway, {"worker_constraints": ["provider=agy"]})
+    assert payload["outcome"] == "BLOCKED"
+    assert payload["primary_blocker"]["code"] == "WORKFORCE_NOT_READY"
+
+
+def test_execution_readiness_stale_source_precedes_missing_material_binding(
+    readiness_env,
+):
+    gateway = UnifiedMCPGateway(service=FakeService())
+    payload = _call_readiness(gateway, {
+        "intended_source_commit": "0" * 40,
+        "worker_constraints": ["provider=agy"],
+    })
+    assert payload["outcome"] == "BLOCKED"
+    assert payload["primary_blocker"]["code"] == "SOURCE_REALM_MISMATCH"
+
+
 def test_execution_readiness_forwards_typed_workforce_binding(monkeypatch, readiness_env):
     import nexus.orchestrator.unified_mcp_gateway as gateway_module
 
@@ -3630,10 +3707,12 @@ def test_execution_readiness_ready_path_end_to_end(readiness_env):
     assert "COMPLETE" not in serialized
 
 
-def test_execution_readiness_requires_all_env_declared_planes(readiness_env):
+def test_execution_readiness_does_not_require_workforce_env_for_non_material_request(
+    readiness_env,
+):
     gateway = UnifiedMCPGateway(service=FakeService())
-    with pytest.raises(GatewayInputError, match="required for in-process preflight"):
-        _call_readiness(gateway, {})
+    payload = _call_readiness(gateway, {})
+    assert payload["outcome"] == "READY_TO_EXECUTE"
 
 
 def test_execution_readiness_invalid_env_status_fails_closed(readiness_env):

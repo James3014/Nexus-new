@@ -365,6 +365,19 @@ def _in_process_readiness_plane_observations(
                     ),
                 )
                 continue
+            # Workforce evidence is completed by the canonical evaluator.  A
+            # missing env status must not prevent the evaluator from proving
+            # the non-material case or returning WORKFORCE_NOT_READY for
+            # material constraints without a typed binding.
+            if plane is ExecutionReadinessPlane.WORKFORCE:
+                observations[plane] = (
+                    PlaneObservation(
+                        plane=plane,
+                        status=ExecutionReadinessStatus.PASSED,
+                        evidence_identities=("workforce_plane:canonical_evaluator_pending",),
+                    ),
+                )
+                continue
             default_identity = _READINESS_DEFAULTED_PASSED_PLANES.get(plane)
             if default_identity is not None:
                 observations[plane] = (
@@ -3610,6 +3623,8 @@ class UnifiedMCPGateway:
                         "intended_source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
                         "intended_source_tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
                         "task_campaign_goal_identity": {"type": "string", "maxLength": 4096},
+                        "durable_coordination_scope_id": {"type": "string", "maxLength": 4096},
+                        "durable_repository_canonical_remote": {"type": "string", "maxLength": 4096},
                         "desired_deployment_identity": {"type": "string", "maxLength": 4096},
                         "execution_realm": {"type": "string", "enum": ["in_process_preflight"]},
                         "required_action_family": {"type": "string", "maxLength": 128},
@@ -4313,7 +4328,12 @@ class UnifiedMCPGateway:
             if raw is None:
                 raise GatewayInputError(f"{field} is required")
             fields[field] = _text(raw, field, max_length=4096)
-        optional_fields = ("task_campaign_goal_identity", "desired_deployment_identity")
+        optional_fields = (
+            "task_campaign_goal_identity",
+            "durable_coordination_scope_id",
+            "durable_repository_canonical_remote",
+            "desired_deployment_identity",
+        )
         optionals: dict[str, str] = {}
         for field in optional_fields:
             raw = arguments.get(field)
@@ -4339,6 +4359,10 @@ class UnifiedMCPGateway:
                 required_action_family=fields["required_action_family"],
                 execution_contract_kind=fields["execution_contract_kind"],
                 task_campaign_goal_identity=optionals.get("task_campaign_goal_identity"),
+                durable_coordination_scope_id=optionals.get("durable_coordination_scope_id"),
+                durable_repository_canonical_remote=optionals.get(
+                    "durable_repository_canonical_remote"
+                ),
                 desired_deployment_identity=optionals.get("desired_deployment_identity"),
                 worker_constraints=worker_constraint_values,
                 workforce_dispatch_binding=arguments.get("workforce_dispatch_binding"),
