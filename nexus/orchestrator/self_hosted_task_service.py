@@ -1142,6 +1142,7 @@ class SelfHostedTaskService:
         ephemeral: bool = False,
         owner_context: Any | None = None,
         writer_factory: Any | None = None,
+        consumer_ports: Any | None = None,
     ):
         canonical = self.canonical_state_dir()
         raw_state_dir = Path(state_dir).expanduser() if state_dir is not None else canonical
@@ -1161,7 +1162,12 @@ class SelfHostedTaskService:
         # Compatibility contexts must be supplied explicitly per operation.
         # Set only by the source-owned Gateway bootstrap.  It is deliberately
         # an operation factory, never a long-lived OwnerWriteContext.
-        self._writer_factory = writer_factory
+        self._consumer_ports = consumer_ports
+        if consumer_ports is not None:
+            consumer_ports.bind_service(self)
+        self._writer_factory = writer_factory or getattr(consumer_ports, "task_writer_factory", None)
+        self._event_bus = getattr(consumer_ports, "event_bus", NexusEventBus)
+        self._event_store = getattr(consumer_ports, "event_store", None)
         self.runner = runner or self._run_default
         self.stale_after_seconds = stale_after_seconds
         self.worker_registry = worker_registry or WorkerRegistry.default()
@@ -2463,17 +2469,19 @@ class SelfHostedTaskService:
     ) -> None:
         try:
             if not self.ephemeral:
-                NexusEventBus.ensure_configured(self.canonical_state_dir(), production=True)
-            self._emit_attempt_transition(result, task_id)
+                self._event_bus.ensure_configured(self.canonical_state_dir(), production=True)
+            self._emit_attempt_transition(result, task_id, event_bus=self._event_bus)
         except Exception as exc:
             self._record_event_append_failure(task_id, exc)
             raise
 
     @staticmethod
-    def _emit_attempt_transition(result: Optional[Mapping[str, Any]], task_id: str) -> None:
+    def _emit_attempt_transition(
+        result: Optional[Mapping[str, Any]], task_id: str, *, event_bus: Any = NexusEventBus
+    ) -> None:
         if not result or not result.get("attempt_id"):
             return
-        sequence = NexusEventBus.next_attempt_sequence(
+        sequence = event_bus.next_attempt_sequence(
             str(result.get("task_id") or task_id), str(result.get("attempt_id"))
         )
         candidate_refs = tuple(str(value) for value in (
@@ -2540,7 +2548,7 @@ class SelfHostedTaskService:
 
         action = str(result.get("action") or request.get("action") or "")
         observation = str(result.get("observation") or request.get("observation") or "")
-        NexusEventBus.emit_attempt_transition(
+        event_bus.emit_attempt_transition(
             build_attempt_transition_event(
                 task_id=str(result.get("task_id") or task_id),
                 attempt_id=str(result.get("attempt_id")),
@@ -2584,7 +2592,12 @@ class SelfHostedTaskService:
 
     @staticmethod
     def read_canonical_attempt_events(
-        task_id: str, attempt_id: str, *, project_root: Optional[Path] = None
+        task_id: str,
+        attempt_id: str,
+        *,
+        project_root: Optional[Path] = None,
+        event_bus: Any = NexusEventBus,
+        event_store: Any = None,
     ) -> list[dict[str, Any]]:
         """Read attempt events from the canonical EventBus log, without mutation."""
         # Read the validated canonical store directly.  The EventBus observer
@@ -2598,13 +2611,14 @@ class SelfHostedTaskService:
             # untouched.
             root = Path(project_root).expanduser().resolve()
             if (
-                NexusEventBus._configured_event_root != root
-                or NexusEventBus._event_log_path is None
+                event_bus._configured_event_root != root
+                or event_bus._event_log_path is None
             ):
-                NexusEventBus.configure(root, create=False, production=True)
-        if NexusEventBus._log_store.event_log_path != NexusEventBus._event_log_path:
-            NexusEventBus._log_store.event_log_path = NexusEventBus._event_log_path
-        records = NexusEventBus._log_store.read_recent(event_type="attempt_transition", limit=10_000)
+                event_bus.configure(root, create=False, production=True)
+        store = event_store or event_bus._log_store
+        if store.event_log_path != event_bus._event_log_path:
+            store.event_log_path = event_bus._event_log_path
+        records = store.read_recent(event_type="attempt_transition", limit=10_000)
         selected = []
         for record in records:
             payload = record.get("payload") if isinstance(record, Mapping) else None
@@ -2661,7 +2675,11 @@ class SelfHostedTaskService:
         if not self.ephemeral:
             events = events_from_attempt_records(
                 self.read_canonical_attempt_events(
-                    task_id, str(target_attempt_id), project_root=self.canonical_state_dir()
+                    task_id,
+                    str(target_attempt_id),
+                    project_root=self.canonical_state_dir(),
+                    event_bus=self._event_bus,
+                    event_store=self._event_store,
                 ),
                 task_id=task_id,
                 attempt_id=str(target_attempt_id),

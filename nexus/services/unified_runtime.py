@@ -2859,12 +2859,20 @@ class UnifiedRuntime:
         planner: CapabilityPlanner | None = None,
         local_service: Any = None,
         workforce_policy_loader: Any = None,
+        consumer_ports: Any = None,
     ) -> None:
         self._planner = planner or CapabilityPlanner()
         self._local_service = local_service
         self._workforce_policy_loader = (
             workforce_policy_loader if workforce_policy_loader is not None else WorkforcePolicyLoader()
         )
+        self._consumer_ports = consumer_ports
+
+    def bind_consumer_ports(self, consumer_ports: Any) -> None:
+        """Bind immutable assembly-owned runtime writer/effect ports."""
+        if consumer_ports is None or not hasattr(consumer_ports, "runtime_kwargs"):
+            raise ValueError("loaded_writer_consumer_ports_required")
+        self._consumer_ports = consumer_ports
 
     def run(
         self,
@@ -2882,6 +2890,13 @@ class UnifiedRuntime:
         owner_context: Any = None,
         runtime_writer_factory: Any = None,
     ) -> dict[str, Any]:
+        if self._consumer_ports is not None:
+            defaults = self._consumer_ports.runtime_kwargs()
+            runtime_writer_factory = runtime_writer_factory or defaults["runtime_writer_factory"]
+            effect_journal = effect_journal or defaults["effect_journal"]
+            effect_dispatch = effect_dispatch or defaults["effect_dispatch"]
+            effect_reconcile = effect_reconcile or defaults["effect_reconcile"]
+            effect_fenced = effect_fenced or defaults["effect_fenced"]
         return self._run_once(
             request=request,
             online_invoker=online_invoker,
@@ -2917,6 +2932,13 @@ class UnifiedRuntime:
         owner_context: Any = None,
         runtime_writer_factory: Any = None,
     ) -> dict[str, Any]:
+        if self._consumer_ports is not None:
+            defaults = self._consumer_ports.runtime_kwargs()
+            runtime_writer_factory = runtime_writer_factory or defaults["runtime_writer_factory"]
+            effect_journal = effect_journal or defaults["effect_journal"]
+            effect_dispatch = effect_dispatch or defaults["effect_dispatch"]
+            effect_reconcile = effect_reconcile or defaults["effect_reconcile"]
+            effect_fenced = effect_fenced or defaults["effect_fenced"]
         _validate_workforce_route(request.route)
         res = validate_receipt_base(previous_receipt, mode="strict")
         if not res.get("ok"):
