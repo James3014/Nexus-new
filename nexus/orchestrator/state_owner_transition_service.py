@@ -321,7 +321,27 @@ class StateOwnerTransitionService:
         self._grant_result: Mapping[str, Any] = {}
         self._service = service
         self._authority_handle = None
+        self._collector_port = None
         self._use_keyed_grant = use_keyed_grant
+
+    def bind_collector_port(self, port: Any) -> None:
+        """Bind the loaded gateway collector to direct A calls."""
+        from nexus.orchestrator.unified_mcp_gateway import UnifiedMCPGateway
+
+        gateway = getattr(port, "__self__", None)
+        if (not isinstance(gateway, UnifiedMCPGateway)
+                or getattr(port, "__func__", None) is not UnifiedMCPGateway._writer_transition_collector):
+            raise TypeError("source-owned collector port is required")
+        if self._service is None or gateway.service is not self._service:
+            raise TransitionServiceError("COLLECTOR_PORT_SERVICE_MISMATCH")
+        if gateway._writer_quiescence_registry is None:
+            raise TransitionServiceError("COLLECTOR_PORT_REGISTRY_REQUIRED")
+        if self._collector_port is not None and (
+            self._collector_port.__self__ is not gateway
+            or self._collector_port.__func__ is not port.__func__
+        ):
+            raise TransitionServiceError("COLLECTOR_PORT_ALREADY_BOUND")
+        self._collector_port = port
 
     def loaded_root_transition(self, request: WriterTransitionRequest) -> LoadedRootTransition:
         """Bind one exact loaded A request for a multi-root coordinator.
@@ -545,9 +565,10 @@ class StateOwnerTransitionService:
             raise TransitionServiceError(str(exc)) from exc
 
     def _collector(self, req: WriterTransitionRequest) -> Mapping[str, Any]:
-        if _COLLECTOR_LOADER is None:
+        loader = self._collector_port or _COLLECTOR_LOADER
+        if loader is None:
             raise MissingDependency("MISSING_WRITER_TRANSITION_COLLECTOR")
-        evidence = _COLLECTOR_LOADER(req)
+        evidence = loader(req)
         if isinstance(evidence, _VerifiedCollectorEvidence):
             evidence = evidence.payload
         if not isinstance(evidence, Mapping):
