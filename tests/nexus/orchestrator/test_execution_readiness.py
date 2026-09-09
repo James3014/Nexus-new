@@ -3,11 +3,17 @@ canonical routing, completion binding, and the no-fake-certification fence."""
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from nexus.contracts.autonomy_goal import (
+    AutonomyActionClass,
+    RepositoryIdentity,
+    StandingGrantContext,
+)
 from nexus.contracts.execution_readiness import (
     CanonicalNextAction,
     ExecutionReadinessBlockerCode,
@@ -21,10 +27,13 @@ from nexus.orchestrator.execution_readiness import (
     CompletionAuthorityObservation,
     GatewayReadinessObservation,
     PlaneObservation,
+    _canonical_authority_observation,
     _canonical_provider_preflight_digest,
     evaluate_execution_readiness,
     evaluate_source_binding,
 )
+from nexus.orchestrator import standing_grant_store
+from nexus.orchestrator.standing_grant_store import StandingGrantReceipt
 
 
 def test_provider_preflight_digest_is_deterministic_and_tamper_sensitive() -> None:
@@ -204,6 +213,74 @@ def _request(**overrides: object) -> ExecutionReadinessRequest:
     }
     base.update(overrides)
     return ExecutionReadinessRequest(**base)  # type: ignore[arg-type]
+
+
+def test_material_authority_selects_exact_repository_with_same_goal_and_scope(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Physical keyed receipts are selected by the complete repository key."""
+    receipt_root = tmp_path / "authority"
+    monkeypatch.setattr(standing_grant_store, "DEFAULT_RECEIPT_PATH", receipt_root / "standing-grant.json")
+    common = dict(goal_id="goal-readiness-keyed", thread_id="scope-readiness-keyed")
+    repo_a = RepositoryIdentity(
+        repository_id="Owner/repo-a", canonical_remote="https://github.com/Owner/repo-a.git"
+    )
+    repo_b = RepositoryIdentity(
+        repository_id="Owner/repo-b", canonical_remote="https://github.com/Owner/repo-b.git"
+    )
+    receipts = []
+    for repo, grant_id in ((repo_a, "readiness-a"), (repo_b, "readiness-b")):
+        context = StandingGrantContext.issue(
+            owner_id="owner-james",
+            coordinator_id="coordinator-codex",
+            repository=repo,
+            allowed_actions=(AutonomyActionClass.TASK_SUBMIT,),
+            issued_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            **common,
+        )
+        receipt = StandingGrantReceipt.issue(grant_id=grant_id, context=context)
+        standing_grant_store.write_keyed_standing_grant_receipt(receipt)
+        receipts.append(receipt)
+
+    def observe(repo: RepositoryIdentity) -> PlaneObservation:
+        return _canonical_authority_observation(
+            _request(
+                repository_owner=repo.repository_id.split("/", 1)[0],
+                repository_name=repo.repository_id.split("/", 1)[1],
+                task_campaign_goal_identity=common["goal_id"],
+                durable_coordination_scope_id=common["thread_id"],
+                durable_repository_canonical_remote=repo.canonical_remote,
+            ),
+            datetime.now(timezone.utc),
+        )
+
+    for repo, receipt in zip((repo_a, repo_b), receipts):
+        observation = observe(repo)
+        assert observation.status is ExecutionReadinessStatus.PASSED
+        assert f"authority_receipt_hash={receipt.receipt_hash}" in observation.evidence_identities
+        assert f"authority_repository_id={repo.repository_id}" in observation.evidence_identities
+        assert f"authority_goal_id={common['goal_id']}" in observation.evidence_identities
+        assert "authority_action=TASK_SUBMIT" in observation.evidence_identities
+
+    wrong = observe(
+        RepositoryIdentity(
+            repository_id="Owner/repo-c",
+            canonical_remote="https://github.com/Owner/repo-c.git",
+        )
+    )
+    assert wrong.status is ExecutionReadinessStatus.BLOCKED
+    assert wrong.blocker_code is ExecutionReadinessBlockerCode.TASK_AUTHORITY_MISSING
+
+    missing = _canonical_authority_observation(
+        _request(
+            task_campaign_goal_identity=common["goal_id"],
+            durable_coordination_scope_id=None,
+            durable_repository_canonical_remote=None,
+        ),
+        datetime.now(timezone.utc),
+    )
+    assert missing.status is ExecutionReadinessStatus.BLOCKED
 
 
 def _pass(plane: ExecutionReadinessPlane, *evidence: str) -> PlaneObservation:
