@@ -3,11 +3,17 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import uuid
 from pathlib import Path
 
 import pytest
 
-from nexus.services.external_intelligence import ExternalIntelligenceStore
+from nexus.services.external_intelligence import (
+    ExternalIntelligenceStore,
+    build_context_pack,
+    build_request,
+    normalize_intake,
+)
 from nexus.services.external_intelligence_automation import (
     ISSUE_SCHEMA,
     TERMINAL_DISPOSITIONS,
@@ -18,6 +24,14 @@ from nexus.services.external_intelligence_automation import (
     compact_publication_payload,
     compute_publication_id,
     parse_issue_contract,
+)
+from nexus.services.external_intelligence_fanout import (
+    AdaptiveWorkerFanoutRuntime,
+    CapacityLease,
+    ExecutionUnit,
+    FanoutStore,
+    OpenCodeRunResult,
+    WorkspaceLease,
 )
 
 
@@ -202,6 +216,19 @@ def _automation(tmp_path, repo, store, sidecar=None, c=None, d=None):
     )
 
 
+def _install_completed_receipt(automation, item, card, store):
+    effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
+    envelope = {"schema": "external_execution_envelope.v1", "x": 1}
+    envelope_bytes = json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode()
+    envelope_path = store.root / "envelopes" / f"{effect_id}.json"
+    envelope_path.parent.mkdir(parents=True, exist_ok=True)
+    envelope_path.write_bytes(envelope_bytes)
+    store.existing_receipt = lambda request: {
+        "receipt_id": "receipt-1",
+        "envelope_sha256": hashlib.sha256(envelope_bytes).hexdigest(),
+    }
+
+
 def test_contract_parser_strict_and_unknown_rejected(tmp_path):
     repo, card, contract, body, _ = _setup(tmp_path)
     assert parse_issue_contract(body)["task_id"] == "task-1"
@@ -383,6 +410,351 @@ def test_incomplete_fanout_blocks_d(tmp_path, mode):
     assert d.calls == []
 
 
+def test_fanout_reconciliation_required_preserves_same_operation_binding(tmp_path):
+    repo, _, _, body, store = _setup(tmp_path)
+
+    class UnknownThenComplete(FakeC):
+        def __init__(self):
+            super().__init__()
+            self.runs = 0
+            self.store = FanoutStore(tmp_path / "fanout")
+            self.first_attempts = {}
+            self.reconciled_attempts = {}
+
+        def run(self, units, lease):
+            self.runs += 1
+            if self.runs == 1:
+                self.calls.append((units, lease))
+                for unit_data in units:
+                    unit = ExecutionUnit.from_mapping(unit_data)
+                    workspace = tmp_path / f"workspace-{unit.unit_id}"
+                    workspace.mkdir()
+                    attempt = self.store.prepare_initial(
+                        unit,
+                        WorkspaceLease(
+                            workspace_id=f"ws-{unit.unit_id}",
+                            path=str(workspace),
+                            expected_base_sha=unit.expected_base_sha,
+                        ),
+                    )
+                    attempt = self.store.bind_operation_id(attempt, "a" * 64)
+                    self.first_attempts[unit.unit_id] = self.store.mark_dispatching(attempt)
+                return {
+                    "receipts": {},
+                    "errors": {unit["unit_id"]: "FANOUT_RECONCILIATION_REQUIRED" for unit in units},
+                    "run_sha256": "c" * 64,
+                }
+            for unit_data in units:
+                unit = ExecutionUnit.from_mapping(unit_data)
+                self.reconciled_attempts[unit.unit_id] = self.store.existing_initial_attempt(unit)
+            return super().run(units, lease)
+
+    c = UnknownThenComplete()
+
+    class ConsistentSidecar(FakeSidecar):
+        def analyze(self, record, sources, selected_worker=None):
+            self.calls.append((record, list(sources)))
+            self.worker_bindings.append(selected_worker)
+            request = build_request(
+                normalize_intake(record),
+                build_context_pack(sources),
+                selected_worker=selected_worker,
+            )
+            envelope = {"schema": "external_execution_envelope.v1", "x": 1}
+            request_sha = request["request_sha256"]
+            path = self.store.root / "envelopes" / f"{request_sha}.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(envelope, sort_keys=True, separators=(",", ":")), encoding="utf-8"
+            )
+            return {
+                "status": "COMPLETED",
+                "receipt_id": "receipt-1",
+                "request": {"request_sha256": request_sha},
+                "envelope_sha256": hashlib.sha256(
+                    json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode()
+                ).hexdigest(),
+            }
+
+    sidecar = ConsistentSidecar(store)
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c)
+    first = automation.run_issue("o/r", 401, "title", body)
+
+    assert first["state"] == "RECONCILIATION_REQUIRED"
+    assert first["prior_state"] == "FANOUT_DISPATCHING"
+    assert first["reconcile_only"] is True
+    assert first["semantic_dispatched"] is True
+    assert first["intelligence_effect_id"]
+    assert first["worker_binding"]
+    assert set(first["fanout_attempts"]) == {"u1", "u2"}
+    assert {a["operation_id"] for a in first["fanout_attempts"].values()} == {"a" * 64}
+
+    source_envelope_path = next((store.root / "envelopes").glob("*.json"))
+    envelope_bytes = source_envelope_path.read_bytes()
+    envelope_path = store.root / "envelopes" / f"{first['intelligence_effect_id']}.json"
+    envelope_path.parent.mkdir(parents=True, exist_ok=True)
+    envelope_path.write_bytes(envelope_bytes)
+    store.existing_receipt = lambda request: {
+        "receipt_id": "receipt-1",
+        "envelope_sha256": hashlib.sha256(envelope_bytes).hexdigest(),
+    }
+
+    second = automation.run_issue("o/r", 401, "title", body)
+
+    assert second["state"] == "COMPLETE"
+    assert len(sidecar.calls) == 1
+    assert len(c.calls) == 2
+    assert {a["attempt_id"] for a in c.first_attempts.values()} == {
+        a["attempt_id"] for a in c.reconciled_attempts.values()
+    }
+    assert {a["operation_id"] for a in c.reconciled_attempts.values()} == {"a" * 64}
+
+
+def _legacy_blocked_automation(tmp_path, *, attempt_state="OUTCOME_UNKNOWN", drift=False):
+    repo, card, contract, body, store = _setup(tmp_path)
+
+    c = FakeC()
+    c.store = FanoutStore(tmp_path / "fanout")
+    sidecar = FakeSidecar(store)
+    automation = _automation(tmp_path, repo, store, sidecar=sidecar, c=c)
+    item = IssueWorkItem("o/r", 402, "title", body, contract)
+    binding = automation._canonical_worker_binding(
+        item, Path("tasks/x.md"), card.read_text(encoding="utf-8")
+    )
+    automation._worker_binding = binding
+    effect_id = automation._intelligence_effect_id(item, card.read_text(encoding="utf-8"))
+    envelope = {"schema": "external_execution_envelope.v1", "x": 1}
+    envelope_bytes = json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode()
+    envelope_path = store.root / "envelopes" / f"{effect_id}.json"
+    envelope_path.parent.mkdir(parents=True, exist_ok=True)
+    envelope_path.write_bytes(envelope_bytes)
+    store.existing_receipt = lambda request: {
+        "receipt_id": "receipt-1",
+        "envelope_sha256": hashlib.sha256(envelope_bytes).hexdigest(),
+    }
+    intelligence = {
+        "status": "COMPLETED",
+        "receipt_id": "receipt-1",
+        "request": {"request_sha256": effect_id},
+        "envelope_sha256": hashlib.sha256(envelope_bytes).hexdigest(),
+    }
+    units = automation._c_units(item, intelligence)
+    from nexus.services.external_intelligence_fanout import ExecutionUnit
+
+    for unit_data in units:
+        unit = ExecutionUnit.from_mapping(unit_data)
+        if drift:
+            unit = ExecutionUnit.from_mapping({**unit_data, "envelope_sha256": "0" * 64})
+        workspace_path = tmp_path / f"workspace-{unit.unit_id}"
+        workspace_path.mkdir()
+        attempt = c.store.prepare_initial(
+            unit,
+            WorkspaceLease(
+                workspace_id=f"ws-{unit.unit_id}",
+                path=str(workspace_path),
+                expected_base_sha=unit.expected_base_sha,
+            ),
+        )
+        attempt = c.store.bind_operation_id(attempt, "a" * 64)
+        attempt = c.store.mark_dispatching(attempt)
+        if attempt_state == "OUTCOME_UNKNOWN":
+            c.store.finish_attempt(
+                attempt, state="OUTCOME_UNKNOWN", transport_status="OPEN_SWE_OUTCOME_UNKNOWN"
+            )
+        elif attempt_state == "COMPLETED":
+            c.store.finish_attempt(attempt, state="COMPLETED", transport_status="COMPLETED")
+    automation.state_store.save(
+        item,
+        "BLOCKED",
+        error="FANOUT_INCOMPLETE",
+        semantic_dispatched=True,
+    )
+    return automation, c, sidecar, body
+
+
+def test_legacy_r21_fanout_projection_reconciles_without_semantic_redispatch(tmp_path):
+    automation, c, sidecar, body = _legacy_blocked_automation(tmp_path)
+
+    result = automation.run_issue("o/r", 402, "title", body)
+
+    assert result["state"] == "COMPLETE"
+    assert sidecar.calls == []
+    assert len(c.calls) == 1
+
+
+@pytest.mark.parametrize("attempt_state,drift", [("COMPLETED", False), ("OUTCOME_UNKNOWN", True)])
+def test_legacy_r21_fanout_projection_fails_closed_without_dispatch(tmp_path, attempt_state, drift):
+    automation, c, sidecar, body = _legacy_blocked_automation(
+        tmp_path, attempt_state=attempt_state, drift=drift
+    )
+
+    result = automation.run_issue("o/r", 402, "title", body)
+
+    assert result["state"] == "BLOCKED"
+    assert result["error"] == "FANOUT_LEGACY_RECONCILIATION_INVALID"
+    assert sidecar.calls == []
+    assert c.calls == []
+
+
+@pytest.mark.parametrize(
+    "malformed_attempt_id",
+    ["-" * 36, "not-a-uuid", str(uuid.uuid4()).upper()],
+)
+def test_legacy_r21_malformed_attempt_id_fails_closed_without_dispatch(
+    tmp_path, malformed_attempt_id
+):
+    automation, c, sidecar, body = _legacy_blocked_automation(tmp_path)
+    attempt_path = next(c.store.attempts.glob("*.json"))
+    attempt = json.loads(attempt_path.read_text(encoding="utf-8"))
+    attempt["attempt_id"] = malformed_attempt_id
+    attempt_path.write_text(json.dumps(attempt), encoding="utf-8")
+
+    result = automation.run_issue("o/r", 402, "title", body)
+
+    assert result["state"] == "BLOCKED"
+    assert result["error"] == "FANOUT_LEGACY_RECONCILIATION_INVALID"
+    assert sidecar.calls == []
+    assert c.calls == []
+
+
+def test_real_adaptive_runtime_reconciles_existing_unknown_without_new_allocation(tmp_path):
+    repo, _, contract, _, _ = _setup(tmp_path)
+    base = contract["main_sha"]
+    envelope_path = tmp_path / "envelope.json"
+    envelope = {
+        "schema": "external_execution_envelope.v1",
+        "binding": {
+            "repository": "example/repo",
+            "item_type": "task",
+            "item_id": "task-1",
+            "revision": "rev-1",
+            "main_sha": base,
+            "task_card_ref": "tasks/example/00-task.md",
+            "task_card_hash": "b" * 64,
+            "context_pack_sha256": "c" * 64,
+        },
+        "goal": "Implement bounded change.",
+        "root_cause": "Bounded implementation required.",
+        "scope_signal": {
+            "production_edit_paths": ["a.py"],
+            "required_test_edit_paths": [],
+            "conditional_migration_paths": [],
+            "read_only_authorities": ["AGENTS.md"],
+            "verification_only_paths": [],
+            "forbidden_paths": [],
+            "max_files": 20,
+            "scope_confidence": "HIGH",
+            "scope_block_conditions": ["scope expands"],
+        },
+        "implementation_signal": {
+            "inspect_first": ["a.py"],
+            "proven_facts": ["base is bound"],
+            "required_semantics": ["bounded edit only"],
+            "suggested_direction": ["minimal change"],
+            "forbidden_behavior": ["do not widen scope"],
+        },
+        "verification_signal": {
+            "red_probe": "pytest -q",
+            "positive_probes": [],
+            "hostile_negative_probes": ["reject scope widening"],
+            "impact_suites": [],
+            "static_checks": ["git diff --check"],
+            "false_green_conditions": ["empty diff"],
+        },
+        "worker_binding": {
+            "assigned_thread": "UNASSIGNED",
+            "persistent_thread": True,
+            "create_subagent": False,
+            "fallback_allowed": False,
+        },
+        "model_adaptation": {
+            "role_contract": ["bounded task engineer"],
+            "task_local_invariants": ["bounded edit only"],
+            "known_failure_guards": ["no scope widening"],
+            "execution_strategy": ["minimal change"],
+            "forbidden_inferences": ["authority overreach"],
+            "repair_policy": ["no blind retry"],
+        },
+        "stop_conditions": ["scope expands"],
+    }
+    envelope_path.write_text(json.dumps(envelope, indent=2), encoding="utf-8")
+    envelope_sha = hashlib.sha256(
+        json.dumps(envelope, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    parsed = ExecutionUnit.from_mapping({
+        "task_id": "task-1",
+        "unit_id": "u1",
+        "envelope_ref": str(envelope_path),
+        "envelope_sha256": envelope_sha,
+        "expected_base_sha": base,
+        "mutation_paths": ["a.py"],
+    })
+    store = FanoutStore(tmp_path / "fanout")
+    workspace_path = repo
+    workspace = WorkspaceLease("workspace-u1", str(workspace_path), base)
+    attempt = store.prepare_initial(parsed, workspace)
+    attempt = store.bind_operation_id(attempt, "a" * 64)
+    attempt = store.mark_dispatching(attempt)
+    store.finish_attempt(
+        attempt, state="OUTCOME_UNKNOWN", transport_status="OPEN_SWE_OUTCOME_UNKNOWN"
+    )
+
+    class RecordingAllocator:
+        allocations = 0
+
+        def allocate(self, unit):
+            self.allocations += 1
+            raise AssertionError("existing OUTCOME_UNKNOWN must not allocate")
+
+    class RecordingTransport:
+        provider_id = "opencode-go"
+        model_id = "deepseek-v4-flash"
+
+        def __init__(self):
+            self.run_new_calls = 0
+            self.reconcile_calls = []
+
+        def run_new(self, **kwargs):
+            self.run_new_calls += 1
+            raise AssertionError("existing OUTCOME_UNKNOWN must reconcile")
+
+        def prepare_operation_id(self, *args, **kwargs):
+            return "a" * 64
+
+        def reconcile_workspace(self, **kwargs):
+            self.reconcile_calls.append(kwargs)
+            return OpenCodeRunResult(
+                status="COMPLETED",
+                session_id="ses_reconciled_00000000",
+                response_text=json.dumps({
+                    "schema": "external_intelligence_worker_result.v1",
+                    "task_id": "task-1",
+                    "unit_id": "u1",
+                    "status": "IMPLEMENTATION_COMPLETED",
+                    "summary": "reconciled",
+                }),
+                provider_id=self.provider_id,
+                model_id=self.model_id,
+                directory=str(workspace_path),
+                process_started=True,
+                operation_id=kwargs["operation_id"],
+            )
+
+    allocator = RecordingAllocator()
+    transport = RecordingTransport()
+    result = AdaptiveWorkerFanoutRuntime(allocator=allocator, store=store, transport=transport).run(
+        [parsed], CapacityLease(1, 1, 1, 1)
+    )
+
+    assert result["errors"] == {}
+    assert allocator.allocations == 0
+    assert transport.run_new_calls == 0
+    assert transport.reconcile_calls == [
+        {"workspace_path": str(workspace_path), "operation_id": "a" * 64}
+    ]
+    assert store.existing_initial_attempt(parsed)["operation_id"] == "a" * 64
+
+
 def test_d_gets_exact_verifiers_and_compact_publication(tmp_path):
     repo, _, contract, body, store = _setup(tmp_path)
     d = FakeD()
@@ -428,11 +800,13 @@ def test_recoverable_dispatching_state_resumes_pipeline(tmp_path, state):
     automation.state_store.save(
         item, state, intelligence_effect_id=effect_id, worker_binding=binding
     )
+    if state == "FANOUT_DISPATCHING":
+        _install_completed_receipt(automation, item, card, store)
 
     result = automation.run_issue("o/r", 7, "title", body)
 
     assert result["state"] == "COMPLETE"
-    assert len(sidecar.calls) == 1
+    assert len(sidecar.calls) == (0 if state == "FANOUT_DISPATCHING" else 1)
     assert len(c.calls) == 1
     assert len(d.calls) == 1
     assert automation.state_store.load(item)["state"] == "COMPLETE"
@@ -499,13 +873,14 @@ def test_recoverable_reconciliation_required_resumes_from_fanout(tmp_path):
         worker_binding=binding,
         semantic_dispatched=True,
     )
+    _install_completed_receipt(automation, item, card, store)
 
     result = automation.run_issue("o/r", 8, "title", body)
 
-    assert result["state"] == "COMPLETE"
-    assert len(sidecar.calls) == 1
-    assert len(c.calls) == 1
-    assert len(d.calls) == 1
+    assert result["state"] == "BLOCKED"
+    assert result["error"] == "FANOUT_RECONCILIATION_BINDING_DRIFT"
+    assert sidecar.calls == []
+    assert c.calls == [] and d.calls == []
 
 
 def test_dispatching_fence_rejects_changed_issue_context_before_new_sidecar_invoke(tmp_path):

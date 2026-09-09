@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Mapping
@@ -870,6 +871,148 @@ class ExternalIntelligenceAutomation:
             ordered.append(receipt)
         return ordered
 
+    def _fanout_attempts(self, units: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        """Read the durable fanout attempts for same-operation recovery."""
+        fanout_store = getattr(self.c_runtime, "store", None)
+        loader = getattr(fanout_store, "existing_initial_attempt", None)
+        if not callable(loader):
+            return {}
+        from nexus.services.external_intelligence_fanout import ExecutionUnit
+
+        attempts: dict[str, dict[str, Any]] = {}
+        for unit in units:
+            try:
+                attempt = loader(ExecutionUnit.from_mapping(unit))
+            except Exception:
+                return {}
+            if not isinstance(attempt, Mapping):
+                return {}
+            attempts[str(unit["unit_id"])] = dict(attempt)
+        return attempts
+
+    def _save_fanout_reconciliation(
+        self,
+        item: IssueWorkItem,
+        *,
+        intelligence_effect_id: str,
+        worker_binding: Mapping[str, Any] | None,
+        units: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        extra: dict[str, Any] = {
+            "prior_state": "FANOUT_DISPATCHING",
+            "intelligence_effect_id": intelligence_effect_id,
+            "reconcile_only": True,
+            "semantic_dispatched": True,
+            "error": "FANOUT_RECONCILIATION_REQUIRED",
+        }
+        if worker_binding is not None:
+            extra["worker_binding"] = dict(worker_binding)
+        attempts = self._fanout_attempts(units)
+        if not self._fanout_attempts_are_reconcilable(units, attempts):
+            return self.state_store.save(
+                item,
+                "BLOCKED",
+                stage="FANOUT",
+                error="FANOUT_RECONCILIATION_BINDING_INVALID",
+                semantic_dispatched=True,
+            )
+        extra["fanout_attempts"] = attempts
+        return self.state_store.save(item, "RECONCILIATION_REQUIRED", **extra)
+
+    @staticmethod
+    def _fanout_attempts_are_reconcilable(
+        units: list[dict[str, Any]], attempts: Mapping[str, Mapping[str, Any]]
+    ) -> bool:
+        from nexus.services.external_intelligence_fanout import ExecutionUnit
+
+        if set(attempts) != {str(unit["unit_id"]) for unit in units}:
+            return False
+        for unit in units:
+            attempt = attempts[str(unit["unit_id"])]
+            if attempt.get("state") not in {"OUTCOME_UNKNOWN", "DISPATCHING"}:
+                return False
+            if (
+                attempt.get("unit_identity_sha256")
+                != ExecutionUnit.from_mapping(unit).identity_sha256
+            ):
+                return False
+            attempt_id = str(attempt.get("attempt_id") or "")
+            try:
+                parsed_attempt_id = uuid.UUID(attempt_id)
+            except (ValueError, AttributeError):
+                return False
+            if (
+                parsed_attempt_id.version != 4
+                or str(parsed_attempt_id) != attempt_id
+                or not str(attempt.get("workspace_id") or "")
+                or not str(attempt.get("workspace_path") or "")
+                or attempt.get("expected_base_sha") != unit["expected_base_sha"]
+                or not SHA256_RE.fullmatch(str(attempt.get("operation_id") or ""))
+            ):
+                return False
+        return True
+
+    def _legacy_fanout_recovery_allowed(self, units: list[dict[str, Any]]) -> bool:
+        """Validate the bounded r21 compatibility projection before resuming."""
+        attempts = self._fanout_attempts(units)
+        return self._fanout_attempts_are_reconcilable(units, attempts)
+
+    def _fanout_snapshot_matches(
+        self, previous: Mapping[str, Any], units: list[dict[str, Any]]
+    ) -> bool:
+        snapshot = previous.get("fanout_attempts")
+        if not isinstance(snapshot, Mapping):
+            return False
+        live = self._fanout_attempts(units)
+        if not self._fanout_attempts_are_reconcilable(units, live):
+            return False
+        fields = (
+            "attempt_id",
+            "operation_id",
+            "workspace_id",
+            "workspace_path",
+            "expected_base_sha",
+            "unit_identity_sha256",
+        )
+        for unit in units:
+            unit_id = str(unit["unit_id"])
+            saved = snapshot.get(unit_id)
+            current = live.get(unit_id)
+            if not isinstance(saved, Mapping) or not isinstance(current, Mapping):
+                return False
+            if any(saved.get(field) != current.get(field) for field in fields):
+                return False
+        return True
+
+    def _load_completed_intelligence(
+        self, item: IssueWorkItem, task_card_text: str
+    ) -> dict[str, Any] | None:
+        """Rehydrate completed semantic evidence without invoking the sidecar."""
+        intake = normalize_intake(self._record(item))
+        context_pack = build_context_pack(self._sources(item, task_card_text))
+        request = build_request(intake, context_pack, selected_worker=self._worker_binding)
+        loader = getattr(self.intelligence_store, "existing_receipt", None)
+        if not callable(loader):
+            return None
+        receipt = loader(request)
+        if not isinstance(receipt, Mapping):
+            return None
+        capsule = receipt.get("control_capsule")
+        envelope_sha = (
+            str(capsule.get("intelligence_envelope_sha256") or "")
+            if isinstance(capsule, Mapping)
+            else ""
+        )
+        envelope_sha = envelope_sha or str(receipt.get("envelope_sha256") or "")
+        if not envelope_sha:
+            return None
+        return {
+            "status": "COMPLETED",
+            "receipt_id": str(receipt.get("receipt_id") or ""),
+            "request": {"request_sha256": str(request["request_sha256"])},
+            "envelope_sha256": envelope_sha,
+        }
+
     def run_issue(
         self, repository: str, issue_number: int, title: str, body: str
     ) -> dict[str, Any]:
@@ -880,11 +1023,21 @@ class ExternalIntelligenceAutomation:
             return {"state": "BLOCKED", "error": str(exc), "semantic_dispatched": False}
         item = IssueWorkItem(repository, int(issue_number), title, body, contract)
         previous = self.state_store.load(item)
+        legacy_fanout_recovery = bool(
+            previous
+            and previous.get("state") == "BLOCKED"
+            and previous.get("error") == "FANOUT_INCOMPLETE"
+            and previous.get("semantic_dispatched") is True
+        )
         if previous is not None:
             previous_state = str(previous.get("state") or "")
             if previous_state == "COMPLETE" or previous_state in TERMINAL_DISPOSITIONS:
                 return {**previous, "reuse": True, "semantic_dispatched": True}
-            if previous_state == "BLOCKED" and bool(previous.get("semantic_dispatched")):
+            if (
+                previous_state == "BLOCKED"
+                and bool(previous.get("semantic_dispatched"))
+                and not legacy_fanout_recovery
+            ):
                 return {**previous, "reuse": True, "semantic_dispatched": True}
             if previous_state == "RECONCILIATION_REQUIRED":
                 prior_state = str(previous.get("prior_state") or "")
@@ -895,6 +1048,8 @@ class ExternalIntelligenceAutomation:
                 resume_from = previous_state
         else:
             resume_from = ""
+        if legacy_fanout_recovery:
+            resume_from = "FANOUT_DISPATCHING"
         if resume_from == "CLOSURE_DISPATCHING":
             return self.state_store.save(
                 item,
@@ -941,7 +1096,7 @@ class ExternalIntelligenceAutomation:
                     "FANOUT_COMPLETED",
                 }
             )
-            if prior_dispatch_state:
+            if prior_dispatch_state and not legacy_fanout_recovery:
                 persisted_binding = previous.get("worker_binding") if previous else None
                 if not isinstance(persisted_binding, Mapping):
                     return self.state_store.save(
@@ -982,7 +1137,7 @@ class ExternalIntelligenceAutomation:
                     "FANOUT_COMPLETED",
                 }
             )
-            if prior_intelligence_state:
+            if prior_intelligence_state and not legacy_fanout_recovery:
                 persisted_effect_id = previous.get("intelligence_effect_id") if previous else None
                 if not persisted_effect_id:
                     return self.state_store.save(
@@ -1005,20 +1160,30 @@ class ExternalIntelligenceAutomation:
             dispatch_state = {}
             if intelligence_effect_id is not None:
                 dispatch_state["intelligence_effect_id"] = intelligence_effect_id
-            self.state_store.save(
-                item,
-                "INTELLIGENCE_DISPATCHING",
-                worker_binding=self._worker_binding,
-                **dispatch_state,
-            )
-            sidecar_kwargs = {}
-            if self._worker_binding is not None:
-                sidecar_kwargs["selected_worker"] = self._worker_binding
-            intelligence = self.sidecar.analyze(
-                record,
-                self._sources(item, task_card_text),
-                **sidecar_kwargs,
-            )
+            if resume_from == "FANOUT_DISPATCHING":
+                intelligence = self._load_completed_intelligence(item, task_card_text)
+                if intelligence is None:
+                    return self.state_store.save(
+                        item,
+                        "BLOCKED",
+                        error="INTELLIGENCE_RECEIPT_MISSING",
+                        semantic_dispatched=True,
+                    )
+            else:
+                self.state_store.save(
+                    item,
+                    "INTELLIGENCE_DISPATCHING",
+                    worker_binding=self._worker_binding,
+                    **dispatch_state,
+                )
+                sidecar_kwargs = {}
+                if self._worker_binding is not None:
+                    sidecar_kwargs["selected_worker"] = self._worker_binding
+                intelligence = self.sidecar.analyze(
+                    record,
+                    self._sources(item, task_card_text),
+                    **sidecar_kwargs,
+                )
             if intelligence.get("status") != "COMPLETED":
                 return self.state_store.save(
                     item,
@@ -1039,6 +1204,26 @@ class ExternalIntelligenceAutomation:
             )
 
             units = self._c_units(item, intelligence)
+            if legacy_fanout_recovery and not self._legacy_fanout_recovery_allowed(units):
+                return self.state_store.save(
+                    item,
+                    "BLOCKED",
+                    error="FANOUT_LEGACY_RECONCILIATION_INVALID",
+                    semantic_dispatched=True,
+                )
+            if (
+                previous is not None
+                and previous.get("state") == "RECONCILIATION_REQUIRED"
+                and previous.get("prior_state") == "FANOUT_DISPATCHING"
+                and not self._fanout_snapshot_matches(previous, units)
+            ):
+                return self.state_store.save(
+                    item,
+                    "BLOCKED",
+                    stage="FANOUT",
+                    error="FANOUT_RECONCILIATION_BINDING_DRIFT",
+                    semantic_dispatched=True,
+                )
             self.state_store.save(
                 item,
                 "FANOUT_DISPATCHING",
@@ -1046,7 +1231,32 @@ class ExternalIntelligenceAutomation:
                 worker_binding=self._worker_binding,
             )
             fanout = self.c_runtime.run(units, self.capacity_factory(contract))
-            receipts = self._valid_receipts(fanout, {unit["unit_id"] for unit in units})
+            admitted_ids = set(
+                (fanout.get("decision") or {}).get("admitted_units")
+                or [unit["unit_id"] for unit in units]
+            )
+            errors = fanout.get("errors") or {}
+            if (
+                admitted_ids
+                and set(errors) == admitted_ids
+                and all(error == "FANOUT_RECONCILIATION_REQUIRED" for error in errors.values())
+            ):
+                return self._save_fanout_reconciliation(
+                    item,
+                    intelligence_effect_id=str(intelligence_effect_id or ""),
+                    worker_binding=self._worker_binding,
+                    units=units,
+                )
+            try:
+                receipts = self._valid_receipts(fanout, {unit["unit_id"] for unit in units})
+            except AutomationError as exc:
+                return self.state_store.save(
+                    item,
+                    "BLOCKED",
+                    stage="FANOUT",
+                    error=str(exc),
+                    semantic_dispatched=True,
+                )
             self.state_store.save(
                 item,
                 "FANOUT_COMPLETED",
