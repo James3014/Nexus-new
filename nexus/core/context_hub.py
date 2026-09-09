@@ -437,7 +437,7 @@ class ContextHub:
     def assemble_conversation_pack(self, audit_mode: bool = False) -> Dict[str, Any]:
         return self.runtime_hub.assemble_conversation_pack(audit_mode)
 
-    def assemble_repair_pack(self, diagnosis: Any, reflections: List[Dict], research: Any, audit_mode: bool = False) -> Dict[str, Any]:
+    def assemble_repair_pack(self, diagnosis: Any, reflections: List[Dict], research: Any = None, audit_mode: bool = False) -> Dict[str, Any]:
         return self.runtime_hub.assemble_repair_pack(diagnosis, reflections, research)
 
     def assemble_context(self, task_id: str, layers: List[int], budget: int = 4000, bayesian_params: Optional[Dict[str, Any]] = None) -> str:
