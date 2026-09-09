@@ -5495,7 +5495,7 @@ class UnifiedRuntime:
 # installed.
 from nexus.services.runtime_compat import _RUNTIME as _PACKAGE_RUNTIME
 
-for _runtime_name in (
+_REQUIRED_RUNTIME_NAMES = (
     "UnifiedRuntime",
     "UnifiedRuntimeRequest",
     "build_canonical_runtime_context",
@@ -5513,6 +5513,13 @@ for _runtime_name in (
     "build_local_search_ranking_capability_invoker",
     "build_prompt_compression_capability_invoker",
     "canonical_execution_identity",
-):
-    if _runtime_name in _PACKAGE_RUNTIME.names():
-        globals()[_runtime_name] = getattr(_PACKAGE_RUNTIME, _runtime_name)
+)
+_missing_runtime_names = sorted(
+    set(_REQUIRED_RUNTIME_NAMES) - set(_PACKAGE_RUNTIME.names())
+)
+if _missing_runtime_names:
+    raise ImportError(
+        "installed nexus-runtime is missing required compatibility symbols: "
+        + ", ".join(_missing_runtime_names)
+    )
+globals().update({name: getattr(_PACKAGE_RUNTIME, name) for name in _REQUIRED_RUNTIME_NAMES})
