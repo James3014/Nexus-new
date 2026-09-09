@@ -290,7 +290,7 @@ def test_r1b1_staging_does_not_accept_caller_selected_git_refs():
 
 def _r1b1_fixture(
     tmp_path, monkeypatch, *, identity_seed=None, gitlink=False,
-    gitlink_path="nested-repository",
+    gitlink_path="nested-repository", external_bootstrap=False,
 ):
     from nexus.contracts.gateway_deployment import (
         RECOVERY_CARD_PATH,
@@ -488,11 +488,20 @@ def _r1b1_fixture(
         "issuer_id": "owner-james",
         "coordinator_id": "coordinator-codex",
         "authorized_actor_id": "coordinator-codex",
-        "owner_activation_id": "OWNER_ISSUE526_FUTURE_TRACKED_20260902",
-        "owner_activation_sha256": "9" * 64,
-        "source_thread": "ops-r1-fixture-future-thread",
-        "standing_grant_id": "OWNER_STANDING_COORDINATOR_20260818_DURABLE_GITHUB_WORKFLOW",
-        "standing_grant_receipt_sha256": "3b8895f093692257d6225fbb8150b34f520e667d250c7817ad120cefd42751d5",
+        "owner_activation_id": (
+            "BREAK_GLASS_BG_842_GATEWAY_R5_A1"
+            if external_bootstrap else "OWNER_ISSUE526_FUTURE_TRACKED_20260902"
+        ),
+        "owner_activation_sha256": (
+            "e67919d4e83dd1621a3530d2894aae96614fcb4b2f9fdd5153ec6d4986701d9c"
+            if external_bootstrap else "9" * 64
+        ),
+        "source_thread": (
+            "01a07ec9-ef56-73e0-943f-eb95269fcf82"
+            if external_bootstrap else "ops-r1-fixture-future-thread"
+        ),
+        "standing_grant_id": None if external_bootstrap else "OWNER_STANDING_COORDINATOR_20260818_DURABLE_GITHUB_WORKFLOW",
+        "standing_grant_receipt_sha256": None if external_bootstrap else "3b8895f093692257d6225fbb8150b34f520e667d250c7817ad120cefd42751d5",
         "repository": "James3014/Nexus-new",
         "host_card_path": RECOVERY_CARD_PATH,
         "accepted_source_merge": accepted,
@@ -687,6 +696,33 @@ def test_r1_local_receipt_not_tracked_on_fresh_main_has_zero_effect(tmp_path, mo
     ):
         g.stage_verified_git_store(forged_request, forged)
     assert not g.GATEWAY_SOURCE_BUNDLES_ROOT.exists()
+
+
+def test_r1_external_bootstrap_not_tracked_has_zero_effect(tmp_path, monkeypatch):
+    from nexus.contracts.gateway_deployment import RecoveryAuthorityReceipt, canonical_hash
+
+    fixture = _r1b1_fixture(tmp_path, monkeypatch, external_bootstrap=True)
+    values = {**fixture["receipt"].model_dump(), "independent_acceptance_receipt_hash": "b" * 64}
+    values["receipt_hash"] = canonical_hash({k: v for k, v in values.items() if k != "receipt_hash"})
+    forged = RecoveryAuthorityReceipt.model_validate(values)
+    request_values = {**fixture["request"].model_dump(), "recovery_authority_hash": forged.receipt_hash}
+    request_values["request_hash"] = canonical_hash({k: v for k, v in request_values.items() if k not in {"request_hash", "schema"}})
+    forged_request = fixture["request"].__class__.model_validate(request_values)
+    g.GATEWAY_RECOVERY_AUTHORITY_STORE.write_bytes(
+        json.dumps(forged.model_dump(), sort_keys=True, separators=(",", ":")).encode()
+    )
+    g.GATEWAY_RECOVERY_AUTHORITY_STORE.chmod(0o600)
+    with pytest.raises(g.GatewayContractError, match="remote/local byte mismatch|differs from fixed local"):
+        g.stage_verified_git_store(forged_request, forged)
+    assert not g.GATEWAY_SOURCE_BUNDLES_ROOT.exists()
+
+
+def test_r1_exact_tracked_external_bootstrap_reaches_pre_effect_staging(tmp_path, monkeypatch):
+    fixture = _r1b1_fixture(tmp_path, monkeypatch, external_bootstrap=True)
+    outcome = g.stage_verified_git_store(fixture["request"], fixture["receipt"])
+    assert outcome.desired_path.is_dir()
+    assert outcome.predecessor_path.is_dir()
+    assert outcome.bundle_evidence.bundle_verified
 
 
 def test_r1b1_safe_ancestry_and_existing_bare_identity_fail_closed(tmp_path, monkeypatch):
