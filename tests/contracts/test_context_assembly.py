@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from nexus.contracts.context_assembly import (
@@ -190,7 +192,8 @@ def test_context_package_hash_is_deterministic_and_detects_drift() -> None:
 
 
 def test_selected_capability_ids_fail_closed_when_malformed() -> None:
-    for malformed in ("prompt_compression", (None,), ("",)):
+    malformed_values: tuple[Any, ...] = ("prompt_compression", (None,), ("",))
+    for malformed in malformed_values:
         with pytest.raises(ValueError, match="invalid_selected_capability_ids"):
             build_context_assembly_contract(
                 task_id="ctx-472-g1",
