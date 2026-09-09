@@ -142,6 +142,8 @@ def test_tools_list_exposes_governed_self_hosted_surface():
     compete_properties = specs["nexus_self_hosted_compete_task"]["inputSchema"]["properties"]
     campaign_properties = specs["nexus_self_hosted_create_refactor_campaign"]["inputSchema"]["properties"]
     push_schema = specs["nexus_self_hosted_push_competition"]["inputSchema"]
+    compete_schema = specs["nexus_self_hosted_compete_task"]["inputSchema"]
+    assert {"authority_goal_id", "authority_coordination_scope_id"} <= set(compete_schema["required"])
     assert set(push_schema["required"]) == {
         "competition_id", "remote", "authority_goal_id", "authority_coordination_scope_id"
     }

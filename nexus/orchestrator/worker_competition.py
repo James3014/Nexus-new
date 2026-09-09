@@ -146,6 +146,12 @@ class WorkerCompetitionCoordinator:
         )
 
     def submit(self, request: Mapping[str, Any], providers: Sequence[str]) -> dict[str, Any]:
+        try:
+            authority_goal_id = request["authority_goal_id"]
+            authority_scope_id = request["authority_coordination_scope_id"]
+            StandingGrantKey(_GITHUB_REPOSITORY, authority_goal_id, authority_scope_id)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("competition requires valid authority goal and coordination scope") from exc
         normalized = tuple(str(provider).strip().lower() for provider in providers)
         if len(normalized) < 2 or len(set(normalized)) != len(normalized):
             raise ValueError("competition requires at least two distinct workers")
@@ -156,7 +162,13 @@ class WorkerCompetitionCoordinator:
         competition_id = _SAFE_ID.sub("-", base_id).strip("-")
         if not competition_id:
             raise ValueError("competition_id must contain a safe identifier")
-        if self._read(competition_id) is not None:
+        existing = self._read(competition_id)
+        if existing is not None:
+            if (
+                existing.get("authority_goal_id") != authority_goal_id
+                or existing.get("authority_coordination_scope_id") != authority_scope_id
+            ):
+                raise ValueError("COMPETITION_AUTHORITY_KEY_MISMATCH")
             return self.get(competition_id)
 
         prepared = [self._candidate_request(request, competition_id, provider) for provider in normalized]
@@ -169,6 +181,8 @@ class WorkerCompetitionCoordinator:
             "competition_id": competition_id,
             "status": "SUBMITTED",
             "provider_order": list(normalized),
+            "authority_goal_id": authority_goal_id,
+            "authority_coordination_scope_id": authority_scope_id,
             "candidates": [
                 {
                     "candidate_id": candidate.candidate_id,
@@ -193,6 +207,15 @@ class WorkerCompetitionCoordinator:
         state = self.get(competition_id)
         if state is None:
             raise KeyError(f"unknown competition_id: {competition_id}")
+        stored_goal_id = state.get("authority_goal_id")
+        stored_scope_id = state.get("authority_coordination_scope_id")
+        if stored_goal_id is None or stored_scope_id is None:
+            raise PermissionError("COMPETITION_AUTHORITY_KEY_MISSING")
+        if (
+            authority_goal_id != stored_goal_id
+            or authority_coordination_scope_id != stored_scope_id
+        ):
+            raise PermissionError("COMPETITION_AUTHORITY_KEY_MISMATCH")
         if state.get("status") != "INTEGRATED":
             raise RuntimeError("only an integrated winner can be pushed")
         integration = state.get("integration") or {}

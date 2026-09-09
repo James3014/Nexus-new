@@ -72,6 +72,8 @@ def test_submit_creates_distinct_target_candidates_in_parallel(tmp_path):
     request = {
         "task_id": "refactor-001",
         "competition_id": "refactor-competition",
+        "authority_goal_id": "goal",
+        "authority_coordination_scope_id": "scope",
         "target_repo_root": str(tmp_path / "targets"),
         "target_worktree_root": str(tmp_path / "targets"),
     }
@@ -104,6 +106,8 @@ def test_get_persists_winner_after_all_candidates_finish(tmp_path):
     request = {
         "task_id": "refactor-002",
         "competition_id": "refactor-competition-002",
+        "authority_goal_id": "goal",
+        "authority_coordination_scope_id": "scope",
         "target_repo_root": str(tmp_path / "targets"),
         "target_worktree_root": str(tmp_path / "targets"),
     }
@@ -134,6 +138,8 @@ def test_push_winner_passes_exact_effect_identity_to_governed_push_sink(monkeypa
         "schema": "nexus.worker_competition_state.v1",
         "competition_id": "push-competition",
         "status": "INTEGRATED",
+        "authority_goal_id": "goal",
+        "authority_coordination_scope_id": "scope",
         "winner": {"winner_task_id": "winner-task"},
         "integration": {
             "integration_branch": "nexus/integration/main",
@@ -211,6 +217,8 @@ def test_push_winner_sink_authority_failure_preserves_integrated_state(monkeypat
         "schema": "nexus.worker_competition_state.v1",
         "competition_id": "blocked-push",
         "status": "INTEGRATED",
+        "authority_goal_id": "goal",
+        "authority_coordination_scope_id": "scope",
         "winner": {"winner_task_id": "winner-task"},
         "integration": {
             "integration_branch": "nexus/integration/main",
@@ -256,6 +264,8 @@ def test_get_preserves_integrated_and_pushed_terminal_status_on_refresh(tmp_path
     request = {
         "task_id": "refactor-003",
         "competition_id": "refactor-competition-003",
+        "authority_goal_id": "goal",
+        "authority_coordination_scope_id": "scope",
         "target_repo_root": str(tmp_path / "targets"),
         "target_worktree_root": str(tmp_path / "targets"),
     }
