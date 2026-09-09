@@ -441,7 +441,7 @@ def _canonical_authority_observation(
                 f"authority_action_family={request.required_action_family}",
             ),
         )
-    if not request.durable_coordination_scope_id:
+    if not request.durable_coordination_scope_id or not request.durable_repository_canonical_remote:
         return PlaneObservation(
             plane=ExecutionReadinessPlane.AUTHORITY,
             status=ExecutionReadinessStatus.BLOCKED,
@@ -468,8 +468,13 @@ def _canonical_authority_observation(
             inspect_standing_grant_receipt,
         )
 
+        authority_repository = RepositoryIdentity(
+            repository_id=f"{request.repository_owner}/{request.repository_name}",
+            canonical_remote=request.durable_repository_canonical_remote,
+        )
         snapshot = inspect_standing_grant_receipt(
             now=moment,
+            repository=authority_repository,
             goal_id=goal_id,
             thread_id=request.durable_coordination_scope_id,
         )
@@ -503,14 +508,10 @@ def _canonical_authority_observation(
             evidence_identities=evidence,
         )
     try:
-        canonical_remote = str(snapshot.get("canonical_remote") or "").strip()
-        decision = evaluate_rehydrated_durable_standing_grant(
+            decision = evaluate_rehydrated_durable_standing_grant(
             requested_owner_id=str(snapshot.get("owner_id") or ""),
             requested_coordinator_id=str(snapshot.get("coordinator_id") or ""),
-            repository=RepositoryIdentity(
-                repository_id=f"{request.repository_owner}/{request.repository_name}",
-                canonical_remote=canonical_remote,
-            ),
+            repository=authority_repository,
             goal_id=goal_id,
             action=action,
             requested_at=moment,
