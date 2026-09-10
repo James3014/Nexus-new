@@ -4564,17 +4564,7 @@ class UnifiedMCPGateway:
             projection = self.service.rehydrate_task_continuation(task_id, state.get("attempt_id"))
         except Exception as exc:
             return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_CONTINUATION_INVALID", str(exc), task_id=task_id)
-        try:
-            binding_reader = getattr(self.service, "project_entry_authority_binding", None)
-            authority_binding = (
-                binding_reader(task_id, repository=repository, issue_number=raw_issue)
-                if callable(binding_reader)
-                else None
-            )
-        except Exception as exc:
-            return self._project_entry_blocker(
-                repository, raw_issue, "PROJECT_ENTRY_AUTHORITY_BINDING_INVALID", str(exc), task_id=task_id
-            )
+        authority_binding = projection.get("project_entry_authority_binding") if isinstance(projection, Mapping) else None
         if authority_binding is not None:
             readiness_args.update({
                 "task_campaign_goal_identity": authority_binding["goal_id"],

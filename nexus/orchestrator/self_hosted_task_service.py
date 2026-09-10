@@ -703,8 +703,13 @@ def _validate_project_entry_authority_binding(
     if not isinstance(raw, Mapping):
         raise ValueError("PROJECT_ENTRY_AUTHORITY_BINDING_INVALID")
     required = ("repository", "issue_number", "goal_id", "coordination_scope_id", "canonical_remote", "intended_action_family")
+    allowed = set(required) | {"binding_hash"}
+    if set(raw) - allowed:
+        raise ValueError("PROJECT_ENTRY_AUTHORITY_BINDING_UNKNOWN_FIELD")
     if any(key not in raw for key in required):
         raise ValueError("PROJECT_ENTRY_AUTHORITY_BINDING_INCOMPLETE")
+    if type(raw["issue_number"]) is not int or raw["issue_number"] <= 0:
+        raise ValueError("PROJECT_ENTRY_AUTHORITY_ISSUE_INVALID")
     try:
         action = AutonomyActionClass(str(raw["intended_action_family"]))
     except ValueError as exc:
@@ -713,6 +718,8 @@ def _validate_project_entry_authority_binding(
         raise ValueError("PROJECT_ENTRY_AUTHORITY_REPOSITORY_MISMATCH")
     if issue_number is not None and raw["issue_number"] != issue_number:
         raise ValueError("PROJECT_ENTRY_AUTHORITY_ISSUE_MISMATCH")
+    if str(raw["canonical_remote"]) != "https://github.com/James3014/Nexus-new.git":
+        raise ValueError("PROJECT_ENTRY_AUTHORITY_REMOTE_MISMATCH")
     values = {
         "repository": str(raw["repository"]),
         "issue_number": str(raw["issue_number"]),
@@ -2426,13 +2433,18 @@ class SelfHostedTaskService:
         persisted_request = state.get("request")
         if isinstance(persisted_request, Mapping):
             try:
-                _validate_project_entry_authority_binding(persisted_request)
+                raw_binding = _validate_project_entry_authority_binding(persisted_request)
                 persisted_hash = str(state.get("action_request_hash") or "")
+                if raw_binding is not None and not persisted_hash:
+                    raise ValueError("PROJECT_ENTRY_REQUEST_HASH_MISSING")
                 if persisted_hash:
                     if "action" in persisted_request or "bound_action_request" in persisted_request:
-                        _, envelope = _validated_action_request(persisted_request)
+                        effective_request, envelope = _validated_action_request(persisted_request)
                         if not isinstance(envelope, Mapping) or persisted_hash != str(envelope.get("request_hash") or ""):
                             raise ValueError("PROJECT_ENTRY_REQUEST_HASH_MISMATCH")
+                        effective_binding = _validate_project_entry_authority_binding(effective_request)
+                        if effective_binding != raw_binding:
+                            raise ValueError("PROJECT_ENTRY_AUTHORITY_BINDING_DUPLICATE_MISMATCH")
                     else:
                         hash_input = dict(persisted_request)
                         hash_input.pop("action_request_hash", None)
@@ -2476,7 +2488,12 @@ class SelfHostedTaskService:
             task_action_envelope=task_action,
             requested_attempt_id=attempt_id,
         )
-        return projection.to_dict()
+        result = projection.to_dict()
+        if isinstance(persisted_request, Mapping):
+            binding = _validate_project_entry_authority_binding(persisted_request)
+            if binding is not None:
+                result["project_entry_authority_binding"] = binding
+        return result
 
     @classmethod
     def rehydrate_task_continuation_snapshot(
