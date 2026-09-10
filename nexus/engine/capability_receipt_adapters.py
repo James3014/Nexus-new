@@ -180,7 +180,7 @@ def _fail_closed_ref(payload: dict[str, Any], key: str, ref: str) -> list[str]:
 
 
 def _gate_verifier_ok(payload: dict[str, Any]) -> bool:
-    """Claim/delivery/artifact/mempalace: require verifier artifact + pass status + source_hash."""
+    """Claim/delivery/artifact/mempalace and verified contribution: require verifier artifact + pass status + source_hash."""
     status = str(
         payload.get("verifier_status")
         or payload.get("status")
@@ -193,6 +193,9 @@ def _gate_verifier_ok(payload: dict[str, Any]) -> bool:
         or ""
     ).strip()
     source = str(payload.get("source_hash") or payload.get("verifier_source_hash") or "").strip()
+    v_source = str(payload.get("verifier_source_hash") or "").strip()
+    payload_source = str(payload.get("source_hash") or "").strip()
+
     if status in {"FAIL", "FAILED", "ERROR", "BLOCKED"}:
         return False
     if payload.get("gate_passed") is False:
@@ -203,7 +206,19 @@ def _gate_verifier_ok(payload: dict[str, Any]) -> bool:
         return False
     if status and status not in {"PASS", "PASSED", "OK", "VERIFIED", "SUCCESS"}:
         return False
+    if payload_source and v_source and payload_source != v_source:
+        return False
+    v_task = str(payload.get("verifier_task_id") or "").strip()
+    p_task = str(payload.get("task_id") or "").strip()
+    if v_task and p_task and v_task != p_task:
+        return False
     return True
+
+
+def _verified_outcome_contributed(gate_passed: bool, claim_verified: bool, payload: dict[str, Any]) -> bool:
+    """Outcome contributed requires gate pass + claim verification + bound verifier proof."""
+    return bool(gate_passed and claim_verified and _gate_verifier_ok(payload))
+
 
 
 def _pillar_present(payload: dict[str, Any], *names: str) -> bool:
@@ -232,7 +247,7 @@ class CodeIntelReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed),
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.name,
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -290,7 +305,7 @@ class AutoreasonReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=bool(invoked and gate_passed),
-            outcome_contributed=bool(invoked and gate_passed and clean_refs),
+            outcome_contributed=_verified_outcome_contributed(bool(invoked and gate_passed and clean_refs), claim_verified, payload),
             executor_id=self.name,
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -362,7 +377,7 @@ class ASIConstraintExtractorReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.name,
             failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
         )
@@ -408,7 +423,7 @@ class DDTreeReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.name,
             failure_reason=failure_reason,
             telemetries={
@@ -439,7 +454,7 @@ class HyperReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=gate_passed,
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             selection_source=str(payload.get("hyper_selection_source") or "planner"),
             executor_id="hyper_sprint",
             failure_reason=selected_failure_reason(
@@ -583,7 +598,7 @@ class MemoryReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.name,
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -612,7 +627,7 @@ class BeliefReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.name,
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -647,7 +662,7 @@ class ResearchReceiptAdapter:
                 invoked=invoked,
                 evidence_present=bool(substantive_refs),
                 gate_passed=gate_passed,
-                outcome_contributed=bool(gate_passed and claim_verified),
+                outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
                 executor_id=self.name,
                 evidence_refs=tuple(refs),
                 failure_reason=selected_failure_reason(
@@ -670,7 +685,7 @@ class ResearchReceiptAdapter:
             invoked=invoked,
             evidence_present=bool(substantive_refs),
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.name,
             evidence_refs=tuple(refs),
             failure_reason=selected_failure_reason(
@@ -697,7 +712,7 @@ class LanceDBReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.name,
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -722,7 +737,8 @@ class SemanticSearcherReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
+
             executor_id=self.name,
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -756,7 +772,7 @@ class UltraReviewReceiptAdapter:
             invoked=invoked,
             evidence_refs=evidence_refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified and evidence_refs),
+            outcome_contributed=_verified_outcome_contributed(bool(gate_passed and evidence_refs), claim_verified, payload),
             executor_id=self.name,
             failure_reason=failure_reason,
             telemetries={
@@ -788,7 +804,7 @@ class SwarmReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.name,
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -836,7 +852,7 @@ class SwarmQuietMomentReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=non_mutating,
-            outcome_contributed=bool(non_mutating and claim_verified),
+            outcome_contributed=_verified_outcome_contributed(non_mutating, claim_verified, payload),
             executor_id=self.name,
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -863,7 +879,7 @@ class ArchitectureScoutReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.name,
             failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
         )
@@ -915,7 +931,7 @@ class ExternalDocScoutReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.name,
             failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
         )
@@ -937,7 +953,7 @@ class FormalReportReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.name,
             failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
         )
@@ -964,7 +980,7 @@ class DroneReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.name,
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -1006,7 +1022,7 @@ class NightshiftReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=recovered,
-            outcome_contributed=bool(recovered and claim_verified),
+            outcome_contributed=_verified_outcome_contributed(recovered, claim_verified, payload),
             executor_id=self.name,
             failure_reason=failure_reason,
             telemetries={
@@ -1047,7 +1063,7 @@ class RepairLoopReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and refs),
+            outcome_contributed=_verified_outcome_contributed(bool(gate_passed and refs), claim_verified, payload),
             executor_id="rlm_trace_bridge",
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -1094,7 +1110,7 @@ class GenericCapabilityReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.executor_id,
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -1136,7 +1152,7 @@ class HarnessPreflightSensorReceiptAdapter(GenericCapabilityReceiptAdapter):
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.name,
             failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
         )
@@ -1175,7 +1191,7 @@ class SemanticFailureSensorReceiptAdapter(GenericCapabilityReceiptAdapter):
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed),
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.name,
             failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
         )
@@ -1209,7 +1225,7 @@ class BddAcceptanceSkillReceiptAdapter(GenericCapabilityReceiptAdapter):
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed),
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.name,
             failure_reason=selected_failure_reason(selected=True, invoked=invoked, evidence_refs=refs, gate_passed=gate_passed),
         )
@@ -1244,7 +1260,7 @@ class MsaRouterReceiptAdapter(GenericCapabilityReceiptAdapter):
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=bool(gate_passed and claim_verified),
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id=self.executor_id,
             failure_reason=selected_failure_reason(
                 selected=True,
@@ -1283,7 +1299,7 @@ class IntentIntakeReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=True,
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id="intent_intake_classifier",
             telemetries=payload.get("telemetries", {})
         )
@@ -1308,7 +1324,7 @@ class StateTransitionReceiptAdapter:
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=gate_passed,
+            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
             executor_id="flow_state_machine",
         )
 
