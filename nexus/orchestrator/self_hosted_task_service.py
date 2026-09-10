@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import fcntl
 import hashlib
 import inspect
 import json
@@ -23,6 +22,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Iterable, Iterator, Mapping, Optional, Sequence
 from uuid import uuid4
+
+from nexus_runtime.execution_state import ExecutionStateStore
 
 from nexus.contracts.autonomy_goal import AutonomyActionClass, AutonomyGoalGrant
 from nexus.contracts.collaboration_realm import CollaborationExecutionRealm
@@ -60,7 +61,6 @@ from nexus.executors.worker_contract import (
     SUPPORTED_WORKER_PROVIDERS,
     AttemptResolutionVerdict,
     WorkerExecutionReceipt,
-    WorkerOutcome,
     resolve_attempt,
 )
 from nexus.executors.worker_registry import WorkerRegistry
@@ -89,6 +89,8 @@ from nexus.orchestrator.lifecycle_guards import (
     validate_architecture_approval,
 )
 from nexus.orchestrator.repository_contract_gate import RepositoryContractGate
+from nexus.orchestrator.runtime_retry_bridge import retry_task_via_runtime
+from nexus.orchestrator.runtime_state_bridge import RuntimeStateBridge
 from nexus.orchestrator.self_hosted_controller import SelfHostedDevelopmentController
 from nexus.orchestrator.target_integration_lifecycle import TargetIntegrationLifecycle
 from nexus.orchestrator.task_contract import (
@@ -113,63 +115,100 @@ from nexus.services.runtime_workforce_admission import (
     evaluate_runtime_workforce_admission,
 )
 
-Runner = Callable[[ArchitectTaskContract, Mapping[str, Any], Callable[[str, dict[str, Any]], None]], dict[str, Any]]
-TERMINAL_STATUSES = frozenset({
-    "FINAL_BLOCK", "RETAINED_FOR_REVIEW", "REJECTED", "SUPERSEDED",
-    "INTEGRATED", "INTEGRATION_FAILED", "CANCELLED", "REHEARSAL_VERIFIED",
-    "DIRECT_COMPLETED", "DIRECT_RECONCILE_REQUIRED", "INTEGRATED_AND_CLEANED",
-})
-PENDING_CANDIDATE_STATUSES = frozenset({
-    "PENDING_HUMAN_APPROVAL", "APPROVED", "APPROVAL_INVALIDATED", "INTEGRATING",
-})
-_LEGACY_V1_NEGATIVE_OMISSION_SET = frozenset({
-    "candidate_status",
-    "promotion_packet",
-    "integration_authorization",
-    "integration_receipt",
-    "promotion_receipt",
-    "candidate_created",
-    "candidate_commit_created",
-    "authority_change_required",
-})
-_PROJECT_ENTRY_AUTHORITY_HINTS = frozenset({
-    "authority_goal_id", "authority_coordination_scope_id", "standing_grant_id",
-    "autonomy_goal_id", "autonomy_submission_binding", "autonomy_goal_grant",
-    "governed", "governed_task", "intended_action_family", "required_action_family",
-})
-RESUMABLE_STATUSES = frozenset({
-    "WORKER_COMPLETED",
-    "WORKER_ESCALATING",
-    "CANDIDATE_CAPTURED",
-    "VERIFIED",
-})
-ACTIVE_EXECUTION_STATUSES = frozenset({
-    "ADOPTING",
-    "SUBMITTED",
-    "TARGET_LEASED",
-    "WORKER_RUNNING",
-    "CANDIDATE_COMMITTED",
-    "CANDIDATE_REF_PROTECTED",
-    "TARGET_CLEANED",
-})
-_EXTERNAL_ADOPTION_CLAIM_CEILING = (
-    "CANDIDATE_ADOPTED_PENDING_HUMAN_APPROVAL_ONLY",
+Runner = Callable[
+    [ArchitectTaskContract, Mapping[str, Any], Callable[[str, dict[str, Any]], None]],
+    dict[str, Any],
+]
+TERMINAL_STATUSES = frozenset(
+    {
+        "FINAL_BLOCK",
+        "RETAINED_FOR_REVIEW",
+        "REJECTED",
+        "SUPERSEDED",
+        "INTEGRATED",
+        "INTEGRATION_FAILED",
+        "CANCELLED",
+        "REHEARSAL_VERIFIED",
+        "DIRECT_COMPLETED",
+        "DIRECT_RECONCILE_REQUIRED",
+        "INTEGRATED_AND_CLEANED",
+    }
 )
-INTEGRATION_INTERMEDIATE_STATUSES = frozenset({
-    "INTEGRATION_FAILED_PRE_APPLY",
-    "INTEGRATION_VERIFY_FAILED_AFTER_APPLY",
-    "INTEGRATED_TARGET_RETAINED",
-})
-DIRECT_EXECUTION_STATUSES = frozenset({
-    "DIRECT_INTENT_RECORDED",
-    "DIRECT_STARTED",
-    "DIRECT_APPLIED",
-    "DIRECT_VERIFIED",
-    "DIRECT_COMMITTED",
-})
-INVALID_STATE_STATUSES = frozenset({
-    "BLOCKED_INVALID_STATE",
-})
+PENDING_CANDIDATE_STATUSES = frozenset(
+    {
+        "PENDING_HUMAN_APPROVAL",
+        "APPROVED",
+        "APPROVAL_INVALIDATED",
+        "INTEGRATING",
+    }
+)
+_LEGACY_V1_NEGATIVE_OMISSION_SET = frozenset(
+    {
+        "candidate_status",
+        "promotion_packet",
+        "integration_authorization",
+        "integration_receipt",
+        "promotion_receipt",
+        "candidate_created",
+        "candidate_commit_created",
+        "authority_change_required",
+    }
+)
+_PROJECT_ENTRY_AUTHORITY_HINTS = frozenset(
+    {
+        "authority_goal_id",
+        "authority_coordination_scope_id",
+        "standing_grant_id",
+        "autonomy_goal_id",
+        "autonomy_submission_binding",
+        "autonomy_goal_grant",
+        "governed",
+        "governed_task",
+        "intended_action_family",
+        "required_action_family",
+    }
+)
+RESUMABLE_STATUSES = frozenset(
+    {
+        "WORKER_COMPLETED",
+        "WORKER_ESCALATING",
+        "CANDIDATE_CAPTURED",
+        "VERIFIED",
+    }
+)
+ACTIVE_EXECUTION_STATUSES = frozenset(
+    {
+        "ADOPTING",
+        "SUBMITTED",
+        "TARGET_LEASED",
+        "WORKER_RUNNING",
+        "CANDIDATE_COMMITTED",
+        "CANDIDATE_REF_PROTECTED",
+        "TARGET_CLEANED",
+    }
+)
+_EXTERNAL_ADOPTION_CLAIM_CEILING = ("CANDIDATE_ADOPTED_PENDING_HUMAN_APPROVAL_ONLY",)
+INTEGRATION_INTERMEDIATE_STATUSES = frozenset(
+    {
+        "INTEGRATION_FAILED_PRE_APPLY",
+        "INTEGRATION_VERIFY_FAILED_AFTER_APPLY",
+        "INTEGRATED_TARGET_RETAINED",
+    }
+)
+DIRECT_EXECUTION_STATUSES = frozenset(
+    {
+        "DIRECT_INTENT_RECORDED",
+        "DIRECT_STARTED",
+        "DIRECT_APPLIED",
+        "DIRECT_VERIFIED",
+        "DIRECT_COMMITTED",
+    }
+)
+INVALID_STATE_STATUSES = frozenset(
+    {
+        "BLOCKED_INVALID_STATE",
+    }
+)
 DURABLE_SELF_HOSTED_STATUSES = frozenset(
     TERMINAL_STATUSES
     | PENDING_CANDIDATE_STATUSES
@@ -178,14 +217,13 @@ DURABLE_SELF_HOSTED_STATUSES = frozenset(
     | INTEGRATION_INTERMEDIATE_STATUSES
     | DIRECT_EXECUTION_STATUSES
 )
-KNOWN_SELF_HOSTED_STATUSES = frozenset(
-    DURABLE_SELF_HOSTED_STATUSES
-    | INVALID_STATE_STATUSES
+KNOWN_SELF_HOSTED_STATUSES = frozenset(DURABLE_SELF_HOSTED_STATUSES | INVALID_STATE_STATUSES)
+RETRYABLE_TASK_STATUSES = frozenset(
+    {
+        "FINAL_BLOCK",
+        "CANCELLED",
+    }
 )
-RETRYABLE_TASK_STATUSES = frozenset({
-    "FINAL_BLOCK",
-    "CANCELLED",
-})
 
 
 def _temporary_state_roots() -> tuple[Path, ...]:
@@ -1309,21 +1347,23 @@ def resolve_execution_lane(
 
 
 class SelfHostedTaskService:
-    _CUSTOM_RUNNER_FORBIDDEN_EVIDENCE_FIELDS = frozenset({
-        "admission_binding",
-        "canonical_dispatch_envelope",
-        "execution",
-        "executions",
-        "execution_outcome",
-        "verified_receipt",
-        "verified_receipt_hash",
-        "worker_preflight",
-        "workforce_admission",
-        "workforce_aggregate_binding_hash",
-        "workforce_binding_hash",
-        "workforce_dispatch",
-        "workforce_policy_hash",
-    })
+    _CUSTOM_RUNNER_FORBIDDEN_EVIDENCE_FIELDS = frozenset(
+        {
+            "admission_binding",
+            "canonical_dispatch_envelope",
+            "execution",
+            "executions",
+            "execution_outcome",
+            "verified_receipt",
+            "verified_receipt_hash",
+            "worker_preflight",
+            "workforce_admission",
+            "workforce_aggregate_binding_hash",
+            "workforce_binding_hash",
+            "workforce_dispatch",
+            "workforce_policy_hash",
+        }
+    )
 
     @staticmethod
     def canonical_state_dir() -> Path:
@@ -1369,11 +1409,19 @@ class SelfHostedTaskService:
         self.stale_after_seconds = stale_after_seconds
         self.worker_registry = worker_registry or WorkerRegistry.default()
         self._threads: dict[str, threading.Thread] = {}
+        self._runtime_state_bridge = RuntimeStateBridge(
+            self.state_dir,
+            validator=lambda task_id, payload, path: self._validate_state_payload(
+                task_id, payload, path
+            ),
+            error_receipt=self._state_error_receipt,
+            before_write=self._normalize_state_write,
+        )
         if auto_reconcile:
             self.reconcile_tasks()
 
     def _state_path(self, task_id: str) -> Path:
-        return self.state_dir / f"{task_id}.json"
+        return self._runtime_state_bridge.store.state_path(task_id)
 
     @classmethod
     def _bound_custom_runner_values(cls, values: Mapping[str, Any]) -> dict[str, Any]:
@@ -1399,10 +1447,7 @@ class SelfHostedTaskService:
         return self._archive_root() / f"{task_id}.json"
 
     def _archive_state_candidates(self, task_id: str) -> list[Path]:
-        root = self._archive_root()
-        candidates = [self._archive_state_path(task_id)]
-        candidates.extend(sorted(root.glob(f"{task_id}--attempt-*.json")) if root.exists() else [])
-        return [path for path in candidates if path.exists()]
+        return self._runtime_state_bridge.store.archive_candidates(task_id)
 
     @staticmethod
     def _candidate_commit(state: Mapping[str, Any]) -> Optional[str]:
@@ -1862,51 +1907,55 @@ class SelfHostedTaskService:
         )
 
     @classmethod
-    def _load_state_path(cls, path: Path, task_id: str) -> Optional[dict[str, Any]]:
-        try:
-            payload = path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return None
-        except OSError as exc:
-            return cls._invalid_state_status(
-                task_id,
-                code="STATE_READ_FAILED",
-                detail=f"state file could not be read: {type(exc).__name__}",
-                source_path=path,
-            )
-        try:
-            decoded = json.loads(payload)
-        except json.JSONDecodeError as exc:
+    def _state_error_receipt(cls, task_id: str, path: Path, error: BaseException) -> dict[str, Any]:
+        if isinstance(error, json.JSONDecodeError):
             return cls._invalid_state_status(
                 task_id,
                 code="STATE_JSON_INVALID",
-                detail=f"state JSON is invalid at line {exc.lineno} column {exc.colno}",
+                detail=f"state JSON is invalid at line {error.lineno} column {error.colno}",
                 source_path=path,
             )
-        if not isinstance(decoded, Mapping):
+        if isinstance(error, ValueError) and str(error) == "state JSON must decode to an object":
             return cls._invalid_state_status(
-                task_id,
-                code="STATE_NOT_OBJECT",
-                detail="state JSON must decode to an object",
-                source_path=path,
+                task_id, code="STATE_NOT_OBJECT", detail=str(error), source_path=path
             )
+        return cls._invalid_state_status(
+            task_id,
+            code="STATE_READ_FAILED",
+            detail=f"state file could not be read: {type(error).__name__}",
+            source_path=path,
+        )
 
-        state = dict(decoded)
-        state_task_id = state.get("task_id")
-        status = state.get("status")
-        if not isinstance(state_task_id, str) or state_task_id != task_id:
+    @classmethod
+    def _validate_state_payload(
+        cls, task_id: str, payload: Mapping[str, Any], source_path: Path
+    ) -> dict[str, Any]:
+        """Validate an already decoded durable state payload for the runtime store."""
+        if not isinstance(payload, Mapping):
+            return cls._state_error_receipt(
+                task_id, source_path, ValueError("state JSON must decode to an object")
+            )
+        state = dict(payload)
+        if not isinstance(state.get("task_id"), str) or state.get("task_id") != task_id:
             return cls._invalid_state_status(
                 task_id,
                 code="STATE_FIELD_INVALID",
                 detail="state task_id is missing or does not match its filename",
-                source_path=path,
+                source_path=source_path,
             )
-        if not isinstance(status, str) or not status.strip() or status not in DURABLE_SELF_HOSTED_STATUSES:
+        status = state.get("status")
+        if (
+            not isinstance(status, str)
+            or not status.strip()
+            or status not in DURABLE_SELF_HOSTED_STATUSES
+        ):
             return cls._invalid_state_status(
                 task_id,
                 code="STATE_FIELD_INVALID",
-                detail=f"state status is invalid or unknown: {status!r}" if isinstance(status, str) and status.strip() else "state status must be a non-empty string",
-                source_path=path,
+                detail=f"state status is invalid or unknown: {status!r}"
+                if isinstance(status, str) and status.strip()
+                else "state status must be a non-empty string",
+                source_path=source_path,
             )
         for field in ("attempts", "executions"):
             value = state.get(field)
@@ -1917,7 +1966,7 @@ class SelfHostedTaskService:
                     task_id,
                     code="STATE_FIELD_INVALID",
                     detail=f"state {field} must be a list of objects",
-                    source_path=path,
+                    source_path=source_path,
                 )
         object_fields = (
             "action",
@@ -1928,69 +1977,55 @@ class SelfHostedTaskService:
             "request",
             "verified_receipt",
         )
-        invalid_object_fields = [
+        invalid = [
             field
             for field in object_fields
             if field in state and state[field] is not None and not isinstance(state[field], Mapping)
         ]
-        if invalid_object_fields:
-            field = invalid_object_fields[0]
-            approval_reasons = [
+        if invalid:
+            field = invalid[0]
+            reasons = [
                 f"malformed_source:{name}:expected_mapping"
-                for name in invalid_object_fields
+                for name in invalid
                 if name in {"promotion_packet", "verified_receipt"}
             ]
             return cls._invalid_state_status(
                 task_id,
                 code="STATE_FIELD_INVALID",
                 detail=f"state {field} must be an object",
-                source_path=path,
-                approval_requirements_reasons=approval_reasons,
+                source_path=source_path,
+                approval_requirements_reasons=reasons,
             )
         return cls._with_task_action(state)
 
-    def _latest_archived_state(self, task_id: str) -> tuple[Optional[Path], Optional[dict[str, Any]]]:
-        latest_path: Optional[Path] = None
-        latest_state: Optional[dict[str, Any]] = None
-        latest_key: tuple[str, int] = ("", -1)
-        for path in self._archive_state_candidates(task_id):
-            state = self._load_state_path(path, task_id)
-            if state is None:
-                continue
-            key = (str(state.get("updated_at") or ""), path.stat().st_mtime_ns)
-            if latest_state is None or key > latest_key:
-                latest_path, latest_state, latest_key = path, state, key
-        return latest_path, latest_state
+    @classmethod
+    def _load_state_path(cls, path: Path, task_id: str) -> Optional[dict[str, Any]]:
+        return ExecutionStateStore(
+            path.parent,
+            validator=cls._validate_state_payload,
+            error_receipt=cls._state_error_receipt,
+            validate_writes=False,
+        ).load_path(path, task_id)
+
+    def _latest_archived_state(
+        self, task_id: str
+    ) -> tuple[Optional[Path], Optional[dict[str, Any]]]:
+        return self._runtime_state_bridge.store.latest_archive(task_id)
 
     def _lock_path(self) -> Path:
         return self.state_dir / ".state.lock"
 
     @contextmanager
     def _state_lock(self) -> Iterator[None]:
-        self.state_dir.mkdir(parents=True, exist_ok=True)
-        with self._lock_path().open("a+", encoding="utf-8") as handle:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        with self._runtime_state_bridge.store.lock():
+            yield
 
     def _write_state_locked(self, task_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        return self._runtime_state_bridge.write(task_id, state, already_locked=True)
+
+    def _normalize_state_write(self, task_id: str, state: Mapping[str, Any]) -> Mapping[str, Any]:
         normalized = _jsonable(state)
         normalized["task_action"] = self._task_action_envelope(normalized)
-        destination = self._state_path(task_id)
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=self.state_dir,
-            prefix=f".{task_id}.",
-            suffix=".tmp",
-            delete=False,
-        ) as handle:
-            json.dump(normalized, handle, sort_keys=True, indent=2)
-            handle.write("\n")
-            temporary = Path(handle.name)
-        temporary.replace(destination)
         return normalized
 
     def _write_state(self, task_id: str, state: dict[str, Any]) -> dict[str, Any]:
@@ -2027,11 +2062,7 @@ class SelfHostedTaskService:
         direct read observes either the previous complete JSON or the next
         complete JSON; a concurrent disappearance is treated as absent.
         """
-        state = self._load_state_path(self._state_path(task_id), task_id)
-        if state is not None:
-            return state
-        _, archived = self._latest_archived_state(task_id)
-        return archived
+        return self._runtime_state_bridge.read(task_id)
 
     def record_operator_outcome(
         self,
@@ -2264,14 +2295,11 @@ class SelfHostedTaskService:
                 raise RuntimeError("archived task receipt disappeared before retry")
             return self._write_state_locked(task_id, state)
 
-    def _mutate_state(self, task_id: str, mutator: Callable[[dict[str, Any]], None]) -> Optional[dict[str, Any]]:
+    def _mutate_state(
+        self, task_id: str, mutator: Callable[[dict[str, Any]], None]
+    ) -> Optional[dict[str, Any]]:
         with self._state_lock():
-            path = self._state_path(task_id)
-            if not path.exists():
-                return None
-            state = json.loads(path.read_text(encoding="utf-8"))
-            mutator(state)
-            return self._write_state_locked(task_id, state)
+            return self._runtime_state_bridge.mutate(task_id, mutator, already_locked=True)
 
     # Issue #129: the claim is deliberately a subrecord of the existing task
     # receipt.  The state lock above is the sole serialization point.
@@ -3567,374 +3595,31 @@ class SelfHostedTaskService:
         task_id: str,
         attempt_id: str,
     ) -> dict[str, Any]:
-        state = self._read_state(task_id) or {}
-        deadline = _task_deadline(contract, state.get("submitted_at"))
-        if deadline is not None and time.time() >= deadline:
-            raise RuntimeError("WALL_TIME_BUDGET_EXHAUSTED")
-        status = str(state.get("status"))
-        fresh_submission = status == "SUBMITTED"
-        dispatch_binding = validate_workforce_dispatch_binding(
-            request,
-            require_binding=_tracked_dispatch_required(request, state),
+        from nexus.orchestrator.runtime_coordination_bridge import RuntimeCoordinationBridge
+
+        return RuntimeCoordinationBridge(self).execute(
+            task_id,
+            attempt_id,
+            contract=contract,
+            request=request,
+            update=update,
         )
-        self._assert_persisted_workforce_dispatch(state, request, dispatch_binding)
-        self._revalidate_tracked_dispatch_task_card(
+
+    def _run_default(self, contract, request, update):
+        return self._run_default_resumable(
             contract,
             request,
-            state,
-            dispatch_binding,
+            update,
+            task_id=contract.task_id,
+            attempt_id=str((self._read_state(contract.task_id) or {}).get("attempt_id", "")),
         )
+
+    def _finalize_runtime_candidate(
+        self, contract, request, lease, state, attempts, update, *, execution, status
+    ):
+        task_id = contract.task_id
         manager = WorktreeManager(root_dir=contract.target_worktree_root)
         controller = SelfHostedDevelopmentController(worktree_manager=manager)
-        policy = self._escalation_policy(contract)
-        attempts = [
-            receipt
-            for raw in state.get("executions") or []
-            if (receipt := self._receipt_from_state(raw)) is not None
-        ]
-        maximum_attempts = int(getattr(contract, "maximum_attempts_per_task", 1) or 1)
-        if len(state.get("attempts") or ()) > maximum_attempts:
-            raise RuntimeError("ATTEMPT_BUDGET_EXHAUSTED")
-        is_fast_lane = check_fast_lane_eligible(contract, request)
-        fast_lane_values = {
-            "execution_lane": "FAST_LANE" if is_fast_lane else "STANDARD",
-            "fast_lane_eligible": is_fast_lane,
-            "maximum_provider_calls": 1 if is_fast_lane else contract.maximum_provider_calls,
-            "maximum_replans": 0 if is_fast_lane else 3,
-            "fallback_disabled": is_fast_lane,
-        }
-
-        if status == "SUBMITTED":
-            self._assert_persisted_workforce_dispatch(state, request, dispatch_binding)
-            self._revalidate_tracked_dispatch_task_card(
-                contract,
-                request,
-                state,
-                dispatch_binding,
-            )
-            provider, preflight = self._select_initial_provider(
-                contract,
-                before_preflight=lambda provider: self._revalidate_provider_boundary(
-                    contract,
-                    request,
-                    task_id,
-                    dispatch_binding,
-                    active_provider=provider,
-                ),
-            )
-            worktree_started = time.perf_counter()
-            # Snapshot durable ownership immediately before leasing.  The
-            # manager uses this to distinguish passive retained evidence from
-            # a live mutation Target; missing/unknown ownership fails closed.
-            task_states = self._workspace_task_states()
-            prepare_task = controller.prepare_task
-            if "task_states" in inspect.signature(prepare_task).parameters:
-                lease = prepare_task(contract, task_states=task_states)
-            else:
-                # Keep narrow test/double compatibility; the production
-                # controller always accepts and forwards the snapshot.
-                lease = prepare_task(contract)
-            worktree_time_ms = max(0, int((time.perf_counter() - worktree_started) * 1000))
-            update(
-                "TARGET_LEASED",
-                {
-                    "lease": lease,
-                    "worker_preflight": preflight,
-                    "active_provider": provider,
-                    "telemetry": {"worktree_time_ms": worktree_time_ms},
-                    **fast_lane_values,
-                },
-            )
-            update("WORKER_RUNNING", {"active_provider": provider, **fast_lane_values})
-            state = self._read_state(task_id) or {}
-            status = "WORKER_RUNNING"
-        elif status == "WORKER_ESCALATING":
-            if is_fast_lane:
-                raise RuntimeError("Fast Lane escalation is forbidden")
-            lease = self._lease_from_state(state)
-            provider = str(state.get("next_provider") or "")
-            if not provider:
-                raise RuntimeError("escalation state is missing next_provider")
-            self._assert_persisted_workforce_dispatch(
-                state, request, dispatch_binding, active_provider=provider
-            )
-            self._revalidate_tracked_dispatch_task_card(
-                contract,
-                request,
-                state,
-                dispatch_binding,
-            )
-            lease = self._replace_failed_target(
-                manager,
-                controller,
-                contract,
-                lease,
-                task_states=self._workspace_task_states(),
-            )
-            self._revalidate_provider_boundary(
-                contract,
-                request,
-                task_id,
-                dispatch_binding,
-                active_provider=provider,
-            )
-            preflight = self.worker_registry.preflight(provider)
-            if not preflight.ready:
-                raise RuntimeError(f"worker preflight failed: {preflight.reason}")
-            update(
-                "TARGET_LEASED",
-                {
-                    "lease": lease,
-                    "worker_preflight": preflight,
-                    "active_provider": provider,
-                    "next_provider": None,
-                },
-            )
-            update("WORKER_RUNNING", {"active_provider": provider})
-            state = self._read_state(task_id) or {}
-            status = "WORKER_RUNNING"
-        elif status == "TARGET_LEASED":
-            raise RuntimeError("worker lost before execution receipt; recovery is fail-closed")
-        else:
-            lease = self._lease_from_state(state)
-
-        # Pure contract/verifier validation must complete before the first
-        # provider invocation.  This also catches unmatched shlex quotes and
-        # malformed manifests without consuming provider budget.
-        static_validator = getattr(CandidateVerifier, "validate_static_contract", None)
-        if static_validator is not None:
-            static_validator(contract, lease.target_worktree)
-
-        execution = state.get("execution")
-        while status in {"WORKER_RUNNING", "WORKER_COMPLETED"}:
-            if status == "WORKER_RUNNING":
-                def on_process_group(pgid: Optional[int]) -> None:
-                    self._set_child_pgid(task_id, attempt_id, pgid)
-
-                provider = str(
-                    state.get("active_provider")
-                    or contract.preferred_provider
-                    or "codex"
-                )
-                self._assert_persisted_workforce_dispatch(
-                    state, request, dispatch_binding, active_provider=provider
-                )
-                self._revalidate_tracked_dispatch_task_card(
-                    contract,
-                    request,
-                    state,
-                    dispatch_binding,
-                )
-                consumed_calls = sum(max(0, int(item.provider_calls or 0)) for item in attempts)
-                consumed_attempts = sum(
-                    max(0, int(item.provider_attempt_count or 0))
-                    for item in attempts
-                )
-                configured_budget = int(fast_lane_values["maximum_provider_calls"])
-                remaining_calls = configured_budget - consumed_calls
-                # Provider attempts are a distinct aggregate ceiling from
-                # provider calls.  The task-level attempt budget is the
-                # durable cap and is intentionally measured across retained
-                # execution receipts from every retry/fallback.
-                attempt_ceiling = int(
-                    getattr(contract, "maximum_attempts_per_task", 1) or 1
-                )
-                remaining_attempts = attempt_ceiling - consumed_attempts
-                if remaining_calls <= 0:
-                    raise RuntimeError("maximum_provider_calls aggregate budget exhausted")
-                if remaining_attempts <= 0:
-                    raise RuntimeError("maximum_provider_attempts aggregate budget exhausted")
-                if deadline is not None and time.time() >= deadline:
-                    raise RuntimeError("WALL_TIME_BUDGET_EXHAUSTED")
-                invoke_contract = contract
-                if remaining_calls != configured_budget and hasattr(contract, "model_copy"):
-                    invoke_contract = contract.model_copy(update={"maximum_provider_calls": remaining_calls})
-                self._revalidate_provider_boundary(
-                    contract,
-                    request,
-                    task_id,
-                    dispatch_binding,
-                    active_provider=provider,
-                )
-                worker_context = self._worker_context_materialization(
-                    request=request,
-                    state=state,
-                    task_id=task_id,
-                    attempt_id=attempt_id,
-                    fresh_submission=fresh_submission,
-                    contract=contract,
-                    lease=lease,
-                    base_prompt=self._prompt(contract),
-                    actual_provider=provider,
-                    actual_model=(
-                        str((dispatch_binding.get("canonical_dispatch_envelope") or {}).get("model", dispatch_binding["model"]))
-                        if dispatch_binding is not None
-                        else str(request.get("model") or "").strip() or None
-                    ),
-                )
-                if worker_context is not None:
-                    from nexus_runtime.task_context import build_worker_consumption_receipt
-
-                worker_prompt = worker_context[0] if worker_context is not None else self._prompt(contract)
-                self._revalidate_provider_boundary(
-                    contract,
-                    request,
-                    task_id,
-                    dispatch_binding,
-                    active_provider=provider,
-                )
-                configured_timeout = float(request.get("timeout_seconds", 900.0))
-                remaining_timeout = (
-                    max(0.0, deadline - time.time()) if deadline is not None else configured_timeout
-                )
-                if remaining_timeout <= 0:
-                    raise RuntimeError("WALL_TIME_BUDGET_EXHAUSTED")
-                execution_receipt = self.worker_registry.invoke(
-                    provider,
-                    invoke_contract,
-                    lease,
-                    prompt=worker_prompt,
-                    model=(
-                        str(
-                            (dispatch_binding.get("canonical_dispatch_envelope") or {}).get(
-                                "model", dispatch_binding["model"]
-                            )
-                        )
-                        if dispatch_binding is not None
-                        else str(request.get("model") or "").strip() or None
-                    ),
-                    timeout_seconds=min(configured_timeout, remaining_timeout),
-                    on_process_group=on_process_group,
-                )
-                if deadline is not None and time.time() >= deadline:
-                    raise RuntimeError("WALL_TIME_BUDGET_EXHAUSTED")
-                reported_calls = int(execution_receipt.provider_calls)
-                reported_attempts = execution_receipt.provider_attempt_count
-                if reported_calls < 0 or reported_calls > remaining_calls:
-                    raise RuntimeError("provider execution receipt exceeded aggregate call budget")
-                if reported_attempts is not None and (
-                    int(reported_attempts) < 0
-                    or int(reported_attempts) > remaining_attempts
-                ):
-                    raise RuntimeError("provider execution receipt exceeded aggregate attempt budget")
-                attempts.append(execution_receipt)
-                execution = execution_receipt
-                worker_consumption_receipt = None
-                if worker_context is not None:
-                    worker_consumption_receipt = build_worker_consumption_receipt(
-                        worker_context[1],
-                        prompt=worker_prompt,
-                        provider=provider,
-                        model=(
-                            str(
-                                (dispatch_binding.get("canonical_dispatch_envelope") or {}).get(
-                                    "model", dispatch_binding["model"]
-                                )
-                            )
-                            if dispatch_binding is not None
-                            else str(request.get("model") or "").strip() or None
-                        ),
-                        execution_receipt=execution_receipt,
-                    )
-                update(
-                    "WORKER_COMPLETED",
-                    {
-                        "execution": execution_receipt,
-                        "executions": attempts,
-                        "active_provider": provider,
-                        **({"worker_model_context_consumption": worker_consumption_receipt}
-                           if worker_consumption_receipt is not None else {}),
-                        **fast_lane_values,
-                    },
-                )
-                state = self._read_state(task_id) or {}
-                status = "WORKER_COMPLETED"
-                continue
-
-            latest = attempts[-1] if attempts else self._receipt_from_state(execution)
-            if latest is None:
-                raise RuntimeError("worker execution receipt is missing common outcome evidence")
-            if latest.outcome == WorkerOutcome.EXECUTION_COMPLETED.value and latest.evidence_complete:
-                break
-
-            if is_fast_lane:
-                raise RuntimeError(latest.failure_reason or f"Fast Lane provider execution failed with outcome {latest.outcome}; escalation/fallback disabled")
-
-            decision = policy.decide(attempts) if policy else None
-            if decision is not None and decision.action in ("VERIFY", "ACCEPT"):
-                break
-            if decision is None or decision.action != "ESCALATE" or not decision.next_provider:
-                raise RuntimeError(
-                    latest.failure_reason or f"worker execution did not complete: {latest.outcome}"
-                )
-            if policy is None:
-                raise RuntimeError("worker escalation policy is missing")
-            next_provider = self._next_ready_provider(
-                policy,
-                attempts,
-                before_preflight=lambda provider: self._revalidate_provider_boundary(
-                    contract,
-                    request,
-                    task_id,
-                    dispatch_binding,
-                    active_provider=provider,
-                ),
-            )
-            if not next_provider:
-                raise RuntimeError("no unattempted ready provider remains for escalation")
-            update(
-                "WORKER_ESCALATING",
-                {
-                    "executions": attempts,
-                    "next_provider": next_provider,
-                    "escalation_reason": decision.reason,
-                    "fallback_lineage": list(state.get("fallback_lineage") or []) + [{
-                        "from_provider": str(latest.provider),
-                        "to_provider": next_provider,
-                        "reason": decision.reason,
-                        "admission_binding_hash": (
-                            dispatch_binding.get("binding_hash") if dispatch_binding else None
-                        ),
-                    }],
-                },
-            )
-            self._revalidate_provider_boundary(
-                contract,
-                request,
-                task_id,
-                dispatch_binding,
-                active_provider=next_provider,
-            )
-            lease = self._replace_failed_target(
-                manager,
-                controller,
-                contract,
-                lease,
-                task_states=self._workspace_task_states(),
-            )
-            self._revalidate_provider_boundary(
-                contract,
-                request,
-                task_id,
-                dispatch_binding,
-                active_provider=next_provider,
-            )
-            preflight = self.worker_registry.preflight(next_provider)
-            if not preflight.ready:
-                raise RuntimeError(f"worker preflight failed: {preflight.reason}")
-            update(
-                "TARGET_LEASED",
-                {
-                    "lease": lease,
-                    "worker_preflight": preflight,
-                    "active_provider": next_provider,
-                    "next_provider": None,
-                },
-            )
-            update("WORKER_RUNNING", {"active_provider": next_provider})
-            state = self._read_state(task_id) or {}
-            status = "WORKER_RUNNING"
-
         if status == "WORKER_COMPLETED":
             candidate = self._capture_resumed_candidate(contract, controller, lease, state)
             update("CANDIDATE_CAPTURED", {"candidate": candidate})
@@ -3954,10 +3639,13 @@ class SelfHostedTaskService:
             raise RuntimeError("worker execution receipt is missing for attempt resolution")
         resolution = resolve_attempt(latest_execution, candidate, verified)
 
-        update("VERIFIED", {
-            "verified_receipt": verified,
-            "attempt_resolution": resolution,
-        })
+        update(
+            "VERIFIED",
+            {
+                "verified_receipt": verified,
+                "attempt_resolution": resolution,
+            },
+        )
 
         if resolution.verdict != AttemptResolutionVerdict.PROVEN.value:
             reasons = ", ".join(resolution.failure_reasons) or f"verdict is {resolution.verdict}"
@@ -3977,29 +3665,36 @@ class SelfHostedTaskService:
                 if cleanup.decision == "BLOCKED_BY_UNSAVED_CHANGES"
                 else "FINAL_BLOCK"
             )
-            update(terminal_status, {
-                "error": authority_error,
-                "candidate_status": "REHEARSAL_VERIFIED" if self.ephemeral and cleanup_ok else terminal_status,
-                "promotion_status": "NOT_CREATED",
-                "promotion_eligible": False,
-                "verification_verdict": "PROVEN" if self.ephemeral and cleanup_ok else "FAILED",
-                "verified_receipt": verified,
-                "attempt_resolution": resolution,
-                "cleanup_decision": cleanup.decision,
-                "cleanup_blocker": cleanup.blocker,
-                "cleanup_performed": cleanup.performed,
-                "cleanup_performed_at": _utc_now() if cleanup.performed else None,
-                "cleanup_eligible": cleanup.eligible,
-                "terminal_status": terminal_status,
-                "state_retention_status": "TERMINAL",
-                "archive_eligible": False,
-            })
+            update(
+                terminal_status,
+                {
+                    "error": authority_error,
+                    "candidate_status": "REHEARSAL_VERIFIED"
+                    if self.ephemeral and cleanup_ok
+                    else terminal_status,
+                    "promotion_status": "NOT_CREATED",
+                    "promotion_eligible": False,
+                    "verification_verdict": "PROVEN" if self.ephemeral and cleanup_ok else "FAILED",
+                    "verified_receipt": verified,
+                    "attempt_resolution": resolution,
+                    "cleanup_decision": cleanup.decision,
+                    "cleanup_blocker": cleanup.blocker,
+                    "cleanup_performed": cleanup.performed,
+                    "cleanup_performed_at": _utc_now() if cleanup.performed else None,
+                    "cleanup_eligible": cleanup.eligible,
+                    "terminal_status": terminal_status,
+                    "state_retention_status": "TERMINAL",
+                    "archive_eligible": False,
+                },
+            )
             return {
                 "execution": execution,
                 "candidate": candidate,
                 "verified_receipt": verified,
                 "attempt_resolution": resolution,
-                "candidate_status": "REHEARSAL_VERIFIED" if self.ephemeral and cleanup_ok else terminal_status,
+                "candidate_status": "REHEARSAL_VERIFIED"
+                if self.ephemeral and cleanup_ok
+                else terminal_status,
                 "promotion_status": "NOT_CREATED",
                 "promotion_eligible": False,
                 "cleanup_decision": cleanup.decision,
@@ -4030,14 +3725,17 @@ class SelfHostedTaskService:
             candidate_ref = manager.protect_candidate(contract, lease, packet.candidate_commit_sha)
             update("CANDIDATE_REF_PROTECTED", {"candidate_ref": candidate_ref})
         except Exception as exc:
-            update("RETAINED_FOR_REVIEW", {
-                "error": f"candidate ref protection failed: {exc}",
-                "promotion_status": "NOT_CREATED",
-                "candidate_status": "RETAINED_FOR_REVIEW",
-                "terminal_status": "RETAINED_FOR_REVIEW",
-                "state_retention_status": "ACTIVE",
-                "recovery_action": "recover_retained_candidate",
-            })
+            update(
+                "RETAINED_FOR_REVIEW",
+                {
+                    "error": f"candidate ref protection failed: {exc}",
+                    "promotion_status": "NOT_CREATED",
+                    "candidate_status": "RETAINED_FOR_REVIEW",
+                    "terminal_status": "RETAINED_FOR_REVIEW",
+                    "state_retention_status": "ACTIVE",
+                    "recovery_action": "recover_retained_candidate",
+                },
+            )
             raise RuntimeError(f"candidate ref protection failed: {exc}")
         cleanup_started = time.perf_counter()
         cleanup = manager.cleanup_terminal_target(
@@ -4049,14 +3747,17 @@ class SelfHostedTaskService:
         cleanup_time_ms = max(0, int((time.perf_counter() - cleanup_started) * 1000))
         if cleanup.decision != "REMOVED":
             raise RuntimeError(f"candidate Target cleanup failed: {cleanup.decision}")
-        update("TARGET_CLEANED", {
-            "cleanup_eligible": cleanup.eligible,
-            "cleanup_decision": cleanup.decision,
-            "cleanup_blocker": cleanup.blocker,
-            "cleanup_performed": cleanup.performed,
-            "cleanup_performed_at": _utc_now(),
-            "telemetry": {"cleanup_time_ms": cleanup_time_ms},
-        })
+        update(
+            "TARGET_CLEANED",
+            {
+                "cleanup_eligible": cleanup.eligible,
+                "cleanup_decision": cleanup.decision,
+                "cleanup_blocker": cleanup.blocker,
+                "cleanup_performed": cleanup.performed,
+                "cleanup_performed_at": _utc_now(),
+                "telemetry": {"cleanup_time_ms": cleanup_time_ms},
+            },
+        )
         result = {
             **candidate_values,
             "candidate_ref": candidate_ref,
@@ -4072,151 +3773,138 @@ class SelfHostedTaskService:
         }
         return result
 
-    def _run_default(self, contract, request, update):
-        return self._run_default_resumable(
-            contract,
-            request,
-            update,
-            task_id=contract.task_id,
-            attempt_id=str((self._read_state(contract.task_id) or {}).get("attempt_id", "")),
-        )
+    def _finalize_runtime_failure(self, task_id, attempt_id, exc):
+        current = self._read_state(task_id) or {}
+        verified_rcpt = current.get("verified_receipt") or {}
+        attempt_res = current.get("attempt_resolution") or {}
+        is_verified = bool(verified_rcpt.get("verified")) and attempt_res.get("verdict") == "PROVEN"
 
-    def _run_owned_task(self, task_id: str, attempt_id: str) -> None:
-        state = self._read_state(task_id)
-        if state is None or state.get("attempt_id") != attempt_id:
-            return
-        owner_pid = os.getpid()
-        if state.get("worker_pid") not in (None, owner_pid):
-            return
-        stop = threading.Event()
-        heartbeat = threading.Thread(target=self._heartbeat, args=(task_id, attempt_id, stop), daemon=True)
-        heartbeat.start()
-
-        def update(status: str, values: dict[str, Any]) -> None:
-            if self._custom_runner is not None:
-                values = self._bound_custom_runner_values(values)
-            self._checkpoint(task_id, status, values, attempt_id=attempt_id)
-
-        try:
-            contract = self.build_contract(state["request"])
-            if self._custom_runner is None:
-                result = self._run_default_resumable(
-                    contract,
-                    state["request"],
-                    update,
-                    task_id=task_id,
-                    attempt_id=attempt_id,
-                )
-            else:
-                result = self._custom_runner(contract, state["request"], update)
-                result = self._bound_custom_runner_values(result)
-            current = self._read_state(task_id) or {}
-            if current.get("status") not in TERMINAL_STATUSES:
-                final_status = "PENDING_HUMAN_APPROVAL" if result.get("promotion_status") == "PENDING_HUMAN_APPROVAL" else "CANDIDATE_COMMITTED"
-                self._checkpoint(task_id, final_status, result, attempt_id=attempt_id)
-        except Exception as exc:
-            self._terminate_owned_processes(task_id, exclude_pid=owner_pid)
-            current = self._read_state(task_id) or {}
-            verified_rcpt = current.get("verified_receipt") or {}
-            attempt_res = current.get("attempt_resolution") or {}
-            is_verified = bool(verified_rcpt.get("verified")) and attempt_res.get("verdict") == "PROVEN"
-
-            if is_verified:
-                self._checkpoint(
-                    task_id,
-                    "RETAINED_FOR_REVIEW",
-                    {
-                        "error": str(exc),
-                        "promotion_status": "NOT_CREATED",
-                        "terminal_status": "RETAINED_FOR_REVIEW",
-                        "state_retention_status": "ACTIVE",
-                        "recovery_action": "recover_verified_uncommitted_candidate",
-                        "cleanup_eligible": False,
-                        "cleanup_performed": False,
-                        "cleanup_decision": "PRESERVED_FOR_REVIEW",
-                    },
-                    attempt_id=attempt_id,
-                )
-            else:
-                cleanup_values: dict[str, Any] = {
-                    "cleanup_decision": "ALREADY_REMOVED",
-                    "cleanup_blocker": None,
+        if is_verified:
+            self._checkpoint(
+                task_id,
+                "RETAINED_FOR_REVIEW",
+                {
+                    "error": str(exc),
+                    "promotion_status": "NOT_CREATED",
+                    "terminal_status": "RETAINED_FOR_REVIEW",
+                    "state_retention_status": "ACTIVE",
+                    "recovery_action": "recover_verified_uncommitted_candidate",
+                    "cleanup_eligible": False,
                     "cleanup_performed": False,
-                    "terminal_status": "FINAL_BLOCK",
-                    "state_retention_status": "TERMINAL",
-                }
-                if current.get("lease"):
-                    try:
-                        contract = self.build_contract(current["request"])
-                        lease = self._lease_from_state(current)
-                        manager = WorktreeManager(root_dir=contract.target_worktree_root)
-                        cleanup = manager.cleanup_terminal_target(contract, lease)
-                        cleanup_values.update({
+                    "cleanup_decision": "PRESERVED_FOR_REVIEW",
+                },
+                attempt_id=attempt_id,
+            )
+        else:
+            cleanup_values: dict[str, Any] = {
+                "cleanup_decision": "ALREADY_REMOVED",
+                "cleanup_blocker": None,
+                "cleanup_performed": False,
+                "terminal_status": "FINAL_BLOCK",
+                "state_retention_status": "TERMINAL",
+            }
+            if current.get("lease"):
+                try:
+                    contract = self.build_contract(current["request"])
+                    lease = self._lease_from_state(current)
+                    manager = WorktreeManager(root_dir=contract.target_worktree_root)
+                    cleanup = manager.cleanup_terminal_target(contract, lease)
+                    cleanup_values.update(
+                        {
                             "cleanup_decision": cleanup.decision,
                             "cleanup_blocker": cleanup.blocker,
                             "cleanup_performed": cleanup.performed,
                             "cleanup_performed_at": _utc_now() if cleanup.performed else None,
-                        })
-                        cleanup_values["cleanup_eligible"] = cleanup.eligible
-                        if cleanup.decision == "BLOCKED_BY_UNSAVED_CHANGES":
-                            cleanup_values["terminal_status"] = "RETAINED_FOR_REVIEW"
-                            try:
-                                salvage = manager.create_salvage_snapshot(contract, lease, attempt_id)
-                                salvage_commit = str(salvage.get("salvage_commit_sha", "") or "")
-                                salvage_ref = str(salvage.get("salvage_ref", "") or "")
-                                cleanup = manager.cleanup_terminal_target(
-                                    contract, lease,
-                                    salvage_commit=salvage_commit,
-                                    salvage_ref=salvage_ref,
-                                )
-                                cleanup_values.update({
+                        }
+                    )
+                    cleanup_values["cleanup_eligible"] = cleanup.eligible
+                    if cleanup.decision == "BLOCKED_BY_UNSAVED_CHANGES":
+                        cleanup_values["terminal_status"] = "RETAINED_FOR_REVIEW"
+                        try:
+                            salvage = manager.create_salvage_snapshot(contract, lease, attempt_id)
+                            salvage_commit = str(salvage.get("salvage_commit_sha", "") or "")
+                            salvage_ref = str(salvage.get("salvage_ref", "") or "")
+                            cleanup = manager.cleanup_terminal_target(
+                                contract,
+                                lease,
+                                salvage_commit=salvage_commit,
+                                salvage_ref=salvage_ref,
+                            )
+                            cleanup_values.update(
+                                {
                                     "cleanup_decision": cleanup.decision,
                                     "cleanup_blocker": cleanup.blocker,
                                     "cleanup_performed": cleanup.performed,
-                                    "cleanup_performed_at": _utc_now() if cleanup.performed else None,
+                                    "cleanup_performed_at": _utc_now()
+                                    if cleanup.performed
+                                    else None,
                                     **salvage,
-                                })
-                                if cleanup.decision in {"REMOVED", "ALREADY_REMOVED"} and salvage_commit and salvage_ref:
-                                    try:
-                                        restore_result = manager.restore_task_branch_for_retry(
-                                            contract, lease, salvage_commit, salvage_ref,
-                                        )
-                                        cleanup_values.update({
-                                            "task_branch_restore_decision": restore_result["decision"],
-                                            "task_branch_restored_to": restore_result["restored_to"],
+                                }
+                            )
+                            if (
+                                cleanup.decision in {"REMOVED", "ALREADY_REMOVED"}
+                                and salvage_commit
+                                and salvage_ref
+                            ):
+                                try:
+                                    restore_result = manager.restore_task_branch_for_retry(
+                                        contract,
+                                        lease,
+                                        salvage_commit,
+                                        salvage_ref,
+                                    )
+                                    cleanup_values.update(
+                                        {
+                                            "task_branch_restore_decision": restore_result[
+                                                "decision"
+                                            ],
+                                            "task_branch_restored_to": restore_result[
+                                                "restored_to"
+                                            ],
                                             "task_branch_restore_performed": True,
                                             "task_branch_restore_verified": True,
                                             "terminal_status": "FINAL_BLOCK",
                                             "state_retention_status": "TERMINAL",
-                                        })
-                                    except Exception as restore_exc:
-                                        cleanup_values.update({
+                                        }
+                                    )
+                                except Exception as restore_exc:
+                                    cleanup_values.update(
+                                        {
                                             "task_branch_restore_decision": "RESTORE_BLOCKED",
                                             "task_branch_restore_performed": False,
                                             "task_branch_restore_verified": False,
                                             "terminal_status": "RETAINED_FOR_REVIEW",
-                                        })
-                            except Exception as salvage_exc:
-                                cleanup_values.update({
+                                        }
+                                    )
+                        except Exception as salvage_exc:
+                            cleanup_values.update(
+                                {
                                     "cleanup_decision": "CLEANUP_BLOCKED",
                                     "cleanup_blocker": str(salvage_exc),
                                     "cleanup_performed": False,
                                     "cleanup_eligible": False,
-                                })
-                    except Exception as cleanup_exc:
-                        cleanup_values.update({
+                                }
+                            )
+                except Exception as cleanup_exc:
+                    cleanup_values.update(
+                        {
                             "cleanup_decision": "CLEANUP_BLOCKED",
                             "cleanup_blocker": str(cleanup_exc),
-                        })
-                self._checkpoint(
-                    task_id,
-                    str(cleanup_values["terminal_status"]),
-                    {"error": str(exc), "promotion_status": "NOT_CREATED", **cleanup_values},
-                    attempt_id=attempt_id,
-                )
-        finally:
-            stop.set()
-            heartbeat.join(timeout=2.0)
+                        }
+                    )
+            self._checkpoint(
+                task_id,
+                str(cleanup_values["terminal_status"]),
+                {"error": str(exc), "promotion_status": "NOT_CREATED", **cleanup_values},
+                attempt_id=attempt_id,
+            )
+
+    def _run_owned_task(self, task_id: str, attempt_id: str) -> None:
+        from nexus.orchestrator.runtime_coordination_bridge import RuntimeCoordinationBridge
+
+        return RuntimeCoordinationBridge(self).run_owned_attempt(
+            task_id, attempt_id, self._custom_runner
+        )
 
     def _wait_for_owner(self, task_id: str, attempt_id: str, pid: int) -> bool:
         deadline = time.monotonic() + 10.0
@@ -4230,59 +3918,14 @@ class SelfHostedTaskService:
         return False
 
     def _launch_worker(self, task_id: str, attempt_id: str) -> Optional[dict[str, Any]]:
-        state = self._read_state(task_id)
-        if state is None or state.get("attempt_id") != attempt_id:
-            return state
-        if state.get("worker_pid") and self._pid_alive(int(state["worker_pid"])):
-            return state
-        if self._custom_runner is not None:
-            thread = threading.Thread(target=self._run_owned_task, args=(task_id, attempt_id), daemon=True)
-            self._threads[task_id] = thread
-            self._mutate_state(
-                task_id,
-                lambda current: current.update({
-                    "worker_pid": os.getpid(),
-                    "worker_pgid": os.getpgrp(),
-                    "worker_mode": "thread",
-                    "worker_started_at": _utc_now(),
-                    "heartbeat_at": _utc_now(),
-                }),
-            )
-            thread.start()
-            return self._read_state(task_id)
-        command = [
-            sys.executable,
-            "-m",
-            "nexus.orchestrator.self_hosted_task_worker",
-            "--state-dir",
-            str(self.state_dir),
-            "--task-id",
+        from nexus.orchestrator.runtime_coordination_bridge import RuntimeCoordinationBridge
+
+        return RuntimeCoordinationBridge(self).launch(
             task_id,
-            "--attempt-id",
             attempt_id,
-        ]
-        env = os.environ.copy()
-        source_root = str(Path(__file__).resolve().parents[2])
-        env["PYTHONPATH"] = source_root + os.pathsep + env.get("PYTHONPATH", "")
-        process = subprocess.Popen(
-            command,
-            cwd=source_root,
-            env=env,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        pgid = os.getpgid(process.pid)
-        return self._mutate_state(
-            task_id,
-            lambda current: current.update({
-                "worker_pid": process.pid,
-                "worker_pgid": pgid,
-                "worker_mode": "process",
-                "worker_started_at": _utc_now(),
-                "heartbeat_at": _utc_now(),
-            }),
+            custom_runner=self._custom_runner,
+            state_dir=str(self.state_dir),
+            source_root=str(Path(__file__).resolve().parents[2]),
         )
 
     @staticmethod
@@ -6576,222 +6219,7 @@ class SelfHostedTaskService:
         return self._launch_worker(contract.task_id, attempt_id) or self._with_task_action(state)
 
     def retry_task(self, task_id: str) -> dict[str, Any]:
-        """Retry one durable task without creating a second task or Target.
-
-        Only a terminal task whose previous Target disposition is already
-        removed/cleaned may be reactivated. Active, pending, and retained
-        tasks return a structured block so callers do not blindly resubmit.
-        """
-        state = self._read_state_snapshot(task_id)
-        if state is None:
-            raise KeyError(f"unknown task_id: {task_id}")
-        if state.get("state_valid") is False:
-            return {
-                **state,
-                "retry": {
-                    "task_id": task_id,
-                    "previous_status": state.get("status"),
-                    "previous_attempt_id": None,
-                    "decision": "BLOCKED_INVALID_STATE",
-                    "blocker": (state.get("blocker") or {}).get("code"),
-                },
-            }
-
-        status = str(state.get("status") or "UNKNOWN")
-        cleanup_decision = str(state.get("cleanup_decision") or "")
-        retry_meta = {
-            "task_id": task_id,
-            "previous_status": status,
-            "previous_attempt_id": state.get("attempt_id"),
-            "decision": None,
-            "blocker": None,
-        }
-        try:
-            retry_contract = self.build_contract(state.get("request") or {})
-            max_attempts = int(getattr(retry_contract, "maximum_attempts_per_task", 1) or 1)
-            if len(state.get("attempts") or ()) >= max_attempts:
-                retry_meta.update(decision="BLOCK", blocker="ATTEMPT_BUDGET_EXHAUSTED")
-                return {**state, "retry": retry_meta}
-        except Exception:
-            pass
-        if status == "RETAINED_FOR_REVIEW":
-            retry_meta.update(
-                decision="BLOCKED_RETAINED_REVIEW",
-                blocker="human disposition or retained-candidate recovery is required before retry; clean no-Candidate retention may retry only after formal cleanup",
-            )
-            return {**state, "retry": retry_meta}
-        if status in INTEGRATION_INTERMEDIATE_STATUSES | {"INTEGRATION_FAILED"}:
-            retry_meta.update(
-                decision="BLOCKED_INTEGRATION_FAILURE",
-                blocker="integration failure requires dedicated integration retry; generic task retry is forbidden",
-            )
-            return {**state, "retry": retry_meta}
-        if status in (TERMINAL_STATUSES - RETRYABLE_TASK_STATUSES - {"RETAINED_FOR_REVIEW", "INTEGRATION_FAILED"}):
-            retry_meta.update(
-                decision="BLOCKED_ABSORBING_STATUS",
-                blocker=f"task is in absorbing terminal status {status}; same-semantic task retry is forbidden",
-            )
-            return {**state, "retry": retry_meta}
-        if status not in RETRYABLE_TASK_STATUSES:
-            retry_meta.update(
-                decision="NO_DUPLICATE_ACTIVE_TASK",
-                blocker=f"task is {status}; wait for its existing attempt instead of resubmitting",
-            )
-            return {**state, "retry": retry_meta}
-        if cleanup_decision not in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}:
-            retry_meta.update(
-                decision="BLOCKED_TARGET_DISPOSITION",
-                blocker="previous Target disposition is not removed/cleaned",
-            )
-            return {**state, "retry": retry_meta}
-
-        request = state.get("request")
-        if not isinstance(request, Mapping):
-            retry_meta.update(
-                decision="BLOCKED_MISSING_REQUEST",
-                blocker="durable request is missing; cannot safely reconstruct the task",
-            )
-            return {**state, "retry": retry_meta}
-
-        # Validate the persisted predecessor envelope against its old
-        # attempt/card identity before minting fresh retry transport IDs.
-        predecessor_dispatch: Optional[dict[str, Any]] = None
-        demands, admission = _workforce_dispatch_inputs(request)
-        envelope_present = (
-            request.get("canonical_dispatch_envelope") is not None
-            or state.get("canonical_dispatch_envelope") is not None
-        )
-        if envelope_present:
-            for envelope_source in (request, state):
-                if (
-                    "canonical_dispatch_envelope" in envelope_source
-                    and not isinstance(envelope_source.get("canonical_dispatch_envelope"), Mapping)
-                ):
-                    return {
-                        **state,
-                        "retry": {
-                            **retry_meta,
-                            "decision": "BLOCK",
-                            "blocker": "WORKFORCE_DISPATCH_ENVELOPE_INVALID",
-                        },
-                    }
-        if envelope_present or demands is not None or admission is not None:
-            predecessor_request = dict(request)
-            predecessor_request.update(
-                task_id=str(state.get("task_id") or ""),
-                attempt_id=str(state.get("attempt_id") or ""),
-                task_card_path=str(state.get("task_card_path") or request.get("task_card_path") or ""),
-                task_card_hash=str(state.get("task_card_hash") or request.get("task_card_hash") or ""),
-                canonical_dispatch_envelope=state.get("canonical_dispatch_envelope"),
-            )
-            try:
-                predecessor_dispatch = validate_workforce_dispatch_binding(
-                    predecessor_request, require_binding=True
-                )
-            except RuntimeError as exc:
-                predecessor_dispatch = _recover_pre_provider_cli_envelope_drift(
-                    state, request, exc
-                )
-                if predecessor_dispatch is None:
-                    return {
-                        **state,
-                        "retry": {**retry_meta, "decision": "BLOCK", "blocker": str(exc)},
-                    }
-            if not isinstance(predecessor_dispatch.get("canonical_dispatch_envelope"), Mapping):
-                return {
-                    **state,
-                    "retry": {
-                        **retry_meta,
-                        "decision": "BLOCK",
-                        "blocker": "WORKFORCE_DISPATCH_ENVELOPE_MISSING",
-                    },
-                }
-        # A REPAIRABLE acceptance must rebind through the canonical Planner /
-        # Workforce admission envelope; caller-supplied worker identity is
-        # never accepted as a selector.
-        repair_dispatch: Optional[dict[str, Any]] = None
-        if str(state.get("acceptance_decision") or "") == "REPAIRABLE":
-            planner = request.get("planner_output")
-            if not isinstance(planner, Mapping):
-                return {**state, "retry": {**retry_meta, "decision": "BLOCK", "blocker": "WORKFORCE_ADMISSION_BINDING_MISSING"}}
-            try:
-                dispatch = validate_workforce_dispatch_binding({**request, "planner_output": planner}, require_binding=True)
-            except RuntimeError as exc:
-                return {**state, "retry": {**retry_meta, "decision": "BLOCK", "blocker": str(exc)}}
-            worker_id = str((dispatch or {}).get("worker_id") or "")
-            if not worker_id:
-                return {**state, "retry": {**retry_meta, "decision": "BLOCK", "blocker": "WORKFORCE_REPAIR_WORKER_MISSING"}}
-            request = dict(request)
-            request["repair_worker_id"] = worker_id
-            repair_dispatch = dict(dispatch or {})
-
-        # Generate fresh attempt transport identity first, then rebuild the
-        # canonical dispatch envelope against that identity.  The old receipt
-        # and binding remain immutable in history; a mismatch blocks before
-        # any worker invocation.
-        retry_source = dict(state)
-        retry_source["request"] = request
-        retry_request = _retry_request(retry_source)
-        rebind_dispatch = repair_dispatch or predecessor_dispatch
-        if rebind_dispatch is not None:
-            retry_request = dict(retry_request)
-            retry_request["planner_output"] = request.get("planner_output")
-            try:
-                retry_request["canonical_dispatch_envelope"] = build_canonical_dispatch_envelope(
-                    request["planner_output"],
-                    {
-                        **rebind_dispatch,
-                        "demand_id": rebind_dispatch.get("demand_id"),
-                    },
-                    task_id=str(retry_request.get("task_id") or ""),
-                    attempt_id=str(retry_request.get("attempt_id") or ""),
-                    task_card_path=str(retry_request.get("task_card_path") or ""),
-                    task_card_hash=str(retry_request.get("task_card_hash") or ""),
-                ).to_dict()
-            except (TypeError, ValueError) as exc:
-                return {**state, "retry": {**retry_meta, "decision": "BLOCK", "blocker": f"WORKFORCE_REBIND_FAILED:{exc}"}}
-            # The action transport is sealed from the bound request.  Refresh
-            # the nested envelope before submit_task rehydrates that bound
-            # request, then reseal its hash while preserving the same scope
-            # and Planner/admission identity.
-            bound_payload = retry_request.get("bound_action_request")
-            if isinstance(bound_payload, Mapping) and isinstance(
-                retry_request.get("action"), Mapping
-            ):
-                bound_request = dict(bound_payload)
-                bound_request["canonical_dispatch_envelope"] = dict(
-                    retry_request["canonical_dispatch_envelope"]
-                )
-                retry_request["bound_action_request"] = bound_request
-                refreshed_hash = canonical_request_hash(bound_request)
-                retry_action = dict(retry_request["action"])
-                retry_action["request_hash"] = refreshed_hash
-                retry_request["action"] = retry_action
-                retry_request["action_request_hash"] = refreshed_hash
-            fresh_dispatch = validate_workforce_dispatch_binding(
-                retry_request, require_binding=True
-            )
-            if not isinstance(fresh_dispatch, Mapping):
-                return {**state, "retry": {**retry_meta, "decision": "BLOCK", "blocker": "WORKFORCE_REBIND_FAILED"}}
-            retry_request.update({
-                "worker": fresh_dispatch["provider"],
-                "provider": fresh_dispatch["provider"],
-                "model": fresh_dispatch["model"],
-                "worker_id": fresh_dispatch["worker_id"],
-                "worker_order": [fresh_dispatch["provider"]],
-                "workforce_dispatch": fresh_dispatch,
-                "canonical_dispatch_envelope": fresh_dispatch.get("canonical_dispatch_envelope"),
-            })
-        result = dict(self.submit_task(retry_request))
-        retry_meta.update(
-            decision="REUSED_TASK_ID",
-            new_attempt_id=result.get("attempt_id"),
-            new_action_id=result.get("action_id"),
-            new_idempotency_key=result.get("idempotency_key"),
-            attempts=len(result.get("attempts") or ()),
-        )
-        result["retry"] = retry_meta
-        return result
+        return retry_task_via_runtime(self, task_id)
 
     @staticmethod
     def _pre_apply_rejection_evidence(
@@ -8735,8 +8163,6 @@ class SelfHostedTaskService:
             temporary.replace(manifest_path)
         return {"dry_run": dry_run, "entries": entries, "manifest_hash": manifest_hash, "manifest_path": str(manifest_path)}
 
-
-
     def get_task(self, task_id: str) -> Optional[dict[str, Any]]:
         result = self.get_task_snapshot(task_id, include_details=True)
         if result is not None:
@@ -9307,7 +8733,6 @@ class SelfHostedTaskService:
             "next_action": action_state.get("next_action"),
             "recommended_tool": action_state.get("recommended_tool"),
         }
-
 
     def approve_promotion(
         self,
