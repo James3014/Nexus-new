@@ -120,6 +120,28 @@ def _claim_request(**overrides):
     return values
 
 
+def test_find_tasks_by_repository_issue_uses_exact_persisted_binding(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("issue-842", {
+        "task_id": "issue-842", "status": "SUBMITTED",
+        "request": {"repository": "James3014/Nexus-new", "issue": 842},
+    })
+    service._write_state("issue-84", {
+        "task_id": "issue-84", "status": "SUBMITTED",
+        "request": {"repository": "James3014/Nexus-new", "issue": 84},
+    })
+    assert [item["task_id"] for item in service.find_tasks_by_repository_issue("James3014/Nexus-new", 842)] == ["issue-842"]
+
+
+def test_find_tasks_by_repository_issue_excludes_conflicting_repository_and_issue(tmp_path):
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service._write_state("repo-conflict", {"task_id": "repo-conflict", "status": "SUBMITTED", "request": {"repository": "James3014/Nexus-new", "issue": 842}, "repository": "evil/x"})
+    service._write_state("issue-conflict", {"task_id": "issue-conflict", "status": "SUBMITTED", "request": {"repository": "James3014/Nexus-new", "issue": 842}, "issue": 7})
+    service._write_state("exact-a", {"task_id": "exact-a", "status": "SUBMITTED", "request": {"repository": "James3014/Nexus-new", "issue": 842}})
+    service._write_state("exact-b", {"task_id": "exact-b", "status": "SUBMITTED", "request": {"repository": "James3014/Nexus-new", "issue": 842}})
+    assert [item["task_id"] for item in service.find_tasks_by_repository_issue("James3014/Nexus-new", 842)] == ["exact-a", "exact-b"]
+
+
 def test_work_claim_hostile_matrix_and_recovery(tmp_path):
     service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
     service._write_state("claim-task", {"task_id": "claim-task", "status": "SUBMITTED"})
