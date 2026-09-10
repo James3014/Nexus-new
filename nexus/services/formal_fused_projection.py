@@ -9,7 +9,13 @@ from __future__ import annotations
 import re
 from typing import Any, Mapping
 
-from nexus.services.verified_assist_contract import decide_fused_slice_verdict
+from nexus.services.verified_assist_contract import (
+    build_verified_assist_packet,
+    decide_fused_slice_verdict,
+    record_packet_consumption,
+    validate_verified_assist_packet_integrity,
+    verify_consumption_projection,
+)
 
 ALLOWED_LIVE_PILOT_SCHEMAS = frozenset(
     {
@@ -48,6 +54,8 @@ def _formal_invalid(reason: str, pilot: dict[str, Any], **extra: Any) -> dict[st
         "provider_receipt_verified": False,
         "verifier_receipt_verified": False,
         "packet_consumption_verified": False,
+        "serialized_projection_verified": False,
+        "measurement_eligible": False,
         "formal_blockers": blockers,
         "simulated": "demo" in reason or "synthetic" in reason or "simulated" in reason,
         "source_pilot_schema": (pilot or {}).get("schema") if isinstance(pilot, dict) else None,
@@ -155,22 +163,27 @@ def _verify_verifier_receipt(ver: Any) -> tuple[bool, list[str]]:
     return (not blockers), blockers
 
 
-def _packet_proof_ok(proof: Any, *, expected_packet_hash: str = "") -> tuple[bool, list[str]]:
+def _projection_proof_ok(
+    proof: Any,
+    *,
+    expected_packet_hash: str = "",
+    expected_packet_id: str = "",
+) -> tuple[bool, list[str], dict[str, Any]]:
     blockers: list[str] = []
     if not isinstance(proof, Mapping) or not proof:
-        return False, ["packet_consumption_proof_missing"]
-    if proof.get("consumed") is not True:
-        blockers.append("packet_not_consumed")
-    ph = str(proof.get("packet_hash") or "").strip()
-    if not _is_sha256(ph):
-        blockers.append("packet_hash_not_sha256")
+        return False, ["serialized_projection_missing"], {}
+    projection = verify_consumption_projection(proof)
+    if projection.get("projection_verified") is not True:
+        blockers.append(f"serialized_projection_invalid:{projection.get('reason')}")
+    ph = str(projection.get("packet_hash") or "").strip()
     exp = str(expected_packet_hash or "").strip()
     if exp and ph and ph != exp:
         blockers.append("packet_hash_mismatch_vap")
-    # reject {"anything": true} style
-    if "consumed" not in proof or "packet_hash" not in proof:
-        blockers.append("packet_proof_fields_incomplete")
-    return (not blockers), blockers
+    pid = str(projection.get("packet_id") or "").strip()
+    expected_pid = str(expected_packet_id or "").strip()
+    if expected_pid and pid != expected_pid:
+        blockers.append("packet_id_mismatch_vap")
+    return (not blockers), blockers, projection
 
 
 def _verify_pairs(
@@ -178,6 +191,7 @@ def _verify_pairs(
     *,
     pilot: Mapping[str, Any],
     packet_hash: str,
+    packet_id: str,
 ) -> tuple[bool, list[str], list[dict[str, Any]]]:
     blockers: list[str] = []
     if not pairs:
@@ -189,6 +203,8 @@ def _verify_pairs(
     task_ids: set[str] = set()
     normalized: list[dict[str, Any]] = []
     pilot_task = str(pilot.get("task_id") or "").strip()
+    if not pilot_task:
+        blockers.append("pilot_task_identity_missing")
     for i, p in enumerate(pairs):
         if not isinstance(p, Mapping):
             blockers.append(f"pair_not_mapping:{i}")
@@ -201,20 +217,35 @@ def _verify_pairs(
             if pid in ids:
                 blockers.append(f"pair_id_duplicate:{pid}")
             ids.append(pid)
-        tid = str(row.get("task_id") or pilot_task or "").strip()
+        pair_task_present = "task_id" in row
+        tid = str(
+            (row.get("task_id") if pair_task_present else pilot_task) or ""
+        ).strip()
         if not tid:
             blockers.append(f"pair_task_identity_missing:{i}")
+        elif pilot_task and tid != pilot_task:
+            blockers.append(f"pair_task_identity_mismatch:{i}")
         else:
             task_ids.add(tid)
         # treatment core equality
         if row.get("treatment_equal") is not True and not row.get("treatment_fingerprint"):
             blockers.append(f"pair_treatment_core_missing:{i}")
+        proof = (
+            row.get("packet_consumption_proof")
+            if "packet_consumption_proof" in row
+            else pilot.get("packet_consumption_proof")
+        )
+        projection_ok, projection_blockers, _ = _projection_proof_ok(
+            proof,
+            expected_packet_hash=packet_hash,
+            expected_packet_id=packet_id,
+        )
         if row.get("d_assist_credited"):
-            proof = row.get("packet_consumption_proof") or pilot.get("packet_consumption_proof")
-            ok, pb = _packet_proof_ok(proof, expected_packet_hash=packet_hash)
-            if not ok:
-                blockers.extend(f"pair{i}:{b}" for b in pb)
-                row["d_assist_credited"] = False
+            blockers.append(f"pair{i}:product_assist_credit_forbidden_in_projection")
+        if not projection_ok:
+            blockers.extend(f"pair{i}:{b}" for b in projection_blockers)
+        row["d_assist_credited"] = False
+        row["d_projection_consistent"] = projection_ok
         normalized.append(row)
     if len(task_ids) > 1:
         blockers.append("pair_task_identity_inconsistent")
@@ -254,27 +285,107 @@ def formal_from_pilot(pilot: dict[str, Any]) -> dict[str, Any]:
     formal_blockers.extend(ver_blockers)
 
     # Packet hash from VAP / assist packet
-    vap = pilot.get("vap_packet") if isinstance(pilot.get("vap_packet"), Mapping) else {}
-    assist = pilot.get("assist_packet") if isinstance(pilot.get("assist_packet"), Mapping) else {}
+    vap_present = "vap_packet" in pilot
+    assist_present = "assist_packet" in pilot
+    vap_raw = pilot.get("vap_packet")
+    assist_raw = pilot.get("assist_packet")
+    if vap_present and not isinstance(vap_raw, Mapping):
+        formal_blockers.append("vap_packet_not_mapping")
+    if assist_present and not isinstance(assist_raw, Mapping):
+        formal_blockers.append("assist_packet_not_mapping")
+    vap = vap_raw if isinstance(vap_raw, Mapping) else {}
+    assist = assist_raw if isinstance(assist_raw, Mapping) else {}
+    validated_packets: dict[str, dict[str, Any]] = {}
+    for source, present, packet in (
+        ("vap", vap_present, vap),
+        ("assist", assist_present, assist),
+    ):
+        if not present or not isinstance(packet, Mapping):
+            continue
+        packet_validation = validate_verified_assist_packet_integrity(packet)
+        if packet_validation.get("ok") is not True:
+            formal_blockers.append(
+                f"{source}_packet_integrity:{packet_validation.get('reason')}"
+            )
+        else:
+            validated_packets[source] = packet_validation
+    if not validated_packets:
+        formal_blockers.append("authoritative_packet_task_id_missing")
+    elif len(
+        {str(packet["task_id"]) for packet in validated_packets.values()}
+    ) > 1:
+        formal_blockers.append("packet_task_identity_inconsistent")
+    authoritative_packet_task = str(
+        next(iter(validated_packets.values()), {}).get("task_id") or ""
+    )
+    pilot_task = str(pilot.get("task_id") or "").strip()
+    if not pilot_task:
+        formal_blockers.append("pilot_task_identity_missing")
+    elif authoritative_packet_task and pilot_task != authoritative_packet_task:
+        formal_blockers.append("pilot_task_identity_mismatch_packet")
     pkt_proof = (
         pilot.get("packet_consumption_proof")
         if isinstance(pilot.get("packet_consumption_proof"), Mapping)
         else {}
     )
-    expected_packet = str(
-        pilot.get("packet_hash")
-        or vap.get("packet_hash")
-        or assist.get("packet_hash")
-        or pkt_proof.get("packet_hash")
-        or ""
-    ).strip()
-    pkt_ok, pkt_blockers = _packet_proof_ok(
+    declared_hashes = {
+        "pilot": ("packet_hash" in pilot, pilot.get("packet_hash")),
+        "vap": (vap_present, vap.get("packet_hash")),
+        "assist": (assist_present, assist.get("packet_hash")),
+        "projection": (
+            isinstance(pilot.get("packet_consumption_proof"), Mapping),
+            pkt_proof.get("packet_hash"),
+        ),
+    }
+    present_hashes: dict[str, str] = {}
+    for source, (present, raw_hash) in declared_hashes.items():
+        if not present:
+            continue
+        packet_hash = str(raw_hash or "").strip()
+        if not _is_sha256(packet_hash):
+            formal_blockers.append(f"{source}_packet_hash_not_sha256")
+        else:
+            present_hashes[source] = packet_hash
+    if not any(source in present_hashes for source in ("pilot", "vap", "assist")):
+        formal_blockers.append("declared_packet_hash_missing")
+
+    pkt_ok, pkt_blockers, pilot_projection = _projection_proof_ok(
         pilot.get("packet_consumption_proof"),
-        expected_packet_hash=expected_packet if _is_sha256(expected_packet) else "",
     )
+    projection_hash = str(pilot_projection.get("packet_hash") or "").strip()
+    for source, packet_hash in present_hashes.items():
+        if projection_hash and packet_hash != projection_hash:
+            formal_blockers.append(f"{source}_packet_hash_mismatch_projection")
+
+    declared_ids = {
+        "pilot": ("packet_id" in pilot, pilot.get("packet_id")),
+        "vap": (vap_present, vap.get("packet_id")),
+        "assist": (assist_present, assist.get("packet_id")),
+        "projection": (
+            isinstance(pilot.get("packet_consumption_proof"), Mapping),
+            pkt_proof.get("packet_id"),
+        ),
+    }
+    projection_packet_id = str(pilot_projection.get("packet_id") or "").strip()
+    if not projection_packet_id:
+        formal_blockers.append("projection_packet_id_missing")
+    for source, (present, raw_id) in declared_ids.items():
+        if not present:
+            continue
+        packet_id = str(raw_id or "").strip()
+        if not packet_id:
+            formal_blockers.append(f"{source}_packet_id_missing")
+        elif projection_packet_id and packet_id != projection_packet_id:
+            formal_blockers.append(f"{source}_packet_id_mismatch_projection")
+    if not any(
+        present and str(raw_id or "").strip()
+        for source in ("pilot", "vap", "assist")
+        for present, raw_id in (declared_ids[source],)
+    ):
+        formal_blockers.append("declared_packet_id_missing")
     # If no pilot-level packet proof, still require per-credited-pair proofs later
     if not isinstance(pilot.get("packet_consumption_proof"), Mapping):
-        formal_blockers.append("packet_consumption_proof_missing")
+        formal_blockers.append("serialized_projection_missing")
         pkt_ok = False
     else:
         formal_blockers.extend(pkt_blockers)
@@ -282,40 +393,27 @@ def formal_from_pilot(pilot: dict[str, Any]) -> dict[str, Any]:
     pairs_ok, pair_blockers, pairs = _verify_pairs(
         pairs,
         pilot=pilot,
-        packet_hash=expected_packet if _is_sha256(expected_packet) else str(
-            (pilot.get("packet_consumption_proof") or {}).get("packet_hash") or ""
-            if isinstance(pilot.get("packet_consumption_proof"), Mapping)
-            else ""
-        ),
+        packet_hash=projection_hash,
+        packet_id=projection_packet_id,
     )
     formal_blockers.extend(pair_blockers)
 
     provider_receipt_verified = prov_ok
     verifier_receipt_verified = ver_ok
-    packet_consumption_verified = pkt_ok and all(
-        (not p.get("d_assist_credited"))
-        or (
-            isinstance(p.get("packet_consumption_proof"), Mapping)
-            and p["packet_consumption_proof"].get("consumed") is True
-            and _is_sha256(p["packet_consumption_proof"].get("packet_hash"))
-        )
-        for p in pairs
+    serialized_projection_verified = pkt_ok and all(
+        p.get("d_projection_consistent") is True for p in pairs
     )
-    # Recompute packet_consumption_verified after pair credit stripping
-    if any(p.get("d_assist_credited") for p in pairs) and not packet_consumption_verified:
-        if "packet_consumption_incomplete" not in formal_blockers:
-            formal_blockers.append("packet_consumption_incomplete")
+    if not serialized_projection_verified:
+        if "serialized_projection_incomplete" not in formal_blockers:
+            formal_blockers.append("serialized_projection_incomplete")
 
     formal_eligible = bool(
         provider_receipt_verified
         and verifier_receipt_verified
-        and packet_consumption_verified
+        and serialized_projection_verified
         and pairs_ok
         and not formal_blockers
     )
-    # Never trust caller contract_path_ok
-    contract_path_ok = formal_eligible
-
     if not formal_eligible:
         return _formal_invalid(
             "formal_authenticity_failed",
@@ -323,7 +421,9 @@ def formal_from_pilot(pilot: dict[str, Any]) -> dict[str, Any]:
             formal_blockers=formal_blockers,
             provider_receipt_verified=provider_receipt_verified,
             verifier_receipt_verified=verifier_receipt_verified,
-            packet_consumption_verified=packet_consumption_verified,
+            packet_consumption_verified=False,
+            serialized_projection_verified=serialized_projection_verified,
+            measurement_eligible=False,
             formal_eligible=False,
             contract_path_ok=False,
         )
@@ -349,7 +449,7 @@ def formal_from_pilot(pilot: dict[str, Any]) -> dict[str, Any]:
     b_tok = _num_list(list(tok.get("b") or []))
     d_tok = _num_list(list(tok.get("d") or []))
     packet_unconsumed = (
-        any((not p.get("d_assist_credited")) for p in pairs if p.get("comparable"))
+        any((not p.get("d_projection_consistent")) for p in pairs if p.get("comparable"))
         if pairs
         else False
     )
@@ -380,10 +480,12 @@ def formal_from_pilot(pilot: dict[str, Any]) -> dict[str, Any]:
     decision["contract_path_ok"] = True
     decision["provider_receipt_verified"] = True
     decision["verifier_receipt_verified"] = True
-    decision["packet_consumption_verified"] = True
+    decision["packet_consumption_verified"] = False
+    decision["serialized_projection_verified"] = True
+    decision["measurement_eligible"] = True
     decision["formal_blockers"] = []
     decision["note"] = (
-        "formal projection from authenticated pilot; KEEP does not unlock public claim; "
+        "formal research projection from authenticated pilot; KEEP does not unlock public claim; "
         "UNAVAILABLE tokens yield efficiency REVISE when empty"
     )
     return decision
@@ -417,7 +519,19 @@ def efficiency_revise_demo_pilot() -> dict[str, Any]:
 
 def efficiency_revise_live_shaped_pilot() -> dict[str, Any]:
     """Allowed live schema pilot with authentic receipts → efficiency REVISE."""
-    packet_hash = "b" * 64
+    packet = build_verified_assist_packet(
+        task_id="formal-task-1",
+        target_files=("formal-target.py",),
+        bounded_diagnosis="formal projection fixture",
+    )
+    fragment = packet.compact_injection()
+    projection = record_packet_consumption(
+        packet,
+        injected_prompt_fragment=fragment,
+        expected_packet_hash=packet.packet_hash,
+        final_prompt="formal provider input\n" + fragment,
+    ).to_dict()
+    packet_hash = packet.packet_hash
     source_hash = "c" * 64
     artifact_hash = "d" * 64
     return {
@@ -433,6 +547,8 @@ def efficiency_revise_live_shaped_pilot() -> dict[str, Any]:
         "d_solve_mean": 1.0,
         "token_samples": {"b": [], "d": []},
         "packet_hash": packet_hash,
+        "packet_id": packet.packet_id,
+        "vap_packet": packet.to_dict(),
         "provider_receipt": {
             "provider": "agy",
             "model_calls": 2,
@@ -449,10 +565,7 @@ def efficiency_revise_live_shaped_pilot() -> dict[str, Any]:
             "artifact_source_bound": True,
             "bound": True,
         },
-        "packet_consumption_proof": {
-            "packet_hash": packet_hash,
-            "consumed": True,
-        },
+        "packet_consumption_proof": projection,
         "pairs": [
             {
                 "pair_id": f"p{i}",
@@ -460,11 +573,9 @@ def efficiency_revise_live_shaped_pilot() -> dict[str, Any]:
                 "comparable": True,
                 "treatment_equal": True,
                 "treatment_fingerprint": "tf-bd-equal",
-                "d_assist_credited": True,
-                "packet_consumption_proof": {
-                    "packet_hash": packet_hash,
-                    "consumed": True,
-                },
+                "d_assist_credited": False,
+                "d_projection_consistent": True,
+                "packet_consumption_proof": projection,
                 "b_infra": False,
                 "d_infra": False,
             }
