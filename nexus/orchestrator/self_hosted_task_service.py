@@ -3335,6 +3335,21 @@ class SelfHostedTaskService:
         if request.get("attempt_id") not in (None, "", attempt_id):
             raise RuntimeError("worker_context_attempt_substitution")
         planner = dict(planner_input)
+        planner_context = planner.get("context")
+        planner_codeintel = (
+            planner_context.get("codeintel")
+            if isinstance(planner_context, Mapping)
+            and isinstance(planner_context.get("codeintel"), Mapping)
+            else None
+        )
+        request_codeintel = request.get("codeintel")
+        codeintel = (
+            dict(request_codeintel)
+            if isinstance(request_codeintel, Mapping)
+            else dict(planner_codeintel)
+            if planner_codeintel is not None
+            else None
+        )
         decision_id = str(envelope.get("planner_decision_hash") or "").strip()
         plan_hash = str(envelope.get("planner_plan_hash") or "").strip()
         workspace_revision = str(
@@ -3422,9 +3437,7 @@ class SelfHostedTaskService:
             if (state.get("worker_model_context_materialization") or {}).get("status") != "STARTED":
                 raise RuntimeError("OUTCOME_UNKNOWN:worker_context_materialization_claim_readback")
             invokers = build_mainchain_capability_invokers(
-                codeintel=request.get("codeintel")
-                if isinstance(request.get("codeintel"), Mapping)
-                else None,
+                codeintel=codeintel,
                 include_postflight_gates=True,
             )
             _, bundle = materialize_selected_capability_evidence(
@@ -3447,9 +3460,7 @@ class SelfHostedTaskService:
                     "target_revision": target_revision,
                     "controller_revision": controller_revision,
                 },
-                codeintel=request.get("codeintel")
-                if isinstance(request.get("codeintel"), Mapping)
-                else None,
+                codeintel=codeintel,
             )
             bundle = dict(bundle)
             record = {

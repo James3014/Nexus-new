@@ -28,6 +28,12 @@ def _fixture(tmp_path):
             "decision_hash": "d" * 64,
             "plan_hash": "p" * 64,
             "selected_capabilities": ["memory"],
+            "context": {
+                "codeintel": {
+                    "allowed_files": ["artifacts/g5-worker-context-witness.json"],
+                    "verify_commands": ["true"],
+                }
+            },
         },
         "canonical_dispatch_envelope": envelope,
         "provider": "codex",
@@ -71,6 +77,7 @@ def _fixture(tmp_path):
 def test_worker_context_materialization_claims_persists_and_reuses_bundle(tmp_path, monkeypatch):
     service, request, state, contract, lease = _fixture(tmp_path)
     calls = {"materialize": 0}
+    forwarded_codeintel = {}
     from nexus.services.capability_evidence_bundle import build_capability_evidence_bundle
 
     bundle = build_capability_evidence_bundle(
@@ -96,12 +103,16 @@ def test_worker_context_materialization_claims_persists_and_reuses_bundle(tmp_pa
 
     monkeypatch.setattr(
         "nexus.services.mainchain_entry.build_mainchain_capability_invokers",
-        lambda **_: {"memory": lambda _: {"status": "SUCCEEDED"}},
+        lambda **kwargs: (
+            forwarded_codeintel.update(kwargs),
+            {"memory": lambda _: {"status": "SUCCEEDED"}},
+        )[1],
     )
 
     def materialize(**kwargs):
         calls["materialize"] += 1
         assert kwargs["capability_context"]["target_worktree"] == str(lease.target_worktree)
+        assert kwargs["codeintel"] == request["planner_output"]["context"]["codeintel"]
         return {}, bundle
 
     monkeypatch.setattr(
@@ -147,6 +158,78 @@ def test_worker_context_materialization_claims_persists_and_reuses_bundle(tmp_pa
     )
     assert second == first
     assert calls["materialize"] == 1
+    assert forwarded_codeintel["codeintel"] == request["planner_output"]["context"]["codeintel"]
+
+
+def test_worker_context_explicit_codeintel_precedes_planner_projection(tmp_path, monkeypatch):
+    service, request, state, contract, lease = _fixture(tmp_path)
+    explicit = {"allowed_files": ["explicit.json"], "verify_commands": ["false"]}
+    request["codeintel"] = explicit
+    captured = {}
+    monkeypatch.setattr(
+        "nexus.services.mainchain_entry.build_mainchain_capability_invokers",
+        lambda **kwargs: (captured.update(kwargs), {"memory": lambda _: {"status": "SUCCEEDED"}})[1],
+    )
+    monkeypatch.setattr(
+        "nexus.services.unified_runtime.materialize_selected_capability_evidence",
+        lambda **kwargs: (captured.update(materialize=kwargs), {"schema": "bundle"}),
+    )
+    monkeypatch.setattr(service, "_prompt", staticmethod(lambda _: "BASE_PROMPT"))
+    monkeypatch.setattr(
+        "nexus_runtime.task_context.build_worker_context_package",
+        lambda _: {"status": "PASS", "selected_capability_ids": ["memory"]},
+    )
+
+    original = deepcopy(request)
+    service._worker_context_materialization(
+        request=request,
+        state=state,
+        task_id=state["task_id"],
+        attempt_id=state["attempt_id"],
+        fresh_submission=True,
+        contract=contract,
+        lease=lease,
+        base_prompt="BASE_PROMPT",
+        actual_provider="codex",
+        actual_model="model-1",
+    )
+    assert captured["codeintel"] == explicit
+    assert captured["materialize"]["codeintel"] == explicit
+    assert request == original
+
+
+def test_worker_context_missing_codeintel_preserves_none(tmp_path, monkeypatch):
+    service, request, state, contract, lease = _fixture(tmp_path)
+    del request["planner_output"]["context"]["codeintel"]
+    captured = {}
+    monkeypatch.setattr(
+        "nexus.services.mainchain_entry.build_mainchain_capability_invokers",
+        lambda **kwargs: (captured.update(kwargs), {"memory": lambda _: {"status": "SUCCEEDED"}})[1],
+    )
+    monkeypatch.setattr(
+        "nexus.services.unified_runtime.materialize_selected_capability_evidence",
+        lambda **kwargs: (captured.update(materialize=kwargs), {"schema": "bundle"}),
+    )
+    monkeypatch.setattr(service, "_prompt", staticmethod(lambda _: "BASE_PROMPT"))
+    monkeypatch.setattr(
+        "nexus_runtime.task_context.build_worker_context_package",
+        lambda _: {"status": "PASS", "selected_capability_ids": ["memory"]},
+    )
+
+    service._worker_context_materialization(
+        request=request,
+        state=state,
+        task_id=state["task_id"],
+        attempt_id=state["attempt_id"],
+        fresh_submission=True,
+        contract=contract,
+        lease=lease,
+        base_prompt="BASE_PROMPT",
+        actual_provider="codex",
+        actual_model="model-1",
+    )
+    assert captured["codeintel"] is None
+    assert captured["materialize"]["codeintel"] is None
 
 
 @pytest.mark.parametrize(
