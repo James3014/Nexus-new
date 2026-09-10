@@ -7,6 +7,27 @@
     "requirements/canonical-learning.txt": [
       "tests/learning/test_canonical_learning_cutover.py",
       "tests/learning"
+    ],
+    "requirements/canonical-runtime.txt": [
+      "tests/test_planner_selected_capability_materialization.py",
+      "tests/services/test_online_planner_context_input.py",
+      "tests/services/test_unified_runtime.py",
+      "tests/services/test_unified_runtime_workforce_admission.py",
+      "tests/nexus/orchestrator/test_self_hosted_task_service.py",
+      "tests/nexus/orchestrator/test_worker_planner_context_input.py"
+    ],
+    "nexus/services/unified_runtime.py": [
+      "tests/test_planner_selected_capability_materialization.py",
+      "tests/services/test_online_planner_context_input.py",
+      "tests/services/test_unified_runtime.py",
+      "tests/services/test_unified_runtime_workforce_admission.py",
+      "tests/services",
+      "tests/test_services_*.py",
+      "tests/nexus/orchestrator/test_worker_planner_context_input.py"
+    ],
+    "nexus/orchestrator/self_hosted_task_service.py": [
+      "tests/nexus/orchestrator/test_self_hosted_task_service.py",
+      "tests/nexus/orchestrator/test_worker_planner_context_input.py"
     ]
   }
 }

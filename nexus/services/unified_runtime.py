@@ -16,7 +16,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Mapping, Sequence
 
 from nexus.contracts.canonical_execution import (
     CanonicalPlanningBundle,
@@ -1327,6 +1327,103 @@ def _capability_stage(
     )
 
 
+def _invoke_capability_into_results(
+    *,
+    capability_name: str,
+    invoker: Any,
+    task_id: str,
+    results: dict[str, dict[str, Any]],
+    capability_context: dict[str, Any],
+) -> None:
+    if not callable(invoker):
+        result: Any = {
+            "task_id": task_id,
+            "invoked": False,
+            "gate_passed": False,
+            "evidence_refs": [f"capability:{capability_name}:{task_id}:not_callable"],
+        }
+    else:
+        try:
+            result = invoker(capability_context)
+        except Exception as exc:
+            result = {
+                "task_id": task_id,
+                "invoked": True,
+                "gate_passed": False,
+                "evidence_refs": [f"capability:{capability_name}:{task_id}:exception"],
+                "error": f"{exc.__class__.__name__}:{exc}",
+            }
+    results[capability_name] = _capability_stage(capability_name, task_id, result)
+
+
+def materialize_selected_capability_evidence(
+    *,
+    planner_output: Mapping[str, Any],
+    selected_capabilities: Sequence[str],
+    task_id: str,
+    task_statement: str,
+    workspace_revision: str,
+    plan_hash: str,
+    planner_decision_id: str,
+    capability_invokers: Mapping[str, Callable[[Mapping[str, Any]], Mapping[str, Any]]] | None,
+    capability_context: Mapping[str, Any] | None = None,
+    codeintel: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """Execute selected preflight capabilities and seal their evidence."""
+    selected = [str(name) for name in selected_capabilities]
+    postflight_names = {
+        "acceptance_check", "artifact_gate", "bdd_acceptance_skill", "claim_gate", "delivery_gate",
+    }
+    from nexus.services.capability_registry import (
+        LOCAL_STAGE_CAPABILITIES,
+        ensure_selected_coverage_invokers,
+    )
+
+    invoker_map = ensure_selected_coverage_invokers(
+        selected, capability_invokers, codeintel=dict(codeintel or {})
+    )
+    results: dict[str, dict[str, Any]] = {}
+    context = dict(capability_context or {})
+    context.update({
+        "schema": REQUEST_SCHEMA,
+        "task_id": task_id,
+        "workspace_revision": workspace_revision,
+        "task_statement": task_statement,
+        "planner": dict(planner_output),
+        "capability_results": results,
+    })
+    selected_set = set(selected)
+    for capability_name, invoker in invoker_map.items():
+        if capability_name in LOCAL_STAGE_CAPABILITIES or capability_name in postflight_names:
+            continue
+        if capability_name not in selected_set:
+            continue
+        _invoke_capability_into_results(
+            capability_name=capability_name,
+            invoker=invoker,
+            task_id=task_id,
+            results=results,
+            capability_context=context,
+        )
+
+    from nexus.services.capability_evidence_bundle import build_capability_evidence_bundle
+
+    bundle = build_capability_evidence_bundle(
+        task_id=task_id,
+        workspace_revision=workspace_revision,
+        task_statement=task_statement,
+        plan_payload=dict(planner_output),
+        plan_hash=plan_hash,
+        planner_decision_id=planner_decision_id,
+        capability_results=results,
+        selected_capabilities=selected,
+        source_hash=hashlib.sha256(f"{workspace_revision}:{task_statement}".encode("utf-8")).hexdigest(),
+    )
+    # The existing caller owns the structured seal-failure receipt path.  This
+    # producer returns the canonical bundle without replacing that contract.
+    return results, bundle
+
+
 @dataclass(frozen=True)
 class UnifiedRuntimeRequest:
     """Inputs shared by every provider route for one task."""
@@ -1907,6 +2004,14 @@ def build_subprocess_online_invoker(
         payload = str(context.get("online_payload") or "")
         local_context_forwarded = False
         capability_context_forwarded = False
+        planner_context = context.get("planner")
+        canonical_context = (
+            context.get("schema") == REQUEST_SCHEMA
+            or (
+                isinstance(planner_context, Mapping)
+                and bool(_mapping(planner_context).get("plan_hash"))
+            )
+        )
         if include_local_context:
             local_stage = context.get("local", {})
             # P2: never dump raw local_outputs (patch/CoT/private reasoning) into Online.
@@ -1950,7 +2055,7 @@ def build_subprocess_online_invoker(
                     )
                     local_context_forwarded = True
             capability_results = context.get("capability_results", {})
-            if capability_results:
+            if capability_results and not canonical_context:
                 compressed = bool(context.get("capability_context_compressed"))
                 # Compressed path: evidence summary only. Uncompressed: capability
                 # stage receipts (status/refs/task_id), not private Local CoT fields.
@@ -1968,6 +2073,55 @@ def build_subprocess_online_invoker(
                 )
                 capability_context_forwarded = True
         stdin = f"{prompt}\n\n[PAYLOAD]\n{payload}" if payload else prompt
+
+        # Canonical Planner contexts must carry the shared runtime package all
+        # the way to the final provider input.  This is deliberately inserted
+        # after every existing Local/capability append above.
+        if canonical_context and context.get("capability_evidence_bundle") is None:
+            return normalize_online_invoker_payload(
+                provider=spec.provider, task_id=task_id, invoked=False,
+                output_delivered=False, gate_passed=False, provider_call_count=0,
+                response="", raw_response="", usage={},
+                error="canonical_runtime_context_bundle_missing",
+                evidence_refs=[f"online:{spec.provider}:{task_id}:context_bundle_missing"],
+                transport=TRANSPORT_REGISTERED_CLI,
+                selection_source=SELECTION_EXPLICIT_REQUEST,
+                extra={"live_provider_claim": False},
+            )
+        context_package = None
+        if context.get("capability_evidence_bundle") is not None:
+            try:
+                from nexus_runtime.task_context import (
+                    append_model_context_to_prompt,
+                    build_online_consumption_receipt,
+                    build_online_context_package,
+                )
+
+                package = build_online_context_package(context)
+                context_package = package
+                stdin = append_model_context_to_prompt(stdin, package)
+            except ModuleNotFoundError:
+                return normalize_online_invoker_payload(
+                    provider=spec.provider, task_id=task_id, invoked=False,
+                    output_delivered=False, gate_passed=False,
+                    provider_call_count=0, response="", raw_response="", usage={},
+                    error="canonical_runtime_dependency_missing",
+                    evidence_refs=[f"online:{spec.provider}:{task_id}:context_package_dependency_missing"],
+                    transport=TRANSPORT_REGISTERED_CLI,
+                    selection_source=SELECTION_EXPLICIT_REQUEST,
+                    extra={"live_provider_claim": False},
+                )
+            except ValueError as exc:
+                return normalize_online_invoker_payload(
+                    provider=spec.provider, task_id=task_id, invoked=False,
+                    output_delivered=False, gate_passed=False,
+                    provider_call_count=0, response="", raw_response="", usage={},
+                    error=f"canonical_runtime_context_package_invalid:{exc}",
+                    evidence_refs=[f"online:{spec.provider}:{task_id}:context_package_invalid"],
+                    transport=TRANSPORT_REGISTERED_CLI,
+                    selection_source=SELECTION_EXPLICIT_REQUEST,
+                    extra={"live_provider_claim": False},
+                )
 
         meta = ONLINE_CLI_SPEC_REGISTRY.get(spec.provider, {})
         print_flag = str(meta.get("print_flag") or "").strip()
@@ -2065,6 +2219,17 @@ def build_subprocess_online_invoker(
         cwd_hash = hashlib.sha256(cwd_str.encode("utf-8")).hexdigest()
         input_sha256 = hashlib.sha256(stdin.encode("utf-8")).hexdigest()
 
+        def attach_context_receipt(payload: dict[str, Any]) -> dict[str, Any]:
+            if context_package is None:
+                return payload
+            payload["model_context_consumption"] = build_online_consumption_receipt(
+                context_package,
+                payload,
+                physical_transport=runner is subprocess.run,
+                expected_provider_input_sha256=input_sha256,
+            )
+            return payload
+
         proc_inv_id = hashlib.sha256(
             json.dumps([task_id, attempt_id, spec.provider, cmd_fp, input_sha256, cwd_hash]).encode("utf-8")
         ).hexdigest()
@@ -2110,7 +2275,7 @@ def build_subprocess_online_invoker(
         except subprocess.TimeoutExpired as exc:
             elapsed = int((time.monotonic() - start_time) * 1000)
             pe = _build_process_evidence(True, "", str(exc), None, max(0, elapsed))
-            return normalize_online_invoker_payload(
+            return attach_context_receipt(normalize_online_invoker_payload(
                 provider=spec.provider,
                 task_id=task_id,
                 invoked=True,
@@ -2125,11 +2290,11 @@ def build_subprocess_online_invoker(
                 transport=TRANSPORT_REGISTERED_CLI,
                 selection_source=SELECTION_EXPLICIT_REQUEST,
                 extra={"returncode": None, "stderr": str(exc), "process_evidence": pe},
-            )
+            ))
         except OSError as exc:
             elapsed = int((time.monotonic() - start_time) * 1000)
             pe = _build_process_evidence(False, "", str(exc), None, max(0, elapsed))
-            return normalize_online_invoker_payload(
+            return attach_context_receipt(normalize_online_invoker_payload(
                 provider=spec.provider,
                 task_id=task_id,
                 invoked=False,
@@ -2144,14 +2309,14 @@ def build_subprocess_online_invoker(
                 transport=TRANSPORT_REGISTERED_CLI,
                 selection_source=SELECTION_EXPLICIT_REQUEST,
                 extra={"returncode": None, "stderr": str(exc), "process_evidence": pe},
-            )
+            ))
         elapsed = int((time.monotonic() - start_time) * 1000)
         stdout = str(getattr(result, "stdout", "") or "")
         stderr = str(getattr(result, "stderr", "") or "")
         returncode = int(getattr(result, "returncode", 1))
         delivered = bool(stdout.strip())
         pe = _build_process_evidence(True, stdout, stderr, returncode, max(0, elapsed))
-        return normalize_online_invoker_payload(
+        return attach_context_receipt(normalize_online_invoker_payload(
             provider=spec.provider,
             task_id=task_id,
             invoked=True,
@@ -2171,7 +2336,7 @@ def build_subprocess_online_invoker(
             transport=TRANSPORT_REGISTERED_CLI,
             selection_source=SELECTION_EXPLICIT_REQUEST,
             extra={"returncode": returncode, "stderr": stderr, "process_evidence": pe},
-        )
+        ))
 
     invoke.provider = spec.provider  # type: ignore[attr-defined]
     invoke.online_invoker_provider = spec.provider  # type: ignore[attr-defined]
@@ -3348,61 +3513,18 @@ class UnifiedRuntime:
         }
         # Coverage handlers for every selected name (real / stub / explicit skip).
         # Not a product route — invoker map only.
-        from nexus.services.capability_registry import (
-            LOCAL_STAGE_CAPABILITIES,
-            ensure_selected_coverage_invokers,
-        )
+        from nexus.services.capability_registry import ensure_selected_coverage_invokers
 
         invoker_map = ensure_selected_coverage_invokers(
             list(plan.selected_capabilities),
             capability_invokers,
             codeintel=dict(request.codeintel) if isinstance(request.codeintel, Mapping) else {},
         )
-        # P2: preflight BEFORE Local/Online so both stages share one evidence baseline.
-        # Local-owned capabilities are not preflight-invoked here.
-        preflight_items = [
-            (name, inv)
-            for name, inv in invoker_map.items()
-            if name not in postflight_names
-            and name not in LOCAL_STAGE_CAPABILITIES
-            and name in plan.selected_capabilities
-        ]
         postflight_items = [
             (name, inv)
             for name, inv in invoker_map.items()
             if name in postflight_names and name in plan.selected_capabilities
         ]
-
-        def _invoke_capability(
-            capability_name: str,
-            invoker: Any,
-            capability_context: dict[str, Any],
-        ) -> None:
-            if capability_name not in plan.selected_capabilities:
-                return
-            if not callable(invoker):
-                result: Any = {
-                    "task_id": request.task_id,
-                    "invoked": False,
-                    "gate_passed": False,
-                    "evidence_refs": [f"capability:{capability_name}:{request.task_id}:not_callable"],
-                }
-            else:
-                try:
-                    result = invoker(capability_context)
-                except Exception as exc:  # fail closed in the shared receipt
-                    result = {
-                        "task_id": request.task_id,
-                        "invoked": True,
-                        "gate_passed": False,
-                        "evidence_refs": [f"capability:{capability_name}:{request.task_id}:exception"],
-                        "error": f"{exc.__class__.__name__}:{exc}",
-                    }
-            capability_results[capability_name] = _capability_stage(
-                capability_name,
-                request.task_id,
-                result,
-            )
 
         # Empty local placeholder until after shared preflight.
         local_stage = _stage("local", status="NOT_REQUESTED", reason="pending_shared_preflight")
@@ -3426,25 +3548,37 @@ class UnifiedRuntime:
                 value = getattr(request.local_request, field_name, None)
                 if value not in (None, ""):
                     capability_context[field_name] = value
-        for capability_name, invoker in preflight_items:
-            _invoke_capability(capability_name, invoker, capability_context)
-
-        # Immutable shared evidence bundle (P2) — both Local and Online must see same baseline.
-        from nexus.services.capability_evidence_bundle import build_capability_evidence_bundle
-
-        evidence_bundle = build_capability_evidence_bundle(
+        # P2: preflight BEFORE Local/Online so both stages share one evidence baseline.
+        # Local-owned and postflight capabilities remain outside this pass.
+        capability_results, evidence_bundle = materialize_selected_capability_evidence(
+            planner_output=plan_payload,
+            selected_capabilities=plan.selected_capabilities,
             task_id=request.task_id,
-            workspace_revision=request.workspace_revision,
             task_statement=request.task_statement,
-            plan_payload=plan_payload,
+            workspace_revision=request.workspace_revision,
             plan_hash=plan_hash,
             planner_decision_id=planner_decision_id,
-            capability_results=capability_results,
-            selected_capabilities=list(plan.selected_capabilities),
-            source_hash=hashlib.sha256(
-                f"{request.workspace_revision}:{request.task_statement}".encode("utf-8")
-            ).hexdigest(),
+            capability_invokers=capability_invokers,
+            capability_context=capability_context,
+            codeintel=dict(request.codeintel) if isinstance(request.codeintel, Mapping) else {},
         )
+        capability_context["capability_results"] = capability_results
+
+        def _invoke_capability(
+            capability_name: str,
+            invoker: Any,
+            invocation_context: dict[str, Any],
+        ) -> None:
+            """Preserve the postflight invocation contract after shared preflight."""
+            if capability_name not in plan.selected_capabilities:
+                return
+            _invoke_capability_into_results(
+                capability_name=capability_name,
+                invoker=invoker,
+                task_id=request.task_id,
+                results=capability_results,
+                capability_context=invocation_context,
+            )
         plan_payload = dict(plan_payload)
         from nexus.services.capability_evidence_bundle import (
             consumer_view as _evidence_consumer_view,

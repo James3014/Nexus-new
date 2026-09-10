@@ -51,6 +51,33 @@ jobs:
       - name: Install exact canonical Learning package
         run: uv pip install --system --requirement requirements/canonical-learning.txt
 
+      - name: Install exact canonical runtime package
+        run: |
+          set -euo pipefail
+          uv pip install --system --requirement requirements/canonical-runtime.txt
+          EXPECTED_RUNTIME_COMMIT="$(sed -n 's/.*@\([0-9a-f]\{40\}\).*/\1/p' requirements/canonical-runtime.txt)"
+          test -n "$EXPECTED_RUNTIME_COMMIT"
+          EXPECTED_RUNTIME_COMMIT="$EXPECTED_RUNTIME_COMMIT" python - <<'PY'
+          import importlib.metadata as metadata
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          dist = metadata.distribution("nexus-runtime")
+          direct_url = json.loads((Path(dist._path) / "direct_url.json").read_text(encoding="utf-8"))
+          commit = direct_url.get("vcs_info", {}).get("commit_id")
+          expected = os.environ["EXPECTED_RUNTIME_COMMIT"]
+          if commit != expected:
+              raise SystemExit(f"nexus-runtime commit mismatch: {commit!r} != {expected!r}")
+          import nexus_runtime
+          print(f"Python {sys.version.split()[0]}")
+          print(f"sys.executable={sys.executable}")
+          print(f"nexus-runtime commit_id={commit}")
+          print(f"nexus-runtime direct_url={Path(dist._path) / 'direct_url.json'}")
+          print(f"nexus_runtime.__file__={nexus_runtime.__file__}")
+          PY
+
       - name: Run Smoke Benchmark
         run: python scripts/ci/run_smoke_benchmark.py
         env:
