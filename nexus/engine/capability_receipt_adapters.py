@@ -45,7 +45,7 @@ def honest_telemetries_from_payload(
     has_tokens = "token_usage" in p or "tokens" in p
     has_overhead = "overhead_ms" in p
     has_costs = "provider_costs" in p
-    if not (has_wall or has_tokens or has_overhead or has_costs):
+    if not (has_wall or has_tokens or has_overhead):
         t = honest_unavailable_telemetries()
         if extras:
             t.update(extras)
@@ -1317,20 +1317,14 @@ class StateTransitionReceiptAdapter:
     name = "state_transition"
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
-        prev = payload.get("previous_state") or payload.get("source_state") or "UNKNOWN"
-        curr = payload.get("current_state") or payload.get("target_state") or "UNKNOWN"
+        prev = payload.get("previous_state", "UNKNOWN")
+        curr = payload.get("current_state", "UNKNOWN")
         reason = payload.get("transition_reason", "")
         refs = [f"from:{prev}", f"to:{curr}"]
         if reason:
             refs.append(f"reason:{reason}")
             
-        invoked = bool(
-            payload.get("source_state")
-            or payload.get("target_state")
-            or payload.get("previous_state")
-            or payload.get("current_state")
-            or refs
-        )
+        invoked = bool(payload.get("previous_state") or payload.get("current_state") or refs)
         # Unexempted flow: fails closed without explicit verifier authority exemption
         gate_passed = False
         outcome_contributed = False
@@ -1358,11 +1352,7 @@ class LocalHealReceiptAdapter:
         hr = payload.get("hybrid_route")
         
         if hr is not None:
-            from nexus.contracts.hybrid_route import (
-                HYBRID_ROUTE_DECISION_SCHEMA,
-                RouteMode,
-                validate_hybrid_route_decision,
-            )
+            from nexus.contracts.hybrid_route import validate_hybrid_route_decision, RouteMode, HYBRID_ROUTE_DECISION_SCHEMA
             
             hr_dict = dict(hr if isinstance(hr, dict) else hr.to_dict())
             if "schema" not in hr_dict:
