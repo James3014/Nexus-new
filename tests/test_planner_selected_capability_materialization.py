@@ -23,7 +23,11 @@ def _run(**overrides):
 
     invokers = overrides.pop(
         "capability_invokers",
-        {"memory": invoker("memory"), "acceptance_check": invoker("acceptance_check"), "unselected": invoker("unselected")},
+        {
+            "memory": invoker("memory"),
+            "acceptance_check": invoker("acceptance_check"),
+            "unselected": invoker("unselected"),
+        },
     )
     result = materialize_selected_capability_evidence(
         planner_output={"plan_hash": "plan-1"},
@@ -61,11 +65,23 @@ def test_reverse_and_duplicate_selection_runs_each_registry_entry_once():
 
     def memory(context):
         order.append("memory")
-        return {"task_id": context["task_id"], "invoked": True, "status": "SUCCEEDED", "gate_passed": True, "evidence_refs": ["memory"]}
+        return {
+            "task_id": context["task_id"],
+            "invoked": True,
+            "status": "SUCCEEDED",
+            "gate_passed": True,
+            "evidence_refs": ["memory"],
+        }
 
     def codeintel(context):
         order.append("codeintel")
-        return {"task_id": context["task_id"], "invoked": True, "status": "SUCCEEDED", "gate_passed": True, "evidence_refs": ["codeintel"]}
+        return {
+            "task_id": context["task_id"],
+            "invoked": True,
+            "status": "SUCCEEDED",
+            "gate_passed": True,
+            "evidence_refs": ["codeintel"],
+        }
 
     (results, bundle), calls = _run(
         selected_capabilities=["memory", "codeintel", "memory"],
@@ -116,7 +132,13 @@ def test_local_capability_is_excluded_from_preflight():
 
     def local(context):
         calls.append(context["task_id"])
-        return {"task_id": context["task_id"], "invoked": True, "status": "SUCCEEDED", "gate_passed": True, "evidence_refs": ["local"]}
+        return {
+            "task_id": context["task_id"],
+            "invoked": True,
+            "status": "SUCCEEDED",
+            "gate_passed": True,
+            "evidence_refs": ["local"],
+        }
 
     (results, bundle), _ = _run(
         selected_capabilities=["local_model_executor"],
@@ -141,9 +163,27 @@ def test_run_once_uses_shared_materialization_helper(monkeypatch):
     monkeypatch.setattr(module, "materialize_selected_capability_evidence", spy)
     receipt = module.UnifiedRuntime(planner=_Planner()).run(
         _request(),
-        online_invoker=lambda context: {"task_id": context["task_id"], "invoked": True, "status": "SUCCEEDED", "gate_passed": True, "evidence_refs": ["online"]},
-        verifier=lambda context: {"task_id": context["task_id"], "invoked": True, "status": "SUCCEEDED", "gate_passed": True, "evidence_refs": ["verifier"]},
-        learning=lambda context: {"task_id": context["task_id"], "invoked": True, "status": "SUCCEEDED", "gate_passed": True, "evidence_refs": ["learning"]},
+        online_invoker=lambda context: {
+            "task_id": context["task_id"],
+            "invoked": True,
+            "status": "SUCCEEDED",
+            "gate_passed": True,
+            "evidence_refs": ["online"],
+        },
+        verifier=lambda context: {
+            "task_id": context["task_id"],
+            "invoked": True,
+            "status": "SUCCEEDED",
+            "gate_passed": True,
+            "evidence_refs": ["verifier"],
+        },
+        learning=lambda context: {
+            "task_id": context["task_id"],
+            "invoked": True,
+            "status": "SUCCEEDED",
+            "gate_passed": True,
+            "evidence_refs": ["learning"],
+        },
     )
     assert len(calls) == 1
     assert receipt["capability_evidence_bundle"]["bundle_hash"]
@@ -154,7 +194,9 @@ def test_run_once_preserves_structured_seal_failure_receipt(monkeypatch):
     import nexus.services.unified_runtime as module
     from tests.services.test_unified_runtime import _Planner, _request
 
-    monkeypatch.setattr(bundle_module, "build_capability_evidence_bundle", lambda **_: {"tampered": True})
+    monkeypatch.setattr(
+        bundle_module, "build_capability_evidence_bundle", lambda **_: {"tampered": True}
+    )
     receipt = module.UnifiedRuntime(planner=_Planner()).run(_request())
     assert receipt["terminal_status"] == "BLOCKED"
     assert receipt["stages"][1]["status"] == "BLOCKED"

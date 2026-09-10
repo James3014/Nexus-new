@@ -45,9 +45,25 @@ def _fixture(tmp_path):
         "controller_revision": "c" * 40,
         "canonical_dispatch_envelope": envelope,
     }
-    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
     service._write_state(task_id, state)
-    contract = SimpleNamespace(controller_revision="c" * 40, target_base_revision="t" * 40, target_worktree_root=str(tmp_path), task_id=task_id, preferred_provider="codex", fallback_provider=None, provider_order=("codex",), maximum_provider_calls=1, maximum_attempts_per_task=1, maximum_provider_attempts=1, allowed_files=("x.py",), verifier_commands=("true",), goal=SimpleNamespace(what="w", why="w"))
+    contract = SimpleNamespace(
+        controller_revision="c" * 40,
+        target_base_revision="t" * 40,
+        target_worktree_root=str(tmp_path),
+        task_id=task_id,
+        preferred_provider="codex",
+        fallback_provider=None,
+        provider_order=("codex",),
+        maximum_provider_calls=1,
+        maximum_attempts_per_task=1,
+        maximum_provider_attempts=1,
+        allowed_files=("x.py",),
+        verifier_commands=("true",),
+        goal=SimpleNamespace(what="w", why="w"),
+    )
     lease = SimpleNamespace(target_worktree=str(tmp_path / "leased-target"), initial_head="t" * 40)
     return service, request, state, contract, lease
 
@@ -56,15 +72,26 @@ def test_worker_context_materialization_claims_persists_and_reuses_bundle(tmp_pa
     service, request, state, contract, lease = _fixture(tmp_path)
     calls = {"materialize": 0}
     from nexus.services.capability_evidence_bundle import build_capability_evidence_bundle
+
     bundle = build_capability_evidence_bundle(
-        task_id=state["task_id"], workspace_revision="t" * 40,
-        task_statement=request["what"], plan_payload=request["planner_output"],
-        plan_hash="p" * 64, planner_decision_id="d" * 64,
-        capability_results={"memory": {
-            "task_id": state["task_id"], "invoked": True, "gate_passed": True,
-            "status": "SUCCEEDED", "evidence_refs": ["evidence:memory"],
-            "consumer_payload": {"fields": {"summary": "UNIQUE_MATERIALIZED_PAYLOAD"}},
-        }}, selected_capabilities=["memory"], source_hash="s" * 64,
+        task_id=state["task_id"],
+        workspace_revision="t" * 40,
+        task_statement=request["what"],
+        plan_payload=request["planner_output"],
+        plan_hash="p" * 64,
+        planner_decision_id="d" * 64,
+        capability_results={
+            "memory": {
+                "task_id": state["task_id"],
+                "invoked": True,
+                "gate_passed": True,
+                "status": "SUCCEEDED",
+                "evidence_refs": ["evidence:memory"],
+                "consumer_payload": {"fields": {"summary": "UNIQUE_MATERIALIZED_PAYLOAD"}},
+            }
+        },
+        selected_capabilities=["memory"],
+        source_hash="s" * 64,
     )
 
     monkeypatch.setattr(
@@ -77,14 +104,23 @@ def test_worker_context_materialization_claims_persists_and_reuses_bundle(tmp_pa
         assert kwargs["capability_context"]["target_worktree"] == str(lease.target_worktree)
         return {}, bundle
 
-    monkeypatch.setattr("nexus.services.unified_runtime.materialize_selected_capability_evidence", materialize)
+    monkeypatch.setattr(
+        "nexus.services.unified_runtime.materialize_selected_capability_evidence", materialize
+    )
     monkeypatch.setattr(service, "_prompt", staticmethod(lambda _: "BASE_PROMPT"))
 
     original_request = deepcopy(request)
     first = service._worker_context_materialization(
-        request=request, state=state, task_id=state["task_id"], attempt_id=state["attempt_id"],
-        fresh_submission=True, contract=contract, lease=lease, base_prompt="BASE_PROMPT",
-        actual_provider="codex", actual_model="model-1",
+        request=request,
+        state=state,
+        task_id=state["task_id"],
+        attempt_id=state["attempt_id"],
+        fresh_submission=True,
+        contract=contract,
+        lease=lease,
+        base_prompt="BASE_PROMPT",
+        actual_provider="codex",
+        actual_model="model-1",
     )
     persisted = service._read_state(state["task_id"])
     assert first[0].startswith("BASE_PROMPT\n\n[NEXUS MODEL CONTEXT]\n")
@@ -98,23 +134,41 @@ def test_worker_context_materialization_claims_persists_and_reuses_bundle(tmp_pa
     assert persisted["action"] == state["action"]
 
     second = service._worker_context_materialization(
-        request=request, state=persisted, task_id=state["task_id"], attempt_id=state["attempt_id"],
-        fresh_submission=False, contract=contract, lease=lease, base_prompt="BASE_PROMPT",
-            actual_provider="codex", actual_model="model-1",
+        request=request,
+        state=persisted,
+        task_id=state["task_id"],
+        attempt_id=state["attempt_id"],
+        fresh_submission=False,
+        contract=contract,
+        lease=lease,
+        base_prompt="BASE_PROMPT",
+        actual_provider="codex",
+        actual_model="model-1",
     )
     assert second == first
     assert calls["materialize"] == 1
 
 
-@pytest.mark.parametrize("field", ["task_id", "attempt_id", "planner_plan_hash", "planner_decision_hash", "provider", "model"])
+@pytest.mark.parametrize(
+    "field",
+    ["task_id", "attempt_id", "planner_plan_hash", "planner_decision_hash", "provider", "model"],
+)
 def test_worker_context_binding_substitution_denies_before_adapter(tmp_path, monkeypatch, field):
     service, request, state, contract, lease = _fixture(tmp_path)
     calls = {"materialize": 0}
-    monkeypatch.setattr("nexus.services.mainchain_entry.build_mainchain_capability_invokers", lambda **_: {"memory": lambda _: calls.__setitem__("materialize", calls["materialize"] + 1)})
+    monkeypatch.setattr(
+        "nexus.services.mainchain_entry.build_mainchain_capability_invokers",
+        lambda **_: {
+            "memory": lambda _: calls.__setitem__("materialize", calls["materialize"] + 1)
+        },
+    )
     values = {
-        "task_id": request["task_id"], "attempt_id": request["attempt_id"],
-        "planner_plan_hash": "p" * 64, "planner_decision_hash": "d" * 64,
-        "provider": "codex", "model": "model-1",
+        "task_id": request["task_id"],
+        "attempt_id": request["attempt_id"],
+        "planner_plan_hash": "p" * 64,
+        "planner_decision_hash": "d" * 64,
+        "provider": "codex",
+        "model": "model-1",
     }
     values[field] = "wrong"
     if field in {"task_id", "attempt_id"}:
@@ -123,9 +177,16 @@ def test_worker_context_binding_substitution_denies_before_adapter(tmp_path, mon
         request["canonical_dispatch_envelope"][field] = values[field]
     with pytest.raises((ValueError, RuntimeError)):
         service._worker_context_materialization(
-            request=request, state=state, task_id=state["task_id"], attempt_id=state["attempt_id"],
-            fresh_submission=True, contract=contract, lease=lease, base_prompt="BASE_PROMPT",
-            actual_provider="codex", actual_model="model-1",
+            request=request,
+            state=state,
+            task_id=state["task_id"],
+            attempt_id=state["attempt_id"],
+            fresh_submission=True,
+            contract=contract,
+            lease=lease,
+            base_prompt="BASE_PROMPT",
+            actual_provider="codex",
+            actual_model="model-1",
         )
     assert calls["materialize"] == 0
 
@@ -142,9 +203,16 @@ def test_worker_context_started_without_completion_is_unknown_and_not_replayed(t
     service._write_state(state["task_id"], state)
     with pytest.raises(RuntimeError, match="OUTCOME_UNKNOWN"):
         service._worker_context_materialization(
-            request=request, state=state, task_id=state["task_id"], attempt_id=state["attempt_id"],
-            fresh_submission=False, contract=contract, lease=lease, base_prompt="BASE_PROMPT",
-            actual_provider="codex", actual_model="model-1",
+            request=request,
+            state=state,
+            task_id=state["task_id"],
+            attempt_id=state["attempt_id"],
+            fresh_submission=False,
+            contract=contract,
+            lease=lease,
+            base_prompt="BASE_PROMPT",
+            actual_provider="codex",
+            actual_model="model-1",
         )
 
 
@@ -163,46 +231,88 @@ def test_resumable_worker_registry_receives_real_bounded_context_and_receipt(tmp
 
     monkeypatch.setattr(
         "nexus.services.mainchain_entry.build_mainchain_capability_invokers",
-        lambda **_: {"memory": lambda context: (calls.__setitem__("adapter", calls["adapter"] + 1) or {
-            "task_id": context["task_id"], "invoked": True, "gate_passed": True,
-            "status": "SUCCEEDED", "evidence_refs": ["memory"],
-            "consumer_payload": {"result": "actual bounded memory"},
-        })},
+        lambda **_: {
+            "memory": lambda context: (
+                calls.__setitem__("adapter", calls["adapter"] + 1)
+                or {
+                    "task_id": context["task_id"],
+                    "invoked": True,
+                    "gate_passed": True,
+                    "status": "SUCCEEDED",
+                    "evidence_refs": ["memory"],
+                    "consumer_payload": {"result": "actual bounded memory"},
+                }
+            )
+        },
     )
     monkeypatch.setattr(service, "build_contract", lambda req: contract)
     monkeypatch.setattr(service, "_revalidate_tracked_dispatch_task_card", lambda *args: None)
-    monkeypatch.setattr(service, "_assert_persisted_workforce_dispatch", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        service, "_assert_persisted_workforce_dispatch", lambda *args, **kwargs: None
+    )
     monkeypatch.setattr(service, "_revalidate_provider_boundary", lambda *args, **kwargs: None)
     monkeypatch.setattr(service, "_escalation_policy", staticmethod(lambda _: None))
-    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CandidateVerifier.validate_static_contract", staticmethod(lambda *args: None))
-    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.WorktreeManager", lambda **_: object())
-    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.SelfHostedDevelopmentController", lambda **_: SimpleNamespace(
-        prepare_task=lambda c: lease,
-    ))
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.CandidateVerifier.validate_static_contract",
+        staticmethod(lambda *args: None),
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.WorktreeManager", lambda **_: object()
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.SelfHostedDevelopmentController",
+        lambda **_: SimpleNamespace(
+            prepare_task=lambda c: lease,
+        ),
+    )
 
     from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerOutcome
+
     def invoke(provider, contract_arg, lease_arg, *, prompt, model=None, **kwargs):
         calls["provider"] += 1
         assert "actual bounded memory" in prompt
         return WorkerExecutionReceipt(
-            provider=provider, task_id=contract_arg.task_id, target_worktree=lease_arg.target_worktree,
-            worker_status="COMPLETED", outcome=WorkerOutcome.EXECUTION_COMPLETED.value, exit_code=0,
-            executable_identity="fake", argv=("fake",), stdout_sha256="a" * 64, stderr_sha256="b" * 64,
-            wall_time_ms=1, process_group_id=None, process_group_killed=False, timed_out=False,
-            provider_calls=1, provider_attempt_count=1, evidence_complete=True, commit_created=False,
-            merge_performed=False, push_performed=False,
+            provider=provider,
+            task_id=contract_arg.task_id,
+            target_worktree=lease_arg.target_worktree,
+            worker_status="COMPLETED",
+            outcome=WorkerOutcome.EXECUTION_COMPLETED.value,
+            exit_code=0,
+            executable_identity="fake",
+            argv=("fake",),
+            stdout_sha256="a" * 64,
+            stderr_sha256="b" * 64,
+            wall_time_ms=1,
+            process_group_id=None,
+            process_group_killed=False,
+            timed_out=False,
+            provider_calls=1,
+            provider_attempt_count=1,
+            evidence_complete=True,
+            commit_created=False,
+            merge_performed=False,
+            push_performed=False,
         )
-    service.worker_registry = SimpleNamespace(invoke=invoke, preflight=lambda _: SimpleNamespace(ready=True))
+
+    service.worker_registry = SimpleNamespace(
+        invoke=invoke, preflight=lambda _: SimpleNamespace(ready=True)
+    )
+
     def update(status, values):
         service._checkpoint(state["task_id"], status, values, attempt_id=state["attempt_id"])
         if status == "WORKER_COMPLETED":
             raise RuntimeError("stop after bounded receipt")
+
     with pytest.raises(RuntimeError, match="stop after bounded receipt"):
-        service._run_default_resumable(contract, request, update, task_id=state["task_id"], attempt_id=state["attempt_id"])
+        service._run_default_resumable(
+            contract, request, update, task_id=state["task_id"], attempt_id=state["attempt_id"]
+        )
     persisted = service._read_state(state["task_id"])
     assert calls == {"adapter": 1, "provider": 1}
     assert persisted["worker_model_context_materialization"]["status"] == "COMPLETE"
-    assert persisted["worker_model_context_consumption"]["proof_basis"] == "WORKER_REGISTRY_INVOCATION"
+    assert (
+        persisted["worker_model_context_consumption"]["proof_basis"] == "WORKER_REGISTRY_INVOCATION"
+    )
 
 
 def test_genuine_legacy_worker_does_not_require_optional_runtime(tmp_path, monkeypatch):
@@ -215,27 +325,53 @@ def test_genuine_legacy_worker_does_not_require_optional_runtime(tmp_path, monke
     service._worker_context_materialization = lambda **_: None
     monkeypatch.setattr(service, "build_contract", lambda req: contract)
     monkeypatch.setattr(service, "_revalidate_tracked_dispatch_task_card", lambda *args: None)
-    monkeypatch.setattr(service, "_assert_persisted_workforce_dispatch", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        service, "_assert_persisted_workforce_dispatch", lambda *args, **kwargs: None
+    )
     monkeypatch.setattr(service, "_revalidate_provider_boundary", lambda *args, **kwargs: None)
     monkeypatch.setattr(service, "_escalation_policy", staticmethod(lambda _: None))
-    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.CandidateVerifier.validate_static_contract", staticmethod(lambda *args: None))
-    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.WorktreeManager", lambda **_: object())
-    monkeypatch.setattr("nexus.orchestrator.self_hosted_task_service.SelfHostedDevelopmentController", lambda **_: SimpleNamespace(
-        prepare_task=lambda c: lease,
-    ))
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.CandidateVerifier.validate_static_contract",
+        staticmethod(lambda *args: None),
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.WorktreeManager", lambda **_: object()
+    )
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service.SelfHostedDevelopmentController",
+        lambda **_: SimpleNamespace(
+            prepare_task=lambda c: lease,
+        ),
+    )
     from nexus.executors.worker_contract import WorkerExecutionReceipt, WorkerOutcome
 
     def invoke(provider, contract_arg, lease_arg, *, prompt, model=None, **kwargs):
         return WorkerExecutionReceipt(
-            provider=provider, task_id=contract_arg.task_id, target_worktree=lease_arg.target_worktree,
-            worker_status="COMPLETED", outcome=WorkerOutcome.EXECUTION_COMPLETED.value, exit_code=0,
-            executable_identity="fake", argv=("fake",), stdout_sha256="a" * 64, stderr_sha256="b" * 64,
-            wall_time_ms=1, process_group_id=None, process_group_killed=False, timed_out=False,
-            provider_calls=1, provider_attempt_count=1, evidence_complete=True, commit_created=False,
-            merge_performed=False, push_performed=False,
+            provider=provider,
+            task_id=contract_arg.task_id,
+            target_worktree=lease_arg.target_worktree,
+            worker_status="COMPLETED",
+            outcome=WorkerOutcome.EXECUTION_COMPLETED.value,
+            exit_code=0,
+            executable_identity="fake",
+            argv=("fake",),
+            stdout_sha256="a" * 64,
+            stderr_sha256="b" * 64,
+            wall_time_ms=1,
+            process_group_id=None,
+            process_group_killed=False,
+            timed_out=False,
+            provider_calls=1,
+            provider_attempt_count=1,
+            evidence_complete=True,
+            commit_created=False,
+            merge_performed=False,
+            push_performed=False,
         )
 
-    service.worker_registry = SimpleNamespace(invoke=invoke, preflight=lambda _: SimpleNamespace(ready=True))
+    service.worker_registry = SimpleNamespace(
+        invoke=invoke, preflight=lambda _: SimpleNamespace(ready=True)
+    )
     original_import = __import__
 
     def reject_optional_runtime(name, *args, **kwargs):
@@ -252,24 +388,54 @@ def test_genuine_legacy_worker_does_not_require_optional_runtime(tmp_path, monke
             raise RuntimeError("legacy worker completed")
 
     with pytest.raises(RuntimeError, match="legacy worker completed"):
-        service._run_default_resumable(contract, request, update, task_id=state["task_id"], attempt_id=state["attempt_id"])
+        service._run_default_resumable(
+            contract, request, update, task_id=state["task_id"], attempt_id=state["attempt_id"]
+        )
     assert "WORKER_COMPLETED" in completed
 
 
 def test_started_failure_and_tampered_complete_bundle_never_replay(tmp_path, monkeypatch):
     service, request, state, contract, lease = _fixture(tmp_path)
     calls = {"materialize": 0}
-    monkeypatch.setattr("nexus.services.mainchain_entry.build_mainchain_capability_invokers", lambda **_: {})
+    monkeypatch.setattr(
+        "nexus.services.mainchain_entry.build_mainchain_capability_invokers", lambda **_: {}
+    )
+
     def fail(**kwargs):
         calls["materialize"] += 1
         raise RuntimeError("adapter failed after STARTED")
-    monkeypatch.setattr("nexus.services.unified_runtime.materialize_selected_capability_evidence", fail)
+
+    monkeypatch.setattr(
+        "nexus.services.unified_runtime.materialize_selected_capability_evidence", fail
+    )
     with pytest.raises(RuntimeError, match="adapter failed"):
-        service._worker_context_materialization(request=request, state=state, task_id=state["task_id"], attempt_id=state["attempt_id"], fresh_submission=True, contract=contract, lease=lease, base_prompt="BASE", actual_provider="codex", actual_model="model-1")
+        service._worker_context_materialization(
+            request=request,
+            state=state,
+            task_id=state["task_id"],
+            attempt_id=state["attempt_id"],
+            fresh_submission=True,
+            contract=contract,
+            lease=lease,
+            base_prompt="BASE",
+            actual_provider="codex",
+            actual_model="model-1",
+        )
     resumed = service._read_state(state["task_id"])
     assert resumed["worker_model_context_materialization"]["status"] == "STARTED"
     with pytest.raises(RuntimeError, match="OUTCOME_UNKNOWN"):
-        service._worker_context_materialization(request=request, state=resumed, task_id=state["task_id"], attempt_id=state["attempt_id"], fresh_submission=False, contract=contract, lease=lease, base_prompt="BASE", actual_provider="codex", actual_model="model-1")
+        service._worker_context_materialization(
+            request=request,
+            state=resumed,
+            task_id=state["task_id"],
+            attempt_id=state["attempt_id"],
+            fresh_submission=False,
+            contract=contract,
+            lease=lease,
+            base_prompt="BASE",
+            actual_provider="codex",
+            actual_model="model-1",
+        )
     assert calls["materialize"] == 1
 
 
@@ -282,40 +448,79 @@ def test_partial_canonical_binding_with_flags_denies(tmp_path):
         partial_state = dict(state)
         partial_state.pop(field, None)
         with pytest.raises(RuntimeError, match="worker_context_binding_missing"):
-            service._worker_context_materialization(request=partial, state=partial_state, task_id=state["task_id"], attempt_id=state["attempt_id"], fresh_submission=True, contract=contract, lease=lease, base_prompt="BASE", actual_provider="codex", actual_model="model-1")
+            service._worker_context_materialization(
+                request=partial,
+                state=partial_state,
+                task_id=state["task_id"],
+                attempt_id=state["attempt_id"],
+                fresh_submission=True,
+                contract=contract,
+                lease=lease,
+                base_prompt="BASE",
+                actual_provider="codex",
+                actual_model="model-1",
+            )
 
 
 def _complete_worker_context(tmp_path, monkeypatch):
     service, request, state, contract, lease = _fixture(tmp_path)
     from nexus.services.capability_evidence_bundle import build_capability_evidence_bundle
+
     bundle = build_capability_evidence_bundle(
-        task_id=state["task_id"], workspace_revision="t" * 40,
-        task_statement=request["what"], plan_payload=request["planner_output"],
-        plan_hash="p" * 64, planner_decision_id="d" * 64,
-        capability_results={"memory": {
-            "task_id": state["task_id"], "invoked": True, "gate_passed": True,
-            "status": "SUCCEEDED", "evidence_refs": ["memory"],
-            "consumer_payload": {"result": "bounded"},
-        }}, selected_capabilities=["memory"], source_hash="s" * 64,
+        task_id=state["task_id"],
+        workspace_revision="t" * 40,
+        task_statement=request["what"],
+        plan_payload=request["planner_output"],
+        plan_hash="p" * 64,
+        planner_decision_id="d" * 64,
+        capability_results={
+            "memory": {
+                "task_id": state["task_id"],
+                "invoked": True,
+                "gate_passed": True,
+                "status": "SUCCEEDED",
+                "evidence_refs": ["memory"],
+                "consumer_payload": {"result": "bounded"},
+            }
+        },
+        selected_capabilities=["memory"],
+        source_hash="s" * 64,
     )
     calls = {"materialize": 0}
-    monkeypatch.setattr("nexus.services.mainchain_entry.build_mainchain_capability_invokers", lambda **_: {})
+    monkeypatch.setattr(
+        "nexus.services.mainchain_entry.build_mainchain_capability_invokers", lambda **_: {}
+    )
+
     def materialize(**kwargs):
         calls["materialize"] += 1
         return {}, bundle
-    monkeypatch.setattr("nexus.services.unified_runtime.materialize_selected_capability_evidence", materialize)
+
+    monkeypatch.setattr(
+        "nexus.services.unified_runtime.materialize_selected_capability_evidence", materialize
+    )
     service._worker_context_materialization(
-        request=request, state=state, task_id=state["task_id"], attempt_id=state["attempt_id"],
-        fresh_submission=True, contract=contract, lease=lease, base_prompt="BASE",
-        actual_provider="codex", actual_model="model-1",
+        request=request,
+        state=state,
+        task_id=state["task_id"],
+        attempt_id=state["attempt_id"],
+        fresh_submission=True,
+        contract=contract,
+        lease=lease,
+        base_prompt="BASE",
+        actual_provider="codex",
+        actual_model="model-1",
     )
     return request, state, contract, lease, calls
 
 
 @pytest.mark.parametrize("tamper", ["bundle", "task_id", "target_worktree"])
-def test_complete_worker_context_tamper_denies_without_adapter_replay(tmp_path, monkeypatch, tamper):
+def test_complete_worker_context_tamper_denies_without_adapter_replay(
+    tmp_path, monkeypatch, tamper
+):
     request, state, contract, lease, calls = _complete_worker_context(tmp_path, monkeypatch)
-    persisted = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)._read_state(state["task_id"])
+    persisted = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )._read_state(state["task_id"])
     record = dict(persisted["worker_model_context_materialization"])
     if tamper == "bundle":
         record["bundle"] = {**record["bundle"], "entries": [{"name": "tampered"}]}
@@ -324,14 +529,26 @@ def test_complete_worker_context_tamper_denies_without_adapter_replay(tmp_path, 
     else:
         record["target_worktree"] = str(tmp_path / "wrong-target")
     persisted["worker_model_context_materialization"] = record
-    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
     service._write_state(state["task_id"], persisted)
-    monkeypatch.setattr("nexus.services.unified_runtime.materialize_selected_capability_evidence", lambda **_: (_ for _ in ()).throw(AssertionError("adapter replay")))
+    monkeypatch.setattr(
+        "nexus.services.unified_runtime.materialize_selected_capability_evidence",
+        lambda **_: (_ for _ in ()).throw(AssertionError("adapter replay")),
+    )
     with pytest.raises(RuntimeError):
         service._worker_context_materialization(
-            request=request, state=persisted, task_id=state["task_id"], attempt_id=state["attempt_id"],
-            fresh_submission=False, contract=contract, lease=lease, base_prompt="BASE",
-            actual_provider="codex", actual_model="model-1",
+            request=request,
+            state=persisted,
+            task_id=state["task_id"],
+            attempt_id=state["attempt_id"],
+            fresh_submission=False,
+            contract=contract,
+            lease=lease,
+            base_prompt="BASE",
+            actual_provider="codex",
+            actual_model="model-1",
         )
     assert calls["materialize"] == 1
 
@@ -340,21 +557,62 @@ def test_missing_resumed_journal_and_reloaded_started_state_never_retry(tmp_path
     service, request, state, contract, lease = _fixture(tmp_path)
     service._write_state(state["task_id"], {**state, "status": "WORKER_RUNNING"})
     calls = {"materialize": 0}
-    monkeypatch.setattr("nexus.services.unified_runtime.materialize_selected_capability_evidence", lambda **_: calls.__setitem__("materialize", calls["materialize"] + 1))
+    monkeypatch.setattr(
+        "nexus.services.unified_runtime.materialize_selected_capability_evidence",
+        lambda **_: calls.__setitem__("materialize", calls["materialize"] + 1),
+    )
     with pytest.raises(RuntimeError, match="OUTCOME_UNKNOWN"):
-        service._worker_context_materialization(request=request, state=state, task_id=state["task_id"], attempt_id=state["attempt_id"], fresh_submission=False, contract=contract, lease=lease, base_prompt="BASE", actual_provider="codex", actual_model="model-1")
+        service._worker_context_materialization(
+            request=request,
+            state=state,
+            task_id=state["task_id"],
+            attempt_id=state["attempt_id"],
+            fresh_submission=False,
+            contract=contract,
+            lease=lease,
+            base_prompt="BASE",
+            actual_provider="codex",
+            actual_model="model-1",
+        )
     assert calls["materialize"] == 0
 
     def fail(**kwargs):
         calls["materialize"] += 1
         raise RuntimeError("materialization interrupted")
-    monkeypatch.setattr("nexus.services.unified_runtime.materialize_selected_capability_evidence", fail)
+
+    monkeypatch.setattr(
+        "nexus.services.unified_runtime.materialize_selected_capability_evidence", fail
+    )
     with pytest.raises(RuntimeError, match="materialization interrupted"):
-        service._worker_context_materialization(request=request, state=state, task_id=state["task_id"], attempt_id=state["attempt_id"], fresh_submission=True, contract=contract, lease=lease, base_prompt="BASE", actual_provider="codex", actual_model="model-1")
-    reloaded = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
+        service._worker_context_materialization(
+            request=request,
+            state=state,
+            task_id=state["task_id"],
+            attempt_id=state["attempt_id"],
+            fresh_submission=True,
+            contract=contract,
+            lease=lease,
+            base_prompt="BASE",
+            actual_provider="codex",
+            actual_model="model-1",
+        )
+    reloaded = SelfHostedTaskService(
+        state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True
+    )
     reloaded_state = reloaded._read_state(state["task_id"])
     with pytest.raises(RuntimeError, match="OUTCOME_UNKNOWN"):
-        reloaded._worker_context_materialization(request=request, state=reloaded_state, task_id=state["task_id"], attempt_id=state["attempt_id"], fresh_submission=False, contract=contract, lease=lease, base_prompt="BASE", actual_provider="codex", actual_model="model-1")
+        reloaded._worker_context_materialization(
+            request=request,
+            state=reloaded_state,
+            task_id=state["task_id"],
+            attempt_id=state["attempt_id"],
+            fresh_submission=False,
+            contract=contract,
+            lease=lease,
+            base_prompt="BASE",
+            actual_provider="codex",
+            actual_model="model-1",
+        )
     assert calls["materialize"] == 1
 
 
@@ -366,4 +624,15 @@ def test_both_canonical_fields_missing_with_workforce_binding_denies(tmp_path):
     flagged_state = {**state, "workforce_dispatch": {"binding": "existing"}}
     flagged_state.pop("canonical_dispatch_envelope", None)
     with pytest.raises(RuntimeError, match="worker_context_binding_missing"):
-        service._worker_context_materialization(request=partial, state=flagged_state, task_id=state["task_id"], attempt_id=state["attempt_id"], fresh_submission=True, contract=contract, lease=lease, base_prompt="BASE", actual_provider="codex", actual_model="model-1")
+        service._worker_context_materialization(
+            request=partial,
+            state=flagged_state,
+            task_id=state["task_id"],
+            attempt_id=state["attempt_id"],
+            fresh_submission=True,
+            contract=contract,
+            lease=lease,
+            base_prompt="BASE",
+            actual_provider="codex",
+            actual_model="model-1",
+        )
