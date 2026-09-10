@@ -3206,6 +3206,216 @@ class SelfHostedTaskService:
             return prepare_task(contract, task_states=task_states)
         return prepare_task(contract)
 
+    def _worker_context_materialization(
+        self,
+        *,
+        request: Mapping[str, Any],
+        state: Mapping[str, Any],
+        task_id: str,
+        attempt_id: str,
+        fresh_submission: bool,
+        contract: ArchitectTaskContract,
+        lease: TargetWorktreeLease,
+        base_prompt: str,
+        actual_provider: str,
+        actual_model: str | None,
+    ) -> tuple[str, dict[str, Any]] | None:
+        """Materialize the frozen Planner projection before a WorkerRegistry call.
+
+        The evidence journal is derived state kept beside the signed request and
+        action.  A resumed attempt may consume a completed journal only; it may
+        never execute an absent or incomplete journal a second time.
+        """
+        planner_input = request.get("planner_output")
+        envelope = state.get("canonical_dispatch_envelope") or request.get(
+            "canonical_dispatch_envelope"
+        )
+        if not isinstance(planner_input, Mapping) and not isinstance(envelope, Mapping):
+            if request.get("worker_candidate_ingress") or state.get("workforce_dispatch"):
+                raise RuntimeError("worker_context_binding_missing")
+            return None
+        if not isinstance(planner_input, Mapping) or not isinstance(envelope, Mapping):
+            raise RuntimeError("worker_context_binding_missing")
+
+        from nexus_runtime.task_context import (
+            append_model_context_to_prompt,
+            build_worker_context_package,
+        )
+
+        from nexus.services.mainchain_entry import build_mainchain_capability_invokers
+        from nexus.services.unified_runtime import materialize_selected_capability_evidence
+
+        if request.get("task_id") not in (None, "", task_id):
+            raise RuntimeError("worker_context_task_substitution")
+        if request.get("attempt_id") not in (None, "", attempt_id):
+            raise RuntimeError("worker_context_attempt_substitution")
+        planner = dict(planner_input)
+        decision_id = str(envelope.get("planner_decision_hash") or "").strip()
+        plan_hash = str(envelope.get("planner_plan_hash") or "").strip()
+        workspace_revision = str(
+            request.get("workspace_revision")
+            or request.get("controller_revision")
+            or state.get("controller_revision")
+            or ""
+        ).strip()
+        task_statement = str(request.get("what") or request.get("task_statement") or "")
+        preliminary_request = {
+            "task_id": task_id,
+            "attempt_id": attempt_id,
+            "what": task_statement,
+            "planner_output": planner,
+            "canonical_dispatch_envelope": dict(envelope),
+        }
+        preliminary_package = build_worker_context_package(preliminary_request)
+        if preliminary_package.get("status") != "PASS":
+            raise RuntimeError("worker_context_preflight_invalid")
+        selected = [str(item) for item in preliminary_package.get("selected_capability_ids", ())]
+        envelope_provider = str(envelope.get("provider") or "").strip()
+        envelope_model = str(envelope.get("model") or "").strip()
+        if envelope_provider != str(actual_provider) or envelope_model != str(actual_model or ""):
+            raise RuntimeError("worker_context_provider_model_substitution")
+        action_request_hash = str(state.get("action_request_hash") or "").strip()
+        controller_revision = str(state.get("controller_revision") or contract.controller_revision).strip()
+        target_revision = str(lease.initial_head or contract.target_base_revision).strip()
+        revision = controller_revision
+        target_worktree = str(Path(lease.target_worktree).resolve())
+        record = state.get("worker_model_context_materialization")
+
+        if record is not None:
+            if not isinstance(record, Mapping) or record.get("status") != "COMPLETE":
+                raise RuntimeError("OUTCOME_UNKNOWN:worker_context_materialization_incomplete")
+            expected = {
+                "task_id": task_id,
+                "attempt_id": attempt_id,
+                "action_request_hash": action_request_hash,
+                "revision": revision,
+                "planner_decision_id": decision_id,
+                "planner_plan_hash": plan_hash,
+                "selected_capabilities": selected,
+                "controller_revision": controller_revision,
+                "target_revision": target_revision,
+                "target_worktree": target_worktree,
+            }
+            for key, value in expected.items():
+                if record.get(key) != value:
+                    raise RuntimeError(f"worker_context_materialization_{key}_mismatch")
+            bundle = record.get("bundle")
+            if not isinstance(bundle, Mapping):
+                raise RuntimeError("OUTCOME_UNKNOWN:worker_context_bundle_missing")
+            bundle_hash = str(record.get("bundle_hash") or "")
+            if not bundle_hash or _sha256_json(bundle) != bundle_hash:
+                raise RuntimeError("worker_context_bundle_hash_mismatch")
+        else:
+            if not fresh_submission:
+                raise RuntimeError("OUTCOME_UNKNOWN:worker_context_materialization_missing")
+            started_record = {
+                "schema": "nexus.worker_model_context_materialization.v1",
+                "status": "STARTED",
+                "task_id": task_id,
+                "attempt_id": attempt_id,
+                "action_request_hash": action_request_hash,
+                "revision": revision,
+                "controller_revision": controller_revision,
+                "target_revision": target_revision,
+                "target_worktree": target_worktree,
+                "planner_decision_id": decision_id,
+                "planner_plan_hash": plan_hash,
+                "selected_capabilities": selected,
+            }
+
+            def claim(current: dict[str, Any]) -> None:
+                if current.get("attempt_id") != attempt_id:
+                    raise RuntimeError("worker_context_materialization_attempt_changed")
+                if current.get("worker_model_context_materialization") is not None:
+                    raise RuntimeError("OUTCOME_UNKNOWN:worker_context_materialization_replay")
+                current["worker_model_context_materialization"] = _jsonable(started_record)
+
+            claimed = self._mutate_state(task_id, claim)
+            if not isinstance(claimed, Mapping):
+                raise RuntimeError("OUTCOME_UNKNOWN:worker_context_materialization_claim")
+            state = claimed
+            if (state.get("worker_model_context_materialization") or {}).get("status") != "STARTED":
+                raise RuntimeError("OUTCOME_UNKNOWN:worker_context_materialization_claim_readback")
+            invokers = build_mainchain_capability_invokers(
+                codeintel=request.get("codeintel")
+                if isinstance(request.get("codeintel"), Mapping)
+                else None,
+                include_postflight_gates=True,
+            )
+            _, bundle = materialize_selected_capability_evidence(
+                planner_output=planner,
+                selected_capabilities=selected,
+                task_id=task_id,
+                task_statement=task_statement,
+                workspace_revision=workspace_revision,
+                plan_hash=plan_hash,
+                planner_decision_id=decision_id,
+                capability_invokers=invokers,
+                capability_context={
+                    **{
+                        key: request[key]
+                        for key in ("task_id", "workspace_revision", "task_statement", "planner")
+                        if key in request
+                    },
+                    "workspace_root": target_worktree,
+                    "target_worktree": target_worktree,
+                    "target_revision": target_revision,
+                    "controller_revision": controller_revision,
+                },
+                codeintel=request.get("codeintel")
+                if isinstance(request.get("codeintel"), Mapping)
+                else None,
+            )
+            bundle = dict(bundle)
+            record = {
+                "schema": "nexus.worker_model_context_materialization.v1",
+                "status": "COMPLETE",
+                "task_id": task_id,
+                "attempt_id": attempt_id,
+                "action_request_hash": action_request_hash,
+                "revision": revision,
+                "controller_revision": controller_revision,
+                "target_revision": target_revision,
+                "target_worktree": target_worktree,
+                "planner_decision_id": decision_id,
+                "planner_plan_hash": plan_hash,
+                "selected_capabilities": selected,
+                "bundle_hash": _sha256_json(bundle),
+                "bundle": bundle,
+                "producer_revision": revision,
+            }
+
+            def persist(current: dict[str, Any]) -> None:
+                if current.get("attempt_id") != attempt_id:
+                    raise RuntimeError("worker_context_materialization_attempt_changed")
+                existing = current.get("worker_model_context_materialization")
+                if not isinstance(existing, Mapping) or existing.get("status") != "STARTED":
+                    raise RuntimeError("OUTCOME_UNKNOWN:worker_context_materialization_replay")
+                if any(existing.get(key) != started_record.get(key) for key in started_record):
+                    raise RuntimeError("worker_context_materialization_binding_changed")
+                current["worker_model_context_materialization"] = _jsonable(record)
+
+            persisted = self._mutate_state(task_id, persist)
+            if not isinstance(persisted, Mapping):
+                raise RuntimeError("OUTCOME_UNKNOWN:worker_context_materialization_write")
+            state = persisted
+            record = state.get("worker_model_context_materialization")
+            if not isinstance(record, Mapping) or record.get("status") != "COMPLETE":
+                raise RuntimeError("OUTCOME_UNKNOWN:worker_context_materialization_readback")
+            bundle = record.get("bundle")
+            if not isinstance(bundle, Mapping):
+                raise RuntimeError("OUTCOME_UNKNOWN:worker_context_bundle_readback")
+
+        planner["capability_evidence_bundle"] = dict(bundle)
+        package_request = dict(request)
+        package_request["task_id"] = task_id
+        package_request["attempt_id"] = attempt_id
+        package_request["planner_output"] = planner
+        package_request["canonical_dispatch_envelope"] = dict(envelope)
+        package = build_worker_context_package(package_request)
+        prompt = append_model_context_to_prompt(base_prompt, package)
+        return prompt, package
+
     def _run_default_resumable(
         self,
         contract: ArchitectTaskContract,
@@ -3220,6 +3430,7 @@ class SelfHostedTaskService:
         if deadline is not None and time.time() >= deadline:
             raise RuntimeError("WALL_TIME_BUDGET_EXHAUSTED")
         status = str(state.get("status"))
+        fresh_submission = status == "SUBMITTED"
         dispatch_binding = validate_workforce_dispatch_binding(
             request,
             require_binding=_tracked_dispatch_required(request, state),
@@ -3403,6 +3614,33 @@ class SelfHostedTaskService:
                     dispatch_binding,
                     active_provider=provider,
                 )
+                worker_context = self._worker_context_materialization(
+                    request=request,
+                    state=state,
+                    task_id=task_id,
+                    attempt_id=attempt_id,
+                    fresh_submission=fresh_submission,
+                    contract=contract,
+                    lease=lease,
+                    base_prompt=self._prompt(contract),
+                    actual_provider=provider,
+                    actual_model=(
+                        str((dispatch_binding.get("canonical_dispatch_envelope") or {}).get("model", dispatch_binding["model"]))
+                        if dispatch_binding is not None
+                        else str(request.get("model") or "").strip() or None
+                    ),
+                )
+                if worker_context is not None:
+                    from nexus_runtime.task_context import build_worker_consumption_receipt
+
+                worker_prompt = worker_context[0] if worker_context is not None else self._prompt(contract)
+                self._revalidate_provider_boundary(
+                    contract,
+                    request,
+                    task_id,
+                    dispatch_binding,
+                    active_provider=provider,
+                )
                 configured_timeout = float(request.get("timeout_seconds", 900.0))
                 remaining_timeout = (
                     max(0.0, deadline - time.time()) if deadline is not None else configured_timeout
@@ -3413,7 +3651,7 @@ class SelfHostedTaskService:
                     provider,
                     invoke_contract,
                     lease,
-                    prompt=self._prompt(contract),
+                    prompt=worker_prompt,
                     model=(
                         str(
                             (dispatch_binding.get("canonical_dispatch_envelope") or {}).get(
@@ -3439,12 +3677,31 @@ class SelfHostedTaskService:
                     raise RuntimeError("provider execution receipt exceeded aggregate attempt budget")
                 attempts.append(execution_receipt)
                 execution = execution_receipt
+                worker_consumption_receipt = None
+                if worker_context is not None:
+                    worker_consumption_receipt = build_worker_consumption_receipt(
+                        worker_context[1],
+                        prompt=worker_prompt,
+                        provider=provider,
+                        model=(
+                            str(
+                                (dispatch_binding.get("canonical_dispatch_envelope") or {}).get(
+                                    "model", dispatch_binding["model"]
+                                )
+                            )
+                            if dispatch_binding is not None
+                            else str(request.get("model") or "").strip() or None
+                        ),
+                        execution_receipt=execution_receipt,
+                    )
                 update(
                     "WORKER_COMPLETED",
                     {
                         "execution": execution_receipt,
                         "executions": attempts,
                         "active_provider": provider,
+                        **({"worker_model_context_consumption": worker_consumption_receipt}
+                           if worker_consumption_receipt is not None else {}),
                         **fast_lane_values,
                     },
                 )
