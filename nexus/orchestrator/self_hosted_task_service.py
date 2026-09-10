@@ -979,6 +979,76 @@ def _terminal_retry_pre_provider_state_allowed(state: Mapping[str, Any]) -> bool
     )
 
 
+def _terminal_retry_released_lease_proof(state: Mapping[str, Any]) -> bool:
+    lease = state.get("lease")
+    contract = state.get("contract")
+    if not isinstance(lease, Mapping) or not isinstance(contract, Mapping):
+        return False
+    controller_root = Path(str(contract.get("controller_repo_root") or "")).expanduser()
+    target_worktree = Path(str(lease.get("target_worktree") or "")).expanduser()
+    if not controller_root.is_dir() or not target_worktree:
+        return False
+    try:
+        controller_root = controller_root.resolve(strict=True)
+        manager = WorktreeManager(create_root=False)
+        return manager.released_lease_proof(
+            controller_root,
+            task_id=str(state.get("task_id") or ""),
+            attempt_id=str(state.get("attempt_id") or "") or None,
+            lease_id=str(lease.get("lease_id") or ""),
+            target_worktree=target_worktree,
+            task_state=state,
+        )
+    except (OSError, RuntimeError, ValueError, TypeError):
+        return False
+
+
+def _terminal_retry_verifier_static_failure_allowed(state: Mapping[str, Any]) -> bool:
+    """Allow the one known verifier pre-provider failure after formal cleanup."""
+    if (
+        state.get("status") != "FINAL_BLOCK"
+        or state.get("error") != "invalid verifier contract: invalid verifier argument"
+        or state.get("cleanup_decision") != "REMOVED"
+        or state.get("cleanup_performed") is not True
+        or not state.get("cleanup_performed_at")
+        or state.get("cleanup_blocker") not in (None, "")
+        or state.get("cleanup_eligible") is not True
+        or not _terminal_retry_released_lease_proof(state)
+    ):
+        return False
+    lease = state.get("lease")
+    if (
+        not isinstance(lease, Mapping)
+        or not lease.get("lease_id")
+        or lease.get("task_id") != state.get("task_id")
+        or state.get("target_created_at") is None
+        or not state.get("active_provider")
+        or not isinstance(state.get("worker_preflight"), Mapping)
+        or state.get("worker_started_at") is None
+        or state.get("worker_finished_at") is None
+        or state.get("worker_child_pgid") is not None
+        or state.get("execution") is not None
+        or state.get("execution_outcome") is not None
+        or state.get("executions") not in (None, [])
+        or state.get("promotion_status") != "NOT_CREATED"
+        or state.get("candidate_status") not in (None, "")
+        or state.get("merge_performed") not in (None, False)
+        or state.get("push_performed") not in (None, False)
+    ):
+        return False
+    if any(state.get(field) is not None for field in (
+        "candidate", "candidate_commit_sha", "candidate_ref", "candidate_state_hash",
+        "verified_receipt", "verified_receipt_hash", "promotion_packet",
+        "provider_receipt", "worker_receipt",
+    )):
+        return False
+    telemetry = state.get("telemetry")
+    return isinstance(telemetry, Mapping) and all(
+        type(telemetry.get(field)) is int and telemetry[field] == 0
+        for field in ("provider_calls", "provider_attempts", "provider_time_ms", "verifier_time_ms")
+    )
+
+
 def _validate_retry_predecessor(
     request: Mapping[str, Any],
     predecessor: Optional[Mapping[str, Any]],
@@ -3064,7 +3134,10 @@ class SelfHostedTaskService:
         action_bound_refresh = isinstance(previous_raw_request, Mapping) and (
             "action" in previous_raw_request or "bound_action_request" in previous_raw_request
         )
-        if action_bound_refresh and not _terminal_retry_pre_provider_state_allowed(existing):
+        if action_bound_refresh and not (
+            _terminal_retry_pre_provider_state_allowed(existing)
+            or _terminal_retry_verifier_static_failure_allowed(existing)
+        ):
             return False
         previous_request = dict(previous_raw_request or {})
         if not isinstance(existing.get("request"), Mapping):
@@ -6429,7 +6502,10 @@ class SelfHostedTaskService:
                             or canonical_request_hash(
                                 _terminal_retry_semantic_payload(current.get("request") or {})
                             ) != predecessor_request_hash
-                            or not _terminal_retry_pre_provider_state_allowed(current)
+                            or not (
+                                _terminal_retry_pre_provider_state_allowed(current)
+                                or _terminal_retry_verifier_static_failure_allowed(current)
+                            )
                         ):
                             raise RuntimeError("RETRY_PREDECESSOR_CHANGED")
                     packet = current.get("promotion_packet") or {}

@@ -439,6 +439,20 @@ def test_candidate_cleanup_requires_durable_ref_and_is_idempotent(sh2_repo):
     )
     assert removed.decision == "REMOVED"
     assert not target.exists()
+    assert manager.released_lease_proof(
+        Path(contract.controller_repo_root),
+        task_id=contract.task_id,
+        attempt_id=lease.attempt_id,
+        lease_id=lease.lease_id,
+        target_worktree=target,
+    )
+    assert not manager.released_lease_proof(
+        Path(contract.controller_repo_root),
+        task_id=contract.task_id,
+        attempt_id="wrong-attempt",
+        lease_id=lease.lease_id,
+        target_worktree=target,
+    )
     assert manager.cleanup_terminal_target(
         contract, lease, candidate_commit=candidate, candidate_ref=candidate_ref
     ).decision == "ALREADY_REMOVED"
@@ -447,6 +461,60 @@ def test_candidate_cleanup_requires_durable_ref_and_is_idempotent(sh2_repo):
     assert retried.initial_head == contract.target_base_revision
     assert retried.target_detached is True
     assert _git(sh2_repo["controller"], "rev-parse", f"refs/heads/{retried.target_branch}") == candidate
+
+
+def test_released_lease_proof_rejects_active_symlink_target_and_tampered_tombstone(sh2_repo):
+    contract, manager, lease, target = _prepare_candidate(sh2_repo, task_id="release-proof-negative")
+    receipt = manager.cleanup_terminal_target(contract, lease)
+    assert receipt.decision == "REMOVED"
+    controller = Path(contract.controller_repo_root)
+    assert manager.released_lease_proof(
+        controller,
+        task_id=contract.task_id,
+        attempt_id=lease.attempt_id,
+        lease_id=lease.lease_id,
+        target_worktree=target,
+    )
+    ownership = manager._ownership_record_path(controller, contract.task_id)
+    tombstones = sorted(ownership.parent.glob(f"{ownership.with_suffix('').name}.*.released"))
+    assert tombstones
+    tombstone = tombstones[-1]
+    ownership.symlink_to(tombstone)
+    assert not manager.released_lease_proof(
+        controller,
+        task_id=contract.task_id,
+        attempt_id=lease.attempt_id,
+        lease_id=lease.lease_id,
+        target_worktree=target,
+    )
+    ownership.unlink()
+    target.symlink_to(controller, target_is_directory=True)
+    assert not manager.released_lease_proof(
+        controller,
+        task_id=contract.task_id,
+        attempt_id=lease.attempt_id,
+        lease_id=lease.lease_id,
+        target_worktree=target,
+    )
+    target.unlink()
+    target.symlink_to(target.parent / "missing-target")
+    assert not manager.released_lease_proof(
+        controller,
+        task_id=contract.task_id,
+        attempt_id=lease.attempt_id,
+        lease_id=lease.lease_id,
+        target_worktree=target,
+    )
+    target.unlink()
+    original = tombstone.read_text(encoding="utf-8")
+    tombstone.write_text(original.replace(lease.lease_id, "wrong-lease", 1), encoding="utf-8")
+    assert not manager.released_lease_proof(
+        controller,
+        task_id=contract.task_id,
+        attempt_id=lease.attempt_id,
+        lease_id=lease.lease_id,
+        target_worktree=target,
+    )
 
 
 def test_create_lease_accepts_verified_salvage_parent_on_revision_refresh(sh2_repo):

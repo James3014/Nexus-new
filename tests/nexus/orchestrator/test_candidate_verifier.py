@@ -86,6 +86,32 @@ def test_static_contract_rejects_malformed_verifier_before_invocation(tmp_path):
         CandidateVerifier.validate_static_contract(contract, str(tmp_path))
 
 
+def test_python_c_verifier_accepts_multiline_code_but_keeps_other_newlines_rejected(tmp_path):
+    request = CandidateVerifier._build_verifier_request(
+        "python3 -c 'assert 1 == 1\nassert 2 == 2'", str(tmp_path)
+    )
+    assert request.argv[0] == "-c"
+    with pytest.raises(ValueError, match="invalid verifier argument"):
+        CandidateVerifier._build_verifier_request(
+            "python3 -m 'assert 1 == 1\nassert 2 == 2'", str(tmp_path)
+        )
+    with pytest.raises(ValueError, match="invalid verifier argument"):
+        CandidateVerifier._build_verifier_request(
+            "python3 -c 'assert 1 == 1\rassert 2 == 2'", str(tmp_path)
+        )
+
+
+def test_python_c_verifier_rejects_extra_arguments_and_non_python_executables(tmp_path):
+    with pytest.raises(ValueError, match="invalid verifier argument"):
+        CandidateVerifier._build_verifier_request(
+            "python3 -c 'assert 1 == 1\nassert 2 == 2' extra", str(tmp_path)
+        )
+    with pytest.raises(ValueError, match="invalid verifier argument"):
+        CandidateVerifier._build_verifier_request(
+            "sh -c 'assert 1 == 1\nassert 2 == 2'", str(tmp_path)
+        )
+
+
 @pytest.mark.parametrize(
     ("name", "value"),
     [
