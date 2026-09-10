@@ -4,7 +4,7 @@ import json
 import os
 import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Mapping, Sequence
@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path[:1]:
     sys.path.insert(0, str(ROOT))
 
+from nexus.contracts.unified_runtime_receipt import validate_failure_diagnostics
 from nexus.engine.capability_contracts import CapabilityPlan
 from nexus.engine.capability_planner import CapabilityPlanner
 from nexus.evidence.receipt_base import validate_receipt_base
@@ -26,8 +27,8 @@ from nexus.services.local_assist_service import (
 from nexus.services.local_heal.local_model_provider import InjectedLocalModelProvider
 from nexus.services.unified_runtime import (
     ONLINE_CLI_SPEC_REGISTRY,
-    OnlineCliSpec,
     REGISTERED_CLI_MODEL_BINDING_FLAGS,
+    OnlineCliSpec,
     UnifiedRuntime,
     UnifiedRuntimeRequest,
     build_execution_replan_request,
@@ -42,10 +43,9 @@ from nexus.services.unified_runtime import (
     extract_online_stage_payload,
     normalize_online_invoker_payload,
     resolve_online_transport_binding,
-    resolve_registered_provider_executable,
     resolve_registered_online_cli_spec,
+    resolve_registered_provider_executable,
 )
-from nexus.contracts.unified_runtime_receipt import validate_failure_diagnostics
 
 
 @dataclass
@@ -829,6 +829,11 @@ def test_gateway_unified_hybrid_uses_real_local_assist_and_shared_planner(monkey
     assert receipt["local"]["response"]["provider"] == "ollama"
     assert receipt["local"]["response"]["physical_callable"] == "LocalModelProvider.generate"
     assert receipt["local"]["response"]["executor_invoked"] is False
+    advisory = receipt["local"]["response"]["hybrid_route_advisory"]
+    assert advisory["route_mode"] == "cloud_first_local_guard_advisory"
+    assert advisory["authority"] == "advisory_only"
+    assert advisory["public_claim_allowed"] is False
+    assert receipt["claim_boundary"]["outcome_contributed"] is False
     local_capability = next(item for item in receipt["capabilities"] if item["name"] == "local_model_executor")
     # Advisor path must not be attributed as local_model_executor INVOKED.
     # FCM: explicit SKIPPED with same reason (coverage row, not silent omit).
@@ -842,6 +847,302 @@ def test_gateway_unified_hybrid_uses_real_local_assist_and_shared_planner(monkey
     assert receipt["claim_boundary"]["local_online_continuation"] is True
     assert receipt["claim_boundary"]["public_claim_allowed"] is False
     assert receipt["receipt_complete"] is True
+
+
+def test_gb019_advisory_verifier_failure_keeps_public_delivery(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("NEXUS_OAUTH_PROVIDER", "gemini")
+    from nexus.services.gateway import BattlesuitGateway
+
+    gateway = BattlesuitGateway(project_root=tmp_path)
+    online_calls: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(
+        gateway,
+        "ask_structured",
+        lambda *args, **kwargs: (online_calls.append((args, kwargs)) or ({"status": "OK"}, "online")),
+    )
+
+    class VerifierFailingAdvisor:
+        def __init__(self) -> None:
+            self.provider_calls = 0
+            self.service = LocalAssistService(
+                provider=InjectedLocalModelProvider(
+                    self._generate,
+                    provider_identity="ollama",
+                    model_identity="qwen2.5-s2t-advisor:3b",
+                )
+            )
+
+        def _generate(self, _request) -> str:
+            self.provider_calls += 1
+            return "bounded diagnosis"
+
+        def handle(self, request):
+            response = self.service.handle(request)
+            result = subprocess.run(
+                [sys.executable, "-c", "import sys; print('gb019 verifier failure'); sys.exit(1)"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert result.returncode == 1
+            return replace(
+                response,
+                verifier_summary={
+                    "verifier_reached": True,
+                    "verifier_status": "fail",
+                    "exit_code": result.returncode,
+                    "stdout": result.stdout,
+                    "stderr": result.stderr,
+                    "evidence_refs": ["verifier:gb019:fail"],
+                },
+            )
+
+    service = VerifierFailingAdvisor()
+    task_id = "gb019-advisory-failure"
+    req = LocalAssistRequest(
+        schema=REQUEST_SCHEMA,
+        task_id=task_id,
+        parent_task_id=task_id,
+        workspace_root=str(tmp_path),
+        workspace_revision="rev-gb019",
+        task_statement="diagnose candidate",
+        action="advisor",
+        allowed_files=("candidate.py",),
+        target_file="candidate.py",
+        target_symbol="",
+        evidence_refs=("gb019:request",),
+    )
+    runtime_request = _admit_gateway_request(UnifiedRuntimeRequest(
+        task_id=task_id, workspace_revision="rev-gb019", task_statement="diagnose candidate",
+        task_type="planning", route={"recommended_flow": "hybrid", "provider": "gemini", "mutation_requested": False}, online_prompt="reply",
+        online_payload="bounded", local_enabled=True, local_request=req,
+    ))
+    runtime_request = replace(
+        runtime_request,
+        route={**runtime_request.route, "mutation_requested": False},
+    )
+    receipt = gateway.ask_unified(
+        runtime_request, local_service=service,
+        capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
+        verifier=_verifier, learning=_learning,
+        online_invoker=_structured_gateway_invoker(gateway),
+    )
+
+    assert service.provider_calls == 1, receipt["local"]
+    assert receipt["local"]["response"]["verifier_summary"]["exit_code"] == 1
+    assert receipt["local"]["response"]["hybrid_route_advisory"]["verifier_result"] == "fail"
+    assert len(online_calls) == 1
+    assert receipt["online"]["status"] == "SUCCEEDED"
+    assert receipt["online"]["response"]["output_delivered"] is True
+    assert receipt["claim_boundary"]["outcome_contributed"] is False
+    assert receipt["claim_boundary"]["public_claim_allowed"] is False
+    assert receipt["local"]["substitution_trace"]["partial_success_claimed"] is False
+
+
+def test_gb019_fail_closed_override_blocks_public_online(monkeypatch, tmp_path: Path) -> None:
+    from nexus.contracts.hybrid_route import (
+        Authority,
+        HybridRouteDecision,
+        RouteMode,
+        VerifierResult,
+    )
+
+    monkeypatch.setenv("NEXUS_OAUTH_PROVIDER", "gemini")
+    import nexus.engine.canonical_execution as canonical_execution
+    from nexus.services.gateway import BattlesuitGateway
+
+    original_plan = canonical_execution.CapabilityPlanner.plan
+
+    def plan_with_fail_closed(self, *args, **kwargs):
+        planned = original_plan(self, *args, **kwargs)
+        snapshot = {**planned.signal_snapshot, "fail_closed_enabled": True}
+        return replace(planned, signal_snapshot=snapshot)
+
+    monkeypatch.setattr(canonical_execution.CapabilityPlanner, "plan", plan_with_fail_closed)
+
+    gateway = BattlesuitGateway(project_root=tmp_path)
+    online_calls: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(gateway, "ask_structured", lambda *args, **kwargs: online_calls.append((args, kwargs)))
+
+    class FailClosedService:
+        def __init__(self) -> None:
+            self.provider_calls = 0
+            self.service = LocalAssistService(
+                provider=InjectedLocalModelProvider(
+                    self._generate,
+                    provider_identity="ollama",
+                    model_identity="qwen2.5-s2t-advisor:3b",
+                )
+            )
+
+        def _generate(self, _request) -> str:
+            self.provider_calls += 1
+            return "diagnosis"
+
+        def handle(self, request):
+            response = self.service.handle(request)
+            verifier = subprocess.run(
+                [sys.executable, "-c", "import sys; print('gb019 verifier failure'); sys.exit(1)"],
+                capture_output=True, text=True, check=False,
+            )
+            route = HybridRouteDecision(
+                route_mode=RouteMode.CLOUD_FIRST_LOCAL_GUARD_FAIL_CLOSED,
+                authority=Authority.FAIL_CLOSED,
+                verifier_result=VerifierResult.FAIL,
+                fallback_block_reason="gb019_verifier_fail",
+                blockers=("gb019_verifier_fail",),
+                evidence_refs=("verifier:gb019:fail",),
+                metadata={
+                    "task_id": response.task_id,
+                    "planner_decision_id": response.planner_decision.get("planner_decision_id", ""),
+                    "verifier_exit_code": verifier.returncode,
+                    "verifier_stdout": verifier.stdout,
+                },
+            )
+            return {
+                **response.to_dict(),
+                "verifier_summary": {
+                    "verifier_reached": True,
+                    "verifier_status": "fail",
+                    "exit_code": verifier.returncode,
+                    "stdout": verifier.stdout,
+                    "stderr": verifier.stderr,
+                    "evidence_refs": ["verifier:gb019:fail"],
+                },
+                "hybrid_route_advisory": route.to_dict(),
+            }
+
+    task_id = "gb019-fail-closed"
+    req = LocalAssistRequest(
+        schema=REQUEST_SCHEMA, task_id=task_id, parent_task_id=task_id,
+        workspace_root=str(tmp_path), workspace_revision="rev-gb019",
+        task_statement="diagnose candidate", action="advisor",
+        allowed_files=("candidate.py",), target_file="candidate.py", target_symbol="",
+        evidence_refs=("gb019:negative",),
+    )
+    negative_request = _admit_gateway_request(UnifiedRuntimeRequest(
+            task_id=task_id, workspace_revision="rev-gb019", task_statement="diagnose candidate",
+            task_type="planning", route={"recommended_flow": "hybrid", "provider": "gemini", "mutation_requested": False}, online_prompt="reply",
+            online_payload="bounded", local_enabled=True, local_request=req,
+        ))
+    negative_request = replace(
+        negative_request,
+        route={**negative_request.route, "mutation_requested": False},
+    )
+    service = FailClosedService()
+    receipt = gateway.ask_unified(
+        negative_request, local_service=service,
+        capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
+        verifier=_verifier, learning=_learning,
+        online_invoker=_structured_gateway_invoker(gateway),
+    )
+    assert receipt["local"]["local_model_invocation_authority"]["status"] == "ALLOW"
+    assert service.provider_calls == 1
+    assert receipt["local"]["response"]["hybrid_route_advisory"]["authority"] == "fail_closed"
+    assert online_calls == [], (receipt["local"].get("reason"), receipt["local"].get("response"), receipt.get("online"))
+    assert receipt["online"]["status"] == "BLOCKED"
+    assert receipt["plan_payload"]["signal_snapshot"].get("fail_closed_enabled") is True, receipt["plan_payload"]["signal_snapshot"]
+    assert receipt["online"]["reason"] == "gb019_verifier_fail"
+    assert receipt["plan_payload"]["signal_snapshot"]["fail_closed_enabled"] is True
+    assert receipt["local"]["invoked"] is True
+    assert receipt["local"]["response"]["verifier_summary"]["verifier_reached"] is True
+    assert receipt["local"]["response"]["verifier_summary"]["exit_code"] == 1
+    assert receipt["local"]["status"] == "FAILED"
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    ["task", "planner", "malformed", "malformed_none", "planner_disabled"],
+)
+def test_gb019_public_guard_negative_controls(monkeypatch, tmp_path: Path, tamper: str) -> None:
+    monkeypatch.setenv("NEXUS_OAUTH_PROVIDER", "gemini")
+    import nexus.engine.canonical_execution as canonical_execution
+    from nexus.contracts.hybrid_route import (
+        Authority,
+        HybridRouteDecision,
+        RouteMode,
+        VerifierResult,
+    )
+    from nexus.services.gateway import BattlesuitGateway
+
+    if tamper != "planner_disabled":
+        original_plan = canonical_execution.CapabilityPlanner.plan
+
+        def plan_with_fail_closed(self, *args, **kwargs):
+            planned = original_plan(self, *args, **kwargs)
+            snapshot = {**planned.signal_snapshot, "fail_closed_enabled": True}
+            return replace(planned, signal_snapshot=snapshot)
+
+        monkeypatch.setattr(canonical_execution.CapabilityPlanner, "plan", plan_with_fail_closed)
+
+    gateway = BattlesuitGateway(project_root=tmp_path)
+    online_calls: list[tuple[tuple, dict]] = []
+    monkeypatch.setattr(gateway, "ask_structured", lambda *args, **kwargs: online_calls.append((args, kwargs)))
+
+    class Service:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.inner = LocalAssistService(provider=InjectedLocalModelProvider(self.generate, provider_identity="ollama", model_identity="qwen2.5-s2t-advisor:3b"))
+
+        def generate(self, _request) -> str:
+            self.calls += 1
+            return "diagnosis"
+
+        def handle(self, request):
+            response = self.inner.handle(request)
+            planner_id = response.planner_decision.get("planner_decision_id", "")
+            route = HybridRouteDecision(
+                route_mode=RouteMode.CLOUD_FIRST_LOCAL_GUARD_FAIL_CLOSED,
+                authority=Authority.FAIL_CLOSED,
+                verifier_result=VerifierResult.FAIL,
+                fallback_block_reason="gb019_verifier_fail",
+                blockers=("gb019_verifier_fail",),
+                metadata={"task_id": response.task_id, "planner_decision_id": planner_id},
+            ).to_dict()
+            metadata = dict(route["metadata"])
+            if tamper == "task":
+                metadata["task_id"] = "other-task"
+                route["metadata"] = metadata
+            elif tamper == "planner":
+                metadata["planner_decision_id"] = "other-plan"
+                route["metadata"] = metadata
+            elif tamper == "malformed":
+                route = ["malformed-advisory"]
+            elif tamper == "malformed_none":
+                route = None
+            return {**response.to_dict(), "hybrid_route_advisory": route}
+
+    service = Service()
+    task_id = f"gb019-negative-{tamper}"
+    request = _admit_gateway_request(UnifiedRuntimeRequest(
+        task_id=task_id, workspace_revision="rev-gb019", task_statement="diagnose",
+        task_type="planning", route={"recommended_flow": "hybrid", "provider": "gemini", "mutation_requested": False},
+        online_prompt="reply", online_payload="bounded", local_enabled=True,
+        local_request=LocalAssistRequest(
+            schema=REQUEST_SCHEMA, task_id=task_id, parent_task_id=task_id,
+            workspace_root=str(tmp_path), workspace_revision="rev-gb019", task_statement="diagnose",
+            action="advisor", allowed_files=("candidate.py",), target_file="candidate.py", target_symbol="",
+            evidence_refs=(f"gb019:{tamper}",),
+        ),
+    ))
+    receipt = gateway.ask_unified(
+        request, local_service=service, capability_invokers=_DETERMINISTIC_CAPABILITY_INVOKERS,
+        verifier=_verifier, learning=_learning, online_invoker=_structured_gateway_invoker(gateway),
+    )
+    assert service.calls == 1
+    assert receipt["local"]["invoked"] is True
+    assert online_calls == []
+    assert receipt["online"]["status"] == "BLOCKED"
+    assert receipt["local"]["status"] == "FAILED"
+    reason = str(receipt["online"].get("reason") or "")
+    if tamper == "task":
+        assert "advisory_task_identity_mismatch" in reason
+    elif tamper == "planner":
+        assert "advisory_planner_identity_mismatch" in reason
+    elif tamper in {"malformed", "malformed_none"}:
+        assert reason.startswith("invalid_local_advisory:")
+    else:
+        assert "fail_closed_override_not_planner_enabled" in reason
 
 
 def test_gateway_unified_entry_uses_same_receipt_contract(monkeypatch, tmp_path: Path) -> None:

@@ -4960,6 +4960,35 @@ class UnifiedRuntime:
                 **local_authority_stage_fields,
             )
         payload = _mapping(response)
+        if str(payload.get("action") or "") == "advisor" and "hybrid_route_advisory" not in payload:
+            try:
+                from nexus.services.local_heal.capability_adapter import (
+                    advisory_route_from_local_response,
+                )
+
+                advisory_route = advisory_route_from_local_response(
+                    payload,
+                    task_id=request.task_id,
+                    planner_decision_id=str(
+                        plan.get("planner_decision_id") or plan.get("plan_hash") or ""
+                    ),
+                    evidence_refs=tuple(str(ref) for ref in payload.get("evidence_refs", ()) or ()),
+                )
+                payload = dict(payload)
+                payload["hybrid_route_advisory"] = advisory_route.to_dict()
+            except (TypeError, ValueError) as exc:
+                return _stage(
+                    "local",
+                    status="FAILED",
+                    invoked=bool(payload.get("local_model_invoked", payload.get("invoked", False))),
+                    gate_passed=False,
+                    evidence_present=True,
+                    reason=f"advisory_guard_failed_closed:{exc}",
+                    response=payload,
+                    provider_call_count=int(payload.get("provider_call_count") or 0),
+                    model_call_count=int(payload.get("model_call_count") or 0),
+                    **local_authority_stage_fields,
+                )
         formal_lineage: dict[str, Any] = {}
         if workforce_admission_enabled:
             if local_authority is not None and local_authority.get("mutation_intent") is False:
@@ -4989,6 +5018,53 @@ class UnifiedRuntime:
                 model_call_count=int(payload.get("model_call_count") or 0),
                 **lineage_fields,
             )
+        existing_advisory = payload.get("hybrid_route_advisory")
+        if "hybrid_route_advisory" in payload and not isinstance(existing_advisory, Mapping):
+            return _stage(
+                "local", status="FAILED",
+                invoked=bool(payload.get("local_model_invoked", payload.get("invoked", False))),
+                gate_passed=False, evidence_present=True,
+                reason="invalid_local_advisory:advisory_payload_not_mapping", response=payload,
+                provider_call_count=int(payload.get("provider_call_count") or 0),
+                model_call_count=int(payload.get("model_call_count") or 0),
+                **local_authority_stage_fields,
+            )
+        if isinstance(existing_advisory, Mapping):
+            try:
+                from nexus.contracts.hybrid_route import hybrid_route_decision_from_payload
+
+                advisory_decision = hybrid_route_decision_from_payload(existing_advisory)
+                metadata = advisory_decision.metadata
+                if str(metadata.get("task_id") or "") != request.task_id:
+                    raise ValueError("advisory_task_identity_mismatch")
+                if str(metadata.get("planner_decision_id") or "") != str(
+                    plan.get("planner_decision_id") or plan.get("plan_hash") or ""
+                ):
+                    raise ValueError("advisory_planner_identity_mismatch")
+                if advisory_decision.authority.value == "fail_closed":
+                    planner_snapshot = plan.get("signal_snapshot")
+                    if not isinstance(planner_snapshot, Mapping) or planner_snapshot.get("fail_closed_enabled") is not True:
+                        raise ValueError("fail_closed_override_not_planner_enabled")
+                    return _stage(
+                        "local", status="FAILED",
+                        invoked=bool(payload.get("local_model_invoked", payload.get("invoked", False))),
+                        gate_passed=False, evidence_present=True,
+                        reason=advisory_decision.fallback_block_reason or "advisory_guard_blocked",
+                        response=payload,
+                        provider_call_count=int(payload.get("provider_call_count") or 0),
+                        model_call_count=int(payload.get("model_call_count") or 0),
+                        **local_authority_stage_fields,
+                    )
+            except (TypeError, ValueError) as exc:
+                return _stage(
+                    "local", status="FAILED",
+                    invoked=bool(payload.get("local_model_invoked", payload.get("invoked", False))),
+                    gate_passed=False, evidence_present=True,
+                    reason=f"invalid_local_advisory:{exc}", response=payload,
+                    provider_call_count=int(payload.get("provider_call_count") or 0),
+                    model_call_count=int(payload.get("model_call_count") or 0),
+                    **local_authority_stage_fields,
+                )
         if formal_lineage:
             local_authority_stage_fields = {
                 **local_authority_stage_fields,
@@ -5164,12 +5240,50 @@ class UnifiedRuntime:
         # VAP binding is a pre-provider gate.  The with_nexus wrapper is not
         # the only possible invoker, so validate every custom/registered edge
         # here using runtime-owned context and expected packet identity.
-        local_stage = context.get("local") if isinstance(context.get("local"), Mapping) else {}
+        local_stage_value = context.get("local")
+        local_stage = local_stage_value if isinstance(local_stage_value, Mapping) else {}
+        local_response_value = local_stage.get("response")
         local_response = (
-            local_stage.get("response")
-            if isinstance(local_stage.get("response"), Mapping)
-            else {}
+            local_response_value if isinstance(local_response_value, Mapping) else {}
         )
+        local_advisory = local_response.get("hybrid_route_advisory")
+        local_reason = str(local_stage.get("reason") or "")
+        if local_reason.startswith(("advisory_guard_failed_closed:", "invalid_local_advisory:")):
+            return _stage(
+                "online", status="BLOCKED", invoked=False, gate_passed=False,
+                evidence_present=True, reason=local_reason,
+                evidence_refs=[f"online:{context.get('task_id')}:invalid_local_advisory"],
+                response={"output_delivered": False, "provider_call_count": 0},
+            )
+        if local_advisory is not None:
+            try:
+                from nexus.contracts.hybrid_route import hybrid_route_decision_from_payload
+
+                advisory_decision = hybrid_route_decision_from_payload(local_advisory)
+                metadata = advisory_decision.metadata
+                if str(metadata.get("task_id") or "") != str(context.get("task_id") or ""):
+                    raise ValueError("advisory_task_identity_mismatch")
+                if str(metadata.get("planner_decision_id") or "") != str(context.get("planner_decision_id") or ""):
+                    raise ValueError("advisory_planner_identity_mismatch")
+                if advisory_decision.authority.value == "fail_closed":
+                    planner_snapshot = context.get("planner", {}).get("signal_snapshot") if isinstance(context.get("planner"), Mapping) else None
+                    if not isinstance(planner_snapshot, Mapping) or planner_snapshot.get("fail_closed_enabled") is not True:
+                        raise ValueError("fail_closed_override_not_planner_enabled")
+                    return _stage(
+                        "online", status="BLOCKED", invoked=False, gate_passed=False,
+                        evidence_present=True,
+                        reason=advisory_decision.fallback_block_reason or "local_advisory_guard_blocked",
+                        evidence_refs=[f"online:{context.get('task_id')}:local_advisory_guard_blocked"],
+                        response={"output_delivered": False, "provider_call_count": 0},
+                    )
+            except (TypeError, ValueError) as exc:
+                return _stage(
+                    "online", status="BLOCKED", invoked=False, gate_passed=False,
+                    evidence_present=True,
+                    reason=f"invalid_local_advisory:{exc}",
+                    evidence_refs=[f"online:{context.get('task_id')}:invalid_local_advisory"],
+                    response={"output_delivered": False, "provider_call_count": 0},
+                )
         local_packet = (
             local_response.get("verified_assist_packet")
             if isinstance(local_response.get("verified_assist_packet"), Mapping)
