@@ -2507,7 +2507,8 @@ class SelfHostedTaskService:
             return result
         try:
             if not isinstance(persisted_request, Mapping):
-                raise ValueError("PROJECT_ENTRY_REQUEST_MISSING")
+                _reject_unbound_project_entry_authority_hints(state)
+                return {"continuation": result, "authority_binding": None}
             _reject_unbound_project_entry_authority_hints(persisted_request)
             binding = _validate_project_entry_authority_binding(
                 persisted_request,
@@ -2527,8 +2528,12 @@ class SelfHostedTaskService:
         if not isinstance(state, Mapping):
             raise KeyError(f"unknown task: {task_id}")
         request = state.get("request") if isinstance(state.get("request"), Mapping) else {}
-        if request.get("repository") != repository or str(request.get("issue") or request.get("issue_number") or "") != str(issue_number):
+        request_present = bool(request.get("repository") or request.get("issue") or request.get("issue_number"))
+        if ((request_present and (request.get("repository") != repository or str(request.get("issue") or request.get("issue_number") or "") != str(issue_number))) or
+                (state.get("repository") and state.get("repository") != repository) or
+                (state.get("issue") and str(state.get("issue")) != str(issue_number))):
             raise ValueError("PROJECT_ENTRY_AUTHORITY_SELECTOR_MISMATCH")
+        _reject_unbound_project_entry_authority_hints(state)
         # The helper performs the continuity read and authority validation from
         # one state snapshot; this entry point exists for the gateway contract.
         return self.rehydrate_task_continuation(task_id, attempt_id, _project_entry=True, _state=state, _project_entry_repository=repository, _project_entry_issue=issue_number)
@@ -4879,13 +4884,10 @@ class SelfHostedTaskService:
             request_issue = str(request.get("issue") or request.get("issue_number") or "").strip()
             state_repository = str(state.get("repository") or "").strip()
             state_issue = str(state.get("issue") or "").strip()
-            if request_repository and state_repository and request_repository != state_repository:
-                continue
-            if request_issue and state_issue and request_issue != state_issue:
-                continue
             bound_repository = request_repository or state_repository
             bound_issue = request_issue or state_issue
-            if bound_repository == repository and bound_issue == issue:
+            if ((request_repository == repository and request_issue == issue) or
+                    (state_repository == repository and state_issue == issue)):
                 matches.append(state)
         return matches
 

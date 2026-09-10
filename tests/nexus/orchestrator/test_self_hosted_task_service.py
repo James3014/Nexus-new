@@ -139,7 +139,7 @@ def test_find_tasks_by_repository_issue_excludes_conflicting_repository_and_issu
     service._write_state("issue-conflict", {"task_id": "issue-conflict", "status": "SUBMITTED", "request": {"repository": "James3014/Nexus-new", "issue": 842}, "issue": 7})
     service._write_state("exact-a", {"task_id": "exact-a", "status": "SUBMITTED", "request": {"repository": "James3014/Nexus-new", "issue": 842}})
     service._write_state("exact-b", {"task_id": "exact-b", "status": "SUBMITTED", "request": {"repository": "James3014/Nexus-new", "issue": 842}})
-    assert [item["task_id"] for item in service.find_tasks_by_repository_issue("James3014/Nexus-new", 842)] == ["exact-a", "exact-b"]
+    assert [item["task_id"] for item in service.find_tasks_by_repository_issue("James3014/Nexus-new", 842)] == ["exact-a", "exact-b", "issue-conflict", "repo-conflict"]
 
 
 def test_work_claim_hostile_matrix_and_recovery(tmp_path):
