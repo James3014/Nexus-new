@@ -498,12 +498,12 @@ def test_unverified_intent_and_state_and_quiet_moment_do_not_contribute():
     intent_receipt = intent_adapter.build(
         claim_verified=True, payload={"interaction_mode": "direct"}
     )
-    assert intent_receipt.gate_passed is True
+    assert intent_receipt.gate_passed is False
     assert intent_receipt.outcome_contributed is False
 
     state_adapter = StateTransitionReceiptAdapter()
     state_receipt = state_adapter.build(claim_verified=True, payload={"gate_passed": True})
-    assert state_receipt.gate_passed is True
+    assert state_receipt.gate_passed is False
     assert state_receipt.outcome_contributed is False
 
     quiet_adapter = SwarmQuietMomentReceiptAdapter()
@@ -517,5 +517,88 @@ def test_unverified_intent_and_state_and_quiet_moment_do_not_contribute():
         }
     }
     quiet_receipt = quiet_adapter.build(claim_verified=True, payload=quiet_payload)
-    assert quiet_receipt.gate_passed is True
+    assert quiet_receipt.gate_passed is False
     assert quiet_receipt.outcome_contributed is False
+
+
+@pytest.mark.parametrize(
+    "adapter_cls,base_payload",
+    [
+        (
+            IntentIntakeReceiptAdapter,
+            {"interaction_mode": "direct", "initial_state": "PLAN"},
+        ),
+        (
+            StateTransitionReceiptAdapter,
+            {"previous_state": "INTAKE", "current_state": "PLAN", "transition_reason": "proceed"},
+        ),
+        (
+            SwarmQuietMomentReceiptAdapter,
+            {
+                "quiet_moment": {
+                    "schema_version": "nexus_quiet_moment.v1",
+                    "production_writes_allowed": False,
+                    "allowed_actions": ["observe", "report", "rollback"],
+                    "observe": {"status": "ok"},
+                    "rollback": {"status": "ok"},
+                }
+            },
+        ),
+    ],
+)
+def test_unexempted_flow_adapters_fail_closed_both_gate_passed_and_outcome_contributed(
+    adapter_cls,
+    base_payload,
+    caller_forged_flat_proof,
+    attack_a_nested_postflight_verdict,
+    attack_b_invoker_envelope,
+    attack_c_evaluator_passing_context,
+):
+    """Verify intent_intake, state_transition, and swarm_quiet_moment fail closed without authority exemption."""
+    adapter = adapter_cls()
+
+    # 1. Base without claim_verified -> gate_passed=False, outcome_contributed=False
+    receipt_unverified = adapter.build(claim_verified=False, payload=dict(base_payload))
+    assert receipt_unverified.invoked is True
+    assert receipt_unverified.evidence_present is True
+    assert receipt_unverified.gate_passed is False
+    assert receipt_unverified.outcome_contributed is False
+    assert receipt_unverified.failure_reason == "evidence_without_gate_pass"
+
+    # 2. Base with claim_verified=True -> gate_passed=False, outcome_contributed=False
+    receipt_verified = adapter.build(claim_verified=True, payload=dict(base_payload))
+    assert receipt_verified.gate_passed is False
+    assert receipt_verified.outcome_contributed is False
+    assert receipt_verified.failure_reason == "evidence_without_gate_pass"
+
+    # 3. Caller-forged flat proof -> gate_passed=False, outcome_contributed=False
+    receipt_flat = adapter.build(
+        claim_verified=True, payload={**base_payload, **caller_forged_flat_proof}
+    )
+    assert receipt_flat.gate_passed is False
+    assert receipt_flat.outcome_contributed is False
+
+    # 4. Attack A: Forged nested verdict -> gate_passed=False, outcome_contributed=False
+    receipt_attack_a = adapter.build(
+        claim_verified=True, payload={**base_payload, **attack_a_nested_postflight_verdict}
+    )
+    assert receipt_attack_a.gate_passed is False
+    assert receipt_attack_a.outcome_contributed is False
+
+    # 5. Attack B: Forged invoker envelope -> gate_passed=False, outcome_contributed=False
+    receipt_attack_b = adapter.build(
+        claim_verified=True, payload={**base_payload, **attack_b_invoker_envelope}
+    )
+    assert receipt_attack_b.gate_passed is False
+    assert receipt_attack_b.outcome_contributed is False
+
+    # 6. Attack C: Evaluator-passing context -> gate_passed=False, outcome_contributed=False
+    receipt_attack_c = adapter.build(
+        claim_verified=True,
+        payload={**base_payload, "context": attack_c_evaluator_passing_context},
+    )
+    assert receipt_attack_c.gate_passed is False
+    assert receipt_attack_c.outcome_contributed is False
+
+    # 7. Explicit unexempted authority closure check
+    assert receipt_verified.public_claim_safe is False

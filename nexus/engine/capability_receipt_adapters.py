@@ -45,7 +45,7 @@ def honest_telemetries_from_payload(
     has_tokens = "token_usage" in p or "tokens" in p
     has_overhead = "overhead_ms" in p
     has_costs = "provider_costs" in p
-    if not (has_wall or has_tokens or has_overhead):
+    if not (has_wall or has_tokens or has_overhead or has_costs):
         t = honest_unavailable_telemetries()
         if extras:
             t.update(extras)
@@ -829,7 +829,7 @@ class SwarmQuietMomentReceiptAdapter:
         allowed = quiet.get("allowed_actions") if isinstance(quiet, dict) else []
         observe = quiet.get("observe") if isinstance(quiet.get("observe"), dict) else {}
         rollback = quiet.get("rollback") if isinstance(quiet.get("rollback"), dict) else {}
-        non_mutating = bool(
+        _non_mutating = bool(
             quiet.get("schema_version") == "nexus_quiet_moment.v1"
             and quiet.get("production_writes_allowed") is False
             and allowed == ["observe", "report", "rollback"]
@@ -843,19 +843,22 @@ class SwarmQuietMomentReceiptAdapter:
                 refs.append(f"observe:{observe.get('status')}")
             if rollback.get("status"):
                 refs.append(f"rollback:{rollback.get('status')}")
+        # Unexempted flow: fails closed without explicit verifier authority exemption
+        gate_passed = False
+        outcome_contributed = False
         return merge_capability_receipt(
             name=self.name,
             selected=True,
             invoked=invoked,
             evidence_refs=refs,
-            gate_passed=non_mutating,
-            outcome_contributed=_verified_outcome_contributed(non_mutating, claim_verified, payload),
+            gate_passed=gate_passed,
+            outcome_contributed=outcome_contributed,
             executor_id=self.name,
             failure_reason=selected_failure_reason(
                 selected=True,
                 invoked=invoked,
                 evidence_refs=refs,
-                gate_passed=non_mutating,
+                gate_passed=gate_passed,
             ),
         )
 
@@ -1288,17 +1291,25 @@ class IntentIntakeReceiptAdapter:
         if payload.get("confirmation_checkpoint"):
             refs.append(f"checkpoint:{payload.get('confirmation_checkpoint')}")
         
-        invoked = True
-        gate_passed = True # Intake always passes if produced
+        invoked = bool(payload.get("interaction_mode") or payload.get("task_id") or refs)
+        # Unexempted flow: fails closed without explicit verifier authority exemption
+        gate_passed = False
+        outcome_contributed = False
         return merge_capability_receipt(
             name=self.name,
             selected=True,
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
+            outcome_contributed=outcome_contributed,
             executor_id="intent_intake_classifier",
-            telemetries=payload.get("telemetries", {})
+            failure_reason=selected_failure_reason(
+                selected=True,
+                invoked=invoked,
+                evidence_refs=refs,
+                gate_passed=gate_passed,
+            ),
+            telemetries=payload.get("telemetries", {}),
         )
 
 
@@ -1306,23 +1317,37 @@ class StateTransitionReceiptAdapter:
     name = "state_transition"
 
     def build(self, *, claim_verified: bool, payload: dict[str, Any]) -> CapabilityReceipt:
-        prev = payload.get("previous_state", "UNKNOWN")
-        curr = payload.get("current_state", "UNKNOWN")
+        prev = payload.get("previous_state") or payload.get("source_state") or "UNKNOWN"
+        curr = payload.get("current_state") or payload.get("target_state") or "UNKNOWN"
         reason = payload.get("transition_reason", "")
         refs = [f"from:{prev}", f"to:{curr}"]
         if reason:
             refs.append(f"reason:{reason}")
             
-        invoked = True
-        gate_passed = bool(payload.get("gate_passed", True))
+        invoked = bool(
+            payload.get("source_state")
+            or payload.get("target_state")
+            or payload.get("previous_state")
+            or payload.get("current_state")
+            or refs
+        )
+        # Unexempted flow: fails closed without explicit verifier authority exemption
+        gate_passed = False
+        outcome_contributed = False
         return merge_capability_receipt(
             name=self.name,
             selected=True,
             invoked=invoked,
             evidence_refs=refs,
             gate_passed=gate_passed,
-            outcome_contributed=_verified_outcome_contributed(gate_passed, claim_verified, payload),
+            outcome_contributed=outcome_contributed,
             executor_id="flow_state_machine",
+            failure_reason=selected_failure_reason(
+                selected=True,
+                invoked=invoked,
+                evidence_refs=refs,
+                gate_passed=gate_passed,
+            ),
         )
 
 
@@ -1333,7 +1358,11 @@ class LocalHealReceiptAdapter:
         hr = payload.get("hybrid_route")
         
         if hr is not None:
-            from nexus.contracts.hybrid_route import validate_hybrid_route_decision, RouteMode, HYBRID_ROUTE_DECISION_SCHEMA
+            from nexus.contracts.hybrid_route import (
+                HYBRID_ROUTE_DECISION_SCHEMA,
+                RouteMode,
+                validate_hybrid_route_decision,
+            )
             
             hr_dict = dict(hr if isinstance(hr, dict) else hr.to_dict())
             if "schema" not in hr_dict:
