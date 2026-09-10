@@ -57,6 +57,7 @@ from nexus.orchestrator.repository_contract_gate import (
 from nexus.orchestrator.self_hosted_task_service import (
     _LEGACY_V1_NEGATIVE_OMISSION_SET,
     SelfHostedTaskService,
+    _validate_project_entry_authority_binding,
     resolve_canonical_target_roots,
     resolve_execution_lane,
     validate_task_card_binding,
@@ -139,7 +140,7 @@ def test_find_tasks_by_repository_issue_excludes_conflicting_repository_and_issu
     service._write_state("issue-conflict", {"task_id": "issue-conflict", "status": "SUBMITTED", "request": {"repository": "James3014/Nexus-new", "issue": 842}, "issue": 7})
     service._write_state("exact-a", {"task_id": "exact-a", "status": "SUBMITTED", "request": {"repository": "James3014/Nexus-new", "issue": 842}})
     service._write_state("exact-b", {"task_id": "exact-b", "status": "SUBMITTED", "request": {"repository": "James3014/Nexus-new", "issue": 842}})
-    assert [item["task_id"] for item in service.find_tasks_by_repository_issue("James3014/Nexus-new", 842)] == ["exact-a", "exact-b"]
+    assert [item["task_id"] for item in service.find_tasks_by_repository_issue("James3014/Nexus-new", 842)] == ["exact-a", "exact-b", "issue-conflict", "repo-conflict"]
 
 
 def test_work_claim_hostile_matrix_and_recovery(tmp_path):
@@ -9429,3 +9430,47 @@ def test_rehydrate_task_continuation_reason_not_promoted_to_observation(tmp_path
     proj = service.rehydrate_task_continuation(task_id, attempt_id)
     assert "verified_observations" not in proj["continuation"]
     assert "verified_observations" in proj["missing_durable_bindings"]
+def test_project_entry_authority_binding_is_canonical_and_strict():
+
+    values = {
+        "repository": "James3014/Nexus-new",
+        "issue_number": 842,
+        "goal_id": "goal-842",
+        "coordination_scope_id": "scope-842",
+        "canonical_remote": "https://github.com/James3014/Nexus-new.git",
+        "intended_action_family": "TASK_SUBMIT",
+    }
+    binding = {**values, "binding_hash": canonical_request_hash(values)}
+    assert _validate_project_entry_authority_binding(
+        {"project_entry_authority_binding": binding},
+        repository="James3014/Nexus-new",
+        issue_number=842,
+    ) == {key: str(value) for key, value in values.items()}
+    with pytest.raises(ValueError, match="BINDING_HASH_MISMATCH"):
+        _validate_project_entry_authority_binding(
+            {"project_entry_authority_binding": {**binding, "goal_id": "other"}},
+            repository="James3014/Nexus-new",
+            issue_number=842,
+        )
+
+
+@pytest.mark.parametrize("field", ["goal_id", "coordination_scope_id", "repository", "canonical_remote", "intended_action_family"])
+def test_project_entry_authority_binding_rejects_null_typed_fields(field):
+
+    values = {
+        "repository": "James3014/Nexus-new", "issue_number": 842,
+        "goal_id": "goal-842", "coordination_scope_id": "scope-842",
+        "canonical_remote": "https://github.com/James3014/Nexus-new.git",
+        "intended_action_family": "TASK_SUBMIT",
+    }
+    binding = {**values, "binding_hash": canonical_request_hash(values)}
+    binding[field] = None
+    with pytest.raises(ValueError):
+        _validate_project_entry_authority_binding({"project_entry_authority_binding": binding})
+
+
+def test_project_entry_authority_binding_rejects_conflicting_legacy_goal():
+    values = {"repository": "James3014/Nexus-new", "issue_number": 842, "goal_id": "goal-842", "coordination_scope_id": "scope-842", "canonical_remote": "https://github.com/James3014/Nexus-new.git", "intended_action_family": "TASK_SUBMIT"}
+    binding = {**values, "binding_hash": canonical_request_hash(values)}
+    with pytest.raises(ValueError, match="DUPLICATE_MISMATCH"):
+        _validate_project_entry_authority_binding({"project_entry_authority_binding": binding, "authority_goal_id": "other-goal"})
