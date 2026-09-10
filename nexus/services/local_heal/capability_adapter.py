@@ -50,6 +50,45 @@ class LocalHealCapabilityRequest:
     dry_run: bool = True
 
 
+def advisory_route_from_local_response(
+    response: Mapping[str, Any],
+    *,
+    task_id: str,
+    planner_decision_id: str,
+    evidence_refs: tuple[str, ...],
+) -> HybridRouteDecision:
+    """Derive the GB019 advisory guard from a real LocalAssist response."""
+    if str(response.get("schema") or "") != "nexus.local_assist.response.v1":
+        raise ValueError("advisory_response_schema_missing")
+    if str(response.get("action") or "") != "advisor":
+        raise ValueError("advisory_route_requires_advisor_response")
+    if str(response.get("task_id") or "") != task_id:
+        raise ValueError("advisory_response_task_mismatch")
+    if str(response.get("physical_callable") or "") != "LocalModelProvider.generate":
+        raise ValueError("advisory_response_callable_mismatch")
+    if response.get("executor_invoked") is not False:
+        raise ValueError("advisory_response_executor_identity_mismatch")
+    verifier = response.get("verifier_summary")
+    verifier_status = str(verifier.get("verifier_status") or "not_run") if isinstance(verifier, Mapping) else "not_run"
+    local_called = bool(response.get("local_model_invoked"))
+    delivered = bool(response.get("output_delivered"))
+    if not local_called or not delivered:
+        raise ValueError("advisory_provider_output_missing")
+    return hybrid_route_decision_from_payload(build_hybrid_route_decision(
+        route_mode=RouteMode.CLOUD_FIRST_LOCAL_GUARD_ADVISORY,
+        authority=Authority.ADVISORY_ONLY,
+        verifier_result=verifier_status,
+        behavior_changed=False,
+        public_claim_allowed=False,
+        production_ready=False,
+        adapter_output_is_route_truth=False,
+        route_truth_source="CapabilityPlanner",
+        local_model_called=True,
+        evidence_refs=tuple(evidence_refs),
+        metadata={"task_id": task_id, "planner_decision_id": planner_decision_id},
+    ))
+
+
 @dataclass(frozen=True)
 class LocalHealCapabilityResponse:
     task_id: str

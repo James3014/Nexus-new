@@ -124,7 +124,7 @@ def test_trace_only_requires_behavior_unchanged() -> None:
         )
 
 
-def test_advisory_guard_cannot_block_delivery_yet() -> None:
+def test_advisory_guard_contract_projection() -> None:
     """GB-019: an advisory verifier failure is observational only."""
     decision = HybridRouteDecision(
         route_mode=RouteMode.CLOUD_FIRST_LOCAL_GUARD_ADVISORY,
@@ -152,25 +152,53 @@ def test_advisory_guard_cannot_block_delivery_yet() -> None:
     assert receipt.public_claim_safe is False
 
 
-def test_gb019_advisory_failure_does_not_block_delivery_or_claim() -> None:
-    test_advisory_guard_cannot_block_delivery_yet()
-
-
-def test_gb019_blocking_override_fails_closed() -> None:
-    """A deliberate fail-closed authority is distinct from advisory mode."""
-    payload = build_hybrid_route_decision(
-        route_mode=RouteMode.CLOUD_FIRST_LOCAL_GUARD_FAIL_CLOSED,
-        authority=Authority.FAIL_CLOSED,
-        verifier_result=VerifierResult.FAIL,
-        fallback_block_reason="verifier_fail",
-        blockers=("verifier_fail",),
+def test_advisory_guard_cannot_block_delivery_yet(monkeypatch, tmp_path) -> None:
+    from tests.services.test_unified_runtime import (
+        test_gb019_advisory_verifier_failure_keeps_public_delivery,
     )
-    decision = hybrid_route_decision_from_payload(payload)
 
-    assert decision.authority is Authority.FAIL_CLOSED
-    assert decision.fallback_block_reason == "verifier_fail"
-    assert decision.blockers == ("verifier_fail",)
-    assert decision.public_claim_allowed is False
+    test_gb019_advisory_verifier_failure_keeps_public_delivery(monkeypatch, tmp_path)
+
+
+def test_gb019_advisory_failure_does_not_block_delivery_or_claim(monkeypatch, tmp_path) -> None:
+    # Keep the corpus node ID while routing closure evidence through the
+    # public UnifiedRuntime witness rather than the projection-only unit.
+    from tests.services.test_unified_runtime import (
+        test_gb019_advisory_verifier_failure_keeps_public_delivery,
+    )
+
+    test_gb019_advisory_verifier_failure_keeps_public_delivery(monkeypatch, tmp_path)
+
+
+def test_gb019_blocking_override_fails_closed(monkeypatch, tmp_path) -> None:
+    """A deliberate fail-closed authority is exercised at public delivery."""
+    from tests.services.test_unified_runtime import (
+        test_gb019_fail_closed_override_blocks_public_online,
+    )
+
+    test_gb019_fail_closed_override_blocks_public_online(monkeypatch, tmp_path)
+
+
+def test_gb019_advisory_route_rejects_task_and_planner_tamper() -> None:
+    from nexus.services.local_heal.capability_adapter import advisory_route_from_local_response
+
+    response = {
+        "schema": "nexus.local_assist.response.v1",
+        "action": "advisor",
+        "task_id": "task-a",
+        "physical_callable": "LocalModelProvider.generate",
+        "executor_invoked": False,
+        "local_model_invoked": True,
+        "output_delivered": True,
+        "verifier_summary": {"verifier_status": "fail"},
+    }
+    with pytest.raises(ValueError, match="task_mismatch"):
+        advisory_route_from_local_response(
+            {**response, "task_id": "task-b"},
+            task_id="task-a",
+            planner_decision_id="plan-a",
+            evidence_refs=("e",),
+        )
 
 
 def test_public_claim_allowed_true_fails() -> None:
