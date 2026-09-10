@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
-from nexus.executors.cli_worker import CliWorkerResult, CliWorkerRequest, run_cli_worker
+from nexus.executors.cli_worker import (
+    CliWorkerRequest,
+    CliWorkerResult,
+    CliWorkerStatus,
+    run_cli_worker,
+)
 from nexus.orchestrator.task_contract import SelfHostedTaskContract
 from nexus.orchestrator.worktree_manager import TargetWorktreeLease
 
@@ -28,6 +33,7 @@ class CodexExecutionReceipt:
     provider_calls: int
     commit_created: bool
     merge_performed: bool
+    provider_attempt_count: int | None = None
 
 
 class CodexCliExecutor:
@@ -97,6 +103,8 @@ class CodexCliExecutor:
         lease: TargetWorktreeLease,
         result: CliWorkerResult,
     ) -> CodexExecutionReceipt:
+        started = result.status != CliWorkerStatus.START_FAILED
+        invocation_count = int(started)
         return CodexExecutionReceipt(
             provider="codex",
             task_id=contract.task_id,
@@ -109,7 +117,8 @@ class CodexCliExecutor:
             stderr_sha256=result.stderr_sha256,
             wall_time_ms=result.wall_time_ms,
             process_group_id=result.process_group_id,
-            provider_calls=1,
+            provider_calls=invocation_count,
+            provider_attempt_count=invocation_count,
             commit_created=False,
             merge_performed=False,
         )

@@ -262,6 +262,7 @@ def test_codex_adapter_normalizes_provider_receipt_to_common_contract(tmp_path):
                 wall_time_ms=17,
                 process_group_id=123,
                 provider_calls=1,
+                provider_attempt_count=1,
                 commit_created=False,
                 merge_performed=False,
             )

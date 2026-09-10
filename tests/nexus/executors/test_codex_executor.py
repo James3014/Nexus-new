@@ -1,13 +1,19 @@
+import sys
 from pathlib import Path
 
 import pytest
 
-from nexus.executors.cli_worker import CliWorkerResult, CliWorkerStatus
+from nexus.executors.cli_worker import (
+    CliWorkerRequest,
+    CliWorkerResult,
+    CliWorkerStatus,
+    run_cli_worker,
+)
 from nexus.executors.codex_executor import CodexCliExecutor
 from nexus.orchestrator.task_contract import (
     AcceptanceProfile,
-    ArchitectureDecision,
     ArchitectTaskContract,
+    ArchitectureDecision,
     DevelopmentGoal,
     HumanApprovalPolicy,
     MutationMode,
@@ -108,6 +114,78 @@ def test_codex_executor_builds_fresh_target_bound_command(tmp_path, monkeypatch)
     assert request.cwd == str(Path(lease.target_worktree).resolve())
     assert receipt.commit_created is False
     assert receipt.merge_performed is False
+    assert receipt.provider_calls == 1
+    assert receipt.provider_attempt_count == 1
+
+
+@pytest.mark.parametrize(
+    ("status", "provider_calls", "provider_attempt_count"),
+    [
+        (CliWorkerStatus.START_FAILED, 0, 0),
+        (CliWorkerStatus.COMPLETED, 1, 1),
+        (CliWorkerStatus.TIMED_OUT, 1, 1),
+    ],
+)
+def test_codex_executor_receipt_counts_started_invocation_once(
+    tmp_path, status, provider_calls, provider_attempt_count
+):
+    contract = _contract(tmp_path)
+    lease = _lease(tmp_path, contract)
+    result = CliWorkerResult(
+        status=status,
+        executable_identity="codex",
+        argv=("exec",),
+        cwd=str(lease.target_worktree),
+        exit_code=None if status == CliWorkerStatus.START_FAILED else 0,
+        stdout=b"",
+        stderr=b"",
+        wall_time_ms=1,
+        process_group_id=None if status == CliWorkerStatus.START_FAILED else 42,
+        process_group_killed=status == CliWorkerStatus.TIMED_OUT,
+        timed_out=status == CliWorkerStatus.TIMED_OUT,
+    )
+
+    receipt = CodexCliExecutor._receipt(contract, lease, result)
+
+    assert receipt.provider_calls == provider_calls
+    assert receipt.provider_attempt_count == provider_attempt_count
+
+
+@pytest.mark.parametrize(
+    ("executable_factory", "expected_status", "expected_count"),
+    [
+        ("completed", CliWorkerStatus.COMPLETED, 1),
+        ("start_failed", CliWorkerStatus.START_FAILED, 0),
+    ],
+)
+def test_codex_receipt_counts_real_local_cli_invocation(
+    tmp_path, executable_factory, expected_status, expected_count
+):
+    if executable_factory == "completed":
+        request = CliWorkerRequest(
+            executable=sys.executable,
+            argv=("-c", "print('ready')"),
+            cwd=str(tmp_path),
+            timeout_seconds=5,
+        )
+    else:
+        executable = tmp_path / "missing-interpreter"
+        executable.write_text("#!/no/such/interpreter\n", encoding="utf-8")
+        executable.chmod(0o755)
+        request = CliWorkerRequest(
+            executable=str(executable),
+            argv=("worker",),
+            cwd=str(tmp_path),
+            timeout_seconds=5,
+        )
+
+    result = run_cli_worker(request)
+    contract = _contract(tmp_path)
+    receipt = CodexCliExecutor._receipt(contract, _lease(tmp_path, contract), result)
+
+    assert result.status is expected_status
+    assert receipt.provider_calls == expected_count
+    assert receipt.provider_attempt_count == expected_count
 
 
 @pytest.mark.parametrize("configured_model", [None, "", "   "])
