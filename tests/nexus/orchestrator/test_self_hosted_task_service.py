@@ -58,6 +58,8 @@ from nexus.orchestrator.repository_contract_gate import (
 from nexus.orchestrator.self_hosted_task_service import (
     _LEGACY_V1_NEGATIVE_OMISSION_SET,
     SelfHostedTaskService,
+    _terminal_retry_inherited_worktree_time_allowed,
+    _terminal_retry_pre_provider_state_allowed,
     _terminal_retry_verifier_static_failure_allowed,
     _validate_project_entry_authority_binding,
     _validated_action_request,
@@ -75,6 +77,161 @@ from nexus.orchestrator.worktree_manager import (
 from nexus.services.model_workforce_policy import WorkforcePolicyLoader
 from nexus.services.runtime_workforce_admission import evaluate_runtime_workforce_admission
 
+
+def _inherited_worktree_timing_state(tmp_path):
+    controller = tmp_path / "controller"
+    target_root = tmp_path / "targets"
+    target = target_root / "task"
+    controller.mkdir()
+    target_root.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=controller, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=controller, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=controller, check=True)
+    (controller / "source.txt").write_text("old\n")
+    subprocess.run(["git", "add", "source.txt"], cwd=controller, check=True)
+    subprocess.run(["git", "commit", "-qm", "old"], cwd=controller, check=True)
+    subprocess.run(
+        ["git", "branch", "nexus/task/inherited-timing-task"], cwd=controller, check=True
+    )
+    (controller / "source.txt").write_text("new\n")
+    subprocess.run(["git", "commit", "-qam", "new"], cwd=controller, check=True)
+    target_base = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=controller, text=True).strip()
+    previous_started = "2026-09-10T17:49:33.803740+00:00"
+    previous_finished = "2026-09-10T17:49:36.818839+00:00"
+    current_started = "2026-09-10T22:59:19.279029+00:00"
+    current_finished = "2026-09-10T22:59:21.873106+00:00"
+    return {
+        "task_id": "inherited-timing-task",
+        "status": "FINAL_BLOCK",
+        "error": "existing task branch candidate lacks durable protection",
+        "cleanup_decision": "ALREADY_REMOVED",
+        "target_created_at": None,
+        "target_worktree": str(target),
+        "lease": None,
+        "execution": None,
+        "executions": None,
+        "active_provider": None,
+        "worker_preflight": None,
+        "worker_child_pgid": None,
+        "candidate": None,
+        "candidate_commit_sha": None,
+        "candidate_ref": None,
+        "candidate_state_hash": None,
+        "verified_receipt": None,
+        "verified_receipt_hash": None,
+        "candidate_status": None,
+        "promotion_status": "NOT_CREATED",
+        "merge_performed": False,
+        "push_performed": False,
+        "worker_started_at": current_started,
+        "worker_finished_at": current_finished,
+        "attempt_id": "attempt-current",
+        "attempts": [
+            {
+                "attempt_id": "attempt-previous",
+                "started_at": previous_started,
+                "finished_at": previous_finished,
+                "last_status": "FINAL_BLOCK",
+            },
+            {
+                "attempt_id": "attempt-current",
+                "started_at": current_started,
+                "finished_at": current_finished,
+                "last_status": "FINAL_BLOCK",
+            },
+        ],
+        "status_history": [
+            {"status": "SUBMITTED", "at": previous_started},
+            {"status": "TARGET_LEASED", "at": "2026-09-10T17:49:35.516136+00:00"},
+            {"status": "WORKER_RUNNING", "at": "2026-09-10T17:49:35.523858+00:00"},
+            {"status": "FINAL_BLOCK", "at": previous_finished},
+            {"status": "ATTEMPT_INCREMENTED", "at": current_started},
+            {"status": "FINAL_BLOCK", "at": current_finished},
+        ],
+        "telemetry": {
+            "provider_calls": 0,
+            "provider_attempts": 0,
+            "provider_time_ms": 0,
+            "worktree_time_ms": 1429,
+            "verifier_time_ms": 0,
+        },
+        "contract": {
+            "controller_repo_root": str(controller),
+            "target_worktree_root": str(target_root),
+            "target_repo_root": str(target),
+            "target_base_revision": target_base,
+        },
+    }
+
+
+def test_terminal_retry_accepts_inherited_worktree_time_only_after_prior_lease(tmp_path):
+    state = _inherited_worktree_timing_state(tmp_path)
+    assert _terminal_retry_inherited_worktree_time_allowed(state)
+    assert _terminal_retry_pre_provider_state_allowed(state)
+
+
+def test_terminal_retry_preserves_zero_worktree_time_for_other_pre_provider_errors(tmp_path):
+    state = _inherited_worktree_timing_state(tmp_path)
+    state["telemetry"]["worktree_time_ms"] = 0
+    state["error"] = "another pre-provider validation failure"
+    assert _terminal_retry_inherited_worktree_time_allowed(state)
+    assert _terminal_retry_pre_provider_state_allowed(state)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda state: state["status_history"].__setitem__(-1, {"status": "TARGET_LEASED", "at": state["attempts"][-1]["finished_at"]}),
+        lambda state: state["status_history"].pop(),
+        lambda state: state["status_history"].__setitem__(1, {"status": "FINAL_BLOCK", "at": state["status_history"][1]["at"]}),
+    ],
+)
+def test_terminal_retry_rejects_inherited_worktree_time_with_ambiguous_current_history(tmp_path, mutation):
+    state = _inherited_worktree_timing_state(tmp_path)
+    mutation(state)
+    assert not _terminal_retry_inherited_worktree_time_allowed(state)
+
+
+def test_terminal_retry_rejects_inherited_worktree_time_with_active_target(tmp_path):
+    state = _inherited_worktree_timing_state(tmp_path)
+    Path(state["target_worktree"]).mkdir(parents=True)
+    assert not _terminal_retry_inherited_worktree_time_allowed(state)
+
+
+def test_terminal_retry_rejects_mixed_timezone_history(tmp_path):
+    state = _inherited_worktree_timing_state(tmp_path)
+    state["status_history"][1]["at"] = "2026-09-10T17:49:35.516136"
+    assert not _terminal_retry_inherited_worktree_time_allowed(state)
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("executions", [{"provider_calls": 0}]),
+        ("lease", {"lease_id": "active"}),
+        ("promotion_packet", {"candidate_state_hash": "a" * 64}),
+        ("candidate", {"commit": "a" * 40}),
+        ("telemetry", {"provider_calls": 1, "provider_attempts": 0, "provider_time_ms": 0, "worktree_time_ms": 1429, "verifier_time_ms": 0}),
+    ],
+)
+def test_terminal_retry_rejects_inherited_worktree_time_after_effect_evidence(tmp_path, field, value):
+    state = _inherited_worktree_timing_state(tmp_path)
+    state[field] = value
+    assert not _terminal_retry_pre_provider_state_allowed(state)
+
+
+def test_terminal_retry_rejects_divergent_branch_base(tmp_path):
+    state = _inherited_worktree_timing_state(tmp_path)
+    state["contract"]["target_base_revision"] = "0" * 40
+    assert not _terminal_retry_inherited_worktree_time_allowed(state)
+
+
+def test_terminal_retry_rejects_dangling_target_symlink(tmp_path):
+    state = _inherited_worktree_timing_state(tmp_path)
+    target = Path(state["target_worktree"])
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.symlink_to(target.parent / "missing")
+    assert not _terminal_retry_inherited_worktree_time_allowed(state)
 
 def _operator_provenance(kind="operator"):
     source = {"source_ref": "authenticated-submission"}
@@ -3423,13 +3580,16 @@ def test_terminal_retry_rejects_action_bound_non_ancestor_before_runner(tmp_path
     assert after["attempts"] == before["attempts"]
 
 
+@pytest.mark.parametrize("inherited_worktree_time", [False, True], ids=["zero", "inherited"])
 def test_terminal_retry_accepts_planner_bound_action_revision_refresh(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, inherited_worktree_time
 ):
     task_id = "planner-bound-revision-refresh"
     service, request, old_envelope, _, _ = _m3c_repairable_workforce_state(
         tmp_path, monkeypatch, task_id=task_id, acceptance_decision="NOT_REPAIRABLE"
     )
+    if inherited_worktree_time:
+        request["maximum_attempts_per_task"] = 3
     old_attempt = old_envelope["attempt_id"]
     initial = _action_transport(
         request,
@@ -3438,6 +3598,7 @@ def test_terminal_retry_accepts_planner_bound_action_revision_refresh(
         idempotency_key="key-planner-old",
     )
     state = service._read_state(task_id)
+    refreshed_contract = service.build_contract(request) if inherited_worktree_time else None
     state.update(
         request=initial,
         action=initial["action"],
@@ -3469,14 +3630,43 @@ def test_terminal_retry_accepts_planner_bound_action_revision_refresh(
         merge_performed=False,
         push_performed=False,
         telemetry={"provider_calls": 0, "provider_attempts": 0, "provider_time_ms": 0,
-                   "worktree_time_ms": 0, "verifier_time_ms": 0},
+                   "worktree_time_ms": 1429 if inherited_worktree_time else 0, "verifier_time_ms": 0},
         attempts=[{"attempt_id": old_attempt, "action_id": initial["action_id"],
                    "idempotency_key": initial["idempotency_key"],
                    "action_request_hash": initial["action_request_hash"]}],
     )
+    if inherited_worktree_time:
+        state.update(
+            error="existing task branch candidate lacks durable protection",
+            executions=[],
+            target_worktree=request["target_repo_root"],
+            attempts=[
+                {"attempt_id": "attempt-previous", "started_at": "2026-01-01T00:00:00+00:00",
+                 "finished_at": "2026-01-01T00:00:03+00:00", "last_status": "FINAL_BLOCK"},
+                {"attempt_id": old_attempt, "action_id": initial["action_id"],
+                 "started_at": "2026-01-01T00:01:00+00:00",
+                 "finished_at": "2026-01-01T00:01:02+00:00", "last_status": "FINAL_BLOCK",
+                 "idempotency_key": initial["idempotency_key"],
+                 "action_request_hash": initial["action_request_hash"]},
+            ],
+            status_history=[
+                {"status": "SUBMITTED", "at": "2026-01-01T00:00:00+00:00"},
+                {"status": "TARGET_LEASED", "at": "2026-01-01T00:00:01+00:00"},
+                {"status": "WORKER_RUNNING", "at": "2026-01-01T00:00:02+00:00"},
+                {"status": "FINAL_BLOCK", "at": "2026-01-01T00:00:03+00:00"},
+                {"status": "ATTEMPT_INCREMENTED", "at": "2026-01-01T00:01:00+00:00"},
+                {"status": "FINAL_BLOCK", "at": "2026-01-01T00:01:02+00:00"},
+            ],
+        )
+        state["contract"] = refreshed_contract.model_dump(mode="json")
+        state["contract_hash"] = refreshed_contract.contract_hash
     service._write_state(task_id, state)
 
     controller = Path(request["controller_repo_root"])
+    if inherited_worktree_time:
+        Path(request["target_worktree_root"]).mkdir(parents=True, exist_ok=True)
+        old_controller_head = _git(controller, "rev-parse", "HEAD")
+        _git(controller, "branch", f"nexus/task/{task_id}", old_controller_head)
     (controller / "README").write_text("activation\n")
     _git(controller, "add", "README")
     _git(controller, "commit", "-m", "activate lifecycle")
@@ -3498,7 +3688,7 @@ def test_terminal_retry_accepts_planner_bound_action_revision_refresh(
     current = service._read_state(task_id)
 
     assert submitted["attempt_id"] == "attempt-planner-new"
-    assert current["attempts"][0]["attempt_id"] == old_attempt
+    assert current["attempts"][1 if inherited_worktree_time else 0]["attempt_id"] == old_attempt
     assert current["canonical_dispatch_envelope"]["attempt_id"] == "attempt-planner-new"
     assert current["workforce_dispatch"]["provider"] == old_envelope["provider"]
 
