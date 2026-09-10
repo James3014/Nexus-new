@@ -111,8 +111,8 @@ def test_actual_launch_process_metadata_does_not_checkpoint(tmp_path, monkeypatc
 def test_actual_resumable_status_preserves_candidate_callback_without_provider(
     tmp_path, monkeypatch, status
 ):
-    target_root = tmp_path / "targets"
-    monkeypatch.setenv("NEXUS_SELF_HOSTED_TARGET_ROOT", str(target_root))
+    target_root = (tmp_path / "targets").resolve()
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str(target_root))
     service = SelfHostedTaskService(
         state_dir=tmp_path / "state", ephemeral=True, auto_reconcile=False
     )
@@ -146,6 +146,7 @@ def test_actual_resumable_status_preserves_candidate_callback_without_provider(
 
 
 def test_actual_target_leased_resume_denies_without_provider(tmp_path, monkeypatch):
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str((tmp_path / "targets").resolve()))
     service = SelfHostedTaskService(
         state_dir=tmp_path / "state", ephemeral=True, auto_reconcile=False
     )
@@ -169,6 +170,7 @@ def test_actual_target_leased_resume_denies_without_provider(tmp_path, monkeypat
 def test_actual_resumable_negative_receipt_budget_fails_closed(tmp_path, monkeypatch):
     from dataclasses import replace
 
+    monkeypatch.setenv("NEXUS_TARGET_ROOT_OVERRIDE", str((tmp_path / "targets").resolve()))
     service = SelfHostedTaskService(
         state_dir=tmp_path / "state", ephemeral=True, auto_reconcile=False
     )
