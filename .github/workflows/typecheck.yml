@@ -195,7 +195,7 @@ jobs:
               return
             fi
             set +e
-            (cd "$root" && "$GITHUB_WORKSPACE/.venv/bin/pyright" --outputjson "${files[@]}") > "$output"
+            (cd "$root" && "$GITHUB_WORKSPACE/.venv/bin/pyright" --pythonpath "$GITHUB_WORKSPACE/.venv/bin/python" --outputjson "${files[@]}") > "$output"
             local status=$?
             set -e
             echo "${prefix}_exit=$status" >> "$GITHUB_OUTPUT"

@@ -150,54 +150,70 @@ def test_local_capability_is_excluded_from_preflight():
 
 
 def test_run_once_uses_shared_materialization_helper(monkeypatch):
-    import nexus.services.unified_runtime as module
+    import sys
+
+    from nexus.services import runtime_compat
     from tests.services.test_unified_runtime import _Planner, _request
 
-    original = module.materialize_selected_capability_evidence
+    exports = runtime_compat.build_host_runtime_exports()
+    original = exports.materialize_selected_capability_evidence
     calls = []
 
-    def spy(**kwargs):
-        calls.append(kwargs["selected_capabilities"])
-        return original(**kwargs)
+    old_profile = sys.getprofile()
 
-    monkeypatch.setattr(module, "materialize_selected_capability_evidence", spy)
-    receipt = module.UnifiedRuntime(planner=_Planner()).run(
-        _request(),
-        online_invoker=lambda context: {
-            "task_id": context["task_id"],
-            "invoked": True,
-            "status": "SUCCEEDED",
-            "gate_passed": True,
-            "evidence_refs": ["online"],
-        },
-        verifier=lambda context: {
-            "task_id": context["task_id"],
-            "invoked": True,
-            "status": "SUCCEEDED",
-            "gate_passed": True,
-            "evidence_refs": ["verifier"],
-        },
-        learning=lambda context: {
-            "task_id": context["task_id"],
-            "invoked": True,
-            "status": "SUCCEEDED",
-            "gate_passed": True,
-            "evidence_refs": ["learning"],
-        },
-    )
+    def profile(frame, event, arg):
+        if event == "call" and frame.f_code is original.__code__:
+            calls.append(frame.f_locals.get("selected_capabilities"))
+        if old_profile is not None:
+            old_profile(frame, event, arg)
+
+    sys.setprofile(profile)
+    try:
+        receipt = exports.UnifiedRuntime(planner=_Planner()).run(
+            _request(),
+            online_invoker=lambda context: {
+                "task_id": context["task_id"],
+                "invoked": True,
+                "status": "SUCCEEDED",
+                "gate_passed": True,
+                "evidence_refs": ["online"],
+            },
+            verifier=lambda context: {
+                "task_id": context["task_id"],
+                "invoked": True,
+                "status": "SUCCEEDED",
+                "gate_passed": True,
+                "evidence_refs": ["verifier"],
+            },
+            learning=lambda context: {
+                "task_id": context["task_id"],
+                "invoked": True,
+                "status": "SUCCEEDED",
+                "gate_passed": True,
+                "evidence_refs": ["learning"],
+            },
+        )
+    finally:
+        sys.setprofile(old_profile)
     assert len(calls) == 1
     assert receipt["capability_evidence_bundle"]["bundle_hash"]
 
 
 def test_run_once_preserves_structured_seal_failure_receipt(monkeypatch):
-    import nexus.services.capability_evidence_bundle as bundle_module
-    import nexus.services.unified_runtime as module
+    import nexus_runtime_support_candidate.composition as bundle_module
+
+    from nexus.services import runtime_compat
     from tests.services.test_unified_runtime import _Planner, _request
 
     monkeypatch.setattr(
         bundle_module, "build_capability_evidence_bundle", lambda **_: {"tampered": True}
     )
-    receipt = module.UnifiedRuntime(planner=_Planner()).run(_request())
+    receipt = (
+        runtime_compat
+        .build_host_runtime_exports()
+        .UnifiedRuntime(planner=_Planner())
+        .run(_request())
+    )
     assert receipt["terminal_status"] == "BLOCKED"
     assert receipt["stages"][1]["status"] == "BLOCKED"
     assert receipt["online"]["status"] == "NOT_REQUESTED"
