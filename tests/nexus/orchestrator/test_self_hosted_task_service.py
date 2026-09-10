@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -728,6 +729,89 @@ def test_workforce_dispatch_binding_is_canonical_and_fail_closed():
     mismatched["records"][0]["decision"]["resolved_model"] = "tampered-model"
     with pytest.raises(RuntimeError, match="WORKFORCE_ADMISSION_BINDING_INVALID"):
         validate_workforce_dispatch_binding({"workforce_demands": demands, "workforce_admission": mismatched})
+
+
+def test_workforce_admission_accepts_forward_derived_age_rollover(monkeypatch):
+    demands, admission = _valid_local_dispatch()
+    persisted = copy.deepcopy(admission)
+    age = persisted["records"][0]["decision"]["freshness_evidence"]["verified_age_days"]
+    assert type(age) is int and age >= 0
+
+    def next_day_age(_last_verified):
+        return {
+            "last_verified": persisted["records"][0]["decision"]["freshness_evidence"]["last_verified"],
+            "verified_age_days": age + 1,
+            "is_future": False,
+        }
+
+    monkeypatch.setattr("nexus.services.model_workforce_policy.get_freshness_evidence", next_day_age)
+    binding = validate_workforce_dispatch_binding({
+        "workforce_demands": demands,
+        "workforce_admission": persisted,
+    }, require_binding=True)
+    assert binding["aggregate_binding_hash"] == admission["aggregate_binding_hash"]
+
+
+def test_workforce_admission_rejects_age_backwards_and_other_tamper(monkeypatch):
+    demands, admission = _valid_local_dispatch()
+    age = admission["records"][0]["decision"]["freshness_evidence"]["verified_age_days"]
+    assert type(age) is int and age >= 0
+
+    monkeypatch.setattr(
+        "nexus.services.model_workforce_policy.get_freshness_evidence",
+        lambda _last_verified: {
+            "last_verified": admission["records"][0]["decision"]["freshness_evidence"]["last_verified"],
+            "verified_age_days": age,
+            "is_future": False,
+        },
+    )
+
+    backwards = copy.deepcopy(admission)
+    backwards["records"][0]["decision"]["freshness_evidence"]["verified_age_days"] = age + 1
+    with pytest.raises(RuntimeError, match="WORKFORCE_ADMISSION_BINDING_INVALID"):
+        validate_workforce_dispatch_binding(
+            {"workforce_demands": demands, "workforce_admission": backwards},
+            require_binding=True,
+        )
+
+    for tamper in ("policy", "freshness", "binding", "age_missing", "deny"):
+        candidate = copy.deepcopy(admission)
+        if tamper == "policy":
+            candidate["policy_identity"]["policy_hash"] = "0" * 64
+        elif tamper == "freshness":
+            candidate["records"][0]["decision"]["freshness_evidence"]["last_verified"] = "2026-08-16"
+        elif tamper == "binding":
+            candidate["records"][0]["decision"]["resolved_model"] = "tampered-model"
+        elif tamper == "age_missing":
+            candidate["records"][0]["decision"]["freshness_evidence"].pop("verified_age_days")
+        else:
+            candidate["overall_decision"] = "BLOCK"
+        with pytest.raises(RuntimeError, match="WORKFORCE_ADMISSION_BINDING_INVALID"):
+            validate_workforce_dispatch_binding(
+                {"workforce_demands": demands, "workforce_admission": candidate},
+                require_binding=True,
+            )
+
+
+def test_workforce_admission_rejects_fresh_evaluator_deny(monkeypatch):
+    demands, admission = _valid_local_dispatch()
+    fresh_decisions = []
+    original_admit = WorkforcePolicyLoader.admit
+
+    def deny_unknown_worker(self, request, snapshot=None):
+        denied_request = replace(request, requested_worker_id="missing-worker")
+        decision = original_admit(self, denied_request, snapshot)
+        fresh_decisions.append(decision.to_dict())
+        return decision
+
+    monkeypatch.setattr(WorkforcePolicyLoader, "admit", deny_unknown_worker)
+    with pytest.raises(RuntimeError, match="WORKFORCE_ADMISSION_BINDING_INVALID"):
+        validate_workforce_dispatch_binding(
+            {"workforce_demands": demands, "workforce_admission": admission},
+            require_binding=True,
+        )
+    assert fresh_decisions
+    assert fresh_decisions[0]["decision"] == "BLOCK"
 
 
 def test_build_contract_binds_selected_admission_identity_and_rejects_override(tmp_path):

@@ -344,6 +344,52 @@ def _tracked_dispatch_required(
     )
 
 
+def _workforce_admission_readback_matches(
+    persisted: Mapping[str, Any],
+    fresh: Mapping[str, Any],
+) -> bool:
+    """Allow only forward daily age derivation drift in a fresh ALLOW receipt."""
+    if persisted.get("overall_decision") != "ALLOW" or fresh.get("overall_decision") != "ALLOW":
+        return False
+    old = json.loads(json.dumps(dict(persisted)))
+    current = json.loads(json.dumps(dict(fresh)))
+    old_records = old.get("records")
+    current_records = current.get("records")
+    if (
+        not isinstance(old_records, list)
+        or not isinstance(current_records, list)
+        or len(old_records) != len(current_records)
+    ):
+        return False
+    for old_record, current_record in zip(old_records, current_records):
+        old_decision = old_record.get("decision") if isinstance(old_record, Mapping) else None
+        current_decision = (
+            current_record.get("decision") if isinstance(current_record, Mapping) else None
+        )
+        old_freshness = (
+            old_decision.get("freshness_evidence") if isinstance(old_decision, Mapping) else None
+        )
+        current_freshness = (
+            current_decision.get("freshness_evidence")
+            if isinstance(current_decision, Mapping)
+            else None
+        )
+        if not isinstance(old_freshness, Mapping) or not isinstance(current_freshness, Mapping):
+            return False
+        old_age = old_freshness.get("verified_age_days")
+        current_age = current_freshness.get("verified_age_days")
+        if (
+            type(old_age) is not int
+            or type(current_age) is not int
+            or old_age < 0
+            or current_age < old_age
+        ):
+            return False
+        old_freshness.pop("verified_age_days", None)
+        current_freshness.pop("verified_age_days", None)
+    return old == current
+
+
 def validate_workforce_dispatch_binding(
     request: Mapping[str, Any],
     *,
@@ -400,7 +446,7 @@ def validate_workforce_dispatch_binding(
             {channel: binding},
             WorkforcePolicyLoader(),
         ).to_dict()
-        if fresh != dict(admission):
+        if not _workforce_admission_readback_matches(admission, fresh):
             raise ValueError("workforce admission receipt is stale or tampered")
         fresh_records = fresh.get("records") or []
         if (
