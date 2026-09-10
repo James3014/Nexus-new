@@ -852,6 +852,87 @@ def _retry_semantic_payload(request: Mapping[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _terminal_retry_semantic_payload(request: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the validated task semantics shared by a terminal fast-forward.
+
+    Action-bound retries legitimately receive fresh transport identity and a
+    fresh expected head.  Validate the complete envelope first, then remove
+    only those transport and revision fields; planner, worker, card, paths,
+    and authority fields remain part of the comparison.
+    """
+    effective, _ = _validated_action_request(request)
+    if "workforce_demands" in effective or "workforce_admission" in effective:
+        validate_workforce_dispatch_binding(effective, require_binding=True)
+    payload = _retry_semantic_payload(effective)
+    payload.pop("controller_revision", None)
+    payload.pop("target_base_revision", None)
+    dispatch_envelope = payload.get("canonical_dispatch_envelope")
+    if isinstance(dispatch_envelope, Mapping):
+        # The envelope is validated as part of the bound request.  Its
+        # attempt_id is the sole transport-derived field that changes on a
+        # legitimate retry; preserve every Planner/admission field.
+        dispatch_envelope = dict(dispatch_envelope)
+        dispatch_envelope.pop("attempt_id", None)
+        payload["canonical_dispatch_envelope"] = dispatch_envelope
+    return payload
+
+
+def _terminal_retry_pre_provider_state_allowed(state: Mapping[str, Any]) -> bool:
+    """Permit revision refresh only for a known, effect-free terminal state."""
+    if state.get("status") != "FINAL_BLOCK":
+        return False
+    if str(state.get("cleanup_decision") or "") not in {
+        "REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED",
+    }:
+        return False
+    if state.get("target_created_at") is not None:
+        return False
+    if state.get("active_provider") not in (None, ""):
+        return False
+    if state.get("worker_preflight") is not None or state.get("worker_child_pgid") is not None:
+        return False
+    if state.get("worker_started_at") is None or state.get("worker_finished_at") is None:
+        return False
+    if state.get("execution") is not None or state.get("execution_outcome") is not None:
+        return False
+    if any(
+        state.get(field) is not None
+        for field in (
+            "candidate", "candidate_commit_sha", "candidate_ref",
+            "candidate_state_hash", "verified_receipt", "verified_receipt_hash",
+        )
+    ):
+        return False
+    packet = state.get("promotion_packet")
+    if packet is not None and (
+        not isinstance(packet, Mapping)
+        or any(
+            packet.get(field) is not None
+            for field in (
+                "candidate_commit_sha", "candidate_tree_sha", "candidate_state_hash",
+                "verified_receipt_hash", "approval_binding",
+            )
+        )
+    ):
+        return False
+    if state.get("candidate_status") not in (None, ""):
+        return False
+    if state.get("promotion_status") != "NOT_CREATED":
+        return False
+    if state.get("merge_performed") not in (None, False) or state.get("push_performed") not in (None, False):
+        return False
+    telemetry = state.get("telemetry")
+    if not isinstance(telemetry, Mapping):
+        return False
+    return all(
+        type(telemetry.get(field)) is int and telemetry[field] == 0
+        for field in (
+            "provider_calls", "provider_attempts", "provider_time_ms",
+            "worktree_time_ms", "verifier_time_ms",
+        )
+    )
+
+
 def _validate_retry_predecessor(
     request: Mapping[str, Any],
     predecessor: Optional[Mapping[str, Any]],
@@ -896,8 +977,8 @@ def _validate_retry_predecessor(
     previous_request = predecessor.get("request")
     if not isinstance(previous_request, Mapping):
         raise ValueError("RETRY_PREDECESSOR_REQUEST_MISSING")
-    if canonical_request_hash(_retry_semantic_payload(request)) != canonical_request_hash(
-        _retry_semantic_payload(previous_request)
+    if canonical_request_hash(_terminal_retry_semantic_payload(request)) != canonical_request_hash(
+        _terminal_retry_semantic_payload(previous_request)
     ):
         raise ValueError("RETRY_SEMANTIC_TASK_MISMATCH")
 
@@ -2933,12 +3014,16 @@ class SelfHostedTaskService:
         request: Mapping[str, Any],
         contract: ArchitectTaskContract,
     ) -> bool:
-        previous_request = dict(existing.get("request") or {})
-        next_request = _jsonable(dict(request))
-        for field in ("controller_revision", "target_base_revision"):
-            previous_request.pop(field, None)
-            next_request.pop(field, None)
-        if previous_request != next_request:
+        previous_raw_request = existing.get("request")
+        action_bound_refresh = isinstance(previous_raw_request, Mapping) and (
+            "action" in previous_raw_request or "bound_action_request" in previous_raw_request
+        )
+        if action_bound_refresh and not _terminal_retry_pre_provider_state_allowed(existing):
+            return False
+        previous_request = dict(previous_raw_request or {})
+        if not isinstance(existing.get("request"), Mapping):
+            return False
+        if _terminal_retry_semantic_payload(previous_request) != _terminal_retry_semantic_payload(request):
             return False
 
         previous_contract = existing.get("contract") or {}
@@ -6262,9 +6347,34 @@ class SelfHostedTaskService:
             if terminal_retry:
                 if existing.get("cleanup_decision") not in {"REMOVED", "ALREADY_REMOVED", "TARGET_CLEANED"}:
                     raise RuntimeError("terminal retry blocked until previous Target disposition")
+                predecessor_snapshot = json.loads(json.dumps(existing))
+                bound_revision_refresh = isinstance(predecessor_snapshot.get("request"), Mapping) and (
+                    "action" in predecessor_snapshot["request"]
+                    or "bound_action_request" in predecessor_snapshot["request"]
+                ) and contract_refreshed
+                predecessor_contract_hash = predecessor_snapshot.get("contract_hash")
+                predecessor_request_hash = (
+                    canonical_request_hash(
+                        _terminal_retry_semantic_payload(predecessor_snapshot["request"])
+                    )
+                    if bound_revision_refresh
+                    else None
+                )
                 existing = self._reactivate_archived_state(contract.task_id, existing)
                 attempt_id = attempt_id_hint or uuid4().hex
                 def retry(current: dict[str, Any]) -> None:
+                    if bound_revision_refresh:
+                        if (
+                            current.get("attempt_id") != predecessor_snapshot.get("attempt_id")
+                            or current.get("contract_hash") != predecessor_contract_hash
+                            or current.get("status") != predecessor_snapshot.get("status")
+                            or current.get("cleanup_decision") != predecessor_snapshot.get("cleanup_decision")
+                            or canonical_request_hash(
+                                _terminal_retry_semantic_payload(current.get("request") or {})
+                            ) != predecessor_request_hash
+                            or not _terminal_retry_pre_provider_state_allowed(current)
+                        ):
+                            raise RuntimeError("RETRY_PREDECESSOR_CHANGED")
                     packet = current.get("promotion_packet") or {}
                     if packet.get("candidate_commit_sha") or current.get("candidate_ref"):
                         current.setdefault("candidate_history", []).append({
