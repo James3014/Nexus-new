@@ -483,7 +483,7 @@ def test_consumption_marker_substitution_and_proof_tamper_fail_closed():
     packet, consumption = make_consumed_observation_packet(obs_set)
     tampered = consumption.to_dict()
     tampered["consumption_proof"] = "0" * 64
-    with pytest.raises(ValueError, match="vap_credit_denied"):
+    with pytest.raises(ValueError, match="vap_projection_denied"):
         compute_phase1a_metrics(
             trajectory,
             observation_set=obs_set,

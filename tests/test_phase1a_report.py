@@ -278,7 +278,7 @@ def _assist(
         task_contract_hash=contract_hash,
         final_candidate_id=f"candidate-{arm.value}",
         verifier_result="pass",
-        consumption=consumption,
+        consumption=consumption.to_dict(),
     )
     return packet.to_dict(), consumption.to_dict(), settlement
 
@@ -487,7 +487,7 @@ def test_admissible_observation_set_substitution_fails_physical_binding() -> Non
     source = _source()
     substituted = _observation_set(Phase1AArm.B, label="substituted")
     bad_b = replace(source.arm_b, observation_set=substituted)
-    with pytest.raises(ValueError, match="physical consumption verification failed"):
+    with pytest.raises(ValueError, match="measurement projection verification failed"):
         build_phase1a_report(replace(source, arm_b=bad_b))
 
 
@@ -508,7 +508,7 @@ def test_evidence_epistemic_type_change_changes_admissible_identity_and_fails_bi
     )
     changed_set = build_admissible_observation_set((inferred,))
     bad_b = replace(source.arm_b, observation_set=changed_set)
-    with pytest.raises(ValueError, match="physical consumption verification failed"):
+    with pytest.raises(ValueError, match="measurement projection verification failed"):
         build_phase1a_report(replace(source, arm_b=bad_b))
 
 
@@ -518,7 +518,7 @@ def test_provider_safe_packet_substitution_fails_closed() -> None:
     assert packet is not None
     packet["packet_hash"] = _h("other-packet")
     bad_b = replace(source.arm_b, verified_assist_packet=packet)
-    with pytest.raises(ValueError, match="physical consumption verification failed"):
+    with pytest.raises(ValueError, match="measurement projection verification failed"):
         build_phase1a_report(replace(source, arm_b=bad_b))
 
 
@@ -596,7 +596,8 @@ def test_final_prompt_physical_consumption_proof_tamper_fails_closed() -> None:
     consumption["final_prompt_hash"] = _h("tampered-final-prompt")
     bad_b = replace(source.arm_b, verified_assist_consumption=consumption)
     with pytest.raises(
-        ValueError, match="physical consumption verification failed|consumption proof invalid"
+        ValueError,
+        match="measurement projection verification failed|consumption proof invalid",
     ):
         build_phase1a_report(replace(source, arm_b=bad_b))
 
