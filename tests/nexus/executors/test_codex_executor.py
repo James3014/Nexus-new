@@ -78,6 +78,9 @@ def _contract(tmp_path: Path) -> ArchitectTaskContract:
 def test_codex_executor_builds_fresh_target_bound_command(tmp_path, monkeypatch):
     contract = _contract(tmp_path)
     lease = _lease(tmp_path, contract)
+    executable = tmp_path / "codex"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
     monkeypatch.delenv("NEXUS_CODEX_WORKER_MODEL", raising=False)
     captured = {}
 
@@ -96,7 +99,7 @@ def test_codex_executor_builds_fresh_target_bound_command(tmp_path, monkeypatch)
         )
 
     monkeypatch.setattr("nexus.executors.codex_executor.run_cli_worker", fake_worker)
-    receipt = CodexCliExecutor(executable="codex").invoke(
+    receipt = CodexCliExecutor(executable=str(executable)).invoke(
         contract,
         lease,
         prompt="Edit only files allowed by the contract.",
@@ -226,6 +229,10 @@ def test_codex_worker_reconstruction_preserves_selected_model(tmp_path, monkeypa
 
     contract = _contract(tmp_path)
     lease = _lease(tmp_path, contract)
+    executable = tmp_path / "codex"
+    executable.write_text("#!/bin/sh\n", encoding="utf-8")
+    executable.chmod(0o755)
+    monkeypatch.setenv("NEXUS_CODEX_BIN", str(executable))
     captured = {}
 
     def fake_worker(request):
