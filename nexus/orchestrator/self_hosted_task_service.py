@@ -134,7 +134,7 @@ _LEGACY_V1_NEGATIVE_OMISSION_SET = frozenset({
 })
 _PROJECT_ENTRY_AUTHORITY_HINTS = frozenset({
     "authority_goal_id", "authority_coordination_scope_id", "autonomy_goal_grant",
-    "governed", "governed_task", "claim_ceiling", "intended_action_family", "required_action_family",
+    "governed", "governed_task", "intended_action_family", "required_action_family",
 })
 RESUMABLE_STATUSES = frozenset({
     "WORKER_COMPLETED",
@@ -763,6 +763,11 @@ def _reject_unbound_project_entry_authority_hints(request: Mapping[str, Any]) ->
     if request.get("project_entry_authority_binding") is not None:
         return
     if any(key in request and request.get(key) is not None for key in _PROJECT_ENTRY_AUTHORITY_HINTS):
+        raise ValueError("PROJECT_ENTRY_AUTHORITY_BINDING_REQUIRED")
+    contract = request.get("contract")
+    if isinstance(contract, Mapping) and contract.get("standing_grant_id") is not None:
+        raise ValueError("PROJECT_ENTRY_AUTHORITY_BINDING_REQUIRED")
+    if str(request.get("execution_lane") or "").upper() in {"GOVERNED", "DIRECT_CANONICAL", "ASSISTED_CANONICAL", "ISOLATED_TARGET"}:
         raise ValueError("PROJECT_ENTRY_AUTHORITY_BINDING_REQUIRED")
 
 
