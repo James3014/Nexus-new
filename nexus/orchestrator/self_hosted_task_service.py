@@ -6583,6 +6583,24 @@ class SelfHostedTaskService:
                 ).to_dict()
             except (TypeError, ValueError) as exc:
                 return {**state, "retry": {**retry_meta, "decision": "BLOCK", "blocker": f"WORKFORCE_REBIND_FAILED:{exc}"}}
+            # The action transport is sealed from the bound request.  Refresh
+            # the nested envelope before submit_task rehydrates that bound
+            # request, then reseal its hash while preserving the same scope
+            # and Planner/admission identity.
+            bound_payload = retry_request.get("bound_action_request")
+            if isinstance(bound_payload, Mapping) and isinstance(
+                retry_request.get("action"), Mapping
+            ):
+                bound_request = dict(bound_payload)
+                bound_request["canonical_dispatch_envelope"] = dict(
+                    retry_request["canonical_dispatch_envelope"]
+                )
+                retry_request["bound_action_request"] = bound_request
+                refreshed_hash = canonical_request_hash(bound_request)
+                retry_action = dict(retry_request["action"])
+                retry_action["request_hash"] = refreshed_hash
+                retry_request["action"] = retry_action
+                retry_request["action_request_hash"] = refreshed_hash
             fresh_dispatch = validate_workforce_dispatch_binding(
                 retry_request, require_binding=True
             )
