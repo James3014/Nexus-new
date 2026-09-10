@@ -3,6 +3,7 @@
 import os
 import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -110,10 +111,13 @@ def test_actual_launch_process_metadata_does_not_checkpoint(tmp_path, monkeypatc
 def test_actual_resumable_status_preserves_candidate_callback_without_provider(
     tmp_path, monkeypatch, status
 ):
+    target_root = tmp_path / "targets"
+    monkeypatch.setenv("NEXUS_SELF_HOSTED_TARGET_ROOT", str(target_root))
     service = SelfHostedTaskService(
         state_dir=tmp_path / "state", ephemeral=True, auto_reconcile=False
     )
     contract, lease, attempt_id = _setup_lc2_task(tmp_path, service, "resume-status")
+    assert Path(lease.target_worktree).is_relative_to(target_root)
     state = service._read_state(contract.task_id)
     receipt = _m3c_receipt(contract.task_id, lease.target_worktree)
     state.update(status=status, execution=receipt.__dict__, executions=[receipt.__dict__])
