@@ -342,10 +342,28 @@ def test_default_impact_map_covers_new_learning_modules_without_shadowing_specif
         "nexus/learning/skill_registry.py: matched nexus/learning/skill_registry.py"
         in specific_details.reasons
     )
-
     assert unknown_details.fallback_used is True
     assert "tests/learning" not in unknown_details.targets
 
+
+def test_verifier_retry_recovery_sources_select_exact_ownership_tests(tmp_path):
+    details = select_target_details(
+        [
+            "nexus/orchestrator/candidate_verifier.py",
+            "nexus/orchestrator/self_hosted_task_service.py",
+            "nexus/orchestrator/worktree_manager.py",
+        ],
+        load_impact_rules(),
+        index_path=tmp_path / "missing_impact_index.json",
+        stats_path=tmp_path / "missing_impact_stats.json",
+        history_path=tmp_path / "missing_test_history.jsonl",
+    )
+
+    assert details.fallback_used is False
+    assert details.unmatched_paths == []
+    assert "tests/nexus/orchestrator/test_candidate_verifier.py" in details.targets
+    assert "tests/nexus/orchestrator/test_worktree_manager.py" in details.targets
+    assert "tests/nexus/orchestrator/test_self_hosted_task_service.py" in details.targets
 
 def test_default_impact_map_covers_product_paths_and_changeset_contract(tmp_path):
     rules = load_impact_rules()

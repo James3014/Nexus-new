@@ -1003,6 +1003,75 @@ class WorktreeManager:
             raise ValueError("MUTATION_IDENTITY_INVALID: ownership record is stale")
         return record
 
+    def released_lease_proof(
+        self,
+        controller_root: Path,
+        *,
+        task_id: str,
+        attempt_id: Optional[str],
+        lease_id: str,
+        target_worktree: Path,
+        task_state: Optional[Mapping[str, Any]] = None,
+    ) -> bool:
+        """Read-only proof that an exact ownership lease was released."""
+        controller_root = Path(controller_root).resolve()
+        target_raw = str(target_worktree or "").strip()
+        if not target_raw:
+            return False
+        target_lexical = Path(target_raw).expanduser()
+        if os.path.lexists(target_lexical) or target_lexical.is_symlink():
+            return False
+        target_worktree = target_lexical.resolve()
+        ownership_path = self._ownership_record_path(controller_root, task_id)
+        if (
+            os.path.lexists(ownership_path)
+            or os.path.lexists(target_worktree)
+            or target_worktree.is_symlink()
+            or self._worktree_entry(controller_root, target_worktree)
+        ):
+            return False
+        if isinstance(task_state, Mapping):
+            state_lease = task_state.get("lease")
+            state_contract = task_state.get("contract")
+            if not isinstance(state_lease, Mapping) or not isinstance(state_contract, Mapping):
+                return False
+            if (
+                state_lease.get("lease_id") != lease_id
+                or state_lease.get("attempt_id") != attempt_id
+                or Path(str(state_lease.get("target_worktree") or "")).expanduser().resolve() != target_worktree
+                or Path(str(state_contract.get("target_repo_root") or "")).expanduser().resolve() != target_worktree
+            ):
+                return False
+        tombstone_stem = ownership_path.with_suffix("").name
+        for tombstone in sorted(ownership_path.parent.glob(f"{tombstone_stem}.*.released"), reverse=True):
+            try:
+                lst = os.lstat(tombstone)
+                if not stat.S_ISREG(lst.st_mode) or stat.S_ISLNK(lst.st_mode):
+                    continue
+                fd = os.open(tombstone, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+                try:
+                    fst = os.fstat(fd)
+                    if not stat.S_ISREG(fst.st_mode) or (fst.st_dev, fst.st_ino) != (lst.st_dev, lst.st_ino):
+                        continue
+                    with os.fdopen(fd, "r", encoding="utf-8") as handle:
+                        fd = -1
+                        record = json.load(handle)
+                finally:
+                    if fd != -1:
+                        os.close(fd)
+                _validate_ownership_record(record, task_state=task_state, controller_root=controller_root)
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                continue
+            if (
+                record.get("task_id") == task_id
+                and record.get("attempt_id") == attempt_id
+                and record.get("lease_id") == lease_id
+                and isinstance(record.get("lease"), Mapping)
+                and Path(str(record["lease"].get("target_worktree") or "")).expanduser().resolve() == target_worktree
+            ):
+                return True
+        return False
+
     def _all_ownership_records(self, controller_root: Path) -> list[dict[str, Any]]:
         try:
             raw_common = self._run_git(["rev-parse", "--git-common-dir"], cwd=controller_root)

@@ -58,6 +58,7 @@ from nexus.orchestrator.repository_contract_gate import (
 from nexus.orchestrator.self_hosted_task_service import (
     _LEGACY_V1_NEGATIVE_OMISSION_SET,
     SelfHostedTaskService,
+    _terminal_retry_verifier_static_failure_allowed,
     _validate_project_entry_authority_binding,
     _validated_action_request,
     resolve_canonical_target_roots,
@@ -3190,6 +3191,160 @@ def test_terminal_retry_accepts_action_bound_revision_fast_forward(tmp_path):
     assert len(current["attempts"]) == 2
     assert current["contract_history"][0]["attempt_id"] == before["attempt_id"]
     assert calls[-1]["action"]["request_hash"] == canonical_request_hash(calls[-1]["bound_action_request"])
+
+
+def test_terminal_retry_static_verifier_failure_uses_formal_released_lease(tmp_path, monkeypatch):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(copy.deepcopy(dict(request)))
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True
+    )
+    base = _real_request(tmp_path, task_id="static-verifier-retry")
+    initial = _action_transport(
+        base, attempt_id="attempt-initial", action_id="action-initial", idempotency_key="key-initial"
+    )
+    first = service.submit_task(initial)
+    assert _wait_for_status(service, base["task_id"], "FINAL_BLOCK")
+    before = copy.deepcopy(service._read_state(base["task_id"]))
+    assert before["attempt_id"] == first["attempt_id"]
+    assert before["cleanup_decision"] == "REMOVED"
+    manager = WorktreeManager(create_root=False)
+    formal_contract = service.build_contract(initial)
+    formal_lease = manager.create_lease(
+        formal_contract,
+        task_states={base["task_id"]: before},
+        attempt_id=before["attempt_id"],
+    )
+    assert manager.cleanup_terminal_target(formal_contract, formal_lease).decision == "REMOVED"
+    ownership = manager._ownership_record_path(Path(base["controller_repo_root"]), base["task_id"])
+    tombstones = sorted(ownership.parent.glob(f"{ownership.with_suffix('').name}.*.released"))
+    assert tombstones
+    released_record = json.loads(tombstones[-1].read_text(encoding="utf-8"))
+    assert released_record["lease"]["target_worktree"]
+
+    def mark_known_static_failure(state):
+        state.update(
+            {
+                "lease": released_record["lease"],
+                "error": "invalid verifier contract: invalid verifier argument",
+                "active_provider": "codex",
+                "target_created_at": "2026-09-11T00:00:00+00:00",
+                "cleanup_performed_at": "2026-09-11T00:00:01+00:00",
+                "cleanup_eligible": True,
+                "cleanup_blocker": None,
+                "worker_preflight": {"provider": "codex", "ready": True},
+                "execution": None,
+                "execution_outcome": None,
+                "executions": [],
+                "candidate": None,
+                "candidate_commit_sha": None,
+                "candidate_ref": None,
+                "candidate_state_hash": None,
+                "verified_receipt": None,
+                "verified_receipt_hash": None,
+                "promotion_packet": None,
+                "promotion_status": "NOT_CREATED",
+                "candidate_status": None,
+                "merge_performed": False,
+                "push_performed": False,
+                "provider_receipt": None,
+                "worker_receipt": None,
+                "worker_child_pgid": None,
+                "telemetry": {
+                    "provider_calls": 0,
+                    "provider_attempts": 0,
+                    "provider_time_ms": 0,
+                    "worktree_time_ms": 0,
+                    "verifier_time_ms": 0,
+                },
+            }
+        )
+
+    service._mutate_state(base["task_id"], mark_known_static_failure)
+    frozen = copy.deepcopy(service._read_state(base["task_id"]))
+    assert _terminal_retry_verifier_static_failure_allowed(frozen)
+
+    controller = Path(base["controller_repo_root"])
+    (controller / "README").write_text("activation\n")
+    _git(controller, "add", "README")
+    _git(controller, "commit", "-m", "activate lifecycle")
+    activated_head = _git(controller, "rev-parse", "HEAD")
+    refreshed = {**base, "controller_revision": activated_head, "target_base_revision": activated_head}
+    retry = _action_transport(
+        refreshed,
+        action_type=LifecycleActionType.TASK_RETRY,
+        attempt_id="attempt-refresh",
+        action_id="action-refresh",
+        idempotency_key="key-refresh",
+    )
+
+    monkeypatch.setattr(service, "_launch_worker", lambda task_id, attempt_id: service._read_state(task_id))
+    submitted = service.submit_task(retry)
+    current = service._read_state(base["task_id"])
+
+    assert submitted["attempt_id"] != frozen["attempt_id"]
+    assert current["attempt_id"] == submitted["attempt_id"]
+    assert len(current["attempts"]) == 2
+    assert len(calls) == 1
+    assert current["telemetry"]["provider_calls"] == 0
+    assert current["request"]["bound_action_request"]["what"] == frozen["request"]["bound_action_request"]["what"]
+    assert current["request"]["bound_action_request"]["allowed_files"] == frozen["request"]["bound_action_request"]["allowed_files"]
+
+
+def test_terminal_retry_verifier_static_failure_requires_formal_zero_effect_cleanup(monkeypatch):
+    state = {
+        "task_id": "static-verifier-recovery",
+        "status": "FINAL_BLOCK",
+        "error": "invalid verifier contract: invalid verifier argument",
+        "cleanup_decision": "REMOVED",
+        "cleanup_performed": True,
+        "cleanup_performed_at": "2026-09-10T17:49:36+00:00",
+        "cleanup_eligible": True,
+        "cleanup_blocker": None,
+        "lease": {"lease_id": "lease", "task_id": "static-verifier-recovery"},
+        "target_created_at": "2026-09-10T17:49:35+00:00",
+        "active_provider": "codex",
+        "worker_preflight": {"provider": "codex", "ready": True},
+        "worker_started_at": "2026-09-10T17:49:33+00:00",
+        "worker_finished_at": "2026-09-10T17:49:36+00:00",
+        "worker_child_pgid": None,
+        "execution": None,
+        "execution_outcome": None,
+        "executions": [],
+        "candidate": None,
+        "candidate_commit_sha": None,
+        "candidate_ref": None,
+        "candidate_state_hash": None,
+        "verified_receipt": None,
+        "verified_receipt_hash": None,
+        "promotion_packet": None,
+        "promotion_status": "NOT_CREATED",
+        "candidate_status": None,
+        "merge_performed": False,
+        "push_performed": False,
+        "provider_receipt": None,
+        "worker_receipt": None,
+        "telemetry": {
+            "provider_calls": 0,
+            "provider_attempts": 0,
+            "provider_time_ms": 0,
+            "verifier_time_ms": 0,
+        },
+    }
+    monkeypatch.setattr(
+        "nexus.orchestrator.self_hosted_task_service._terminal_retry_released_lease_proof",
+        lambda _: True,
+    )
+    assert _terminal_retry_verifier_static_failure_allowed(state)
+    for field, value in (("telemetry", {"provider_calls": 1}), ("lease", None), ("candidate", {})):
+        rejected = copy.deepcopy(state)
+        rejected[field] = value
+        assert not _terminal_retry_verifier_static_failure_allowed(rejected)
 
 
 def test_terminal_retry_rejects_action_bound_semantic_tamper_before_runner(tmp_path):
