@@ -1,0 +1,90 @@
+"""Independent isolated acceptance harness; never touches live Nexus stores."""
+import sys, os, json, hashlib, subprocess
+from pathlib import Path
+from datetime import datetime, timedelta, timezone
+source, root, mode, case = Path(sys.argv[1]), Path(sys.argv[2]), sys.argv[3], sys.argv[4]
+sys.path.insert(0, str(source))
+os.environ['NEXUS_CANONICAL_SOURCE_ROOT'] = str(source)
+os.environ['NEXUS_SELF_HOSTED_CANONICAL_STATE_DIR'] = str(root / 'state')
+from nexus.orchestrator.self_hosted_task_service import SelfHostedTaskService
+from nexus.events.transport import NexusEventBus
+from nexus.events.contracts import build_attempt_transition_event
+from nexus.contracts.lifecycle_action import canonical_request_hash, build_action_envelope, LifecycleActionType, ContractKind
+from nexus.contracts.autonomy_goal import StandingGrantContext, RepositoryIdentity, AutonomyActionClass
+from nexus.orchestrator import standing_grant_store as store
+from nexus.orchestrator.unified_mcp_gateway import UnifiedMCPGateway
+store.DEFAULT_RECEIPT_PATH = root / 'authority' / 'standing-grant.json'
+store.DEFAULT_TRANSITIONS_DIR = root / 'authority' / 'transitions'
+repo = 'James3014/Nexus-new'; remote = 'https://github.com/James3014/Nexus-new.git'
+head = subprocess.check_output(['git','rev-parse','HEAD'],cwd=source,text=True).strip()
+NexusEventBus.configure(root / "state", production=True)
+service = SelfHostedTaskService(state_dir=root/'state', ephemeral=False, auto_reconcile=False)
+task, attempt, goal, scope = 'pe2-fixture-task', 'pe2-fixture-attempt', 'pe2-fixture-goal', 'pe2-fixture-scope'
+contract = 'a' * 64
+if mode == 'setup':
+    values = {'repository':'James3014/Other' if case == 'foreign_repository' else repo,'issue_number':843 if case == 'foreign_issue' else 842,'goal_id':goal,'coordination_scope_id':scope,'canonical_remote':remote,'intended_action_family':'CANDIDATE_VERIFY'}
+    binding = {**values,'binding_hash':canonical_request_hash(values)}
+    request = {'repository':repo,'issue_number':842,'project_entry_authority_binding':binding}
+    state = {'task_id':task,'attempt_id':attempt,'status':'FINAL_BLOCK','controller_revision':head,'contract_hash':contract,'request':request,'action_request_hash':canonical_request_hash(request)}
+    if case == 'material_bound':
+        state['execution_lane'] = 'ISOLATED_TARGET'
+    if case == 'rehashed_tamper':
+        binding['goal_id'] = 'changed-goal'
+        binding['binding_hash'] = canonical_request_hash({k:v for k,v in binding.items() if k != 'binding_hash'})
+    if case == 'missing_hash':
+        state.pop('action_request_hash')
+    if case == 'legacy_material':
+        request.pop('project_entry_authority_binding')
+        state['autonomy_goal_id'] = goal
+        state['action_request_hash'] = canonical_request_hash(request)
+    if case == 'legacy_state_only':
+        state.update(repository=repo,issue=842)
+        request.pop('repository'); request.pop('issue_number')
+        state['action_request_hash'] = canonical_request_hash(request)
+    if case == 'conflicting_identity':
+        state.update(repository=repo,issue=842)
+        request['issue_number'] = 843
+        state['action_request_hash'] = canonical_request_hash(request)
+    if case.startswith('envelope_'):
+        bound = {**request,'task_id':task,'attempt_id':attempt,'action_id':'fixture-action','idempotency_key':'fixture-fence','action_type':'TASK_RUN','contract_kind':'NONE','controller_revision':head,'allowed_files':[]}
+        envelope = build_action_envelope(task_id=task,action_type=LifecycleActionType.TASK_RUN,request=bound,tool_manifest_hash='b'*64,expected_head=head,allowed_paths=(),mutation=False,contract_kind=ContractKind.NONE,attempt_id=attempt,action_id='fixture-action',idempotency_key='fixture-fence').model_dump(mode='json')
+        request = {**json.loads(json.dumps(bound)),'action':envelope,'bound_action_request':json.loads(json.dumps(bound)),'action_request_hash':envelope['request_hash']}
+        state['request'] = request
+        state['action_request_hash'] = envelope['request_hash']
+        if case == 'envelope_outer_tamper':
+            raw = request['project_entry_authority_binding']
+            raw['goal_id'] = 'changed-goal'
+            raw['binding_hash'] = canonical_request_hash({k:v for k,v in raw.items() if k != 'binding_hash'})
+        if case == 'envelope_binding_deleted':
+            request.pop('project_entry_authority_binding')
+    if case == 'duplicate_issue':
+        request['issue'] = 842
+        request['issue_number'] = 843
+        state['action_request_hash'] = canonical_request_hash(request)
+    service._write_state(task, state)  # Isolated fixture producer, not a live API claim.
+    NexusEventBus.emit_attempt_transition(build_attempt_transition_event(task_id=task,attempt_id=attempt,sequence=1,state='ATTEMPT_REJECTED',continuity_event_type='ATTEMPT_REJECTED',reason='isolated verification fixture; never dispatch',source_revision=head,contract_revision=contract,claim_ceiling='TEST_FIXTURE_OBSERVATION_ONLY'))
+    now = datetime.now(timezone.utc)
+    context = StandingGrantContext.issue(owner_id='fixture-owner',coordinator_id='fixture-coordinator',repository=RepositoryIdentity(repository_id=repo,canonical_remote=remote),thread_id=scope,goal_id='foreign-goal' if case == 'foreign_goal' else 'changed-goal' if case in ('rehashed_tamper','envelope_outer_tamper') else goal,allowed_actions=(AutonomyActionClass.TASK_SUBMIT if case == 'wrong_action' else AutonomyActionClass.CANDIDATE_VERIFY,),issued_at=now-timedelta(hours=2),expires_at=now-timedelta(hours=1) if case == 'expired' else now+timedelta(hours=1),revoked_at=now if case == 'revoked' else None,revocation_reason='fixture revoked' if case == 'revoked' else None)
+    receipt = store.StandingGrantReceipt.issue(grant_id='fixture-grant',context=context)
+    store.write_standing_grant_receipt(receipt)
+    print(json.dumps({'phase':'setup','pid':os.getpid(),'source':head,'case':case,'receipt_hash':receipt.receipt_hash,'fixture_root':str(root)}))
+else:
+    def hashes():
+        return {str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest() for p in root.rglob('*') if p.is_file()}
+    before = hashes()
+    gateway = UnifiedMCPGateway(service=service,github_issue_observer=lambda repository, issue:{'ok':True,'issue':{'number':issue,'state':'OPEN'},'observation_scope':'ISOLATED_ISSUE_OBSERVER_FIXTURE'})
+    result = gateway._project_entry({'repository_owner':'James3014','repository_name':'Nexus-new','issue_number':842})
+    after = hashes()
+    payload = {'phase':'evaluate','pid':os.getpid(),'source':head,'case':case,'service_module':sys.modules[SelfHostedTaskService.__module__].__file__,'read_only':before==after,'before_hashes':before,'after_hashes':after,'result':result,'service_ephemeral':service.ephemeral,'claim_ceiling':'ISOLATED_PERSISTED_COMPOSITION_NO_NATIVE_TASK_RESUME'}
+    print(json.dumps(payload,default=str))
+    assert before == after, 'evaluation mutated persisted state'
+    if case in ('positive','legacy_state_only','material_bound','envelope_positive'):
+        assert result['status'] == 'TASK_REHYDRATED', result
+        assert result['readiness_result']['outcome'] == 'READY_TO_EXECUTE', result
+        assert 'GRANT_MATCH' in json.dumps(result), result
+    elif case in ('foreign_issue','foreign_repository','rehashed_tamper','missing_hash','legacy_material','conflicting_identity','envelope_outer_tamper','envelope_binding_deleted','duplicate_issue'):
+        assert result['status'] == 'BLOCKED', result
+    else:
+        assert result['readiness_result']['outcome'] == 'BLOCKED', result
+        assert result['readiness_result']['primary_blocker']['plane'] == 'AUTHORITY_PLANE', result
+        assert result['readiness_result']['primary_blocker']['code'] == ('AUTHORITY_OUT_OF_SCOPE' if case == 'wrong_action' else 'TASK_AUTHORITY_MISSING'), result

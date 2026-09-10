@@ -1,0 +1,65 @@
+{
+  "observed_at": "2026-09-10T07:44:03.207622+00:00",
+  "mounts": [
+    {
+      "repository": "James3014/Nexus-new",
+      "root": "/Users/jameschen/Workspace/nexus-automation-repos/Nexus-new",
+      "origin": "https://github.com/James3014/Nexus-new.git",
+      "head": "6a4527bcb585aaaa0a53a0b71b7ca0a8a1414b39",
+      "tree": "03fe7f03cd8a0aab0b7065ea522d3ca622d9ae64",
+      "branch": "",
+      "dirty": "",
+      "fetched_origin_main": "d1b02c15fda5700fa60db07f8fffc70652f2f98d",
+      "remote_main_at_audit": "d1b02c15fda5700fa60db07f8fffc70652f2f98d",
+      "interpretation": "accepted frozen deployment; remote advancement alone is not runtime acceptance"
+    },
+    {
+      "repository": "James3014/devspace",
+      "root": "/Users/jameschen/Workspace/nexus-automation-repos/devspace",
+      "origin": "https://github.com/James3014/devspace.git",
+      "head": "e9942d2a598866e8f8c091304b1700065791091c",
+      "tree": "b87d4fc2593052b1f617af681494a36181a8cb11",
+      "branch": "",
+      "dirty": "",
+      "fetched_origin_main": "e9942d2a598866e8f8c091304b1700065791091c",
+      "remote_main_at_audit": "38803ad3aff1689dbcb449dea1ced72a117b9cd8",
+      "interpretation": "accepted frozen deployment; remote advancement alone is not runtime acceptance"
+    },
+    {
+      "repository": "James3014/nexus-core",
+      "root": "/Users/jameschen/Workspace/nexus-automation-repos/nexus-core",
+      "origin": "https://github.com/James3014/nexus-core.git",
+      "head": "87204263637058453cb83d10f0f370995fe01cfb",
+      "tree": "de5ad9619f1f3ad772404b9f8ff12480fb42f9bb",
+      "branch": "",
+      "dirty": "",
+      "fetched_origin_main": "87204263637058453cb83d10f0f370995fe01cfb",
+      "remote_main_at_audit": "87204263637058453cb83d10f0f370995fe01cfb",
+      "interpretation": "accepted frozen deployment; remote advancement alone is not runtime acceptance"
+    },
+    {
+      "repository": "James3014/nexus-learning",
+      "root": "/Users/jameschen/Workspace/nexus-automation-repos/nexus-learning",
+      "origin": "https://github.com/James3014/nexus-learning.git",
+      "head": "d09f05b942f35236562ae26e7b718d111368b0b1",
+      "tree": "a549ebcd46970fd5246decefcd770906ae9ef70a",
+      "branch": "",
+      "dirty": "",
+      "fetched_origin_main": "d09f05b942f35236562ae26e7b718d111368b0b1",
+      "remote_main_at_audit": "d09f05b942f35236562ae26e7b718d111368b0b1",
+      "interpretation": "accepted frozen deployment; remote advancement alone is not runtime acceptance"
+    },
+    {
+      "repository": "James3014/nexus-open-swe-runtime",
+      "root": "/Users/jameschen/Workspace/nexus-automation-repos/nexus-open-swe-runtime",
+      "origin": "https://github.com/James3014/nexus-open-swe-runtime.git",
+      "head": "3eb673bfcfd874043a70743e34761784fda39c10",
+      "tree": "3fc5b2ed0a795800a103baf69ea59581de35b6d7",
+      "branch": "",
+      "dirty": "",
+      "fetched_origin_main": "3eb673bfcfd874043a70743e34761784fda39c10",
+      "remote_main_at_audit": "3eb673bfcfd874043a70743e34761784fda39c10",
+      "interpretation": "accepted frozen deployment; remote advancement alone is not runtime acceptance"
+    }
+  ]
+}

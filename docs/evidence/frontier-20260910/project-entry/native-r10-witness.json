@@ -1,0 +1,50 @@
+{
+  "conversation": "https://chatgpt.com/c/6aa2373d-14bc-83e8-8fc3-56c04597e52a",
+  "first_prompt": "continue James3014/Nexus-new #842",
+  "attached_plugin": "plugin_asdk_app_6a9c96cba73c819197a688e804beb3cb",
+  "handoff_package": false,
+  "positive": {
+    "status": "NO_TASK",
+    "task_resolution": "NO_EXACT_TASK",
+    "readiness": "READY_TO_EXECUTE",
+    "evaluated_at": "2026-09-10T04:52:08.001047Z",
+    "request_hash": "3f09b21dbb4259ee76c6d18172cda65b13274f6ceabc9ed5a8e6c4aabe6f94d8",
+    "binding_hash": "e11521f271c38bcbc5463e089c173d3ff8be309db6433f8417616cf61cda8335",
+    "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+    "tree": "06a796e22bc8fa756cd965fcb0fcd6becae97498",
+    "server_instance": "81c3389f257d433491579dd5ad296739",
+    "runtime_hash": "70a455ce096d0a4e93efceb32b7be7c1d23bc5f015e72fd54b8dfb259185bac0"
+  },
+  "claim_ceiling": "Native observation readiness; existing-task composition separately tested in isolated persisted fixture; no native effectful task resume",
+  "negative": {
+    "issue": 806,
+    "status": "BLOCKED",
+    "blocker": "PROJECT_ENTRY_ISSUE_NOT_OPEN",
+    "binding_hash": "f01dc0e7e5ae19e9d9cb53776a378eade05a3e9641c685bcb45d3f4a427324a8"
+  },
+  "switch": {
+    "sequence": [
+      842,
+      806,
+      842
+    ],
+    "status": "PASS",
+    "return_readiness": "READY_TO_EXECUTE",
+    "return_evaluated_at": "2026-09-10T04:57:01.718561Z",
+    "return_binding_hash": "e11521f271c38bcbc5463e089c173d3ff8be309db6433f8417616cf61cda8335",
+    "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+    "task": null,
+    "attempt": null,
+    "goal": null,
+    "freshness_advanced": true
+  },
+  "stale_source": {
+    "outcome": "BLOCKED",
+    "plane": "SOURCE_PLANE",
+    "code": "SOURCE_REALM_MISMATCH",
+    "canonical_next_action": "BIND_EXACT_DESIRED_SOURCE_IDENTITY",
+    "intended_source": "9f7b4c8cac25b6e5630239711857b2318059479c",
+    "effects": false
+  },
+  "status": "PASS"
+}

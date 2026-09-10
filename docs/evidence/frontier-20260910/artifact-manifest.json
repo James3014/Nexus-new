@@ -1,0 +1,1420 @@
+{
+  "schema": "nexus.frontier.delivery_archive.v1",
+  "records": [
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/before-r10-recovery-authority.json",
+      "archive": "project-entry/before-r10-recovery-authority.json",
+      "sha256": "46b590064dd439a3e73fcfc5dacbe399c7fd442e8ffb3ad32d9d5a2508539b20",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/before-r10-request.json",
+      "archive": "project-entry/before-r10-request.json",
+      "sha256": "7ff137cc7f9b763201ef0ba481c934a5b438b073b555a8e998a37c1e94c0549b",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-conflicting_identity-evaluate.log",
+      "archive": "project-entry/composition-6cc-conflicting_identity-evaluate.log",
+      "sha256": "0d918c20557ae764fe944b5db38268656167f6fd29d0556a5eededd714c95bb6",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-conflicting_identity-setup.log",
+      "archive": "project-entry/composition-6cc-conflicting_identity-setup.log",
+      "sha256": "ff16a9a8916f2c3c07a7a2ecb91f82984c5ebf523083b88820e3aab5bdfafee7",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-expired-evaluate.log",
+      "archive": "project-entry/composition-6cc-expired-evaluate.log",
+      "sha256": "b646a5c92a71b7aae0344c89fe9e3e3d3a2d278df9d2143e044f281168cc120b",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-expired-setup.log",
+      "archive": "project-entry/composition-6cc-expired-setup.log",
+      "sha256": "ed98507b9a91ec840180e63cc493d26bb4513ff4854e70162a18111ab4b20240",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-foreign_goal-evaluate.log",
+      "archive": "project-entry/composition-6cc-foreign_goal-evaluate.log",
+      "sha256": "85046e6a1f1fd3b592fc9cc519b59cfd8de7520d83888e697de926dd9475d733",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-foreign_goal-setup.log",
+      "archive": "project-entry/composition-6cc-foreign_goal-setup.log",
+      "sha256": "6cc9aaad738e297245b5ad3f61d64f01cbc95f53b25576eb446393f7a1854bb3",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-foreign_issue-evaluate.log",
+      "archive": "project-entry/composition-6cc-foreign_issue-evaluate.log",
+      "sha256": "bd9964978c29c494d12709492aa9aedb402a4eb13296a581249f7d03277d967d",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-foreign_issue-setup.log",
+      "archive": "project-entry/composition-6cc-foreign_issue-setup.log",
+      "sha256": "c573a429c84158ca474cf32e226c2226e7694b5e815844f219e2cbf247a97dd1",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-foreign_repository-evaluate.log",
+      "archive": "project-entry/composition-6cc-foreign_repository-evaluate.log",
+      "sha256": "5d94b80695895a9d9a25d8709af4e0dc1550b4c1e2a6892f9c11993ef8b31cb2",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-foreign_repository-setup.log",
+      "archive": "project-entry/composition-6cc-foreign_repository-setup.log",
+      "sha256": "f68a2c7ffd597b4f9ea4c9e804e04b309d5c8c4ea15489bffa85625d00ee7e88",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-legacy_material-evaluate.log",
+      "archive": "project-entry/composition-6cc-legacy_material-evaluate.log",
+      "sha256": "7830e820debfbc1ff06ec65e98d1d7c61867c0243ea45f6ed83706a66376b300",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-legacy_material-setup.log",
+      "archive": "project-entry/composition-6cc-legacy_material-setup.log",
+      "sha256": "4d353160b9d76b7056444af70710ec336e0c2b853a234a9e8ad32c74717ddc90",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-legacy_state_only-evaluate.log",
+      "archive": "project-entry/composition-6cc-legacy_state_only-evaluate.log",
+      "sha256": "dcbfec405188498171c7ed4335483076f3cb7bfc49e4ae8301ab661061a53bbb",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-legacy_state_only-setup.log",
+      "archive": "project-entry/composition-6cc-legacy_state_only-setup.log",
+      "sha256": "fc9bed5595a2f157024ef151c9d6e6f390c13647b09515a5cd32bcd410634446",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-material_bound-evaluate.log",
+      "archive": "project-entry/composition-6cc-material_bound-evaluate.log",
+      "sha256": "3dd4c87578ae4bfd4cc8d4f4306a2dbfde47e67be9fe72ea51434f8364998c93",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-material_bound-setup.log",
+      "archive": "project-entry/composition-6cc-material_bound-setup.log",
+      "sha256": "50473aa3ec8389939aab858063a952d090fcacea523e1217c44e3f3fe1a0eabc",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-missing_hash-evaluate.log",
+      "archive": "project-entry/composition-6cc-missing_hash-evaluate.log",
+      "sha256": "0605f7d487ebf6b220edf1dcca49f9b548c8935038d900d60327a7c12b68fbfc",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-missing_hash-setup.log",
+      "archive": "project-entry/composition-6cc-missing_hash-setup.log",
+      "sha256": "42d365ba082c1a8f65ce24064bfbd2afe9c01f0ed664c3211daedf1e6e369283",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-positive-evaluate.log",
+      "archive": "project-entry/composition-6cc-positive-evaluate.log",
+      "sha256": "b1ba864f25fef8adcf802c262260bf1ce4742ee7d03ed318287a93e5a3e24670",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-positive-setup.log",
+      "archive": "project-entry/composition-6cc-positive-setup.log",
+      "sha256": "87d50e1496533a45d8c696a9b945c0d3110e06eaaa54ea1d97a91e33edfdd6c0",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-rehashed_tamper-evaluate.log",
+      "archive": "project-entry/composition-6cc-rehashed_tamper-evaluate.log",
+      "sha256": "0613e48e3764d9b6db1a829c0afb91f75714e2861df1cc7a4741d1f94f9c2187",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-rehashed_tamper-setup.log",
+      "archive": "project-entry/composition-6cc-rehashed_tamper-setup.log",
+      "sha256": "735f0cd429f0035a59e4a7e8bc9fbc27ee289ad921f70cb8ac40ce27aa10d8ad",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-revoked-evaluate.log",
+      "archive": "project-entry/composition-6cc-revoked-evaluate.log",
+      "sha256": "ea5f72482ab479b9bfd7feb909af5f8d11804826b76569414d4526bdb5295a33",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-revoked-setup.log",
+      "archive": "project-entry/composition-6cc-revoked-setup.log",
+      "sha256": "2b83539fff1c1db40bb7b48e977a1309025f8e15dc882246486f8655b213243a",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-summary.json",
+      "archive": "project-entry/composition-6cc-summary.json",
+      "sha256": "2010ca28df8f5425ab1247b103462c9c5c9c775288d25ab8eb5b983be6a03813",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-wrong_action-evaluate.log",
+      "archive": "project-entry/composition-6cc-wrong_action-evaluate.log",
+      "sha256": "be4962a9a9b36e156015ecf12d122faf7e774cc515b45bc5afaf47d81e975d6c",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-6cc-wrong_action-setup.log",
+      "archive": "project-entry/composition-6cc-wrong_action-setup.log",
+      "sha256": "dac5f0f15f12a1dd2d2fcad28e4fe8a091d32d20315b27ce1740fcff89dfec01",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-75b-evaluate.log",
+      "archive": "project-entry/composition-75b-evaluate.log",
+      "sha256": "603751f75444d3a67a382d1d28d085f743a4f4e10a28cbc7d480018ab3ab1c03",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-75b-expired-evaluate.log",
+      "archive": "project-entry/composition-75b-expired-evaluate.log",
+      "sha256": "aee4f975c20a8646e0f374d1578a1b0f1decfeff37dd441cc87dba1749566874",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-75b-expired-setup.log",
+      "archive": "project-entry/composition-75b-expired-setup.log",
+      "sha256": "5f0b19e3eee1fa0d85953f241308c2982af7e2b1ae97ae4ddb86085fa3d2b697",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-75b-foreign_goal-evaluate.log",
+      "archive": "project-entry/composition-75b-foreign_goal-evaluate.log",
+      "sha256": "0862afa3b7d3a11a51b00f71b332c47fcae85738ca672b7d1a710459af85298d",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-75b-foreign_goal-setup.log",
+      "archive": "project-entry/composition-75b-foreign_goal-setup.log",
+      "sha256": "8db4e7b7f46692f705bdd037a933d6a81cdaa563bf59a0a58868b4595c4ece62",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-75b-foreign_issue-evaluate.log",
+      "archive": "project-entry/composition-75b-foreign_issue-evaluate.log",
+      "sha256": "eb7d1bdc23ea2738c11f38de1a1426879f320c2f8ac7506cfe13b6fb9d82d2d1",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-75b-foreign_issue-setup.log",
+      "archive": "project-entry/composition-75b-foreign_issue-setup.log",
+      "sha256": "a2f9beed1f660fdb06def8171e10fef7c47c8ecc51db591ffa2196870694ef4c",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-75b-revoked-evaluate.log",
+      "archive": "project-entry/composition-75b-revoked-evaluate.log",
+      "sha256": "78c492383d92abc41e87eb9402e76725d702f2800faf0ebc3d48d5f6b3d96dd0",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-75b-revoked-setup.log",
+      "archive": "project-entry/composition-75b-revoked-setup.log",
+      "sha256": "d2271f93f82f48143da15cd20f6dde14f9659109c6057163f9e4deb73a8eab82",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-75b-setup.log",
+      "archive": "project-entry/composition-75b-setup.log",
+      "sha256": "82db7f11bbdaa733c2ef6a2655ad122f7b0c6a64816184f1500a5e0ba8463dc0",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-75b-wrong_action-evaluate.log",
+      "archive": "project-entry/composition-75b-wrong_action-evaluate.log",
+      "sha256": "a40cb195671eee0c34e83c14b29dfe3b28e784bb495adebcfd3e6edea5aefecd",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-75b-wrong_action-setup.log",
+      "archive": "project-entry/composition-75b-wrong_action-setup.log",
+      "sha256": "09bccb4a7581b29e8ec3343c502954d9c03959a056dd4b0561fa590c8697cbbd",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-conflicting_identity-evaluate.log",
+      "archive": "project-entry/composition-c1fd-conflicting_identity-evaluate.log",
+      "sha256": "2f2277ba7aab7ce48f6c52d0a096a44887e91a942a118fc5628d7197c9392491",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-conflicting_identity-setup.log",
+      "archive": "project-entry/composition-c1fd-conflicting_identity-setup.log",
+      "sha256": "d2b59af35599b17a9aca614cc2a48cb4fbe2ee18ef4e1137747e0f05bda539bc",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-expired-evaluate.log",
+      "archive": "project-entry/composition-c1fd-expired-evaluate.log",
+      "sha256": "8e32155fcb431ea3208de9df02d07fc63723deaf232aaa9ac9b329a22d7d444e",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-expired-setup.log",
+      "archive": "project-entry/composition-c1fd-expired-setup.log",
+      "sha256": "1c48f2b02d2cdf1a544ad263053a1892969d9c88287e7f34c43843b19037e60c",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-foreign_goal-evaluate.log",
+      "archive": "project-entry/composition-c1fd-foreign_goal-evaluate.log",
+      "sha256": "34843df2b7bc9a99a74834bb491b4d79b05c05e91156ad0e71ee1613acffb8f6",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-foreign_goal-setup.log",
+      "archive": "project-entry/composition-c1fd-foreign_goal-setup.log",
+      "sha256": "7fb9a59a880fec5da79f4a6dbc2262a7a284ceee7fd8966d7cea858707a13218",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-foreign_issue-evaluate.log",
+      "archive": "project-entry/composition-c1fd-foreign_issue-evaluate.log",
+      "sha256": "93077b98063a6dd31ed4f30520574aeaf8b0ead5594a72edc48d6e4ba2730db3",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-foreign_issue-setup.log",
+      "archive": "project-entry/composition-c1fd-foreign_issue-setup.log",
+      "sha256": "4ba670cd7b0c35399140e5bc4a5e4b52e63fd47d87ba6261063b35db4dd2b39b",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-foreign_repository-evaluate.log",
+      "archive": "project-entry/composition-c1fd-foreign_repository-evaluate.log",
+      "sha256": "214a44525ce7665bfb906991816e398b038f332160849102b9ab95670050f5bd",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-foreign_repository-setup.log",
+      "archive": "project-entry/composition-c1fd-foreign_repository-setup.log",
+      "sha256": "0ab067c09de6c5bc204aa8a922c140a5d35b25de8a02d40ffae179b424c411dd",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-legacy_material-evaluate.log",
+      "archive": "project-entry/composition-c1fd-legacy_material-evaluate.log",
+      "sha256": "85b9553707c70f6dae23528c0aeb1740f0fb952fbd5ae239f3b0e95bb8ba0f6f",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-legacy_material-setup.log",
+      "archive": "project-entry/composition-c1fd-legacy_material-setup.log",
+      "sha256": "6eb7e170ec636876de1741218cfd1eca4021ea925ef2df2ebf85574fdf839f64",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-legacy_state_only-evaluate.log",
+      "archive": "project-entry/composition-c1fd-legacy_state_only-evaluate.log",
+      "sha256": "6c6b8a5b77c5f3790de968710dd039d76afe93a914f3fa95dd8dadfb0c8d8ea4",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-legacy_state_only-setup.log",
+      "archive": "project-entry/composition-c1fd-legacy_state_only-setup.log",
+      "sha256": "5b924db4a1aae1a9f69673b4720f8ba094feb3c9135f8387ac2d5e65aa8cf0f9",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-material_bound-evaluate.log",
+      "archive": "project-entry/composition-c1fd-material_bound-evaluate.log",
+      "sha256": "2315a1bf7e5fa81a1d9438cac5ab5b8e62539fe5d125f93bbdb6d9b40371841a",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-material_bound-setup.log",
+      "archive": "project-entry/composition-c1fd-material_bound-setup.log",
+      "sha256": "a2b3c03e7e9505f6c137c629058f404a87df6955b91226bbc345f26775c13248",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-missing_hash-evaluate.log",
+      "archive": "project-entry/composition-c1fd-missing_hash-evaluate.log",
+      "sha256": "08b7a8905a34753bebd41414ef3835849d0ff0506f11e9cbe1cb6816d7476089",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-missing_hash-setup.log",
+      "archive": "project-entry/composition-c1fd-missing_hash-setup.log",
+      "sha256": "1daafce3d1b212e76675bb50eb9291d5a2f0d309a3815bddaa380aa705d5aea4",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-positive-evaluate.log",
+      "archive": "project-entry/composition-c1fd-positive-evaluate.log",
+      "sha256": "94771701d4cad174e28256ecb3fb4c8bb98032cb741b714dfbfbc27a9336a48c",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-positive-setup.log",
+      "archive": "project-entry/composition-c1fd-positive-setup.log",
+      "sha256": "197341c63c90d15fd12e5cdc09ca6f3b368e1f44ebb993237d09e430aabac2bb",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-rehashed_tamper-evaluate.log",
+      "archive": "project-entry/composition-c1fd-rehashed_tamper-evaluate.log",
+      "sha256": "c688ee9129844601eb05edab51ad0c4a3631001c7d5fe49c5afc26166c086924",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-rehashed_tamper-setup.log",
+      "archive": "project-entry/composition-c1fd-rehashed_tamper-setup.log",
+      "sha256": "0d0b0c123bb78706134d62ffccb3e466764a3c958f455a369264f94cf0cb4230",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-revoked-evaluate.log",
+      "archive": "project-entry/composition-c1fd-revoked-evaluate.log",
+      "sha256": "f1f591dc1a29a59e966adecc1cdb27644f5503b86599da465fdfd1eded49d89b",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-revoked-setup.log",
+      "archive": "project-entry/composition-c1fd-revoked-setup.log",
+      "sha256": "c646ac35937c853986e728acf3e97c60571f5c441d7c38bab11832474f0b2169",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-summary.json",
+      "archive": "project-entry/composition-c1fd-summary.json",
+      "sha256": "08cb0a0f43cd8af8bb4cbdbcff2df8a3e86b5bee28ca148137f654b311cea17a",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-wrong_action-evaluate.log",
+      "archive": "project-entry/composition-c1fd-wrong_action-evaluate.log",
+      "sha256": "ebea6618ba2c15c9e477b566c0cb4c2704215759873e01dee712964f9fee7936",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-c1fd-wrong_action-setup.log",
+      "archive": "project-entry/composition-c1fd-wrong_action-setup.log",
+      "sha256": "03160782cc828605f4837214e1d31c3a35e1f2ff4345735bd9213763b34c7c2e",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-canonical-75b-evaluate.log",
+      "archive": "project-entry/composition-canonical-75b-evaluate.log",
+      "sha256": "85ec4f0103449edce5a18d8da1005e985e93062455d8827fb53c5526fe7fff3c",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-canonical-75b-expired-evaluate.log",
+      "archive": "project-entry/composition-canonical-75b-expired-evaluate.log",
+      "sha256": "5fdfd482111a8a6dfad313c76e5928519fada6d80966a5a01c19633a52af51d9",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-canonical-75b-expired-setup.log",
+      "archive": "project-entry/composition-canonical-75b-expired-setup.log",
+      "sha256": "d15fb47f154d4114ebf0c66e7a5222ce41cc97df6371636398f953863a879993",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-canonical-75b-foreign_goal-evaluate.log",
+      "archive": "project-entry/composition-canonical-75b-foreign_goal-evaluate.log",
+      "sha256": "9b7f1affceda17a10c21c48a6b7089c265fc0337bd41e1c8e831bb9bacb09a72",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-canonical-75b-foreign_goal-setup.log",
+      "archive": "project-entry/composition-canonical-75b-foreign_goal-setup.log",
+      "sha256": "7d422fae294770c1410f8c0a32ff1586a3f846215857c7768a6b1435ca010983",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-canonical-75b-foreign_issue-evaluate.log",
+      "archive": "project-entry/composition-canonical-75b-foreign_issue-evaluate.log",
+      "sha256": "b87d71c0a8e15be6e2a2429c325204d64bf7c7e5725ba520fc0fbb11431a412a",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-canonical-75b-foreign_issue-setup.log",
+      "archive": "project-entry/composition-canonical-75b-foreign_issue-setup.log",
+      "sha256": "14d23495ce7871255af33255edf7213d6ece7c87146c45b4adacf576eb7592e1",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-canonical-75b-revoked-evaluate.log",
+      "archive": "project-entry/composition-canonical-75b-revoked-evaluate.log",
+      "sha256": "1c358f2f665c0111d35d435f0bc904b6f8aeb328a08465770c5309277b8dcf20",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-canonical-75b-revoked-setup.log",
+      "archive": "project-entry/composition-canonical-75b-revoked-setup.log",
+      "sha256": "f6c5bda7dd8dba33dde6f5b497afb1e23585409cc18d0850223dffa130ca16db",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-canonical-75b-setup.log",
+      "archive": "project-entry/composition-canonical-75b-setup.log",
+      "sha256": "61d1476211ae2fe125e0877c645923c299840e6066aa47da99e9172c4f775481",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-canonical-75b-wrong_action-evaluate.log",
+      "archive": "project-entry/composition-canonical-75b-wrong_action-evaluate.log",
+      "sha256": "b7fb95be3a5b8510a8485612c8828252d4843a3f26c1ed5c39f13192a6812a79",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-canonical-75b-wrong_action-setup.log",
+      "archive": "project-entry/composition-canonical-75b-wrong_action-setup.log",
+      "sha256": "49e1c5b089ed7f05e711404b6088c83d012904094a79e7d2fb62bcbf2a98cdb3",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-conflicting_identity-evaluate.log",
+      "archive": "project-entry/composition-e28-conflicting_identity-evaluate.log",
+      "sha256": "4dcc8503e7d94460bc7708dafb3ef5c14cee55ccc20cf0b50d34530338473f47",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-conflicting_identity-setup.log",
+      "archive": "project-entry/composition-e28-conflicting_identity-setup.log",
+      "sha256": "9f6614079a802da36494868b3acef5e570d3e30c9692073bfbe402a7c6f75245",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-corrected-envelope_binding_deleted-evaluate.log",
+      "archive": "project-entry/composition-e28-corrected-envelope_binding_deleted-evaluate.log",
+      "sha256": "415040f1891a23fe5f7d8216eabc3e9ecbf19a716fcd9fa8c016fa0b2c6c6e45",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-corrected-envelope_binding_deleted-setup.log",
+      "archive": "project-entry/composition-e28-corrected-envelope_binding_deleted-setup.log",
+      "sha256": "262fa480811d953414e09b060e4035cb5095bede6bb27456d55f05f144ba0d9e",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-corrected-envelope_outer_tamper-evaluate.log",
+      "archive": "project-entry/composition-e28-corrected-envelope_outer_tamper-evaluate.log",
+      "sha256": "4ae9dec1306556698210a50817ccbe9b8e9a57bd5fcd9c34a91be380bcdd33de",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-corrected-envelope_outer_tamper-setup.log",
+      "archive": "project-entry/composition-e28-corrected-envelope_outer_tamper-setup.log",
+      "sha256": "b3f2d780b81b324a8104b4708d6196e896162eee63e1f3ba649099a33ab814e0",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-corrected-envelope_positive-evaluate.log",
+      "archive": "project-entry/composition-e28-corrected-envelope_positive-evaluate.log",
+      "sha256": "ca9eec4b3cd5e6d00434a237281c46ef29ea2ddd10dabd7095871b1f93fb1686",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-corrected-envelope_positive-setup.log",
+      "archive": "project-entry/composition-e28-corrected-envelope_positive-setup.log",
+      "sha256": "54c6ab8a29a56d027d1ef6fac6f957f7d4fe1409093553c4facc01af82249d42",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-duplicate_issue-evaluate.log",
+      "archive": "project-entry/composition-e28-duplicate_issue-evaluate.log",
+      "sha256": "15e15dd62ecf50d2794f743d6c3d34b9cad02f82c45db9916e8d152b5f3026f1",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-duplicate_issue-setup.log",
+      "archive": "project-entry/composition-e28-duplicate_issue-setup.log",
+      "sha256": "1ab1112f737aa9eb14bcc78cf6ccbf57a7b6c68a84186053271e11065e90613c",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-envelope_binding_deleted-evaluate.log",
+      "archive": "project-entry/composition-e28-envelope_binding_deleted-evaluate.log",
+      "sha256": "ad45c66d0a8264a0281b708243bde6ef508f667d7be7f790949cd0b481e337b0",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-envelope_binding_deleted-setup.log",
+      "archive": "project-entry/composition-e28-envelope_binding_deleted-setup.log",
+      "sha256": "892782138e47d2b3aac270c73a7104cd56c4cd5b72f9b7888725029f362ed401",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-envelope_outer_tamper-evaluate.log",
+      "archive": "project-entry/composition-e28-envelope_outer_tamper-evaluate.log",
+      "sha256": "0068f7808571fd2cd4ef0ca62747b88077c3d26371c3d6a36c502e1654a17b6e",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-envelope_outer_tamper-setup.log",
+      "archive": "project-entry/composition-e28-envelope_outer_tamper-setup.log",
+      "sha256": "892782138e47d2b3aac270c73a7104cd56c4cd5b72f9b7888725029f362ed401",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-envelope_positive-evaluate.log",
+      "archive": "project-entry/composition-e28-envelope_positive-evaluate.log",
+      "sha256": "f65c6a9a2d3b36ea57001fa8c699ca231567825fbbc2b443a55e96725dc341fb",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-envelope_positive-setup.log",
+      "archive": "project-entry/composition-e28-envelope_positive-setup.log",
+      "sha256": "892782138e47d2b3aac270c73a7104cd56c4cd5b72f9b7888725029f362ed401",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-expired-evaluate.log",
+      "archive": "project-entry/composition-e28-expired-evaluate.log",
+      "sha256": "4aa4c4dd02940db52541c419422f43c59878159cde384ce786e54bd5123c4ec1",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-expired-setup.log",
+      "archive": "project-entry/composition-e28-expired-setup.log",
+      "sha256": "5bed6c127eb744ee34cec1435b0aafebb5439c1fb0aa1edec02b9993eee2c4ed",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-foreign_goal-evaluate.log",
+      "archive": "project-entry/composition-e28-foreign_goal-evaluate.log",
+      "sha256": "5e10b0e61edc4abf4abcfa075704548a62368492404da025b703eeee34ad617a",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-foreign_goal-setup.log",
+      "archive": "project-entry/composition-e28-foreign_goal-setup.log",
+      "sha256": "4c4337518b70988f1a5898c55ffa151a4844d95fa1a07ec9cc1dfdaa342636ce",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-foreign_issue-evaluate.log",
+      "archive": "project-entry/composition-e28-foreign_issue-evaluate.log",
+      "sha256": "0135a358a55c7de77ab748e5c9f5bc044ad975a0116fb265649fdbd93554f73b",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-foreign_issue-setup.log",
+      "archive": "project-entry/composition-e28-foreign_issue-setup.log",
+      "sha256": "00f53296b263ff9c43aa669e2171060f012db1febc808633282b8d39030bb81d",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-foreign_repository-evaluate.log",
+      "archive": "project-entry/composition-e28-foreign_repository-evaluate.log",
+      "sha256": "70081ffdff5a7913155599379cf8f76bea303d6a55535280d916d54a222935ea",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-foreign_repository-setup.log",
+      "archive": "project-entry/composition-e28-foreign_repository-setup.log",
+      "sha256": "239bcc500be10c2d9ecd3cfced5b82dabe393352c601696fcfd9f82b23b9b861",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-legacy_material-evaluate.log",
+      "archive": "project-entry/composition-e28-legacy_material-evaluate.log",
+      "sha256": "ee0a1df6f8b2db2b0c94e71c3d594a107c2d3f505d849457292f16f5258b08dd",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-legacy_material-setup.log",
+      "archive": "project-entry/composition-e28-legacy_material-setup.log",
+      "sha256": "01d39c3488a0fc294fb1c175f60ee36df0fae8a4834d450a198d1bfad0293107",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-legacy_state_only-evaluate.log",
+      "archive": "project-entry/composition-e28-legacy_state_only-evaluate.log",
+      "sha256": "47c3ae434f94e3327b001d09302a18a78b30670c14956bd9540cfe65d994334d",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-legacy_state_only-setup.log",
+      "archive": "project-entry/composition-e28-legacy_state_only-setup.log",
+      "sha256": "7ebf51845572d00dfacd793f984320f2038a772277bd5a7aacdce3e51ad1da73",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-material_bound-evaluate.log",
+      "archive": "project-entry/composition-e28-material_bound-evaluate.log",
+      "sha256": "8ada902aa8bb72365c0c237bf1605cf59008214319ad47d3e15be1dc847632c6",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-material_bound-setup.log",
+      "archive": "project-entry/composition-e28-material_bound-setup.log",
+      "sha256": "e9d4b927ae496d9eb852d6956992078e566fcf5b97e4309516a76f4760c9b569",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-missing_hash-evaluate.log",
+      "archive": "project-entry/composition-e28-missing_hash-evaluate.log",
+      "sha256": "305ccabefcac034caa35cb7cd07e9e0d0f019e49c081327ff29995039b9a9bfd",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-missing_hash-setup.log",
+      "archive": "project-entry/composition-e28-missing_hash-setup.log",
+      "sha256": "c434cc034adfd5bca5edc2f16145dc9360ea9819464279fe2e45251cf81abb2a",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-positive-evaluate.log",
+      "archive": "project-entry/composition-e28-positive-evaluate.log",
+      "sha256": "7e192dd4743dad49be2aef30be548796b73cbba27036ae2068f74391f7ba6898",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-positive-setup.log",
+      "archive": "project-entry/composition-e28-positive-setup.log",
+      "sha256": "09deb7ebfe6784cb76169fc17e8044d3c397ddbf6c4eef0f78e2fd012d681d77",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-rehashed_tamper-evaluate.log",
+      "archive": "project-entry/composition-e28-rehashed_tamper-evaluate.log",
+      "sha256": "5e9420c3c31a0ffdfbc0c857ef1e10c420dcaf996f78ee760a7f6afb2950e3a9",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-rehashed_tamper-setup.log",
+      "archive": "project-entry/composition-e28-rehashed_tamper-setup.log",
+      "sha256": "3952f9999e28bada834d671ad31510edfc706863eb28b0f8084e9227b60c78ff",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-revoked-evaluate.log",
+      "archive": "project-entry/composition-e28-revoked-evaluate.log",
+      "sha256": "f38226e5ba9709ab6715a1359f265e12c5bbde1db2d7737c0c4dfd5e10494b05",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-revoked-setup.log",
+      "archive": "project-entry/composition-e28-revoked-setup.log",
+      "sha256": "01c1759ac6fd354c3f61d98c1f2195018e018979fa1ca7138ba14e661badcaf9",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-summary.json",
+      "archive": "project-entry/composition-e28-summary.json",
+      "sha256": "c68035ae0921d65087d752e5eddaa9faca3845aeba2460da33e92068ed6512af",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-v3-envelope_binding_deleted-evaluate.log",
+      "archive": "project-entry/composition-e28-v3-envelope_binding_deleted-evaluate.log",
+      "sha256": "6d31be2a8e08866c140d8553b6d289d49354fcd2a5479b10ab65e5a2abe6e4e4",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-v3-envelope_binding_deleted-setup.log",
+      "archive": "project-entry/composition-e28-v3-envelope_binding_deleted-setup.log",
+      "sha256": "5613f5aa5c23835606696fbf768ec51cb12cad9ff006bd2934978f62a7e14156",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-v3-envelope_outer_tamper-evaluate.log",
+      "archive": "project-entry/composition-e28-v3-envelope_outer_tamper-evaluate.log",
+      "sha256": "0bc674235b93eea571d8e7732f49b2aea1fdac5e7665b2d1c83962d405d4d8a0",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-v3-envelope_outer_tamper-setup.log",
+      "archive": "project-entry/composition-e28-v3-envelope_outer_tamper-setup.log",
+      "sha256": "2ad8456661b8dbfbe31902a05a2aa483f15e4cfee38081483e11064f08a72c57",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-v3-envelope_positive-evaluate.log",
+      "archive": "project-entry/composition-e28-v3-envelope_positive-evaluate.log",
+      "sha256": "283319d790a19a3b6bf2931e55e16d8fc445db758d9e89a22ad445671dfc51b9",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-v3-envelope_positive-setup.log",
+      "archive": "project-entry/composition-e28-v3-envelope_positive-setup.log",
+      "sha256": "ccd15a93cf8db00d3eee8096cb7a5ca23f67a1afbfd07eaee2ed78ffeae7e397",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-wrong_action-evaluate.log",
+      "archive": "project-entry/composition-e28-wrong_action-evaluate.log",
+      "sha256": "ed2c4c0072dbc71650afaca0793f4807fac1e6818083e96719e5117a970ee709",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-e28-wrong_action-setup.log",
+      "archive": "project-entry/composition-e28-wrong_action-setup.log",
+      "sha256": "6fe0680249df5b816bf5120b97f655ca2e9c01f11fc0c47859f2e4878df56687",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/composition-final-6d-summary.json",
+      "archive": "project-entry/composition-final-6d-summary.json",
+      "sha256": "2644426221f80be3707d3eb070356ceef6f960e32044e7676a95ccd1c82d5d6e",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/current-completion-matrix.json",
+      "archive": "project-entry/current-completion-matrix.json",
+      "sha256": "f415fdae06e93a88dc1fe11597cf42fd806fdc2dcb0124aeccb21ca89d68a908",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-conflicting_identity-evaluate.log",
+      "archive": "project-entry/final-6d-conflicting_identity-evaluate.log",
+      "sha256": "7f83728468d83b99a3e284266f2478b14f0eec7007117a8faaca6aa7949cfab9",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-conflicting_identity-setup.log",
+      "archive": "project-entry/final-6d-conflicting_identity-setup.log",
+      "sha256": "5d8253ece7e8e07201690f75c06f126b9668d64b7684215bb90310c83a7454ad",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-duplicate_issue-evaluate.log",
+      "archive": "project-entry/final-6d-duplicate_issue-evaluate.log",
+      "sha256": "624c32add5b7766316abd919f70f8a463bcf835369bebc5bc0074408ffae69cf",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-duplicate_issue-setup.log",
+      "archive": "project-entry/final-6d-duplicate_issue-setup.log",
+      "sha256": "7f37841963ab772a9f85572f490f7a811efad4b5b0dd035c6452df5c1d354df9",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-envelope_binding_deleted-evaluate.log",
+      "archive": "project-entry/final-6d-envelope_binding_deleted-evaluate.log",
+      "sha256": "2e10e20f476226b69c70a0f6ea65173908afbea6eb49b28544fd082fef5da86b",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-envelope_binding_deleted-setup.log",
+      "archive": "project-entry/final-6d-envelope_binding_deleted-setup.log",
+      "sha256": "e700995e433c136ae05ecabdebb6e043964920d3c666746dc0dfb19d79df4e07",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-envelope_outer_tamper-evaluate.log",
+      "archive": "project-entry/final-6d-envelope_outer_tamper-evaluate.log",
+      "sha256": "b046e8714f9c82436991c7b47be840bffd47e10c24bd3024a9ab887f6bb98930",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-envelope_outer_tamper-setup.log",
+      "archive": "project-entry/final-6d-envelope_outer_tamper-setup.log",
+      "sha256": "2ba8a84c28c1414697d0ed0cd1647fafc3d97451868e2ca6956c79fb2bdbbcf9",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-envelope_positive-evaluate.log",
+      "archive": "project-entry/final-6d-envelope_positive-evaluate.log",
+      "sha256": "4b6e9155b398148505bca5536550919f01c985770c9dee850e9945bb6c635fcb",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-envelope_positive-setup.log",
+      "archive": "project-entry/final-6d-envelope_positive-setup.log",
+      "sha256": "089939c8557872d206aa7c9505342c10ff8c7a7dbbabc93fa2859054c1eeff9b",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-expired-evaluate.log",
+      "archive": "project-entry/final-6d-expired-evaluate.log",
+      "sha256": "98b5dbfaa245c96407a8d3db9dcc5338ed8dc1fc7c0cac78f46ae2a7d0139f67",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-expired-setup.log",
+      "archive": "project-entry/final-6d-expired-setup.log",
+      "sha256": "c00880e3919b0e55b9df5b4d39200853649b9b791b2c0c2e98bf8c34b0eaa685",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-foreign_goal-evaluate.log",
+      "archive": "project-entry/final-6d-foreign_goal-evaluate.log",
+      "sha256": "f8dafc08c9fc8859a20e38f281c3e6a221e71621bbf49f3ace6dfb6bc20d6659",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-foreign_goal-setup.log",
+      "archive": "project-entry/final-6d-foreign_goal-setup.log",
+      "sha256": "5ba49848bc6ed04b4f59856e9283ed360ea77afd8e536384a07260ae2ebedbb3",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-foreign_issue-evaluate.log",
+      "archive": "project-entry/final-6d-foreign_issue-evaluate.log",
+      "sha256": "877591aa60a2f75f66c680cace91ddadf01bd656cfa60586c25b2f85087be3f3",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-foreign_issue-setup.log",
+      "archive": "project-entry/final-6d-foreign_issue-setup.log",
+      "sha256": "13bd7306ea8fe41971f41d02f1018195657234f4ed05ab3fe1f2de84356b0ea7",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-foreign_repository-evaluate.log",
+      "archive": "project-entry/final-6d-foreign_repository-evaluate.log",
+      "sha256": "1c1725360c42bb3a2bc191d0902b374d7f320a84f2c475a5bd465d5b384ecf8a",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-foreign_repository-setup.log",
+      "archive": "project-entry/final-6d-foreign_repository-setup.log",
+      "sha256": "a0c2e96a087b9325afd03f198ec5aa45e3b34e85447fe13245800e5393f03ad5",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-legacy_material-evaluate.log",
+      "archive": "project-entry/final-6d-legacy_material-evaluate.log",
+      "sha256": "f9512c835122a4923eb70cdb03932a201dec1846bbbac592115042941caa8601",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-legacy_material-setup.log",
+      "archive": "project-entry/final-6d-legacy_material-setup.log",
+      "sha256": "e1ed6f99712d8945179e9a2260d305495b8c036119b7b7e0dc2f5582f37642e4",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-legacy_state_only-evaluate.log",
+      "archive": "project-entry/final-6d-legacy_state_only-evaluate.log",
+      "sha256": "9036fb41a88bb346e4eab5b2a2a223a57ae0ead64c72dda2f07cb82c44360dbd",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-legacy_state_only-setup.log",
+      "archive": "project-entry/final-6d-legacy_state_only-setup.log",
+      "sha256": "d7b57fcff5dd52966e4e31f2be4b5a94d4e1b6c58ff877098af0bf399d738843",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-material_bound-evaluate.log",
+      "archive": "project-entry/final-6d-material_bound-evaluate.log",
+      "sha256": "ce4340f3d70fbe92284ed17ee25b1c099b3904e75c4c759978d6e526c63cb846",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-material_bound-setup.log",
+      "archive": "project-entry/final-6d-material_bound-setup.log",
+      "sha256": "8cf80b527d5b43bf77713ccfd27c14bc9719cfebc5d31999c57e40fe939d4de1",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-missing_hash-evaluate.log",
+      "archive": "project-entry/final-6d-missing_hash-evaluate.log",
+      "sha256": "3057d5d2980a671bdbf89da16d0015405e1f64ceda398ce3c77956803ac2358d",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-missing_hash-setup.log",
+      "archive": "project-entry/final-6d-missing_hash-setup.log",
+      "sha256": "e05732bbe58683aaf7b0b2d44879332866ccf6c3c0dd6d2cfc512dad0f99ac81",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-positive-evaluate.log",
+      "archive": "project-entry/final-6d-positive-evaluate.log",
+      "sha256": "9aa11b3d31b6643aa9f14edb5b0ab7ac949a7dfaeac2c29152ccaf97a0d0e344",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-positive-setup.log",
+      "archive": "project-entry/final-6d-positive-setup.log",
+      "sha256": "3a9b08c920c96cc1baf8cbd1cf6105103c268d7f445acfc6f679f52579df43c9",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-rehashed_tamper-evaluate.log",
+      "archive": "project-entry/final-6d-rehashed_tamper-evaluate.log",
+      "sha256": "0699e173abb83f1b535305b8f5f9777889e1db9ae50a393fa7a1958dc88df693",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-rehashed_tamper-setup.log",
+      "archive": "project-entry/final-6d-rehashed_tamper-setup.log",
+      "sha256": "0969b66b291ed8f00507001b4734442f1de9c6062e6279045b52c6a16f85c6b3",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-revoked-evaluate.log",
+      "archive": "project-entry/final-6d-revoked-evaluate.log",
+      "sha256": "c209acb1e46b57f64dd44b53527c182c05fc71371b5a9050950531915f581452",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-revoked-setup.log",
+      "archive": "project-entry/final-6d-revoked-setup.log",
+      "sha256": "462de5fd31b0b0e912d53460bf8956028c739cc7f34cc501bb1cfd758a16c6a4",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-wrong_action-evaluate.log",
+      "archive": "project-entry/final-6d-wrong_action-evaluate.log",
+      "sha256": "86cef81e144323431c392bdbbe893c829fa72554ff1c181ae35b41bb60a083f5",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/final-6d-wrong_action-setup.log",
+      "archive": "project-entry/final-6d-wrong_action-setup.log",
+      "sha256": "f7068b68697ff92435d245dcb529cdb9ef191eef3fa15bf30b5b21af9c932f48",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/live-controls.json",
+      "archive": "project-entry/live-controls.json",
+      "sha256": "7cd3ec00fa161a93f3dbb549337f921c6e77b5ef89b6f9db87ac45027c934166",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/live-project-entry-842.json",
+      "archive": "project-entry/live-project-entry-842.json",
+      "sha256": "5c9b0ff4ec5822df2ae98b2a1394ac1f194ce12969285aed4db65dac09eb0ab0",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/native-project-entry-witness.json",
+      "archive": "project-entry/native-project-entry-witness.json",
+      "sha256": "10367e15fa4dbed0492928e6149088821a3618bf11792cbd8b1602c11dd35c4d",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/native-r10-witness.json",
+      "archive": "project-entry/native-r10-witness.json",
+      "sha256": "be83135d8e5e23cd617bdbe92206fb9ca46723842ca0bdf3dae5a662e48c3cc2",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/pe2-continuity-witness.json",
+      "archive": "project-entry/pe2-continuity-witness.json",
+      "sha256": "da5d76046c189fb2c5b9cdc634a3cba66292ef422c3a93b41f526f5f4a3e9f4d",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/pr925-premerge.json",
+      "archive": "project-entry/pr925-premerge.json",
+      "sha256": "7149d1563039d799d39041367ec86a68b1c7052d8de4e2d8c220ba4fee0ad41d",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/project-entry-predecessor.bundle",
+      "sha256": "326dd4a790a9bac8a4ddb8c717ac027c143b02f841cd72c2bcde8ec4745deef2",
+      "disposition": "Retained local immutable rollback Git bundle; runtime history intentionally not imported into source repository"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/project-entry-predecessor.json",
+      "archive": "project-entry/project-entry-predecessor.json",
+      "sha256": "a38149647536ac355fed1e5d653478d91b777f7974b3a8576e2b9bd0cbe7d453",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/project-entry-r10-predecessor.bundle",
+      "sha256": "9fd6b6752f987ed69a4912a2d0f55e6a3aa6737532a2bce7e6dedb6ddde159bf",
+      "disposition": "Retained local immutable rollback Git bundle; runtime history intentionally not imported into source repository"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/project-entry-r10-predecessor.json",
+      "archive": "project-entry/project-entry-r10-predecessor.json",
+      "sha256": "c430e05a1a4183c80b34d85c581b8ff179bb80d220e90127253e93aa21aa6c44",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/project-entry-repair-lease.json",
+      "archive": "project-entry/project-entry-repair-lease.json",
+      "sha256": "e59381ae9aff4a1e5260712a9deb43da09ac9339677d0b91725df782fbf45f15",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/pytest-6cc-full.log",
+      "archive": "project-entry/pytest-6cc-full.log",
+      "sha256": "07d964abdd536cfb1041d0febb49b500c206f040b876b3b28eaf3d644c5264a1",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/pytest-e28-full.log",
+      "archive": "project-entry/pytest-e28-full.log",
+      "sha256": "65dfc4d255a40f6fdda47d004ca79b20948b327be0db787f0340dc44e4c0aa9e",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/pytest-final-6d.log",
+      "archive": "project-entry/pytest-final-6d.log",
+      "sha256": "7d9ef1d4a4b76406392b3ccdc1791f2eb2b7e56bece6020890b546964e9b13a7",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/r10-direct-controls.json",
+      "archive": "project-entry/r10-direct-controls.json",
+      "sha256": "0fd7481f16027dd208aa9cc40111caf7a489028a40cfec4aa421897fefb798d2",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/r10-gateway-status.json",
+      "archive": "project-entry/r10-gateway-status.json",
+      "sha256": "9baa4c68a446e44973aadb2a7ffe54c54cd67a0ec44860f47021fa30f5da301b",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/r10-health.json",
+      "archive": "project-entry/r10-health.json",
+      "sha256": "f97cefabbdd625c96aa19a377811407002d51e49d83c42c3bb12823c1fdc180b",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/r10-owner-instruction-provenance.json",
+      "archive": "project-entry/r10-owner-instruction-provenance.json",
+      "sha256": "efcff8dd2515c10c4caf0886efed873a2cf13e867a0bc65f8979fade034aa6d3",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/r10-pr-body.md",
+      "archive": "project-entry/r10-pr-body.md",
+      "sha256": "2f354d490f599cf96d60e8b0642f25a1e06faf6750288349cf871993013b3a3c",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/r10-request.json",
+      "archive": "project-entry/r10-request.json",
+      "sha256": "fbaf6d5544283a5fc390068c13e7b89973f199032f01a63c1339af66afde6bec",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/r10-runtime-outcome.json",
+      "archive": "project-entry/r10-runtime-outcome.json",
+      "sha256": "cfb7727abdf30929508b525577a3cb53a4e2d52320a2a72d8a4c74a10812bb7c",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/r10-terminal-comment.md",
+      "archive": "project-entry/r10-terminal-comment.md",
+      "sha256": "311b147808ac01cc357a48ccfc8dbc8f219d72d5e1c8af8919ca50be62a8b644",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/r9a2-runtime-outcome.json",
+      "archive": "project-entry/r9a2-runtime-outcome.json",
+      "sha256": "436b265ec3c240a5b61d23985f143a6c88f0a1cfa0df59c8244ac7213858b7e2",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/ruff-17f.json",
+      "archive": "project-entry/ruff-17f.json",
+      "sha256": "179f4b517de00db9700f89fa1a882b2d3c9ab30f7d016a558c6b274b5abd8a8f",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/ruff-baseline.json",
+      "archive": "project-entry/ruff-baseline.json",
+      "sha256": "03621ce2751e5cebdeaa6a54b3b329a0722bb6ddfbac094c633925a73ac0c62a",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/ruff-e28.json",
+      "archive": "project-entry/ruff-e28.json",
+      "sha256": "0832b8dbcff6b7ba3b748e58f69ac83cdaf1a96a19fcd162d495253131c68f75",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/source-acceptance-final-6d.json",
+      "archive": "project-entry/source-acceptance-final-6d.json",
+      "sha256": "4bd134a695e359ddd1dd35c25f23bd157750e4b6a7c06ed1ee194874815fd3f5",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/verify-project-entry-composition.py",
+      "archive": "project-entry/verify-project-entry-composition.py.txt",
+      "sha256": "44e06473cf6bc5271a1ddd77556ab5d4ea63c4a56a87242e954aeb6935580896",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/807-current-main-audit.log",
+      "archive": "frontier-audit/807-current-main-audit.log",
+      "sha256": "9d322cbc423e0f663f875abe5672b66cf05219f763d2789d834a543cc3820484",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/807-current-main-tests.log",
+      "archive": "frontier-audit/807-current-main-tests.log",
+      "sha256": "2005559f31bef3c99c50f45b3e5ed10e3e04fe905ea82ec508578b328512a41c",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/807-terminal-reconciliation.md",
+      "archive": "frontier-audit/807-terminal-reconciliation.md",
+      "sha256": "b816c77dd5ace7ba75031f3c8dca547c48c48b32da23882b2921317b0423e7f2",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/850-853-terminal-reconciliation.md",
+      "archive": "frontier-audit/850-853-terminal-reconciliation.md",
+      "sha256": "1a4c9ce1c83d12b619137f418e9b2ba1fc3b8a331013e38184b13f36533ae834",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/closeout-evidence-hashes.json",
+      "archive": "frontier-audit/closeout-evidence-hashes.json",
+      "sha256": "6509a331f71a4cb490ac64f91e85cb348d3c6c0ac3126dca3d02a7ff14d01a12",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/completion-status.svg",
+      "archive": "frontier-audit/completion-status.svg",
+      "sha256": "7b3da6c71fa216d9188141aa340613f5b7885aa08deba915b6b73b42b6981d0b",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/controller-closeout-publication-readback.json",
+      "archive": "frontier-audit/controller-closeout-publication-readback.json",
+      "sha256": "64f5abb61b4199a752e45ff0c9c9aa020f22a5b9fb99da82ac660e12ffeb31e4",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/controller-closeout-publication.md",
+      "archive": "frontier-audit/controller-closeout-publication.md",
+      "sha256": "dc627d4afcbb130d1bd2705151c08d072ade0bf7b489bb13c320e657a2f0df87",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/controller-closeout.md",
+      "archive": "frontier-audit/controller-closeout.md",
+      "sha256": "07dba4fc8e9852282c6888be0e7a95aed18247cc948965b9cd7461a7200be555",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/controller-regression-readback.json",
+      "archive": "frontier-audit/controller-regression-readback.json",
+      "sha256": "d8211674bfe6a843bf835556c510ed6b6cb00fac49176eddb6981464f53f6f31",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/current-completion-matrix.csv",
+      "archive": "frontier-audit/current-completion-matrix.csv",
+      "sha256": "56416f11149041f90a66e405865d23243b659592bcdd61dc450a89ea953be999",
+      "disposition": "CSV line endings normalized CRLF to LF; original source retained locally",
+      "source_sha256": "460fc5144d12021b53aa4fe3ee2611b8b31e50d9e7b266e019161a417dc8d642"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/current-completion-matrix.json",
+      "archive": "frontier-audit/current-completion-matrix.json",
+      "sha256": "c9ab49ce2d9b4583a26c28bad196604246e9612d16370eb9a952d5fd287982b5",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/current-completion-matrix.md",
+      "archive": "frontier-audit/current-completion-matrix.md",
+      "sha256": "a13d17412039df1bd40a7927e15aae09fc7469978908fbf77a097e239338c79a",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/devspace-frontier.log",
+      "archive": "frontier-audit/devspace-frontier.log",
+      "sha256": "afddc8a387d2cd766d5f828c68dd4c6e0df051974ea01ee8887d6cb5f60b2aa7",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/devspace-frozen-38803-generation.log",
+      "archive": "frontier-audit/devspace-frozen-38803-generation.log",
+      "sha256": "21ade136f1b42ac6ff480dd8c8b5c7da3029dc87e0260c73e4b4a6e7bf7f5895",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/devspace-goal-sessions.log",
+      "archive": "frontier-audit/devspace-goal-sessions.log",
+      "sha256": "a4c5e330a38d7601eb03148c1c15e9246ec3e9f0e25c40ed49ca0ba83e71044e",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/devspace-issue31-cutover.log",
+      "archive": "frontier-audit/devspace-issue31-cutover.log",
+      "sha256": "2c0bf434e4b76c377cbec48fef0dd052582b13d48789d04e32b9abd08d652d27",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/devspace-skills.log",
+      "archive": "frontier-audit/devspace-skills.log",
+      "sha256": "d67bb2ff143afc3e81a548e8cd7a6f55e48c4331f1eb56a9e88646fe7b518bda",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/final-issue-pr-readback.json",
+      "archive": "frontier-audit/final-issue-pr-readback.json",
+      "sha256": "5ee76b7ab136f8313082ef5653fbb2f14df2d9c1ee71de30cf018f1446994e5a",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/five-mount-current-identity.json",
+      "archive": "frontier-audit/five-mount-current-identity.json",
+      "sha256": "bb1c769a461762782b100099ac7e97622b4fea1afe152b3b960ae63696523b72",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/frontier-evidence-qualification.json",
+      "archive": "frontier-audit/frontier-evidence-qualification.json",
+      "sha256": "67a67aebac4dec988548db8f6e628f890f92c059a978e13ae3c6f9d964e5ba21",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/gateway-current-readback.json",
+      "archive": "frontier-audit/gateway-current-readback.json",
+      "sha256": "f67b83b1d609817a7b25bcb81ac0274ce9bdbafa163c6ad41e55eae300156101",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/gateway-final-readback.json",
+      "archive": "frontier-audit/gateway-final-readback.json",
+      "sha256": "bf37111fbb37e467763145e096d0fce4d702fdfebc913ecfb0e6609ac43c54d3",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/issue-807-comments.json",
+      "archive": "frontier-audit/issue-807-comments.json",
+      "sha256": "cd12e2fb796d651ccc210064528bd73b244020920a4adaa1447b6d957bc792fa",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/issue-842-comments.json",
+      "archive": "frontier-audit/issue-842-comments.json",
+      "sha256": "a17579e5cf80932422366990acfd92790e8e90cef4b3aa67d7636fcf8f5a5f39",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/issue-851-comments.json",
+      "archive": "frontier-audit/issue-851-comments.json",
+      "sha256": "d8e4f3c6a5264feeac950650bd680c8e6bd6091a9a8d6fd941fccabddc5a3443",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/issue850-resident-current-readback.json",
+      "archive": "frontier-audit/issue850-resident-current-readback.json",
+      "sha256": "8e11d2e04af67dea61f9e32ca2ef8261b45a944999bb2d10eb111c3902210bf6",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/issue853-attempts-r1-r28.json",
+      "archive": "frontier-audit/issue853-attempts-r1-r28.json",
+      "sha256": "4741a4126f1000d3e798eab88fecabac35a41ade6fb5172c5945f7da967301c7",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/nexus-core-frozen.log",
+      "archive": "frontier-audit/nexus-core-frozen.log",
+      "sha256": "7e19c1e4869b2373f6042b615eeeba8adbb26667c40d37459a35ee95e1b86f89",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/nexus-core-tg8-cutover.log",
+      "archive": "frontier-audit/nexus-core-tg8-cutover.log",
+      "sha256": "15052e89822dac90da216de7077d79f7c41d596617110f3584196a973e534b9c",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/nexus-core-tg8-protocol.log",
+      "archive": "frontier-audit/nexus-core-tg8-protocol.log",
+      "sha256": "68f312c9d2df848ad228d0ea84f9a0420c96c180420938ca73054181f0dbefdb",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/nexus-core-tg8.log",
+      "archive": "frontier-audit/nexus-core-tg8.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/nexus-learning-focused.log",
+      "archive": "frontier-audit/nexus-learning-focused.log",
+      "sha256": "43a0f0f7465317bc520970a538cd37b0354e08d322aaf6265355996b242eafcc",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/nexus-learning-frozen.log",
+      "archive": "frontier-audit/nexus-learning-frozen.log",
+      "sha256": "43a0f0f7465317bc520970a538cd37b0354e08d322aaf6265355996b242eafcc",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/nexus-new-consumer-collision.log",
+      "archive": "frontier-audit/nexus-new-consumer-collision.log",
+      "sha256": "06d897ee9424423a68862c716c0667114b6069aaf633d7316e7c8c6fbc894c90",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/nexus-new-focused-rs.log",
+      "archive": "frontier-audit/nexus-new-focused-rs.log",
+      "sha256": "30f6e541b08677f318e3bbd6067dcf2cd5b0477fc00350b8e61d354544dc47ec",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/nexus-new-focused.log",
+      "archive": "frontier-audit/nexus-new-focused.log",
+      "sha256": "5758a47ff3d7db73e20520b9ce4c95d9ad8236e1e734d7dab435d497d3c0c123",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/nexus-new-g8g9-contract.log",
+      "archive": "frontier-audit/nexus-new-g8g9-contract.log",
+      "sha256": "3ebf984551cd64861db3fc2d5e06c15bb1e098c88711a140ef0832c097f89705",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/nexus-open-swe-runtime-focused.log",
+      "archive": "frontier-audit/nexus-open-swe-runtime-focused.log",
+      "sha256": "6e9812f0049da71490b1b7ec00042106ab2803a50588120363ffdc3532b10aac",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/nexus-runtime-frozen-rs.log",
+      "archive": "frontier-audit/nexus-runtime-frozen-rs.log",
+      "sha256": "5d924b534c5f9c1d79048335197bcfe496031922f877a09ab939c77399862fe0",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/nexus-runtime-frozen.log",
+      "archive": "frontier-audit/nexus-runtime-frozen.log",
+      "sha256": "bcb79ae904e9a6edc84e5ae2f41a9de707b16639bb321fbe738b3b4e49f2a9f4",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/nexus-runtime-lifecycle-acceptance.log",
+      "archive": "frontier-audit/nexus-runtime-lifecycle-acceptance.log",
+      "sha256": "f60e85a0e6de854cfd38262b397f2b3d21e08b0b73b206647dc0841b3da32713",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/repositories.json",
+      "archive": "frontier-audit/repositories.json",
+      "sha256": "79a79eb9a3298b077a21852715d58c8f3a18b307911fbf39ae9bfeff6dc35b78",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/resident-final-poll.json",
+      "archive": "frontier-audit/resident-final-poll.json",
+      "sha256": "c205a711a32206ac6fec366e77c6d12b38070ad0835870551dc34022966da16e",
+      "disposition": "Exact-byte evidence copy"
+    },
+    {
+      "source": "/Users/jameschen/.codex/visualizations/2026/09/10/01a08944-28b8-7db1-b7a8-ea5a050c038e/frontier-audit/resident-publication-readback.json",
+      "archive": "frontier-audit/resident-publication-readback.json",
+      "sha256": "fcc7705234caabbe1e0836b81d213f895b2b72fbee29f543cc42aae97155057f",
+      "disposition": "Exact-byte evidence copy"
+    }
+  ]
+}
