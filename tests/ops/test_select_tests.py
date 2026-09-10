@@ -122,6 +122,42 @@ def test_unrelated_worker_registry_path_remains_fallback():
     assert details.unmatched_paths == ["nexus/executors/worker_registry_unknown.py"]
 
 
+def test_state_json_store_mapping_preserves_full_impact_breadth(tmp_path):
+    details = select_target_details(
+        ["nexus/infrastructure/state_json_store.py"],
+        load_impact_rules(),
+        index_path=tmp_path / "missing-impact-index.json",
+        history_path=tmp_path / "missing-test-history.jsonl",
+    )
+
+    assert details.targets == [
+        "tests/infrastructure/test_state_json_store.py",
+        "tests/core",
+        "tests/services/test_policy_gate.py",
+        "tests/gates/test_s2t_memory_sidecar_fixtures.py",
+        "tests/ops/test_select_tests.py",
+        "tests/ops/test_pr_impact_gate.py",
+        "tests/architecture/test_boundaries.py",
+        "tests/architecture/test_boundaries_v2.py",
+        "tests/architecture/test_boundaries_v3.py",
+        "tests/architecture/test_boundaries_v4.py",
+    ]
+    assert details.unmatched_paths == []
+    assert details.fallback_used is False
+    assert details.risk == "high"
+    assert details.high_risk_escalated is True
+    assert details.risk_reasons == ["state_json_atomic_cas_contract"]
+
+    unknown = select_target_details(
+        ["nexus/infrastructure/unknown_store.py"],
+        load_impact_rules(),
+        index_path=tmp_path / "missing-impact-index.json",
+        history_path=tmp_path / "missing-test-history.jsonl",
+    )
+    assert unknown.fallback_used is True
+    assert unknown.unmatched_paths == ["nexus/infrastructure/unknown_store.py"]
+
+
 def test_issue153_feedback_row_maps_exact_targets_without_fallback():
     rules = load_impact_rules()
     details = select_target_details(
