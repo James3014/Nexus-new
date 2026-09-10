@@ -1,0 +1,14 @@
+{
+  "request_id": "req-issue842-project-entry-composition-r10-20260910",
+  "request_hash": "8d4896347fec8c5f63316f8679a91193ab40ee6c68555bf407b89b85cabc5a7f",
+  "idempotency_fence": "fence-issue842-project-entry-composition-r10-20260910",
+  "desired_manifest_id": "r1-9cd1b9ed2f9bff435029a95c7b0f506b793ce3b2",
+  "predecessor_manifest_id": "r1-ac21476af2b4988b70be82b683a573df0b68a165",
+  "physical_observation": {
+    "state": "VERIFIED",
+    "deployment_id": "r1-9cd1b9ed2f9bff435029a95c7b0f506b793ce3b2"
+  },
+  "effect_started": true,
+  "result": "VERIFIED",
+  "evidence_hash": "71701c2132eea03d1bc7be95b637bb73271bf1972b08de556504a8db3e782e29"
+}

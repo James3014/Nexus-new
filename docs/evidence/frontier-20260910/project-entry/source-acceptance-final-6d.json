@@ -1,0 +1,153 @@
+{
+  "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+  "tree": "06a796e22bc8fa756cd965fcb0fcd6becae97498",
+  "base": "9d768a527078eb82dde4048e83e029f0c4f2e73e",
+  "status": "PASS",
+  "pytest": "639 passed, 12 warnings in 117.18s",
+  "composition": [
+    {
+      "case": "positive",
+      "passed": true,
+      "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "pid": 68909,
+      "read_only": true,
+      "status": "TASK_REHYDRATED"
+    },
+    {
+      "case": "material_bound",
+      "passed": true,
+      "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "pid": 69343,
+      "read_only": true,
+      "status": "TASK_REHYDRATED"
+    },
+    {
+      "case": "legacy_state_only",
+      "passed": true,
+      "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "pid": 70131,
+      "read_only": true,
+      "status": "TASK_REHYDRATED"
+    },
+    {
+      "case": "envelope_positive",
+      "passed": true,
+      "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "pid": 70790,
+      "read_only": true,
+      "status": "TASK_REHYDRATED"
+    },
+    {
+      "case": "revoked",
+      "passed": true,
+      "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "pid": 71639,
+      "read_only": true,
+      "status": "TASK_REHYDRATED"
+    },
+    {
+      "case": "expired",
+      "passed": true,
+      "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "pid": 72192,
+      "read_only": true,
+      "status": "TASK_REHYDRATED"
+    },
+    {
+      "case": "foreign_goal",
+      "passed": true,
+      "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "pid": 72910,
+      "read_only": true,
+      "status": "TASK_REHYDRATED"
+    },
+    {
+      "case": "wrong_action",
+      "passed": true,
+      "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "pid": 73489,
+      "read_only": true,
+      "status": "TASK_REHYDRATED"
+    },
+    {
+      "case": "foreign_issue",
+      "passed": true,
+      "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "pid": 74238,
+      "read_only": true,
+      "status": "BLOCKED"
+    },
+    {
+      "case": "foreign_repository",
+      "passed": true,
+      "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "pid": 74995,
+      "read_only": true,
+      "status": "BLOCKED"
+    },
+    {
+      "case": "rehashed_tamper",
+      "passed": true,
+      "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "pid": 75752,
+      "read_only": true,
+      "status": "BLOCKED"
+    },
+    {
+      "case": "missing_hash",
+      "passed": true,
+      "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "pid": 76575,
+      "read_only": true,
+      "status": "BLOCKED"
+    },
+    {
+      "case": "legacy_material",
+      "passed": true,
+      "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "pid": 77335,
+      "read_only": true,
+      "status": "BLOCKED"
+    },
+    {
+      "case": "conflicting_identity",
+      "passed": true,
+      "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "pid": 78084,
+      "read_only": true,
+      "status": "BLOCKED"
+    },
+    {
+      "case": "envelope_outer_tamper",
+      "passed": true,
+      "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "pid": 78696,
+      "read_only": true,
+      "status": "BLOCKED"
+    },
+    {
+      "case": "envelope_binding_deleted",
+      "passed": true,
+      "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "pid": 79567,
+      "read_only": true,
+      "status": "BLOCKED"
+    },
+    {
+      "case": "duplicate_issue",
+      "passed": true,
+      "source": "6d1e32216434bdda7930c0cf21921209d9243c6d",
+      "pid": 80306,
+      "read_only": true,
+      "status": "BLOCKED"
+    }
+  ],
+  "ruff": "7 pre-existing findings; zero added",
+  "diff_check": "PASS",
+  "claim_ceiling": "SOURCE_ACCEPTED; native/runtime final reacceptance pending",
+  "evidence_hashes": {
+    "pytest-final-6d.log": "7d9ef1d4a4b76406392b3ccdc1791f2eb2b7e56bece6020890b546964e9b13a7",
+    "composition-final-6d-summary.json": "2644426221f80be3707d3eb070356ceef6f960e32044e7676a95ccd1c82d5d6e",
+    "verify-project-entry-composition.py": "44e06473cf6bc5271a1ddd77556ab5d4ea63c4a56a87242e954aeb6935580896"
+  }
+}
