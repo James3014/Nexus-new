@@ -194,62 +194,80 @@ def _looks_like_verifier_artifact(value: Any) -> bool:
 
 
 def _gate_verifier_ok(payload: dict[str, Any]) -> bool:
-    """Validate verifier artifact, explicit pass status, source hash binding, task binding, and invocation.
+    """Validate that verifier proof has genuine provenance and is not a caller-forged flat payload.
 
-    Fail closed if any required field is missing, wrong type, mismatched, or invalid.
+    Fail closed unless the proof originates from a canonical postflight gate evaluation
+    or a validated postflight context binding verifier stage, sealed source, and task identity.
     """
     if not isinstance(payload, dict):
         return False
 
-    # 1. Invocation evidence (must be explicitly true)
-    invoked = payload.get("verifier_invoked")
-    if invoked is None:
-        invoked = payload.get("invoked")
-    if not isinstance(invoked, bool) or not invoked:
-        return False
+    # Path A: canonical postflight verdict / invoker response
+    # Produced by online_nexus_context.evaluate_postflight_gate or build_plan_gated_postflight_invokers
+    postflight_verdict = payload.get("postflight_verdict") or payload.get("postflight_result")
+    if isinstance(postflight_verdict, dict):
+        proof = postflight_verdict.get("proof")
+        if isinstance(proof, dict):
+            if postflight_verdict.get("gate_passed") is True and not postflight_verdict.get("blockers"):
+                v_art = proof.get("verifier_artifact")
+                v_stat = str(proof.get("verifier_status") or "").upper()
+                v_task = str(proof.get("verifier_task_id") or "").strip()
+                task = str(proof.get("task_id") or "").strip()
+                v_src = str(proof.get("verifier_source_hash") or "").strip()
+                src = str(proof.get("source_hash") or "").strip()
+                if (
+                    _looks_like_verifier_artifact(v_art)
+                    and v_stat in {"PASS", "PASSED", "OK", "VERIFIED", "SUCCESS", "SUCCEEDED"}
+                    and bool(proof.get("verifier_invoked"))
+                    and bool(proof.get("verifier_gate_passed"))
+                    and bool(task and v_task and task == v_task)
+                    and bool(src and v_src and src == v_src)
+                ):
+                    return True
 
-    # 2. Gate passed must not be explicitly False
-    if payload.get("gate_passed") is False or payload.get("verifier_gate_passed") is False:
-        return False
+    # Path B: postflight invoker envelope
+    if (
+        payload.get("action") == "evaluate_postflight_gate"
+        or str(payload.get("physical_callable") or "").startswith("online_nexus_context.evaluate_postflight_gate")
+        or payload.get("delegated_to") == "postflight"
+    ):
+        resp = payload.get("response") if isinstance(payload.get("response"), dict) else payload
+        proof = resp.get("proof") if isinstance(resp, dict) else None
+        if isinstance(proof, dict) and resp.get("status") in {"PASS", "SUCCEEDED"} and not resp.get("blockers"):
+            v_art = proof.get("verifier_artifact")
+            v_stat = str(proof.get("verifier_status") or "").upper()
+            v_task = str(proof.get("verifier_task_id") or "").strip()
+            task = str(proof.get("task_id") or payload.get("task_id") or "").strip()
+            v_src = str(proof.get("verifier_source_hash") or "").strip()
+            src = str(proof.get("source_hash") or payload.get("source_hash") or "").strip()
+            if (
+                _looks_like_verifier_artifact(v_art)
+                and v_stat in {"PASS", "PASSED", "OK", "VERIFIED", "SUCCESS", "SUCCEEDED"}
+                and bool(proof.get("verifier_invoked"))
+                and bool(proof.get("verifier_gate_passed"))
+                and bool(task and v_task and task == v_task)
+                and bool(src and v_src and src == v_src)
+            ):
+                return True
 
-    # 3. Verifier artifact must be valid sha256:64hex or 64hex
-    raw_art = (
-        payload.get("verifier_artifact")
-        or payload.get("verification_artifact")
-        or payload.get("verifier_artifact_hash")
-    )
-    if not _looks_like_verifier_artifact(raw_art):
-        return False
+    # Path C: context containing an isolated verifier stage mapping and sealed source
+    # Evaluated via canonical online_nexus_context.evaluate_postflight_gate
+    context = payload.get("context") if isinstance(payload.get("context"), dict) else payload
+    if isinstance(context, dict):
+        verifier = context.get("verifier")
+        if isinstance(verifier, dict) and verifier:
+            from nexus.services.online_nexus_context import evaluate_postflight_gate
 
-    # 4. Verifier status must be explicit passing string
-    raw_status = payload.get("verifier_status") or payload.get("status") or payload.get("verification_status")
-    if not isinstance(raw_status, str):
-        return False
-    status = raw_status.strip().upper()
-    if status not in {"PASS", "PASSED", "OK", "VERIFIED", "SUCCESS", "SUCCEEDED"}:
-        return False
+            gate_name = str(payload.get("gate_name") or payload.get("name") or "claim_gate")
+            try:
+                verdict = evaluate_postflight_gate(gate_name, context)
+                if verdict.get("gate_passed") is True and not verdict.get("blockers"):
+                    return True
+            except Exception:
+                return False
 
-    # 5. Source hash binding: both source_hash and verifier_source_hash must be present non-empty strings and match
-    source = payload.get("source_hash")
-    v_source = payload.get("verifier_source_hash")
-    if not isinstance(source, str) or not isinstance(v_source, str):
-        return False
-    source = source.strip()
-    v_source = v_source.strip()
-    if not source or not v_source or source != v_source:
-        return False
-
-    # 6. Task identity binding: both task_id and verifier_task_id must be present non-empty strings and match
-    task = payload.get("task_id")
-    v_task = payload.get("verifier_task_id")
-    if not isinstance(task, str) or not isinstance(v_task, str):
-        return False
-    task = task.strip()
-    v_task = v_task.strip()
-    if not task or not v_task or task != v_task:
-        return False
-
-    return True
+    # Fail closed on flat caller-authored payload without genuine postflight/verifier provenance
+    return False
 
 
 def _verified_outcome_contributed(gate_passed: bool, claim_verified: bool, payload: dict[str, Any]) -> bool:
@@ -553,6 +571,31 @@ class ArtifactGateReceiptAdapter:
         )
 
 
+def _extract_gate_proof_value(payload: dict[str, Any], key: str) -> Any:
+    if key in payload and payload.get(key):
+        return payload.get(key)
+    verdict = payload.get("postflight_verdict") or payload.get("postflight_result")
+    if isinstance(verdict, dict):
+        proof = verdict.get("proof")
+        if isinstance(proof, dict) and proof.get(key):
+            return proof.get(key)
+    resp = payload.get("response")
+    if isinstance(resp, dict):
+        proof = resp.get("proof")
+        if isinstance(proof, dict) and proof.get(key):
+            return proof.get(key)
+    ctx = payload.get("context")
+    if isinstance(ctx, dict):
+        if key == "source_hash":
+            bundle = ctx.get("capability_evidence_bundle")
+            bundle = bundle if isinstance(bundle, dict) else {}
+            return ctx.get("source_hash") or bundle.get("source_hash")
+        verifier = ctx.get("verifier")
+        if isinstance(verifier, dict):
+            return verifier.get(key)
+    return None
+
+
 class ClaimGateReceiptAdapter:
     name = "claim_gate"
 
@@ -563,9 +606,12 @@ class ClaimGateReceiptAdapter:
         
         # Real validation to prevent fake payloads
         reasons = []
-        if not payload.get("verifier_artifact") and not payload.get("verifier_status"):
+        art = _extract_gate_proof_value(payload, "verifier_artifact")
+        stat = _extract_gate_proof_value(payload, "verifier_status")
+        src = _extract_gate_proof_value(payload, "source_hash")
+        if not art and not stat:
             reasons.append("missing_verifier_artifact")
-        if not payload.get("source_hash"):
+        if not src:
             reasons.append("missing_source_hash")
             
         gate_passed = bool(refs and claim_verified and not reasons)
@@ -597,9 +643,12 @@ class DeliveryGateReceiptAdapter:
         
         # Real validation to prevent fake payloads
         reasons = []
-        if not payload.get("verifier_artifact") and not payload.get("verifier_status"):
+        art = _extract_gate_proof_value(payload, "verifier_artifact")
+        stat = _extract_gate_proof_value(payload, "verifier_status")
+        src = _extract_gate_proof_value(payload, "source_hash")
+        if not art and not stat:
             reasons.append("missing_verifier_artifact")
-        if not payload.get("source_hash"):
+        if not src:
             reasons.append("missing_source_hash")
             
         gate_passed = bool(refs and _as_bool(payload.get("delivery_gate_passed", claim_verified)) and not reasons)
