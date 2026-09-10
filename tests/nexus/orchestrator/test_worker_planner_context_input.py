@@ -168,7 +168,9 @@ def test_worker_context_explicit_codeintel_precedes_planner_projection(tmp_path,
     captured = {}
     monkeypatch.setattr(
         "nexus.services.mainchain_entry.build_mainchain_capability_invokers",
-        lambda **kwargs: (captured.update(kwargs), {"memory": lambda _: {"status": "SUCCEEDED"}})[1],
+        lambda **kwargs: (captured.update(kwargs), {"memory": lambda _: {"status": "SUCCEEDED"}})[
+            1
+        ],
     )
     monkeypatch.setattr(
         "nexus.services.unified_runtime.materialize_selected_capability_evidence",
@@ -204,7 +206,9 @@ def test_worker_context_missing_codeintel_preserves_none(tmp_path, monkeypatch):
     captured = {}
     monkeypatch.setattr(
         "nexus.services.mainchain_entry.build_mainchain_capability_invokers",
-        lambda **kwargs: (captured.update(kwargs), {"memory": lambda _: {"status": "SUCCEEDED"}})[1],
+        lambda **kwargs: (captured.update(kwargs), {"memory": lambda _: {"status": "SUCCEEDED"}})[
+            1
+        ],
     )
     monkeypatch.setattr(
         "nexus.services.unified_runtime.materialize_selected_capability_evidence",
