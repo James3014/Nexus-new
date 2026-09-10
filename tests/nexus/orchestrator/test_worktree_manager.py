@@ -556,9 +556,6 @@ def test_create_lease_accepts_verified_salvage_parent_on_revision_refresh(sh2_re
 
     assert retried.target_detached is True
     assert retried.initial_head == refreshed_sha
-    assert Path(retried.target_worktree).exists()
-    assert _git(Path(retried.target_worktree), "rev-parse", "HEAD") == refreshed_sha
-    assert _git(Path(retried.target_worktree), "branch", "--show-current") == ""
     assert _git(sh2_repo["controller"], "rev-parse", f"refs/heads/{retried.target_branch}") == original.target_base_revision
 
 
@@ -580,6 +577,9 @@ def test_create_lease_accepts_unprotected_ancestor_task_branch_on_refresh(sh2_re
 
     assert retried.target_detached is True
     assert retried.initial_head == refreshed_sha
+    assert Path(retried.target_worktree).exists()
+    assert _git(Path(retried.target_worktree), "rev-parse", "HEAD") == refreshed_sha
+    assert _git(Path(retried.target_worktree), "branch", "--show-current") == ""
     assert _git(sh2_repo["controller"], "rev-parse", f"refs/heads/{retried.target_branch}") == original.target_base_revision
 
 
