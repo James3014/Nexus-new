@@ -4915,8 +4915,6 @@ class SelfHostedTaskService:
             request_issue = str(request.get("issue") or request.get("issue_number") or "").strip()
             state_repository = str(state.get("repository") or "").strip()
             state_issue = str(state.get("issue") or "").strip()
-            bound_repository = request_repository or state_repository
-            bound_issue = request_issue or state_issue
             if ((request_repository == repository and request_issue == issue) or
                     (state_repository == repository and state_issue == issue)):
                 matches.append(state)

@@ -61,6 +61,7 @@ from nexus.orchestrator.self_hosted_task_service import (
     resolve_execution_lane,
     validate_task_card_binding,
     validate_workforce_dispatch_binding,
+    _validate_project_entry_authority_binding,
 )
 from nexus.orchestrator.worktree_manager import (
     TargetCleanupReceipt,
@@ -9430,8 +9431,6 @@ def test_rehydrate_task_continuation_reason_not_promoted_to_observation(tmp_path
     assert "verified_observations" not in proj["continuation"]
     assert "verified_observations" in proj["missing_durable_bindings"]
 def test_project_entry_authority_binding_is_canonical_and_strict():
-    from nexus.contracts.lifecycle_action import canonical_request_hash
-    from nexus.orchestrator.self_hosted_task_service import _validate_project_entry_authority_binding
 
     values = {
         "repository": "James3014/Nexus-new",
@@ -9457,8 +9456,6 @@ def test_project_entry_authority_binding_is_canonical_and_strict():
 
 @pytest.mark.parametrize("field", ["goal_id", "coordination_scope_id", "repository", "canonical_remote", "intended_action_family"])
 def test_project_entry_authority_binding_rejects_null_typed_fields(field):
-    from nexus.contracts.lifecycle_action import canonical_request_hash
-    from nexus.orchestrator.self_hosted_task_service import _validate_project_entry_authority_binding
 
     values = {
         "repository": "James3014/Nexus-new", "issue_number": 842,
@@ -9473,8 +9470,6 @@ def test_project_entry_authority_binding_rejects_null_typed_fields(field):
 
 
 def test_project_entry_authority_binding_rejects_conflicting_legacy_goal():
-    from nexus.contracts.lifecycle_action import canonical_request_hash
-    from nexus.orchestrator.self_hosted_task_service import _validate_project_entry_authority_binding
     values = {"repository": "James3014/Nexus-new", "issue_number": 842, "goal_id": "goal-842", "coordination_scope_id": "scope-842", "canonical_remote": "https://github.com/James3014/Nexus-new.git", "intended_action_family": "TASK_SUBMIT"}
     binding = {**values, "binding_hash": canonical_request_hash(values)}
     with pytest.raises(ValueError, match="DUPLICATE_MISMATCH"):
