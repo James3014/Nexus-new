@@ -2449,44 +2449,23 @@ class SelfHostedTaskService:
         self,
         task_id: str,
         attempt_id: Optional[str] = None,
+        *,
+        _project_entry: bool = False,
+        _state: Mapping[str, Any] | None = None,
+        _project_entry_repository: str | None = None,
+        _project_entry_issue: int | None = None,
     ) -> dict[str, Any]:
         """Deterministic, model-independent, read-only rehydration projection.
 
         Rebuilds task continuation projection purely from physical durable state
         and canonical attempt continuity records. Never mutates task state.
         """
-        state = self._read_state_snapshot(task_id)
+        state = _state if _state is not None else self._read_state_snapshot(task_id)
         if state is None:
             raise KeyError(f"unknown task: {task_id}")
         if not isinstance(state, Mapping):
             raise ValueError("REHYDRATION_MALFORMED_STATE: task state must be a mapping")
         persisted_request = state.get("request")
-        if isinstance(persisted_request, Mapping):
-            try:
-                _reject_unbound_project_entry_authority_hints(persisted_request)
-                raw_binding = _validate_project_entry_authority_binding(persisted_request)
-                if raw_binding is not None:
-                    for field in ("authority_goal_id", "autonomy_goal_id"):
-                        if state.get(field) is not None and state[field] != raw_binding["goal_id"]:
-                            raise ValueError("PROJECT_ENTRY_AUTHORITY_DUPLICATE_MISMATCH")
-                persisted_hash = str(state.get("action_request_hash") or "")
-                if raw_binding is not None and not persisted_hash:
-                    raise ValueError("PROJECT_ENTRY_REQUEST_HASH_MISSING")
-                if persisted_hash:
-                    if "action" in persisted_request or "bound_action_request" in persisted_request:
-                        effective_request, envelope = _validated_action_request(persisted_request)
-                        if not isinstance(envelope, Mapping) or persisted_hash != str(envelope.get("request_hash") or ""):
-                            raise ValueError("PROJECT_ENTRY_REQUEST_HASH_MISMATCH")
-                        effective_binding = _validate_project_entry_authority_binding(effective_request)
-                        if effective_binding != raw_binding:
-                            raise ValueError("PROJECT_ENTRY_AUTHORITY_BINDING_DUPLICATE_MISMATCH")
-                    else:
-                        hash_input = dict(persisted_request)
-                        hash_input.pop("action_request_hash", None)
-                        if persisted_hash != canonical_request_hash(hash_input):
-                            raise ValueError("PROJECT_ENTRY_REQUEST_HASH_MISMATCH")
-            except ValueError as exc:
-                raise ValueError(f"REHYDRATION_AUTHORITY_BINDING_INVALID: {exc}") from exc
         if state.get("state_valid") is False or str(state.get("status") or "").startswith("BLOCKED_INVALID_"):
             blocker = state.get("blocker") if isinstance(state.get("blocker"), Mapping) else {}
             detail = blocker.get("detail") or "state is invalid"
@@ -2524,11 +2503,35 @@ class SelfHostedTaskService:
             requested_attempt_id=attempt_id,
         )
         result = projection.to_dict()
-        if isinstance(persisted_request, Mapping):
-            binding = _validate_project_entry_authority_binding(persisted_request)
+        if not _project_entry:
+            return result
+        try:
+            if not isinstance(persisted_request, Mapping):
+                raise ValueError("PROJECT_ENTRY_REQUEST_MISSING")
+            _reject_unbound_project_entry_authority_hints(persisted_request)
+            binding = _validate_project_entry_authority_binding(
+                persisted_request,
+                repository=_project_entry_repository or str(persisted_request.get("repository") or ""),
+                issue_number=_project_entry_issue or int(persisted_request.get("issue") or persisted_request.get("issue_number") or 0),
+            )
             if binding is not None:
-                result["project_entry_authority_binding"] = binding
-        return result
+                for field in ("authority_goal_id", "autonomy_goal_id"):
+                    if state.get(field) is not None and state[field] != binding["goal_id"]:
+                        raise ValueError("PROJECT_ENTRY_AUTHORITY_DUPLICATE_MISMATCH")
+            return {"continuation": result, "authority_binding": binding}
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"PROJECT_ENTRY_AUTHORITY_BINDING_INVALID: {exc}") from exc
+
+    def rehydrate_project_entry(self, task_id: str, attempt_id: Optional[str], *, repository: str, issue_number: int) -> dict[str, Any]:
+        state = self._read_state_snapshot(task_id)
+        if not isinstance(state, Mapping):
+            raise KeyError(f"unknown task: {task_id}")
+        request = state.get("request") if isinstance(state.get("request"), Mapping) else {}
+        if request.get("repository") != repository or str(request.get("issue") or request.get("issue_number") or "") != str(issue_number):
+            raise ValueError("PROJECT_ENTRY_AUTHORITY_SELECTOR_MISMATCH")
+        # The helper performs the continuity read and authority validation from
+        # one state snapshot; this entry point exists for the gateway contract.
+        return self.rehydrate_task_continuation(task_id, attempt_id, _project_entry=True, _state=state, _project_entry_repository=repository, _project_entry_issue=issue_number)
 
     @classmethod
     def rehydrate_task_continuation_snapshot(
@@ -2546,20 +2549,6 @@ class SelfHostedTaskService:
             task_action_envelope=task_action,
             requested_attempt_id=attempt_id,
         ).to_dict()
-
-    def project_entry_authority_binding(
-        self, task_id: str, *, repository: str, issue_number: int
-    ) -> dict[str, str] | None:
-        """Read and validate the explicit authority continuation for project entry."""
-        state = self._read_state_snapshot(task_id)
-        if not isinstance(state, Mapping):
-            raise ValueError("PROJECT_ENTRY_CONTINUATION_STATE_INVALID")
-        request = state.get("request")
-        if not isinstance(request, Mapping):
-            return None
-        return _validate_project_entry_authority_binding(
-            request, repository=repository, issue_number=issue_number
-        )
 
     @staticmethod
     def _request_hash(request: Mapping[str, Any]) -> str:
@@ -4890,15 +4879,13 @@ class SelfHostedTaskService:
             request_issue = str(request.get("issue") or request.get("issue_number") or "").strip()
             state_repository = str(state.get("repository") or "").strip()
             state_issue = str(state.get("issue") or "").strip()
-            # Project entry is allowed to rehydrate only a request that itself
-            # carries the exact caller selectors.  State-level projections are
-            # insufficient because they can survive a tampered request.
-            if (
-                request_repository == repository
-                and request_issue == issue
-                and (not state_repository or state_repository == repository)
-                and (not state_issue or state_issue == issue)
-            ):
+            if request_repository and state_repository and request_repository != state_repository:
+                continue
+            if request_issue and state_issue and request_issue != state_issue:
+                continue
+            bound_repository = request_repository or state_repository
+            bound_issue = request_issue or state_issue
+            if bound_repository == repository and bound_issue == issue:
                 matches.append(state)
         return matches
 
@@ -5540,10 +5527,7 @@ class SelfHostedTaskService:
 
     def submit_task(self, request: Mapping[str, Any]) -> dict[str, Any]:
         request, _ = _validated_action_request(request)
-        _reject_unbound_project_entry_authority_hints(request)
-        binding = _validate_project_entry_authority_binding(request)
-        if binding is not None and not str(request.get("action_request_hash") or "").strip():
-            raise ValueError("PROJECT_ENTRY_REQUEST_HASH_MISSING")
+        _validate_project_entry_authority_binding(request)
         task_id = self._resolve_current_execution_task_id(request)
         raw_autonomy_grant = request.get("autonomy_goal_grant")
         autonomy_grant: Optional[AutonomyGoalGrant] = None

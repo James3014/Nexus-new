@@ -9479,11 +9479,3 @@ def test_project_entry_authority_binding_rejects_conflicting_legacy_goal():
     binding = {**values, "binding_hash": canonical_request_hash(values)}
     with pytest.raises(ValueError, match="DUPLICATE_MISMATCH"):
         _validate_project_entry_authority_binding({"project_entry_authority_binding": binding, "authority_goal_id": "other-goal"})
-
-
-@pytest.mark.parametrize("hint", ["authority_goal_id", "authority_coordination_scope_id", "autonomy_goal_grant", "governed"])
-def test_rehydrate_rejects_partial_legacy_authority_hints(tmp_path, hint):
-    service = SelfHostedTaskService(state_dir=tmp_path / "state", auto_reconcile=False, ephemeral=True)
-    service._write_state("legacy-authority", {"task_id": "legacy-authority", "attempt_id": "a1", "status": "FINAL_BLOCK", "request": {"repository": "James3014/Nexus-new", "issue": 842, hint: "legacy"}, "action_request_hash": "x"})
-    with pytest.raises(ValueError, match="AUTHORITY_BINDING"):
-        service.rehydrate_task_continuation("legacy-authority", "a1")

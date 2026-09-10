@@ -4561,20 +4561,13 @@ class UnifiedMCPGateway:
         state = matches[0]
         task_id = str(state.get("task_id") or "")
         try:
-            projection = self.service.rehydrate_task_continuation(task_id, state.get("attempt_id"))
+            entry = self.service.rehydrate_project_entry(
+                task_id, state.get("attempt_id"), repository=repository, issue_number=raw_issue
+            )
+            projection = entry["continuation"]
         except Exception as exc:
             return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_CONTINUATION_INVALID", str(exc), task_id=task_id)
-        authority_binding = projection.get("project_entry_authority_binding") if isinstance(projection, Mapping) else None
-        # Compatibility for lightweight service doubles.  The real service
-        # includes this field in the rehydration projection from its one state
-        # snapshot; never perform a second mutable read on that path.
-        if authority_binding is None and not isinstance(self.service, SelfHostedTaskService):
-            reader = getattr(self.service, "project_entry_authority_binding", None)
-            if callable(reader):
-                try:
-                    authority_binding = reader(task_id, repository=repository, issue_number=raw_issue)
-                except Exception as exc:
-                    return self._project_entry_blocker(repository, raw_issue, "PROJECT_ENTRY_CONTINUATION_INVALID", str(exc), task_id=task_id)
+        authority_binding = entry.get("authority_binding") if isinstance(entry, Mapping) else None
         if authority_binding is not None:
             readiness_args.update({
                 "task_campaign_goal_identity": authority_binding["goal_id"],
