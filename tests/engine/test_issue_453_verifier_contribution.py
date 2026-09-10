@@ -193,7 +193,9 @@ def test_missing_invocation_proof_fails_closed(valid_verifier_proof):
 
 def test_unverified_intent_and_state_and_quiet_moment_do_not_contribute():
     intent_adapter = IntentIntakeReceiptAdapter()
-    intent_receipt = intent_adapter.build(claim_verified=True, payload={"interaction_mode": "direct"})
+    intent_receipt = intent_adapter.build(
+        claim_verified=True, payload={"interaction_mode": "direct"}
+    )
     assert intent_receipt.gate_passed is True
     assert intent_receipt.outcome_contributed is False
 
@@ -233,16 +235,36 @@ def test_valid_verifier_proof_grants_outcome_contributed(valid_verifier_proof):
 @pytest.mark.parametrize(
     "adapter_cls,valid_base_payload",
     [
-        (MemoryReceiptAdapter, {"memory_hits": 1, "memory_refs": ["m:1"], "memory_gate_passed": True}),
+        (
+            MemoryReceiptAdapter,
+            {"memory_hits": 1, "memory_refs": ["m:1"], "memory_gate_passed": True},
+        ),
         (BeliefReceiptAdapter, {"belief_refs": ["b:1"], "belief_gate_passed": True}),
         (ResearchReceiptAdapter, {"research_refs": ["r:1"], "research_gate_passed": True}),
         (LanceDBReceiptAdapter, {"lancedb_refs": ["l:1"], "lancedb_gate_passed": True}),
-        (SemanticSearcherReceiptAdapter, {"semantic_searcher_refs": ["s:1"], "semantic_searcher_gate_passed": True}),
+        (
+            SemanticSearcherReceiptAdapter,
+            {"semantic_searcher_refs": ["s:1"], "semantic_searcher_gate_passed": True},
+        ),
         (AutoreasonReceiptAdapter, {"winner": "c1", "enabled": True, "claim_verified": True}),
-        (DDTreeReceiptAdapter, {"enabled": True, "eligible": True, "actual_saved_steps": 2, "selected_candidate_ids": ["c1"]}),
+        (
+            DDTreeReceiptAdapter,
+            {
+                "enabled": True,
+                "eligible": True,
+                "actual_saved_steps": 2,
+                "selected_candidate_ids": ["c1"],
+            },
+        ),
         (HyperReceiptAdapter, {"hyper_used": True, "winner_source": "test"}),
-        (UltraReviewReceiptAdapter, {"invoked": True, "report_path": "report.json", "gate_passed": True}),
-        (SwarmReceiptAdapter, {"swarm_used": True, "swarm_report": {"evidence_count": 1, "evidence_refs": ["sw:1"]}}),
+        (
+            UltraReviewReceiptAdapter,
+            {"invoked": True, "report_path": "report.json", "gate_passed": True},
+        ),
+        (
+            SwarmReceiptAdapter,
+            {"swarm_used": True, "swarm_report": {"evidence_count": 1, "evidence_refs": ["sw:1"]}},
+        ),
     ],
 )
 def test_ten_adapters_require_verifier_proof_for_outcome_contributed(
