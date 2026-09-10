@@ -3,11 +3,11 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import tomllib
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-import tomllib
 
 
 def _module():
