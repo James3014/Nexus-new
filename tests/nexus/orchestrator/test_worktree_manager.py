@@ -556,7 +556,65 @@ def test_create_lease_accepts_verified_salvage_parent_on_revision_refresh(sh2_re
 
     assert retried.target_detached is True
     assert retried.initial_head == refreshed_sha
+    assert Path(retried.target_worktree).exists()
+    assert _git(Path(retried.target_worktree), "rev-parse", "HEAD") == refreshed_sha
+    assert _git(Path(retried.target_worktree), "branch", "--show-current") == ""
     assert _git(sh2_repo["controller"], "rev-parse", f"refs/heads/{retried.target_branch}") == original.target_base_revision
+
+
+def test_create_lease_accepts_unprotected_ancestor_task_branch_on_refresh(sh2_repo):
+    original = _contract(sh2_repo, task_id="ancestor-refresh")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    lease = manager.create_lease(original)
+    assert manager.cleanup_terminal_target(original, lease).decision == "REMOVED"
+
+    (sh2_repo["controller"] / "controller.txt").write_text("refreshed\n", encoding="utf-8")
+    _git(sh2_repo["controller"], "add", "controller.txt")
+    _git(sh2_repo["controller"], "commit", "-m", "refreshed integration base")
+    refreshed_sha = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    refreshed = original.model_copy(
+        update={"controller_revision": refreshed_sha, "target_base_revision": refreshed_sha}
+    )
+
+    retried = manager.create_lease(refreshed)
+
+    assert retried.target_detached is True
+    assert retried.initial_head == refreshed_sha
+    assert _git(sh2_repo["controller"], "rev-parse", f"refs/heads/{retried.target_branch}") == original.target_base_revision
+
+
+def test_create_lease_rejects_unprotected_divergent_task_branch_on_refresh(sh2_repo):
+    original = _contract(sh2_repo, task_id="divergent-refresh")
+    manager = WorktreeManager(root_dir=str(sh2_repo["target_root"]))
+    lease = manager.create_lease(original)
+    assert manager.cleanup_terminal_target(original, lease).decision == "REMOVED"
+
+    divergent_target = sh2_repo["target_root"] / "divergent-source"
+    _git(sh2_repo["controller"], "worktree", "add", "--detach", str(divergent_target), original.target_base_revision)
+    (divergent_target / "src" / "allowed.txt").write_text("divergent\n", encoding="utf-8")
+    _git(divergent_target, "add", "src/allowed.txt")
+    _git(divergent_target, "commit", "-m", "unprotected divergent task branch")
+    divergent_head = _git(divergent_target, "rev-parse", "HEAD")
+    _git(sh2_repo["controller"], "worktree", "remove", "--force", str(divergent_target))
+    _git(
+        sh2_repo["controller"],
+        "update-ref",
+        f"refs/heads/{lease.target_branch}",
+        divergent_head,
+    )
+
+    (sh2_repo["controller"] / "controller.txt").write_text("refreshed\n", encoding="utf-8")
+    _git(sh2_repo["controller"], "add", "controller.txt")
+    _git(sh2_repo["controller"], "commit", "-m", "refreshed integration base")
+    refreshed_sha = _git(sh2_repo["controller"], "rev-parse", "HEAD")
+    refreshed = original.model_copy(
+        update={"controller_revision": refreshed_sha, "target_base_revision": refreshed_sha}
+    )
+
+    with pytest.raises(RuntimeError, match="lacks durable protection"):
+        manager.create_lease(refreshed)
+    assert not (sh2_repo["target_root"] / original.task_id).exists()
+    assert _git(sh2_repo["controller"], "rev-parse", f"refs/heads/{lease.target_branch}") == divergent_head
 
 
 def test_dirty_unique_target_is_retained_for_review(sh2_repo):
