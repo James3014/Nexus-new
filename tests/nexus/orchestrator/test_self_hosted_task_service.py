@@ -3064,6 +3064,282 @@ def test_terminal_retry_accepts_revision_fast_forward_and_preserves_contract_his
     assert calls == [(activated_head, activated_head)]
 
 
+def test_terminal_retry_accepts_action_bound_revision_fast_forward(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(copy.deepcopy(dict(request)))
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True
+    )
+    base = _real_request(tmp_path, task_id="bound-activation-retry")
+    initial = _action_transport(base, attempt_id="attempt-initial", action_id="action-initial", idempotency_key="key-initial")
+    first = service.submit_task(initial)
+    assert _wait_for_status(service, base["task_id"], "FINAL_BLOCK")
+    before = copy.deepcopy(service._read_state(base["task_id"]))
+
+    controller = Path(base["controller_repo_root"])
+    (controller / "README").write_text("activation\n")
+    _git(controller, "add", "README")
+    _git(controller, "commit", "-m", "activate lifecycle")
+    activated_head = _git(controller, "rev-parse", "HEAD")
+    refreshed = {**base, "controller_revision": activated_head, "target_base_revision": activated_head}
+    retry = _action_transport(
+        refreshed,
+        action_type=LifecycleActionType.TASK_RETRY,
+        attempt_id="attempt-refresh",
+        action_id="action-refresh",
+        idempotency_key="key-refresh",
+    )
+
+    submitted = service.submit_task(retry)
+    current = _wait_for_status(service, base["task_id"], "FINAL_BLOCK")
+
+    assert submitted["attempt_id"] != first["attempt_id"]
+    assert current["attempt_id"] == submitted["attempt_id"]
+    assert current["controller_revision"] == activated_head
+    assert current["request"]["bound_action_request"]["controller_revision"] == activated_head
+    assert current["request"]["action"]["expected_head"] == activated_head
+    assert len(current["attempts"]) == 2
+    assert current["contract_history"][0]["attempt_id"] == before["attempt_id"]
+    assert calls[-1]["action"]["request_hash"] == canonical_request_hash(calls[-1]["bound_action_request"])
+
+
+def test_terminal_retry_rejects_action_bound_semantic_tamper_before_runner(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(contract.task_id)
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True
+    )
+    base = _real_request(tmp_path, task_id="bound-semantic-tamper")
+    first = service.submit_task(_action_transport(base, attempt_id="attempt-initial", action_id="action-initial", idempotency_key="key-initial"))
+    assert _wait_for_status(service, base["task_id"], "FINAL_BLOCK")
+    before = copy.deepcopy(service._read_state(base["task_id"]))
+    controller = Path(base["controller_repo_root"])
+    (controller / "README").write_text("activation\n")
+    _git(controller, "add", "README")
+    _git(controller, "commit", "-m", "activate lifecycle")
+    activated_head = _git(controller, "rev-parse", "HEAD")
+    tampered = {
+        **base,
+        "controller_revision": activated_head,
+        "target_base_revision": activated_head,
+        "allowed_files": ["different.py"],
+    }
+    retry = _action_transport(
+        tampered,
+        action_type=LifecycleActionType.TASK_RETRY,
+        attempt_id="attempt-tampered",
+        action_id="action-tampered",
+        idempotency_key="key-tampered",
+    )
+
+    with pytest.raises(ValueError, match="RETRY_SEMANTIC_TASK_MISMATCH"):
+        service.submit_task(retry)
+
+    after = service._read_state(base["task_id"])
+    assert calls == [base["task_id"]]
+    assert after["attempt_id"] == before["attempt_id"] == first["attempt_id"]
+    assert after["attempts"] == before["attempts"]
+
+
+def test_terminal_retry_rejects_action_bound_non_ancestor_before_runner(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(contract.task_id)
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(
+        state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True
+    )
+    base = _real_request(tmp_path, task_id="bound-non-ancestor")
+    first = service.submit_task(_action_transport(base, attempt_id="attempt-initial", action_id="action-initial", idempotency_key="key-initial"))
+    assert _wait_for_status(service, base["task_id"], "FINAL_BLOCK")
+    before = copy.deepcopy(service._read_state(base["task_id"]))
+    invalid_head = "f" * 40
+    retry = _action_transport(
+        {**base, "controller_revision": invalid_head, "target_base_revision": invalid_head},
+        action_type=LifecycleActionType.TASK_RETRY,
+        attempt_id="attempt-invalid",
+        action_id="action-invalid",
+        idempotency_key="key-invalid",
+    )
+
+    with pytest.raises(ValueError, match="different contract"):
+        service.submit_task(retry)
+
+    after = service._read_state(base["task_id"])
+    assert calls == [base["task_id"]]
+    assert after["attempt_id"] == before["attempt_id"] == first["attempt_id"]
+    assert after["attempts"] == before["attempts"]
+
+
+def test_terminal_retry_accepts_planner_bound_action_revision_refresh(
+    tmp_path, monkeypatch
+):
+    task_id = "planner-bound-revision-refresh"
+    service, request, old_envelope, _, _ = _m3c_repairable_workforce_state(
+        tmp_path, monkeypatch, task_id=task_id, acceptance_decision="NOT_REPAIRABLE"
+    )
+    old_attempt = old_envelope["attempt_id"]
+    initial = _action_transport(
+        request,
+        attempt_id=old_attempt,
+        action_id="action-planner-old",
+        idempotency_key="key-planner-old",
+    )
+    state = service._read_state(task_id)
+    state.update(
+        request=initial,
+        action=initial["action"],
+        action_id=initial["action_id"],
+        idempotency_key=initial["idempotency_key"],
+        action_request_hash=initial["action_request_hash"],
+        status="FINAL_BLOCK",
+        terminal_status="FINAL_BLOCK",
+        final_disposition="FINAL_BLOCK",
+        cleanup_decision="ALREADY_REMOVED",
+        cleanup_performed=False,
+        promotion_status="NOT_CREATED",
+        candidate_status=None,
+        candidate=None,
+        candidate_commit_sha=None,
+        candidate_ref=None,
+        candidate_state_hash=None,
+        verified_receipt=None,
+        verified_receipt_hash=None,
+        promotion_packet=None,
+        execution=None,
+        execution_outcome=None,
+        worker_preflight=None,
+        worker_child_pgid=None,
+        active_provider=None,
+        target_created_at=None,
+        worker_started_at="2026-01-01T00:00:00+00:00",
+        worker_finished_at="2026-01-01T00:00:01+00:00",
+        merge_performed=False,
+        push_performed=False,
+        telemetry={"provider_calls": 0, "provider_attempts": 0, "provider_time_ms": 0,
+                   "worktree_time_ms": 0, "verifier_time_ms": 0},
+        attempts=[{"attempt_id": old_attempt, "action_id": initial["action_id"],
+                   "idempotency_key": initial["idempotency_key"],
+                   "action_request_hash": initial["action_request_hash"]}],
+    )
+    service._write_state(task_id, state)
+
+    controller = Path(request["controller_repo_root"])
+    (controller / "README").write_text("activation\n")
+    _git(controller, "add", "README")
+    _git(controller, "commit", "-m", "activate lifecycle")
+    activated_head = _git(controller, "rev-parse", "HEAD")
+    refreshed = {**request, "controller_revision": activated_head, "target_base_revision": activated_head}
+    retry = _action_transport(
+        refreshed,
+        action_type=LifecycleActionType.TASK_RETRY,
+        attempt_id="attempt-planner-new",
+        action_id="action-planner-new",
+        idempotency_key="key-planner-new",
+    )
+    retry["bound_action_request"]["canonical_dispatch_envelope"]["attempt_id"] = retry["attempt_id"]
+    retry_hash = canonical_request_hash(retry["bound_action_request"])
+    retry["action"]["request_hash"] = retry_hash
+    retry["action_request_hash"] = retry_hash
+
+    submitted = service.submit_task(retry)
+    current = service._read_state(task_id)
+
+    assert submitted["attempt_id"] == "attempt-planner-new"
+    assert current["attempts"][0]["attempt_id"] == old_attempt
+    assert current["canonical_dispatch_envelope"]["attempt_id"] == "attempt-planner-new"
+    assert current["workforce_dispatch"]["provider"] == old_envelope["provider"]
+
+
+def test_terminal_retry_rejects_action_bound_predecessor_drift_under_write_lock(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(contract.task_id)
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True)
+    base = _real_request(tmp_path, task_id="bound-predecessor-drift")
+    first = service.submit_task(_action_transport(base, attempt_id="attempt-initial", action_id="action-initial", idempotency_key="key-initial"))
+    assert _wait_for_status(service, base["task_id"], "FINAL_BLOCK")
+    controller = Path(base["controller_repo_root"])
+    (controller / "README").write_text("activation\n")
+    _git(controller, "add", "README")
+    _git(controller, "commit", "-m", "activate lifecycle")
+    activated_head = _git(controller, "rev-parse", "HEAD")
+    retry = _action_transport(
+        {**base, "controller_revision": activated_head, "target_base_revision": activated_head},
+        action_type=LifecycleActionType.TASK_RETRY,
+        attempt_id="attempt-refresh", action_id="action-refresh", idempotency_key="key-refresh",
+    )
+    original_mutate = service._mutate_state
+    drifted = False
+
+    def mutate_with_drift(task_id, mutator):
+        nonlocal drifted
+        if not drifted:
+            drifted = True
+            original_mutate(task_id, lambda current: current.update(attempt_id="external-attempt"))
+        return original_mutate(task_id, mutator)
+
+    service._mutate_state = mutate_with_drift
+    with pytest.raises(RuntimeError, match="RETRY_PREDECESSOR_CHANGED"):
+        service.submit_task(retry)
+    current = service._read_state(base["task_id"])
+    assert calls == [base["task_id"]]
+    assert current["attempt_id"] == "external-attempt"
+    assert len(current["attempts"]) == 1
+    assert first["attempt_id"] != current["attempt_id"]
+
+
+def test_terminal_retry_rejects_hidden_promotion_packet_effect(tmp_path):
+    calls = []
+
+    def runner(contract, request, update):
+        calls.append(contract.task_id)
+        update("FINAL_BLOCK", {"cleanup_decision": "REMOVED", "cleanup_performed": True})
+        return {"promotion_status": "NOT_CREATED"}
+
+    service = SelfHostedTaskService(state_dir=tmp_path / "state", runner=runner, auto_reconcile=False, ephemeral=True)
+    base = _real_request(tmp_path, task_id="bound-hidden-packet")
+    first = service.submit_task(_action_transport(base, attempt_id="attempt-initial", action_id="action-initial", idempotency_key="key-initial"))
+    assert _wait_for_status(service, base["task_id"], "FINAL_BLOCK")
+    original = service._read_state(base["task_id"])
+    service._mutate_state(base["task_id"], lambda current: current.update(
+        promotion_packet={"candidate_commit_sha": "c" * 40}
+    ))
+    controller = Path(base["controller_repo_root"])
+    (controller / "README").write_text("activation\n")
+    _git(controller, "add", "README")
+    _git(controller, "commit", "-m", "activate lifecycle")
+    activated_head = _git(controller, "rev-parse", "HEAD")
+    retry = _action_transport(
+        {**base, "controller_revision": activated_head, "target_base_revision": activated_head},
+        action_type=LifecycleActionType.TASK_RETRY,
+        attempt_id="attempt-refresh", action_id="action-refresh", idempotency_key="key-refresh",
+    )
+    with pytest.raises(ValueError, match="different contract"):
+        service.submit_task(retry)
+    current = service._read_state(base["task_id"])
+    assert calls == [base["task_id"]]
+    assert current["attempt_id"] == first["attempt_id"] == original["attempt_id"]
+    assert current["promotion_packet"] == {"candidate_commit_sha": "c" * 40}
+
+
 def test_terminal_retry_rejects_non_revision_contract_change(tmp_path):
     service = SelfHostedTaskService(
         state_dir=tmp_path / "state", runner=lambda *_: {}, auto_reconcile=False, ephemeral=True
