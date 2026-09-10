@@ -1298,47 +1298,70 @@ class WorktreeManager:
                 branch_created_this_call = True
             else:
                 if branch_head != contract.target_base_revision:
-                    protected = self._run_git(
-                        ["for-each-ref", "--format=%(objectname)", f"refs/nexus-candidates/{contract.task_id}/"],
-                        cwd=controller_root,
-                    ).splitlines()
-                    protected.extend(
-                        self._run_git(
-                            ["for-each-ref", "--format=%(objectname)", f"refs/nexus-candidate-commits/{contract.task_id}/"],
-                            cwd=controller_root,
-                        ).splitlines()
-                    )
+                    # A task branch that is an ancestor of the refreshed target
+                    # base contains no branch-only commits to protect. Reuse it
+                    # detached, while retaining the protection gate below for
+                    # divergent branch heads.
+                    branch_is_ancestor = False
                     try:
-                        legacy_candidate = self._run_git(
-                            ["rev-parse", f"refs/nexus-candidates/{contract.task_id}^{{commit}}"],
+                        self._run_git(
+                            ["merge-base", "--is-ancestor", branch_head, contract.target_base_revision],
                             cwd=controller_root,
                         )
+                        branch_is_ancestor = True
                     except RuntimeError:
-                        legacy_candidate = None
-                    if legacy_candidate:
-                        protected.append(legacy_candidate)
-                    salvage_refs = self._run_git(
-                        [
-                            "for-each-ref",
-                            "--format=%(refname)",
-                            f"refs/nexus-salvage/worktree/{contract.task_id}-*",
-                        ],
-                        cwd=controller_root,
-                    ).splitlines()
-                    for salvage_ref in salvage_refs:
-                        try:
-                            salvage_parents = self._run_git(
-                                ["rev-list", "--parents", "-n", "1", salvage_ref],
+                        pass
+                    if branch_is_ancestor:
+                        target_detached = True
+                        add_args = [
+                            "worktree",
+                            "add",
+                            "--detach",
+                            str(target_path),
+                            contract.target_base_revision,
+                        ]
+                    else:
+                        protected = self._run_git(
+                            ["for-each-ref", "--format=%(objectname)", f"refs/nexus-candidates/{contract.task_id}/"],
+                            cwd=controller_root,
+                        ).splitlines()
+                        protected.extend(
+                            self._run_git(
+                                ["for-each-ref", "--format=%(objectname)", f"refs/nexus-candidate-commits/{contract.task_id}/"],
                                 cwd=controller_root,
-                            ).split()
+                            ).splitlines()
+                        )
+                        try:
+                            legacy_candidate = self._run_git(
+                                ["rev-parse", f"refs/nexus-candidates/{contract.task_id}^{{commit}}"],
+                                cwd=controller_root,
+                            )
                         except RuntimeError:
-                            continue
-                        if len(salvage_parents) == 2:
-                            protected.append(salvage_parents[1])
-                    if branch_head not in protected:
-                        raise RuntimeError("existing task branch candidate lacks durable protection")
-                    target_detached = True
-                    add_args = ["worktree", "add", "--detach", str(target_path), contract.target_base_revision]
+                            legacy_candidate = None
+                        if legacy_candidate:
+                            protected.append(legacy_candidate)
+                        salvage_refs = self._run_git(
+                            [
+                                "for-each-ref",
+                                "--format=%(refname)",
+                                f"refs/nexus-salvage/worktree/{contract.task_id}-*",
+                            ],
+                            cwd=controller_root,
+                        ).splitlines()
+                        for salvage_ref in salvage_refs:
+                            try:
+                                salvage_parents = self._run_git(
+                                    ["rev-list", "--parents", "-n", "1", salvage_ref],
+                                    cwd=controller_root,
+                                ).split()
+                            except RuntimeError:
+                                continue
+                            if len(salvage_parents) == 2:
+                                protected.append(salvage_parents[1])
+                        if branch_head not in protected:
+                            raise RuntimeError("existing task branch candidate lacks durable protection")
+                        target_detached = True
+                        add_args = ["worktree", "add", "--detach", str(target_path), contract.target_base_revision]
                 else:
                     add_args = ["worktree", "add", str(target_path), target_branch]
             self._run_git(add_args, cwd=controller_root)
