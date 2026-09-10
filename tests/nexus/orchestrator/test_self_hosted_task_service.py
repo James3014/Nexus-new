@@ -57,11 +57,11 @@ from nexus.orchestrator.repository_contract_gate import (
 from nexus.orchestrator.self_hosted_task_service import (
     _LEGACY_V1_NEGATIVE_OMISSION_SET,
     SelfHostedTaskService,
+    _validate_project_entry_authority_binding,
     resolve_canonical_target_roots,
     resolve_execution_lane,
     validate_task_card_binding,
     validate_workforce_dispatch_binding,
-    _validate_project_entry_authority_binding,
 )
 from nexus.orchestrator.worktree_manager import (
     TargetCleanupReceipt,
