@@ -133,7 +133,8 @@ _LEGACY_V1_NEGATIVE_OMISSION_SET = frozenset({
     "authority_change_required",
 })
 _PROJECT_ENTRY_AUTHORITY_HINTS = frozenset({
-    "authority_goal_id", "authority_coordination_scope_id", "autonomy_goal_grant",
+    "authority_goal_id", "authority_coordination_scope_id", "standing_grant_id",
+    "autonomy_goal_id", "autonomy_submission_binding", "autonomy_goal_grant",
     "governed", "governed_task", "intended_action_family", "required_action_family",
 })
 RESUMABLE_STATUSES = frozenset({
@@ -767,7 +768,7 @@ def _reject_unbound_project_entry_authority_hints(request: Mapping[str, Any]) ->
     contract = request.get("contract")
     if isinstance(contract, Mapping) and contract.get("standing_grant_id") is not None:
         raise ValueError("PROJECT_ENTRY_AUTHORITY_BINDING_REQUIRED")
-    if str(request.get("execution_lane") or "").upper() in {"GOVERNED", "DIRECT_CANONICAL", "ASSISTED_CANONICAL", "ISOLATED_TARGET"}:
+    if str(request.get("execution_lane") or "").upper() in {"GOVERNED"}:
         raise ValueError("PROJECT_ENTRY_AUTHORITY_BINDING_REQUIRED")
 
 
@@ -2541,6 +2542,8 @@ class SelfHostedTaskService:
                 for field in ("authority_goal_id", "autonomy_goal_id"):
                     if state.get(field) is not None and state[field] != binding["goal_id"]:
                         raise ValueError("PROJECT_ENTRY_AUTHORITY_DUPLICATE_MISMATCH")
+            else:
+                _reject_unbound_project_entry_authority_hints(state)
             return {"continuation": result, "authority_binding": binding}
         except (TypeError, ValueError) as exc:
             raise ValueError(f"PROJECT_ENTRY_AUTHORITY_BINDING_INVALID: {exc}") from exc
@@ -2555,7 +2558,6 @@ class SelfHostedTaskService:
                 (state.get("repository") and state.get("repository") != repository) or
                 (state.get("issue") and str(state.get("issue")) != str(issue_number))):
             raise ValueError("PROJECT_ENTRY_AUTHORITY_SELECTOR_MISMATCH")
-        _reject_unbound_project_entry_authority_hints(state)
         # The helper performs the continuity read and authority validation from
         # one state snapshot; this entry point exists for the gateway contract.
         return self.rehydrate_task_continuation(task_id, attempt_id, _project_entry=True, _state=state, _project_entry_repository=repository, _project_entry_issue=issue_number)
