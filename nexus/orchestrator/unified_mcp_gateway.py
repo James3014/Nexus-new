@@ -8,6 +8,7 @@ must not need to know its Target paths or internal action names.
 from __future__ import annotations
 
 import ast
+import copy
 import difflib
 import hashlib
 import json
@@ -53,6 +54,10 @@ from nexus.engine.canonical_task_seam import (
     build_canonical_planner_admission,
     execute_canonical_product_task,
 )
+from nexus.engine.learning_policy_loader import (
+    DEFAULT_GOVERNED_ADOPTION_PATH,
+    DEFAULT_GOVERNED_ROLLBACK_PATH,
+)
 from nexus.orchestrator.canonical_mcp_ingress import (
     build_mcp_execution_context,
     reject_caller_route_overrides,
@@ -67,6 +72,9 @@ from nexus.orchestrator.execution_readiness import (
     evaluate_completion_contract,
     evaluate_execution_readiness,
     evaluate_source_binding,
+)
+from nexus.orchestrator.learning_policy_control import (
+    apply_learning_policy_effect,
 )
 from nexus.orchestrator.lifecycle_guards import (
     LifecycleGuardError,
@@ -4168,6 +4176,34 @@ class UnifiedMCPGateway:
                 },
             },
             {
+                "name": "nexus_learning_policy_adopt",
+                "description": "Apply one exact, Owner-authorized governed Learning policy adoption through single-file CAS.",
+                "inputSchema": {
+                    "type": "object", "additionalProperties": False,
+                    "required": ["artifact", "recommendation", "validation", "expected_current_digest", "operation_id", "idempotency_key", "source_revision", "task_family", "model_name", "runtime_identity", "authority_goal_id", "authority_coordination_scope_id"],
+                    "properties": {
+                        "artifact": {"type": "object"}, "recommendation": {"type": "object"}, "validation": {"type": "object"},
+                        "expected_current_digest": {"type": ["string", "null"]}, "operation_id": {"type": "string"}, "idempotency_key": {"type": "string"},
+                        "source_revision": {"type": "string"}, "task_family": {"type": "string"}, "model_name": {"type": "string"}, "runtime_identity": {"type": "string"},
+                        "authority_goal_id": {"type": "string", "maxLength": 128}, "authority_coordination_scope_id": {"type": "string", "maxLength": 128},
+                    },
+                },
+            },
+            {
+                "name": "nexus_learning_policy_rollback",
+                "description": "Apply one exact, Owner-authorized governed Learning policy rollback through single-file CAS.",
+                "inputSchema": {
+                    "type": "object", "additionalProperties": False,
+                    "required": ["artifact", "previous_adoption", "expected_current_digest", "operation_id", "idempotency_key", "authority_goal_id", "authority_coordination_scope_id"],
+                    "properties": {
+                        "artifact": {"type": "object"}, "previous_adoption": {"type": "object"},
+                        "expected_current_digest": {"type": ["string", "null"]}, "operation_id": {"type": "string"}, "idempotency_key": {"type": "string"},
+                        "source_revision": {"type": "string"}, "task_family": {"type": "string"}, "model_name": {"type": "string"}, "runtime_identity": {"type": "string"},
+                        "authority_goal_id": {"type": "string", "maxLength": 128}, "authority_coordination_scope_id": {"type": "string", "maxLength": 128},
+                    },
+                },
+            },
+            {
                 "name": "nexus_candidate_approve",
                 "description": "Approve an exact Candidate binding; approval does not integrate or push.",
                 "inputSchema": {
@@ -4936,6 +4972,83 @@ class UnifiedMCPGateway:
                 "NO_RELEASE", "NO_PRODUCTION",
             ],
         }
+
+    def _learning_policy_control(
+        self,
+        arguments: Mapping[str, Any],
+        *,
+        action: AutonomyActionClass,
+    ) -> dict[str, Any]:
+        """Validate one closed Learning effect, authorize it, then CAS it."""
+        common = {
+            "artifact", "expected_current_digest", "operation_id", "idempotency_key",
+            "source_revision", "task_family", "model_name", "runtime_identity",
+            "authority_goal_id", "authority_coordination_scope_id",
+        }
+        allowed = common | ({"recommendation", "validation"} if action is AutonomyActionClass.LEARNING_POLICY_ADOPT else {"previous_adoption"})
+        unknown = set(arguments) - allowed
+        if unknown:
+            raise GatewayInputError("LEARNING_POLICY_CONTROL_SCHEMA_CLOSED")
+        missing = common - set(arguments)
+        if missing:
+            raise GatewayInputError("LEARNING_POLICY_CONTROL_FIELDS_REQUIRED:" + ",".join(sorted(missing)))
+        if action is AutonomyActionClass.LEARNING_POLICY_ADOPT and not {"recommendation", "validation"} <= set(arguments):
+            raise GatewayInputError("LEARNING_POLICY_PROVENANCE_REQUIRED")
+        if action is AutonomyActionClass.LEARNING_POLICY_ROLLBACK and "previous_adoption" not in arguments:
+            raise GatewayInputError("LEARNING_POLICY_ROLLBACK_ADOPTION_BINDING_REQUIRED")
+        # Freeze every nested request object before hashing or authority lookup.
+        arguments = copy.deepcopy(dict(arguments))
+        artifact = arguments.get("artifact")
+        if not isinstance(artifact, Mapping):
+            raise GatewayInputError("LEARNING_POLICY_ARTIFACT_INVALID")
+        previous = arguments.get("previous_adoption")
+        if previous is not None and not isinstance(previous, Mapping):
+            raise GatewayInputError("LEARNING_POLICY_ROLLBACK_ADOPTION_INVALID")
+        artifact_hash = hashlib.sha256(json.dumps(dict(artifact), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+        def input_hash(value: Any) -> str | None:
+            if not isinstance(value, Mapping):
+                return None
+            return hashlib.sha256(json.dumps(dict(value), sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+        effect = {
+            "repository": GITHUB_REPOSITORY.repository_id,
+            "action": action.value,
+            "operation_id": str(arguments["operation_id"]),
+            "idempotency_key": str(arguments["idempotency_key"]),
+            "artifact_hash": artifact_hash,
+            "target_path": str(CANONICAL_SOURCE_ROOT / (DEFAULT_GOVERNED_ADOPTION_PATH if action is AutonomyActionClass.LEARNING_POLICY_ADOPT else DEFAULT_GOVERNED_ROLLBACK_PATH)),
+            "expected_current_digest": arguments.get("expected_current_digest"),
+            "source_revision": str(arguments["source_revision"]),
+            "task_family": str(arguments["task_family"]),
+            "model_name": str(arguments["model_name"]),
+            "runtime_identity": str(arguments["runtime_identity"]),
+            "recommendation_input_hash": input_hash(arguments.get("recommendation")),
+            "validation_input_hash": input_hash(arguments.get("validation")),
+            "previous_adoption_input_hash": input_hash(previous),
+        }
+        owner_authority = self._require_owner_effect_authority(
+            action, effect, key=self._owner_effect_key(arguments)
+        )
+        try:
+            result = apply_learning_policy_effect(
+                action=action,
+                project_root=CANONICAL_SOURCE_ROOT,
+                artifact=artifact,
+                recommendation=arguments.get("recommendation"),
+                validation=arguments.get("validation"),
+                expected_current_digest=arguments.get("expected_current_digest"),
+                operation_id=str(arguments["operation_id"]),
+                idempotency_key=str(arguments["idempotency_key"]),
+                source_revision=str(arguments["source_revision"]),
+                task_family=str(arguments["task_family"]),
+                model_name=str(arguments["model_name"]),
+                runtime_identity=str(arguments["runtime_identity"]),
+                previous_adoption_id=(str(previous.get("adoption_id")) if isinstance(previous, Mapping) else None),
+                previous_adoption_hash=(str(previous.get("adoption_hash")) if isinstance(previous, Mapping) else None),
+                previous_adoption=previous,
+            )
+        except Exception as exc:
+            raise GatewayInputError(str(exc)) from exc
+        return {**result, "owner_authority": owner_authority}
 
     @staticmethod
     def _validate_external_adoption_result(
@@ -5760,6 +5873,14 @@ class UnifiedMCPGateway:
             return self._candidate_approve(arguments)
         if name == "nexus_candidate_adopt_external":
             return self._candidate_adopt_external(arguments)
+        if name == "nexus_learning_policy_adopt":
+            return self._learning_policy_control(
+                arguments, action=AutonomyActionClass.LEARNING_POLICY_ADOPT
+            )
+        if name == "nexus_learning_policy_rollback":
+            return self._learning_policy_control(
+                arguments, action=AutonomyActionClass.LEARNING_POLICY_ROLLBACK
+            )
         if name == "nexus_candidate_bind_integration":
             return self._candidate_bind_integration(arguments)
         if name == "nexus_candidate_integrate":
