@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+
 import pytest
 
 from nexus.engine.capability_receipt_adapters import (
@@ -17,9 +18,7 @@ from nexus.engine.capability_receipt_adapters import (
     SwarmQuietMomentReceiptAdapter,
     SwarmReceiptAdapter,
     UltraReviewReceiptAdapter,
-    _gate_verifier_ok,
     _looks_like_verifier_artifact,
-    _verified_outcome_contributed,
 )
 
 
